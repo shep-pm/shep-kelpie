@@ -29,3 +29,17 @@ Gotchas:
 - Committed text calls the maintainer "the maintainer" and uses repo-relative paths, because the repo goes public one day.
 - Commit subjects are conventional: `type(scope): summary`, with types `feat` `fix` `perf` `refactor` `docs` `test` `ci` `chore` `style`, and `!` on the commit that breaks something. Bodies carry the full reasoning.
 - One commit per item. Work reaches `main` through pull requests.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `shep-pm/shep-kelpie`, via `gh`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default roles, label string equal to role name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` at the root, ADRs in `docs/adr/`, and `docs/design-log.md`. See `docs/agents/domain.md`.
