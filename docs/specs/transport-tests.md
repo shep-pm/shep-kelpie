@@ -65,10 +65,10 @@ Measure: whether channels are available on this account at all, whether a push w
 
 ### L: a lease round trip through shep
 
-1. Two Python runner sheep, A and B. The dog-side program subscribes to `channel.*`.
-2. A raises a `wants.gpu` running total. The dog sees it, triggers `status` on A (`shep trigger <selector> <action> [params]`, params positional), reads the JSON in the reply body, and triggers `grant`.
-3. B asks while A holds the lease.
-4. Kill A while it holds the lease. The dog must see A's exit on the bus and grant B.
+1. Two Python runner sheep, standing in for two projects and named after them: `koji` and `reactmap`. The dog-side program subscribes to `channel.*`.
+2. `koji` raises a `wants.gpu` running total. The dog sees it, runs the equivalent of `shep trigger koji status` (params, when there are any, go positionally after the action), reads the JSON in the reply body, then `shep trigger koji grant gpu`.
+3. `reactmap` asks while `koji` holds the lease.
+4. Kill `koji` while it holds the lease. The dog must see its exit on the bus and grant `reactmap`.
 5. Flood metrics so some drop, and check the running totals still converge.
 6. Adopt the dog-side program as a dog, and try `shep trigger` against it by exact name.
 
