@@ -40,7 +40,9 @@ Measure: cache write and read per turn against T1, latency on the turn after the
 
 ### T3: a background session steered over its socket
 
-Needs a permission rule, added by the maintainer, that lets the test read `~/.claude/sessions/<pid>.*.key` for sessions the test itself started.
+Needs a local permission rule (in `.claude/settings.local.json`, already added) that lets the test read `~/.claude/sessions/<pid>.*.key` for sessions the test itself started.
+
+The `crossSessionInbound` setting decides what a session does with an injected message. Left unset, it delivers only when the sender's permission-mode class matches its own (bypass with bypass, prompting with prompting), and holds anything else for approval. Run T3 once unset and once with `accept`, and record which one delivered.
 
 1. Start a session with `claude --bg` in the worker repo and let it go idle.
 2. Send a user message over its socket, with the auth line first.
