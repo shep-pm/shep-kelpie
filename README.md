@@ -7,3 +7,7 @@ Design stage. Nothing runs yet.
 - `CONTEXT.md`: the vocabulary
 - `docs/adr/`: decisions that are hard to reverse
 - `docs/design-log.md`: every decision so far, the facts behind them, and the test plan
+
+## License
+
+MIT or Apache-2.0, at your option.
