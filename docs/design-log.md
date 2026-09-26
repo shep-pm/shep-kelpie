@@ -73,12 +73,12 @@ Measured 2026-09-24 on Claude Code 2.1.282, `--model sonnet`, one sample each. F
 - Baseline floor 41,012. `--setting-sources ""` gives 22,927, and also drops hooks and plugins. `--strict-mcp-config` with an empty `--mcp-config` gives 36,935. `--disable-slash-commands` gives 36,482. All three together give 26,273. `--tools ""` grows the floor to 91,744.
 - `--bare` refuses subscription login. It reads only an API key.
 - Two identical fresh calls share the whole prefix: the second reads 41,010 from cache. A different working directory shares only about 10k.
-- The first `--resume` onto a fresh session rewrote about 29k of cache instead of reading it. Later turns in a resume chain wrote about 6k each.
+- The first `--resume` onto a fresh session rewrote about 29k of cache in one early probe. Seven runs in the transport series wrote only the new turn (about 5.3k), so it did not reproduce.
 - `total_cost_usd` is cumulative across a resumed session. `usage` is per call.
 - `/compact` works under `-p`. The result carries `local_command: "compact"` and `num_turns: 0`. Context went from 125,122 to 54,484 on the next turn, which wrote a fresh 42.6k cache. `/compact <instructions>` is accepted.
 - Two concurrent `--resume` calls on one session both succeed and run one after the other. `--fork-session` gives a new session id and a separate transcript.
 - Flags missing from `--help` but present in the binary: `--max-budget-usd`, `--task-budget`, `--autocompact`, `--session-id`, `--resume-session-at`, `--channels`, `--dangerously-load-development-channels`.
-- The CLI parses rate-limit data into `five_hour` and `seven_day` windows (plus `seven_day_opus` and `seven_day_sonnet`), each with a utilization and a reset time. `-p --output-format json` does not carry it.
+- The CLI parses rate-limit data into `five_hour` and `seven_day` windows (plus `seven_day_opus` and `seven_day_sonnet`), each with a utilization and a reset time. `-p --output-format json` does not carry it, stream-json does as `rate_limit_event`, and headless `claude -p "/usage"` reads it for free.
 
 ### How messages reach sessions
 
@@ -89,7 +89,7 @@ Read from the desktop app's bundle and the CLI binary, 2026-09-25.
 - `claude agents --json` lists live sessions, interactive and background, with their status. It is meant for scripting and needs no TTY.
 - Background sessions: `claude --bg` prints an id that `claude attach`, `logs`, `stop` and `rm` take. `--bg --resume <id>` continues a session in the background.
 - An MCP server can push `notifications/claude/channel` into a session, which would wake it. It is gated per organisation and off on Bedrock and Vertex.
-- Untested: whether a socket message wakes an idle CLI session.
+- A socket message wakes an idle background session, about 5 seconds, 3 times out of 3. It arrives framed as a message from another Claude session.
 
 ### Usage limits
 
@@ -141,8 +141,10 @@ The model to fit: one session's cache reads grow with the square of its length. 
 
 ## Waiting on the tests
 
-- Worker transport. Tentative: `claude -p --resume`.
+- Worker transport: settled on `claude -p --resume` by the thresholds. See `docs/specs/transport-results.md`: stream-json costs the same per turn and runs 2.2 times faster, which the thresholds did not price.
 - How the maintainer takes over a worker.
+- A worker settings profile: which of the maintainer's hooks, skills and plugins a worker loads. Workers inherit them today, and in the work-split run a delegation hook blocked a worker's crew.
 - Compact or clear, and when.
 - The handoff format.
-- Model defaults.
+- Model defaults. First data in the experiments repo's `calibration/` (commit d93f73b): as a reviewer and checker, Opus at low effort matches Opus medium (94% checker accuracy, no false alarms) and is the fastest config; Fable medium is the most accurate checker. The implementer set did not separate the configs (all 36 runs passed), so it needs harder cases.
+- Work split rules and the calculator's constants. First grid in the experiments repo's `worksplit/results/SUMMARY.md` (commit d93f73b), reading tasks only: no strategy wins on every module. Inline is cheapest per verified finding on two of three modules, a crew has the best precision on two at the highest cost, and phased has the weakest precision everywhere. Implementation tasks are not measured yet.
