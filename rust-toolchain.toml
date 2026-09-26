@@ -1,0 +1,5 @@
+# One toolchain for every local run, so a green build means the same thing
+# on each machine that runs it.
+[toolchain]
+channel = "stable"
+components = ["clippy", "rustfmt"]
