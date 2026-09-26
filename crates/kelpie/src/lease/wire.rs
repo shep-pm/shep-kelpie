@@ -93,7 +93,7 @@ impl Totals {
 
 /// A runner's side of its book leases: its totals and what it holds
 ///
-/// A runner waiting on a grant may raise [`Asker::totals`] again at any
+/// A runner waiting on a grant may raise [`Asker::metrics`] again at any
 /// time: the dog reads totals, so repeats change nothing, and they cover
 /// a metric shep dropped.
 #[derive(Debug, Clone)]
@@ -114,6 +114,7 @@ impl Asker {
     }
 
     /// Asks for `kind`: the metric to raise, and its value
+    #[must_use = "the dog hears of the ask only through this metric"]
     pub fn want(&mut self, kind: &LeaseKind) -> (String, f64) {
         let entry = self.totals.entry(kind.clone()).or_default();
         entry.want += 1;
@@ -121,6 +122,7 @@ impl Asker {
     }
 
     /// Gives `kind` back, or withdraws the ask: the metric to raise
+    #[must_use = "the dog hears of the return only through this metric"]
     pub fn give_back(&mut self, kind: &LeaseKind) -> (String, f64) {
         self.held.retain(|k| k != kind);
         let entry = self.totals.entry(kind.clone()).or_default();
@@ -158,11 +160,11 @@ impl Asker {
     }
 
     /// Every metric this run has raised, at its current value
-    pub fn totals(&self) -> Vec<(String, f64)> {
-        let totals = [Total::Want, Total::Return];
+    pub fn metrics(&self) -> Vec<(String, f64)> {
+        let both = [Total::Want, Total::Return];
         self.totals
             .keys()
-            .flat_map(|kind| totals.map(|total| self.metric(kind, total)))
+            .flat_map(|kind| both.map(|total| self.metric(kind, total)))
             .collect()
     }
 
@@ -230,7 +232,7 @@ mod tests {
             ("lease.stand-in.want.4242".into(), 2.0)
         );
         assert_eq!(
-            asker.totals(),
+            asker.metrics(),
             [
                 ("lease.stand-in.want.4242".into(), 2.0),
                 ("lease.stand-in.return.4242".into(), 1.0)
@@ -263,13 +265,13 @@ mod tests {
     #[test]
     fn a_grant_for_this_run_is_held_until_given_back() {
         let mut asker = Asker::new(Epoch(9));
-        asker.want(&stand_in());
+        let _ = asker.want(&stand_in());
         assert_eq!(
             asker.grant(&grant_params(&stand_in(), Epoch(9))),
             Ok(stand_in())
         );
         assert!(asker.holds(&stand_in()));
-        asker.give_back(&stand_in());
+        let _ = asker.give_back(&stand_in());
         assert!(!asker.holds(&stand_in()));
     }
 
@@ -280,7 +282,7 @@ mod tests {
             asker.grant("stand-in 9"),
             Err(GrantError::NotAsked(stand_in()))
         );
-        asker.want(&stand_in());
+        let _ = asker.want(&stand_in());
         assert_eq!(
             asker.grant("stand-in 8"),
             Err(GrantError::OtherRun(Epoch(8)))
@@ -298,18 +300,18 @@ mod tests {
     #[test]
     fn a_repeated_grant_is_held_once() {
         let mut asker = Asker::new(Epoch(9));
-        asker.want(&stand_in());
+        let _ = asker.want(&stand_in());
         asker.grant("stand-in 9").unwrap();
         asker.grant("stand-in 9").unwrap();
-        asker.give_back(&stand_in());
+        let _ = asker.give_back(&stand_in());
         assert!(!asker.holds(&stand_in()));
     }
 
     #[test]
     fn a_grant_after_the_ask_was_withdrawn_is_refused() {
         let mut asker = Asker::new(Epoch(9));
-        asker.want(&stand_in());
-        asker.give_back(&stand_in());
+        let _ = asker.want(&stand_in());
+        let _ = asker.give_back(&stand_in());
         assert_eq!(
             asker.grant("stand-in 9"),
             Err(GrantError::NotAsked(stand_in()))

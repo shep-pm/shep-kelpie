@@ -248,7 +248,10 @@ async fn the_lease_round_trip_runs_through_a_real_shepherd() {
     trigger(&client, "koji", "want", Some("stand-in")).await;
     until("koji's grant", async || holds(&client, "koji").await).await;
     let koji = trigger(&client, "koji", "status", None).await;
-    let round_trip = koji["granted_ms"].as_u64().unwrap() - koji["wanted_ms"].as_u64().unwrap();
+    let round_trip = koji["granted_ms"]
+        .as_u64()
+        .unwrap()
+        .saturating_sub(koji["wanted_ms"].as_u64().unwrap());
 
     // A held one queues.
     trigger(&client, "reactmap", "want", Some("stand-in")).await;
@@ -265,7 +268,7 @@ async fn the_lease_round_trip_runs_through_a_real_shepherd() {
     let reclaim = trigger(&client, "reactmap", "status", None).await["granted_ms"]
         .as_u64()
         .unwrap()
-        - killed;
+        .saturating_sub(killed);
 
     // The maintainer waits without preempting, and goes ahead of a runner
     // that asked first.
@@ -295,9 +298,13 @@ async fn the_lease_round_trip_runs_through_a_real_shepherd() {
 
     // A runner that restarts loses its lease; the maintainer is next.
     shepherd.shep_ok(&["restart", "reactmap"]);
-    let take = tokio::task::spawn_blocking(move || take.wait())
-        .await
-        .unwrap();
+    let take = tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || take.wait()),
+    )
+    .await
+    .expect("take was never granted")
+    .unwrap();
     assert!(
         take.status.success(),
         "{}",

@@ -159,8 +159,9 @@ impl Desk {
             _ => return error(format!("unknown action `{action}`")),
         };
         if action == "return" {
+            let held = self.book.holder(&kind) == Some(&Holder::Maintainer);
             let grants = self.book.give_back(&kind, &Holder::Maintainer);
-            let body = json!({ "kind": kind, "returned": true });
+            let body = json!({ "kind": kind, "returned": held });
             return (body.to_string(), deliveries(grants));
         }
         let body = match self.book.ask(&kind, Holder::Maintainer) {
@@ -222,14 +223,10 @@ mod tests {
     }
 
     fn world() -> World {
-        let temp = tempfile::tempdir().unwrap();
+        let _temp = tempfile::tempdir().unwrap();
         let clock = FakeClock::at(EPOCH);
-        let desk = Desk::new(Box::new(clock.clone()), GpuLock::under(temp.path()));
-        World {
-            desk,
-            clock,
-            _temp: temp,
-        }
+        let desk = Desk::new(Box::new(clock.clone()), GpuLock::under(_temp.path()));
+        World { desk, clock, _temp }
     }
 
     fn stand_in() -> LeaseKind {
@@ -299,7 +296,7 @@ mod tests {
         let mut koji = Asker::new(Epoch(101));
         let want = koji.want(&stand_in());
         w.raise("koji", want.clone());
-        for metric in koji.totals() {
+        for metric in koji.metrics() {
             assert_eq!(w.raise("koji", metric), []);
         }
         assert_eq!(w.raise("koji", want), []);
@@ -339,6 +336,8 @@ mod tests {
         let (body, out) = w.ask("return", Some("stand-in"));
         assert_eq!(body, json!({ "kind": "stand-in", "returned": true }));
         assert_eq!(out, [grant("reactmap", 202)]);
+        let (body, _) = w.ask("return", Some("stand-in"));
+        assert_eq!(body, json!({ "kind": "stand-in", "returned": false }));
     }
 
     #[test]

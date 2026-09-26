@@ -164,25 +164,29 @@ async fn take_book(kind: &LeaseKind) -> Result<ExitCode, String> {
 }
 
 async fn return_book(kind: &LeaseKind) -> Result<ExitCode, String> {
-    ask_dog("return", kind.as_str()).await?;
-    println!("kelpie lease: returned {kind}");
+    let reply = ask_dog("return", kind.as_str()).await?;
+    if reply["returned"] == true {
+        println!("kelpie lease: returned {kind}");
+    } else {
+        println!("kelpie lease: you did not hold {kind}, and any wait for it is withdrawn");
+    }
     Ok(ExitCode::SUCCESS)
 }
 
 // Asks the dog until it grants, or withdraws the ask on a signal and
 // returns it.
 async fn wait_for_grant(kind: &LeaseKind, signals: &mut Signals) -> Result<Option<Caught>, String> {
-    let mut said = None;
+    let mut last_ahead = None;
     loop {
         let reply = ask_dog("take", kind.as_str()).await?;
         if reply["granted"] == true {
             return Ok(None);
         }
         let ahead = reply["queued"].as_u64();
-        if ahead != said {
+        if ahead != last_ahead {
             let ahead = ahead.ok_or_else(|| format!("the dog answered {reply}"))?;
             eprintln!("kelpie lease: waiting for {kind}, {ahead} ahead");
-            said = Some(ahead);
+            last_ahead = Some(ahead);
         }
         tokio::select! {
             () = tokio::time::sleep(DOG_POLL) => {}
@@ -249,10 +253,12 @@ async fn hold_gpu() -> Result<ExitCode, String> {
     lock.take(&claim, gpu::scripts_naps, tell_take)
         .await
         .map_err(|e| format!("cannot take {}: {e}", lock.path().display()))?;
+    // A take that is gone cannot hear HELD, and nobody would return the lock.
     let mut stdout = std::io::stdout();
-    writeln!(stdout, "{HELD}")
-        .and_then(|()| stdout.flush())
-        .map_err(|e| e.to_string())?;
+    if let Err(e) = writeln!(stdout, "{HELD}").and_then(|()| stdout.flush()) {
+        let _ = lock.release(claim.pid);
+        return Err(format!("take went away, so the lock is let go: {e}"));
+    }
     std::future::pending::<()>().await;
     Ok(ExitCode::SUCCESS)
 }
@@ -422,5 +428,45 @@ impl Signals {
             _ = self.terminate.recv() => Caught::Terminate,
             _ = self.hangup.recv() => Caught::Hangup,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::process::ExitStatusExt;
+
+    use super::*;
+
+    fn exited(code: i32) -> ExitStatus {
+        ExitStatus::from_raw(code << 8)
+    }
+
+    #[test]
+    fn both_keeps_every_error() {
+        let ok = || Ok::<_, String>(exited(0));
+        assert_eq!(both(ok(), Ok::<(), String>(())), Ok(exited(0)));
+        assert_eq!(
+            both(Err("ran".into()), Ok::<(), String>(())),
+            Err("ran".into())
+        );
+        assert_eq!(both(ok(), Err::<(), _>("back".into())), Err("back".into()));
+        assert_eq!(
+            both(Err("ran".into()), Err::<(), _>("back".into())),
+            Err("ran, and back".into())
+        );
+    }
+
+    #[test]
+    fn exit_codes_follow_the_shell() {
+        assert_eq!(exit_code(exited(3)), ExitCode::from(3));
+        assert_eq!(exit_code(ExitStatus::from_raw(15)), ExitCode::from(143));
+        assert_eq!(Caught::Interrupt.exit_code(), ExitCode::from(130));
+        assert_eq!(Caught::Hangup.exit_code(), ExitCode::from(129));
+        assert_eq!(
+            Caught::Interrupt.forward(),
+            None,
+            "the terminal already sent it"
+        );
+        assert_eq!(Caught::Terminate.forward(), Some("TERM"));
     }
 }
