@@ -1,10 +1,12 @@
 //! Leases on the shared resources every project uses
 //!
 //! Two kinds of lease with two homes. The GPU lease is the lock the
-//! maintainer's qwen scripts already take, and the dog stays out of it.
-//! Every other lease lives in the dog's [`book`].
+//! maintainer's qwen scripts already take, which [`gpu`] reads and takes
+//! in their format, and the dog stays out of it. Every other lease lives
+//! in the dog's [`book`].
 
 pub mod book;
+pub mod gpu;
 
 use std::fmt;
 
