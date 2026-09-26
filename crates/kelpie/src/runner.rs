@@ -32,18 +32,32 @@ impl ProjectName {
 }
 
 impl TryFrom<&str> for ProjectName {
-    type Error = String;
+    type Error = ProjectNameError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.');
         if value.is_empty() || value.starts_with('.') || !value.chars().all(allowed) {
-            return Err(format!(
-                "{value:?} is not a project name: use letters, digits, - _ ."
-            ));
+            return Err(ProjectNameError(value.to_owned()));
         }
         Ok(Self(value.to_owned()))
     }
 }
+
+/// A name that is not one plain path component, carrying the name
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectNameError(pub String);
+
+impl fmt::Display for ProjectNameError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{:?} is not a project name: use letters, digits, - _ .",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for ProjectNameError {}
 
 /// Where a project's files live under kelpie's home
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -212,21 +226,29 @@ impl Runner {
 }
 
 fn check_repo(settings: &Settings) -> Result<(), SettingsError> {
-    let inside = Command::new("git")
+    let repo = &settings.repo;
+    let invalid = |reason: String| SettingsError::Invalid {
+        setting: "repo",
+        reason,
+    };
+    if !repo.is_dir() {
+        return Err(invalid(format!("{} is not a folder", repo.display())));
+    }
+    let output = Command::new("git")
         .arg("-C")
-        .arg(&settings.repo)
+        .arg(repo)
         .args(["rev-parse", "--is-inside-work-tree"])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .output()
-        .is_ok_and(|out| out.status.success() && out.stdout.trim_ascii() == b"true");
-    if inside {
+        .map_err(|e| invalid(format!("cannot run git to check it: {}", e.kind())))?;
+    if output.status.success() && output.stdout.trim_ascii() == b"true" {
         return Ok(());
     }
-    Err(SettingsError::Invalid {
-        setting: "repo",
-        reason: format!("{} is not a git work tree", settings.repo.display()),
-    })
+    Err(invalid(format!(
+        "{} is not a git work tree",
+        repo.display()
+    )))
 }
 
 fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError> {
@@ -330,6 +352,23 @@ mod tests {
     }
 
     #[test]
+    fn every_registered_action_is_answered_and_no_other() {
+        let rig = Rig::new("koji");
+        let runner = rig.open().unwrap();
+        for action in ACTIONS {
+            assert_eq!(
+                rig.ask(&runner, action, None)["project"],
+                "koji",
+                "{action}"
+            );
+        }
+        assert_eq!(
+            rig.ask(&runner, "merge", None),
+            json!({ "error": "unknown action `merge`" })
+        );
+    }
+
+    #[test]
     fn a_trigger_with_params_is_refused_and_changes_nothing() {
         let rig = Rig::new("rotom");
         let runner = rig.open().unwrap();
@@ -374,6 +413,16 @@ mod tests {
                 .ends_with("not-a-repo is not a git work tree"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn a_repo_that_does_not_exist_stops_the_runner() {
+        let rig = Rig::new("reactmap");
+        let gone = rig.repo().display().to_string();
+        rig.edit_settings(|s| s.replace(&gone, &format!("{gone}-gone")));
+        let err = rig.open().unwrap_err().to_string();
+        assert!(err.starts_with("setting `repo`: "), "{err}");
+        assert!(err.ends_with("reactmap-gone is not a folder"), "{err}");
     }
 
     #[test]

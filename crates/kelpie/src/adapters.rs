@@ -98,13 +98,13 @@ fn argv(call: &ClaudeCall) -> Vec<OsString> {
 // JSON is read before the exit status.
 fn parse_result(output: &Output) -> Result<ClaudeReply, ClaudeError> {
     #[derive(Deserialize)]
-    struct Result_ {
+    struct ResultMessage {
         is_error: bool,
         session_id: String,
         #[serde(default)]
         result: String,
     }
-    match serde_json::from_slice::<Result_>(&output.stdout) {
+    match serde_json::from_slice::<ResultMessage>(&output.stdout) {
         Ok(r) if !r.is_error && output.status.success() => Ok(ClaudeReply {
             session_id: SessionId(r.session_id),
             text: r.result,

@@ -29,7 +29,7 @@ pub fn run(project: &str) -> ExitCode {
 }
 
 fn serve(project: &str) -> Result<(), String> {
-    let project = ProjectName::try_from(project)?;
+    let project = ProjectName::try_from(project).map_err(|e| e.to_string())?;
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or("HOME is not set")?;
@@ -62,7 +62,8 @@ fn serve(project: &str) -> Result<(), String> {
     });
     shepherd.ready().map_err(|e| e.to_string())?;
 
-    // A closed sender means the channel's reader is gone, which is a stop too.
+    // Only a shutdown message ends the wait. Without one, the shepherd's
+    // stop signal ends the process instead.
     let _ = stopped.recv();
     shepherd.flush(FLUSH_TIMEOUT).map_err(|e| e.to_string())
 }

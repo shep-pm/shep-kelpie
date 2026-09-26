@@ -15,6 +15,9 @@ use crate::ports::{
 use crate::runner::{OpenError, ProjectName, ProjectPaths, Runner, answer};
 use crate::settings::ForgeSlug;
 
+/// The `repo` in `settings.example.toml`, which the rig points at its own
+const EXAMPLE_REPO: &str = "~/.kelpie/repos/shep";
+
 /// Records every call, and fails each one, since no test yet expects any
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FakeClaude {
@@ -105,8 +108,9 @@ impl Rig {
         };
         rig.make_repo(&rig.home.path().join("origin.git"));
 
-        let settings = include_str!("../settings.example.toml")
-            .replace("~/.kelpie/repos/shep", &rig.repo().display().to_string());
+        let example = include_str!("../settings.example.toml");
+        assert!(example.contains(EXAMPLE_REPO), "the example's repo moved");
+        let settings = example.replace(EXAMPLE_REPO, &rig.repo().display().to_string());
         let paths = rig.paths();
         std::fs::create_dir_all(paths.settings.parent().unwrap()).unwrap();
         std::fs::write(&paths.settings, settings).unwrap();
