@@ -39,7 +39,8 @@ impl Scratch {
     }
 
     fn read(&self, file: &str) -> String {
-        std::fs::read_to_string(self.lock().join(file)).unwrap_or_default()
+        let path = self.lock().join(file);
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
     }
 }
 
@@ -64,9 +65,15 @@ fn wait_output(child: Child, timeout: Duration) -> Output {
     let pid = child.id();
     let (done, finished) = std::sync::mpsc::channel();
     std::thread::spawn(move || done.send(child.wait_with_output().unwrap()));
-    finished
-        .recv_timeout(timeout)
-        .unwrap_or_else(|_| panic!("pid {pid} did not exit within {timeout:?}"))
+    match finished.recv_timeout(timeout) {
+        Ok(output) => output,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            panic!("pid {pid} did not exit within {timeout:?}")
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            panic!("waiting on pid {pid} failed")
+        }
+    }
 }
 
 fn text(bytes: &[u8]) -> String {

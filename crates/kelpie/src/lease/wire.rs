@@ -75,6 +75,22 @@ pub fn grant_params(kind: &LeaseKind, epoch: Epoch) -> String {
     format!("{kind} {}", epoch.0)
 }
 
+/// One run's two running totals for one kind
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Totals {
+    /// How many times it has asked
+    pub want: u64,
+    /// How many times it has given back or withdrawn
+    pub give_back: u64,
+}
+
+impl Totals {
+    /// Whether the run is asking: more wants than give-backs
+    pub fn asking(self) -> bool {
+        self.want > self.give_back
+    }
+}
+
 /// A runner's side of its book leases: its totals and what it holds
 ///
 /// A runner waiting on a grant may raise [`Asker::totals`] again at any
@@ -83,7 +99,7 @@ pub fn grant_params(kind: &LeaseKind, epoch: Epoch) -> String {
 #[derive(Debug, Clone)]
 pub struct Asker {
     epoch: Epoch,
-    totals: BTreeMap<LeaseKind, (u64, u64)>,
+    totals: BTreeMap<LeaseKind, Totals>,
     held: Vec<LeaseKind>,
 }
 
@@ -100,7 +116,7 @@ impl Asker {
     /// Asks for `kind`: the metric to raise, and its value
     pub fn want(&mut self, kind: &LeaseKind) -> (String, f64) {
         let entry = self.totals.entry(kind.clone()).or_default();
-        entry.0 += 1;
+        entry.want += 1;
         self.metric(kind, Total::Want)
     }
 
@@ -108,7 +124,7 @@ impl Asker {
     pub fn give_back(&mut self, kind: &LeaseKind) -> (String, f64) {
         self.held.retain(|k| k != kind);
         let entry = self.totals.entry(kind.clone()).or_default();
-        entry.1 += 1;
+        entry.give_back += 1;
         self.metric(kind, Total::Return)
     }
 
@@ -126,7 +142,7 @@ impl Asker {
         if epoch != self.epoch {
             return Err(GrantError::OtherRun(epoch));
         }
-        let asking = self.totals.get(&kind).is_some_and(|(w, r)| w > r);
+        let asking = self.totals.get(&kind).is_some_and(|t| t.asking());
         if !asking {
             return Err(GrantError::NotAsked(kind));
         }
@@ -151,10 +167,10 @@ impl Asker {
     }
 
     fn metric(&self, kind: &LeaseKind, total: Total) -> (String, f64) {
-        let (want, give_back) = self.totals.get(kind).copied().unwrap_or_default();
+        let totals = self.totals.get(kind).copied().unwrap_or_default();
         let value = match total {
-            Total::Want => want,
-            Total::Return => give_back,
+            Total::Want => totals.want,
+            Total::Return => totals.give_back,
         };
         let name = MetricName {
             kind: kind.clone(),
@@ -276,6 +292,18 @@ mod tests {
                 "{bad:?}"
             );
         }
+        assert!(!asker.holds(&stand_in()));
+    }
+
+    #[test]
+    fn a_grant_after_the_ask_was_withdrawn_is_refused() {
+        let mut asker = Asker::new(Epoch(9));
+        asker.want(&stand_in());
+        asker.give_back(&stand_in());
+        assert_eq!(
+            asker.grant("stand-in 9"),
+            Err(GrantError::NotAsked(stand_in()))
+        );
         assert!(!asker.holds(&stand_in()));
     }
 }

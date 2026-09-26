@@ -114,17 +114,22 @@ async fn serve() -> Result<(), String> {
     let mut names = flock(&client).await?.names;
     shepherd.ready().map_err(|e| e.to_string())?;
     println!("up");
-    loop {
+    let ended = loop {
         let grants = tokio::select! {
-            event = events.next() => on_event(event, &desk, &client, &mut names).await?,
+            event = events.next() => match on_event(event, &desk, &client, &mut names).await {
+                Ok(grants) => grants,
+                Err(e) => break Err(e),
+            },
             Some(grants) = to_deliver.recv() => grants,
-            _ = stopped.recv() => break,
+            _ = stopped.recv() => break Ok(()),
         };
         for grant in grants {
             deliver_grant(&client, &grant).await;
         }
-    }
-    shepherd.flush(FLUSH_TIMEOUT).map_err(|e| e.to_string())
+    };
+    // Replies already queued reach the shepherd however the dog ends.
+    let flushed = shepherd.flush(FLUSH_TIMEOUT).map_err(|e| e.to_string());
+    ended.and(flushed)
 }
 
 // The shepherd channel's handlers run on its own threads, and nothing

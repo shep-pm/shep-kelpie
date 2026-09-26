@@ -10,7 +10,7 @@ use serde_json::json;
 
 use crate::lease::book::{Asked, Grant, LeaseBook};
 use crate::lease::gpu::GpuLock;
-use crate::lease::wire::{MetricName, Total};
+use crate::lease::wire::{MetricName, Total, Totals};
 use crate::lease::{Epoch, GPU, Holder, LeaseKind};
 use crate::ports::Clock;
 use crate::runner::ProjectName;
@@ -29,11 +29,11 @@ pub struct Delivery {
     pub epoch: Epoch,
 }
 
-// One run of a runner and the totals it has raised, want then return.
+// One run of a runner and the totals it has raised.
 #[derive(Debug)]
 struct Run {
     epoch: Epoch,
-    totals: BTreeMap<LeaseKind, (u64, u64)>,
+    totals: BTreeMap<LeaseKind, Totals>,
 }
 
 /// The lease book and everything the dog knows about each runner's run
@@ -83,11 +83,11 @@ impl Desk {
             epoch: metric.epoch,
         };
         let kind = metric.kind;
-        let (want, give_back) = run.totals.entry(kind.clone()).or_default();
+        let totals = run.totals.entry(kind.clone()).or_default();
         match metric.total {
-            Total::Want if value > *want => {
-                *want = value;
-                let asking = *want > *give_back;
+            Total::Want if value > totals.want => {
+                totals.want = value;
+                let asking = totals.asking();
                 // A runner asks only when it holds nothing, so a return was dropped.
                 if self.book.holder(&kind) == Some(&holder) {
                     grants.extend(self.book.give_back(&kind, &holder));
@@ -96,8 +96,8 @@ impl Desk {
                     grants.push(Grant { kind, holder });
                 }
             }
-            Total::Return if value > *give_back => {
-                *give_back = value;
+            Total::Return if value > totals.give_back => {
+                totals.give_back = value;
                 grants.extend(self.book.give_back(&kind, &holder));
             }
             Total::Want | Total::Return => {}
@@ -184,9 +184,12 @@ impl Desk {
     }
 }
 
-// Totals are whole and never negative; anything else is not a total.
+/// The largest whole number an f64 holds exactly, 2^53
+const EXACT: f64 = 9_007_199_254_740_992.0;
+
+// Totals are whole, never negative and exact; anything else is not a total.
 fn count(value: f64) -> Option<u64> {
-    let whole = value.is_finite() && value >= 0.0 && value.fract() == 0.0;
+    let whole = (0.0..=EXACT).contains(&value) && value.fract() == 0.0;
     // In range and whole, checked above.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     whole.then_some(value as u64)
@@ -420,6 +423,7 @@ mod tests {
             ("koji", "lease.stand-in.want.101", 1.5),
             ("koji", "lease.stand-in.want.101", -1.0),
             ("koji", "lease.stand-in.want.101", f64::NAN),
+            ("koji", "lease.stand-in.want.101", 1e19),
             ("a/b", "lease.stand-in.want.101", 1.0),
         ] {
             assert_eq!(

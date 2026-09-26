@@ -66,10 +66,11 @@ async fn dispatch(args: &[String]) -> Result<ExitCode, String> {
         ["return", GPU] => return_gpu().map(|()| ExitCode::SUCCESS),
         ["return", kind] => return_book(&kind_of(kind)?).await,
         ["status"] => status().await,
-        // take reads a holder's stdout alone, so its errors go there too.
-        ["hold", GPU] => hold_gpu()
-            .await
-            .inspect_err(|e| println!("kelpie lease: {e}")),
+        // take reads a holder's stdout alone, so its errors go there.
+        ["hold", GPU] => Ok(hold_gpu().await.unwrap_or_else(|e| {
+            println!("kelpie lease: {e}");
+            ExitCode::FAILURE
+        })),
         _ => {
             eprintln!("usage: {}", USAGE.trim_start());
             Ok(ExitCode::from(2))
@@ -114,9 +115,9 @@ fn said(waiting: Waiting<'_>) -> String {
 async fn run_gpu(command: &[&str]) -> Result<ExitCode, String> {
     let lock = gpu_lock();
     let mut signals = Signals::new()?;
-    let me = std::process::id();
+    let pid = std::process::id();
     let claim = Claim {
-        pid: me,
+        pid,
         what: format!("kelpie lease run: {}", command.join(" ")),
     };
     tokio::select! {
@@ -126,7 +127,7 @@ async fn run_gpu(command: &[&str]) -> Result<ExitCode, String> {
         caught = signals.recv() => return Ok(caught.exit_code()),
     }
     let ran = run_command(command, &mut signals).await;
-    let released = lock.release(me);
+    let released = lock.release(pid);
     let status = ran?;
     released.map_err(|e| format!("cannot remove {}: {e}", lock.path().display()))?;
     Ok(exit_code(status))
@@ -202,19 +203,17 @@ fn take_gpu() -> Result<(), String> {
         .spawn()
         .map_err(|e| format!("cannot start a holder: {e}"))?;
     let pid = holder.id();
-    let lines = holder.stdout.take().map(|out| BufReader::new(out).lines());
-    let held = lines
-        .into_iter()
-        .flatten()
-        .map_while(Result::ok)
-        .find(|line| {
-            let held = line == HELD;
-            if !held {
-                eprintln!("{line}");
-            }
-            held
-        });
-    if held.is_none() {
+    let stdout = holder.stdout.take().ok_or("the holder has no stdout")?;
+    let mut held = false;
+    for line in BufReader::new(stdout).lines() {
+        let line = line.map_err(|e| format!("cannot read the holder: {e}"))?;
+        if line == HELD {
+            held = true;
+            break;
+        }
+        eprintln!("{line}");
+    }
+    if !held {
         let status = holder.wait().map_err(|e| e.to_string())?;
         return Err(format!("the holder gave up ({status})"));
     }
