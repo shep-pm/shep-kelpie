@@ -18,7 +18,7 @@ use crate::settings::ForgeSlug;
 /// The `repo` in `settings.example.toml`, which the rig points at its own
 const EXAMPLE_REPO: &str = "~/.kelpie/repos/shep";
 
-/// Records every call, and fails each one, since no test yet expects any
+/// Records every call and answers each with a failure
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FakeClaude {
     calls: Arc<Mutex<Vec<ClaudeCall>>>,

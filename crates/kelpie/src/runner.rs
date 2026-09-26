@@ -177,7 +177,7 @@ impl Runner {
         })
     }
 
-    /// The project's settings
+    /// The project's settings, as read when the runner started
     pub fn settings(&self) -> &Settings {
         &self.settings
     }
@@ -255,7 +255,7 @@ fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError>
     if !settings.coderabbit.enabled {
         return Ok(());
     }
-    let seen_by = match ports.forge.visibility(&settings.forge)? {
+    let visibility = match ports.forge.visibility(&settings.forge)? {
         Visibility::Public => return Ok(()),
         Visibility::Private => "private",
         Visibility::Internal => "internal",
@@ -263,7 +263,7 @@ fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError>
     Err(SettingsError::Invalid {
         setting: "coderabbit.enabled",
         reason: format!(
-            "{} is {seen_by}, and CodeRabbit's free plan reviews public repos only",
+            "{} is {visibility}, and CodeRabbit's free plan reviews public repos only",
             settings.forge.as_str()
         ),
     }
@@ -271,6 +271,8 @@ fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError>
 }
 
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
+///
+/// Blank params count as none.
 pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> String {
     let error = |message: String| serde_json::json!({ "error": message }).to_string();
     if params.is_some_and(|p| !p.trim().is_empty()) {
@@ -441,6 +443,13 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn coderabbit_on_for_a_public_repo_asks_the_forge_once() {
+        let rig = Rig::new("shep");
+        rig.open().unwrap();
+        assert_eq!(rig.forge.calls(), 1);
     }
 
     #[test]
