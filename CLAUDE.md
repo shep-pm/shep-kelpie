@@ -4,7 +4,7 @@ Kelpie is a shep dog that runs Claude Code workers from a planned work item to a
 
 ## Where things stand
 
-The design is settled and nothing runs yet. The pillars get measured before any code, in this order: transport tests, model calibration, work-split tests, then the MVP (one project, one worker, merge on `ask`, no GUI).
+The design is settled and the pillars are measured. The MVP is being built from #5 (one project, one worker, merge on `ask`, no GUI), one ticket at a time. The code is one Rust crate, `crates/kelpie`, with `#![forbid(unsafe_code)]`.
 
 - `docs/design-log.md`: status, every decision, the measured facts and the test plan. Read it before proposing anything a test has not settled.
 - `docs/specs/`: one spec per test series, and its results. The experiment code and raw results live in shep-pm/kelpie-lab, and results here cite its commits as "the experiments repo".
