@@ -1,0 +1,92 @@
+{
+ "model": "claude-opus-5-5",
+ "effort": "medium",
+ "case": "graph-dogs-last-with-cycle",
+ "commit": "dda57085fd0b0ac043399e058a19c8f3349d2e60",
+ "parent": "e31a5299d2164668817747aaf7f23ab3fd96d9ef",
+ "crate": "shep-core",
+ "file": "crates/shep-core/src/config/graph.rs",
+ "effort_passed": "medium",
+ "error": null,
+ "stderr_tail": null,
+ "num_turns": 8,
+ "wall_s": 31.5,
+ "duration_ms": 29889,
+ "total_cost_usd": 0.4615928,
+ "modelUsage": {
+  "claude-opus-5-5": {
+   "inputTokens": 12,
+   "outputTokens": 2162,
+   "cacheReadInputTokens": 283724,
+   "cacheCreationInputTokens": 45195,
+   "webSearchRequests": 0,
+   "costUSD": 0.4615928,
+   "contextWindow": 1000000,
+   "maxOutputTokens": 128000,
+   "thinkingTokens": 208,
+   "canonicalModel": "claude-opus-5-5",
+   "provider": "firstParty",
+   "costBasis": "list"
+  }
+ },
+ "weighted_units": 129584.4,
+ "stop_reason": "end_turn",
+ "subtype": "success",
+ "session_id": "ddaefc09-8876-4421-88c1-fa70d61a62bb",
+ "permission_denials": [
+  {
+   "tool_name": "Bash",
+   "tool_use_id": "toolu_01GTvWXA5xH4a8H1AVgrZ552",
+   "tool_input": {
+    "command": "cargo test -p shep-core --lib config::graph 2>&1 | tail -5",
+    "description": "Run existing graph tests"
+   }
+  }
+ ],
+ "result_text": "The fix is in and `cargo check -p shep-core` passes. Dogs that nothing depends on are now the last stage of the plan, with or without a cycle. I didn't run the tests: the `cargo test` call needed approval. The task stops at `cargo check`, so I left it there.\n\nChanges, all in `crates/shep-core/src/config/graph.rs`:\n\n1. **Code:** in `plan`, the stage holding those dogs (the `last` list) is now pushed after the stages for nodes that depend on the cycle, not before the cyclic stage. When there's no cycle, the order is the same as before.\n2. **Doc comment:** the stage order now reads: boot-first dogs, the ordinary sort, the cyclic stage, the nodes that depend on the cycle, then dogs nothing depends on.\n3. **Everything else is unchanged:** boot-first dogs, the ordinary order, the single cyclic stage, the stages after it, and the reported cycles.\n\nNone of those dogs can land in the depends-on-the-cycle set: a dog with a path into the cycle is already in that set, so it's never added to `last`.\n\nNext: run `cargo test -p shep-core --lib config::graph` to confirm the existing cycle tests still pass with the new order.",
+ "diff_stat": " crates/shep-core/src/config/graph.rs | 14 ++++++++------\n 1 file changed, 8 insertions(+), 6 deletions(-)\n",
+ "files_changed": [
+  "crates/shep-core/src/config/graph.rs"
+ ],
+ "cargo_lock_changed": false,
+ "other_files_changed": [],
+ "touched_test_module": false,
+ "test_fns_added": 0,
+ "test_patch_applied": "git apply",
+ "hidden": {
+  "cmd": "cargo test -p shep-core --lib -- config::graph::tests::a_dog_still_runs_last_when_the_flock_holds_a_cycle --exact",
+  "exit": 0,
+  "seconds": 9.5,
+  "passed": true,
+  "results": {
+   "config::graph::tests::a_dog_still_runs_last_when_the_flock_holds_a_cycle": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "running 1 test\ntest config::graph::tests::a_dog_still_runs_last_when_the_flock_holds_a_cycle ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 370 filtered out; finished in 0.00s\n\n   Compiling serde_core v1.0.229\n   Compiling serde v1.0.229\n   Compiling serde_json v1.0.151\n   Compiling serde-saphyr v1.0.1\n   Compiling serde_spanned v0.6.9\n   Compiling toml_datetime v0.6.11\n   Compiling shep-channel v0.4.5 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-zq8lps5d/wt/crates/shep-channel)\n   Compiling json5 v0.4.1\n   Compiling insta v1.48.0\n   Compiling toml_edit v0.22.27\n   Compiling toml v0.8.23\n   Compiling shep-core v0.4.5 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-zq8lps5d/wt/crates/shep-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.05s\n     Running unittests src/lib.rs (~/.kelpie/targets/claude-opus-5-5@medium/debug/deps/shep_core-a2dab7729c059e3d)"
+ },
+ "passed": true,
+ "failing_tests": [],
+ "crate_suite": {
+  "exit": 0,
+  "failed": [],
+  "passed_count": 370
+ },
+ "transcript": {
+  "transcript": "graph-dogs-last-with-cycle.transcript.jsonl",
+  "tool_calls": {
+   "Bash": 3,
+   "Read": 1,
+   "Edit": 3
+  },
+  "bash": [
+   "grep -n \"fn plan\\|trailing\\|last_dogs\\|boot_first\\|cycl\" crates/shep-core/src/config/graph.rs | head -80",
+   "cargo check -p shep-core 2>&1 | tail -3",
+   "cargo test -p shep-core --lib config::graph 2>&1 | tail -5"
+  ],
+  "edited_paths": [
+   "/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-zq8lps5d/wt/crates/shep-core/src/config/graph.rs"
+  ]
+ }
+}

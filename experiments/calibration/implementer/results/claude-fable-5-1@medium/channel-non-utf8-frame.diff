@@ -1,0 +1,31 @@
+diff --git a/crates/shep-channel/src/session.rs b/crates/shep-channel/src/session.rs
+index 48acf7be..23e9cd67 100644
+--- a/crates/shep-channel/src/session.rs
++++ b/crates/shep-channel/src/session.rs
+@@ -12,15 +12,22 @@ use crate::{ChannelError, ChildMessage, ShepherdMessage};
+ pub(crate) fn read_message<R: BufRead>(
+     reader: &mut R,
+ ) -> Result<Option<ShepherdMessage>, ChannelError> {
+-    let mut line = String::new();
+-    if reader.read_line(&mut line).map_err(ChannelError::Io)? == 0 {
++    // Bytes rather than `read_line`, which reports a line that is not UTF-8
++    // as `Io(InvalidData)`. That is one bad frame, not a broken transport,
++    // so it must reach the caller as `Malformed` with the whole line
++    // consumed; `serde_json::from_slice` rejects the bytes for us.
++    let mut line = Vec::new();
++    if reader.read_until(b'\n', &mut line).map_err(ChannelError::Io)? == 0 {
+         return Ok(None);
+     }
+     // Belt and braces, not load-bearing: serde_json already skips a
+     // trailing `\r`/`\n` as JSON whitespace before parsing. Kept explicit
+     // so a bare line does not quietly depend on that.
+-    let trimmed = line.trim_end_matches(['\n', '\r']);
+-    serde_json::from_str(trimmed)
++    let end = line
++        .iter()
++        .rposition(|byte| !matches!(byte, b'\n' | b'\r'))
++        .map_or(0, |index| index + 1);
++    serde_json::from_slice(&line[..end])
+         .map(Some)
+         .map_err(|error| ChannelError::Malformed(error.to_string()))
+ }

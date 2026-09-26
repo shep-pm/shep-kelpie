@@ -1,0 +1,48 @@
+diff --git a/crates/shep-core/src/protocol/wire.rs b/crates/shep-core/src/protocol/wire.rs
+index 8f31c775..8065b8f1 100644
+--- a/crates/shep-core/src/protocol/wire.rs
++++ b/crates/shep-core/src/protocol/wire.rs
+@@ -7,7 +7,7 @@ use core::fmt;
+ 
+ use bytes::Bytes;
+ use serde::Serialize;
+-use serde::de::DeserializeOwned;
++use serde::de::{DeserializeOwned, IgnoredAny};
+ use tokio_util::codec::LengthDelimitedCodec;
+ 
+ /// Hard ceiling per frame; larger is a protocol violation
+@@ -47,13 +47,22 @@ pub fn decode_frame<T: DeserializeOwned>(frame: &[u8]) -> Result<T, WireError> {
+ 
+ /// Enough of a reply to recover its id when the reply's own type does not
+ /// decode.
++///
++/// Both of `Reply`'s keys are required, so this matches exactly the frames
++/// `ServerFrame::Reply` would claim. `result` is read as [`IgnoredAny`]:
++/// its presence is what makes the frame a reply, and its content is the
++/// part that may not decode. A frame carrying an `id` without a `result`
++/// (a future progress or flow-control frame, say) is not a reply and must
++/// not be mistaken for an undecodable one.
+ #[derive(serde::Deserialize)]
+ struct ReplyIdOnly {
+     id: u64,
++    result: IgnoredAny,
+ }
+ 
+ /// If `frame` is a reply, the id it answers; `None` for anything else,
+-/// including an event and a frame that is not JSON at all.
++/// including an event, an id-bearing frame with no `result`, and a frame
++/// that is not JSON at all.
+ ///
+ /// A reply whose `Response` this build cannot decode still has a caller
+ /// waiting on it. The id is the only thing needed to fail that caller by
+@@ -61,7 +70,9 @@ struct ReplyIdOnly {
+ /// already arrived.
+ #[must_use]
+ pub fn reply_id(frame: &[u8]) -> Option<u64> {
+-    decode_frame::<ReplyIdOnly>(frame).ok().map(|r| r.id)
++    decode_frame::<ReplyIdOnly>(frame)
++        .ok()
++        .map(|ReplyIdOnly { id, result: IgnoredAny }| id)
+ }
+ 
+ /// Error type returned from [`encode_frame`] and [`decode_frame`]

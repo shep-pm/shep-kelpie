@@ -1,0 +1,45 @@
+diff --git a/crates/shep-core/src/paths.rs b/crates/shep-core/src/paths.rs
+index 04ed766d..224c85de 100644
+--- a/crates/shep-core/src/paths.rs
++++ b/crates/shep-core/src/paths.rs
+@@ -42,6 +42,40 @@ pub fn strip_verbatim_prefix(path: &Path) -> std::borrow::Cow<'_, Path> {
+     std::borrow::Cow::Borrowed(path)
+ }
+ 
++/// Finds the user's home directory, reading the environment only through `var`
++///
++/// A variable set to the empty string counts as unset. Returns `None` when
++/// nothing resolves.
++///
++/// Unix: `HOME`, and no other variable.
++///
++/// Windows, in order: `HOME`, `USERPROFILE`, then `HOMEDRIVE` and `HOMEPATH`
++/// joined as one string. The pair is two halves of a single path, such as
++/// `C:` and `\Users\name`, so it counts only when both are present.
++#[cfg(unix)]
++#[must_use]
++pub fn user_home(var: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
++    var("HOME")
++        .filter(|value| !value.is_empty())
++        .map(PathBuf::from)
++}
++
++/// Finds the user's home directory, reading the environment only through `var`
++///
++/// See the unix sibling for the shared contract; this is the Windows order.
++#[cfg(not(unix))]
++#[must_use]
++pub fn user_home(var: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
++    let set = |name: &str| var(name).filter(|value| !value.is_empty());
++
++    if let Some(home) = set("HOME").or_else(|| set("USERPROFILE")) {
++        return Some(PathBuf::from(home));
++    }
++    let mut joined = set("HOMEDRIVE")?;
++    joined.push(set("HOMEPATH")?);
++    Some(PathBuf::from(joined))
++}
++
+ /// Resolved filesystem layout for one shep home
+ ///
+ /// All paths are derived from `$SHEP_HOME` (default `<home>/.shep`); nothing

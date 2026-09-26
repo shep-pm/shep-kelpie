@@ -1,0 +1,31 @@
+diff --git a/crates/shep-channel/src/outbox.rs b/crates/shep-channel/src/outbox.rs
+index 2c731f9b..9a852c77 100644
+--- a/crates/shep-channel/src/outbox.rs
++++ b/crates/shep-channel/src/outbox.rs
+@@ -34,6 +34,9 @@ pub(crate) struct Outbox {
+ }
+ 
+ impl Outbox {
++    /// `capacity` bounds how many messages `push_lossy` will hold before it
++    /// starts discarding. Zero is legal: nothing is ever retained, so every
++    /// lossy push is immediately counted as a drop.
+     pub(crate) fn new(capacity: usize) -> Self {
+         Self {
+             inner: Mutex::new(Inner {
+@@ -57,7 +60,16 @@ impl Outbox {
+         if inner.closed {
+             return;
+         }
++        if self.capacity == 0 {
++            // Nothing is ever retained at zero capacity, so the message
++            // being pushed is exactly what gets dropped. Count it and stop,
++            // rather than evicting nothing and queueing past capacity.
++            inner.dropped = inner.dropped.saturating_add(1);
++            return;
++        }
+         if inner.queue.len() >= self.capacity {
++            // `capacity >= 1` here, so `len >= capacity` means the queue is
++            // non-empty and this always evicts a real message.
+             inner.queue.pop_front();
+             inner.dropped = inner.dropped.saturating_add(1);
+         }

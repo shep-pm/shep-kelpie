@@ -1,0 +1,34 @@
+diff --git a/crates/shep-core/src/config/app.rs b/crates/shep-core/src/config/app.rs
+index e6541b42..d3279137 100644
+--- a/crates/shep-core/src/config/app.rs
++++ b/crates/shep-core/src/config/app.rs
+@@ -522,6 +522,8 @@ enum EnvValue {
+     Bool(bool),
+     /// A whole number
+     Int(i64),
++    /// A whole number read as unsigned, so one above `i64::MAX` never wraps
++    UInt(u64),
+     /// A floating point number
+     Real(f64),
+ }
+@@ -535,6 +537,7 @@ impl EnvValue {
+             Self::Str(s) => s,
+             Self::Bool(b) => b.to_string(),
+             Self::Int(n) => n.to_string(),
++            Self::UInt(n) => n.to_string(),
+             Self::Real(f) => f.to_string(),
+         }
+     }
+@@ -569,10 +572,8 @@ impl<'de> serde::de::Deserialize<'de> for EnvValue {
+ 
+             fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<EnvValue, E> {
+                 // A u64 beyond i64::MAX is valid JSON; wrapping it would turn
+-                // it into a negative number.
+-                Ok(EnvValue::Int(
+-                    v.try_into().map_err(serde::de::Error::custom)?,
+-                ))
++                // it into a negative number, so it keeps its unsigned form.
++                Ok(EnvValue::UInt(v))
+             }
+ 
+             fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<EnvValue, E> {

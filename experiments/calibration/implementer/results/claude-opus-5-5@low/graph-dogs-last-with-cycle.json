@@ -1,0 +1,82 @@
+{
+ "model": "claude-opus-5-5",
+ "effort": "low",
+ "case": "graph-dogs-last-with-cycle",
+ "commit": "dda57085fd0b0ac043399e058a19c8f3349d2e60",
+ "parent": "e31a5299d2164668817747aaf7f23ab3fd96d9ef",
+ "crate": "shep-core",
+ "file": "crates/shep-core/src/config/graph.rs",
+ "effort_passed": "low",
+ "error": null,
+ "stderr_tail": null,
+ "num_turns": 7,
+ "wall_s": 31.6,
+ "duration_ms": 29810,
+ "total_cost_usd": 0.4193112,
+ "modelUsage": {
+  "claude-opus-5-5": {
+   "inputTokens": 8,
+   "outputTokens": 1798,
+   "cacheReadInputTokens": 169876,
+   "cacheCreationInputTokens": 43668,
+   "webSearchRequests": 0,
+   "costUSD": 0.4193112,
+   "contextWindow": 1000000,
+   "maxOutputTokens": 128000,
+   "thinkingTokens": 178,
+   "canonicalModel": "claude-opus-5-5",
+   "provider": "firstParty",
+   "costBasis": "list"
+  }
+ },
+ "weighted_units": 113321.6,
+ "stop_reason": "end_turn",
+ "subtype": "success",
+ "session_id": "da3e5a44-ccf9-4be9-b8f1-fa0d026f814f",
+ "permission_denials": [],
+ "result_text": "I fixed it: a dog that nothing depends on (and isn't boot-first) is now always the last stage, even when the graph has a cycle. `cargo check -p shep-core` passes. I didn't run any tests.\n\nWhat changed in `crates/shep-core/src/config/graph.rs`:\n1. **The fix:** the stage holding those dogs used to be added right after the ordinary order, which put it ahead of the cyclic stage. It is now added after the stages that depend on the cycle, so it comes last.\n2. **Docs:** the stage-order paragraph above `plan` now reads: boot-first dogs, the ordinary order, the cyclic stage, the nodes that depend on the cycle, then the trailing dogs, \"last whether or not there is a cycle\".\n\nNothing else in the plan changed. A dog with no dependents that itself depends on the cycle still sits in the stages after the cycle, as before, not in the final stage.\n\nNext: if an existing test encodes the old order for cyclic graphs it will now fail, so run `cargo test -p shep-core --lib config::graph` to check.",
+ "diff_stat": " crates/shep-core/src/config/graph.rs | 12 ++++++------\n 1 file changed, 6 insertions(+), 6 deletions(-)\n",
+ "files_changed": [
+  "crates/shep-core/src/config/graph.rs"
+ ],
+ "cargo_lock_changed": false,
+ "other_files_changed": [],
+ "touched_test_module": false,
+ "test_fns_added": 0,
+ "test_patch_applied": "git apply",
+ "hidden": {
+  "cmd": "cargo test -p shep-core --lib -- config::graph::tests::a_dog_still_runs_last_when_the_flock_holds_a_cycle --exact",
+  "exit": 0,
+  "seconds": 8.6,
+  "passed": true,
+  "results": {
+   "config::graph::tests::a_dog_still_runs_last_when_the_flock_holds_a_cycle": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "running 1 test\ntest config::graph::tests::a_dog_still_runs_last_when_the_flock_holds_a_cycle ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 370 filtered out; finished in 0.00s\n\n   Compiling serde_core v1.0.229\n   Compiling serde v1.0.229\n   Compiling serde-saphyr v1.0.1\n   Compiling serde_json v1.0.151\n   Compiling serde_spanned v0.6.9\n   Compiling toml_datetime v0.6.11\n   Compiling json5 v0.4.1\n   Compiling shep-channel v0.4.5 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-e2fe6gvg/wt/crates/shep-channel)\n   Compiling insta v1.48.0\n   Compiling toml_edit v0.22.27\n   Compiling toml v0.8.23\n   Compiling shep-core v0.4.5 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-e2fe6gvg/wt/crates/shep-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.17s\n     Running unittests src/lib.rs (~/.kelpie/targets/claude-opus-5-5@low/debug/deps/shep_core-a2dab7729c059e3d)"
+ },
+ "passed": true,
+ "failing_tests": [],
+ "crate_suite": {
+  "exit": 0,
+  "failed": [],
+  "passed_count": 370
+ },
+ "transcript": {
+  "transcript": "graph-dogs-last-with-cycle.transcript.jsonl",
+  "tool_calls": {
+   "Bash": 2,
+   "Read": 1,
+   "Edit": 3
+  },
+  "bash": [
+   "grep -n \"pub fn plan\" -A140 crates/shep-core/src/config/graph.rs | head -220; grep -n \"fn plan\\b\\|/// \" crates/shep-core/src/config/graph.rs | head -0",
+   "cargo check -p shep-core 2>&1 | tail -2"
+  ],
+  "edited_paths": [
+   "/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-e2fe6gvg/wt/crates/shep-core/src/config/graph.rs"
+  ]
+ }
+}

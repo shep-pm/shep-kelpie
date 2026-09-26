@@ -1,0 +1,37 @@
+diff --git a/crates/shep-core/src/config/graph.rs b/crates/shep-core/src/config/graph.rs
+index cc378549..053d364b 100644
+--- a/crates/shep-core/src/config/graph.rs
++++ b/crates/shep-core/src/config/graph.rs
+@@ -490,6 +496,32 @@ mod tests {
+         assert_eq!(out.stages, vec![vec!["db"], vec!["api"], vec!["metrics"]]);
+     }
+ 
++    #[test]
++    fn a_dog_still_runs_last_when_the_flock_holds_a_cycle() {
++        // fails if the undepended-on dogs are placed before the cyclic stage
++        // rather than after everything: a metrics dog would then answer for a
++        // flock whose knot has not started, which is the exact case the
++        // dogs-last default exists to prevent.
++        let out = plan(&[
++            dog("metrics", false),
++            sheep("a", &["b"]),
++            sheep("b", &["a"]),
++            sheep("tail", &["a"]),
++            sheep("plain", &[]),
++        ]);
++        let metrics = out
++            .stages
++            .iter()
++            .position(|stage| stage.iter().any(|n| n == "metrics"))
++            .expect("the dog is planned");
++        assert_eq!(
++            metrics,
++            out.stages.len() - 1,
++            "the dog must be the last stage: {:?}",
++            out.stages
++        );
++    }
++
+     #[test]
+     fn a_boot_first_dog_runs_before_every_sheep() {
+         // fails if boot_first is ignored, which is the log-rotate case

@@ -1,0 +1,81 @@
+{
+ "model": "claude-haiku-4-5-20251001",
+ "effort": "low",
+ "case": "env-u64-beyond-i64",
+ "commit": "016d92ba6bb8b0f407280a957f0d32bc0d266453",
+ "parent": "9d72449fdb47d506c6bc0ab8879bb451dfab2d3e",
+ "crate": "shep-core",
+ "file": "crates/shep-core/src/config/app.rs",
+ "effort_passed": "low",
+ "error": null,
+ "stderr_tail": null,
+ "num_turns": 6,
+ "wall_s": 40.6,
+ "duration_ms": 38992,
+ "total_cost_usd": 0.10413750000000001,
+ "modelUsage": {
+  "claude-haiku-4-5-20251001": {
+   "inputTokens": 49,
+   "outputTokens": 3235,
+   "cacheReadInputTokens": 241215,
+   "cacheCreationInputTokens": 31896,
+   "webSearchRequests": 0,
+   "costUSD": 0.10413750000000001,
+   "contextWindow": 200000,
+   "maxOutputTokens": 32000,
+   "thinkingTokens": 1404,
+   "canonicalModel": "claude-haiku-4-5",
+   "provider": "firstParty",
+   "costBasis": "list"
+  }
+ },
+ "weighted_units": 104137.5,
+ "stop_reason": "end_turn",
+ "subtype": "success",
+ "session_id": "db3b4179-fc1d-4b50-b308-d12c2988ca36",
+ "permission_denials": [],
+ "result_text": "Done. Added a `UInt(u64)` variant to `EnvValue` to store unsigned integers larger than `i64::MAX`. The `visit_u64` deserializer now checks if a value fits in `i64`; if yes, it stores as `Int` (for backward compat), otherwise as `UInt`. Both convert to their exact decimal string form via `into_string`. Existing behavior for strings, booleans, floats, and signed integers is unchanged.",
+ "diff_stat": " crates/shep-core/src/config/app.rs | 17 +++++++++++------\n 1 file changed, 11 insertions(+), 6 deletions(-)\n",
+ "files_changed": [
+  "crates/shep-core/src/config/app.rs"
+ ],
+ "cargo_lock_changed": false,
+ "other_files_changed": [],
+ "touched_test_module": false,
+ "test_fns_added": 0,
+ "test_patch_applied": "git apply",
+ "hidden": {
+  "cmd": "cargo test -p shep-core --lib -- config::app::tests::env_reads_a_number_beyond_i64_max_without_wrapping --exact",
+  "exit": 0,
+  "seconds": 4.0,
+  "passed": true,
+  "results": {
+   "config::app::tests::env_reads_a_number_beyond_i64_max_without_wrapping": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "running 1 test\ntest config::app::tests::env_reads_a_number_beyond_i64_max_without_wrapping ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 463 filtered out; finished in 0.00s\n\n   Compiling shep-channel v0.7.3 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-o05cbh0e/wt/crates/shep-channel)\n   Compiling shep-core v0.7.3 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-o05cbh0e/wt/crates/shep-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.62s\n     Running unittests src/lib.rs (~/.kelpie/targets/claude-haiku-4-5-20251001@low/debug/deps/shep_core-15ebfb63181e4b76)"
+ },
+ "passed": true,
+ "failing_tests": [],
+ "crate_suite": {
+  "exit": 0,
+  "failed": [],
+  "passed_count": 463
+ },
+ "transcript": {
+  "transcript": "env-u64-beyond-i64.transcript.jsonl",
+  "tool_calls": {
+   "Read": 1,
+   "Edit": 3,
+   "Bash": 1
+  },
+  "bash": [
+   "cargo check -p shep-core"
+  ],
+  "edited_paths": [
+   "/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-o05cbh0e/wt/crates/shep-core/src/config/app.rs"
+  ]
+ }
+}

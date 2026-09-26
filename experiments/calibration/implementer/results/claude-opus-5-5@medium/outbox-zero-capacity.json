@@ -1,0 +1,92 @@
+{
+ "model": "claude-opus-5-5",
+ "effort": "medium",
+ "case": "outbox-zero-capacity",
+ "commit": "20b7dcbd986767dd6d2a14881748d435890999f3",
+ "parent": "0353f6b11702828aafc0a4fc3441c490b5ef7e6a",
+ "crate": "shep-channel",
+ "file": "crates/shep-channel/src/outbox.rs",
+ "effort_passed": "medium",
+ "error": null,
+ "stderr_tail": null,
+ "num_turns": 5,
+ "wall_s": 25.5,
+ "duration_ms": 22259,
+ "total_cost_usd": 0.40307560000000003,
+ "modelUsage": {
+  "claude-opus-5-5": {
+   "inputTokens": 8,
+   "outputTokens": 1270,
+   "cacheReadInputTokens": 168458,
+   "cacheCreationInputTokens": 42994,
+   "webSearchRequests": 0,
+   "costUSD": 0.40307560000000003,
+   "contextWindow": 1000000,
+   "maxOutputTokens": 128000,
+   "thinkingTokens": 85,
+   "canonicalModel": "claude-opus-5-5",
+   "provider": "firstParty",
+   "costBasis": "list"
+  }
+ },
+ "weighted_units": 109191.8,
+ "stop_reason": "end_turn",
+ "subtype": "success",
+ "session_id": "0c82be4f-2423-4332-a48e-4fb1a3e4acce",
+ "permission_denials": [
+  {
+   "tool_name": "Bash",
+   "tool_use_id": "toolu_01LBEuHdNvyUppFjRLPeH8AY",
+   "tool_input": {
+    "command": "cargo check -p shep-channel; echo EXIT=$?",
+    "description": "Type-check the shep-channel crate"
+   }
+  }
+ ],
+ "result_text": "A zero-capacity `Outbox` now keeps nothing. Each `push_lossy` counts one drop (the message being pushed) and returns, so the queue stays empty and `pop()` after `close()` returns `None`. `cargo check -p shep-channel` passes. I didn't run any tests, because the task limited verification to that check.\n\n**The change** is in `crates/shep-channel/src/outbox.rs:55`. After the existing closed check, `push_lossy` now does this:\n```rust\nif self.capacity == 0 {\n    inner.dropped = inner.dropped.saturating_add(1);\n    return;\n}\n```\n- **Capacity 1 or more:** unchanged. It still evicts the oldest message and counts one drop.\n- **After close:** unchanged. The closed check runs first, so the message is ignored and the drop counter stays at 0.\n- **Doc comment:** one added sentence explains why the new message is the one discarded at zero capacity.\n\nThe check prints 4 dead-code warnings. They were there before this edit: nothing in the crate uses `Outbox` yet.\n\n**Still open, and outside this task:** with capacity 0, `push_blocking` waits forever for room that never comes, and only `close()` releases it. Want me to make that a refusal or document it?",
+ "diff_stat": " Cargo.lock                        | 2 +-\n crates/shep-channel/src/outbox.rs | 7 ++++++-\n 2 files changed, 7 insertions(+), 2 deletions(-)\n",
+ "files_changed": [
+  "Cargo.lock",
+  "crates/shep-channel/src/outbox.rs"
+ ],
+ "cargo_lock_changed": true,
+ "other_files_changed": [],
+ "touched_test_module": false,
+ "test_fns_added": 0,
+ "test_patch_applied": "git apply",
+ "hidden": {
+  "cmd": "cargo test -p shep-channel --lib -- outbox::tests::a_zero_capacity_outbox_counts_the_drop_and_retains_nothing --exact",
+  "exit": 0,
+  "seconds": 2.0,
+  "passed": true,
+  "results": {
+   "outbox::tests::a_zero_capacity_outbox_counts_the_drop_and_retains_nothing": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "running 1 test\ntest outbox::tests::a_zero_capacity_outbox_counts_the_drop_and_retains_nothing ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.00s\n\n   Compiling serde v1.0.229\n   Compiling shep-channel v0.4.3 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-_vbojec8/wt/crates/shep-channel)\nwarning: constant `DEFAULT_CAPACITY` is never used\n  --> crates/shep-channel/src/outbox.rs:16:18\n   |\n16 | pub(crate) const DEFAULT_CAPACITY: usize = 1024;\n   |                  ^^^^^^^^^^^^^^^^\n   |\n   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default\n\nwarning: `shep-channel` (lib test) generated 1 warning\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.73s\n     Running unittests src/lib.rs (~/.kelpie/targets/claude-opus-5-5@medium/debug/deps/shep_channel-7dd5f7e3e476a5a1)"
+ },
+ "passed": true,
+ "failing_tests": [],
+ "crate_suite": {
+  "exit": 0,
+  "failed": [],
+  "passed_count": 18
+ },
+ "transcript": {
+  "transcript": "outbox-zero-capacity.transcript.jsonl",
+  "tool_calls": {
+   "Read": 1,
+   "Edit": 1,
+   "Bash": 2
+  },
+  "bash": [
+   "cargo check -p shep-channel; echo EXIT=$?",
+   "cargo check -p shep-channel"
+  ],
+  "edited_paths": [
+   "/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-_vbojec8/wt/crates/shep-channel/src/outbox.rs"
+  ]
+ }
+}

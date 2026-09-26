@@ -1,0 +1,24 @@
+diff --git a/crates/shep-channel/src/outbox.rs b/crates/shep-channel/src/outbox.rs
+index 2c731f9b..9a852c77 100644
+--- a/crates/shep-channel/src/outbox.rs
++++ b/crates/shep-channel/src/outbox.rs
+@@ -229,4 +241,19 @@ mod tests {
+         assert_eq!(outbox.pop(), None);
+         assert_eq!(outbox.dropped(), 0);
+     }
++
++    /// fails if a zero-capacity outbox either under-counts the drop or
++    /// queues past its own capacity. `dropped()` is what an app reads to
++    /// judge whether the shepherd is keeping up, so it must count exactly
++    /// what it discards -- and closing before `pop()` is what keeps this
++    /// test from blocking on an empty, open outbox.
++    #[test]
++    fn a_zero_capacity_outbox_counts_the_drop_and_retains_nothing() {
++        let outbox = Outbox::new(0);
++        outbox.push_lossy(metric(1.0));
++        assert_eq!(outbox.dropped(), 1);
++
++        outbox.close();
++        assert_eq!(outbox.pop(), None);
++    }
+ }

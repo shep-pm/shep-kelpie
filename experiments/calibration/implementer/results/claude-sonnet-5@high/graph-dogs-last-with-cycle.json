@@ -1,0 +1,83 @@
+{
+ "model": "claude-sonnet-5",
+ "effort": "high",
+ "case": "graph-dogs-last-with-cycle",
+ "commit": "dda57085fd0b0ac043399e058a19c8f3349d2e60",
+ "parent": "e31a5299d2164668817747aaf7f23ab3fd96d9ef",
+ "crate": "shep-core",
+ "file": "crates/shep-core/src/config/graph.rs",
+ "effort_passed": "high",
+ "error": null,
+ "stderr_tail": null,
+ "num_turns": 9,
+ "wall_s": 24.7,
+ "duration_ms": 22808,
+ "total_cost_usd": 0.240868,
+ "modelUsage": {
+  "claude-sonnet-5": {
+   "inputTokens": 10,
+   "outputTokens": 1715,
+   "cacheReadInputTokens": 224810,
+   "cacheCreationInputTokens": 44684,
+   "webSearchRequests": 0,
+   "costUSD": 0.240868,
+   "contextWindow": 1000000,
+   "maxOutputTokens": 128000,
+   "thinkingTokens": 228,
+   "canonicalModel": "claude-sonnet-5",
+   "provider": "firstParty",
+   "costBasis": "list"
+  }
+ },
+ "weighted_units": 120434.0,
+ "stop_reason": "end_turn",
+ "subtype": "success",
+ "session_id": "c1b1659e-6ceb-46b5-ace7-085d5700cc61",
+ "permission_denials": [],
+ "result_text": "`plan` now always puts the dogs nothing depends on in the final stage, cycle or not. `cargo check -p shep-core` passes. I did not run any tests.\n\nIn `crates/shep-core/src/config/graph.rs`, the push of that stage now comes after the stages for nodes that depend on the cycle. Nothing else in the plan changes. The doc comment on `plan` now lists the stage order as boot-first dogs, the ordinary sort, the cyclic stage, the nodes depending on the cycle, then the remaining dogs.\n\nNext: run `cargo test -p shep-daemon --lib --all-features -- --skip ::slow::`. `crates/shep-daemon`'s boot code consumes this plan.",
+ "diff_stat": " crates/shep-core/src/config/graph.rs | 15 +++++++++------\n 1 file changed, 9 insertions(+), 6 deletions(-)\n",
+ "files_changed": [
+  "crates/shep-core/src/config/graph.rs"
+ ],
+ "cargo_lock_changed": false,
+ "other_files_changed": [],
+ "touched_test_module": false,
+ "test_fns_added": 0,
+ "test_patch_applied": "git apply",
+ "hidden": {
+  "cmd": "cargo test -p shep-core --lib -- config::graph::tests::a_dog_still_runs_last_when_the_flock_holds_a_cycle --exact",
+  "exit": 0,
+  "seconds": 4.8,
+  "passed": true,
+  "results": {
+   "config::graph::tests::a_dog_still_runs_last_when_the_flock_holds_a_cycle": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "running 1 test\ntest config::graph::tests::a_dog_still_runs_last_when_the_flock_holds_a_cycle ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 370 filtered out; finished in 0.00s\n\n   Compiling serde_core v1.0.229\n   Compiling serde v1.0.229\n   Compiling serde-saphyr v1.0.1\n   Compiling serde_json v1.0.151\n   Compiling serde_spanned v0.6.9\n   Compiling toml_datetime v0.6.11\n   Compiling insta v1.48.0\n   Compiling shep-channel v0.4.5 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-wwr4h1jp/wt/crates/shep-channel)\n   Compiling json5 v0.4.1\n   Compiling toml_edit v0.22.27\n   Compiling toml v0.8.23\n   Compiling shep-core v0.4.5 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-wwr4h1jp/wt/crates/shep-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.38s\n     Running unittests src/lib.rs (~/.kelpie/targets/claude-sonnet-5@high/debug/deps/shep_core-a2dab7729c059e3d)"
+ },
+ "passed": true,
+ "failing_tests": [],
+ "crate_suite": {
+  "exit": 0,
+  "failed": [],
+  "passed_count": 370
+ },
+ "transcript": {
+  "transcript": "graph-dogs-last-with-cycle.transcript.jsonl",
+  "tool_calls": {
+   "Skill": 1,
+   "Bash": 2,
+   "Read": 1,
+   "Edit": 3
+  },
+  "bash": [
+   "grep -n \"fn plan\\|last_dogs\\|boot_first\\|dog\" crates/shep-core/src/config/graph.rs | head -80",
+   "cargo check -p shep-core 2>&1 | tail -5"
+  ],
+  "edited_paths": [
+   "/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-wwr4h1jp/wt/crates/shep-core/src/config/graph.rs"
+  ]
+ }
+}

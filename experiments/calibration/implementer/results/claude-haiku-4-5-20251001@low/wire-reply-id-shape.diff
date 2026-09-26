@@ -1,0 +1,19 @@
+diff --git a/crates/shep-core/src/protocol/wire.rs b/crates/shep-core/src/protocol/wire.rs
+index 8f31c775..c70edc19 100644
+--- a/crates/shep-core/src/protocol/wire.rs
++++ b/crates/shep-core/src/protocol/wire.rs
+@@ -46,10 +46,13 @@ pub fn decode_frame<T: DeserializeOwned>(frame: &[u8]) -> Result<T, WireError> {
+ }
+ 
+ /// Enough of a reply to recover its id when the reply's own type does not
+-/// decode.
++/// decode. Requires both `id` and `result` to distinguish from other
++/// id-bearing frames (progress, flow-control, etc.).
+ #[derive(serde::Deserialize)]
+ struct ReplyIdOnly {
+     id: u64,
++    #[allow(dead_code)]
++    result: serde_json::Value,
+ }
+ 
+ /// If `frame` is a reply, the id it answers; `None` for anything else,

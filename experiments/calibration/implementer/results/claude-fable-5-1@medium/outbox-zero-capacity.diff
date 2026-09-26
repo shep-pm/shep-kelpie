@@ -1,0 +1,37 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 060d93d9..c71ae0ef 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2096,7 +2096,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "shep-channel"
+-version = "0.2.2"
++version = "0.4.3"
+ dependencies = [
+  "serde",
+  "serde_json",
+diff --git a/crates/shep-channel/src/outbox.rs b/crates/shep-channel/src/outbox.rs
+index 2c731f9b..98f8ac76 100644
+--- a/crates/shep-channel/src/outbox.rs
++++ b/crates/shep-channel/src/outbox.rs
+@@ -51,12 +51,18 @@ impl Outbox {
+     ///
+     /// On a full queue the oldest waiting message is discarded and counted.
+     /// Oldest rather than newest: a metric's value is a sample, and the
+-    /// newer sample is the one worth keeping.
++    /// newer sample is the one worth keeping. A zero-capacity outbox has no
++    /// room at all, so the message being pushed is the one discarded, and
++    /// the queue stays empty.
+     pub(crate) fn push_lossy(&self, message: ChildMessage) {
+         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+         if inner.closed {
+             return;
+         }
++        if self.capacity == 0 {
++            inner.dropped = inner.dropped.saturating_add(1);
++            return;
++        }
+         if inner.queue.len() >= self.capacity {
+             inner.queue.pop_front();
+             inner.dropped = inner.dropped.saturating_add(1);

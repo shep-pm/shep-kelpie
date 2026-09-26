@@ -1,0 +1,93 @@
+{
+ "model": "claude-sonnet-5",
+ "effort": "high",
+ "case": "wire-reply-id-shape",
+ "commit": "59cdae0ac67f483f84ca3ced7fb9e7e908fa729a",
+ "parent": "47e603cba8189f4398b44eb8dc6a6761e4c89813",
+ "crate": "shep-core",
+ "file": "crates/shep-core/src/protocol/wire.rs",
+ "effort_passed": "high",
+ "error": null,
+ "stderr_tail": null,
+ "num_turns": 10,
+ "wall_s": 34.9,
+ "duration_ms": 33081,
+ "total_cost_usd": 0.27000900000000005,
+ "modelUsage": {
+  "claude-sonnet-5": {
+   "inputTokens": 12,
+   "outputTokens": 2477,
+   "cacheReadInputTokens": 286055,
+   "cacheCreationInputTokens": 47001,
+   "webSearchRequests": 0,
+   "costUSD": 0.27000900000000005,
+   "contextWindow": 1000000,
+   "maxOutputTokens": 128000,
+   "thinkingTokens": 768,
+   "canonicalModel": "claude-sonnet-5",
+   "provider": "firstParty",
+   "costBasis": "list"
+  }
+ },
+ "weighted_units": 135004.5,
+ "stop_reason": "end_turn",
+ "subtype": "success",
+ "session_id": "366c0577-ee5b-42f7-aa6e-8d2fe22fa2bb",
+ "permission_denials": [
+  {
+   "tool_name": "Bash",
+   "tool_use_id": "toolu_01QZU9xdpqFpVNVeCcfc2fjV",
+   "tool_input": {
+    "command": "sed -i 's|^/// decode: the id, and a `result` in \\[`Reply::result`\\]|/// decode: the id, and a `result` in [`Reply::result`](crate::protocol::Reply::result)|' crates/shep-core/src/protocol/wire.rs; cargo check -p shep-core 2>&1 | tail -15"
+   }
+  }
+ ],
+ "result_text": "`reply_id` now returns `Some(id)` only when the frame has a numeric `id` and a `result` in the `Ok`/`Err` shape that `Reply::result` uses. An id-bearing frame with no `result` gets `None`. `cargo check -p shep-core` passes; I did not run any tests.\n\nThe change is in `crates/shep-core/src/protocol/wire.rs`. It reads `result` for its shape only and ignores the payload. A reply whose `Ok` or `Err` payload doesn't decode, such as a future `Response` variant, still yields its id. Events and non-JSON input still yield `None`.\n\nA frame with an `id` and a `result` that is not an `Ok`/`Err` object, such as `\"result\": \"garbage\"`, now also gets `None`. If you'd rather accept any `result` value, that's a small loosening of the struct.\n\nI did not touch the tests.",
+ "diff_stat": " crates/shep-core/src/protocol/wire.rs | 15 +++++++++++++--\n 1 file changed, 13 insertions(+), 2 deletions(-)\n",
+ "files_changed": [
+  "crates/shep-core/src/protocol/wire.rs"
+ ],
+ "cargo_lock_changed": false,
+ "other_files_changed": [],
+ "touched_test_module": false,
+ "test_fns_added": 0,
+ "test_patch_applied": "git apply",
+ "hidden": {
+  "cmd": "cargo test -p shep-core --lib -- protocol::wire::tests::reply_id_is_none_for_a_future_progress_frame --exact",
+  "exit": 0,
+  "seconds": 27.9,
+  "passed": true,
+  "results": {
+   "protocol::wire::tests::reply_id_is_none_for_a_future_progress_frame": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "   Compiling futures-task v0.3.33\n   Compiling slab v0.4.12\n   Compiling errno v0.3.14\n   Compiling rustix v1.1.4\n   Compiling mio v1.2.2\n   Compiling rand_core v0.9.5\n   Compiling socket2 v0.6.5\n   Compiling rand_xorshift v0.4.0\n   Compiling encoding_rs_io v0.1.8\n   Compiling rand v0.9.5\n   Compiling itoa v1.0.18\n   Compiling unarray v0.1.4\n   Compiling similar v2.7.0\n   Compiling tokio v1.53.1\n   Compiling futures-util v0.3.33\n   Compiling nix v0.29.0\n   Compiling croner v3.0.1\n   Compiling chrono-tz v0.10.4\n   Compiling regex-automata v0.4.18\n   Compiling tempfile v3.27.0\n   Compiling serde v1.0.229\n   Compiling serde-saphyr v1.0.1\n   Compiling serde_json v1.0.151\n   Compiling serde_ignored v0.1.14\n   Compiling toml_datetime v0.6.11\n   Compiling serde_spanned v0.6.9\n   Compiling json5 v0.4.1\n   Compiling insta v1.48.0\n   Compiling shep-channel v0.5.0 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-zul4_m9x/wt/crates/shep-channel)\n   Compiling toml_edit v0.22.27\n   Compiling globset v0.4.20\n   Compiling regex v1.13.1\n   Compiling ppv-lite86 v0.2.21\n   Compiling rand_chacha v0.9.0\n   Compiling proptest v1.11.0\n   Compiling toml v0.8.23\n   Compiling tokio-util v0.7.19\n   Compiling shep-core v0.5.0 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-zul4_m9x/wt/crates/shep-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 27.33s\n     Running unittests src/lib.rs (~/.kelpie/targets/claude-sonnet-5@high/debug/deps/shep_core-f2e64bb6adaecb93)"
+ },
+ "passed": true,
+ "failing_tests": [],
+ "crate_suite": {
+  "exit": 0,
+  "failed": [],
+  "passed_count": 388
+ },
+ "transcript": {
+  "transcript": "wire-reply-id-shape.transcript.jsonl",
+  "tool_calls": {
+   "Skill": 1,
+   "Bash": 4,
+   "Read": 1,
+   "Edit": 2
+  },
+  "bash": [
+   "grep -n \"reply_id\" -r crates/shep-core/src | head -20",
+   "grep -n -B3 -A25 \"struct Reply\\|enum Reply\\|struct Frame\\|enum Frame\" crates/shep-core/src/protocol/*.rs | head -120",
+   "sed -i 's|^/// decode: the id, and a `result` in \\[`Reply::result`\\]|/// decode: the id, and a `result` in [`Reply::result`](crate::protocol::Reply::result)|' crates/shep-core/src/protocol/wire.rs; ca",
+   "cargo check -p shep-core 2>&1 | tail -15"
+  ],
+  "edited_paths": [
+   "/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-zul4_m9x/wt/crates/shep-core/src/protocol/wire.rs"
+  ]
+ }
+}

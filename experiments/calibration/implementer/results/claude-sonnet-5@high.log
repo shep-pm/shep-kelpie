@@ -1,0 +1,7 @@
+implement: 6 cases to run for claude-sonnet-5@high
+07:44:52 wire-reply-id-shape passed=True turns=10 35s units=135004
+07:45:56 channel-non-utf8-frame passed=True turns=6 45s units=109748
+07:46:22 outbox-zero-capacity passed=True turns=6 20s units=103655
+07:47:01 env-u64-beyond-i64 passed=True turns=10 26s units=97050
+07:47:38 graph-dogs-last-with-cycle passed=True turns=9 25s units=120434
+07:48:13 paths-user-home passed=True turns=7 24s units=94988

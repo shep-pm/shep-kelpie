@@ -1,0 +1,126 @@
+{
+ "model": "claude-fable-5-1",
+ "effort": "medium",
+ "case": "wire-reply-id-shape",
+ "commit": "59cdae0ac67f483f84ca3ced7fb9e7e908fa729a",
+ "parent": "47e603cba8189f4398b44eb8dc6a6761e4c89813",
+ "crate": "shep-core",
+ "file": "crates/shep-core/src/protocol/wire.rs",
+ "effort_passed": "medium",
+ "error": null,
+ "stderr_tail": null,
+ "num_turns": 17,
+ "wall_s": 117.5,
+ "duration_ms": 112853,
+ "total_cost_usd": 1.570374,
+ "modelUsage": {
+  "claude-fable-5-1": {
+   "inputTokens": 514,
+   "outputTokens": 4416,
+   "cacheReadInputTokens": 978136,
+   "cacheCreationInputTokens": 54995,
+   "webSearchRequests": 0,
+   "costUSD": 1.570374,
+   "contextWindow": 1000000,
+   "maxOutputTokens": 64000,
+   "thinkingTokens": 417,
+   "canonicalModel": "claude-fable-5-1",
+   "provider": "firstParty",
+   "costBasis": "list"
+  }
+ },
+ "weighted_units": 230397.6,
+ "stop_reason": "end_turn",
+ "subtype": "success",
+ "session_id": "4dd423b9-6293-4724-9931-b2236418b868",
+ "permission_denials": [
+  {
+   "tool_name": "Bash",
+   "tool_use_id": "toolu_01Qs4FtqmMksn2fPkXjU61GC",
+   "tool_input": {
+    "command": "cargo check -p shep-core 2>&1 | tail -5; echo \"EXIT=$?\"",
+    "timeout": 300000,
+    "description": "Run cargo check on shep-core"
+   }
+  },
+  {
+   "tool_name": "Bash",
+   "tool_use_id": "toolu_01BGdrNLftJrHUqy8c8rLR3v",
+   "tool_input": {
+    "command": "cargo fmt --all --check",
+    "description": "Check formatting"
+   }
+  },
+  {
+   "tool_name": "Bash",
+   "tool_use_id": "toolu_0141NHNqck8rWo4xCb4NgRkh",
+   "tool_input": {
+    "command": "cargo test -p shep-core --lib reply_id 2>&1 | grep -E \"^test |test result\"",
+    "timeout": 300000,
+    "description": "Run the existing reply_id tests"
+   }
+  },
+  {
+   "tool_name": "Bash",
+   "tool_use_id": "toolu_01KvzjZzasyRr65Wfh3ZPHVT",
+   "tool_input": {
+    "command": "cargo test -p shep-core --lib reply_id",
+    "timeout": 300000,
+    "description": "Run the existing reply_id tests"
+   }
+  }
+ ],
+ "result_text": "Done. `cargo check -p shep-core` passes with no warnings. The test run and `cargo fmt --check` were denied by the sandbox, so those two are unverified here.\n\n**What changed** in `crates/shep-core/src/protocol/wire.rs`:\n\n1. `ReplyIdOnly` now has a second required field, `result: IgnoredAny`, so it matches exactly the `{id, result}` key set that `ServerFrame::Reply` claims. `IgnoredAny` accepts any JSON value without decoding it, so a reply whose `Response` this build cannot decode still yields its id.\n2. A frame with an `id` but no `result` fails to deserialize into `ReplyIdOnly`, so `reply_id` returns None for it. Events and non-JSON input return None as before.\n3. `reply_id` destructures the field with the unit pattern `result: IgnoredAny` rather than `_`, which keeps the field counted as read and avoids the `dead_code` warning that clippy's `-D warnings` gate would refuse.\n4. The doc comments on the struct and on `reply_id` state the new rule.\n\nNext: run the existing tests once to confirm the three pinned cases still pass.\n\n```\ncargo test -p shep-core --lib reply_id\n```",
+ "diff_stat": " crates/shep-core/src/protocol/wire.rs | 17 ++++++++++++++---\n 1 file changed, 14 insertions(+), 3 deletions(-)\n",
+ "files_changed": [
+  "crates/shep-core/src/protocol/wire.rs"
+ ],
+ "cargo_lock_changed": false,
+ "other_files_changed": [],
+ "touched_test_module": false,
+ "test_fns_added": 0,
+ "test_patch_applied": "git apply",
+ "hidden": {
+  "cmd": "cargo test -p shep-core --lib -- protocol::wire::tests::reply_id_is_none_for_a_future_progress_frame --exact",
+  "exit": 0,
+  "seconds": 12.1,
+  "passed": true,
+  "results": {
+   "protocol::wire::tests::reply_id_is_none_for_a_future_progress_frame": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "   Compiling annotate-snippets v0.12.16\n   Compiling encoding_rs_io v0.1.8\n   Compiling granit-parser v1.0.1\n   Compiling phf v0.12.1\n   Compiling derive_builder v0.20.2\n   Compiling regex-automata v0.4.18\n   Compiling tokio v1.53.1\n   Compiling strum v0.27.2\n   Compiling zmij v1.0.23\n   Compiling bstr v1.13.0\n   Compiling serde v1.0.229\n   Compiling itoa v1.0.18\n   Compiling tempfile v3.27.0\n   Compiling unarray v0.1.4\n   Compiling slab v0.4.12\n   Compiling similar v2.7.0\n   Compiling futures-task v0.3.33\n   Compiling serde_json v1.0.151\n   Compiling serde-saphyr v1.0.1\n   Compiling serde_ignored v0.1.14\n   Compiling nix v0.29.0\n   Compiling toml_datetime v0.6.11\n   Compiling serde_spanned v0.6.9\n   Compiling shep-channel v0.5.0 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-9xsk19fb/wt/crates/shep-channel)\n   Compiling json5 v0.4.1\n   Compiling futures-util v0.3.33\n   Compiling croner v3.0.1\n   Compiling chrono-tz v0.10.4\n   Compiling toml_edit v0.22.27\n   Compiling insta v1.48.0\n   Compiling globset v0.4.20\n   Compiling regex v1.13.1\n   Compiling ppv-lite86 v0.2.21\n   Compiling rand_chacha v0.9.0\n   Compiling proptest v1.11.0\n   Compiling toml v0.8.23\n   Compiling tokio-util v0.7.19\n   Compiling shep-core v0.5.0 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-9xsk19fb/wt/crates/shep-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.69s\n     Running unittests src/lib.rs (~/.kelpie/targets/claude-fable-5-1@medium/debug/deps/shep_core-f2e64bb6adaecb93)"
+ },
+ "passed": true,
+ "failing_tests": [],
+ "crate_suite": {
+  "exit": 0,
+  "failed": [],
+  "passed_count": 388
+ },
+ "transcript": {
+  "transcript": "wire-reply-id-shape.transcript.jsonl",
+  "tool_calls": {
+   "Bash": 10,
+   "Read": 1,
+   "Edit": 5
+  },
+  "bash": [
+   "grep -n \"reply_id\\|struct Reply\\|pub struct\\|pub enum\\|\\\"id\\\"\\|\\\"result\\\"\\|\\\"event\\\"\" /private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-9xsk19fb/wt/crates/shep-core/src/protocol/wire.rs /p",
+   "grep -rn -B3 -A12 \"Reply {\" crates/shep-core/src/protocol/*.rs | grep -v \"^.*wire.rs\" | head -60",
+   "grep -rn -B6 -A10 \"Reply {\" crates/shep-core/src/protocol/mod.rs crates/shep-core/src/protocol/frames.rs crates/shep-core/src/protocol/messages.rs 2>/dev/null | head -50; ls crates/shep-core/src/proto",
+   "grep -n -B8 -A8 \"Reply\\b\" crates/shep-core/src/protocol/frame.rs | head -80",
+   "cargo check -p shep-core 2>&1 | tail -5; echo \"EXIT=$?\"",
+   "cargo check -p shep-core",
+   "cargo check -p shep-core 2>&1 | grep -E \"^(warning|error|    Finished)\"",
+   "cargo fmt --all --check",
+   "cargo test -p shep-core --lib reply_id 2>&1 | grep -E \"^test |test result\"",
+   "cargo test -p shep-core --lib reply_id"
+  ],
+  "edited_paths": [
+   "/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-9xsk19fb/wt/crates/shep-core/src/protocol/wire.rs"
+  ]
+ }
+}

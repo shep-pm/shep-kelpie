@@ -1,0 +1,86 @@
+{
+ "model": "claude-opus-5-5",
+ "effort": "low",
+ "case": "paths-user-home",
+ "commit": "683599568babd7de6d1b2da8f524131cdc598eaa",
+ "parent": "ba076171737ea2a2dcf000a022da9a1117f9eb4e",
+ "crate": "shep-core",
+ "file": "crates/shep-core/src/paths.rs",
+ "effort_passed": "low",
+ "error": null,
+ "stderr_tail": null,
+ "num_turns": 7,
+ "wall_s": 42.7,
+ "duration_ms": 40202,
+ "total_cost_usd": 0.321068,
+ "modelUsage": {
+  "claude-opus-5-5": {
+   "inputTokens": 10,
+   "outputTokens": 2267,
+   "cacheReadInputTokens": 170200,
+   "cacheCreationInputTokens": 30206,
+   "webSearchRequests": 0,
+   "costUSD": 0.321068,
+   "contextWindow": 1000000,
+   "maxOutputTokens": 128000,
+   "thinkingTokens": 275,
+   "canonicalModel": "claude-opus-5-5",
+   "provider": "firstParty",
+   "costBasis": "list"
+  }
+ },
+ "weighted_units": 88777.0,
+ "stop_reason": "end_turn",
+ "subtype": "success",
+ "session_id": "7712b539-7e5c-4b64-beda-30c93443478b",
+ "permission_denials": [],
+ "result_text": "I added `user_home` to `crates/shep-core/src/paths.rs`, right after `strip_verbatim_prefix`. `cargo check -p shep-core` passes, and so does a check for the Windows target (`x86_64-pc-windows-gnu`).\n\n- **Env access:** it reads variables only through `var`. Any variable set to the empty string is treated as unset.\n- **Unix** (strictly, every non-Windows target, matching how this file already splits by platform): it returns `HOME` and ignores everything else.\n- **Windows:** it tries `HOME`, then `USERPROFILE`, then `HOMEDRIVE` and `HOMEPATH` joined into one string. The pair only counts when both halves are present.\n- **Nothing found:** it returns `None`.\n- **Docs:** the doc comment covers the behaviour on both platforms. I also added `#[must_use]`, like the other functions in the file.\n\nNo tests were added or changed, as asked, so nothing has exercised the function yet. The full task gate (fmt, clippy, workspace tests, docs) hasn't been run either.\n\nNext: `cargo clippy -p shep-core --all-targets --all-features -- -D warnings` (about 10 seconds).",
+ "diff_stat": " crates/shep-core/src/paths.rs | 23 +++++++++++++++++++++++\n 1 file changed, 23 insertions(+)\n",
+ "files_changed": [
+  "crates/shep-core/src/paths.rs"
+ ],
+ "cargo_lock_changed": false,
+ "other_files_changed": [],
+ "touched_test_module": false,
+ "test_fns_added": 0,
+ "test_patch_applied": "git apply",
+ "hidden": {
+  "cmd": "cargo test -p shep-core --lib -- paths::tests::home_is_read_first_on_every_platform paths::tests::nothing_named_resolves_nothing paths::tests::an_empty_value_counts_as_unset paths::tests::unix_ignores_the_windows_variables --exact",
+  "exit": 0,
+  "seconds": 3.9,
+  "passed": true,
+  "results": {
+   "paths::tests::home_is_read_first_on_every_platform": "ok",
+   "paths::tests::nothing_named_resolves_nothing": "ok",
+   "paths::tests::an_empty_value_counts_as_unset": "ok",
+   "paths::tests::unix_ignores_the_windows_variables": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "running 4 tests\ntest paths::tests::home_is_read_first_on_every_platform ... ok\ntest paths::tests::nothing_named_resolves_nothing ... ok\ntest paths::tests::an_empty_value_counts_as_unset ... ok\ntest paths::tests::unix_ignores_the_windows_variables ... ok\n\ntest result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 452 filtered out; finished in 0.00s\n\n   Compiling shep-channel v0.7.0 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-qhylbu53/wt/crates/shep-channel)\n   Compiling shep-core v0.7.0 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-qhylbu53/wt/crates/shep-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.51s\n     Running unittests src/lib.rs (~/.kelpie/targets/claude-opus-5-5@low/debug/deps/shep_core-7268d796adac7378)"
+ },
+ "passed": true,
+ "failing_tests": [],
+ "crate_suite": {
+  "exit": 0,
+  "failed": [],
+  "passed_count": 455
+ },
+ "transcript": {
+  "transcript": "paths-user-home.transcript.jsonl",
+  "tool_calls": {
+   "Bash": 3,
+   "Read": 1,
+   "Edit": 2
+  },
+  "bash": [
+   "grep -n \"fn \\|^use\\|OsString\\|cfg(\" crates/shep-core/src/paths.rs | head -50",
+   "cargo check -p shep-core 2>&1 | tail -15",
+   "cargo check -p shep-core 2>&1 | tail -3; cargo check -p shep-core --target x86_64-pc-windows-gnu 2>&1 | tail -3"
+  ],
+  "edited_paths": [
+   "/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-qhylbu53/wt/crates/shep-core/src/paths.rs"
+  ]
+ }
+}

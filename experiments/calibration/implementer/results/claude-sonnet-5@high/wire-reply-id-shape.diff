@@ -1,0 +1,32 @@
+diff --git a/crates/shep-core/src/protocol/wire.rs b/crates/shep-core/src/protocol/wire.rs
+index 8f31c775..209f09ce 100644
+--- a/crates/shep-core/src/protocol/wire.rs
++++ b/crates/shep-core/src/protocol/wire.rs
+@@ -46,14 +46,25 @@ pub fn decode_frame<T: DeserializeOwned>(frame: &[u8]) -> Result<T, WireError> {
+ }
+ 
+ /// Enough of a reply to recover its id when the reply's own type does not
+-/// decode.
++/// decode: the id, and a `result` in `Reply`'s `Ok`/`Err` shape with
++/// its payload left unread.
+ #[derive(serde::Deserialize)]
+ struct ReplyIdOnly {
+     id: u64,
++    #[allow(dead_code, reason = "checked for shape only, payload is never read")]
++    result: ResultShape,
++}
++
++/// The externally tagged `Ok`/`Err` envelope of a `Result`, payload ignored.
++#[derive(serde::Deserialize)]
++enum ResultShape {
++    Ok(serde::de::IgnoredAny),
++    Err(serde::de::IgnoredAny),
+ }
+ 
+ /// If `frame` is a reply, the id it answers; `None` for anything else,
+-/// including an event and a frame that is not JSON at all.
++/// including an event, a frame that carries an `id` but no reply `result`,
++/// and a frame that is not JSON at all.
+ ///
+ /// A reply whose `Response` this build cannot decode still has a caller
+ /// waiting on it. The id is the only thing needed to fail that caller by

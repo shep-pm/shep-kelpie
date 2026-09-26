@@ -1,0 +1,43 @@
+diff --git a/crates/shep-core/src/paths.rs b/crates/shep-core/src/paths.rs
+index 04ed766d..4f2ffdd6 100644
+--- a/crates/shep-core/src/paths.rs
++++ b/crates/shep-core/src/paths.rs
+@@ -42,6 +42,38 @@ pub fn strip_verbatim_prefix(path: &Path) -> std::borrow::Cow<'_, Path> {
+     std::borrow::Cow::Borrowed(path)
+ }
+ 
++/// Finds the user's home directory from an environment lookup
++///
++/// Reads only through `var`, never the process environment. A variable set
++/// to the empty string counts as unset.
++///
++/// - Unix: `HOME`, and nothing else.
++/// - Windows: `HOME`, then `USERPROFILE`, then `HOMEDRIVE` and `HOMEPATH`
++///   concatenated (`C:` and `\Users\name` are two halves of one path), which
++///   counts only when both halves are set.
++///
++/// Returns `None` when nothing resolves.
++#[must_use]
++pub fn user_home(var: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
++    let set = |key: &str| var(key).filter(|value| !value.is_empty());
++
++    #[cfg(windows)]
++    {
++        set("HOME")
++            .or_else(|| set("USERPROFILE"))
++            .or_else(|| {
++                let mut joined = set("HOMEDRIVE")?;
++                joined.push(set("HOMEPATH")?);
++                Some(joined)
++            })
++            .map(PathBuf::from)
++    }
++    #[cfg(not(windows))]
++    {
++        set("HOME").map(PathBuf::from)
++    }
++}
++
+ /// Resolved filesystem layout for one shep home
+ ///
+ /// All paths are derived from `$SHEP_HOME` (default `<home>/.shep`); nothing

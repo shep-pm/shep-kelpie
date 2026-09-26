@@ -1,0 +1,37 @@
+diff --git a/crates/shep-core/src/config/app.rs b/crates/shep-core/src/config/app.rs
+index e6541b42..2b041d88 100644
+--- a/crates/shep-core/src/config/app.rs
++++ b/crates/shep-core/src/config/app.rs
+@@ -520,8 +520,8 @@ enum EnvValue {
+     Str(String),
+     /// A bare `true` or `false`
+     Bool(bool),
+-    /// A whole number
+-    Int(i64),
++    /// A whole number, signed or unsigned
++    Int(i128),
+     /// A floating point number
+     Real(f64),
+ }
+@@ -564,15 +564,15 @@ impl<'de> serde::de::Deserialize<'de> for EnvValue {
+             }
+ 
+             fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<EnvValue, E> {
+-                Ok(EnvValue::Int(v))
++                // i128 holds the full i64 range losslessly.
++                Ok(EnvValue::Int(i128::from(v)))
+             }
+ 
+             fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<EnvValue, E> {
+-                // A u64 beyond i64::MAX is valid JSON; wrapping it would turn
+-                // it into a negative number.
+-                Ok(EnvValue::Int(
+-                    v.try_into().map_err(serde::de::Error::custom)?,
+-                ))
++                // A u64 beyond i64::MAX is valid JSON (and TOML). i128 holds
++                // the full u64 range losslessly, so no value is refused and
++                // none is silently wrapped.
++                Ok(EnvValue::Int(i128::from(v)))
+             }
+ 
+             fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<EnvValue, E> {

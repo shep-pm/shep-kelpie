@@ -1,0 +1,6 @@
+implement: 5 cases to run for claude-haiku-4-5-20251001@low
+07:46:22 wire-reply-id-shape passed=True turns=15 76s units=167364
+07:47:05 channel-non-utf8-frame passed=True turns=4 40s units=87981
+07:47:57 env-u64-beyond-i64 passed=True turns=6 41s units=104138
+07:49:35 graph-dogs-last-with-cycle passed=True turns=8 86s units=156497
+07:50:29 paths-user-home passed=True turns=6 38s units=85466

@@ -1,0 +1,22 @@
+diff --git a/crates/shep-core/src/protocol/wire.rs b/crates/shep-core/src/protocol/wire.rs
+index 8f31c775..1bacf319 100644
+--- a/crates/shep-core/src/protocol/wire.rs
++++ b/crates/shep-core/src/protocol/wire.rs
+@@ -136,6 +144,17 @@ mod tests {
+         assert_eq!(reply_id(b"not json"), None);
+     }
+ 
++    #[test]
++    fn reply_id_is_none_for_a_future_progress_frame() {
++        // A frame that carries an `id` but is not shaped like a reply (no
++        // `result`) must not be mistaken for an undecodable reply: the
++        // caller it would falsely fail is still waiting on the real one.
++        assert_eq!(
++            reply_id(br#"{"kind":"progress","id":7,"percent":40}"#),
++            None
++        );
++    }
++
+     #[test]
+     fn codec_uses_u32_prefix_and_max_frame() {
+         let c = codec();

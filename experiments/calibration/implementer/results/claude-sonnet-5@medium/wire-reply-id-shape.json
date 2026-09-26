@@ -1,0 +1,91 @@
+{
+ "model": "claude-sonnet-5",
+ "effort": "medium",
+ "case": "wire-reply-id-shape",
+ "commit": "59cdae0ac67f483f84ca3ced7fb9e7e908fa729a",
+ "parent": "47e603cba8189f4398b44eb8dc6a6761e4c89813",
+ "crate": "shep-core",
+ "file": "crates/shep-core/src/protocol/wire.rs",
+ "effort_passed": "medium",
+ "error": null,
+ "stderr_tail": null,
+ "num_turns": 6,
+ "wall_s": 33.1,
+ "duration_ms": 31319,
+ "total_cost_usd": 0.2502672,
+ "modelUsage": {
+  "claude-sonnet-5": {
+   "inputTokens": 10,
+   "outputTokens": 1977,
+   "cacheReadInputTokens": 222186,
+   "cacheCreationInputTokens": 46510,
+   "webSearchRequests": 0,
+   "costUSD": 0.2502672,
+   "contextWindow": 1000000,
+   "maxOutputTokens": 128000,
+   "thinkingTokens": 174,
+   "canonicalModel": "claude-sonnet-5",
+   "provider": "firstParty",
+   "costBasis": "list"
+  }
+ },
+ "weighted_units": 125133.6,
+ "stop_reason": "end_turn",
+ "subtype": "success",
+ "session_id": "dc51daf5-ab64-478b-bb0d-df17878211df",
+ "permission_denials": [
+  {
+   "tool_name": "Bash",
+   "tool_use_id": "toolu_017sJRB1YtCTTmRpEFuYt3TC",
+   "tool_input": {
+    "command": "cd /private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-rqtgbldj/wt && python3 - <<'E'\np='crates/shep-core/src/protocol/wire.rs'\ns=open(p).read()\ns=s.replace('''/// Enough of a reply to recover its id when the reply's own type does not\n/// decode.\n#[derive(serde::Deserialize)]\nstruct ReplyIdOnly {\n    id: u64,\n}\n''','''/// Enough of a reply to recover its id when the reply's own type does not\n/// decode.\n///\n/// Mirrors [`Reply`](crate::protocol::Reply)'s shape, an `id` beside a\n/// `result` in serde's `Ok`/`Err` representation, with both payloads left\n/// unread. A frame with an `id` but no such `result` is not a reply.\n#[derive(serde::Deserialize)]\nstruct ReplyIdOnly {\n    id: u64,\n    #[allow(dead_code)] // read by the derive only, to require the field's shape\n    result: ResultShape,\n}\n\n/// The two arms of `Result`'s wire form, payloads ignored.\n#[derive(serde::Deserialize)]\n#[allow(dead_code)] // never read; deserialization is the check\nenum ResultShape {\n    Ok(serde::de::IgnoredAny),\n    Err(serde::de::IgnoredAny),\n}\n''')\nopen(p,'w').write(s)\nE\ncargo check -p shep-core 2>&1 | tail -5"
+   }
+  }
+ ],
+ "result_text": "`reply_id` now returns `Some` only when the frame has a numeric `id` and a `result` in the `Ok`/`Err` form that `Reply` defines. `cargo check -p shep-core` passes. I didn't run any tests, and I didn't add or change any.\n\nThe change is in `crates/shep-core/src/protocol/wire.rs`. The helper struct behind `reply_id` now requires a `result` field. That field must be an object keyed `Ok` or `Err`, and its payload is left unread.\n\nFrames should now behave like this:\n- **Undecodable replies:** a reply whose `Response` fails to decode still yields its id, since the payload is never parsed.\n- **Id without `result`:** a frame with an `id` but no `result` now gives `None`, so a future progress or flow-control frame won't be taken for a reply.\n- **Events and non-JSON:** these still give `None`.\n\nNext: run `cargo test -p shep-core --lib --all-features` to confirm the three existing `reply_id` tests still pass.",
+ "diff_stat": " crates/shep-core/src/protocol/wire.rs | 14 ++++++++++++++\n 1 file changed, 14 insertions(+)\n",
+ "files_changed": [
+  "crates/shep-core/src/protocol/wire.rs"
+ ],
+ "cargo_lock_changed": false,
+ "other_files_changed": [],
+ "touched_test_module": false,
+ "test_fns_added": 0,
+ "test_patch_applied": "git apply",
+ "hidden": {
+  "cmd": "cargo test -p shep-core --lib -- protocol::wire::tests::reply_id_is_none_for_a_future_progress_frame --exact",
+  "exit": 0,
+  "seconds": 8.0,
+  "passed": true,
+  "results": {
+   "protocol::wire::tests::reply_id_is_none_for_a_future_progress_frame": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "   Compiling encoding_rs_io v0.1.8\n   Compiling rand v0.9.5\n   Compiling tokio v1.53.1\n   Compiling rand_xorshift v0.4.0\n   Compiling phf v0.12.1\n   Compiling derive_builder v0.20.2\n   Compiling strum v0.27.2\n   Compiling zmij v1.0.23\n   Compiling bstr v1.13.0\n   Compiling regex-automata v0.4.18\n   Compiling itoa v1.0.18\n   Compiling tempfile v3.27.0\n   Compiling serde v1.0.229\n   Compiling unarray v0.1.4\n   Compiling futures-task v0.3.33\n   Compiling similar v2.7.0\n   Compiling slab v0.4.12\n   Compiling serde_json v1.0.151\n   Compiling serde-saphyr v1.0.1\n   Compiling futures-util v0.3.33\n   Compiling serde_ignored v0.1.14\n   Compiling chrono-tz v0.10.4\n   Compiling croner v3.0.1\n   Compiling nix v0.29.0\n   Compiling toml_datetime v0.6.11\n   Compiling serde_spanned v0.6.9\n   Compiling shep-channel v0.5.0 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-rqtgbldj/wt/crates/shep-channel)\n   Compiling insta v1.48.0\n   Compiling json5 v0.4.1\n   Compiling toml_edit v0.22.27\n   Compiling regex v1.13.1\n   Compiling globset v0.4.20\n   Compiling toml v0.8.23\n   Compiling ppv-lite86 v0.2.21\n   Compiling rand_chacha v0.9.0\n   Compiling proptest v1.11.0\n   Compiling tokio-util v0.7.19\n   Compiling shep-core v0.5.0 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-rqtgbldj/wt/crates/shep-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.57s\n     Running unittests src/lib.rs (~/.kelpie/targets/claude-sonnet-5@medium/debug/deps/shep_core-f2e64bb6adaecb93)"
+ },
+ "passed": true,
+ "failing_tests": [],
+ "crate_suite": {
+  "exit": 0,
+  "failed": [],
+  "passed_count": 388
+ },
+ "transcript": {
+  "transcript": "wire-reply-id-shape.transcript.jsonl",
+  "tool_calls": {
+   "Bash": 4,
+   "Edit": 1
+  },
+  "bash": [
+   "cd crates/shep-core/src/protocol && grep -n \"reply_id\" -B8 -A30 wire.rs | head -120; grep -rn \"enum Frame\\|struct Reply\\|enum ServerFrame\\|struct ReplyFrame\" . | head",
+   "sed -n 1,54p wire.rs; sed -n 1625,1670p request.rs; sed -n 15,60p frame.rs",
+   "cd /private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-rqtgbldj/wt && python3 - <<'E'\np='crates/shep-core/src/protocol/wire.rs'\ns=open(p).read()\ns=s.replace('''/// Enough of a reply to recov",
+   "cd /private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-rqtgbldj/wt && cargo check -p shep-core 2>&1 | tail -5"
+  ],
+  "edited_paths": [
+   "/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-rqtgbldj/wt/crates/shep-core/src/protocol/wire.rs"
+  ]
+ }
+}

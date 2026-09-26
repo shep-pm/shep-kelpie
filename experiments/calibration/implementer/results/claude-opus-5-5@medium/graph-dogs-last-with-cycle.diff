@@ -1,0 +1,39 @@
+diff --git a/crates/shep-core/src/config/graph.rs b/crates/shep-core/src/config/graph.rs
+index cc378549..8fbcb0e1 100644
+--- a/crates/shep-core/src/config/graph.rs
++++ b/crates/shep-core/src/config/graph.rs
+@@ -96,9 +96,9 @@ pub fn render_cycle(cycle: &[String]) -> String {
+ /// depending on it, which gives it an ordinary graph position. A dog runs
+ /// at the earliest stage anything asks for.
+ ///
+-/// The stages therefore run: `boot_first` dogs, the ordinary sort, dogs
+-/// nothing depends on, the cyclic stage, then the nodes that depend on the
+-/// cycle in their own edge order.
++/// The stages therefore run: `boot_first` dogs, the ordinary sort, the
++/// cyclic stage, the nodes that depend on the cycle in their own edge order,
++/// then dogs nothing depends on, which are last with or without a cycle.
+ ///
+ /// That paragraph describes the plan this function returns, and not even
+ /// shep's boot honours all of it. `shep-daemon`'s `boot` spawns dogs in two
+@@ -165,9 +165,6 @@ pub fn plan(nodes: &[BootNode]) -> BootPlan {
+         stages.push(first.iter().map(|n| (*n).to_string()).collect());
+     }
+     stages.extend(kahn(&ordered, &edges, &first));
+-    if !last.is_empty() {
+-        stages.push(last.iter().map(|n| (*n).to_string()).collect());
+-    }
+     if !in_a_cycle.is_empty() {
+         // One stage for every cyclic node, never one per reported cycle: a
+         // node several cycles run through is still started once.
+@@ -177,6 +174,11 @@ pub fn plan(nodes: &[BootNode]) -> BootPlan {
+     // outside this set is already placed, which is what `kahn` reads a
+     // missing name as.
+     stages.extend(kahn(&after_cycle, &edges, &[]));
++    // Last whether or not there is a knot, so a dog nothing depends on never
++    // reports on a flock whose cyclic half is still coming up.
++    if !last.is_empty() {
++        stages.push(last.iter().map(|n| (*n).to_string()).collect());
++    }
+ 
+     BootPlan {
+         stages,

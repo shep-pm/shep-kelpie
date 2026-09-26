@@ -1,0 +1,26 @@
+diff --git a/crates/shep-core/src/config/app.rs b/crates/shep-core/src/config/app.rs
+index e6541b42..2b041d88 100644
+--- a/crates/shep-core/src/config/app.rs
++++ b/crates/shep-core/src/config/app.rs
+@@ -825,6 +825,21 @@ env = { SOME_BOOL = true, PORT = 8080, NEG = -1, RATIO = 1.5, STR = "plain" }
+         assert_eq!(app.env["STR"], "plain");
+     }
+ 
++    /// A whole number larger than `i64::MAX` is valid JSON and TOML, and a
++    /// Flockfile that writes one (a port, a token, an id) must still load. It
++    /// stringifies to its full, positive value — not a negative wrap and not a
++    /// refused error. Pinned to the exact string.
++    #[test]
++    fn env_reads_a_number_beyond_i64_max_without_wrapping() {
++        let beyond_i64 = u64::MAX; // 18446744073709551615
++        let src = format!(
++            r#"{{ "name":"web","script":"./srv","env":{{ "BIG": {beyond_i64} }} }}"#
++        );
++        let app = serde_json::from_str::<AppConfig>(&src)
++            .expect("a u64 beyond i64::MAX is valid JSON and must load");
++        assert_eq!(app.env["BIG"], "18446744073709551615");
++    }
++
+     /// Serialization is the inverse of the coercion: whatever form a value
+     /// arrived as, the wire form is a string. A `true` that deserialized
+     /// into `"true"` must serialize to the JSON string `"true"`, not the

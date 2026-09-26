@@ -1,0 +1,7 @@
+implement: 6 cases to run for claude-fable-5-1@medium
+07:46:35 wire-reply-id-shape passed=True turns=17 118s units=230398
+07:47:17 channel-non-utf8-frame passed=True turns=8 39s units=133765
+07:47:45 outbox-zero-capacity passed=True turns=6 28s units=123910
+07:48:57 env-u64-beyond-i64 passed=True turns=10 60s units=113904
+07:49:46 graph-dogs-last-with-cycle passed=True turns=9 36s units=144128
+07:50:32 paths-user-home passed=True turns=11 32s units=108659

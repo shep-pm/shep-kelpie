@@ -1,0 +1,7 @@
+implement: 6 cases to run for claude-opus-5-5@medium
+07:40:01 wire-reply-id-shape passed=True turns=9 42s units=147687
+07:40:56 channel-non-utf8-frame passed=True turns=7 48s units=120443
+07:41:25 outbox-zero-capacity passed=True turns=5 26s units=109192
+07:42:18 env-u64-beyond-i64 passed=True turns=8 37s units=90378
+07:43:09 graph-dogs-last-with-cycle passed=True turns=8 32s units=129584
+07:43:49 paths-user-home passed=True turns=8 28s units=104885

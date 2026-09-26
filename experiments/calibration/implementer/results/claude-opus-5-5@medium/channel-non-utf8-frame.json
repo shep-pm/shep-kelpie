@@ -1,0 +1,101 @@
+{
+ "model": "claude-opus-5-5",
+ "effort": "medium",
+ "case": "channel-non-utf8-frame",
+ "commit": "4f8f5146e59b124923e3b14bddcbc95de30b6cc6",
+ "parent": "b5f84ea40cea158743316e2de6e1050d6815f4a5",
+ "crate": "shep-channel",
+ "file": "crates/shep-channel/src/session.rs",
+ "effort_passed": "medium",
+ "error": null,
+ "stderr_tail": null,
+ "num_turns": 7,
+ "wall_s": 47.5,
+ "duration_ms": 43839,
+ "total_cost_usd": 0.42772060000000006,
+ "modelUsage": {
+  "claude-opus-5-5": {
+   "inputTokens": 12,
+   "outputTokens": 2061,
+   "cacheReadInputTokens": 270263,
+   "cacheCreationInputTokens": 41550,
+   "webSearchRequests": 0,
+   "costUSD": 0.42772060000000006,
+   "contextWindow": 1000000,
+   "maxOutputTokens": 128000,
+   "thinkingTokens": 258,
+   "canonicalModel": "claude-opus-5-5",
+   "provider": "firstParty",
+   "costBasis": "list"
+  }
+ },
+ "weighted_units": 120443.3,
+ "stop_reason": "end_turn",
+ "subtype": "success",
+ "session_id": "6b5a8962-795e-48c0-b31e-21eddb3fe9c0",
+ "permission_denials": [
+  {
+   "tool_name": "Bash",
+   "tool_use_id": "toolu_01B7S4ywuZfe9tbLntQxKRNt",
+   "tool_input": {
+    "command": "cargo check -p shep-channel; echo EXIT=$?",
+    "description": "Check shep-channel compiles"
+   }
+  },
+  {
+   "tool_name": "Bash",
+   "tool_use_id": "toolu_01ToQY1CJaR6GCnyNfaPW5t5",
+   "tool_input": {
+    "command": "cargo test -p shep-channel --lib session 2>&1 | tail -5",
+    "description": "Run existing session tests"
+   }
+  }
+ ],
+ "result_text": "A line that isn't valid UTF-8 now comes back from `read_message` as `ChannelError::Malformed`, and the next call returns the frame on the following line. `cargo check -p shep-channel` passes. I didn't get to run the existing session tests: `cargo test -p shep-channel --lib session` needed an approval that wasn't given.\n\nThe fix is in `crates/shep-channel/src/session.rs:15-24`:\n\n- **Why it failed before:** `read_line` treats bad UTF-8 as an `io::Error`, which then became `ChannelError::Io`.\n- **What it does now:** `read_until(b'\\n', \u2026)` reads the raw bytes up to the newline, so the whole bad line is consumed whatever it contains. `core::str::from_utf8` then checks the text, and a failure becomes `ChannelError::Malformed`, the same as a line that is text but not JSON.\n- **Unchanged:** end of input (0 bytes) still returns `Ok(None)`, and real read errors still come back as `Io`.\n\nI didn't add or change any tests, as asked.\n\nNext: run `cargo test -p shep-channel --lib session` to confirm the existing session tests still pass.",
+ "diff_stat": " crates/shep-channel/src/session.rs | 10 ++++++++--\n 1 file changed, 8 insertions(+), 2 deletions(-)\n",
+ "files_changed": [
+  "crates/shep-channel/src/session.rs"
+ ],
+ "cargo_lock_changed": false,
+ "other_files_changed": [],
+ "touched_test_module": false,
+ "test_fns_added": 0,
+ "test_patch_applied": "git apply",
+ "hidden": {
+  "cmd": "cargo test -p shep-channel --lib -- session::tests::a_frame_that_is_not_utf8_is_malformed_and_recoverable --exact",
+  "exit": 0,
+  "seconds": 4.4,
+  "passed": true,
+  "results": {
+   "session::tests::a_frame_that_is_not_utf8_is_malformed_and_recoverable": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "running 1 test\ntest session::tests::a_frame_that_is_not_utf8_is_malformed_and_recoverable ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 42 filtered out; finished in 0.00s\n\n   Compiling thiserror v2.0.20\n   Compiling bitflags v2.13.1\n   Compiling memchr v2.8.3\n   Compiling nix v0.31.3\n   Compiling serde_core v1.0.229\n   Compiling syn v3.0.3\n   Compiling thiserror-impl v2.0.20\n   Compiling serde_derive v1.0.229\n   Compiling serde_json v1.0.151\n   Compiling command-fds v0.3.3\n   Compiling serde v1.0.229\n   Compiling shep-channel v0.4.3 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-g9mubix6/wt/crates/shep-channel)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.42s\n     Running unittests src/lib.rs (~/.kelpie/targets/claude-opus-5-5@medium/debug/deps/shep_channel-f7894b2b30e6c32e)"
+ },
+ "passed": true,
+ "failing_tests": [],
+ "crate_suite": {
+  "exit": 0,
+  "failed": [],
+  "passed_count": 43
+ },
+ "transcript": {
+  "transcript": "channel-non-utf8-frame.transcript.jsonl",
+  "tool_calls": {
+   "Bash": 4,
+   "Read": 1,
+   "Edit": 1
+  },
+  "bash": [
+   "grep -n \"read_message\\|read_line\\|Malformed\\|fn \\|Utf8\\|InvalidData\" crates/shep-channel/src/session.rs | head -60; grep -n \"Malformed\\|Io\" crates/shep-channel/src/error.rs 2>/dev/null | head",
+   "cargo check -p shep-channel; echo EXIT=$?",
+   "cargo check -p shep-channel",
+   "cargo test -p shep-channel --lib session 2>&1 | tail -5"
+  ],
+  "edited_paths": [
+   "/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-g9mubix6/wt/crates/shep-channel/src/session.rs"
+  ]
+ }
+}

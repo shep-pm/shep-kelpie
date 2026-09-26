@@ -1,0 +1,27 @@
+diff --git a/crates/shep-core/src/protocol/wire.rs b/crates/shep-core/src/protocol/wire.rs
+index 8f31c775..df55af79 100644
+--- a/crates/shep-core/src/protocol/wire.rs
++++ b/crates/shep-core/src/protocol/wire.rs
+@@ -47,9 +47,22 @@ pub fn decode_frame<T: DeserializeOwned>(frame: &[u8]) -> Result<T, WireError> {
+ 
+ /// Enough of a reply to recover its id when the reply's own type does not
+ /// decode.
++///
++/// `result` is required so that only a frame shaped like a
++/// [`Reply`](super::Reply) qualifies: an id alone does not make a reply.
+ #[derive(serde::Deserialize)]
+ struct ReplyIdOnly {
+     id: u64,
++    #[expect(dead_code, reason = "present only to require the field's shape")]
++    result: ResultShape,
++}
++
++/// `Reply::result`'s wire shape, `{"Ok": ...}` or `{"Err": ...}`, with the
++/// payload left undecoded.
++#[derive(serde::Deserialize)]
++enum ResultShape {
++    Ok(serde::de::IgnoredAny),
++    Err(serde::de::IgnoredAny),
+ }
+ 
+ /// If `frame` is a reply, the id it answers; `None` for anything else,

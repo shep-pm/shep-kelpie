@@ -1,0 +1,22 @@
+diff --git a/crates/shep-core/src/protocol/wire.rs b/crates/shep-core/src/protocol/wire.rs
+index 8f31c775..1bacf319 100644
+--- a/crates/shep-core/src/protocol/wire.rs
++++ b/crates/shep-core/src/protocol/wire.rs
+@@ -47,9 +47,17 @@ pub fn decode_frame<T: DeserializeOwned>(frame: &[u8]) -> Result<T, WireError> {
+ 
+ /// Enough of a reply to recover its id when the reply's own type does not
+ /// decode.
++///
++/// `result` is required but its value is never looked at: its only job is to
++/// keep this struct from matching a frame that merely happens to carry an
++/// `id`, such as a future progress or flow-control frame. Without it,
++/// `reply_id` would misidentify that frame as an undecodable reply and fail
++/// a caller whose real reply is still in flight.
+ #[derive(serde::Deserialize)]
+ struct ReplyIdOnly {
+     id: u64,
++    #[allow(dead_code, reason = "present only to narrow the match; never read")]
++    result: serde::de::IgnoredAny,
+ }
+ 
+ /// If `frame` is a reply, the id it answers; `None` for anything else,

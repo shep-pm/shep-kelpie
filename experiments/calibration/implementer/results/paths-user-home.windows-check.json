@@ -1,0 +1,26 @@
+{
+ "claude-fable-5-1@medium": {
+  "exit": 0,
+  "diagnostics": []
+ },
+ "claude-haiku-4-5-20251001@low": {
+  "exit": 0,
+  "diagnostics": []
+ },
+ "claude-opus-5-5@low": {
+  "exit": 0,
+  "diagnostics": []
+ },
+ "claude-opus-5-5@medium": {
+  "exit": 0,
+  "diagnostics": []
+ },
+ "claude-sonnet-5@high": {
+  "exit": 0,
+  "diagnostics": []
+ },
+ "claude-sonnet-5@medium": {
+  "exit": 0,
+  "diagnostics": []
+ }
+}

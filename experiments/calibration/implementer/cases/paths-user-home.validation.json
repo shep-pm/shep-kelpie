@@ -1,0 +1,46 @@
+{
+ "id": "paths-user-home",
+ "commit": "683599568babd7de6d1b2da8f524131cdc598eaa",
+ "parent": "ba076171737ea2a2dcf000a022da9a1117f9eb4e",
+ "test_patch_applied": "git apply",
+ "parent_with_tests": {
+  "cmd": "cargo test -p shep-core --lib -- paths::tests::home_is_read_first_on_every_platform paths::tests::nothing_named_resolves_nothing paths::tests::an_empty_value_counts_as_unset paths::tests::unix_ignores_the_windows_variables --exact",
+  "exit": 101,
+  "seconds": 1.5,
+  "passed": false,
+  "results": {
+   "paths::tests::home_is_read_first_on_every_platform": "not run",
+   "paths::tests::nothing_named_resolves_nothing": "not run",
+   "paths::tests::an_empty_value_counts_as_unset": "not run",
+   "paths::tests::unix_ignores_the_windows_variables": "not run"
+  },
+  "failing": [],
+  "missing": [
+   "paths::tests::home_is_read_first_on_every_platform",
+   "paths::tests::nothing_named_resolves_nothing",
+   "paths::tests::an_empty_value_counts_as_unset",
+   "paths::tests::unix_ignores_the_windows_variables"
+  ],
+  "compile_error": true,
+  "tail": "Compiling shep-channel v0.7.0 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-validate-i_y8wtb0/wt/crates/shep-channel)\n   Compiling shep-core v0.7.0 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-validate-i_y8wtb0/wt/crates/shep-core)\nerror[E0425]: cannot find function `user_home` in this scope\n   --> crates/shep-core/src/paths.rs:349:13\n    |\n349 |             user_home(&os_env(&[\n    |             ^^^^^^^^^ not found in this scope\n\nerror[E0425]: cannot find function `user_home` in this scope\n   --> crates/shep-core/src/paths.rs:359:20\n    |\n359 |         assert_eq!(user_home(&os_env(&[])), None);\n    |                    ^^^^^^^^^ not found in this scope\n\nerror[E0425]: cannot find function `user_home` in this scope\n   --> crates/shep-core/src/paths.rs:366:20\n    |\n366 |         assert_eq!(user_home(&os_env(&[(\"HOME\", \"\")])), None);\n    |                    ^^^^^^^^^ not found in this scope\n\nerror[E0425]: cannot find function `user_home` in this scope\n   --> crates/shep-core/src/paths.rs:398:13\n    |\n398 |             user_home(&os_env(&[\n    |             ^^^^^^^^^ not found in this scope\n\nFor more information about this error, try `rustc --explain E0425`.\nerror: could not compile `shep-core` (lib test) due to 4 previous errors"
+ },
+ "src_patch_applied": "git apply",
+ "recomposes_commit_file": true,
+ "commit_with_tests": {
+  "cmd": "cargo test -p shep-core --lib -- paths::tests::home_is_read_first_on_every_platform paths::tests::nothing_named_resolves_nothing paths::tests::an_empty_value_counts_as_unset paths::tests::unix_ignores_the_windows_variables --exact",
+  "exit": 0,
+  "seconds": 3.4,
+  "passed": true,
+  "results": {
+   "paths::tests::home_is_read_first_on_every_platform": "ok",
+   "paths::tests::nothing_named_resolves_nothing": "ok",
+   "paths::tests::an_empty_value_counts_as_unset": "ok",
+   "paths::tests::unix_ignores_the_windows_variables": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "running 4 tests\ntest paths::tests::nothing_named_resolves_nothing ... ok\ntest paths::tests::unix_ignores_the_windows_variables ... ok\ntest paths::tests::an_empty_value_counts_as_unset ... ok\ntest paths::tests::home_is_read_first_on_every_platform ... ok\n\ntest result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 452 filtered out; finished in 0.00s\n\n   Compiling shep-core v0.7.0 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-validate-i_y8wtb0/wt/crates/shep-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.01s\n     Running unittests src/lib.rs (~/.kelpie/targets/validate/debug/deps/shep_core-7268d796adac7378)"
+ },
+ "holds": true
+}

@@ -1,0 +1,37 @@
+{
+ "id": "normalize-colon-in-name",
+ "commit": "605f59823ebe81e1ee2995209beb8ca757aa3373",
+ "parent": "eca214ac9735a1d54009e6d901ddbaffd6530a0f",
+ "test_patch_applied": "git apply",
+ "parent_with_tests": {
+  "cmd": "cargo test -p shep-core --lib -- config::normalize::tests::a_colon_in_a_name_is_refused_because_it_is_the_instance_separator --exact",
+  "exit": 101,
+  "seconds": 3.4,
+  "passed": false,
+  "results": {
+   "config::normalize::tests::a_colon_in_a_name_is_refused_because_it_is_the_instance_separator": "FAILED"
+  },
+  "failing": [
+   "config::normalize::tests::a_colon_in_a_name_is_refused_because_it_is_the_instance_separator"
+  ],
+  "missing": [],
+  "compile_error": false,
+  "tail": "running 1 test\ntest config::normalize::tests::a_colon_in_a_name_is_refused_because_it_is_the_instance_separator ... FAILED\n\nfailures:\n\n---- config::normalize::tests::a_colon_in_a_name_is_refused_because_it_is_the_instance_separator stdout ----\n\nthread 'config::normalize::tests::a_colon_in_a_name_is_refused_because_it_is_the_instance_separator' (12578124) panicked at crates/shep-core/src/config/normalize.rs:848:67:\ncalled `Result::unwrap_err()` on an `Ok` value: ResolvedApp { config: AppConfig { name: \"web:2\", script: \"./srv\", env: <0 vars>, .. } }\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    config::normalize::tests::a_colon_in_a_name_is_refused_because_it_is_the_instance_separator\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 286 filtered out; finished in 0.00s\n\n   Compiling regex-syntax v0.8.11\n   Compiling regex-automata v0.4.18\n   Compiling regex v1.13.1\n   Compiling globset v0.4.20\n   Compiling shep-core v0.1.12 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-validate-ndit1mx3/wt/crates/shep-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.03s\n     Running unittests src/lib.rs (~/.kelpie/targets/validate/debug/deps/shep_core-d5bb28f867327e71)\nerror: test failed, to rerun pass `-p shep-core --lib`"
+ },
+ "src_patch_applied": "git apply",
+ "recomposes_commit_file": true,
+ "commit_with_tests": {
+  "cmd": "cargo test -p shep-core --lib -- config::normalize::tests::a_colon_in_a_name_is_refused_because_it_is_the_instance_separator --exact",
+  "exit": 0,
+  "seconds": 1.0,
+  "passed": true,
+  "results": {
+   "config::normalize::tests::a_colon_in_a_name_is_refused_because_it_is_the_instance_separator": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "running 1 test\ntest config::normalize::tests::a_colon_in_a_name_is_refused_because_it_is_the_instance_separator ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 286 filtered out; finished in 0.00s\n\n   Compiling shep-core v0.1.12 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-validate-ndit1mx3/wt/crates/shep-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.66s\n     Running unittests src/lib.rs (~/.kelpie/targets/validate/debug/deps/shep_core-d5bb28f867327e71)"
+ },
+ "holds": true
+}

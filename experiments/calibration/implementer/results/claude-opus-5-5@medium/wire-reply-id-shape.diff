@@ -1,0 +1,29 @@
+diff --git a/crates/shep-core/src/protocol/wire.rs b/crates/shep-core/src/protocol/wire.rs
+index 8f31c775..49973c2c 100644
+--- a/crates/shep-core/src/protocol/wire.rs
++++ b/crates/shep-core/src/protocol/wire.rs
+@@ -47,9 +47,24 @@ pub fn decode_frame<T: DeserializeOwned>(frame: &[u8]) -> Result<T, WireError> {
+ 
+ /// Enough of a reply to recover its id when the reply's own type does not
+ /// decode.
++///
++/// Shaped like [`Reply`](crate::protocol::Reply) rather than just carrying an
++/// `id`: `result` must be present, as serde's `{"Ok": ...}` / `{"Err": ...}`,
++/// or this is not a reply. A future server frame with an `id` of its own is
++/// not mistaken for one. What sits under `Ok`/`Err` is never read, so a
++/// `Response` this build cannot decode still yields its id.
+ #[derive(serde::Deserialize)]
+ struct ReplyIdOnly {
+     id: u64,
++    #[allow(dead_code)] // required for the shape, never read
++    result: ReplyResultShape,
++}
++
++/// The outer shape of a reply's `result`, with both payloads skipped.
++#[derive(serde::Deserialize)]
++enum ReplyResultShape {
++    Ok(serde::de::IgnoredAny),
++    Err(serde::de::IgnoredAny),
+ }
+ 
+ /// If `frame` is a reply, the id it answers; `None` for anything else,

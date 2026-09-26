@@ -1,0 +1,73 @@
+diff --git a/crates/shep-core/src/paths.rs b/crates/shep-core/src/paths.rs
+index 04ed766d..d4347178 100644
+--- a/crates/shep-core/src/paths.rs
++++ b/crates/shep-core/src/paths.rs
+@@ -105,6 +105,68 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
+     })
+ }
+ 
++/// Finds the user's home directory by consulting environment variables.
++///
++/// Reads environment variables only through `var`, never from the process
++/// environment, maintaining consistency with the rest of the module.
++///
++/// # Platform behavior
++///
++/// **Unix (Linux, macOS, etc.):** Returns the value of `HOME`, ignoring all
++/// other variables.
++///
++/// **Windows:** Tries variables in order:
++/// 1. `HOME`
++/// 2. `USERPROFILE`
++/// 3. `HOMEDRIVE` and `HOMEPATH` joined as a single path (both must be
++///    present and non-empty)
++///
++/// A variable set to an empty string is treated as unset. Returns `None` if no
++/// variable resolves to a non-empty value.
++///
++/// # Arguments
++///
++/// * `var` - A function that looks up an environment variable by name and
++///   returns its value as an `OsString`, or `None` if unset.
++///
++/// # Returns
++///
++/// `Some(PathBuf)` if a home directory is found, `None` otherwise.
++#[must_use]
++pub fn user_home(var: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Option<std::path::PathBuf> {
++    #[cfg(unix)]
++    {
++        var("HOME")
++            .filter(|s| !s.is_empty())
++            .map(PathBuf::from)
++    }
++
++    #[cfg(windows)]
++    {
++        if let Some(home) = var("HOME") {
++            if !home.is_empty() {
++                return Some(PathBuf::from(home));
++            }
++        }
++
++        if let Some(userprofile) = var("USERPROFILE") {
++            if !userprofile.is_empty() {
++                return Some(PathBuf::from(userprofile));
++            }
++        }
++
++        if let (Some(drive), Some(path)) = (var("HOMEDRIVE"), var("HOMEPATH")) {
++            if !drive.is_empty() && !path.is_empty() {
++                let mut combined = drive.to_os_string();
++                combined.push(&path);
++                return Some(PathBuf::from(combined));
++            }
++        }
++
++        None
++    }
++}
++
+ impl ShepPaths {
+     /// Windows named-pipe identity for this home:
+     /// `\\.\pipe\shep-<sanitized>-<digest>`

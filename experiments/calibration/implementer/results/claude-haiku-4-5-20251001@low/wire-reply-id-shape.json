@@ -1,0 +1,84 @@
+{
+ "model": "claude-haiku-4-5-20251001",
+ "effort": "low",
+ "case": "wire-reply-id-shape",
+ "commit": "59cdae0ac67f483f84ca3ced7fb9e7e908fa729a",
+ "parent": "47e603cba8189f4398b44eb8dc6a6761e4c89813",
+ "crate": "shep-core",
+ "file": "crates/shep-core/src/protocol/wire.rs",
+ "effort_passed": "low",
+ "error": null,
+ "stderr_tail": null,
+ "num_turns": 15,
+ "wall_s": 75.6,
+ "duration_ms": 73475,
+ "total_cost_usd": 0.16736379999999998,
+ "modelUsage": {
+  "claude-haiku-4-5-20251001": {
+   "inputTokens": 121,
+   "outputTokens": 4298,
+   "cacheReadInputTokens": 699788,
+   "cacheCreationInputTokens": 37887,
+   "webSearchRequests": 0,
+   "costUSD": 0.16736379999999998,
+   "contextWindow": 200000,
+   "maxOutputTokens": 32000,
+   "thinkingTokens": 1640,
+   "canonicalModel": "claude-haiku-4-5",
+   "provider": "firstParty",
+   "costBasis": "list"
+  }
+ },
+ "weighted_units": 167363.8,
+ "stop_reason": "end_turn",
+ "subtype": "success",
+ "session_id": "e59903f5-2f65-4dd5-90b8-99779b39680f",
+ "permission_denials": [],
+ "result_text": "Done! The change is complete and compiles cleanly.\n\n## Summary\n\nModified `reply_id` in `crates/shep-core/src/protocol/wire.rs` to properly distinguish replies from other id-bearing frames. The `ReplyIdOnly` struct now requires both `id` and `result` fields to deserialize successfully, so:\n\n- **Returns `Some(id)`** only for frames with both fields (shaped like a reply, per the Reply protocol definition)\n- **Returns `None`** for id-bearing frames missing `result` (future progress/flow-control frames, events, etc.)\n- **Still works** for replies with un-decodable results (checks field existence, not content)\n- **Still works** for events and non-JSON input (they fail to deserialize)\n\n`cargo check -p shep-core` passes.",
+ "diff_stat": " crates/shep-core/src/protocol/wire.rs | 5 ++++-\n 1 file changed, 4 insertions(+), 1 deletion(-)\n",
+ "files_changed": [
+  "crates/shep-core/src/protocol/wire.rs"
+ ],
+ "cargo_lock_changed": false,
+ "other_files_changed": [],
+ "touched_test_module": false,
+ "test_fns_added": 0,
+ "test_patch_applied": "git apply",
+ "hidden": {
+  "cmd": "cargo test -p shep-core --lib -- protocol::wire::tests::reply_id_is_none_for_a_future_progress_frame --exact",
+  "exit": 0,
+  "seconds": 57.4,
+  "passed": true,
+  "results": {
+   "protocol::wire::tests::reply_id_is_none_for_a_future_progress_frame": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "   Compiling slab v0.4.12\n   Compiling futures-task v0.3.33\n   Compiling indexmap v2.14.0\n   Compiling similar v2.7.0\n   Compiling chrono v0.4.45\n   Compiling futures-util v0.3.33\n   Compiling errno v0.3.14\n   Compiling rustix v1.1.4\n   Compiling socket2 v0.6.5\n   Compiling rand_core v0.9.5\n   Compiling mio v1.2.2\n   Compiling encoding_rs_io v0.1.8\n   Compiling croner v3.0.1\n   Compiling regex-automata v0.4.18\n   Compiling rand v0.9.5\n   Compiling rand_xorshift v0.4.0\n   Compiling chrono-tz v0.10.4\n   Compiling nix v0.29.0\n   Compiling tokio v1.53.1\n   Compiling serde v1.0.229\n   Compiling serde_ignored v0.1.14\n   Compiling serde_json v1.0.151\n   Compiling serde-saphyr v1.0.1\n   Compiling toml_datetime v0.6.11\n   Compiling serde_spanned v0.6.9\n   Compiling json5 v0.4.1\n   Compiling shep-channel v0.5.0 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-tl3jtk8z/wt/crates/shep-channel)\n   Compiling tempfile v3.27.0\n   Compiling toml_edit v0.22.27\n   Compiling insta v1.48.0\n   Compiling globset v0.4.20\n   Compiling regex v1.13.1\n   Compiling ppv-lite86 v0.2.21\n   Compiling rand_chacha v0.9.0\n   Compiling proptest v1.11.0\n   Compiling toml v0.8.23\n   Compiling tokio-util v0.7.19\n   Compiling shep-core v0.5.0 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-tl3jtk8z/wt/crates/shep-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 56.93s\n     Running unittests src/lib.rs (~/.kelpie/targets/claude-haiku-4-5-20251001@low/debug/deps/shep_core-f2e64bb6adaecb93)"
+ },
+ "passed": true,
+ "failing_tests": [],
+ "crate_suite": {
+  "exit": 0,
+  "failed": [],
+  "passed_count": 388
+ },
+ "transcript": {
+  "transcript": "wire-reply-id-shape.transcript.jsonl",
+  "tool_calls": {
+   "Read": 8,
+   "Bash": 4,
+   "Edit": 2
+  },
+  "bash": [
+   "find /private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-tl3jtk8z/wt/crates/shep-core/src/protocol -type f -name \"*.rs\" | head -20",
+   "grep -n \"pub struct Reply\\|pub enum Reply\" /private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-tl3jtk8z/wt/crates/shep-core/src/protocol/request.rs | head -5",
+   "cargo check -p shep-core",
+   "cargo check -p shep-core 2>&1 | grep -E \"(warning|error|Finished)\""
+  ],
+  "edited_paths": [
+   "/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-tl3jtk8z/wt/crates/shep-core/src/protocol/wire.rs"
+  ]
+ }
+}

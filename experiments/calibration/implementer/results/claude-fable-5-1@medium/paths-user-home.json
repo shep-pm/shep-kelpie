@@ -1,0 +1,123 @@
+{
+ "model": "claude-fable-5-1",
+ "effort": "medium",
+ "case": "paths-user-home",
+ "commit": "683599568babd7de6d1b2da8f524131cdc598eaa",
+ "parent": "ba076171737ea2a2dcf000a022da9a1117f9eb4e",
+ "crate": "shep-core",
+ "file": "crates/shep-core/src/paths.rs",
+ "effort_passed": "medium",
+ "error": null,
+ "stderr_tail": null,
+ "num_turns": 11,
+ "wall_s": 31.5,
+ "duration_ms": 29894,
+ "total_cost_usd": 0.8988127499999999,
+ "modelUsage": {
+  "claude-fable-5-1": {
+   "inputTokens": 162,
+   "outputTokens": 1820,
+   "cacheReadInputTokens": 250371,
+   "cacheCreationInputTokens": 37180,
+   "webSearchRequests": 0,
+   "costUSD": 0.8988127499999999,
+   "contextWindow": 1000000,
+   "maxOutputTokens": 64000,
+   "thinkingTokens": 102,
+   "canonicalModel": "claude-fable-5-1",
+   "provider": "firstParty",
+   "costBasis": "list"
+  }
+ },
+ "weighted_units": 108659.1,
+ "stop_reason": "end_turn",
+ "subtype": "success",
+ "session_id": "0eb8c78c-7e0f-4c19-be01-624683d84dbd",
+ "permission_denials": [
+  {
+   "tool_name": "Bash",
+   "tool_use_id": "toolu_011U4JtWroZZe2VouQ7p4SZd",
+   "tool_input": {
+    "command": "cargo check -p shep-core; echo \"exit=$?\"",
+    "description": "Type-check shep-core"
+   }
+  },
+  {
+   "tool_name": "Bash",
+   "tool_use_id": "toolu_013T6XPdm1NFdAnE6Nb9TCmM",
+   "tool_input": {
+    "command": "cargo check -p shep-core --target x86_64-pc-windows-gnu 2>&1 | tail -5; echo \"exit=$?\"",
+    "description": "Type-check shep-core for Windows"
+   }
+  },
+  {
+   "tool_name": "Bash",
+   "tool_use_id": "toolu_016uXospNzoxsMfNVtPz8oMQ",
+   "tool_input": {
+    "command": "cargo fmt --all --check",
+    "description": "Check formatting"
+   }
+  },
+  {
+   "tool_name": "Bash",
+   "tool_use_id": "toolu_013YCkrURo3noEnEjkyWQkdy",
+   "tool_input": {
+    "command": "cargo clippy -p shep-core --all-features -- -D warnings",
+    "description": "Lint shep-core"
+   }
+  }
+ ],
+ "result_text": "Done. `user_home` is added at `crates/shep-core/src/paths.rs:45` and `cargo check -p shep-core` passes on macOS and on the `x86_64-pc-windows-gnu` target.\n\nWhat it does:\n- Reads every variable through `var`, never the process environment, and treats an empty value as unset.\n- Unix: returns `HOME` only.\n- Windows: `HOME`, then `USERPROFILE`, then `HOMEDRIVE` joined with `HOMEPATH` as one `OsString`, only when both halves are set.\n- Returns `None` when nothing resolves. The doc comment states the platform behaviour.\n\nNot run: `cargo fmt --check` and `cargo clippy` were denied approval in this session, so formatting and lint are unverified.\n\nNext: run `cargo fmt --all --check` from the worktree.",
+ "diff_stat": " crates/shep-core/src/paths.rs | 32 ++++++++++++++++++++++++++++++++\n 1 file changed, 32 insertions(+)\n",
+ "files_changed": [
+  "crates/shep-core/src/paths.rs"
+ ],
+ "cargo_lock_changed": false,
+ "other_files_changed": [],
+ "touched_test_module": false,
+ "test_fns_added": 0,
+ "test_patch_applied": "git apply",
+ "hidden": {
+  "cmd": "cargo test -p shep-core --lib -- paths::tests::home_is_read_first_on_every_platform paths::tests::nothing_named_resolves_nothing paths::tests::an_empty_value_counts_as_unset paths::tests::unix_ignores_the_windows_variables --exact",
+  "exit": 0,
+  "seconds": 6.7,
+  "passed": true,
+  "results": {
+   "paths::tests::home_is_read_first_on_every_platform": "ok",
+   "paths::tests::nothing_named_resolves_nothing": "ok",
+   "paths::tests::an_empty_value_counts_as_unset": "ok",
+   "paths::tests::unix_ignores_the_windows_variables": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "running 4 tests\ntest paths::tests::an_empty_value_counts_as_unset ... ok\ntest paths::tests::nothing_named_resolves_nothing ... ok\ntest paths::tests::unix_ignores_the_windows_variables ... ok\ntest paths::tests::home_is_read_first_on_every_platform ... ok\n\ntest result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 452 filtered out; finished in 0.00s\n\n   Compiling shep-channel v0.7.0 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-pf5vurd3/wt/crates/shep-channel)\n   Compiling shep-core v0.7.0 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-pf5vurd3/wt/crates/shep-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.32s\n     Running unittests src/lib.rs (~/.kelpie/targets/claude-fable-5-1@medium/debug/deps/shep_core-7268d796adac7378)"
+ },
+ "passed": true,
+ "failing_tests": [],
+ "crate_suite": {
+  "exit": 0,
+  "failed": [],
+  "passed_count": 455
+ },
+ "transcript": {
+  "transcript": "paths-user-home.transcript.jsonl",
+  "tool_calls": {
+   "Skill": 1,
+   "Read": 1,
+   "Edit": 1,
+   "Bash": 6
+  },
+  "bash": [
+   "cargo check -p shep-core; echo \"exit=$?\"",
+   "cargo check -p shep-core --target x86_64-pc-windows-gnu 2>&1 | tail -5; echo \"exit=$?\"",
+   "cargo check -p shep-core",
+   "cargo check -p shep-core --target x86_64-pc-windows-gnu",
+   "cargo fmt --all --check",
+   "cargo clippy -p shep-core --all-features -- -D warnings"
+  ],
+  "edited_paths": [
+   "/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-pf5vurd3/wt/crates/shep-core/src/paths.rs"
+  ]
+ }
+}

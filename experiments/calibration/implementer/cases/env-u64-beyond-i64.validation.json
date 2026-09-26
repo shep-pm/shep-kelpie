@@ -1,0 +1,37 @@
+{
+ "id": "env-u64-beyond-i64",
+ "commit": "016d92ba6bb8b0f407280a957f0d32bc0d266453",
+ "parent": "9d72449fdb47d506c6bc0ab8879bb451dfab2d3e",
+ "test_patch_applied": "git apply",
+ "parent_with_tests": {
+  "cmd": "cargo test -p shep-core --lib -- config::app::tests::env_reads_a_number_beyond_i64_max_without_wrapping --exact",
+  "exit": 101,
+  "seconds": 3.6,
+  "passed": false,
+  "results": {
+   "config::app::tests::env_reads_a_number_beyond_i64_max_without_wrapping": "FAILED"
+  },
+  "failing": [
+   "config::app::tests::env_reads_a_number_beyond_i64_max_without_wrapping"
+  ],
+  "missing": [],
+  "compile_error": false,
+  "tail": "running 1 test\ntest config::app::tests::env_reads_a_number_beyond_i64_max_without_wrapping ... FAILED\n\nfailures:\n\n---- config::app::tests::env_reads_a_number_beyond_i64_max_without_wrapping stdout ----\n\nthread 'config::app::tests::env_reads_a_number_beyond_i64_max_without_wrapping' (12575665) panicked at crates/shep-core/src/config/app.rs:839:14:\na u64 beyond i64::MAX is valid JSON and must load: Error(\"out of range integral type conversion attempted\", line: 1, column: 67)\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    config::app::tests::env_reads_a_number_beyond_i64_max_without_wrapping\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 463 filtered out; finished in 0.00s\n\n   Compiling shep-channel v0.7.3 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-validate-16ier7dl/wt/crates/shep-channel)\n   Compiling shep-core v0.7.3 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-validate-16ier7dl/wt/crates/shep-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.17s\n     Running unittests src/lib.rs (~/.kelpie/targets/validate/debug/deps/shep_core-15ebfb63181e4b76)\nerror: test failed, to rerun pass `-p shep-core --lib`"
+ },
+ "src_patch_applied": "git apply",
+ "recomposes_commit_file": true,
+ "commit_with_tests": {
+  "cmd": "cargo test -p shep-core --lib -- config::app::tests::env_reads_a_number_beyond_i64_max_without_wrapping --exact",
+  "exit": 0,
+  "seconds": 1.8,
+  "passed": true,
+  "results": {
+   "config::app::tests::env_reads_a_number_beyond_i64_max_without_wrapping": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "running 1 test\ntest config::app::tests::env_reads_a_number_beyond_i64_max_without_wrapping ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 463 filtered out; finished in 0.00s\n\n   Compiling shep-core v0.7.3 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-validate-16ier7dl/wt/crates/shep-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.39s\n     Running unittests src/lib.rs (~/.kelpie/targets/validate/debug/deps/shep_core-15ebfb63181e4b76)"
+ },
+ "holds": true
+}

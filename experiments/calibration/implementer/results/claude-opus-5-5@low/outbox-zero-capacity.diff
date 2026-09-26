@@ -1,0 +1,30 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 060d93d9..c71ae0ef 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2096,7 +2096,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "shep-channel"
+-version = "0.2.2"
++version = "0.4.3"
+ dependencies = [
+  "serde",
+  "serde_json",
+diff --git a/crates/shep-channel/src/outbox.rs b/crates/shep-channel/src/outbox.rs
+index 2c731f9b..e0213809 100644
+--- a/crates/shep-channel/src/outbox.rs
++++ b/crates/shep-channel/src/outbox.rs
+@@ -57,6 +57,12 @@ impl Outbox {
+         if inner.closed {
+             return;
+         }
++        // A zero-capacity outbox has no room even for the newest message,
++        // so that one is the drop, and nothing is queued.
++        if self.capacity == 0 {
++            inner.dropped = inner.dropped.saturating_add(1);
++            return;
++        }
+         if inner.queue.len() >= self.capacity {
+             inner.queue.pop_front();
+             inner.dropped = inner.dropped.saturating_add(1);

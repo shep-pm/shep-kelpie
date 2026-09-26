@@ -1,0 +1,37 @@
+{
+ "id": "channel-non-utf8-frame",
+ "commit": "4f8f5146e59b124923e3b14bddcbc95de30b6cc6",
+ "parent": "b5f84ea40cea158743316e2de6e1050d6815f4a5",
+ "test_patch_applied": "git apply",
+ "parent_with_tests": {
+  "cmd": "cargo test -p shep-channel --lib -- session::tests::a_frame_that_is_not_utf8_is_malformed_and_recoverable --exact",
+  "exit": 101,
+  "seconds": 2.4,
+  "passed": false,
+  "results": {
+   "session::tests::a_frame_that_is_not_utf8_is_malformed_and_recoverable": "FAILED"
+  },
+  "failing": [
+   "session::tests::a_frame_that_is_not_utf8_is_malformed_and_recoverable"
+  ],
+  "missing": [],
+  "compile_error": false,
+  "tail": "running 1 test\ntest session::tests::a_frame_that_is_not_utf8_is_malformed_and_recoverable ... FAILED\n\nfailures:\n\n---- session::tests::a_frame_that_is_not_utf8_is_malformed_and_recoverable stdout ----\n\nthread 'session::tests::a_frame_that_is_not_utf8_is_malformed_and_recoverable' (12574015) panicked at crates/shep-channel/src/session.rs:127:9:\na non-UTF-8 frame must be Malformed, not Io\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    session::tests::a_frame_that_is_not_utf8_is_malformed_and_recoverable\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 42 filtered out; finished in 0.00s\n\n   Compiling serde_core v1.0.229\n   Compiling thiserror v2.0.20\n   Compiling serde v1.0.229\n   Compiling bitflags v2.13.1\n   Compiling memchr v2.8.3\n   Compiling nix v0.31.3\n   Compiling syn v3.0.3\n   Compiling thiserror-impl v2.0.20\n   Compiling serde_derive v1.0.229\n   Compiling command-fds v0.3.3\n   Compiling serde_json v1.0.151\n   Compiling shep-channel v0.4.3 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-validate-zilditv5/wt/crates/shep-channel)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.15s\n     Running unittests src/lib.rs (~/.kelpie/targets/validate/debug/deps/shep_channel-f7894b2b30e6c32e)\nerror: test failed, to rerun pass `-p shep-channel --lib`"
+ },
+ "src_patch_applied": "git apply",
+ "recomposes_commit_file": true,
+ "commit_with_tests": {
+  "cmd": "cargo test -p shep-channel --lib -- session::tests::a_frame_that_is_not_utf8_is_malformed_and_recoverable --exact",
+  "exit": 0,
+  "seconds": 0.5,
+  "passed": true,
+  "results": {
+   "session::tests::a_frame_that_is_not_utf8_is_malformed_and_recoverable": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "running 1 test\ntest session::tests::a_frame_that_is_not_utf8_is_malformed_and_recoverable ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 42 filtered out; finished in 0.00s\n\n   Compiling shep-channel v0.4.3 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-validate-zilditv5/wt/crates/shep-channel)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s\n     Running unittests src/lib.rs (~/.kelpie/targets/validate/debug/deps/shep_channel-f7894b2b30e6c32e)"
+ },
+ "holds": true
+}

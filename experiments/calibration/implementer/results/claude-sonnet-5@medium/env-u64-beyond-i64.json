@@ -1,0 +1,91 @@
+{
+ "model": "claude-sonnet-5",
+ "effort": "medium",
+ "case": "env-u64-beyond-i64",
+ "commit": "016d92ba6bb8b0f407280a957f0d32bc0d266453",
+ "parent": "9d72449fdb47d506c6bc0ab8879bb451dfab2d3e",
+ "crate": "shep-core",
+ "file": "crates/shep-core/src/config/app.rs",
+ "effort_passed": "medium",
+ "error": null,
+ "stderr_tail": null,
+ "num_turns": 8,
+ "wall_s": 30.6,
+ "duration_ms": 28497,
+ "total_cost_usd": 0.1805406,
+ "modelUsage": {
+  "claude-sonnet-5": {
+   "inputTokens": 12,
+   "outputTokens": 1771,
+   "cacheReadInputTokens": 209873,
+   "cacheCreationInputTokens": 30208,
+   "webSearchRequests": 0,
+   "costUSD": 0.1805406,
+   "contextWindow": 1000000,
+   "maxOutputTokens": 128000,
+   "thinkingTokens": 0,
+   "canonicalModel": "claude-sonnet-5",
+   "provider": "firstParty",
+   "costBasis": "list"
+  }
+ },
+ "weighted_units": 90270.3,
+ "stop_reason": "end_turn",
+ "subtype": "success",
+ "session_id": "7bbb25db-5b56-4091-9d89-b5038f947559",
+ "permission_denials": [
+  {
+   "tool_name": "Bash",
+   "tool_use_id": "toolu_01BRwCKQo2NefnDi3xfq2fHd",
+   "tool_input": {
+    "command": "python3 - <<'E'\np='crates/shep-core/src/config/app.rs'\ns=open(p).read()\ns=s.replace(\"\"\"    Int(i64),\n    /// A floating\"\"\",\"\"\"    Int(i64),\n    /// A whole number above `i64::MAX`\n    Uint(u64),\n    /// A floating\"\"\",1)\ns=s.replace(\"\"\"            Self::Int(n) => n.to_string(),\n\"\"\",\"\"\"            Self::Int(n) => n.to_string(),\n            Self::Uint(n) => n.to_string(),\n\"\"\",1)\ns=s.replace(\"\"\"                // A u64 beyond i64::MAX is valid JSON; wrapping it would turn\n                // it into a negative number.\n                Ok(EnvValue::Int(\n                    v.try_into().map_err(serde::de::Error::custom)?,\n                ))\n\"\"\",\"\"\"                // A u64 beyond i64::MAX is valid JSON; keep it unsigned rather\n                // than wrapping it into a negative number.\n                Ok(EnvValue::Uint(v))\n\"\"\",1)\nopen(p,'w').write(s)\nE\ncargo check -p shep-core 2>&1 | tail -5"
+   }
+  }
+ ],
+ "result_text": "Env values above `i64::MAX` now load, up to `u64::MAX`, and are stored as their exact decimal digits. `cargo check -p shep-core` passes; I didn't run the tests or the rest of the gate.\n\nThe change is in `crates/shep-core/src/config/app.rs`. I added a `Uint(u64)` variant to `EnvValue`. `visit_u64` now returns it instead of trying to narrow to `i64`, which was the source of the error. `into_string` renders it with `to_string()`.\n\nNegative whole numbers and every other value kind take the same paths as before. Serialization is untouched, so env values are still written as strings.",
+ "diff_stat": " crates/shep-core/src/config/app.rs | 11 ++++++-----\n 1 file changed, 6 insertions(+), 5 deletions(-)\n",
+ "files_changed": [
+  "crates/shep-core/src/config/app.rs"
+ ],
+ "cargo_lock_changed": false,
+ "other_files_changed": [],
+ "touched_test_module": false,
+ "test_fns_added": 0,
+ "test_patch_applied": "git apply",
+ "hidden": {
+  "cmd": "cargo test -p shep-core --lib -- config::app::tests::env_reads_a_number_beyond_i64_max_without_wrapping --exact",
+  "exit": 0,
+  "seconds": 25.7,
+  "passed": true,
+  "results": {
+   "config::app::tests::env_reads_a_number_beyond_i64_max_without_wrapping": "ok"
+  },
+  "failing": [],
+  "missing": [],
+  "compile_error": false,
+  "tail": "running 1 test\ntest config::app::tests::env_reads_a_number_beyond_i64_max_without_wrapping ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 463 filtered out; finished in 0.00s\n\n   Compiling shep-channel v0.7.3 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-8_zv1kis/wt/crates/shep-channel)\n   Compiling shep-core v0.7.3 (/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-8_zv1kis/wt/crates/shep-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 25.22s\n     Running unittests src/lib.rs (~/.kelpie/targets/claude-sonnet-5@medium/debug/deps/shep_core-15ebfb63181e4b76)"
+ },
+ "passed": true,
+ "failing_tests": [],
+ "crate_suite": {
+  "exit": 0,
+  "failed": [],
+  "passed_count": 463
+ },
+ "transcript": {
+  "transcript": "env-u64-beyond-i64.transcript.jsonl",
+  "tool_calls": {
+   "Bash": 3,
+   "Read": 1,
+   "Edit": 3
+  },
+  "bash": [
+   "grep -n \"visit_i64\\|visit_u64\\|visit_f64\\|visit_bool\\|fn visit_\\|i128\\|u128\" crates/shep-core/src/config/app.rs | head -40",
+   "python3 - <<'E'\np='crates/shep-core/src/config/app.rs'\ns=open(p).read()\ns=s.replace(\"\"\"    Int(i64),\n    /// A floating\"\"\",\"\"\"    Int(i64),\n    /// A whole number above `i64::MAX`\n    Uint(u64),\n    /",
+   "cargo check -p shep-core 2>&1 | tail -5"
+  ],
+  "edited_paths": [
+   "/private/var/folders/vq/j363y9jx1c129m894zzqhc980000gn/T/impl-8_zv1kis/wt/crates/shep-core/src/config/app.rs"
+  ]
+ }
+}
