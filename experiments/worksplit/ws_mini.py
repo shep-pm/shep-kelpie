@@ -1,7 +1,7 @@
 """A compact work-split run: one reading-heavy work item, three strategies.
 
 Usage: python3 ws_mini.py STRATEGY RUN
-Strategies: inline, crew, phased.
+Strategies: inline, crew, crew_nohooks, phased, inline_cbm.
 
 The work item reviews crates/shep-daemon/src/supervisor/ (54 files, about
 22k lines) in the pinned worker repo. Cost comes from `modelUsage`, which
@@ -80,6 +80,19 @@ def main():
         result, wall = run_p(BRIEF + " Do all the reading yourself; do not use the Agent tool.",
                              ["--disallowedTools", "Agent"])
         record(strategy, run, "all", result, wall)
+    elif strategy == "inline_cbm":
+        # Same as inline, plus the codebase-memory-mcp server: a pre-built graph
+        # of this repo the worker can query instead of guessing where to look.
+        cbm_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cbm-mcp-config.json")
+        result, wall = run_p(
+            BRIEF + " Do all the reading yourself; do not use the Agent tool. A codebase-memory-mcp "
+            "server is also connected (tools named mcp__cbm__*): it holds a pre-built code graph of "
+            "this repository (search_graph, query_graph, trace_path, get_code_snippet, "
+            "get_file_outline, get_architecture, search_code, and related read tools). You may use it "
+            "to navigate the codebase — find callers, trace paths, look up symbols — instead of "
+            "guessing from file names, but still read the actual source before reporting a finding.",
+            ["--disallowedTools", "Agent", "--mcp-config", cbm_config])
+        record(strategy, run, "all", result, wall)
     elif strategy in ("crew", "crew_nohooks"):
         # The maintainer's interactive hooks block review dispatches from a
         # worker, so crew_nohooks runs with every hook off.
@@ -87,7 +100,10 @@ def main():
         result, wall = run_p(
             BRIEF + " Split the files into four groups of similar size and review them with four "
             "subagents in parallel (Agent tool, model sonnet), one group each, giving each the same "
-            "brief. Then merge, deduplicate and rank their findings yourself.", extra)
+            "brief. Then merge, deduplicate and rank their findings yourself. Your final message must "
+            "repeat the full merged, deduplicated list of findings (one per line, `path:line: claim`) "
+            "and the `FINDINGS: <n>` line in full — do not refer back to a subagent's report or an "
+            "earlier message instead of restating them.", extra)
         record(strategy, run, "all", result, wall)
     elif strategy == "phased":
         half = len(fs) // 2
