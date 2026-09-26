@@ -1,0 +1,14 @@
+{"test": "l", "ts": "2026-09-25T19:54:13+00:00", "claude": "2.1.282 (Claude Code)", "model": "sonnet", "step": "flock_started", "rc": 0, "stderr": ""}
+{"test": "l", "ts": "2026-09-25T19:54:18+00:00", "claude": "2.1.282 (Claude Code)", "model": "sonnet", "round": 1, "step": "koji_granted", "driver_wait_s": 0.015432875021360815, "runner_want_to_grant_ms": 2.505859375, "driver_to_grant_ms": 27.70263671875}
+{"test": "l", "ts": "2026-09-25T19:54:19+00:00", "claude": "2.1.282 (Claude Code)", "model": "sonnet", "round": 1, "step": "reactmap_queued", "holding": null}
+{"test": "l", "ts": "2026-09-25T19:54:19+00:00", "claude": "2.1.282 (Claude Code)", "model": "sonnet", "round": 1, "step": "reclaimed_to_reactmap", "driver_wait_s": 0.011403500044252723, "kill_to_grant_ms": 16.77099609375}
+{"test": "l", "ts": "2026-09-25T19:54:21+00:00", "claude": "2.1.282 (Claude Code)", "model": "sonnet", "round": 2, "step": "koji_granted", "driver_wait_s": 0.014682749984785914, "runner_want_to_grant_ms": 1.154052734375, "driver_to_grant_ms": 24.017822265625}
+{"test": "l", "ts": "2026-09-25T19:54:22+00:00", "claude": "2.1.282 (Claude Code)", "model": "sonnet", "round": 2, "step": "reactmap_queued", "holding": null}
+{"test": "l", "ts": "2026-09-25T19:54:22+00:00", "claude": "2.1.282 (Claude Code)", "model": "sonnet", "round": 2, "step": "reclaimed_to_reactmap", "driver_wait_s": 0.011550583003554493, "kill_to_grant_ms": 17.054931640625}
+{"test": "l", "ts": "2026-09-25T19:54:24+00:00", "claude": "2.1.282 (Claude Code)", "model": "sonnet", "round": 3, "step": "koji_granted", "driver_wait_s": 0.014808041974902153, "runner_want_to_grant_ms": 1.49609375, "driver_to_grant_ms": 29.85791015625}
+{"test": "l", "ts": "2026-09-25T19:54:25+00:00", "claude": "2.1.282 (Claude Code)", "model": "sonnet", "round": 3, "step": "reactmap_queued", "holding": null}
+{"test": "l", "ts": "2026-09-25T19:54:25+00:00", "claude": "2.1.282 (Claude Code)", "model": "sonnet", "round": 3, "step": "reclaimed_to_reactmap", "driver_wait_s": 0.011498000007122755, "kill_to_grant_ms": 16.956298828125}
+{"test": "l", "ts": "2026-09-25T19:54:26+00:00", "claude": "2.1.282 (Claude Code)", "model": "sonnet", "step": "flood_sent", "bodies": ["sending 5000"]}
+{"test": "l", "ts": "2026-09-25T19:54:33+00:00", "claude": "2.1.282 (Claude Code)", "model": "sonnet", "step": "adopt", "rc": 0, "stdout": "NAME       SOURCE   SHEPHERD  STATUS\nlease-dog  adopted  true      online\n", "stderr": ""}
+{"test": "l", "ts": "2026-09-25T19:54:35+00:00", "claude": "2.1.282 (Claude Code)", "model": "sonnet", "step": "trigger_dog", "rc": 0, "stdout": "ID  NAME       OUTCOME     DETAIL\n4   lease-dog  no_channel  no shepherd channel \u2014 set channel = true, or wait_ready / shutdown_with_message, which imply it\n", "stderr": ""}
+{"test": "l", "ts": "2026-09-25T19:54:35+00:00", "claude": "2.1.282 (Claude Code)", "model": "sonnet", "step": "rehome", "rc": 0, "stderr": ""}

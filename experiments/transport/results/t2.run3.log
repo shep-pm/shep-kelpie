@@ -1,0 +1,15 @@
+t2 r3 1: ctx=73053 w=0 r=73049 units=7763.9 2.26s longest=25247
+t2 r3 2: ctx=85705 w=0 r=85701 units=9029.1 1.57s longest=24050
+t2 r3 3: ctx=96115 w=0 r=96111 units=10080.1 1.56s longest=26161
+t2 r3 4: ctx=106998 w=0 r=106994 units=11768.4 2.93s longest=24973
+t2 r3 5: ctx=117752 w=4978 r=112770 units=21677.0 1.65s longest=23683
+t2 r3 6: ctx=128127 w=5522 r=122601 units=23743.1 1.68s longest=26142
+t2 r3 7: ctx=138494 w=4840 r=133650 units=23509.0 1.91s longest=22735
+t2 r3 8: ctx=149086 w=5750 r=143332 units=26317.2 1.85s longest=29272
+t2 r3 9: ctx=160887 w=6050 r=154833 units=28062.3 1.9s longest=28157
+t2 r3 10: ctx=172828 w=5890 r=166934 units=28967.4 1.88s longest=27663
+t2 r3 after_idle: ctx=89368 w=62 r=89304 units=9076.4 0.88s longest=14034
+t2 r3 bigline: ctx=181179 w=2353 r=178822 units=23072.2 3.57s longest=32840
+t2 r3 compact: ctx=0 w=0 r=0 units=0.0 44.5s longest=14784
+t2 r3 after_compact: ctx=42623 w=30761 r=11860 units=62735.0 1.17s longest=14034
+t2 r3 after_crash_resume: ctx=59507 w=47645 r=11860 units=96503.0 1.79s longest=14783

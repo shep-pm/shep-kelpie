@@ -1,0 +1,11 @@
+crash r1 t1: ctx=74214 w=0 r=74210 units=8480.0 4.68s
+crash r1 t2: ctx=84925 w=5312 r=79609 units=19043.9 3.56s
+crash r1 t3: ctx=95335 w=5222 r=90109 units=19923.9 3.81s
+crash r1 t4: ctx=106218 w=5657 r=100557 units=21828.7 3.9s
+crash r1 t5: ctx=116728 w=4856 r=111868 units=21342.8 3.58s
+crash r1: killed turn 6 (alive=True), transcript 87 -> 91
+crash r1 t6: ctx=127301 w=5524 r=121773 units=23664.3 3.63s
+crash r1 t7: ctx=137668 w=4840 r=132824 units=23426.4 3.95s
+crash r1 t8: ctx=148260 w=5750 r=142506 units=26234.6 3.84s
+crash r1 t9: ctx=160061 w=6050 r=154007 units=27979.7 3.75s
+crash r1 t10: ctx=172002 w=5890 r=166108 units=28884.8 3.76s

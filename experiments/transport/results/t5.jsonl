@@ -1,0 +1,2 @@
+{"test": "t5", "ts": "2026-09-26T01:35:51+00:00", "claude": "2.1.283 (Claude Code)", "model": "sonnet", "step": "channel_push", "first_result": "ready", "woke": false, "woke_after_s": null, "woke_result": null, "events_while_idle": [], "stderr_tail": ""}
+{"test": "t5", "ts": "2026-09-26T01:38:07+00:00", "claude": "2.1.283 (Claude Code)", "model": "sonnet", "step": "channel_push", "first_result": "ready", "woke": false, "woke_after_s": null, "woke_result": null, "events_while_idle": [], "stderr_tail": ""}

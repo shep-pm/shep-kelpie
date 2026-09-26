@@ -1,0 +1,8 @@
+t5: woke=False after=None result=None
+t4b r1 trivial: 'ok' ctx=32836 mcp=['initialize', 'notifications/initialized', 'tools/list']
+t4b r1 tool_call: 'null' ctx=106001 mcp=['initialize', 'notifications/initialized', 'tools/list', 'tools/call']
+t4b r2 trivial: 'ok' ctx=32836 mcp=['initialize', 'notifications/initialized', 'tools/list']
+t4b r2 tool_call: 'null' ctx=106001 mcp=['initialize', 'notifications/initialized', 'tools/list', 'tools/call']
+t4a r1: 'null' turns=3 4.58s
+t4a r2: 'null' turns=3 4.74s
+t4a r3: 'null' turns=3 4.44s

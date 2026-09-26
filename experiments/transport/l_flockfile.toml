@@ -1,0 +1,17 @@
+# Two stand-in project runners for transport test L, run by the pinned
+# shepherd under SHEP_HOME=~/.kelpie/shep. Named after real projects so
+# `shep trigger koji status` reads the way it will in use.
+
+[[app]]
+name        = "koji"
+script      = "runner.py"
+interpreter = "python3"
+channel     = true
+autorestart = false
+
+[[app]]
+name        = "reactmap"
+script      = "runner.py"
+interpreter = "python3"
+channel     = true
+autorestart = false

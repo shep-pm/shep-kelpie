@@ -1,0 +1,21 @@
+[package]
+name = "lease-dog"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Throwaway dog side of transport test L: grants a GPU lease to project runners over shep"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+shep-client = "=0.10.1"
+shep-core = "=0.10.1"
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+
+[workspace]
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
