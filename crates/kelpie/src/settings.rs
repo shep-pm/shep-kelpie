@@ -213,7 +213,7 @@ impl TryFrom<String> for ForgeSlug {
 
 /// Hours in a working day, from 1 to 24
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(try_from = "u8")]
+#[serde(try_from = "i64")]
 pub struct KickoffHours(u8);
 
 impl KickoffHours {
@@ -224,12 +224,12 @@ impl KickoffHours {
     }
 }
 
-impl TryFrom<u8> for KickoffHours {
+impl TryFrom<i64> for KickoffHours {
     type Error = &'static str;
 
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            1..=24 => Ok(Self(value)),
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        match u8::try_from(value) {
+            Ok(hours @ 1..=24) => Ok(Self(hours)),
             _ => Err("must be from 1 to 24"),
         }
     }
@@ -384,11 +384,13 @@ mod tests {
     }
 
     #[test]
-    fn kickoff_hours_past_a_day_are_refused() {
-        let text = EXAMPLE.replace("kickoff_hours = 8", "kickoff_hours = 25");
-        let err = parse_err(&text);
-        assert!(err.contains("kickoff_hours = 25"), "{err}");
-        assert!(err.contains("must be from 1 to 24"), "{err}");
+    fn kickoff_hours_outside_a_day_are_refused() {
+        for hours in ["0", "25", "300", "-1"] {
+            let line = format!("kickoff_hours = {hours}");
+            let err = parse_err(&EXAMPLE.replace("kickoff_hours = 8", &line));
+            assert!(err.contains(&line), "{err}");
+            assert!(err.contains("must be from 1 to 24"), "{err}");
+        }
     }
 
     #[test]

@@ -241,7 +241,7 @@ fn check_repo(settings: &Settings) -> Result<(), SettingsError> {
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .output()
-        .map_err(|e| invalid(format!("cannot run git to check it: {}", e.kind())))?;
+        .map_err(|e| invalid(format!("cannot run git to check it: {e}")))?;
     if output.status.success() && output.stdout.trim_ascii() == b"true" {
         return Ok(());
     }
@@ -426,15 +426,21 @@ mod tests {
     }
 
     #[test]
-    fn coderabbit_on_for_a_private_repo_stops_the_runner() {
-        let rig = Rig::new("shep");
-        rig.forge.set_visibility(Visibility::Private);
-        let err = rig.open().unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "setting `coderabbit.enabled`: shep-pm/shep is private, \
-             and CodeRabbit's free plan reviews public repos only"
-        );
+    fn coderabbit_on_for_a_repo_that_is_not_public_stops_the_runner() {
+        for (visibility, seen_by) in [
+            (Visibility::Private, "private"),
+            (Visibility::Internal, "internal"),
+        ] {
+            let rig = Rig::new("shep");
+            rig.forge.set_visibility(visibility);
+            assert_eq!(
+                rig.open().unwrap_err().to_string(),
+                format!(
+                    "setting `coderabbit.enabled`: shep-pm/shep is {seen_by}, \
+                     and CodeRabbit's free plan reviews public repos only"
+                )
+            );
+        }
     }
 
     #[test]

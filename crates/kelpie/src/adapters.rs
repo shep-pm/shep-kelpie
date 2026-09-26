@@ -35,7 +35,7 @@ impl Forge for Gh {
             .args(["repo", "view", repo.as_str(), "--json", "visibility"])
             .stdin(Stdio::null())
             .output()
-            .map_err(|e| ForgeError::Spawn(e.kind()))?;
+            .map_err(|e| ForgeError::Spawn(e.to_string()))?;
         if !output.status.success() {
             return Err(ForgeError::Failed(
                 String::from_utf8_lossy(&output.stderr).into(),
@@ -72,7 +72,7 @@ impl Claude for ClaudeCli {
             .current_dir(&call.cwd)
             .stdin(Stdio::null())
             .output()
-            .map_err(|e| ClaudeError::Spawn(e.kind()))?;
+            .map_err(|e| ClaudeError::Spawn(e.to_string()))?;
         parse_result(&output)
     }
 }

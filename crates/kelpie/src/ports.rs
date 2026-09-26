@@ -47,8 +47,8 @@ pub trait Forge: Send {
 /// Why a forge call failed
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ForgeError {
-    /// The forge's command line tool could not be started
-    Spawn(std::io::ErrorKind),
+    /// The forge's command line tool could not be started, with the OS's reason
+    Spawn(String),
     /// The tool ran and exited unsuccessfully, with this on stderr
     Failed(String),
     /// The tool succeeded but its output was not what was asked for
@@ -58,7 +58,7 @@ pub enum ForgeError {
 impl fmt::Display for ForgeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Spawn(kind) => write!(f, "cannot run gh: {kind}"),
+            Self::Spawn(error) => write!(f, "cannot run gh: {error}"),
             Self::Failed(stderr) => write!(f, "gh failed: {}", stderr.trim()),
             Self::Unreadable(output) => write!(f, "unreadable gh output: {}", output.trim()),
         }
@@ -122,8 +122,8 @@ pub trait Claude: Send {
 /// Why a Claude call failed
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClaudeError {
-    /// `claude` could not be started
-    Spawn(std::io::ErrorKind),
+    /// `claude` could not be started, with the OS's reason
+    Spawn(String),
     /// `claude` exited without a result it reports as a success
     Failed(String),
     /// `claude`'s output was not the JSON result asked for
@@ -133,7 +133,7 @@ pub enum ClaudeError {
 impl fmt::Display for ClaudeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Spawn(kind) => write!(f, "cannot run claude: {kind}"),
+            Self::Spawn(error) => write!(f, "cannot run claude: {error}"),
             Self::Failed(detail) => write!(f, "claude failed: {}", detail.trim()),
             Self::Unreadable(output) => write!(f, "unreadable claude output: {}", output.trim()),
         }
