@@ -8,4 +8,6 @@
 #![forbid(unsafe_code)]
 #![doc(test(attr(deny(warnings))))]
 
+pub mod adapters;
+pub mod ports;
 pub mod settings;
