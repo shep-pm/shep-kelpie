@@ -18,7 +18,8 @@ So kelpie moves the control room's rules (gates, locks, rate windows) into code,
 - Rust for all business code. A Tauri GUI comes after the MVP. Until then kelpie is run and watched from a Claude session.
 - One kelpie serves every project, because the GPU lease, the CodeRabbit window and the usage pacer are machine-wide or account-wide. Realistically two projects at once. shep comes first.
 - Kelpie and its runners talk through shep: triggers down, `channel.metric` up on the bus. Runners report running totals, because metrics drop under backpressure. A private socket only if the MVP shows the round trips do not hold up.
-- Leases live in the dog, and only runners ask for them. Workers and crew never touch the GPU or CodeRabbit. The dog holds the real `gpu.lock` for the length of each round, so the maintainer's own interactive qwen use still queues fairly against it.
+- Book leases (CodeRabbit first) live in the dog, and only runners and the maintainer ask for them. Workers and crew never touch the GPU or CodeRabbit. The GPU lease is the lock the maintainer's qwen scripts already take, and the dog stays out of it (decided 2026-09-26 on #5, option A): a qwen round takes the lock itself, and `kelpie lease run|take gpu` takes the same lock in the same format.
+- A runner asks for a book lease by raising running totals, `lease.<kind>.want.<epoch>` and `lease.<kind>.return.<epoch>`, and the dog grants with `grant <kind> <epoch>`. The epoch is the runner's pid, which shep's process events also carry, so the dog reclaims an old run's leases on `restart` without racing the new run's first metric.
 - MVP: a thin vertical slice. One project, one worker at a time, merge on `ask`, no GUI. shep-pm/shep-kelpie#5 is its spec.
 - Project settings live in one TOML file per project, `~/.kelpie/projects/<project>/settings.toml`, read when the runner starts. Every setting is required, so a missing or malformed one stops the runner with a message naming it. The project's state file sits beside it and is written atomically.
 
@@ -131,6 +132,9 @@ Measured 2026-09-26 in the experiments repo.
 - `SendLine` (`shep whisper`) writes one line to a sheep's stdin.
 - A lamb is a pid and an executable name, found by walking the process tree, never argv. The stop ladder kills the process group.
 - A dog is an ordinary sheep with a marker. Wildcard selectors never touch a dog. A dog's `--schema` feeds lookout's settings pane.
+- A sheep under the pinned shep 0.10.1 starts with only `HOME`, `LANG`, `PATH`, `USER` and its `SHEP_*` variables, read with `ps eww` on 2026-09-26. `TMPDIR` and `SHEP_HOME` are not among them, though the shepherd itself has both. So `${TMPDIR:-/tmp}` names `/tmp` under the shepherd and macOS's per-user temporary folder in the maintainer's shell: two different GPU locks. Kelpie falls back to `getconf DARWIN_USER_TEMP_DIR`, the folder macOS sets `TMPDIR` from at login, and whatever runs a qwen script for kelpie must pass it on as `TMPDIR`.
+- shep emits `restart` after the new process is spawned, with the new pid in its info (read from shep-daemon 0.10.0's `actor_lifecycle.rs`). A crash that will restart emits `exit` first.
+- Kelpie's lease round trip through the pinned shepherd, three runs of `crates/kelpie/tests/dog_smoke.rs` on 2026-09-26: want to grant 1, 6 and 11 ms, and a SIGKILLed holder to the next grant 8, 11 and 9 ms.
 - Open against shep: shep-pm/shep#623 (an opaque per-dog settings table on a sheep) and shep-pm/shep#624 (a sheep labels its own lambs).
 
 ### codebase-memory-mcp
