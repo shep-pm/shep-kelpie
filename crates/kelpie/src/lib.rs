@@ -7,3 +7,5 @@
 
 #![forbid(unsafe_code)]
 #![doc(test(attr(deny(warnings))))]
+
+pub mod settings;

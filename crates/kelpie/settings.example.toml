@@ -1,0 +1,49 @@
+# A project's settings, read once when its runner starts. Every key is
+# required. This file holds the first build's defaults, for shep.
+
+repo = "~/.kelpie/repos/shep"
+forge = "shep-pm/shep"
+
+# `ask` is the only merge authority the first build accepts.
+merge_authority = "ask"
+
+# Left out of a pull request's changed-line count.
+generated = [
+    "Cargo.lock",
+    "**/snapshots/*.snap",
+    "web/src/data/cli-reference.generated.txt",
+]
+
+[models.worker]
+model = "claude-sonnet-5"
+effort = "medium"
+
+[models.reviewer]
+model = "claude-sonnet-5"
+effort = "medium"
+
+[models.judge]
+model = "claude-opus-5-5"
+effort = "low"
+
+[models.relay]
+model = "claude-haiku-4-5-20251001"
+effort = "low"
+
+[review]
+loop_guard = 8
+
+# CodeRabbit's free plan reviews public repos only. Turn this off for a
+# private repo, which then goes from the qwen-review loop and CI straight
+# to the merge ruling.
+[coderabbit]
+enabled = true
+divisor = 1000
+
+[pacing]
+kickoff_hours = 8
+
+[[worker.guard_hooks]]
+event = "PreToolUse"
+matcher = "Bash"
+command = "node ~/.claude/hooks/git-gh-guard.js"
