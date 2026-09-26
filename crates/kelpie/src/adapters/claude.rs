@@ -1,0 +1,328 @@
+//! Headless Claude Code, one `claude -p` process per call
+
+use std::ffi::OsString;
+use std::process::{Command, Output};
+
+use serde::Deserialize;
+
+use super::process::{Processes, RunError};
+use crate::ports::{
+    Claude, ClaudeCall, ClaudeError, ClaudeReply, Cost, Role, Session, SessionId, Usage,
+};
+
+/// What `claude -p --resume` prints when the session has no transcript
+const NO_SESSION: &str = "No conversation found with session ID";
+
+/// Headless Claude Code, one `claude -p` process per call
+///
+/// Clones share their calls in flight, so one clone can stop them all.
+#[derive(Debug, Clone, Default)]
+pub struct ClaudeCli {
+    processes: Processes,
+}
+
+impl ClaudeCli {
+    /// Ends every call in flight, and refuses new ones, as the runner stops
+    ///
+    /// A call ended this way returns [`ClaudeError::Stopped`].
+    pub fn stop(&self) {
+        self.processes.stop();
+    }
+}
+
+impl Claude for ClaudeCli {
+    fn run(&self, call: &ClaudeCall) -> Result<ClaudeReply, ClaudeError> {
+        // Stdin is closed: a `claude -p` with an open stdin waits on it.
+        let output = self
+            .processes
+            .output(
+                Command::new("claude")
+                    .args(argv(call))
+                    .current_dir(&call.cwd),
+            )
+            .map_err(|e| match e {
+                RunError::Io(e) => ClaudeError::Spawn(e.to_string()),
+                RunError::Stopped => ClaudeError::Stopped,
+            })?;
+        parse_result(&output, &call.session)
+    }
+}
+
+// `--setting-sources project,local` keeps the project's CLAUDE.md and skills
+// and drops the maintainer's own hooks, plugins and skills.
+fn argv(call: &ClaudeCall) -> Vec<OsString> {
+    let mut argv: Vec<OsString> = vec![
+        "-p".into(),
+        call.prompt.as_str().into(),
+        "--model".into(),
+        call.model.as_str().into(),
+        "--effort".into(),
+        call.effort.as_str().into(),
+        "--setting-sources".into(),
+        "project,local".into(),
+        "--settings".into(),
+        call.settings.clone().into(),
+        "--output-format".into(),
+        "json".into(),
+    ];
+    if call.role == Role::Worker {
+        argv.extend(["--permission-mode".into(), "bypassPermissions".into()]);
+    }
+    match &call.session {
+        Session::New(id) => {
+            argv.extend(["--session-id".into(), id.0.as_str().into()]);
+            if let Some(instructions) = &call.instructions {
+                argv.extend([
+                    "--append-system-prompt-file".into(),
+                    instructions.clone().into(),
+                ]);
+            }
+        }
+        Session::Resume(id) => argv.extend(["--resume".into(), id.0.as_str().into()]),
+    }
+    argv
+}
+
+// `claude -p` exits 1 on an error result but still prints its JSON, so the
+// JSON is read before the exit status.
+fn parse_result(output: &Output, session: &Session) -> Result<ClaudeReply, ClaudeError> {
+    #[derive(Deserialize)]
+    struct ResultMessage {
+        is_error: bool,
+        session_id: String,
+        #[serde(default)]
+        result: String,
+        #[serde(default)]
+        usage: Option<ResultUsage>,
+        total_cost_usd: Option<f64>,
+    }
+    #[derive(Deserialize)]
+    struct ResultUsage {
+        input_tokens: u64,
+        cache_creation_input_tokens: u64,
+        cache_read_input_tokens: u64,
+        output_tokens: u64,
+    }
+    let stdout = || String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let r = match serde_json::from_slice::<ResultMessage>(&output.stdout) {
+        Ok(r) if !r.is_error && output.status.success() => r,
+        Ok(r) => return Err(ClaudeError::Failed(r.result)),
+        Err(_) if output.status.success() => return Err(ClaudeError::Unreadable(stdout())),
+        Err(_) => {
+            return Err(match session {
+                Session::Resume(id) if stderr.contains(NO_SESSION) => {
+                    ClaudeError::NoSession(id.clone())
+                }
+                _ => ClaudeError::Failed(stderr.into_owned()),
+            });
+        }
+    };
+    let (Some(u), Some(cost)) = (r.usage, r.total_cost_usd.and_then(Cost::from_usd)) else {
+        return Err(ClaudeError::Unreadable(stdout()));
+    };
+    Ok(ClaudeReply {
+        session_id: SessionId(r.session_id),
+        text: r.result,
+        usage: Usage {
+            input: u.input_tokens,
+            cache_write: u.cache_creation_input_tokens,
+            cache_read: u.cache_read_input_tokens,
+            output: u.output_tokens,
+        },
+        session_cost: cost,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::process::ExitStatusExt;
+    use std::path::PathBuf;
+    use std::process::ExitStatus;
+
+    use super::*;
+    use crate::settings::Effort;
+
+    // Recorded from Claude Code 2.1.283 on Haiku: a call asked to say ok.
+    const RESULT: &str = include_str!("../../fixtures/claude-p-result.json");
+    // Recorded from Claude Code 2.1.283 on Haiku: a new session, then the
+    // same session resumed for a second call.
+    const FRESH: &str = include_str!("../../fixtures/claude-p-fresh.json");
+    const RESUMED: &str = include_str!("../../fixtures/claude-p-resumed.json");
+    // Recorded: `--resume` onto a session killed before it wrote a transcript.
+    const NO_SESSION_STDERR: &str = include_str!("../../fixtures/claude-p-no-session.stderr");
+
+    fn output(code: i32, stdout: &str, stderr: &str) -> Output {
+        Output {
+            status: ExitStatus::from_raw(code << 8),
+            stdout: stdout.into(),
+            stderr: stderr.into(),
+        }
+    }
+
+    fn resume(id: &str) -> Session {
+        Session::Resume(SessionId(id.into()))
+    }
+
+    fn fresh() -> Session {
+        Session::New(SessionId("7e812e8a-3bf1-42a7-bddf-0ab283b7372a".into()))
+    }
+
+    fn call(role: Role, session: Session) -> ClaudeCall {
+        ClaudeCall {
+            role,
+            model: "claude-sonnet-5".into(),
+            effort: Effort::Medium,
+            session,
+            cwd: PathBuf::from("/tmp"),
+            settings: PathBuf::from("/k/worker/settings.json"),
+            instructions: Some(PathBuf::from("/k/worker/instructions.md")),
+            prompt: "implement #6".into(),
+        }
+    }
+
+    fn strings(call: &ClaudeCall) -> Vec<String> {
+        argv(call)
+            .into_iter()
+            .map(|a| a.into_string().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_new_worker_session_carries_the_whole_profile() {
+        assert_eq!(
+            strings(&call(Role::Worker, fresh())),
+            [
+                "-p",
+                "implement #6",
+                "--model",
+                "claude-sonnet-5",
+                "--effort",
+                "medium",
+                "--setting-sources",
+                "project,local",
+                "--settings",
+                "/k/worker/settings.json",
+                "--output-format",
+                "json",
+                "--permission-mode",
+                "bypassPermissions",
+                "--session-id",
+                "7e812e8a-3bf1-42a7-bddf-0ab283b7372a",
+                "--append-system-prompt-file",
+                "/k/worker/instructions.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_resumed_session_names_it_and_keeps_its_instructions() {
+        let argv = strings(&call(Role::Worker, resume("abc")));
+        assert_eq!(argv[argv.len() - 2..], ["--resume", "abc"]);
+        assert!(!argv.iter().any(|a| a == "--append-system-prompt-file"));
+        assert!(!argv.iter().any(|a| a == "--session-id"));
+    }
+
+    #[test]
+    fn only_a_worker_bypasses_permissions() {
+        for role in [Role::Reviewer, Role::Judge] {
+            let argv = strings(&call(role, fresh()));
+            assert!(!argv.iter().any(|a| a == "--permission-mode"), "{role:?}");
+        }
+    }
+
+    #[test]
+    fn a_success_result_is_read() {
+        let reply = parse_result(&output(0, RESULT, ""), &fresh()).unwrap();
+        assert_eq!(reply.session_id.0, "f83901c5-6d39-421b-b709-7828b56ba237");
+        assert_eq!(reply.text, "ok");
+        assert_eq!(
+            reply.usage,
+            Usage {
+                input: 10,
+                cache_write: 8003,
+                cache_read: 13673,
+                output: 53,
+            }
+        );
+        assert_eq!(reply.session_cost, Cost(17_648_300));
+    }
+
+    #[test]
+    fn a_resumed_call_reports_its_own_usage_and_the_session_cost_so_far() {
+        let first = parse_result(&output(0, FRESH, ""), &fresh()).unwrap();
+        let second = parse_result(&output(0, RESUMED, ""), &resume(&first.session_id.0)).unwrap();
+        assert_eq!(first.session_id, second.session_id);
+        assert_eq!(
+            (first.usage, first.session_cost),
+            (
+                Usage {
+                    input: 10,
+                    cache_write: 8984,
+                    cache_read: 13673,
+                    output: 148,
+                },
+                Cost(20_085_300),
+            )
+        );
+        assert_eq!(
+            (second.usage, second.session_cost),
+            (
+                Usage {
+                    input: 10,
+                    cache_write: 193,
+                    cache_read: 22657,
+                    output: 34,
+                },
+                Cost(22_917_000),
+            )
+        );
+    }
+
+    #[test]
+    fn resuming_a_session_that_never_started_is_named() {
+        let err = parse_result(&output(1, "", NO_SESSION_STDERR), &resume("0e2c")).unwrap_err();
+        assert_eq!(err, ClaudeError::NoSession(SessionId("0e2c".into())));
+    }
+
+    #[test]
+    fn the_same_stderr_for_a_new_session_is_a_plain_failure() {
+        let err = parse_result(&output(1, "", NO_SESSION_STDERR), &fresh()).unwrap_err();
+        assert!(matches!(err, ClaudeError::Failed(_)), "{err:?}");
+    }
+
+    #[test]
+    fn an_error_result_is_a_failure_carrying_its_text() {
+        let text = RESULT.replace("\"is_error\":false", "\"is_error\":true");
+        let err = parse_result(&output(1, &text, ""), &fresh()).unwrap_err();
+        assert_eq!(err, ClaudeError::Failed("ok".into()));
+    }
+
+    #[test]
+    fn a_result_without_its_cost_is_unreadable() {
+        let text = RESULT.replace("\"total_cost_usd\":0.0176483,", "");
+        let err = parse_result(&output(0, &text, ""), &fresh()).unwrap_err();
+        assert!(matches!(err, ClaudeError::Unreadable(_)), "{err:?}");
+    }
+
+    #[test]
+    fn no_json_and_a_failed_exit_reports_stderr() {
+        let err = parse_result(&output(1, "", "not logged in"), &fresh()).unwrap_err();
+        assert_eq!(err, ClaudeError::Failed("not logged in".into()));
+    }
+
+    #[test]
+    fn no_json_and_a_clean_exit_is_unreadable() {
+        let err = parse_result(&output(0, "hello", ""), &fresh()).unwrap_err();
+        assert_eq!(err, ClaudeError::Unreadable("hello".into()));
+    }
+
+    #[test]
+    fn a_cost_is_kept_to_the_billionth_and_refuses_nonsense() {
+        assert_eq!(Cost::from_usd(0.16096939999999998), Some(Cost(160_969_400)));
+        assert_eq!(Cost::from_usd(0.0), Some(Cost(0)));
+        assert_eq!(Cost::from_usd(-0.01), None);
+        assert_eq!(Cost::from_usd(f64::NAN), None);
+        assert_eq!(Cost(22_917_000).usd(), 0.022917);
+    }
+}
