@@ -7,6 +7,7 @@
 //! lays out.
 
 pub mod book;
+pub mod cli;
 pub mod gpu;
 pub mod wire;
 
