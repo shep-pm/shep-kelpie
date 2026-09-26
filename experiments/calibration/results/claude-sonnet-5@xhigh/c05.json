@@ -4,15 +4,55 @@
  "model": "claude-sonnet-5",
  "backend": "claude",
  "effort": "xhigh",
- "error": "exit 1",
- "parsed": null,
- "content": "",
- "usage": {},
- "total_cost_usd": null,
- "duration_ms": null,
- "wall_s": 6.161561012268066,
- "weighted_units": 0.0,
- "stop_reason": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "risk",
+    "quote": "// An overlay open when this reply landed would otherwise survive",
+    "what": "Both edited functions also handle refreshing a pane that is already open (they carry the view, env cursor, list view and edits across), so the unconditional `self.keymap_open = false` also dismisses a help overlay the operator raised over an existing pane when a refresh reply lands, although the body is not replaced by a different one."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"risk\", \"quote\": \"// An overlay open when this reply landed would otherwise survive\", \"what\": \"Both edited functions also handle refreshing a pane that is already open (they carry the view, env cursor, list view and edits across), so the unconditional `self.keymap_open = false` also dismisses a help overlay the operator raised over an existing pane when a refresh reply lands, although the body is not replaced by a different one.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 23325,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 3505,
+  "output_tokens_details": {
+   "thinking_tokens": 3356
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23325,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3505,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 23325,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 23325
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.13073259999999998,
+ "duration_ms": 33687,
+ "wall_s": 37.41941976547241,
+ "weighted_units": 65366.3,
+ "stop_reason": "end_turn",
  "kind": "clean",
  "caught": null,
  "false_alarms": 0,

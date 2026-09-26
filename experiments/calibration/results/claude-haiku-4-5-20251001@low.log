@@ -60,3 +60,29 @@ c10 6s clean, false_alarms=0 ERROR exit 1
 c11 6s clean, false_alarms=0 ERROR exit 1
 c12 7s clean, false_alarms=0 ERROR exit 1
 calibrate: finished claude-haiku-4-5-20251001@low in 4.4 min
+calibrate: 24 cases to run for claude-haiku-4-5-20251001@low
+r05 17s caught=True false_alarms=0
+r06 15s caught=True false_alarms=0
+r04 47s caught=True false_alarms=0
+r07 27s caught=True false_alarms=0
+r03 71s caught=True false_alarms=0
+c01 24s clean, false_alarms=0
+r09 70s caught=True false_alarms=0
+r08 84s caught=True false_alarms=0
+c02 49s clean, false_alarms=0
+c05 42s clean, false_alarms=0
+c06 16s clean, false_alarms=0
+c03 108s clean, false_alarms=0
+c04 111s clean, false_alarms=0
+h01 34s caught=True false_alarms=0
+h02 55s caught=True false_alarms=0
+c07 101s clean, false_alarms=0
+h03 74s caught=True false_alarms=0
+h05 74s caught=True false_alarms=0
+h04 109s caught=True false_alarms=0
+c08 62s clean, false_alarms=0
+c11 14s clean, false_alarms=0
+c09 103s clean, false_alarms=0
+c10 87s clean, false_alarms=0
+c12 118s clean, false_alarms=1
+calibrate: finished claude-haiku-4-5-20251001@low in 9.0 min

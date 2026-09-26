@@ -61,3 +61,5 @@ c09 8s clean, false_alarms=0
 c11 3s clean, false_alarms=0
 c12 6s clean, false_alarms=0
 calibrate: finished claude-opus-5-5@low in 2.1 min
+calibrate: 0 cases to run for claude-opus-5-5@low
+calibrate: finished claude-opus-5-5@low in 0.0 min

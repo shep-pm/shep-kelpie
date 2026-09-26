@@ -4,15 +4,55 @@
  "model": "claude-fable-5-1",
  "backend": "claude",
  "effort": "medium",
- "error": "exit 1",
- "parsed": null,
- "content": "",
- "usage": {},
- "total_cost_usd": null,
- "duration_ms": null,
- "wall_s": 6.431806802749634,
- "weighted_units": 0.0,
- "stop_reason": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "risk",
+    "quote": "        insta::assert_json_snapshot!(\"reply_wire_v9\", replies);",
+    "what": "The commit appends new entries to the request_wire_v9 and reply_wire_v9 snapshot inputs but includes no update to the corresponding .snap files, so both snapshot tests fail until the snapshots are re-accepted."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"risk\", \"quote\": \"        insta::assert_json_snapshot!(\\\"reply_wire_v9\\\", replies);\", \"what\": \"The commit appends new entries to the request_wire_v9 and reply_wire_v9 snapshot inputs but includes no update to the corresponding .snap files, so both snapshot tests fail until the snapshots are re-accepted.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 24305,
+  "cache_read_input_tokens": 13647,
+  "output_tokens": 1119,
+  "output_tokens_details": {
+   "thinking_tokens": 985
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 24305,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1119,
+    "cache_read_input_tokens": 13647,
+    "cache_creation_input_tokens": 24305,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 24305
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.54548175,
+ "duration_ms": 15410,
+ "wall_s": 17.530874252319336,
+ "weighted_units": 55571.7,
+ "stop_reason": "end_turn",
  "kind": "clean",
  "caught": null,
  "false_alarms": 0,

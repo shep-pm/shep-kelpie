@@ -4,17 +4,57 @@
  "model": "claude-haiku-4-5-20251001",
  "backend": "claude",
  "effort": "low",
- "error": "exit 1",
- "parsed": null,
- "content": "",
- "usage": {},
- "total_cost_usd": null,
- "duration_ms": null,
- "wall_s": 6.78041410446167,
- "weighted_units": 0.0,
- "stop_reason": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "mod config_reply;",
+    "what": "Modules declared in request/mod.rs (config_reply, envelope, handshake, outcomes, process, redacted, response, smit) will fail to compile because the diff does not show these files being moved from protocol/ to protocol/request/ where mod.rs expects them"
+   }
+  ]
+ },
+ "content": "```json\n{\n  \"findings\": [\n    {\n      \"severity\": \"bug\",\n      \"quote\": \"mod config_reply;\",\n      \"what\": \"Modules declared in request/mod.rs (config_reply, envelope, handshake, outcomes, process, redacted, response, smit) will fail to compile because the diff does not show these files being moved from protocol/ to protocol/request/ where mod.rs expects them\"\n    }\n  ]\n}\n```",
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 10553,
+  "cache_read_input_tokens": 17673,
+  "output_tokens": 13481,
+  "output_tokens_details": {
+   "thinking_tokens": 13365
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 10553,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 10,
+    "output_tokens": 13481,
+    "cache_read_input_tokens": 17673,
+    "cache_creation_input_tokens": 10553,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 10553
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.09028829999999999,
+ "duration_ms": 116049,
+ "wall_s": 118.18635296821594,
+ "weighted_units": 90288.3,
+ "stop_reason": "end_turn",
  "kind": "clean",
  "caught": null,
- "false_alarms": 0,
+ "false_alarms": 1,
  "matched": null
 }

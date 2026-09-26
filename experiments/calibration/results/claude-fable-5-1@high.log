@@ -61,3 +61,26 @@ c10 5s clean, false_alarms=0 ERROR exit 1
 c11 5s clean, false_alarms=0 ERROR exit 1
 c12 5s clean, false_alarms=0 ERROR exit 1
 calibrate: finished claude-fable-5-1@high in 2.8 min
+calibrate: 21 cases to run for claude-fable-5-1@high
+r07 9s caught=True false_alarms=0
+r06 11s caught=True false_alarms=0
+r09 71s caught=True false_alarms=0
+c02 13s clean, false_alarms=0
+c03 22s clean, false_alarms=0 ERROR exit 1
+r08 146s caught=False false_alarms=0 ERROR exit 1
+c01 161s clean, false_alarms=0 ERROR exit 1
+c06 17s clean, false_alarms=0
+c05 47s clean, false_alarms=0
+h01 12s caught=True false_alarms=0
+c07 19s clean, false_alarms=0 ERROR exit 1
+h02 12s caught=True false_alarms=0
+h03 18s caught=True false_alarms=0
+h04 11s caught=True false_alarms=0
+h05 14s caught=True false_alarms=0
+c04 133s clean, false_alarms=0 ERROR exit 1
+c10 16s clean, false_alarms=0
+c11 9s clean, false_alarms=0
+c12 37s clean, false_alarms=0
+c09 129s clean, false_alarms=0
+c08 146s clean, false_alarms=0 ERROR exit 1
+calibrate: finished claude-fable-5-1@high in 6.2 min

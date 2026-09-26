@@ -61,3 +61,22 @@ c11 4s clean, false_alarms=0 ERROR exit 1
 c12 4s clean, false_alarms=0 ERROR exit 1
 c01 155s clean, false_alarms=0 ERROR exit 1
 calibrate: finished claude-sonnet-5@xhigh in 7.6 min
+calibrate: 17 cases to run for claude-sonnet-5@xhigh
+c03 17s clean, false_alarms=0
+c01 37s clean, false_alarms=0 ERROR exit 1
+c04 32s clean, false_alarms=0
+c05 37s clean, false_alarms=0
+c06 30s clean, false_alarms=0 ERROR exit 1
+h01 17s caught=True false_alarms=0
+h02 21s caught=True false_alarms=0
+r08 142s caught=False false_alarms=0 ERROR exit 1
+h03 29s caught=True false_alarms=0
+h04 12s caught=True false_alarms=0
+h05 22s caught=True false_alarms=0
+c07 148s clean, false_alarms=0 ERROR exit 1
+c09 71s clean, false_alarms=0 ERROR exit 1
+c11 18s clean, false_alarms=0
+c12 37s clean, false_alarms=0
+c08 207s clean, false_alarms=0 ERROR exit 1
+c10 171s clean, false_alarms=0 ERROR exit 1
+calibrate: finished claude-sonnet-5@xhigh in 6.5 min

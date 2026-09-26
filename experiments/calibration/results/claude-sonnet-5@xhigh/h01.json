@@ -4,17 +4,61 @@
  "model": "claude-sonnet-5",
  "backend": "claude",
  "effort": "xhigh",
- "error": "exit 1",
- "parsed": null,
- "content": "",
- "usage": {},
- "total_cost_usd": null,
- "duration_ms": null,
- "wall_s": 5.649080991744995,
- "weighted_units": 0.0,
- "stop_reason": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "if line.is_empty() {",
+    "what": "The condition is inverted: non-empty continuation lines get no indent and empty lines get two spaces, so a forged `error[` line still starts at column 0, paragraph breaks gain trailing whitespace, and the new tests and the multiline table snapshot fail."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"if line.is_empty() {\", \"what\": \"The condition is inverted: non-empty continuation lines get no indent and empty lines get two spaces, so a forged `error[` line still starts at column 0, paragraph breaks gain trailing whitespace, and the new tests and the multiline table snapshot fail.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21136,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 1073,
+  "output_tokens_details": {
+   "thinking_tokens": 950
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21136,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1073,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 21136,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21136
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0976566,
+ "duration_ms": 12694,
+ "wall_s": 17.09805703163147,
+ "weighted_units": 48828.3,
+ "stop_reason": "end_turn",
  "kind": "bug",
- "caught": false,
+ "caught": true,
  "false_alarms": 0,
- "matched": null
+ "matched": {
+  "severity": "bug",
+  "quote": "if line.is_empty() {",
+  "what": "The condition is inverted: non-empty continuation lines get no indent and empty lines get two spaces, so a forged `error[` line still starts at column 0, paragraph breaks gain trailing whitespace, and the new tests and the multiline table snapshot fail."
+ }
 }

@@ -61,3 +61,14 @@ c11 7s clean, false_alarms=0 ERROR exit 1
 c12 7s clean, false_alarms=0 ERROR exit 1
 c07 144s clean, false_alarms=0 ERROR exit 1
 calibrate: finished claude-fable-5-1@medium in 4.9 min
+calibrate: 9 cases to run for claude-fable-5-1@medium
+h04 12s caught=True false_alarms=0
+r08 17s caught=True false_alarms=0
+h05 11s caught=True false_alarms=0
+c08 23s clean, false_alarms=0
+c09 18s clean, false_alarms=0
+c11 10s clean, false_alarms=0
+c10 13s clean, false_alarms=0
+c12 28s clean, false_alarms=0
+c07 145s clean, false_alarms=0 ERROR exit 1
+calibrate: finished claude-fable-5-1@medium in 2.4 min

@@ -4,15 +4,55 @@
  "model": "claude-sonnet-5",
  "backend": "claude",
  "effort": "high",
- "error": "exit 1",
- "parsed": null,
- "content": "",
- "usage": {},
- "total_cost_usd": null,
- "duration_ms": null,
- "wall_s": 6.560848236083984,
- "weighted_units": 0.0,
- "stop_reason": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "risk",
+    "quote": "                body: Request::HostUsage,",
+    "what": "The commit adds a new envelope and three new replies to the `request_wire_v9` and `reply_wire_v9` insta snapshot tests, but the diff contains no updated `.snap` files, so those tests will fail until the snapshots are regenerated and committed."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"risk\", \"quote\": \"                body: Request::HostUsage,\", \"what\": \"The commit adds a new envelope and three new replies to the `request_wire_v9` and `reply_wire_v9` insta snapshot tests, but the diff contains no updated `.snap` files, so those tests will fail until the snapshots are regenerated and committed.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 23541,
+  "cache_read_input_tokens": 11891,
+  "output_tokens": 1216,
+  "output_tokens_details": {
+   "thinking_tokens": 1090
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23541,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1216,
+    "cache_read_input_tokens": 11891,
+    "cache_creation_input_tokens": 23541,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 23541
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1087062,
+ "duration_ms": 12580,
+ "wall_s": 14.400749206542969,
+ "weighted_units": 54353.1,
+ "stop_reason": "end_turn",
  "kind": "clean",
  "caught": null,
  "false_alarms": 0,

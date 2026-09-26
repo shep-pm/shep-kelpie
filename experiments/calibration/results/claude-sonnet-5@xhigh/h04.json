@@ -4,17 +4,61 @@
  "model": "claude-sonnet-5",
  "backend": "claude",
  "effort": "xhigh",
- "error": "exit 1",
- "parsed": null,
- "content": "",
- "usage": {},
- "total_cost_usd": null,
- "duration_ms": null,
- "wall_s": 6.063657999038696,
- "weighted_units": 0.0,
- "stop_reason": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());",
+    "what": "The overlay is now drawn before `draw_body`, not after it, so the body's `set_line` and pane draws overwrite the muted cells and keymap box. The overlay is hidden or corrupted on every body, and the commit's own doc says it should draw after the body."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());\", \"what\": \"The overlay is now drawn before `draw_body`, not after it, so the body's `set_line` and pane draws overwrite the muted cells and keymap box. The overlay is hidden or corrupted on every body, and the commit's own doc says it should draw after the body.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 24116,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 747,
+  "output_tokens_details": {
+   "thinking_tokens": 602
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 24116,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 747,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 24116,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 24116
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1063166,
+ "duration_ms": 7957,
+ "wall_s": 11.50833773612976,
+ "weighted_units": 53158.3,
+ "stop_reason": "end_turn",
  "kind": "bug",
- "caught": false,
+ "caught": true,
  "false_alarms": 0,
- "matched": null
+ "matched": {
+  "severity": "bug",
+  "quote": "draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());",
+  "what": "The overlay is now drawn before `draw_body`, not after it, so the body's `set_line` and pane draws overwrite the muted cells and keymap box. The overlay is hidden or corrupted on every body, and the commit's own doc says it should draw after the body."
+ }
 }

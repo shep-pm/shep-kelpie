@@ -4,17 +4,61 @@
  "model": "claude-fable-5-1",
  "backend": "claude",
  "effort": "medium",
- "error": "exit 1",
- "parsed": null,
- "content": "",
- "usage": {},
- "total_cost_usd": null,
- "duration_ms": null,
- "wall_s": 2.9946529865264893,
- "weighted_units": 0.0,
- "stop_reason": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "    draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());",
+    "what": "The overlay is drawn before `draw_body`, so the body, title band and status bar paint over the muted background and keymap box; the overlay ends up under the body instead of over it, contrary to the removed code and the commit's own doc comment (\"after whichever body drew\")."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"    draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());\", \"what\": \"The overlay is drawn before `draw_body`, so the body, title band and status bar paint over the muted background and keymap box; the overlay ends up under the body instead of over it, contrary to the removed code and the commit's own doc comment (\\\"after whichever body drew\\\").\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 28433,
+  "cache_read_input_tokens": 10092,
+  "output_tokens": 388,
+  "output_tokens_details": {
+   "thinking_tokens": 240
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 28433,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 388,
+    "cache_read_input_tokens": 10092,
+    "cache_creation_input_tokens": 28433,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 28433
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.590603,
+ "duration_ms": 9291,
+ "wall_s": 12.461548089981079,
+ "weighted_units": 59817.2,
+ "stop_reason": "end_turn",
  "kind": "bug",
- "caught": false,
+ "caught": true,
  "false_alarms": 0,
- "matched": null
+ "matched": {
+  "severity": "bug",
+  "quote": "    draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());",
+  "what": "The overlay is drawn before `draw_body`, so the body, title band and status bar paint over the muted background and keymap box; the overlay ends up under the body instead of over it, contrary to the removed code and the commit's own doc comment (\"after whichever body drew\")."
+ }
 }

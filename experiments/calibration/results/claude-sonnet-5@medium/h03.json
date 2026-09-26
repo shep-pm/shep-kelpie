@@ -4,17 +4,66 @@
  "model": "claude-sonnet-5",
  "backend": "claude",
  "effort": "medium",
- "error": "exit 1",
- "parsed": null,
- "content": "",
- "usage": {},
- "total_cost_usd": null,
- "duration_ms": null,
- "wall_s": 6.840197801589966,
- "weighted_units": 0.0,
- "stop_reason": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "            indent_continuations(&clean)",
+    "what": "The old `.trim_end()` was dropped, so a message ending in a newline (e.g. toml_edit parse errors) keeps its trailing `\\n` and the caller's `writeln!` prints a blank line, contradicting the doc comment and breaking `a_message_that_ends_in_a_newline_does_not_print_a_blank_line`."
+   },
+   {
+    "severity": "risk",
+    "quote": "let written = \"no flock at /tmp/x\\nto set up a flock there deliberately: mkdir -p /tmp/x\";",
+    "what": "Every message is now indented at the emitter, but this diff does not change the callers that hand-write their own two-space continuation indent (such as the flock refusal and `refuse_version_skew`), so those would render with four spaces."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"            indent_continuations(&clean)\",\"what\":\"The old `.trim_end()` was dropped, so a message ending in a newline (e.g. toml_edit parse errors) keeps its trailing `\\\\n` and the caller's `writeln!` prints a blank line, contradicting the doc comment and breaking `a_message_that_ends_in_a_newline_does_not_print_a_blank_line`.\"},{\"severity\":\"risk\",\"quote\":\"let written = \\\"no flock at /tmp/x\\\\nto set up a flock there deliberately: mkdir -p /tmp/x\\\";\",\"what\":\"Every message is now indented at the emitter, but this diff does not change the callers that hand-write their own two-space continuation indent (such as the flock refusal and `refuse_version_skew`), so those would render with four spaces.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21818,
+  "cache_read_input_tokens": 11891,
+  "output_tokens": 874,
+  "output_tokens_details": {
+   "thinking_tokens": 590
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21818,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 874,
+    "cache_read_input_tokens": 11891,
+    "cache_creation_input_tokens": 21818,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21818
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0983942,
+ "duration_ms": 8263,
+ "wall_s": 10.655887842178345,
+ "weighted_units": 49197.1,
+ "stop_reason": "end_turn",
  "kind": "bug",
- "caught": false,
+ "caught": true,
  "false_alarms": 0,
- "matched": null
+ "matched": {
+  "severity": "bug",
+  "quote": "            indent_continuations(&clean)",
+  "what": "The old `.trim_end()` was dropped, so a message ending in a newline (e.g. toml_edit parse errors) keeps its trailing `\\n` and the caller's `writeln!` prints a blank line, contradicting the doc comment and breaking `a_message_that_ends_in_a_newline_does_not_print_a_blank_line`."
+ }
 }

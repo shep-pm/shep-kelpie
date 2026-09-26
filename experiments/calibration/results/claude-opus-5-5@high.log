@@ -61,3 +61,8 @@ c11 5s clean, false_alarms=0
 c07 66s clean, false_alarms=0 ERROR exit 1
 c12 26s clean, false_alarms=0
 calibrate: finished claude-opus-5-5@high in 3.6 min
+calibrate: 3 cases to run for claude-opus-5-5@high
+c06 11s clean, false_alarms=0
+r08 12s caught=True false_alarms=0
+c07 14s clean, false_alarms=0 ERROR exit 1
+calibrate: finished claude-opus-5-5@high in 0.2 min

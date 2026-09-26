@@ -4,17 +4,66 @@
  "model": "claude-sonnet-5",
  "backend": "claude",
  "effort": "xhigh",
- "error": "exit 1",
- "parsed": null,
- "content": "",
- "usage": {},
- "total_cost_usd": null,
- "duration_ms": null,
- "wall_s": 4.896383047103882,
- "weighted_units": 0.0,
- "stop_reason": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "indent_continuations(&clean)",
+    "what": "The old `.trim_end()` was dropped and `indent_continuations` does not replace it, so a table message ending in `\\n` (such as a toml_edit parse error) keeps that newline and the caller's `writeln!` prints a blank line; this also contradicts the updated doc comment and breaks the existing `a_message_that_ends_in_a_newline_does_not_print_a_blank_line` test."
+   },
+   {
+    "severity": "risk",
+    "quote": "let written = \"no flock at /tmp/x\\nto set up a flock there deliberately: mkdir -p /tmp/x\";",
+    "what": "The emitter now adds a two-space indent to every continuation line, but the commit touches only this file, so any caller that still writes its own `\\n  ` indent (the test fixture did, and `refuse_version_skew` is elsewhere) will now print four spaces."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"indent_continuations(&clean)\",\"what\":\"The old `.trim_end()` was dropped and `indent_continuations` does not replace it, so a table message ending in `\\\\n` (such as a toml_edit parse error) keeps that newline and the caller's `writeln!` prints a blank line; this also contradicts the updated doc comment and breaks the existing `a_message_that_ends_in_a_newline_does_not_print_a_blank_line` test.\"},{\"severity\":\"risk\",\"quote\":\"let written = \\\"no flock at /tmp/x\\\\nto set up a flock there deliberately: mkdir -p /tmp/x\\\";\",\"what\":\"The emitter now adds a two-space indent to every continuation line, but the commit touches only this file, so any caller that still writes its own `\\\\n  ` indent (the test fixture did, and `refuse_version_skew` is elsewhere) will now print four spaces.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20866,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 2792,
+  "output_tokens_details": {
+   "thinking_tokens": 2478
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20866,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2792,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 20866,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20866
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1137666,
+ "duration_ms": 25398,
+ "wall_s": 29.37405014038086,
+ "weighted_units": 56883.3,
+ "stop_reason": "end_turn",
  "kind": "bug",
- "caught": false,
+ "caught": true,
  "false_alarms": 0,
- "matched": null
+ "matched": {
+  "severity": "bug",
+  "quote": "indent_continuations(&clean)",
+  "what": "The old `.trim_end()` was dropped and `indent_continuations` does not replace it, so a table message ending in `\\n` (such as a toml_edit parse error) keeps that newline and the caller's `writeln!` prints a blank line; this also contradicts the updated doc comment and breaks the existing `a_message_that_ends_in_a_newline_does_not_print_a_blank_line` test."
+ }
 }

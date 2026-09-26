@@ -4,17 +4,61 @@
  "model": "claude-fable-5-1",
  "backend": "claude",
  "effort": "high",
- "error": "exit 1",
- "parsed": null,
- "content": "",
- "usage": {},
- "total_cost_usd": null,
- "duration_ms": null,
- "wall_s": 6.835285902023315,
- "weighted_units": 0.0,
- "stop_reason": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "    draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());",
+    "what": "The overlay is drawn before draw_body, so the body's title band, panes and status line paint over the muted background and keymap box, hiding the overlay that the removed per-exit calls drew last; the call must come after draw_body(app, frame) as the commit's own doc says."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"    draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());\", \"what\": \"The overlay is drawn before draw_body, so the body's title band, panes and status line paint over the muted background and keymap box, hiding the overlay that the removed per-exit calls drew last; the call must come after draw_body(app, frame) as the commit's own doc says.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 24878,
+  "cache_read_input_tokens": 13647,
+  "output_tokens": 494,
+  "output_tokens_details": {
+   "thinking_tokens": 347
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 24878,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 494,
+    "cache_read_input_tokens": 13647,
+    "cache_creation_input_tokens": 24878,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 24878
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.52569175,
+ "duration_ms": 8668,
+ "wall_s": 10.606995820999146,
+ "weighted_units": 53592.7,
+ "stop_reason": "end_turn",
  "kind": "bug",
- "caught": false,
+ "caught": true,
  "false_alarms": 0,
- "matched": null
+ "matched": {
+  "severity": "bug",
+  "quote": "    draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());",
+  "what": "The overlay is drawn before draw_body, so the body's title band, panes and status line paint over the muted background and keymap box, hiding the overlay that the removed per-exit calls drew last; the call must come after draw_body(app, frame) as the commit's own doc says."
+ }
 }
