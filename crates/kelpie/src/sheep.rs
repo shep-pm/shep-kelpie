@@ -5,6 +5,7 @@
 //! Triggers are answered at once; the worker's turns run on a thread of
 //! their own, woken by each trigger.
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::mpsc::{self, Receiver};
@@ -67,21 +68,40 @@ fn serve(project: &str) -> Result<(), String> {
             reply
         });
     }
-    let worker = Arc::clone(&runner);
-    std::thread::spawn(move || work(&worker, &woken));
-
     let (stop, stopped) = mpsc::channel();
+    let worker = Arc::clone(&runner);
+    let died = stop.clone();
+    std::thread::spawn(move || {
+        // A runner with no worker thread would answer triggers and never work.
+        if catch_unwind(AssertUnwindSafe(|| work(&worker, &woken))).is_err() {
+            let _ = died.send(Stop::WorkerDied);
+        }
+    });
     shepherd.on_shutdown(move || {
-        let _ = stop.send(());
+        let _ = stop.send(Stop::Shutdown);
     });
     shepherd.ready().map_err(|e| e.to_string())?;
 
-    // Only a shutdown message ends the wait. Without one, the shepherd's
-    // stop signal ends the process instead. Exiting on the message skips
-    // shep's stop ladder, so the worker is stopped here.
-    let _ = stopped.recv();
+    // Only a shutdown message or a dead worker thread ends the wait. Without
+    // either, the shepherd's stop signal ends the process instead. Exiting on
+    // the message skips shep's stop ladder, so the worker is stopped here.
+    let why = stopped.recv();
     claude.stop();
-    shepherd.flush(FLUSH_TIMEOUT).map_err(|e| e.to_string())
+    shepherd.flush(FLUSH_TIMEOUT).map_err(|e| e.to_string())?;
+    match why {
+        Ok(Stop::WorkerDied) => {
+            Err("the worker's thread panicked; the turn resumes on restart".into())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Why the runner stops
+enum Stop {
+    /// The shepherd sent its shutdown message
+    Shutdown,
+    /// The thread that runs turns panicked
+    WorkerDied,
 }
 
 // Runs turns while there are any, then sleeps until a trigger may have

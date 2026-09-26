@@ -24,8 +24,15 @@ impl Forge for Gh {
 
     fn issue(&self, repo: &ForgeSlug, number: u64) -> Result<Issue, ForgeError> {
         let number = number.to_string();
-        let args = ["issue", "view", &number, "--repo", repo.as_str()];
-        parse_issue(&gh(&[&args[..], &["--json", "title,body"]].concat())?)
+        parse_issue(&gh(&[
+            "issue",
+            "view",
+            &number,
+            "--repo",
+            repo.as_str(),
+            "--json",
+            "title,body",
+        ])?)
     }
 }
 
@@ -65,12 +72,12 @@ fn parse_issue(stdout: &[u8]) -> Result<Issue, ForgeError> {
     #[derive(Deserialize)]
     struct View {
         title: String,
-        body: String,
+        body: Option<String>,
     }
     let view: View = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
     Ok(Issue {
         title: view.title,
-        body: view.body,
+        body: view.body.unwrap_or_default(),
     })
 }
 
@@ -105,6 +112,12 @@ mod tests {
             "{}",
             issue.body
         );
+    }
+
+    #[test]
+    fn an_issue_without_a_body_has_an_empty_one() {
+        let issue = parse_issue(br#"{"title":"t","body":null}"#).unwrap();
+        assert_eq!(issue.body, "");
     }
 
     #[test]

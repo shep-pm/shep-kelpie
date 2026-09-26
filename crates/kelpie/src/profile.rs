@@ -235,6 +235,7 @@ mod tests {
             ]
         );
         assert_eq!(s["env"]["CARGO_TARGET_DIR"], "/k/targets/shep/7");
+        assert_eq!(strings(&s["sandbox"]["network"]["allowedDomains"]), DOMAINS);
     }
 
     #[test]

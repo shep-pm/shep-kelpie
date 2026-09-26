@@ -83,11 +83,12 @@ pub fn prepare(
     branch: &str,
     build: &Path,
 ) -> Result<Worktree, WorktreeError> {
-    create(build)?;
     if worktree.exists() {
-        let head = git(worktree, ["rev-parse", "--abbrev-ref", "HEAD"])
-            .map_err(|_| WorktreeError::Foreign(worktree.to_owned()))?;
-        if head != branch {
+        let head = match git(worktree, ["rev-parse", "--abbrev-ref", "HEAD"]) {
+            Err(e @ WorktreeError::Spawn(_)) => return Err(e),
+            head => head.ok(),
+        };
+        if head.as_deref() != Some(branch) {
             return Err(WorktreeError::Foreign(worktree.to_owned()));
         }
     } else {
@@ -115,6 +116,7 @@ pub fn prepare(
             ],
         )?;
     }
+    create(build)?;
     let dir = |flag: &str| {
         git(worktree, ["rev-parse", "--path-format=absolute", flag]).map(PathBuf::from)
     };

@@ -67,21 +67,20 @@ enum Begin {
 /// [`StateError`] when the turn's start or end cannot be saved.
 pub fn step(runner: &Mutex<Runner>) -> Result<Option<TurnReport>, StateError> {
     let claude = Arc::clone(&lock(runner).ports.claude);
-    let call = match lock(runner).begin_turn(false)? {
-        Begin::Idle => return Ok(None),
-        Begin::Failed(report) => return Ok(Some(report)),
-        Begin::Call(call) => call,
-    };
-    let mut result = claude.run(&call);
-    if matches!(result, Err(ClaudeError::NoSession(_))) {
-        let call = match lock(runner).begin_turn(true)? {
+    let mut start_over = false;
+    loop {
+        let call = match lock(runner).begin_turn(start_over)? {
             Begin::Idle => return Ok(None),
             Begin::Failed(report) => return Ok(Some(report)),
             Begin::Call(call) => call,
         };
-        result = claude.run(&call);
+        let result = claude.run(&call);
+        if !start_over && matches!(result, Err(ClaudeError::NoSession(_))) {
+            start_over = true;
+            continue;
+        }
+        return lock(runner).end_turn(result);
     }
-    lock(runner).end_turn(result)
 }
 
 fn first_prompt(number: u64, issue: &Issue) -> String {

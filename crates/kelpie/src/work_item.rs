@@ -161,4 +161,19 @@ mod tests {
         assert_eq!(&a[14..15], "4");
         assert!(matches!(&a[19..20], "8" | "9" | "a" | "b"), "{a}");
     }
+
+    #[test]
+    fn a_calls_cost_is_measured_from_its_own_sessions_last_call() {
+        let mut item = a_work_item();
+        let other = SessionId("0th3r".into());
+        let mut call = item.calls[0].clone();
+        call.session = other.clone();
+        call.session_cost = Cost(40);
+        call.cost = Cost(40);
+        item.calls.push(call);
+        assert_eq!(item.session_cost(&item.session), Cost(6));
+        assert_eq!(item.session_cost(&other), Cost(40));
+        assert_eq!(item.session_cost(&SessionId("new".into())), Cost(0));
+        assert_eq!(item.cost(), Cost(45));
+    }
 }

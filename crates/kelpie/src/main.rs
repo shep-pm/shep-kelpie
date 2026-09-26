@@ -10,7 +10,7 @@ use std::process::ExitCode;
 
 use kelpie::confine::{Verdict, judge};
 
-const USAGE: &str = "usage: kelpie runner <project>";
+const USAGE: &str = "usage: kelpie runner <project> | kelpie confine <folder>...";
 
 /// A PreToolUse hook's exit code that refuses the tool call
 const REFUSE: u8 = 2;
