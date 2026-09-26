@@ -9,6 +9,7 @@
 #![doc(test(attr(deny(warnings))))]
 
 pub mod adapters;
+pub mod dog;
 pub mod lease;
 pub mod ports;
 pub mod runner;

@@ -3,10 +3,12 @@
 //! Two kinds of lease with two homes. The GPU lease is the lock the
 //! maintainer's qwen scripts already take, which [`gpu`] reads and takes
 //! in their format, and the dog stays out of it. Every other lease lives
-//! in the dog's [`book`].
+//! in the dog's [`book`], asked for and granted through shep as [`wire`]
+//! lays out.
 
 pub mod book;
 pub mod gpu;
+pub mod wire;
 
 use std::fmt;
 
@@ -75,10 +77,11 @@ impl fmt::Display for LeaseKindError {
 
 impl std::error::Error for LeaseKindError {}
 
-/// Which run of a runner is asking: its start time in Unix milliseconds
+/// Which run of a runner is asking: its process id
 ///
-/// A restarted runner has a new epoch, and the dog reclaims every lease
-/// the old one held or queued for.
+/// A restart is a new process, so a new epoch, and the dog reclaims what
+/// the old run held. shep's process events carry the pid too, so the dog
+/// tells runs apart without relying on event order.
 // wire format: changing this is a breaking change to runner metrics
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(transparent)]

@@ -139,6 +139,11 @@ impl LeaseBook {
         grants
     }
 
+    /// Who holds `kind`, if anyone
+    pub fn holder(&self, kind: &LeaseKind) -> Option<&Holder> {
+        self.leases.get(kind)?.held.as_ref().map(|(h, _)| h)
+    }
+
     /// Who holds and waits for each kind anyone has asked for, by kind
     pub fn status(&self) -> Vec<LeaseStatus> {
         self.leases
