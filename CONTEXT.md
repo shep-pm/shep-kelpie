@@ -78,3 +78,7 @@ Only the project manager summons.
 
 **Ruling**:
 A decision only the maintainer makes. A worker waiting on one is **parked**.
+
+**Relay**:
+The Claude Code session through which kelpie asks the maintainer for
+rulings and passes the answers back. A stopgap for the first build.

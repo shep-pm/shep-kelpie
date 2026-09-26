@@ -1,6 +1,6 @@
 # Design log
 
-Decisions from the design sessions of 2026-09-24 and 2026-09-25, and the facts behind them. The hard-to-reverse ones are also ADRs in `docs/adr/`. The vocabulary is in `CONTEXT.md`.
+Decisions from the design sessions of 2026-09-24 to 2026-09-26, and the facts behind them. The hard-to-reverse ones are also ADRs in `docs/adr/`. The vocabulary is in `CONTEXT.md`.
 
 ## Why kelpie exists
 
@@ -19,7 +19,8 @@ So kelpie moves the control room's rules (gates, locks, rate windows) into code,
 - One kelpie serves every project, because the GPU lease, the CodeRabbit window and the usage pacer are machine-wide or account-wide. Realistically two projects at once. shep comes first.
 - Kelpie and its runners talk through shep: triggers down, `channel.metric` up on the bus. Runners report running totals, because metrics drop under backpressure. A private socket only if the MVP shows the round trips do not hold up.
 - Leases live in the dog, and only runners ask for them. Workers and crew never touch the GPU or CodeRabbit. The dog holds the real `gpu.lock` for the length of each round, so the maintainer's own interactive qwen use still queues fairly against it.
-- MVP: a thin vertical slice. One project, one worker at a time, merge on `ask`, no GUI.
+- MVP: a thin vertical slice. One project, one worker at a time, merge on `ask`, no GUI. shep-pm/shep-kelpie#5 is its spec.
+- Project settings live in one TOML file per project, `~/.kelpie/projects/<project>/settings.toml`, read when the runner starts. Every setting is required, so a missing or malformed one stops the runner with a message naming it. The project's state file sits beside it and is written atomically.
 
 ## Work
 
@@ -36,16 +37,20 @@ So kelpie moves the control room's rules (gates, locks, rate windows) into code,
 - The worker picks the work split: inline, phased, or a crew. The project manager never does, so it keeps a minimal context for merges, git and gates.
 - The calculator runs as needed. Kelpie code reads every call's usage, which is free, and acts only at a phase boundary or a threshold. Inside a turn, a skill plus a hook that fires before an agent spawn or past a context threshold.
 - Agents never see budget numbers. Budget talk makes models stop after every task. Budgets live in kelpie's code, and the in-turn hook hands a worker a decision ("delegate the next chunk"), never a cost figure.
+- Workers start with `--setting-sources project,local` plus a settings file kelpie writes for each one. They get the project's CLAUDE.md and project skills, and none of the maintainer's hooks, plugins or skills. The guard hooks the project settings name go into kelpie's file.
 - Permissions: `bypassPermissions` with three layers under it. The project's `main` ruleset (shep's already blocks direct pushes, force-pushes and deletion, and requires a PR and passing checks). Claude Code's sandbox, confining Bash writes to the worktree (`sandbox.filesystem.allowWrite`, `failIfUnavailable`). A short denylist of what only the project manager does: `gh pr merge`, `gh pr ready`, adding the `review please` label, reading credential paths. Kelpie flags any label or ready change it did not make and parks that worker. No auto mode: classifier outages have blocked work before.
-- Model defaults are placeholders until the calibration series runs. Planning on Opus. Workers on Sonnet, with Opus at medium effort where being wrong is expensive (credentials, deletion, boot, the supervision engine). Review rounds on Sonnet at high effort. Project manager judgement calls on Sonnet, with Opus at medium effort for the read before a merge. Crew on Sonnet or Haiku.
+- Model defaults, settled 2026-09-26 and kept as project settings: workers on Sonnet 5 at medium effort, implementing inline. Claude review rounds on Sonnet 5 at medium effort. Judging findings on Opus 5.5 at low effort. The relay on Haiku 4.5 at low effort. A `worker:<model>-<effort>` label on an issue overrides the worker's defaults for that item. Planning stays on Opus.
 
 ## Review and merge
 
 - Kelpie runs the qwen round itself and hands the findings file straight to the worker's next turn. No model reads the findings and rewrites them.
 - The qwen queue: critical first, then closest to merge, then arrival. A running round is never preempted, since a kill takes 20 to 70 seconds and throws the partial round away.
-- The Claude round is a fresh review session each time, on Sonnet at high effort, with findings delivered as a file like qwen's.
+- The Claude round is a fresh review session each time, never the worker's, on Sonnet 5 at medium effort, with findings delivered as a file like qwen's.
+- Opus 5.5 at low effort judges every qwen, Claude and CodeRabbit finding before the worker sees it: whether it holds, and its severity, which it may regrade. The worker fixes only the findings that hold.
+- CodeRabbit is in the first build's gates. Its free plan reviews public repos only, so the gate is a per-project setting, and the runner refuses to start with it on for a repo the forge reports as private. With it off, a work item goes from the qwen-review loop and CI straight to the merge ruling.
 - The worker opens its own draft PR with its own title and body. Only the project manager summons CodeRabbit (adds `review please`) or marks a PR ready. shep's `.coderabbit.yaml` gates auto-review on that label, so opening a PR spends nothing.
-- Merge authority is a project setting: `auto`, `ask`, or `ask-surface` (ask only when a PR touches operator-facing surface). The default is `ask` until kelpie has merged a handful of PRs cleanly.
+- Merge authority is a project setting: `auto`, `ask`, or `ask-surface` (ask only when a PR touches operator-facing surface). The default is `ask` until kelpie has merged a handful of PRs cleanly, and the first build accepts only `ask`.
+- The relay, a stopgap for the first build: a background Claude Code session that kelpie sends each ruling to over the session's messaging socket. It pushes the question to the maintainer's phone and passes the reply back verbatim through `shep trigger`. A merge yes through it needs the maintainer's tap on a permission prompt. It rides an undocumented protocol and costs tokens per ruling, so a webhook (Discord or ntfy) is the fallback now and becomes the primary path when the relay goes.
 - The project manager is kelpie code plus one-shot judgement calls (reading commits that landed after a review, auditing a docs PR's claims, checking new plans for overlapping intent) and a state file workers read. Coordination needs footprints, not a codebase map: planned files from the plan, actual files from the branch diff, `git merge-tree` for conflicts, and GitHub issue dependencies for order.
 
 ## Budget
@@ -96,6 +101,30 @@ Read from the desktop app's bundle and the CLI binary, 2026-09-25.
 - Weekly limits were never tied to time of day. Anthropic announced in March 2026 that 5-hour limits drain faster on weekdays between 5 and 11am PT. Secondary sources report that was removed for Claude Code on Pro and Max on 2026-05-06.
 - `/usage` reports the share of usage spent while four or more sessions ran in parallel, and says queueing uses the shared limit more evenly. Parallelism is about timing against the 5-hour window, not a surcharge.
 
+### Worker profile and sandbox
+
+Measured 2026-09-26 on Claude Code 2.1.283.
+
+- `--setting-sources ""` also drops the project's CLAUDE.md and project skills, so workers do not use it.
+- `--setting-sources project,local` keeps both and drops the maintainer's hooks, plugins and skills. It brought the floor from 29.2k to 24.8k. It also loaded the maintainer's global CLAUDE.md in one probe.
+- A hook passed through `--settings` still runs under `project,local`.
+- The sandbox keys exist as named: `sandbox.enabled`, `sandbox.failIfUnavailable`, `sandbox.filesystem.allowWrite` and `sandbox.network.allowedDomains`. With only the worktree and the build folder writable, a warm-cache `cargo check` passed and a write to the home folder was refused.
+- The build folder must exist before the worker starts.
+
+### The relay
+
+Measured 2026-09-26 in the experiments repo.
+
+- Two rulings sent over the messaging socket woke a background session in about 2 seconds each.
+- Its pushes reached the maintainer's phone, and replies from the phone came back verbatim.
+- The merge approval needed a tap on the permission prompt, even in auto mode.
+- A question cost 12k to 26k units and an answer about 11k.
+
+### CodeRabbit
+
+- The free plan reviews public repos only.
+- The included quota on shep was 1 review an hour when last read. It has changed without notice before, so kelpie reads it from each review's footer.
+
 ### The shep surface kelpie leans on
 
 - `Request::Trigger` becomes an `action` message on a sheep's shepherd channel (fd 3), answered with an `action-reply`. `ready`, `metric` and `action-reply` are all republished on the bus as `channel.*`.
@@ -136,15 +165,15 @@ The model to fit: one session's cache reads grow with the square of its length. 
 
 ### Other checks
 
-- Claude Code's sandbox with cargo, which writes to `~/.cargo`.
+- Claude Code's sandbox with cargo, which writes to `~/.cargo`. A warm cache passes (see Worker profile and sandbox). A cold cache waits for the hands-on run.
 - Whether removing `review please` after a review stops a later push from spending the next window.
 
 ## Waiting on the tests
 
 - Worker transport: settled on `claude -p --resume` by the thresholds. See `docs/specs/transport-results.md`: stream-json costs the same per turn and runs 2.2 times faster, which the thresholds did not price.
 - How the maintainer takes over a worker.
-- A worker settings profile: which of the maintainer's hooks, skills and plugins a worker loads. Workers inherit them today, and in the work-split run a delegation hook blocked a worker's crew.
+- A worker settings profile: settled on `--setting-sources project,local` plus kelpie's settings file. See Workers, and Worker profile and sandbox under Facts.
 - Compact or clear, and when.
 - The handoff format.
-- Model defaults. First data in the experiments repo's `calibration/` (commit d93f73b): as a reviewer and checker, Opus at low effort matches Opus medium (94% checker accuracy, no false alarms) and is the fastest config; Fable medium is the most accurate checker. The first implementer set did not separate the configs (all 36 runs passed). The harder set barely did either (23 of 24 passed; `docs/specs/implementation-results.md`), and its proposed rule picks Sonnet at medium effort, the cheapest config within one case of the best. Haiku cost more than Sonnet there. The rule waits on the maintainer.
+- Model defaults: settled 2026-09-26 (see Workers). First data in the experiments repo's `calibration/` (commit d93f73b): as a reviewer and checker, Opus at low effort matches Opus medium (94% checker accuracy, no false alarms) and is the fastest config; Fable medium is the most accurate checker. The first implementer set did not separate the configs (all 36 runs passed). The harder set barely did either (23 of 24 passed; `docs/specs/implementation-results.md`), and its proposed rule picks Sonnet at medium effort, the cheapest config within one case of the best. Haiku cost more than Sonnet there. The maintainer took that rule for workers.
 - Work split rules and the calculator's constants. First grid in the experiments repo's `worksplit/results/SUMMARY.md` (commit d93f73b), reading tasks only: no strategy wins on every module. Inline is cheapest per verified finding on two of three modules, a crew has the best precision on all three (0.67, 0.51, 0.62) at the highest cost, and phased has the weakest precision everywhere. On implementation tasks (`docs/specs/implementation-results.md`) every strategy passed 12 of 12 on Sonnet medium, so the proposed rule picks the cheapest per pass: inline at $0.36, against crew at $0.59 and phased at $0.65. Crew leads often skipped delegating. Whether codebase-memory-mcp helps an implementer is unmeasured, because no run called it.
