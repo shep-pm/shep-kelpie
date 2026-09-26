@@ -84,7 +84,7 @@ impl std::error::Error for LeaseKindError {}
 /// the old run held. shep's process events carry the pid too, so the dog
 /// tells runs apart without relying on event order.
 // wire format: changing this is a breaking change to runner metrics
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct Epoch(pub u64);
 

@@ -4,7 +4,7 @@
 //! go in, and the grants the dog must deliver come out. The shell in
 //! [`super`] feeds it from shep and delivers its grants as triggers.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::json;
 
@@ -42,6 +42,9 @@ pub struct Desk {
     book: LeaseBook,
     gpu: GpuLock,
     runs: HashMap<String, Run>,
+    // Runs already replaced. Pids are not ordered, so a late metric from
+    // one is known only by having seen it retired.
+    retired: HashSet<(String, Epoch)>,
 }
 
 impl Desk {
@@ -51,6 +54,7 @@ impl Desk {
             book: LeaseBook::new(clock),
             gpu,
             runs: HashMap::new(),
+            retired: HashSet::new(),
         }
     }
 
@@ -66,12 +70,16 @@ impl Desk {
         ) else {
             return Vec::new();
         };
+        if self.retired.contains(&(sheep.to_owned(), metric.epoch)) {
+            return Vec::new();
+        }
         let mut grants = Vec::new();
         let run = self.runs.entry(sheep.to_owned()).or_insert_with(|| Run {
             epoch: metric.epoch,
             totals: BTreeMap::new(),
         });
         if run.epoch != metric.epoch {
+            self.retired.insert((sheep.to_owned(), run.epoch));
             *run = Run {
                 epoch: metric.epoch,
                 totals: BTreeMap::new(),
@@ -113,11 +121,8 @@ impl Desk {
             return Vec::new();
         };
         let keep = pid.map(|pid| Epoch(u64::from(pid)));
-        if self
-            .runs
-            .get(sheep)
-            .is_some_and(|run| Some(run.epoch) != keep)
-        {
+        if let Some(run) = self.runs.get(sheep).filter(|run| Some(run.epoch) != keep) {
+            self.retired.insert((sheep.to_owned(), run.epoch));
             self.runs.remove(sheep);
         }
         deliveries(self.book.reclaim(&project, keep))
@@ -374,6 +379,18 @@ mod tests {
         w.raise("koji", koji.want(&stand_in()));
         assert_eq!(w.desk.runner_is("koji", Some(303)), []);
         assert_eq!(w.book_line()["holder"], json!({ "runner": "koji" }));
+    }
+
+    #[test]
+    fn a_late_metric_from_a_replaced_run_changes_nothing() {
+        let mut w = world();
+        let (mut old, mut new) = (Asker::new(Epoch(101)), Asker::new(Epoch(303)));
+        w.raise("koji", old.want(&stand_in()));
+        w.raise("koji", new.want(&stand_in()));
+        assert_eq!(w.raise("koji", old.give_back(&stand_in())), []);
+        assert_eq!(w.raise("koji", old.want(&stand_in())), []);
+        assert_eq!(w.book_line()["holder"], json!({ "runner": "koji" }));
+        assert_eq!(w.desk.runner_is("koji", Some(303)), [], "303 still holds");
     }
 
     #[test]

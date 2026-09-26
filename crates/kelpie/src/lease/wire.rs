@@ -298,6 +298,26 @@ mod tests {
     }
 
     #[test]
+    fn each_kind_keeps_its_own_totals_and_hold() {
+        let other = LeaseKind::try_from("other").unwrap();
+        let mut asker = Asker::new(Epoch(9));
+        let _ = asker.want(&stand_in());
+        let _ = asker.want(&other);
+        let _ = asker.want(&other);
+        asker.grant("other 9").unwrap();
+        assert!(asker.holds(&other) && !asker.holds(&stand_in()));
+        assert_eq!(
+            asker.metrics(),
+            [
+                ("lease.other.want.9".into(), 2.0),
+                ("lease.other.return.9".into(), 0.0),
+                ("lease.stand-in.want.9".into(), 1.0),
+                ("lease.stand-in.return.9".into(), 0.0),
+            ]
+        );
+    }
+
+    #[test]
     fn a_repeated_grant_is_held_once() {
         let mut asker = Asker::new(Epoch(9));
         let _ = asker.want(&stand_in());
