@@ -296,6 +296,16 @@ mod tests {
     }
 
     #[test]
+    fn a_repeated_grant_is_held_once() {
+        let mut asker = Asker::new(Epoch(9));
+        asker.want(&stand_in());
+        asker.grant("stand-in 9").unwrap();
+        asker.grant("stand-in 9").unwrap();
+        asker.give_back(&stand_in());
+        assert!(!asker.holds(&stand_in()));
+    }
+
+    #[test]
     fn a_grant_after_the_ask_was_withdrawn_is_refused() {
         let mut asker = Asker::new(Epoch(9));
         asker.want(&stand_in());

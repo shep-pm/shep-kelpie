@@ -68,7 +68,10 @@ fn wait_output(child: Child, timeout: Duration) -> Output {
     match finished.recv_timeout(timeout) {
         Ok(output) => output,
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            panic!("pid {pid} did not exit within {timeout:?}")
+            let _ = Command::new("kill")
+                .args(["-KILL", &pid.to_string()])
+                .status();
+            panic!("pid {pid} did not exit within {timeout:?}, so it was killed")
         }
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
             panic!("waiting on pid {pid} failed")
@@ -84,20 +87,19 @@ fn text(bytes: &[u8]) -> String {
 fn run_holds_the_lock_in_the_scripts_format_while_the_command_runs() {
     let s = Scratch::new();
     let lock = s.lock();
-    let script = format!("cat {0}/pid {0}/what; exit 3", lock.display());
-    let out = s
-        .kelpie(&["lease", "run", "gpu", "--", "sh", "-c", &script])
-        .output()
-        .unwrap();
+    // The lock's path goes in as an argument, never into the script text.
+    let script = r#"cat "$0/pid" "$0/what"; exit 3"#;
+    let command = ["sh", "-c", script, lock.to_str().unwrap()];
+    let mut args = vec!["lease", "run", "gpu", "--"];
+    args.extend(command);
+    let out = s.kelpie(&args).output().unwrap();
     assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
     let seen = text(&out.stdout);
     let mut lines = seen.lines();
     let pid: u32 = lines.next().unwrap().parse().unwrap();
     assert_ne!(pid, 0);
-    assert_eq!(
-        lines.next(),
-        Some(format!("kelpie lease run: sh -c {script}").as_str())
-    );
+    let what = format!("kelpie lease run: {}", command.join(" "));
+    assert_eq!(lines.next(), Some(what.as_str()));
     assert!(!lock.exists(), "the lock outlived the command");
 }
 

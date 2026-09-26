@@ -29,6 +29,13 @@ fn now_ms() -> u64 {
     u64::try_from(since.as_millis()).unwrap()
 }
 
+// When this run last asked and was last granted, in Unix milliseconds.
+#[derive(Default)]
+struct Times {
+    wanted_ms: u64,
+    granted_ms: u64,
+}
+
 // A project runner reduced to its lease traffic. Triggers: `want <kind>`
 // and `return <kind>` raise the totals, `grant` is the dog's, and
 // `status` reports what this run holds and when it asked and was granted.
@@ -41,7 +48,7 @@ fn stand_in_runner() {
     let shepherd = shep_channel::serve();
     let epoch = Epoch(u64::from(std::process::id()));
     let asker = Arc::new(Mutex::new(Asker::new(epoch)));
-    let times = Arc::new(Mutex::new((0_u64, 0_u64)));
+    let times = Arc::new(Mutex::new(Times::default()));
     for action in ["want", "return", "grant", "status"] {
         let (asker, times, shepherd) = (asker.clone(), times.clone(), shepherd.clone());
         shepherd.clone().on_action(action, move |params, name| {
@@ -50,7 +57,7 @@ fn stand_in_runner() {
             let kind = || LeaseKind::try_from(params.unwrap_or_default().trim()).unwrap();
             match name {
                 "want" => {
-                    times.0 = now_ms();
+                    times.wanted_ms = now_ms();
                     let (metric, value) = asker.want(&kind());
                     shepherd.metric(metric, value);
                 }
@@ -59,7 +66,7 @@ fn stand_in_runner() {
                     shepherd.metric(metric, value);
                 }
                 "grant" => match asker.grant(params.unwrap_or_default()) {
-                    Ok(_) => times.1 = now_ms(),
+                    Ok(_) => times.granted_ms = now_ms(),
                     Err(e) => return e.to_string(),
                 },
                 _ => {}
@@ -68,8 +75,8 @@ fn stand_in_runner() {
             json!({
                 "epoch": epoch.0,
                 "holds": asker.holds(&stand_in),
-                "wanted_ms": times.0,
-                "granted_ms": times.1,
+                "wanted_ms": times.wanted_ms,
+                "granted_ms": times.granted_ms,
             })
             .to_string()
         });
@@ -77,6 +84,24 @@ fn stand_in_runner() {
     shepherd.ready().unwrap();
     loop {
         std::thread::park();
+    }
+}
+
+// A child that is killed if the test ends before it is waited on.
+struct Reaped(Option<std::process::Child>);
+
+impl Reaped {
+    fn wait(mut self) -> Output {
+        self.0.take().unwrap().wait_with_output().unwrap()
+    }
+}
+
+impl Drop for Reaped {
+    fn drop(&mut self) {
+        if let Some(child) = &mut self.0 {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 
@@ -127,6 +152,15 @@ impl Shepherd {
             runner("koji"),
             runner("reactmap")
         )
+    }
+
+    fn shep_ok(&self, args: &[&str]) {
+        let out = self.shep(args);
+        assert!(
+            out.status.success(),
+            "shep {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 
     fn shep(&self, args: &[&str]) -> Output {
@@ -186,8 +220,14 @@ async fn holds(client: &Client, runner: &str) -> bool {
 }
 
 async fn book(client: &Client) -> Value {
-    let status = trigger(client, "kelpie", "status", None).await;
-    status["leases"][1].clone()
+    stand_in(&trigger(client, "kelpie", "status", None).await)
+}
+
+fn stand_in(status: &Value) -> Value {
+    let leases = status["leases"].as_array().expect("a leases list");
+    let line = leases.iter().find(|l| l["kind"] == "stand-in");
+    line.cloned()
+        .unwrap_or_else(|| panic!("no stand-in line in {status}"))
 }
 
 #[tokio::test]
@@ -220,7 +260,7 @@ async fn the_lease_round_trip_runs_through_a_real_shepherd() {
 
     // A runner that dies loses its lease to the next waiter.
     let killed = now_ms();
-    shepherd.shep(&["signal", "koji", "SIGKILL"]);
+    shepherd.shep_ok(&["signal", "koji", "SIGKILL"]);
     until("the reclaim", async || holds(&client, "reactmap").await).await;
     let reclaim = trigger(&client, "reactmap", "status", None).await["granted_ms"]
         .as_u64()
@@ -229,17 +269,19 @@ async fn the_lease_round_trip_runs_through_a_real_shepherd() {
 
     // The maintainer waits without preempting, and goes ahead of a runner
     // that asked first.
-    let take = shepherd
-        .kelpie(&["lease", "take", "stand-in"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+    let take = Reaped(Some(
+        shepherd
+            .kelpie(&["lease", "take", "stand-in"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    ));
     until("the maintainer in the queue", async || {
         book(&client).await["queue"] == json!(["maintainer"])
     })
     .await;
-    shepherd.shep(&["restart", "koji"]);
+    shepherd.shep_ok(&["restart", "koji"]);
     until("koji back", async || {
         trigger(&client, "koji", "status", None).await.is_object()
     })
@@ -252,8 +294,8 @@ async fn the_lease_round_trip_runs_through_a_real_shepherd() {
     assert!(holds(&client, "reactmap").await, "the maintainer preempted");
 
     // A runner that restarts loses its lease; the maintainer is next.
-    shepherd.shep(&["restart", "reactmap"]);
-    let take = tokio::task::spawn_blocking(move || take.wait_with_output().unwrap())
+    shepherd.shep_ok(&["restart", "reactmap"]);
+    let take = tokio::task::spawn_blocking(move || take.wait())
         .await
         .unwrap();
     assert!(
@@ -286,8 +328,8 @@ async fn the_lease_round_trip_runs_through_a_real_shepherd() {
     let status: Value = serde_json::from_slice(&status.stdout).unwrap();
     let lock = shepherd.home.path().join("qwen-review/gpu.lock");
     assert_eq!(status["leases"][0]["lock"], lock.display().to_string());
-    assert_eq!(status["leases"][1]["holder"], json!({ "runner": "koji" }));
-    assert!(status["leases"][1]["since"].as_u64().is_some());
+    assert_eq!(stand_in(&status)["holder"], json!({ "runner": "koji" }));
+    assert!(stand_in(&status)["since"].as_u64().is_some());
 
     eprintln!("want to grant {round_trip} ms, killed to next grant {reclaim} ms");
 }

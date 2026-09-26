@@ -184,14 +184,10 @@ impl Desk {
     }
 }
 
-/// The largest whole number an f64 holds exactly, 2^53
-const EXACT: f64 = 9_007_199_254_740_992.0;
-
-// Totals are whole, never negative and exact; anything else is not a total.
+// A total is whole, not negative, and exact in an f64: at most 2^53.
 fn count(value: f64) -> Option<u64> {
+    const EXACT: f64 = 9_007_199_254_740_992.0;
     let whole = (0.0..=EXACT).contains(&value) && value.fract() == 0.0;
-    // In range and whole, checked above.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     whole.then_some(value as u64)
 }
 

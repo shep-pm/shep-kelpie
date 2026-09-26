@@ -127,10 +127,10 @@ async fn run_gpu(command: &[&str]) -> Result<ExitCode, String> {
         caught = signals.recv() => return Ok(caught.exit_code()),
     }
     let ran = run_command(command, &mut signals).await;
-    let released = lock.release(pid);
-    let status = ran?;
-    released.map_err(|e| format!("cannot remove {}: {e}", lock.path().display()))?;
-    Ok(exit_code(status))
+    let released = lock
+        .release(pid)
+        .map_err(|e| format!("cannot remove {}: {e}", lock.path().display()));
+    Ok(exit_code(both(ran, released)?))
 }
 
 async fn run_book(kind: &LeaseKind, command: &[&str]) -> Result<ExitCode, String> {
@@ -139,10 +139,19 @@ async fn run_book(kind: &LeaseKind, command: &[&str]) -> Result<ExitCode, String
         return Ok(caught.exit_code());
     }
     let ran = run_command(command, &mut signals).await;
-    let returned = ask_dog("return", kind.as_str()).await;
-    let status = ran?;
-    returned?;
-    Ok(exit_code(status))
+    let returned = ask_dog("return", kind.as_str())
+        .await
+        .map_err(|e| format!("{e}: run `kelpie lease return {kind}`"));
+    Ok(exit_code(both(ran, returned)?))
+}
+
+// The command's outcome and its lease's return, with both errors if both failed.
+fn both<T>(ran: Result<ExitStatus, String>, back: Result<T, String>) -> Result<ExitStatus, String> {
+    match (ran, back) {
+        (Ok(status), Ok(_)) => Ok(status),
+        (Err(e), Ok(_)) | (Ok(_), Err(e)) => Err(e),
+        (Err(ran), Err(back)) => Err(format!("{ran}, and {back}")),
+    }
 }
 
 async fn take_book(kind: &LeaseKind) -> Result<ExitCode, String> {
