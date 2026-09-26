@@ -24,6 +24,10 @@ Gotchas:
 - `shep trigger <sheep> <action> [params]` takes params positionally.
 - Headless Claude Code has its own traps (stdin, cumulative cost, cache sharing). They are under Facts in the design log.
 
+## Code style
+
+Invoke the `rust-house-style` skill before writing or reviewing Rust. The rules are shep-pm/rust-house-style, IR-1 to IR-48.
+
 ## Writing and git
 
 - Committed text calls the maintainer "the maintainer" and uses repo-relative paths, because the repo goes public one day.
