@@ -83,16 +83,13 @@ pub fn prepare(
     branch: &str,
     build: &Path,
 ) -> Result<Worktree, WorktreeError> {
+    let foreign = || WorktreeError::Foreign(worktree.to_owned());
+    let full_ref = format!("refs/heads/{branch}");
     if worktree.exists() {
-        let head = match git(worktree, ["rev-parse", "--abbrev-ref", "HEAD"]) {
-            Err(e @ WorktreeError::Spawn(_)) => return Err(e),
-            head => head.ok(),
-        };
-        if head.as_deref() != Some(branch) {
-            return Err(WorktreeError::Foreign(worktree.to_owned()));
+        if listed_branch(repo, worktree)?.as_deref() != Some(full_ref.as_str()) {
+            return Err(foreign());
         }
     } else {
-        let full_ref = format!("refs/heads/{branch}");
         if git(repo, ["rev-parse", "--verify", "--quiet", &full_ref]).is_ok() {
             return Err(WorktreeError::BranchTaken(branch.to_owned()));
         }
@@ -116,14 +113,55 @@ pub fn prepare(
             ],
         )?;
     }
+    let common = git(
+        repo,
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
+    let git_common_dir = canonical(Path::new(&common));
+    let git_dir = own_git_dir(&git_common_dir, worktree).ok_or_else(foreign)?;
     create(build)?;
-    let dir = |flag: &str| {
-        git(worktree, ["rev-parse", "--path-format=absolute", flag]).map(PathBuf::from)
-    };
     Ok(Worktree {
-        git_common_dir: dir("--git-common-dir")?,
-        git_dir: dir("--git-dir")?,
+        git_common_dir,
+        git_dir,
     })
+}
+
+// Everything about the worktree is read from the project's repo, never from
+// inside the worktree. The worker can rewrite its worktree's `.git` file,
+// and git run there would believe it.
+
+/// The branch `git worktree list` shows checked out at `worktree`
+fn listed_branch(repo: &Path, worktree: &Path) -> Result<Option<String>, WorktreeError> {
+    let list = git(repo, ["worktree", "list", "--porcelain"])?;
+    let want = canonical(worktree);
+    let mut here = false;
+    for line in list.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            here = canonical(Path::new(path)) == want;
+        } else if let Some(branch) = line.strip_prefix("branch ")
+            && here
+        {
+            return Ok(Some(branch.to_owned()));
+        }
+    }
+    Ok(None)
+}
+
+/// The folder under `<common>/worktrees/` whose `gitdir` names `worktree`
+fn own_git_dir(common: &Path, worktree: &Path) -> Option<PathBuf> {
+    let want = canonical(&worktree.join(".git"));
+    std::fs::read_dir(common.join("worktrees"))
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|dir| {
+            std::fs::read_to_string(dir.join("gitdir"))
+                .is_ok_and(|named| canonical(Path::new(named.trim())) == want)
+        })
+}
+
+fn canonical(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_owned())
 }
 
 fn create(path: &Path) -> Result<(), WorktreeError> {

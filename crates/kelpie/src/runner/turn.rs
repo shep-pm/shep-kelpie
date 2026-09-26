@@ -399,6 +399,41 @@ mod tests {
     }
 
     #[test]
+    fn a_worker_that_repoints_its_git_file_cannot_move_its_fence() {
+        let (rig, runner) = with_issue_7("golbat");
+        rig.claude.script([Scripted::Kill]);
+        let _ = catch_unwind(AssertUnwindSafe(|| step(&runner)));
+        drop(runner);
+
+        // What a worker could do from inside its worktree: a fake git dir
+        // whose common dir is a folder it wants to write.
+        let worktree = rig.home.path().join("kelpie/wt/golbat/7");
+        let wanted = rig.home.path().join("wanted");
+        let fake = worktree.join("fake");
+        for dir in ["refs", "objects"] {
+            fs::create_dir_all(fake.join(dir)).unwrap();
+            fs::create_dir_all(wanted.join(dir)).unwrap();
+        }
+        fs::write(fake.join("HEAD"), "ref: refs/heads/kelpie/7\n").unwrap();
+        fs::write(fake.join("commondir"), format!("{}\n", wanted.display())).unwrap();
+        fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", fake.display()),
+        )
+        .unwrap();
+
+        let runner = rig.open().unwrap();
+        rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
+        step(&runner).unwrap();
+        let [_, seen] = rig.claude.seen().try_into().unwrap();
+        let git_dir = fs::canonicalize(rig.repo().join(".git")).unwrap();
+        let allow = &seen.settings["sandbox"]["filesystem"]["allowWrite"];
+        assert_eq!(allow[2], json!(git_dir.join("objects")));
+        assert_eq!(allow[3], json!(git_dir.join("worktrees/7")));
+        assert!(!allow.to_string().contains("wanted"), "{allow}");
+    }
+
+    #[test]
     fn a_turn_stopped_with_the_runner_resumes_when_it_starts_again() {
         let (rig, runner) = with_issue_7("reactmap");
         rig.claude.script([Scripted::Fail(ClaudeError::Stopped)]);
