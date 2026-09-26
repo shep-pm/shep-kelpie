@@ -9,6 +9,7 @@
 #![doc(test(attr(deny(warnings))))]
 
 pub mod adapters;
+pub mod lease;
 pub mod ports;
 pub mod runner;
 pub mod settings;

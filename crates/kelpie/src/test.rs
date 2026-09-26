@@ -68,6 +68,10 @@ impl Forge for FakeForge {
 pub(crate) struct FakeClock(Arc<AtomicU64>);
 
 impl FakeClock {
+    pub(crate) fn at(seconds: u64) -> Self {
+        Self(Arc::new(AtomicU64::new(seconds)))
+    }
+
     pub(crate) fn advance(&self, seconds: u64) {
         self.0.fetch_add(seconds, Ordering::SeqCst);
     }
@@ -104,7 +108,7 @@ impl Rig {
                 visibility: Arc::new(Mutex::new(Visibility::Public)),
                 calls: Arc::default(),
             },
-            clock: FakeClock(Arc::new(AtomicU64::new(Self::EPOCH))),
+            clock: FakeClock::at(Self::EPOCH),
         };
         rig.make_repo(&rig.home.path().join("origin.git"));
 
