@@ -1,0 +1,69 @@
+{
+ "id": "r06",
+ "set": "reviewer",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "// Same as `Self::open_or_refresh_config_pane`: an overlay",
+    "what": "The `on_dog_section` hunk adds only this comment and no `self.keymap_open = false;`, so the dog-section reply still leaves the overlay open, and the new test `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` would fail on its final assertion."
+   },
+   {
+    "severity": "risk",
+    "quote": "self.keymap_open = false;",
+    "what": "`open_or_refresh_config_pane` also serves refreshes where the body is already a `ConfigPane` (it carries the view, env cursor and list state over), so the unconditional assignment dismisses a help overlay the operator raised over that pane when a refresh reply lands, although no stale body is involved."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"// Same as `Self::open_or_refresh_config_pane`: an overlay\",\"what\":\"The `on_dog_section` hunk adds only this comment and no `self.keymap_open = false;`, so the dog-section reply still leaves the overlay open, and the new test `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` would fail on its final assertion.\"},{\"severity\":\"risk\",\"quote\":\"self.keymap_open = false;\",\"what\":\"`open_or_refresh_config_pane` also serves refreshes where the body is already a `ConfigPane` (it carries the view, env cursor and list state over), so the unconditional assignment dismisses a help overlay the operator raised over that pane when a refresh reply lands, although no stale body is involved.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 23425,
+  "cache_read_input_tokens": 11892,
+  "output_tokens": 1986,
+  "output_tokens_details": {
+   "thinking_tokens": 1710
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23425,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1986,
+    "cache_read_input_tokens": 11892,
+    "cache_creation_input_tokens": 23425,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 23425
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1159424,
+ "duration_ms": 17781,
+ "wall_s": 19.556453943252563,
+ "weighted_units": 57971.2,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "// Same as `Self::open_or_refresh_config_pane`: an overlay",
+  "what": "The `on_dog_section` hunk adds only this comment and no `self.keymap_open = false;`, so the dog-section reply still leaves the overlay open, and the new test `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` would fail on its final assertion."
+ }
+}

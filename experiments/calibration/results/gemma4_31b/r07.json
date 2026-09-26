@@ -1,0 +1,40 @@
+{
+ "id": "r07",
+ "set": "reviewer",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let code = &crate::terminal_safe::sanitise(message).0;",
+    "what": "The code sanitises the `message` argument instead of the `code` argument in `emit_notice`."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"let code = &crate::terminal_safe::sanitise(message).0;\", \"what\": \"The code sanitises the `message` argument instead of the `code` argument in `emit_notice`.\"}]}",
+ "thinking_chars": 2325,
+ "done_reason": "stop",
+ "prompt_tokens": 1753,
+ "eval_tokens": 728,
+ "load_s": 0.0027588,
+ "prompt_s": 0.769521,
+ "eval_s": 18.408584,
+ "wall_s": 19.52575707435608,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "let code = &crate::terminal_safe::sanitise(message).0;",
+  "what": "The code sanitises the `message` argument instead of the `code` argument in `emit_notice`."
+ }
+}

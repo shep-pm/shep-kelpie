@@ -1,0 +1,55 @@
+{
+ "id": "t04",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The two branches at lines 283-286 and 288-291 differ: one matches `pane.sheep()` on a bleats pane, the other `pane.feed_sheep()` on a sheep pane, with different pane types and accessors. Only the inner `RowKey::Sheep(id) => self.flock.get(id), _ => None` arm is shared, and that is a two-line match, so a helper adds indirection for little gain and the finding overstates the duplication."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The two branches at lines 283-286 and 288-291 differ: one matches `pane.sheep()` on a bleats pane, the other `pane.feed_sheep()` on a sheep pane, with different pane types and accessors. Only the inner `RowKey::Sheep(id) => self.flock.get(id), _ => None` arm is shared, and that is a two-line match, so a helper adds indirection for little gain and the finding overstates the duplication.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 19907,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 164,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19907,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 164,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 19907,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 19907
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0836506,
+ "duration_ms": 2417,
+ "wall_s": 5.698860168457031,
+ "weighted_units": 41825.3,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": false
+}

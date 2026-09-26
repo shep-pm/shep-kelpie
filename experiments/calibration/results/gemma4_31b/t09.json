@@ -1,0 +1,31 @@
+{
+ "id": "t09",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "sheep_lines checks that app.selected_row() is Some on line 170 and returns early otherwise, making the subsequent call to log_row on line 176 and the expect on line 337 redundant."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"sheep_lines checks that app.selected_row() is Some on line 170 and returns early otherwise, making the subsequent call to log_row on line 176 and the expect on line 337 redundant.\"}",
+ "thinking_chars": 2807,
+ "done_reason": "stop",
+ "prompt_tokens": 1322,
+ "eval_tokens": 911,
+ "load_s": 0.002303,
+ "prompt_s": 0.601252,
+ "eval_s": 22.971334,
+ "wall_s": 23.924821138381958,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

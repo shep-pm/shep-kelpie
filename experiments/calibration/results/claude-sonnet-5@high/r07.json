@@ -1,0 +1,64 @@
+{
+ "id": "r07",
+ "set": "reviewer",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let code = &crate::terminal_safe::sanitise(message).0;",
+    "what": "emit_notice sanitises `message` instead of `code`, so the notice code becomes the message text (`notice[a message]: a message`), the real code is dropped, and the newline-in-code guarantee is not applied."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"let code = &crate::terminal_safe::sanitise(message).0;\", \"what\": \"emit_notice sanitises `message` instead of `code`, so the notice code becomes the message text (`notice[a message]: a message`), the real code is dropped, and the newline-in-code guarantee is not applied.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21283,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 403,
+  "output_tokens_details": {
+   "thinking_tokens": 282
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21283,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 403,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 21283,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21283
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0915446,
+ "duration_ms": 23210,
+ "wall_s": 24.930302143096924,
+ "weighted_units": 45772.3,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "let code = &crate::terminal_safe::sanitise(message).0;",
+  "what": "emit_notice sanitises `message` instead of `code`, so the notice code becomes the message text (`notice[a message]: a message`), the real code is dropped, and the newline-in-code guarantee is not applied."
+ }
+}

@@ -1,0 +1,41 @@
+{
+ "id": "c05",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "A refused write reopens the text editor, and the overlay must not survive to hide it: `on_key` checks text mode ahead of `keymap_open`, so a still-open overlay would swallow every key meant for the reopened editor.",
+    "what": "The tests reveal that setting `self.keymap_open = false;` in `on_event` and `on_dog_section` is necessary to prevent the overlay from remaining open when the body is replaced with a config pane, which would cause all key presses to be incorrectly routed."
+   },
+   {
+    "severity": "bug",
+    "quote": "the overlay survived a body change under it",
+    "what": "The test `a_config_reply_that_lands_with_the_overlay_up_closes_it` and `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` demonstrate that without resetting `self.keymap_open`, the overlay persists after a reply lands, preventing input from reaching the newly opened config pane."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"A refused write reopens the text editor, and the overlay must not survive to hide it: `on_key` checks text mode ahead of `keymap_open`, so a still-open overlay would swallow every key meant for the reopened editor.\", \"what\": \"The tests reveal that setting `self.keymap_open = false;` in `on_event` and `on_dog_section` is necessary to prevent the overlay from remaining open when the body is replaced with a config pane, which would cause all key presses to be incorrectly routed.\"}, {\"severity\": \"bug\", \"quote\": \"the overlay survived a body change under it\", \"what\": \"The test `a_config_reply_that_lands_with_the_overlay_up_closes_it` and `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` demonstrate that without resetting `self.keymap_open`, the overlay persists after a reply lands, preventing input from reaching the newly opened config pane.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 3381,
+ "eval_tokens": 234,
+ "load_s": 0.0050849,
+ "prompt_s": 1.138513,
+ "eval_s": 5.081238,
+ "wall_s": 6.357990980148315,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 2,
+ "matched": null
+}

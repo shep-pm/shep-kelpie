@@ -1,0 +1,55 @@
+{
+ "id": "t17",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The code at ui_event_loop.rs:36-47 documents the design: the extra PathBufs are deliberately separate 'so a test can hand this loop an arbitrary pair', and `home` may differ from the paths' home. The redundancy is intentional, and the cloning (entry.rs:136-139) is a small one-time cost, not a HIGH-severity defect."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The code at ui_event_loop.rs:36-47 documents the design: the extra PathBufs are deliberately separate 'so a test can hand this loop an arbitrary pair', and `home` may differ from the paths' home. The redundancy is intentional, and the cloning (entry.rs:136-139) is a small one-time cost, not a HIGH-severity defect.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21669,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 137,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21669,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 137,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 21669,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21669
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0904286,
+ "duration_ms": 21037,
+ "wall_s": 24.949329137802124,
+ "weighted_units": 45214.3,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": false
+}

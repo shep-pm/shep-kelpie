@@ -1,0 +1,64 @@
+{
+ "id": "r02",
+ "set": "reviewer",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let (code, message) = safe_parts(fmt, message, code);",
+    "what": "Arguments are swapped in emit_notice: safe_parts(fmt, code, message) receives message as code and code as message, so the notice's code and message are exchanged in the output and each is sanitised by the wrong rule (code text gets table indentation/JSON collapse handling, message gets code sanitising)."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"let (code, message) = safe_parts(fmt, message, code);\", \"what\": \"Arguments are swapped in emit_notice: safe_parts(fmt, code, message) receives message as code and code as message, so the notice's code and message are exchanged in the output and each is sanitised by the wrong rule (code text gets table indentation/JSON collapse handling, message gets code sanitising).\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20812,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 149,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20812,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 149,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 20812,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20812
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0871206,
+ "duration_ms": 21757,
+ "wall_s": 23.697752714157104,
+ "weighted_units": 43560.3,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "let (code, message) = safe_parts(fmt, message, code);",
+  "what": "Arguments are swapped in emit_notice: safe_parts(fmt, code, message) receives message as code and code as message, so the notice's code and message are exchanged in the output and each is sanitised by the wrong rule (code text gets table indentation/JSON collapse handling, message gets code sanitising)."
+ }
+}

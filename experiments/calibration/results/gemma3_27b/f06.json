@@ -1,0 +1,31 @@
+{
+ "id": "f06",
+ "set": "checker",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 311 allocates a new String with `label.to_ascii_uppercase()` every frame when `label` is either \"Flock\" or \"Dogs\". The suggested fix of matching on `label` and returning a pre-known `&str` or storing the uppercase label in `RowKey::Section` would avoid this allocation."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 311 allocates a new String with `label.to_ascii_uppercase()` every frame when `label` is either \\\"Flock\\\" or \\\"Dogs\\\". The suggested fix of matching on `label` and returning a pre-known `&str` or storing the uppercase label in `RowKey::Section` would avoid this allocation.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2291,
+ "eval_tokens": 84,
+ "load_s": 0.0052662,
+ "prompt_s": 0.806359,
+ "eval_s": 1.811525,
+ "wall_s": 2.7613840103149414,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

@@ -1,0 +1,40 @@
+{
+ "id": "h04",
+ "set": "reviewer",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());\n    draw_body(app, frame);",
+    "what": "The keymap overlay is drawn before the body, causing the body to overwrite the overlay instead of the overlay appearing on top of the body."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());\\n    draw_body(app, frame);\", \"what\": \"The keymap overlay is drawn before the body, causing the body to overwrite the overlay instead of the overlay appearing on top of the body.\"}]}",
+ "thinking_chars": 4543,
+ "done_reason": "stop",
+ "prompt_tokens": 4000,
+ "eval_tokens": 1318,
+ "load_s": 0.0065543,
+ "prompt_s": 1.596563,
+ "eval_s": 33.672282,
+ "wall_s": 35.675621032714844,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());\n    draw_body(app, frame);",
+  "what": "The keymap overlay is drawn before the body, causing the body to overwrite the overlay instead of the overlay appearing on top of the body."
+ }
+}

@@ -1,0 +1,64 @@
+{
+ "id": "r04",
+ "set": "reviewer",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "if self.disarm_settings_candidate()",
+    "what": "The condition is inverted: disarm_settings_candidate returns true only when it cancelled an armed candidate, so the new arm moves the cursor exactly when it should have eaten the key and does nothing at all for ordinary unarmed navigation, breaking every Up/Down/First/Last in settings (it needs `!`)."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"if self.disarm_settings_candidate()\", \"what\": \"The condition is inverted: disarm_settings_candidate returns true only when it cancelled an armed candidate, so the new arm moves the cursor exactly when it should have eaten the key and does nothing at all for ordinary unarmed navigation, breaking every Up/Down/First/Last in settings (it needs `!`).\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21861,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 719,
+  "output_tokens_details": {
+   "thinking_tokens": 571
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21861,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 719,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 21861,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21861
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.47660199999999997,
+ "duration_ms": 10076,
+ "wall_s": 12.109477996826172,
+ "weighted_units": 48683.8,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "if self.disarm_settings_candidate()",
+  "what": "The condition is inverted: disarm_settings_candidate returns true only when it cancelled an armed candidate, so the new arm moves the cursor exactly when it should have eaten the key and does nothing at all for ordinary unarmed navigation, breaking every Up/Down/First/Last in settings (it needs `!`)."
+ }
+}

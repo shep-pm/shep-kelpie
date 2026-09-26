@@ -1,0 +1,36 @@
+{
+ "id": "c12",
+ "set": "reviewer",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "mod config_reply;",
+    "what": "Missing module declaration for config_reply in verbs.rs. Since config_reply is a nested module in request/mod.rs, it must be declared in verbs.rs to be accessible via use super::DogSectionToml; otherwise the compiler will fail to resolve the module path."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"mod config_reply;\", \"what\": \"Missing module declaration for config_reply in verbs.rs. Since config_reply is a nested module in request/mod.rs, it must be declared in verbs.rs to be accessible via use super::DogSectionToml; otherwise the compiler will fail to resolve the module path.\"}]}",
+ "thinking_chars": 24569,
+ "done_reason": "stop",
+ "prompt_tokens": 1427,
+ "eval_tokens": 6312,
+ "load_s": 0.00556,
+ "prompt_s": 0.220416,
+ "eval_s": 43.023951,
+ "wall_s": 43.348634243011475,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 1,
+ "matched": null
+}

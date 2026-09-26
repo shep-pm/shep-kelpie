@@ -1,0 +1,24 @@
+{
+ "id": "t05",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 93\u2013106 confirm `secrets_hint` is a non-`const` fn returning `String` with `.to_string()` on two plain string literals (no format args), while lines 131 and 156 show the structurally identical siblings are `const fn` returning `&'static str`\u2014the inconsistency and unnecessary allocation are real as described."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 93\u2013106 confirm `secrets_hint` is a non-`const` fn returning `String` with `.to_string()` on two plain string literals (no format args), while lines 131 and 156 show the structurally identical siblings are `const fn` returning `&'static str`\u2014the inconsistency and unnecessary allocation are real as described.\"}",
+ "thinking_chars": 3807,
+ "done_reason": "stop",
+ "prompt_tokens": 2115,
+ "eval_tokens": 1045,
+ "load_s": 0.0023157,
+ "prompt_s": 0.871419,
+ "eval_s": 11.097058,
+ "wall_s": 12.110504865646362,
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

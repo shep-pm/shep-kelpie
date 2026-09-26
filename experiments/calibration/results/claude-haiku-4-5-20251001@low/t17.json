@@ -1,0 +1,55 @@
+{
+ "id": "t17",
+ "set": "checker",
+ "model": "claude-haiku-4-5-20251001",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The function signature (lines 37, 42, 46-47) accepts both `paths: ShepPaths` and three individual `PathBuf` fields, and the call site (lines 136-139) passes all four by cloning `paths` and its `.home`, `.daemon_config`, and `.socket` fields separately. This is factually redundant at the call site shown, though the comment (lines 43-45) explains it enables test flexibility by allowing arbitrary field values."
+ },
+ "content": "```json\n{\"verdict\": \"holds\", \"reason\": \"The function signature (lines 37, 42, 46-47) accepts both `paths: ShepPaths` and three individual `PathBuf` fields, and the call site (lines 136-139) passes all four by cloning `paths` and its `.home`, `.daemon_config`, and `.socket` fields separately. This is factually redundant at the call site shown, though the comment (lines 43-45) explains it enables test flexibility by allowing arbitrary field values.\"}\n```",
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 10814,
+  "cache_read_input_tokens": 17675,
+  "output_tokens": 2480,
+  "output_tokens_details": {
+   "thinking_tokens": 2352
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 10814,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 10,
+    "output_tokens": 2480,
+    "cache_read_input_tokens": 17675,
+    "cache_creation_input_tokens": 10814,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 10814
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.035805500000000004,
+ "duration_ms": 26597,
+ "wall_s": 28.394898176193237,
+ "weighted_units": 35805.5,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

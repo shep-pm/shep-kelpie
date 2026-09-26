@@ -1,0 +1,55 @@
+{
+ "id": "s07",
+ "set": "checker",
+ "model": "claude-haiku-4-5-20251001",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Line 119 already returns 1 when config is None, not 0. The code matches the suggested fix and correctly accounts for the single waiting line drawn by waiting_line() (line 104-106)."
+ },
+ "content": "```json\n{\"verdict\": \"fails\", \"reason\": \"Line 119 already returns 1 when config is None, not 0. The code matches the suggested fix and correctly accounts for the single waiting line drawn by waiting_line() (line 104-106).\"}\n```",
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 9350,
+  "cache_read_input_tokens": 17675,
+  "output_tokens": 577,
+  "output_tokens_details": {
+   "thinking_tokens": 510
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 9350,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 10,
+    "output_tokens": 577,
+    "cache_read_input_tokens": 17675,
+    "cache_creation_input_tokens": 9350,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 9350
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0233625,
+ "duration_ms": 6555,
+ "wall_s": 8.294468879699707,
+ "weighted_units": 23362.5,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

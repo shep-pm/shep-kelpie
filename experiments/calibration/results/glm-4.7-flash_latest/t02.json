@@ -1,0 +1,31 @@
+{
+ "id": "t02",
+ "set": "checker",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The match arms for the `min_level` cycle (lines 198-205 in sheep_pane.rs and lines 66-71 in bleats.rs) are identical."
+ },
+ "content": "{\n  \"verdict\": \"holds\",\n  \"reason\": \"The match arms for the `min_level` cycle (lines 198-205 in sheep_pane.rs and lines 66-71 in bleats.rs) are identical.\"\n}",
+ "thinking_chars": 5755,
+ "done_reason": "stop",
+ "prompt_tokens": 1457,
+ "eval_tokens": 1486,
+ "load_s": 0.0047085,
+ "prompt_s": 0.217862,
+ "eval_s": 9.674079,
+ "wall_s": 9.955085754394531,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,55 @@
+{
+ "id": "t06",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Line 143 takes `text: String` but line 145 only borrows it via `fit(&text, width)` and then `format!` builds a fresh String, so the ownership is never used; lines 276 and 311-312 call `.to_owned()` on string literals solely to satisfy that signature, allocating a String that is immediately borrowed and dropped. Changing the parameter to `&str` removes those allocations while the `format!` call at line 270 and 287 still work by passing `&sentence` / `&format!(...)`."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Line 143 takes `text: String` but line 145 only borrows it via `fit(&text, width)` and then `format!` builds a fresh String, so the ownership is never used; lines 276 and 311-312 call `.to_owned()` on string literals solely to satisfy that signature, allocating a String that is immediately borrowed and dropped. Changing the parameter to `&str` removes those allocations while the `format!` call at line 270 and 287 still work by passing `&sentence` / `&format!(...)`.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21452,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 183,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21452,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 183,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 21452,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21452
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.44162199999999996,
+ "duration_ms": 3714,
+ "wall_s": 5.378575086593628,
+ "weighted_units": 45185.8,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

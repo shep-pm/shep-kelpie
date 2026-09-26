@@ -1,0 +1,51 @@
+{
+ "id": "c06",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "Ok(Err(other)) => return Err(bark::Resubscribe::Refused(other))",
+    "what": "The code now returns `bark::Resubscribe::Request` instead of `bark::Resubscribe::Refused` when a shepherd answers and then rejects the subscription, changing behaviour the commit does not intend."
+   },
+   {
+    "severity": "bug",
+    "quote": "Ok(Err(other)) => return Err(bark::Resubscribe::Request(other))",
+    "what": "The same change as above is repeated in the `dog` module as well, which is a bug."
+   },
+   {
+    "severity": "bug",
+    "quote": "let Err(bark::Resubscribe::Refused(err)) = refused else {",
+    "what": "This test assertion expects `Resubscribe::Refused` but will now receive `Resubscribe::Request` and thus fail."
+   },
+   {
+    "severity": "bug",
+    "quote": "assert!(matches!(&err, RequestError::Rpc(rpc) if rpc.code == RpcErrorCode::Unsupported),",
+    "what": "The test continues to check for `RequestError::Rpc` as if it were a refusal, but it's now a more generic 'request failed' and may have different error codes."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"Ok(Err(other)) => return Err(bark::Resubscribe::Refused(other))\", \"what\": \"The code now returns `bark::Resubscribe::Request` instead of `bark::Resubscribe::Refused` when a shepherd answers and then rejects the subscription, changing behaviour the commit does not intend.\"},{\"severity\": \"bug\", \"quote\": \"Ok(Err(other)) => return Err(bark::Resubscribe::Request(other))\", \"what\": \"The same change as above is repeated in the `dog` module as well, which is a bug.\"},{\"severity\": \"bug\", \"quote\": \"let Err(bark::Resubscribe::Refused(err)) = refused else {\", \"what\": \"This test assertion expects `Resubscribe::Refused` but will now receive `Resubscribe::Request` and thus fail.\"},{\"severity\": \"bug\", \"quote\": \"assert!(matches!(&err, RequestError::Rpc(rpc) if rpc.code == RpcErrorCode::Unsupported),\", \"what\": \"The test continues to check for `RequestError::Rpc` as if it were a refusal, but it's now a more generic 'request failed' and may have different error codes.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2803,
+ "eval_tokens": 279,
+ "load_s": 0.0043399,
+ "prompt_s": 0.962799,
+ "eval_s": 6.061791,
+ "wall_s": 7.212313175201416,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 4,
+ "matched": null
+}

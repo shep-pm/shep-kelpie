@@ -1,0 +1,31 @@
+{
+ "id": "t10",
+ "set": "checker",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The code at lines 265-293 in `on_pane_key` exhaustively handles each `KeyPress` variant, whereas the code at lines 444 in `on_pane_text_key` uses a catch-all `_ => {}`, effectively swallowing unbound key presses, violating the principle stated in the comment in `on_pane_key`."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The code at lines 265-293 in `on_pane_key` exhaustively handles each `KeyPress` variant, whereas the code at lines 444 in `on_pane_text_key` uses a catch-all `_ => {}`, effectively swallowing unbound key presses, violating the principle stated in the comment in `on_pane_key`.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2106,
+ "eval_tokens": 93,
+ "load_s": 0.0047283,
+ "prompt_s": 0.776467,
+ "eval_s": 1.997867,
+ "wall_s": 2.9466300010681152,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,55 @@
+{
+ "id": "t05",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Both arms of `secrets_hint` (lines 95-104) are plain string literals with `.to_string()` tacked on. Nothing is interpolated, so the allocation is unnecessary, and the siblings `pane_hint` (line 131) and `sheep_pane_hint` (line 156) return `&'static str` from a `const fn`. The finding overstates the cost, since comparing a `String` with a `&str` needs no extra allocation, but the change it suggests is valid. The callers aren't shown, so any that need an owned `String` would need a small adjustment."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Both arms of `secrets_hint` (lines 95-104) are plain string literals with `.to_string()` tacked on. Nothing is interpolated, so the allocation is unnecessary, and the siblings `pane_hint` (line 131) and `sheep_pane_hint` (line 156) return `&'static str` from a `const fn`. The finding overstates the cost, since comparing a `String` with a `&str` needs no extra allocation, but the change it suggests is valid. The callers aren't shown, so any that need an owned `String` would need a small adjustment.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21433,
+  "cache_read_input_tokens": 11892,
+  "output_tokens": 709,
+  "output_tokens_details": {
+   "thinking_tokens": 508
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21433,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 709,
+    "cache_read_input_tokens": 11892,
+    "cache_creation_input_tokens": 21433,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21433
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0952044,
+ "duration_ms": 7533,
+ "wall_s": 10.821295261383057,
+ "weighted_units": 47602.2,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

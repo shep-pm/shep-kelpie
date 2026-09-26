@@ -1,0 +1,24 @@
+{
+ "id": "t16",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The code at lines 252-255, 346-349, and 459-462 all contain the identical two-step `.map_err(...).and_then(|inner| inner.map_err(...))` pattern, and line 429-432 contains the near-identical variant `.and_then(|inner| inner)` as described. The duplication and the proposed helper are factually accurate."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The code at lines 252-255, 346-349, and 459-462 all contain the identical two-step `.map_err(...).and_then(|inner| inner.map_err(...))` pattern, and line 429-432 contains the near-identical variant `.and_then(|inner| inner)` as described. The duplication and the proposed helper are factually accurate.\"}",
+ "thinking_chars": 3795,
+ "done_reason": "stop",
+ "prompt_tokens": 2081,
+ "eval_tokens": 1124,
+ "load_s": 0.0024045,
+ "prompt_s": 0.870729,
+ "eval_s": 10.977705,
+ "wall_s": 12.076848030090332,
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

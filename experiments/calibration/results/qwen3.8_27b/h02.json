@@ -1,0 +1,40 @@
+{
+ "id": "h02",
+ "set": "reviewer",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "if n > 1 {",
+    "what": "The off-by-one (should be `n > 0`) means the second line of every multi-line message is glued to the first with no separating newline, e.g. \"a\\nb\" becomes \"ab\"."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"if n > 1 {\", \"what\": \"The off-by-one (should be `n > 0`) means the second line of every multi-line message is glued to the first with no separating newline, e.g. \\\"a\\\\nb\\\" becomes \\\"ab\\\".\"}]}",
+ "thinking_chars": 9463,
+ "done_reason": "stop",
+ "prompt_tokens": 2019,
+ "eval_tokens": 2927,
+ "load_s": 0.0044344,
+ "prompt_s": 0.819349,
+ "eval_s": 28.584803,
+ "wall_s": 29.609307289123535,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.536059963,
+  "vram_gb": 17.536059963,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "if n > 1 {",
+  "what": "The off-by-one (should be `n > 0`) means the second line of every multi-line message is glued to the first with no separating newline, e.g. \"a\\nb\" becomes \"ab\"."
+ }
+}

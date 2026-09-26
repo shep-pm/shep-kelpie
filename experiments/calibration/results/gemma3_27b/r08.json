@@ -1,0 +1,40 @@
+{
+ "id": "r08",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "start - tail_window_start(start, body_rows, cost)",
+    "what": "This calculation will return 0 when `tail_window_start` returns `start`. This means that scrolling backwards one page will not scroll at all in this case, effectively disabling backward paging."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"start - tail_window_start(start, body_rows, cost)\", \"what\": \"This calculation will return 0 when `tail_window_start` returns `start`. This means that scrolling backwards one page will not scroll at all in this case, effectively disabling backward paging.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 753,
+ "eval_tokens": 74,
+ "load_s": 0.0040578,
+ "prompt_s": 0.315889,
+ "eval_s": 1.57911,
+ "wall_s": 2.0347509384155273,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "start - tail_window_start(start, body_rows, cost)",
+  "what": "This calculation will return 0 when `tail_window_start` returns `start`. This means that scrolling backwards one page will not scroll at all in this case, effectively disabling backward paging."
+ }
+}

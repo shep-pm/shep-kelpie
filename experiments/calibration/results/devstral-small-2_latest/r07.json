@@ -1,0 +1,40 @@
+{
+ "id": "r07",
+ "set": "reviewer",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let code = &crate::terminal_safe::sanitise(message).0;",
+    "what": "The code incorrectly sanitizes the `message` parameter instead of the `code` parameter in the `emit_notice` function."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"let code = &crate::terminal_safe::sanitise(message).0;\", \"what\": \"The code incorrectly sanitizes the `message` parameter instead of the `code` parameter in the `emit_notice` function.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2114,
+ "eval_tokens": 68,
+ "load_s": 0.0050799,
+ "prompt_s": 0.39677,
+ "eval_s": 1.169525,
+ "wall_s": 1.6537790298461914,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "let code = &crate::terminal_safe::sanitise(message).0;",
+  "what": "The code incorrectly sanitizes the `message` parameter instead of the `code` parameter in the `emit_notice` function."
+ }
+}

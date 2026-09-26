@@ -1,0 +1,79 @@
+{
+ "id": "h03",
+ "set": "reviewer",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "            indent_continuations(&clean)",
+    "what": "The old `.trim_end()` is gone, so a message ending in `\\n` (for example toml_edit parse errors) keeps its trailing newline, and the caller's `writeln!` then prints a blank line; this breaks the behaviour that the retained test `a_message_that_ends_in_a_newline_does_not_print_a_blank_line` and the updated doc comment ('loses its trailing whitespace') still promise."
+   },
+   {
+    "severity": "bug",
+    "quote": "/// `writeln!` would otherwise print as a blank line.",
+    "what": "Nothing trims trailing whitespace any more, so a message ending in spaces or tabs, or in `\\n  `, now emits that whitespace, and after indentation a whitespace-only last line such as `\\n  ` gets another two spaces added."
+   },
+   {
+    "severity": "risk",
+    "quote": "-        let written = \"no flock at /tmp/x\\n  to set up a flock there deliberately: mkdir -p /tmp/x\";",
+    "what": "Callers that already wrote `\\n  ` before continuation lines (the old convention this test used) now get a four-space indent, and this diff does not update any real call site to drop its own indent."
+   },
+   {
+    "severity": "risk",
+    "quote": "            if !line.is_empty() {",
+    "what": "Only an exactly empty line skips the indent; a line holding only whitespace, or a `\\r`-terminated segment if `sanitise_multiline` keeps `\\r`, is still indented, which adds trailing whitespace to that line or, with `\\r`, moves the cursor back so later text overwrites column 0."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"            indent_continuations(&clean)\",\"what\":\"The old `.trim_end()` is gone, so a message ending in `\\\\n` (for example toml_edit parse errors) keeps its trailing newline, and the caller's `writeln!` then prints a blank line; this breaks the behaviour that the retained test `a_message_that_ends_in_a_newline_does_not_print_a_blank_line` and the updated doc comment ('loses its trailing whitespace') still promise.\"},{\"severity\":\"bug\",\"quote\":\"/// `writeln!` would otherwise print as a blank line.\",\"what\":\"Nothing trims trailing whitespace any more, so a message ending in spaces or tabs, or in `\\\\n  `, now emits that whitespace, and after indentation a whitespace-only last line such as `\\\\n  ` gets another two spaces added.\"},{\"severity\":\"risk\",\"quote\":\"-        let written = \\\"no flock at /tmp/x\\\\n  to set up a flock there deliberately: mkdir -p /tmp/x\\\";\",\"what\":\"Callers that already wrote `\\\\n  ` before continuation lines (the old convention this test used) now get a four-space indent, and this diff does not update any real call site to drop its own indent.\"},{\"severity\":\"risk\",\"quote\":\"            if !line.is_empty() {\",\"what\":\"Only an exactly empty line skips the indent; a line holding only whitespace, or a `\\\\r`-terminated segment if `sanitise_multiline` keeps `\\\\r`, is still indented, which adds trailing whitespace to that line or, with `\\\\r`, moves the cursor back so later text overwrites column 0.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22624,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 967,
+  "output_tokens_details": {
+   "thinking_tokens": 418
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22624,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 967,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 22624,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22624
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.20269779999999998,
+ "duration_ms": 11109,
+ "wall_s": 12.877368927001953,
+ "weighted_units": 51263.9,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 1,
+ "matched": {
+  "severity": "bug",
+  "quote": "            indent_continuations(&clean)",
+  "what": "The old `.trim_end()` is gone, so a message ending in `\\n` (for example toml_edit parse errors) keeps its trailing newline, and the caller's `writeln!` then prints a blank line; this breaks the behaviour that the retained test `a_message_that_ends_in_a_newline_does_not_print_a_blank_line` and the updated doc comment ('loses its trailing whitespace') still promise."
+ }
+}

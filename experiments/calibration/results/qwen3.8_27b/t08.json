@@ -1,0 +1,24 @@
+{
+ "id": "t08",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 225-226 both return Ok(()) for Err(RequestError::Closed) and Err(_other), so the explicit match on the Closed variant is behaviorally redundant; collapsing to a single Err(_) => Ok(()) arm would produce identical behavior."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 225-226 both return Ok(()) for Err(RequestError::Closed) and Err(_other), so the explicit match on the Closed variant is behaviorally redundant; collapsing to a single Err(_) => Ok(()) arm would produce identical behavior.\"}",
+ "thinking_chars": 2787,
+ "done_reason": "stop",
+ "prompt_tokens": 899,
+ "eval_tokens": 734,
+ "load_s": 0.0037061,
+ "prompt_s": 0.430789,
+ "eval_s": 7.532645,
+ "wall_s": 8.097392082214355,
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

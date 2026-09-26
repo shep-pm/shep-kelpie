@@ -1,0 +1,55 @@
+{
+ "id": "f03",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The function runs inside `spawn_blocking` at ui_event_loop.rs:315-317 from an `Effect::RevealSecret` that carries owned `store` and `provider_cache` paths. A `&self` method would need the whole `SecretsModel` moved into the task, which is the reverse of the design that avoids holding secrets in the model (lines 158-161). The fixture call at view/fixtures/secrets.rs:370 also passes a separate `store` and `provider_cache` local, and the finding claims every call site uses `&model.store, &model.provider_cache`. The swap risk is also a speculative style concern, since both are `&Path`."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The function runs inside `spawn_blocking` at ui_event_loop.rs:315-317 from an `Effect::RevealSecret` that carries owned `store` and `provider_cache` paths. A `&self` method would need the whole `SecretsModel` moved into the task, which is the reverse of the design that avoids holding secrets in the model (lines 158-161). The fixture call at view/fixtures/secrets.rs:370 also passes a separate `store` and `provider_cache` local, and the finding claims every call site uses `&model.store, &model.provider_cache`. The swap risk is also a speculative style concern, since both are `&Path`.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21122,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 228,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21122,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 228,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 21122,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21122
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0891506,
+ "duration_ms": 12644,
+ "wall_s": 14.829498767852783,
+ "weighted_units": 44575.3,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

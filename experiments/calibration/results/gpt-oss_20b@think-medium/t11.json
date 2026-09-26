@@ -1,0 +1,31 @@
+{
+ "id": "t11",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Both `tail_window_start` (172\u2011184) and `page_lines_back` (245\u2011259) implement the same backward budget\u2011walk logic; `page_lines_back` merely counts the lines and returns that count, duplicating the walk performed by `tail_window_start`, exactly as the documentation at 168\u2011171 warns about maintaining two copies in sync."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"Both `tail_window_start` (172\u2011184) and `page_lines_back` (245\u2011259) implement the same backward budget\u2011walk logic; `page_lines_back` merely counts the lines and returns that count, duplicating the walk performed by `tail_window_start`, exactly as the documentation at 168\u2011171 warns about maintaining two copies in sync.\"}",
+ "thinking_chars": 8550,
+ "done_reason": "stop",
+ "prompt_tokens": 1962,
+ "eval_tokens": 2183,
+ "load_s": 0.0050638,
+ "prompt_s": 0.145912,
+ "eval_s": 12.404231,
+ "wall_s": 12.739711999893188,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,40 @@
+{
+ "id": "r02",
+ "set": "reviewer",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let (code, message) = safe_parts(fmt, message, code);",
+    "what": "The arguments to `safe_parts` are swapped, causing `message` to be sanitized as a code and vice versa."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"let (code, message) = safe_parts(fmt, message, code);\", \"what\": \"The arguments to `safe_parts` are swapped, causing `message` to be sanitized as a code and vice versa.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1769,
+ "eval_tokens": 66,
+ "load_s": 0.0046205,
+ "prompt_s": 0.317909,
+ "eval_s": 1.131526,
+ "wall_s": 1.605297327041626,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "let (code, message) = safe_parts(fmt, message, code);",
+  "what": "The arguments to `safe_parts` are swapped, causing `message` to be sanitized as a code and vice versa."
+ }
+}

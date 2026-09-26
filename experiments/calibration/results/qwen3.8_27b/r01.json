@@ -1,0 +1,33 @@
+{
+ "id": "r01",
+ "set": "reviewer",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "        Ok(Err(err)) => {",
+    "what": "The read-error arm is missing `kill_group(leader)`, so a failed read only kills the direct child and leaves any grandchild processes in the hook's process group running\u2014the very sweep the commit's subject says it is adding."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"        Ok(Err(err)) => {\", \"what\": \"The read-error arm is missing `kill_group(leader)`, so a failed read only kills the direct child and leaves any grandchild processes in the hook's process group running\u2014the very sweep the commit's subject says it is adding.\"}]}",
+ "thinking_chars": 4157,
+ "done_reason": "stop",
+ "prompt_tokens": 795,
+ "eval_tokens": 1148,
+ "load_s": 0.0037212,
+ "prompt_s": 0.388693,
+ "eval_s": 11.439749,
+ "wall_s": 12.037036180496216,
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "        Ok(Err(err)) => {",
+  "what": "The read-error arm is missing `kill_group(leader)`, so a failed read only kills the direct child and leaves any grandchild processes in the hook's process group running\u2014the very sweep the commit's subject says it is adding."
+ }
+}

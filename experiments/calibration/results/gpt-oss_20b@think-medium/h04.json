@@ -1,0 +1,40 @@
+{
+ "id": "h04",
+ "set": "reviewer",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());",
+    "what": "draw_keymap_overlay is called before draw_body, so the body\u2019s rendering overwrites the overlay, preventing the keymap overlay from appearing on top of the body as intended."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());\",\"what\":\"draw_keymap_overlay is called before draw_body, so the body\u2019s rendering overwrites the overlay, preventing the keymap overlay from appearing on top of the body as intended.\"}]}",
+ "thinking_chars": 13843,
+ "done_reason": "stop",
+ "prompt_tokens": 3470,
+ "eval_tokens": 3026,
+ "load_s": 0.0026458,
+ "prompt_s": 0.26776,
+ "eval_s": 17.19162,
+ "wall_s": 17.619025945663452,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());",
+  "what": "draw_keymap_overlay is called before draw_body, so the body\u2019s rendering overwrites the overlay, preventing the keymap overlay from appearing on top of the body as intended."
+ }
+}

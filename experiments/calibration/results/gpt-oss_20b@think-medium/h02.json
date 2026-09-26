@@ -1,0 +1,40 @@
+{
+ "id": "h02",
+ "set": "reviewer",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "        if n > 1 {",
+    "what": "indent_continuations skips inserting a newline and indent for the second line of a multiline message (it only does so for lines after the second), causing the first and second lines to concatenate and producing incorrectly formatted output."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"        if n > 1 {\",\"what\":\"indent_continuations skips inserting a newline and indent for the second line of a multiline message (it only does so for lines after the second), causing the first and second lines to concatenate and producing incorrectly formatted output.\"}]}",
+ "thinking_chars": 7430,
+ "done_reason": "stop",
+ "prompt_tokens": 1940,
+ "eval_tokens": 1821,
+ "load_s": 0.0050403,
+ "prompt_s": 0.152375,
+ "eval_s": 10.182085,
+ "wall_s": 10.416108131408691,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "        if n > 1 {",
+  "what": "indent_continuations skips inserting a newline and indent for the second line of a multiline message (it only does so for lines after the second), causing the first and second lines to concatenate and producing incorrectly formatted output."
+ }
+}

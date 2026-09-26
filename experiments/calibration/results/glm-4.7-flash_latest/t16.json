@@ -1,0 +1,31 @@
+{
+ "id": "t16",
+ "set": "checker",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 252-255, 346-349, and 459-462 contain the identical error handling expression, and line 429 contains the near-identical simplified version."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 252-255, 346-349, and 459-462 contain the identical error handling expression, and line 429 contains the near-identical simplified version.\"}",
+ "thinking_chars": 5218,
+ "done_reason": "stop",
+ "prompt_tokens": 1861,
+ "eval_tokens": 1448,
+ "load_s": 0.0046844,
+ "prompt_s": 0.295045,
+ "eval_s": 9.52207,
+ "wall_s": 9.905289888381958,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,31 @@
+{
+ "id": "f06",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "`label.to_ascii_uppercase()` creates a new String on every paint frame (lines\u202f287\u2011311), but the labels are static literals pushed from `RowKey::Section` in `selection.rs` (lines\u202f66\u201174,\u202f112\u2011114)."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"`label.to_ascii_uppercase()` creates a new String on every paint frame (lines\u202f287\u2011311), but the labels are static literals pushed from `RowKey::Section` in `selection.rs` (lines\u202f66\u201174,\u202f112\u2011114).\"}",
+ "thinking_chars": 2314,
+ "done_reason": "stop",
+ "prompt_tokens": 2044,
+ "eval_tokens": 631,
+ "load_s": 0.0022144,
+ "prompt_s": 0.150273,
+ "eval_s": 3.515682,
+ "wall_s": 3.73659610748291,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

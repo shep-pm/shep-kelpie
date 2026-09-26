@@ -1,0 +1,31 @@
+{
+ "id": "t07",
+ "set": "checker",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 70-73 and 233-236 in the provided code both perform the identical chain of operations `pane.config().map(|view| view.pending.len()).filter(|count| *count > 0)` to determine if a count exists."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 70-73 and 233-236 in the provided code both perform the identical chain of operations `pane.config().map(|view| view.pending.len()).filter(|count| *count > 0)` to determine if a count exists.\"}",
+ "thinking_chars": 3774,
+ "done_reason": "stop",
+ "prompt_tokens": 1032,
+ "eval_tokens": 1048,
+ "load_s": 0.0030571,
+ "prompt_s": 0.144292,
+ "eval_s": 6.685564,
+ "wall_s": 6.879073143005371,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

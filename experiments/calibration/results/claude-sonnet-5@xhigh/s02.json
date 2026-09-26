@@ -1,0 +1,55 @@
+{
+ "id": "s02",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Line 225 is `Err(RequestError::Closed) => Ok(())`, so `Closed` already returns `Ok(())`, as the finding suggests. Only the `msgs.send(...).await.map_err(|_| UiGone)` path at lines 218-224 returns `UiGone`, and that is when the UI channel is closed, not the link."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Line 225 is `Err(RequestError::Closed) => Ok(())`, so `Closed` already returns `Ok(())`, as the finding suggests. Only the `msgs.send(...).await.map_err(|_| UiGone)` path at lines 218-224 returns `UiGone`, and that is when the UI channel is closed, not the link.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 19991,
+  "cache_read_input_tokens": 11892,
+  "output_tokens": 216,
+  "output_tokens_details": {
+   "thinking_tokens": 84
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19991,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 216,
+    "cache_read_input_tokens": 11892,
+    "cache_creation_input_tokens": 19991,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 19991
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0845064,
+ "duration_ms": 3873,
+ "wall_s": 5.8458170890808105,
+ "weighted_units": 42253.2,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

@@ -1,0 +1,24 @@
+{
+ "id": "f06",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Line 311 does call `label.to_ascii_uppercase()` which allocates a new String on every invocation, and the labels are drawn from a small finite set of literals (\"Flock\", \"Dogs\", and also \"no fold\" at line 113), so the allocation is indeed avoidable; the finding slightly undercounts the set (says two, it's three) but the core performance observation is correct."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Line 311 does call `label.to_ascii_uppercase()` which allocates a new String on every invocation, and the labels are drawn from a small finite set of literals (\\\"Flock\\\", \\\"Dogs\\\", and also \\\"no fold\\\" at line 113), so the allocation is indeed avoidable; the finding slightly undercounts the set (says two, it's three) but the core performance observation is correct.\"}",
+ "thinking_chars": 4053,
+ "done_reason": "stop",
+ "prompt_tokens": 2303,
+ "eval_tokens": 1073,
+ "load_s": 0.0038785,
+ "prompt_s": 0.936197,
+ "eval_s": 11.481318,
+ "wall_s": 12.594054222106934,
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

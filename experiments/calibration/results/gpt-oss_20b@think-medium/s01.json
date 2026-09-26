@@ -1,0 +1,31 @@
+{
+ "id": "s01",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The Allowed arm string at lines\u202f101\u2011102 includes \"y copy\" (\\u{21b5} set a value\u202fD delete\u202fy copy\u202fq quit), so it does not omit that key."
+ },
+ "content": "{\"verdict\":\"fails\",\"reason\":\"The Allowed arm string at lines\u202f101\u2011102 includes \\\"y copy\\\" (\\\\u{21b5} set a value\u202fD delete\u202fy copy\u202fq quit), so it does not omit that key.\"}",
+ "thinking_chars": 809,
+ "done_reason": "stop",
+ "prompt_tokens": 715,
+ "eval_tokens": 263,
+ "load_s": 0.0015351,
+ "prompt_s": 0.060994,
+ "eval_s": 1.448861,
+ "wall_s": 1.5647339820861816,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

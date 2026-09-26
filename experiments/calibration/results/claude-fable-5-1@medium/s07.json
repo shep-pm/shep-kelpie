@@ -1,0 +1,55 @@
+{
+ "id": "s07",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Line 119 already returns 1 for `None`, matching the single waiting line described on lines 100-103 and 109-110; the finding claims the code returns 0, which it does not."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Line 119 already returns 1 for `None`, matching the single waiting line described on lines 100-103 and 109-110; the finding claims the code returns 0, which it does not.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20556,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 74,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20556,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 74,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 20556,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20556
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.41825200000000007,
+ "duration_ms": 2219,
+ "wall_s": 3.9624478816986084,
+ "weighted_units": 42848.8,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

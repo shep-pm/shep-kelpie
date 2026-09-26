@@ -1,0 +1,31 @@
+{
+ "id": "f04",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "`Scene::label` (lines\u202f210\u2011268) and `Scene::caption` (lines\u202f279\u2011313) match on every variant, so a new variant will fail to compile here. In contrast, `Scene::size` (lines\u202f473\u2011615) ends with a wildcard arm `_ => (120, 30)` and `Scene::control` (lines\u202f464\u2011468) ends with `_ => Control::Allowed`. Thus a new variant would silently inherit the default size or control values without a compiler error, while `Scene::is_keymap` (lines\u202f624\u2011684) already matches all variants and would likewise error on a missing arm. The reviewer\u2019s claim that the false arm adds no marginal safety and that size/control are dangerous wildcards is therefore correct.}"
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"`Scene::label` (lines\u202f210\u2011268) and `Scene::caption` (lines\u202f279\u2011313) match on every variant, so a new variant will fail to compile here. In contrast, `Scene::size` (lines\u202f473\u2011615) ends with a wildcard arm `_ => (120, 30)` and `Scene::control` (lines\u202f464\u2011468) ends with `_ => Control::Allowed`. Thus a new variant would silently inherit the default size or control values without a compiler error, while `Scene::is_keymap` (lines\u202f624\u2011684) already matches all variants and would likewise error on a missing arm. The reviewer\u2019s claim that the false arm adds no marginal safety and that size/control are dangerous wildcards is therefore correct.}\"}",
+ "thinking_chars": 2721,
+ "done_reason": "stop",
+ "prompt_tokens": 6390,
+ "eval_tokens": 760,
+ "load_s": 0.0105905,
+ "prompt_s": 0.475441,
+ "eval_s": 4.444438,
+ "wall_s": 5.104650020599365,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

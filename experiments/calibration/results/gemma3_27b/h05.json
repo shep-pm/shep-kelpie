@@ -1,0 +1,36 @@
+{
+ "id": "h05",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let second = Line::from(Span::raw(format!(\"need {MIN_TERM_WIDTH}x{MIN_HEIGHT}\")))",
+    "what": "The `format!` macro uses string literals for the minimum width and height. If these constants are changed, this code will not automatically reflect the changes. This could lead to incorrect error messages being displayed to the user if the minimum dimensions are updated elsewhere."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"let second = Line::from(Span::raw(format!(\\\"need {MIN_TERM_WIDTH}x{MIN_HEIGHT}\\\")))\", \"what\": \"The `format!` macro uses string literals for the minimum width and height. If these constants are changed, this code will not automatically reflect the changes. This could lead to incorrect error messages being displayed to the user if the minimum dimensions are updated elsewhere.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 3994,
+ "eval_tokens": 100,
+ "load_s": 0.0028151,
+ "prompt_s": 1.332019,
+ "eval_s": 2.16629,
+ "wall_s": 3.6483030319213867,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": false,
+ "false_alarms": 1,
+ "matched": null
+}

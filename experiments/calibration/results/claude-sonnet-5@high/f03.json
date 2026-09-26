@@ -1,0 +1,55 @@
+{
+ "id": "f03",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The claim that every call site passes `&model.store, &model.provider_cache` is false. `ui_event_loop.rs:316` passes `&store, &provider_cache` that were moved out of `Effect::RevealSecret` (lines 308-313) into `spawn_blocking`, and `fixtures/secrets.rs:370` passes local `store` and `provider_cache` values. No `SecretsModel` is in hand at those sites, so the `&self` method would force cloning or sharing the model into the blocking task. The paths are also not tied to one struct in the code shown."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The claim that every call site passes `&model.store, &model.provider_cache` is false. `ui_event_loop.rs:316` passes `&store, &provider_cache` that were moved out of `Effect::RevealSecret` (lines 308-313) into `spawn_blocking`, and `fixtures/secrets.rs:370` passes local `store` and `provider_cache` values. No `SecretsModel` is in hand at those sites, so the `&self` method would force cloning or sharing the model into the blocking task. The paths are also not tied to one struct in the code shown.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21122,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 491,
+  "output_tokens_details": {
+   "thinking_tokens": 289
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21122,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 491,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 21122,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21122
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.09178059999999999,
+ "duration_ms": 6471,
+ "wall_s": 8.458960056304932,
+ "weighted_units": 45890.3,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

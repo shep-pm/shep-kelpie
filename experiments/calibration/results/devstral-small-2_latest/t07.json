@@ -1,0 +1,31 @@
+{
+ "id": "t07",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The code at lines 70-74 and 233-237 in the two files indeed performs the same extraction logic: `pane.config().map(|view| view.pending.len()).filter(|count| *count > 0)`. This duplication violates DRY (Don't Repeat Yourself) and could lead to inconsistencies if one is updated but not the other. The suggested fix of introducing a helper method like `SheepPane::pending_count() -> Option<usize>` is valid and would improve maintainability."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The code at lines 70-74 and 233-237 in the two files indeed performs the same extraction logic: `pane.config().map(|view| view.pending.len()).filter(|count| *count > 0)`. This duplication violates DRY (Don't Repeat Yourself) and could lead to inconsistencies if one is updated but not the other. The suggested fix of introducing a helper method like `SheepPane::pending_count() -> Option<usize>` is valid and would improve maintainability.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1684,
+ "eval_tokens": 125,
+ "load_s": 0.0022694,
+ "prompt_s": 0.297661,
+ "eval_s": 2.146733,
+ "wall_s": 2.5360939502716064,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

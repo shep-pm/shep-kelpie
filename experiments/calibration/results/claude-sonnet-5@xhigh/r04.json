@@ -1,0 +1,64 @@
+{
+ "id": "r04",
+ "set": "reviewer",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "if self.disarm_settings_candidate()",
+    "what": "The condition is inverted, because `disarm_settings_candidate` returns true when it cancelled an armed candidate; movement now happens only right after a cancel, and an unarmed prompt never moves the cursor (it needs `!self.disarm_settings_candidate()`)."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"if self.disarm_settings_candidate()\", \"what\": \"The condition is inverted, because `disarm_settings_candidate` returns true when it cancelled an armed candidate; movement now happens only right after a cancel, and an unarmed prompt never moves the cursor (it needs `!self.disarm_settings_candidate()`).\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21097,
+  "cache_read_input_tokens": 11892,
+  "output_tokens": 586,
+  "output_tokens_details": {
+   "thinking_tokens": 454
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21097,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 586,
+    "cache_read_input_tokens": 11892,
+    "cache_creation_input_tokens": 21097,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21097
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0926304,
+ "duration_ms": 24604,
+ "wall_s": 26.258620262145996,
+ "weighted_units": 46315.2,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "if self.disarm_settings_candidate()",
+  "what": "The condition is inverted, because `disarm_settings_candidate` returns true when it cancelled an armed candidate; movement now happens only right after a cancel, and an unarmed prompt never moves the cursor (it needs `!self.disarm_settings_candidate()`)."
+ }
+}

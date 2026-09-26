@@ -1,0 +1,55 @@
+{
+ "id": "t19",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 189-198 and 234-243 are verbatim identical, including the comment. The suggested `&mut self` method would recreate the borrow problem the comment warns about (it would lock all of `self`, making `self.mode` at 208/216/249 unreachable), so the helper must take `&mut Body` (e.g. `fn config_pane_direct(body: &mut Body) -> Option<&mut ConfigPane>`) rather than `&mut self`; the duplication itself is real."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 189-198 and 234-243 are verbatim identical, including the comment. The suggested `&mut self` method would recreate the borrow problem the comment warns about (it would lock all of `self`, making `self.mode` at 208/216/249 unreachable), so the helper must take `&mut Body` (e.g. `fn config_pane_direct(body: &mut Body) -> Option<&mut ConfigPane>`) rather than `&mut self`; the duplication itself is real.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21410,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 912,
+  "output_tokens_details": {
+   "thinking_tokens": 736
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21410,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 912,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 21410,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21410
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.477232,
+ "duration_ms": 13285,
+ "wall_s": 15.044235944747925,
+ "weighted_units": 48746.8,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

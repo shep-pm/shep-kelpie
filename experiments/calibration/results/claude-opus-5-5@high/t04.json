@@ -1,0 +1,55 @@
+{
+ "id": "t04",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 284-285 and 289-290 contain the same match arms, `RowKey::Sheep(id) => self.flock.get(id), _ => None`, applied to `pane.sheep()` and `pane.feed_sheep()`. The duplication is real as described, though at two three-line copies a MEDIUM severity overstates it."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 284-285 and 289-290 contain the same match arms, `RowKey::Sheep(id) => self.flock.get(id), _ => None`, applied to `pane.sheep()` and `pane.feed_sheep()`. The duplication is real as described, though at two three-line copies a MEDIUM severity overstates it.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20711,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 349,
+  "output_tokens_details": {
+   "thinking_tokens": 223
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20711,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 349,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 20711,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20711
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.17503380000000002,
+ "duration_ms": 4602,
+ "wall_s": 8.037938833236694,
+ "weighted_units": 44347.9,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,210 @@
+diff --git a/crates/shep-cli/src/dog/bark/mod.rs b/crates/shep-cli/src/dog/bark/mod.rs
+index 66fa7cb1..2adcb331 100644
+--- a/crates/shep-cli/src/dog/bark/mod.rs
++++ b/crates/shep-cli/src/dog/bark/mod.rs
+@@ -116,47 +116,54 @@ pub trait EventSource: Send {
+ ///
+ /// Two outcomes rather than one, so a re-subscribe reports what the first
+ /// subscription would have. `run_bark` exits `ExitCode::from(&err)` when
+ /// the shepherd refuses the opening `Subscribe`; without this a refusal
+ /// after a handover would exit `DaemonUnreachable` instead, naming a
+ /// shepherd that is running and answering.
+ #[derive(Debug)]
+ #[must_use = "which of the two it was decides how the dog exits"]
+ pub enum Resubscribe {
+     /// No shepherd answered inside the dog's budget, or one refused this
+     /// dog's protocol version at the handshake.
+     Lost(LinkLost),
+-    /// A shepherd answered and refused the subscription itself, so waiting
+-    /// cannot help. Carried whole, since `RequestError` already decides an
+-    /// exit code and flattening it would lose that.
+-    Refused(RequestError),
++    /// The `Subscribe` reached a shepherd and did not succeed, and waiting
++    /// cannot change that: a refusal, a mangled frame, or a reply this
++    /// build cannot decode. Carried whole, since `RequestError` already
++    /// decides an exit code and flattening it would lose that.
++    ///
++    /// Named for the request rather than for a refusal, matching
++    /// [`super::DogRunError::Request`]. Only `RequestError::Rpc` is a
++    /// shepherd saying no; `Wire` and `Undecodable` are the transport
++    /// failing, and calling those a refusal points an operator at the
++    /// shepherd's configuration when the fault is on the wire.
++    Request(RequestError),
+ }
+ 
+ impl fmt::Display for Resubscribe {
+     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+         match self {
+             Self::Lost(lost) => lost.fmt(f),
+-            Self::Refused(err) => write!(f, "the shepherd refused a subscription: {err}"),
++            Self::Request(err) => write!(f, "the subscription request failed: {err}"),
+         }
+     }
+ }
+ 
+ impl core::error::Error for Resubscribe {
+     /// Both arms wrap an error rather than describing one, so a structured
+     /// logger walking the chain reaches the connection or RPC failure
+     /// underneath instead of stopping here.
+     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+         match self {
+             Self::Lost(lost) => Some(lost),
+-            Self::Refused(err) => Some(err),
++            Self::Request(err) => Some(err),
+         }
+     }
+ }
+ 
+ /// What bark reads the flock through, so the loop's poll is drivable
+ /// without a socket.
+ ///
+ /// `Sync`, not just `Send`: [`run_loop`]'s future holds `&F` across the
+ /// `.await` in [`reconcile`], so both its lag arm and its interval arm
+ /// poll the same source without moving it.
+ pub trait FlockSource: Send + Sync {
+     /// The flock as it stands.
+@@ -306,25 +313,25 @@ pub fn run_loop<E: EventSource, F: FlockSource, C: ConfigSource>(
+                             Ok(()) => {
+                                 // Reconcile whichever daemon answered.
+                                 // Frames sent with no subscription are
+                                 // gone, and the verdict decides nothing
+                                 // here: bark debounces on a sheep's name,
+                                 // never on an id the shepherd minted.
+                                 reconcile(&flock, &mut rules, &delivery).await;
+                             }
+                             Err(failed) => {
+                                 eprintln!("shep dog bark: {failed}");
+                                 break match &failed {
+                                     Resubscribe::Lost(lost) => super::exit_for(lost),
+-                                    Resubscribe::Refused(err) => ExitCode::from(err),
++                                    Resubscribe::Request(err) => ExitCode::from(err),
+                                 };
+                             }
+                         },
+                         // Matched on the variant rather than on the dog's
+                         // name: the subscription already narrows this to
+                         // bark's own topic, `config.dog.<name>`.
+                         Some(Ok(BusEvent::DogConfigChanged { .. })) => {
+                             if let Some((next, next_rules)) = reloaded_config(&config_source).await {
+                                 // In place, never a restart: sinks and
+                                 // rules are pure data with no OS resource
+                                 // to rebind.
+                                 delivery.sinks = Arc::new(next.sinks.clone());
+@@ -621,25 +628,25 @@ mod tests {
+                 Err(broadcast::error::RecvError::Lagged(count)) => Some(Err(count)),
+                 Err(broadcast::error::RecvError::Closed) => {
+                     self.current = None;
+                     None
+                 }
+             }
+         }
+ 
+         async fn resubscribe(&mut self) -> Result<(), Resubscribe> {
+             self.resubscribes
+                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+             if let Some(code) = self.refuses {
+-                return Err(Resubscribe::Refused(RequestError::Rpc(RpcError {
++                return Err(Resubscribe::Request(RequestError::Rpc(RpcError {
+                     code,
+                     message: "this shepherd does not serve that topic".into(),
+                     daemon_version: None,
+                 })));
+             }
+             match self.later.pop_front() {
+                 Some(stream) => {
+                     self.current = Some(stream);
+                     Ok(())
+                 }
+                 None => Err(Resubscribe::Lost(self.when_gone.clone())),
+             }
+diff --git a/crates/shep-cli/src/dog/mod.rs b/crates/shep-cli/src/dog/mod.rs
+index f86a6406..56a5602e 100644
+--- a/crates/shep-cli/src/dog/mod.rs
++++ b/crates/shep-cli/src/dog/mod.rs
+@@ -431,28 +431,28 @@ impl bark::EventSource for ClientEvents {
+             }
+             let asked =
+                 tokio::time::timeout(left, self.shepherd.client.subscribe(self.topics.clone()));
+             match asked.await {
+                 Ok(Ok(stream)) => {
+                     self.stream = stream;
+                     return Ok(());
+                 }
+                 // The generation it was issued on had already gone. The
+                 // supervisor is about to say so, and the budget decides
+                 // whether to keep asking.
+                 Ok(Err(RequestError::Closed)) => {}
+-                // A shepherd answered and refused. Waiting cannot change
+-                // its answer, and the error already decides an exit code
+-                // that the opening `Subscribe` would have used.
+-                Ok(Err(other)) => return Err(bark::Resubscribe::Refused(other)),
++                // The request reached a shepherd and did not succeed.
++                // Waiting cannot change that, and the error already decides
++                // the exit code the opening `Subscribe` would have used.
++                Ok(Err(other)) => return Err(bark::Resubscribe::Request(other)),
+                 Err(_elapsed) => {
+                     return Err(bark::Resubscribe::Lost(LinkLost::Budget {
+                         waited: started.elapsed(),
+                     }));
+                 }
+             }
+             // The supervisor reports a connection's death a moment after
+             // the socket does, so a bare retry would spin against a link
+             // still reading as connected. One rung of the supervisor's own
+             // ladder outlasts that and is short against the handover.
+             tokio::time::sleep(RECONNECT_MIN_DELAY.min(remaining(started.elapsed()))).await;
+         }
+@@ -620,25 +620,25 @@ mod tests {
+             .collect();
+         assert_eq!(
+             asked,
+             vec![Some("bark".to_owned()), Some("bark".to_owned())],
+             "the second handshake must name the dog too, or a refusal is unactionable"
+         );
+     }
+ 
+     /// fails if the adapter treats a shepherd that answers and refuses as
+     /// one that never answered.
+     ///
+     /// The bark loop's own test drives a fake that hands it a
+-    /// `Resubscribe::Refused` ready-made. This is the other half: the
++    /// `Resubscribe::Request` ready-made. This is the other half: the
+     /// adapter producing one from a real shepherd that accepts the
+     /// handshake and then rejects the `Subscribe`. Conflating it with
+     /// `Closed` would retry until the budget was gone and then report an
+     /// unreachable shepherd for one that answered.
+     #[tokio::test]
+     async fn the_bark_adapter_keeps_a_refusal_rather_than_retrying_it() {
+         use bark::EventSource as _;
+         use shep_core::protocol::{RpcError, RpcErrorCode};
+ 
+         let dir = tempfile::tempdir().unwrap();
+         let socket = shep_client::testing::control_address(dir.path());
+         let shepherds = fake_daemon_across_handovers(
+@@ -669,25 +669,25 @@ mod tests {
+             code: RpcErrorCode::Unsupported,
+             message: "this shepherd does not serve that topic".into(),
+             daemon_version: None,
+         });
+         shepherds.cut().await;
+ 
+         let started = tokio::time::Instant::now();
+         let refused = tokio::time::timeout(SHEPHERD_RETURN_BUDGET * 2, events.resubscribe())
+             .await
+             .expect("a refusal must end the wait, not hang it");
+         let waited = started.elapsed();
+ 
+-        let Err(bark::Resubscribe::Refused(err)) = refused else {
++        let Err(bark::Resubscribe::Request(err)) = refused else {
+             panic!("expected a kept refusal, got {refused:?}");
+         };
+         assert!(
+             matches!(&err, RequestError::Rpc(rpc) if rpc.code == RpcErrorCode::Unsupported),
+             "the shepherd's own error must survive: {err:?}"
+         );
+         assert!(
+             waited < SHEPHERD_RETURN_BUDGET,
+             "spent {waited:?} of the {SHEPHERD_RETURN_BUDGET:?} budget, so it retried a \
+              refusal instead of keeping it"
+         );
+     }

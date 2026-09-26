@@ -1,0 +1,31 @@
+{
+ "id": "f05",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The code contains large, redundant lists of KeyPress variants mapping to Effect::None in both secrets_keys.rs (lines 134-162) and dialog_keys.rs (lines 22-62), creating the maintenance burden described."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The code contains large, redundant lists of KeyPress variants mapping to Effect::None in both secrets_keys.rs (lines 134-162) and dialog_keys.rs (lines 22-62), creating the maintenance burden described.\"}",
+ "thinking_chars": 6081,
+ "done_reason": "stop",
+ "prompt_tokens": 2268,
+ "eval_tokens": 1643,
+ "load_s": 0.0049601,
+ "prompt_s": 0.955686,
+ "eval_s": 41.606245,
+ "wall_s": 42.933403968811035,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

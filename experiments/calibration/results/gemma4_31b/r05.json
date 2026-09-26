@@ -1,0 +1,40 @@
+{
+ "id": "r05",
+ "set": "reviewer",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "(stages + slack).min(START_DEADLINE)",
+    "what": "The use of `.min()` instead of `.max()` reverses the logic, capping the deadline at `START_DEADLINE` rather than ensuring it is at least `START_DEADLINE` as intended."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"(stages + slack).min(START_DEADLINE)\", \"what\": \"The use of `.min()` instead of `.max()` reverses the logic, capping the deadline at `START_DEADLINE` rather than ensuring it is at least `START_DEADLINE` as intended.\"}]}",
+ "thinking_chars": 3381,
+ "done_reason": "stop",
+ "prompt_tokens": 2744,
+ "eval_tokens": 1095,
+ "load_s": 0.0051883,
+ "prompt_s": 1.130498,
+ "eval_s": 27.808553,
+ "wall_s": 29.281641960144043,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "(stages + slack).min(START_DEADLINE)",
+  "what": "The use of `.min()` instead of `.max()` reverses the logic, capping the deadline at `START_DEADLINE` rather than ensuring it is at least `START_DEADLINE` as intended."
+ }
+}

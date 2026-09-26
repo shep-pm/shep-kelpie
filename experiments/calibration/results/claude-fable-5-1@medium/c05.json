@@ -1,0 +1,60 @@
+{
+ "id": "c05",
+ "set": "reviewer",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "risk",
+    "quote": "        // An overlay open when this reply landed would otherwise survive",
+    "what": "`open_or_refresh_config_pane` is also the refresh path (it carries view, env cursor and list state from an existing pane), so a re-read reply landing while the operator has the help overlay open over an already-open config pane now silently closes that overlay even though the body did not change kind; the unconditional clear should be limited to the case where the previous body was not a `ConfigPane`."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"risk\", \"quote\": \"        // An overlay open when this reply landed would otherwise survive\", \"what\": \"`open_or_refresh_config_pane` is also the refresh path (it carries view, env cursor and list state from an existing pane), so a re-read reply landing while the operator has the help overlay open over an already-open config pane now silently closes that overlay even though the body did not change kind; the unconditional clear should be limited to the case where the previous body was not a `ConfigPane`.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 24202,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 1440,
+  "output_tokens_details": {
+   "thinking_tokens": 1271
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 24202,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1440,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 24202,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 24202
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.5594720000000001,
+ "duration_ms": 19679,
+ "wall_s": 21.252319812774658,
+ "weighted_units": 56970.8,
+ "stop_reason": "end_turn",
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 0,
+ "matched": null
+}

@@ -1,0 +1,294 @@
+diff --git a/crates/shep-cli/src/lookout/view/mod.rs b/crates/shep-cli/src/lookout/view/mod.rs
+index 1d783efd..be82714c 100644
+--- a/crates/shep-cli/src/lookout/view/mod.rs
++++ b/crates/shep-cli/src/lookout/view/mod.rs
+@@ -190,48 +190,78 @@ pub fn body_rows(area: Rect) -> u16 {
+ /// Rows `draw` spends between the top of the frame and a full-screen pane's
+ /// body: the title band, plus a blank row under it on a roomy terminal
+ /// ([`ROOMY_HEIGHT`]).
+ ///
+ /// The one function both `draw` and [`body_rows`] call for this, so the two
+ /// can't drift the way they once did: a row added here reaches both without
+ /// a second edit.
+ #[must_use]
+ fn title_gap_rows(height: u16) -> u16 {
+     1 + u16::from(height >= ROOMY_HEIGHT)
+ }
+ 
++/// The refusal a terminal under [`MIN_TERM_WIDTH`] or [`MIN_HEIGHT`] gets
++/// instead of a body.
++///
++/// Two short lines, not one long sentence: `Buffer::set_line` truncates at
++/// `max_width` in silence, and this exists for terminals narrower than
++/// `MIN_TERM_WIDTH`.
++fn draw_too_small(frame: &mut Frame<'_>, area: Rect, width: u16, height: u16) {
++    if width == 0 || height == 0 {
++        return;
++    }
++    let first = Line::from(Span::raw("too small"));
++    frame.buffer_mut().set_line(area.x, area.y, &first, width);
++    if height >= 2 {
++        let second = Line::from(Span::raw(format!("need {MIN_TERM_WIDTH}x{MIN_HEIGHT}")));
++        frame
++            .buffer_mut()
++            .set_line(area.x, area.y + 1, &second, width);
++    }
++}
++
+ /// Real caller: `super::mod`'s `run_ui`, once per frame.
++///
++/// Three steps, in this shape so the overlay's own call is structural. It
++/// used to sit at every one of [`draw_body`]'s six exits, identically, and a
++/// seventh `Body` variant would have skipped it in silence: the compiler has
++/// nothing to say about a call a new match arm forgets to make. One call
++/// here, after whichever body drew, is a guarantee instead of a convention.
++/// `the_overlay_draws_over_every_body` stays as the net, but it is no longer
++/// the only thing holding this.
++///
++/// The refusal is the one path that does NOT get an overlay: a terminal too
++/// narrow for a body is too narrow for a box over it, and the keymap's own
++/// `Shed::Refuse` answers a short terminal rather than a tiny one.
+ pub fn draw(app: &App, frame: &mut Frame<'_>) {
+     let area = frame.area();
+     let (width, height) = (area.width, area.height);
+-    let palette = app.palette();
+ 
+     if width < MIN_TERM_WIDTH || height < MIN_HEIGHT {
+-        // Two short lines, not one long sentence: `Buffer::set_line`
+-        // truncates at `max_width` in silence, and this branch exists for
+-        // terminals narrower than `MIN_TERM_WIDTH`.
+-        if width == 0 || height == 0 {
+-            return;
+-        }
+-        let first = Line::from(Span::raw("too small"));
+-        frame.buffer_mut().set_line(area.x, area.y, &first, width);
+-        if height >= 2 {
+-            let second = Line::from(Span::raw(format!("need {MIN_TERM_WIDTH}x{MIN_HEIGHT}")));
+-            frame
+-                .buffer_mut()
+-                .set_line(area.x, area.y + 1, &second, width);
+-        }
++        draw_too_small(frame, area, width, height);
+         return;
+     }
+ 
++    draw_body(app, frame);
++    draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());
++}
++
++/// Whichever of the six [`Body`] variants is up, plus the title band and
++/// the status bar around it. Never the keymap overlay: [`draw`] draws that
++/// once, over whatever this left on the screen.
++fn draw_body(app: &App, frame: &mut Frame<'_>) {
++    let area = frame.area();
++    let (width, height) = (area.width, area.height);
++    let palette = app.palette();
++
+     let panes = panes_for(height);
+     let mut y = area.y;
+     // The status bar's own row. Held once, up front: the bottom stack below
+     // is laid out UPWARD from it, so nothing has to know the flock table's
+     // length before deciding where the table ends.
+     let bottom = area.y + height - 1;
+     let buffer = frame.buffer_mut();
+ 
+     buffer.set_line(area.x, y, &title_band(app, width), width);
+     // The sheep pane owns the whole body between the title and the status
+     // bar too, the same as the four below, but row 1 is its own identity
+     // band rather than blank chrome, so it is checked here, ahead of the
+@@ -240,95 +270,90 @@ pub fn draw(app: &App, frame: &mut Frame<'_>) {
+     // own row, `y + 1`, rather than `title_gap_rows`, which is exactly the
+     // gap it is skipping.
+     if let Body::Sheep(pane) = app.body() {
+         let top = y + 1;
+         let body = Rect {
+             x: area.x,
+             y: top,
+             width,
+             height: bottom.saturating_sub(top),
+         };
+         sheep::draw(app, pane, body, buffer);
+         buffer.set_line(area.x, bottom, &status::status_line(app, width), width);
+-        draw_keymap_overlay(app, area, buffer, palette);
+         return;
+     }
+ 
+     // `title_gap_rows` also covers the blank row under the title on a
+     // roomy terminal; the rule further down spends a second one of its
+     // own, both from the design's own row allocation. One function, read
+     // by `body_rows` too, so the two cannot drift.
+     y += title_gap_rows(height);
+     let roomy = height >= ROOMY_HEIGHT;
+     // Read four times below: the column header's own wording, and the three
+     // panes the bottom stack chooses between.
+     let frozen = matches!(app.link(), Link::Lost { .. });
+ 
+     // The settings screen and the config pane each own the whole body
+     // between the title and the status bar: a swap, not an overlay, so
+     // nothing below draws while one is up. One `match` on `App::body`
+     // rather than two sequential `if let`s, since the two can never both
+     // be open at once. Still true of these four bodies; two overlays draw
+     // over a body rather than swapping for it. The config pane's own close
+     // dialog came first, inside `pane::draw_pane` rather than here, over
+     // whichever body that pane already is. The keymap overlay came second
+-    // and is general: `draw_keymap_overlay` runs at every one of `draw`'s
+-    // exits, over whichever of the six bodies drew.
++    // and is general: `draw` draws it after this function returns, over
++    // whichever of the six bodies drew, so nothing here has to remember.
+     match app.body() {
+         Body::ConfigPane(pane) => {
+             let body = Rect {
+                 x: area.x,
+                 y,
+                 width,
+                 height: body_rows(area),
+             };
+             pane::draw_pane(app, pane, body, buffer);
+             buffer.set_line(area.x, bottom, &status::status_line(app, width), width);
+-            draw_keymap_overlay(app, area, buffer, palette);
+             return;
+         }
+         Body::Settings(settings) => {
+             let body = Rect {
+                 x: area.x,
+                 y,
+                 width,
+                 height: body_rows(area),
+             };
+             settings::draw_settings(app, settings, body, buffer);
+             buffer.set_line(area.x, bottom, &status::status_line(app, width), width);
+-            draw_keymap_overlay(app, area, buffer, palette);
+             return;
+         }
+         Body::Bleats(pane) => {
+             let body = Rect {
+                 x: area.x,
+                 y,
+                 width,
+                 height: body_rows(area),
+             };
+             bleats_full::draw(app, pane, body, buffer);
+             buffer.set_line(area.x, bottom, &status::status_line(app, width), width);
+-            draw_keymap_overlay(app, area, buffer, palette);
+             return;
+         }
+         Body::Secrets(pane) => {
+             let body = Rect {
+                 x: area.x,
+                 y,
+                 width,
+                 height: body_rows(area),
+             };
+             secrets::draw(app, pane, body, buffer);
+             buffer.set_line(area.x, bottom, &status::status_line(app, width), width);
+-            draw_keymap_overlay(app, area, buffer, palette);
+             return;
+         }
+         Body::Sheep(_) => unreachable!("handled above, ahead of the roomy blank row"),
+         Body::FlockTable => {}
+     }
+ 
+     if let Some(banner) = status::banner_line(app, width) {
+         buffer.set_line(area.x, y, &banner, width);
+         y += 1;
+     }
+ 
+     if panes.host {
+@@ -488,36 +513,34 @@ pub fn draw(app: &App, frame: &mut Frame<'_>) {
+             area.x,
+             top,
+             &status::rule_line(palette.line(), width),
+             width,
+         );
+         for (offset, line) in link_panel::panel_lines(app, width).iter().enumerate() {
+             let offset = u16::try_from(offset).unwrap_or(0);
+             buffer.set_line(area.x, top + 1 + offset, line, width);
+         }
+     }
+ 
+     buffer.set_line(area.x, bottom, &status::status_line(app, width), width);
+-    draw_keymap_overlay(app, area, buffer, palette);
+ }
+ 
+ /// Last, over everything: the overlay covers whatever body is showing,
+ /// unlike 1g's dialog, which only ever covers the config pane and so draws
+ /// from inside `view::pane::draw_pane`.
+ ///
+ /// [`App::keymap_open`]'s own doc says the overlay is "reached from every
+-/// body's own `Help` arm", so this call sits at every one of `draw`'s exit
+-/// points rather than only the final one: `Body::Sheep`, `ConfigPane`,
+-/// `Settings`, `Bleats` and `Secrets` each return before reaching the
+-/// bottom of this function, and the overlay has to cover them too.
++/// body's own `Help` arm", and [`draw_body`] returns early for five of the
++/// six, so this used to be called at each of its exits. [`draw`] calls it
++/// once now, after `draw_body` has returned from whichever one it took.
+ fn draw_keymap_overlay(app: &App, area: Rect, buffer: &mut Buffer, palette: Palette) {
+     if app.keymap_open() {
+         overlay::mute(buffer, area, palette);
+         keymap::draw(app, area, buffer);
+     }
+ }
+ 
+ /// The title row: a full-width reverse-video band naming the mode.
+ ///
+ /// Meadow while [`App::link`] is live, bark once it is [`Link::Lost`] — the
+ /// only two arms this pane needs; the editing and secrets bands belong to
+ /// panes this plan does not build. What this is, where it points, and how
+@@ -732,24 +755,57 @@ mod tests {
+         assert!(
+             cramped.lines().nth(1).unwrap().trim_end() == "need 33x6",
+             "the dimensions were cut off in the terminal that needed them"
+         );
+ 
+         // One row to write into: the second line has nowhere to go, and the
+         // draw must not reach past the buffer for it.
+         let single = draw_to(&app, 20, 1);
+         assert_eq!(single.lines().next().unwrap().trim_end(), "too small");
+         assert_eq!(single.lines().count(), 1);
+     }
+ 
++    /// The refusal is the one screen the keymap overlay does not cover, and
++    /// `draw`'s own doc says so, so something has to check it.
++    ///
++    /// It reads as free, since `draw` returns before the overlay call. It is
++    /// not: that early return is the only thing holding it, and the whole
++    /// point of moving the overlay call out of the six body exits was that
++    /// a call made in one place is easy to move to another. Drawing a box
++    /// over `too small` would bury the one sentence naming the fix.
++    #[test]
++    fn the_refusal_gets_no_keymap_overlay_over_it() {
++        let mut app = App::new(
++            Palette::detect(None, None, None),
++            Control::ReadOnly,
++            "/home/ada/.shep".to_string(),
++            Instant::now(),
++        );
++        let _ = app.update(Msg::Key(KeyPress::Help));
++        assert!(app.keymap_open(), "the overlay did not open");
++
++        // Roomy enough for the box at 130 columns, three rows short of a
++        // body: `MIN_HEIGHT` is what refuses here, not the width, so the
++        // overlay would have had the room it needs.
++        let frame = draw_to(&app, 130, 3);
++        assert_eq!(frame.lines().next().unwrap().trim_end(), "too small");
++        for group in crate::lookout::keymap::Group::DRAWN {
++            assert!(
++                !frame.contains(group.heading()),
++                "the overlay drew {} over the refusal: {frame}",
++                group.heading()
++            );
++        }
++    }
++
+     /// A bare empty screen does not tell an operator whether the shepherd
+     /// has nothing to run or the dashboard is broken.
+     #[test]
+     fn an_empty_flock_still_prints_the_header_and_says_it_is_empty() {
+         let app = App::new(
+             Palette::detect(None, None, None),
+             Control::ReadOnly,
+             "/home/ada/.shep".to_string(),
+             Instant::now(),
+         );
+         let frame = draw_to(&app, 100, 12);
+         assert!(frame.contains("STATUS"));

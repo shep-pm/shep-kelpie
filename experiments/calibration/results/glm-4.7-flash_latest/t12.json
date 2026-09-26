@@ -1,0 +1,31 @@
+{
+ "id": "t12",
+ "set": "checker",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The code confirms the reviewer's observation: the match arms for ConfigPane, Settings, Bleats, and Secrets (lines 122-185) and Sheep (lines 83-99) all follow the identical sequence of defining a Rect, calling a specific draw function, drawing the status line, and returning, differing only in the Rect calculation for Sheep."
+ },
+ "content": "{\n  \"verdict\": \"holds\",\n  \"reason\": \"The code confirms the reviewer's observation: the match arms for ConfigPane, Settings, Bleats, and Secrets (lines 122-185) and Sheep (lines 83-99) all follow the identical sequence of defining a Rect, calling a specific draw function, drawing the status line, and returning, differing only in the Rect calculation for Sheep.\"\n}",
+ "thinking_chars": 5734,
+ "done_reason": "stop",
+ "prompt_tokens": 1816,
+ "eval_tokens": 1577,
+ "load_s": 0.0037191,
+ "prompt_s": 0.287574,
+ "eval_s": 10.398028,
+ "wall_s": 10.765231132507324,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

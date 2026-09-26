@@ -1,0 +1,31 @@
+{
+ "id": "f05",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "unsure",
+  "reason": "The match statements in both files are exhaustive (no wildcard arm), so a new KeyPress variant would not silently fall through but would require a one\u2011line edit in each arm list (see lines\u202f131\u2011162 in secrets_keys.rs and 22\u201148 in dialog_keys.rs)."
+ },
+ "content": "{\"verdict\":\"unsure\",\"reason\":\"The match statements in both files are exhaustive (no wildcard arm), so a new KeyPress variant would not silently fall through but would require a one\u2011line edit in each arm list (see lines\u202f131\u2011162 in secrets_keys.rs and 22\u201148 in dialog_keys.rs).\"}",
+ "thinking_chars": 4794,
+ "done_reason": "stop",
+ "prompt_tokens": 2142,
+ "eval_tokens": 1108,
+ "load_s": 0.0024305,
+ "prompt_s": 0.156655,
+ "eval_s": 6.184739,
+ "wall_s": 6.477056980133057,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "unsure",
+ "correct": false
+}

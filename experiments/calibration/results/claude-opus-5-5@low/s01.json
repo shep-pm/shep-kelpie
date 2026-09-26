@@ -1,0 +1,55 @@
+{
+ "id": "s01",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The Allowed arm already includes `y copy` on line 102 (\"\\u{21b5} set a value   D delete   y copy   q quit\"), so the key is listed for operators with write access too."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The Allowed arm already includes `y copy` on line 102 (\\\"\\\\u{21b5} set a value   D delete   y copy   q quit\\\"), so the key is listed for operators with write access too.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20486,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 81,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20486,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 81,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 20486,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20486
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.16787380000000002,
+ "duration_ms": 2121,
+ "wall_s": 6.904677152633667,
+ "weighted_units": 42557.9,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

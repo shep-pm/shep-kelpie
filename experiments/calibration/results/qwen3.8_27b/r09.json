@@ -1,0 +1,33 @@
+{
+ "id": "r09",
+ "set": "reviewer",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "    (start - tail_window_start(start, body_rows - 1, cost)).max(1)",
+    "what": "The old loop admits lines whose cumulative cost is at most `body_rows`, but the replacement passes `body_rows - 1` as the capacity to `tail_window_start`, making every backward page one unit of cost smaller than before."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"    (start - tail_window_start(start, body_rows - 1, cost)).max(1)\", \"what\": \"The old loop admits lines whose cumulative cost is at most `body_rows`, but the replacement passes `body_rows - 1` as the capacity to `tail_window_start`, making every backward page one unit of cost smaller than before.\"}]}",
+ "thinking_chars": 9151,
+ "done_reason": "stop",
+ "prompt_tokens": 700,
+ "eval_tokens": 2436,
+ "load_s": 0.0015967,
+ "prompt_s": 0.356937,
+ "eval_s": 26.553013,
+ "wall_s": 27.073725938796997,
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "    (start - tail_window_start(start, body_rows - 1, cost)).max(1)",
+  "what": "The old loop admits lines whose cumulative cost is at most `body_rows`, but the replacement passes `body_rows - 1` as the capacity to `tail_window_start`, making every backward page one unit of cost smaller than before."
+ }
+}

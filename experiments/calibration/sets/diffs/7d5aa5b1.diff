@@ -1,0 +1,249 @@
+diff --git a/crates/shep-cli/src/lookout/app.rs b/crates/shep-cli/src/lookout/app.rs
+index e14d2f46..76d53d28 100644
+--- a/crates/shep-cli/src/lookout/app.rs
++++ b/crates/shep-cli/src/lookout/app.rs
+@@ -3173,24 +3173,28 @@ impl App {
+             pane.adopt_view(carried);
+         }
+         if let Some(env_key) = carried_env_key {
+             pane.adopt_env_cursor(env_key.as_deref());
+         }
+         if let Some((key, carried)) = carried_list {
+             pane.adopt_list_view(&key, carried);
+         }
+         self.body = Body::ConfigPane(pane);
+         // The rebuilt pane carries no editor, so the keyboard must not
+         // still think one is open.
+         self.release_text_mode_if_unowned();
++        // An overlay open when this reply landed would otherwise survive
++        // the body it was drawn over, and every key from here goes to
++        // `on_keymap_key` instead of the pane the operator asked for.
++        self.keymap_open = false;
+     }
+ 
+     fn on_event(&mut self, event: BusEvent) -> Effect {
+         match event {
+             BusEvent::Process { event, info, .. } => {
+                 if matches!(event, ProcessEventKind::Delete) {
+                     let previous = self.selected_index();
+                     self.flock.remove(&info.id);
+                     self.forget_missing_target();
+                     return if self.reseat(previous) {
+                         Effect::RefreshSelected
+                     } else {
+@@ -3268,24 +3272,28 @@ impl App {
+                     toml.as_str().to_owned(),
+                 );
+                 pane.adopt_edits(carried_edits);
+                 if let Some(carried) = carried {
+                     pane.adopt_view(carried);
+                 }
+                 // The settings screen is what a dog pane opens over, and this
+                 // one assignment is what closes it: `Body` holds one
+                 // variant, so the pane replaces it once there is something
+                 // to look at.
+                 self.body = Body::ConfigPane(pane);
+                 self.release_text_mode_if_unowned();
++                // Same as `Self::open_or_refresh_config_pane`: an overlay
++                // open when this reply landed must not survive the body
++                // change under it.
++                self.keymap_open = false;
+             }
+             Ok(_unrecognised) => {
+                 self.notice = Some(Notice {
+                     text: format!(
+                         "{name}: the shepherd answered something this lookout does not understand"
+                     ),
+                     grave: true,
+                 });
+             }
+             Err(RequestError::Rpc(err)) => {
+                 self.notice = Some(Notice {
+                     text: format!("{name}: {}", err.message),
+@@ -12224,26 +12232,28 @@ mod tests {
+         let mut updated = fixtures::settings_snapshot();
+         updated.max_cron_sleep = ScalarView {
+             value: "30s".to_string(),
+             source: StyleSource::Default,
+         };
+         let _ = app.update(Msg::Settings {
+             result: Ok(updated.clone()),
+         });
+ 
+         assert_eq!(app.settings().unwrap().snapshot(), &updated);
+     }
+ 
+-    /// A refused write must not reopen the text editor underneath the
+-    /// overlay, because `on_key` checks text mode ahead of `keymap_open`.
++    /// A refused write reopens the text editor, and the overlay must not
++    /// survive to hide it: `on_key` checks text mode ahead of
++    /// `keymap_open`, so a still-open overlay would swallow every key
++    /// meant for the reopened editor.
+     ///
+     /// The ordering in `on_key` is deliberate and documented: `h` typed into
+     /// an open filter box is a letter, so the overlay can never be raised
+     /// from inside text mode. It says nothing about the other direction, and
+     /// `Msg::SettingWritten`'s `Err` arm restores `InputMode::Text` from a
+     /// message rather than a keypress.
+     ///
+     /// Reachable because `is_armed` covers `Pending::Armed` and
+     /// `Pending::DogArmed` and not `Pending::Sent`, so `h` with a write in
+     /// flight opens the overlay instead of cancelling anything. The reply
+     /// then lands, and the operator has a box on screen while every key goes
+     /// into a socket path they cannot see.
+@@ -13156,24 +13166,54 @@ mod tests {
+             sent: Sent::SheepConfig {
+                 name: "web".to_string(),
+             },
+             result: Ok(Response::SheepConfig(Box::new(
+                 fixtures::sheep_config_view(),
+             ))),
+         });
+         let pane = app.config_pane().expect("the reply opens the pane");
+         assert_eq!(pane.target().name(), "web");
+         assert_eq!(pane.fields().len(), 42);
+     }
+ 
++    /// `h` before the reply arrives raises the overlay over the dashboard;
++    /// the reply then replaces `self.body` with the pane, which must close
++    /// the overlay too, or every key past this point goes to
++    /// `on_keymap_key` instead of the pane the operator asked for.
++    #[test]
++    fn a_config_reply_that_lands_with_the_overlay_up_closes_it() {
++        let mut app =
++            fixtures::with_selection(ProcessInfo::builder(9, "web", ProcStatus::Online).build());
++        let _ = app.update(Msg::Key(KeyPress::Edit));
++        let _ = app.update(Msg::Key(KeyPress::Help));
++        assert!(app.keymap_open(), "the overlay did not open");
++
++        app.update(Msg::Replied {
++            sent: Sent::SheepConfig {
++                name: "web".to_string(),
++            },
++            result: Ok(Response::SheepConfig(Box::new(
++                fixtures::sheep_config_view(),
++            ))),
++        });
++        assert!(
++            app.config_pane().is_some(),
++            "the reply must still open the pane"
++        );
++        assert!(
++            !app.keymap_open(),
++            "the overlay survived a body change under it"
++        );
++    }
++
+     /// `s` then `e` fire two reads; if the settings one lands first it opens
+     /// the settings screen, and the config-pane reply that follows replaces
+     /// it (`Body` cannot hold both at once). `Escape` from the config pane
+     /// must land on the dashboard, not resurrect the settings screen it
+     /// walked past on the way in — see the doc note on [`Body`] and on
+     /// [`App::close_pane`].
+     #[test]
+     fn escape_from_a_config_pane_that_outraced_a_settings_read_lands_on_the_dashboard() {
+         let mut app =
+             fixtures::with_selection(ProcessInfo::builder(9, "web", ProcStatus::Online).build());
+         let _ = app.update(Msg::Key(KeyPress::Settings));
+         let _ = app.update(Msg::Key(KeyPress::Edit));
+@@ -16357,24 +16397,58 @@ mod tests {
+                 toml: "bind = \"0.0.0.0:9615\"\n".to_string().into(),
+             }),
+         });
+         let pane = app.config_pane().expect("both halves are a pane");
+         assert_eq!(pane.target().name(), "metrics");
+         assert_eq!(pane.value("bind"), "0.0.0.0:9615");
+         assert!(
+             app.settings().is_none(),
+             "the settings screen closes once there is something to look at"
+         );
+     }
+ 
++    /// Same property as `a_config_reply_that_lands_with_the_overlay_up_closes_it`,
++    /// on `on_dog_section`'s own body-replacing reply rather than
++    /// `open_or_refresh_config_pane`'s.
++    #[test]
++    fn a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it() {
++        let mut app = fixtures::app_in_settings_on_dog("metrics");
++        app.update(Msg::Key(KeyPress::Edit));
++        app.update(Msg::DogPane {
++            name: "metrics".to_string(),
++            adopted_path: None,
++            result: Ok(crate::dog::builtin_schema("metrics").expect("a built-in")),
++        });
++        assert!(app.config_pane().is_none(), "one half is not a pane yet");
++        let _ = app.update(Msg::Key(KeyPress::Help));
++        assert!(app.keymap_open(), "the overlay did not open");
++
++        app.update(Msg::Replied {
++            sent: Sent::DogSection {
++                name: "metrics".to_string(),
++            },
++            result: Ok(Response::DogSection {
++                toml: "bind = \"0.0.0.0:9615\"\n".to_string().into(),
++            }),
++        });
++        assert!(
++            app.config_pane().is_some(),
++            "the reply must still open the pane"
++        );
++        assert!(
++            !app.keymap_open(),
++            "the overlay survived a body change under it"
++        );
++    }
++
+     /// The same property `config_target` buys for a sheep.
+     #[test]
+     fn a_section_for_a_dog_nobody_is_waiting_for_is_dropped() {
+         let mut app = fixtures::app_in_dog_pane();
+         app.update(Msg::Key(KeyPress::Escape));
+         assert!(app.config_pane().is_none());
+         app.update(Msg::Replied {
+             sent: Sent::DogSection {
+                 name: "bark".to_string(),
+             },
+             result: Ok(Response::DogSection {
+                 toml: fixtures::dog_section().into(),
+diff --git a/crates/shep-cli/src/lookout/frames.rs b/crates/shep-cli/src/lookout/frames.rs
+index 35b77f29..c4ad91e5 100644
+--- a/crates/shep-cli/src/lookout/frames.rs
++++ b/crates/shep-cli/src/lookout/frames.rs
+@@ -4085,30 +4085,31 @@ mod tests {
+     /// Writes `docs/lookout/frames.txt` and `docs/lookout/frames.ansi`.
+     ///
+     /// `#[ignore]`: writes into the repository, so it only runs on request.
+     ///
+     /// ```text
+     /// cargo test -p shep --lib --all-features -- --ignored write_the_gallery
+     /// ```
+     ///
+     /// A layout change cannot rot these files unnoticed: they render the
+     /// same `Scene::ALL` the pinned snapshots read, so the ordinary suite
+     /// reddens first and whoever fixes it comes back here.
+     ///
+-    /// **Adding a scene can.** Nothing reddens, because the committed files
+-    /// are simply missing the new frame and still carry the old count in
+-    /// their own preamble. That is what happened when the eight keymap
+-    /// scenes landed: both files said fifty scenes and held none of them.
+-    /// So run this in the same commit that adds a scene, the way the close
+-    /// dialog's own gallery commit did.
++    /// **Adding a scene without running this one is caught too, now.**
++    /// `the_committed_gallery_matches_what_the_generator_would_write`
++    /// diffs the committed files against fresh output, catching a scene
++    /// missing from both while their own preamble still carries the old
++    /// count. Run this anyway, in the same commit that adds a scene: a
++    /// missing regeneration failing there is a one-line fix, failing in
++    /// the other test means reading a full-file diff to find it.
+     #[test]
+     #[ignore = "writes into docs/lookout; run it deliberately"]
+     fn write_the_gallery() {
+         // Absolute, derived from the manifest, so it lands in the same
+         // place whatever directory the run started in.
+         let dir = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/lookout"));
+         std::fs::create_dir_all(dir).unwrap();
+ 
+         let (plain, ansi) = gallery_text();
+         std::fs::write(dir.join("frames.txt"), &plain).unwrap();
+         std::fs::write(dir.join("frames.ansi"), &ansi).unwrap();
+ 

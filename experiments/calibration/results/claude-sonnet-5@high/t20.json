@@ -1,0 +1,55 @@
+{
+ "id": "t20",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The comment at lines 28-30 says the inline match exists so `self.now` stays reachable after the borrow. But text_editor_input.rs:12-13 shows `let now = self.now;` hoisted before `self.settings_mut()`, so the same fix works here and line 49 could use the hoisted `now`. The match at lines 31-40 therefore duplicates `settings_mut()` for no borrow-checker reason, though HIGH severity is overstated."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The comment at lines 28-30 says the inline match exists so `self.now` stays reachable after the borrow. But text_editor_input.rs:12-13 shows `let now = self.now;` hoisted before `self.settings_mut()`, so the same fix works here and line 49 could use the hoisted `now`. The match at lines 31-40 therefore duplicates `settings_mut()` for no borrow-checker reason, though HIGH severity is overstated.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21020,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 693,
+  "output_tokens_details": {
+   "thinking_tokens": 527
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21020,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 693,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 21020,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21020
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0933926,
+ "duration_ms": 44382,
+ "wall_s": 45.92150902748108,
+ "weighted_units": 46696.3,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

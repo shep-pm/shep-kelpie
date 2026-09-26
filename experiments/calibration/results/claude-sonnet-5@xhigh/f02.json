@@ -1,0 +1,55 @@
+{
+ "id": "f02",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The finding's premise is false. `RequestError`'s Display for `Rpc` (client.rs:102) prints \"the daemon reported {:?}: {}\" with `err.code`, but the `Rpc` arm at file_edit.rs:68 prints only `err.message`. The two arms give different text, and the `Rpc` arm deliberately drops the prefix. Collapsing to `{other}` as suggested would change the operator-visible message."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The finding's premise is false. `RequestError`'s Display for `Rpc` (client.rs:102) prints \\\"the daemon reported {:?}: {}\\\" with `err.code`, but the `Rpc` arm at file_edit.rs:68 prints only `err.message`. The two arms give different text, and the `Rpc` arm deliberately drops the prefix. Collapsing to `{other}` as suggested would change the operator-visible message.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20936,
+  "cache_read_input_tokens": 11892,
+  "output_tokens": 492,
+  "output_tokens_details": {
+   "thinking_tokens": 330
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20936,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 492,
+    "cache_read_input_tokens": 11892,
+    "cache_creation_input_tokens": 20936,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20936
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0910464,
+ "duration_ms": 5750,
+ "wall_s": 8.623456001281738,
+ "weighted_units": 45523.2,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

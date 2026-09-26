@@ -1,0 +1,55 @@
+{
+ "id": "f04",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The false arm's safety is per-function, not per-enum: a compile error in label() (line 209) only forces the author to edit label(), whereas the exhaustive match at lines 634-683 forces a decision in is_keymap itself, which is exactly what the doc comment at lines 620-622 says it is for; with `_ => false` a ninth Keymap* variant would compile and silently render without the overlay. The wildcards in control() (467) and size() (614) are documented defaults, and even if one wanted them exhaustive, that does not make the is_keymap arm redundant."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The false arm's safety is per-function, not per-enum: a compile error in label() (line 209) only forces the author to edit label(), whereas the exhaustive match at lines 634-683 forces a decision in is_keymap itself, which is exactly what the doc comment at lines 620-622 says it is for; with `_ => false` a ninth Keymap* variant would compile and silently render without the overlay. The wildcards in control() (467) and size() (614) are documented defaults, and even if one wanted them exhaustive, that does not make the is_keymap arm redundant.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 28476,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 559,
+  "output_tokens_details": {
+   "thinking_tokens": 359
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 28476,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 559,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 28476,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 28476
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.600902,
+ "duration_ms": 9556,
+ "wall_s": 11.320049047470093,
+ "weighted_units": 61113.8,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

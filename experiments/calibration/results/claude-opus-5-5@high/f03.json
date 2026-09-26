@@ -1,0 +1,55 @@
+{
+ "id": "f03",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The premise is false: the production call at ui_event_loop.rs:316 does not use a `SecretsModel`. It passes owned `store` and `provider_cache` paths taken from `Effect::RevealSecret` (lines 308-313) into a `'static` `spawn_blocking` closure, and the fixture call at view/fixtures/secrets.rs:370 also passes locals. A `&self` method on `SecretsModel` would not fit that off-UI-task design, which deliberately sends only the paths and the row, not the model."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The premise is false: the production call at ui_event_loop.rs:316 does not use a `SecretsModel`. It passes owned `store` and `provider_cache` paths taken from `Effect::RevealSecret` (lines 308-313) into a `'static` `spawn_blocking` closure, and the fixture call at view/fixtures/secrets.rs:370 also passes locals. A `&self` method on `SecretsModel` would not fit that off-UI-task design, which deliberately sends only the paths and the row, not the model.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21926,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 462,
+  "output_tokens_details": {
+   "thinking_tokens": 273
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21926,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 462,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 21926,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21926
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1870138,
+ "duration_ms": 5232,
+ "wall_s": 7.4053661823272705,
+ "weighted_units": 47342.9,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

@@ -1,0 +1,31 @@
+{
+ "id": "f04",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The factual claims are all verifiable: label() (line 210) and caption() (line 279) are exhaustive matches with no wildcard, so they already produce a compile error on any new variant; meanwhile size() line 614 uses `_ => (120, 30)` and control() line 467 uses `_ => Control::Allowed`, both of which would silently absorb a new variant. The is_keymap false arm (lines 634-683) therefore adds no safety beyond what label()/caption() already guarantee, while the wildcards in size() and control() are the genuine silent-misassignment risk."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The factual claims are all verifiable: label() (line 210) and caption() (line 279) are exhaustive matches with no wildcard, so they already produce a compile error on any new variant; meanwhile size() line 614 uses `_ => (120, 30)` and control() line 467 uses `_ => Control::Allowed`, both of which would silently absorb a new variant. The is_keymap false arm (lines 634-683) therefore adds no safety beyond what label()/caption() already guarantee, while the wildcards in size() and control() are the genuine silent-misassignment risk.\"}",
+ "thinking_chars": 5493,
+ "done_reason": "stop",
+ "prompt_tokens": 7505,
+ "eval_tokens": 1545,
+ "load_s": 0.0063663,
+ "prompt_s": 2.924736,
+ "eval_s": 16.613174,
+ "wall_s": 19.84960389137268,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.536059963,
+  "vram_gb": 17.536059963,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

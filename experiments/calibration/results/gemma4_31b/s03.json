@@ -1,0 +1,31 @@
+{
+ "id": "s03",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Line 202 explicitly maps `Some(Level::Info)` to `Some(Level::Warn)`, and line 203 maps `Some(Level::Warn)` to `Some(Level::Error)`, so `Level::Warn` is not skipped."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Line 202 explicitly maps `Some(Level::Info)` to `Some(Level::Warn)`, and line 203 maps `Some(Level::Warn)` to `Some(Level::Error)`, so `Level::Warn` is not skipped.\"}",
+ "thinking_chars": 1912,
+ "done_reason": "stop",
+ "prompt_tokens": 839,
+ "eval_tokens": 671,
+ "load_s": 0.0049722,
+ "prompt_s": 0.397962,
+ "eval_s": 16.767773,
+ "wall_s": 17.493170976638794,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

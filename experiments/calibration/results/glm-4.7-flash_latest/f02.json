@@ -1,0 +1,31 @@
+{
+ "id": "f02",
+ "set": "checker",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The `Err(other)` arm handles all errors, so `{other}`'s Display output (e.g., 'no reply within {after:?}') differs from `err.message` for non-Rpc errors."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The `Err(other)` arm handles all errors, so `{other}`'s Display output (e.g., 'no reply within {after:?}') differs from `err.message` for non-Rpc errors.\"}",
+ "thinking_chars": 9358,
+ "done_reason": "stop",
+ "prompt_tokens": 1419,
+ "eval_tokens": 2481,
+ "load_s": 0.002292,
+ "prompt_s": 0.213997,
+ "eval_s": 16.281166,
+ "wall_s": 16.627084016799927,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

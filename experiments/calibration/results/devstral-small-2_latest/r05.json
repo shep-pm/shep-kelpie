@@ -1,0 +1,40 @@
+{
+ "id": "r05",
+ "set": "reviewer",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "(stages + slack).max(START_DEADLINE)",
+    "what": "The original code used `.max()` instead of `.min()`, which would incorrectly increase the deadline beyond `START_DEADLINE` instead of capping it."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"(stages + slack).max(START_DEADLINE)\", \"what\": \"The original code used `.max()` instead of `.min()`, which would incorrectly increase the deadline beyond `START_DEADLINE` instead of capping it.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 3114,
+ "eval_tokens": 66,
+ "load_s": 0.0051736,
+ "prompt_s": 0.657001,
+ "eval_s": 1.143748,
+ "wall_s": 1.865170955657959,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "(stages + slack).max(START_DEADLINE)",
+  "what": "The original code used `.max()` instead of `.min()`, which would incorrectly increase the deadline beyond `START_DEADLINE` instead of capping it."
+ }
+}

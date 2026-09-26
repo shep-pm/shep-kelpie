@@ -1,0 +1,55 @@
+{
+ "id": "t06",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "`close_dialog_option_line` only uses `text` via `fit(&text, width)` (line 145), so `&str` would work. The `.to_owned()` calls at lines 276 and 311\u2013312 allocate a String that is dropped right away. Line 270 passes an owned sentence and line 287 passes a `format!` result, so those would need `&` at the call site, but nothing breaks. The cost is small (a minor allocation nit), and the finding's description is accurate."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"`close_dialog_option_line` only uses `text` via `fit(&text, width)` (line 145), so `&str` would work. The `.to_owned()` calls at lines 276 and 311\u2013312 allocate a String that is dropped right away. Line 270 passes an owned sentence and line 287 passes a `format!` result, so those would need `&` at the call site, but nothing breaks. The cost is small (a minor allocation nit), and the finding's description is accurate.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20689,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 167,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20689,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 167,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 20689,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20689
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0868086,
+ "duration_ms": 2751,
+ "wall_s": 6.078893184661865,
+ "weighted_units": 43404.3,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

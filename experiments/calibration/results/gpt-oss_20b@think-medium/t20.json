@@ -1,0 +1,31 @@
+{
+ "id": "t20",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The match in `cycle_scalar` borrows `self.body` mutably to get `settings` (lines\u202f31\u201138) and later accesses `self.now` (line\u202f49). In Rust, a mutable borrow of any field of `self` prevents accessing any other field of `self` while that borrow is active, so this code would not compile unless `now` is hoisted before the borrow (as shown in `text_editor_input.rs` line\u202f12). The duplicated pattern in `secrets_pane_mut` is unnecessary and should be replaced by a `settings_mut()` accessor with the earlier `now` capture.}"
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"The match in `cycle_scalar` borrows `self.body` mutably to get `settings` (lines\u202f31\u201138) and later accesses `self.now` (line\u202f49). In Rust, a mutable borrow of any field of `self` prevents accessing any other field of `self` while that borrow is active, so this code would not compile unless `now` is hoisted before the borrow (as shown in `text_editor_input.rs` line\u202f12). The duplicated pattern in `secrets_pane_mut` is unnecessary and should be replaced by a `settings_mut()` accessor with the earlier `now` capture.}\"}",
+ "thinking_chars": 4784,
+ "done_reason": "stop",
+ "prompt_tokens": 1541,
+ "eval_tokens": 1159,
+ "load_s": 0.002389,
+ "prompt_s": 0.124529,
+ "eval_s": 6.445054,
+ "wall_s": 6.633514165878296,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

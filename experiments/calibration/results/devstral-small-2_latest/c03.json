@@ -1,0 +1,36 @@
+{
+ "id": "c03",
+ "set": "reviewer",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "if let Some(settings) = self.settings_mut() && settings.is_armed()",
+    "what": "This is invalid Rust syntax; the `if let` construct cannot be used with multiple conditions in this way."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"if let Some(settings) = self.settings_mut() && settings.is_armed()\", \"what\": \"This is invalid Rust syntax; the `if let` construct cannot be used with multiple conditions in this way.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1961,
+ "eval_tokens": 62,
+ "load_s": 0.0030611,
+ "prompt_s": 0.354382,
+ "eval_s": 1.059550999,
+ "wall_s": 1.4729862213134766,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 1,
+ "matched": null
+}

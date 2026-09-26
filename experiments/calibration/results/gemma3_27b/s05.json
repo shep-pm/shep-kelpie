@@ -1,0 +1,31 @@
+{
+ "id": "s05",
+ "set": "checker",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The reviewer correctly identified a discrepancy in how the `pending` count is handled in `column.rs` (line 233) and `mod.rs` (line 70). Both locations calculate `pane.config().map(|view| view.pending.len())`, and then apply `.filter(|count| *count > 0)`. However, the reviewer points out that the `column.rs` code at line 233 *already* contains the `.filter(|count| *count > 0)`, which means the header will show '0 pending' if the count is zero. This contrasts with `mod.rs` which also uses the filter, but apparently the intended behavior is that the pane title should *not* display a count if it is zero. While the code in both locations is identical, the reviewer highlights a functional inconsistency in the expected presentation of this information, suggesting a difference in desired behavior."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The reviewer correctly identified a discrepancy in how the `pending` count is handled in `column.rs` (line 233) and `mod.rs` (line 70). Both locations calculate `pane.config().map(|view| view.pending.len())`, and then apply `.filter(|count| *count > 0)`. However, the reviewer points out that the `column.rs` code at line 233 *already* contains the `.filter(|count| *count > 0)`, which means the header will show '0 pending' if the count is zero. This contrasts with `mod.rs` which also uses the filter, but apparently the intended behavior is that the pane title should *not* display a count if it is zero. While the code in both locations is identical, the reviewer highlights a functional inconsistency in the expected presentation of this information, suggesting a difference in desired behavior.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1094,
+ "eval_tokens": 205,
+ "load_s": 0.0016411,
+ "prompt_s": 0.445458,
+ "eval_s": 4.421061,
+ "wall_s": 4.986073732376099,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "holds",
+ "correct": false
+}

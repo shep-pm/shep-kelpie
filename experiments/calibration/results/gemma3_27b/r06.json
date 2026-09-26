@@ -1,0 +1,45 @@
+{
+ "id": "r06",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "assert!(app.keymap_open(), \"the overlay did not open\"",
+    "what": "The test asserts that the overlay *did* open, but the commit sets `self.keymap_open = false;` which makes the assertion fail."
+   },
+   {
+    "severity": "bug",
+    "quote": "// Same as `Self::open_or_refresh_config_pane`: an overlay\n// open when this reply landed must not survive the body\n// change under it.",
+    "what": "The comment indicates intended behavior: an overlay should be closed when the body changes. The test `a_config_reply_that_lands_with_the_overlay_up_closes_it` confirms this. Without the `self.keymap_open = false;` line, the overlay would survive the body change, and the test would fail."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"assert!(app.keymap_open(), \\\"the overlay did not open\\\"\", \"what\": \"The test asserts that the overlay *did* open, but the commit sets `self.keymap_open = false;` which makes the assertion fail.\"}, {\"severity\": \"bug\", \"quote\": \"// Same as `Self::open_or_refresh_config_pane`: an overlay\\n// open when this reply landed must not survive the body\\n// change under it.\", \"what\": \"The comment indicates intended behavior: an overlay should be closed when the body changes. The test `a_config_reply_that_lands_with_the_overlay_up_closes_it` confirms this. Without the `self.keymap_open = false;` line, the overlay would survive the body change, and the test would fail.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 3369,
+ "eval_tokens": 191,
+ "load_s": 0.0056354,
+ "prompt_s": 1.13442,
+ "eval_s": 4.143913999,
+ "wall_s": 5.532029151916504,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 1,
+ "matched": {
+  "severity": "bug",
+  "quote": "assert!(app.keymap_open(), \"the overlay did not open\"",
+  "what": "The test asserts that the overlay *did* open, but the commit sets `self.keymap_open = false;` which makes the assertion fail."
+ }
+}

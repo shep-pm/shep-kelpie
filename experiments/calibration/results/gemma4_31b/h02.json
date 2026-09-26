@@ -1,0 +1,40 @@
+{
+ "id": "h02",
+ "set": "reviewer",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "if n > 1 {",
+    "what": "The second line of a multiline message (index 1) is concatenated to the first line without a newline or indentation because the condition is n > 1 instead of n > 0."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"if n > 1 {\", \"what\": \"The second line of a multiline message (index 1) is concatenated to the first line without a newline or indentation because the condition is n > 1 instead of n > 0.\"}]}",
+ "thinking_chars": 4224,
+ "done_reason": "stop",
+ "prompt_tokens": 2176,
+ "eval_tokens": 1411,
+ "load_s": 0.0054489,
+ "prompt_s": 0.935968,
+ "eval_s": 35.732723,
+ "wall_s": 37.01464605331421,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "if n > 1 {",
+  "what": "The second line of a multiline message (index 1) is concatenated to the first line without a newline or indentation because the condition is n > 1 instead of n > 0."
+ }
+}

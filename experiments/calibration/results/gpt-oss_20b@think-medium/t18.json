@@ -1,0 +1,31 @@
+{
+ "id": "t18",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Duplicate provider-row refusal logic at lines 24\u201129 in delete_secret.rs and 49\u201154 in write_secret.rs, both setting the same notice and returning Effect::None."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"Duplicate provider-row refusal logic at lines 24\u201129 in delete_secret.rs and 49\u201154 in write_secret.rs, both setting the same notice and returning Effect::None.\"}",
+ "thinking_chars": 2037,
+ "done_reason": "stop",
+ "prompt_tokens": 1716,
+ "eval_tokens": 534,
+ "load_s": 0.0049147,
+ "prompt_s": 0.132264999,
+ "eval_s": 2.965153,
+ "wall_s": 3.1695239543914795,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

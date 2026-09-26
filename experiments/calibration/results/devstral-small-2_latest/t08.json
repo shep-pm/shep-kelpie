@@ -1,0 +1,31 @@
+{
+ "id": "t08",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 225-226 show two separate Err arms in the match that both return Ok(()), making the distinction between RequestError::Closed and other errors meaningless."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 225-226 show two separate Err arms in the match that both return Ok(()), making the distinction between RequestError::Closed and other errors meaningless.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1427,
+ "eval_tokens": 49,
+ "load_s": 0.0016167,
+ "prompt_s": 0.216833,
+ "eval_s": 0.831877,
+ "wall_s": 1.1028239727020264,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

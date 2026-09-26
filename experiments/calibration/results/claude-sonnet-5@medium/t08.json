@@ -1,0 +1,55 @@
+{
+ "id": "t08",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The two arms at lines 225-226 are indeed identical in behavior, but the doc comment at lines 213-215 states that a failed poll is dropped, and the explicit Closed arm documents that a closed connection is intentionally ignored here because it ends its own subscription. Collapsing is a style nit rather than a real defect. The claim that it 'implies a differentiation that does not exist' is contradicted by the comment explaining both are deliberately dropped."
+ },
+ "content": "{\"verdict\":\"fails\",\"reason\":\"The two arms at lines 225-226 are indeed identical in behavior, but the doc comment at lines 213-215 states that a failed poll is dropped, and the explicit Closed arm documents that a closed connection is intentionally ignored here because it ends its own subscription. Collapsing is a style nit rather than a real defect. The claim that it 'implies a differentiation that does not exist' is contradicted by the comment explaining both are deliberately dropped.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 19993,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 163,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19993,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 163,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 19993,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 19993
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0839846,
+ "duration_ms": 2364,
+ "wall_s": 4.974562168121338,
+ "weighted_units": 41992.3,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": false
+}

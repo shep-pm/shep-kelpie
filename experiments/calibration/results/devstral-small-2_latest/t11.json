@@ -1,0 +1,31 @@
+{
+ "id": "t11",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The reviewer is correct: `page_lines_back` (245) reimplements the same backward budget-walk as `tail_window_start` (172), returning a line count instead of the stopping index, and the doc on `tail_window_start` (164-171) explicitly warns that two copies of this walk must be kept in step."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The reviewer is correct: `page_lines_back` (245) reimplements the same backward budget-walk as `tail_window_start` (172), returning a line count instead of the stopping index, and the doc on `tail_window_start` (164-171) explicitly warns that two copies of this walk must be kept in step.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2726,
+ "eval_tokens": 90,
+ "load_s": 0.0024571,
+ "prompt_s": 0.556521,
+ "eval_s": 1.551203,
+ "wall_s": 2.3053832054138184,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

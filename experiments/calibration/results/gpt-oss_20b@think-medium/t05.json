@@ -1,0 +1,31 @@
+{
+ "id": "t05",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "secrets_hint returns a String via .to_string() (lines\u202f93\u2011104) while the others return &'static str (lines\u202f131 and\u202f156), so it does allocate, but a caller can compare a String directly to a &str (via PartialEq), so the claim that an extra allocation is required is incorrect."
+ },
+ "content": "{\"verdict\":\"fails\",\"reason\":\"secrets_hint returns a String via .to_string() (lines\u202f93\u2011104) while the others return &'static str (lines\u202f131 and\u202f156), so it does allocate, but a caller can compare a String directly to a &str (via PartialEq), so the claim that an extra allocation is required is incorrect.\"}",
+ "thinking_chars": 5194,
+ "done_reason": "stop",
+ "prompt_tokens": 1904,
+ "eval_tokens": 1194,
+ "load_s": 0.0050468,
+ "prompt_s": 0.140754,
+ "eval_s": 6.655373,
+ "wall_s": 6.98536491394043,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": false
+}

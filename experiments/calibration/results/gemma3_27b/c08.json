@@ -1,0 +1,36 @@
+{
+ "id": "c08",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "indent_continuations(clean.trim_end())",
+    "what": "The table message is trimmed *before* indentation. This means that any trailing whitespace within the message itself is lost before the indentation is applied, potentially altering the original message\u2019s formatting and meaning."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"indent_continuations(clean.trim_end())\", \"what\": \"The table message is trimmed *before* indentation. This means that any trailing whitespace within the message itself is lost before the indentation is applied, potentially altering the original message\u2019s formatting and meaning.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2170,
+ "eval_tokens": 70,
+ "load_s": 0.0025033,
+ "prompt_s": 0.774155,
+ "eval_s": 1.507605,
+ "wall_s": 2.603102207183838,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 1,
+ "matched": null
+}

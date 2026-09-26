@@ -1,0 +1,55 @@
+{
+ "id": "s08",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Lines 315-317 already wrap the `stored_value` call in `tokio::task::spawn_blocking`, and lines 318-328 push the join handle into `inflight` rather than awaiting it inline, so the read does not run on the UI task; the finding describes the suggested fix as if it were missing."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Lines 315-317 already wrap the `stored_value` call in `tokio::task::spawn_blocking`, and lines 318-328 push the join handle into `inflight` rather than awaiting it inline, so the read does not run on the UI task; the finding describes the suggested fix as if it were missing.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20822,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 115,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20822,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 115,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 20822,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20822
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.42562200000000006,
+ "duration_ms": 2909,
+ "wall_s": 4.747659921646118,
+ "weighted_units": 43585.8,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

@@ -1,0 +1,31 @@
+{
+ "id": "s07",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The code at line 119 already returns 1 for `None`, matching the suggested fix, so the finding is incorrect."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The code at line 119 already returns 1 for `None`, matching the suggested fix, so the finding is incorrect.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1279,
+ "eval_tokens": 41,
+ "load_s": 0.0020738,
+ "prompt_s": 0.178542,
+ "eval_s": 0.696148,
+ "wall_s": 0.9356920719146729,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

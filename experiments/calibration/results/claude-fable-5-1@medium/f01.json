@@ -1,0 +1,55 @@
+{
+ "id": "f01",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The finding concedes the panic needs an invariant violation it cannot point to: every flock-mutating site in the grep (update.rs:60/615/628, keys.rs:202/337, action.rs:186) calls reseat, and reseat (selection.rs:166-181) drops or moves a selection whose sheep is gone, so the key reaching action.rs:281 is always in the flock. Preferring a Notice over expect for a hypothetical future bug is a style choice, not a real defect in the code shown."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The finding concedes the panic needs an invariant violation it cannot point to: every flock-mutating site in the grep (update.rs:60/615/628, keys.rs:202/337, action.rs:186) calls reseat, and reseat (selection.rs:166-181) drops or moves a selection whose sheep is gone, so the key reaching action.rs:281 is always in the flock. Preferring a Notice over expect for a hypothetical future bug is a style choice, not a real defect in the code shown.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22454,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 608,
+  "output_tokens_details": {
+   "thinking_tokens": 429
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22454,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 608,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 22454,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22454
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.482912,
+ "duration_ms": 10617,
+ "wall_s": 12.427264213562012,
+ "weighted_units": 49314.8,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

@@ -1,0 +1,31 @@
+{
+ "id": "f03",
+ "set": "checker",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The logic in `stored_value` branches on `row.source`. If it is `Source::Operator`, it reads from `store` and ignores `provider_cache`. If it is `Source::Namespace`, it reads from `provider_cache` and ignores `store`. Therefore, a mismatched pair of paths would have no effect on the runtime behavior because the unused argument is never accessed."
+ },
+ "content": "{\n  \"verdict\": \"fails\",\n  \"reason\": \"The logic in `stored_value` branches on `row.source`. If it is `Source::Operator`, it reads from `store` and ignores `provider_cache`. If it is `Source::Namespace`, it reads from `provider_cache` and ignores `store`. Therefore, a mismatched pair of paths would have no effect on the runtime behavior because the unused argument is never accessed.\"\n}",
+ "thinking_chars": 9172,
+ "done_reason": "stop",
+ "prompt_tokens": 1578,
+ "eval_tokens": 2209,
+ "load_s": 0.0048033,
+ "prompt_s": 0.228735,
+ "eval_s": 14.515102,
+ "wall_s": 14.804667711257935,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

@@ -1,0 +1,31 @@
+{
+ "id": "f03",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "All call sites (lines 316, 426, 446, 370) pass `&built.store` and `&built.provider_cache` from the same `SecretsModel` instance, and the function is `pub(crate)`, so no external code can supply a mismatched pair."
+ },
+ "content": "{\"verdict\":\"fails\",\"reason\":\"All call sites (lines 316, 426, 446, 370) pass `&built.store` and `&built.provider_cache` from the same `SecretsModel` instance, and the function is `pub(crate)`, so no external code can supply a mismatched pair.\"}",
+ "thinking_chars": 4468,
+ "done_reason": "stop",
+ "prompt_tokens": 1597,
+ "eval_tokens": 1138,
+ "load_s": 0.0048335,
+ "prompt_s": 0.126246,
+ "eval_s": 6.39889,
+ "wall_s": 6.600417137145996,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

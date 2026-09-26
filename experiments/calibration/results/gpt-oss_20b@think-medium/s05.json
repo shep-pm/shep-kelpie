@@ -1,0 +1,31 @@
+{
+ "id": "s05",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Both column_header_line (lines\u202f232\u2011237) and the pane title logic (lines\u202f70\u201174) apply a `.filter(|count| *count > 0)` before formatting, so 0 pending is never printed."
+ },
+ "content": "{\"verdict\":\"fails\",\"reason\":\"Both column_header_line (lines\u202f232\u2011237) and the pane title logic (lines\u202f70\u201174) apply a `.filter(|count| *count > 0)` before formatting, so 0 pending is never printed.\"}",
+ "thinking_chars": 1475,
+ "done_reason": "stop",
+ "prompt_tokens": 1014,
+ "eval_tokens": 417,
+ "load_s": 0.0031584,
+ "prompt_s": 0.076862,
+ "eval_s": 2.305126,
+ "wall_s": 2.430467128753662,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

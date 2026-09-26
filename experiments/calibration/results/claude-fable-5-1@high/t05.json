@@ -1,0 +1,55 @@
+{
+ "id": "t05",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 93-105 show secrets_hint returning String by calling .to_string() on two plain literals with no interpolation, while pane_hint (line 131) and sheep_pane_hint (line 156) are const fn returning &'static str; the allocation and inconsistency are real and the suggested change is sound, though the sub-claim that comparison needs an extra allocation is overstated since String implements PartialEq<&str>."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 93-105 show secrets_hint returning String by calling .to_string() on two plain literals with no interpolation, while pane_hint (line 131) and sheep_pane_hint (line 156) are const fn returning &'static str; the allocation and inconsistency are real and the suggested change is sound, though the sub-claim that comparison needs an extra allocation is overstated since String implements PartialEq<&str>.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22197,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 483,
+  "output_tokens_details": {
+   "thinking_tokens": 330
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22197,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 483,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 22197,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22197
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.471522,
+ "duration_ms": 7684,
+ "wall_s": 9.647499084472656,
+ "weighted_units": 48175.8,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,31 @@
+{
+ "id": "s04",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Both `visible_rows` (line 45, 49) and `rows` (line 237, 241) lowercase both the needle and the name before comparing them."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Both `visible_rows` (line 45, 49) and `rows` (line 237, 241) lowercase both the needle and the name before comparing them.\"}",
+ "thinking_chars": 1579,
+ "done_reason": "stop",
+ "prompt_tokens": 1262,
+ "eval_tokens": 559,
+ "load_s": 0.0041151,
+ "prompt_s": 0.567177,
+ "eval_s": 14.112937,
+ "wall_s": 14.919578075408936,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

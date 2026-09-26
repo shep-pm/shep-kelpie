@@ -1,0 +1,55 @@
+{
+ "id": "t03",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Line 49 and line 241 use the same predicate, `needle.is_empty() || row.info.name.to_lowercase().contains(&needle)`. The setup at lines 45 and 237 is the same too, `self.filter.to_lowercase()`. `rows` feeds the title bar count and `visible_rows` feeds the cursor, so the two must stay in sync, which makes a shared helper worthwhile. A `&self` helper would re-lowercase the filter for every row unless it took the needle as an argument."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Line 49 and line 241 use the same predicate, `needle.is_empty() || row.info.name.to_lowercase().contains(&needle)`. The setup at lines 45 and 237 is the same too, `self.filter.to_lowercase()`. `rows` feeds the title bar count and `visible_rows` feeds the cursor, so the two must stay in sync, which makes a shared helper worthwhile. A `&self` helper would re-lowercase the filter for every row unless it took the needle as an argument.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21509,
+  "cache_read_input_tokens": 10195,
+  "output_tokens": 761,
+  "output_tokens_details": {
+   "thinking_tokens": 577
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21509,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 761,
+    "cache_read_input_tokens": 10195,
+    "cache_creation_input_tokens": 21509,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21509
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.095689,
+ "duration_ms": 8836,
+ "wall_s": 13.92555284500122,
+ "weighted_units": 47844.5,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

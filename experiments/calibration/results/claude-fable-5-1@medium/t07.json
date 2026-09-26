@@ -1,0 +1,55 @@
+{
+ "id": "t07",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "mod.rs:70-73 and column.rs:233-236 are the identical four-line extraction (`pane.config().map(|view| view.pending.len()).filter(|count| *count > 0)`), each followed by formatting a \"{pending} pending\" suffix (mod.rs:76, column.rs:238). The duplication is real; only the styling/prefix of the resulting text differs, which the suggested `pending_count()` helper would leave at the call sites."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"mod.rs:70-73 and column.rs:233-236 are the identical four-line extraction (`pane.config().map(|view| view.pending.len()).filter(|count| *count > 0)`), each followed by formatting a \\\"{pending} pending\\\" suffix (mod.rs:76, column.rs:238). The duplication is real; only the styling/prefix of the resulting text differs, which the suggested `pending_count()` helper would leave at the call sites.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21068,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 166,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21068,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 166,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 21068,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21068
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.43309200000000003,
+ "duration_ms": 3474,
+ "wall_s": 5.25852108001709,
+ "weighted_units": 44332.8,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

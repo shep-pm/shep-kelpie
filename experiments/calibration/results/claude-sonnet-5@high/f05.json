@@ -1,0 +1,55 @@
+{
+ "id": "f05",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The exhaustive lists are deliberate: secrets_keys.rs:131-133 says they are 'Listed rather than a wildcard, so a new KeyPress variant cannot fall silently into an arm that ignores it'. The compile error on a new variant is the intended behaviour, not a silent fall-through. The suggested shared predicate or macro would recreate that catch-all. The two lists also differ (e.g. Action(_) vs Action(Stop), and different Help/Secrets handling), so they aren't one shared ignore set."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The exhaustive lists are deliberate: secrets_keys.rs:131-133 says they are 'Listed rather than a wildcard, so a new KeyPress variant cannot fall silently into an arm that ignores it'. The compile error on a new variant is the intended behaviour, not a silent fall-through. The suggested shared predicate or macro would recreate that catch-all. The two lists also differ (e.g. Action(_) vs Action(Stop), and different Help/Secrets handling), so they aren't one shared ignore set.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22022,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 458,
+  "output_tokens_details": {
+   "thinking_tokens": 267
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22022,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 458,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 22022,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22022
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0950506,
+ "duration_ms": 14539,
+ "wall_s": 16.202419996261597,
+ "weighted_units": 47525.3,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

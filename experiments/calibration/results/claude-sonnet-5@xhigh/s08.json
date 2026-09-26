@@ -1,0 +1,55 @@
+{
+ "id": "s08",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Lines 315-317 already run `stored_value` inside `tokio::task::spawn_blocking`, and lines 318-328 push the join handle into `inflight` instead of awaiting it on the UI task, which is exactly the suggested fix. The comment at lines 301-303 states this intent."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Lines 315-317 already run `stored_value` inside `tokio::task::spawn_blocking`, and lines 318-328 push the join handle into `inflight` instead of awaiting it on the UI task, which is exactly the suggested fix. The comment at lines 301-303 states this intent.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20058,
+  "cache_read_input_tokens": 11892,
+  "output_tokens": 113,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20058,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 113,
+    "cache_read_input_tokens": 11892,
+    "cache_creation_input_tokens": 20058,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20058
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0837444,
+ "duration_ms": 6954,
+ "wall_s": 8.648474931716919,
+ "weighted_units": 41872.2,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

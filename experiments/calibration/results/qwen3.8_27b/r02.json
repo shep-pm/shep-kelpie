@@ -1,0 +1,33 @@
+{
+ "id": "r02",
+ "set": "reviewer",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let (code, message) = safe_parts(fmt, message, code);",
+    "what": "In `emit_notice` the `code` and `message` arguments to `safe_parts` are swapped, so the emitted notice JSON/table will contain the message in the `code` field and the code in the `message` field, inverting the intended output."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"let (code, message) = safe_parts(fmt, message, code);\", \"what\": \"In `emit_notice` the `code` and `message` arguments to `safe_parts` are swapped, so the emitted notice JSON/table will contain the message in the `code` field and the code in the `message` field, inverting the intended output.\"}]}",
+ "thinking_chars": 2622,
+ "done_reason": "stop",
+ "prompt_tokens": 1276,
+ "eval_tokens": 812,
+ "load_s": 0.0043558,
+ "prompt_s": 0.559059,
+ "eval_s": 7.657066,
+ "wall_s": 8.413792848587036,
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "let (code, message) = safe_parts(fmt, message, code);",
+  "what": "In `emit_notice` the `code` and `message` arguments to `safe_parts` are swapped, so the emitted notice JSON/table will contain the message in the `code` field and the code in the `message` field, inverting the intended output."
+ }
+}

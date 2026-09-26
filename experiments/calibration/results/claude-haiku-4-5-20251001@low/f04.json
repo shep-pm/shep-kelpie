@@ -1,0 +1,55 @@
+{
+ "id": "f04",
+ "set": "checker",
+ "model": "claude-haiku-4-5-20251001",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The code shows `label()` (lines 209-269) and `caption()` are exhaustive with explicit variants, so they force compile errors on new variants. `is_keymap()` (lines 624-685) is also exhaustive with all 58 variants named. However, `size()` (line 614) and `control()` (line 467) both have wildcards (`_ => (120, 30)` and `_ => Control::Allowed`) that would silently inherit wrong defaults for new variants. The exhaustiveness of `is_keymap()` adds no safety beyond what `label()` and `caption()` already provide."
+ },
+ "content": "```json\n{\n  \"verdict\": \"holds\",\n  \"reason\": \"The code shows `label()` (lines 209-269) and `caption()` are exhaustive with explicit variants, so they force compile errors on new variants. `is_keymap()` (lines 624-685) is also exhaustive with all 58 variants named. However, `size()` (line 614) and `control()` (line 467) both have wildcards (`_ => (120, 30)` and `_ => Control::Allowed`) that would silently inherit wrong defaults for new variants. The exhaustiveness of `is_keymap()` adds no safety beyond what `label()` and `caption()` already provide.\"\n}\n```",
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 15766,
+  "cache_read_input_tokens": 17675,
+  "output_tokens": 2970,
+  "output_tokens_details": {
+   "thinking_tokens": 2798
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15766,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 10,
+    "output_tokens": 2970,
+    "cache_read_input_tokens": 17675,
+    "cache_creation_input_tokens": 15766,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 15766
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.048159499999999994,
+ "duration_ms": 29370,
+ "wall_s": 31.00727415084839,
+ "weighted_units": 48159.5,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

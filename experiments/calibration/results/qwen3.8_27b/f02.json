@@ -1,0 +1,24 @@
+{
+ "id": "f02",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The two arms are not structurally identical: line 68 uses `err.message` directly, while the Display impl for `Rpc` (line 102) produces \"the daemon reported {:?}: {}\" with both `err.code` and `err.message`, so the outputs differ. Moreover, the `Err(other)` arm can never receive an `Rpc` variant because the first arm (line 66) already matches it exclusively."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The two arms are not structurally identical: line 68 uses `err.message` directly, while the Display impl for `Rpc` (line 102) produces \\\"the daemon reported {:?}: {}\\\" with both `err.code` and `err.message`, so the outputs differ. Moreover, the `Err(other)` arm can never receive an `Rpc` variant because the first arm (line 66) already matches it exclusively.\"}",
+ "thinking_chars": 2156,
+ "done_reason": "stop",
+ "prompt_tokens": 1620,
+ "eval_tokens": 682,
+ "load_s": 0.0017276,
+ "prompt_s": 0.702736,
+ "eval_s": 6.620066,
+ "wall_s": 7.637743949890137,
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

@@ -1,0 +1,31 @@
+{
+ "id": "f04",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The reviewer is correct: `is_keymap` exhaustively lists all variants (lines 626-683), making its false arm redundant since `label()` and `caption()` would already fail to compile on new variants. The real hazard is in `size()` (line 614) and `control()` (line 467), where wildcards silently inherit default values for new variants."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The reviewer is correct: `is_keymap` exhaustively lists all variants (lines 626-683), making its false arm redundant since `label()` and `caption()` would already fail to compile on new variants. The real hazard is in `size()` (line 614) and `control()` (line 467), where wildcards silently inherit default values for new variants.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 7959,
+ "eval_tokens": 100,
+ "load_s": 0.0086646,
+ "prompt_s": 1.958457,
+ "eval_s": 1.789942,
+ "wall_s": 3.9001340866088867,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

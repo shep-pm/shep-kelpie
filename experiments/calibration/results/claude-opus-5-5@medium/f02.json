@@ -1,0 +1,55 @@
+{
+ "id": "f02",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The two arms print different text. The Rpc arm prints only `err.message` (line 68). `RequestError`'s Display for `Rpc` (client.rs:102) adds a \"the daemon reported {code:?}: \" prefix, so merging the arms into one `Err(e)` would change what the user sees."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The two arms print different text. The Rpc arm prints only `err.message` (line 68). `RequestError`'s Display for `Rpc` (client.rs:102) adds a \\\"the daemon reported {code:?}: \\\" prefix, so merging the arms into one `Err(e)` would change what the user sees.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21741,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 193,
+  "output_tokens_details": {
+   "thinking_tokens": 76
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21741,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 193,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 21741,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21741
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1801538,
+ "duration_ms": 3078,
+ "wall_s": 7.68430495262146,
+ "weighted_units": 45627.9,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

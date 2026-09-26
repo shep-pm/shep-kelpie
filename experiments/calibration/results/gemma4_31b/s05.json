@@ -1,0 +1,31 @@
+{
+ "id": "s05",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The code in `column_header_line` (lines 233-239) already contains the `.filter(|count| *count > 0)` call, which prevents it from printing `0 pending`."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The code in `column_header_line` (lines 233-239) already contains the `.filter(|count| *count > 0)` call, which prevents it from printing `0 pending`.\"}",
+ "thinking_chars": 1418,
+ "done_reason": "stop",
+ "prompt_tokens": 1100,
+ "eval_tokens": 480,
+ "load_s": 0.0034569,
+ "prompt_s": 0.519605,
+ "eval_s": 12.093775,
+ "wall_s": 13.036589622497559,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

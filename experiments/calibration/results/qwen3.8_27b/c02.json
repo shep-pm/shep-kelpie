@@ -1,0 +1,23 @@
+{
+ "id": "c02",
+ "set": "reviewer",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": []
+ },
+ "content": "{\"findings\": []}",
+ "thinking_chars": 4634,
+ "done_reason": "stop",
+ "prompt_tokens": 1276,
+ "eval_tokens": 1285,
+ "load_s": 0.0040318,
+ "prompt_s": 0.280654,
+ "eval_s": 11.679163,
+ "wall_s": 12.144914865493774,
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 0,
+ "matched": null
+}

@@ -1,0 +1,55 @@
+{
+ "id": "f06",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Line 311 calls `to_ascii_uppercase()` on every visible `RowKey::Section` row each paint, and the labels are all `&'static str` literals, so the per-frame String allocation is real. The finding miscounts them, though: selection.rs:113 also pushes `\"no fold\"`, so a match-based fix needs a third arm (`\"NO FOLD\"`)."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Line 311 calls `to_ascii_uppercase()` on every visible `RowKey::Section` row each paint, and the labels are all `&'static str` literals, so the per-frame String allocation is real. The finding miscounts them, though: selection.rs:113 also pushes `\\\"no fold\\\"`, so a match-based fix needs a third arm (`\\\"NO FOLD\\\"`).\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22720,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 430,
+  "output_tokens_details": {
+   "thinking_tokens": 285
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22720,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 430,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 22720,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22720
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1927258,
+ "duration_ms": 5408,
+ "wall_s": 7.294435262680054,
+ "weighted_units": 48770.9,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

@@ -1,0 +1,31 @@
+{
+ "id": "t16",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The same two\u2011step error mapping expression appears at lines 252, 346, 459, and near 429 (with a minor variant on line 429)."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"The same two\u2011step error mapping expression appears at lines 252, 346, 459, and near 429 (with a minor variant on line 429).\"}",
+ "thinking_chars": 1172,
+ "done_reason": "stop",
+ "prompt_tokens": 1824,
+ "eval_tokens": 311,
+ "load_s": 0.0049655,
+ "prompt_s": 0.138802,
+ "eval_s": 1.725575,
+ "wall_s": 1.9252920150756836,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

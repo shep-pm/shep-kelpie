@@ -1,0 +1,31 @@
+{
+ "id": "f01",
+ "set": "checker",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Line 281 uses `.expect(\"a selected sheep is in the flock\")` to access the flock. The code calls `self.reseat()` in several places (e.g., lines 186 in `action.rs`, 202 & 337 in `keys.rs`, 166 in `selection.rs`, 60, 615, & 628 in `update.rs`). However, the `reseat` function is called *after* the flock has changed (e.g., after rows are filtered or updated) to update the selection. If a sheep is removed from the flock *after* it is selected but *before* the action is triggered at line 281, the `expect` will indeed panic because the selected sheep will no longer be present in the flock. The reviewer is correct that `reseat` is the mechanism to keep the selection valid when the underlying data changes, and the failure to call it in all mutation paths would lead to the described panic."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Line 281 uses `.expect(\\\"a selected sheep is in the flock\\\")` to access the flock. The code calls `self.reseat()` in several places (e.g., lines 186 in `action.rs`, 202 & 337 in `keys.rs`, 166 in `selection.rs`, 60, 615, & 628 in `update.rs`). However, the `reseat` function is called *after* the flock has changed (e.g., after rows are filtered or updated) to update the selection. If a sheep is removed from the flock *after* it is selected but *before* the action is triggered at line 281, the `expect` will indeed panic because the selected sheep will no longer be present in the flock. The reviewer is correct that `reseat` is the mechanism to keep the selection valid when the underlying data changes, and the failure to call it in all mutation paths would lead to the described panic.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2402,
+ "eval_tokens": 233,
+ "load_s": 0.0028285,
+ "prompt_s": 0.832145,
+ "eval_s": 5.044908,
+ "wall_s": 6.078552961349487,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

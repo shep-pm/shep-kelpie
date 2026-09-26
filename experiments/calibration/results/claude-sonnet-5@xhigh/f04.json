@@ -1,0 +1,55 @@
+{
+ "id": "f04",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "label() being exhaustive (lines 210-269) only forces a new variant to get a label. It does not force a decision about whether the variant is a keymap. With the suggested `_ => false`, a new `Keymap*` variant would compile once label() and caption() are updated, and it would silently render without the overlay raised. The doc comment at lines 620-622 says the named false arm exists to prevent exactly that, so the claim that it adds zero marginal safety is wrong. The wildcards in size() (line 614) and control() (line 467) are real, but they are documented defaults (lines 459 and 610-613). They are a separate matter and not a reason to weaken is_keymap."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"label() being exhaustive (lines 210-269) only forces a new variant to get a label. It does not force a decision about whether the variant is a keymap. With the suggested `_ => false`, a new `Keymap*` variant would compile once label() and caption() are updated, and it would silently render without the overlay raised. The doc comment at lines 620-622 says the named false arm exists to prevent exactly that, so the claim that it adds zero marginal safety is wrong. The wildcards in size() (line 614) and control() (line 467) are real, but they are documented defaults (lines 459 and 610-613). They are a separate matter and not a reason to weaken is_keymap.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 27712,
+  "cache_read_input_tokens": 11892,
+  "output_tokens": 1011,
+  "output_tokens_details": {
+   "thinking_tokens": 779
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 27712,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1011,
+    "cache_read_input_tokens": 11892,
+    "cache_creation_input_tokens": 27712,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 27712
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1233404,
+ "duration_ms": 19704,
+ "wall_s": 21.642549991607666,
+ "weighted_units": 61670.2,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

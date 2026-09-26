@@ -1,0 +1,55 @@
+{
+ "id": "t02",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "sheep_pane.rs:198-205 and bleats.rs:65-72 contain the same six-arm None\u2192Trace\u2192Debug\u2192Info\u2192Warn\u2192Error\u2192None match, and both call sites use the same filters()/set_min_level() API (lines 198/206 and 65/73), so extracting one cycle_min_level() method would let each arm become a single call, as the finding describes."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"sheep_pane.rs:198-205 and bleats.rs:65-72 contain the same six-arm None\u2192Trace\u2192Debug\u2192Info\u2192Warn\u2192Error\u2192None match, and both call sites use the same filters()/set_min_level() API (lines 198/206 and 65/73), so extracting one cycle_min_level() method would let each arm become a single call, as the finding describes.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 25517,
+  "cache_read_input_tokens": 10092,
+  "output_tokens": 436,
+  "output_tokens_details": {
+   "thinking_tokens": 297
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 25517,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 436,
+    "cache_read_input_tokens": 10092,
+    "cache_creation_input_tokens": 25517,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 25517
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.534683,
+ "duration_ms": 7259,
+ "wall_s": 9.661856651306152,
+ "weighted_units": 54225.2,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

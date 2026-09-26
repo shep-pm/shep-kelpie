@@ -1,0 +1,55 @@
+{
+ "id": "t03",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 45/49 and 237/241 contain the same needle setup and the same `needle.is_empty() || row.info.name.to_lowercase().contains(&needle)` predicate. The only difference is the closure pattern, `(_, row)` versus `row`, so both call sites could use a shared `matches_filter` helper."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 45/49 and 237/241 contain the same needle setup and the same `needle.is_empty() || row.info.name.to_lowercase().contains(&needle)` predicate. The only difference is the closure pattern, `(_, row)` versus `row`, so both call sites could use a shared `matches_filter` helper.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20617,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 123,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20617,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 123,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 20617,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20617
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1697618,
+ "duration_ms": 2883,
+ "wall_s": 7.8366968631744385,
+ "weighted_units": 43029.9,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

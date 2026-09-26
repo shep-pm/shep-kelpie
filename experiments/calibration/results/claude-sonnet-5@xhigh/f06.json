@@ -1,0 +1,55 @@
+{
+ "id": "f06",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The premise miscounts the labels. `RowKey::Section` also carries \"no fold\" (selection.rs:113, paint_frame.rs:296-298), so a match returning only \"FLOCK\"/\"DOGS\" would break that band. The allocation itself is real but is a few bytes for at most two or three visible section rows per frame, in a paint path that already builds `Line`/`Span` values. It is not a meaningful defect."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The premise miscounts the labels. `RowKey::Section` also carries \\\"no fold\\\" (selection.rs:113, paint_frame.rs:296-298), so a match returning only \\\"FLOCK\\\"/\\\"DOGS\\\" would break that band. The allocation itself is real but is a few bytes for at most two or three visible section rows per frame, in a paint path that already builds `Line`/`Span` values. It is not a meaningful defect.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21931,
+  "cache_read_input_tokens": 11892,
+  "output_tokens": 1402,
+  "output_tokens_details": {
+   "thinking_tokens": 1242
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21931,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1402,
+    "cache_read_input_tokens": 11892,
+    "cache_creation_input_tokens": 21931,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21931
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1041264,
+ "duration_ms": 52121,
+ "wall_s": 54.261311054229736,
+ "weighted_units": 52063.2,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

@@ -1,0 +1,55 @@
+{
+ "id": "f04",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The doc comment at lines 620-622 says is_keymap deliberately names every arm so a new Keymap* variant fails to compile there instead of silently rendering without the overlay. Relaxing it to a wildcard would remove that guard, and the finding's claim that label() and caption() already force a compile error does not cover it. The finding is right that size() (line 614) and control() (line 467) have wildcards. That is a separate matter from is_keymap's exhaustiveness being pointless."
+ },
+ "content": "{\"verdict\":\"fails\",\"reason\":\"The doc comment at lines 620-622 says is_keymap deliberately names every arm so a new Keymap* variant fails to compile there instead of silently rendering without the overlay. Relaxing it to a wildcard would remove that guard, and the finding's claim that label() and caption() already force a compile error does not cover it. The finding is right that size() (line 614) and control() (line 467) have wildcards. That is a separate matter from is_keymap's exhaustiveness being pointless.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 27713,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 172,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 27713,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 172,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 27713,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 27713
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1149546,
+ "duration_ms": 12195,
+ "wall_s": 14.486992835998535,
+ "weighted_units": 57477.3,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

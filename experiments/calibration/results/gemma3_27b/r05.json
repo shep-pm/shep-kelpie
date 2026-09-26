@@ -1,0 +1,40 @@
+{
+ "id": "r05",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let slack = STAGED_START_SLACK * u32::try_from(apps.len()).unwrap_or(u32::MAX);",
+    "what": "The slack calculation multiplies the stage slack by the number of apps, which makes the deadline scale linearly with the number of apps. The original logic used `.max(START_DEADLINE)` which is incorrect, as the result is then *not* clamped by START_DEADLINE. The intention, as stated in the comment, is to keep the deadline at least START_DEADLINE, implying `max` not `min`."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"let slack = STAGED_START_SLACK * u32::try_from(apps.len()).unwrap_or(u32::MAX);\", \"what\": \"The slack calculation multiplies the stage slack by the number of apps, which makes the deadline scale linearly with the number of apps. The original logic used `.max(START_DEADLINE)` which is incorrect, as the result is then *not* clamped by START_DEADLINE. The intention, as stated in the comment, is to keep the deadline at least START_DEADLINE, implying `max` not `min`.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2738,
+ "eval_tokens": 140,
+ "load_s": 0.0067235,
+ "prompt_s": 0.949242,
+ "eval_s": 3.033856,
+ "wall_s": 4.12599778175354,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "let slack = STAGED_START_SLACK * u32::try_from(apps.len()).unwrap_or(u32::MAX);",
+  "what": "The slack calculation multiplies the stage slack by the number of apps, which makes the deadline scale linearly with the number of apps. The original logic used `.max(START_DEADLINE)` which is incorrect, as the result is then *not* clamped by START_DEADLINE. The intention, as stated in the comment, is to keep the deadline at least START_DEADLINE, implying `max` not `min`."
+ }
+}

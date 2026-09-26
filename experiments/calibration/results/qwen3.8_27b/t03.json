@@ -1,0 +1,24 @@
+{
+ "id": "t03",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 45/49 and 237/241 indeed contain the identical filter setup (`self.filter.to_lowercase()`) and predicate (`needle.is_empty() || row.info.name.to_lowercase().contains(&needle)`), so the duplication the finding describes is real and a private helper would eliminate the redundancy."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 45/49 and 237/241 indeed contain the identical filter setup (`self.filter.to_lowercase()`) and predicate (`needle.is_empty() || row.info.name.to_lowercase().contains(&needle)`), so the duplication the finding describes is real and a private helper would eliminate the redundancy.\"}",
+ "thinking_chars": 3060,
+ "done_reason": "stop",
+ "prompt_tokens": 1251,
+ "eval_tokens": 818,
+ "load_s": 0.0012346,
+ "prompt_s": 0.545604,
+ "eval_s": 8.739679,
+ "wall_s": 9.42418885231018,
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

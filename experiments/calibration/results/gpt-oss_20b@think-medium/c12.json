@@ -1,0 +1,36 @@
+{
+ "id": "c12",
+ "set": "reviewer",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "use super::super::{Envelope, LineOutcome, LineReply, Response, SignalOutcome, SignalReply};",
+    "what": "The test imports types from `super::super`, which refers to the `protocol` module, but `Envelope`, `Response`, etc. are re\u2011exported from the `request` module, not from `protocol`. This causes compile errors because those names are not found."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"use super::super::{Envelope, LineOutcome, LineReply, Response, SignalOutcome, SignalReply};\",\"what\":\"The test imports types from `super::super`, which refers to the `protocol` module, but `Envelope`, `Response`, etc. are re\u2011exported from the `request` module, not from `protocol`. This causes compile errors because those names are not found.\"}]}",
+ "thinking_chars": 11207,
+ "done_reason": "stop",
+ "prompt_tokens": 1488,
+ "eval_tokens": 2551,
+ "load_s": 0.0026856,
+ "prompt_s": 0.127209,
+ "eval_s": 14.258843,
+ "wall_s": 14.497424125671387,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 1,
+ "matched": null
+}

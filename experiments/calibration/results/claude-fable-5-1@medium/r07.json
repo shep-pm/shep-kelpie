@@ -1,0 +1,64 @@
+{
+ "id": "r07",
+ "set": "reviewer",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "    let code = &crate::terminal_safe::sanitise(message).0;",
+    "what": "emit_notice sanitises `message` instead of `code`, so the printed code becomes the message text (e.g. `notice[a message]: a message`) and the real code is dropped from both table and JSON output, while the code remains unsanitised; the new test would fail for the notice case."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"    let code = &crate::terminal_safe::sanitise(message).0;\", \"what\": \"emit_notice sanitises `message` instead of `code`, so the printed code becomes the message text (e.g. `notice[a message]: a message`) and the real code is dropped from both table and JSON output, while the code remains unsanitised; the new test would fail for the notice case.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22046,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 141,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22046,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 141,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 22046,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22046
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.45140199999999997,
+ "duration_ms": 3493,
+ "wall_s": 5.489572763442993,
+ "weighted_units": 46163.8,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "    let code = &crate::terminal_safe::sanitise(message).0;",
+  "what": "emit_notice sanitises `message` instead of `code`, so the printed code becomes the message text (e.g. `notice[a message]: a message`) and the real code is dropped from both table and JSON output, while the code remains unsanitised; the new test would fail for the notice case."
+ }
+}

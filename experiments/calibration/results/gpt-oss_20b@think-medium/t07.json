@@ -1,0 +1,31 @@
+{
+ "id": "t07",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Both locations (lines\u202f70\u201174 in mod.rs and lines\u202f233\u2011236 in column.rs) contain the identical chain `pane.config().map(|view| view.pending.len()).filter(|count| *count > 0)`, indicating duplicated logic that could be refactored."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"Both locations (lines\u202f70\u201174 in mod.rs and lines\u202f233\u2011236 in column.rs) contain the identical chain `pane.config().map(|view| view.pending.len()).filter(|count| *count > 0)`, indicating duplicated logic that could be refactored.\"}",
+ "thinking_chars": 534,
+ "done_reason": "stop",
+ "prompt_tokens": 1072,
+ "eval_tokens": 206,
+ "load_s": 0.0016868,
+ "prompt_s": 0.081059,
+ "eval_s": 1.134778,
+ "wall_s": 1.265765905380249,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

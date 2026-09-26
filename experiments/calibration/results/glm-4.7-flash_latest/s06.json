@@ -1,0 +1,31 @@
+{
+ "id": "s06",
+ "set": "checker",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The let-else block at line 170 checks app.selected_row() before calling log_row at line 176, preventing log_row from being called when selected_row() is None."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The let-else block at line 170 checks app.selected_row() before calling log_row at line 176, preventing log_row from being called when selected_row() is None.\"}",
+ "thinking_chars": 3358,
+ "done_reason": "stop",
+ "prompt_tokens": 1100,
+ "eval_tokens": 919,
+ "load_s": 0.0033724,
+ "prompt_s": 0.151417,
+ "eval_s": 5.862172,
+ "wall_s": 6.063549280166626,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

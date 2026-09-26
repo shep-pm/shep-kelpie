@@ -1,0 +1,55 @@
+{
+ "id": "f05",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The matches are exhaustive and have no wildcard, and lines 131-133 say this is deliberate, so a new `KeyPress` variant is a compile error in each pane; it cannot fall through silently. The one-line edit per pane is the intended cost of that check. The suggested shared-ignore predicate would bring back the silent-fallthrough risk the finding warns about."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The matches are exhaustive and have no wildcard, and lines 131-133 say this is deliberate, so a new `KeyPress` variant is a compile error in each pane; it cannot fall through silently. The one-line edit per pane is the intended cost of that check. The suggested shared-ignore predicate would bring back the silent-fallthrough risk the finding warns about.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22826,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 719,
+  "output_tokens_details": {
+   "thinking_tokens": 582
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22826,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 719,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 22826,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22826
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1993538,
+ "duration_ms": 8322,
+ "wall_s": 10.245045900344849,
+ "weighted_units": 50427.9,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

@@ -1,0 +1,31 @@
+{
+ "id": "f02",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Lines 66-71 use `err.message` directly while lines 73-78 use `{other}` which expands to the `Display` impl for `RequestError`. The `Display` for `RequestError::Rpc` outputs \"the daemon reported {:?}: {}\", so the two arms generate different `Notice` texts, not byte\u2011identical output."
+ },
+ "content": "{\"verdict\":\"fails\",\"reason\":\"Lines 66-71 use `err.message` directly while lines 73-78 use `{other}` which expands to the `Display` impl for `RequestError`. The `Display` for `RequestError::Rpc` outputs \\\"the daemon reported {:?}: {}\\\", so the two arms generate different `Notice` texts, not byte\u2011identical output.\"}",
+ "thinking_chars": 3029,
+ "done_reason": "stop",
+ "prompt_tokens": 1475,
+ "eval_tokens": 757,
+ "load_s": 0.0022075,
+ "prompt_s": 0.120923,
+ "eval_s": 4.199582,
+ "wall_s": 4.384404897689819,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

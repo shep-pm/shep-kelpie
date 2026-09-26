@@ -1,0 +1,55 @@
+{
+ "id": "t18",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "delete_secret.rs:24-29 and write_secret.rs:49-54 are the same block. Each does `matches!(row.source, Source::Namespace(_))`, sets `Notice { text: PROVIDER_ROW_REFUSAL.to_string(), grave: true }`, then `return Effect::None`. A shared helper would work, though the duplication is only six lines, so HIGH severity is overstated."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"delete_secret.rs:24-29 and write_secret.rs:49-54 are the same block. Each does `matches!(row.source, Source::Namespace(_))`, sets `Notice { text: PROVIDER_ROW_REFUSAL.to_string(), grave: true }`, then `return Effect::None`. A shared helper would work, though the duplication is only six lines, so HIGH severity is overstated.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21281,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 433,
+  "output_tokens_details": {
+   "thinking_tokens": 280
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21281,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 433,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 21281,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21281
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0918366,
+ "duration_ms": 42221,
+ "wall_s": 44.36413812637329,
+ "weighted_units": 45918.3,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

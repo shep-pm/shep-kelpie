@@ -1,0 +1,55 @@
+{
+ "id": "t17",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The redundancy is real but deliberate. Lines 36-47 document why `home`, `daemon_config` and `socket_default` are separate owned `PathBuf`s: a test can hand the loop an arbitrary pair, `home` is the invocation's resolved `$SHEP_HOME`, and the values are cloned into `spawn_blocking` closures. The finding ignores this, and the fix would remove that test flexibility. The extra parameters are already acknowledged by `#[allow(clippy::too_many_arguments)]` at line 28, so HIGH severity is overstated for a style tradeoff."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The redundancy is real but deliberate. Lines 36-47 document why `home`, `daemon_config` and `socket_default` are separate owned `PathBuf`s: a test can hand the loop an arbitrary pair, `home` is the invocation's resolved `$SHEP_HOME`, and the values are cloned into `spawn_blocking` closures. The finding ignores this, and the fix would remove that test flexibility. The extra parameters are already acknowledged by `#[allow(clippy::too_many_arguments)]` at line 28, so HIGH severity is overstated for a style tradeoff.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21668,
+  "cache_read_input_tokens": 11892,
+  "output_tokens": 1476,
+  "output_tokens_details": {
+   "thinking_tokens": 1261
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21668,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1476,
+    "cache_read_input_tokens": 11892,
+    "cache_creation_input_tokens": 21668,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21668
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1038144,
+ "duration_ms": 85842,
+ "wall_s": 87.7502031326294,
+ "weighted_units": 51907.2,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": false
+}

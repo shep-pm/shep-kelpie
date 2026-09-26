@@ -1,0 +1,55 @@
+{
+ "id": "t02",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 198-205 in sheep_pane.rs repeat the None\u2192Trace\u2192Debug\u2192Info\u2192Warn\u2192Error\u2192None match from bleats.rs lines 65-72 exactly, and the comment on lines 194-195 says the two are meant to stay the same cycle. The duplication is real, though HIGH overstates it; it is a maintainability issue, not a bug."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 198-205 in sheep_pane.rs repeat the None\u2192Trace\u2192Debug\u2192Info\u2192Warn\u2192Error\u2192None match from bleats.rs lines 65-72 exactly, and the comment on lines 194-195 says the two are meant to stay the same cycle. The duplication is real, though HIGH overstates it; it is a maintainability issue, not a bug.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21315,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 352,
+  "output_tokens_details": {
+   "thinking_tokens": 213
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21315,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 352,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 21315,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21315
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1799258,
+ "duration_ms": 6086,
+ "wall_s": 11.041554927825928,
+ "weighted_units": 45570.9,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,40 @@
+{
+ "id": "h01",
+ "set": "reviewer",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "if line.is_empty() {",
+    "what": "The indentation logic is inverted: it indents empty lines and leaves non-empty continuation lines unindented, which contradicts the intended behavior and the accompanying comments."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"if line.is_empty() {\", \"what\": \"The indentation logic is inverted: it indents empty lines and leaves non-empty continuation lines unindented, which contradicts the intended behavior and the accompanying comments.\"}]}",
+ "thinking_chars": 6095,
+ "done_reason": "stop",
+ "prompt_tokens": 2175,
+ "eval_tokens": 1838,
+ "load_s": 0.0024459,
+ "prompt_s": 0.923887,
+ "eval_s": 46.470343,
+ "wall_s": 47.724334955215454,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "if line.is_empty() {",
+  "what": "The indentation logic is inverted: it indents empty lines and leaves non-empty continuation lines unindented, which contradicts the intended behavior and the accompanying comments."
+ }
+}

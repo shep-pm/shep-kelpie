@@ -1,0 +1,45 @@
+{
+ "id": "r06",
+ "set": "reviewer",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "Same as `Self::open_or_refresh_config_pane`: an overlay open when this reply landed must not survive the body change under it.",
+    "what": "The code handling a `Sent::SheepConfig` reply sets `self.body = Body::ConfigPane(pane)` but never resets `self.keymap_open`, so an overlay that was open before the reply will remain open after the body changes, causing key events to be sent to the overlay instead of the new pane."
+   },
+   {
+    "severity": "bug",
+    "quote": "Same as `Self::open_or_refresh_config_pane`: an overlay open when this reply landed must not survive the body change under it.",
+    "what": "The code handling a `Sent::DogSection` reply similarly changes `self.body` without resetting `self.keymap_open`, leading to the overlay persisting after a dog section reply lands and interfering with subsequent key handling."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"Same as `Self::open_or_refresh_config_pane`: an overlay open when this reply landed must not survive the body change under it.\",\"what\":\"The code handling a `Sent::SheepConfig` reply sets `self.body = Body::ConfigPane(pane)` but never resets `self.keymap_open`, so an overlay that was open before the reply will remain open after the body changes, causing key events to be sent to the overlay instead of the new pane.\"},{\"severity\":\"bug\",\"quote\":\"Same as `Self::open_or_refresh_config_pane`: an overlay open when this reply landed must not survive the body change under it.\",\"what\":\"The code handling a `Sent::DogSection` reply similarly changes `self.body` without resetting `self.keymap_open`, leading to the overlay persisting after a dog section reply lands and interfering with subsequent key handling.\"}]}",
+ "thinking_chars": 12003,
+ "done_reason": "stop",
+ "prompt_tokens": 2918,
+ "eval_tokens": 2819,
+ "load_s": 0.00574,
+ "prompt_s": 0.219702,
+ "eval_s": 15.937372,
+ "wall_s": 16.266691207885742,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 1,
+ "matched": {
+  "severity": "bug",
+  "quote": "Same as `Self::open_or_refresh_config_pane`: an overlay open when this reply landed must not survive the body change under it.",
+  "what": "The code handling a `Sent::SheepConfig` reply sets `self.body = Body::ConfigPane(pane)` but never resets `self.keymap_open`, so an overlay that was open before the reply will remain open after the body changes, causing key events to be sent to the overlay instead of the new pane."
+ }
+}

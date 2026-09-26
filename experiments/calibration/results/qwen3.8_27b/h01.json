@@ -1,0 +1,40 @@
+{
+ "id": "h01",
+ "set": "reviewer",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "            if line.is_empty() {",
+    "what": "The condition is inverted: it indents empty lines (adding trailing whitespace the doc says to avoid) while leaving non-empty continuation lines un-indented (defeating the commit's purpose and failing both the blank-line and forged-newline tests)."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"            if line.is_empty() {\", \"what\": \"The condition is inverted: it indents empty lines (adding trailing whitespace the doc says to avoid) while leaving non-empty continuation lines un-indented (defeating the commit's purpose and failing both the blank-line and forged-newline tests).\"}]}",
+ "thinking_chars": 6725,
+ "done_reason": "stop",
+ "prompt_tokens": 2018,
+ "eval_tokens": 1932,
+ "load_s": 0.0034374,
+ "prompt_s": 0.821136,
+ "eval_s": 18.036485,
+ "wall_s": 19.096553087234497,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.536059963,
+  "vram_gb": 17.536059963,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "            if line.is_empty() {",
+  "what": "The condition is inverted: it indents empty lines (adding trailing whitespace the doc says to avoid) while leaving non-empty continuation lines un-indented (defeating the commit's purpose and failing both the blank-line and forged-newline tests)."
+ }
+}

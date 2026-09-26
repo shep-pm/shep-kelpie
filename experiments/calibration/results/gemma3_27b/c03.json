@@ -1,0 +1,36 @@
+{
+ "id": "c03",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "if !self.disarm_settings_candidate() && let Some(settings) = self.settings_mut()",
+    "what": "The condition `if !self.disarm_settings_candidate()` means that the movement logic is only executed if `disarm_settings_candidate` returns `false`. This changes the behavior as previously, even when armed, the select keys would attempt to move the cursor. This violates the stated intent of the commit to *not* change the behavior of the tests."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"if !self.disarm_settings_candidate() && let Some(settings) = self.settings_mut()\", \"what\": \"The condition `if !self.disarm_settings_candidate()` means that the movement logic is only executed if `disarm_settings_candidate` returns `false`. This changes the behavior as previously, even when armed, the select keys would attempt to move the cursor. This violates the stated intent of the commit to *not* change the behavior of the tests.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1552,
+ "eval_tokens": 119,
+ "load_s": 0.0047284,
+ "prompt_s": 0.613212,
+ "eval_s": 2.563417,
+ "wall_s": 3.3482418060302734,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 1,
+ "matched": null
+}

@@ -1,0 +1,31 @@
+{
+ "id": "t14",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The match statements on lines 27-30 and 73-76 are identical, confirming the reported duplication."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The match statements on lines 27-30 and 73-76 are identical, confirming the reported duplication.\"}",
+ "thinking_chars": 1444,
+ "done_reason": "stop",
+ "prompt_tokens": 1414,
+ "eval_tokens": 472,
+ "load_s": 0.0301287,
+ "prompt_s": 0.65073,
+ "eval_s": 11.951196,
+ "wall_s": 13.02351975440979,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

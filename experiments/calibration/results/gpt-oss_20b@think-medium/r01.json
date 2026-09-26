@@ -1,0 +1,40 @@
+{
+ "id": "r01",
+ "set": "reviewer",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "Ok(Err(err)) => {",
+    "what": "The code fails to sweep the process group when a read error occurs; it only kills the child process, contrary to the commit\u2019s intent to sweep the group on any failed read."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"Ok(Err(err)) => {\",\"what\":\"The code fails to sweep the process group when a read error occurs; it only kills the child process, contrary to the commit\u2019s intent to sweep the group on any failed read.\"}]}",
+ "thinking_chars": 12235,
+ "done_reason": "stop",
+ "prompt_tokens": 791,
+ "eval_tokens": 2796,
+ "load_s": 0.0125356,
+ "prompt_s": 0.070498,
+ "eval_s": 15.548032,
+ "wall_s": 15.692901134490967,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "Ok(Err(err)) => {",
+  "what": "The code fails to sweep the process group when a read error occurs; it only kills the child process, contrary to the commit\u2019s intent to sweep the group on any failed read."
+ }
+}

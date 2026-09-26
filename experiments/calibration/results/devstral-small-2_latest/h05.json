@@ -1,0 +1,30 @@
+{
+ "id": "h05",
+ "set": "reviewer",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": []
+ },
+ "content": "{\"findings\": []}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 4155,
+ "eval_tokens": 7,
+ "load_s": 0.0026014,
+ "prompt_s": 0.827962,
+ "eval_s": 0.109927,
+ "wall_s": 1.2126379013061523,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": false,
+ "false_alarms": 0,
+ "matched": null
+}

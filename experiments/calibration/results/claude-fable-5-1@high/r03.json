@@ -1,0 +1,64 @@
+{
+ "id": "r03",
+ "set": "reviewer",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "    if footer.is_none() {",
+    "what": "The condition is inverted from the removed `footer.is_some()`: a dog pane with a footer now reserves no line for it (the footer is appended past the budget, overflowing the pane by one row), while a sheep pane with no footer loses a body line for nothing and can underflow `body_budget` at small heights."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"    if footer.is_none() {\", \"what\": \"The condition is inverted from the removed `footer.is_some()`: a dog pane with a footer now reserves no line for it (the footer is appended past the budget, overflowing the pane by one row), while a sheep pane with no footer loses a body line for nothing and can underflow `body_budget` at small heights.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22438,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 643,
+  "output_tokens_details": {
+   "thinking_tokens": 506
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22438,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 643,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 22438,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22438
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.484342,
+ "duration_ms": 10099,
+ "wall_s": 12.186770915985107,
+ "weighted_units": 49457.8,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "    if footer.is_none() {",
+  "what": "The condition is inverted from the removed `footer.is_some()`: a dog pane with a footer now reserves no line for it (the footer is appended past the budget, overflowing the pane by one row), while a sheep pane with no footer loses a body line for nothing and can underflow `body_budget` at small heights."
+ }
+}

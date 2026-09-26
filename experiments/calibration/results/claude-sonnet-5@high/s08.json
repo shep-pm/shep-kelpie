@@ -1,0 +1,55 @@
+{
+ "id": "s08",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Lines 315-317 already wrap the `stored_value` call in `tokio::task::spawn_blocking`, and the result is awaited via `inflight` (lines 318-328). It is not called directly on the UI task, so the suggested fix is already in place."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Lines 315-317 already wrap the `stored_value` call in `tokio::task::spawn_blocking`, and the result is awaited via `inflight` (lines 318-328). It is not called directly on the UI task, so the suggested fix is already in place.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20059,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 100,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20059,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 100,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 20059,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20059
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0836186,
+ "duration_ms": 11858,
+ "wall_s": 14.981220006942749,
+ "weighted_units": 41809.3,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

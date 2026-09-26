@@ -1,0 +1,31 @@
+{
+ "id": "t01",
+ "set": "checker",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The code at line 17 in delete_secret.rs and line 47 in reveal_secret.rs contains the identical boolean check `!pane.visible_row_indices().contains(&pane.selected)`, confirming the finding of duplicated logic."
+ },
+ "content": "{\n  \"verdict\": \"holds\",\n  \"reason\": \"The code at line 17 in delete_secret.rs and line 47 in reveal_secret.rs contains the identical boolean check `!pane.visible_row_indices().contains(&pane.selected)`, confirming the finding of duplicated logic.\"\n}",
+ "thinking_chars": 4032,
+ "done_reason": "stop",
+ "prompt_tokens": 1821,
+ "eval_tokens": 1014,
+ "load_s": 21.1291848,
+ "prompt_s": 8.624136,
+ "eval_s": 6.633656,
+ "wall_s": 36.41706609725952,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

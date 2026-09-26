@@ -1,0 +1,31 @@
+{
+ "id": "t20",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The reviewer is correct: the match in `value_cycling.rs:31-40` duplicates logic from `secrets_pane_mut` and could be replaced by hoisting `let now = self.now;` before the match and using `self.settings_mut()` as shown in `text_editor_input.rs:12."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The reviewer is correct: the match in `value_cycling.rs:31-40` duplicates logic from `secrets_pane_mut` and could be replaced by hoisting `let now = self.now;` before the match and using `self.settings_mut()` as shown in `text_editor_input.rs:12.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2194,
+ "eval_tokens": 80,
+ "load_s": 0.0032665,
+ "prompt_s": 0.425318,
+ "eval_s": 1.375352,
+ "wall_s": 1.8787169456481934,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

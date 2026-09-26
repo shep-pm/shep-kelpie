@@ -1,0 +1,40 @@
+{
+ "id": "r09",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "(start - tail_window_start(start, body_rows - 1, cost)).max(1)",
+    "what": "This calculation appears incorrect. The original `page_lines_back` function iterated backward, accumulating row heights until the total exceeded `body_rows`. This new calculation subtracts `tail_window_start` from `start`, which is calculating something different entirely and will likely produce drastically different page sizes than before, particularly for non-uniform row heights. The result is likely to be off-by-one, or more, and could cause scrolling to jump or miss lines."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"(start - tail_window_start(start, body_rows - 1, cost)).max(1)\", \"what\": \"This calculation appears incorrect. The original `page_lines_back` function iterated backward, accumulating row heights until the total exceeded `body_rows`. This new calculation subtracts `tail_window_start` from `start`, which is calculating something different entirely and will likely produce drastically different page sizes than before, particularly for non-uniform row heights. The result is likely to be off-by-one, or more, and could cause scrolling to jump or miss lines.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 761,
+ "eval_tokens": 138,
+ "load_s": 0.0033773,
+ "prompt_s": 0.267339,
+ "eval_s": 2.95331,
+ "wall_s": 3.2471747398376465,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "(start - tail_window_start(start, body_rows - 1, cost)).max(1)",
+  "what": "This calculation appears incorrect. The original `page_lines_back` function iterated backward, accumulating row heights until the total exceeded `body_rows`. This new calculation subtracts `tail_window_start` from `start`, which is calculating something different entirely and will likely produce drastically different page sizes than before, particularly for non-uniform row heights. The result is likely to be off-by-one, or more, and could cause scrolling to jump or miss lines."
+ }
+}

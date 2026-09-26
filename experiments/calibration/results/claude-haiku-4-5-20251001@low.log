@@ -1,0 +1,62 @@
+calibrate: 60 cases to run for claude-haiku-4-5-20251001@low
+t03 10s holds (label holds)
+t02 14s holds (label holds)
+t04 15s holds (label holds)
+t07 11s holds (label holds)
+t05 16s holds (label holds)
+t06 18s holds (label holds)
+t08 15s holds (label holds)
+t10 19s holds (label holds)
+t12 18s holds (label holds)
+t11 29s holds (label holds)
+t13 8s holds (label holds)
+t09 53s unsure (label holds)
+t14 10s holds (label holds)
+t16 14s holds (label holds)
+t18 11s holds (label holds)
+t17 28s holds (label holds)
+t15 32s holds (label holds)
+t19 13s holds (label holds)
+t20 15s holds (label holds)
+f02 15s fails (label fails)
+f01 25s holds (label fails)
+f03 17s holds (label fails)
+f06 18s holds (label fails)
+f04 31s holds (label fails)
+f05 31s holds (label fails)
+s01 7s fails (label fails)
+s03 8s fails (label fails)
+s02 11s fails (label fails)
+s04 13s fails (label fails)
+s05 10s fails (label fails)
+s07 8s fails (label fails)
+s09 7s fails (label fails)
+s08 11s fails (label fails)
+r02 11s caught=True false_alarms=0
+s06 33s fails (label fails)
+r03 4s caught=False false_alarms=0 ERROR exit 1
+r04 5s caught=False false_alarms=0 ERROR exit 1
+r05 6s caught=False false_alarms=0 ERROR exit 1
+r06 6s caught=False false_alarms=0 ERROR exit 1
+r07 7s caught=False false_alarms=0 ERROR exit 1
+r08 7s caught=False false_alarms=0 ERROR exit 1
+r01 32s caught=True false_alarms=0
+r09 7s caught=False false_alarms=0 ERROR exit 1
+c01 7s clean, false_alarms=0 ERROR exit 1
+c02 7s clean, false_alarms=0 ERROR exit 1
+c03 7s clean, false_alarms=0 ERROR exit 1
+c04 6s clean, false_alarms=0 ERROR exit 1
+c05 6s clean, false_alarms=0 ERROR exit 1
+c06 6s clean, false_alarms=0 ERROR exit 1
+h01 6s caught=False false_alarms=0 ERROR exit 1
+c07 6s clean, false_alarms=0 ERROR exit 1
+h02 5s caught=False false_alarms=0 ERROR exit 1
+h03 5s caught=False false_alarms=0 ERROR exit 1
+h04 5s caught=False false_alarms=0 ERROR exit 1
+h05 6s caught=False false_alarms=0 ERROR exit 1
+c08 5s clean, false_alarms=0 ERROR exit 1
+c09 5s clean, false_alarms=0 ERROR exit 1
+c10 6s clean, false_alarms=0 ERROR exit 1
+c11 6s clean, false_alarms=0 ERROR exit 1
+c12 7s clean, false_alarms=0 ERROR exit 1
+calibrate: finished claude-haiku-4-5-20251001@low in 4.4 min

@@ -1,0 +1,55 @@
+{
+ "id": "t18",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "delete_secret.rs:24-30 and write_secret.rs:49-55 are the same code: the matches! check on Source::Namespace, the grave PROVIDER_ROW_REFUSAL Notice, and the early return. The one wording slip is that both return Effect::None, not None, but the duplication is real."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"delete_secret.rs:24-30 and write_secret.rs:49-55 are the same code: the matches! check on Source::Namespace, the grave PROVIDER_ROW_REFUSAL Notice, and the early return. The one wording slip is that both return Effect::None, not None, but the duplication is real.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22085,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 119,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22085,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 119,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 22085,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22085
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1814258,
+ "duration_ms": 3467,
+ "wall_s": 5.522187948226929,
+ "weighted_units": 45945.9,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

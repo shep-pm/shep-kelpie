@@ -1,0 +1,55 @@
+{
+ "id": "f06",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Line 311 calls `to_ascii_uppercase()` on a `&'static str` label, which allocates a new String for every section row on every paint, so the waste is real. The finding miscounts the labels, though: selection.rs lines 66, 73 and 113 push three of them (\"Flock\", \"Dogs\" and \"no fold\"), so a match would also need a \"NO FOLD\" arm."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Line 311 calls `to_ascii_uppercase()` on a `&'static str` label, which allocates a new String for every section row on every paint, so the waste is real. The finding miscounts the labels, though: selection.rs lines 66, 73 and 113 push three of them (\\\"Flock\\\", \\\"Dogs\\\" and \\\"no fold\\\"), so a match would also need a \\\"NO FOLD\\\" arm.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22720,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 505,
+  "output_tokens_details": {
+   "thinking_tokens": 355
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22720,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 505,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 22720,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22720
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1942258,
+ "duration_ms": 5805,
+ "wall_s": 7.725414991378784,
+ "weighted_units": 49145.9,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

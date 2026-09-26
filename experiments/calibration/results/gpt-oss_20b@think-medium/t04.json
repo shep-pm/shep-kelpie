@@ -1,0 +1,31 @@
+{
+ "id": "t04",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The method performs the same lookup twice: lines\u00a0283\u2011286 (`RowKey::Sheep(id) => self.flock.get(id)`) and lines\u00a0288\u2011291 (`RowKey::Sheep(id) => self.flock.get(id)`)."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"The method performs the same lookup twice: lines\u00a0283\u2011286 (`RowKey::Sheep(id) => self.flock.get(id)`) and lines\u00a0288\u2011291 (`RowKey::Sheep(id) => self.flock.get(id)`).\"}",
+ "thinking_chars": 721,
+ "done_reason": "stop",
+ "prompt_tokens": 779,
+ "eval_tokens": 261,
+ "load_s": 0.0015819,
+ "prompt_s": 0.063005,
+ "eval_s": 1.44875,
+ "wall_s": 1.5607481002807617,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

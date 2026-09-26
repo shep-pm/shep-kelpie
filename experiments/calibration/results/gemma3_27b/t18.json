@@ -1,0 +1,31 @@
+{
+ "id": "t18",
+ "set": "checker",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 24-29 in `delete_secret.rs` and lines 49-54 in `write_secret.rs` contain identical code blocks that check `row.source` against `Source::Namespace` and set a notice if it matches. This confirms the reviewer's claim of copy-pasted code and the suggested refactoring to a shared function."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 24-29 in `delete_secret.rs` and lines 49-54 in `write_secret.rs` contain identical code blocks that check `row.source` against `Source::Namespace` and set a notice if it matches. This confirms the reviewer's claim of copy-pasted code and the suggested refactoring to a shared function.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1863,
+ "eval_tokens": 92,
+ "load_s": 0.0022727,
+ "prompt_s": 0.674717,
+ "eval_s": 1.974698,
+ "wall_s": 2.825937032699585,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

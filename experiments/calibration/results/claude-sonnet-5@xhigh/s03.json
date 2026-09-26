@@ -1,0 +1,55 @@
+{
+ "id": "s03",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Line 202 already has `Some(Level::Info) => Some(Level::Warn)`, and line 203 continues `Warn => Error`, so the cycle passes through Warn as the fix asks. The match runs None \u2192 Trace \u2192 Debug \u2192 Info \u2192 Warn \u2192 Error \u2192 None."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Line 202 already has `Some(Level::Info) => Some(Level::Warn)`, and line 203 continues `Warn => Error`, so the cycle passes through Warn as the fix asks. The match runs None \u2192 Trace \u2192 Debug \u2192 Info \u2192 Warn \u2192 Error \u2192 None.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 19941,
+  "cache_read_input_tokens": 11892,
+  "output_tokens": 108,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19941,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 108,
+    "cache_read_input_tokens": 11892,
+    "cache_creation_input_tokens": 19941,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 19941
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0832264,
+ "duration_ms": 21809,
+ "wall_s": 24.04366970062256,
+ "weighted_units": 41613.2,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

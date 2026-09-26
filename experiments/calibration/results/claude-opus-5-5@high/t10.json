@@ -1,0 +1,55 @@
+{
+ "id": "t10",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "unsure",
+  "reason": "Line 444 is a `_ => {}` wildcard and lines 265-293 do name every unbound variant, so the mismatch the finding describes is real. The quoted principle is not in the lines shown, and line 244 itself uses a wildcard. Whether a new KeyPress variant could ever reach this handler depends on the text-mode keymap, which is also not shown; if that keymap only produces Text* and Quit, the wildcard hides nothing."
+ },
+ "content": "{\"verdict\": \"unsure\", \"reason\": \"Line 444 is a `_ => {}` wildcard and lines 265-293 do name every unbound variant, so the mismatch the finding describes is real. The quoted principle is not in the lines shown, and line 244 itself uses a wildcard. Whether a new KeyPress variant could ever reach this handler depends on the text-mode keymap, which is also not shown; if that keymap only produces Text* and Quit, the wildcard hides nothing.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22323,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 1015,
+  "output_tokens_details": {
+   "thinking_tokens": 851
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22323,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1015,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 22323,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22323
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.2012498,
+ "duration_ms": 10867,
+ "wall_s": 13.084755897521973,
+ "weighted_units": 50901.9,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "unsure",
+ "correct": false
+}

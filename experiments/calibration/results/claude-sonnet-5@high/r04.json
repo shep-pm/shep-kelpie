@@ -1,0 +1,64 @@
+{
+ "id": "r04",
+ "set": "reviewer",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "if self.disarm_settings_candidate()",
+    "what": "The condition is inverted: `disarm_settings_candidate` returns true when it cancelled an armed candidate, so the cursor now moves only right after a cancel (the old code never moved then) and never moves when nothing is armed, which breaks normal Up/Down/First/Last navigation in settings; it needs `!self.disarm_settings_candidate()`, and the updated test `movement_cancels_an_armed_candidate_rather_than_also_moving` would fail on its cursor assertion."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"if self.disarm_settings_candidate()\", \"what\": \"The condition is inverted: `disarm_settings_candidate` returns true when it cancelled an armed candidate, so the cursor now moves only right after a cancel (the old code never moved then) and never moves when nothing is armed, which breaks normal Up/Down/First/Last navigation in settings; it needs `!self.disarm_settings_candidate()`, and the updated test `movement_cancels_an_armed_candidate_rather_than_also_moving` would fail on its cursor assertion.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21098,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 609,
+  "output_tokens_details": {
+   "thinking_tokens": 406
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21098,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 609,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 21098,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21098
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.09286459999999999,
+ "duration_ms": 6017,
+ "wall_s": 7.920896053314209,
+ "weighted_units": 46432.3,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "if self.disarm_settings_candidate()",
+  "what": "The condition is inverted: `disarm_settings_candidate` returns true when it cancelled an armed candidate, so the cursor now moves only right after a cancel (the old code never moved then) and never moves when nothing is armed, which breaks normal Up/Down/First/Last navigation in settings; it needs `!self.disarm_settings_candidate()`, and the updated test `movement_cancels_an_armed_candidate_rather_than_also_moving` would fail on its cursor assertion."
+ }
+}

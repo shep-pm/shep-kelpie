@@ -1,0 +1,36 @@
+{
+ "id": "h04",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "The refusal is the one screen the keymap overlay does not cover, and `draw`'s own doc says so, so something has to check it.",
+    "what": "The comment claims the keymap overlay should *not* draw over the 'too small' refusal message. The test confirms this, meaning the refactoring changed intended behaviour."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"The refusal is the one screen the keymap overlay does not cover, and `draw`'s own doc says so, so something has to check it.\", \"what\": \"The comment claims the keymap overlay should *not* draw over the 'too small' refusal message. The test confirms this, meaning the refactoring changed intended behaviour.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 3994,
+ "eval_tokens": 85,
+ "load_s": 0.0035252,
+ "prompt_s": 1.329944,
+ "eval_s": 1.83954,
+ "wall_s": 3.3186757564544678,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": false,
+ "false_alarms": 1,
+ "matched": null
+}

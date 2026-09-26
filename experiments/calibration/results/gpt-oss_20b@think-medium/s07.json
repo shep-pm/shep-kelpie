@@ -1,0 +1,31 @@
+{
+ "id": "s07",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The function explicitly returns 1 for `None` (lines\u202f116\u2011120), not 0. Therefore the reported issue is not present in the shown code."
+ },
+ "content": "{\"verdict\":\"fails\",\"reason\":\"The function explicitly returns 1 for `None` (lines\u202f116\u2011120), not 0. Therefore the reported issue is not present in the shown code.\"}",
+ "thinking_chars": 752,
+ "done_reason": "stop",
+ "prompt_tokens": 707,
+ "eval_tokens": 226,
+ "load_s": 0.0020671,
+ "prompt_s": 0.060364,
+ "eval_s": 1.244619,
+ "wall_s": 1.348449945449829,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

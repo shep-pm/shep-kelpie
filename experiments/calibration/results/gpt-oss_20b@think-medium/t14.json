@@ -1,0 +1,31 @@
+{
+ "id": "t14",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The same match on `pane.target()` returning \"sheep config\" or \"dog config\" appears verbatim in both `title_line` (lines 27\u201129) and `title_band_line` (lines 73\u201175), so the duplication the reviewer identified is present."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"The same match on `pane.target()` returning \\\"sheep config\\\" or \\\"dog config\\\" appears verbatim in both `title_line` (lines 27\u201129) and `title_band_line` (lines 73\u201175), so the duplication the reviewer identified is present.\"}",
+ "thinking_chars": 1739,
+ "done_reason": "stop",
+ "prompt_tokens": 1344,
+ "eval_tokens": 489,
+ "load_s": 0.002685,
+ "prompt_s": 0.116682,
+ "eval_s": 2.708137,
+ "wall_s": 2.877990961074829,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,30 @@
+{
+ "id": "c10",
+ "set": "reviewer",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": []
+ },
+ "content": "{\"findings\": []}",
+ "thinking_chars": 7365,
+ "done_reason": "stop",
+ "prompt_tokens": 4000,
+ "eval_tokens": 2177,
+ "load_s": 0.0051868,
+ "prompt_s": 1.594927,
+ "eval_s": 55.562883,
+ "wall_s": 57.547120809555054,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 0,
+ "matched": null
+}

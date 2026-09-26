@@ -1,0 +1,40 @@
+{
+ "id": "r01",
+ "set": "reviewer",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let _ = child.kill().await;",
+    "what": "The implementation fails to call `kill_group(leader)` before killing the child, contradicting the commit subject and the updated comments stating that both failure arms should follow the 'ladder' order."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"let _ = child.kill().await;\", \"what\": \"The implementation fails to call `kill_group(leader)` before killing the child, contradicting the commit subject and the updated comments stating that both failure arms should follow the 'ladder' order.\"}]}",
+ "thinking_chars": 4027,
+ "done_reason": "stop",
+ "prompt_tokens": 840,
+ "eval_tokens": 1187,
+ "load_s": 0.0015972,
+ "prompt_s": 0.404564,
+ "eval_s": 29.675782,
+ "wall_s": 30.400793075561523,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "let _ = child.kill().await;",
+  "what": "The implementation fails to call `kill_group(leader)` before killing the child, contradicting the commit subject and the updated comments stating that both failure arms should follow the 'ladder' order."
+ }
+}

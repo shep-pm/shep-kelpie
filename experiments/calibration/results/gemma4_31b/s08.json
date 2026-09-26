@@ -1,0 +1,31 @@
+{
+ "id": "s08",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The code already uses `tokio::task::spawn_blocking` on line 315 to wrap the call to `stored_value` on line 316, preventing the UI task from stalling."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The code already uses `tokio::task::spawn_blocking` on line 315 to wrap the call to `stored_value` on line 316, preventing the UI task from stalling.\"}",
+ "thinking_chars": 1373,
+ "done_reason": "stop",
+ "prompt_tokens": 976,
+ "eval_tokens": 492,
+ "load_s": 0.0016764,
+ "prompt_s": 0.451947,
+ "eval_s": 12.373288,
+ "wall_s": 13.12270998954773,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

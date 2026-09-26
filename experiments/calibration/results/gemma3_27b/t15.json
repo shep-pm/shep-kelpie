@@ -1,0 +1,31 @@
+{
+ "id": "t15",
+ "set": "checker",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 86 and 99 are identical format strings. Lines 108 and 132 are also identical, and share the same format as 86/99, differing only in the variable used for the label. Line 122 has a similar format, including \"enter applies esc cancels\" and the vertical bar character. This confirms the reviewer's observation about repeated formatting patterns."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 86 and 99 are identical format strings. Lines 108 and 132 are also identical, and share the same format as 86/99, differing only in the variable used for the label. Line 122 has a similar format, including \\\"enter applies esc cancels\\\" and the vertical bar character. This confirms the reviewer's observation about repeated formatting patterns.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2006,
+ "eval_tokens": 98,
+ "load_s": 0.0050792,
+ "prompt_s": 0.718599,
+ "eval_s": 2.112639999,
+ "wall_s": 3.0586278438568115,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

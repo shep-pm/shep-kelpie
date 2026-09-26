@@ -1,0 +1,31 @@
+{
+ "id": "f03",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The function `stored_value` (line 167) takes two separate `&Path` arguments, and all observed call sites (e.g., lines 316, 426) pass them as a coupled pair from the same source, meaning the API lacks the encapsulation to prevent mismatching."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The function `stored_value` (line 167) takes two separate `&Path` arguments, and all observed call sites (e.g., lines 316, 426) pass them as a coupled pair from the same source, meaning the API lacks the encapsulation to prevent mismatching.\"}",
+ "thinking_chars": 2922,
+ "done_reason": "stop",
+ "prompt_tokens": 1845,
+ "eval_tokens": 891,
+ "load_s": 0.0020836,
+ "prompt_s": 0.797615,
+ "eval_s": 22.523401,
+ "wall_s": 23.654685974121094,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

@@ -1,0 +1,55 @@
+{
+ "id": "t11",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "page_lines_back (245-259) repeats the backward walk in tail_window_start (172-184) with the same shape: it steps back from `start`, adds each `cost(at-1)`, and stops once a line would exceed `body_rows` after at least one line is taken. Its `count` is just `start - base`, so the proposed `(s - tail_window_start(s,b,c)).max(1)` matches it, including the `start == 0` and `body_rows == 0` edge cases. The two differ only when a row costs 0, since 177 checks `used > 0` and 251 checks `count > 0`. The 164-171 doc warns against keeping two copies in step by hand, and this is the kind of drift it describes."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"page_lines_back (245-259) repeats the backward walk in tail_window_start (172-184) with the same shape: it steps back from `start`, adds each `cost(at-1)`, and stops once a line would exceed `body_rows` after at least one line is taken. Its `count` is just `start - base`, so the proposed `(s - tail_window_start(s,b,c)).max(1)` matches it, including the `start == 0` and `body_rows == 0` edge cases. The two differ only when a row costs 0, since 177 checks `used > 0` and 251 checks `count > 0`. The 164-171 doc warns against keeping two copies in step by hand, and this is the kind of drift it describes.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22345,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 810,
+  "output_tokens_details": {
+   "thinking_tokens": 566
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22345,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 810,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 22345,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22345
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1973258,
+ "duration_ms": 9235,
+ "wall_s": 11.475006341934204,
+ "weighted_units": 49920.9,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

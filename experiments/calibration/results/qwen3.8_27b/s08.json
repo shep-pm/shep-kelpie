@@ -1,0 +1,24 @@
+{
+ "id": "s08",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Lines 315-317 show `stored_value` is already called inside `tokio::task::spawn_blocking`, which is exactly what the finding's suggested fix recommends; the finding misreads the code as if the call were made directly on the UI task."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Lines 315-317 show `stored_value` is already called inside `tokio::task::spawn_blocking`, which is exactly what the finding's suggested fix recommends; the finding misreads the code as if the call were made directly on the UI task.\"}",
+ "thinking_chars": 1304,
+ "done_reason": "stop",
+ "prompt_tokens": 985,
+ "eval_tokens": 408,
+ "load_s": 0.0015728,
+ "prompt_s": 0.452933,
+ "eval_s": 3.894881,
+ "wall_s": 4.510746002197266,
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

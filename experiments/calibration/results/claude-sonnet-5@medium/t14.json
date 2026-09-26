@@ -1,0 +1,55 @@
+{
+ "id": "t14",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 27-30 and 73-76 contain the identical `match pane.target()` mapping PaneTarget::Sheep/Dog to \"sheep config\"/\"dog config\", and both then format `\"{name}  ({kind})\"`. The duplication is real, and a `kind_label()` helper would remove it."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"Lines 27-30 and 73-76 contain the identical `match pane.target()` mapping PaneTarget::Sheep/Dog to \\\"sheep config\\\"/\\\"dog config\\\", and both then format `\\\"{name}  ({kind})\\\"`. The duplication is real, and a `kind_label()` helper would remove it.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20681,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 122,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20681,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 122,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 20681,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20681
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0863266,
+ "duration_ms": 1968,
+ "wall_s": 4.583350896835327,
+ "weighted_units": 43163.3,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

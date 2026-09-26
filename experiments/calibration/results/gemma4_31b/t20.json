@@ -1,0 +1,31 @@
+{
+ "id": "t20",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The match in value_cycling.rs:31-40 duplicates the logic of the settings_mut() accessor seen in text_editor_input.rs:13; hoisting the read of self.now (line 49) would resolve the borrow conflict and allow using the accessor."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The match in value_cycling.rs:31-40 duplicates the logic of the settings_mut() accessor seen in text_editor_input.rs:13; hoisting the read of self.now (line 49) would resolve the borrow conflict and allow using the accessor.\"}",
+ "thinking_chars": 7197,
+ "done_reason": "stop",
+ "prompt_tokens": 1670,
+ "eval_tokens": 2062,
+ "load_s": 0.0048852,
+ "prompt_s": 0.743724,
+ "eval_s": 52.010367,
+ "wall_s": 53.20300912857056,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

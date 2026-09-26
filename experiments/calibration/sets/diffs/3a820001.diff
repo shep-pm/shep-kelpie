@@ -1,0 +1,187 @@
+diff --git a/crates/shep-cli/src/commands/daemon/reload.rs b/crates/shep-cli/src/commands/daemon/reload.rs
+index 35cbda07..10aa8b01 100644
+--- a/crates/shep-cli/src/commands/daemon/reload.rs
++++ b/crates/shep-cli/src/commands/daemon/reload.rs
+@@ -110,34 +110,34 @@ fn version_from_refusal(err: &ConnectError) -> Option<&str> {
+     }
+ }
+ 
+ /// Replaces the running shepherd with one running this binary's code, and
+ /// brings the flock back.
+ ///
+ /// One of the three recovery verbs the version guard exempts, so it must work
+ /// against a shepherd that refuses the handshake and never needs the socket to
+ /// succeed. `guard` is threaded from `crate::run`.
+ pub async fn reload(
+     streams: &mut Streams<'_>,
+     paths: &ShepPaths,
+-    guard: crate::VersionGuard,
++    guard: crate::version_guard::VersionGuard,
+ ) -> ExitCode {
+     reload_with_wait(streams, paths, guard, admin::KILL_TEARDOWN_WAIT).await
+ }
+ 
+ /// As [`reload`], but with a caller-chosen teardown wait.
+ async fn reload_with_wait(
+     streams: &mut Streams<'_>,
+     paths: &ShepPaths,
+-    guard: crate::VersionGuard,
++    guard: crate::version_guard::VersionGuard,
+     wait: std::time::Duration,
+ ) -> ExitCode {
+     // Before the connection and before either arm: the handover arm execs a
+     // successor that re-reads this file, and a value that fails to load there
+     // exits it with the predecessor already gone. File only, since the
+     // successor inherits the daemon's own env and flags through `execve`.
+     if let Err(err) = read_daemon_config_source(paths).and_then(|source| {
+         DaemonConfig::load(source.as_deref(), &|_| None).map_err(DaemonRunError::from)
+     }) {
+         return streams.fail(daemon_exit_code(&err), &err.to_string());
+     }
+ 
+@@ -246,25 +246,25 @@ async fn ask_fitness(client: &Client) -> Fitness {
+ /// Signals the shepherd to replace its own image in place, then waits for
+ /// the successor to serve and reports the flock.
+ ///
+ /// The flock never stops: a carried sheep keeps its pid, its log file handles
+ /// and its place in the shepherd's registry. The signal is the trigger, not
+ /// the decision, which already happened over the socket. A handover can still
+ /// fail after the signal, so this waits for a shepherd of this binary's
+ /// version and takes the stop arm's own tail when none answers.
+ #[cfg(unix)]
+ async fn hand_over(
+     streams: &mut Streams<'_>,
+     paths: &ShepPaths,
+-    guard: crate::VersionGuard,
++    guard: crate::version_guard::VersionGuard,
+     wait: std::time::Duration,
+ ) -> ExitCode {
+     let pid = match proven_shepherd(streams, paths) {
+         Ok(pid) => pid,
+         Err(code) => return code,
+     };
+     // Held across the signal: accepted connections are not carried across the
+     // `execve`, so this one closing is the proof the old image is gone.
+     // Predecessor and successor otherwise answer on the same pid and version.
+     let Ok(witness) = Client::connect(&paths.socket).await else {
+         // No witness, no handover: `await_successor` with nothing to outlive
+         // would take the predecessor's own answer as the successor's.
+@@ -276,25 +276,25 @@ async fn hand_over(
+     if let Err((code, message)) = signal_handover(pid) {
+         return streams.fail(code, &message);
+     }
+     match await_successor(paths, &witness, wait).await {
+         // The successor carried the flock; nothing to restore.
+         Some(client) => report_reload(&client, streams, false).await,
+         None => {
+             // The flock is about to be started rather than carried, so the
+             // pids change and the operator is told.
+             let message = "the shepherd did not come back on this version after the handover \
+                            signal; starting one instead";
+             streams.aside("reload", message);
+-            let client = match crate::connect_or_spawn_client(streams, paths, guard).await {
++            let client = match crate::client::connect_or_spawn_client(streams, paths, guard).await {
+                 Ok(client) => client,
+                 Err(code) => return code,
+             };
+             report_reload(&client, streams, true).await
+         }
+     }
+ }
+ 
+ /// Asks the shepherd at `pid` to hand its flock to a successor.
+ ///
+ /// SIGHUP, since SIGUSR2 is already the log-reopen signal. A shepherd too old
+ /// to hand over installs SIGHUP as a graceful stop, so the arm selection keeps
+@@ -436,61 +436,61 @@ fn refusal_after_teardown_budget(
+             format!(
+                 "the shepherd was signalled, teardown is still in progress, and this home's \
+                  pidfile could not be read to find out whether it stopped ({err}); nothing has \
+                  been started in its place"
+             ),
+         )),
+     }
+ }
+ 
+ /// Stops the shepherd, waits it out, starts a successor, and musters.
+ ///
+ /// [`boot::daemon_liveness`] proves the pid, `commands::admin` owns the signal
+-/// and the teardown wait, and `crate::connect_or_spawn_client` is the
++/// and the teardown wait, and `crate::client::connect_or_spawn_client` is the
+ /// autostart `shep start` already uses.
+ ///
+ /// A budget that elapses is a question rather than an answer, and
+ /// [`refusal_after_teardown_budget`] asks the lock: the predecessor has been
+ /// signalled by then, so reading the clock as a failure is how this verb
+ /// would leave a home with no shepherd at all.
+ async fn stop_and_start(
+     streams: &mut Streams<'_>,
+     paths: &ShepPaths,
+-    guard: crate::VersionGuard,
++    guard: crate::version_guard::VersionGuard,
+     wait: std::time::Duration,
+ ) -> ExitCode {
+     let pid = match proven_shepherd(streams, paths) {
+         Ok(pid) => pid,
+         Err(code) => return code,
+     };
+     if let Err((code, message)) = admin::signal_graceful_stop(pid) {
+         return streams.fail(code, &message);
+     }
+     if !admin::wait_for_socket_to_disappear(&paths.socket, wait).await
+         && let Some((code, message)) = refusal_after_teardown_budget(boot::daemon_liveness(paths))
+     {
+         return streams.fail(code, &message);
+     }
+-    let client = match crate::connect_or_spawn_client(streams, paths, guard).await {
++    let client = match crate::client::connect_or_spawn_client(streams, paths, guard).await {
+         Ok(client) => client,
+         Err(code) => return code,
+     };
+     report_reload(&client, streams, true).await
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+-    use crate::VersionGuard;
+     use crate::cli::Format;
++    use crate::version_guard::VersionGuard;
+     use shep_core::protocol::{Request, Response};
+ 
+     #[test]
+     fn reload_picks_the_stop_arm_against_a_daemon_too_old_to_hand_over() {
+         assert_eq!(Arm::for_daemon(Some("0.1.8")), Arm::StopAndStart);
+     }
+ 
+     /// Component-wise rather than lexical: `0.1.9` against `0.1.18` is the
+     /// case that tells the two apart.
+     #[test]
+     fn reload_picks_the_stop_arm_at_every_version_below_the_floor() {
+         assert_eq!(Arm::for_daemon(Some("0.1.9")), Arm::StopAndStart);
+diff --git a/crates/shep-cli/src/commands/dogs/mod.rs b/crates/shep-cli/src/commands/dogs/mod.rs
+index 6b9e0333..d2632403 100644
+--- a/crates/shep-cli/src/commands/dogs/mod.rs
++++ b/crates/shep-cli/src/commands/dogs/mod.rs
+@@ -101,17 +101,20 @@ fn dog_source(cfg: &ShepToml, name: &str) -> DogSource {
+ /// shepherd answered and refused rather than being absent.
+ async fn connect_or_absent(
+     paths: &ShepPaths,
+     streams: &mut Streams<'_>,
+ ) -> Result<Option<Client>, ExitCode> {
+     match Client::connect(&paths.socket).await {
+         Ok(client) => Ok(Some(client)),
+         Err(ConnectError::Connect { .. }) => Ok(None),
+         Err(err) => {
+             let code = ExitCode::from(&err);
+             Err(streams.fail(
+                 code,
+-                &format!("{err}; run `shep {}`", crate::VERSION_SKEW_REMEDY),
++                &format!(
++                    "{err}; run `shep {}`",
++                    crate::version_guard::VERSION_SKEW_REMEDY
++                ),
+             ))
+         }
+     }
+ }

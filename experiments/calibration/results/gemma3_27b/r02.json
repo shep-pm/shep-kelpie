@@ -1,0 +1,40 @@
+{
+ "id": "r02",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let (code, message) = safe_parts(fmt, code, message);",
+    "what": "The order of arguments to `safe_parts` is swapped in `emit_notice`. It should be `safe_parts(fmt, code, message)` but is called as `safe_parts(fmt, message, code)` causing the code and message to be reversed in the emitted notice."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"let (code, message) = safe_parts(fmt, code, message);\", \"what\": \"The order of arguments to `safe_parts` is swapped in `emit_notice`. It should be `safe_parts(fmt, code, message)` but is called as `safe_parts(fmt, message, code)` causing the code and message to be reversed in the emitted notice.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1361,
+ "eval_tokens": 97,
+ "load_s": 0.0047983,
+ "prompt_s": 0.510097,
+ "eval_s": 2.086094,
+ "wall_s": 2.6844940185546875,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "let (code, message) = safe_parts(fmt, code, message);",
+  "what": "The order of arguments to `safe_parts` is swapped in `emit_notice`. It should be `safe_parts(fmt, code, message)` but is called as `safe_parts(fmt, message, code)` causing the code and message to be reversed in the emitted notice."
+ }
+}

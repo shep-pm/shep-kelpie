@@ -1,0 +1,36 @@
+{
+ "id": "c07",
+ "set": "reviewer",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let mut used = 0usize;",
+    "what": "The removed implementation of page_lines_back correctly handled the case where the sum of row costs exceeded body_rows by breaking early, but the new implementation using tail_window_start does not account for this constraint, potentially returning a value larger than intended."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"let mut used = 0usize;\", \"what\": \"The removed implementation of page_lines_back correctly handled the case where the sum of row costs exceeded body_rows by breaking early, but the new implementation using tail_window_start does not account for this constraint, potentially returning a value larger than intended.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1224,
+ "eval_tokens": 80,
+ "load_s": 0.001568,
+ "prompt_s": 0.172811,
+ "eval_s": 1.373249,
+ "wall_s": 1.6279940605163574,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 1,
+ "matched": null
+}

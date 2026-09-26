@@ -1,0 +1,63 @@
+calibrate: 61 cases to run for claude-sonnet-5@high
+t03 8s holds (label holds)
+t01 8s holds (label holds)
+t02 10s holds (label holds)
+t05 5s holds (label holds)
+t04 6s fails (label holds)
+t06 5s holds (label holds)
+t07 6s fails (label holds)
+t08 6s holds (label holds)
+t09 5s holds (label holds)
+t12 9s holds (label holds)
+t10 11s unsure (label holds)
+t11 12s holds (label holds)
+t13 4s holds (label holds)
+t14 4s holds (label holds)
+t15 7s None (label holds)
+t17 25s fails (label holds)
+t16 30s holds (label holds)
+t18 44s holds (label holds)
+f01 11s fails (label fails)
+f02 6s fails (label fails)
+t19 48s fails (label holds)
+f03 8s fails (label fails)
+t20 46s holds (label holds)
+f05 16s fails (label fails)
+f06 17s fails (label fails)
+s01 3s fails (label fails)
+s03 3s fails (label fails)
+s04 6s fails (label fails)
+s05 6s fails (label fails)
+s06 24s fails (label fails)
+s02 41s fails (label fails)
+s07 15s fails (label fails)
+s08 15s fails (label fails)
+s09 3s fails (label fails)
+r01 7s caught=True false_alarms=0
+r02 24s caught=True false_alarms=0
+r03 26s caught=True false_alarms=0
+r04 8s caught=True false_alarms=0
+r05 79s caught=True false_alarms=0
+f04 188s fails (label fails)
+r06 79s caught=True false_alarms=0
+r07 25s caught=True false_alarms=0
+r08 28s caught=True false_alarms=0
+r09 29s caught=True false_alarms=1
+c02 17s clean, false_alarms=0
+c03 14s clean, false_alarms=0
+c01 22s clean, false_alarms=0
+c04 5s clean, false_alarms=0 ERROR exit 1
+c05 5s clean, false_alarms=0 ERROR exit 1
+c06 6s clean, false_alarms=0 ERROR exit 1
+c07 6s clean, false_alarms=0 ERROR exit 1
+h01 7s caught=False false_alarms=0 ERROR exit 1
+h02 7s caught=False false_alarms=0 ERROR exit 1
+h03 7s caught=False false_alarms=0 ERROR exit 1
+h04 7s caught=False false_alarms=0 ERROR exit 1
+h05 7s caught=False false_alarms=0 ERROR exit 1
+c08 7s clean, false_alarms=0 ERROR exit 1
+c09 7s clean, false_alarms=0 ERROR exit 1
+c10 7s clean, false_alarms=0 ERROR exit 1
+c11 6s clean, false_alarms=0 ERROR exit 1
+c12 6s clean, false_alarms=0 ERROR exit 1
+calibrate: finished claude-sonnet-5@high in 6.2 min

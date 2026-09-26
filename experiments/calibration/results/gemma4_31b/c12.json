@@ -1,0 +1,36 @@
+{
+ "id": "c12",
+ "set": "reviewer",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "use super::super::{Envelope, LineOutcome, LineReply, Response, SignalOutcome, SignalReply};",
+    "what": "These types are exported by the parent module (super), but the import uses the grandparent module (super::super), causing a compilation failure."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"use super::super::{Envelope, LineOutcome, LineReply, Response, SignalOutcome, SignalReply};\", \"what\": \"These types are exported by the parent module (super), but the import uses the grandparent module (super::super), causing a compilation failure.\"}]}",
+ "thinking_chars": 10380,
+ "done_reason": "stop",
+ "prompt_tokens": 1687,
+ "eval_tokens": 3038,
+ "load_s": 0.0055669,
+ "prompt_s": 0.749447,
+ "eval_s": 76.737047,
+ "wall_s": 77.83467388153076,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 1,
+ "matched": null
+}

@@ -1,0 +1,64 @@
+{
+ "id": "r08",
+ "set": "reviewer",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "risk",
+    "quote": "    start - tail_window_start(start, body_rows, cost)",
+    "what": "The old code's `count.max(1)` guarantee of at least one line per page is gone, so `start == 0` now returns 0 instead of 1. The same happens if `tail_window_start` returns `start` when nothing fits, for example when `body_rows` is 0. A zero-sized backward page can then make `page_amount_up` a no-op or feed a zero into its callers."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"risk\", \"quote\": \"    start - tail_window_start(start, body_rows, cost)\", \"what\": \"The old code's `count.max(1)` guarantee of at least one line per page is gone, so `start == 0` now returns 0 instead of 1. The same happens if `tail_window_start` returns `start` when nothing fits, for example when `body_rows` is 0. A zero-sized backward page can then make `page_amount_up` a no-op or feed a zero into its callers.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 19927,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 666,
+  "output_tokens_details": {
+   "thinking_tokens": 497
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19927,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 666,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 19927,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 19927
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0887506,
+ "duration_ms": 26155,
+ "wall_s": 27.899526834487915,
+ "weighted_units": 44375.3,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "risk",
+  "quote": "    start - tail_window_start(start, body_rows, cost)",
+  "what": "The old code's `count.max(1)` guarantee of at least one line per page is gone, so `start == 0` now returns 0 instead of 1. The same happens if `tail_window_start` returns `start` when nothing fits, for example when `body_rows` is 0. A zero-sized backward page can then make `page_amount_up` a no-op or feed a zero into its callers."
+ }
+}

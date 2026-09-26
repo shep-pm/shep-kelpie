@@ -1,0 +1,31 @@
+{
+ "id": "s09",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Both title_line (lines 28-29) and title_band_line (lines 74-75) correctly map PaneTarget::Dog to \"dog config\"."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Both title_line (lines 28-29) and title_band_line (lines 74-75) correctly map PaneTarget::Dog to \\\"dog config\\\".\"}",
+ "thinking_chars": 2144,
+ "done_reason": "stop",
+ "prompt_tokens": 1412,
+ "eval_tokens": 735,
+ "load_s": 0.0047594,
+ "prompt_s": 0.638503,
+ "eval_s": 18.52896,
+ "wall_s": 19.551702976226807,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

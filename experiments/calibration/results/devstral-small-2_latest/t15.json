@@ -1,0 +1,31 @@
+{
+ "id": "t15",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 86, 99, 108, and 132 indeed format the same 'edit bar' sentence with minor variations in the label, and line 122 follows the same pattern with an 'editing' prefix. Extracting this into a shared function would improve maintainability and clarity."
+ },
+ "content": "{\n  \"verdict\": \"holds\",\n  \"reason\": \"Lines 86, 99, 108, and 132 indeed format the same 'edit bar' sentence with minor variations in the label, and line 122 follows the same pattern with an 'editing' prefix. Extracting this into a shared function would improve maintainability and clarity.\"\n}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2562,
+ "eval_tokens": 83,
+ "load_s": 0.0022764,
+ "prompt_s": 0.514229,
+ "eval_s": 1.429179,
+ "wall_s": 2.0351309776306152,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

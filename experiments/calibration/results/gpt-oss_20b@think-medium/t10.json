@@ -1,0 +1,31 @@
+{
+ "id": "t10",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "on_pane_text_key matches with _ => {} (lines\u202f428\u2011444) swallowing any KeyPress that is not a text key, while on_pane_key lists all unbound variants explicitly (lines\u202f265\u2011293)."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"on_pane_text_key matches with _ => {} (lines\u202f428\u2011444) swallowing any KeyPress that is not a text key, while on_pane_key lists all unbound variants explicitly (lines\u202f265\u2011293).\"}",
+ "thinking_chars": 10463,
+ "done_reason": "stop",
+ "prompt_tokens": 1895,
+ "eval_tokens": 2546,
+ "load_s": 0.0022687,
+ "prompt_s": 0.142679,
+ "eval_s": 14.301656,
+ "wall_s": 14.529605865478516,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

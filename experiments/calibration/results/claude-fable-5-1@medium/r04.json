@@ -1,0 +1,64 @@
+{
+ "id": "r04",
+ "set": "reviewer",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "                if self.disarm_settings_candidate()",
+    "what": "The condition is inverted: disarm_settings_candidate returns true when it cancelled an armed candidate, so the new code moves the cursor only after cancelling (breaking the 'cancel must not also move' rule) and never moves at all when nothing is armed, which is the ordinary navigation case; it needs a `!`."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"                if self.disarm_settings_candidate()\", \"what\": \"The condition is inverted: disarm_settings_candidate returns true when it cancelled an armed candidate, so the new code moves the cursor only after cancelling (breaking the 'cancel must not also move' rule) and never moves at all when nothing is armed, which is the ordinary navigation case; it needs a `!`.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21861,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 421,
+  "output_tokens_details": {
+   "thinking_tokens": 274
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21861,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 421,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 21861,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21861
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.46170199999999995,
+ "duration_ms": 7845,
+ "wall_s": 9.520595788955688,
+ "weighted_units": 47193.8,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "                if self.disarm_settings_candidate()",
+  "what": "The condition is inverted: disarm_settings_candidate returns true when it cancelled an armed candidate, so the new code moves the cursor only after cancelling (breaking the 'cancel must not also move' rule) and never moves at all when nothing is armed, which is the ordinary navigation case; it needs a `!`."
+ }
+}

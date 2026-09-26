@@ -1,0 +1,24 @@
+{
+ "id": "t18",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The code at delete_secret.rs:24-29 and write_secret.rs:49-54 is indeed identical (same `matches!(row.source, Source::Namespace(_))` guard, same `Notice { text: PROVIDER_ROW_REFUSAL.to_string(), grave: true }` assignment, same `return Effect::None`), confirming the duplication the finding describes."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The code at delete_secret.rs:24-29 and write_secret.rs:49-54 is indeed identical (same `matches!(row.source, Source::Namespace(_))` guard, same `Notice { text: PROVIDER_ROW_REFUSAL.to_string(), grave: true }` assignment, same `return Effect::None`), confirming the duplication the finding describes.\"}",
+ "thinking_chars": 2999,
+ "done_reason": "stop",
+ "prompt_tokens": 1871,
+ "eval_tokens": 831,
+ "load_s": 0.0019536,
+ "prompt_s": 0.774882,
+ "eval_s": 8.023085,
+ "wall_s": 9.021652221679688,
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

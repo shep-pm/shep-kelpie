@@ -1,0 +1,55 @@
+{
+ "id": "t06",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "close_dialog_option_line (line 143) only borrows `text` via `fit(&text, width)` at line 145, so `&str` would work. Lines 276 and 311-312 call `.to_owned()` on string literals, which allocates a String that is dropped right after. Changing the parameter to `&str` removes those two allocations. The other two call sites (lines 270 and 287) pass owned Strings and would just need `&`. The impact is tiny, which fits the LOW severity."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"close_dialog_option_line (line 143) only borrows `text` via `fit(&text, width)` at line 145, so `&str` would work. Lines 276 and 311-312 call `.to_owned()` on string literals, which allocates a String that is dropped right after. Changing the parameter to `&str` removes those two allocations. The other two call sites (lines 270 and 287) pass owned Strings and would just need `&`. The impact is tiny, which fits the LOW severity.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20689,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 171,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20689,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 171,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 20689,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20689
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0868486,
+ "duration_ms": 2431,
+ "wall_s": 4.71376895904541,
+ "weighted_units": 43424.3,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

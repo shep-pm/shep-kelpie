@@ -1,0 +1,46 @@
+{
+ "id": "c10",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "Two short lines, not one long sentence: `Buffer::set_line` truncates at `max_width` in silence, and this branch exists for terminals narrower than `MIN_TERM_WIDTH`.",
+    "what": "The comment describes behavior that no longer exists, as the `draw_too_small` function is now called directly, potentially losing the intended truncation."
+   },
+   {
+    "severity": "bug",
+    "quote": "the overlay did not open",
+    "what": "The test asserts that the keymap should be open when testing the refusal case. However, the code now draws the overlay *after* the refusal check. This means the overlay is drawn on a refusal if the overlay was previously open, meaning the test is failing to assert the intended behavior."
+   },
+   {
+    "severity": "bug",
+    "quote": "the overlay drew {} over the refusal: {frame}",
+    "what": "The test expects the overlay to not draw over the refusal message, but the logic only prevents drawing if the terminal is too small, not if the refusal message is being displayed. If the keymap was open before the refusal condition, the overlay *will* draw over the 'too small' message."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"Two short lines, not one long sentence: `Buffer::set_line` truncates at `max_width` in silence, and this branch exists for terminals narrower than `MIN_TERM_WIDTH`.\", \"what\": \"The comment describes behavior that no longer exists, as the `draw_too_small` function is now called directly, potentially losing the intended truncation.\"}, {\"severity\": \"bug\", \"quote\": \"the overlay did not open\", \"what\": \"The test asserts that the keymap should be open when testing the refusal case. However, the code now draws the overlay *after* the refusal check. This means the overlay is drawn on a refusal if the overlay was previously open, meaning the test is failing to assert the intended behavior.\"}, {\"severity\": \"bug\", \"quote\": \"the overlay drew {} over the refusal: {frame}\", \"what\": \"The test expects the overlay to not draw over the refusal message, but the logic only prevents drawing if the terminal is too small, not if the refusal message is being displayed. If the keymap was open before the refusal condition, the overlay *will* draw over the 'too small' message.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 3994,
+ "eval_tokens": 255,
+ "load_s": 0.0026102,
+ "prompt_s": 1.341829,
+ "eval_s": 5.555349,
+ "wall_s": 7.098924875259399,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 3,
+ "matched": null
+}

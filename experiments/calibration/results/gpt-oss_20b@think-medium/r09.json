@@ -1,0 +1,40 @@
+{
+ "id": "r09",
+ "set": "reviewer",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "(start - tail_window_start(start, body_rows - 1, cost)).max(1)",
+    "what": "If body_rows is 0, the expression body_rows - 1 underflows to usize::MAX, leading to a wrong, overly large page_lines_back value and incorrect scroll behaviour."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"(start - tail_window_start(start, body_rows - 1, cost)).max(1)\",\"what\":\"If body_rows is 0, the expression body_rows - 1 underflows to usize::MAX, leading to a wrong, overly large page_lines_back value and incorrect scroll behaviour.\"}]}",
+ "thinking_chars": 8353,
+ "done_reason": "stop",
+ "prompt_tokens": 710,
+ "eval_tokens": 2318,
+ "load_s": 0.004138,
+ "prompt_s": 0.066337,
+ "eval_s": 12.858145,
+ "wall_s": 12.987981081008911,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "(start - tail_window_start(start, body_rows - 1, cost)).max(1)",
+  "what": "If body_rows is 0, the expression body_rows - 1 underflows to usize::MAX, leading to a wrong, overly large page_lines_back value and incorrect scroll behaviour."
+ }
+}

@@ -1,0 +1,24 @@
+{
+ "id": "s02",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Line 225 explicitly shows `Err(RequestError::Closed) => Ok(())`, so the finding's claim that Closed is mapped to `Err(UiGone)` is a misread of the code; the code already does exactly what the suggested fix proposes."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Line 225 explicitly shows `Err(RequestError::Closed) => Ok(())`, so the finding's claim that Closed is mapped to `Err(UiGone)` is a misread of the code; the code already does exactly what the suggested fix proposes.\"}",
+ "thinking_chars": 952,
+ "done_reason": "stop",
+ "prompt_tokens": 903,
+ "eval_tokens": 347,
+ "load_s": 0.003659,
+ "prompt_s": 0.434862,
+ "eval_s": 3.447271,
+ "wall_s": 4.072600841522217,
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

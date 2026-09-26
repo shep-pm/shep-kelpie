@@ -1,0 +1,24 @@
+{
+ "id": "s06",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The finding claims log_row is called before the check, but lines 170-172 show the `let Some(row) = app.selected_row() else { return ... }` guard executes before log_row is invoked at line 176, so by the time log_row calls its own `.expect(...)` at line 337, the selection was already confirmed `Some` via the immutable `&App` reference."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The finding claims log_row is called before the check, but lines 170-172 show the `let Some(row) = app.selected_row() else { return ... }` guard executes before log_row is invoked at line 176, so by the time log_row calls its own `.expect(...)` at line 337, the selection was already confirmed `Some` via the immutable `&App` reference.\"}",
+ "thinking_chars": 3013,
+ "done_reason": "stop",
+ "prompt_tokens": 1245,
+ "eval_tokens": 951,
+ "load_s": 0.0015095,
+ "prompt_s": 0.550487,
+ "eval_s": 9.236178,
+ "wall_s": 9.972612142562866,
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

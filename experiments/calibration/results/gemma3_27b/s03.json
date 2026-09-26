@@ -1,0 +1,31 @@
+{
+ "id": "s03",
+ "set": "checker",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Lines 199-205 show the level cycle transitions from None to Trace, Trace to Debug, Debug to Info, Info to Warn, and Warn to Error, covering all levels before becoming None. The reviewer incorrectly claims Warn is skipped."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Lines 199-205 show the level cycle transitions from None to Trace, Trace to Debug, Debug to Info, Info to Warn, and Warn to Error, covering all levels before becoming None. The reviewer incorrectly claims Warn is skipped.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 833,
+ "eval_tokens": 64,
+ "load_s": 0.0015581,
+ "prompt_s": 0.334331,
+ "eval_s": 1.357987,
+ "wall_s": 1.797137975692749,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

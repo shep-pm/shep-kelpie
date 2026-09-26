@@ -1,0 +1,55 @@
+{
+ "id": "t11",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "page_lines_back (245-259) repeats the backward walk in tail_window_start (172-184). It has the same loop, the same break condition and the same at-least-one-line floor, and it counts lines where the other returns the index. Both stop at the same line, so start - tail_window_start(start, ..) gives the same count, which the .max(1) covers when start is 0. The two loops differ only if a line can cost 0 rows (count > 0 versus used > 0), and row_height isn't shown, so that case is unchecked. Line 168-171 already warns that two copies of this walk drift apart."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"page_lines_back (245-259) repeats the backward walk in tail_window_start (172-184). It has the same loop, the same break condition and the same at-least-one-line floor, and it counts lines where the other returns the index. Both stop at the same line, so start - tail_window_start(start, ..) gives the same count, which the .max(1) covers when start is 0. The two loops differ only if a line can cost 0 rows (count > 0 versus used > 0), and row_height isn't shown, so that case is unchecked. Line 168-171 already warns that two copies of this walk drift apart.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21541,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 804,
+  "output_tokens_details": {
+   "thinking_tokens": 598
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21541,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 804,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 21541,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21541
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.09658660000000001,
+ "duration_ms": 9351,
+ "wall_s": 11.79202389717102,
+ "weighted_units": 48293.3,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

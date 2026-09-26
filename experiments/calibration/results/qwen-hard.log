@@ -1,0 +1,13 @@
+calibrate: 11 cases to run for qwen3.8_27b
+[1/11] f04 20s holds (label fails)
+[2/11] h01 19s caught=True false_alarms=0
+[3/11] h02 30s caught=True false_alarms=0
+[4/11] h03 28s caught=True false_alarms=0
+[5/11] h04 15s caught=True false_alarms=0
+[6/11] h05 16s caught=True false_alarms=0
+[7/11] c08 44s clean, false_alarms=0
+[8/11] c09 28s clean, false_alarms=0
+[9/11] c10 56s clean, false_alarms=0
+[10/11] c11 13s clean, false_alarms=0
+[11/11] c12 75s clean, false_alarms=1
+calibrate: finished qwen3.8_27b in 5.7 min

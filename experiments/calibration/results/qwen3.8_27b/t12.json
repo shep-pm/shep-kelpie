@@ -1,0 +1,24 @@
+{
+ "id": "t12",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 122-185 confirm all four match arms (ConfigPane, Settings, Bleats, Secrets) build an identical Rect{x,y,width,height:body_rows(area)}, call a pane-specific draw fn, then repeat the same buffer.set_line(status_line) + return tail; the Sheep arm at lines 83-99 does the same status_line+return with a different Rect, exactly as the finding describes."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 122-185 confirm all four match arms (ConfigPane, Settings, Bleats, Secrets) build an identical Rect{x,y,width,height:body_rows(area)}, call a pane-specific draw fn, then repeat the same buffer.set_line(status_line) + return tail; the Sheep arm at lines 83-99 does the same status_line+return with a different Rect, exactly as the finding describes.\"}",
+ "thinking_chars": 3179,
+ "done_reason": "stop",
+ "prompt_tokens": 2148,
+ "eval_tokens": 966,
+ "load_s": 0.0046667,
+ "prompt_s": 0.886747,
+ "eval_s": 8.577678,
+ "wall_s": 9.659090042114258,
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

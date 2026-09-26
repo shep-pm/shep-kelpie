@@ -1,0 +1,55 @@
+{
+ "id": "f05",
+ "set": "checker",
+ "model": "claude-haiku-4-5-20251001",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The code shows two panes with overlapping sets of ~20 KeyPress variants (TextChar, TextBackspace, TextApply, etc.) all returning Effect::None in separate match statements at secrets_keys.rs:134-162 and close_dialog/dialog_keys.rs:22-62. Adding a new variant does require updates in multiple places. However, Rust's exhaustiveness checking prevents true 'silent fall-through'\u2014a missing variant causes a compiler error per pane, not silent behavior."
+ },
+ "content": "```json\n{\n  \"verdict\": \"holds\",\n  \"reason\": \"The code shows two panes with overlapping sets of ~20 KeyPress variants (TextChar, TextBackspace, TextApply, etc.) all returning Effect::None in separate match statements at secrets_keys.rs:134-162 and close_dialog/dialog_keys.rs:22-62. Adding a new variant does require updates in multiple places. However, Rust's exhaustiveness checking prevents true 'silent fall-through'\u2014a missing variant causes a compiler error per pane, not silent behavior.\"\n}\n```",
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 11020,
+  "cache_read_input_tokens": 17675,
+  "output_tokens": 2924,
+  "output_tokens_details": {
+   "thinking_tokens": 2786
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 11020,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 10,
+    "output_tokens": 2924,
+    "cache_read_input_tokens": 17675,
+    "cache_creation_input_tokens": 11020,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 11020
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0384375,
+ "duration_ms": 29569,
+ "wall_s": 31.143441915512085,
+ "weighted_units": 38437.5,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

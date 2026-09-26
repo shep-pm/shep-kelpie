@@ -1,0 +1,40 @@
+{
+ "id": "h05",
+ "set": "reviewer",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "if height > 2",
+    "what": "The refactor changes the condition from `height >= 2` to `height > 2`, causing the \u201cneed \u2026\u201d line to be omitted when the terminal height is exactly 2, which differs from the original intended behavior."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"if height > 2\",\"what\":\"The refactor changes the condition from `height >= 2` to `height > 2`, causing the \u201cneed \u2026\u201d line to be omitted when the terminal height is exactly 2, which differs from the original intended behavior.\"}]}",
+ "thinking_chars": 16396,
+ "done_reason": "stop",
+ "prompt_tokens": 3470,
+ "eval_tokens": 3814,
+ "load_s": 0.0061829,
+ "prompt_s": 0.268279,
+ "eval_s": 21.727775,
+ "wall_s": 22.128514766693115,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "if height > 2",
+  "what": "The refactor changes the condition from `height >= 2` to `height > 2`, causing the \u201cneed \u2026\u201d line to be omitted when the terminal height is exactly 2, which differs from the original intended behavior."
+ }
+}

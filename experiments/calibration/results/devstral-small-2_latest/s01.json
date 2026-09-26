@@ -1,0 +1,31 @@
+{
+ "id": "s01",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The code at line 102 shows that the 'y copy' key is actually included in the Allowed arm, contradicting the finding's claim that it is omitted."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The code at line 102 shows that the 'y copy' key is actually included in the Allowed arm, contradicting the finding's claim that it is omitted.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1281,
+ "eval_tokens": 50,
+ "load_s": 0.0015988,
+ "prompt_s": 0.190205,
+ "eval_s": 0.848713,
+ "wall_s": 1.122148036956787,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

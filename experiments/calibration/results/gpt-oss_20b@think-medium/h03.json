@@ -1,0 +1,40 @@
+{
+ "id": "h03",
+ "set": "reviewer",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "        Format::Table => crate::terminal_safe::sanitise_multiline(message).0",
+    "what": "`safe_message` no longer removes trailing whitespace (including the final newline) when formatting table output, so messages that end with a newline will cause an extra blank line to be printed via the surrounding `writeln!`."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"        Format::Table => crate::terminal_safe::sanitise_multiline(message).0\",\"what\":\"`safe_message` no longer removes trailing whitespace (including the final newline) when formatting table output, so messages that end with a newline will cause an extra blank line to be printed via the surrounding `writeln!`.\"}]}",
+ "thinking_chars": 13932,
+ "done_reason": "stop",
+ "prompt_tokens": 1939,
+ "eval_tokens": 3042,
+ "load_s": 0.0050923,
+ "prompt_s": 0.152345,
+ "eval_s": 17.090194,
+ "wall_s": 17.37114715576172,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "        Format::Table => crate::terminal_safe::sanitise_multiline(message).0",
+  "what": "`safe_message` no longer removes trailing whitespace (including the final newline) when formatting table output, so messages that end with a newline will cause an extra blank line to be printed via the surrounding `writeln!`."
+ }
+}

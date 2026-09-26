@@ -1,0 +1,139 @@
+diff --git a/crates/shep-core/src/protocol/request/mod.rs b/crates/shep-core/src/protocol/request/mod.rs
+new file mode 100644
+index 00000000..68512a3f
+--- /dev/null
++++ b/crates/shep-core/src/protocol/request/mod.rs
+@@ -0,0 +1,23 @@
++//! RPC frames: requests, responses, envelopes, and structured errors
++
++mod config_reply;
++mod envelope;
++mod handshake;
++mod outcomes;
++mod process;
++mod redacted;
++mod response;
++mod smit;
++mod verbs;
++
++pub use config_reply::{SheepApplied, SheepConfigView, SheepDrift, SheepRefusal};
++pub use envelope::{Envelope, HelloReply, Reply, RpcError, RpcErrorCode};
++pub use handshake::{Hello, HelloAck};
++pub use outcomes::{
++    ActionOutcome, ActionReply, LineOutcome, LineReply, SignalOutcome, SignalReply,
++};
++pub use process::{DogSource, ExitInfo, Lamb, ProcessInfo, ProcessInfoBuilder, sort_flock};
++pub use redacted::{DogSectionToml, EnvValue};
++pub use response::{HostUsage, Response};
++pub use smit::{Smit, SmitError};
++pub use verbs::{Request, SelectorSpec};
+diff --git a/crates/shep-core/src/protocol/request.rs b/crates/shep-core/src/protocol/request/verbs.rs
+similarity index 98%
+rename from crates/shep-core/src/protocol/request.rs
+rename to crates/shep-core/src/protocol/request/verbs.rs
+index d0caab98..11ba0188 100644
+--- a/crates/shep-core/src/protocol/request.rs
++++ b/crates/shep-core/src/protocol/request/verbs.rs
+@@ -1,39 +1,26 @@
+-//! RPC frames: requests, responses, envelopes, and structured errors
++//! [`Request`], one variant per verb, and the selector a verb names a sheep with.
+ 
+ use std::collections::BTreeMap;
+ 
+ use serde::{Deserialize, Serialize};
+ 
+ use crate::config::{AppConfig, DeclaredApp, ResetDepth};
+ 
+-mod config_reply;
+-mod envelope;
+-mod handshake;
+-mod outcomes;
+-mod process;
+-mod redacted;
+-mod response;
+-mod smit;
++use super::{DogSectionToml, DogSource, EnvValue, Smit};
+ 
+-pub use config_reply::{SheepApplied, SheepConfigView, SheepDrift, SheepRefusal};
+-pub use envelope::{Envelope, HelloReply, Reply, RpcError, RpcErrorCode};
+-pub use handshake::{Hello, HelloAck};
+-pub use outcomes::{
+-    ActionOutcome, ActionReply, LineOutcome, LineReply, SignalOutcome, SignalReply,
+-};
+-pub use process::{DogSource, ExitInfo, Lamb, ProcessInfo, ProcessInfoBuilder, sort_flock};
+-pub use redacted::{DogSectionToml, EnvValue};
+-pub use response::{HostUsage, Response};
+-pub use smit::{Smit, SmitError};
++// Named by intra-doc links and by nothing rustc compiles, so the
++// import is behind `cfg(doc)` rather than flagged unused.
++#[cfg(doc)]
++use super::{Response, RpcErrorCode, SheepApplied, SheepDrift};
+ 
+ /// Serializable selector (mirror of [`crate::selector::ProcessSelector`];
+ /// regex travels as its source string)
+ // wire format: changing this is a breaking change
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+ pub enum SelectorSpec {
+     /// Every sheep
+     All,
+     /// By id
+     Id(u32),
+     /// By exact name
+@@ -487,27 +474,27 @@ pub enum Request {
+     ///
+     /// `#[serde(other)]`, which serde allows here because `Request` is
+     /// internally tagged and this variant carries nothing. The unknown
+     /// body's own fields are discarded: the only thing to do with a
+     /// request we cannot name is refuse it, and the refusal needs the
+     /// envelope's id rather than the body.
+     #[serde(other)]
+     Unrecognized,
+ }
+ 
+ #[cfg(test)]
+ mod tests {
++    use super::super::{Envelope, LineOutcome, LineReply, Response, SignalOutcome, SignalReply};
+     use super::*;
+-
+-    use crate::config::AppConfig;
++    use crate::protocol::MIN_SUPPORTED;
+ 
+     #[test]
+     fn a_signal_request_and_its_reply_round_trip() {
+         let request = Request::Signal {
+             selector: SelectorSpec::Name("web".to_string()),
+             signal: "SIGHUP".to_string(),
+         };
+         let json = serde_json::to_string(&request).unwrap();
+         assert_eq!(serde_json::from_str::<Request>(&json).unwrap(), request);
+ 
+         let reply = Response::Signalled(vec![
+             SignalReply {
+@@ -640,25 +627,25 @@ mod tests {
+         assert_eq!(
+             json,
+             r#"{"kind":"set_sheep_env_batch","name":"web","entries":{"A":"1"},"force":true,"dry_run":false}"#
+         );
+         assert_eq!(serde_json::from_str::<Request>(&json).unwrap(), request);
+     }
+ 
+     /// Additive, so the floor does not move. Guards against a reflexive
+     /// raise. The ceiling is pinned once, by `protocol::tests`, and moves
+     /// for reasons unrelated to this variant.
+     #[test]
+     fn the_batch_variant_did_not_raise_the_floor() {
+-        assert_eq!(super::super::MIN_SUPPORTED, 8);
++        assert_eq!(MIN_SUPPORTED, 8);
+     }
+ 
+     #[test]
+     fn request_wire_snapshots() {
+         let requests = vec![
+             Envelope {
+                 id: 1,
+                 deadline_ms: Some(5000),
+                 body: Request::Ping,
+             },
+             Envelope {
+                 id: 2,

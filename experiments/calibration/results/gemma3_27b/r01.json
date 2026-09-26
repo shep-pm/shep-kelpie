@@ -1,0 +1,41 @@
+{
+ "id": "r01",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let _ = child.kill().await;",
+    "what": "The code unconditionally kills the child process in both the timeout and unread error branches, but it has already been killed in the timeout branch, leading to a potential double-kill."
+   },
+   {
+    "severity": "bug",
+    "quote": "Ok(Err(err)) => { let _ = child.kill().await; HookOutcome::Unread { reason: err.to_string(), } }",
+    "what": "The code calls `child.kill()` before returning `HookOutcome::Unread`. The hook outcome should not include any state changes like `kill()`."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"let _ = child.kill().await;\", \"what\": \"The code unconditionally kills the child process in both the timeout and unread error branches, but it has already been killed in the timeout branch, leading to a potential double-kill.\"}, {\"severity\": \"bug\", \"quote\": \"Ok(Err(err)) => { let _ = child.kill().await; HookOutcome::Unread { reason: err.to_string(), } }\", \"what\": \"The code calls `child.kill()` before returning `HookOutcome::Unread`. The hook outcome should not include any state changes like `kill()`.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 834,
+ "eval_tokens": 143,
+ "load_s": 0.0016229,
+ "prompt_s": 0.338964,
+ "eval_s": 3.052888,
+ "wall_s": 3.5875656604766846,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": false,
+ "false_alarms": 2,
+ "matched": null
+}

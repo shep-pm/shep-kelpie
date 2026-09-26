@@ -1,0 +1,31 @@
+{
+ "id": "f04",
+ "set": "checker",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The reviewer correctly identifies that `size()` and `control()` use wildcards (`_`), meaning a new `Scene` variant would inherit incorrect default values without a compiler error, and that `is_keymap` contains an exhaustive list of variants (the false arm) that adds no marginal safety since `label()` and `caption()` already force a compile error for new variants."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The reviewer correctly identifies that `size()` and `control()` use wildcards (`_`), meaning a new `Scene` variant would inherit incorrect default values without a compiler error, and that `is_keymap` contains an exhaustive list of variants (the false arm) that adds no marginal safety since `label()` and `caption()` already force a compile error for new variants.\"}",
+ "thinking_chars": 10600,
+ "done_reason": "stop",
+ "prompt_tokens": 6641,
+ "eval_tokens": 2798,
+ "load_s": 0.0055675,
+ "prompt_s": 1.198667,
+ "eval_s": 20.389178,
+ "wall_s": 21.67002272605896,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

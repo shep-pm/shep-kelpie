@@ -1,0 +1,55 @@
+{
+ "id": "t03",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 45 and 49 in `visible_rows` and lines 237 and 241 in `rows` build the same lowercase needle and apply the same `needle.is_empty() || name.to_lowercase().contains(&needle)` predicate. If the two copies diverged, the title-bar count from `rows` would stop matching the cursor sequence from `visible_rows`. A shared helper is a reasonable fix, though the severity is closer to low than medium."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"Lines 45 and 49 in `visible_rows` and lines 237 and 241 in `rows` build the same lowercase needle and apply the same `needle.is_empty() || name.to_lowercase().contains(&needle)` predicate. If the two copies diverged, the title-bar count from `rows` would stop matching the cursor sequence from `visible_rows`. A shared helper is a reasonable fix, though the severity is closer to low than medium.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21511,
+  "cache_read_input_tokens": 10195,
+  "output_tokens": 163,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21511,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 163,
+    "cache_read_input_tokens": 10195,
+    "cache_creation_input_tokens": 21511,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21511
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.08971699999999999,
+ "duration_ms": 2896,
+ "wall_s": 7.224478006362915,
+ "weighted_units": 44858.5,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

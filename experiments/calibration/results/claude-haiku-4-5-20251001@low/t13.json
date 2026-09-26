@@ -1,0 +1,55 @@
+{
+ "id": "t13",
+ "set": "checker",
+ "model": "claude-haiku-4-5-20251001",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 220-225 in row_cells.rs and lines 116-121 in flock/layout.rs are functionally identical implementations (same algorithm, same parameters in same order), and the comment at line 218 explicitly acknowledges the duplication ('Mirrors flock::pad_ground'). Lifting to a shared module would eliminate the duplicate."
+ },
+ "content": "```json\n{\"verdict\": \"holds\", \"reason\": \"Lines 220-225 in row_cells.rs and lines 116-121 in flock/layout.rs are functionally identical implementations (same algorithm, same parameters in same order), and the comment at line 218 explicitly acknowledges the duplication ('Mirrors flock::pad_ground'). Lifting to a shared module would eliminate the duplicate.\"}\n```",
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 9991,
+  "cache_read_input_tokens": 17675,
+  "output_tokens": 708,
+  "output_tokens_details": {
+   "thinking_tokens": 609
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 9991,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 10,
+    "output_tokens": 708,
+    "cache_read_input_tokens": 17675,
+    "cache_creation_input_tokens": 9991,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 9991
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0252995,
+ "duration_ms": 6280,
+ "wall_s": 7.956401824951172,
+ "weighted_units": 25299.5,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,31 @@
+{
+ "id": "t06",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The function `close_dialog_option_line` takes a `String` but only borrows it in `fit(&text, width)` and the `format!`. Call sites at lines 276\u2011279 and 311\u2011313 convert a `&'static str` to a `String` with `.to_owned()` only to immediately borrow it, creating unnecessary heap allocations."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"The function `close_dialog_option_line` takes a `String` but only borrows it in `fit(&text, width)` and the `format!`. Call sites at lines 276\u2011279 and 311\u2011313 convert a `&'static str` to a `String` with `.to_owned()` only to immediately borrow it, creating unnecessary heap allocations.\"}",
+ "thinking_chars": 1837,
+ "done_reason": "stop",
+ "prompt_tokens": 1325,
+ "eval_tokens": 507,
+ "load_s": 0.0027169,
+ "prompt_s": 0.115479,
+ "eval_s": 2.807005,
+ "wall_s": 2.991513967514038,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

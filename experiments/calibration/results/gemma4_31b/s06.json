@@ -1,0 +1,31 @@
+{
+ "id": "s06",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "sheep_lines checks `app.selected_row()` on line 170 and returns early on line 171 if it is None, meaning the call to `log_row` on line 176 only happens after the check has succeeded."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"sheep_lines checks `app.selected_row()` on line 170 and returns early on line 171 if it is None, meaning the call to `log_row` on line 176 only happens after the check has succeeded.\"}",
+ "thinking_chars": 3115,
+ "done_reason": "stop",
+ "prompt_tokens": 1287,
+ "eval_tokens": 1101,
+ "load_s": 0.0016963,
+ "prompt_s": 0.586147,
+ "eval_s": 27.702714,
+ "wall_s": 28.619535207748413,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

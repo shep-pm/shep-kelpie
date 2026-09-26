@@ -1,0 +1,31 @@
+{
+ "id": "t19",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The 10-line match block is indeed duplicated at lines 189-198 and 234-243, both with the same comment, and extracting it into a helper function would improve code maintainability."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The 10-line match block is indeed duplicated at lines 189-198 and 234-243, both with the same comment, and extracting it into a helper function would improve code maintainability.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1978,
+ "eval_tokens": 62,
+ "load_s": 0.0032282,
+ "prompt_s": 0.354478,
+ "eval_s": 1.057174,
+ "wall_s": 1.4870350360870361,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

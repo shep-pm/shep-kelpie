@@ -1,0 +1,31 @@
+{
+ "id": "s08",
+ "set": "checker",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Lines 315-317 already wrap the `stored_value` call in `tokio::task::spawn_blocking`, addressing the reviewer's concern about blocking the redraw, tick, and bus drain."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Lines 315-317 already wrap the `stored_value` call in `tokio::task::spawn_blocking`, addressing the reviewer's concern about blocking the redraw, tick, and bus drain.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 970,
+ "eval_tokens": 59,
+ "load_s": 0.0019072,
+ "prompt_s": 0.388455,
+ "eval_s": 1.257441,
+ "wall_s": 1.7392470836639404,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

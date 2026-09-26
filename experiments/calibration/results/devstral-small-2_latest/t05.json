@@ -1,0 +1,31 @@
+{
+ "id": "t05",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "secrets_hint (line 93) allocates a String via .to_string() on string literals, while sheep_pane_hint (line 156) and pane_hint (line 131) return &'static str and are const fn, making secrets_hint inconsistent and less efficient."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"secrets_hint (line 93) allocates a String via .to_string() on string literals, while sheep_pane_hint (line 156) and pane_hint (line 131) return &'static str and are const fn, making secrets_hint inconsistent and less efficient.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2632,
+ "eval_tokens": 79,
+ "load_s": 0.0047636,
+ "prompt_s": 0.516129,
+ "eval_s": 1.359319,
+ "wall_s": 2.142534017562866,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,31 @@
+{
+ "id": "t05",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "secrets_hint (lines 93-106) unnecessarily allocates Strings from literals, whereas structurally identical functions pane_hint (line 131) and sheep_pane_hint (line 156) return &'static str and are const fn."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"secrets_hint (lines 93-106) unnecessarily allocates Strings from literals, whereas structurally identical functions pane_hint (line 131) and sheep_pane_hint (line 156) return &'static str and are const fn.\"}",
+ "thinking_chars": 2385,
+ "done_reason": "stop",
+ "prompt_tokens": 2082,
+ "eval_tokens": 763,
+ "load_s": 0.0022591,
+ "prompt_s": 0.92755,
+ "eval_s": 19.395378,
+ "wall_s": 20.68296980857849,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

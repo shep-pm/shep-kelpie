@@ -1,0 +1,40 @@
+{
+ "id": "h01",
+ "set": "reviewer",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "fn indent_continuations(message: &str) -> String {",
+    "what": "The function fails to indent non\u2011empty continuation lines and incorrectly indents empty lines, violating the intended \"indent every line after the first by two spaces\" behavior."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"fn indent_continuations(message: &str) -> String {\",\"what\":\"The function fails to indent non\u2011empty continuation lines and incorrectly indents empty lines, violating the intended \\\"indent every line after the first by two spaces\\\" behavior.\"}]}",
+ "thinking_chars": 6204,
+ "done_reason": "stop",
+ "prompt_tokens": 1939,
+ "eval_tokens": 1468,
+ "load_s": 0.0059916,
+ "prompt_s": 0.152964,
+ "eval_s": 8.237956,
+ "wall_s": 8.607379913330078,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "fn indent_continuations(message: &str) -> String {",
+  "what": "The function fails to indent non\u2011empty continuation lines and incorrectly indents empty lines, violating the intended \"indent every line after the first by two spaces\" behavior."
+ }
+}

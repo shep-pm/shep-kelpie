@@ -1,0 +1,60 @@
+{
+ "id": "c05",
+ "set": "reviewer",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "risk",
+    "quote": "        self.keymap_open = false;",
+    "what": "`open_or_refresh_config_pane` also runs for refreshes of a pane that is already open, where the body type does not change, so any background refresh reply now also closes a help overlay the operator deliberately opened over that pane."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"risk\", \"quote\": \"        self.keymap_open = false;\", \"what\": \"`open_or_refresh_config_pane` also runs for refreshes of a pane that is already open, where the body type does not change, so any background refresh reply now also closes a help overlay the operator deliberately opened over that pane.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 24243,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 280,
+  "output_tokens_details": {
+   "thinking_tokens": 169
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 24243,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 280,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 24243,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 24243
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.2019098,
+ "duration_ms": 3919,
+ "wall_s": 5.741023063659668,
+ "weighted_units": 51066.9,
+ "stop_reason": "end_turn",
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 0,
+ "matched": null
+}

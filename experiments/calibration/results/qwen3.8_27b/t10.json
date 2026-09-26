@@ -1,0 +1,24 @@
+{
+ "id": "t10",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The finding correctly identifies that `on_pane_text_key` at line 444 uses a catch-all `_ => {}` while the sibling `on_pane_key` (lines 265\u2013293) explicitly names every unbound variant in two grouped arms; this means a newly added `KeyPress` variant would be silently swallowed in the text-mode handler without triggering a compile error, unlike the explicitly-enumerated sibling."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The finding correctly identifies that `on_pane_text_key` at line 444 uses a catch-all `_ => {}` while the sibling `on_pane_key` (lines 265\u2013293) explicitly names every unbound variant in two grouped arms; this means a newly added `KeyPress` variant would be silently swallowed in the text-mode handler without triggering a compile error, unlike the explicitly-enumerated sibling.\"}",
+ "thinking_chars": 8330,
+ "done_reason": "stop",
+ "prompt_tokens": 2170,
+ "eval_tokens": 2134,
+ "load_s": 0.001812,
+ "prompt_s": 0.88988,
+ "eval_s": 23.739756,
+ "wall_s": 24.896995067596436,
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

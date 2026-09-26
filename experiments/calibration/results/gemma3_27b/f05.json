@@ -1,0 +1,31 @@
+{
+ "id": "f05",
+ "set": "checker",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Both code snippets list many `KeyPress` variants that explicitly return `Effect::None`. The reviewer correctly identified that adding a new `KeyPress` variant would require updating these lists in multiple places to avoid silent fall-through, or employing a shared ignore list as suggested."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Both code snippets list many `KeyPress` variants that explicitly return `Effect::None`. The reviewer correctly identified that adding a new `KeyPress` variant would require updating these lists in multiple places to avoid silent fall-through, or employing a shared ignore list as suggested.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2262,
+ "eval_tokens": 66,
+ "load_s": 0.0024466,
+ "prompt_s": 0.800727,
+ "eval_s": 1.422514,
+ "wall_s": 2.469081163406372,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

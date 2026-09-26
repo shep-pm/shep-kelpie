@@ -1,0 +1,36 @@
+{
+ "id": "c07",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "(start - tail_window_start(start, body_rows, cost)).max(1)",
+    "what": "The calculation of `page_lines_back` is now incorrect.  The original code iterated backwards, accumulating line heights until it exceeded the available space. The new code simply subtracts `tail_window_start` from `start`, effectively calculating the number of lines *before* the current starting point, instead of the number of lines that fit on a single backward page. This will lead to incorrect scrolling behavior, particularly when line heights are variable."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"(start - tail_window_start(start, body_rows, cost)).max(1)\", \"what\": \"The calculation of `page_lines_back` is now incorrect.  The original code iterated backwards, accumulating line heights until it exceeded the available space. The new code simply subtracts `tail_window_start` from `start`, effectively calculating the number of lines *before* the current starting point, instead of the number of lines that fit on a single backward page. This will lead to incorrect scrolling behavior, particularly when line heights are variable.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 758,
+ "eval_tokens": 130,
+ "load_s": 0.001616,
+ "prompt_s": 0.235972,
+ "eval_s": 2.78152,
+ "wall_s": 3.1860811710357666,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 1,
+ "matched": null
+}

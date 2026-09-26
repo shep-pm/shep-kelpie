@@ -1,0 +1,55 @@
+{
+ "id": "f05",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The 'silent fall-through' hazard cannot happen: both matches are exhaustive with no wildcard (secrets_keys.rs:131-133 states this is deliberate), so a new KeyPress variant is a compile error in every pane, which is the intended forcing function. The two ignore sets also differ (dialog_keys.rs:11-15 handles Continue and Action(Reload|Restart) that secrets_keys.rs:134,162 ignores, and dialog_keys.rs:31 ignores Help that secrets_keys.rs:130 handles), so a shared predicate or macro would either be partial or reintroduce the wildcard the code explicitly avoids."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The 'silent fall-through' hazard cannot happen: both matches are exhaustive with no wildcard (secrets_keys.rs:131-133 states this is deliberate), so a new KeyPress variant is a compile error in every pane, which is the intended forcing function. The two ignore sets also differ (dialog_keys.rs:11-15 handles Continue and Action(Reload|Restart) that secrets_keys.rs:134,162 ignores, and dialog_keys.rs:31 ignores Help that secrets_keys.rs:130 handles), so a shared predicate or macro would either be partial or reintroduce the wildcard the code explicitly avoids.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22785,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 1028,
+  "output_tokens_details": {
+   "thinking_tokens": 792
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22785,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1028,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 22785,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22785
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.510532,
+ "duration_ms": 14699,
+ "wall_s": 16.481234073638916,
+ "weighted_units": 52076.8,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

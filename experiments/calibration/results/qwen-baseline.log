@@ -1,0 +1,51 @@
+calibrate: 49 cases to run for qwen3.8_27b
+[1/49] t01 10s holds (label holds)
+[2/49] t02 12s holds (label holds)
+[3/49] t03 9s holds (label holds)
+[4/49] t04 6s fails (label holds)
+[5/49] t05 12s holds (label holds)
+[6/49] t06 13s holds (label holds)
+[7/49] t07 11s holds (label holds)
+[8/49] t08 8s holds (label holds)
+[9/49] t09 18s holds (label holds)
+[10/49] t10 25s holds (label holds)
+[11/49] t11 37s holds (label holds)
+[12/49] t12 10s holds (label holds)
+[13/49] t13 11s holds (label holds)
+[14/49] t14 10s holds (label holds)
+[15/49] t15 20s holds (label holds)
+[16/49] t16 12s holds (label holds)
+[17/49] t17 17s fails (label holds)
+[18/49] t18 9s holds (label holds)
+[19/49] t19 8s holds (label holds)
+[20/49] t20 24s holds (label holds)
+[21/49] f01 60s fails (label fails)
+[22/49] f02 8s fails (label fails)
+[23/49] f04 45s unsure (label fails)
+[24/49] f05 26s fails (label fails)
+[25/49] f06 13s holds (label fails)
+[26/49] s01 4s fails (label fails)
+[27/49] s02 4s fails (label fails)
+[28/49] s03 3s fails (label fails)
+[29/49] s04 4s fails (label fails)
+[30/49] s05 4s fails (label fails)
+[31/49] s06 10s fails (label fails)
+[32/49] s07 3s fails (label fails)
+[33/49] s08 5s fails (label fails)
+[34/49] s09 4s fails (label fails)
+[35/49] r01 12s caught=True false_alarms=0
+[36/49] r02 8s caught=True false_alarms=0
+[37/49] r03 14s caught=True false_alarms=0
+[38/49] r04 19s caught=True false_alarms=0
+[39/49] r05 11s caught=True false_alarms=0
+[40/49] r06 17s caught=True false_alarms=0
+[41/49] r07 10s caught=True false_alarms=0
+[42/49] r09 27s caught=True false_alarms=0
+[43/49] c01 25s clean, false_alarms=0
+[44/49] c02 12s clean, false_alarms=0
+[45/49] c03 18s clean, false_alarms=0
+[46/49] c04 15s clean, false_alarms=0
+[47/49] c05 23s clean, false_alarms=0
+[48/49] c06 11s clean, false_alarms=0
+[49/49] c07 33s clean, false_alarms=0
+calibrate: finished qwen3.8_27b in 12.2 min

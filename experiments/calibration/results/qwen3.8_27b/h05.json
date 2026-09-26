@@ -1,0 +1,40 @@
+{
+ "id": "h05",
+ "set": "reviewer",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "    if height > 2 {",
+    "what": "The guard was changed from `height >= 2` (original) to `height > 2`, so a terminal that is exactly 2 rows tall no longer gets the second line (\"need 33x6\") even though `area.y + 1` is a valid row in a 2-row buffer."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"    if height > 2 {\", \"what\": \"The guard was changed from `height >= 2` (original) to `height > 2`, so a terminal that is exactly 2 rows tall no longer gets the second line (\\\"need 33x6\\\") even though `area.y + 1` is a valid row in a 2-row buffer.\"}]}",
+ "thinking_chars": 4495,
+ "done_reason": "stop",
+ "prompt_tokens": 3699,
+ "eval_tokens": 1395,
+ "load_s": 0.0041168,
+ "prompt_s": 1.450755,
+ "eval_s": 14.215389,
+ "wall_s": 15.853454113006592,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.536059963,
+  "vram_gb": 17.536059963,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "    if height > 2 {",
+  "what": "The guard was changed from `height >= 2` (original) to `height > 2`, so a terminal that is exactly 2 rows tall no longer gets the second line (\"need 33x6\") even though `area.y + 1` is a valid row in a 2-row buffer."
+ }
+}

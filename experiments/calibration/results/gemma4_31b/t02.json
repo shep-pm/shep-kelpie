@@ -1,0 +1,31 @@
+{
+ "id": "t02",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The match arms for cycling the minimum level are identical in sheep_pane.rs:198-205 and bleats.rs:65-72, as explicitly noted in the comments at sheep_pane.rs:194-195."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The match arms for cycling the minimum level are identical in sheep_pane.rs:198-205 and bleats.rs:65-72, as explicitly noted in the comments at sheep_pane.rs:194-195.\"}",
+ "thinking_chars": 2278,
+ "done_reason": "stop",
+ "prompt_tokens": 1683,
+ "eval_tokens": 768,
+ "load_s": 0.0027865,
+ "prompt_s": 0.798778,
+ "eval_s": 19.433829,
+ "wall_s": 20.698774099349976,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

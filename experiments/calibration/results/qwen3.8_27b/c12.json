@@ -1,0 +1,36 @@
+{
+ "id": "c12",
+ "set": "reviewer",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "-    use crate::config::AppConfig;",
+    "what": "The explicit import of `AppConfig` into the test module is removed, but `AppConfig` is not re-exported by `super::*` (it is a non-pub `use` in `verbs.rs`), so any unchanged test that references `AppConfig` unqualified will fail to compile."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"-    use crate::config::AppConfig;\", \"what\": \"The explicit import of `AppConfig` into the test module is removed, but `AppConfig` is not re-exported by `super::*` (it is a non-pub `use` in `verbs.rs`), so any unchanged test that references `AppConfig` unqualified will fail to compile.\"}]}",
+ "thinking_chars": 26400,
+ "done_reason": "stop",
+ "prompt_tokens": 1569,
+ "eval_tokens": 7078,
+ "load_s": 0.0028877,
+ "prompt_s": 0.684921,
+ "eval_s": 73.893251,
+ "wall_s": 74.79841899871826,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.536059963,
+  "vram_gb": 17.536059963,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 1,
+ "matched": null
+}

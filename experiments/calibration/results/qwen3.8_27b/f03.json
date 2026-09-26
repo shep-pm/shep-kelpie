@@ -1,0 +1,24 @@
+{
+ "id": "f03",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "All four call sites (secrets.rs:426, secrets.rs:446, ui_event_loop.rs:316, fixtures/secrets.rs:370) pass a matching pair from the same source (`&built.store, &built.provider_cache` or the `Effect::RevealSecret` struct variant fields set together), so no mismatch actually occurs; the finding is a speculative API-design preference, not a defect present in the code."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"All four call sites (secrets.rs:426, secrets.rs:446, ui_event_loop.rs:316, fixtures/secrets.rs:370) pass a matching pair from the same source (`&built.store, &built.provider_cache` or the `Effect::RevealSecret` struct variant fields set together), so no mismatch actually occurs; the finding is a speculative API-design preference, not a defect present in the code.\"}",
+ "thinking_chars": 5215,
+ "done_reason": "stop",
+ "prompt_tokens": 1816,
+ "eval_tokens": 1389,
+ "load_s": 9.5920807,
+ "prompt_s": 0.80646,
+ "eval_s": 14.843345,
+ "wall_s": 25.31345295906067,
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

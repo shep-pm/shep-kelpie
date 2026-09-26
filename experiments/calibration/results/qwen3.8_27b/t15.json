@@ -1,0 +1,24 @@
+{
+ "id": "t15",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 86 and 99 are indeed byte-identical (`format!(\"match  {buffer}\\u{258f}   enter applies   esc cancels\")`), lines 108 and 132 are byte-identical to each other (`format!(\"{label}  {buffer}\\u{258f}   enter applies   esc cancels\")`), and line 122 is the same shape with an `\"editing\"` prefix \u2014 the duplication the finding describes is real in the code shown."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 86 and 99 are indeed byte-identical (`format!(\\\"match  {buffer}\\\\u{258f}   enter applies   esc cancels\\\")`), lines 108 and 132 are byte-identical to each other (`format!(\\\"{label}  {buffer}\\\\u{258f}   enter applies   esc cancels\\\")`), and line 122 is the same shape with an `\\\"editing\\\"` prefix \u2014 the duplication the finding describes is real in the code shown.\"}",
+ "thinking_chars": 6509,
+ "done_reason": "stop",
+ "prompt_tokens": 2035,
+ "eval_tokens": 1976,
+ "load_s": 0.0017404,
+ "prompt_s": 0.828645,
+ "eval_s": 19.410686,
+ "wall_s": 20.399024963378906,
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

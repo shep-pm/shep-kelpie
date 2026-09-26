@@ -1,0 +1,31 @@
+{
+ "id": "s03",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Lines 198\u2011205 explicitly map `Some(Level::Info)` to `Some(Level::Warn)`, so the cycle does not skip Warn and can filter to warnings."
+ },
+ "content": "{\"verdict\":\"fails\",\"reason\":\"Lines 198\u2011205 explicitly map `Some(Level::Info)` to `Some(Level::Warn)`, so the cycle does not skip Warn and can filter to warnings.\"}",
+ "thinking_chars": 1004,
+ "done_reason": "stop",
+ "prompt_tokens": 755,
+ "eval_tokens": 279,
+ "load_s": 0.0020946,
+ "prompt_s": 0.062501,
+ "eval_s": 1.54093,
+ "wall_s": 1.6448147296905518,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

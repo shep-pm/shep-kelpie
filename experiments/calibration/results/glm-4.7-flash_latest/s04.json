@@ -1,0 +1,31 @@
+{
+ "id": "s04",
+ "set": "checker",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Both functions call `self.filter.to_lowercase()` on lines 237 and 45, respectively."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Both functions call `self.filter.to_lowercase()` on lines 237 and 45, respectively.\"}",
+ "thinking_chars": 2348,
+ "done_reason": "stop",
+ "prompt_tokens": 1120,
+ "eval_tokens": 653,
+ "load_s": 0.0043128,
+ "prompt_s": 1.574731,
+ "eval_s": 4.149099,
+ "wall_s": 5.765452146530151,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

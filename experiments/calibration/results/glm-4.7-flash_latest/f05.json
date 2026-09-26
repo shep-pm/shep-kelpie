@@ -1,0 +1,31 @@
+{
+ "id": "f05",
+ "set": "checker",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The key press variants listed (TextChar, TextBackspace, etc.) are all matched with Effect::None in both secrets_keys.rs and dialog_keys.rs, confirming the observation about the shared ignore set."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The key press variants listed (TextChar, TextBackspace, etc.) are all matched with Effect::None in both secrets_keys.rs and dialog_keys.rs, confirming the observation about the shared ignore set.\"}",
+ "thinking_chars": 12824,
+ "done_reason": "stop",
+ "prompt_tokens": 2091,
+ "eval_tokens": 3249,
+ "load_s": 0.0049764,
+ "prompt_s": 0.311376,
+ "eval_s": 21.808899,
+ "wall_s": 22.2134211063385,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

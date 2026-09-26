@@ -1,0 +1,55 @@
+{
+ "id": "t10",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Line 444 uses `_ => {}` so any new KeyPress variant is silently ignored in text mode, while the sibling on_pane_key (lines 265-293) exhaustively lists every unbound variant so a new one would fail to compile; the inconsistency is real in the code shown, though the quoted 'stated principle' comment does not appear in the excerpt."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Line 444 uses `_ => {}` so any new KeyPress variant is silently ignored in text mode, while the sibling on_pane_key (lines 265-293) exhaustively lists every unbound variant so a new one would fail to compile; the inconsistency is real in the code shown, though the quoted 'stated principle' comment does not appear in the excerpt.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22282,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 730,
+  "output_tokens_details": {
+   "thinking_tokens": 595
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22282,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 730,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 22282,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22282
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.485572,
+ "duration_ms": 10566,
+ "wall_s": 12.523797988891602,
+ "weighted_units": 49580.8,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

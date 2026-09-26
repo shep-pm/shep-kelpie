@@ -1,0 +1,31 @@
+{
+ "id": "s05",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The code at line 236 already includes `.filter(|count| *count > 0)`, so it does not print `0 pending` for a config with nothing pending."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The code at line 236 already includes `.filter(|count| *count > 0)`, so it does not print `0 pending` for a config with nothing pending.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1623,
+ "eval_tokens": 51,
+ "load_s": 0.0015381,
+ "prompt_s": 0.266935,
+ "eval_s": 0.867341,
+ "wall_s": 1.1839370727539062,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

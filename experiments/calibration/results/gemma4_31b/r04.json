@@ -1,0 +1,40 @@
+{
+ "id": "r04",
+ "set": "reviewer",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "if self.disarm_settings_candidate()\n                    && let Some(settings) = self.settings_mut()",
+    "what": "The logic is inverted: movement now occurs only when a settings candidate is successfully disarmed, and is suppressed when no candidate is armed."
+   }
+  ]
+ },
+ "content": "{\n  \"findings\": [\n    {\n      \"severity\": \"bug\",\n      \"quote\": \"if self.disarm_settings_candidate()\\n                    && let Some(settings) = self.settings_mut()\",\n      \"what\": \"The logic is inverted: movement now occurs only when a settings candidate is successfully disarmed, and is suppressed when no candidate is armed.\"\n    }\n  ]\n}",
+ "thinking_chars": 5772,
+ "done_reason": "stop",
+ "prompt_tokens": 1557,
+ "eval_tokens": 1614,
+ "load_s": 0.0056271,
+ "prompt_s": 0.734965,
+ "eval_s": 40.67056,
+ "wall_s": 41.76782298088074,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "if self.disarm_settings_candidate()\n                    && let Some(settings) = self.settings_mut()",
+  "what": "The logic is inverted: movement now occurs only when a settings candidate is successfully disarmed, and is suppressed when no candidate is armed."
+ }
+}

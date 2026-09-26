@@ -1,0 +1,63 @@
+calibrate: 61 cases to run for claude-fable-5-1@medium
+t03 5s holds (label holds)
+t01 7s holds (label holds)
+t02 9s holds (label holds)
+t04 8s holds (label holds)
+t06 6s holds (label holds)
+t05 10s holds (label holds)
+t07 5s holds (label holds)
+t08 5s holds (label holds)
+t09 12s holds (label holds)
+t10 13s holds (label holds)
+t11 12s holds (label holds)
+t12 5s holds (label holds)
+t13 6s holds (label holds)
+t14 6s holds (label holds)
+t16 5s holds (label holds)
+t18 5s holds (label holds)
+t15 17s holds (label holds)
+t17 13s holds (label holds)
+t20 11s holds (label holds)
+t19 15s holds (label holds)
+f01 12s fails (label fails)
+f02 8s fails (label fails)
+f03 10s fails (label fails)
+f04 11s fails (label fails)
+f06 6s holds (label fails)
+s01 4s fails (label fails)
+s02 5s fails (label fails)
+s03 5s fails (label fails)
+s04 6s fails (label fails)
+s05 7s fails (label fails)
+f05 24s fails (label fails)
+s06 5s fails (label fails)
+s07 4s fails (label fails)
+s08 5s fails (label fails)
+s09 4s fails (label fails)
+r01 8s caught=True false_alarms=0
+r02 7s caught=True false_alarms=0
+r03 13s caught=True false_alarms=0
+r04 10s caught=True false_alarms=0
+r05 8s caught=True false_alarms=0
+r07 5s caught=True false_alarms=0
+r06 9s caught=True false_alarms=0
+r08 16s caught=False false_alarms=0 ERROR exit 1
+c02 7s clean, false_alarms=0
+c01 17s clean, false_alarms=0
+r09 24s caught=True false_alarms=0
+c03 14s clean, false_alarms=0
+c04 16s clean, false_alarms=0
+c06 5s clean, false_alarms=0
+c05 21s clean, false_alarms=0
+h01 14s caught=True false_alarms=0
+h02 9s caught=True false_alarms=0
+h04 3s caught=False false_alarms=0 ERROR exit 1
+h05 4s caught=False false_alarms=0 ERROR exit 1
+h03 14s caught=True false_alarms=0
+c08 6s clean, false_alarms=0 ERROR exit 1
+c09 6s clean, false_alarms=0 ERROR exit 1
+c10 7s clean, false_alarms=0 ERROR exit 1
+c11 7s clean, false_alarms=0 ERROR exit 1
+c12 7s clean, false_alarms=0 ERROR exit 1
+c07 144s clean, false_alarms=0 ERROR exit 1
+calibrate: finished claude-fable-5-1@medium in 4.9 min

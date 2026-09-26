@@ -1,0 +1,55 @@
+{
+ "id": "t03",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Line 45 and line 237 both compute `self.filter.to_lowercase()`, and lines 49 and 241 both use the same predicate `needle.is_empty() || row.info.name.to_lowercase().contains(&needle)`, applied to the same `row.info.name` field. The two closures take different argument shapes (a tuple vs `row`), but a shared `matches_filter` helper would still remove the duplicated logic, so the extraction the finding suggests is possible."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Line 45 and line 237 both compute `self.filter.to_lowercase()`, and lines 49 and 241 both use the same predicate `needle.is_empty() || row.info.name.to_lowercase().contains(&needle)`, applied to the same `row.info.name` field. The two closures take different argument shapes (a tuple vs `row`), but a shared `matches_filter` helper would still remove the duplicated logic, so the extraction the finding suggests is possible.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22314,
+  "cache_read_input_tokens": 10092,
+  "output_tokens": 171,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22314,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 171,
+    "cache_read_input_tokens": 10092,
+    "cache_creation_input_tokens": 22314,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22314
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1839584,
+ "duration_ms": 3398,
+ "wall_s": 8.399395942687988,
+ "weighted_units": 46494.2,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,9 @@
+=== hard stop firing at Fri Sep 25 23:10:26 EDT 2026 ===
+--- pattern: run_claude_configs.py ---
+(none)
+--- pattern: calibrate.py --backend claude ---
+(none)
+--- pattern: claude -p ... --output-format json --max-turns 1 ---
+(none)
+--- survivors after kill ---
+=== hard stop done at Fri Sep 25 23:10:29 EDT 2026 ===

@@ -1,0 +1,31 @@
+{
+ "id": "t06",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The function `close_dialog_option_line` at line 143 takes an owned `String` but only uses it by reference in `fit(&text, width)` at line 145. As a result, the call sites at lines 276 and 311 perform unnecessary allocations using `.to_owned()`."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The function `close_dialog_option_line` at line 143 takes an owned `String` but only uses it by reference in `fit(&text, width)` at line 145. As a result, the call sites at lines 276 and 311 perform unnecessary allocations using `.to_owned()`.\"}",
+ "thinking_chars": 4341,
+ "done_reason": "stop",
+ "prompt_tokens": 1526,
+ "eval_tokens": 1388,
+ "load_s": 0.0022494,
+ "prompt_s": 0.698164,
+ "eval_s": 34.996812,
+ "wall_s": 36.221784830093384,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,64 @@
+{
+ "id": "r01",
+ "set": "reviewer",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "Ok(Err(err)) => {",
+    "what": "The new Ok(Err) arm only calls child.kill() and never calls kill_group(leader), so the dog's process group is not swept on a failed read. This contradicts both the commit subject and the new comment that says both failure arms take the ladder with the group first. Grandchildren that were left running on a read failure stay alive."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"Ok(Err(err)) => {\", \"what\": \"The new Ok(Err) arm only calls child.kill() and never calls kill_group(leader), so the dog's process group is not swept on a failed read. This contradicts both the commit subject and the new comment that says both failure arms take the ladder with the group first. Grandchildren that were left running on a read failure stay alive.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20021,
+  "cache_read_input_tokens": 11892,
+  "output_tokens": 1152,
+  "output_tokens_details": {
+   "thinking_tokens": 1009
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20021,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1152,
+    "cache_read_input_tokens": 11892,
+    "cache_creation_input_tokens": 20021,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20021
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0939864,
+ "duration_ms": 21700,
+ "wall_s": 23.528717756271362,
+ "weighted_units": 46993.2,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "Ok(Err(err)) => {",
+  "what": "The new Ok(Err) arm only calls child.kill() and never calls kill_group(leader), so the dog's process group is not swept on a failed read. This contradicts both the commit subject and the new comment that says both failure arms take the ladder with the group first. Grandchildren that were left running on a read failure stay alive."
+ }
+}

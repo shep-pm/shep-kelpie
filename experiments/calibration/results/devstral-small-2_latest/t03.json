@@ -1,0 +1,31 @@
+{
+ "id": "t03",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The filter predicate `needle.is_empty() || name.to_lowercase().contains(&needle)` is indeed duplicated in both `visible_rows` (line 49) and `rows` (line 241), suggesting it should be refactored into a private `fn matches_filter(&self, name: &str) -> bool` as suggested."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The filter predicate `needle.is_empty() || name.to_lowercase().contains(&needle)` is indeed duplicated in both `visible_rows` (line 49) and `rows` (line 241), suggesting it should be refactored into a private `fn matches_filter(&self, name: &str) -> bool` as suggested.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1789,
+ "eval_tokens": 87,
+ "load_s": 0.0043763,
+ "prompt_s": 0.318956,
+ "eval_s": 1.493127,
+ "wall_s": 1.8704841136932373,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

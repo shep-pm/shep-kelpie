@@ -1,0 +1,55 @@
+{
+ "id": "t02",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The six-arm min_level match at sheep_pane.rs:198-205 is identical to bleats.rs:65-72, and the comment at 194-195 says it follows the same cycle. The Stream cycle is duplicated the same way. The duplication is real, though the HIGH severity is overstated for a small, stable match."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The six-arm min_level match at sheep_pane.rs:198-205 is identical to bleats.rs:65-72, and the comment at 194-195 says it follows the same cycle. The Stream cycle is duplicated the same way. The duplication is real, though the HIGH severity is overstated for a small, stable match.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20527,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 120,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20527,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 120,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 20527,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20527
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0856906,
+ "duration_ms": 2603,
+ "wall_s": 7.8647942543029785,
+ "weighted_units": 42845.3,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

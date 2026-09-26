@@ -1,0 +1,31 @@
+{
+ "id": "f02",
+ "set": "checker",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 67-70 and 74-77 construct `Notice` objects with the same shape (same fields, same `grave: true`, same formatting of the `text` field) using string formatting. The difference is only in the variable used for the error message: `err.message` in the `Rpc` arm and `other` in the `other` arm, but the `Display` implementation for `RequestError::Rpc` uses `err.message` so the resulting strings will be identical."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 67-70 and 74-77 construct `Notice` objects with the same shape (same fields, same `grave: true`, same formatting of the `text` field) using string formatting. The difference is only in the variable used for the error message: `err.message` in the `Rpc` arm and `other` in the `other` arm, but the `Display` implementation for `RequestError::Rpc` uses `err.message` so the resulting strings will be identical.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1600,
+ "eval_tokens": 121,
+ "load_s": 0.0023158,
+ "prompt_s": 0.611973,
+ "eval_s": 2.60272,
+ "wall_s": 3.3661251068115234,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

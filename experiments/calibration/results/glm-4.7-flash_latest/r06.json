@@ -1,0 +1,28 @@
+{
+ "id": "r06",
+ "set": "reviewer",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": null,
+ "content": "",
+ "thinking_chars": 62593,
+ "done_reason": "length",
+ "prompt_tokens": 2864,
+ "eval_tokens": 16000,
+ "load_s": 0.0025915,
+ "prompt_s": 0.468457,
+ "eval_s": 122.616068,
+ "wall_s": 123.14710879325867,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": false,
+ "false_alarms": 0,
+ "matched": null
+}

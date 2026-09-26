@@ -1,0 +1,36 @@
+{
+ "id": "c09",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "Answered by [`Response::HostUsage`], and by nothing else",
+    "what": "The documentation states `HostUsage` is only answered by `Response::HostUsage`, but the tests include it in `reply_wire_snapshots` without an associated test case to verify its proper handling. This creates a disconnect between the intended usage and potentially missing test coverage."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"Answered by [`Response::HostUsage`], and by nothing else\", \"what\": \"The documentation states `HostUsage` is only answered by `Response::HostUsage`, but the tests include it in `reply_wire_snapshots` without an associated test case to verify its proper handling. This creates a disconnect between the intended usage and potentially missing test coverage.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 3233,
+ "eval_tokens": 88,
+ "load_s": 0.0064777,
+ "prompt_s": 1.099262,
+ "eval_s": 1.900769,
+ "wall_s": 3.2287259101867676,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 1,
+ "matched": null
+}

@@ -1,0 +1,24 @@
+{
+ "id": "t01",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Both delete_secret.rs:17 and reveal_secret.rs:47 contain the identical expression `!pane.visible_row_indices().contains(&pane.selected)` with the same silent-refusal semantics (return Effect::None), confirming the duplication the finding describes."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Both delete_secret.rs:17 and reveal_secret.rs:47 contain the identical expression `!pane.visible_row_indices().contains(&pane.selected)` with the same silent-refusal semantics (return Effect::None), confirming the duplication the finding describes.\"}",
+ "thinking_chars": 3543,
+ "done_reason": "stop",
+ "prompt_tokens": 2030,
+ "eval_tokens": 867,
+ "load_s": 0.0018828,
+ "prompt_s": 0.942228,
+ "eval_s": 9.291556,
+ "wall_s": 10.472566843032837,
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

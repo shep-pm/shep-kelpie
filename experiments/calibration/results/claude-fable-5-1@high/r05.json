@@ -1,0 +1,64 @@
+{
+ "id": "r05",
+ "set": "reviewer",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "    (stages + slack).min(START_DEADLINE)",
+    "what": "The moved function changed `.max(START_DEADLINE)` to `.min(START_DEADLINE)`, so the staged deadline is now capped at START_DEADLINE instead of floored by it, which contradicts the doc comment (\"Never under START_DEADLINE\") and reinstates the flat budget the function existed to remove, making multi-stage starts time out client-side before the daemon."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"    (stages + slack).min(START_DEADLINE)\", \"what\": \"The moved function changed `.max(START_DEADLINE)` to `.min(START_DEADLINE)`, so the staged deadline is now capped at START_DEADLINE instead of floored by it, which contradicts the doc comment (\\\"Never under START_DEADLINE\\\") and reinstates the flat budget the function existed to remove, making multi-stage starts time out client-side before the daemon.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 23739,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 770,
+  "output_tokens_details": {
+   "thinking_tokens": 594
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23739,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 770,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 23739,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 23739
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.516712,
+ "duration_ms": 12448,
+ "wall_s": 14.615715026855469,
+ "weighted_units": 52694.8,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "    (stages + slack).min(START_DEADLINE)",
+  "what": "The moved function changed `.max(START_DEADLINE)` to `.min(START_DEADLINE)`, so the staged deadline is now capped at START_DEADLINE instead of floored by it, which contradicts the doc comment (\"Never under START_DEADLINE\") and reinstates the flat budget the function existed to remove, making multi-stage starts time out client-side before the daemon."
+ }
+}

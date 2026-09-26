@@ -1,0 +1,40 @@
+{
+ "id": "r05",
+ "set": "reviewer",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "(stages + slack).min(START_DEADLINE)",
+    "what": "The new deadline calculation caps the total at START_DEADLINE, whereas the original code enforced a minimum of START_DEADLINE, causing the staged start deadline to be incorrectly reduced rather than ensured not to fall below the daemon\u2019s required minimum."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"(stages + slack).min(START_DEADLINE)\",\"what\":\"The new deadline calculation caps the total at START_DEADLINE, whereas the original code enforced a minimum of START_DEADLINE, causing the staged start deadline to be incorrectly reduced rather than ensured not to fall below the daemon\u2019s required minimum.\"}]}",
+ "thinking_chars": 2157,
+ "done_reason": "stop",
+ "prompt_tokens": 2499,
+ "eval_tokens": 616,
+ "load_s": 0.0025856,
+ "prompt_s": 0.199264,
+ "eval_s": 3.444548,
+ "wall_s": 3.722867965698242,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "(stages + slack).min(START_DEADLINE)",
+  "what": "The new deadline calculation caps the total at START_DEADLINE, whereas the original code enforced a minimum of START_DEADLINE, causing the staged start deadline to be incorrectly reduced rather than ensured not to fall below the daemon\u2019s required minimum."
+ }
+}

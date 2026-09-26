@@ -1,0 +1,24 @@
+{
+ "id": "s03",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Line 202 explicitly maps `Some(Level::Info) => Some(Level::Warn)`, so the cycle does include Warn between Info and Error; the finding misreads the code."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Line 202 explicitly maps `Some(Level::Info) => Some(Level::Warn)`, so the cycle does include Warn between Info and Error; the finding misreads the code.\"}",
+ "thinking_chars": 849,
+ "done_reason": "stop",
+ "prompt_tokens": 821,
+ "eval_tokens": 306,
+ "load_s": 0.0037945,
+ "prompt_s": 0.401633,
+ "eval_s": 2.730279,
+ "wall_s": 3.4082508087158203,
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

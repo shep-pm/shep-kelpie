@@ -1,0 +1,36 @@
+{
+ "id": "r09",
+ "set": "reviewer",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let row = cost(at - 1);",
+    "what": "The removed code incorrectly uses `at - 1` as the index for `cost`, which can lead to out-of-bounds access when `at` is 0."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"let row = cost(at - 1);\", \"what\": \"The removed code incorrectly uses `at - 1` as the index for `cost`, which can lead to out-of-bounds access when `at` is 0.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1227,
+ "eval_tokens": 68,
+ "load_s": 0.0048391,
+ "prompt_s": 0.071548,
+ "eval_s": 1.166131,
+ "wall_s": 1.2634539604187012,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": false,
+ "false_alarms": 1,
+ "matched": null
+}

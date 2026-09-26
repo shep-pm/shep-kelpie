@@ -1,0 +1,24 @@
+{
+ "id": "t19",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 189-198 and 234-243 are indeed verbatim identical 10-line match blocks (same arms, same else-let pattern), and both are preceded by the same comment (186-188 and 231-233) explaining why they avoid `config_pane_mut`. The duplication is real as described."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 189-198 and 234-243 are indeed verbatim identical 10-line match blocks (same arms, same else-let pattern), and both are preceded by the same comment (186-188 and 231-233) explaining why they avoid `config_pane_mut`. The duplication is real as described.\"}",
+ "thinking_chars": 2022,
+ "done_reason": "stop",
+ "prompt_tokens": 1466,
+ "eval_tokens": 771,
+ "load_s": 0.0050273,
+ "prompt_s": 0.62515,
+ "eval_s": 7.13052,
+ "wall_s": 7.9542951583862305,
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

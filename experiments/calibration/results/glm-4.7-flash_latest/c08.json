@@ -1,0 +1,36 @@
+{
+ "id": "c08",
+ "set": "reviewer",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let mut out = String::with_capacity(message.len());",
+    "what": "The function will panic due to capacity overflow when processing multi-line messages because the indentation logic adds 2 spaces per continuation line, exceeding the original string length."
+   }
+  ]
+ },
+ "content": "{\n  \"findings\": [\n    {\n      \"severity\": \"bug\",\n      \"quote\": \"let mut out = String::with_capacity(message.len());\",\n      \"what\": \"The function will panic due to capacity overflow when processing multi-line messages because the indentation logic adds 2 spaces per continuation line, exceeding the original string length.\"\n    }\n  ]\n}",
+ "thinking_chars": 40098,
+ "done_reason": "stop",
+ "prompt_tokens": 1868,
+ "eval_tokens": 10925,
+ "load_s": 0.0025127,
+ "prompt_s": 0.292141,
+ "eval_s": 80.182262,
+ "wall_s": 80.63015818595886,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 1,
+ "matched": null
+}

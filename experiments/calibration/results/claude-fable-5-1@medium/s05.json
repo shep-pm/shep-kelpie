@@ -1,0 +1,55 @@
+{
+ "id": "s05",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "column_header_line already applies `.filter(|count| *count > 0)` at column.rs:236, matching the pane title's filter at mod.rs:73, so a zero-pending config prints no `0 pending` suffix; the suggested fix is already present."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"column_header_line already applies `.filter(|count| *count > 0)` at column.rs:236, matching the pane title's filter at mod.rs:73, so a zero-pending config prints no `0 pending` suffix; the suggested fix is already present.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20987,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 98,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20987,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 98,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 20987,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20987
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.428072,
+ "duration_ms": 4865,
+ "wall_s": 6.586175918579102,
+ "weighted_units": 43830.8,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

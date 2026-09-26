@@ -1,0 +1,31 @@
+{
+ "id": "t12",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The four match arms (lines 122-185) and the Sheep arm (lines 83-99) indeed repeat the sequence of creating a Rect, calling a draw function, and drawing the status line before returning."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The four match arms (lines 122-185) and the Sheep arm (lines 83-99) indeed repeat the sequence of creating a Rect, calling a draw function, and drawing the status line before returning.\"}",
+ "thinking_chars": 2597,
+ "done_reason": "stop",
+ "prompt_tokens": 2127,
+ "eval_tokens": 979,
+ "load_s": 0.0048385,
+ "prompt_s": 0.945471,
+ "eval_s": 24.773582,
+ "wall_s": 26.120166063308716,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

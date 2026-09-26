@@ -1,0 +1,31 @@
+{
+ "id": "s01",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The `Allowed` arm in `secrets_hint` explicitly includes `y copy` on line 102."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The `Allowed` arm in `secrets_hint` explicitly includes `y copy` on line 102.\"}",
+ "thinking_chars": 1004,
+ "done_reason": "stop",
+ "prompt_tokens": 747,
+ "eval_tokens": 412,
+ "load_s": 0.0015414,
+ "prompt_s": 0.374714,
+ "eval_s": 10.304865,
+ "wall_s": 11.017934083938599,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

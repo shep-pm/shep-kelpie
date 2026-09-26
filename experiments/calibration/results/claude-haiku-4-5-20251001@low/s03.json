@@ -1,0 +1,55 @@
+{
+ "id": "s03",
+ "set": "checker",
+ "model": "claude-haiku-4-5-20251001",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Lines 202\u2013203 show the correct cycle: Some(Level::Info) => Some(Level::Warn) followed by Some(Level::Warn) => Some(Level::Error). The Info-to-Warn transition already exists in the code; the finding misread the match arms."
+ },
+ "content": "```json\n{\"verdict\": \"fails\", \"reason\": \"Lines 202\u2013203 show the correct cycle: Some(Level::Info) => Some(Level::Warn) followed by Some(Level::Warn) => Some(Level::Error). The Info-to-Warn transition already exists in the code; the finding misread the match arms.\"}\n```",
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 9451,
+  "cache_read_input_tokens": 17675,
+  "output_tokens": 589,
+  "output_tokens_details": {
+   "thinking_tokens": 504
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 9451,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 10,
+    "output_tokens": 589,
+    "cache_read_input_tokens": 17675,
+    "cache_creation_input_tokens": 9451,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 9451
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0236245,
+ "duration_ms": 6131,
+ "wall_s": 8.165578126907349,
+ "weighted_units": 23624.5,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

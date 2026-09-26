@@ -1,0 +1,249 @@
+diff --git a/crates/shep-core/src/protocol/mod.rs b/crates/shep-core/src/protocol/mod.rs
+index 8dbf4c9b..e5c82762 100644
+--- a/crates/shep-core/src/protocol/mod.rs
++++ b/crates/shep-core/src/protocol/mod.rs
+@@ -10,41 +10,44 @@
+ //! payload, and still bumps.
+ //! Version 6 bumped on a retype: [`Response::Reloading`] became a struct
+ //! variant to carry the apps a staged reload refused, so it serializes as
+ //! an object where an older peer reads an array. Version 7 bumped on the
+ //! same retype applied to [`Response::Restarted`], which a staged restart
+ //! refuses apps of for the same reason and had nowhere to name them.
+ //! Version 8 bumped on a second new `AppConfig` field, `environment`, for
+ //! the reason version 5 did. [`Request::PutSecrets`] rode in on the same
+ //! commit and forced nothing: it is an additive variant, and a daemon that
+ //! has never heard of it decodes [`Request::Unrecognized`] and refuses by
+ //! name. Version 9 bumped on removing `increment_var`, the first shape
+ //! change here to subtract a field rather than add one.
++//! [`Request::HostUsage`] and [`Response::HostUsage`] rode in after it
++//! and forced nothing either, on the terms [`Request::PutSecrets`] set
++//! above.
+ //!
+ //! A `*_wire_v9` test pins today's shape. A
+ //! `v1_*_fixture_still_deserializes` test pins an old peer's payload and
+ //! never renames.
+ 
+ pub mod events;
+ pub mod frame;
+ pub mod request;
+ /// Frame encoding shared by daemon and client
+ pub mod wire;
+ 
+ pub use events::{BusEvent, ProcessEventKind};
+ pub use frame::ServerFrame;
+ pub use request::{
+     ActionOutcome, ActionReply, DogSectionToml, DogSource, EnvValue, Envelope, ExitInfo, Hello,
+-    HelloAck, HelloReply, Lamb, LineOutcome, LineReply, ProcessInfo, ProcessInfoBuilder, Reply,
+-    Request, Response, RpcError, RpcErrorCode, SelectorSpec, SheepApplied, SheepConfigView,
++    HelloAck, HelloReply, HostUsage, Lamb, LineOutcome, LineReply, ProcessInfo, ProcessInfoBuilder,
++    Reply, Request, Response, RpcError, RpcErrorCode, SelectorSpec, SheepApplied, SheepConfigView,
+     SheepDrift, SheepRefusal, SignalOutcome, SignalReply, Smit, SmitError, sort_flock,
+ };
+ pub use shep_channel::{CHANNEL_VERSION, ChildMessage, ShepherdMessage};
+ pub use wire::{MAX_FRAME_BYTES, WireError, codec, decode_frame, encode_frame, reply_id};
+ 
+ /// The shepherd channel's wire types. Moved to the `shep-channel` crate;
+ /// this path is kept so consumers of 0.1.x do not break. Use
+ /// `shep_core::protocol` directly instead.
+ #[deprecated(note = "use `shep_core::protocol` directly")]
+ pub mod channel {
+     pub use shep_channel::{CHANNEL_VERSION, ChildMessage, ShepherdMessage};
+ }
+diff --git a/crates/shep-core/src/protocol/request.rs b/crates/shep-core/src/protocol/request.rs
+index 5999f975..3ffeb806 100644
+--- a/crates/shep-core/src/protocol/request.rs
++++ b/crates/shep-core/src/protocol/request.rs
+@@ -183,34 +183,75 @@ impl fmt::Display for SmitError {
+                 Smit::MAX_CHARS
+             ),
+             Self::Unprintable => {
+                 f.write_str("a smit may not contain a control character, an escape included")
+             }
+             Self::Empty => f.write_str("a smit may not be empty"),
+         }
+     }
+ }
+ 
+ impl core::error::Error for SmitError {}
+ 
++/// The machine the flock runs on, as the shepherd last read it.
++///
++/// Three of the four numbers are rates, so none of them exists in a single
++/// moment: CPU, disk traffic and network traffic are all differences between
++/// two readings of a counter the kernel only ever increments. The shepherd
++/// keeps the earlier reading between its own ticks and serves the
++/// difference, which is what lets a one-shot listing carry them at all.
++///
++/// Answered by [`Response::HostUsage`], and by nothing else: this is
++/// deliberately not a field on [`Response::Flock`], whose array shape
++/// predates it.
++#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
++pub struct HostUsage {
++    /// Every core's usage over the shepherd's last window, as one percentage
++    /// of one whole machine.
++    ///
++    /// `None` where no window long enough to divide by has passed yet, which
++    /// on a shepherd that has just booted it has not. Absent is not idle.
++    pub cpu_percent: Option<f32>,
++    /// Memory in use, as the platform reports it. Not a rate, so never
++    /// absent.
++    pub memory_used_bytes: u64,
++    /// Total physical memory.
++    pub memory_total_bytes: u64,
++    /// Bytes a second the block devices read and wrote over that window,
++    /// absent on [`Self::cpu_percent`]'s terms.
++    pub disk_bytes_per_second: Option<(u64, u64)>,
++    /// Bytes a second the non-loopback interfaces received and transmitted
++    /// over that window, absent on the same terms.
++    pub network_bytes_per_second: Option<(u64, u64)>,
++}
++
+ /// One RPC request
+ // wire format: changing existing variants is a breaking change
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+ #[serde(tag = "kind", rename_all = "snake_case")]
+ #[non_exhaustive]
+ pub enum Request {
+     /// Liveness check
+     Ping,
+     /// Full flock listing
+     ListFlock,
++    /// What the machine the flock runs on is doing
++    ///
++    /// Answers [`Response::HostUsage`]. Its own request rather than a field
++    /// on [`Response::Flock`]: that variant serializes as an array, and
++    /// giving it a second field would retype it into an object that no
++    /// shipped client can read. A daemon that has never heard of this one
++    /// decodes [`Self::Unrecognized`] and refuses by name, which costs the
++    /// caller the host block and nothing else.
++    HostUsage,
+     /// Detailed info for matching sheep
+     Describe {
+         /// Which sheep
+         selector: SelectorSpec,
+     },
+     /// Register + start apps
+     Start {
+         /// App configs. The daemon must re-normalize them, since peer input
+         /// is untrusted; failures return [`RpcErrorCode::InvalidConfig`]
+         apps: Vec<AppConfig>,
+     },
+     /// Register apps as flock members without starting any of them
+@@ -1517,24 +1558,31 @@ impl fmt::Debug for SheepConfigView {
+ // `large_enum_variant` allowed, not fixed: clippy's remedy is to box
+ // `DogStarted`'s payload, a source break for every
+ // `Response::DogStarted(info)` in and out of this workspace.
+ #[allow(clippy::large_enum_variant)]
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+ #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+ #[non_exhaustive]
+ pub enum Response {
+     /// Answer to `Ping`
+     Pong,
+     /// Answer to `ListFlock`
+     Flock(Vec<ProcessInfo>),
++    /// Answer to `HostUsage`
++    ///
++    /// `None` on a platform `sysinfo` cannot read at all, which is a state a
++    /// caller renders rather than an error. A supported platform with no
++    /// window yet answers `Some`, carrying the memory it could read and
++    /// `None` for each rate it could not.
++    HostUsage(Option<HostUsage>),
+     /// Answer to `Describe`
+     Described(Vec<ProcessInfo>),
+     /// Answer to `Start`
+     Started(Vec<ProcessInfo>),
+     /// Answer to `Add`: one row per app the request named, registered and
+     /// spawning nothing.
+     ///
+     /// A row here can still be `Online`: `Add` is idempotent by name, so the
+     /// reply describes the membership the request leaves behind.
+     Added(Vec<ProcessInfo>),
+     /// Answer to `ConfigDrift`: one entry per app that is registered under a
+     /// config different from the one asked about, and no entry for anything
+@@ -2838,24 +2886,29 @@ mod tests {
+                             "DATABASE_URL".to_string(),
+                             EnvValue::from("postgres://localhost/app".to_string()),
+                         ),
+                         (
+                             "API_KEY".to_string(),
+                             EnvValue::from("sk_live_placeholder".to_string()),
+                         ),
+                     ]),
+                     force: true,
+                     dry_run: true,
+                 },
+             },
++            Envelope {
++                id: 34,
++                deadline_ms: None,
++                body: Request::HostUsage,
++            },
+         ];
+         insta::assert_json_snapshot!("request_wire_v9", requests);
+     }
+ 
+     #[test]
+     fn reply_wire_snapshots() {
+         let replies = vec![
+             Reply {
+                 id: 1,
+                 result: Ok(Response::Pong),
+             },
+             Reply {
+@@ -3236,24 +3289,55 @@ mod tests {
+             // element type wrong would still pass against an empty-list
+             // fixture. `collisions` also proves a forced write can name a
+             // key in both `set` and `collisions` at once.
+             Reply {
+                 id: 39,
+                 result: Ok(Response::SheepEnvBatch {
+                     name: "web".to_string(),
+                     set: vec!["DATABASE_URL".to_string(), "API_KEY".to_string()],
+                     unchanged: vec!["LOG_LEVEL".to_string()],
+                     collisions: vec!["API_KEY".to_string()],
+                 }),
+             },
++            // Both halves of the same reply: a machine that has been read
++            // and one that has not been read for long enough yet. The rates
++            // are what separate them, and they are `null` rather than `0`
++            // in the second, which is the whole distinction the renderer
++            // spells as `-`.
++            Reply {
++                id: 40,
++                result: Ok(Response::HostUsage(Some(HostUsage {
++                    cpu_percent: Some(11.5),
++                    memory_used_bytes: 39_963_869_184,
++                    memory_total_bytes: 51_539_607_552,
++                    disk_bytes_per_second: Some((1_258_291, 491_520)),
++                    network_bytes_per_second: Some((24_594, 9_260)),
++                }))),
++            },
++            Reply {
++                id: 41,
++                result: Ok(Response::HostUsage(Some(HostUsage {
++                    cpu_percent: None,
++                    memory_used_bytes: 39_963_869_184,
++                    memory_total_bytes: 51_539_607_552,
++                    disk_bytes_per_second: None,
++                    network_bytes_per_second: None,
++                }))),
++            },
++            // A platform `sysinfo` cannot read at all, which is neither of
++            // the two above.
++            Reply {
++                id: 42,
++                result: Ok(Response::HostUsage(None)),
++            },
+         ];
+         insta::assert_json_snapshot!("reply_wire_v9", replies);
+     }
+ 
+     /// Asserts on the JSON, not the struct: a `Vec<String>` cannot say which
+     /// of the two a string is, so a build carrying a value would typecheck.
+     #[test]
+     fn a_sheep_applied_carries_names_and_never_values() {
+         let applied = SheepApplied::new(
+             "web",
+             vec!["cwd".to_string()],
+             vec!["env".to_string()],

@@ -1,0 +1,31 @@
+{
+ "id": "s08",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The code at lines 314-317 already uses `tokio::task::spawn_blocking` to run the `stored_value` call, which prevents stalling the UI event loop."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The code at lines 314-317 already uses `tokio::task::spawn_blocking` to run the `stored_value` call, which prevents stalling the UI event loop.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1508,
+ "eval_tokens": 58,
+ "load_s": 0.0041087,
+ "prompt_s": 0.234201,
+ "eval_s": 0.990966,
+ "wall_s": 1.2689158916473389,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

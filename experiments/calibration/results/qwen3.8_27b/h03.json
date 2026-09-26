@@ -1,0 +1,40 @@
+{
+ "id": "h03",
+ "set": "reviewer",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "            indent_continuations(&clean)",
+    "what": "The old code's `.trim_end()` was dropped, so a message ending in `\\n` (e.g. a `toml_edit` parse error) now passes through `indent_continuations` still carrying that trailing newline, and the caller's `writeln!` adds a second one, producing a blank line the existing test `a_message_that_ends_in_a_newline_does_not_print_a_blank_line` forbids."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"            indent_continuations(&clean)\",\"what\":\"The old code's `.trim_end()` was dropped, so a message ending in `\\\\n` (e.g. a `toml_edit` parse error) now passes through `indent_continuations` still carrying that trailing newline, and the caller's `writeln!` adds a second one, producing a blank line the existing test `a_message_that_ends_in_a_newline_does_not_print_a_blank_line` forbids.\"}]}",
+ "thinking_chars": 9673,
+ "done_reason": "stop",
+ "prompt_tokens": 2018,
+ "eval_tokens": 2759,
+ "load_s": 0.0020538,
+ "prompt_s": 0.820643,
+ "eval_s": 26.807604,
+ "wall_s": 27.80945110321045,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.536059963,
+  "vram_gb": 17.536059963,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "            indent_continuations(&clean)",
+  "what": "The old code's `.trim_end()` was dropped, so a message ending in `\\n` (e.g. a `toml_edit` parse error) now passes through `indent_continuations` still carrying that trailing newline, and the caller's `writeln!` adds a second one, producing a blank line the existing test `a_message_that_ends_in_a_newline_does_not_print_a_blank_line` forbids."
+ }
+}

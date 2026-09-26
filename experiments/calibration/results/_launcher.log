@@ -1,0 +1,19 @@
+[launcher] 21:42:11 starting claude-opus-5-5@low: experiments/calibration/calibrate.py --backend claude --model claude-opus-5-5 --effort low
+[launcher] 21:42:11 starting claude-opus-5-5@medium: experiments/calibration/calibrate.py --backend claude --model claude-opus-5-5 --effort medium
+[launcher] 21:42:11 starting claude-opus-5-5@high: experiments/calibration/calibrate.py --backend claude --model claude-opus-5-5 --effort high
+[launcher] 21:42:11 starting claude-sonnet-5@medium: experiments/calibration/calibrate.py --backend claude --model claude-sonnet-5 --effort medium
+[launcher] 21:42:11 starting claude-sonnet-5@high: experiments/calibration/calibrate.py --backend claude --model claude-sonnet-5 --effort high
+[launcher] 21:42:11 starting claude-sonnet-5@xhigh: experiments/calibration/calibrate.py --backend claude --model claude-sonnet-5 --effort xhigh
+[launcher] 21:44:21 finished claude-opus-5-5@low rc=0
+[launcher] 21:44:21 starting claude-haiku-4-5-20251001@low: experiments/calibration/calibrate.py --backend claude --model claude-haiku-4-5-20251001 --effort low
+[launcher] 21:44:51 finished claude-opus-5-5@medium rc=0
+[launcher] 21:44:51 starting claude-fable-5-1@medium: experiments/calibration/calibrate.py --backend claude --model claude-fable-5-1 --effort medium
+[launcher] 21:45:46 finished claude-opus-5-5@high rc=0
+[launcher] 21:45:46 starting claude-fable-5-1@high: experiments/calibration/calibrate.py --backend claude --model claude-fable-5-1 --effort high
+[launcher] 21:48:26 finished claude-sonnet-5@high rc=0
+[launcher] 21:48:31 finished claude-sonnet-5@medium rc=0
+[launcher] 21:48:36 finished claude-fable-5-1@high rc=0
+[launcher] 21:48:46 finished claude-haiku-4-5-20251001@low rc=0
+[launcher] 21:49:51 finished claude-sonnet-5@xhigh rc=0
+[launcher] 21:49:51 finished claude-fable-5-1@medium rc=0
+[launcher] 21:49:56 done. dropped=[]

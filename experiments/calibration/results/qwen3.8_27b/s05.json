@@ -1,0 +1,24 @@
+{
+ "id": "s05",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The finding claims column_header_line prints `0 pending` and suggests adding `.filter(|count| *count > 0)`, but line 236 already contains exactly that filter (`.filter(|count| *count > 0)`), so the zero-count case is already handled identically to mod.rs:73."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The finding claims column_header_line prints `0 pending` and suggests adding `.filter(|count| *count > 0)`, but line 236 already contains exactly that filter (`.filter(|count| *count > 0)`), so the zero-count case is already handled identically to mod.rs:73.\"}",
+ "thinking_chars": 984,
+ "done_reason": "stop",
+ "prompt_tokens": 1093,
+ "eval_tokens": 360,
+ "load_s": 0.0011235,
+ "prompt_s": 0.508046,
+ "eval_s": 3.290054,
+ "wall_s": 3.9868009090423584,
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

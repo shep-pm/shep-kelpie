@@ -1,0 +1,31 @@
+{
+ "id": "t17",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 136-139 of `entry.rs` pass both the cloned `ShepPaths` struct and three of its individual fields as separate arguments to `run_ui`, which is defined to accept these redundant parameters in `ui_event_loop.rs` (lines 37-47)."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 136-139 of `entry.rs` pass both the cloned `ShepPaths` struct and three of its individual fields as separate arguments to `run_ui`, which is defined to accept these redundant parameters in `ui_event_loop.rs` (lines 37-47).\"}",
+ "thinking_chars": 3882,
+ "done_reason": "stop",
+ "prompt_tokens": 2173,
+ "eval_tokens": 1265,
+ "load_s": 0.0023132,
+ "prompt_s": 0.931662,
+ "eval_s": 32.011706,
+ "wall_s": 33.27731990814209,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

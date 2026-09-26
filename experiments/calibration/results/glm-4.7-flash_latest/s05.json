@@ -1,0 +1,31 @@
+{
+ "id": "s05",
+ "set": "checker",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "column.rs:236 contains the `.filter(|count| *count > 0)` call that the reviewer claimed was missing, so the fix is already implemented."
+ },
+ "content": "{\n  \"verdict\": \"fails\",\n  \"reason\": \"column.rs:236 contains the `.filter(|count| *count > 0)` call that the reviewer claimed was missing, so the fix is already implemented.\"\n}",
+ "thinking_chars": 4110,
+ "done_reason": "stop",
+ "prompt_tokens": 974,
+ "eval_tokens": 1125,
+ "load_s": 0.0041864,
+ "prompt_s": 0.140943,
+ "eval_s": 7.187148,
+ "wall_s": 7.376076698303223,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

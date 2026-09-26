@@ -1,0 +1,31 @@
+{
+ "id": "f02",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The reviewer is correct: lines 66-79 show two Err arms with identical Notice construction, differing only in the error type (RequestError::Rpc vs. other). The Display impl for RequestError::Rpc (line 102) includes err.code and err.message, making the outputs not byte-identical, but the structure is redundant as suggested."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The reviewer is correct: lines 66-79 show two Err arms with identical Notice construction, differing only in the error type (RequestError::Rpc vs. other). The Display impl for RequestError::Rpc (line 102) includes err.code and err.message, making the outputs not byte-identical, but the structure is redundant as suggested.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2124,
+ "eval_tokens": 88,
+ "load_s": 0.0048051,
+ "prompt_s": 0.39748,
+ "eval_s": 1.514818,
+ "wall_s": 2.048642635345459,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

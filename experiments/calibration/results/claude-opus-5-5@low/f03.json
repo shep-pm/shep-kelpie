@@ -1,0 +1,55 @@
+{
+ "id": "f03",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The finding says every call site passes `&model.store, &model.provider_cache`, but that is false. `ui_event_loop.rs:316` passes loose `store`/`provider_cache` paths taken out of `Effect::RevealSecret`, inside `spawn_blocking`, and `fixtures/secrets.rs:370` also passes locals, so no `SecretsModel` exists at those points to call a method on."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The finding says every call site passes `&model.store, &model.provider_cache`, but that is false. `ui_event_loop.rs:316` passes loose `store`/`provider_cache` paths taken out of `Effect::RevealSecret`, inside `spawn_blocking`, and `fixtures/secrets.rs:370` also passes locals, so no `SecretsModel` exists at those points to call a method on.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21926,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 262,
+  "output_tokens_details": {
+   "thinking_tokens": 111
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21926,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 262,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 21926,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21926
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1830138,
+ "duration_ms": 3582,
+ "wall_s": 5.313107252120972,
+ "weighted_units": 46342.9,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

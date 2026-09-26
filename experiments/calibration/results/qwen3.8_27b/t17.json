@@ -1,0 +1,24 @@
+{
+ "id": "t17",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The comments at lines 38-45 explicitly explain why `home`, `daemon_config`, and `socket_default` are separate owned PathBufs rather than read from `paths`: `home` serves a different semantic role (setting SHEP_HOME for probed candidates in `Effect::LoadDogPane`), and `daemon_config`/`socket_default` are kept as owned values so tests can pass arbitrary pairs and so they can be moved into `spawn_blocking` closures requiring `'static`. The finding ignores these documented design constraints and incorrectly labels the parameters as redundant."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The comments at lines 38-45 explicitly explain why `home`, `daemon_config`, and `socket_default` are separate owned PathBufs rather than read from `paths`: `home` serves a different semantic role (setting SHEP_HOME for probed candidates in `Effect::LoadDogPane`), and `daemon_config`/`socket_default` are kept as owned values so tests can pass arbitrary pairs and so they can be moved into `spawn_blocking` closures requiring `'static`. The finding ignores these documented design constraints and incorrectly labels the parameters as redundant.\"}",
+ "thinking_chars": 5796,
+ "done_reason": "stop",
+ "prompt_tokens": 2187,
+ "eval_tokens": 1564,
+ "load_s": 0.0017986,
+ "prompt_s": 0.903155,
+ "eval_s": 15.788125,
+ "wall_s": 16.954198837280273,
+ "label": "holds",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": false
+}

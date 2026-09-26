@@ -1,0 +1,31 @@
+{
+ "id": "f05",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The finding is correct: lines 134-162 and 22-62 explicitly list ~20 KeyPress variants as Effect::None, and adding a new variant would require updating each match arm or risk silent fall-through."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The finding is correct: lines 134-162 and 22-62 explicitly list ~20 KeyPress variants as Effect::None, and adding a new variant would require updating each match arm or risk silent fall-through.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2884,
+ "eval_tokens": 64,
+ "load_s": 0.0024751,
+ "prompt_s": 0.585786,
+ "eval_s": 1.100383,
+ "wall_s": 1.8861100673675537,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

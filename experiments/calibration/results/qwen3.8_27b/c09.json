@@ -1,0 +1,30 @@
+{
+ "id": "c09",
+ "set": "reviewer",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": []
+ },
+ "content": "{\"findings\": []}",
+ "thinking_chars": 9441,
+ "done_reason": "stop",
+ "prompt_tokens": 3081,
+ "eval_tokens": 2561,
+ "load_s": 0.004712,
+ "prompt_s": 1.241119,
+ "eval_s": 26.254266,
+ "wall_s": 27.687288999557495,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.536059963,
+  "vram_gb": 17.536059963,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 0,
+ "matched": null
+}

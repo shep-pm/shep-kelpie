@@ -1,0 +1,40 @@
+{
+ "id": "h03",
+ "set": "reviewer",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "indent_continuations(&clean)",
+    "what": "The `.trim_end()` call from the previous implementation is missing, meaning trailing whitespace and newlines are no longer removed, which contradicts the function's documentation and regresses behavior."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"indent_continuations(&clean)\", \"what\": \"The `.trim_end()` call from the previous implementation is missing, meaning trailing whitespace and newlines are no longer removed, which contradicts the function's documentation and regresses behavior.\"}]}",
+ "thinking_chars": 6222,
+ "done_reason": "stop",
+ "prompt_tokens": 2172,
+ "eval_tokens": 1860,
+ "load_s": 0.0056035,
+ "prompt_s": 0.928301,
+ "eval_s": 47.034842,
+ "wall_s": 48.31238412857056,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "indent_continuations(&clean)",
+  "what": "The `.trim_end()` call from the previous implementation is missing, meaning trailing whitespace and newlines are no longer removed, which contradicts the function's documentation and regresses behavior."
+ }
+}

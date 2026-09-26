@@ -1,0 +1,31 @@
+{
+ "id": "t12",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 83-99 and 122-185 all build a Rect, call a pane\u2011specific draw function, draw the status line at the bottom, and return. The code duplication is evident; only the Sheep arm uses a different `top` and `height`, but the status line/return logic is identical across all arms."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"Lines 83-99 and 122-185 all build a Rect, call a pane\u2011specific draw function, draw the status line at the bottom, and return. The code duplication is evident; only the Sheep arm uses a different `top` and `height`, but the status line/return logic is identical across all arms.\"}",
+ "thinking_chars": 1578,
+ "done_reason": "stop",
+ "prompt_tokens": 1867,
+ "eval_tokens": 430,
+ "load_s": 0.0025491,
+ "prompt_s": 0.141101,
+ "eval_s": 2.385997,
+ "wall_s": 2.6408348083496094,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

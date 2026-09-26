@@ -1,0 +1,55 @@
+{
+ "id": "s04",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "`rows` already lowercases the filter at line 237 (`let needle = self.filter.to_lowercase();`) and compares against the lowercased name at line 241, exactly as `visible_rows` does at lines 45 and 49. The two filters behave identically, so the claimed mismatch does not exist."
+ },
+ "content": "{\"verdict\":\"fails\",\"reason\":\"`rows` already lowercases the filter at line 237 (`let needle = self.filter.to_lowercase();`) and compares against the lowercased name at line 241, exactly as `visible_rows` does at lines 45 and 49. The two filters behave identically, so the claimed mismatch does not exist.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20481,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 114,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20481,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 114,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 20481,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20481
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0854466,
+ "duration_ms": 1599,
+ "wall_s": 3.609469175338745,
+ "weighted_units": 42723.3,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

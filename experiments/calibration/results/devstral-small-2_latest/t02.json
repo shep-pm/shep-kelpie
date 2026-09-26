@@ -1,0 +1,31 @@
+{
+ "id": "t02",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The reviewer is correct: the None\u2192Trace\u2192Debug\u2192Info\u2192Warn\u2192Error\u2192None level cycle is duplicated inline at lines 198-205 in sheep_pane.rs and identically at lines 65-72 in bleats.rs, and should be extracted into a shared method like BleatsPane::cycle_min_level() to avoid duplication."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The reviewer is correct: the None\u2192Trace\u2192Debug\u2192Info\u2192Warn\u2192Error\u2192None level cycle is duplicated inline at lines 198-205 in sheep_pane.rs and identically at lines 65-72 in bleats.rs, and should be extracted into a shared method like BleatsPane::cycle_min_level() to avoid duplication.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2175,
+ "eval_tokens": 90,
+ "load_s": 0.0049352,
+ "prompt_s": 5.219722,
+ "eval_s": 1.605622,
+ "wall_s": 6.920010089874268,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,55 @@
+{
+ "id": "t02",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The six-arm min_level match at sheep_pane.rs:198-205 is token-for-token identical to bleats.rs:65-72, and the comment on lines 194-195 acknowledges the intentional mirroring; both call sites have set_min_level available so a shared cycle helper would work. The duplication is real, though HIGH severity is generous for an 8-line refactor."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The six-arm min_level match at sheep_pane.rs:198-205 is token-for-token identical to bleats.rs:65-72, and the comment on lines 194-195 acknowledges the intentional mirroring; both call sites have set_min_level available so a shared cycle helper would work. The duplication is real, though HIGH severity is generous for an 8-line refactor.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 25517,
+  "cache_read_input_tokens": 10092,
+  "output_tokens": 138,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 25517,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 138,
+    "cache_read_input_tokens": 10092,
+    "cache_creation_input_tokens": 25517,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 25517
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.519783,
+ "duration_ms": 6371,
+ "wall_s": 8.781970024108887,
+ "weighted_units": 52735.2,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

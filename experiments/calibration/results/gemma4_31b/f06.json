@@ -1,0 +1,31 @@
+{
+ "id": "f06",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Line 311 calls `to_ascii_uppercase()`, which allocates a new String every time it is called in the paint loop. While it missed the 'no fold' literal (line 113), the allocation problem is real."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Line 311 calls `to_ascii_uppercase()`, which allocates a new String every time it is called in the paint loop. While it missed the 'no fold' literal (line 113), the allocation problem is real.\"}",
+ "thinking_chars": 2530,
+ "done_reason": "stop",
+ "prompt_tokens": 2297,
+ "eval_tokens": 820,
+ "load_s": 0.0025674,
+ "prompt_s": 0.970014,
+ "eval_s": 20.784471,
+ "wall_s": 22.10008716583252,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

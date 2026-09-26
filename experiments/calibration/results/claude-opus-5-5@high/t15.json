@@ -1,0 +1,55 @@
+{
+ "id": "t15",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 86 and 99 are byte-identical `match  {buffer}\\u{258f}   enter applies   esc cancels`, lines 108 and 132 use the same format with `{label}`, and line 122 has the same shape with an `editing {field}` label, so five format! calls build one bar. HIGH overstates it, since this is duplication and not a bug, and the filter branch's `ctrl-c quits` suffix is cut off at line 150 so it can't be checked."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 86 and 99 are byte-identical `match  {buffer}\\\\u{258f}   enter applies   esc cancels`, lines 108 and 132 use the same format with `{label}`, and line 122 has the same shape with an `editing {field}` label, so five format! calls build one bar. HIGH overstates it, since this is duplication and not a bug, and the filter branch's `ctrl-c quits` suffix is cut off at line 150 so it can't be checked.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22146,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 402,
+  "output_tokens_details": {
+   "thinking_tokens": 230
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22146,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 402,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 22146,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22146
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.18757379999999998,
+ "duration_ms": 4955,
+ "wall_s": 8.209184169769287,
+ "weighted_units": 47482.9,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

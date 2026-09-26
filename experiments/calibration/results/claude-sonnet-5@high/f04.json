@@ -1,0 +1,55 @@
+{
+ "id": "f04",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The is_keymap doc comment (lines 620-622) states the deliberate design: name every arm so a new Keymap* variant fails to compile there. The suggested `_ => false` wildcard would delete exactly that guarantee. The claim that label()/caption() make it redundant is weak, since those only force a new variant to be named in those matches, not to be classified as keymap or not. The remark about size() (line 614) and control() (line 467) wildcards may be fair, but it is a separate concern and does not make is_keymap's exhaustiveness worthless."
+ },
+ "content": "{\"verdict\":\"fails\",\"reason\":\"The is_keymap doc comment (lines 620-622) states the deliberate design: name every arm so a new Keymap* variant fails to compile there. The suggested `_ => false` wildcard would delete exactly that guarantee. The claim that label()/caption() make it redundant is weak, since those only force a new variant to be named in those matches, not to be classified as keymap or not. The remark about size() (line 614) and control() (line 467) wildcards may be fair, but it is a separate concern and does not make is_keymap's exhaustiveness worthless.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 27713,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 194,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 27713,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 194,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 27713,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 27713
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1151746,
+ "duration_ms": 185950,
+ "wall_s": 187.8022918701172,
+ "weighted_units": 57587.3,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

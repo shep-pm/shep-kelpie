@@ -1,0 +1,40 @@
+{
+ "id": "r02",
+ "set": "reviewer",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let (code, message) = safe_parts(fmt, message, code);",
+    "what": "The code and message arguments are swapped in the call to safe_parts, causing them to be incorrectly sanitized and assigned."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"let (code, message) = safe_parts(fmt, message, code);\", \"what\": \"The code and message arguments are swapped in the call to safe_parts, causing them to be incorrectly sanitized and assigned.\"}]}",
+ "thinking_chars": 3003,
+ "done_reason": "stop",
+ "prompt_tokens": 1367,
+ "eval_tokens": 915,
+ "load_s": 0.0055628,
+ "prompt_s": 0.605482,
+ "eval_s": 23.035679,
+ "wall_s": 23.938729763031006,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "let (code, message) = safe_parts(fmt, message, code);",
+  "what": "The code and message arguments are swapped in the call to safe_parts, causing them to be incorrectly sanitized and assigned."
+ }
+}

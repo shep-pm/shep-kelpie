@@ -1,0 +1,30 @@
+{
+ "id": "c09",
+ "set": "reviewer",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": []
+ },
+ "content": "{\"findings\": []}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 3572,
+ "eval_tokens": 7,
+ "load_s": 0.0036013,
+ "prompt_s": 0.779711,
+ "eval_s": 0.109198,
+ "wall_s": 0.9584009647369385,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 0,
+ "matched": null
+}

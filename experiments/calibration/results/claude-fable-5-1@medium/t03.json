@@ -1,0 +1,55 @@
+{
+ "id": "t03",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 45 and 237 both compute `self.filter.to_lowercase()` and lines 49 and 241 both apply the identical predicate `needle.is_empty() || row.info.name.to_lowercase().contains(&needle)` to `row.info.name`; the duplication is real, though it is a minor style point rather than a defect."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 45 and 237 both compute `self.filter.to_lowercase()` and lines 49 and 241 both apply the identical predicate `needle.is_empty() || row.info.name.to_lowercase().contains(&needle)` to `row.info.name`; the duplication is real, though it is a minor style point rather than a defect.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 24819,
+  "cache_read_input_tokens": 10092,
+  "output_tokens": 126,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 24819,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 126,
+    "cache_read_input_tokens": 10092,
+    "cache_creation_input_tokens": 24819,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 24819
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.5052230000000001,
+ "duration_ms": 2615,
+ "wall_s": 5.063558101654053,
+ "weighted_units": 51279.2,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

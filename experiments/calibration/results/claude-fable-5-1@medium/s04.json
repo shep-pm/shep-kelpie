@@ -1,0 +1,55 @@
+{
+ "id": "s04",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Line 237 lowercases the needle (`let needle = self.filter.to_lowercase()`) and line 241 lowercases the name before `contains`, identical to lines 45 and 49 in `visible_rows`; the two filters already agree."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Line 237 lowercases the needle (`let needle = self.filter.to_lowercase()`) and line 241 lowercases the name before `contains`, identical to lines 45 and 49 in `visible_rows`; the two filters already agree.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21244,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 96,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21244,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 96,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 21244,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21244
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.433112,
+ "duration_ms": 4472,
+ "wall_s": 6.121362924575806,
+ "weighted_units": 44334.8,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

@@ -1,0 +1,40 @@
+{
+ "id": "r08",
+ "set": "reviewer",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "start - tail_window_start(start, body_rows, cost)",
+    "what": "page_lines_back may return 0 when start is 0 or when the first row exceeds body_rows, breaking the contract that a page always covers at least one line."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"start - tail_window_start(start, body_rows, cost)\",\"what\":\"page_lines_back may return 0 when start is 0 or when the first row exceeds body_rows, breaking the contract that a page always covers at least one line.\"}]}",
+ "thinking_chars": 9293,
+ "done_reason": "stop",
+ "prompt_tokens": 702,
+ "eval_tokens": 2376,
+ "load_s": 0.0015773,
+ "prompt_s": 0.065724,
+ "eval_s": 13.368992,
+ "wall_s": 13.548128128051758,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "start - tail_window_start(start, body_rows, cost)",
+  "what": "page_lines_back may return 0 when start is 0 or when the first row exceeds body_rows, breaking the contract that a page always covers at least one line."
+ }
+}

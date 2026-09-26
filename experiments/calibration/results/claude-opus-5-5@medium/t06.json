@@ -1,0 +1,55 @@
+{
+ "id": "t06",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "At line 145, `text` is only used as `&text` inside `format!`, which builds its own owned String. So the `.to_owned()` calls at lines 276 and 311 allocate a String that is dropped right away. Changing the parameter to `&str` would remove those allocations; the call sites at 270 and 287 would just pass `&sentence` and `&format!(..)`. This assumes `fit` accepts `&str` (its signature isn't shown), which is very likely."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"At line 145, `text` is only used as `&text` inside `format!`, which builds its own owned String. So the `.to_owned()` calls at lines 276 and 311 allocate a String that is dropped right away. Changing the parameter to `&str` would remove those allocations; the call sites at 270 and 287 would just pass `&sentence` and `&format!(..)`. This assumes `fit` accepts `&str` (its signature isn't shown), which is very likely.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21493,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 383,
+  "output_tokens_details": {
+   "thinking_tokens": 215
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21493,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 383,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 21493,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21493
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.18196980000000001,
+ "duration_ms": 4757,
+ "wall_s": 6.741769313812256,
+ "weighted_units": 46081.9,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

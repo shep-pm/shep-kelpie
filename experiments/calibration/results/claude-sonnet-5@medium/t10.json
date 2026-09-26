@@ -1,0 +1,55 @@
+{
+ "id": "t10",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "on_pane_key (lines 265-293) lists every unbound KeyPress variant explicitly so a new variant forces a compile error, but on_pane_text_key ends with `_ => {}` at line 444, which silently absorbs any new variant. The inconsistency the finding describes is real, though it is a style/robustness concern rather than a runtime bug."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"on_pane_key (lines 265-293) lists every unbound KeyPress variant explicitly so a new variant forces a compile error, but on_pane_text_key ends with `_ => {}` at line 444, which silently absorbs any new variant. The inconsistency the finding describes is real, though it is a style/robustness concern rather than a runtime bug.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21519,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 132,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21519,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 132,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 21519,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21519
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0897786,
+ "duration_ms": 2176,
+ "wall_s": 4.649244070053101,
+ "weighted_units": 44889.3,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

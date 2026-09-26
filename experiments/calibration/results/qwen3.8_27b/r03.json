@@ -1,0 +1,33 @@
+{
+ "id": "r03",
+ "set": "reviewer",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "    if footer.is_none() {",
+    "what": "The condition is inverted: the old (correct) code reserved a budget line when footer.is_some(), but the new code reserves it when footer.is_none(), so a dog pane (which has a footer) no longer reserves a line for it\u2014reproducing the very bug this commit sets out to fix\u2014while a sheep pane (no footer) wastes a line it didn't need to spare."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"    if footer.is_none() {\", \"what\": \"The condition is inverted: the old (correct) code reserved a budget line when footer.is_some(), but the new code reserves it when footer.is_none(), so a dog pane (which has a footer) no longer reserves a line for it\u2014reproducing the very bug this commit sets out to fix\u2014while a sheep pane (no footer) wastes a line it didn't need to spare.\"}]}",
+ "thinking_chars": 4477,
+ "done_reason": "stop",
+ "prompt_tokens": 1999,
+ "eval_tokens": 1363,
+ "load_s": 0.0043689,
+ "prompt_s": 0.824196,
+ "eval_s": 13.179881,
+ "wall_s": 14.181222200393677,
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "    if footer.is_none() {",
+  "what": "The condition is inverted: the old (correct) code reserved a budget line when footer.is_some(), but the new code reserves it when footer.is_none(), so a dog pane (which has a footer) no longer reserves a line for it\u2014reproducing the very bug this commit sets out to fix\u2014while a sheep pane (no footer) wastes a line it didn't need to spare."
+ }
+}

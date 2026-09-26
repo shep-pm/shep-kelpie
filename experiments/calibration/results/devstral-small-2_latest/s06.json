@@ -1,0 +1,31 @@
+{
+ "id": "s06",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The finding is correct: `log_row` calls `app.selected_row().expect()` at line 337, but `sheep_lines` only checks `app.selected_row()` at line 170, meaning `log_row` could panic if called when `app.selected_row()` is `None` (line 176)."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The finding is correct: `log_row` calls `app.selected_row().expect()` at line 337, but `sheep_lines` only checks `app.selected_row()` at line 170, meaning `log_row` could panic if called when `app.selected_row()` is `None` (line 176).\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1775,
+ "eval_tokens": 83,
+ "load_s": 0.0017362,
+ "prompt_s": 0.30359,
+ "eval_s": 1.427267,
+ "wall_s": 1.805325984954834,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "holds",
+ "correct": false
+}

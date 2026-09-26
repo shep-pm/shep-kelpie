@@ -1,0 +1,45 @@
+{
+ "id": "r07",
+ "set": "reviewer",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let code = &crate::terminal_safe::sanitise(code).0;",
+    "what": "`emit_error` borrows from a temporary `Sanitised` value; the reference becomes dangling and the code will not compile."
+   },
+   {
+    "severity": "bug",
+    "quote": "let code = &crate::terminal_safe::sanitise(message).0;",
+    "what": "`emit_notice` sanitises the message instead of the diagnostic `code`, so a newline in the code can escape the indent logic and break the format."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"let code = &crate::terminal_safe::sanitise(code).0;\",\"what\":\"`emit_error` borrows from a temporary `Sanitised` value; the reference becomes dangling and the code will not compile.\"},{\"severity\":\"bug\",\"quote\":\"let code = &crate::terminal_safe::sanitise(message).0;\",\"what\":\"`emit_notice` sanitises the message instead of the diagnostic `code`, so a newline in the code can escape the indent logic and break the format.\"}]}",
+ "thinking_chars": 12449,
+ "done_reason": "stop",
+ "prompt_tokens": 1565,
+ "eval_tokens": 2922,
+ "load_s": 0.0027132,
+ "prompt_s": 0.130799,
+ "eval_s": 16.582827,
+ "wall_s": 16.860421895980835,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 1,
+ "matched": {
+  "severity": "bug",
+  "quote": "let code = &crate::terminal_safe::sanitise(message).0;",
+  "what": "`emit_notice` sanitises the message instead of the diagnostic `code`, so a newline in the code can escape the indent logic and break the format."
+ }
+}

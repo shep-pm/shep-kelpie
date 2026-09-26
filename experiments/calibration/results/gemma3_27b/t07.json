@@ -1,0 +1,31 @@
+{
+ "id": "t07",
+ "set": "checker",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 70-73 in `sheep/mod.rs` and lines 233-236 in `column.rs` both contain identical code blocks that calculate the number of pending items from `pane.config().map(|view| view.pending.len()).filter(|count| *count > 0)`. The reviewer correctly identifies this duplication and suggests extracting it into a reusable function `SheepPane::pending_count()` to improve code maintainability and reduce redundancy."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 70-73 in `sheep/mod.rs` and lines 233-236 in `column.rs` both contain identical code blocks that calculate the number of pending items from `pane.config().map(|view| view.pending.len()).filter(|count| *count > 0)`. The reviewer correctly identifies this duplication and suggests extracting it into a reusable function `SheepPane::pending_count()` to improve code maintainability and reduce redundancy.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1156,
+ "eval_tokens": 114,
+ "load_s": 0.0016657,
+ "prompt_s": 0.470722,
+ "eval_s": 2.445506,
+ "wall_s": 3.066488027572632,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

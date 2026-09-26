@@ -1,0 +1,40 @@
+{
+ "id": "r08",
+ "set": "reviewer",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "start - tail_window_start(start, body_rows, cost)",
+    "what": "The new implementation can return 0 (e.g., when start is 0) while the original code explicitly capped the result to 1 using .max(1), changing the function's behavior at the boundary where no lines can be scrolled back."
+   }
+  ]
+ },
+ "content": "{\n  \"findings\": [\n    {\n      \"severity\": \"bug\",\n      \"quote\": \"start - tail_window_start(start, body_rows, cost)\",\n      \"what\": \"The new implementation can return 0 (e.g., when start is 0) while the original code explicitly capped the result to 1 using .max(1), changing the function's behavior at the boundary where no lines can be scrolled back.\"\n    }\n  ]\n}",
+ "thinking_chars": 18181,
+ "done_reason": "stop",
+ "prompt_tokens": 645,
+ "eval_tokens": 4735,
+ "load_s": 0.0015792,
+ "prompt_s": 0.11466,
+ "eval_s": 31.167294,
+ "wall_s": 31.52726912498474,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "start - tail_window_start(start, body_rows, cost)",
+  "what": "The new implementation can return 0 (e.g., when start is 0) while the original code explicitly capped the result to 1 using .max(1), changing the function's behavior at the boundary where no lines can be scrolled back."
+ }
+}

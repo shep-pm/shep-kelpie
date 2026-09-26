@@ -1,0 +1,40 @@
+{
+ "id": "r04",
+ "set": "reviewer",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "    && let Some(settings) = self.settings_mut()",
+    "what": "The condition is inverted: when a settings candidate is armed, the code clears it but then proceeds to move the cursor, whereas it should only move when not armed."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"    && let Some(settings) = self.settings_mut()\",\"what\":\"The condition is inverted: when a settings candidate is armed, the code clears it but then proceeds to move the cursor, whereas it should only move when not armed.\"}]}",
+ "thinking_chars": 8065,
+ "done_reason": "stop",
+ "prompt_tokens": 1409,
+ "eval_tokens": 1877,
+ "load_s": 0.0022963,
+ "prompt_s": 0.124174,
+ "eval_s": 10.455229,
+ "wall_s": 10.663039207458496,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "    && let Some(settings) = self.settings_mut()",
+  "what": "The condition is inverted: when a settings candidate is armed, the code clears it but then proceeds to move the cursor, whereas it should only move when not armed."
+ }
+}

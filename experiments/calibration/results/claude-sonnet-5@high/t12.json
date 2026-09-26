@@ -1,0 +1,55 @@
+{
+ "id": "t12",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 122-185 repeat the same 16-line block four times (Rect with `body_rows(area)`, one draw call, `set_line` with `status_line` at `bottom`, `return`). Only the draw function and pane differ. The Sheep arm (83-99) has a different Rect but the same tail, as the finding says. A closure-taking helper would work, since every draw call takes `(app, pane, body, buffer)`. HIGH severity is inflated for duplication like this."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"Lines 122-185 repeat the same 16-line block four times (Rect with `body_rows(area)`, one draw call, `set_line` with `status_line` at `bottom`, `return`). Only the draw function and pane differ. The Sheep arm (83-99) has a different Rect but the same tail, as the finding says. A closure-taking helper would work, since every draw call takes `(app, pane, body, buffer)`. HIGH severity is inflated for duplication like this.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21337,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 555,
+  "output_tokens_details": {
+   "thinking_tokens": 384
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21337,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 555,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 21337,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21337
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.09328059999999999,
+ "duration_ms": 6772,
+ "wall_s": 8.727168083190918,
+ "weighted_units": 46640.3,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

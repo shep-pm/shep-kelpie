@@ -1,0 +1,31 @@
+{
+ "id": "s07",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The finding claims `column_len` returns 0 when there is no config, but line 119 explicitly returns 1 for the `None` case."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The finding claims `column_len` returns 0 when there is no config, but line 119 explicitly returns 1 for the `None` case.\"}",
+ "thinking_chars": 928,
+ "done_reason": "stop",
+ "prompt_tokens": 733,
+ "eval_tokens": 334,
+ "load_s": 0.0040225,
+ "prompt_s": 0.362367,
+ "eval_s": 8.437144,
+ "wall_s": 9.104988813400269,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

@@ -1,0 +1,33 @@
+{
+ "id": "r04",
+ "set": "reviewer",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "if self.disarm_settings_candidate()",
+    "what": "The condition is inverted: `disarm_settings_candidate()` returns `true` when the candidate WAS armed (and got cancelled), so the move-by/move-to code now runs only on the armed path and never on the un-armed path \u2014 the exact opposite of the old `if is_armed { cancel } else { move }` logic the doc comment and test both expect."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"if self.disarm_settings_candidate()\",\"what\":\"The condition is inverted: `disarm_settings_candidate()` returns `true` when the candidate WAS armed (and got cancelled), so the move-by/move-to code now runs only on the armed path and never on the un-armed path \u2014 the exact opposite of the old `if is_armed { cancel } else { move }` logic the doc comment and test both expect.\"}]}",
+ "thinking_chars": 6548,
+ "done_reason": "stop",
+ "prompt_tokens": 1466,
+ "eval_tokens": 1764,
+ "load_s": 0.0017401,
+ "prompt_s": 0.626277,
+ "eval_s": 17.763678,
+ "wall_s": 18.59707999229431,
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "if self.disarm_settings_candidate()",
+  "what": "The condition is inverted: `disarm_settings_candidate()` returns `true` when the candidate WAS armed (and got cancelled), so the move-by/move-to code now runs only on the armed path and never on the un-armed path \u2014 the exact opposite of the old `if is_armed { cancel } else { move }` logic the doc comment and test both expect."
+ }
+}

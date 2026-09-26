@@ -1,0 +1,41 @@
+{
+ "id": "c12",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "assert_eq!(super::super::MIN_SUPPORTED, 8);",
+    "what": "The test `the_batch_variant_did_not_raise_the_floor` checks a constant defined in a parent module using a qualified path that will break after the refactor, because `Request` and related modules have been moved into a subdirectory. It will likely fail to compile or run incorrectly after the change."
+   },
+   {
+    "severity": "bug",
+    "quote": "use super::super::{Envelope, LineOutcome, LineReply, Response, SignalOutcome, SignalReply};",
+    "what": "The test suite now imports types from two levels above the current module. This will break if the project structure changes and the relative path becomes invalid."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"assert_eq!(super::super::MIN_SUPPORTED, 8);\", \"what\": \"The test `the_batch_variant_did_not_raise_the_floor` checks a constant defined in a parent module using a qualified path that will break after the refactor, because `Request` and related modules have been moved into a subdirectory. It will likely fail to compile or run incorrectly after the change.\"}, {\"severity\": \"bug\", \"quote\": \"use super::super::{Envelope, LineOutcome, LineReply, Response, SignalOutcome, SignalReply};\", \"what\": \"The test suite now imports types from two levels above the current module. This will break if the project structure changes and the relative path becomes invalid.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1681,
+ "eval_tokens": 167,
+ "load_s": 0.0023416,
+ "prompt_s": 0.626249,
+ "eval_s": 3.613207,
+ "wall_s": 4.380520820617676,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 2,
+ "matched": null
+}

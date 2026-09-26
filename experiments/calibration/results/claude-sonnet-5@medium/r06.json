@@ -1,0 +1,64 @@
+{
+ "id": "r06",
+ "set": "reviewer",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "// change under it.",
+    "what": "The `on_dog_section` hunk adds only a comment saying the overlay must not survive, but never sets `self.keymap_open = false`, so the dog-section reply still leaks the overlay and the new `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` test would fail."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"// change under it.\", \"what\": \"The `on_dog_section` hunk adds only a comment saying the overlay must not survive, but never sets `self.keymap_open = false`, so the dog-section reply still leaks the overlay and the new `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` test would fail.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 23426,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 595,
+  "output_tokens_details": {
+   "thinking_tokens": 459
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23426,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 595,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 23426,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 23426
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.10203659999999999,
+ "duration_ms": 6229,
+ "wall_s": 8.101449012756348,
+ "weighted_units": 51018.3,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "// change under it.",
+  "what": "The `on_dog_section` hunk adds only a comment saying the overlay must not survive, but never sets `self.keymap_open = false`, so the dog-section reply still leaks the overlay and the new `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` test would fail."
+ }
+}

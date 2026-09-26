@@ -1,0 +1,55 @@
+{
+ "id": "t19",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 189-198 and 234-243 are identical 10-line matches, each with the same comment (186-188, 231-233). A `config_pane_direct(&mut self) -> Option<&mut ConfigPane>` helper would still borrow all of `self`, though, so `self.mode` would not be reachable. The helper would have to take `&mut self.body` instead, and the finding's suggested signature won't work as written. The duplication is real, but the severity looks overstated and the fix needs adjusting."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 189-198 and 234-243 are identical 10-line matches, each with the same comment (186-188, 231-233). A `config_pane_direct(&mut self) -> Option<&mut ConfigPane>` helper would still borrow all of `self`, though, so `self.mode` would not be reachable. The helper would have to take `&mut self.body` instead, and the finding's suggested signature won't work as written. The duplication is real, but the severity looks overstated and the fix needs adjusting.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20647,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 179,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20647,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 179,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 20647,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20647
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0867606,
+ "duration_ms": 2284,
+ "wall_s": 4.305818796157837,
+ "weighted_units": 43380.3,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

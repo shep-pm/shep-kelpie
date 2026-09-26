@@ -1,0 +1,106 @@
+diff --git a/crates/shep-cli/src/output/mod.rs b/crates/shep-cli/src/output/mod.rs
+index c4ddcfa1..1356ba35 100644
+--- a/crates/shep-cli/src/output/mod.rs
++++ b/crates/shep-cli/src/output/mod.rs
+@@ -595,24 +595,39 @@ pub fn emit_partial<T: Render>(
+ struct ErrorEnvelope<'a> {
+     schema_version: u32,
+     error: ErrorBody<'a>,
+ }
+ 
+ /// The `error` object inside [`ErrorEnvelope`].
+ #[derive(Debug, Serialize)]
+ struct ErrorBody<'a> {
+     code: &'a str,
+     message: &'a str,
+ }
+ 
++/// The two strings an emitter prints, both cleaned: `code` stripped of
++/// anything that could drive a terminal, `message` in the shape `fmt`
++/// renders.
++///
++/// One function rather than four lines in each emitter, because the two have
++/// to agree and have drifted once already. `emit_error` carried the comment
++/// explaining why `code` was exempt from sanitising and `emit_notice`
++/// carried nothing, which is how the exemption outlived the reason for it.
++fn safe_parts(fmt: Format, code: &str, message: &str) -> (String, String) {
++    (
++        crate::terminal_safe::sanitise(code).0,
++        safe_message(fmt, message),
++    )
++}
++
+ /// `message` with everything that could drive a terminal stripped, in the
+ /// shape `fmt` renders.
+ ///
+ /// The seam every emitted message passes through, which is why the
+ /// guarantee lives here rather than at each caller. JSON collapses to one
+ /// line: `jq -r .error.message` unescapes a control byte straight back
+ /// onto a terminal. A table keeps the line breaks shep wrote, indents every
+ /// one of them, and loses its trailing whitespace, which the caller's
+ /// `writeln!` would otherwise print as a blank line.
+ fn safe_message(fmt: Format, message: &str) -> String {
+     match fmt {
+         Format::Json => crate::terminal_safe::sanitise(message).0,
+@@ -658,28 +673,26 @@ fn indent_continuations(message: &str) -> String {
+ /// it prints on both surfaces: JSON carries it in `error.code`, and
+ /// table mode names it too, so a human at a terminal sees the same
+ /// failure name a script would.
+ ///
+ /// # Errors
+ /// The underlying write failed.
+ pub fn emit_error(
+     err: &mut dyn io::Write,
+     fmt: Format,
+     code: &str,
+     message: &str,
+ ) -> io::Result<()> {
+-    let code = crate::terminal_safe::sanitise(code).0;
+-    let code = code.as_str();
+-    let message = safe_message(fmt, message);
+-    let message = message.as_str();
++    let (code, message) = safe_parts(fmt, code, message);
++    let (code, message) = (code.as_str(), message.as_str());
+     match fmt {
+         Format::Json => {
+             let envelope = ErrorEnvelope {
+                 schema_version: SCHEMA_VERSION,
+                 error: ErrorBody { code, message },
+             };
+             serde_json::to_writer(&mut *err, &envelope)?;
+             writeln!(err)
+         }
+         Format::Table => writeln!(err, "error[{code}]: {message}"),
+     }
+ }
+@@ -718,28 +731,26 @@ struct NoticeBody<'a> {
+ /// `emit_error`'s exit-code taxonomy. A caller already holding a
+ /// [`Streams`] can use [`Streams::note`] instead.
+ ///
+ /// # Errors
+ /// The underlying write failed.
+ #[cfg_attr(windows, allow(dead_code))]
+ pub fn emit_notice(
+     out: &mut dyn io::Write,
+     fmt: Format,
+     code: &str,
+     message: &str,
+ ) -> io::Result<()> {
+-    let code = crate::terminal_safe::sanitise(code).0;
+-    let code = code.as_str();
+-    let message = safe_message(fmt, message);
+-    let message = message.as_str();
++    let (code, message) = safe_parts(fmt, code, message);
++    let (code, message) = (code.as_str(), message.as_str());
+     match fmt {
+         Format::Json => {
+             let envelope = NoticeEnvelope {
+                 schema_version: SCHEMA_VERSION,
+                 notice: NoticeBody { code, message },
+             };
+             serde_json::to_writer(&mut *out, &envelope)?;
+             writeln!(out)
+         }
+         Format::Table => writeln!(out, "notice[{code}]: {message}"),
+     }
+ }

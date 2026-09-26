@@ -1,0 +1,31 @@
+{
+ "id": "s07",
+ "set": "checker",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The finding claims `column_len` returns 0 for `None`, but line 119 explicitly returns 1."
+ },
+ "content": "{\n  \"verdict\": \"fails\",\n  \"reason\": \"The finding claims `column_len` returns 0 for `None`, but line 119 explicitly returns 1.\"\n}",
+ "thinking_chars": 5606,
+ "done_reason": "stop",
+ "prompt_tokens": 647,
+ "eval_tokens": 1470,
+ "load_s": 0.0036525,
+ "prompt_s": 0.108368,
+ "eval_s": 9.329358,
+ "wall_s": 9.511296033859253,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

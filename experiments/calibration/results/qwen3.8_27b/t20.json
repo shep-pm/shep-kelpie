@@ -1,0 +1,24 @@
+{
+ "id": "t20",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The comment at lines 28-30 explicitly states the direct match is used 'not Self::settings_mut, so self.now stays reachable below,' confirming the duplication exists solely for the borrow-ordering reason, and text_editor_input.rs:12-13 demonstrates the valid fix (hoist `let now = self.now;` before calling `self.settings_mut()`)."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The comment at lines 28-30 explicitly states the direct match is used 'not Self::settings_mut, so self.now stays reachable below,' confirming the duplication exists solely for the borrow-ordering reason, and text_editor_input.rs:12-13 demonstrates the valid fix (hoist `let now = self.now;` before calling `self.settings_mut()`).\"}",
+ "thinking_chars": 8289,
+ "done_reason": "stop",
+ "prompt_tokens": 1682,
+ "eval_tokens": 2177,
+ "load_s": 0.0023917,
+ "prompt_s": 0.716951,
+ "eval_s": 22.610994,
+ "wall_s": 23.546733856201172,
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

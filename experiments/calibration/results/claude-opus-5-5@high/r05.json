@@ -1,0 +1,64 @@
+{
+ "id": "r05",
+ "set": "reviewer",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "+    (stages + slack).min(START_DEADLINE)",
+    "what": "The moved function now uses `.min` where the removed code used `.max`, so START_DEADLINE becomes a ceiling instead of a floor; multi-stage starts get cut down to the one-stage budget and the client times out before the daemon does, which the refactor did not intend and which its own doc comment ('Never under START_DEADLINE', 'not clamped') contradicts."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"+    (stages + slack).min(START_DEADLINE)\", \"what\": \"The moved function now uses `.min` where the removed code used `.max`, so START_DEADLINE becomes a ceiling instead of a floor; multi-stage starts get cut down to the one-stage budget and the client times out before the daemon does, which the refactor did not intend and which its own doc comment ('Never under START_DEADLINE', 'not clamped') contradicts.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 23780,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 422,
+  "output_tokens_details": {
+   "thinking_tokens": 252
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23780,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 422,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 23780,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 23780
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.2010458,
+ "duration_ms": 5124,
+ "wall_s": 6.987398862838745,
+ "weighted_units": 50850.9,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "+    (stages + slack).min(START_DEADLINE)",
+  "what": "The moved function now uses `.min` where the removed code used `.max`, so START_DEADLINE becomes a ceiling instead of a floor; multi-stage starts get cut down to the one-stage budget and the client times out before the daemon does, which the refactor did not intend and which its own doc comment ('Never under START_DEADLINE', 'not clamped') contradicts."
+ }
+}

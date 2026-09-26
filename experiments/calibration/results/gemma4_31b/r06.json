@@ -1,0 +1,40 @@
+{
+ "id": "r06",
+ "set": "reviewer",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "// Same as `Self::open_or_refresh_config_pane`: an overlay\n// open when this reply landed must not survive the body\n// change under it.",
+    "what": "The logic to set `self.keymap_open = false` is missing despite the accompanying comment, which will cause the associated test `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` to fail."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"// Same as `Self::open_or_refresh_config_pane`: an overlay\\n// open when this reply landed must not survive the body\\n// change under it.\", \"what\": \"The logic to set `self.keymap_open = false` is missing despite the accompanying comment, which will cause the associated test `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` to fail.\"}]}",
+ "thinking_chars": 5116,
+ "done_reason": "stop",
+ "prompt_tokens": 3375,
+ "eval_tokens": 1488,
+ "load_s": 0.0067072,
+ "prompt_s": 1.360669,
+ "eval_s": 37.866478,
+ "wall_s": 39.56387186050415,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "// Same as `Self::open_or_refresh_config_pane`: an overlay\n// open when this reply landed must not survive the body\n// change under it.",
+  "what": "The logic to set `self.keymap_open = false` is missing despite the accompanying comment, which will cause the associated test `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` to fail."
+ }
+}

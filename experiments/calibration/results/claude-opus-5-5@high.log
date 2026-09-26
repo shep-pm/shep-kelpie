@@ -1,0 +1,63 @@
+calibrate: 61 cases to run for claude-opus-5-5@high
+t03 8s holds (label holds)
+t01 9s holds (label holds)
+t02 11s holds (label holds)
+t04 8s holds (label holds)
+t06 6s holds (label holds)
+t05 9s holds (label holds)
+t07 6s holds (label holds)
+t08 6s holds (label holds)
+t09 9s holds (label holds)
+t12 6s holds (label holds)
+t11 11s holds (label holds)
+t10 13s unsure (label holds)
+t13 7s holds (label holds)
+t14 7s holds (label holds)
+t15 8s holds (label holds)
+t16 6s holds (label holds)
+t18 5s holds (label holds)
+t17 13s holds (label holds)
+t20 8s holds (label holds)
+t19 14s fails (label holds)
+f02 6s fails (label fails)
+f01 13s fails (label fails)
+f03 7s fails (label fails)
+f04 8s fails (label fails)
+s01 4s fails (label fails)
+f06 8s holds (label fails)
+f05 10s fails (label fails)
+s03 4s fails (label fails)
+s02 5s fails (label fails)
+s04 4s fails (label fails)
+s05 5s fails (label fails)
+s07 5s fails (label fails)
+s08 5s fails (label fails)
+s09 4s fails (label fails)
+s06 11s fails (label fails)
+r02 7s caught=True false_alarms=0
+r01 8s caught=True false_alarms=0
+r03 9s caught=True false_alarms=1
+r05 7s caught=True false_alarms=0
+r04 8s caught=True false_alarms=0
+r06 9s caught=True false_alarms=0
+r07 6s caught=True false_alarms=0
+r08 10s caught=False false_alarms=0 ERROR exit 1
+c02 5s clean, false_alarms=0
+r09 10s caught=True false_alarms=1
+c01 13s clean, false_alarms=0
+c03 7s clean, false_alarms=0
+c04 11s clean, false_alarms=0
+c06 9s clean, false_alarms=0 ERROR exit 1
+c05 16s clean, false_alarms=0
+h01 10s caught=True false_alarms=0
+h02 11s caught=True false_alarms=0
+h04 7s caught=True false_alarms=0
+h03 13s caught=True false_alarms=0
+h05 8s caught=True false_alarms=0
+c08 17s clean, false_alarms=0
+c10 10s clean, false_alarms=0
+c09 22s clean, false_alarms=0
+c11 5s clean, false_alarms=0
+c07 66s clean, false_alarms=0 ERROR exit 1
+c12 26s clean, false_alarms=0
+calibrate: finished claude-opus-5-5@high in 3.6 min

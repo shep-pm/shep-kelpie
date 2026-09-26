@@ -1,0 +1,24 @@
+{
+ "id": "t11",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Both `page_lines_back` (lines 245-258) and `tail_window_start` (lines 172-184) perform the identical backward budget walk\u2014same loop structure, same `cost(i-1)` accumulation, same 'always keep at least one line' guard\u2014differing only in returning a count vs. a stopping index. The doc at lines 169-171 explicitly warns that 'two copies of this walk would have to be kept in step by hand,' confirming the duplication the finding identifies is a real maintenance hazard acknowledged by the code's own documentation."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Both `page_lines_back` (lines 245-258) and `tail_window_start` (lines 172-184) perform the identical backward budget walk\u2014same loop structure, same `cost(i-1)` accumulation, same 'always keep at least one line' guard\u2014differing only in returning a count vs. a stopping index. The doc at lines 169-171 explicitly warns that 'two copies of this walk would have to be kept in step by hand,' confirming the duplication the finding identifies is a real maintenance hazard acknowledged by the code's own documentation.\"}",
+ "thinking_chars": 12373,
+ "done_reason": "stop",
+ "prompt_tokens": 2236,
+ "eval_tokens": 3586,
+ "load_s": 0.03176,
+ "prompt_s": 0.910706,
+ "eval_s": 35.702775,
+ "wall_s": 36.859710931777954,
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

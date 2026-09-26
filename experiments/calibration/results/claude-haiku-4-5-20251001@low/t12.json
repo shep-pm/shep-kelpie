@@ -1,0 +1,55 @@
+{
+ "id": "t12",
+ "set": "checker",
+ "model": "claude-haiku-4-5-20251001",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "ConfigPane (122\u2013137), Settings (138\u2013153), Bleats (154\u2013169), and Secrets (170\u2013185) all build identical Rects with `height: body_rows(area)`, call pane-specific draw functions, write the same `status_line`, and return. Sheep (83\u201399) has a different Rect but calls `status_line` and returns identically. The duplication is real and a helper closure would eliminate it."
+ },
+ "content": "```json\n{\"verdict\": \"holds\", \"reason\": \"ConfigPane (122\u2013137), Settings (138\u2013153), Bleats (154\u2013169), and Secrets (170\u2013185) all build identical Rects with `height: body_rows(area)`, call pane-specific draw functions, write the same `status_line`, and return. Sheep (83\u201399) has a different Rect but calls `status_line` and returns identically. The duplication is real and a helper closure would eliminate it.\"}\n```",
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 10723,
+  "cache_read_input_tokens": 17675,
+  "output_tokens": 1723,
+  "output_tokens_details": {
+   "thinking_tokens": 1599
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 10723,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 10,
+    "output_tokens": 1723,
+    "cache_read_input_tokens": 17675,
+    "cache_creation_input_tokens": 10723,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 10723
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0318385,
+ "duration_ms": 15689,
+ "wall_s": 17.58216404914856,
+ "weighted_units": 31838.5,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,31 @@
+{
+ "id": "s01",
+ "set": "checker",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Lines 101 and 103 both include \"y copy\" in the strings returned for both `Control::ReadOnly` and `Control::Allowed`, so the hint does not omit it."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Lines 101 and 103 both include \\\"y copy\\\" in the strings returned for both `Control::ReadOnly` and `Control::Allowed`, so the hint does not omit it.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 741,
+ "eval_tokens": 54,
+ "load_s": 0.0015457,
+ "prompt_s": 0.318042,
+ "eval_s": 1.150246,
+ "wall_s": 1.6018640995025635,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

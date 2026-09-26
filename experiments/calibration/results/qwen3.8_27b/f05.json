@@ -1,0 +1,24 @@
+{
+ "id": "f05",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The comment at lines 131-133 explicitly states the design is intentional: \"Listed rather than a wildcard, so a new `KeyPress` variant cannot fall silently into an arm that ignores it.\" Rust's exhaustive-match requirement means a new variant is a compile error in every non-wildcard match, so the \"silent fall-through\" the finding fears cannot actually occur; the suggested `is_ignored_in_pane()` predicate would *reduce* compile-time safety. Additionally, the two files' ignore sets are not identical (e.g., `Continue` is handled at dialog_keys.rs:15 but ignored at secrets_keys.rs:162; the dialog lists SelectUp/Down/First/Last, Refresh, Confirm, Help, etc. that the secrets pane does not), so there is no single \"shared ignore set\" to macro out."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The comment at lines 131-133 explicitly states the design is intentional: \\\"Listed rather than a wildcard, so a new `KeyPress` variant cannot fall silently into an arm that ignores it.\\\" Rust's exhaustive-match requirement means a new variant is a compile error in every non-wildcard match, so the \\\"silent fall-through\\\" the finding fears cannot actually occur; the suggested `is_ignored_in_pane()` predicate would *reduce* compile-time safety. Additionally, the two files' ignore sets are not identical (e.g., `Continue` is handled at dialog_keys.rs:15 but ignored at secrets_keys.rs:162; the dialog lists SelectUp/Down/First/Last, Refresh, Confirm, Help, etc. that the secrets pane does not), so there is no single \\\"shared ignore set\\\" to macro out.\"}",
+ "thinking_chars": 8242,
+ "done_reason": "stop",
+ "prompt_tokens": 2351,
+ "eval_tokens": 2525,
+ "load_s": 0.0048154,
+ "prompt_s": 0.959302,
+ "eval_s": 24.740468,
+ "wall_s": 25.93940806388855,
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

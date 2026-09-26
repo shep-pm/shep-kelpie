@@ -1,0 +1,55 @@
+{
+ "id": "t06",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Line 143 takes `text: String` but line 145 only borrows it via `fit(&text, width)`, so the `.to_owned()` calls at lines 276 and 311 allocate a String that is dropped straight after. A `&str` parameter would still work for the owned callers at 270 and 287-290, which could pass `&sentence` and `&format!(...)`, so the fix is valid."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Line 143 takes `text: String` but line 145 only borrows it via `fit(&text, width)`, so the `.to_owned()` calls at lines 276 and 311 allocate a String that is dropped straight after. A `&str` parameter would still work for the owned callers at 270 and 287-290, which could pass `&sentence` and `&format!(...)`, so the fix is valid.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21493,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 266,
+  "output_tokens_details": {
+   "thinking_tokens": 123
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21493,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 266,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 21493,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21493
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1796298,
+ "duration_ms": 3636,
+ "wall_s": 5.519178867340088,
+ "weighted_units": 45496.9,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

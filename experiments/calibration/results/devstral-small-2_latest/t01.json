@@ -1,0 +1,31 @@
+{
+ "id": "t01",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The finding is correct: the identical check `pane.visible_row_indices().contains(&pane.selected)` appears at both delete_secret.rs:17 and reveal_secret.rs:47, and refactoring into a shared method or helper would improve maintainability."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The finding is correct: the identical check `pane.visible_row_indices().contains(&pane.selected)` appears at both delete_secret.rs:17 and reveal_secret.rs:47, and refactoring into a shared method or helper would improve maintainability.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2528,
+ "eval_tokens": 66,
+ "load_s": 11.7453779,
+ "prompt_s": 0.690426,
+ "eval_s": 1.145402,
+ "wall_s": 13.613516807556152,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

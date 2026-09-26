@@ -1,0 +1,31 @@
+{
+ "id": "t01",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Both functions contain the identical visibility check:\n- delete_secret.rs: line\u202f17 `if !pane.visible_row_indices().contains(&pane.selected)`\n- reveal_secret.rs: line\u202f47 `if !pane.visible_row_indices().contains(&pane.selected)`"
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"Both functions contain the identical visibility check:\\n- delete_secret.rs: line\u202f17 `if !pane.visible_row_indices().contains(&pane.selected)`\\n- reveal_secret.rs: line\u202f47 `if !pane.visible_row_indices().contains(&pane.selected)`\"}",
+ "thinking_chars": 1074,
+ "done_reason": "stop",
+ "prompt_tokens": 1877,
+ "eval_tokens": 310,
+ "load_s": 10.1725664,
+ "prompt_s": 4.824541,
+ "eval_s": 1.727668,
+ "wall_s": 16.77750873565674,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,55 @@
+{
+ "id": "t19",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The blocks at 189-198 and 234-243 are textually identical, but the proposed `config_pane_direct(&mut self)` borrows all of `self`, exactly like `config_pane_mut`, which the comments at 186-188 and 231-233 say is avoided so `self.mode` stays reachable. In `on_list_text_key` that would not compile, because `self.mode = InputMode::Normal` (line 208) is assigned while `pane` is still used at line 211. Only a helper that takes `&mut Body` would work, so the suggested fix and the HIGH severity don't hold."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The blocks at 189-198 and 234-243 are textually identical, but the proposed `config_pane_direct(&mut self)` borrows all of `self`, exactly like `config_pane_mut`, which the comments at 186-188 and 231-233 say is avoided so `self.mode` stays reachable. In `on_list_text_key` that would not compile, because `self.mode = InputMode::Normal` (line 208) is assigned while `pane` is still used at line 211. Only a helper that takes `&mut Body` would work, so the suggested fix and the HIGH severity don't hold.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20646,
+  "cache_read_input_tokens": 11892,
+  "output_tokens": 2071,
+  "output_tokens_details": {
+   "thinking_tokens": 1862
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20646,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2071,
+    "cache_read_input_tokens": 11892,
+    "cache_creation_input_tokens": 20646,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20646
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1056764,
+ "duration_ms": 30585,
+ "wall_s": 32.53004479408264,
+ "weighted_units": 52838.2,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": false
+}

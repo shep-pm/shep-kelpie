@@ -1,0 +1,55 @@
+{
+ "id": "t05",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 93-105 build `String`s from two fixed literals with no interpolation, while the parallel `pane_hint` (131) and `sheep_pane_hint` (156) are `const fn` returning `&'static str`, so `secrets_hint` could match them and drop the needless allocation. One side claim is overstated: `String` already implements `PartialEq<&str>`, so comparing results would not need an extra allocation."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 93-105 build `String`s from two fixed literals with no interpolation, while the parallel `pane_hint` (131) and `sheep_pane_hint` (156) are `const fn` returning `&'static str`, so `secrets_hint` could match them and drop the needless allocation. One side claim is overstated: `String` already implements `PartialEq<&str>`, so comparing results would not need an extra allocation.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22238,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 474,
+  "output_tokens_details": {
+   "thinking_tokens": 320
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22238,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 474,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 22238,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22238
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1897498,
+ "duration_ms": 6087,
+ "wall_s": 9.356505155563354,
+ "weighted_units": 48026.9,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

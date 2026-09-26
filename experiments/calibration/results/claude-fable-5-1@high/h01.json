@@ -1,0 +1,20 @@
+{
+ "id": "h01",
+ "set": "reviewer",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "high",
+ "error": "exit 1",
+ "parsed": null,
+ "content": "",
+ "usage": {},
+ "total_cost_usd": null,
+ "duration_ms": null,
+ "wall_s": 6.7905237674713135,
+ "weighted_units": 0.0,
+ "stop_reason": null,
+ "kind": "bug",
+ "caught": false,
+ "false_alarms": 0,
+ "matched": null
+}

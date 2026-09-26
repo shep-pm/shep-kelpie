@@ -1,0 +1,31 @@
+{
+ "id": "t06",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The function `close_dialog_option_line` takes a `String` parameter (line 143) but only borrows it via `fit(&text, width)` (line 145). The call sites at lines 276 and 311 unnecessarily allocate owned `String`s using `.to_owned()` on `&'static str` literals, which are immediately borrowed and dropped. Changing the parameter to `&str` would eliminate these allocations."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The function `close_dialog_option_line` takes a `String` parameter (line 143) but only borrows it via `fit(&text, width)` (line 145). The call sites at lines 276 and 311 unnecessarily allocate owned `String`s using `.to_owned()` on `&'static str` literals, which are immediately borrowed and dropped. Changing the parameter to `&str` would eliminate these allocations.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2037,
+ "eval_tokens": 111,
+ "load_s": 0.0039913,
+ "prompt_s": 0.363182,
+ "eval_s": 1.918065,
+ "wall_s": 2.3614511489868164,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

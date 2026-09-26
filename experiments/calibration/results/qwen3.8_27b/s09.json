@@ -1,0 +1,24 @@
+{
+ "id": "s09",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Both title_line (line 29) and title_band_line (line 75) label PaneTarget::Dog as \"dog config\"; the finding's claim that title_band_line says \"sheep config\" for a Dog target is a misread of the code."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Both title_line (line 29) and title_band_line (line 75) label PaneTarget::Dog as \\\"dog config\\\"; the finding's claim that title_band_line says \\\"sheep config\\\" for a Dog target is a misread of the code.\"}",
+ "thinking_chars": 828,
+ "done_reason": "stop",
+ "prompt_tokens": 1436,
+ "eval_tokens": 325,
+ "load_s": 0.0039635,
+ "prompt_s": 0.624056,
+ "eval_s": 2.973554,
+ "wall_s": 3.780179023742676,
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

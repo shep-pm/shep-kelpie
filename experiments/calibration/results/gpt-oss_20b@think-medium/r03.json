@@ -1,0 +1,40 @@
+{
+ "id": "r03",
+ "set": "reviewer",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "if footer.is_none() {\n        body_budget -= 1;\n    }",
+    "what": "Subtracts from the row budget when the footer is absent, which incorrectly reduces available space for rows and can cause the cursor\u2019s own row to be omitted. The intended logic is to reserve a line only when a footer is present."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"if footer.is_none() {\\n        body_budget -= 1;\\n    }\",\"what\":\"Subtracts from the row budget when the footer is absent, which incorrectly reduces available space for rows and can cause the cursor\u2019s own row to be omitted. The intended logic is to reserve a line only when a footer is present.\"}]}",
+ "thinking_chars": 14635,
+ "done_reason": "stop",
+ "prompt_tokens": 1908,
+ "eval_tokens": 3325,
+ "load_s": 0.0031683,
+ "prompt_s": 0.149581,
+ "eval_s": 18.680024,
+ "wall_s": 18.96544909477234,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "if footer.is_none() {\n        body_budget -= 1;\n    }",
+  "what": "Subtracts from the row budget when the footer is absent, which incorrectly reduces available space for rows and can cause the cursor\u2019s own row to be omitted. The intended logic is to reserve a line only when a footer is present."
+ }
+}

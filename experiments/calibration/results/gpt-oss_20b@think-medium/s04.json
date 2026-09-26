@@ -1,0 +1,31 @@
+{
+ "id": "s04",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Both visible_rows and rows lower\u2011case the filter: lines 45\u201349 and 236\u2013241 both use `needle = self.filter.to_lowercase()` and compare `row.info.name.to_lowercase().contains(&needle)`."
+ },
+ "content": "{\"verdict\":\"fails\",\"reason\":\"Both visible_rows and rows lower\u2011case the filter: lines 45\u201349 and 236\u2013241 both use `needle = self.filter.to_lowercase()` and compare `row.info.name.to_lowercase().contains(&needle)`.\"}",
+ "thinking_chars": 2991,
+ "done_reason": "stop",
+ "prompt_tokens": 1154,
+ "eval_tokens": 761,
+ "load_s": 0.0017273,
+ "prompt_s": 0.083634,
+ "eval_s": 4.212659,
+ "wall_s": 4.344727993011475,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

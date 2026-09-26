@@ -1,0 +1,55 @@
+{
+ "id": "s02",
+ "set": "checker",
+ "model": "claude-haiku-4-5-20251001",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Line 225 shows `Err(RequestError::Closed) => Ok(())`, not `Err(UiGone)`. The code treats `RequestError::Closed` identically to other errors (line 226), both returning `Ok(())`. The only `Err(UiGone)` is returned on line 224 when message send fails in the Ok case."
+ },
+ "content": "```json\n{\"verdict\": \"fails\", \"reason\": \"Line 225 shows `Err(RequestError::Closed) => Ok(())`, not `Err(UiGone)`. The code treats `RequestError::Closed` identically to other errors (line 226), both returning `Ok(())`. The only `Err(UiGone)` is returned on line 224 when message send fails in the Ok case.\"}\n```",
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 9515,
+  "cache_read_input_tokens": 17675,
+  "output_tokens": 1020,
+  "output_tokens_details": {
+   "thinking_tokens": 912
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 9515,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 10,
+    "output_tokens": 1020,
+    "cache_read_input_tokens": 17675,
+    "cache_creation_input_tokens": 9515,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 9515
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0259075,
+ "duration_ms": 9657,
+ "wall_s": 11.436681985855103,
+ "weighted_units": 25907.5,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

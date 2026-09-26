@@ -1,0 +1,55 @@
+{
+ "id": "t15",
+ "set": "checker",
+ "model": "claude-haiku-4-5-20251001",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 86 and 99 are byte-identical format calls (`match  {buffer}...`), lines 108 and 132 are byte-identical format calls with `{label}`, and line 122 follows the same pattern with an \"editing\" prefix. These five format! calls across different branches all produce the same sentence structure and could be unified into a helper function."
+ },
+ "content": "```json\n{\"verdict\": \"holds\", \"reason\": \"Lines 86 and 99 are byte-identical format calls (`match  {buffer}...`), lines 108 and 132 are byte-identical format calls with `{label}`, and line 122 follows the same pattern with an \\\"editing\\\" prefix. These five format! calls across different branches all produce the same sentence structure and could be unified into a helper function.\"}\n```",
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 10607,
+  "cache_read_input_tokens": 17675,
+  "output_tokens": 3355,
+  "output_tokens_details": {
+   "thinking_tokens": 3252
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 10607,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 10,
+    "output_tokens": 3355,
+    "cache_read_input_tokens": 17675,
+    "cache_creation_input_tokens": 10607,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 10607
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.039766499999999996,
+ "duration_ms": 30559,
+ "wall_s": 32.10309600830078,
+ "weighted_units": 39766.5,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

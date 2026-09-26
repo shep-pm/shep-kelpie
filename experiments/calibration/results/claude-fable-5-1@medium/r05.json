@@ -1,0 +1,64 @@
+{
+ "id": "r05",
+ "set": "reviewer",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "    (stages + slack).min(START_DEADLINE)",
+    "what": "The original used `.max(START_DEADLINE)` so the budget is never under the flat deadline; `.min` inverts this, capping every staged start at START_DEADLINE and discarding the summed per-app budget the function exists to provide."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"    (stages + slack).min(START_DEADLINE)\", \"what\": \"The original used `.max(START_DEADLINE)` so the budget is never under the flat deadline; `.min` inverts this, capping every staged start at START_DEADLINE and discarding the summed per-app budget the function exists to provide.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 23739,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 350,
+  "output_tokens_details": {
+   "thinking_tokens": 226
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23739,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 350,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 23739,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 23739
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.495712,
+ "duration_ms": 6654,
+ "wall_s": 8.490546941757202,
+ "weighted_units": 50594.8,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "    (stages + slack).min(START_DEADLINE)",
+  "what": "The original used `.max(START_DEADLINE)` so the budget is never under the flat deadline; `.min` inverts this, capping every staged start at START_DEADLINE and discarding the summed per-app budget the function exists to provide."
+ }
+}

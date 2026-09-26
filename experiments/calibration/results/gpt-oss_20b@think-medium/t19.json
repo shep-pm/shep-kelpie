@@ -1,0 +1,31 @@
+{
+ "id": "t19",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The match on `&mut self.body` appears verbatim in both blocks (lines\u202f189\u2011196 and lines\u202f234\u2011241) with the same comment and pattern, making the duplication real."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"The match on `&mut self.body` appears verbatim in both blocks (lines\u202f189\u2011196 and lines\u202f234\u2011241) with the same comment and pattern, making the duplication real.\"}",
+ "thinking_chars": 1267,
+ "done_reason": "stop",
+ "prompt_tokens": 1301,
+ "eval_tokens": 350,
+ "load_s": 0.0042277,
+ "prompt_s": 0.116086,
+ "eval_s": 1.935064,
+ "wall_s": 2.109391212463379,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,63 @@
+calibrate: 61 cases to run for claude-fable-5-1@high
+t03 7s holds (label holds)
+t01 8s holds (label holds)
+t02 10s holds (label holds)
+t06 5s holds (label holds)
+t04 10s holds (label holds)
+t05 10s holds (label holds)
+t07 5s holds (label holds)
+t08 5s holds (label holds)
+t09 10s holds (label holds)
+t10 13s holds (label holds)
+t12 10s holds (label holds)
+t13 5s holds (label holds)
+t11 17s holds (label holds)
+t14 7s holds (label holds)
+t15 8s None (label holds)
+t16 7s holds (label holds)
+t17 12s holds (label holds)
+t18 12s holds (label holds)
+t19 14s fails (label holds)
+t20 10s holds (label holds)
+f02 9s fails (label fails)
+f01 22s fails (label fails)
+f03 14s fails (label fails)
+f04 14s fails (label fails)
+s01 5s fails (label fails)
+f06 12s holds (label fails)
+s02 6s fails (label fails)
+f05 16s fails (label fails)
+s04 5s fails (label fails)
+s03 6s fails (label fails)
+s05 4s fails (label fails)
+s06 7s fails (label fails)
+s07 6s fails (label fails)
+s08 7s fails (label fails)
+s09 4s fails (label fails)
+r02 4s caught=True false_alarms=0
+r01 11s caught=True false_alarms=0
+r03 12s caught=True false_alarms=0
+r04 12s caught=True false_alarms=0
+r06 5s caught=False false_alarms=0 ERROR exit 1
+r07 5s caught=False false_alarms=0 ERROR exit 1
+r05 15s caught=True false_alarms=0
+r08 6s caught=False false_alarms=0 ERROR exit 1
+r09 7s caught=False false_alarms=0 ERROR exit 1
+c01 7s clean, false_alarms=0 ERROR exit 1
+c02 6s clean, false_alarms=0 ERROR exit 1
+c03 6s clean, false_alarms=0 ERROR exit 1
+c04 7s clean, false_alarms=0 ERROR exit 1
+c05 7s clean, false_alarms=0 ERROR exit 1
+c06 7s clean, false_alarms=0 ERROR exit 1
+c07 7s clean, false_alarms=0 ERROR exit 1
+h01 7s caught=False false_alarms=0 ERROR exit 1
+h02 6s caught=False false_alarms=0 ERROR exit 1
+h03 7s caught=False false_alarms=0 ERROR exit 1
+h04 7s caught=False false_alarms=0 ERROR exit 1
+h05 7s caught=False false_alarms=0 ERROR exit 1
+c08 6s clean, false_alarms=0 ERROR exit 1
+c09 6s clean, false_alarms=0 ERROR exit 1
+c10 5s clean, false_alarms=0 ERROR exit 1
+c11 5s clean, false_alarms=0 ERROR exit 1
+c12 5s clean, false_alarms=0 ERROR exit 1
+calibrate: finished claude-fable-5-1@high in 2.8 min

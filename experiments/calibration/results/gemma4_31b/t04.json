@@ -1,0 +1,31 @@
+{
+ "id": "t04",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The same match logic is repeated exactly on lines 283-286 and 288-291."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The same match logic is repeated exactly on lines 283-286 and 288-291.\"}",
+ "thinking_chars": 1240,
+ "done_reason": "stop",
+ "prompt_tokens": 836,
+ "eval_tokens": 423,
+ "load_s": 0.0015682,
+ "prompt_s": 0.41128,
+ "eval_s": 10.597865,
+ "wall_s": 11.41147494316101,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

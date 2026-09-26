@@ -1,0 +1,55 @@
+{
+ "id": "s09",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Line 75 maps `PaneTarget::Dog { .. }` to \"dog config\" in title_band_line, which matches title_line at line 29. The Dog arm does not say \"sheep config\"."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Line 75 maps `PaneTarget::Dog { .. }` to \\\"dog config\\\" in title_band_line, which matches title_line at line 29. The Dog arm does not say \\\"sheep config\\\".\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21487,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 85,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21487,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 85,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 21487,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21487
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1759618,
+ "duration_ms": 2250,
+ "wall_s": 4.75719690322876,
+ "weighted_units": 44579.9,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

@@ -1,0 +1,55 @@
+{
+ "id": "t14",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 27-30 and 73-76 contain the identical match on pane.target() mapping Sheep to \"sheep config\" and Dog to \"dog config\", so the duplication is real as described. Calling it HIGH severity overstates a four-line duplication, but the problem itself exists."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 27-30 and 73-76 contain the identical match on pane.target() mapping Sheep to \\\"sheep config\\\" and Dog to \\\"dog config\\\", so the duplication is real as described. Calling it HIGH severity overstates a four-line duplication, but the problem itself exists.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21485,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 112,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21485,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 112,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 21485,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21485
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1764858,
+ "duration_ms": 2516,
+ "wall_s": 4.8961851596832275,
+ "weighted_units": 44710.9,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

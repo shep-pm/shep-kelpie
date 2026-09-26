@@ -1,0 +1,55 @@
+{
+ "id": "s06",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The let-else at lines 170-172 already returns `empty_lines` when `app.selected_row()` is `None`, so `log_row` at line 176 only runs after that check. `app` is an immutable `&App` with no intervening mutation, so the `expect` at line 337 cannot see a `None` the guard didn't."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The let-else at lines 170-172 already returns `empty_lines` when `app.selected_row()` is `None`, so `log_row` at line 176 only runs after that check. `app` is an immutable `&App` with no intervening mutation, so the `expect` at line 337 cannot see a `None` the guard didn't.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20408,
+  "cache_read_input_tokens": 11892,
+  "output_tokens": 284,
+  "output_tokens_details": {
+   "thinking_tokens": 164
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20408,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 284,
+    "cache_read_input_tokens": 11892,
+    "cache_creation_input_tokens": 20408,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20408
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0868544,
+ "duration_ms": 22243,
+ "wall_s": 24.115750074386597,
+ "weighted_units": 43427.2,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

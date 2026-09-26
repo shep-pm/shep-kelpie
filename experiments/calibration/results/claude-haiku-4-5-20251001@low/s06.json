@@ -1,0 +1,55 @@
+{
+ "id": "s06",
+ "set": "checker",
+ "model": "claude-haiku-4-5-20251001",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The check at line 170 (`let Some(row) = app.selected_row() else`) occurs before the `log_row` call at line 176. The code already has the structure the reviewer suggests, so the claim that `log_row` is called before the check has happened is factually incorrect."
+ },
+ "content": "```json\n{\"verdict\": \"fails\", \"reason\": \"The check at line 170 (`let Some(row) = app.selected_row() else`) occurs before the `log_row` call at line 176. The code already has the structure the reviewer suggests, so the claim that `log_row` is called before the check has happened is factually incorrect.\"}\n```",
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 9860,
+  "cache_read_input_tokens": 17675,
+  "output_tokens": 2975,
+  "output_tokens_details": {
+   "thinking_tokens": 2886
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 9860,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 10,
+    "output_tokens": 2975,
+    "cache_read_input_tokens": 17675,
+    "cache_creation_input_tokens": 9860,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 9860
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0363725,
+ "duration_ms": 31160,
+ "wall_s": 32.79494500160217,
+ "weighted_units": 36372.5,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

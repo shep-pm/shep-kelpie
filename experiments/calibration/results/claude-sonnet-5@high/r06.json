@@ -1,0 +1,69 @@
+{
+ "id": "r06",
+ "set": "reviewer",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "// Same as `Self::open_or_refresh_config_pane`: an overlay",
+    "what": "The `on_dog_section` arm gets only a comment and no `self.keymap_open = false;`, so the dog-pane reply still leaks the overlay and the new test `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` fails on its final assertion."
+   },
+   {
+    "severity": "risk",
+    "quote": "self.keymap_open = false;",
+    "what": "`open_or_refresh_config_pane` also runs when refreshing a pane that is already open, so a refresh reply arriving while the operator has the help overlay up over that pane now closes the overlay, which the commit does not intend."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"// Same as `Self::open_or_refresh_config_pane`: an overlay\",\"what\":\"The `on_dog_section` arm gets only a comment and no `self.keymap_open = false;`, so the dog-pane reply still leaks the overlay and the new test `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` fails on its final assertion.\"},{\"severity\":\"risk\",\"quote\":\"self.keymap_open = false;\",\"what\":\"`open_or_refresh_config_pane` also runs when refreshing a pane that is already open, so a refresh reply arriving while the operator has the help overlay up over that pane now closes the overlay, which the commit does not intend.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 23426,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 1023,
+  "output_tokens_details": {
+   "thinking_tokens": 775
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23426,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1023,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 23426,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 23426
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1063166,
+ "duration_ms": 77621,
+ "wall_s": 79.26049280166626,
+ "weighted_units": 53158.3,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "// Same as `Self::open_or_refresh_config_pane`: an overlay",
+  "what": "The `on_dog_section` arm gets only a comment and no `self.keymap_open = false;`, so the dog-pane reply still leaks the overlay and the new test `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` fails on its final assertion."
+ }
+}

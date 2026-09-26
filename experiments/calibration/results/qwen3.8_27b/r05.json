@@ -1,0 +1,33 @@
+{
+ "id": "r05",
+ "set": "reviewer",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "    (stages + slack).min(START_DEADLINE)",
+    "what": "The refactor changed `.max(START_DEADLINE)` to `.min(START_DEADLINE)`, inverting the guarantee from \"never under START_DEADLINE\" to \"never above START_DEADLINE\", so multi-app flocks whose summed timeouts exceed START_DEADLINE now get a shorter deadline than before instead of a longer one."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"    (stages + slack).min(START_DEADLINE)\", \"what\": \"The refactor changed `.max(START_DEADLINE)` to `.min(START_DEADLINE)`, inverting the guarantee from \\\"never under START_DEADLINE\\\" to \\\"never above START_DEADLINE\\\", so multi-app flocks whose summed timeouts exceed START_DEADLINE now get a shorter deadline than before instead of a longer one.\"}]}",
+ "thinking_chars": 3433,
+ "done_reason": "stop",
+ "prompt_tokens": 2587,
+ "eval_tokens": 1011,
+ "load_s": 0.0030457,
+ "prompt_s": 1.056695999,
+ "eval_s": 10.165988,
+ "wall_s": 11.417139053344727,
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "    (stages + slack).min(START_DEADLINE)",
+  "what": "The refactor changed `.max(START_DEADLINE)` to `.min(START_DEADLINE)`, inverting the guarantee from \"never under START_DEADLINE\" to \"never above START_DEADLINE\", so multi-app flocks whose summed timeouts exceed START_DEADLINE now get a shorter deadline than before instead of a longer one."
+ }
+}

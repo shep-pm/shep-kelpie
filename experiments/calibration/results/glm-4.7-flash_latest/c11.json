@@ -1,0 +1,36 @@
+{
+ "id": "c11",
+ "set": "reviewer",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "crate::version_guard::VersionGuard and crate::client::connect_or_spawn_client",
+    "what": "References modules 'version_guard' and 'client' in the crate root without their definitions being present in the diff (e.g., requiring 'pub mod version_guard;' and 'pub mod client;' in 'src/lib.rs'), which causes the code to fail to compile."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"crate::version_guard::VersionGuard and crate::client::connect_or_spawn_client\", \"what\": \"References modules 'version_guard' and 'client' in the crate root without their definitions being present in the diff (e.g., requiring 'pub mod version_guard;' and 'pub mod client;' in 'src/lib.rs'), which causes the code to fail to compile.\"}]}",
+ "thinking_chars": 27740,
+ "done_reason": "stop",
+ "prompt_tokens": 2169,
+ "eval_tokens": 6802,
+ "load_s": 0.0064736,
+ "prompt_s": 0.354188,
+ "eval_s": 47.235203,
+ "wall_s": 47.67569375038147,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 1,
+ "matched": null
+}

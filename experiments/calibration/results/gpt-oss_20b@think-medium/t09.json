@@ -1,0 +1,31 @@
+{
+ "id": "t09",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "In `sheep_lines` (line\u202f170) the code checks `app.selected_row()` and returns early if it is `None`. `log_row` is then called on line\u202f176, but it calls `app.selected_row()` again and uses `.expect(...)` (lines\u202f335\u2011338). Since the earlier check guarantees the row is `Some`, the `expect` will never panic under the current code, making it a redundant check that would only fire if the call order or the function\u2019s caller changed. Lines\u202f170\u2011176 and\u202f335\u2011338 confirm this."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"In `sheep_lines` (line\u202f170) the code checks `app.selected_row()` and returns early if it is `None`. `log_row` is then called on line\u202f176, but it calls `app.selected_row()` again and uses `.expect(...)` (lines\u202f335\u2011338). Since the earlier check guarantees the row is `Some`, the `expect` will never panic under the current code, making it a redundant check that would only fire if the call order or the function\u2019s caller changed. Lines\u202f170\u2011176 and\u202f335\u2011338 confirm this.\"}",
+ "thinking_chars": 1871,
+ "done_reason": "stop",
+ "prompt_tokens": 1177,
+ "eval_tokens": 530,
+ "load_s": 0.0047465,
+ "prompt_s": 1.218928,
+ "eval_s": 2.931428,
+ "wall_s": 4.1973960399627686,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

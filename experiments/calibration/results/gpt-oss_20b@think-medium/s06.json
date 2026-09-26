@@ -1,0 +1,31 @@
+{
+ "id": "s06",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The check for a selected row occurs before the call to `log_row`: lines 170\u2013177 perform `let Some(row) = app.selected_row() else { \u2026 }` and only then call `log_row(app, width)`. Inside `log_row` the `expect` (line\u202f337) will only panic if `app.selected_row()` is `None`, but this cannot happen because the earlier let\u2011else guarantees it is `Some`. Therefore the reviewer\u2019s claim is incorrect."
+ },
+ "content": "{\"verdict\":\"fails\",\"reason\":\"The check for a selected row occurs before the call to `log_row`: lines 170\u2013177 perform `let Some(row) = app.selected_row() else { \u2026 }` and only then call `log_row(app, width)`. Inside `log_row` the `expect` (line\u202f337) will only panic if `app.selected_row()` is `None`, but this cannot happen because the earlier let\u2011else guarantees it is `Some`. Therefore the reviewer\u2019s claim is incorrect.\"}",
+ "thinking_chars": 5232,
+ "done_reason": "stop",
+ "prompt_tokens": 1138,
+ "eval_tokens": 1291,
+ "load_s": 0.0017878,
+ "prompt_s": 0.083605,
+ "eval_s": 7.156228,
+ "wall_s": 7.3014819622039795,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

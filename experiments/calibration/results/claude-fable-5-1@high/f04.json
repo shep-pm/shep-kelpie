@@ -1,0 +1,55 @@
+{
+ "id": "f04",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The false arm is not redundant with label()/caption(): a new KeymapXyz variant would compile once label/caption arms are added, and a wildcard `_ => false` in is_keymap would then let it render without the overlay, which is exactly the hazard the doc comment at lines 620-622 names. The size() and control() wildcards (lines 467, 614) are documented deliberate defaults, not silent inheritance, so the finding's core claim of zero marginal safety and its proposed relaxation are wrong."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The false arm is not redundant with label()/caption(): a new KeymapXyz variant would compile once label/caption arms are added, and a wildcard `_ => false` in is_keymap would then let it render without the overlay, which is exactly the hazard the doc comment at lines 620-622 names. The size() and control() wildcards (lines 467, 614) are documented deliberate defaults, not silent inheritance, so the finding's core claim of zero marginal safety and its proposed relaxation are wrong.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 28476,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 611,
+  "output_tokens_details": {
+   "thinking_tokens": 431
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 28476,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 611,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 28476,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 28476
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.603502,
+ "duration_ms": 11944,
+ "wall_s": 13.685869932174683,
+ "weighted_units": 61373.8,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

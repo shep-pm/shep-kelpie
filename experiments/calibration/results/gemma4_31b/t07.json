@@ -1,0 +1,31 @@
+{
+ "id": "t07",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Both `crates/shep-cli/src/lookout/view/sheep/mod.rs:70-73` and `crates/shep-cli/src/lookout/view/sheep/column.rs:233-236` use the exact same method chain to extract and filter the pending count."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Both `crates/shep-cli/src/lookout/view/sheep/mod.rs:70-73` and `crates/shep-cli/src/lookout/view/sheep/column.rs:233-236` use the exact same method chain to extract and filter the pending count.\"}",
+ "thinking_chars": 2085,
+ "done_reason": "stop",
+ "prompt_tokens": 1162,
+ "eval_tokens": 732,
+ "load_s": 0.0021846,
+ "prompt_s": 0.583218,
+ "eval_s": 18.440353,
+ "wall_s": 19.582995891571045,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

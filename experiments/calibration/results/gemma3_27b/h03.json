@@ -1,0 +1,45 @@
+{
+ "id": "h03",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "indent_continuations(&clean)",
+    "what": "The `indent_continuations` function unconditionally indents all lines after the first, including empty lines. This can introduce unwanted trailing whitespace on empty lines when outputting to a table, breaking the prior guarantee that `writeln!` would not add blank lines."
+   },
+   {
+    "severity": "bug",
+    "quote": "if !line.is_empty() { out.push_str(\"  \"); }",
+    "what": "The indentation is applied even to empty lines within the message, leading to a visible indent for what should be paragraph breaks."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"indent_continuations(&clean)\", \"what\": \"The `indent_continuations` function unconditionally indents all lines after the first, including empty lines. This can introduce unwanted trailing whitespace on empty lines when outputting to a table, breaking the prior guarantee that `writeln!` would not add blank lines.\"}, {\"severity\": \"bug\", \"quote\": \"if !line.is_empty() { out.push_str(\\\"  \\\"); }\", \"what\": \"The indentation is applied even to empty lines within the message, leading to a visible indent for what should be paragraph breaks.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2166,
+ "eval_tokens": 137,
+ "load_s": 0.0061211,
+ "prompt_s": 0.770553,
+ "eval_s": 2.962885,
+ "wall_s": 3.9449212551116943,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 1,
+ "matched": {
+  "severity": "bug",
+  "quote": "indent_continuations(&clean)",
+  "what": "The `indent_continuations` function unconditionally indents all lines after the first, including empty lines. This can introduce unwanted trailing whitespace on empty lines when outputting to a table, breaking the prior guarantee that `writeln!` would not add blank lines."
+ }
+}

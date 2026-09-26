@@ -1,0 +1,33 @@
+{
+ "id": "r06",
+ "set": "reviewer",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "+                // Same as `Self::open_or_refresh_config_pane`: an overlay",
+    "what": "The comment documents the intended fix (`self.keymap_open = false;`) in the dog-section reply arm, but the assignment is never added, so the overlay still leaks and the new test `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` fails at runtime."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"+                // Same as `Self::open_or_refresh_config_pane`: an overlay\", \"what\": \"The comment documents the intended fix (`self.keymap_open = false;`) in the dog-section reply arm, but the assignment is never added, so the overlay still leaks and the new test `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` fails at runtime.\"}]}",
+ "thinking_chars": 5383,
+ "done_reason": "stop",
+ "prompt_tokens": 3115,
+ "eval_tokens": 1435,
+ "load_s": 0.0032996,
+ "prompt_s": 1.245899,
+ "eval_s": 15.249255,
+ "wall_s": 16.70319676399231,
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "+                // Same as `Self::open_or_refresh_config_pane`: an overlay",
+  "what": "The comment documents the intended fix (`self.keymap_open = false;`) in the dog-section reply arm, but the assignment is never added, so the overlay still leaks and the new test `a_dog_sections_reply_that_lands_with_the_overlay_up_closes_it` fails at runtime."
+ }
+}

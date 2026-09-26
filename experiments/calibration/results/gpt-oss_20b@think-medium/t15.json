@@ -1,0 +1,31 @@
+{
+ "id": "t15",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The branches at lines\u202f86,\u202f99,\u202f108,\u202f132 and 122 all produce the same edit\u2011bar format (only the prefix label differs). Lines\u202f86\u201399 and 108\u2013132 literally duplicate the same `format!` string, so the reviewer\u2019s claim is accurate."
+ },
+ "content": "{\"verdict\":\"holds\",\"reason\":\"The branches at lines\u202f86,\u202f99,\u202f108,\u202f132 and 122 all produce the same edit\u2011bar format (only the prefix label differs). Lines\u202f86\u201399 and 108\u2013132 literally duplicate the same `format!` string, so the reviewer\u2019s claim is accurate.\"}",
+ "thinking_chars": 867,
+ "done_reason": "stop",
+ "prompt_tokens": 1847,
+ "eval_tokens": 296,
+ "load_s": 0.0051497,
+ "prompt_s": 0.139891,
+ "eval_s": 1.642363,
+ "wall_s": 1.8465948104858398,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

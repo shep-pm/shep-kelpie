@@ -1,0 +1,31 @@
+{
+ "id": "t01",
+ "set": "checker",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 17 in `delete_secret.rs` and 47 in `reveal_secret.rs` both contain the same check `pane.visible_row_indices().contains(&pane.selected)`, which verifies that the selected row is within the currently visible rows. The reviewer correctly identifies this as redundant and suggests encapsulating it in a shared helper or method to avoid repetition."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 17 in `delete_secret.rs` and 47 in `reveal_secret.rs` both contain the same check `pane.visible_row_indices().contains(&pane.selected)`, which verifies that the selected row is within the currently visible rows. The reviewer correctly identifies this as redundant and suggests encapsulating it in a shared helper or method to avoid repetition.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2036,
+ "eval_tokens": 92,
+ "load_s": 8.3486568,
+ "prompt_s": 8.736177,
+ "eval_s": 2.106327,
+ "wall_s": 19.21750521659851,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

@@ -1,0 +1,55 @@
+{
+ "id": "t20",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The comment at lines 28-30 says the direct match is deliberate so `self.now` stays reachable; `settings_mut()` borrows all of `&mut self`, so `self.now` at line 49 could not be read while `settings` is live. The suggested `let now = self.now;` hoist would compile, but the finding calls the code a bug (HIGH) when it is a documented style choice, and a duplication of a small accessor pattern is not a correctness problem."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The comment at lines 28-30 says the direct match is deliberate so `self.now` stays reachable; `settings_mut()` borrows all of `&mut self`, so `self.now` at line 49 could not be read while `settings` is live. The suggested `let now = self.now;` hoist would compile, but the finding calls the code a bug (HIGH) when it is a documented style choice, and a duplication of a small accessor pattern is not a correctness problem.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21020,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 164,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21020,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 164,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 21020,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21020
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0881026,
+ "duration_ms": 21671,
+ "wall_s": 25.398685932159424,
+ "weighted_units": 44051.3,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": false
+}

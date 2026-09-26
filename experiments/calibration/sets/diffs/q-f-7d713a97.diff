@@ -1,0 +1,43 @@
+diff --git a/crates/shep-cli/src/lookout/view/bleats_full.rs b/crates/shep-cli/src/lookout/view/bleats_full.rs
+index 9f59e0a5..e19699b8 100644
+--- a/crates/shep-cli/src/lookout/view/bleats_full.rs
++++ b/crates/shep-cli/src/lookout/view/bleats_full.rs
+@@ -234,37 +234,25 @@ pub(crate) fn max_scroll_offset(app: &App, pane: &BleatsPane) -> usize {
+     // oldest frame, so that index is the ceiling.
+     tail_window_start(survivors.len(), body_rows, cost)
+ }
+ 
+ /// Lines one backward page covers: what fits ending at `start`.
+ ///
+ /// Pure, and separated from [`page_amount_up`] so the invariant that matters
+ /// can be tested directly over cost profiles rather than hunted for through a
+ /// fixture. A feed of uniform heights cannot expose a direction-mismatched
+ /// page size at all, because a backward count and a window's own length agree
+ /// there, which is how the `ctrl-d` gap survived its first fix.
+ fn page_lines_back(start: usize, body_rows: usize, cost: impl Fn(usize) -> usize) -> usize {
+-    let mut used = 0usize;
+-    let mut count = 0usize;
+-    let mut at = start;
+-    while at > 0 {
+-        let row = cost(at - 1);
+-        if count > 0 && used + row > body_rows {
+-            break;
+-        }
+-        at -= 1;
+-        used += row;
+-        count += 1;
+-    }
+-    count.max(1)
++    (start - tail_window_start(start, body_rows, cost)).max(1)
+ }
+ 
+ /// Lines one forward page covers: the lines the window is showing.
+ ///
+ /// Pure and named, mirroring [`page_lines_back`], so the property test can
+ /// call the same code the key does. Its first version re-implemented this
+ /// expression inline, which pinned the arithmetic and left the wiring free:
+ /// `page_amount_down` could return a constant and every test still passed.
+ fn page_lines_forward(shown: &std::ops::Range<usize>) -> usize {
+     shown.len().max(1)
+ }
+ 

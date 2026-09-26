@@ -1,0 +1,31 @@
+{
+ "id": "f01",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "The use of `.expect()` at line 281 in `action.rs` will cause a panic if the `RowKey::Sheep(id)` used as the `key` is no longer present in the `flock` map, which can occur if the flock is mutated without calling `reseat()` to update the selection."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"The use of `.expect()` at line 281 in `action.rs` will cause a panic if the `RowKey::Sheep(id)` used as the `key` is no longer present in the `flock` map, which can occur if the flock is mutated without calling `reseat()` to update the selection.\"}",
+ "thinking_chars": 8200,
+ "done_reason": "stop",
+ "prompt_tokens": 2408,
+ "eval_tokens": 2271,
+ "load_s": 0.0045222,
+ "prompt_s": 0.99788,
+ "eval_s": 57.577114,
+ "wall_s": 58.96752691268921,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": false
+}

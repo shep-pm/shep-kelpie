@@ -1,0 +1,55 @@
+{
+ "id": "t05",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "low",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "Lines 93-105 return String built from two plain literals with .to_string() and no interpolation, while the sibling functions at lines 131 and 156 are const fn returning &'static str. Converting secrets_hint the same way would work; the cost is small, but the inconsistency is real."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 93-105 return String built from two plain literals with .to_string() and no interpolation, while the sibling functions at lines 131 and 156 are const fn returning &'static str. Converting secrets_hint the same way would work; the cost is small, but the inconsistency is real.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22238,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 107,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22238,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 107,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 22238,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22238
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1824098,
+ "duration_ms": 2516,
+ "wall_s": 6.004786968231201,
+ "weighted_units": 46191.9,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

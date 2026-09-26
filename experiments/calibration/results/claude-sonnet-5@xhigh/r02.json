@@ -1,0 +1,64 @@
+{
+ "id": "r02",
+ "set": "reviewer",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let (code, message) = safe_parts(fmt, message, code);",
+    "what": "emit_notice passes `message` and `code` to safe_parts in swapped order, so the notice's code field carries the sanitised message and its message field carries the code, and the code is shaped by safe_message instead of sanitise."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"let (code, message) = safe_parts(fmt, message, code);\", \"what\": \"emit_notice passes `message` and `code` to safe_parts in swapped order, so the notice's code field carries the sanitised message and its message field carries the code, and the code is shaped by safe_message instead of sanitise.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20811,
+  "cache_read_input_tokens": 11892,
+  "output_tokens": 326,
+  "output_tokens_details": {
+   "thinking_tokens": 205
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20811,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 326,
+    "cache_read_input_tokens": 11892,
+    "cache_creation_input_tokens": 20811,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20811
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0888864,
+ "duration_ms": 8651,
+ "wall_s": 10.750205039978027,
+ "weighted_units": 44443.2,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "let (code, message) = safe_parts(fmt, message, code);",
+  "what": "emit_notice passes `message` and `code` to safe_parts in swapped order, so the notice's code field carries the sanitised message and its message field carries the code, and the code is shaped by safe_message instead of sanitise."
+ }
+}

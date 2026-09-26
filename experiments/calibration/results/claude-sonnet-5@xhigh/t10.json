@@ -1,0 +1,55 @@
+{
+ "id": "t10",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The `_ => {}` at line 444 catches only variants the text keymap never produces, since `on_pane_text_key` runs under its own text keymap (doc at lines 403-404). Its real inputs are `Quit` (line 413) and the `TextChar`, `TextBackspace`, `TextApply` and `TextAbandon` arms (lines 429-443). The sibling's exhaustive list at lines 265-293 exists so a newly bound normal-mode variant gets an explicit decision. A new variant would not reach this handler unless the text keymap emitted it. The quoted principle also does not appear in the lines shown, and line 244 already uses `_ => unreachable!()`."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The `_ => {}` at line 444 catches only variants the text keymap never produces, since `on_pane_text_key` runs under its own text keymap (doc at lines 403-404). Its real inputs are `Quit` (line 413) and the `TextChar`, `TextBackspace`, `TextApply` and `TextAbandon` arms (lines 429-443). The sibling's exhaustive list at lines 265-293 exists so a newly bound normal-mode variant gets an explicit decision. A new variant would not reach this handler unless the text keymap emitted it. The quoted principle also does not appear in the lines shown, and line 244 already uses `_ => unreachable!()`.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21518,
+  "cache_read_input_tokens": 11892,
+  "output_tokens": 1683,
+  "output_tokens_details": {
+   "thinking_tokens": 1443
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21518,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1683,
+    "cache_read_input_tokens": 11892,
+    "cache_creation_input_tokens": 21518,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21518
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1052844,
+ "duration_ms": 35788,
+ "wall_s": 39.031005859375,
+ "weighted_units": 52642.2,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": false
+}

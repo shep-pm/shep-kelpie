@@ -1,0 +1,40 @@
+{
+ "id": "r02",
+ "set": "reviewer",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let (code, message) = safe_parts(fmt, message, code);",
+    "what": "The arguments passed to safe_parts in emit_notice are swapped, causing the unpacked variables to hold (sanitized message, sanitized code). This results in the NoticeBody struct fields notice.code and notice.message, as well as the table output format string, receiving swapped values."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"let (code, message) = safe_parts(fmt, message, code);\", \"what\": \"The arguments passed to safe_parts in emit_notice are swapped, causing the unpacked variables to hold (sanitized message, sanitized code). This results in the NoticeBody struct fields notice.code and notice.message, as well as the table output format string, receiving swapped values.\"}]}",
+ "thinking_chars": 17071,
+ "done_reason": "stop",
+ "prompt_tokens": 1163,
+ "eval_tokens": 4506,
+ "load_s": 0.0033568,
+ "prompt_s": 0.19106,
+ "eval_s": 29.964194,
+ "wall_s": 30.240323066711426,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "let (code, message) = safe_parts(fmt, message, code);",
+  "what": "The arguments passed to safe_parts in emit_notice are swapped, causing the unpacked variables to hold (sanitized message, sanitized code). This results in the NoticeBody struct fields notice.code and notice.message, as well as the table output format string, receiving swapped values."
+ }
+}

@@ -1,0 +1,55 @@
+{
+ "id": "t11",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "`page_lines_back` (245-259) runs the same backward loop as `tail_window_start` (172-184), and its `count` is just `start - at`. The only difference is the guard: `count > 0` versus `used > 0`. Those agree whenever `row_height` is at least 1, and a drawn line takes at least one row, so the stated identity `(s - tail_window_start(s,b,c)).max(1)` holds, including `start == 0`. That is the drift hazard the doc at 168-171 warns about, though HIGH overstates the severity."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"`page_lines_back` (245-259) runs the same backward loop as `tail_window_start` (172-184), and its `count` is just `start - at`. The only difference is the guard: `count > 0` versus `used > 0`. Those agree whenever `row_height` is at least 1, and a drawn line takes at least one row, so the stated identity `(s - tail_window_start(s,b,c)).max(1)` holds, including `start == 0`. That is the drift hazard the doc at 168-171 warns about, though HIGH overstates the severity.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22345,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 551,
+  "output_tokens_details": {
+   "thinking_tokens": 357
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22345,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 551,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 22345,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22345
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1921458,
+ "duration_ms": 6907,
+ "wall_s": 9.156944274902344,
+ "weighted_units": 48625.9,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

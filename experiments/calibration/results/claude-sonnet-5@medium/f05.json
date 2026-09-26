@@ -1,0 +1,55 @@
+{
+ "id": "f05",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The comments at secrets_keys.rs:131-133 say the variants are listed on purpose, rather than through a wildcard, so a new `KeyPress` variant produces a compile error instead of falling silently into an ignore arm. The suggested predicate or macro would bring back the silent fall-through that the explicit lists (secrets_keys.rs:134-162, dialog_keys.rs:22-62) are meant to prevent. The per-pane lists are also not identical: the secrets pane ignores `Cycle`/`Edit`, and the dialog handles `Reload`/`Restart` specially."
+ },
+ "content": "{\"verdict\":\"fails\",\"reason\":\"The comments at secrets_keys.rs:131-133 say the variants are listed on purpose, rather than through a wildcard, so a new `KeyPress` variant produces a compile error instead of falling silently into an ignore arm. The suggested predicate or macro would bring back the silent fall-through that the explicit lists (secrets_keys.rs:134-162, dialog_keys.rs:22-62) are meant to prevent. The per-pane lists are also not identical: the secrets pane ignores `Cycle`/`Edit`, and the dialog handles `Reload`/`Restart` specially.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22022,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 211,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22022,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 211,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 22022,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22022
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0925806,
+ "duration_ms": 3783,
+ "wall_s": 5.9953837394714355,
+ "weighted_units": 46290.3,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

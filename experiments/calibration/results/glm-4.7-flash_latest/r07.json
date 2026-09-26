@@ -1,0 +1,40 @@
+{
+ "id": "r07",
+ "set": "reviewer",
+ "model": "glm-4.7-flash:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "+    let code = &crate::terminal_safe::sanitise(message).0;",
+    "what": "emit_notice incorrectly sanitizes message instead of code parameter"
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"+    let code = &crate::terminal_safe::sanitise(message).0;\", \"what\": \"emit_notice incorrectly sanitizes message instead of code parameter\"}]}",
+ "thinking_chars": 2268,
+ "done_reason": "stop",
+ "prompt_tokens": 1499,
+ "eval_tokens": 610,
+ "load_s": 0.0046967,
+ "prompt_s": 0.222157,
+ "eval_s": 3.947665,
+ "wall_s": 4.3167290687561035,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.949594274,
+  "vram_gb": 20.949594274,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "+    let code = &crate::terminal_safe::sanitise(message).0;",
+  "what": "emit_notice incorrectly sanitizes message instead of code parameter"
+ }
+}

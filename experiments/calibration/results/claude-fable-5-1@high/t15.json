@@ -1,0 +1,52 @@
+{
+ "id": "t15",
+ "set": "checker",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": null,
+ "content": "{\"verdict\": \"holds\", \"reason\": \"Lines 86 and 99 are byte-identical format! strings, lines 108 and 132 are identical with a `{label}` slot, and line 122 is the same `{buffer}\\u{258f}   enter applies   esc cancels` shape with an `editing {}` prefix, so the described duplication of the edit-bar sentence across five branches is real; only the filter-branch suffix claim (line 149+) is outside the shown code.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22105,
+  "cache_read_input_tokens": 13648,
+  "output_tokens": 408,
+  "output_tokens_details": {
+   "thinking_tokens": 252
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22105,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 408,
+    "cache_read_input_tokens": 13648,
+    "cache_creation_input_tokens": 22105,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22105
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.465932,
+ "duration_ms": 6525,
+ "wall_s": 8.25530195236206,
+ "weighted_units": 47616.8,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": null,
+ "correct": false
+}

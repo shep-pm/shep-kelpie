@@ -1,0 +1,40 @@
+{
+ "id": "h01",
+ "set": "reviewer",
+ "model": "gemma3:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "if n > 0 { out.push('\n'); if line.is_empty() { out.push_str(\"  \"); } }",
+    "what": "The code adds indentation to empty lines in the table format, which will result in trailing whitespace on what are visually blank lines."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"if n > 0 { out.push('\\n'); if line.is_empty() { out.push_str(\\\"  \\\"); } }\", \"what\": \"The code adds indentation to empty lines in the table format, which will result in trailing whitespace on what are visually blank lines.\"}]}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 2169,
+ "eval_tokens": 77,
+ "load_s": 0.0025451,
+ "prompt_s": 0.767827,
+ "eval_s": 1.658003,
+ "wall_s": 2.545428991317749,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.653521448,
+  "vram_gb": 17.653521448,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "if n > 0 { out.push('\n'); if line.is_empty() { out.push_str(\"  \"); } }",
+  "what": "The code adds indentation to empty lines in the table format, which will result in trailing whitespace on what are visually blank lines."
+ }
+}

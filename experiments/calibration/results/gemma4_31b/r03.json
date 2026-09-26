@@ -1,0 +1,40 @@
+{
+ "id": "r03",
+ "set": "reviewer",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "if footer.is_none() {\n        body_budget -= 1;\n    }",
+    "what": "The logic for reserving budget for the footer is inverted; it subtracts from the budget when the footer is absent and fails to do so when the footer is present, which contradicts the intended fix."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"if footer.is_none() {\\n        body_budget -= 1;\\n    }\", \"what\": \"The logic for reserving budget for the footer is inverted; it subtracts from the budget when the footer is absent and fails to do so when the footer is present, which contradicts the intended fix.\"}]}",
+ "thinking_chars": 6165,
+ "done_reason": "stop",
+ "prompt_tokens": 2140,
+ "eval_tokens": 1822,
+ "load_s": 0.0050109,
+ "prompt_s": 0.928738,
+ "eval_s": 46.052479,
+ "wall_s": 47.30849099159241,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "if footer.is_none() {\n        body_budget -= 1;\n    }",
+  "what": "The logic for reserving budget for the footer is inverted; it subtracts from the budget when the footer is absent and fails to do so when the footer is present, which contradicts the intended fix."
+ }
+}

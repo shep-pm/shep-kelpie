@@ -1,0 +1,24 @@
+{
+ "id": "s04",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Line 237 in `rows` clearly shows `let needle = self.filter.to_lowercase();`, identical to line 45 in `visible_rows`. Both functions lowercase the needle before comparing, so the alleged inconsistency does not exist."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Line 237 in `rows` clearly shows `let needle = self.filter.to_lowercase();`, identical to line 45 in `visible_rows`. Both functions lowercase the needle before comparing, so the alleged inconsistency does not exist.\"}",
+ "thinking_chars": 1155,
+ "done_reason": "stop",
+ "prompt_tokens": 1245,
+ "eval_tokens": 358,
+ "load_s": 0.0015632,
+ "prompt_s": 0.552442,
+ "eval_s": 3.150766,
+ "wall_s": 4.038798809051514,
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

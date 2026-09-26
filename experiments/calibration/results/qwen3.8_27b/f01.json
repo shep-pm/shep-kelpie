@@ -1,0 +1,24 @@
+{
+ "id": "f01",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The `reseat` mechanism (selection.rs:166-181) explicitly resets the selection whenever it no longer maps to a visible row, and the grep shows `reseat` is called after every visible flock-mutation path (update.rs:60,615,628; keys.rs:202,337; action.rs:186). In this single-threaded TUI, `key` is derived from `self.selected`, which is kept in sync by `reseat`, so `self.flock.get(id)` at line 281 cannot return None for a still-selected sheep\u2014the `.expect()` is an invariant assertion, not a reachable panic."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The `reseat` mechanism (selection.rs:166-181) explicitly resets the selection whenever it no longer maps to a visible row, and the grep shows `reseat` is called after every visible flock-mutation path (update.rs:60,615,628; keys.rs:202,337; action.rs:186). In this single-threaded TUI, `key` is derived from `self.selected`, which is kept in sync by `reseat`, so `self.flock.get(id)` at line 281 cannot return None for a still-selected sheep\u2014the `.expect()` is an invariant assertion, not a reachable panic.\"}",
+ "thinking_chars": 21010,
+ "done_reason": "stop",
+ "prompt_tokens": 2346,
+ "eval_tokens": 5440,
+ "load_s": 0.0019186,
+ "prompt_s": 0.960058,
+ "eval_s": 59.106892,
+ "wall_s": 60.24954700469971,
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

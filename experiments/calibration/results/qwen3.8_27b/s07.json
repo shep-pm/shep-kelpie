@@ -1,0 +1,24 @@
+{
+ "id": "s07",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Line 119 clearly shows `None => 1`, so `column_len` already returns 1 when there is no config, exactly as the suggested fix proposes. The finding misreads the code as returning 0."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Line 119 clearly shows `None => 1`, so `column_len` already returns 1 when there is no config, exactly as the suggested fix proposes. The finding misreads the code as returning 0.\"}",
+ "thinking_chars": 753,
+ "done_reason": "stop",
+ "prompt_tokens": 734,
+ "eval_tokens": 264,
+ "load_s": 0.0037698,
+ "prompt_s": 0.367925,
+ "eval_s": 2.367012,
+ "wall_s": 2.900892972946167,
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

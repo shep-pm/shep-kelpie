@@ -1,0 +1,55 @@
+{
+ "id": "t17",
+ "set": "checker",
+ "model": "claude-opus-5-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The extra parameters are a documented design choice, not accidental redundancy. Lines 43-45 say `daemon_config` and `socket_default` are passed as owned `PathBuf`s so that a test can give the loop any pair of paths and each can be cloned into `spawn_blocking` closures. Lines 38-41 say `home` is kept separate for `LoadDogPane`. Tests can therefore pass values that differ from `paths`, and the suggested `&ShepPaths` fix would take that away; the claim that 'all seven tests' pass redundant fields can't be checked from the code shown."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The extra parameters are a documented design choice, not accidental redundancy. Lines 43-45 say `daemon_config` and `socket_default` are passed as owned `PathBuf`s so that a test can give the loop any pair of paths and each can be cloned into `spawn_blocking` closures. Lines 38-41 say `home` is kept separate for `LoadDogPane`. Tests can therefore pass values that differ from `paths`, and the suggested `&ShepPaths` fix would take that away; the claim that 'all seven tests' pass redundant fields can't be checked from the code shown.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22473,
+  "cache_read_input_tokens": 11789,
+  "output_tokens": 597,
+  "output_tokens_details": {
+   "thinking_tokens": 386
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22473,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 597,
+    "cache_read_input_tokens": 11789,
+    "cache_creation_input_tokens": 22473,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22473
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.1940898,
+ "duration_ms": 6900,
+ "wall_s": 9.00630497932434,
+ "weighted_units": 49111.9,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": false
+}

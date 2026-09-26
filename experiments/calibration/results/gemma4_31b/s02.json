@@ -1,0 +1,31 @@
+{
+ "id": "s02",
+ "set": "checker",
+ "model": "gemma4:31b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Line 225 explicitly maps `Err(RequestError::Closed)` to `Ok(())`, which contradicts the claim that it maps it to `Err(UiGone)`."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Line 225 explicitly maps `Err(RequestError::Closed)` to `Ok(())`, which contradicts the claim that it maps it to `Err(UiGone)`.\"}",
+ "thinking_chars": 1632,
+ "done_reason": "stop",
+ "prompt_tokens": 883,
+ "eval_tokens": 592,
+ "load_s": 0.0040335,
+ "prompt_s": 0.411163,
+ "eval_s": 14.82099,
+ "wall_s": 15.522272825241089,
+ "num_ctx": 16384,
+ "loaded": {
+  "size_gb": 19.723756501,
+  "vram_gb": 19.723756501,
+  "gpu_share": 1.0,
+  "context": 16384
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

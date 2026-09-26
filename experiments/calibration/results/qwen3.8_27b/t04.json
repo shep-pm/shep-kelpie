@@ -1,0 +1,24 @@
+{
+ "id": "t04",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The two matches are not identical: line 283 matches on `pane.sheep()` while line 288 matches on `pane.feed_sheep()`, so the lookups operate on different values even though the inner pattern arms look the same."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The two matches are not identical: line 283 matches on `pane.sheep()` while line 288 matches on `pane.feed_sheep()`, so the lookups operate on different values even though the inner pattern arms look the same.\"}",
+ "thinking_chars": 1727,
+ "done_reason": "stop",
+ "prompt_tokens": 834,
+ "eval_tokens": 545,
+ "load_s": 0.0025501,
+ "prompt_s": 0.395085,
+ "eval_s": 5.273851,
+ "wall_s": 5.800155878067017,
+ "label": "holds",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": false
+}

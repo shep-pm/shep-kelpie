@@ -1,0 +1,40 @@
+{
+ "id": "h04",
+ "set": "reviewer",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "    draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());",
+    "what": "The overlay is now drawn *before* `draw_body`, so the body's subsequent `set_line` calls paint over the keymap; the old code drew the overlay last, over everything, as its own doc comment states."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"    draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());\",\"what\":\"The overlay is now drawn *before* `draw_body`, so the body's subsequent `set_line` calls paint over the keymap; the old code drew the overlay last, over everything, as its own doc comment states.\"}]}",
+ "thinking_chars": 5072,
+ "done_reason": "stop",
+ "prompt_tokens": 3699,
+ "eval_tokens": 1432,
+ "load_s": 0.0028159,
+ "prompt_s": 1.449135,
+ "eval_s": 13.836158,
+ "wall_s": 15.47621488571167,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 17.536059963,
+  "vram_gb": 17.536059963,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "    draw_keymap_overlay(app, area, frame.buffer_mut(), app.palette());",
+  "what": "The overlay is now drawn *before* `draw_body`, so the body's subsequent `set_line` calls paint over the keymap; the old code drew the overlay last, over everything, as its own doc comment states."
+ }
+}

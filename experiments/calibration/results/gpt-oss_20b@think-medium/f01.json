@@ -1,0 +1,31 @@
+{
+ "id": "f01",
+ "set": "checker",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Any mutation of `self.flock` is followed by a call to `self.reseat(...)` (see update.rs where flock changes trigger reseat). Because `key` is derived from the current selection, the selection is kept in sync with the flock before an action keypress, so `self.flock.get(id)` will always succeed and the `.expect` cannot panic. The scenario described therefore cannot occur with the shown code."
+ },
+ "content": "{\"verdict\":\"fails\",\"reason\":\"Any mutation of `self.flock` is followed by a call to `self.reseat(...)` (see update.rs where flock changes trigger reseat). Because `key` is derived from the current selection, the selection is kept in sync with the flock before an action keypress, so `self.flock.get(id)` will always succeed and the `.expect` cannot panic. The scenario described therefore cannot occur with the shown code.\"}",
+ "thinking_chars": 8397,
+ "done_reason": "stop",
+ "prompt_tokens": 2062,
+ "eval_tokens": 1973,
+ "load_s": 0.0049908,
+ "prompt_s": 0.152201,
+ "eval_s": 11.188526,
+ "wall_s": 11.447834014892578,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

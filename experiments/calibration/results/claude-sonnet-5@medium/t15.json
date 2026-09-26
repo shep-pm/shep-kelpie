@@ -1,0 +1,55 @@
+{
+ "id": "t15",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The duplication is real (lines 86/99 are identical, 108/132 share a format), but it is a small maintainability nit, not a HIGH-severity defect. Line 122 also has a distinct 'editing' prefix and the filter branch differs, so the suggested helper with an Option suffix is only marginal. Nothing here is wrong at runtime."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The duplication is real (lines 86/99 are identical, 108/132 share a format), but it is a small maintainability nit, not a HIGH-severity defect. Line 122 also has a distinct 'editing' prefix and the filter branch differs, so the suggested helper with an Option suffix is only marginal. Nothing here is wrong at runtime.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21342,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 131,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21342,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 131,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 21342,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21342
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0890606,
+ "duration_ms": 2154,
+ "wall_s": 4.6432271003723145,
+ "weighted_units": 44530.3,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": false
+}

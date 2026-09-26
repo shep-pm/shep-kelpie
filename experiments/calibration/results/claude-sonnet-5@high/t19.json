@@ -1,0 +1,55 @@
+{
+ "id": "t19",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The duplication is real (189-198 and 234-243), but the suggested `fn config_pane_direct(&mut self)` would borrow all of `self`. Lines 208 and 216 assign `self.mode` while `pane` and `list` are still live, and line 211 uses `pane` after line 208, so that would not compile. This is the reason the comments at 186-188 and 231-233 avoid `config_pane_mut`. The fix is a re-creation of the helper the code deliberately avoids, and a two-site, intentional duplication is not HIGH."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The duplication is real (189-198 and 234-243), but the suggested `fn config_pane_direct(&mut self)` would borrow all of `self`. Lines 208 and 216 assign `self.mode` while `pane` and `list` are still live, and line 211 uses `pane` after line 208, so that would not compile. This is the reason the comments at 186-188 and 231-233 avoid `config_pane_mut`. The fix is a re-creation of the helper the code deliberately avoids, and a two-site, intentional duplication is not HIGH.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 20647,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 747,
+  "output_tokens_details": {
+   "thinking_tokens": 551
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20647,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 747,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 20647,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 20647
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0924406,
+ "duration_ms": 46003,
+ "wall_s": 47.62653207778931,
+ "weighted_units": 46220.3,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": false
+}

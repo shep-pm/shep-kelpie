@@ -1,0 +1,24 @@
+{
+ "id": "s01",
+ "set": "checker",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "Line 102 clearly shows the Allowed arm includes `y copy` (\"...D delete   y copy   q quit\"), so the finding's claim that it omits this key is a misread of the code."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"Line 102 clearly shows the Allowed arm includes `y copy` (\\\"...D delete   y copy   q quit\\\"), so the finding's claim that it omits this key is a misread of the code.\"}",
+ "thinking_chars": 781,
+ "done_reason": "stop",
+ "prompt_tokens": 740,
+ "eval_tokens": 321,
+ "load_s": 0.0156952,
+ "prompt_s": 0.373093,
+ "eval_s": 2.915281,
+ "wall_s": 3.515470027923584,
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

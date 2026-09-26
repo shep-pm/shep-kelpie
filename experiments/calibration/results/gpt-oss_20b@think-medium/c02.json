@@ -1,0 +1,30 @@
+{
+ "id": "c02",
+ "set": "reviewer",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "findings": []
+ },
+ "content": "{\"findings\": []}",
+ "thinking_chars": 18625,
+ "done_reason": "stop",
+ "prompt_tokens": 1227,
+ "eval_tokens": 3957,
+ "load_s": 0.0042803,
+ "prompt_s": 0.089623,
+ "eval_s": 22.481665,
+ "wall_s": 22.688915967941284,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 0,
+ "matched": null
+}

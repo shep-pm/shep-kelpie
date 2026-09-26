@@ -1,0 +1,31 @@
+{
+ "id": "s09",
+ "set": "checker",
+ "model": "devstral-small-2:latest",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The code at lines 73-76 correctly labels a `PaneTarget::Dog` pane as \"dog config\" in both `title_band_line` and `title_line`, matching the behavior described in the finding."
+ },
+ "content": "{\"verdict\": \"fails\", \"reason\": \"The code at lines 73-76 correctly labels a `PaneTarget::Dog` pane as \\\"dog config\\\" in both `title_band_line` and `title_line`, matching the behavior described in the finding.\"}",
+ "thinking_chars": 0,
+ "done_reason": "stop",
+ "prompt_tokens": 1947,
+ "eval_tokens": 60,
+ "load_s": 0.0017599,
+ "prompt_s": 0.345567,
+ "eval_s": 1.02363,
+ "wall_s": 1.4469819068908691,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 20.091240447,
+  "vram_gb": 20.091240447,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "label": "fails",
+ "origin": "synthetic",
+ "verdict": "fails",
+ "correct": true
+}

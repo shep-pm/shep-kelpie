@@ -1,0 +1,328 @@
+=== glm-4.7-flash:latest at num_ctx 65536  (22:18)
+calibrate: 61 cases to run for glm-4.7-flash_latest
+[1/61] t01 36s holds (label holds)
+[2/61] t02 10s holds (label holds)
+[3/61] t03 6s holds (label holds)
+[4/61] t04 6s holds (label holds)
+[5/61] t05 9s holds (label holds)
+[6/61] t06 9s holds (label holds)
+[7/61] t07 7s holds (label holds)
+[8/61] t08 11s holds (label holds)
+[9/61] t09 45s holds (label holds)
+[10/61] t10 43s holds (label holds)
+[11/61] t11 21s holds (label holds)
+[12/61] t12 11s holds (label holds)
+[13/61] t13 7s holds (label holds)
+[14/61] t14 30s holds (label holds)
+[15/61] t15 10s holds (label holds)
+[16/61] t16 10s holds (label holds)
+[17/61] t17 13s holds (label holds)
+[18/61] t18 7s holds (label holds)
+[19/61] t19 5s holds (label holds)
+[20/61] t20 14s holds (label holds)
+[21/61] f01 47s fails (label fails)
+[22/61] f02 17s fails (label fails)
+[23/61] f03 15s fails (label fails)
+[24/61] f04 22s holds (label fails)
+[25/61] f05 22s holds (label fails)
+[26/61] f06 38s holds (label fails)
+[27/61] s01 5s fails (label fails)
+[28/61] s02 20s fails (label fails)
+[29/61] s03 6s fails (label fails)
+[30/61] s04 6s fails (label fails)
+[31/61] s05 7s fails (label fails)
+[32/61] s06 6s fails (label fails)
+[33/61] s07 10s fails (label fails)
+[34/61] s08 12s fails (label fails)
+[35/61] s09 5s fails (label fails)
+[36/61] r01 33s caught=True false_alarms=0
+[37/61] r02 30s caught=True false_alarms=0
+[38/61] r03 65s caught=True false_alarms=0
+[39/61] r04 17s caught=True false_alarms=0
+[40/61] r05 33s caught=True false_alarms=0
+[41/61] r06 123s caught=False false_alarms=0
+[42/61] r07 4s caught=True false_alarms=0
+[43/61] r08 32s caught=True false_alarms=0
+[44/61] r09 33s caught=True false_alarms=0
+[45/61] c01 40s clean, false_alarms=0
+[46/61] c02 43s clean, false_alarms=0
+[47/61] c03 48s clean, false_alarms=0
+[48/61] c04 21s clean, false_alarms=0
+[49/61] c05 17s clean, false_alarms=0
+[50/61] c06 39s clean, false_alarms=0
+[51/61] c07 118s clean, false_alarms=0
+[52/61] h01 11s caught=False false_alarms=1
+[53/61] h02 35s caught=True false_alarms=0
+[54/61] h03 109s caught=True false_alarms=0
+[55/61] h04 82s caught=False false_alarms=0
+[56/61] h05 93s caught=True false_alarms=0
+[57/61] c08 81s clean, false_alarms=1
+[58/61] c09 38s clean, false_alarms=0
+[59/61] c10 7s clean, false_alarms=0
+[60/61] c11 48s clean, false_alarms=1
+[61/61] c12 43s clean, false_alarms=1
+calibrate: finished glm-4.7-flash_latest in 29.9 min
+=== gpt-oss:20b at num_ctx 65536 --think medium (22:47)
+calibrate: 61 cases to run for gpt-oss_20b@think-medium
+[1/61] t01 17s holds (label holds)
+[2/61] t02 3s holds (label holds)
+[3/61] t03 2s fails (label holds)
+[4/61] t04 2s holds (label holds)
+[5/61] t05 7s fails (label holds)
+[6/61] t06 3s holds (label holds)
+[7/61] t07 1s holds (label holds)
+[8/61] t08 2s holds (label holds)
+[9/61] t09 4s holds (label holds)
+[10/61] t10 15s holds (label holds)
+[11/61] t11 13s holds (label holds)
+[12/61] t12 3s holds (label holds)
+[13/61] t13 2s holds (label holds)
+[14/61] t14 3s holds (label holds)
+[15/61] t15 2s holds (label holds)
+[16/61] t16 2s holds (label holds)
+[17/61] t17 6s holds (label holds)
+[18/61] t18 3s holds (label holds)
+[19/61] t19 2s holds (label holds)
+[20/61] t20 7s holds (label holds)
+[21/61] f01 11s fails (label fails)
+[22/61] f02 4s fails (label fails)
+[23/61] f03 7s fails (label fails)
+[24/61] f04 5s holds (label fails)
+[25/61] f05 6s unsure (label fails)
+[26/61] f06 4s holds (label fails)
+[27/61] s01 2s fails (label fails)
+[28/61] s02 3s fails (label fails)
+[29/61] s03 2s fails (label fails)
+[30/61] s04 4s fails (label fails)
+[31/61] s05 2s fails (label fails)
+[32/61] s06 7s fails (label fails)
+[33/61] s07 1s fails (label fails)
+[34/61] s08 2s fails (label fails)
+[35/61] s09 2s fails (label fails)
+[36/61] r01 16s caught=True false_alarms=0
+[37/61] r02 7s caught=True false_alarms=0
+[38/61] r03 19s caught=True false_alarms=0
+[39/61] r04 11s caught=True false_alarms=0
+[40/61] r05 4s caught=True false_alarms=0
+[41/61] r06 16s caught=True false_alarms=1
+[42/61] r07 17s caught=True false_alarms=1
+[43/61] r08 14s caught=True false_alarms=0
+[44/61] r09 13s caught=True false_alarms=0
+[45/61] c01 11s clean, false_alarms=0
+[46/61] c02 23s clean, false_alarms=0
+[47/61] c03 38s clean, false_alarms=0
+[48/61] c04 14s clean, false_alarms=0
+[49/61] c05 10s clean, false_alarms=0
+[50/61] c06 36s clean, false_alarms=0
+[51/61] c07 27s clean, false_alarms=0
+[52/61] h01 9s caught=True false_alarms=0
+[53/61] h02 10s caught=True false_alarms=0
+[54/61] h03 17s caught=True false_alarms=0
+[55/61] h04 18s caught=True false_alarms=0
+[56/61] h05 22s caught=True false_alarms=0
+[57/61] c08 31s clean, false_alarms=0
+[58/61] c09 27s clean, false_alarms=0
+[59/61] c10 95s clean, false_alarms=0
+[60/61] c11 19s clean, false_alarms=0
+[61/61] c12 14s clean, false_alarms=1
+calibrate: finished gpt-oss_20b@think-medium in 11.7 min
+=== devstral-small-2:latest at num_ctx 65536  (22:59)
+calibrate: 61 cases to run for devstral-small-2_latest
+[1/61] t01 14s holds (label holds)
+[2/61] t02 7s holds (label holds)
+[3/61] t03 2s holds (label holds)
+[4/61] t04 2s holds (label holds)
+[5/61] t05 2s holds (label holds)
+[6/61] t06 2s holds (label holds)
+[7/61] t07 3s holds (label holds)
+[8/61] t08 1s holds (label holds)
+[9/61] t09 2s holds (label holds)
+[10/61] t10 2s holds (label holds)
+[11/61] t11 2s holds (label holds)
+[12/61] t12 2s holds (label holds)
+[13/61] t13 2s holds (label holds)
+[14/61] t14 2s holds (label holds)
+[15/61] t15 2s holds (label holds)
+[16/61] t16 2s holds (label holds)
+[17/61] t17 2s holds (label holds)
+[18/61] t18 2s holds (label holds)
+[19/61] t19 1s holds (label holds)
+[20/61] t20 2s holds (label holds)
+[21/61] f01 2s holds (label fails)
+[22/61] f02 2s holds (label fails)
+[23/61] f03 2s holds (label fails)
+[24/61] f04 4s holds (label fails)
+[25/61] f05 2s holds (label fails)
+[26/61] f06 2s holds (label fails)
+[27/61] s01 1s fails (label fails)
+[28/61] s02 1s holds (label fails)
+[29/61] s03 1s fails (label fails)
+[30/61] s04 1s fails (label fails)
+[31/61] s05 1s fails (label fails)
+[32/61] s06 2s holds (label fails)
+[33/61] s07 1s fails (label fails)
+[34/61] s08 1s fails (label fails)
+[35/61] s09 1s fails (label fails)
+[36/61] r01 0s caught=False false_alarms=0
+[37/61] r02 2s caught=True false_alarms=0
+[38/61] r03 1s caught=False false_alarms=0
+[39/61] r04 2s caught=True false_alarms=0
+[40/61] r05 2s caught=True false_alarms=0
+[41/61] r06 1s caught=False false_alarms=0
+[42/61] r07 2s caught=True false_alarms=0
+[43/61] r08 1s caught=True false_alarms=0
+[44/61] r09 1s caught=False false_alarms=1
+[45/61] c01 0s clean, false_alarms=0
+[46/61] c02 0s clean, false_alarms=0
+[47/61] c03 1s clean, false_alarms=1
+[48/61] c04 1s clean, false_alarms=0
+[49/61] c05 1s clean, false_alarms=0
+[50/61] c06 1s clean, false_alarms=0
+[51/61] c07 2s clean, false_alarms=1
+[52/61] h01 1s caught=False false_alarms=0
+[53/61] h02 0s caught=False false_alarms=0
+[54/61] h03 1s caught=False false_alarms=0
+[55/61] h04 1s caught=False false_alarms=0
+[56/61] h05 1s caught=False false_alarms=0
+[57/61] c08 1s clean, false_alarms=0
+[58/61] c09 1s clean, false_alarms=0
+[59/61] c10 1s clean, false_alarms=0
+[60/61] c11 1s clean, false_alarms=0
+[61/61] c12 1s clean, false_alarms=0
+calibrate: finished devstral-small-2_latest in 1.9 min
+=== gemma3:27b at num_ctx 65536  (23:01)
+calibrate: 61 cases to run for gemma3_27b
+[1/61] t01 19s holds (label holds)
+[2/61] t02 3s holds (label holds)
+[3/61] t03 3s holds (label holds)
+[4/61] t04 2s holds (label holds)
+[5/61] t05 3s holds (label holds)
+[6/61] t06 3s holds (label holds)
+[7/61] t07 3s holds (label holds)
+[8/61] t08 2s holds (label holds)
+[9/61] t09 3s holds (label holds)
+[10/61] t10 3s holds (label holds)
+[11/61] t11 4s holds (label holds)
+[12/61] t12 2s holds (label holds)
+[13/61] t13 3s holds (label holds)
+[14/61] t14 3s holds (label holds)
+[15/61] t15 3s holds (label holds)
+[16/61] t16 4s holds (label holds)
+[17/61] t17 3s holds (label holds)
+[18/61] t18 3s holds (label holds)
+[19/61] t19 2s holds (label holds)
+[20/61] t20 3s holds (label holds)
+[21/61] f01 6s holds (label fails)
+[22/61] f02 3s holds (label fails)
+[23/61] f03 4s holds (label fails)
+[24/61] f04 5s holds (label fails)
+[25/61] f05 2s holds (label fails)
+[26/61] f06 3s holds (label fails)
+[27/61] s01 2s fails (label fails)
+[28/61] s02 2s holds (label fails)
+[29/61] s03 2s fails (label fails)
+[30/61] s04 3s holds (label fails)
+[31/61] s05 5s holds (label fails)
+[32/61] s06 3s holds (label fails)
+[33/61] s07 2s fails (label fails)
+[34/61] s08 2s fails (label fails)
+[35/61] s09 2s holds (label fails)
+[36/61] r01 4s caught=False false_alarms=2
+[37/61] r02 3s caught=True false_alarms=0
+[38/61] r03 6s caught=False false_alarms=2
+[39/61] r04 7s caught=True false_alarms=0
+[40/61] r05 4s caught=True false_alarms=0
+[41/61] r06 6s caught=True false_alarms=1
+[42/61] r07 4s caught=True false_alarms=1
+[43/61] r08 2s caught=True false_alarms=0
+[44/61] r09 3s caught=True false_alarms=0
+[45/61] c01 2s clean, false_alarms=1
+[46/61] c02 2s clean, false_alarms=1
+[47/61] c03 3s clean, false_alarms=1
+[48/61] c04 1s clean, false_alarms=0
+[49/61] c05 6s clean, false_alarms=2
+[50/61] c06 7s clean, false_alarms=4
+[51/61] c07 3s clean, false_alarms=1
+[52/61] h01 3s caught=True false_alarms=0
+[53/61] h02 3s caught=True false_alarms=1
+[54/61] h03 4s caught=True false_alarms=1
+[55/61] h04 3s caught=False false_alarms=1
+[56/61] h05 4s caught=False false_alarms=1
+[57/61] c08 3s clean, false_alarms=1
+[58/61] c09 3s clean, false_alarms=1
+[59/61] c10 7s clean, false_alarms=3
+[60/61] c11 7s clean, false_alarms=3
+[61/61] c12 4s clean, false_alarms=2
+calibrate: finished gemma3_27b in 3.8 min
+=== gemma4:31b at num_ctx 16384  (23:05)
+calibrate: 61 cases to run for gemma4_31b
+[1/61] t01 31s holds (label holds)
+[2/61] t02 21s holds (label holds)
+[3/61] t03 16s holds (label holds)
+[4/61] t04 11s holds (label holds)
+[5/61] t05 21s holds (label holds)
+[6/61] t06 36s holds (label holds)
+[7/61] t07 20s holds (label holds)
+[8/61] t08 12s holds (label holds)
+[9/61] t09 24s holds (label holds)
+[10/61] t10 21s holds (label holds)
+[11/61] t11 90s holds (label holds)
+[12/61] t12 26s holds (label holds)
+[13/61] t13 20s holds (label holds)
+[14/61] t14 13s holds (label holds)
+[15/61] t15 42s holds (label holds)
+[16/61] t16 22s holds (label holds)
+[17/61] t17 33s holds (label holds)
+[18/61] t18 22s holds (label holds)
+[19/61] t19 13s holds (label holds)
+[20/61] t20 53s holds (label holds)
+[21/61] f01 59s holds (label fails)
+[22/61] f02 63s fails (label fails)
+[23/61] f03 24s holds (label fails)
+[24/61] f04 46s holds (label fails)
+[25/61] f05 43s holds (label fails)
+[26/61] f06 22s holds (label fails)
+[27/61] s01 11s fails (label fails)
+[28/61] s02 16s fails (label fails)
+[29/61] s03 17s fails (label fails)
+[30/61] s04 15s fails (label fails)
+[31/61] s05 13s fails (label fails)
+[32/61] s06 29s fails (label fails)
+[33/61] s07 9s fails (label fails)
+[34/61] s08 13s fails (label fails)
+[35/61] s09 20s fails (label fails)
+[36/61] r01 30s caught=True false_alarms=0
+[37/61] r02 24s caught=True false_alarms=0
+[38/61] r03 47s caught=True false_alarms=0
+[39/61] r04 42s caught=True false_alarms=0
+[40/61] r05 29s caught=True false_alarms=0
+[41/61] r06 40s caught=True false_alarms=0
+[42/61] r07 20s caught=True false_alarms=0
+[43/61] r08 121s caught=True false_alarms=0
+[44/61] r09 125s caught=True false_alarms=0
+[45/61] c01 37s clean, false_alarms=0
+[46/61] c02 35s clean, false_alarms=0
+[47/61] c03 75s clean, false_alarms=0
+[48/61] c04 34s clean, false_alarms=0
+[49/61] c05 25s clean, false_alarms=0
+[50/61] c06 19s clean, false_alarms=0
+[51/61] c07 142s clean, false_alarms=0
+[52/61] h01 48s caught=True false_alarms=0
+[53/61] h02 37s caught=True false_alarms=0
+[54/61] h03 48s caught=True false_alarms=0
+[55/61] h04 36s caught=True false_alarms=0
+[56/61] h05 70s caught=True false_alarms=0
+[57/61] c08 102s clean, false_alarms=0
+[58/61] c09 23s clean, false_alarms=0
+[59/61] c10 58s clean, false_alarms=0
+[60/61] c11 32s clean, false_alarms=0
+[61/61] c12 78s clean, false_alarms=1
+calibrate: finished gemma4_31b in 38.8 min
+=== done 23:44
+model                     ctx  gpu   n      check bal  holds  fails real  fails synth  unsure  caught easy  caught hard  alarms easy  alarms hard  alarms extra  unparsed  s/case  tok/s
+devstral-small-2_latest   64k  100%  35+26  73%        100%   0%          78%          0       5/9          0/5          2 in 7       0 in 5       1             0         2       58   
+gemma3_27b                64k  100%  35+26  63%        100%   0%          44%          0       7/9          3/5          10 in 7      10 in 5      10            0         4       46   
+gemma4_31b                16k  100%  35+26  83%        100%   17%         100%         0       9/9          5/5          0 in 7       1 in 5       0             0         38      40   
+glm-4.7-flash_latest      64k  100%  35+26  90%        100%   50%         100%         0       8/9          3/5          0 in 7       3 in 5       1             2         29      142  
+gpt-oss_20b@think-medium  64k  100%  35+26  85%        90%    50%         100%         1       9/9          5/5          0 in 7       1 in 5       2             1         11      176  
+qwen3.8_27b               64k  100%  35+26  88%        90%    67%         100%         0       9/9          5/5          0 in 7       1 in 5       0             0         18      98   

@@ -1,0 +1,40 @@
+{
+ "id": "r02",
+ "set": "reviewer",
+ "model": "gpt-oss:20b",
+ "think": "medium",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "let (code, message) = safe_parts(fmt, message, code);",
+    "what": "The arguments to `safe_parts` are swapped in `emit_notice`, causing the code and message to be sanitized and displayed in reverse order."
+   }
+  ]
+ },
+ "content": "{\"findings\":[{\"severity\":\"bug\",\"quote\":\"let (code, message) = safe_parts(fmt, message, code);\",\"what\":\"The arguments to `safe_parts` are swapped in `emit_notice`, causing the code and message to be sanitized and displayed in reverse order.\"}]}",
+ "thinking_chars": 5171,
+ "done_reason": "stop",
+ "prompt_tokens": 1227,
+ "eval_tokens": 1170,
+ "load_s": 0.0043183,
+ "prompt_s": 0.116196,
+ "eval_s": 6.489188,
+ "wall_s": 6.670359134674072,
+ "num_ctx": 65536,
+ "loaded": {
+  "size_gb": 12.966397213,
+  "vram_gb": 12.966397213,
+  "gpu_share": 1.0,
+  "context": 65536
+ },
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "let (code, message) = safe_parts(fmt, message, code);",
+  "what": "The arguments to `safe_parts` are swapped in `emit_notice`, causing the code and message to be sanitized and displayed in reverse order."
+ }
+}

@@ -1,0 +1,55 @@
+{
+ "id": "f01",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "medium",
+ "error": null,
+ "parsed": {
+  "verdict": "fails",
+  "reason": "The `.expect` at line 281 rests on an invariant the code maintains: `key` comes from the current selection, and `reseat` (selection.rs:166-173) moves the selection off any sheep that has left the flock or is hidden by the filter. All the shown flock-mutation paths call it (action.rs:186, keys.rs:202/337, update.rs:60/615/628). The finding names no path that skips it, and the panic would only follow from a separate bug."
+ },
+ "content": "{\"verdict\":\"fails\",\"reason\":\"The `.expect` at line 281 rests on an invariant the code maintains: `key` comes from the current selection, and `reseat` (selection.rs:166-173) moves the selection off any sheep that has left the flock or is hidden by the filter. All the shown flock-mutation paths call it (action.rs:186, keys.rs:202/337, update.rs:60/615/628). The finding names no path that skips it, and the panic would only follow from a separate bug.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21691,
+  "cache_read_input_tokens": 11893,
+  "output_tokens": 164,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21691,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 164,
+    "cache_read_input_tokens": 11893,
+    "cache_creation_input_tokens": 21691,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21691
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.0907866,
+ "duration_ms": 21952,
+ "wall_s": 25.573733806610107,
+ "weighted_units": 45393.3,
+ "stop_reason": "end_turn",
+ "label": "fails",
+ "origin": "real",
+ "verdict": "fails",
+ "correct": true
+}

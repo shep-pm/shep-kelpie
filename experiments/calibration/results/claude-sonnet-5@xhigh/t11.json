@@ -1,0 +1,55 @@
+{
+ "id": "t11",
+ "set": "checker",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": null,
+ "parsed": {
+  "verdict": "holds",
+  "reason": "page_lines_back (245-259) is the same backward budget-walk as tail_window_start (172-184). Its `count > 0` guard tracks `used > 0` as long as row costs are at least 1, and `count.max(1)` matches `(start - base).max(1)` at `start == 0`. So the claimed equality holds, and the doc at 168-171 already warns that two copies of this walk drift. The two guards differ only if `cost` can return 0, which the shown code doesn't settle."
+ },
+ "content": "{\"verdict\": \"holds\", \"reason\": \"page_lines_back (245-259) is the same backward budget-walk as tail_window_start (172-184). Its `count > 0` guard tracks `used > 0` as long as row costs are at least 1, and `count.max(1)` matches `(start - base).max(1)` at `start == 0`. So the claimed equality holds, and the doc at 168-171 already warns that two copies of this walk drift. The two guards differ only if `cost` can return 0, which the shown code doesn't settle.\"}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 21540,
+  "cache_read_input_tokens": 11892,
+  "output_tokens": 1625,
+  "output_tokens_details": {
+   "thinking_tokens": 1450
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21540,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1625,
+    "cache_read_input_tokens": 11892,
+    "cache_creation_input_tokens": 21540,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 21540
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.10479240000000001,
+ "duration_ms": 33882,
+ "wall_s": 36.9978711605072,
+ "weighted_units": 52396.2,
+ "stop_reason": "end_turn",
+ "label": "holds",
+ "origin": "real",
+ "verdict": "holds",
+ "correct": true
+}

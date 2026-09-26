@@ -1,0 +1,33 @@
+{
+ "id": "r07",
+ "set": "reviewer",
+ "model": "qwen3.8:27b",
+ "think": null,
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "bug",
+    "quote": "    let code = &crate::terminal_safe::sanitise(message).0;",
+    "what": "In `emit_notice` the sanitisation call passes `message` instead of `code`, so the `code` field is never sanitised (newlines remain) and the variable is instead assigned the sanitised *message*."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"bug\", \"quote\": \"    let code = &crate::terminal_safe::sanitise(message).0;\", \"what\": \"In `emit_notice` the sanitisation call passes `message` instead of `code`, so the `code` field is never sanitised (newlines remain) and the variable is instead assigned the sanitised *message*.\"}]}",
+ "thinking_chars": 3310,
+ "done_reason": "stop",
+ "prompt_tokens": 1640,
+ "eval_tokens": 946,
+ "load_s": 0.0017731,
+ "prompt_s": 0.704201,
+ "eval_s": 9.60472,
+ "wall_s": 10.483155965805054,
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "bug",
+  "quote": "    let code = &crate::terminal_safe::sanitise(message).0;",
+  "what": "In `emit_notice` the sanitisation call passes `message` instead of `code`, so the `code` field is never sanitised (newlines remain) and the variable is instead assigned the sanitised *message*."
+ }
+}
