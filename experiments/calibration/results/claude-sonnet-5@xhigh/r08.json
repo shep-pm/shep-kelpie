@@ -1,0 +1,20 @@
+{
+ "id": "r08",
+ "set": "reviewer",
+ "model": "claude-sonnet-5",
+ "backend": "claude",
+ "effort": "xhigh",
+ "error": "exit 1: subtype=error_max_turns turns=2 result='None'",
+ "parsed": null,
+ "content": "",
+ "usage": {},
+ "total_cost_usd": null,
+ "duration_ms": null,
+ "wall_s": 145.94392490386963,
+ "weighted_units": 0.0,
+ "stop_reason": null,
+ "kind": "bug",
+ "caught": false,
+ "false_alarms": 0,
+ "matched": null
+}

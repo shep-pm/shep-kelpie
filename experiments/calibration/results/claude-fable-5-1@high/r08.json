@@ -1,0 +1,64 @@
+{
+ "id": "r08",
+ "set": "reviewer",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "risk",
+    "quote": "+    start - tail_window_start(start, body_rows, cost)",
+    "what": "The removed `count.max(1)` floor is gone: at `start == 0` this now returns 0 where it returned 1, and if `tail_window_start` does not itself force at least one frame into the window when the frame above exceeds `body_rows`, a page-up will move 0 lines and the scroll sticks."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"risk\", \"quote\": \"+    start - tail_window_start(start, body_rows, cost)\", \"what\": \"The removed `count.max(1)` floor is gone: at `start == 0` this now returns 0 where it returned 1, and if `tail_window_start` does not itself force at least one frame into the window when the frame above exceeds `body_rows`, a page-up will move 0 lines and the scroll sticks.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 24244,
+  "cache_read_input_tokens": 10092,
+  "output_tokens": 1380,
+  "output_tokens_details": {
+   "thinking_tokens": 1232
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 24244,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1380,
+    "cache_read_input_tokens": 10092,
+    "cache_creation_input_tokens": 24244,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 24244
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.556423,
+ "duration_ms": 19822,
+ "wall_s": 23.822300910949707,
+ "weighted_units": 56399.2,
+ "stop_reason": "end_turn",
+ "kind": "bug",
+ "caught": true,
+ "false_alarms": 0,
+ "matched": {
+  "severity": "risk",
+  "quote": "+    start - tail_window_start(start, body_rows, cost)",
+  "what": "The removed `count.max(1)` floor is gone: at `start == 0` this now returns 0 where it returned 1, and if `tail_window_start` does not itself force at least one frame into the window when the frame above exceeds `body_rows`, a page-up will move 0 lines and the scroll sticks."
+ }
+}

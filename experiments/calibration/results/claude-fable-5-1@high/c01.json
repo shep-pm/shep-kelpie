@@ -1,0 +1,60 @@
+{
+ "id": "c01",
+ "set": "reviewer",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "risk",
+    "quote": "        Ok(Err(err)) => {",
+    "what": "This arm also fires when a read fails after `drain`'s wait has already reaped the child (or when the wait itself failed with ECHILD), so `kill_group(leader)` can then name a pgid the OS has handed to an unrelated process group, which is the exact hazard the comment says the ordering avoids; the sweep should be gated on the child not yet having been reaped (e.g. `child.try_wait()` returning `Ok(None)`)."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"risk\", \"quote\": \"        Ok(Err(err)) => {\", \"what\": \"This arm also fires when a read fails after `drain`'s wait has already reaped the child (or when the wait itself failed with ECHILD), so `kill_group(leader)` can then name a pgid the OS has handed to an unrelated process group, which is the exact hazard the comment says the ordering avoids; the sweep should be gated on the child not yet having been reaped (e.g. `child.try_wait()` returning `Ok(None)`).\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 24350,
+  "cache_read_input_tokens": 10092,
+  "output_tokens": 1376,
+  "output_tokens_details": {
+   "thinking_tokens": 1191
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 24350,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1376,
+    "cache_read_input_tokens": 10092,
+    "cache_creation_input_tokens": 24350,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 24350
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.558343,
+ "duration_ms": 23350,
+ "wall_s": 27.72478199005127,
+ "weighted_units": 56591.2,
+ "stop_reason": "end_turn",
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 0,
+ "matched": null
+}

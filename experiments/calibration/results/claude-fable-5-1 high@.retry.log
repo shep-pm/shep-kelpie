@@ -1,5 +1,0 @@
-usage: calibrate.py [-h] [--model MODEL] [--think THINK]
-                    [--backend {ollama,claude}] [--effort EFFORT]
-                    [--set {checker,reviewer,all}] [--only ONLY] [--score]
-                    [--check-sets]
-calibrate.py: error: argument --effort: expected one argument

@@ -238,6 +238,12 @@ def run_claude_case(model, effort, set_name, case, cwd):
         stdout = proc.stdout
         if proc.returncode != 0 or not stdout.strip():
             error = (proc.stderr or "").strip()[:2000] or f"exit {proc.returncode}"
+            try:
+                partial = json.loads(stdout)
+                error += (f": subtype={partial.get('subtype')} turns={partial.get('num_turns')} "
+                          f"result={str(partial.get('result'))[:200]!r}")
+            except (json.JSONDecodeError, AttributeError):
+                pass
     except subprocess.TimeoutExpired:
         error = f"timeout after {CLAUDE_TIMEOUT_S}s"
     except OSError as exc:

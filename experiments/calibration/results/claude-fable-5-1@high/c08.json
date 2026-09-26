@@ -1,0 +1,70 @@
+{
+ "id": "c08",
+ "set": "reviewer",
+ "model": "claude-fable-5-1",
+ "backend": "claude",
+ "effort": "high",
+ "error": null,
+ "parsed": {
+  "findings": [
+   {
+    "severity": "risk",
+    "quote": "-        let written = \"no flock at /tmp/x\\n  to set up a flock there deliberately: mkdir -p /tmp/x\";",
+    "what": "The old convention was caller-owned indentation, but this commit touches no call site, so any production message still carrying its own \"\\n  \" continuation (the flock refusal, refuse_version_skew, toml_edit's \"  |\" gutter lines) now renders with four spaces in table mode."
+   },
+   {
+    "severity": "risk",
+    "quote": "+        let written = \"no flock at /tmp/x\\nto set up a flock there deliberately: mkdir -p /tmp/x\";",
+    "what": "Dropping the two spaces from the test input changes the error_multiline_json snapshot (the JSON message no longer contains the indent) yet the commit includes no updated .snap file, so the insta test fails."
+   },
+   {
+    "severity": "nit",
+    "quote": "+            if !line.is_empty() {",
+    "what": "A whitespace-only continuation line is not empty, so it is indented and emits trailing whitespace on what reads as a blank line, contrary to the documented guarantee."
+   }
+  ]
+ },
+ "content": "{\"findings\": [{\"severity\": \"risk\", \"quote\": \"-        let written = \\\"no flock at /tmp/x\\\\n  to set up a flock there deliberately: mkdir -p /tmp/x\\\";\", \"what\": \"The old convention was caller-owned indentation, but this commit touches no call site, so any production message still carrying its own \\\"\\\\n  \\\" continuation (the flock refusal, refuse_version_skew, toml_edit's \\\"  |\\\" gutter lines) now renders with four spaces in table mode.\"}, {\"severity\": \"risk\", \"quote\": \"+        let written = \\\"no flock at /tmp/x\\\\nto set up a flock there deliberately: mkdir -p /tmp/x\\\";\", \"what\": \"Dropping the two spaces from the test input changes the error_multiline_json snapshot (the JSON message no longer contains the indent) yet the commit includes no updated .snap file, so the insta test fails.\"}, {\"severity\": \"nit\", \"quote\": \"+            if !line.is_empty() {\", \"what\": \"A whitespace-only continuation line is not empty, so it is indented and emits trailing whitespace on what reads as a blank line, contrary to the documented guarantee.\"}]}",
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 22586,
+  "cache_read_input_tokens": 13647,
+  "output_tokens": 3089,
+  "output_tokens_details": {
+   "thinking_tokens": 2701
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22586,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3089,
+    "cache_read_input_tokens": 13647,
+    "cache_creation_input_tokens": 22586,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 22586
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "total_cost_usd": 0.6096017499999999,
+ "duration_ms": 46126,
+ "wall_s": 49.10506987571716,
+ "weighted_units": 61983.7,
+ "stop_reason": "end_turn",
+ "kind": "clean",
+ "caught": null,
+ "false_alarms": 0,
+ "matched": null
+}
