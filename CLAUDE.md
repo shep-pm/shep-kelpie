@@ -28,6 +28,8 @@ Gotchas:
 
 Invoke the `rust-house-style` skill before writing or reviewing Rust. The rules are shep-pm/rust-house-style, IR-1 to IR-48.
 
+CI (`.github/workflows/test.yml`) runs `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`, rustdoc with `-D warnings`, and `cargo +1.88 check` for the MSRV. Run the same before handing a branch over.
+
 ## Writing and git
 
 - Committed text calls the maintainer "the maintainer" and uses repo-relative paths, because the repo goes public one day.
