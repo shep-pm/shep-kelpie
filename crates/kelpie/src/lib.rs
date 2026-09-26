@@ -10,5 +10,10 @@
 
 pub mod adapters;
 pub mod ports;
+pub mod runner;
 pub mod settings;
+pub mod sheep;
 pub mod state;
+
+#[cfg(test)]
+mod test;
