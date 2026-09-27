@@ -46,6 +46,8 @@ impl std::error::Error for ProjectNameError {}
 /// Where a project's files live under kelpie's home
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectPaths {
+    /// Kelpie's own settings file, which every project shares
+    pub kelpie_settings: PathBuf,
     /// The settings file
     pub settings: PathBuf,
     /// The state file
@@ -57,12 +59,14 @@ pub struct ProjectPaths {
 }
 
 impl ProjectPaths {
-    /// `<kelpie home>/projects/<project>/`, with worktrees under
+    /// `<kelpie home>/projects/<project>/`, beside kelpie's own
+    /// `<kelpie home>/settings.toml`, with worktrees under
     /// `<kelpie home>/wt/<project>/` and build folders under
     /// `<kelpie home>/targets/<project>/`
     pub fn under(kelpie_home: &Path, project: &ProjectName) -> Self {
         let folder = kelpie_home.join("projects").join(project.as_str());
         Self {
+            kelpie_settings: kelpie_home.join("settings.toml"),
             settings: folder.join("settings.toml"),
             state: folder.join("state.json"),
             worker: folder.join("worker"),

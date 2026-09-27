@@ -20,6 +20,7 @@ pub mod runner;
 pub mod settings;
 pub mod sheep;
 pub mod state;
+pub mod webhook;
 pub mod work_item;
 pub mod worktree;
 

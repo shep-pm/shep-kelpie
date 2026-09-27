@@ -207,12 +207,14 @@ mod tests {
                 "question": question,
                 "pull_request": 71,
                 "kind": { "kind": "merge", "head": head },
+                "alerted": false,
             }])
         );
         assert_eq!(
             status["work_item"]["phase"],
             json!({ "state": "ruling", "id": 1 })
         );
+        assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
         assert_eq!(step(&runner).unwrap(), None, "a parked worker waits");
     }
 
@@ -266,6 +268,10 @@ mod tests {
         );
         assert!(question.starts_with(&parked), "{question}");
         assert_eq!(rig.claude.calls().len(), 2, "the red run went out once");
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Alerted { .. })
+        ));
         assert_eq!(step(&runner).unwrap(), None);
     }
 

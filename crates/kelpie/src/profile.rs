@@ -38,7 +38,7 @@ const GIT_DENY: [&str; 8] = [
 // Read and written by no worker. Also denied to sandboxed Bash, which takes
 // `Read` deny rules as its own. `~/.config/gh` stays readable: `gh` will not
 // start without its config, and the worker opens its own pull request.
-const CREDENTIALS: [&str; 10] = [
+const CREDENTIALS: [&str; 11] = [
     "~/.ssh/**",
     "~/.aws/**",
     "~/.gnupg/**",
@@ -49,6 +49,8 @@ const CREDENTIALS: [&str; 10] = [
     "~/.cargo/credentials",
     "~/.cargo/credentials.toml",
     "~/.kelpie/projects/**",
+    // The webhook URL. Not all of `~/.kelpie`: worktrees and build folders live there.
+    "~/.kelpie/settings.toml",
 ];
 
 // What only the project manager does: merge, mark ready, and summon.
@@ -437,16 +439,34 @@ mod tests {
         assert!(!allow.iter().any(|p| p.ends_with("/main")), "{allow:?}");
     }
 
+    // Unset, the sandbox blocks every Unix socket, kelpie's shepherd socket
+    // included, so a worker cannot `shep trigger` its own ruling's answer.
+    #[test]
+    fn a_worker_reaches_no_unix_socket() {
+        let s = settings(&[]);
+        let network = s["sandbox"]["network"].as_object().unwrap();
+        assert!(!network.contains_key("allowUnixSockets"), "{network:?}");
+        assert!(!network.contains_key("allowAllUnixSockets"), "{network:?}");
+    }
+
     #[test]
     fn credential_paths_are_unreadable() {
         let deny = settings(&[])["permissions"]["deny"].clone();
         let deny = strings(&deny);
-        for rule in ["Read(~/.ssh/**)", "Read(~/.kelpie/projects/**)"] {
+        for rule in [
+            "Read(~/.ssh/**)",
+            "Read(~/.kelpie/projects/**)",
+            "Read(~/.kelpie/settings.toml)",
+        ] {
             assert!(deny.contains(&rule), "{rule}");
         }
         assert!(
             !deny.iter().any(|r| r.contains(".config/gh")),
             "gh cannot start without its config"
+        );
+        assert!(
+            !deny.contains(&"Read(~/.kelpie/**)"),
+            "a worker's worktree and build folder are under ~/.kelpie"
         );
     }
 

@@ -1,7 +1,8 @@
 //! What each step of the runner did, one JSON line each in its log
 //!
-//! A step dispatches from the board, runs a worker's turn, or moves the
-//! work item through the gate: CI, a rebase, a ruling, the merge.
+//! A step dispatches from the board, runs a worker's turn, moves the work
+//! item through the gate (CI, a rebase, a ruling, the merge), or posts a
+//! ruling to the maintainer's webhook.
 
 use serde::Serialize;
 
@@ -51,6 +52,27 @@ pub enum StepReport {
         work_item_cost_usd: f64,
         /// The worker's draft pull request, once it has opened one
         pull_request: Option<u64>,
+    },
+    /// A turn ended on the worker's question, and the worker is parked on it
+    Asked {
+        /// The work item's issue
+        issue: u64,
+        /// The worker's session
+        session: SessionId,
+        /// What the call used
+        usage: Usage,
+        /// What the call cost, in US dollars
+        cost_usd: f64,
+        /// What the work item has cost so far, in US dollars
+        work_item_cost_usd: f64,
+        /// The worker's draft pull request, once it has opened one
+        pull_request: Option<u64>,
+        /// The ruling's id
+        id: u64,
+        /// The question, with the trigger that answers it
+        question: String,
+        /// Why the question could not be posted on the pull request, if it could not
+        comment_failed: Option<String>,
     },
     /// A turn could not run
     Failed {
@@ -116,6 +138,20 @@ pub enum StepReport {
         pull_request: Option<u64>,
         /// Whether the pull request merged
         merged: bool,
+    },
+    /// A ruling was posted to the maintainer's webhook
+    Alerted {
+        /// The ruling's id
+        id: u64,
+    },
+    /// A ruling could not be posted to the webhook, and is tried again later
+    AlertFailed {
+        /// The ruling's id
+        id: u64,
+        /// Why, never naming the webhook's URL
+        reason: String,
+        /// When the post is tried again at the earliest
+        retry_at: Timestamp,
     },
     /// The forge or git could not be asked, and the step is tried again later
     GateFailed {

@@ -87,9 +87,13 @@ pub struct Ruling {
     pub pull_request: Option<u64>,
     /// What raised it, which decides what a yes does
     pub kind: RulingKind,
+    /// Whether it reached the maintainer's webhook. One saved before
+    /// webhooks existed is posted once.
+    #[serde(default)]
+    pub alerted: bool,
 }
 
-/// What raised a ruling. A no with a note always goes to the worker.
+/// What raised a ruling. A no's note, or an answer, always goes to the worker.
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
@@ -114,6 +118,11 @@ pub enum RulingKind {
     /// Someone closed the pull request without merging it. A yes drops the
     /// work item and keeps its branch on the forge.
     Closed,
+    /// The worker ended its turn on a question. The answer is its next turn.
+    Question {
+        /// The question, verbatim from the worker's question block
+        asked: String,
+    },
 }
 
 /// A lease the dog granted this project
@@ -305,6 +314,7 @@ mod tests {
                 question: format!("question {n}"),
                 pull_request: Some(n),
                 kind: RulingKind::Closed,
+                alerted: false,
             })
             .collect();
         state
@@ -335,6 +345,7 @@ mod tests {
             kind: RulingKind::Merge {
                 head: "c0ffee".into(),
             },
+            alerted: true,
         });
         state.last_ruling = 1;
         state.leases.push(LeaseHeld {
@@ -375,6 +386,7 @@ mod tests {
             question: "q".into(),
             pull_request: Some(30),
             kind,
+            alerted: id.is_multiple_of(2),
         };
         state.rulings = vec![
             ruling(
@@ -397,8 +409,14 @@ mod tests {
                 },
             ),
             ruling(4, RulingKind::Closed),
+            ruling(
+                5,
+                RulingKind::Question {
+                    asked: "Which name?".into(),
+                },
+            ),
         ];
-        state.last_ruling = 4;
+        state.last_ruling = 5;
         state.finished = vec![22, 30];
         state.pacing = Some(DayStart {
             week_resets_at: Timestamp(9),
@@ -408,7 +426,15 @@ mod tests {
         store.save(&state).unwrap();
         let text = fs::read_to_string(dir.path().join("state.json")).unwrap();
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
-        let pinned = |id, kind| serde_json::json!({ "id": id, "question": "q", "pull_request": 30, "kind": kind });
+        let pinned = |id: u64, kind| {
+            serde_json::json!({
+                "id": id,
+                "question": "q",
+                "pull_request": 30,
+                "kind": kind,
+                "alerted": id.is_multiple_of(2),
+            })
+        };
         assert_eq!(
             value,
             serde_json::json!({
@@ -421,8 +447,9 @@ mod tests {
                     pinned(2, serde_json::json!({ "kind": "rebase", "reason": "conflicts" })),
                     pinned(3, serde_json::json!({ "kind": "still-red", "head": "bad", "checks": ["lint"] })),
                     pinned(4, serde_json::json!({ "kind": "closed" })),
+                    pinned(5, serde_json::json!({ "kind": "question", "asked": "Which name?" })),
                 ],
-                "last_ruling": 4,
+                "last_ruling": 5,
                 "finished": [22, 30],
                 "leases": [{ "resource": "coderabbit", "since": 8 }],
                 "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
@@ -441,6 +468,17 @@ mod tests {
         .unwrap();
         let state = store.load().unwrap().unwrap();
         assert_eq!((state.last_ruling, state.finished), (0, vec![]));
+    }
+
+    #[test]
+    fn a_ruling_saved_before_webhooks_is_posted_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        let old = r#"{"version":1,"run":"running","since":7,"work_item":null,
+            "rulings":[{"id":1,"question":"q","pull_request":3,"kind":{"kind":"closed"}}],
+            "leases":[]}"#;
+        fs::write(dir.path().join("state.json"), old).unwrap();
+        assert!(!store.load().unwrap().unwrap().rulings[0].alerted);
     }
 
     #[test]

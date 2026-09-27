@@ -12,7 +12,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::adapters::{ClaudeCli, Gh, SystemClock};
+use crate::adapters::{ClaudeCli, Curl, Gh, SystemClock};
 use crate::ports::Ports;
 use crate::runner::{ACTIONS, ProjectName, ProjectPaths, Runner, answer, step};
 
@@ -52,6 +52,7 @@ fn serve(project: &str) -> Result<(), String> {
         claude: Arc::new(claude.clone()),
         forge: Box::new(Gh),
         meter: Box::new(claude.meter()),
+        alerts: Arc::new(Curl),
         clock: Box::new(SystemClock),
     };
     let runner = Runner::open(project, &paths, &home, &kelpie, ports).map_err(|e| e.to_string())?;
