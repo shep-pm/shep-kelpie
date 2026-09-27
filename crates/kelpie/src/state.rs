@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
 use crate::ports::Timestamp;
-use crate::work_item::WorkItem;
+use crate::work_item::{Review, WorkItem};
 
 /// The state file's format version
 const VERSION: u32 = 1;
@@ -118,11 +118,37 @@ pub enum RulingKind {
     /// Someone closed the pull request without merging it. A yes drops the
     /// work item and keeps its branch on the forge.
     Closed,
+    /// The qwen-review loop passed its round guard without settling. A yes
+    /// lets it past the guard for the rest of this work item.
+    ReviewGuard {
+        /// The review, at the round the guard stopped it on
+        review: Review,
+    },
     /// The worker ended its turn on a question. The answer is its next turn.
     Question {
         /// The question, verbatim from the worker's question block
         asked: String,
+        /// Where the qwen-review loop stood when the question interrupted
+        /// it, so the answer resumes the right place instead of the
+        /// ordinary rule (a known pull request goes straight to CI)
+        resume: Resume,
     },
+}
+
+/// Where the qwen-review loop stood when a worker's question interrupted
+/// it
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum Resume {
+    /// No pull request existed yet; answering it changes nothing
+    Nothing,
+    /// A pull request existed, but the loop had not run its first round;
+    /// once answered, start it
+    ReviewFirst,
+    /// The loop had already reached this round and stage; once answered,
+    /// resume exactly there
+    Review(Review),
 }
 
 /// A lease the dog granted this project
@@ -413,6 +439,7 @@ mod tests {
                 5,
                 RulingKind::Question {
                     asked: "Which name?".into(),
+                    resume: Resume::Nothing,
                 },
             ),
         ];
@@ -447,7 +474,14 @@ mod tests {
                     pinned(2, serde_json::json!({ "kind": "rebase", "reason": "conflicts" })),
                     pinned(3, serde_json::json!({ "kind": "still-red", "head": "bad", "checks": ["lint"] })),
                     pinned(4, serde_json::json!({ "kind": "closed" })),
-                    pinned(5, serde_json::json!({ "kind": "question", "asked": "Which name?" })),
+                    pinned(
+                        5,
+                        serde_json::json!({
+                            "kind": "question",
+                            "asked": "Which name?",
+                            "resume": { "state": "nothing" },
+                        }),
+                    ),
                 ],
                 "last_ruling": 5,
                 "finished": [22, 30],

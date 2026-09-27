@@ -1,0 +1,4 @@
+HIGH|src/pricing.rs:118|discount is applied twice when a coupon and a tier both match|customers are overcharged... or undercharged, depending on which bug you prefer
+MEDIUM|src/pricing.rs:140|Vec<Discount> is cloned on every call inside the pricing loop|O(n^2) allocation on a hot path with a large cart
+LOW|src/cli.rs:9|unused import `std::fmt::Write`|dead code
+LOW|src/generated.rs:0|not reviewed: 900 lines exceeds the chunk limit|split the file or review it by hand

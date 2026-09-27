@@ -15,7 +15,7 @@ use crate::ports::{ForgeError, Ports, Timestamp, Visibility};
 use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
-use crate::work_item::{Phase, Turn, WorkItem, new_session_id};
+use crate::work_item::{Phase, ReviewCallState, Turn, WorkItem, new_session_id};
 
 mod alert;
 mod dispatch;
@@ -25,6 +25,7 @@ mod pace;
 mod paths;
 mod question;
 mod report;
+mod review;
 mod ruling;
 mod trigger;
 mod turn;
@@ -153,9 +154,19 @@ impl Runner {
         check_repo(&settings)?;
         check_coderabbit(&settings, &ports)?;
         let store = StateStore::new(paths.state.clone());
-        let state = store
+        let mut state = store
             .load()?
             .unwrap_or_else(|| ProjectState::new(ports.clock.now()));
+        // A review call in flight when the runner stopped never resumes on
+        // its own, unlike a turn: nothing reruns review_step to naturally
+        // clear it, so a restart clears it here instead of leaving it stuck
+        // running forever and refusing every later drop.
+        if let Some(item) = &mut state.work_item
+            && matches!(item.review_call, ReviewCallState::Running { .. })
+        {
+            item.review_call = ReviewCallState::Idle;
+            store.save(&state)?;
+        }
         Ok(Self {
             project,
             settings,
@@ -241,6 +252,8 @@ impl Runner {
             pull_request: None,
             phase: Phase::Implement,
             red_head: None,
+            resume: None,
+            review_call: ReviewCallState::default(),
             calls: Vec::new(),
         });
         self.save(next).map_err(AddError::State)?;

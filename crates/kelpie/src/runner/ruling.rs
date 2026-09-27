@@ -12,8 +12,8 @@ use super::Runner;
 use super::gate::short;
 use super::report::{Begin, StepReport};
 use crate::ports::Timestamp;
-use crate::state::{ProjectState, Ruling, RulingKind, StateError};
-use crate::work_item::{Phase, Turn, WorkItem};
+use crate::state::{ProjectState, Resume, Ruling, RulingKind, StateError};
+use crate::work_item::{Phase, Review, Turn, WorkItem};
 
 /// The maintainer's answer to a ruling
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,8 +62,14 @@ impl std::error::Error for RuleError {}
 enum Move {
     /// It goes on to this phase
     Phase(Phase),
-    /// The worker takes a turn with this prompt
-    Turn(String),
+    /// The worker takes a turn with this prompt, under this phase; once
+    /// that turn ends with no further question, `force` (when given)
+    /// replaces the ordinary rule of a known pull request going to CI
+    Turn {
+        prompt: String,
+        phase: Phase,
+        force: Option<Phase>,
+    },
 }
 
 impl Runner {
@@ -86,9 +92,14 @@ impl Runner {
         if let Some(item) = next.work_item.as_mut().filter(|item| parked_on(item)) {
             match moved {
                 Move::Phase(phase) => item.phase = phase,
-                Move::Turn(prompt) => {
+                Move::Turn {
+                    prompt,
+                    phase,
+                    force,
+                } => {
                     item.turn = Turn::Next { prompt };
-                    item.phase = Phase::Implement;
+                    item.phase = phase;
+                    item.resume = force;
                 }
             }
         }
@@ -164,12 +175,33 @@ pub(super) fn park(
 // A yes, a no or an answer that does not fit the ruling is refused.
 fn decide(id: u64, answer: Answer, ruling: Ruling, now: Timestamp) -> Result<Move, RuleError> {
     let phase = match (answer, ruling.kind) {
-        (Answer::Text(text), RulingKind::Question { .. }) => {
-            return Ok(Move::Turn(answer_prompt(&text)));
+        (Answer::Text(text), RulingKind::Question { resume, .. }) => {
+            // A question resumes exactly where it interrupted the qwen-review
+            // loop; one asked before the loop ever started, with a pull
+            // request already open, starts it once answered instead of the
+            // ordinary rule of going straight to CI.
+            let (phase, force) = match resume {
+                Resume::Nothing => (Phase::Implement, None),
+                Resume::ReviewFirst => (Phase::Implement, Some(Phase::Review(Review::first()))),
+                Resume::Review(review) => (Phase::Review(review), None),
+            };
+            return Ok(Move::Turn {
+                prompt: answer_prompt(&text),
+                phase,
+                force,
+            });
         }
         (_, RulingKind::Question { .. }) => return Err(RuleError::WantsAnswer(id)),
         (Answer::Text(_), _) => return Err(RuleError::NotAQuestion(id)),
-        (Answer::No(note), _) => return Ok(Move::Turn(note_prompt(ruling.pull_request, &note))),
+        // A no's fix is new code, unreviewed: it goes through the
+        // qwen-review loop again before CI, whatever ruling this answers.
+        (Answer::No(note), _) => {
+            return Ok(Move::Turn {
+                prompt: note_prompt(ruling.pull_request, &note),
+                phase: Phase::Implement,
+                force: Some(Phase::Review(Review::first())),
+            });
+        }
         (Answer::Yes, RulingKind::Merge { head }) => Phase::Merge {
             head,
             readied: None,
@@ -179,6 +211,10 @@ fn decide(id: u64, answer: Answer, ruling: Ruling, now: Timestamp) -> Result<Mov
             since: now,
         },
         (Answer::Yes, RulingKind::Closed) => Phase::Done { merged: false },
+        (Answer::Yes, RulingKind::ReviewGuard { review }) => Phase::Review(Review {
+            guard_cleared: true,
+            ..review
+        }),
     };
     Ok(Move::Phase(phase))
 }
@@ -212,7 +248,12 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
              item and keeps its branch on the forge",
             capitalized(&about)
         ),
-        RulingKind::Question { asked } => {
+        RulingKind::ReviewGuard { review } => format!(
+            "The qwen-review loop on {about} has run {} rounds without \
+             settling. {yes} lets it keep going",
+            review.round.saturating_sub(1)
+        ),
+        RulingKind::Question { asked, .. } => {
             return format!(
                 "The worker on {about} asks:\n\n{asked}\n\n{} sends the worker your answer.",
                 trigger("answer <text>")
@@ -292,13 +333,17 @@ mod tests {
         assert!(rig.worktree_7().exists());
     }
 
+    // A no's fix is new code the loop has not seen: it goes back through
+    // the qwen-review loop, not straight to CI, before the next ruling.
     #[test]
-    fn a_no_sends_the_note_to_the_worker_and_a_new_ruling_follows_its_next_green_push() {
+    fn a_no_sends_the_note_to_the_worker_and_it_goes_through_review_before_the_next_ruling() {
         let (rig, runner, _) = Rig::parked("rotom");
         rig.ask(&runner, "rule", Some("1 no  rename the flag to --dry-run "));
-        rig.claude
-            .script([Scripted::Push("rename.txt", "renamed\n")]);
-        step(&runner).unwrap();
+        rig.claude.script([
+            Scripted::Push("rename.txt", "renamed\n"),
+            Scripted::Text("CLEAN"),
+        ]);
+        step(&runner).unwrap(); // the noted turn: pushes, enters round 1
         let [first, noted] = rig.claude.calls().try_into().unwrap();
         assert_eq!(noted.session, Session::Resume(first.session.id().clone()));
         assert_eq!(
@@ -306,8 +351,15 @@ mod tests {
             "The maintainer answered no on pull request #71, with this note:\n\n\
              rename the flag to --dry-run\n"
         );
+        assert_eq!(
+            rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+            "review",
+            "a no's fix resumes the loop, not CI directly"
+        );
 
         let pushed = rig.forge.head_of("kelpie/7").unwrap();
+        step(&runner).unwrap(); // review round 1, qwen: clean by default
+        step(&runner).unwrap(); // review round 2, claude: scripted clean above
         assert_eq!(
             step(&runner).unwrap(),
             None,
@@ -341,8 +393,13 @@ mod tests {
         let runner = rig.open().unwrap();
         rig.ask(&runner, "add", Some("7"));
         rig.forge.open_pull_request(72, "kelpie/7", &[7]);
-        rig.claude.script([Scripted::Push("again.txt", "again\n")]);
-        step(&runner).unwrap();
+        rig.claude.script([
+            Scripted::Push("again.txt", "again\n"),
+            Scripted::Text("CLEAN"),
+        ]);
+        step(&runner).unwrap(); // the worker's first turn: opens the pull request
+        step(&runner).unwrap(); // review round 1, qwen: clean by default
+        step(&runner).unwrap(); // review round 2, claude: scripted clean above
         let head = rig.forge.head_of("kelpie/7").unwrap();
         rig.forge.set_checks(&head, Checks::Passed);
         assert!(matches!(

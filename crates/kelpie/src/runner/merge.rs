@@ -12,7 +12,7 @@ use super::gate::{settled, short};
 use super::report::{Begin, StepReport};
 use crate::ports::{Checks, PullRequestState};
 use crate::state::{RulingKind, StateError};
-use crate::work_item::{Phase, Turn};
+use crate::work_item::{Phase, ReviewCallState, Turn};
 use crate::worktree::{self, Base};
 
 /// Why `drop` was refused
@@ -22,6 +22,9 @@ pub enum DropError {
     NoWorkItem,
     /// The worker's turn is running, and the work item stays until it ends
     TurnRunning(u64),
+    /// A review round or judge call is running, and the work item stays
+    /// until it ends, since its result runs outside the runner's lock
+    ReviewRunning(u64),
     /// A yes is being carried out, and the merge is not stopped halfway
     Merging(u64),
     /// Its worktree, branch or build folder could not be removed
@@ -35,6 +38,9 @@ impl fmt::Display for DropError {
         match self {
             Self::NoWorkItem => f.write_str("no work item is in flight"),
             Self::TurnRunning(issue) => write!(f, "the worker's turn on #{issue} is running"),
+            Self::ReviewRunning(issue) => {
+                write!(f, "the qwen-review loop's round on #{issue} is running")
+            }
             Self::Merging(issue) => write!(f, "the work item for #{issue} is merging"),
             Self::Cleanup(reason) => f.write_str(reason),
             Self::State(e) => e.fmt(f),
@@ -53,12 +59,15 @@ impl Runner {
     ///
     /// # Errors
     ///
-    /// [`DropError`] when nothing is in flight, a turn or a merge is under
-    /// way, or the cleanup fails. The work item stays then.
+    /// [`DropError`] when nothing is in flight, a turn, a review round or a
+    /// merge is under way, or the cleanup fails. The work item stays then.
     pub fn drop_work_item(&mut self) -> Result<(), DropError> {
         let item = self.state.work_item.as_ref().ok_or(DropError::NoWorkItem)?;
         if matches!(item.turn, Turn::Running { .. }) {
             return Err(DropError::TurnRunning(item.issue));
+        }
+        if matches!(item.review_call, ReviewCallState::Running { .. }) {
+            return Err(DropError::ReviewRunning(item.issue));
         }
         if matches!(
             item.phase,
@@ -466,6 +475,35 @@ mod tests {
             json!({ "error": "the work item for #7 is merging" })
         );
         assert!(rig.worktree_7().exists());
+    }
+
+    // A review round or judge call runs outside the runner's lock, the
+    // same as a worker's turn. Dropping the work item out from under one
+    // used to clear it while the call was still in flight, so the result
+    // panicked the runner (`end_review`'s `.expect` on a work item that
+    // was no longer there). Recording it in state the way a running turn
+    // is, and refusing `drop` while it is set, keeps the call from ever
+    // outliving its own work item. Unlike a turn, nothing ever reruns a
+    // review call on restart, so the marker cannot be left running: `open`
+    // clears it, rather than resuming it, before this drop can even ask.
+    #[test]
+    fn a_restart_clears_a_stale_review_call_so_drop_no_longer_refuses() {
+        let (rig, runner, _) = Rig::with_pull_request("shep");
+        drop(runner);
+        let state = rig.paths().state;
+        let text = std::fs::read_to_string(&state).unwrap();
+        let mut saved: serde_json::Value = serde_json::from_str(&text).unwrap();
+        saved["work_item"]["review_call"] = json!({ "state": "running", "since": Rig::EPOCH });
+        std::fs::write(&state, saved.to_string()).unwrap();
+
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "pause", None);
+        assert_eq!(
+            rig.ask(&runner, "drop", None)["work_item"],
+            json!(null),
+            "the restart cleared the stale marker, so the drop goes through"
+        );
+        assert!(!rig.worktree_7().exists());
     }
 
     // Seen live on the playground: the board polled a second after the

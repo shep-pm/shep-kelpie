@@ -33,10 +33,10 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::ports::{Checks, Session};
+    use crate::ports::{Checks, Finding, Session, Severity};
     use crate::profile::INSTRUCTIONS;
     use crate::runner::{Runner, StepReport, step};
-    use crate::test::{Rig, Scripted};
+    use crate::test::{Rig, Scripted, ScriptedRound};
 
     const ASKS: &str = "I added the flag.\n\n<kelpie-question>\nShould it be `--dry-run` or \
                         `--check`?\n\nBoth appear in the docs.\n</kelpie-question>\n";
@@ -135,7 +135,11 @@ mod tests {
                 "id": 1,
                 "question": question,
                 "pull_request": null,
-                "kind": { "kind": "question", "asked": QUESTION },
+                "kind": {
+                    "kind": "question",
+                    "asked": QUESTION,
+                    "resume": { "state": "nothing" },
+                },
                 "alerted": false,
             }])
         );
@@ -172,8 +176,11 @@ mod tests {
         assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
     }
 
+    // A question on the very turn that opens the pull request interrupts
+    // before the qwen-review loop ever started; once answered, the loop
+    // still runs, rather than skipping straight to CI the way it used to.
     #[test]
-    fn a_question_about_an_open_pull_request_is_posted_on_it_and_ci_waits() {
+    fn a_question_on_the_pr_opening_turn_still_runs_the_loop() {
         let (rig, runner) = asking("shep");
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
         let Some(StepReport::Asked {
@@ -192,15 +199,86 @@ mod tests {
         );
 
         rig.ask(&runner, "rule", Some("1 answer --dry-run"));
-        rig.claude
-            .script([Scripted::Push("rename.txt", "renamed\n")]);
-        step(&runner).unwrap();
+        rig.claude.script([
+            Scripted::Push("rename.txt", "renamed\n"),
+            Scripted::Text("CLEAN"),
+        ]);
+        step(&runner).unwrap(); // the answered turn: pushes, enters round 1
+        assert_eq!(
+            rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+            "review",
+            "answering resumes the qwen-review loop, not CI directly"
+        );
+        step(&runner).unwrap(); // review round 1, qwen: clean by default
+        step(&runner).unwrap(); // review round 2, claude: scripted clean above
         let head = rig.forge.head_of("kelpie/7").unwrap();
         rig.forge.set_checks(&head, Checks::Passed);
         assert!(matches!(
             rig.verdict(&runner),
             Some(StepReport::Ruling { id: 2, .. })
         ));
+    }
+
+    // A question asked mid-fix, during a review round's own turn,
+    // interrupts that exact round; once answered, it resumes there rather
+    // than restarting the loop.
+    #[test]
+    fn a_question_during_a_fix_turn_resumes_that_round() {
+        let rig = Rig::new("shep");
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "start", None);
+        rig.ask(&runner, "add", Some("7"));
+        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+        rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+        step(&runner).unwrap(); // opens the pull request, enters round 1 (qwen)
+
+        rig.reviewer.script([ScriptedRound::Findings(vec![Finding {
+            severity: Severity::Medium,
+            file: "src/lib.rs".into(),
+            line: 3,
+            what: "unused variable".into(),
+            why: "dead code".into(),
+        }])]);
+        step(&runner).unwrap(); // round 1's qwen call
+        rig.claude.script([Scripted::Text(
+            r#"{"holds": true, "severity": "low", "reason": "a nit"}"#,
+        )]);
+        step(&runner).unwrap(); // the judge holds it, a nit
+        step(&runner).unwrap(); // the round finalizes: sends the worker its fix
+
+        rig.claude.script([Scripted::Say(ASKS)]);
+        let Some(StepReport::Asked { id, .. }) = step(&runner).unwrap() else {
+            panic!("the fix turn's question raised no ruling");
+        };
+        assert_eq!(
+            rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+            "ruling",
+            "parked, but the round underneath is still round 1"
+        );
+
+        rig.ask(&runner, "rule", Some(&format!("{id} answer use --dry-run")));
+        rig.claude.script([
+            Scripted::Push("fixed.txt", "fixed\n"),
+            Scripted::Text("CLEAN"),
+        ]);
+        step(&runner).unwrap(); // the answered fix turn: pushes, round 1 ends
+        assert_eq!(
+            rig.ask(&runner, "status", None)["work_item"]["phase"],
+            json!({
+                "state": "review",
+                "round": 2,
+                "consecutive_clean": 1,
+                "guard_cleared": false,
+                "stage": { "stage": "round" },
+            }),
+            "resumed round 1, not restarted at round 1 again"
+        );
+        step(&runner).unwrap(); // round 2, claude: scripted clean above
+        assert_eq!(
+            rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+            "ci",
+            "two clean rounds in a row end the loop"
+        );
     }
 
     #[test]

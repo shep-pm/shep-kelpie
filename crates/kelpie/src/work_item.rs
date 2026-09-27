@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::board::WorkerModel;
-use crate::ports::{Cost, Role, SessionId, Timestamp, Usage};
+use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage, Verdict};
 
 /// The work item in flight
 // wire format: changing this is a breaking change to the state file
@@ -38,6 +38,15 @@ pub struct WorkItem {
     /// The head whose red CI run last went to the worker
     #[serde(default)]
     pub red_head: Option<String>,
+    /// What phase to force once the turn now running ends, overriding the
+    /// ordinary rule that a known pull request goes straight to CI. Set by
+    /// a ruling's answer that needs the qwen-review loop to run again;
+    /// cleared once applied.
+    #[serde(default)]
+    pub resume: Option<Phase>,
+    /// Whether a review round or judge call is in flight
+    #[serde(default)]
+    pub review_call: ReviewCallState,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
 }
@@ -50,9 +59,12 @@ pub struct WorkItem {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Phase {
-    /// The worker's turns. One that ends with a pull request open starts CI.
+    /// The worker's turns. One that ends with a pull request open starts the
+    /// qwen-review loop.
     #[default]
     Implement,
+    /// The qwen-review loop, between the draft pull request and CI
+    Review(Review),
     /// Waiting for CI on the pull request's head
     Ci {
         /// The head kelpie last saw, once it has looked
@@ -77,6 +89,97 @@ pub enum Phase {
     Done {
         /// Whether the pull request merged, so its branch on the forge goes too
         merged: bool,
+    },
+}
+
+/// Whether a review round or judge call is in flight
+///
+/// Recorded in state the way a running turn is: `drop` refuses while a
+/// call is running, since it runs outside the runner's lock and a dropped
+/// work item would leave nothing for the result to land on.
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ReviewCallState {
+    /// Nothing is running
+    #[default]
+    Idle,
+    /// A round or a judge call is running, started at this time
+    Running {
+        /// When it started
+        since: Timestamp,
+    },
+}
+
+/// Where the qwen-review loop stands
+///
+/// Rounds alternate, qwen first: an odd round is qwen's, an even one is
+/// Claude's. The loop ends once two rounds in a row hold nothing above a nit
+/// (LOW), with the worker's fix turn for each folded in before the next round.
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Review {
+    /// The round now running or about to run, 1-indexed
+    pub round: u32,
+    /// Rounds finished in a row with nothing held above a nit
+    pub consecutive_clean: u32,
+    /// Whether the maintainer already let the loop past its round guard
+    pub guard_cleared: bool,
+    /// Where this round stands
+    pub stage: ReviewStage,
+}
+
+impl Review {
+    /// The first round: qwen, about to run
+    pub fn first() -> Self {
+        Self {
+            round: 1,
+            consecutive_clean: 0,
+            guard_cleared: false,
+            stage: ReviewStage::Round,
+        }
+    }
+
+    /// Which reviewer runs this round
+    pub fn reviewer(&self) -> ReviewerKind {
+        if self.round % 2 == 1 {
+            ReviewerKind::Qwen
+        } else {
+            ReviewerKind::Claude
+        }
+    }
+}
+
+/// Which reviewer a review round runs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReviewerKind {
+    /// The maintainer's qwen-review script
+    Qwen,
+    /// A fresh Claude session, never the worker's
+    Claude,
+}
+
+/// Where one review round stands
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "stage", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ReviewStage {
+    /// About to run this round's reviewer
+    Round,
+    /// The round's raw findings, judged in order, oldest first
+    Judging {
+        /// What the reviewer found
+        findings: Vec<Finding>,
+        /// The judge's verdict on each finding judged so far, same order
+        verdicts: Vec<Verdict>,
+    },
+    /// The findings the judge held were sent to the worker; waiting for its fix
+    Fixing {
+        /// Whether every held finding was a nit (LOW), so a clean fix keeps
+        /// or extends the consecutive-clean streak
+        clean: bool,
     },
 }
 
@@ -180,6 +283,8 @@ mod tests {
                 "pull_request": 51,
                 "phase": { "state": "ci", "head": "c0ffee", "since": 11 },
                 "red_head": "bad",
+                "resume": null,
+                "review_call": { "state": "idle" },
                 "calls": [{
                     "role": "worker",
                     "at": 10,
@@ -214,6 +319,21 @@ mod tests {
         let value = |p: Phase| serde_json::to_value(p).unwrap();
         assert_eq!(value(Phase::Implement), json!({ "state": "implement" }));
         assert_eq!(
+            value(Phase::Review(Review {
+                round: 2,
+                consecutive_clean: 1,
+                guard_cleared: false,
+                stage: ReviewStage::Round,
+            })),
+            json!({
+                "state": "review",
+                "round": 2,
+                "consecutive_clean": 1,
+                "guard_cleared": false,
+                "stage": { "stage": "round" },
+            })
+        );
+        assert_eq!(
             value(Phase::Ruling { id: 3 }),
             json!({ "state": "ruling", "id": 3 })
         );
@@ -234,6 +354,69 @@ mod tests {
             })
             .unwrap(),
             json!({ "state": "next", "prompt": "fix it" })
+        );
+    }
+
+    #[test]
+    fn every_review_stage_is_pinned() {
+        let value = |s: ReviewStage| serde_json::to_value(s).unwrap();
+        let finding = Finding {
+            severity: crate::ports::Severity::High,
+            file: "a.rs".into(),
+            line: 3,
+            what: "bad".into(),
+            why: "breaks".into(),
+        };
+        let verdict = Verdict {
+            holds: true,
+            severity: crate::ports::Severity::Medium,
+            reason: "regraded".into(),
+        };
+        assert_eq!(
+            value(ReviewStage::Judging {
+                findings: vec![finding.clone()],
+                verdicts: vec![verdict.clone()],
+            }),
+            json!({
+                "stage": "judging",
+                "findings": [{
+                    "severity": "high",
+                    "file": "a.rs",
+                    "line": 3,
+                    "what": "bad",
+                    "why": "breaks",
+                }],
+                "verdicts": [{ "holds": true, "severity": "medium", "reason": "regraded" }],
+            })
+        );
+        assert_eq!(
+            value(ReviewStage::Fixing { clean: true }),
+            json!({ "stage": "fixing", "clean": true })
+        );
+    }
+
+    #[test]
+    fn rounds_alternate_qwen_first() {
+        let review = Review::first();
+        assert_eq!(review.reviewer(), ReviewerKind::Qwen);
+        assert_eq!(
+            Review { round: 2, ..review }.reviewer(),
+            ReviewerKind::Claude
+        );
+    }
+
+    #[test]
+    fn review_call_state_is_pinned() {
+        assert_eq!(
+            serde_json::to_value(ReviewCallState::Idle).unwrap(),
+            json!({ "state": "idle" })
+        );
+        assert_eq!(
+            serde_json::to_value(ReviewCallState::Running {
+                since: Timestamp(9)
+            })
+            .unwrap(),
+            json!({ "state": "running", "since": 9 })
         );
     }
 
