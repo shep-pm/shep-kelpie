@@ -19,6 +19,11 @@ use crate::worktree;
 /// `qwen-review.sh`, under the maintainer's `~/.claude/scripts/`
 const SCRIPT: &str = ".claude/scripts/qwen-review.sh";
 
+/// `origin/main`: the ref every round diffs against
+fn base_ref() -> String {
+    format!("origin/{}", worktree::BASE)
+}
+
 /// The maintainer's qwen-review script
 ///
 /// Clones share their rounds in flight, so one clone can stop them all.
@@ -61,9 +66,7 @@ impl QwenReviewer {
                 command.arg("--files").arg(files);
             }
             None => {
-                command
-                    .arg("--diff")
-                    .arg(format!("origin/{}", worktree::BASE));
+                command.arg("--diff").arg(base_ref());
             }
         }
         let output = self.processes.output(&mut command).map_err(|e| match e {
@@ -100,11 +103,10 @@ impl QwenReviewer {
         round: u32,
         skipped: &Finding,
     ) -> Result<Vec<Finding>, ReviewerError> {
-        let base = format!("origin/{}", worktree::BASE);
         let diff = Command::new("git")
             .arg("-C")
             .arg(worktree)
-            .args(["diff", &base, "-U25", "--"])
+            .args(["diff", &base_ref(), "-U25", "--"])
             .arg(&skipped.file)
             .stdin(Stdio::null())
             .output()
@@ -208,6 +210,34 @@ mod tests {
         );
     }
 
+    // A script that exits 0 but never wrote the marker: a round killed
+    // between its exit and the marker write, or one whose exit code lied.
+    #[test]
+    fn a_round_with_no_completion_marker_is_incomplete() {
+        let home = tempfile::tempdir().unwrap();
+        let script_dir = home.path().join(".claude/scripts");
+        std::fs::create_dir_all(&script_dir).unwrap();
+        let script = script_dir.join("qwen-review.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nmkdir -p \"$QWEN_REVIEW_OUT\"\nexit 0\n",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        let worktree = home.path().join("wt");
+        std::fs::create_dir_all(&worktree).unwrap();
+        let out = home.path().join("out");
+        let reviewer = QwenReviewer::new(home.path());
+
+        assert_eq!(
+            reviewer.round(&worktree, &out, 1),
+            Err(ReviewerError::Incomplete)
+        );
+    }
+
     // A fake script whose main round reports one file as skipped for size,
     // and whose hunk round (given `--files`) reports one real finding
     // against whatever path it was handed. Proves the hunk's own finding is
@@ -269,6 +299,98 @@ esac
                 why: "noisy logs".into(),
             }]
         );
+    }
+
+    // Not a git repository, so the `-U25` diff itself fails.
+    #[test]
+    fn a_git_diff_failure_keeps_the_skip_placeholder() {
+        let home = tempfile::tempdir().unwrap();
+        let script_dir = home.path().join(".claude/scripts");
+        std::fs::create_dir_all(&script_dir).unwrap();
+        let script = script_dir.join("qwen-review.sh");
+        let contents = "#!/bin/sh\nmkdir -p \"$QWEN_REVIEW_OUT\"\n\
+             printf 'LOW|nope.rs:0|not reviewed: 900 lines exceeds the chunk limit|split the file or review it by hand\\n' \\
+             > \"$QWEN_REVIEW_OUT/round-1.txt\"\n\
+             : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n";
+        std::fs::write(&script, contents).unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        let worktree = home.path().join("not-a-repo");
+        std::fs::create_dir_all(&worktree).unwrap();
+        let out = home.path().join("out");
+        let reviewer = QwenReviewer::new(home.path());
+
+        let skip = Finding {
+            severity: Severity::Low,
+            file: "nope.rs".into(),
+            line: 0,
+            what: "not reviewed: 900 lines exceeds the chunk limit".into(),
+            why: "split the file or review it by hand".into(),
+        };
+        assert_eq!(reviewer.round(&worktree, &out, 1).unwrap(), vec![skip]);
+    }
+
+    // Two files skipped in the same round, sharing a basename in different
+    // folders: their hunk files must not overwrite each other on disk.
+    #[test]
+    fn two_skipped_files_sharing_a_basename_keep_separate_hunk_files() {
+        let home = tempfile::tempdir().unwrap();
+        let script_dir = home.path().join(".claude/scripts");
+        std::fs::create_dir_all(&script_dir).unwrap();
+        let script = script_dir.join("qwen-review.sh");
+        let contents = "#!/bin/sh
+mkdir -p \"$QWEN_REVIEW_OUT\"
+case \"$*\" in
+  *--files*)
+    printf 'MEDIUM|whatever:1|a finding|a reason\\n' > \"$QWEN_REVIEW_OUT/round-1.txt\"
+    ;;
+  *)
+    printf 'LOW|sub/a/util.rs:0|not reviewed: 900 lines exceeds the chunk limit|split the file or review it by hand\\n' \\
+      > \"$QWEN_REVIEW_OUT/round-1.txt\"
+    printf 'LOW|sub/b/util.rs:0|not reviewed: 900 lines exceeds the chunk limit|split the file or review it by hand\\n' \\
+      >> \"$QWEN_REVIEW_OUT/round-1.txt\"
+    ;;
+esac
+: > \"$QWEN_REVIEW_OUT/round-1.txt.done\"
+";
+        std::fs::write(&script, contents).unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        let worktree = home.path().join("repo");
+        std::fs::create_dir_all(worktree.join("sub/a")).unwrap();
+        std::fs::create_dir_all(worktree.join("sub/b")).unwrap();
+        crate::test::git(&worktree, &["init", "--quiet", "-b", "main"]);
+        std::fs::write(worktree.join("sub/a/util.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(worktree.join("sub/b/util.rs"), "fn b() {}\n").unwrap();
+        crate::test::git(&worktree, &["add", "."]);
+        crate::test::git(&worktree, &["commit", "--quiet", "-m", "init"]);
+        let base = crate::test::git(&worktree, &["rev-parse", "HEAD"]);
+        crate::test::git(
+            &worktree,
+            &["update-ref", "refs/remotes/origin/main", &base],
+        );
+        std::fs::write(worktree.join("sub/a/util.rs"), "fn a() {}\nfn a2() {}\n").unwrap();
+        std::fs::write(worktree.join("sub/b/util.rs"), "fn b() {}\nfn b2() {}\n").unwrap();
+        crate::test::git(&worktree, &["commit", "--quiet", "-am", "change"]);
+
+        let out = home.path().join("out");
+        let reviewer = QwenReviewer::new(home.path());
+        let findings = reviewer.round(&worktree, &out, 1).unwrap();
+        assert_eq!(findings.len(), 2, "{findings:?}");
+        assert_eq!(findings[0].file, "sub/a/util.rs");
+        assert_eq!(findings[1].file, "sub/b/util.rs");
+
+        let hunk_dir = out.join("hunks").join("1");
+        let mut names: Vec<_> = std::fs::read_dir(&hunk_dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["sub_a_util.rs", "sub_b_util.rs"]);
     }
 
     #[test]
