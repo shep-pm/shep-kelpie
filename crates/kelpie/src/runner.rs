@@ -27,6 +27,7 @@ mod turn;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
 pub use report::StepReport;
 pub use ruling::{Answer, RuleError};
+pub use trigger::GateError;
 pub use trigger::{ACTIONS, Status, WorkItemStatus, answer};
 pub use turn::step;
 

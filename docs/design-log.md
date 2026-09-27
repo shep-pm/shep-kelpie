@@ -56,6 +56,7 @@ So kelpie moves the control room's rules (gates, locks, rate windows) into code,
 - A ruling is a pull request comment, a log line and a status entry, all carrying the same question and the triggers that answer it. Ruling ids never repeat. A no with a note is the worker's next turn.
 - A yes merges only the head it was asked about, while CI on it is green and it has the latest `main`. Otherwise kelpie withdraws the yes, reruns CI, and asks again. The merge is `gh pr merge --merge --match-head-commit`, never a squash, and kelpie then removes the worktree, both branches and the build folder.
 - A pull request the maintainer merges by hand ends its work item with no merge by kelpie. One closed without merging parks the worker.
+- A work item saved before the gate existed stays with its worker until `shep trigger <project> gate` sends it in. The trigger takes only an item whose turn has ended with a known pull request.
 - The project manager is kelpie code plus one-shot judgement calls (reading commits that landed after a review, auditing a docs PR's claims, checking new plans for overlapping intent) and a state file workers read. Coordination needs footprints, not a codebase map: planned files from the plan, actual files from the branch diff, `git merge-tree` for conflicts, and GitHub issue dependencies for order.
 
 ## Budget

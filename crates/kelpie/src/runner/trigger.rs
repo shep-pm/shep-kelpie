@@ -1,5 +1,6 @@
 //! The maintainer's triggers and what `status` shows
 
+use std::fmt;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -8,11 +9,11 @@ use serde::Serialize;
 use super::{Answer, Runner};
 use crate::board::WorkerModel;
 use crate::ports::{SessionId, Timestamp};
-use crate::state::{LeaseHeld, Ruling, RunState};
+use crate::state::{LeaseHeld, Ruling, RunState, StateError};
 use crate::work_item::{Phase, Turn, WorkItem};
 
 /// The triggers a runner answers
-pub const ACTIONS: [&str; 5] = ["status", "start", "pause", "add", "rule"];
+pub const ACTIONS: [&str; 6] = ["status", "start", "pause", "add", "rule", "gate"];
 
 /// What `rule` takes, as its refusals say
 const RULE_USAGE: &str = "`rule` takes `<id> yes` or `<id> no <note>`";
@@ -86,6 +87,7 @@ enum Request {
     Pause,
     Add(u64),
     Rule(u64, Answer),
+    Gate,
 }
 
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
@@ -107,6 +109,7 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
         Request::Pause => runner.pause().map_err(|e| e.to_string()),
         Request::Add(issue) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
         Request::Rule(id, answer) => runner.rule(id, answer).map_err(|e| e.to_string()),
+        Request::Gate => runner.gate().map_err(|e| e.to_string()),
     };
     match changed {
         Ok(()) => serde_json::to_string(&runner.status()).expect("status serializes to JSON"),
@@ -126,6 +129,7 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
         (_, Some(_)) => Err(format!("`{action}` takes no params")),
         ("start", None) => Ok(Request::Start),
         ("pause", None) => Ok(Request::Pause),
+        ("gate", None) => Ok(Request::Gate),
         (_, None) => Ok(Request::Status),
     }
 }
@@ -148,6 +152,73 @@ fn number(text: &str) -> Option<u64> {
     (n > 0 && text.bytes().all(|b| b.is_ascii_digit())).then_some(n)
 }
 
+/// Why `gate` was refused
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GateError {
+    /// No work item is in flight
+    NoWorkItem,
+    /// The work item is past its worker's turns: in CI, parked, or merging
+    AlreadyGated(u64),
+    /// The worker's turn has not ended, with the turn's state
+    TurnNotEnded(u64, &'static str),
+    /// Kelpie knows no pull request for the work item
+    NoPullRequest(u64),
+    /// The change could not be saved
+    State(StateError),
+}
+
+impl fmt::Display for GateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoWorkItem => f.write_str("no work item is in flight"),
+            Self::AlreadyGated(issue) => {
+                write!(f, "the work item for #{issue} is already in the gate")
+            }
+            Self::TurnNotEnded(issue, state) => {
+                write!(f, "the worker's turn on #{issue} is {state}, not ended")
+            }
+            Self::NoPullRequest(issue) => write!(f, "no pull request is known for #{issue}"),
+            Self::State(e) => e.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for GateError {}
+
+impl Runner {
+    /// Sends the work item into the gate, when its worker's turn has ended
+    /// with a pull request kelpie knows but the gate was not entered
+    ///
+    /// A work item saved before the gate existed is one such.
+    ///
+    /// # Errors
+    ///
+    /// [`GateError`] naming why the work item cannot enter the gate. Nothing
+    /// changes then.
+    pub fn gate(&mut self) -> Result<(), GateError> {
+        let item = self.state.work_item.as_ref().ok_or(GateError::NoWorkItem)?;
+        let issue = item.issue;
+        if item.phase != Phase::Implement {
+            return Err(GateError::AlreadyGated(issue));
+        }
+        let state = match item.turn {
+            Turn::Ended { .. } => None,
+            Turn::Due => Some("due"),
+            Turn::Next { .. } => Some("queued"),
+            Turn::Running { .. } => Some("running"),
+            Turn::Failed { .. } => Some("failed"),
+        };
+        if let Some(state) = state {
+            return Err(GateError::TurnNotEnded(issue, state));
+        }
+        if item.pull_request.is_none() {
+            return Err(GateError::NoPullRequest(issue));
+        }
+        let since = self.ports.clock.now();
+        self.update(|item| item.phase = Phase::Ci { head: None, since })
+            .map_err(GateError::State)
+    }
+}
 pub(super) fn lock(runner: &Mutex<Runner>) -> MutexGuard<'_, Runner> {
     runner.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -157,7 +228,9 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::test::Rig;
+    use crate::ports::{Checks, Cost, Usage};
+    use crate::runner::{StepReport, step};
+    use crate::test::{Rig, Scripted};
 
     // A running project with issue 7 in flight
     fn with_issue_7(project: &str) -> (Rig, Mutex<Runner>) {
@@ -189,7 +262,10 @@ mod tests {
     fn every_registered_action_is_answered_and_no_other() {
         let rig = Rig::new("koji");
         let runner = rig.open().unwrap();
-        for action in ACTIONS.into_iter().filter(|&a| a != "rule") {
+        for action in ACTIONS
+            .into_iter()
+            .filter(|a| !["rule", "gate"].contains(a))
+        {
             let params = (action == "add").then_some("7");
             assert_eq!(
                 rig.ask(&runner, action, params)["project"],
@@ -254,5 +330,60 @@ mod tests {
             json!({ "error": "cannot read the issue: gh failed: no issue #9" })
         );
         assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
+    }
+
+    #[test]
+    fn gate_sends_a_work_item_saved_before_the_gate_to_its_merge_ruling() {
+        let (rig, runner, head) = Rig::with_pull_request("hazels-lab");
+        drop(runner);
+        let state = rig.paths().state;
+        let text = std::fs::read_to_string(&state).unwrap();
+        let mut saved: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let item = saved["work_item"].as_object_mut().unwrap();
+        item.remove("phase");
+        item.remove("red_head");
+        std::fs::write(&state, saved.to_string()).unwrap();
+
+        let runner = rig.open().unwrap();
+        rig.forge.set_checks(&head, Checks::Passed);
+        assert_eq!(step(&runner).unwrap(), None, "left alone until asked");
+        let status = rig.ask(&runner, "gate", None);
+        assert_eq!(
+            status["work_item"]["phase"],
+            json!({ "state": "ci", "head": null, "since": Rig::EPOCH })
+        );
+        assert!(matches!(
+            rig.verdict(&runner),
+            Some(StepReport::Ruling { id: 1, .. })
+        ));
+        assert_eq!(rig.forge.merges(), []);
+    }
+
+    #[test]
+    fn gate_refuses_anything_but_an_ended_turn_with_a_known_pull_request() {
+        let rig = Rig::new("koji");
+        let runner = rig.open().unwrap();
+        let refused = |runner: &Mutex<Runner>, error: &str| {
+            assert_eq!(rig.ask(runner, "gate", None), json!({ "error": error }));
+        };
+        refused(&runner, "no work item is in flight");
+        rig.ask(&runner, "add", Some("7"));
+        refused(&runner, "the worker's turn on #7 is due, not ended");
+        assert_eq!(
+            rig.ask(&runner, "gate", Some("7")),
+            json!({ "error": "`gate` takes no params" })
+        );
+
+        rig.ask(&runner, "start", None);
+        rig.claude
+            .script([Scripted::Reply(Usage::default(), Cost(1))]);
+        step(&runner).unwrap();
+        refused(&runner, "no pull request is known for #7");
+
+        let (rig, runner, _) = Rig::with_pull_request("rotom");
+        assert_eq!(
+            rig.ask(&runner, "gate", None),
+            json!({ "error": "the work item for #7 is already in the gate" })
+        );
     }
 }
