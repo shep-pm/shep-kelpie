@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::settings::{BuildDir, EnvName, GuardHook, HookEvent, NonBlank};
+use crate::worktree::BASE;
 
 /// Kelpie's instructions to every worker, appended to its system prompt
 pub const INSTRUCTIONS: &str = include_str!("worker-instructions.md");
@@ -58,6 +59,10 @@ const PM_ONLY: [&str; 5] = [
     "Bash(gh pr ready *)",
     "Bash(gh *review please*)",
 ];
+
+// `gh api` could merge or relabel around the rules above, and nothing else a
+// worker does needs it.
+const GH_API: [&str; 2] = ["Bash(gh api)", "Bash(gh api *)"];
 
 // What `git push` and `gh` reach. A project adds its own, such as a registry.
 const GITHUB: [&str; 2] = ["github.com", "api.github.com"];
@@ -108,6 +113,8 @@ impl WorkerProfile<'_> {
             .iter()
             .map(|p| format!("Read({p})"))
             .chain(PM_ONLY.iter().map(|&r| r.to_owned()))
+            .chain(GH_API.iter().map(|&r| r.to_owned()))
+            .chain(push_to_base())
             .collect();
         let domains: Vec<&str> = GITHUB
             .into_iter()
@@ -159,6 +166,15 @@ impl WorkerProfile<'_> {
         }
         hooks
     }
+}
+
+// Pushes that name the branch kelpie cuts from, as `origin main`,
+// `HEAD:main` or `refs/heads/main`. A repo without branch protection
+// would otherwise take them.
+fn push_to_base() -> impl Iterator<Item = String> {
+    [" {b}", " {b} *", ":{b}*", "/{b}*", " +{b}*"]
+        .into_iter()
+        .map(|p| format!("Bash(git push *{})", p.replace("{b}", BASE)))
 }
 
 fn entry(matcher: Option<&str>, command: &str) -> Value {
@@ -339,6 +355,32 @@ mod tests {
         ] {
             assert!(deny.contains(&rule), "{rule}");
         }
+    }
+
+    #[test]
+    fn gh_api_is_denied() {
+        let deny = settings(&[])["permissions"]["deny"].clone();
+        let deny = strings(&deny);
+        assert!(deny.contains(&"Bash(gh api)"));
+        assert!(deny.contains(&"Bash(gh api *)"));
+    }
+
+    #[test]
+    fn a_push_to_the_base_branch_is_denied_however_it_is_spelt() {
+        let deny = settings(&[])["permissions"]["deny"].clone();
+        assert_eq!(
+            strings(&deny)
+                .into_iter()
+                .filter(|r| r.starts_with("Bash(git push"))
+                .collect::<Vec<_>>(),
+            [
+                "Bash(git push * main)",
+                "Bash(git push * main *)",
+                "Bash(git push *:main*)",
+                "Bash(git push */main*)",
+                "Bash(git push * +main*)",
+            ]
+        );
     }
 
     #[test]
