@@ -191,7 +191,9 @@ async fn wait_for_grant(kind: &LeaseKind, signals: &mut Signals) -> Result<Optio
         tokio::select! {
             () = tokio::time::sleep(DOG_POLL) => {}
             caught = signals.recv() => {
-                ask_dog("return", kind.as_str()).await?;
+                if let Err(e) = ask_dog("return", kind.as_str()).await {
+                    eprintln!("kelpie lease: {e}: run `kelpie lease return {kind}`");
+                }
                 return Ok(Some(caught));
             }
         }
