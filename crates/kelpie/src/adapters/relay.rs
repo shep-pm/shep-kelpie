@@ -341,6 +341,16 @@ mod tests {
         assert_eq!(newest_and_extras(&agents), (None, Vec::new()));
     }
 
+    #[test]
+    fn a_pid_over_u32_max_is_dropped_rather_than_matched_wrong() {
+        let agents = vec![json!({
+            "pid": u64::from(u32::MAX) + 1,
+            "id": "impossible",
+            "name": NAME,
+        })];
+        assert_eq!(newest_and_extras(&agents), (None, Vec::new()));
+    }
+
     // Measured live on #14: more than one live relay under the fixed name
     // at once, both with a pid. The newest is kept; the other is an extra
     // to stop and remove.
