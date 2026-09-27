@@ -423,6 +423,56 @@ impl fmt::Display for AlertError {
 
 impl std::error::Error for AlertError {}
 
+/// Sends a ruling to the maintainer's relay session
+///
+/// The relay is one background Claude Code session, found by its fixed
+/// name so a second one is never started. Sending only delivers the
+/// message: the relay's own reply, if any, is not read here. The
+/// maintainer's answer comes back later through `shep trigger`, on its own.
+pub trait Relay: Send + Sync {
+    /// Sends `message`, starting the relay first if none is running
+    ///
+    /// # Errors
+    ///
+    /// [`RelayError`] when the relay cannot be started or reached.
+    fn send(&self, message: &str) -> Result<(), RelayError>;
+
+    /// Stops the relay, if one is running, so kelpie starts a fresh one
+    /// next time and its context does not grow without bound
+    ///
+    /// # Errors
+    ///
+    /// [`RelayError`] when a running relay could not be stopped. Not an
+    /// error when none was running.
+    fn clear(&self) -> Result<(), RelayError>;
+}
+
+/// Why the relay could not be reached
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelayError {
+    /// The relay session could not be started, with the reason
+    CannotStart(String),
+    /// The relay was started but never appeared in `claude agents --json --all`
+    NeverAppeared,
+    /// Its messaging socket could not be reached, with the reason
+    Unreachable(String),
+    /// A running relay could not be stopped, with the reason
+    CannotStop(String),
+}
+
+impl fmt::Display for RelayError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CannotStart(reason) => write!(f, "cannot start the relay: {reason}"),
+            Self::NeverAppeared => f.write_str("the relay never appeared after starting"),
+            Self::Unreachable(reason) => write!(f, "cannot reach the relay: {reason}"),
+            Self::CannotStop(reason) => write!(f, "cannot stop the relay: {reason}"),
+        }
+    }
+}
+
+impl std::error::Error for RelayError {}
+
 /// Every port the runner uses, as one bundle
 pub struct Ports {
     /// Headless Claude, shared so a turn runs without holding the runner
@@ -431,6 +481,8 @@ pub struct Ports {
     pub forge: Box<dyn Forge>,
     /// The account's usage
     pub meter: Box<dyn Meter>,
+    /// The maintainer's relay session, tried before the webhook
+    pub relay: Arc<dyn Relay>,
     /// The maintainer's webhook, shared so a post runs without holding the runner
     pub alerts: Arc<dyn Alerts>,
     /// The clock

@@ -37,15 +37,23 @@ const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
 ///
 /// [`StateError`] when the turn's start or end, or a post, cannot be saved.
 pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
-    let (claude, alerts) = {
+    let (claude, relay, alerts) = {
         let runner = lock(runner);
         (
             Arc::clone(&runner.ports.claude),
+            Arc::clone(&runner.ports.relay),
             Arc::clone(&runner.ports.alerts),
         )
     };
     let due = lock(runner).alert_due();
     if let Some(due) = due {
+        // The relay is a faster, nicer path when it is reachable, but the
+        // webhook is what actually keeps a ruling from being lost, so it
+        // posts every ruling regardless of how the relay's send went.
+        if lock(runner).relay_clear_due() {
+            let _ = relay.clear();
+        }
+        let _ = relay.send(&due.relay_message);
         let sent = alerts.post(&due.webhook, &due.alert);
         return lock(runner).alert_sent(due.id, sent).map(Some);
     }

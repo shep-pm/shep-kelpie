@@ -126,6 +126,9 @@ pub struct Runner {
     webhook: Webhook,
     // The last failed webhook post, kept in memory so a restart tries at once
     retry: Option<alert::Retry>,
+    // When the relay was last cleared, kept in memory only: a restart may
+    // clear a session sooner than a full day, never later.
+    relay_cleared: Option<Timestamp>,
 }
 
 impl Runner {
@@ -164,6 +167,7 @@ impl Runner {
             pacing: None,
             webhook,
             retry: None,
+            relay_cleared: None,
         })
     }
 
