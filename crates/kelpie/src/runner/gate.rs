@@ -32,7 +32,6 @@ impl Runner {
         let Phase::Ci { head: seen, since } = item.phase.clone() else {
             return Ok(Begin::Idle);
         };
-        let known = item.known.clone();
         let pr = match self.ports.forge.pull_request(&self.settings.forge, number) {
             Ok(pr) => pr,
             Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}: {e}"))),
@@ -46,7 +45,7 @@ impl Runner {
             }
             PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
         }
-        if let Some((known, description)) = foreign_change(&known, &pr.labels, !pr.draft) {
+        if let Some((known, description)) = foreign_change(&item.known, &pr.labels, !pr.draft) {
             return self.raise(number, RulingKind::ForeignChange { description, known });
         }
         let now = self.ports.clock.now();

@@ -80,10 +80,18 @@ pub fn foreign_change(known: &Known, labels: &[String], ready: bool) -> Option<(
         .collect();
     let mut parts = Vec::new();
     if !added.is_empty() {
-        parts.push(format!("the `{}` label was added", joined(&added)));
+        parts.push(format!(
+            "the `{}` {} added",
+            joined(&added),
+            label_or_labels(added.len())
+        ));
     }
     if !removed.is_empty() {
-        parts.push(format!("the `{}` label was removed", joined(&removed)));
+        parts.push(format!(
+            "the `{}` {} removed",
+            joined(&removed),
+            label_or_labels(removed.len())
+        ));
     }
     if ready && !known.ready {
         parts.push("it was marked ready for review".to_owned());
@@ -98,6 +106,10 @@ pub fn foreign_change(known: &Known, labels: &[String], ready: bool) -> Option<(
         ready,
     };
     Some((seen, parts.join("; ")))
+}
+
+fn label_or_labels(n: usize) -> &'static str {
+    if n == 1 { "label was" } else { "labels were" }
 }
 
 fn joined(labels: &[&String]) -> String {
@@ -497,6 +509,84 @@ mod tests {
         assert_eq!(groups, [8, 4, 4, 4, 12]);
         assert_eq!(&a[14..15], "4");
         assert!(matches!(&a[19..20], "8" | "9" | "a" | "b"), "{a}");
+    }
+
+    #[test]
+    fn nothing_changed_is_no_foreign_change() {
+        let known = Known {
+            labels: vec!["bug".into()],
+            ready: true,
+        };
+        assert_eq!(foreign_change(&known, &["bug".to_owned()], true), None);
+    }
+
+    #[test]
+    fn one_label_added_is_named_in_the_singular() {
+        let known = Known::default();
+        let (seen, text) = foreign_change(&known, &["bug".to_owned()], false).unwrap();
+        assert_eq!(text, "the `bug` label was added");
+        assert_eq!(
+            seen,
+            Known {
+                labels: vec!["bug".into()],
+                ready: false,
+            }
+        );
+    }
+
+    #[test]
+    fn two_labels_added_are_named_in_the_plural() {
+        let known = Known::default();
+        let labels = ["urgent".to_owned(), "bug".to_owned()];
+        let (_, text) = foreign_change(&known, &labels, false).unwrap();
+        assert_eq!(text, "the `urgent`, `bug` labels were added");
+    }
+
+    #[test]
+    fn labels_removed_are_named_with_the_same_singular_and_plural_rule() {
+        let known = Known {
+            labels: vec!["bug".into()],
+            ready: false,
+        };
+        let (_, text) = foreign_change(&known, &[], false).unwrap();
+        assert_eq!(text, "the `bug` label was removed");
+
+        let known = Known {
+            labels: vec!["urgent".into(), "bug".into()],
+            ready: false,
+        };
+        let (_, text) = foreign_change(&known, &[], false).unwrap();
+        assert_eq!(text, "the `urgent`, `bug` labels were removed");
+    }
+
+    #[test]
+    fn marking_ready_or_a_draft_again_is_named() {
+        let known = Known::default();
+        let (seen, text) = foreign_change(&known, &[], true).unwrap();
+        assert_eq!(text, "it was marked ready for review");
+        assert!(seen.ready);
+
+        let known = Known {
+            labels: vec![],
+            ready: true,
+        };
+        let (seen, text) = foreign_change(&known, &[], false).unwrap();
+        assert_eq!(text, "it was marked a draft again");
+        assert!(!seen.ready);
+    }
+
+    #[test]
+    fn every_kind_of_change_at_once_is_joined_with_semicolons() {
+        let known = Known {
+            labels: vec!["bug".into()],
+            ready: false,
+        };
+        let (_, text) = foreign_change(&known, &["urgent".to_owned()], true).unwrap();
+        assert_eq!(
+            text,
+            "the `urgent` label was added; the `bug` label was removed; \
+             it was marked ready for review"
+        );
     }
 
     #[test]
