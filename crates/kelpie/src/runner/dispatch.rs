@@ -168,7 +168,7 @@ mod tests {
         assert_eq!(
             rig.ask(&runner, "add", Some("8")),
             json!({ "error": "label `worker:gpt-high` is not `worker:<model>-<effort>` \
-                              with model opus, sonnet, haiku or fable" })
+                              with a model from opus, sonnet, haiku, fable" })
         );
         rig.forge.label(9, "worker:haiku-low");
         let item = &rig.ask(&runner, "add", Some("9"))["work_item"];
@@ -211,6 +211,20 @@ mod tests {
             step(&runner).unwrap(),
             Some(TurnReport::Dispatched { issue: 2, .. })
         ));
+    }
+
+    #[test]
+    fn a_dispatch_that_cannot_be_saved_is_an_error_and_takes_nothing() {
+        let (rig, runner) = running("rotom");
+        rig.forge.list_ready(4, false);
+        std::fs::remove_dir_all(rig.paths().state.parent().unwrap()).unwrap();
+        let err = step(&runner).unwrap_err();
+        assert!(
+            err.to_string().starts_with("cannot write state file"),
+            "{err}"
+        );
+        assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
+        assert_eq!(rig.claude.calls(), []);
     }
 
     #[test]

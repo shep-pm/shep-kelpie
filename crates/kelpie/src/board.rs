@@ -156,11 +156,14 @@ impl fmt::Display for LabelError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Several => f.write_str("the issue has more than one `worker:` label"),
-            Self::Unreadable(label) => write!(
-                f,
-                "label `{label}` is not `worker:<model>-<effort>` with model \
-                 opus, sonnet, haiku or fable"
-            ),
+            Self::Unreadable(label) => {
+                let names: Vec<&str> = MODELS.iter().map(|(name, _)| *name).collect();
+                write!(
+                    f,
+                    "label `{label}` is not `worker:<model>-<effort>` with a model from {}",
+                    names.join(", ")
+                )
+            }
         }
     }
 }
@@ -241,6 +244,19 @@ mod tests {
                 },
                 Skip::Assigned { issue: 3 },
             ]
+        );
+    }
+
+    #[test]
+    fn a_board_where_every_issue_is_taken_picks_nothing_and_says_why() {
+        let mut taken = ready(3);
+        taken.assigned = true;
+        assert_eq!(
+            pick(&[taken], &[]),
+            Pick {
+                issue: None,
+                skipped: vec![Skip::Assigned { issue: 3 }]
+            }
         );
     }
 
