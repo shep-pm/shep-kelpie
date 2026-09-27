@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::board::WorkerModel;
 use crate::ports::{Cost, Role, SessionId, Timestamp, Usage};
 
 /// The work item in flight
@@ -23,10 +24,14 @@ pub struct WorkItem {
     pub worktree: PathBuf,
     /// Its worker's build folder
     pub build: PathBuf,
+    /// The model and effort its worker runs on
+    pub worker: WorkerModel,
     /// The worker's session, chosen before its first turn
     pub session: SessionId,
     /// Where the worker's turn stands
     pub turn: Turn,
+    /// The draft pull request its worker opened, once kelpie has seen it
+    pub pull_request: Option<u64>,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
 }
@@ -120,8 +125,10 @@ mod tests {
                 "branch": "kelpie/42",
                 "worktree": "/k/wt/shep/42",
                 "build": "/k/targets/shep/42",
+                "worker": { "model": "claude-opus-5-5", "effort": "medium" },
                 "session": "5e55",
                 "turn": { "state": "running", "since": 9 },
+                "pull_request": 51,
                 "calls": [{
                     "role": "worker",
                     "at": 10,

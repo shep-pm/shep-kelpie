@@ -9,6 +9,7 @@
 #![doc(test(attr(deny(warnings))))]
 
 pub mod adapters;
+pub mod board;
 pub mod confine;
 pub mod ports;
 pub mod profile;

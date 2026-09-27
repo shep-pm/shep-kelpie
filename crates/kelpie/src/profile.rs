@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::settings::{GuardHook, HookEvent};
+use crate::settings::{GuardHook, HookEvent, NonBlank};
 
 /// Kelpie's instructions to every worker, appended to its system prompt
 pub const INSTRUCTIONS: &str = include_str!("worker-instructions.md");
@@ -58,14 +58,8 @@ const PM_ONLY: [&str; 5] = [
     "Bash(gh *review please*)",
 ];
 
-// GitHub for git and `gh`, and the crates registry for a cold cargo cache.
-const DOMAINS: [&str; 5] = [
-    "github.com",
-    "api.github.com",
-    "crates.io",
-    "index.crates.io",
-    "static.crates.io",
-];
+// What `git push` and `gh` reach. A project adds its own, such as a registry.
+const GITHUB: [&str; 2] = ["github.com", "api.github.com"];
 
 /// Where one worker may write, and what it runs under
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +78,8 @@ pub struct WorkerProfile<'a> {
     pub kelpie: &'a Path,
     /// The guard hooks the project's settings name
     pub guard_hooks: &'a [GuardHook],
+    /// The domains the project's settings add to GitHub's
+    pub allowed_domains: &'a [NonBlank],
 }
 
 impl WorkerProfile<'_> {
@@ -106,13 +102,17 @@ impl WorkerProfile<'_> {
             .map(|p| format!("Read({p})"))
             .chain(PM_ONLY.iter().map(|&r| r.to_owned()))
             .collect();
+        let domains: Vec<&str> = GITHUB
+            .into_iter()
+            .chain(self.allowed_domains.iter().map(NonBlank::as_str))
+            .collect();
         json!({
             "sandbox": {
                 "enabled": true,
                 "failIfUnavailable": true,
                 "allowUnsandboxedCommands": false,
                 "filesystem": { "allowWrite": allow_write, "denyWrite": deny_write },
-                "network": { "allowedDomains": DOMAINS },
+                "network": { "allowedDomains": domains },
             },
             "permissions": { "deny": deny },
             "hooks": self.hooks(),
@@ -177,6 +177,10 @@ mod tests {
     }
 
     fn settings(hooks: &[GuardHook]) -> Value {
+        with_domains(hooks, &[])
+    }
+
+    fn with_domains(hooks: &[GuardHook], domains: &[NonBlank]) -> Value {
         WorkerProfile {
             worktree: Path::new("/k/wt/shep/7"),
             build: Path::new("/k/targets/shep/7"),
@@ -185,6 +189,7 @@ mod tests {
             branch: "kelpie/7",
             kelpie: Path::new("/opt/kelpie's bin/kelpie"),
             guard_hooks: hooks,
+            allowed_domains: domains,
         }
         .settings()
     }
@@ -235,7 +240,19 @@ mod tests {
             ]
         );
         assert_eq!(s["env"]["CARGO_TARGET_DIR"], "/k/targets/shep/7");
-        assert_eq!(strings(&s["sandbox"]["network"]["allowedDomains"]), DOMAINS);
+    }
+
+    #[test]
+    fn the_network_is_github_and_the_projects_own_domains_only() {
+        assert_eq!(
+            strings(&settings(&[])["sandbox"]["network"]["allowedDomains"]),
+            ["github.com", "api.github.com"]
+        );
+        let npm = [NonBlank::try_from("registry.npmjs.org".to_owned()).unwrap()];
+        assert_eq!(
+            strings(&with_domains(&[], &npm)["sandbox"]["network"]["allowedDomains"]),
+            ["github.com", "api.github.com", "registry.npmjs.org"]
+        );
     }
 
     #[test]

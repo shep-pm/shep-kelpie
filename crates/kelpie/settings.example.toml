@@ -43,6 +43,11 @@ divisor = 1000
 [pacing]
 kickoff_hours = 8
 
+# Domains a worker's sandbox may reach besides GitHub: here the crates
+# registry, for a cold cargo cache.
+[worker]
+allowed_domains = ["crates.io", "index.crates.io", "static.crates.io"]
+
 [[worker.guard_hooks]]
 event = "PreToolUse"
 matcher = "Bash"

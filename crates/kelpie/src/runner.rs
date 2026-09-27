@@ -9,11 +9,13 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::board::{LabelError, WorkerModel, worker_override};
 use crate::ports::{ForgeError, Ports, Visibility};
 use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::work_item::{Turn, WorkItem, new_session_id};
 
+mod dispatch;
 mod paths;
 mod trigger;
 mod turn;
@@ -70,6 +72,8 @@ pub enum AddError {
     InFlight(u64),
     /// The forge could not show the issue
     Forge(ForgeError),
+    /// The issue's `worker:` label cannot be used
+    Label(LabelError),
     /// No random session id could be drawn, with the OS's reason
     Session(String),
     /// The work item could not be saved
@@ -81,6 +85,7 @@ impl fmt::Display for AddError {
         match self {
             Self::InFlight(issue) => write!(f, "the work item for #{issue} is in flight"),
             Self::Forge(e) => write!(f, "cannot read the issue: {e}"),
+            Self::Label(e) => e.fmt(f),
             Self::Session(e) => write!(f, "cannot draw a session id: {e}"),
             Self::State(e) => e.fmt(f),
         }
@@ -175,8 +180,9 @@ impl Runner {
     ///
     /// # Errors
     ///
-    /// [`AddError`] when a work item is in flight, the issue cannot be read,
-    /// or the change cannot be saved. Nothing changes then.
+    /// [`AddError`] when a work item is in flight, the issue cannot be read
+    /// or its `worker:` label understood, or the change cannot be saved.
+    /// Nothing changes then.
     pub fn add(&mut self, issue: u64) -> Result<(), AddError> {
         if let Some(item) = &self.state.work_item {
             return Err(AddError::InFlight(item.issue));
@@ -186,6 +192,9 @@ impl Runner {
             .forge
             .issue(&self.settings.forge, issue)
             .map_err(AddError::Forge)?;
+        let worker = worker_override(&found.labels)
+            .map_err(AddError::Label)?
+            .unwrap_or_else(|| WorkerModel::from(&self.settings.models.worker));
         let session = new_session_id().map_err(|e| AddError::Session(e.to_string()))?;
         let mut next = self.state.clone();
         next.work_item = Some(WorkItem {
@@ -194,8 +203,10 @@ impl Runner {
             branch: format!("kelpie/{issue}"),
             worktree: self.paths.worktree(issue),
             build: self.paths.build(issue),
+            worker,
             session,
             turn: Turn::Due,
+            pull_request: None,
             calls: Vec::new(),
         });
         self.save(next).map_err(AddError::State)

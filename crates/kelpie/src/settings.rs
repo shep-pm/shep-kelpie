@@ -10,7 +10,7 @@ use std::io;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Everything kelpie reads about one project
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -72,7 +72,8 @@ pub struct RoleModel {
 }
 
 /// A Claude effort level
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Effort {
     /// `low`
@@ -97,6 +98,13 @@ impl Effort {
             Self::Xhigh => "xhigh",
             Self::Max => "max",
         }
+    }
+
+    /// The level `claude --effort` takes as `s`, if any
+    pub fn parse(s: &str) -> Option<Self> {
+        [Self::Low, Self::Medium, Self::High, Self::Xhigh, Self::Max]
+            .into_iter()
+            .find(|e| e.as_str() == s)
     }
 }
 
@@ -133,6 +141,9 @@ pub struct Pacing {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Worker {
+    /// Domains the worker's sandbox may reach besides GitHub, such as a
+    /// package registry
+    pub allowed_domains: Vec<NonBlank>,
     /// Hooks copied into each worker's own settings file
     pub guard_hooks: Vec<GuardHook>,
 }
@@ -347,6 +358,16 @@ mod tests {
         assert_eq!(s.pacing.kickoff_hours.get(), 8);
         assert!(s.generated.iter().any(|g| g == "Cargo.lock"));
         assert_eq!(s.worker.guard_hooks[0].event, HookEvent::PreToolUse);
+        let domains: Vec<&str> = s
+            .worker
+            .allowed_domains
+            .iter()
+            .map(NonBlank::as_str)
+            .collect();
+        assert_eq!(
+            domains,
+            ["crates.io", "index.crates.io", "static.crates.io"]
+        );
     }
 
     #[test]
