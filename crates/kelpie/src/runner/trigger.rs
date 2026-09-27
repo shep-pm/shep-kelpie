@@ -5,14 +5,17 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use serde::Serialize;
 
-use super::Runner;
+use super::{Answer, Runner};
 use crate::board::WorkerModel;
 use crate::ports::{SessionId, Timestamp};
 use crate::state::{LeaseHeld, Ruling, RunState};
-use crate::work_item::{Turn, WorkItem};
+use crate::work_item::{Phase, Turn, WorkItem};
 
 /// The triggers a runner answers
-pub const ACTIONS: [&str; 4] = ["status", "start", "pause", "add"];
+pub const ACTIONS: [&str; 5] = ["status", "start", "pause", "add", "rule"];
+
+/// What `rule` takes, as its refusals say
+const RULE_USAGE: &str = "`rule` takes `<id> yes` or `<id> no <note>`";
 
 /// What `status` answers
 #[derive(Debug, Serialize)]
@@ -48,6 +51,8 @@ pub struct WorkItemStatus<'a> {
     pub session: &'a SessionId,
     /// Where the worker's turn stands
     pub turn: &'a Turn,
+    /// Where it stands between the worker's turns and the merge
+    pub phase: &'a Phase,
     /// The worker's draft pull request, once kelpie has seen it
     pub pull_request: Option<u64>,
     /// Claude calls made for it so far
@@ -66,6 +71,7 @@ impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
             worker: &item.worker,
             session: &item.session,
             turn: &item.turn,
+            phase: &item.phase,
             pull_request: item.pull_request,
             calls: item.calls.len(),
             cost_usd: item.cost().usd(),
@@ -73,38 +79,73 @@ impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
     }
 }
 
+/// A trigger, read
+enum Request {
+    Status,
+    Start,
+    Pause,
+    Add(u64),
+    Rule(u64, Answer),
+}
+
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
 ///
-/// Blank params count as none. `add` takes an issue number, and every
-/// other action takes nothing.
+/// Blank params count as none. `add` takes an issue number, `rule` takes
+/// `<id> yes` or `<id> no <note>`, and every other action takes nothing.
 pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> String {
     let error = |message: String| serde_json::json!({ "error": message }).to_string();
-    if !ACTIONS.contains(&action) {
-        return error(format!("unknown action `{action}`"));
-    }
-    let params = params.map(str::trim).filter(|p| !p.is_empty());
-    let issue = match (action, params) {
-        ("add", Some(p)) => match p.parse::<u64>() {
-            Ok(n) if n > 0 && p.bytes().all(|b| b.is_ascii_digit()) => Some(n),
-            _ => return error(format!("{p:?} is not an issue number")),
-        },
-        ("add", None) => return error("`add` takes an issue number".into()),
-        (_, Some(_)) => return error(format!("`{action}` takes no params")),
-        (_, None) => None,
+    let request = match read(action, params.map(str::trim).filter(|p| !p.is_empty())) {
+        Ok(request) => request,
+        Err(e) => return error(e),
     };
     // Memory changes only after a save succeeds, so a panicked holder
     // cannot have left the runner half changed.
     let mut runner = lock(runner);
-    let changed = match (action, issue) {
-        ("start", _) => runner.start().map_err(|e| e.to_string()),
-        ("pause", _) => runner.pause().map_err(|e| e.to_string()),
-        ("add", Some(issue)) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
-        _ => Ok(()),
+    let changed = match request {
+        Request::Status => Ok(()),
+        Request::Start => runner.start().map_err(|e| e.to_string()),
+        Request::Pause => runner.pause().map_err(|e| e.to_string()),
+        Request::Add(issue) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
+        Request::Rule(id, answer) => runner.rule(id, answer).map_err(|e| e.to_string()),
     };
     match changed {
         Ok(()) => serde_json::to_string(&runner.status()).expect("status serializes to JSON"),
         Err(e) => error(e),
     }
+}
+
+fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
+    match (action, params) {
+        ("add", Some(p)) => number(p)
+            .map(Request::Add)
+            .ok_or_else(|| format!("{p:?} is not an issue number")),
+        ("add", None) => Err("`add` takes an issue number".into()),
+        ("rule", Some(p)) => read_rule(p).ok_or_else(|| format!("{RULE_USAGE}, not {p:?}")),
+        ("rule", None) => Err(RULE_USAGE.into()),
+        (_, _) if !ACTIONS.contains(&action) => Err(format!("unknown action `{action}`")),
+        (_, Some(_)) => Err(format!("`{action}` takes no params")),
+        ("start", None) => Ok(Request::Start),
+        ("pause", None) => Ok(Request::Pause),
+        (_, None) => Ok(Request::Status),
+    }
+}
+
+fn read_rule(params: &str) -> Option<Request> {
+    let (id, rest) = params.split_once(char::is_whitespace)?;
+    let id = number(id)?;
+    let rest = rest.trim_start();
+    let answer = match rest.split_once(char::is_whitespace) {
+        None if rest == "yes" => Answer::Yes,
+        Some(("no", note)) if !note.trim().is_empty() => Answer::No(note.trim().to_owned()),
+        _ => return None,
+    };
+    Some(Request::Rule(id, answer))
+}
+
+// Digits only, so `+7` and `#7` are refused rather than read as 7.
+fn number(text: &str) -> Option<u64> {
+    let n = text.parse::<u64>().ok()?;
+    (n > 0 && text.bytes().all(|b| b.is_ascii_digit())).then_some(n)
 }
 
 pub(super) fn lock(runner: &Mutex<Runner>) -> MutexGuard<'_, Runner> {
@@ -148,7 +189,7 @@ mod tests {
     fn every_registered_action_is_answered_and_no_other() {
         let rig = Rig::new("koji");
         let runner = rig.open().unwrap();
-        for action in ACTIONS {
+        for action in ACTIONS.into_iter().filter(|&a| a != "rule") {
             let params = (action == "add").then_some("7");
             assert_eq!(
                 rig.ask(&runner, action, params)["project"],
@@ -156,6 +197,10 @@ mod tests {
                 "{action}"
             );
         }
+        assert_eq!(
+            rig.ask(&runner, "rule", Some("1 yes")),
+            json!({ "error": "no ruling 1 is pending" })
+        );
         assert_eq!(
             rig.ask(&runner, "merge", None),
             json!({ "error": "unknown action `merge`" })

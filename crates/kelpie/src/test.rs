@@ -14,9 +14,9 @@ use crate::ports::{
     Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Forge, ForgeError, Issue,
     Ports, PullRequest, PullRequestState, Role, SessionId, Timestamp, Usage, Visibility,
 };
-use crate::runner::{OpenError, ProjectName, ProjectPaths, Runner, answer};
+use crate::runner::{OpenError, ProjectName, ProjectPaths, Runner, answer, step};
 use crate::settings::{Effort, ForgeSlug};
-use crate::work_item::{CallRecord, Turn, WorkItem};
+use crate::work_item::{CallRecord, Phase, Turn, WorkItem};
 
 /// A work item with one call, so every field of its format shows
 pub(crate) fn a_work_item() -> WorkItem {
@@ -35,6 +35,11 @@ pub(crate) fn a_work_item() -> WorkItem {
             since: Timestamp(9),
         },
         pull_request: Some(51),
+        phase: Phase::Ci {
+            head: Some("c0ffee".into()),
+            since: Timestamp(11),
+        },
+        red_head: Some("bad".into()),
         calls: vec![CallRecord {
             role: Role::Worker,
             at: Timestamp(10),
@@ -66,6 +71,9 @@ pub(crate) enum Scripted {
     Fail(ClaudeError),
     /// Leaves [`LEFT_BEHIND`] in the worktree, then dies with the runner
     Kill,
+    /// Commits this file with this text on the worktree's branch, pushes
+    /// it the way a worker does, and answers
+    Push(&'static str, &'static str),
 }
 
 /// A call as the stand-in Claude saw it
@@ -126,6 +134,18 @@ impl Claude for FakeClaude {
                 std::fs::write(call.cwd.join(LEFT_BEHIND), "work in progress\n").unwrap();
                 panic!("the runner is killed mid-turn");
             }
+            Some(Scripted::Push(file, text)) => {
+                std::fs::write(call.cwd.join(file), text).unwrap();
+                git(&call.cwd, &["add", file]);
+                git(&call.cwd, &["commit", "--quiet", "-m", file]);
+                git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);
+                Ok(ClaudeReply {
+                    session_id: call.session.id().clone(),
+                    text: "pushed".into(),
+                    usage: Usage::default(),
+                    session_cost: Cost(0),
+                })
+            }
             None => Err(ClaudeError::Failed("the rig scripts no reply".into())),
         }
     }
@@ -147,6 +167,7 @@ pub(crate) struct FakeForge {
     checks: Arc<Mutex<HashMap<String, Checks>>>,
     comments: Arc<Mutex<Vec<(u64, String)>>>,
     comments_down: Arc<AtomicBool>,
+    merges_down: Arc<AtomicBool>,
     readied: Arc<Mutex<Vec<u64>>>,
     merges: Arc<Mutex<Vec<(u64, String)>>>,
 }
@@ -214,6 +235,11 @@ impl FakeForge {
     /// Makes posting comments fail, or work again
     pub(crate) fn set_comments_down(&self, down: bool) {
         self.comments_down.store(down, Ordering::SeqCst);
+    }
+
+    /// Makes merging fail, or work again
+    pub(crate) fn set_merges_down(&self, down: bool) {
+        self.merges_down.store(down, Ordering::SeqCst);
     }
 
     /// Every comment posted, oldest first, with its pull request
@@ -351,6 +377,9 @@ impl Forge for FakeForge {
     // Refuses what GitHub refuses: a draft, a pull request that is not open,
     // and a head that moved since the caller looked.
     fn merge(&self, repo: &ForgeSlug, number: u64, head: &str) -> Result<(), ForgeError> {
+        if self.merges_down.load(Ordering::SeqCst) {
+            return Err(ForgeError::Failed("merges are down".into()));
+        }
         let now = self.pull_request(repo, number)?;
         if now.draft || now.state != PullRequestState::Open || now.head != head {
             return Err(ForgeError::Failed(format!(
@@ -420,6 +449,7 @@ impl Rig {
                 checks: Arc::default(),
                 comments: Arc::default(),
                 comments_down: Arc::default(),
+                merges_down: Arc::default(),
                 readied: Arc::default(),
                 merges: Arc::default(),
             },
@@ -521,6 +551,32 @@ impl Rig {
         params: Option<&str>,
     ) -> serde_json::Value {
         serde_json::from_str(&answer(runner, action, params)).expect("a JSON reply")
+    }
+
+    /// A running project whose worker's first turn pushed `work.txt` on
+    /// `kelpie/7` and opened draft pull request 71, with CI not yet reported
+    ///
+    /// Returns the pull request's head. The gate tests all start here, since
+    /// the gate begins where the worker's pull request is open.
+    pub(crate) fn with_pull_request(project: &str) -> (Self, Mutex<Runner>, String) {
+        let rig = Self::new(project);
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "start", None);
+        rig.ask(&runner, "add", Some("7"));
+        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+        rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+        step(&runner).unwrap();
+        let head = rig.forge.head_of("kelpie/7").expect("the worker pushed");
+        (rig, runner, head)
+    }
+
+    /// The worktree kelpie makes for issue 7
+    pub(crate) fn worktree_7(&self) -> PathBuf {
+        self.home
+            .path()
+            .join("kelpie/wt")
+            .join(self.project.as_str())
+            .join("7")
     }
 }
 

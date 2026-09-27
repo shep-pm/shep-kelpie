@@ -32,8 +32,49 @@ pub struct WorkItem {
     pub turn: Turn,
     /// The draft pull request its worker opened, once kelpie has seen it
     pub pull_request: Option<u64>,
+    /// Where it stands between the worker's turns and the merge
+    #[serde(default)]
+    pub phase: Phase,
+    /// The head whose red CI run last went to the worker
+    #[serde(default)]
+    pub red_head: Option<String>,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
+}
+
+/// Where a work item stands between the worker's turns and the merge
+///
+/// A work item saved before phases existed reads as [`Phase::Implement`],
+/// so a restart never puts its pull request through the gate unasked.
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum Phase {
+    /// The worker's turns. One that ends with a pull request open starts CI.
+    #[default]
+    Implement,
+    /// Waiting for CI on the pull request's head
+    Ci {
+        /// The head kelpie last saw, once it has looked
+        head: Option<String>,
+        /// When kelpie first saw that head, or entered CI
+        since: Timestamp,
+    },
+    /// Parked on a ruling
+    Ruling {
+        /// The ruling's id
+        id: u64,
+    },
+    /// The maintainer said yes: merging this head
+    Merge {
+        /// The head the ruling was about
+        head: String,
+    },
+    /// Removing the worktree, branch and build folder
+    Done {
+        /// Whether the pull request merged, so its branch on the forge goes too
+        merged: bool,
+    },
 }
 
 impl WorkItem {
@@ -74,6 +115,11 @@ pub enum Turn {
     Running {
         /// When it started
         since: Timestamp,
+    },
+    /// A later turn waits to resume the session with this prompt
+    Next {
+        /// What the turn tells the worker
+        prompt: String,
     },
     /// The turn ended and the worker waits for kelpie
     Ended {
@@ -129,6 +175,8 @@ mod tests {
                 "session": "5e55",
                 "turn": { "state": "running", "since": 9 },
                 "pull_request": 51,
+                "phase": { "state": "ci", "head": "c0ffee", "since": 11 },
+                "red_head": "bad",
                 "calls": [{
                     "role": "worker",
                     "at": 10,
@@ -156,6 +204,43 @@ mod tests {
             }),
             json!({ "state": "failed", "at": 4, "reason": "no worktree" })
         );
+    }
+
+    #[test]
+    fn every_phase_is_pinned() {
+        let value = |p: Phase| serde_json::to_value(p).unwrap();
+        assert_eq!(value(Phase::Implement), json!({ "state": "implement" }));
+        assert_eq!(
+            value(Phase::Ruling { id: 3 }),
+            json!({ "state": "ruling", "id": 3 })
+        );
+        assert_eq!(
+            value(Phase::Merge {
+                head: "c0ffee".into()
+            }),
+            json!({ "state": "merge", "head": "c0ffee" })
+        );
+        assert_eq!(
+            value(Phase::Done { merged: true }),
+            json!({ "state": "done", "merged": true })
+        );
+        assert_eq!(
+            serde_json::to_value(Turn::Next {
+                prompt: "fix it".into()
+            })
+            .unwrap(),
+            json!({ "state": "next", "prompt": "fix it" })
+        );
+    }
+
+    #[test]
+    fn a_work_item_saved_before_phases_reads_as_implementing() {
+        let mut value = serde_json::to_value(a_work_item()).unwrap();
+        let fields = value.as_object_mut().unwrap();
+        fields.remove("phase");
+        fields.remove("red_head");
+        let item: WorkItem = serde_json::from_value(value).unwrap();
+        assert_eq!((item.phase, item.red_head), (Phase::Implement, None));
     }
 
     #[test]

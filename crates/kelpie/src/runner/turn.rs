@@ -20,7 +20,7 @@ use crate::ports::{
 };
 use crate::profile::{INSTRUCTIONS, WorkerProfile};
 use crate::state::{RunState, StateError};
-use crate::work_item::{CallRecord, Turn, WorkItem};
+use crate::work_item::{CallRecord, Phase, Turn, WorkItem};
 use crate::worktree;
 
 /// The prompt for a turn resumed after the runner restarted
@@ -68,6 +68,71 @@ pub enum StepReport {
         /// Why
         reason: String,
     },
+    /// CI failed, and the failure is the worker's next turn
+    CiFailed {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The head CI ran on
+        head: String,
+        /// The checks that failed
+        checks: Vec<String>,
+    },
+    /// The branch was rebased onto `main` and pushed, and CI runs again
+    Rebased {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The rebased head
+        head: String,
+    },
+    /// A ruling was raised, and the worker is parked on it
+    Ruling {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The ruling's id
+        id: u64,
+        /// The question, with the triggers that answer it
+        question: String,
+        /// Why the question could not be posted on the pull request, if it could not
+        comment_failed: Option<String>,
+    },
+    /// A yes no longer held when kelpie came to merge, so CI runs again
+    YesWithdrawn {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// What changed since the question
+        reason: String,
+    },
+    /// The work item is gone: its worktree, branch and build folder removed
+    Finished {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: Option<u64>,
+        /// Whether the pull request merged
+        merged: bool,
+    },
+    /// The forge or git could not be asked, and the step is tried again later
+    GateFailed {
+        /// The work item's issue
+        issue: u64,
+        /// Why
+        reason: String,
+    },
+}
+
+impl StepReport {
+    /// Whether the runner should wait before its next step, rather than go on
+    pub fn waits(&self) -> bool {
+        matches!(self, Self::BoardFailed { .. } | Self::GateFailed { .. })
+    }
 }
 
 pub(super) enum Begin {
@@ -117,13 +182,22 @@ impl Runner {
         let Some(item) = &self.state.work_item else {
             return self.dispatch();
         };
-        let session = match &item.turn {
-            Turn::Due => Session::New(item.session.clone()),
-            Turn::Running { .. } if start_over => Session::New(item.session.clone()),
-            Turn::Running { .. } => Session::Resume(item.session.clone()),
+        match &item.phase {
+            Phase::Implement => {}
+            Phase::Ci { .. } => return self.check_ci(),
+            Phase::Ruling { .. } => return Ok(Begin::Idle),
+            Phase::Merge { head } => return self.merge(head.clone()),
+            Phase::Done { merged } => return self.finish(*merged),
+        }
+        let id = item.session.clone();
+        let (session, prompt) = match &item.turn {
+            Turn::Due => (Session::New(id), None),
+            Turn::Running { .. } if start_over => (Session::New(id), None),
+            Turn::Running { .. } => (Session::Resume(id), Some(CONTINUE.to_owned())),
+            Turn::Next { prompt } => (Session::Resume(id), Some(prompt.clone())),
             Turn::Ended { .. } | Turn::Failed { .. } => return Ok(Begin::Idle),
         };
-        let prepared = self.prepare(item, session);
+        let prepared = self.prepare(item, session, prompt);
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
         let item = next
@@ -151,8 +225,14 @@ impl Runner {
     }
 
     // Everything the worker needs on disk before it starts: its worktree, its
-    // build folder, its settings file and kelpie's instructions.
-    fn prepare(&self, item: &WorkItem, session: Session) -> Result<ClaudeCall, String> {
+    // build folder, its settings file and kelpie's instructions. A turn with
+    // no prompt of its own is the first, and takes the issue.
+    fn prepare(
+        &self,
+        item: &WorkItem,
+        session: Session,
+        prompt: Option<String>,
+    ) -> Result<ClaudeCall, String> {
         let dirs = worktree::prepare(
             &self.settings.repo,
             &item.worktree,
@@ -177,8 +257,9 @@ impl Runner {
         let text = serde_json::to_string_pretty(&profile.settings()).expect("settings are JSON");
         write(folder, &settings, &text)?;
         write(folder, &instructions, INSTRUCTIONS)?;
-        let prompt = match &session {
-            Session::New(_) => {
+        let prompt = match prompt {
+            Some(prompt) => prompt,
+            None => {
                 let issue = self
                     .ports
                     .forge
@@ -186,7 +267,6 @@ impl Runner {
                     .map_err(|e| format!("cannot read issue #{}: {e}", item.issue))?;
                 first_prompt(item.issue, &issue)
             }
-            Session::Resume(_) => CONTINUE.to_owned(),
         };
         Ok(ClaudeCall {
             role: Role::Worker,
@@ -229,6 +309,12 @@ impl Runner {
                     session_cost: reply.session_cost,
                 });
                 item.turn = Turn::Ended { at: now };
+                if item.pull_request.is_some() {
+                    item.phase = Phase::Ci {
+                        head: None,
+                        since: now,
+                    };
+                }
                 StepReport::Ended {
                     issue: item.issue,
                     session: item.session.clone(),

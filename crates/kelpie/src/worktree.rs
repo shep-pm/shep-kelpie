@@ -45,6 +45,13 @@ pub enum WorktreeError {
         /// What creating it failed with
         kind: io::ErrorKind,
     },
+    /// A build folder could not be removed
+    Remove {
+        /// The folder
+        path: PathBuf,
+        /// What removing it failed with
+        kind: io::ErrorKind,
+    },
 }
 
 impl fmt::Display for WorktreeError {
@@ -62,6 +69,9 @@ impl fmt::Display for WorktreeError {
             }
             Self::Folder { path, kind } => {
                 write!(f, "cannot create {}: {kind}", path.display())
+            }
+            Self::Remove { path, kind } => {
+                write!(f, "cannot remove {}: {kind}", path.display())
             }
         }
     }
@@ -124,6 +134,50 @@ pub fn prepare(
         git_common_dir,
         git_dir,
     })
+}
+
+/// Removes a work item's worktree, its branch and its build folder
+///
+/// `remote` also deletes the branch on `origin`. Whatever is already gone
+/// is skipped, so a removal cut short can run again.
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command or folder that failed.
+pub fn remove(
+    repo: &Path,
+    worktree: &Path,
+    branch: &str,
+    build: &Path,
+    remote: bool,
+) -> Result<(), WorktreeError> {
+    if worktree.exists() {
+        let wt = worktree.as_os_str();
+        git(
+            repo,
+            [
+                "worktree".as_ref(),
+                "remove".as_ref(),
+                "--force".as_ref(),
+                wt,
+            ],
+        )?;
+    }
+    git(repo, ["worktree", "prune"])?;
+    let full_ref = format!("refs/heads/{branch}");
+    if git(repo, ["rev-parse", "--verify", "--quiet", &full_ref]).is_ok() {
+        git(repo, ["branch", "--quiet", "-D", branch])?;
+    }
+    if remote && !git(repo, ["ls-remote", "--heads", "origin", &full_ref])?.is_empty() {
+        git(repo, ["push", "--quiet", "origin", "--delete", &full_ref])?;
+    }
+    match std::fs::remove_dir_all(build) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(WorktreeError::Remove {
+            path: build.to_owned(),
+            kind: e.kind(),
+        }),
+        _ => Ok(()),
+    }
 }
 
 // Everything about the worktree is read from the project's repo, never from
