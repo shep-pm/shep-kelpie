@@ -110,7 +110,7 @@ impl RelayCli {
         effort: Effort,
     ) -> Result<(), RelayError> {
         let mut command = Command::new("claude");
-        relay_env(&mut command);
+        self.relay_env(&mut command);
         let output = command
             .args(start_argv(settings, instructions, model, effort))
             .current_dir(&self.home)
@@ -156,6 +156,26 @@ impl RelayCli {
 
     fn sessions(&self) -> PathBuf {
         self.home.join(".claude/sessions")
+    }
+
+    // What the relay needs from kelpie's own environment: a home to find
+    // its trust and sessions under, a shell to run in, a temporary folder,
+    // and whose account it is, mirroring the minimal set a pinned shep
+    // sheep itself starts with (see docs/design-log.md). Everything else
+    // kelpie's own process happens to carry stays out of the relay's.
+    //
+    // `HOME` comes from `self.home`, not the ambient environment: `find`,
+    // `current_dir` and the relay's own `~/.claude/sessions` all key off
+    // `self.home`, and a process whose real `$HOME` ever differed from it
+    // would otherwise start the relay somewhere it can never be found again.
+    fn relay_env(&self, command: &mut Command) {
+        command.env_clear();
+        command.env("HOME", &self.home);
+        for var in RELAY_ENV {
+            if let Ok(value) = std::env::var(var) {
+                command.env(var, value);
+            }
+        }
     }
 }
 
@@ -236,21 +256,9 @@ fn start_argv(settings: &Path, instructions: &Path, model: &str, effort: Effort)
     ]
 }
 
-// What the relay needs from kelpie's own environment: a home to find its
-// trust and sessions under, a shell to run in, a temporary folder, and
-// whose account it is, mirroring the minimal set a pinned shep sheep
-// itself starts with (see docs/design-log.md). Everything else kelpie's
-// own process happens to carry stays out of the relay's.
-const RELAY_ENV: [&str; 5] = ["HOME", "PATH", "TMPDIR", "USER", "LANG"];
-
-fn relay_env(command: &mut Command) {
-    command.env_clear();
-    for var in RELAY_ENV {
-        if let Ok(value) = std::env::var(var) {
-            command.env(var, value);
-        }
-    }
-}
+// The rest of `relay_env`'s allowed set, read from the ambient process
+// environment: `HOME` itself comes from `self.home` (see `relay_env`).
+const RELAY_ENV: [&str; 4] = ["PATH", "TMPDIR", "USER", "LANG"];
 
 fn write_line(stream: &mut UnixStream, value: &Value) -> Result<(), RelayError> {
     let mut line = value.to_string();
@@ -365,21 +373,31 @@ mod tests {
 
     #[test]
     fn the_relay_gets_only_the_minimal_environment() {
+        let relay = RelayCli::new(
+            PathBuf::from("/k/maintainer-home"),
+            PathBuf::from("/k/relay"),
+        );
         let mut command = Command::new("true");
-        relay_env(&mut command);
-        let names: Vec<&str> = command
+        relay.relay_env(&mut command);
+        let envs: Vec<(&str, &str)> = command
             .get_envs()
-            .map(|(name, _)| name.to_str().unwrap())
+            .map(|(name, value)| (name.to_str().unwrap(), value.unwrap().to_str().unwrap()))
             .collect();
-        for name in &names {
+        for (name, _) in &envs {
             assert!(
-                RELAY_ENV.contains(name),
+                *name == "HOME" || RELAY_ENV.contains(name),
                 "{name} should not reach the relay"
             );
         }
+        // HOME comes from the RelayCli itself, not this test process's own
+        // $HOME, so `find` and the sessions it reads always agree on it.
+        assert_eq!(
+            envs.iter().find(|(n, _)| *n == "HOME"),
+            Some(&("HOME", "/k/maintainer-home"))
+        );
         // A var this process carries but `relay_env` does not name never
         // reaches the child: `env_clear` ran before the allowed set was applied.
-        assert!(!names.contains(&"KELPIE_HOME"));
+        assert!(!envs.iter().any(|(n, _)| *n == "KELPIE_HOME"));
     }
 
     // Framed the way the experiments repo's `relay_inject.py send` framed
