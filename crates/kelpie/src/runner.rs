@@ -29,6 +29,9 @@ pub use ruling::{Answer, RuleError};
 pub use trigger::{ACTIONS, Status, WorkItemStatus, answer};
 pub use turn::step;
 
+#[cfg(test)]
+pub(crate) use gate::CHECKS_SETTLE;
+
 /// Why a runner could not start
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenError {

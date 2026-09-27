@@ -151,7 +151,8 @@ impl Runner {
             PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
         }
         let now = self.ports.clock.now();
-        let settling = readied.is_some_and(|at| !settled(at, now));
+        let ci = self.settings.ci;
+        let settling = ci && readied.is_some_and(|at| !settled(at, now));
         if pr.head != head {
             let reason = format!("#{number} moved to {}", short(&pr.head));
             return self.withdraw(issue, number, reason);
@@ -159,9 +160,10 @@ impl Runner {
         // A run that marking the draft ready started is waited for; before
         // that, anything but green withdraws the yes.
         let green = match pr.checks {
-            Checks::Passed | Checks::None => true,
-            Checks::Pending if readied.is_some() => false,
-            Checks::Pending | Checks::Failed(_) => {
+            _ if !ci => true,
+            Checks::Passed => true,
+            Checks::None | Checks::Pending if readied.is_some() => false,
+            Checks::None | Checks::Pending | Checks::Failed(_) => {
                 let reason = format!("CI on #{number} is no longer green");
                 return self.withdraw(issue, number, reason);
             }
@@ -300,7 +302,7 @@ mod tests {
         let (rig, runner, head) = Rig::with_pull_request(project);
         rig.forge.set_checks(&head, Checks::Passed);
         assert!(matches!(
-            step(&runner).unwrap(),
+            rig.verdict(&runner),
             Some(StepReport::Ruling { id: 1, .. })
         ));
         (rig, runner, head)
@@ -415,7 +417,7 @@ mod tests {
         );
         rig.forge.set_checks(&pushed, Checks::Passed);
         assert!(matches!(
-            step(&runner).unwrap(),
+            rig.verdict(&runner),
             Some(StepReport::Ruling { id: 2, .. })
         ));
         let rulings = &rig.ask(&runner, "status", None)["rulings"];
@@ -449,7 +451,7 @@ mod tests {
         assert_eq!(rig.forge.merges(), []);
         rig.forge.set_checks(&moved, Checks::Passed);
         assert!(matches!(
-            step(&runner).unwrap(),
+            rig.verdict(&runner),
             Some(StepReport::Ruling { id: 2, .. })
         ));
     }
@@ -596,7 +598,7 @@ mod tests {
         let head = rig.forge.head_of("kelpie/7").unwrap();
         rig.forge.set_checks(&head, Checks::Passed);
         assert!(matches!(
-            step(&runner).unwrap(),
+            rig.verdict(&runner),
             Some(StepReport::Ruling { id: 2, .. })
         ));
         assert_eq!(

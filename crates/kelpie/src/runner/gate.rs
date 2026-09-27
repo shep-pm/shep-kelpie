@@ -2,9 +2,9 @@
 //!
 //! Each step looks once at the pull request's head. A branch without the
 //! latest `main` is rebased and pushed, and a conflict parks the worker on a
-//! ruling. A pending run waits for the next step. A red run is the worker's
-//! next turn, naming the checks that failed. A green run raises the merge
-//! ruling.
+//! ruling. A pending run, or none yet, waits for the next step. A red run is
+//! the worker's next turn, naming the checks that failed. A green run raises
+//! the merge ruling. A project without CI skips the checks.
 
 use super::Runner;
 use super::report::{Begin, StepReport};
@@ -14,8 +14,8 @@ use crate::work_item::{Phase, Turn};
 use crate::worktree::{self, Rebase};
 
 // GitHub registers the checks a push or a ready pull request starts within
-// seconds. Kelpie trusts a rollup only once two minutes have passed.
-pub(super) const CHECKS_SETTLE: u64 = 120;
+// seconds, one at a time. Kelpie trusts a rollup once two minutes have passed.
+pub(crate) const CHECKS_SETTLE: u64 = 120;
 
 impl Runner {
     pub(super) fn check_ci(&mut self) -> Result<Begin, StateError> {
@@ -56,12 +56,17 @@ impl Runner {
             Ok(false) => return self.rebase(number, &pr.head),
             Err(reason) => return Ok(self.gate_failed(reason)),
         }
+        if !self.settings.ci {
+            return self.raise(number, RulingKind::Merge { head: pr.head });
+        }
+        // A check set registers a check at a time, so a verdict waits until
+        // it has had time to register whole.
+        if !settled(since, now) {
+            return Ok(Begin::Idle);
+        }
         match pr.checks {
-            Checks::Pending => Ok(Begin::Idle),
-            Checks::None if !settled(since, now) => Ok(Begin::Idle),
-            Checks::None | Checks::Passed => {
-                self.raise(number, RulingKind::Merge { head: pr.head })
-            }
+            Checks::None | Checks::Pending => Ok(Begin::Idle),
+            Checks::Passed => self.raise(number, RulingKind::Merge { head: pr.head }),
             Checks::Failed(checks) => self.ci_failed(number, pr.head, checks),
         }
     }
@@ -182,7 +187,7 @@ mod tests {
         assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
 
         rig.forge.set_checks(&head, Checks::Passed);
-        let (id, question) = ruling_report(step(&runner).unwrap());
+        let (id, question) = ruling_report(rig.verdict(&runner));
         assert_eq!(id, 1);
         assert_eq!(
             question,
@@ -216,7 +221,7 @@ mod tests {
         let failed = vec!["lint".to_owned(), "test".to_owned()];
         rig.forge.set_checks(&head, Checks::Failed(failed.clone()));
         assert_eq!(
-            step(&runner).unwrap(),
+            rig.verdict(&runner),
             Some(StepReport::CiFailed {
                 issue: 7,
                 pull_request: 71,
@@ -238,7 +243,7 @@ mod tests {
         let fixed = rig.forge.head_of("kelpie/7").unwrap();
         assert_ne!(fixed, head);
         rig.forge.set_checks(&fixed, Checks::Passed);
-        let (id, question) = ruling_report(step(&runner).unwrap());
+        let (id, question) = ruling_report(rig.verdict(&runner));
         assert_eq!(id, 1);
         assert!(question.contains(&fixed[..7]), "{question}");
     }
@@ -248,12 +253,12 @@ mod tests {
         let (rig, runner, head) = Rig::with_pull_request("rotom");
         rig.forge
             .set_checks(&head, Checks::Failed(vec!["lint".into()]));
-        step(&runner).unwrap();
+        rig.verdict(&runner);
         rig.claude
             .script([Scripted::Reply(Usage::default(), Cost(1))]);
         step(&runner).unwrap();
 
-        let (_, question) = ruling_report(step(&runner).unwrap());
+        let (_, question) = ruling_report(rig.verdict(&runner));
         let parked = format!(
             "CI failed again on pull request #71 at {}, and the worker pushed no fix: lint.",
             &head[..7]
@@ -284,7 +289,7 @@ mod tests {
         );
         assert_eq!(rig.forge.comments(), []);
         rig.forge.set_checks(&rebased, Checks::Passed);
-        ruling_report(step(&runner).unwrap());
+        ruling_report(rig.verdict(&runner));
         assert_eq!(
             rig.ask(&runner, "status", None)["rulings"][0]["kind"],
             json!({ "kind": "merge", "head": rebased })
@@ -332,7 +337,7 @@ mod tests {
             "CI on the fixed head is pending"
         );
         rig.forge.set_checks(&fixed, Checks::Passed);
-        let (next, question) = ruling_report(step(&runner).unwrap());
+        let (next, question) = ruling_report(rig.verdict(&runner));
         assert_eq!(next, id + 1);
         assert!(question.starts_with("Merge pull request #71"), "{question}");
     }
@@ -369,9 +374,20 @@ mod tests {
     }
 
     #[test]
-    fn a_head_without_checks_waits_out_the_grace_then_counts_as_green() {
+    fn with_ci_on_a_head_without_checks_waits_however_long_it_takes() {
         let (rig, runner, head) = Rig::with_pull_request("chelone");
         rig.forge.set_checks(&head, Checks::None);
+        for _ in 0..5 {
+            rig.clock.advance(3600);
+            assert_eq!(step(&runner).unwrap(), None);
+        }
+        assert_eq!(rig.forge.comments(), []);
+    }
+
+    #[test]
+    fn a_verdict_waits_for_the_check_set_to_settle() {
+        let (rig, runner, head) = Rig::with_pull_request("zeus");
+        rig.forge.set_checks(&head, Checks::Passed);
         assert_eq!(step(&runner).unwrap(), None);
         rig.clock.advance(CHECKS_SETTLE - 1);
         assert_eq!(step(&runner).unwrap(), None);
@@ -380,11 +396,43 @@ mod tests {
     }
 
     #[test]
+    fn with_ci_off_the_checks_are_never_read() {
+        let rig = Rig::new("hazels-lab");
+        rig.edit_settings(|s| s.replace("ci = true", "ci = false"));
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "start", None);
+        rig.ask(&runner, "add", Some("7"));
+        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+        rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+        step(&runner).unwrap();
+        let head = rig.forge.head_of("kelpie/7").unwrap();
+        rig.forge
+            .set_checks(&head, Checks::Failed(vec!["lint".into()]));
+
+        let (id, question) = ruling_report(step(&runner).unwrap());
+        assert!(question.starts_with("Merge pull request #71"), "{question}");
+        rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::MarkedReady { .. })
+        ));
+        assert_eq!(
+            step(&runner).unwrap(),
+            Some(StepReport::Finished {
+                issue: 7,
+                pull_request: Some(71),
+                merged: true
+            })
+        );
+        assert_eq!(rig.forge.merges(), [(71, head)]);
+    }
+
+    #[test]
     fn a_ruling_whose_comment_fails_still_stands_in_status_and_the_log() {
         let (rig, runner, head) = Rig::with_pull_request("golbat");
         rig.forge.set_checks(&head, Checks::Passed);
         rig.forge.set_comments_down(true);
-        let Some(StepReport::Ruling { comment_failed, .. }) = step(&runner).unwrap() else {
+        let Some(StepReport::Ruling { comment_failed, .. }) = rig.verdict(&runner) else {
             panic!("no ruling was raised");
         };
         assert_eq!(

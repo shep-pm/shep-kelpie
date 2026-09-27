@@ -14,7 +14,9 @@ use crate::ports::{
     Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Ports, Role, SessionId, Timestamp,
     Usage,
 };
-use crate::runner::{OpenError, ProjectName, ProjectPaths, Runner, answer, step};
+use crate::runner::{
+    CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
+};
 use crate::settings::Effort;
 use crate::work_item::{CallRecord, Phase, Turn, WorkItem};
 
@@ -315,6 +317,16 @@ impl Rig {
         step(&runner).unwrap();
         let head = rig.forge.head_of("kelpie/7").expect("the worker pushed");
         (rig, runner, head)
+    }
+
+    /// Steps once and, if nothing happened, waits out CI's settling and
+    /// steps again: how a CI verdict is reached
+    pub(crate) fn verdict(&self, runner: &Mutex<Runner>) -> Option<StepReport> {
+        if let Some(report) = step(runner).unwrap() {
+            return Some(report);
+        }
+        self.clock.advance(CHECKS_SETTLE);
+        step(runner).unwrap()
     }
 
     /// The worktree kelpie makes for issue 7
