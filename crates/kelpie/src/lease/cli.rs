@@ -95,18 +95,21 @@ fn tell_take(waiting: Waiting<'_>) {
     println!("{}", said(waiting));
 }
 
+fn pid_or_unknown(pid: Option<u32>) -> String {
+    pid.map_or_else(|| "unknown".into(), |p| p.to_string())
+}
+
 fn said(waiting: Waiting<'_>) -> String {
-    let pid = |pid: Option<u32>| pid.map_or_else(|| "unknown".into(), |p| p.to_string());
     match waiting {
         Waiting::Held { waited, holder } => format!(
             "kelpie lease: waiting {waited}s for the GPU, now held by pid {} running {}",
-            pid(holder.pid),
+            pid_or_unknown(holder.pid),
             holder.what
         ),
         Waiting::Cleared(dead) => {
             format!(
                 "kelpie lease: clearing a stale lock, pid {} is gone",
-                pid(dead)
+                pid_or_unknown(dead)
             )
         }
     }
@@ -282,9 +285,7 @@ fn return_gpu() -> Result<(), String> {
         .ok_or_else(|| {
             format!(
                 "the GPU lock is held by pid {} running {}, not by `kelpie lease take gpu`",
-                holder
-                    .pid
-                    .map_or_else(|| "unknown".into(), |p| p.to_string()),
+                pid_or_unknown(holder.pid),
                 holder.what
             )
         })?;
