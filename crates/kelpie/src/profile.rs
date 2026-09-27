@@ -118,6 +118,8 @@ impl WorkerProfile<'_> {
                 "enabled": true,
                 "failIfUnavailable": true,
                 "allowUnsandboxedCommands": false,
+                // Without it, `gh` fails TLS verification on macOS: x509 OSStatus -26276.
+                "enableWeakerNetworkIsolation": true,
                 "filesystem": { "allowWrite": allow_write, "denyWrite": deny_write },
                 "network": { "allowedDomains": domains },
             },
@@ -224,6 +226,15 @@ mod tests {
         assert_eq!(s["sandbox"]["enabled"], true);
         assert_eq!(s["sandbox"]["failIfUnavailable"], true);
         assert_eq!(s["sandbox"]["allowUnsandboxedCommands"], false);
+        assert_eq!(s["sandbox"]["excludedCommands"], Value::Null);
+    }
+
+    #[test]
+    fn gh_can_verify_tls_inside_the_sandbox() {
+        assert_eq!(
+            settings(&[])["sandbox"]["enableWeakerNetworkIsolation"],
+            true
+        );
     }
 
     #[test]
