@@ -124,6 +124,25 @@ pub enum RulingKind {
         /// The review, at the round the guard stopped it on
         review: Review,
     },
+    /// CodeRabbit's rounds reached their cap with findings the judge held.
+    /// A yes sends the worker those findings and lifts the cap for the rest
+    /// of this work item.
+    #[serde(rename = "coderabbit-cap")]
+    CodeRabbitCap {
+        /// Rounds run
+        rounds: u32,
+        /// Findings the judge held
+        held: usize,
+        /// The fix turn a yes starts
+        prompt: String,
+    },
+    /// CodeRabbit never reviewed this head after a summon. A yes looks at
+    /// CI again, and summons again once it is green.
+    #[serde(rename = "coderabbit-silent")]
+    CodeRabbitSilent {
+        /// The head the summon was for
+        head: String,
+    },
     /// The worker ended its turn on a question. The answer is its next turn.
     Question {
         /// The question, verbatim from the worker's question block
@@ -488,6 +507,25 @@ mod tests {
                 "leases": [{ "resource": "coderabbit", "since": 8 }],
                 "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
             })
+        );
+    }
+
+    #[test]
+    fn the_coderabbit_rulings_are_pinned() {
+        let cap = RulingKind::CodeRabbitCap {
+            rounds: 2,
+            held: 1,
+            prompt: "fix".into(),
+        };
+        let silent = RulingKind::CodeRabbitSilent {
+            head: "c0ffee".into(),
+        };
+        assert_eq!(
+            serde_json::to_value([&cap, &silent]).unwrap(),
+            serde_json::json!([
+                { "kind": "coderabbit-cap", "rounds": 2, "held": 1, "prompt": "fix" },
+                { "kind": "coderabbit-silent", "head": "c0ffee" },
+            ])
         );
     }
 

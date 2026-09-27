@@ -210,7 +210,7 @@ pub(crate) fn parse_threads(stdout: &[u8]) -> Result<Vec<Thread>, ForgeError> {
         .filter_map(|node| {
             let first = node.comments.nodes.into_iter().next()?;
             let by_bot = first.author.is_some_and(|a| a.login == BOT_GRAPHQL);
-            by_bot.then(|| Thread {
+            by_bot.then_some(Thread {
                 id: node.id,
                 resolved: node.is_resolved,
                 path: node.path,

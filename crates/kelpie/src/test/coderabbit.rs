@@ -20,7 +20,7 @@ pub(crate) struct FakeCodeRabbit {
 }
 
 /// A CodeRabbit thread's first comment, as it words a Minor finding
-pub(crate) fn finding_body(title: &str) -> String {
+fn finding_body(title: &str) -> String {
     format!(
         "_🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_\n\n\
          <details>\n<summary>🔎 Supported by static analysis</summary>\n\n\

@@ -85,11 +85,16 @@ impl Runner {
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
         let ruling = next.rulings.remove(at);
+        let lifts_cap = matches!(
+            (&answer, &ruling.kind),
+            (Answer::Yes, RulingKind::CodeRabbitCap { .. })
+        );
         let moved = decide(id, answer, ruling, now)?;
         // Only the ruling the work item is parked on moves it. Any other,
         // which nothing leaves behind today, is answered by clearing it.
         let parked_on = |item: &WorkItem| item.phase == Phase::Ruling { id };
         if let Some(item) = next.work_item.as_mut().filter(|item| parked_on(item)) {
+            item.coderabbit.cap_cleared |= lifts_cap;
             match moved {
                 Move::Phase(phase) => item.phase = phase,
                 Move::Turn {
@@ -215,6 +220,18 @@ fn decide(id: u64, answer: Answer, ruling: Ruling, now: Timestamp) -> Result<Mov
             guard_cleared: true,
             ..review
         }),
+        // The fix ends under Implement, which takes it to CI and the next round.
+        (Answer::Yes, RulingKind::CodeRabbitCap { prompt, .. }) => {
+            return Ok(Move::Turn {
+                prompt,
+                phase: Phase::Implement,
+                force: None,
+            });
+        }
+        (Answer::Yes, RulingKind::CodeRabbitSilent { .. }) => Phase::Ci {
+            head: None,
+            since: now,
+        },
     };
     Ok(Move::Phase(phase))
 }
@@ -252,6 +269,16 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
             "The qwen-review loop on {about} has run {} rounds without \
              settling. {yes} lets it keep going",
             review.round.saturating_sub(1)
+        ),
+        RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
+            "CodeRabbit has run {rounds} rounds on {about}, its cap, and the judge \
+             still holds {held} of its findings. {yes} sends the worker those \
+             findings and lets the rounds go past the cap"
+        ),
+        RulingKind::CodeRabbitSilent { head } => format!(
+            "CodeRabbit never reviewed {about} at {} after kelpie summoned it. \
+             {yes} has kelpie look at CI and summon it again",
+            short(head)
         ),
         RulingKind::Question { asked, .. } => {
             return format!(

@@ -187,6 +187,58 @@ pub enum StepReport {
         /// The judge's severity
         severity: Severity,
     },
+    /// Kelpie put the `review please` label on, holding the CodeRabbit lease
+    Summoned {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The head the summon is for
+        head: String,
+    },
+    /// CodeRabbit refused the summon, and the label came off
+    SummonRefused {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// When CodeRabbit said its window opens
+        opens: Timestamp,
+    },
+    /// A CodeRabbit review covered the head, and the label came off
+    CodeRabbitReviewed {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// Which round this was
+        round: u32,
+        /// Its threads still open, which the judge now reads
+        open_threads: usize,
+    },
+    /// The judge ruled on every open CodeRabbit thread
+    CodeRabbitJudged {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The round
+        round: u32,
+        /// Threads the judge held, sent to the worker
+        held: usize,
+        /// Threads the judge rejected, now resolved
+        resolved: usize,
+    },
+    /// No CodeRabbit thread is open and the judge holds nothing: CI, then
+    /// the merge ruling
+    CodeRabbitSatisfied {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// Rounds it took
+        rounds: u32,
+    },
     /// The round's held findings were sent to the worker's next turn
     ReviewFindingsSent {
         /// The work item's issue

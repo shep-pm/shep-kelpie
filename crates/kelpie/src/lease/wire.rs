@@ -243,6 +243,11 @@ impl Asker {
         self.held.contains(kind)
     }
 
+    /// Whether this run has asked for `kind` and not given it back
+    pub fn asking(&self, kind: &LeaseKind) -> bool {
+        self.totals.get(kind).is_some_and(|t| t.asking())
+    }
+
     /// Every metric this run has raised, at its current value
     pub fn metrics(&self) -> Vec<(String, f64)> {
         let both = [Total::Want, Total::Return];

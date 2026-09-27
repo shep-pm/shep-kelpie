@@ -3,8 +3,9 @@
 //! Each step looks once at the pull request's head. A branch without the
 //! latest `main` is rebased and pushed, and a conflict parks the worker on a
 //! ruling. A pending run, or none yet, waits for the next step. A red run is
-//! the worker's next turn, naming the checks that failed. A green run raises
-//! the merge ruling. A project without CI skips the checks.
+//! the worker's next turn, naming the checks that failed. A green run starts
+//! a CodeRabbit round while one is owed, and otherwise raises the merge
+//! ruling. A project without CI skips the checks.
 
 use super::Runner;
 use super::report::{Begin, StepReport};
@@ -58,7 +59,7 @@ impl Runner {
             Err(reason) => return Ok(self.gate_failed(reason)),
         }
         if !self.settings.ci {
-            return self.raise(number, RulingKind::Merge { head: pr.head });
+            return self.passed(number, pr.head);
         }
         // A check set registers a check at a time, so a verdict waits until
         // it has had time to register whole.
@@ -67,9 +68,17 @@ impl Runner {
         }
         match pr.checks {
             Checks::None | Checks::Pending => Ok(Begin::Idle),
-            Checks::Passed => self.raise(number, RulingKind::Merge { head: pr.head }),
+            Checks::Passed => self.passed(number, pr.head),
             Checks::Failed(checks) => self.ci_failed(number, pr.head, checks),
         }
+    }
+
+    // Green CI goes to a CodeRabbit round while one is owed, then to the merge.
+    fn passed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
+        if self.coderabbit_due() {
+            return self.start_round(head);
+        }
+        self.raise(number, RulingKind::Merge { head })
     }
 
     // A worker that pushed nothing after its last red run would get the

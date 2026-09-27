@@ -47,8 +47,64 @@ pub struct WorkItem {
     /// Whether a review round or judge call is in flight
     #[serde(default)]
     pub review_call: ReviewCallState,
+    /// Its CodeRabbit rounds so far
+    #[serde(default)]
+    pub coderabbit: CodeRabbitTally,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
+}
+
+/// A work item's CodeRabbit rounds so far
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodeRabbitTally {
+    /// Rounds whose review covered the head
+    pub rounds: u32,
+    /// Whether the maintainer let the rounds past their cap
+    pub cap_cleared: bool,
+    /// Whether CodeRabbit is satisfied with the code as it stands. A
+    /// worker's turn changes the code, so it clears this.
+    pub satisfied: bool,
+}
+
+/// Where one CodeRabbit round stands
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "stage", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum CodeRabbitStage {
+    /// Waiting for the CodeRabbit lease, to summon a review of `head`
+    Lease {
+        /// The head CI passed on
+        head: String,
+    },
+    /// The label went on at `at`. The lease goes back once CodeRabbit answers.
+    Summoned {
+        /// The head the summon is for
+        head: String,
+        /// When the label went on
+        at: Timestamp,
+    },
+    /// The open threads of a review of `head`, judged in order
+    Judging {
+        /// The head the review covered
+        head: String,
+        /// Every thread still open, as a finding
+        threads: Vec<OpenThread>,
+        /// The judge's verdict on each thread judged so far, same order
+        verdicts: Vec<Verdict>,
+    },
+}
+
+/// A CodeRabbit thread still open, as the judge reads it
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenThread {
+    /// The forge's id, which resolving it takes
+    pub id: String,
+    /// What it says
+    pub finding: Finding,
 }
 
 /// Where a work item stands between the worker's turns and the merge
@@ -72,6 +128,9 @@ pub enum Phase {
         /// When kelpie first saw that head, or entered CI
         since: Timestamp,
     },
+    /// A CodeRabbit round, between green CI and the merge ruling
+    #[serde(rename = "coderabbit")]
+    CodeRabbit(CodeRabbitStage),
     /// Parked on a ruling
     Ruling {
         /// The ruling's id
@@ -285,6 +344,7 @@ mod tests {
                 "red_head": "bad",
                 "resume": null,
                 "review_call": { "state": "idle" },
+                "coderabbit": { "rounds": 0, "cap_cleared": false, "satisfied": false },
                 "calls": [{
                     "role": "worker",
                     "at": 10,
@@ -333,6 +393,30 @@ mod tests {
                 "stage": { "stage": "round" },
             })
         );
+        assert_eq!(
+            value(Phase::CodeRabbit(CodeRabbitStage::Summoned {
+                head: "c0ffee".into(),
+                at: Timestamp(12),
+            })),
+            json!({ "state": "coderabbit", "stage": "summoned", "head": "c0ffee", "at": 12 })
+        );
+        let judging = Phase::CodeRabbit(CodeRabbitStage::Judging {
+            head: "c0ffee".into(),
+            threads: vec![OpenThread {
+                id: "PRRT_1".into(),
+                finding: Finding {
+                    severity: crate::ports::Severity::Medium,
+                    file: "a.rs".into(),
+                    line: 0,
+                    what: "w".into(),
+                    why: "y".into(),
+                },
+            }],
+            verdicts: vec![],
+        });
+        let pinned = value(judging.clone());
+        assert_eq!(pinned["threads"][0]["id"], "PRRT_1");
+        assert_eq!(serde_json::from_value::<Phase>(pinned).unwrap(), judging);
         assert_eq!(
             value(Phase::Ruling { id: 3 }),
             json!({ "state": "ruling", "id": 3 })

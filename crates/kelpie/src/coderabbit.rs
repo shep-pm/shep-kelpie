@@ -129,7 +129,7 @@ impl Activity {
 
     fn sticky(&self) -> Option<&Comment> {
         let sticky = |c: &&Comment| STICKY.iter().any(|m| c.body.contains(m));
-        self.comments.iter().filter(sticky).next_back()
+        self.comments.iter().rfind(sticky)
     }
 }
 
