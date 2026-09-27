@@ -183,8 +183,8 @@ async fn wait_for_grant(kind: &LeaseKind, signals: &mut Signals) -> Result<Optio
             return Ok(None);
         }
         let ahead = reply["queued"].as_u64();
-        if ahead != last_ahead {
-            let ahead = ahead.ok_or_else(|| format!("the dog answered {reply}"))?;
+        let ahead = ahead.ok_or_else(|| format!("the dog answered {reply}"))?;
+        if last_ahead != Some(ahead) {
             eprintln!("kelpie lease: waiting for {kind}, {ahead} ahead");
             last_ahead = Some(ahead);
         }
@@ -259,8 +259,7 @@ async fn hold_gpu() -> Result<ExitCode, String> {
         let _ = lock.release(claim.pid);
         return Err(format!("take went away, so the lock is let go: {e}"));
     }
-    std::future::pending::<()>().await;
-    Ok(ExitCode::SUCCESS)
+    std::future::pending().await
 }
 
 fn return_gpu() -> Result<(), String> {
@@ -335,7 +334,8 @@ async fn ask_dog(action: &str, params: &str) -> Result<Value, String> {
     };
     let value: Value =
         serde_json::from_str(&body).map_err(|_| format!("the dog answered {body:?}"))?;
-    match value["error"].as_str() {
+    match value.get("error") {
+        Some(Value::String(error)) => Err(format!("the dog refused: {error}")),
         Some(error) => Err(format!("the dog refused: {error}")),
         None => Ok(value),
     }
