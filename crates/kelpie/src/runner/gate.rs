@@ -41,7 +41,7 @@ impl Runner {
                 self.update(|item| item.phase = Phase::Done { merged: true })?;
                 return self.finish(true);
             }
-            PullRequestState::Closed => return self.raise(RulingKind::Closed),
+            PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
         }
         let now = self.ports.clock.now();
         let since = if seen.as_deref() == Some(pr.head.as_str()) {
@@ -59,7 +59,9 @@ impl Runner {
         match pr.checks {
             Checks::Pending => Ok(Begin::Idle),
             Checks::None if !grace_over(since, now) => Ok(Begin::Idle),
-            Checks::None | Checks::Passed => self.raise(RulingKind::Merge { head: pr.head }),
+            Checks::None | Checks::Passed => {
+                self.raise(number, RulingKind::Merge { head: pr.head })
+            }
             Checks::Failed(checks) => self.ci_failed(number, pr.head, checks),
         }
     }
@@ -78,7 +80,7 @@ impl Runner {
             .as_ref()
             .expect("CI runs on a work item");
         if item.red_head.as_deref() == Some(head.as_str()) {
-            return self.raise(RulingKind::StillRed { head, checks });
+            return self.raise(number, RulingKind::StillRed { head, checks });
         }
         let issue = item.issue;
         let prompt = red_prompt(number, &head, &checks);
@@ -127,7 +129,7 @@ impl Runner {
                     head,
                 }))
             }
-            Ok(Rebase::Refused(reason)) => self.raise(RulingKind::Rebase { reason }),
+            Ok(Rebase::Refused(reason)) => self.raise(number, RulingKind::Rebase { reason }),
             Err(e) => Ok(self.gate_failed(format!("cannot rebase #{number}: {e}"))),
         }
     }

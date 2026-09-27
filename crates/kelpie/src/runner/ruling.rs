@@ -58,7 +58,10 @@ impl Runner {
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
         let ruling = next.rulings.remove(at);
-        if let Some(item) = next.work_item.as_mut() {
+        // Only the ruling the work item is parked on moves it. Any other,
+        // which nothing leaves behind today, is answered by clearing it.
+        let parked_on = |item: &WorkItem| item.phase == Phase::Ruling { id };
+        if let Some(item) = next.work_item.as_mut().filter(|item| parked_on(item)) {
             match (answer, ruling.kind) {
                 (Answer::Yes, RulingKind::Merge { head }) => item.phase = Phase::Merge { head },
                 (Answer::Yes, RulingKind::Rebase { .. } | RulingKind::StillRed { .. }) => {
@@ -79,14 +82,15 @@ impl Runner {
         self.save(next).map_err(RuleError::State)
     }
 
-    // Saves the ruling and parks the worker on it, then posts it.
-    pub(super) fn raise(&mut self, kind: RulingKind) -> Result<Begin, StateError> {
+    // Saves the ruling and parks the worker on it, then posts it on pull
+    // request `number`.
+    pub(super) fn raise(&mut self, number: u64, kind: RulingKind) -> Result<Begin, StateError> {
         let item = self
             .state
             .work_item
             .as_ref()
             .expect("a ruling is about a work item");
-        let (issue, number) = (item.issue, item.pull_request.unwrap_or_default());
+        let issue = item.issue;
         let id = self.state.last_ruling + 1;
         let question = question(self.project.as_str(), id, number, &kind);
         let mut next = self.state.clone();
@@ -118,7 +122,9 @@ impl Runner {
             .work_item
             .as_ref()
             .expect("a merge is of a work item");
-        let (issue, number) = (item.issue, item.pull_request.unwrap_or_default());
+        let (issue, Some(number)) = (item.issue, item.pull_request) else {
+            return Ok(Begin::Idle);
+        };
         let forge = &self.ports.forge;
         let repo = &self.settings.forge;
         let pr = match forge.pull_request(repo, number) {
@@ -131,7 +137,7 @@ impl Runner {
                 self.update(|item| item.phase = Phase::Done { merged: true })?;
                 return self.finish(true);
             }
-            PullRequestState::Closed => return self.raise(RulingKind::Closed),
+            PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
         }
         let stale = if pr.head != head {
             Some(format!("#{number} moved to {}", short(&pr.head)))
@@ -193,6 +199,9 @@ impl Runner {
         };
         let mut next = self.state.clone();
         next.work_item = None;
+        // Rulings about this work item's pull request go with it.
+        next.rulings
+            .retain(|r| r.pull_request.is_none() || r.pull_request != item.pull_request);
         self.save(next)?;
         Ok(Begin::Report(report))
     }
