@@ -20,7 +20,7 @@ use super::trigger::lock;
 use crate::pacer::Scope;
 use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session};
 use crate::profile::{INSTRUCTIONS, WorkerProfile};
-use crate::state::{RulingKind, RunState, StateError};
+use crate::state::{Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CallRecord, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree;
 
@@ -231,23 +231,35 @@ impl Runner {
                     session_cost: reply.session_cost,
                 });
                 item.turn = Turn::Ended { at: now };
-                match item.phase.clone() {
-                    Phase::Implement if discovering && item.pull_request.is_some() => {
-                        item.phase = Phase::Review(Review::first());
+                // A question leaves the phase untouched: it interrupted
+                // whatever was running, before that turn could be said to
+                // have ended normally, and the answer resumes exactly this,
+                // captured below before `park` parks it on a ruling.
+                if question.is_none() {
+                    if let Some(resume) = item.resume.take() {
+                        item.phase = resume;
+                    } else {
+                        match item.phase.clone() {
+                            Phase::Implement if discovering && item.pull_request.is_some() => {
+                                item.phase = Phase::Review(Review::first());
+                            }
+                            Phase::Implement if item.pull_request.is_some() => {
+                                item.phase = Phase::Ci {
+                                    head: None,
+                                    since: now,
+                                };
+                            }
+                            Phase::Review(review) => {
+                                let ReviewStage::Fixing { clean } = review.stage else {
+                                    unreachable!(
+                                        "only a fix turn drives the worker while reviewing"
+                                    );
+                                };
+                                item.phase = review::advance(review, clean, now);
+                            }
+                            _ => {}
+                        }
                     }
-                    Phase::Implement if item.pull_request.is_some() => {
-                        item.phase = Phase::Ci {
-                            head: None,
-                            since: now,
-                        };
-                    }
-                    Phase::Review(review) => {
-                        let ReviewStage::Fixing { clean } = review.stage else {
-                            unreachable!("only a fix turn drives the worker while reviewing");
-                        };
-                        item.phase = review::advance(review, clean, now);
-                    }
-                    _ => {}
                 }
                 let (issue, session) = (item.issue, item.session.clone());
                 let (work_item_cost_usd, pull_request) = (item.cost().usd(), item.pull_request);
@@ -261,7 +273,15 @@ impl Runner {
                         pull_request,
                     },
                     Some(text) => {
-                        let kind = RulingKind::Question { asked: text };
+                        let resume = match &item.phase {
+                            Phase::Review(review) => Resume::Review(review.clone()),
+                            Phase::Implement if pull_request.is_some() => Resume::ReviewFirst,
+                            _ => Resume::Nothing,
+                        };
+                        let kind = RulingKind::Question {
+                            asked: text,
+                            resume,
+                        };
                         let project = self.project.as_str();
                         let (_, id, question) = park(project, &mut next, pull_request, kind);
                         StepReport::Asked {

@@ -189,25 +189,28 @@ mod tests {
         rig.claude.script([
             Scripted::Say("<kelpie-question>Which name?</kelpie-question>"),
             Scripted::Push("work.txt", "work\n"),
+            Scripted::Text("CLEAN"),
         ]);
         let mut seen = Vec::new();
         let mut log = |report: Option<StepReport>| {
             seen.push(serde_json::to_string(&report).unwrap());
         };
-        log(step(&runner).unwrap());
-        log(step(&runner).unwrap());
+        log(step(&runner).unwrap()); // asked
+        log(step(&runner).unwrap()); // alert-failed: the webhook is down
         rig.alerts.set_down(false);
         rig.clock.advance(60);
-        log(step(&runner).unwrap());
+        log(step(&runner).unwrap()); // alerted: the question's ruling, retried
         rig.ask(&runner, "rule", Some("1 answer --dry-run"));
-        log(step(&runner).unwrap());
+        log(step(&runner).unwrap()); // ended: pushes work.txt, enters round 1
+        log(step(&runner).unwrap()); // review round 1, qwen: clean by default
+        log(step(&runner).unwrap()); // review round 2, claude: scripted clean above
         let head = rig.forge.head_of("kelpie/7").unwrap();
         rig.forge.set_checks(&head, Checks::Passed);
-        log(rig.verdict(&runner));
-        log(step(&runner).unwrap());
+        log(rig.verdict(&runner)); // the merge ruling
+        log(step(&runner).unwrap()); // alerted: the merge ruling
 
         assert!(seen[1].contains("alert-failed"), "{seen:?}");
-        assert!(seen[5].contains("alerted"), "{seen:?}");
+        assert!(seen[7].contains("alerted"), "{seen:?}");
         seen.push(rig.ask(&runner, "status", None).to_string());
         seen.push(format!("{:?}", runner.lock().unwrap()));
         seen.extend(rig.forge.comments().into_iter().map(|(_, c)| c));
