@@ -5,15 +5,73 @@
 //! yes, goes back to CI, and asks again. Every step is saved before the next,
 //! so a runner restarted mid-merge picks up where it stopped.
 
+use std::fmt;
+
 use super::Runner;
 use super::gate::{settled, short};
 use super::report::{Begin, StepReport};
 use crate::ports::{Checks, PullRequestState};
 use crate::state::{RulingKind, StateError};
-use crate::work_item::Phase;
+use crate::work_item::{Phase, Turn};
 use crate::worktree::{self, Base};
 
+/// Why `drop` was refused
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DropError {
+    /// No work item is in flight
+    NoWorkItem,
+    /// The worker's turn is running, and the work item stays until it ends
+    TurnRunning(u64),
+    /// A yes is being carried out, and the merge is not stopped halfway
+    Merging(u64),
+    /// Its worktree, branch or build folder could not be removed
+    Cleanup(String),
+    /// The change could not be saved
+    State(StateError),
+}
+
+impl fmt::Display for DropError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoWorkItem => f.write_str("no work item is in flight"),
+            Self::TurnRunning(issue) => write!(f, "the worker's turn on #{issue} is running"),
+            Self::Merging(issue) => write!(f, "the work item for #{issue} is merging"),
+            Self::Cleanup(reason) => f.write_str(reason),
+            Self::State(e) => e.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for DropError {}
+
 impl Runner {
+    /// Ends the work item in flight without merging it
+    ///
+    /// Its worktree, local branch and build folder go, and its issue is
+    /// recorded as finished. Its pull request and branch on the forge stay.
+    /// It works whether the project runs or not.
+    ///
+    /// # Errors
+    ///
+    /// [`DropError`] when nothing is in flight, a turn or a merge is under
+    /// way, or the cleanup fails. The work item stays then.
+    pub fn drop_work_item(&mut self) -> Result<(), DropError> {
+        let item = self.state.work_item.as_ref().ok_or(DropError::NoWorkItem)?;
+        if matches!(item.turn, Turn::Running { .. }) {
+            return Err(DropError::TurnRunning(item.issue));
+        }
+        if matches!(
+            item.phase,
+            Phase::Merge { .. } | Phase::Done { merged: true }
+        ) {
+            return Err(DropError::Merging(item.issue));
+        }
+        match self.finish(false).map_err(DropError::State)? {
+            Begin::Report(StepReport::GateFailed { reason, .. }) => Err(DropError::Cleanup(reason)),
+            _ => Ok(()),
+        }
+    }
+
     // Marking the draft ready can start a fresh CI run on the same head, so
     // that pass ends there. A later pass, once the checks have had time to
     // register, merges only on a green run.
@@ -139,14 +197,16 @@ impl Runner {
 
 #[cfg(test)]
 mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::Mutex;
 
     use serde_json::json;
 
     use super::*;
+    use crate::ports::{Cost, Usage};
     use crate::runner::gate::CHECKS_SETTLE;
     use crate::runner::step;
-    use crate::test::{Rig, git};
+    use crate::test::{Rig, Scripted, git};
 
     fn finished() -> Option<StepReport> {
         Some(StepReport::Finished {
@@ -348,6 +408,64 @@ mod tests {
         rig.forge.set_merges_down(false);
         assert_eq!(step(&runner).unwrap(), finished());
         assert_eq!(rig.forge.merges(), [(71, head)]);
+    }
+
+    // The work item the playground's board wrongly took: a turn that ended
+    // with no pull request, in a project the maintainer paused.
+    #[test]
+    fn drop_clears_a_work_item_in_a_paused_project_and_the_board_never_retakes_it() {
+        let rig = Rig::new("hazels-lab");
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "start", None);
+        rig.ask(&runner, "add", Some("7"));
+        rig.claude
+            .script([Scripted::Reply(Usage::default(), Cost(1))]);
+        step(&runner).unwrap();
+        rig.ask(&runner, "pause", None);
+        let build = rig.home.path().join("kelpie/targets/hazels-lab/7");
+        assert!(rig.worktree_7().exists() && build.exists());
+
+        let status = rig.ask(&runner, "drop", None);
+        assert_eq!(
+            (&status["work_item"], &status["run"]),
+            (&json!(null), &json!("paused"))
+        );
+        assert!(!rig.worktree_7().exists());
+        assert!(!build.exists());
+        assert_eq!(git(&rig.repo(), &["branch", "--list", "kelpie/7"]), "");
+
+        rig.forge.list_ready(7, false);
+        rig.ask(&runner, "start", None);
+        assert_eq!(step(&runner).unwrap(), None);
+        assert_eq!(rig.claude.calls().len(), 1);
+    }
+
+    #[test]
+    fn drop_refuses_with_nothing_in_flight_a_running_turn_or_a_merge() {
+        let rig = Rig::new("koji");
+        let runner = rig.open().unwrap();
+        assert_eq!(
+            rig.ask(&runner, "drop", None),
+            json!({ "error": "no work item is in flight" })
+        );
+        rig.ask(&runner, "start", None);
+        rig.ask(&runner, "add", Some("7"));
+        rig.claude.script([Scripted::Kill]);
+        let _ = catch_unwind(AssertUnwindSafe(|| step(&runner)));
+        drop(runner);
+        let runner = rig.open().unwrap();
+        assert_eq!(
+            rig.ask(&runner, "drop", None),
+            json!({ "error": "the worker's turn on #7 is running" })
+        );
+
+        let (rig, runner, _) = Rig::parked("rotom");
+        rig.ask(&runner, "rule", Some("1 yes"));
+        assert_eq!(
+            rig.ask(&runner, "drop", None),
+            json!({ "error": "the work item for #7 is merging" })
+        );
+        assert!(rig.worktree_7().exists());
     }
 
     // Seen live on the playground: the board polled a second after the

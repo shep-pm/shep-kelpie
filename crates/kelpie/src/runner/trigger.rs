@@ -13,7 +13,7 @@ use crate::state::{LeaseHeld, Ruling, RunState, StateError};
 use crate::work_item::{Phase, Turn, WorkItem};
 
 /// The triggers a runner answers
-pub const ACTIONS: [&str; 6] = ["status", "start", "pause", "add", "rule", "gate"];
+pub const ACTIONS: [&str; 7] = ["status", "start", "pause", "add", "rule", "gate", "drop"];
 
 /// What `rule` takes, as its refusals say
 const RULE_USAGE: &str = "`rule` takes `<id> yes` or `<id> no <note>`";
@@ -88,6 +88,7 @@ enum Request {
     Add(u64),
     Rule(u64, Answer),
     Gate,
+    Drop,
 }
 
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
@@ -110,6 +111,7 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
         Request::Add(issue) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
         Request::Rule(id, answer) => runner.rule(id, answer).map_err(|e| e.to_string()),
         Request::Gate => runner.gate().map_err(|e| e.to_string()),
+        Request::Drop => runner.drop_work_item().map_err(|e| e.to_string()),
     };
     match changed {
         Ok(()) => serde_json::to_string(&runner.status()).expect("status serializes to JSON"),
@@ -130,6 +132,7 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
         ("start", None) => Ok(Request::Start),
         ("pause", None) => Ok(Request::Pause),
         ("gate", None) => Ok(Request::Gate),
+        ("drop", None) => Ok(Request::Drop),
         (_, None) => Ok(Request::Status),
     }
 }
@@ -219,6 +222,7 @@ impl Runner {
             .map_err(GateError::State)
     }
 }
+
 pub(super) fn lock(runner: &Mutex<Runner>) -> MutexGuard<'_, Runner> {
     runner.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -264,7 +268,7 @@ mod tests {
         let runner = rig.open().unwrap();
         for action in ACTIONS
             .into_iter()
-            .filter(|a| !["rule", "gate"].contains(a))
+            .filter(|a| !["rule", "gate", "drop"].contains(a))
         {
             let params = (action == "add").then_some("7");
             assert_eq!(

@@ -24,6 +24,7 @@ mod ruling;
 mod trigger;
 mod turn;
 
+pub use merge::DropError;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
 pub use report::StepReport;
 pub use ruling::{Answer, RuleError};
