@@ -87,8 +87,10 @@ impl RelayCli {
             let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
             return Err(RelayError::Unreachable(stderr));
         }
+        // The parse error is safe to surface as-is: an agent listing never
+        // carries a secret, unlike a session's own registry or key file.
         let agents: Vec<Value> = serde_json::from_slice(&output.stdout)
-            .map_err(|_| RelayError::Unreachable("unreadable agent list".into()))?;
+            .map_err(|e| RelayError::Unreachable(format!("unreadable agent list: {e}")))?;
         let (newest, extras) = newest_and_extras(&agents);
         for id in extras {
             let _ = self.stop_and_remove(&id);
@@ -195,10 +197,11 @@ impl RelayCli {
     }
 
     // What the relay needs from kelpie's own environment: a home to find
-    // its trust and sessions under, a shell to run in, a temporary folder,
-    // and whose account it is, mirroring the minimal set a pinned shep
-    // sheep itself starts with (see docs/design-log.md). Everything else
-    // kelpie's own process happens to carry stays out of the relay's.
+    // its trust and sessions under, where `claude` and its own dependencies
+    // resolve on `PATH`, a temporary folder, and whose account it is,
+    // mirroring the minimal set a pinned shep sheep itself starts with
+    // (see docs/design-log.md). Everything else kelpie's own process
+    // happens to carry stays out of the relay's.
     //
     // `HOME` comes from `self.home`, not the ambient environment: `find`,
     // `current_dir` and the relay's own `~/.claude/sessions` all key off
