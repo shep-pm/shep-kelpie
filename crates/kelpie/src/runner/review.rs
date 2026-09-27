@@ -9,42 +9,14 @@
 //! Past the round guard the worker parks for a ruling; a yes clears the
 //! guard for the rest of this work item.
 
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+mod calls;
+mod findings;
 
 use super::Runner;
 use super::report::{Begin, ReviewCall, ReviewResult, StepReport};
-use crate::ports::{ClaudeCall, Finding, Role, Session, Severity, Verdict, parse_findings};
-use crate::settings::RoleModel;
+use crate::ports::{Claude, Finding, Reviewer, Severity, Verdict, parse_findings};
 use crate::state::{RulingKind, StateError};
-use crate::work_item::{Phase, Review, ReviewStage, ReviewerKind, Turn, new_session_id};
-
-/// Where the round's held findings are written for the worker's next turn
-const FINDINGS_FILE: &str = "review-findings.md";
-
-/// The Claude round's throwaway settings: no sandbox fencing, no bypassed
-/// permissions, but Read, Grep and Glob still work by default so it can
-/// check its own work against the worktree
-const REVIEW_SETTINGS_FILE: &str = "review-settings.json";
-
-/// The judge's throwaway settings: every tool denied, so its one-shot answer
-/// is schema-constrained text and nothing it read on the side
-const JUDGE_SETTINGS_FILE: &str = "judge-settings.json";
-
-/// Every tool name a Claude Code call can reach, denied outright for the judge
-const NO_TOOLS: [&str; 11] = [
-    "Bash",
-    "Read",
-    "Edit",
-    "Write",
-    "MultiEdit",
-    "NotebookEdit",
-    "Glob",
-    "Grep",
-    "WebFetch",
-    "WebSearch",
-    "Task",
-];
+use crate::work_item::{Phase, Review, ReviewStage, ReviewerKind, Turn};
 
 impl Runner {
     pub(super) fn review_step(&mut self) -> Result<Begin, StateError> {
@@ -75,7 +47,7 @@ impl Runner {
                     })),
                     ReviewerKind::Claude => {
                         let model = self.settings.models.reviewer.clone();
-                        match reviewer_call(&worktree, &worker_folder, &model) {
+                        match calls::reviewer_call(&worktree, &worker_folder, &model) {
                             Ok(call) => Ok(Begin::Review(ReviewCall::ClaudeRound(call))),
                             Err(reason) => Ok(self.gate_failed(reason)),
                         }
@@ -88,7 +60,7 @@ impl Runner {
                 }
                 let finding = findings[verdicts.len()].clone();
                 let model = self.settings.models.judge.clone();
-                match judge_call(&worktree, &worker_folder, &model, &finding) {
+                match calls::judge_call(&worktree, &worker_folder, &model, &finding) {
                     Ok(call) => Ok(Begin::Review(ReviewCall::Judge(call))),
                     Err(reason) => Ok(self.gate_failed(reason)),
                 }
@@ -139,12 +111,13 @@ impl Runner {
             }));
         }
         let clean = held.iter().all(|f| f.severity <= Severity::Low);
-        let path = self.paths.worker.join(FINDINGS_FILE);
-        if let Err(reason) = write_findings_file(&self.paths.worker, &path, round, &held) {
+        let path = findings::findings_path(&self.paths.worker);
+        if let Err(reason) = findings::write_findings_file(&self.paths.worker, &path, round, &held)
+        {
             return Ok(self.gate_failed(reason));
         }
         let held_count = held.len();
-        let prompt = fix_prompt(number, round, held_count, &path);
+        let prompt = findings::fix_prompt(number, round, held_count, &path);
         self.update(|item| {
             item.turn = Turn::Next { prompt };
             item.phase = Phase::Review(Review {
@@ -267,8 +240,8 @@ pub(super) fn advance(review: Review, clean: bool, now: crate::ports::Timestamp)
 /// Runs `action` outside the runner's lock: the qwen script, or a fresh
 /// Claude call for a review round or the judge
 pub(super) fn run_review_call(
-    claude: &dyn crate::ports::Claude,
-    reviewer: &dyn crate::ports::Reviewer,
+    claude: &dyn Claude,
+    reviewer: &dyn Reviewer,
     action: ReviewCall,
 ) -> ReviewResult {
     match action {
@@ -292,257 +265,21 @@ pub(super) fn run_review_call(
                 .run(&call)
                 .map_err(|e| e.to_string())
                 .and_then(|reply| {
-                    parse_verdict(&reply.text)
+                    calls::parse_verdict(&reply.text)
                         .ok_or_else(|| format!("unreadable judge output: {}", reply.text.trim()))
                 }),
         ),
     }
 }
 
-fn reviewer_call(
-    worktree: &Path,
-    worker_folder: &Path,
-    model: &RoleModel,
-) -> Result<ClaudeCall, String> {
-    let diff = diff_against_base(worktree)?;
-    let settings = review_settings(worker_folder)?;
-    let session = new_session_id().map_err(|e| format!("cannot draw a session id: {e}"))?;
-    Ok(ClaudeCall {
-        role: Role::Reviewer,
-        model: model.model.as_str().to_owned(),
-        effort: model.effort,
-        session: Session::New(session),
-        cwd: worktree.to_owned(),
-        settings,
-        instructions: None,
-        prompt: reviewer_prompt(&diff),
-    })
-}
-
-fn judge_call(
-    worktree: &Path,
-    worker_folder: &Path,
-    model: &RoleModel,
-    finding: &Finding,
-) -> Result<ClaudeCall, String> {
-    let diff = diff_against_base(worktree)?;
-    let settings = judge_settings(worker_folder)?;
-    let session = new_session_id().map_err(|e| format!("cannot draw a session id: {e}"))?;
-    Ok(ClaudeCall {
-        role: Role::Judge,
-        model: model.model.as_str().to_owned(),
-        effort: model.effort,
-        session: Session::New(session),
-        cwd: worktree.to_owned(),
-        settings,
-        instructions: None,
-        prompt: judge_prompt(&diff, finding),
-    })
-}
-
-fn review_settings(worker_folder: &Path) -> Result<PathBuf, String> {
-    let path = worker_folder.join(REVIEW_SETTINGS_FILE);
-    super::turn::write(worker_folder, &path, "{}\n")?;
-    Ok(path)
-}
-
-fn judge_settings(worker_folder: &Path) -> Result<PathBuf, String> {
-    let path = worker_folder.join(JUDGE_SETTINGS_FILE);
-    let deny = serde_json::json!({ "permissions": { "deny": NO_TOOLS } });
-    let text = serde_json::to_string_pretty(&deny).expect("settings are JSON");
-    super::turn::write(worker_folder, &path, &text)?;
-    Ok(path)
-}
-
-fn diff_against_base(worktree: &Path) -> Result<String, String> {
-    let base = format!("origin/{}", crate::worktree::BASE);
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(worktree)
-        .args(["diff", &base])
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|e| format!("cannot run git diff: {e}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "git diff failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-fn reviewer_prompt(diff: &str) -> String {
-    format!(
-        "You are a founding engineer reviewing a junior developer's pull request. Be \
-         extremely critical and check every line of the diff below, against \
-         `origin/main`. You may open any file in this worktree with Read, Grep or Glob \
-         to check your work; do not run any command and do not edit anything.\n\n\
-         Look for: code smells; duplicated code, types or logic; non-performant code; \
-         non-idiomatic code for this language; hard-to-follow logic; poorly named \
-         variables, functions and types; missing or inadequate doc comments; comments \
-         that no longer match the code; missing error handling; unsafe assumptions \
-         about input; and thin test coverage for new logic.\n\n\
-         Report only real problems, never formatting or anything a linter already \
-         enforces. Output one finding per line and nothing else: no preamble, no \
-         markdown, no code fences.\n\
-         SEVERITY|file:line|what is wrong|why it matters\n\n\
-         SEVERITY must be HIGH, MEDIUM or LOW. If the diff is genuinely fine, output \
-         exactly CLEAN and nothing else.\n\n\
-         --- diff against origin/main ---\n{diff}\n--- end ---"
-    )
-}
-
-fn judge_prompt(diff: &str, finding: &Finding) -> String {
-    format!(
-        "You are judging one code-review finding on a pull request. You did not write \
-         the finding and will not fix it; you only decide whether it holds against the \
-         diff below.\n\n\
-         Finding:\n\
-         severity: {}\n\
-         location: {}:{}\n\
-         what: {}\n\
-         why: {}\n\n\
-         Decide whether it holds. You may regrade its severity in either direction, \
-         whether or not it holds. Output exactly one line of JSON and nothing else:\n\
-         {{\"holds\": true|false, \"severity\": \"low\"|\"medium\"|\"high\", \"reason\": \"<one sentence>\"}}\n\n\
-         --- diff against origin/main ---\n{diff}\n--- end ---",
-        severity_tag(finding.severity),
-        finding.file,
-        finding.line,
-        finding.what,
-        finding.why,
-    )
-}
-
-fn severity_tag(severity: Severity) -> &'static str {
-    match severity {
-        Severity::Low => "LOW",
-        Severity::Medium => "MEDIUM",
-        Severity::High => "HIGH",
-    }
-}
-
-fn parse_verdict(text: &str) -> Option<Verdict> {
-    #[derive(serde::Deserialize)]
-    struct Raw {
-        holds: bool,
-        severity: String,
-        reason: String,
-    }
-    let start = text.find('{')?;
-    let end = text.rfind('}')?;
-    if end < start {
-        return None;
-    }
-    let raw: Raw = serde_json::from_str(&text[start..=end]).ok()?;
-    let severity = match raw.severity.to_lowercase().as_str() {
-        "low" => Severity::Low,
-        "medium" => Severity::Medium,
-        "high" => Severity::High,
-        _ => return None,
-    };
-    Some(Verdict {
-        holds: raw.holds,
-        severity,
-        reason: raw.reason,
-    })
-}
-
-fn write_findings_file(
-    folder: &Path,
-    path: &Path,
-    round: u32,
-    findings: &[Finding],
-) -> Result<(), String> {
-    let mut text = format!(
-        "Round {round}'s held findings, at the judge's severity. Fix each one, then \
-         commit and push.\n\n"
-    );
-    for f in findings {
-        text.push_str(&format!(
-            "{}|{}:{}|{}|{}\n",
-            severity_tag(f.severity),
-            f.file,
-            f.line,
-            f.what,
-            f.why
-        ));
-    }
-    super::turn::write(folder, path, &text)
-}
-
-fn fix_prompt(number: u64, round: u32, count: usize, path: &Path) -> String {
-    format!(
-        "Round {round} of the qwen-review loop on your pull request #{number} held \
-         {count} finding(s), in {}. Fix each one, then commit and push with \
-         `git push origin HEAD`.",
-        path.display()
-    )
-}
-
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
-
     use serde_json::json;
 
     use super::*;
+    use crate::ports::{Role, Session};
     use crate::runner::step;
     use crate::test::{Rig, Scripted, ScriptedRound};
-
-    #[test]
-    fn a_findings_file_that_cannot_be_written_is_an_error() {
-        let dir = tempfile::tempdir().unwrap();
-        let folder = dir.path().join("readonly");
-        std::fs::create_dir(&folder).unwrap();
-        let mut perms = std::fs::metadata(&folder).unwrap().permissions();
-        perms.set_mode(0o555);
-        std::fs::set_permissions(&folder, perms).unwrap();
-
-        let finding = Finding {
-            severity: Severity::Low,
-            file: "a.rs".into(),
-            line: 1,
-            what: "nit".into(),
-            why: "style".into(),
-        };
-        let err = write_findings_file(&folder, &folder.join("review-findings.md"), 1, &[finding])
-            .unwrap_err();
-        assert!(err.contains("review-findings.md"), "{err}");
-
-        // Restore write access so the tempdir can clean itself up.
-        let mut perms = std::fs::metadata(&folder).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&folder, perms).unwrap();
-    }
-
-    #[test]
-    fn a_judge_reply_wrapped_in_prose_or_fences_still_parses() {
-        let plain = r#"{"holds": true, "severity": "medium", "reason": "it does hold"}"#;
-        assert_eq!(
-            parse_verdict(plain),
-            Some(Verdict {
-                holds: true,
-                severity: Severity::Medium,
-                reason: "it does hold".into(),
-            })
-        );
-        let fenced = format!("```json\n{plain}\n```");
-        assert_eq!(parse_verdict(&fenced), parse_verdict(plain));
-        let cased = r#"{"holds": false, "severity": "HIGH", "reason": "no"}"#;
-        assert_eq!(parse_verdict(cased).unwrap().severity, Severity::High);
-    }
-
-    #[test]
-    fn an_unparseable_judge_reply_is_none() {
-        assert_eq!(parse_verdict("I think it holds."), None);
-        assert_eq!(parse_verdict(r#"{"holds": true}"#), None);
-        assert_eq!(
-            parse_verdict(r#"{"holds": true, "severity": "urgent", "reason": "x"}"#),
-            None
-        );
-    }
 
     #[test]
     fn advancing_a_clean_round_extends_the_streak_and_settles_at_two() {
@@ -813,76 +550,6 @@ mod tests {
                 "guard_cleared": true,
                 "stage": { "stage": "round" },
             }),
-        );
-    }
-
-    #[test]
-    fn the_judge_gets_every_tool_denied() {
-        let rig = Rig::new("shep");
-        let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
-        rig.ask(&runner, "add", Some("7"));
-        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-        rig.claude.script([Scripted::Push("work.txt", "work\n")]);
-        step(&runner).unwrap(); // opens the pull request, enters round 1 (qwen)
-
-        rig.reviewer.script([ScriptedRound::Findings(vec![Finding {
-            severity: Severity::Low,
-            file: "src/lib.rs".into(),
-            line: 3,
-            what: "unused variable".into(),
-            why: "dead code".into(),
-        }])]);
-        step(&runner).unwrap(); // round 1's qwen call
-
-        rig.claude.script([Scripted::Text(
-            r#"{"holds": true, "severity": "low", "reason": "real, but minor"}"#,
-        )]);
-        step(&runner).unwrap(); // the judge's one-shot
-
-        let all = rig.claude.all_seen();
-        let judge = all
-            .iter()
-            .find(|s| s.call.role == Role::Judge)
-            .expect("the judge ran");
-        let denied: Vec<&str> = judge.settings["permissions"]["deny"]
-            .as_array()
-            .expect("a deny list")
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        for tool in ["Bash", "Read", "Edit", "Write", "WebFetch"] {
-            assert!(
-                denied.contains(&tool),
-                "{tool} should be denied to the judge"
-            );
-        }
-    }
-
-    #[test]
-    fn the_claude_round_keeps_its_read_tools_to_check_its_own_work() {
-        let rig = Rig::new("shep");
-        let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
-        rig.ask(&runner, "add", Some("7"));
-        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-        rig.claude.script([
-            Scripted::Push("work.txt", "work\n"),
-            Scripted::Text("CLEAN"),
-        ]);
-        step(&runner).unwrap(); // the worker's first turn
-        step(&runner).unwrap(); // round 1, qwen: clean by default
-        step(&runner).unwrap(); // round 2, claude: scripted clean above
-
-        let all = rig.claude.all_seen();
-        let reviewer = all
-            .iter()
-            .find(|s| s.call.role == Role::Reviewer)
-            .expect("a reviewer round ran");
-        assert_eq!(
-            reviewer.settings,
-            serde_json::json!({}),
-            "no tool is denied, unlike the judge's"
         );
     }
 }
