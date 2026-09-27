@@ -83,7 +83,7 @@ impl Runner {
         if settling || !green {
             return Ok(Begin::Idle);
         }
-        if let Err(e) = self.ports.forge.merge(&self.settings.forge, number, &head) {
+        if let Err(e) = self.ports.forge.merge(repo, number, &head) {
             return Ok(self.gate_failed(format!("cannot merge #{number}: {e}")));
         }
         self.update(|item| item.phase = Phase::Done { merged: true })?;

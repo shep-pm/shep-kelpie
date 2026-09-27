@@ -123,15 +123,15 @@ impl Runner {
             .as_ref()
             .expect("a rebase is of a work item");
         let issue = item.issue;
-        let rebased = worktree::rebase(&self.settings.repo, &item.worktree, &item.branch, head);
-        match rebased {
-            Ok(Rebase::Pushed(head)) => {
-                let (seen, since) = (Some(head.clone()), self.ports.clock.now());
+        let outcome = worktree::rebase(&self.settings.repo, &item.worktree, &item.branch, head);
+        match outcome {
+            Ok(Rebase::Pushed(rebased)) => {
+                let (seen, since) = (Some(rebased.clone()), self.ports.clock.now());
                 self.update(|item| item.phase = Phase::Ci { head: seen, since })?;
                 Ok(Begin::Report(StepReport::Rebased {
                     issue,
                     pull_request: number,
-                    head,
+                    head: rebased,
                 }))
             }
             Ok(Rebase::Refused(reason)) => self.raise(number, RulingKind::Rebase { reason }),
