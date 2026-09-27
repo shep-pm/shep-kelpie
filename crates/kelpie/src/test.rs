@@ -1,6 +1,7 @@
 //! The main seam's rig: a runner on stand-ins for Claude, the forge and the
 //! clock, over a real git repo in a throwaway home
 
+use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -9,40 +10,127 @@ use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 
 use crate::ports::{
-    Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Forge, ForgeError, Ports, Timestamp,
-    Visibility,
+    Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Forge, ForgeError, Issue, Ports,
+    Role, SessionId, Timestamp, Usage, Visibility,
 };
 use crate::runner::{OpenError, ProjectName, ProjectPaths, Runner, answer};
 use crate::settings::ForgeSlug;
+use crate::work_item::{CallRecord, Turn, WorkItem};
+
+/// A work item with one call, so every field of its format shows
+pub(crate) fn a_work_item() -> WorkItem {
+    WorkItem {
+        issue: 42,
+        title: "Add a thing".into(),
+        branch: "kelpie/42".into(),
+        worktree: "/k/wt/shep/42".into(),
+        build: "/k/targets/shep/42".into(),
+        session: SessionId("5e55".into()),
+        turn: Turn::Running {
+            since: Timestamp(9),
+        },
+        calls: vec![CallRecord {
+            role: Role::Worker,
+            at: Timestamp(10),
+            session: SessionId("5e55".into()),
+            usage: Usage {
+                input: 1,
+                cache_write: 2,
+                cache_read: 3,
+                output: 4,
+            },
+            cost: Cost(5),
+            session_cost: Cost(6),
+        }],
+    }
+}
 
 /// The `repo` in `settings.example.toml`, which the rig points at its own
 const EXAMPLE_REPO: &str = "~/.kelpie/repos/shep";
 
-/// Records every call and answers each with a failure
+/// The file a killed worker leaves in its worktree, to find after a restart
+pub(crate) const LEFT_BEHIND: &str = "left-behind.txt";
+
+/// What the stand-in Claude does with its next call
+#[derive(Debug, Clone)]
+pub(crate) enum Scripted {
+    /// Answers with this usage, and this cost for the session so far
+    Reply(Usage, Cost),
+    /// Fails with this error
+    Fail(ClaudeError),
+    /// Leaves [`LEFT_BEHIND`] in the worktree, then dies with the runner
+    Kill,
+}
+
+/// A call as the stand-in Claude saw it
+#[derive(Debug, Clone)]
+pub(crate) struct Seen {
+    /// The call
+    pub(crate) call: ClaudeCall,
+    /// The settings file it named, as it stood during the call
+    pub(crate) settings: serde_json::Value,
+    /// Whether its build folder existed when the call started
+    pub(crate) build_existed: bool,
+}
+
+/// Records every call and answers from a script, failing once it runs out
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FakeClaude {
-    calls: Arc<Mutex<Vec<ClaudeCall>>>,
+    seen: Arc<Mutex<Vec<Seen>>>,
+    script: Arc<Mutex<VecDeque<Scripted>>>,
 }
 
 impl FakeClaude {
     pub(crate) fn calls(&self) -> Vec<ClaudeCall> {
-        self.calls.lock().unwrap().clone()
+        self.seen().into_iter().map(|s| s.call).collect()
+    }
+
+    pub(crate) fn seen(&self) -> Vec<Seen> {
+        self.seen.lock().unwrap().clone()
+    }
+
+    pub(crate) fn script(&self, steps: impl IntoIterator<Item = Scripted>) {
+        self.script.lock().unwrap().extend(steps);
     }
 }
 
 impl Claude for FakeClaude {
     fn run(&self, call: &ClaudeCall) -> Result<ClaudeReply, ClaudeError> {
-        self.calls.lock().unwrap().push(call.clone());
-        Err(ClaudeError::Failed(
-            "the rig scripts no Claude reply".into(),
-        ))
+        let settings: serde_json::Value = std::fs::read_to_string(&call.settings)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        let build = settings["env"]["CARGO_TARGET_DIR"].as_str().map(Path::new);
+        let build_existed = build.is_some_and(Path::is_dir);
+        self.seen.lock().unwrap().push(Seen {
+            call: call.clone(),
+            settings,
+            build_existed,
+        });
+        let next = self.script.lock().unwrap().pop_front();
+        match next {
+            Some(Scripted::Reply(usage, session_cost)) => Ok(ClaudeReply {
+                session_id: call.session.id().clone(),
+                text: "done".into(),
+                usage,
+                session_cost,
+            }),
+            Some(Scripted::Fail(error)) => Err(error),
+            Some(Scripted::Kill) => {
+                std::fs::write(call.cwd.join(LEFT_BEHIND), "work in progress\n").unwrap();
+                panic!("the runner is killed mid-turn");
+            }
+            None => Err(ClaudeError::Failed("the rig scripts no reply".into())),
+        }
     }
 }
 
-/// A forge whose repo is public unless a test says otherwise
+/// A forge whose repo is public and whose every issue exists, unless a
+/// test says otherwise
 #[derive(Debug, Clone)]
 pub(crate) struct FakeForge {
     visibility: Arc<Mutex<Visibility>>,
+    missing: Arc<Mutex<HashSet<u64>>>,
     calls: Arc<AtomicUsize>,
 }
 
@@ -51,8 +139,21 @@ impl FakeForge {
         *self.visibility.lock().unwrap() = visibility;
     }
 
+    pub(crate) fn remove_issue(&self, number: u64) {
+        self.missing.lock().unwrap().insert(number);
+    }
+
+    /// How many times the repo's visibility was asked
     pub(crate) fn calls(&self) -> usize {
         self.calls.load(Ordering::SeqCst)
+    }
+
+    /// The issue every present number has
+    pub(crate) fn issue_for(number: u64) -> Issue {
+        Issue {
+            title: format!("Title of #{number}"),
+            body: format!("Body of #{number}.\n"),
+        }
     }
 }
 
@@ -60,6 +161,13 @@ impl Forge for FakeForge {
     fn visibility(&self, _repo: &ForgeSlug) -> Result<Visibility, ForgeError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(*self.visibility.lock().unwrap())
+    }
+
+    fn issue(&self, _repo: &ForgeSlug, number: u64) -> Result<Issue, ForgeError> {
+        if self.missing.lock().unwrap().contains(&number) {
+            return Err(ForgeError::Failed(format!("no issue #{number}")));
+        }
+        Ok(Self::issue_for(number))
     }
 }
 
@@ -98,6 +206,9 @@ impl Rig {
     /// Where every rig's clock starts
     pub(crate) const EPOCH: u64 = 1_790_000_000;
 
+    /// Where the rig says the kelpie binary is
+    pub(crate) const KELPIE: &str = "/opt/kelpie/bin/kelpie";
+
     /// A project with the example settings, pointed at a fresh repo
     pub(crate) fn new(project: &str) -> Self {
         let rig = Self {
@@ -106,11 +217,12 @@ impl Rig {
             claude: FakeClaude::default(),
             forge: FakeForge {
                 visibility: Arc::new(Mutex::new(Visibility::Public)),
+                missing: Arc::default(),
                 calls: Arc::default(),
             },
             clock: FakeClock::at(Self::EPOCH),
         };
-        rig.make_repo(&rig.home.path().join("origin.git"));
+        rig.make_repo();
 
         let example = include_str!("../settings.example.toml");
         assert!(example.contains(EXAMPLE_REPO), "the example's repo moved");
@@ -121,8 +233,9 @@ impl Rig {
         rig
     }
 
-    fn make_repo(&self, origin: &Path) {
+    fn make_repo(&self) {
         let root = self.home.path();
+        let origin = self.origin();
         git(
             root,
             &[
@@ -130,17 +243,38 @@ impl Rig {
                 "--quiet",
                 "--bare",
                 "--initial-branch=main",
-                path(origin),
+                path(&origin),
             ],
         );
         git(
             root,
-            &["clone", "--quiet", path(origin), path(&self.repo())],
+            &["clone", "--quiet", path(&origin), path(&self.repo())],
         );
         std::fs::write(self.repo().join("README.md"), "a project\n").unwrap();
         git(&self.repo(), &["add", "README.md"]);
         git(&self.repo(), &["commit", "--quiet", "-m", "first"]);
         git(&self.repo(), &["push", "--quiet", "origin", "main"]);
+    }
+
+    fn origin(&self) -> PathBuf {
+        self.home.path().join("origin.git")
+    }
+
+    /// Lands a commit on origin's `main` from another clone, as a merge
+    /// elsewhere would, and returns its hash
+    pub(crate) fn land_on_origin(&self, file: &str) -> String {
+        let other = self.home.path().join("other");
+        if !other.exists() {
+            git(
+                self.home.path(),
+                &["clone", "--quiet", path(&self.origin()), path(&other)],
+            );
+        }
+        std::fs::write(other.join(file), "landed elsewhere\n").unwrap();
+        git(&other, &["add", file]);
+        git(&other, &["commit", "--quiet", "-m", "landed elsewhere"]);
+        git(&other, &["push", "--quiet", "origin", "main"]);
+        git(&other, &["rev-parse", "HEAD"])
     }
 
     /// The project's checkout
@@ -161,11 +295,18 @@ impl Rig {
     /// Starts a runner, as a restarted sheep would, on the rig's stand-ins
     pub(crate) fn open(&self) -> Result<Mutex<Runner>, OpenError> {
         let ports = Ports {
-            claude: Box::new(self.claude.clone()),
+            claude: Arc::new(self.claude.clone()),
             forge: Box::new(self.forge.clone()),
             clock: Box::new(self.clock.clone()),
         };
-        Runner::open(self.project.clone(), &self.paths(), self.home.path(), ports).map(Mutex::new)
+        Runner::open(
+            self.project.clone(),
+            &self.paths(),
+            self.home.path(),
+            Path::new(Self::KELPIE),
+            ports,
+        )
+        .map(Mutex::new)
     }
 
     /// Sends a trigger the way `shep trigger <project> <action>` does
@@ -183,8 +324,10 @@ fn path(p: &Path) -> &str {
     p.to_str().expect("a UTF-8 temporary path")
 }
 
-// The maintainer's own git config never reaches the rig: no signing, no hooks.
-fn git(cwd: &Path, args: &[&str]) {
+/// Runs git in `cwd` and returns its trimmed stdout
+///
+/// The maintainer's own git config never reaches the rig: no signing, no hooks.
+pub(crate) fn git(cwd: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .args([
             "-c",
@@ -205,4 +348,5 @@ fn git(cwd: &Path, args: &[&str]) {
         "git {args:?} in {}: {stderr}",
         cwd.display()
     );
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
 }

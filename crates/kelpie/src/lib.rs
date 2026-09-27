@@ -9,13 +9,17 @@
 #![doc(test(attr(deny(warnings))))]
 
 pub mod adapters;
+pub mod confine;
 pub mod dog;
 pub mod lease;
 pub mod ports;
+pub mod profile;
 pub mod runner;
 pub mod settings;
 pub mod sheep;
 pub mod state;
+pub mod work_item;
+pub mod worktree;
 
 #[cfg(test)]
 mod test;

@@ -2,82 +2,25 @@
 //!
 //! One runner per project, run as a sheep under kelpie's own shepherd. It
 //! reads the project's settings when it starts, keeps the project's state
-//! file, and answers the maintainer's `status`, `start` and `pause`
-//! triggers. Every change is saved before it takes effect in memory.
+//! file, answers the maintainer's triggers, and runs the worker's turns.
+//! Every change is saved before it takes effect in memory.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Mutex, PoisonError};
 
-use serde::Serialize;
-
-use crate::ports::{ForgeError, Ports, Timestamp, Visibility};
+use crate::ports::{ForgeError, Ports, Visibility};
 use crate::settings::{Settings, SettingsError};
-use crate::state::{LeaseHeld, ProjectState, Ruling, RunState, StateError, StateStore, WorkItem};
+use crate::state::{ProjectState, RunState, StateError, StateStore};
+use crate::work_item::{Turn, WorkItem, new_session_id};
 
-/// The triggers a runner answers
-pub const ACTIONS: [&str; 3] = ["status", "start", "pause"];
+mod paths;
+mod trigger;
+mod turn;
 
-/// A project's name, which is also its sheep's name
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectName(String);
-
-impl ProjectName {
-    /// The name as written
-    #[inline]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl TryFrom<&str> for ProjectName {
-    type Error = ProjectNameError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.');
-        if value.is_empty() || value.starts_with('.') || !value.chars().all(allowed) {
-            return Err(ProjectNameError(value.to_owned()));
-        }
-        Ok(Self(value.to_owned()))
-    }
-}
-
-/// A name that is not one plain path component, carrying the name
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectNameError(pub String);
-
-impl fmt::Display for ProjectNameError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{:?} is not a project name: use letters, digits, - _ .",
-            self.0
-        )
-    }
-}
-
-impl std::error::Error for ProjectNameError {}
-
-/// Where a project's files live under kelpie's home
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectPaths {
-    /// The settings file
-    pub settings: PathBuf,
-    /// The state file
-    pub state: PathBuf,
-}
-
-impl ProjectPaths {
-    /// `<kelpie home>/projects/<project>/`
-    pub fn under(kelpie_home: &Path, project: &ProjectName) -> Self {
-        let folder = kelpie_home.join("projects").join(project.as_str());
-        Self {
-            settings: folder.join("settings.toml"),
-            state: folder.join("state.json"),
-        }
-    }
-}
+pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
+pub use trigger::{ACTIONS, Status, WorkItemStatus, answer};
+pub use turn::{TurnReport, step};
 
 /// Why a runner could not start
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,28 +63,39 @@ impl From<StateError> for OpenError {
     }
 }
 
-/// What `status` answers
-#[derive(Debug, Serialize)]
-pub struct Status<'a> {
-    /// The project
-    pub project: &'a str,
-    /// Running or paused
-    pub run: RunState,
-    /// When it last started or paused
-    pub since: Timestamp,
-    /// The work item in flight
-    pub work_item: Option<&'a WorkItem>,
-    /// Rulings waiting on the maintainer, oldest first
-    pub rulings: &'a [Ruling],
-    /// Leases held
-    pub leases: &'a [LeaseHeld],
+/// Why `add` was refused
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AddError {
+    /// A work item is already in flight, for this issue
+    InFlight(u64),
+    /// The forge could not show the issue
+    Forge(ForgeError),
+    /// No random session id could be drawn, with the OS's reason
+    Session(String),
+    /// The work item could not be saved
+    State(StateError),
 }
+
+impl fmt::Display for AddError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InFlight(issue) => write!(f, "the work item for #{issue} is in flight"),
+            Self::Forge(e) => write!(f, "cannot read the issue: {e}"),
+            Self::Session(e) => write!(f, "cannot draw a session id: {e}"),
+            Self::State(e) => e.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for AddError {}
 
 /// One project's runner
 #[derive(Debug)]
 pub struct Runner {
     project: ProjectName,
     settings: Settings,
+    paths: ProjectPaths,
+    kelpie: PathBuf,
     store: StateStore,
     state: ProjectState,
     ports: Ports,
@@ -151,6 +105,7 @@ impl Runner {
     /// Reads the project's settings and state and checks the settings hold
     ///
     /// `home` is the maintainer's home folder, for `~/` in settings.
+    /// `kelpie` is the kelpie binary, which each worker's file-tool hook runs.
     ///
     /// # Errors
     ///
@@ -159,6 +114,7 @@ impl Runner {
         project: ProjectName,
         paths: &ProjectPaths,
         home: &Path,
+        kelpie: &Path,
         ports: Ports,
     ) -> Result<Self, OpenError> {
         let settings = Settings::load(&paths.settings, home)?;
@@ -171,6 +127,8 @@ impl Runner {
         Ok(Self {
             project,
             settings,
+            paths: paths.clone(),
+            kelpie: kelpie.to_owned(),
             store,
             state,
             ports,
@@ -188,7 +146,7 @@ impl Runner {
             project: self.project.as_str(),
             run: self.state.run,
             since: self.state.since,
-            work_item: self.state.work_item.as_ref(),
+            work_item: self.state.work_item.as_ref().map(WorkItemStatus::from),
             rulings: &self.state.rulings,
             leases: &self.state.leases,
         }
@@ -212,6 +170,37 @@ impl Runner {
         self.set_run(RunState::Paused)
     }
 
+    /// Makes `issue` the work item in flight. Its first turn runs once the
+    /// project is running.
+    ///
+    /// # Errors
+    ///
+    /// [`AddError`] when a work item is in flight, the issue cannot be read,
+    /// or the change cannot be saved. Nothing changes then.
+    pub fn add(&mut self, issue: u64) -> Result<(), AddError> {
+        if let Some(item) = &self.state.work_item {
+            return Err(AddError::InFlight(item.issue));
+        }
+        let found = self
+            .ports
+            .forge
+            .issue(&self.settings.forge, issue)
+            .map_err(AddError::Forge)?;
+        let session = new_session_id().map_err(|e| AddError::Session(e.to_string()))?;
+        let mut next = self.state.clone();
+        next.work_item = Some(WorkItem {
+            issue,
+            title: found.title,
+            branch: format!("kelpie/{issue}"),
+            worktree: self.paths.worktree(issue),
+            build: self.paths.build(issue),
+            session,
+            turn: Turn::Due,
+            calls: Vec::new(),
+        });
+        self.save(next).map_err(AddError::State)
+    }
+
     fn set_run(&mut self, run: RunState) -> Result<(), StateError> {
         if self.state.run == run {
             return Ok(());
@@ -219,6 +208,10 @@ impl Runner {
         let mut next = self.state.clone();
         next.run = run;
         next.since = self.ports.clock.now();
+        self.save(next)
+    }
+
+    fn save(&mut self, next: ProjectState) -> Result<(), StateError> {
         self.store.save(&next)?;
         self.state = next;
         Ok(())
@@ -234,21 +227,31 @@ fn check_repo(settings: &Settings) -> Result<(), SettingsError> {
     if !repo.is_dir() {
         return Err(invalid(format!("{} is not a folder", repo.display())));
     }
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["rev-parse", "--is-inside-work-tree"])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .map_err(|e| invalid(format!("cannot run git to check it: {e}")))?;
-    if output.status.success() && output.stdout.trim_ascii() == b"true" {
-        return Ok(());
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|e| invalid(format!("cannot run git to check it: {e}")))
+    };
+    let output = git(&["rev-parse", "--is-inside-work-tree"])?;
+    if !output.status.success() || output.stdout.trim_ascii() != b"true" {
+        return Err(invalid(format!(
+            "{} is not a git work tree",
+            repo.display()
+        )));
     }
-    Err(invalid(format!(
-        "{} is not a git work tree",
-        repo.display()
-    )))
+    // Every work item's branch is cut from `origin/main`.
+    if !git(&["remote", "get-url", "origin"])?.status.success() {
+        return Err(invalid(format!(
+            "{} has no `origin` remote to cut branches from",
+            repo.display()
+        )));
+    }
+    Ok(())
 }
 
 fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError> {
@@ -270,52 +273,12 @@ fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError>
     .into())
 }
 
-/// Answers one trigger with a JSON body: the status, or `{"error": ...}`
-///
-/// Blank params count as none.
-pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> String {
-    let error = |message: String| serde_json::json!({ "error": message }).to_string();
-    if params.is_some_and(|p| !p.trim().is_empty()) {
-        return error(format!("`{action}` takes no params"));
-    }
-    // Memory changes only after a save succeeds, so a panicked holder
-    // cannot have left the runner half changed.
-    let mut runner = runner.lock().unwrap_or_else(PoisonError::into_inner);
-    let changed = match action {
-        "status" => Ok(()),
-        "start" => runner.start(),
-        "pause" => runner.pause(),
-        _ => return error(format!("unknown action `{action}`")),
-    };
-    match changed {
-        Ok(()) => serde_json::to_string(&runner.status()).expect("status serializes to JSON"),
-        Err(e) => error(e.to_string()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::test::Rig;
-
-    #[test]
-    fn a_new_project_is_paused_with_nothing_in_flight() {
-        let rig = Rig::new("koji");
-        let runner = rig.open().unwrap();
-        assert_eq!(
-            rig.ask(&runner, "status", None),
-            json!({
-                "project": "koji",
-                "run": "paused",
-                "since": Rig::EPOCH,
-                "work_item": null,
-                "rulings": [],
-                "leases": [],
-            })
-        );
-    }
+    use crate::test::{Rig, git};
 
     #[test]
     fn start_and_pause_survive_a_restart() {
@@ -354,34 +317,6 @@ mod tests {
     }
 
     #[test]
-    fn every_registered_action_is_answered_and_no_other() {
-        let rig = Rig::new("koji");
-        let runner = rig.open().unwrap();
-        for action in ACTIONS {
-            assert_eq!(
-                rig.ask(&runner, action, None)["project"],
-                "koji",
-                "{action}"
-            );
-        }
-        assert_eq!(
-            rig.ask(&runner, "merge", None),
-            json!({ "error": "unknown action `merge`" })
-        );
-    }
-
-    #[test]
-    fn a_trigger_with_params_is_refused_and_changes_nothing() {
-        let rig = Rig::new("rotom");
-        let runner = rig.open().unwrap();
-        assert_eq!(
-            rig.ask(&runner, "start", Some("now")),
-            json!({ "error": "`start` takes no params" })
-        );
-        assert_eq!(rig.ask(&runner, "status", None)["run"], "paused");
-    }
-
-    #[test]
     fn a_failed_save_is_reported_and_changes_nothing() {
         let rig = Rig::new("xilriws");
         let runner = rig.open().unwrap();
@@ -413,6 +348,18 @@ mod tests {
         assert!(
             err.to_string()
                 .ends_with("not-a-repo is not a git work tree"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_repo_without_an_origin_stops_the_runner() {
+        let rig = Rig::new("koji");
+        git(&rig.repo(), &["remote", "remove", "origin"]);
+        let err = rig.open().unwrap_err().to_string();
+        assert!(err.starts_with("setting `repo`: "), "{err}");
+        assert!(
+            err.ends_with("koji has no `origin` remote to cut branches from"),
             "{err}"
         );
     }
@@ -468,13 +415,5 @@ mod tests {
         let err = rig.open().unwrap_err().to_string();
         assert!(err.starts_with("cannot read settings file "), "{err}");
         assert!(err.contains("projects/koji/settings.toml"), "{err}");
-    }
-
-    #[test]
-    fn a_project_name_is_one_path_component() {
-        for bad in ["", "a/b", "..", ".hidden", "sp ace"] {
-            assert!(ProjectName::try_from(bad).is_err(), "{bad:?}");
-        }
-        assert!(ProjectName::try_from("shep-kelpie_2.0").is_ok());
     }
 }

@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::ports::Timestamp;
+use crate::work_item::WorkItem;
 
 /// The state file's format version
 const VERSION: u32 = 1;
@@ -58,15 +59,6 @@ pub enum RunState {
     Running,
     /// Taking no new turns
     Paused,
-}
-
-/// The work item in flight
-// wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItem {
-    /// The issue it resolves
-    pub issue: u64,
 }
 
 /// A decision only the maintainer makes
@@ -253,6 +245,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
+    use crate::test::a_work_item;
 
     const WRITER_DIR: &str = "KELPIE_TEST_WRITER_DIR";
 
@@ -291,7 +284,7 @@ mod tests {
         let store = store_in(dir.path());
         let mut state = ProjectState::new(Timestamp(1_790_000_000));
         state.run = RunState::Running;
-        state.work_item = Some(WorkItem { issue: 42 });
+        state.work_item = Some(a_work_item());
         state.rulings.push(Ruling {
             id: 1,
             question: "merge #43?".into(),
@@ -393,7 +386,7 @@ mod tests {
         };
         let store = store_in(Path::new(&dir));
         let mut out = io::stdout().lock();
-        for n in 0.. {
+        for n in 0..=u64::MAX {
             store.save(&big_state(n)).unwrap();
             writeln!(out, "saved {n}").unwrap();
             out.flush().unwrap();

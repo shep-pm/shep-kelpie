@@ -1,0 +1,314 @@
+//! The worker's profile: the settings file and instructions kelpie starts it with
+//!
+//! The worker runs in `bypassPermissions`, so the file is its whole fence.
+//! Claude Code's sandbox confines Bash and its children, and fails closed.
+//! The sandbox does not cover Claude's own file tools, so a hook that runs
+//! `kelpie confine` holds those to the same folders. Deny rules keep what
+//! only the project manager does, and credential paths, out of reach.
+
+use std::path::{Path, PathBuf};
+
+use serde_json::{Value, json};
+
+use crate::settings::{GuardHook, HookEvent};
+
+/// Kelpie's instructions to every worker, appended to its system prompt
+pub const INSTRUCTIONS: &str = include_str!("worker-instructions.md");
+
+/// The tools that write files without going through Bash
+const FILE_TOOLS: &str = "Edit|Write|MultiEdit|NotebookEdit";
+
+// Claude Code opens a worktree's whole common git dir to sandboxed writes.
+// These are the parts a commit does not need, and whose change would run
+// code outside the sandbox or move what kelpie cuts branches from.
+const GIT_DENY: [&str; 9] = [
+    "config",
+    "hooks",
+    "info",
+    "modules",
+    "HEAD",
+    "index",
+    "packed-refs",
+    "refs/remotes",
+    "refs/tags",
+];
+
+// Read and written by no worker. Also denied to sandboxed Bash, which takes
+// `Read` deny rules as its own.
+const CREDENTIALS: [&str; 11] = [
+    "~/.ssh/**",
+    "~/.aws/**",
+    "~/.gnupg/**",
+    "~/.docker/**",
+    "~/.config/gh/**",
+    "~/.netrc",
+    "~/.git-credentials",
+    "~/.npmrc",
+    "~/.cargo/credentials",
+    "~/.cargo/credentials.toml",
+    "~/.kelpie/projects/**",
+];
+
+// What only the project manager does: merge, mark ready, and summon.
+const PM_ONLY: [&str; 5] = [
+    "Bash(gh pr merge)",
+    "Bash(gh pr merge *)",
+    "Bash(gh pr ready)",
+    "Bash(gh pr ready *)",
+    "Bash(gh *review please*)",
+];
+
+// GitHub for git and `gh`, and the crates registry for a cold cargo cache.
+const DOMAINS: [&str; 5] = [
+    "github.com",
+    "api.github.com",
+    "crates.io",
+    "index.crates.io",
+    "static.crates.io",
+];
+
+/// Where one worker may write, and what it runs under
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerProfile<'a> {
+    /// The work item's worktree
+    pub worktree: &'a Path,
+    /// The worker's build folder, its `CARGO_TARGET_DIR`
+    pub build: &'a Path,
+    /// The project repo's common git dir, which holds objects and refs
+    pub git_common_dir: &'a Path,
+    /// The worktree's own git dir, inside the common one
+    pub git_dir: &'a Path,
+    /// The work item's branch
+    pub branch: &'a str,
+    /// The kelpie binary, which the file-tool hook runs
+    pub kelpie: &'a Path,
+    /// The guard hooks the project's settings name
+    pub guard_hooks: &'a [GuardHook],
+}
+
+impl WorkerProfile<'_> {
+    /// The settings file's contents
+    pub fn settings(&self) -> Value {
+        let git = |p: &str| self.git_common_dir.join(p);
+        let branch_ref = git("refs/heads").join(self.branch);
+        let mut allow_write = vec![
+            self.worktree.to_owned(),
+            self.build.to_owned(),
+            git("objects"),
+            self.git_dir.to_owned(),
+            git("logs/refs/heads").join(self.branch),
+        ];
+        allow_write.push(with_suffix(&branch_ref, ".lock"));
+        allow_write.push(branch_ref);
+        let deny_write: Vec<PathBuf> = GIT_DENY.iter().map(|p| git(p)).collect();
+        let deny: Vec<String> = CREDENTIALS
+            .iter()
+            .map(|p| format!("Read({p})"))
+            .chain(PM_ONLY.iter().map(|&r| r.to_owned()))
+            .collect();
+        json!({
+            "sandbox": {
+                "enabled": true,
+                "failIfUnavailable": true,
+                "allowUnsandboxedCommands": false,
+                "filesystem": { "allowWrite": allow_write, "denyWrite": deny_write },
+                "network": { "allowedDomains": DOMAINS },
+            },
+            "permissions": { "deny": deny },
+            "hooks": self.hooks(),
+            "env": { "CARGO_TARGET_DIR": self.build },
+        })
+    }
+
+    fn hooks(&self) -> Value {
+        let confine = [self.kelpie, Path::new("confine"), self.worktree, self.build]
+            .map(|p| shell_quote(&p.to_string_lossy()))
+            .join(" ");
+        let mut pre = vec![entry(Some(FILE_TOOLS), &confine)];
+        let mut post = Vec::new();
+        for hook in self.guard_hooks {
+            let e = entry(
+                hook.matcher.as_ref().map(|m| m.as_str()),
+                hook.command.as_str(),
+            );
+            match hook.event {
+                HookEvent::PreToolUse => pre.push(e),
+                HookEvent::PostToolUse => post.push(e),
+            }
+        }
+        let mut hooks = json!({ "PreToolUse": pre });
+        if !post.is_empty() {
+            hooks["PostToolUse"] = post.into();
+        }
+        hooks
+    }
+}
+
+fn entry(matcher: Option<&str>, command: &str) -> Value {
+    let mut entry = json!({ "hooks": [{ "type": "command", "command": command }] });
+    if let Some(matcher) = matcher {
+        entry["matcher"] = matcher.into();
+    }
+    entry
+}
+
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut s = path.as_os_str().to_owned();
+    s.push(suffix);
+    s.into()
+}
+
+/// `s` as one word to a POSIX shell
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::NonBlank;
+
+    fn guard(event: HookEvent, matcher: Option<&str>, command: &str) -> GuardHook {
+        GuardHook {
+            event,
+            matcher: matcher.map(|m| NonBlank::try_from(m.to_owned()).unwrap()),
+            command: NonBlank::try_from(command.to_owned()).unwrap(),
+        }
+    }
+
+    fn settings(hooks: &[GuardHook]) -> Value {
+        WorkerProfile {
+            worktree: Path::new("/k/wt/shep/7"),
+            build: Path::new("/k/targets/shep/7"),
+            git_common_dir: Path::new("/k/repos/shep/.git"),
+            git_dir: Path::new("/k/repos/shep/.git/worktrees/7"),
+            branch: "kelpie/7",
+            kelpie: Path::new("/opt/kelpie's bin/kelpie"),
+            guard_hooks: hooks,
+        }
+        .settings()
+    }
+
+    fn strings(v: &Value) -> Vec<&str> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn the_sandbox_is_on_and_fails_closed_with_no_way_out() {
+        let s = settings(&[]);
+        assert_eq!(s["sandbox"]["enabled"], true);
+        assert_eq!(s["sandbox"]["failIfUnavailable"], true);
+        assert_eq!(s["sandbox"]["allowUnsandboxedCommands"], false);
+    }
+
+    #[test]
+    fn writes_go_only_to_the_worktree_the_build_folder_and_what_a_commit_needs() {
+        let s = settings(&[]);
+        assert_eq!(
+            strings(&s["sandbox"]["filesystem"]["allowWrite"]),
+            [
+                "/k/wt/shep/7",
+                "/k/targets/shep/7",
+                "/k/repos/shep/.git/objects",
+                "/k/repos/shep/.git/worktrees/7",
+                "/k/repos/shep/.git/logs/refs/heads/kelpie/7",
+                "/k/repos/shep/.git/refs/heads/kelpie/7.lock",
+                "/k/repos/shep/.git/refs/heads/kelpie/7",
+            ]
+        );
+        assert_eq!(
+            strings(&s["sandbox"]["filesystem"]["denyWrite"]),
+            [
+                "/k/repos/shep/.git/config",
+                "/k/repos/shep/.git/hooks",
+                "/k/repos/shep/.git/info",
+                "/k/repos/shep/.git/modules",
+                "/k/repos/shep/.git/HEAD",
+                "/k/repos/shep/.git/index",
+                "/k/repos/shep/.git/packed-refs",
+                "/k/repos/shep/.git/refs/remotes",
+                "/k/repos/shep/.git/refs/tags",
+            ]
+        );
+        assert_eq!(s["env"]["CARGO_TARGET_DIR"], "/k/targets/shep/7");
+        assert_eq!(strings(&s["sandbox"]["network"]["allowedDomains"]), DOMAINS);
+    }
+
+    #[test]
+    fn file_tools_are_held_to_the_same_folders_by_kelpie() {
+        let s = settings(&[]);
+        assert_eq!(
+            s["hooks"]["PreToolUse"][0],
+            json!({
+                "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+                "hooks": [{
+                    "type": "command",
+                    "command": r"'/opt/kelpie'\''s bin/kelpie' 'confine' '/k/wt/shep/7' '/k/targets/shep/7'",
+                }],
+            })
+        );
+    }
+
+    #[test]
+    fn what_only_the_project_manager_does_is_denied() {
+        let deny = settings(&[])["permissions"]["deny"].clone();
+        let deny = strings(&deny);
+        for rule in [
+            "Bash(gh pr merge)",
+            "Bash(gh pr merge *)",
+            "Bash(gh pr ready)",
+            "Bash(gh pr ready *)",
+            "Bash(gh *review please*)",
+        ] {
+            assert!(deny.contains(&rule), "{rule}");
+        }
+    }
+
+    #[test]
+    fn credential_paths_are_unreadable() {
+        let deny = settings(&[])["permissions"]["deny"].clone();
+        let deny = strings(&deny);
+        for rule in [
+            "Read(~/.ssh/**)",
+            "Read(~/.config/gh/**)",
+            "Read(~/.kelpie/projects/**)",
+        ] {
+            assert!(deny.contains(&rule), "{rule}");
+        }
+    }
+
+    #[test]
+    fn the_projects_guard_hooks_are_carried_after_kelpies_own() {
+        let s = settings(&[
+            guard(
+                HookEvent::PreToolUse,
+                Some("Bash"),
+                "node ~/.claude/hooks/git-gh-guard.js",
+            ),
+            guard(HookEvent::PostToolUse, None, "~/bin/after"),
+        ]);
+        assert_eq!(
+            s["hooks"]["PreToolUse"][1],
+            json!({
+                "matcher": "Bash",
+                "hooks": [{ "type": "command", "command": "node ~/.claude/hooks/git-gh-guard.js" }],
+            })
+        );
+        assert_eq!(
+            s["hooks"]["PostToolUse"],
+            json!([{ "hooks": [{ "type": "command", "command": "~/bin/after" }] }])
+        );
+    }
+
+    #[test]
+    fn the_instructions_never_mention_money_or_limits() {
+        let text = INSTRUCTIONS.to_lowercase();
+        for word in ["budget", "cost", "spend", "token", "usage", "$", "limit"] {
+            assert!(!text.contains(word), "the instructions mention {word:?}");
+        }
+    }
+}
