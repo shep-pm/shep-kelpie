@@ -63,7 +63,7 @@ impl Runner {
                 now,
                 &usage,
                 self.state.pacing,
-                self.settings.pacing.kickoff_hours.get(),
+                self.settings.pacing.kickoff_hours,
             ),
             Err(e) => Assessment::unreadable(now, format!("cannot read usage: {e}")),
         };
