@@ -481,7 +481,7 @@ pub struct Ports {
     pub forge: Box<dyn Forge>,
     /// The account's usage
     pub meter: Box<dyn Meter>,
-    /// The maintainer's relay session, tried before the webhook
+    /// The maintainer's relay session, sent every ruling alongside the webhook
     pub relay: Arc<dyn Relay>,
     /// The maintainer's webhook, shared so a post runs without holding the runner
     pub alerts: Arc<dyn Alerts>,

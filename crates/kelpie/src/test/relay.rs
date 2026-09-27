@@ -1,6 +1,7 @@
 //! The rig's relay: recording every send and clear, and refusing sends
 //! until a test says it is up. Down by default, so a test that never
-//! mentions the relay still exercises the webhook fallback it replaced.
+//! mentions the relay still exercises the webhook alone, as every ruling
+//! did before the relay existed.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

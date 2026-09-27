@@ -15,6 +15,7 @@ use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
@@ -44,12 +45,19 @@ pub struct RelayCli {
     /// Where the relay's own settings and instructions files are written,
     /// under kelpie's home
     folder: PathBuf,
+    /// Held across a start, so two calls racing to find none running
+    /// never both start one
+    starting: Arc<Mutex<()>>,
 }
 
 impl RelayCli {
     /// A relay whose settings and instructions live under `folder`
     pub fn new(home: PathBuf, folder: PathBuf) -> Self {
-        Self { home, folder }
+        Self {
+            home,
+            folder,
+            starting: Arc::default(),
+        }
     }
 
     fn find(&self) -> Result<Option<Found>, RelayError> {
@@ -58,12 +66,17 @@ impl RelayCli {
             .stdin(Stdio::null())
             .output()
             .map_err(|e| RelayError::Unreachable(e.to_string()))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            return Err(RelayError::Unreachable(stderr));
+        }
         let agents: Vec<Value> = serde_json::from_slice(&output.stdout)
             .map_err(|_| RelayError::Unreachable("unreadable agent list".into()))?;
         let found = agents.iter().find(|a| a["name"] == json!(NAME));
         Ok(found
             .and_then(|a| a["pid"].as_u64())
-            .map(|pid| Found { pid: pid as u32 }))
+            .and_then(|pid| u32::try_from(pid).ok())
+            .map(|pid| Found { pid }))
     }
 
     fn start(&self) -> Result<(), RelayError> {
@@ -91,10 +104,17 @@ impl RelayCli {
         if let Some(found) = self.find()? {
             return Ok(found);
         }
+        let _starting = self.starting.lock().unwrap_or_else(PoisonError::into_inner);
+        // Another call may have started one while this one waited for the lock.
+        if let Some(found) = self.find()? {
+            return Ok(found);
+        }
         self.start()?;
         for _ in 0..APPEAR_TRIES {
             thread::sleep(APPEAR_POLL);
-            if let Some(found) = self.find()? {
+            // A transient hiccup in `claude agents` here is not the relay
+            // failing to start: only running out of tries is.
+            if let Ok(Some(found)) = self.find() {
                 return Ok(found);
             }
         }

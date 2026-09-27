@@ -37,7 +37,7 @@ pub(super) struct Retry {
 #[derive(Debug)]
 pub(super) struct Due {
     pub(super) id: u64,
-    /// What the relay is sent, tried before the webhook
+    /// What the relay is sent, best-effort, alongside the webhook
     pub(super) relay_message: String,
     pub(super) webhook: Webhook,
     pub(super) alert: Alert,
