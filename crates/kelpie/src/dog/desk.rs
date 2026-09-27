@@ -117,6 +117,10 @@ impl Desk {
             return Vec::new();
         };
         let keep = pid.map(|pid| Epoch(u64::from(pid)));
+        // A live pid is a live run, even one reusing a retired pid.
+        if let Some(epoch) = keep {
+            self.retired.remove(&(sheep.to_owned(), epoch));
+        }
         if let Some(run) = self.runs.get(sheep).filter(|run| Some(run.epoch) != keep) {
             self.retired.insert((sheep.to_owned(), run.epoch));
             self.runs.remove(sheep);
@@ -144,6 +148,7 @@ fn count(value: f64) -> Option<u64> {
     whole.then_some(value as u64)
 }
 
+/// The grants that go out as triggers: the maintainer's are only answered
 pub(super) fn deliveries(grants: impl IntoIterator<Item = Grant>) -> Vec<Delivery> {
     grants
         .into_iter()
@@ -315,6 +320,20 @@ pub(super) mod tests {
         assert_eq!(w.raise("koji", old.want(&stand_in())), []);
         assert_eq!(w.book_line()["holder"], json!({ "runner": "koji" }));
         assert_eq!(w.desk.runner_is("koji", Some(303)), [], "303 still holds");
+    }
+
+    #[test]
+    fn a_pid_reused_by_a_restart_counts_again() {
+        let mut w = world();
+        let (mut old, mut new) = (Asker::new(Epoch(101)), Asker::new(Epoch(303)));
+        w.raise("koji", old.want(&stand_in()));
+        w.raise("koji", new.want(&stand_in()));
+        w.desk.runner_is("koji", Some(101));
+        let mut reused = Asker::new(Epoch(101));
+        assert_eq!(
+            w.raise("koji", reused.want(&stand_in())),
+            [grant("koji", 101)]
+        );
     }
 
     #[test]

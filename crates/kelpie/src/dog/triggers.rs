@@ -64,6 +64,7 @@ impl Desk {
 mod tests {
     use serde_json::json;
 
+    use super::ACTIONS;
     use crate::dog::desk::tests::{grant, stand_in, world};
     use crate::lease::Epoch;
     use crate::lease::wire::Asker;
@@ -147,6 +148,18 @@ mod tests {
         ] {
             assert_eq!(w.ask(action, params).0, json!({ "error": error }));
         }
-        assert!(w.ask("take", Some("Stand In")).0["error"].is_string());
+        assert_eq!(
+            w.ask("take", Some("Stand In")).0["error"],
+            "\"Stand In\" is not a lease kind: use lowercase letters, digits and -"
+        );
+    }
+
+    #[test]
+    fn every_listed_action_is_answered() {
+        let mut w = world();
+        for action in ACTIONS {
+            let (body, _) = w.ask(action, (action != "status").then_some("stand-in"));
+            assert!(body.get("error").is_none(), "{action}: {body}");
+        }
     }
 }
