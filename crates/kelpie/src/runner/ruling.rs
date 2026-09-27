@@ -9,7 +9,7 @@
 use std::fmt;
 
 use super::Runner;
-use super::gate::short;
+use super::gate::{settled, short};
 use super::report::{Begin, StepReport};
 use crate::ports::{Checks, PullRequestState};
 use crate::state::{Ruling, RulingKind, StateError};
@@ -63,7 +63,12 @@ impl Runner {
         let parked_on = |item: &WorkItem| item.phase == Phase::Ruling { id };
         if let Some(item) = next.work_item.as_mut().filter(|item| parked_on(item)) {
             match (answer, ruling.kind) {
-                (Answer::Yes, RulingKind::Merge { head }) => item.phase = Phase::Merge { head },
+                (Answer::Yes, RulingKind::Merge { head }) => {
+                    item.phase = Phase::Merge {
+                        head,
+                        readied: None,
+                    }
+                }
                 (Answer::Yes, RulingKind::Rebase { .. } | RulingKind::StillRed { .. }) => {
                     item.phase = Phase::Ci {
                         head: None,
@@ -116,13 +121,19 @@ impl Runner {
         }))
     }
 
-    pub(super) fn merge(&mut self, head: String) -> Result<Begin, StateError> {
+    // Marking the draft ready can start a fresh CI run on the same head, so
+    // that pass ends there. A later pass, once the checks have had time to
+    // register, merges only on a green run.
+    pub(super) fn merge(&mut self) -> Result<Begin, StateError> {
         let item = self
             .state
             .work_item
             .as_ref()
             .expect("a merge is of a work item");
         let (issue, Some(number)) = (item.issue, item.pull_request) else {
+            return Ok(Begin::Idle);
+        };
+        let Phase::Merge { head, readied } = item.phase.clone() else {
             return Ok(Begin::Idle);
         };
         let forge = &self.ports.forge;
@@ -139,26 +150,45 @@ impl Runner {
             }
             PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
         }
-        let stale = if pr.head != head {
-            Some(format!("#{number} moved to {}", short(&pr.head)))
-        } else if !matches!(pr.checks, Checks::Passed | Checks::None) {
-            Some(format!("CI on #{number} is no longer green"))
-        } else {
-            match self.has_latest_base(&head) {
-                Ok(true) => None,
-                Ok(false) => Some("main moved since the question".to_owned()),
-                Err(reason) => return Ok(self.gate_failed(reason)),
-            }
-        };
-        if let Some(reason) = stale {
+        let now = self.ports.clock.now();
+        let settling = readied.is_some_and(|at| !settled(at, now));
+        if pr.head != head {
+            let reason = format!("#{number} moved to {}", short(&pr.head));
             return self.withdraw(issue, number, reason);
         }
-        if pr.draft
-            && let Err(e) = forge.mark_ready(repo, number)
-        {
-            return Ok(self.gate_failed(format!("cannot mark #{number} ready: {e}")));
+        // A run that marking the draft ready started is waited for; before
+        // that, anything but green withdraws the yes.
+        let green = match pr.checks {
+            Checks::Passed | Checks::None => true,
+            Checks::Pending if readied.is_some() => false,
+            Checks::Pending | Checks::Failed(_) => {
+                let reason = format!("CI on #{number} is no longer green");
+                return self.withdraw(issue, number, reason);
+            }
+        };
+        match self.has_latest_base(&head) {
+            Ok(true) => {}
+            Ok(false) => {
+                let reason = "main moved since the question".to_owned();
+                return self.withdraw(issue, number, reason);
+            }
+            Err(reason) => return Ok(self.gate_failed(reason)),
         }
-        if let Err(e) = forge.merge(repo, number, &head) {
+        if pr.draft {
+            if let Err(e) = self.ports.forge.mark_ready(repo, number) {
+                return Ok(self.gate_failed(format!("cannot mark #{number} ready: {e}")));
+            }
+            let readied = Some(now);
+            self.update(|item| item.phase = Phase::Merge { head, readied })?;
+            return Ok(Begin::Report(StepReport::MarkedReady {
+                issue,
+                pull_request: number,
+            }));
+        }
+        if settling || !green {
+            return Ok(Begin::Idle);
+        }
+        if let Err(e) = self.ports.forge.merge(&self.settings.forge, number, &head) {
             return Ok(self.gate_failed(format!("cannot merge #{number}: {e}")));
         }
         self.update(|item| item.phase = Phase::Done { merged: true })?;
@@ -261,6 +291,7 @@ mod tests {
 
     use super::*;
     use crate::ports::Session;
+    use crate::runner::gate::CHECKS_SETTLE;
     use crate::runner::step;
     use crate::test::{Rig, Scripted, git};
 
@@ -281,6 +312,21 @@ mod tests {
             pull_request: Some(71),
             merged: true,
         })
+    }
+
+    fn marked_ready() -> Option<StepReport> {
+        Some(StepReport::MarkedReady {
+            issue: 7,
+            pull_request: 71,
+        })
+    }
+
+    // After a yes: the pass that marks the draft ready, then the pass that
+    // merges once CI has had time to settle
+    fn ready_then_merge(rig: &Rig, runner: &Mutex<Runner>) -> Option<StepReport> {
+        assert_eq!(step(runner).unwrap(), marked_ready());
+        rig.clock.advance(CHECKS_SETTLE);
+        step(runner).unwrap()
     }
 
     #[test]
@@ -329,10 +375,10 @@ mod tests {
         assert_eq!(status["rulings"], json!([]));
         assert_eq!(
             status["work_item"]["phase"],
-            json!({ "state": "merge", "head": head })
+            json!({ "state": "merge", "head": head, "readied": null })
         );
 
-        assert_eq!(step(&runner).unwrap(), finished());
+        assert_eq!(ready_then_merge(&rig, &runner), finished());
         assert_eq!(rig.forge.readied(), [71]);
         assert_eq!(rig.forge.merges(), [(71, head)]);
         assert_eq!(rig.forge.head_of("kelpie/7"), None);
@@ -453,19 +499,72 @@ mod tests {
     }
 
     #[test]
-    fn a_runner_restarted_after_a_yes_still_merges() {
-        let (rig, runner, head) = parked("zeus");
+    fn a_draft_marked_ready_merges_only_on_a_later_pass_once_ci_settles() {
+        let (rig, runner, head) = parked("golbat");
         rig.ask(&runner, "rule", Some("1 yes"));
-        drop(runner);
-        let runner = rig.open().unwrap();
+        assert_eq!(step(&runner).unwrap(), marked_ready());
+        assert_eq!(rig.forge.merges(), []);
+        assert_eq!(step(&runner).unwrap(), None);
+        rig.clock.advance(CHECKS_SETTLE - 1);
+        assert_eq!(step(&runner).unwrap(), None);
+        assert_eq!(rig.forge.merges(), []);
+        rig.clock.advance(1);
         assert_eq!(step(&runner).unwrap(), finished());
         assert_eq!(rig.forge.merges(), [(71, head)]);
+    }
+
+    #[test]
+    fn a_run_that_marking_ready_starts_is_waited_for() {
+        let (rig, runner, head) = parked("xilriws");
+        rig.ask(&runner, "rule", Some("1 yes"));
+        assert_eq!(step(&runner).unwrap(), marked_ready());
+        rig.forge.set_checks(&head, Checks::Pending);
+        rig.clock.advance(3 * CHECKS_SETTLE);
+        assert_eq!(step(&runner).unwrap(), None);
+        assert_eq!(rig.forge.merges(), []);
+        rig.forge.set_checks(&head, Checks::Passed);
+        assert_eq!(step(&runner).unwrap(), finished());
+    }
+
+    #[test]
+    fn a_red_run_after_marking_ready_withdraws_the_yes() {
+        let (rig, runner, head) = parked("chelone");
+        rig.ask(&runner, "rule", Some("1 yes"));
+        assert_eq!(step(&runner).unwrap(), marked_ready());
+        rig.forge
+            .set_checks(&head, Checks::Failed(vec!["test".into()]));
+        rig.clock.advance(CHECKS_SETTLE);
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::YesWithdrawn { reason, .. }) if reason == "CI on #71 is no longer green"
+        ));
+        assert_eq!(rig.forge.merges(), []);
+    }
+
+    #[test]
+    fn a_runner_restarted_between_ready_and_merge_still_waits_then_merges() {
+        let (rig, runner, head) = parked("zeus");
+        rig.ask(&runner, "rule", Some("1 yes"));
+        assert_eq!(step(&runner).unwrap(), marked_ready());
+        drop(runner);
+        let runner = rig.open().unwrap();
+        assert_eq!(
+            step(&runner).unwrap(),
+            None,
+            "the settling survived the restart"
+        );
+        rig.clock.advance(CHECKS_SETTLE);
+        assert_eq!(step(&runner).unwrap(), finished());
+        assert_eq!(rig.forge.merges(), [(71, head)]);
+        assert_eq!(rig.forge.readied(), [71]);
     }
 
     #[test]
     fn a_merge_the_forge_refuses_is_tried_again_later() {
         let (rig, runner, head) = parked("reactmap");
         rig.ask(&runner, "rule", Some("1 yes"));
+        assert_eq!(step(&runner).unwrap(), marked_ready());
+        rig.clock.advance(CHECKS_SETTLE);
         rig.forge.set_merges_down(true);
         let report = step(&runner).unwrap().expect("a report");
         assert_eq!(
@@ -485,9 +584,9 @@ mod tests {
 
     #[test]
     fn ruling_ids_are_never_given_twice() {
-        let (rig, runner, _) = parked("xilriws");
+        let (rig, runner, _) = parked("rotom");
         rig.ask(&runner, "rule", Some("1 yes"));
-        assert_eq!(step(&runner).unwrap(), finished());
+        assert_eq!(ready_then_merge(&rig, &runner), finished());
         drop(runner);
         let runner = rig.open().unwrap();
         rig.ask(&runner, "add", Some("7"));

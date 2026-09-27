@@ -68,7 +68,7 @@ impl Runner {
             Phase::Implement => {}
             Phase::Ci { .. } => return self.check_ci(),
             Phase::Ruling { .. } => return Ok(Begin::Idle),
-            Phase::Merge { head } => return self.merge(head.clone()),
+            Phase::Merge { .. } => return self.merge(),
             Phase::Done { merged } => return self.finish(*merged),
         }
         let id = item.session.clone();

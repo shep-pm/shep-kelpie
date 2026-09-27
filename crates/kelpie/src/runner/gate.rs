@@ -13,9 +13,9 @@ use crate::state::{RulingKind, StateError};
 use crate::work_item::{Phase, Turn};
 use crate::worktree::{self, Rebase};
 
-// GitHub registers a push's checks within seconds. A head that still has
-// none two minutes after kelpie first saw it is taken to have no CI.
-pub(super) const NO_CHECKS_GRACE: u64 = 120;
+// GitHub registers the checks a push or a ready pull request starts within
+// seconds. Kelpie trusts a rollup only once two minutes have passed.
+pub(super) const CHECKS_SETTLE: u64 = 120;
 
 impl Runner {
     pub(super) fn check_ci(&mut self) -> Result<Begin, StateError> {
@@ -58,7 +58,7 @@ impl Runner {
         }
         match pr.checks {
             Checks::Pending => Ok(Begin::Idle),
-            Checks::None if !grace_over(since, now) => Ok(Begin::Idle),
+            Checks::None if !settled(since, now) => Ok(Begin::Idle),
             Checks::None | Checks::Passed => {
                 self.raise(number, RulingKind::Merge { head: pr.head })
             }
@@ -140,8 +140,8 @@ impl Runner {
     }
 }
 
-fn grace_over(since: Timestamp, now: Timestamp) -> bool {
-    now.0.saturating_sub(since.0) >= NO_CHECKS_GRACE
+pub(super) fn settled(since: Timestamp, now: Timestamp) -> bool {
+    now.0.saturating_sub(since.0) >= CHECKS_SETTLE
 }
 
 /// The first seven characters of a commit hash, as git shows it
@@ -373,7 +373,7 @@ mod tests {
         let (rig, runner, head) = Rig::with_pull_request("chelone");
         rig.forge.set_checks(&head, Checks::None);
         assert_eq!(step(&runner).unwrap(), None);
-        rig.clock.advance(NO_CHECKS_GRACE - 1);
+        rig.clock.advance(CHECKS_SETTLE - 1);
         assert_eq!(step(&runner).unwrap(), None);
         rig.clock.advance(1);
         ruling_report(step(&runner).unwrap());

@@ -82,6 +82,13 @@ pub enum StepReport {
         /// Why the question could not be posted on the pull request, if it could not
         comment_failed: Option<String>,
     },
+    /// The draft was marked ready after a yes; the merge waits for CI to settle
+    MarkedReady {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+    },
     /// A yes no longer held when kelpie came to merge, so CI runs again
     YesWithdrawn {
         /// The work item's issue

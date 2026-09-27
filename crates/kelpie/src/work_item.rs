@@ -69,6 +69,9 @@ pub enum Phase {
     Merge {
         /// The head the ruling was about
         head: String,
+        /// When kelpie marked the draft ready, which can start a fresh CI run
+        #[serde(default)]
+        readied: Option<Timestamp>,
     },
     /// Removing the worktree, branch and build folder
     Done {
@@ -216,9 +219,10 @@ mod tests {
         );
         assert_eq!(
             value(Phase::Merge {
-                head: "c0ffee".into()
+                head: "c0ffee".into(),
+                readied: Some(Timestamp(12)),
             }),
-            json!({ "state": "merge", "head": "c0ffee" })
+            json!({ "state": "merge", "head": "c0ffee", "readied": 12 })
         );
         assert_eq!(
             value(Phase::Done { merged: true }),
