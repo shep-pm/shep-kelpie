@@ -29,8 +29,8 @@ const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
 
 /// What one step of the runner did, for its log
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "turn", rename_all = "kebab-case")]
-pub enum TurnReport {
+#[serde(tag = "step", rename_all = "kebab-case")]
+pub enum StepReport {
     /// The board's oldest free issue became the work item in flight
     Dispatched {
         /// The work item's issue
@@ -72,7 +72,7 @@ pub enum TurnReport {
 
 pub(super) enum Begin {
     Idle,
-    Report(TurnReport),
+    Report(StepReport),
     Call(ClaudeCall),
 }
 
@@ -83,7 +83,7 @@ pub(super) enum Begin {
 /// # Errors
 ///
 /// [`StateError`] when the turn's start or end cannot be saved.
-pub fn step(runner: &Mutex<Runner>) -> Result<Option<TurnReport>, StateError> {
+pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
     let claude = Arc::clone(&lock(runner).ports.claude);
     let mut start_over = false;
     loop {
@@ -140,7 +140,7 @@ impl Runner {
                     at: now,
                     reason: reason.clone(),
                 };
-                Begin::Report(TurnReport::Failed {
+                Begin::Report(StepReport::Failed {
                     issue: item.issue,
                     reason,
                 })
@@ -203,7 +203,7 @@ impl Runner {
     fn end_turn(
         &mut self,
         result: Result<ClaudeReply, ClaudeError>,
-    ) -> Result<Option<TurnReport>, StateError> {
+    ) -> Result<Option<StepReport>, StateError> {
         // A turn stopped with the runner stays running, to resume on restart.
         if matches!(result, Err(ClaudeError::Stopped)) {
             return Ok(None);
@@ -229,7 +229,7 @@ impl Runner {
                     session_cost: reply.session_cost,
                 });
                 item.turn = Turn::Ended { at: now };
-                TurnReport::Ended {
+                StepReport::Ended {
                     issue: item.issue,
                     session: item.session.clone(),
                     usage: reply.usage,
@@ -244,7 +244,7 @@ impl Runner {
                     at: now,
                     reason: reason.clone(),
                 };
-                TurnReport::Failed {
+                StepReport::Failed {
                     issue: item.issue,
                     reason,
                 }
@@ -386,7 +386,7 @@ mod tests {
         let session = rig.claude.calls()[0].session.id().clone();
         assert_eq!(
             report,
-            TurnReport::Ended {
+            StepReport::Ended {
                 issue: 7,
                 session: session.clone(),
                 usage: usage(2),
@@ -529,7 +529,7 @@ mod tests {
         let reason = "claude failed: overloaded".to_owned();
         assert_eq!(
             report,
-            TurnReport::Failed {
+            StepReport::Failed {
                 issue: 7,
                 reason: reason.clone()
             }
@@ -546,7 +546,7 @@ mod tests {
     fn a_foreign_folder_where_the_worktree_goes_fails_the_turn_before_any_call() {
         let (rig, runner) = with_issue_7("koji");
         fs::create_dir_all(rig.home.path().join("kelpie/wt/koji/7")).unwrap();
-        let Some(TurnReport::Failed { reason, .. }) = step(&runner).unwrap() else {
+        let Some(StepReport::Failed { reason, .. }) = step(&runner).unwrap() else {
             panic!("the turn ran in a folder kelpie did not make");
         };
         assert!(

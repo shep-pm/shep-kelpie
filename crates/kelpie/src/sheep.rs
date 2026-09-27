@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use crate::adapters::{ClaudeCli, Gh, SystemClock};
 use crate::ports::Ports;
-use crate::runner::{ACTIONS, ProjectName, ProjectPaths, Runner, TurnReport, answer, step};
+use crate::runner::{ACTIONS, ProjectName, ProjectPaths, Runner, StepReport, answer, step};
 
 /// How long queued replies get to reach the shepherd before the runner exits
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
@@ -116,7 +116,7 @@ fn work(runner: &Mutex<Runner>, woken: &Receiver<()>) {
             Ok(Some(report)) => {
                 let line = serde_json::to_string(&report).expect("a report serializes to JSON");
                 println!("{line}");
-                if !matches!(report, TurnReport::BoardFailed { .. }) {
+                if !matches!(report, StepReport::BoardFailed { .. }) {
                     continue;
                 }
             }

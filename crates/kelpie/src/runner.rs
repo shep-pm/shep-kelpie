@@ -22,7 +22,7 @@ mod turn;
 
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
 pub use trigger::{ACTIONS, Status, WorkItemStatus, answer};
-pub use turn::{TurnReport, step};
+pub use turn::{StepReport, step};
 
 /// Why a runner could not start
 #[derive(Debug, Clone, PartialEq, Eq)]
