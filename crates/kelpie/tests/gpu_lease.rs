@@ -278,6 +278,10 @@ fn a_sheep_without_tmpdir_finds_the_lock_the_maintainers_shell_uses() {
         Path::new(&lock_seen_by(&[])),
         Path::new(&user_temp).join("qwen-review/gpu.lock")
     );
+}
+
+#[test]
+fn a_sheep_given_tmpdir_uses_it() {
     let scratch = tempfile::tempdir().unwrap();
     assert_eq!(
         Path::new(&lock_seen_by(&[("TMPDIR", scratch.path())])),
