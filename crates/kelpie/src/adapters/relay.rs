@@ -91,7 +91,14 @@ impl RelayCli {
         Ok(pid_of_the_relay(&agents).map(|pid| Found { pid }))
     }
 
-    fn start(&self, model: &str, effort: Effort) -> Result<(), RelayError> {
+    // Kelpie is not the only thing that can bring the relay's process back:
+    // Claude Code's own background-session handling was seen live on #14
+    // reviving a killed session under its old pid, bypassing `start`
+    // entirely. So the settings and instructions files are rewritten here,
+    // unconditionally, on every `send`, whether or not this call ends up
+    // starting a process itself: an upgrade's new settings reach the file
+    // kelpie owns even when nothing of kelpie's runs to write it.
+    fn write_relay_files(&self) -> Result<(PathBuf, PathBuf), RelayError> {
         fs::create_dir_all(&self.folder).map_err(|e| RelayError::CannotStart(e.to_string()))?;
         let settings = self.folder.join("settings.json");
         let instructions = self.folder.join("instructions.md");
@@ -99,10 +106,20 @@ impl RelayCli {
         fs::write(&settings, text).map_err(|e| RelayError::CannotStart(e.to_string()))?;
         fs::write(&instructions, relay::INSTRUCTIONS)
             .map_err(|e| RelayError::CannotStart(e.to_string()))?;
+        Ok((settings, instructions))
+    }
+
+    fn start(
+        &self,
+        settings: &Path,
+        instructions: &Path,
+        model: &str,
+        effort: Effort,
+    ) -> Result<(), RelayError> {
         let mut command = Command::new("claude");
         relay_env(&mut command);
         let output = command
-            .args(start_argv(&settings, &instructions, model, effort))
+            .args(start_argv(settings, instructions, model, effort))
             .current_dir(&self.home)
             .stdin(Stdio::null())
             .output()
@@ -117,7 +134,13 @@ impl RelayCli {
     // Whether a fresh relay had to be started, alongside where it is: a
     // freshly started one is given `SOCKET_GRACE` longer before the first
     // write to its socket, past what it took to appear in the listing.
-    fn ensure_running(&self, model: &str, effort: Effort) -> Result<(Found, bool), RelayError> {
+    fn ensure_running(
+        &self,
+        settings: &Path,
+        instructions: &Path,
+        model: &str,
+        effort: Effort,
+    ) -> Result<(Found, bool), RelayError> {
         if let Some(found) = self.find()? {
             return Ok((found, false));
         }
@@ -126,7 +149,7 @@ impl RelayCli {
         if let Some(found) = self.find()? {
             return Ok((found, false));
         }
-        self.start(model, effort)?;
+        self.start(settings, instructions, model, effort)?;
         for _ in 0..APPEAR_TRIES {
             thread::sleep(APPEAR_POLL);
             // A transient hiccup in `claude agents` here is not the relay
@@ -168,7 +191,8 @@ impl RelayCli {
 
 impl Relay for RelayCli {
     fn send(&self, message: &str, model: &str, effort: Effort) -> Result<(), RelayError> {
-        let (found, fresh) = self.ensure_running(model, effort)?;
+        let (settings, instructions) = self.write_relay_files()?;
+        let (found, fresh) = self.ensure_running(&settings, &instructions, model, effort)?;
         if fresh {
             thread::sleep(SOCKET_GRACE);
         }
@@ -403,6 +427,27 @@ mod tests {
             !argv.contains(&"--dangerously-skip-permissions".to_owned()),
             "{argv:?}"
         );
+    }
+
+    // Measured live on #14: Claude Code's own background-session handling
+    // can revive a killed relay under its old pid, bypassing `start`
+    // entirely, so a settings.json an upgrade left stale never gets
+    // rewritten unless writing it does not wait on `start` running at all.
+    #[test]
+    fn a_stale_settings_file_is_rewritten_whether_or_not_a_start_happens() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("relay");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(
+            folder.join("settings.json"),
+            r#"{"crossSessionInbound":"accept"}"#,
+        )
+        .unwrap();
+
+        let relay = RelayCli::new(dir.path().to_owned(), folder.clone());
+        let (settings, _) = relay.write_relay_files().unwrap();
+        let written: Value = serde_json::from_str(&fs::read_to_string(settings).unwrap()).unwrap();
+        assert_eq!(written, relay::settings());
     }
 
     #[test]
