@@ -4,6 +4,7 @@
 //! hears of it away from the terminal. It is saved before it is posted, so
 //! a failed post loses nothing: the post is tried again, waiting longer
 //! after each failure, and the ruling is marked alerted only once it lands.
+//! A save that fails after a post lands leaves it to be posted again.
 
 use super::Runner;
 use super::report::StepReport;
