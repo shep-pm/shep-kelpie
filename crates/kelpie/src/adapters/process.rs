@@ -122,6 +122,9 @@ impl Processes {
                     .iter()
                     .position(|(i, _)| *i == id)
                     .expect("only wait removes a child");
+                // Checked before the deadline below, so a child that has
+                // already exited by the time a poll lands is never reported
+                // as timed out, however close the two were.
                 if let Some(status) = running.children[at].1.try_wait().map_err(RunError::Io)? {
                     running.children.remove(at);
                     return Ok(status);
