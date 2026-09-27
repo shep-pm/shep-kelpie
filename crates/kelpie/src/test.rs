@@ -115,6 +115,7 @@ impl FakeClaude {
         self.seen().into_iter().map(|s| s.call).collect()
     }
 
+    /// The worker's own calls, with the settings file each one saw
     pub(crate) fn seen(&self) -> Vec<Seen> {
         self.all_seen()
             .into_iter()
@@ -127,6 +128,7 @@ impl FakeClaude {
         self.all_seen().into_iter().map(|s| s.call).collect()
     }
 
+    /// Every call, with the settings file each one saw
     pub(crate) fn all_seen(&self) -> Vec<Seen> {
         self.seen.lock().unwrap().clone()
     }
@@ -282,10 +284,12 @@ pub(crate) struct FakeReviewer {
 }
 
 impl FakeReviewer {
+    /// Every round asked of it, in order
     pub(crate) fn seen(&self) -> Vec<SeenRound> {
         self.seen.lock().unwrap().clone()
     }
 
+    /// Queues answers for its next rounds, oldest first
     pub(crate) fn script(&self, rounds: impl IntoIterator<Item = ScriptedRound>) {
         self.script.lock().unwrap().extend(rounds);
     }

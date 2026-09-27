@@ -101,6 +101,7 @@ impl QwenReviewer {
         worktree: &Path,
         out: &Path,
         round: u32,
+        skipped_index: u32,
         skipped: &Finding,
     ) -> Result<Vec<Finding>, ReviewerError> {
         let diff = Command::new("git")
@@ -128,7 +129,12 @@ impl QwenReviewer {
         std::fs::write(&hunk_path, &diff.stdout).map_err(|e| {
             ReviewerError::Failed(format!("cannot write {}: {e}", hunk_path.display()))
         })?;
-        let hunk_out = out.join("hunks").join(format!("{round}-out"));
+        // Its own output folder per skipped file, so a second hunk in the
+        // same round does not overwrite the first's `round-N.txt` before
+        // anyone can look at it.
+        let hunk_out = out
+            .join("hunks")
+            .join(format!("{round}-out-{skipped_index}"));
         let files = hunk_path.to_string_lossy().into_owned();
         let findings = self.run(worktree, &hunk_out, round, Some(&files))?;
         Ok(findings
@@ -150,9 +156,11 @@ impl Reviewer for QwenReviewer {
     ) -> Result<Vec<Finding>, ReviewerError> {
         let findings = self.run(worktree, out, round, None)?;
         let mut combined = Vec::with_capacity(findings.len());
+        let mut skipped_index = 0u32;
         for finding in findings {
             if is_skipped_for_size(&finding) {
-                combined.extend(self.hunk_round(worktree, out, round, &finding)?);
+                combined.extend(self.hunk_round(worktree, out, round, skipped_index, &finding)?);
+                skipped_index += 1;
             } else {
                 combined.push(finding);
             }
