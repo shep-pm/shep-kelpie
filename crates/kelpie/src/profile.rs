@@ -439,6 +439,16 @@ mod tests {
         assert!(!allow.iter().any(|p| p.ends_with("/main")), "{allow:?}");
     }
 
+    // Unset, the sandbox blocks every Unix socket, kelpie's shepherd socket
+    // included, so a worker cannot `shep trigger` its own ruling's answer.
+    #[test]
+    fn a_worker_reaches_no_unix_socket() {
+        let s = settings(&[]);
+        let network = s["sandbox"]["network"].as_object().unwrap();
+        assert!(!network.contains_key("allowUnixSockets"), "{network:?}");
+        assert!(!network.contains_key("allowAllUnixSockets"), "{network:?}");
+    }
+
     #[test]
     fn credential_paths_are_unreadable() {
         let deny = settings(&[])["permissions"]["deny"].clone();
