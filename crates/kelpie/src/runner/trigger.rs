@@ -6,6 +6,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use serde::Serialize;
 
+use super::pace::PacerStatus;
 use super::{Answer, Runner};
 use crate::board::WorkerModel;
 use crate::ports::{SessionId, Timestamp};
@@ -33,6 +34,8 @@ pub struct Status<'a> {
     pub rulings: &'a [Ruling],
     /// Leases held
     pub leases: &'a [LeaseHeld],
+    /// What usage was when last read, and why nothing new is starting
+    pub pacer: PacerStatus<'a>,
 }
 
 /// The work item in flight, as `status` shows it
@@ -258,6 +261,7 @@ mod tests {
                 "work_item": null,
                 "rulings": [],
                 "leases": [],
+                "pacer": { "reading": null, "holding": null },
             })
         );
     }

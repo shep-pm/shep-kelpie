@@ -7,9 +7,11 @@ use crate::ports::{Clock, Timestamp};
 mod claude;
 mod gh;
 mod process;
+mod usage;
 
 pub use claude::ClaudeCli;
 pub use gh::Gh;
+pub use usage::UsageMeter;
 
 /// The machine's wall clock
 #[derive(Debug, Clone, Copy, Default)]

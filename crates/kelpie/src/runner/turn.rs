@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use super::Runner;
 use super::report::{Begin, StepReport};
 use super::trigger::lock;
+use crate::pacer::Scope;
 use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session};
 use crate::profile::{INSTRUCTIONS, WorkerProfile};
 use crate::state::{RunState, StateError};
@@ -71,6 +72,14 @@ impl Runner {
             Phase::Merge { .. } => return self.merge(),
             Phase::Done { merged } => return self.finish(*merged),
         }
+        // Only a turn that has not begun waits on the pacer: one already
+        // running carries on, since a turn is never interrupted, and start_over
+        // resumes the same not-yet-begun turn after a session died unborn.
+        let due = matches!(item.turn, Turn::Due | Turn::Next { .. });
+        if due && let Some(held) = self.pace(Scope::Turn)?.holds() {
+            return Ok(held);
+        }
+        let item = self.state.work_item.as_ref().expect("checked above");
         let id = item.session.clone();
         let (session, prompt) = match &item.turn {
             Turn::Due => (Session::New(id), None),

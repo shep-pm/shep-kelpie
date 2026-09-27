@@ -13,6 +13,7 @@ pub mod board;
 pub mod confine;
 pub mod dog;
 pub mod lease;
+pub mod pacer;
 pub mod ports;
 pub mod profile;
 pub mod runner;

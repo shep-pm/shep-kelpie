@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::pacer::DayStart;
 use crate::ports::Timestamp;
 use crate::work_item::WorkItem;
 
@@ -40,6 +41,9 @@ pub struct ProjectState {
     pub finished: Vec<u64>,
     /// Leases this project holds
     pub leases: Vec<LeaseHeld>,
+    /// What the week had spent when today began, once usage has been read
+    #[serde(default)]
+    pub pacing: Option<DayStart>,
 }
 
 impl ProjectState {
@@ -54,6 +58,7 @@ impl ProjectState {
             last_ruling: 0,
             finished: Vec::new(),
             leases: Vec::new(),
+            pacing: None,
         }
     }
 }
@@ -336,8 +341,24 @@ mod tests {
             resource: Resource::Gpu,
             since: Timestamp(1_790_000_100),
         });
+        state.pacing = Some(DayStart {
+            week_resets_at: Timestamp(1_790_500_000),
+            day: 2,
+            week_used_pct: 31,
+        });
         store.save(&state).unwrap();
         assert_eq!(store.load().unwrap(), Some(state));
+    }
+
+    #[test]
+    fn a_file_saved_before_pacing_loads_with_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        let old =
+            r#"{"version":1,"run":"running","since":7,"work_item":null,"rulings":[],"leases":[]}"#;
+        fs::write(dir.path().join("state.json"), old).unwrap();
+        let state = store.load().unwrap().unwrap();
+        assert_eq!((state.run, state.pacing), (RunState::Running, None));
     }
 
     #[test]
@@ -379,6 +400,11 @@ mod tests {
         ];
         state.last_ruling = 4;
         state.finished = vec![22, 30];
+        state.pacing = Some(DayStart {
+            week_resets_at: Timestamp(9),
+            day: 1,
+            week_used_pct: 10,
+        });
         store.save(&state).unwrap();
         let text = fs::read_to_string(dir.path().join("state.json")).unwrap();
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -399,6 +425,7 @@ mod tests {
                 "last_ruling": 4,
                 "finished": [22, 30],
                 "leases": [{ "resource": "coderabbit", "since": 8 }],
+                "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
             })
         );
     }

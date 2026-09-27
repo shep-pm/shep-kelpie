@@ -6,7 +6,8 @@
 use serde::Serialize;
 
 use crate::board::{Skip, WorkerModel};
-use crate::ports::{ClaudeCall, SessionId, Usage};
+use crate::pacer::HoldKind;
+use crate::ports::{ClaudeCall, SessionId, Timestamp, Usage};
 
 /// What one step of the runner did, for its log
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -26,6 +27,15 @@ pub enum StepReport {
     BoardFailed {
         /// Why
         reason: String,
+    },
+    /// The pacer found a limit reached, so nothing new started
+    Held {
+        /// Which limit
+        kind: HoldKind,
+        /// Why, as `status` shows it
+        reason: String,
+        /// When the pacer reads usage again at the latest
+        until: Timestamp,
     },
     /// A turn ended and its call was recorded
     Ended {
@@ -119,7 +129,10 @@ pub enum StepReport {
 impl StepReport {
     /// Whether the runner should wait before its next step, rather than go on
     pub fn waits(&self) -> bool {
-        matches!(self, Self::BoardFailed { .. } | Self::GateFailed { .. })
+        matches!(
+            self,
+            Self::BoardFailed { .. } | Self::GateFailed { .. } | Self::Held { .. }
+        )
     }
 }
 

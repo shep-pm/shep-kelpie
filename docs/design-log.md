@@ -64,6 +64,11 @@ So kelpie moves the control room's rules (gates, locks, rate windows) into code,
 
 - Kelpie paces against the account's weekly window. The daily allowance is what is left of the week divided by the days until reset (100/7 on a fresh week), spread over the hours set at kickoff (default 8, about 1.8% an hour). It covers all account usage, the maintainer's own sessions included.
 - The 5-hour window is a local limiter: pause near 50% until it resets.
+- Built in #15. A day is 24 hours counted from the weekly reset, so the days until reset are always whole. The allowance is fixed when the day begins (what the week had left, over the days left) and kept in the state file, so a restart keeps it. Today's spend is the week's utilization now minus its utilization at that read, the maintainer's own sessions included. Once spend reaches the allowance, no work item is dispatched and the one in flight continues. The kickoff hours only divide the allowance into the per-hour figure `status` shows.
+- A maintainer's `add` is not held by the daily allowance, the way it already skips the board's screening. The 5-hour window still holds its turns.
+- Decided 2026-09-27 on #15: the allowance is one figure for the day, not spread by the hour. The kickoff hours only produce the per-hour figure `status` shows, given the gates already in place: the 5-hour window and the board's own screening.
+- The 50% mark stops a turn from starting, dispatch included, until the window resets. Usage is read only before a dispatch and before a turn that has not begun, never mid-turn, and a turn resumed after a restart is not held. A hold is trusted for at most 10 minutes, since reset times are printed to the minute and a window can reset mid-read.
+- When usage cannot be read, the pacer holds both limits and says so in `status`. A pacer that guessed would spend the account it exists to protect.
 - The pacer sets concurrency, and logs utilization per unit by hour of day. A peak-hour effect, if one returns, shows up in the data rather than being hard-coded.
 - "Do n work items today" comes later, once per-item costs are measured.
 
@@ -108,6 +113,9 @@ Read from the desktop app's bundle and the CLI binary, 2026-09-25.
 
 - Weekly limits were never tied to time of day. Anthropic announced in March 2026 that 5-hour limits drain faster on weekdays between 5 and 11am PT. Secondary sources report that was removed for Claude Code on Pro and Max on 2026-05-06.
 - `/usage` reports the share of usage spent while four or more sessions ran in parallel, and says queueing uses the shared limit more evenly. Parallelism is about timing against the 5-hour window, not a surcharge.
+- Headless `/usage`, measured 2026-09-26 on Claude Code 2.1.283 (recorded in `crates/kelpie/fixtures/usage-result.json`): `total_cost_usd` 0, `num_turns` 0, `local_command: "usage"`, about 1.5 to 3 seconds. The `result` text has one line per window, `Current session: 2% used · resets Sep 27 at 3:40am (America/New_York)`, and a `Current week (all models)` line beside per-model ones (`Current week (Fable)`). Percentages are whole numbers.
+- Reset times carry no year and are rounded to the minute. The same weekly reset printed as `Sep 25 at 10:59pm` on two reads and `Sep 25 at 11pm` on a third, so a weekly reset that moves by under an hour is the same week. A reset later today may print as time only.
+- `--setting-sources ""` and `--no-session-persistence` both leave `/usage` working, so the read runs none of the maintainer's hooks and writes no transcript.
 
 ### Worker profile and sandbox
 

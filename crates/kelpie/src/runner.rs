@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::board::{LabelError, WorkerModel, worker_override};
-use crate::ports::{ForgeError, Ports, Visibility};
+use crate::pacer::Assessment;
+use crate::ports::{ForgeError, Ports, Timestamp, Visibility};
 use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::work_item::{Phase, Turn, WorkItem, new_session_id};
@@ -18,6 +19,7 @@ use crate::work_item::{Phase, Turn, WorkItem, new_session_id};
 mod dispatch;
 mod gate;
 mod merge;
+mod pace;
 mod paths;
 mod report;
 mod ruling;
@@ -25,6 +27,7 @@ mod trigger;
 mod turn;
 
 pub use merge::DropError;
+pub use pace::PacerStatus;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
 pub use report::StepReport;
 pub use ruling::{Answer, RuleError};
@@ -115,6 +118,8 @@ pub struct Runner {
     store: StateStore,
     state: ProjectState,
     ports: Ports,
+    // The pacer's last reading of usage and when it was read, kept in memory only
+    pacing: Option<(Timestamp, Assessment)>,
 }
 
 impl Runner {
@@ -148,6 +153,7 @@ impl Runner {
             store,
             state,
             ports,
+            pacing: None,
         })
     }
 
@@ -165,6 +171,7 @@ impl Runner {
             work_item: self.state.work_item.as_ref().map(WorkItemStatus::from),
             rulings: &self.state.rulings,
             leases: &self.state.leases,
+            pacer: self.pacer_status(self.ports.clock.now()),
         }
     }
 

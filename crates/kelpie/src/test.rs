@@ -4,15 +4,15 @@
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tempfile::TempDir;
 
 use crate::board::WorkerModel;
 use crate::ports::{
-    Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Ports, Role, SessionId,
-    Timestamp, Usage,
+    Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Meter, MeterError, Ports,
+    Role, SessionId, Timestamp, Usage, Utilization, Window,
 };
 use crate::runner::{
     CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
@@ -73,6 +73,9 @@ pub(crate) const LEFT_BEHIND: &str = "left-behind.txt";
 pub(crate) enum Scripted {
     /// Answers with this usage, and this cost for the session so far
     Reply(Usage, Cost),
+    /// Answers like [`Self::Reply`], with the account's usage as given by
+    /// the time it does: the call itself spent it
+    Spend(Utilization, Usage, Cost),
     /// Fails with this error
     Fail(ClaudeError),
     /// Leaves [`LEFT_BEHIND`] in the worktree, then dies with the runner
@@ -98,6 +101,7 @@ pub(crate) struct Seen {
 pub(crate) struct FakeClaude {
     seen: Arc<Mutex<Vec<Seen>>>,
     script: Arc<Mutex<VecDeque<Scripted>>>,
+    meter: Option<FakeMeter>,
 }
 
 impl FakeClaude {
@@ -128,6 +132,15 @@ impl Claude for FakeClaude {
             build_existed,
         });
         let next = self.script.lock().unwrap().pop_front();
+        let next = match next {
+            Some(Scripted::Spend(account, usage, cost)) => {
+                if let Some(meter) = &self.meter {
+                    meter.set(account);
+                }
+                Some(Scripted::Reply(usage, cost))
+            }
+            other => other,
+        };
         match next {
             Some(Scripted::Reply(usage, session_cost)) => Ok(ClaudeReply {
                 session_id: call.session.id().clone(),
@@ -135,6 +148,7 @@ impl Claude for FakeClaude {
                 usage,
                 session_cost,
             }),
+            Some(Scripted::Spend(..)) => unreachable!("turned into a reply above"),
             Some(Scripted::Fail(error)) => Err(error),
             Some(Scripted::Kill) => {
                 std::fs::write(call.cwd.join(LEFT_BEHIND), "work in progress\n").unwrap();
@@ -154,6 +168,47 @@ impl Claude for FakeClaude {
             }
             None => Err(ClaudeError::Failed("the rig scripts no reply".into())),
         }
+    }
+}
+
+/// A meter that reports what a test sets, and counts its reads
+///
+/// It starts with the account idle: nothing used in either window, the
+/// week `Rig::EPOCH` begins and the session window five hours long.
+#[derive(Debug, Clone)]
+pub(crate) struct FakeMeter {
+    reading: Arc<Mutex<Result<Utilization, MeterError>>>,
+    reads: Arc<AtomicUsize>,
+}
+
+impl FakeMeter {
+    fn idle() -> Self {
+        Self {
+            reading: Arc::new(Mutex::new(Ok(Rig::utilization(0, 0)))),
+            reads: Arc::default(),
+        }
+    }
+
+    /// Reports `usage` from now on
+    pub(crate) fn set(&self, usage: Utilization) {
+        *self.reading.lock().unwrap() = Ok(usage);
+    }
+
+    /// Fails every read with `error`, until a test sets a reading
+    pub(crate) fn fail(&self, error: MeterError) {
+        *self.reading.lock().unwrap() = Err(error);
+    }
+
+    /// How many times usage was read
+    pub(crate) fn reads(&self) -> usize {
+        self.reads.load(Ordering::SeqCst)
+    }
+}
+
+impl Meter for FakeMeter {
+    fn read(&self, _now: Timestamp) -> Result<Utilization, MeterError> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        self.reading.lock().unwrap().clone()
     }
 }
 
@@ -185,6 +240,7 @@ pub(crate) struct Rig {
     pub(crate) project: ProjectName,
     pub(crate) claude: FakeClaude,
     pub(crate) forge: FakeForge,
+    pub(crate) meter: FakeMeter,
     pub(crate) clock: FakeClock,
 }
 
@@ -192,16 +248,39 @@ impl Rig {
     /// Where every rig's clock starts
     pub(crate) const EPOCH: u64 = 1_790_000_000;
 
+    /// One day, in seconds
+    pub(crate) const DAY: u64 = 86_400;
+
+    /// Usage with `week` and `session` percent spent. The week began at
+    /// [`Self::EPOCH`] and the session window resets five hours on.
+    pub(crate) fn utilization(week: u32, session: u32) -> Utilization {
+        Utilization {
+            session: Window {
+                used_pct: session,
+                resets_at: Timestamp(Self::EPOCH + 5 * 3600),
+            },
+            week: Window {
+                used_pct: week,
+                resets_at: Timestamp(Self::EPOCH + 7 * Self::DAY),
+            },
+        }
+    }
+
     /// Where the rig says the kelpie binary is
     pub(crate) const KELPIE: &str = "/opt/kelpie/bin/kelpie";
 
     /// A project with the example settings, pointed at a fresh repo
     pub(crate) fn new(project: &str) -> Self {
         let home = tempfile::tempdir().unwrap();
+        let meter = FakeMeter::idle();
         let rig = Self {
             project: ProjectName::try_from(project).unwrap(),
-            claude: FakeClaude::default(),
+            claude: FakeClaude {
+                meter: Some(meter.clone()),
+                ..FakeClaude::default()
+            },
             forge: FakeForge::new(home.path().join("origin.git")),
+            meter,
             clock: FakeClock::at(Self::EPOCH),
             home,
         };
@@ -280,6 +359,7 @@ impl Rig {
         let ports = Ports {
             claude: Arc::new(self.claude.clone()),
             forge: Box::new(self.forge.clone()),
+            meter: Box::new(self.meter.clone()),
             clock: Box::new(self.clock.clone()),
         };
         Runner::open(

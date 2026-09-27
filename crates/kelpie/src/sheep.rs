@@ -51,6 +51,7 @@ fn serve(project: &str) -> Result<(), String> {
     let ports = Ports {
         claude: Arc::new(claude.clone()),
         forge: Box::new(Gh),
+        meter: Box::new(claude.meter()),
         clock: Box::new(SystemClock),
     };
     let runner = Runner::open(project, &paths, &home, &kelpie, ports).map_err(|e| e.to_string())?;

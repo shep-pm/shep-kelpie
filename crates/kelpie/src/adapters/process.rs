@@ -25,6 +25,8 @@ pub(super) enum RunError {
     Io(io::Error),
     /// [`Processes::stop`] ended it, or came first
     Stopped,
+    /// It ran past its limit and was killed
+    TimedOut,
 }
 
 /// Running children, and whether the runner is stopping
@@ -41,6 +43,19 @@ struct Running {
 impl Processes {
     /// Runs `command` to its end with stdin closed, collecting its output
     pub(super) fn output(&self, command: &mut Command) -> Result<Output, RunError> {
+        self.run(command, None)
+    }
+
+    /// Like [`Self::output`], and kills the child once `limit` has passed
+    pub(super) fn output_within(
+        &self,
+        command: &mut Command,
+        limit: Duration,
+    ) -> Result<Output, RunError> {
+        self.run(command, Some(Instant::now() + limit))
+    }
+
+    fn run(&self, command: &mut Command, deadline: Option<Instant>) -> Result<Output, RunError> {
         let mut child = command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -61,7 +76,7 @@ impl Processes {
             running.children.push((id, child));
             id
         };
-        let status = self.wait(id).map_err(RunError::Io)?;
+        let status = self.wait(id, deadline)?;
         // A stopped child's own children may hold its pipes open, so its
         // output is left unread.
         if self.lock().stopping {
@@ -98,7 +113,7 @@ impl Processes {
         }
     }
 
-    fn wait(&self, id: u64) -> io::Result<ExitStatus> {
+    fn wait(&self, id: u64, deadline: Option<Instant>) -> Result<ExitStatus, RunError> {
         loop {
             {
                 let mut running = self.lock();
@@ -107,9 +122,15 @@ impl Processes {
                     .iter()
                     .position(|(i, _)| *i == id)
                     .expect("only wait removes a child");
-                if let Some(status) = running.children[at].1.try_wait()? {
+                if let Some(status) = running.children[at].1.try_wait().map_err(RunError::Io)? {
                     running.children.remove(at);
                     return Ok(status);
+                }
+                if deadline.is_some_and(|d| Instant::now() >= d) {
+                    let (_, mut child) = running.children.remove(at);
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(RunError::TimedOut);
                 }
             }
             thread::sleep(POLL);
@@ -146,6 +167,20 @@ mod tests {
         assert_eq!(output.status.code(), Some(3));
         assert_eq!(output.stdout, b"out\n");
         assert_eq!(output.stderr, b"err\n");
+    }
+
+    // Real time: a real process that would outlive the test's own bound
+    #[test]
+    fn a_child_past_its_limit_is_killed() {
+        let processes = Processes::default();
+        let started = Instant::now();
+        let result = processes.output_within(
+            Command::new("sh").args(["-c", "sleep 30"]),
+            Duration::from_millis(200),
+        );
+        assert!(matches!(result, Err(RunError::TimedOut)), "{result:?}");
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(processes.lock().children.is_empty());
     }
 
     // Real time: the child is a real process, and the test bounds its own

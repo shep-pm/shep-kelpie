@@ -18,7 +18,7 @@ const NO_SESSION: &str = "No conversation found with session ID";
 /// Clones share their calls in flight, so one clone can stop them all.
 #[derive(Debug, Clone, Default)]
 pub struct ClaudeCli {
-    processes: Processes,
+    pub(super) processes: Processes,
 }
 
 impl ClaudeCli {
@@ -43,6 +43,8 @@ impl Claude for ClaudeCli {
             .map_err(|e| match e {
                 RunError::Io(e) => ClaudeError::Spawn(e.to_string()),
                 RunError::Stopped => ClaudeError::Stopped,
+                // A call has no limit, so this cannot arrive.
+                RunError::TimedOut => ClaudeError::Failed("claude ran past its limit".into()),
             })?;
         parse_result(&output, &call.session)
     }
