@@ -236,7 +236,7 @@ pub enum Rebase {
 ///
 /// The push is forced with a lease on `head`, so it fails rather than drop a
 /// commit pushed since. A conflict aborts the rebase, and a failed push
-/// puts the branch back at `head`. Run [`has_latest_base`] first, which fetches.
+/// puts the branch back at `head`. Run [`base_of`] first, which fetches.
 ///
 /// # Errors
 ///
