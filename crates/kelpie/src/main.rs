@@ -37,7 +37,9 @@ fn main() -> ExitCode {
             }
         }
         [role, project, id] if role == "relay-yes" => rule_trigger(project, &format!("{id} yes")),
-        [role, project, params] if role == "relay-answer" => rule_trigger(project, params),
+        [role, project, params] if role == "relay-answer" => {
+            relay_answer(Command::new("shep"), project, params)
+        }
         _ => {
             eprintln!(
                 "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>",
@@ -52,6 +54,20 @@ fn main() -> ExitCode {
 // or gate an exact subcommand instead of a pattern over free-text params.
 fn rule_trigger(project: &str, params: &str) -> ExitCode {
     run_shep(Command::new("shep"), project, params)
+}
+
+// Refuses anything that does not read as `<id> no <note>` or `<id> answer
+// <text>`, by the same grammar `rule` itself reads, so a "yes" the relay
+// was talked into forwarding as an "answer" never reaches the pre-allowed
+// path: the settings' `ask` rule on `relay-yes` is the only way one merges.
+fn relay_answer(shep: Command, project: &str, params: &str) -> ExitCode {
+    if !kelpie::runner::is_no_or_answer(params) {
+        eprintln!(
+            "relay-answer refuses {params:?}: not a `<id> no <note>` or `<id> answer <text>`"
+        );
+        return ExitCode::FAILURE;
+    }
+    run_shep(shep, project, params)
 }
 
 fn run_shep(mut shep: Command, project: &str, params: &str) -> ExitCode {
@@ -103,13 +119,35 @@ mod tests {
     }
 
     #[test]
-    fn relay_answer_passes_its_params_through_verbatim() {
+    fn relay_answer_passes_a_no_or_an_answer_through_verbatim() {
         let (dir, script) = fake_shep();
-        run_shep(Command::new(&script), "shep", "3 no rename the flag");
+        relay_answer(Command::new(&script), "shep", "3 no rename the flag");
         assert_eq!(
             fs::read_to_string(dir.path().join("log")).unwrap(),
             "trigger shep rule 3 no rename the flag\n"
         );
+
+        let (dir, script) = fake_shep();
+        relay_answer(Command::new(&script), "shep", "3 answer use --dry-run");
+        assert_eq!(
+            fs::read_to_string(dir.path().join("log")).unwrap(),
+            "trigger shep rule 3 answer use --dry-run\n"
+        );
+    }
+
+    // A "yes" the relay was talked into forwarding as an "answer" must
+    // never reach `shep trigger`, whatever shape it is disguised in.
+    #[test]
+    fn relay_answer_refuses_every_shape_of_yes() {
+        for disguised in ["3 yes", "3 Yes", " 3 yes", "3  yes", "3 yes extra"] {
+            let (dir, script) = fake_shep();
+            let code = relay_answer(Command::new(&script), "shep", disguised);
+            assert_eq!(code, ExitCode::FAILURE, "{disguised:?}");
+            assert!(
+                !dir.path().join("log").exists(),
+                "{disguised:?} reached shep trigger"
+            );
+        }
     }
 
     #[test]

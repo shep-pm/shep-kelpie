@@ -35,7 +35,7 @@ pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
 pub use report::StepReport;
 pub use ruling::{Answer, RuleError};
 pub use trigger::GateError;
-pub use trigger::{ACTIONS, Status, WorkItemStatus, answer};
+pub use trigger::{ACTIONS, Status, WorkItemStatus, answer, is_no_or_answer};
 pub use turn::step;
 
 #[cfg(test)]

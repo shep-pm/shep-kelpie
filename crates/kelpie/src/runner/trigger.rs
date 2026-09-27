@@ -154,6 +154,20 @@ fn read_rule(params: &str) -> Option<Request> {
     Some(Request::Rule(id, answer))
 }
 
+/// Whether `params` reads as `rule`'s own `<id> no <note>` or
+/// `<id> answer <text>`, and never as `<id> yes`
+///
+/// The relay's settings pre-allow `kelpie relay-answer`, so this is what
+/// keeps a "yes" the relay was talked into forwarding as an "answer" from
+/// reaching `rule` as one: the same parser `rule` itself reads decides it,
+/// not a second guess at the grammar.
+pub fn is_no_or_answer(params: &str) -> bool {
+    matches!(
+        read_rule(params),
+        Some(Request::Rule(_, Answer::No(_) | Answer::Text(_)))
+    )
+}
+
 // Digits only, so `+7` and `#7` are refused rather than read as 7.
 fn number(text: &str) -> Option<u64> {
     let n = text.parse::<u64>().ok()?;
@@ -248,6 +262,25 @@ mod tests {
         rig.ask(&runner, "start", None);
         assert_eq!(rig.ask(&runner, "add", Some("7"))["work_item"]["issue"], 7);
         (rig, runner)
+    }
+
+    #[test]
+    fn is_no_or_answer_refuses_every_shape_of_yes() {
+        for refused in [
+            "3 yes",
+            "3 Yes",
+            " 3 yes",
+            "3  yes",
+            "3 yes extra",
+            "yes",
+            "3",
+            "",
+        ] {
+            assert!(!is_no_or_answer(refused), "{refused:?}");
+        }
+        for allowed in ["3 no rename it", "3 answer use --dry-run"] {
+            assert!(is_no_or_answer(allowed), "{allowed:?}");
+        }
     }
 
     #[test]
