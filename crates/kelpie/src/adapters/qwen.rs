@@ -1,11 +1,13 @@
 //! The maintainer's qwen-review script, run as a subprocess
 //!
 //! The script takes the GPU lock itself and waits in line for it, up to an
-//! hour; kelpie never takes or holds that lock itself, so a long wait here
-//! is normal, not a hang. A round's findings and its
-//! completion marker both come from disk, never from stdout: a round killed
-//! mid-flight can leave a `round-N.txt` behind with no `.done` beside it,
-//! and only the marker tells the two apart.
+//! hour; a long wait here is normal, not a hang. This module only spawns
+//! the script and waits on its exit status: it never reads or writes a lock
+//! folder itself, so a round holding one for the whole hour is simply a
+//! long-running child process from kelpie's side, never a wait on the lock.
+//! A round's findings and its completion marker both come from disk, never
+//! from stdout: a round killed mid-flight can leave a `round-N.txt` behind
+//! with no `.done` beside it, and only the marker tells the two apart.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -164,7 +166,45 @@ fn is_skipped_for_size(finding: &Finding) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
+
+    // A stand-in for the real script: it takes and releases a lock of its
+    // own around the round, the way the maintainer's script takes the GPU
+    // lock. Kelpie's side of the call never touches that path, so the round
+    // still succeeds and the lock is gone once the script exits.
+    #[test]
+    fn a_round_never_touches_the_lock_the_script_takes_itself() {
+        let home = tempfile::tempdir().unwrap();
+        let script_dir = home.path().join(".claude/scripts");
+        std::fs::create_dir_all(&script_dir).unwrap();
+        let script = script_dir.join("qwen-review.sh");
+        let lock = home.path().join("gpu.lock");
+        let contents = format!(
+            "#!/bin/sh\nmkdir '{lock}'\nsleep 0.05\nrmdir '{lock}'\n\
+             mkdir -p \"$QWEN_REVIEW_OUT\"\n\
+             : > \"$QWEN_REVIEW_OUT/round-1.txt\"\n\
+             : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n",
+            lock = lock.display(),
+        );
+        std::fs::write(&script, contents).unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        let worktree = home.path().join("wt");
+        std::fs::create_dir_all(&worktree).unwrap();
+        let out = home.path().join("out");
+        let reviewer = QwenReviewer::new(home.path());
+
+        assert_eq!(reviewer.round(&worktree, &out, 1).unwrap(), vec![]);
+        assert!(
+            !lock.exists(),
+            "the script's own lock is released once it finishes, \
+             and kelpie never created or left it behind"
+        );
+    }
 
     #[test]
     fn only_the_scripts_own_skip_placeholder_is_treated_as_skipped_for_size() {
