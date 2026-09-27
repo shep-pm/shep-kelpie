@@ -23,6 +23,12 @@ pub struct Settings {
     pub forge: ForgeSlug,
     /// Who decides a merge
     pub merge_authority: MergeAuthority,
+    /// Whether the repo runs CI on pull requests
+    ///
+    /// With it on, a pull request with no checks yet waits for them. With it
+    /// off, kelpie reads no checks and asks for the merge once the branch
+    /// has the latest `main`.
+    pub ci: bool,
     /// Globs for files left out of a pull request's changed-line count
     pub generated: Vec<String>,
     /// The model and effort for each role
@@ -395,6 +401,7 @@ mod tests {
         assert_eq!(s.repo, Path::new("/home/maintainer/.kelpie/repos/shep"));
         assert_eq!(s.forge.as_str(), "shep-pm/shep");
         assert_eq!(s.merge_authority, MergeAuthority::Ask);
+        assert!(s.ci);
         let role = |r: &RoleModel| (r.model.as_str().to_owned(), r.effort);
         assert_eq!(
             role(&s.models.worker),
@@ -442,6 +449,17 @@ mod tests {
         let err = parse_err(&text);
         assert!(err.contains("missing field `divisor`"), "{err}");
         assert!(err.contains("[coderabbit]"), "{err}");
+    }
+
+    #[test]
+    fn ci_must_be_said_either_way() {
+        let err = parse_err(&EXAMPLE.replace("ci = true\n", ""));
+        assert!(err.contains("missing field `ci`"), "{err}");
+        assert!(
+            !parse(&EXAMPLE.replace("ci = true", "ci = false"))
+                .unwrap()
+                .ci
+        );
     }
 
     #[test]

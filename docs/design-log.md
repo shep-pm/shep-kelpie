@@ -52,6 +52,12 @@ So kelpie moves the control room's rules (gates, locks, rate windows) into code,
 - The worker opens its own draft PR with its own title and body. Only the project manager summons CodeRabbit (adds `review please`) or marks a PR ready. shep's `.coderabbit.yaml` gates auto-review on that label, so opening a PR spends nothing.
 - Merge authority is a project setting: `auto`, `ask`, or `ask-surface` (ask only when a PR touches operator-facing surface). The default is `ask` until kelpie has merged a handful of PRs cleanly, and the first build accepts only `ask`.
 - The relay, a stopgap for the first build: a background Claude Code session that kelpie sends each ruling to over the session's messaging socket. It pushes the question to the maintainer's phone and passes the reply back verbatim through `shep trigger`. A merge yes through it needs the maintainer's tap on a permission prompt. It rides an undocumented protocol and costs tokens per ruling, so a webhook (Discord or ntfy) is the fallback now and becomes the primary path when the relay goes.
+- The merge gate (shep-pm/shep-kelpie#9). After the worker's draft pull request, kelpie waits for CI. A red run is the worker's next turn, naming the failed checks; a second red run on a head the worker left alone parks it on a ruling. A green run on a branch that has the latest `main` raises the merge ruling, and a branch without it is rebased and pushed by the project manager first. A conflict parks the worker on a ruling.
+- A ruling is a pull request comment, a log line and a status entry, all carrying the same question and the triggers that answer it. Ruling ids never repeat. A no with a note is the worker's next turn.
+- A yes merges only the head it was asked about, while CI on it is green and it has the latest `main`. Otherwise kelpie withdraws the yes, reruns CI, and asks again. The merge is `gh pr merge --merge --match-head-commit`, never a squash, and kelpie then removes the worktree, both branches and the build folder.
+- A pull request the maintainer merges by hand ends its work item with no merge by kelpie. One closed without merging parks the worker.
+- Kelpie records each issue whose work item it finished, merged or dropped, and the board never takes one again: GitHub closes an issue from `Resolves` a moment after the merge, and the playground's board re-picked #22 in that moment. `shep trigger <project> drop` ends the work item in flight without merging, paused or not, keeping its pull request and branch on the forge.
+- A work item saved before the gate existed stays with its worker until `shep trigger <project> gate` sends it in. The trigger takes only an item whose turn has ended with a known pull request.
 - The project manager is kelpie code plus one-shot judgement calls (reading commits that landed after a review, auditing a docs PR's claims, checking new plans for overlapping intent) and a state file workers read. Coordination needs footprints, not a codebase map: planned files from the plan, actual files from the branch diff, `git merge-tree` for conflicts, and GitHub issue dependencies for order.
 
 ## Budget
@@ -150,6 +156,17 @@ Measured 2026-09-26 in the experiments repo.
 - The merge approval needed a tap on the permission prompt, even in auto mode.
 - A question cost 12k to 26k units and an answer about 11k.
 
+### CI and the merge
+
+Read 2026-09-26 with gh 2.96.
+
+- `gh pr view --json statusCheckRollup` lists two kinds of check: a `CheckRun` (GitHub Actions, with `status` and `conclusion`) and a `StatusContext` (a commit status such as CodeRabbit's, with `state`). shep's checks include `SKIPPED` runs, which count as passing.
+- The playground's pull requests carry no checks at all: an empty rollup. GitHub cannot tell that from CI not registered yet, so a project says whether it runs CI with `ci` in its settings. With it on, an empty rollup is pending, never green; with it off, kelpie reads no checks. The playground's settings have `ci = false`, set 2026-09-27.
+- A check set registers a check at a time, so kelpie reads a verdict from a head's rollup only two minutes after it first saw that head, and merges two minutes after marking a draft ready, which can start a fresh run on the same head.
+- `gh pr view` lags a push. Seen live 2026-09-27 on the playground: two seconds after kelpie pushed a rebase, it still reported the old head. Kelpie now reads the branch on `origin` after each fetch and waits while the forge's head differs.
+- `gh pr merge --delete-branch` also deletes and switches branches in the checkout gh runs from, so kelpie leaves it out and removes the branch with `git push origin --delete`.
+- The runner's own `gh` and `git` calls are plain child processes. The worker's settings file, its sandbox and its denylist apply only to `claude` sessions started with it, so they never reach the project manager's merge, rebase or `--force-with-lease` push.
+
 ### CodeRabbit
 
 - The free plan reviews public repos only.
@@ -165,6 +182,7 @@ Measured 2026-09-26 in the experiments repo.
 - A sheep under the pinned shep 0.10.1 starts with only `HOME`, `LANG`, `PATH`, `USER` and its `SHEP_*` variables, read with `ps eww` on 2026-09-26. `TMPDIR` and `SHEP_HOME` are not among them, though the shepherd itself has both. So `${TMPDIR:-/tmp}` names `/tmp` under the shepherd and macOS's per-user temporary folder in the maintainer's shell: two different GPU locks. Kelpie falls back to `getconf DARWIN_USER_TEMP_DIR`, the folder macOS sets `TMPDIR` from at login, and whatever runs a qwen script for kelpie must pass it on as `TMPDIR`.
 - shep emits `restart` after the new process is spawned, with the new pid in its info (read from shep-daemon 0.10.0's `actor_lifecycle.rs`). A crash that will restart emits `exit` first.
 - Kelpie's lease round trip through the pinned shepherd, three runs of `crates/kelpie/tests/dog_smoke.rs` on 2026-09-26: want to grant 1, 6 and 11 ms, and a SIGKILLed holder to the next grant 8, 11 and 9 ms.
+- `shep trigger <sheep> <action> [params]` takes params as one argument, passed through verbatim (read from shep 0.10.0's `cli/sheep.rs`). So an answer with more than one word is quoted: `shep trigger hazels-lab rule '3 no rename the flag'`. Unquoted, clap refuses the extra arguments.
 - Open against shep: shep-pm/shep#623 (an opaque per-dog settings table on a sheep) and shep-pm/shep#624 (a sheep labels its own lambs).
 
 ### codebase-memory-mcp

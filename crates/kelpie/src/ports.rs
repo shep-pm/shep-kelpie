@@ -68,6 +68,74 @@ pub trait Forge: Send {
     ///
     /// [`ForgeError`] when the forge cannot be asked or its answer read.
     fn open_pull_requests(&self, repo: &ForgeSlug) -> Result<Vec<OpenPullRequest>, ForgeError>;
+
+    /// Pull request `number` on `repo`: its state, head and checks
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked, has no such pull
+    /// request, or its answer cannot be read.
+    fn pull_request(&self, repo: &ForgeSlug, number: u64) -> Result<PullRequest, ForgeError>;
+
+    /// Posts `body` as a comment on pull request `number`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the comment cannot be posted.
+    fn comment(&self, repo: &ForgeSlug, number: u64, body: &str) -> Result<(), ForgeError>;
+
+    /// Marks draft pull request `number` ready for review
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses or cannot be asked.
+    fn mark_ready(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError>;
+
+    /// Merges pull request `number` with a merge commit, only while its head is `head`
+    ///
+    /// Never a squash or a rebase: the branch's history survives the merge.
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses, the head moved, or it cannot be asked.
+    fn merge(&self, repo: &ForgeSlug, number: u64, head: &str) -> Result<(), ForgeError>;
+}
+
+/// A pull request as the forge holds it
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequest {
+    /// Open, merged or closed
+    pub state: PullRequestState,
+    /// Whether it is still a draft
+    pub draft: bool,
+    /// Its head commit's hash
+    pub head: String,
+    /// Where CI stands on its head
+    pub checks: Checks,
+}
+
+/// Whether a pull request is open, merged or closed without merging
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullRequestState {
+    /// Open, draft or not
+    Open,
+    /// Merged
+    Merged,
+    /// Closed without merging
+    Closed,
+}
+
+/// Where CI stands on a pull request's head
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Checks {
+    /// No check has reported on the head
+    None,
+    /// At least one check is still running or queued
+    Pending,
+    /// Every check finished, and none failed
+    Passed,
+    /// Every check finished, and these failed
+    Failed(Vec<String>),
 }
 
 /// An issue as the forge holds it

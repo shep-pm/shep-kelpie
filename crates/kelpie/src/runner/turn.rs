@@ -10,81 +10,19 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use serde::Serialize;
-
 use super::Runner;
+use super::report::{Begin, StepReport};
 use super::trigger::lock;
-use crate::board::{Skip, WorkerModel};
-use crate::pacer::{HoldKind, Scope};
-use crate::ports::{
-    ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session, SessionId, Timestamp, Usage,
-};
+use crate::pacer::Scope;
+use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session};
 use crate::profile::{INSTRUCTIONS, WorkerProfile};
 use crate::state::{RunState, StateError};
-use crate::work_item::{CallRecord, Turn, WorkItem};
+use crate::work_item::{CallRecord, Phase, Turn, WorkItem};
 use crate::worktree;
 
 /// The prompt for a turn resumed after the runner restarted
 const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
                         Carry on with the work item from where you left off.";
-
-/// What one step of the runner did, for its log
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "turn", rename_all = "kebab-case")]
-pub enum TurnReport {
-    /// The board's oldest free issue became the work item in flight
-    Dispatched {
-        /// The work item's issue
-        issue: u64,
-        /// The model and effort its worker runs on
-        worker: WorkerModel,
-        /// Older ready issues the board passed over, and why
-        skipped: Vec<Skip>,
-    },
-    /// Nothing was dispatched: the board could not be read, or the issue it
-    /// picked could not be taken
-    BoardFailed {
-        /// Why
-        reason: String,
-    },
-    /// The pacer found a limit reached, so nothing new started
-    Held {
-        /// Which limit
-        kind: HoldKind,
-        /// Why, as `status` shows it
-        reason: String,
-        /// When the pacer reads usage again at the latest
-        until: Timestamp,
-    },
-    /// A turn ended and its call was recorded
-    Ended {
-        /// The work item's issue
-        issue: u64,
-        /// The worker's session
-        session: SessionId,
-        /// What the call used
-        usage: Usage,
-        /// What the call cost, in US dollars
-        cost_usd: f64,
-        /// What the work item has cost so far, in US dollars
-        work_item_cost_usd: f64,
-        /// The worker's draft pull request, once it has opened one
-        pull_request: Option<u64>,
-    },
-    /// A turn could not run
-    Failed {
-        /// The work item's issue
-        issue: u64,
-        /// Why
-        reason: String,
-    },
-}
-
-pub(super) enum Begin {
-    Idle,
-    Report(TurnReport),
-    Call(ClaudeCall),
-}
 
 /// Runs the worker's next turn, if one is due and the project is running
 ///
@@ -93,7 +31,7 @@ pub(super) enum Begin {
 /// # Errors
 ///
 /// [`StateError`] when the turn's start or end cannot be saved.
-pub fn step(runner: &Mutex<Runner>) -> Result<Option<TurnReport>, StateError> {
+pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
     let claude = Arc::clone(&lock(runner).ports.claude);
     let mut start_over = false;
     loop {
@@ -124,23 +62,33 @@ impl Runner {
         if self.state.run != RunState::Running {
             return Ok(Begin::Idle);
         }
-        // Only a turn that has not begun waits on the pacer: one cut short by
-        // a restart carries on, since a turn is never interrupted.
-        let due = match &self.state.work_item {
-            Some(item) => matches!(item.turn, Turn::Due),
-            None => return self.dispatch(),
+        let Some(item) = &self.state.work_item else {
+            return self.dispatch();
         };
+        match &item.phase {
+            Phase::Implement => {}
+            Phase::Ci { .. } => return self.check_ci(),
+            Phase::Ruling { .. } => return Ok(Begin::Idle),
+            Phase::Merge { .. } => return self.merge(),
+            Phase::Done { merged } => return self.finish(*merged),
+        }
+        // Only a turn that has not begun waits on the pacer: one already
+        // running carries on, since a turn is never interrupted, and start_over
+        // resumes the same not-yet-begun turn after a session died unborn.
+        let due = matches!(item.turn, Turn::Due | Turn::Next { .. });
         if due && let Some(held) = self.pace(Scope::Turn)?.holds() {
             return Ok(held);
         }
         let item = self.state.work_item.as_ref().expect("checked above");
-        let session = match &item.turn {
-            Turn::Due => Session::New(item.session.clone()),
-            Turn::Running { .. } if start_over => Session::New(item.session.clone()),
-            Turn::Running { .. } => Session::Resume(item.session.clone()),
+        let id = item.session.clone();
+        let (session, prompt) = match &item.turn {
+            Turn::Due => (Session::New(id), None),
+            Turn::Running { .. } if start_over => (Session::New(id), None),
+            Turn::Running { .. } => (Session::Resume(id), Some(CONTINUE.to_owned())),
+            Turn::Next { prompt } => (Session::Resume(id), Some(prompt.clone())),
             Turn::Ended { .. } | Turn::Failed { .. } => return Ok(Begin::Idle),
         };
-        let prepared = self.prepare(item, session);
+        let prepared = self.prepare(item, session, prompt);
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
         let item = next
@@ -157,7 +105,7 @@ impl Runner {
                     at: now,
                     reason: reason.clone(),
                 };
-                Begin::Report(TurnReport::Failed {
+                Begin::Report(StepReport::Failed {
                     issue: item.issue,
                     reason,
                 })
@@ -168,8 +116,14 @@ impl Runner {
     }
 
     // Everything the worker needs on disk before it starts: its worktree, its
-    // build folder, its settings file and kelpie's instructions.
-    fn prepare(&self, item: &WorkItem, session: Session) -> Result<ClaudeCall, String> {
+    // build folder, its settings file and kelpie's instructions. A turn with
+    // no prompt of its own is the first, and takes the issue.
+    fn prepare(
+        &self,
+        item: &WorkItem,
+        session: Session,
+        prompt: Option<String>,
+    ) -> Result<ClaudeCall, String> {
         let dirs = worktree::prepare(
             &self.settings.repo,
             &item.worktree,
@@ -194,8 +148,9 @@ impl Runner {
         let text = serde_json::to_string_pretty(&profile.settings()).expect("settings are JSON");
         write(folder, &settings, &text)?;
         write(folder, &instructions, INSTRUCTIONS)?;
-        let prompt = match &session {
-            Session::New(_) => {
+        let prompt = match prompt {
+            Some(prompt) => prompt,
+            None => {
                 let issue = self
                     .ports
                     .forge
@@ -203,7 +158,6 @@ impl Runner {
                     .map_err(|e| format!("cannot read issue #{}: {e}", item.issue))?;
                 first_prompt(item.issue, &issue)
             }
-            Session::Resume(_) => CONTINUE.to_owned(),
         };
         Ok(ClaudeCall {
             role: Role::Worker,
@@ -220,7 +174,7 @@ impl Runner {
     fn end_turn(
         &mut self,
         result: Result<ClaudeReply, ClaudeError>,
-    ) -> Result<Option<TurnReport>, StateError> {
+    ) -> Result<Option<StepReport>, StateError> {
         // A turn stopped with the runner stays running, to resume on restart.
         if matches!(result, Err(ClaudeError::Stopped)) {
             return Ok(None);
@@ -246,7 +200,13 @@ impl Runner {
                     session_cost: reply.session_cost,
                 });
                 item.turn = Turn::Ended { at: now };
-                TurnReport::Ended {
+                if item.pull_request.is_some() {
+                    item.phase = Phase::Ci {
+                        head: None,
+                        since: now,
+                    };
+                }
+                StepReport::Ended {
                     issue: item.issue,
                     session: item.session.clone(),
                     usage: reply.usage,
@@ -261,7 +221,7 @@ impl Runner {
                     at: now,
                     reason: reason.clone(),
                 };
-                TurnReport::Failed {
+                StepReport::Failed {
                     issue: item.issue,
                     reason,
                 }
@@ -298,6 +258,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::ports::Usage;
     use crate::settings::Effort;
     use crate::test::{LEFT_BEHIND, Rig, Scripted, git};
 
@@ -403,7 +364,7 @@ mod tests {
         let session = rig.claude.calls()[0].session.id().clone();
         assert_eq!(
             report,
-            TurnReport::Ended {
+            StepReport::Ended {
                 issue: 7,
                 session: session.clone(),
                 usage: usage(2),
@@ -546,7 +507,7 @@ mod tests {
         let reason = "claude failed: overloaded".to_owned();
         assert_eq!(
             report,
-            TurnReport::Failed {
+            StepReport::Failed {
                 issue: 7,
                 reason: reason.clone()
             }
@@ -563,7 +524,7 @@ mod tests {
     fn a_foreign_folder_where_the_worktree_goes_fails_the_turn_before_any_call() {
         let (rig, runner) = with_issue_7("koji");
         fs::create_dir_all(rig.home.path().join("kelpie/wt/koji/7")).unwrap();
-        let Some(TurnReport::Failed { reason, .. }) = step(&runner).unwrap() else {
+        let Some(StepReport::Failed { reason, .. }) = step(&runner).unwrap() else {
             panic!("the turn ran in a folder kelpie did not make");
         };
         assert!(

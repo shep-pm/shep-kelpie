@@ -33,6 +33,12 @@ pub struct ProjectState {
     pub work_item: Option<WorkItem>,
     /// Rulings waiting on the maintainer, oldest first
     pub rulings: Vec<Ruling>,
+    /// The id of the last ruling raised, so no id is ever given twice
+    #[serde(default)]
+    pub last_ruling: u64,
+    /// Issues whose work items kelpie finished, which the board never takes again
+    #[serde(default)]
+    pub finished: Vec<u64>,
     /// Leases this project holds
     pub leases: Vec<LeaseHeld>,
     /// What the week had spent when today began, once usage has been read
@@ -49,6 +55,8 @@ impl ProjectState {
             since,
             work_item: None,
             rulings: Vec::new(),
+            last_ruling: 0,
+            finished: Vec::new(),
             leases: Vec::new(),
             pacing: None,
         }
@@ -77,6 +85,35 @@ pub struct Ruling {
     pub question: String,
     /// The pull request it is about, once there is one
     pub pull_request: Option<u64>,
+    /// What raised it, which decides what a yes does
+    pub kind: RulingKind,
+}
+
+/// What raised a ruling. A no with a note always goes to the worker.
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum RulingKind {
+    /// CI is green on this head of a current branch. A yes merges it.
+    Merge {
+        /// The head the question is about
+        head: String,
+    },
+    /// Kelpie could not rebase the branch onto `main`. A yes looks again.
+    Rebase {
+        /// Why
+        reason: String,
+    },
+    /// CI failed again on a head whose red run the worker already had. A yes looks again.
+    StillRed {
+        /// The head
+        head: String,
+        /// The checks that failed
+        checks: Vec<String>,
+    },
+    /// Someone closed the pull request without merging it. A yes drops the
+    /// work item and keeps its branch on the forge.
+    Closed,
 }
 
 /// A lease the dog granted this project
@@ -267,6 +304,7 @@ mod tests {
                 id,
                 question: format!("question {n}"),
                 pull_request: Some(n),
+                kind: RulingKind::Closed,
             })
             .collect();
         state
@@ -294,7 +332,11 @@ mod tests {
             id: 1,
             question: "merge #43?".into(),
             pull_request: Some(43),
+            kind: RulingKind::Merge {
+                head: "c0ffee".into(),
+            },
         });
+        state.last_ruling = 1;
         state.leases.push(LeaseHeld {
             resource: Resource::Gpu,
             since: Timestamp(1_790_000_100),
@@ -328,6 +370,36 @@ mod tests {
             resource: Resource::Coderabbit,
             since: Timestamp(8),
         });
+        let ruling = |id, kind| Ruling {
+            id,
+            question: "q".into(),
+            pull_request: Some(30),
+            kind,
+        };
+        state.rulings = vec![
+            ruling(
+                1,
+                RulingKind::Merge {
+                    head: "c0ffee".into(),
+                },
+            ),
+            ruling(
+                2,
+                RulingKind::Rebase {
+                    reason: "conflicts".into(),
+                },
+            ),
+            ruling(
+                3,
+                RulingKind::StillRed {
+                    head: "bad".into(),
+                    checks: vec!["lint".into()],
+                },
+            ),
+            ruling(4, RulingKind::Closed),
+        ];
+        state.last_ruling = 4;
+        state.finished = vec![22, 30];
         state.pacing = Some(DayStart {
             week_resets_at: Timestamp(9),
             day: 1,
@@ -336,6 +408,7 @@ mod tests {
         store.save(&state).unwrap();
         let text = fs::read_to_string(dir.path().join("state.json")).unwrap();
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let pinned = |id, kind| serde_json::json!({ "id": id, "question": "q", "pull_request": 30, "kind": kind });
         assert_eq!(
             value,
             serde_json::json!({
@@ -343,11 +416,31 @@ mod tests {
                 "run": "paused",
                 "since": 7,
                 "work_item": null,
-                "rulings": [],
+                "rulings": [
+                    pinned(1, serde_json::json!({ "kind": "merge", "head": "c0ffee" })),
+                    pinned(2, serde_json::json!({ "kind": "rebase", "reason": "conflicts" })),
+                    pinned(3, serde_json::json!({ "kind": "still-red", "head": "bad", "checks": ["lint"] })),
+                    pinned(4, serde_json::json!({ "kind": "closed" })),
+                ],
+                "last_ruling": 4,
+                "finished": [22, 30],
                 "leases": [{ "resource": "coderabbit", "since": 8 }],
                 "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
             })
         );
+    }
+
+    #[test]
+    fn a_state_saved_before_ruling_ids_were_counted_starts_counting_at_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        fs::write(
+            dir.path().join("state.json"),
+            r#"{"version":1,"run":"running","since":3,"work_item":null,"rulings":[],"leases":[]}"#,
+        )
+        .unwrap();
+        let state = store.load().unwrap().unwrap();
+        assert_eq!((state.last_ruling, state.finished), (0, vec![]));
     }
 
     #[test]

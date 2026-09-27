@@ -8,7 +8,7 @@
 use serde::Serialize;
 
 use super::Runner;
-use super::turn::{Begin, TurnReport};
+use super::report::{Begin, StepReport};
 use crate::pacer::{Assessment, Hold, RECHECK_SECS, Reading, Scope, assess};
 use crate::ports::Timestamp;
 use crate::state::StateError;
@@ -40,7 +40,7 @@ impl Pace {
                 kind,
                 reason,
                 until,
-            }) => Some(Begin::Report(TurnReport::Held {
+            }) => Some(Begin::Report(StepReport::Held {
                 kind,
                 reason,
                 until,
@@ -121,9 +121,9 @@ mod tests {
         (rig, runner)
     }
 
-    fn held(report: Option<TurnReport>) -> (HoldKind, String, u64) {
+    fn held(report: Option<StepReport>) -> (HoldKind, String, u64) {
         match report {
-            Some(TurnReport::Held {
+            Some(StepReport::Held {
                 kind,
                 reason,
                 until,
@@ -136,12 +136,12 @@ mod tests {
         Scripted::Reply(Usage::default(), Cost(1))
     }
 
-    fn dispatched(report: &Option<TurnReport>) -> bool {
-        matches!(report, Some(TurnReport::Dispatched { issue: 7, .. }))
+    fn dispatched(report: &Option<StepReport>) -> bool {
+        matches!(report, Some(StepReport::Dispatched { issue: 7, .. }))
     }
 
-    fn ended(report: &Option<TurnReport>) -> bool {
-        matches!(report, Some(TurnReport::Ended { issue: 7, .. }))
+    fn ended(report: &Option<StepReport>) -> bool {
+        matches!(report, Some(StepReport::Ended { issue: 7, .. }))
     }
 
     #[test]

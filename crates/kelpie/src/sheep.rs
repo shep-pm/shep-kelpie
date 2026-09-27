@@ -14,13 +14,14 @@ use std::time::Duration;
 
 use crate::adapters::{ClaudeCli, Gh, SystemClock};
 use crate::ports::Ports;
-use crate::runner::{ACTIONS, ProjectName, ProjectPaths, Runner, TurnReport, answer, step};
+use crate::runner::{ACTIONS, ProjectName, ProjectPaths, Runner, answer, step};
 
 /// How long queued replies get to reach the shepherd before the runner exits
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 
-// How often an idle runner looks at the board. Each look is two `gh` calls,
-// 120 an hour, against GitHub's 5,000 an hour for the maintainer's login.
+// How often an idle runner looks at the board, or at its pull request's CI.
+// A look is at most two `gh` calls, 120 an hour, against GitHub's 5,000 an
+// hour for the maintainer's login.
 const BOARD_POLL: Duration = Duration::from_secs(60);
 
 /// Runs `project`'s runner until the shepherd stops it
@@ -117,10 +118,7 @@ fn work(runner: &Mutex<Runner>, woken: &Receiver<()>) {
             Ok(Some(report)) => {
                 let line = serde_json::to_string(&report).expect("a report serializes to JSON");
                 println!("{line}");
-                if !matches!(
-                    report,
-                    TurnReport::BoardFailed { .. } | TurnReport::Held { .. }
-                ) {
+                if !report.waits() {
                     continue;
                 }
             }

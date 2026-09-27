@@ -59,6 +59,11 @@ pub enum Skip {
         /// The pull request
         pull_request: u64,
     },
+    /// Kelpie already finished a work item for it
+    Finished {
+        /// The issue
+        issue: u64,
+    },
     /// Someone is assigned to it
     Assigned {
         /// The issue
@@ -83,13 +88,19 @@ pub struct Pick {
 }
 
 /// Picks the oldest ready issue that nobody is working on
-pub fn pick(ready: &[ReadyIssue], open: &[OpenPullRequest]) -> Pick {
+///
+/// `finished` lists the issues whose work items kelpie already finished. The
+/// forge can still list one as open and ready for a while after its pull
+/// request merges, so the board never takes one again.
+pub fn pick(ready: &[ReadyIssue], open: &[OpenPullRequest], finished: &[u64]) -> Pick {
     let mut ready: Vec<&ReadyIssue> = ready.iter().collect();
     ready.sort_by_key(|i| i.number);
     let mut skipped = Vec::new();
     for issue in ready {
         let number = issue.number;
-        if let Some(pr) = open.iter().find(|pr| pr.closes.contains(&number)) {
+        if finished.contains(&number) {
+            skipped.push(Skip::Finished { issue: number });
+        } else if let Some(pr) = open.iter().find(|pr| pr.closes.contains(&number)) {
             skipped.push(Skip::PullRequest {
                 issue: number,
                 pull_request: pr.number,
@@ -208,7 +219,7 @@ mod tests {
 
     #[test]
     fn the_oldest_ready_issue_is_picked_whatever_order_they_are_listed_in() {
-        let pick = pick(&[ready(16), ready(12), ready(14)], &[]);
+        let pick = pick(&[ready(16), ready(12), ready(14)], &[], &[]);
         assert_eq!(pick.issue, Some(12));
         assert_eq!(pick.skipped, []);
     }
@@ -216,7 +227,7 @@ mod tests {
     #[test]
     fn nothing_ready_picks_nothing() {
         assert_eq!(
-            pick(&[], &[]),
+            pick(&[], &[], &[]),
             Pick {
                 issue: None,
                 skipped: vec![]
@@ -233,7 +244,7 @@ mod tests {
             head: "feat/2".into(),
             closes: vec![2],
         }];
-        let pick = pick(&[ready(2), taken, ready(5)], &open);
+        let pick = pick(&[ready(2), taken, ready(5)], &open, &[]);
         assert_eq!(pick.issue, Some(5));
         assert_eq!(
             pick.skipped,
@@ -248,11 +259,18 @@ mod tests {
     }
 
     #[test]
+    fn an_issue_kelpie_finished_is_passed_over_while_the_forge_still_lists_it() {
+        let pick = pick(&[ready(22), ready(23)], &[], &[22]);
+        assert_eq!(pick.issue, Some(23));
+        assert_eq!(pick.skipped, [Skip::Finished { issue: 22 }]);
+    }
+
+    #[test]
     fn a_board_where_every_issue_is_taken_picks_nothing_and_says_why() {
         let mut taken = ready(3);
         taken.assigned = true;
         assert_eq!(
-            pick(&[taken], &[]),
+            pick(&[taken], &[], &[]),
             Pick {
                 issue: None,
                 skipped: vec![Skip::Assigned { issue: 3 }]
@@ -264,7 +282,7 @@ mod tests {
     fn an_issue_with_an_unreadable_worker_label_is_passed_over() {
         let mut odd = ready(1);
         odd.labels.push("worker:gpt-high".into());
-        let pick = pick(&[odd, ready(2)], &[]);
+        let pick = pick(&[odd, ready(2)], &[], &[]);
         assert_eq!(pick.issue, Some(2));
         assert_eq!(
             pick.skipped,

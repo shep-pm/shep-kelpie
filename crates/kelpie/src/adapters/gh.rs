@@ -5,7 +5,7 @@ use std::process::{Command, Stdio};
 use serde::Deserialize;
 
 use crate::board::{OpenPullRequest, READY, ReadyIssue};
-use crate::ports::{Forge, ForgeError, Issue, Visibility};
+use crate::ports::{Checks, Forge, ForgeError, Issue, PullRequest, PullRequestState, Visibility};
 use crate::settings::ForgeSlug;
 
 /// GitHub, through the `gh` command line
@@ -70,6 +70,58 @@ impl Forge for Gh {
             repo,
         )
     }
+
+    fn pull_request(&self, repo: &ForgeSlug, number: u64) -> Result<PullRequest, ForgeError> {
+        let number = number.to_string();
+        parse_pull_request(&gh(&[
+            "pr",
+            "view",
+            &number,
+            "--repo",
+            repo.as_str(),
+            "--json",
+            "state,isDraft,headRefOid,statusCheckRollup",
+        ])?)
+    }
+
+    fn comment(&self, repo: &ForgeSlug, number: u64, body: &str) -> Result<(), ForgeError> {
+        let number = number.to_string();
+        let args = [
+            "pr",
+            "comment",
+            &number,
+            "--repo",
+            repo.as_str(),
+            "--body",
+            body,
+        ];
+        gh(&args).map(drop)
+    }
+
+    fn mark_ready(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
+        let number = number.to_string();
+        gh(&["pr", "ready", &number, "--repo", repo.as_str()]).map(drop)
+    }
+
+    fn merge(&self, repo: &ForgeSlug, number: u64, head: &str) -> Result<(), ForgeError> {
+        let number = number.to_string();
+        gh(&merge_args(repo, &number, head)).map(drop)
+    }
+}
+
+// A merge commit, and only of the head the ruling was about. No
+// `--delete-branch`: gh would also switch branches in its working folder.
+fn merge_args<'a>(repo: &'a ForgeSlug, number: &'a str, head: &'a str) -> [&'a str; 8] {
+    [
+        "pr",
+        "merge",
+        number,
+        "--repo",
+        repo.as_str(),
+        "--merge",
+        "--match-head-commit",
+        head,
+    ]
 }
 
 // `gh` lists newest first and stops at its limit, so a short limit would
@@ -192,6 +244,99 @@ fn parse_pull_requests(
         .collect())
 }
 
+fn parse_pull_request(stdout: &[u8]) -> Result<PullRequest, ForgeError> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct View {
+        state: String,
+        is_draft: bool,
+        head_ref_oid: String,
+        status_check_rollup: Vec<Check>,
+    }
+    let view: View = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
+    let state = match view.state.as_str() {
+        "OPEN" => PullRequestState::Open,
+        "MERGED" => PullRequestState::Merged,
+        "CLOSED" => PullRequestState::Closed,
+        _ => return Err(unreadable(stdout)),
+    };
+    Ok(PullRequest {
+        state,
+        draft: view.is_draft,
+        head: view.head_ref_oid,
+        checks: checks(&view.status_check_rollup),
+    })
+}
+
+// GitHub has two kinds of check: an Actions-style check run, and a commit
+// status posted by an outside service such as CodeRabbit.
+#[derive(Deserialize)]
+#[serde(tag = "__typename")]
+enum Check {
+    CheckRun {
+        name: String,
+        status: Option<String>,
+        conclusion: Option<String>,
+    },
+    StatusContext {
+        context: String,
+        state: Option<String>,
+    },
+}
+
+enum Outcome {
+    Pending,
+    Passed,
+    Failed,
+}
+
+impl Check {
+    fn outcome(&self) -> (&str, Outcome) {
+        match self {
+            Self::CheckRun {
+                name,
+                status,
+                conclusion,
+            } => {
+                let outcome = match (status.as_deref(), conclusion.as_deref()) {
+                    (Some("COMPLETED"), Some("SUCCESS" | "NEUTRAL" | "SKIPPED")) => Outcome::Passed,
+                    (Some("COMPLETED"), _) => Outcome::Failed,
+                    _ => Outcome::Pending,
+                };
+                (name, outcome)
+            }
+            Self::StatusContext { context, state } => {
+                let outcome = match state.as_deref() {
+                    Some("SUCCESS") => Outcome::Passed,
+                    Some("FAILURE" | "ERROR") => Outcome::Failed,
+                    _ => Outcome::Pending,
+                };
+                (context, outcome)
+            }
+        }
+    }
+}
+
+// The whole run is read before a verdict, so a red run names every failure.
+fn checks(rollup: &[Check]) -> Checks {
+    if rollup.is_empty() {
+        return Checks::None;
+    }
+    let mut failed = Vec::new();
+    for check in rollup {
+        match check.outcome() {
+            (_, Outcome::Pending) => return Checks::Pending,
+            (name, Outcome::Failed) => failed.push(name.to_owned()),
+            (_, Outcome::Passed) => {}
+        }
+    }
+    if failed.is_empty() {
+        Checks::Passed
+    } else {
+        Checks::Failed(failed)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,6 +420,118 @@ mod tests {
                 closes: vec![10],
             }]
         );
+    }
+
+    // Recorded from gh 2.96: `gh pr view 23 --repo shep-pm/shep-kelpie` with
+    // the `pull_request` arguments.
+    const PR_GREEN: &str = include_str!("../../fixtures/gh-pr-view-green.json");
+
+    // Recorded the same way from shep-pm/shep#625: skipped check runs and a
+    // CodeRabbit commit status.
+    const PR_SKIPPED: &str = include_str!("../../fixtures/gh-pr-view-skipped.json");
+
+    // The check runs GitHub recorded on this repo's commit edc8526, a red
+    // lint, read through GraphQL and set in `gh pr view`'s shape.
+    const PR_RED: &str = include_str!("../../fixtures/gh-pr-view-red.json");
+
+    fn rollup(checks: &str) -> Checks {
+        let view = format!(
+            r#"{{"headRefOid":"abc","isDraft":true,"state":"OPEN","statusCheckRollup":{checks}}}"#
+        );
+        parse_pull_request(view.as_bytes()).unwrap().checks
+    }
+
+    #[test]
+    fn a_merged_pull_request_with_every_check_green_is_read() {
+        let pr = parse_pull_request(PR_GREEN.as_bytes()).unwrap();
+        assert_eq!(
+            pr,
+            PullRequest {
+                state: PullRequestState::Merged,
+                draft: false,
+                head: "baea925a2ed5358932b3506e99ecb9f20cba5e2c".into(),
+                checks: Checks::Passed,
+            }
+        );
+    }
+
+    #[test]
+    fn skipped_runs_and_a_green_commit_status_pass() {
+        let pr = parse_pull_request(PR_SKIPPED.as_bytes()).unwrap();
+        assert_eq!(pr.checks, Checks::Passed);
+    }
+
+    #[test]
+    fn a_red_run_names_its_failed_checks() {
+        let pr = parse_pull_request(PR_RED.as_bytes()).unwrap();
+        assert_eq!(
+            (pr.state, pr.draft, pr.checks),
+            (
+                PullRequestState::Open,
+                true,
+                Checks::Failed(vec!["lint".into()])
+            )
+        );
+    }
+
+    #[test]
+    fn no_checks_is_not_green() {
+        assert_eq!(rollup("[]"), Checks::None);
+    }
+
+    #[test]
+    fn a_running_check_holds_the_verdict_even_beside_a_failure() {
+        let failed = r#"{"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"FAILURE"}"#;
+        for running in [
+            r#"{"__typename":"CheckRun","name":"test","status":"IN_PROGRESS","conclusion":""}"#,
+            r#"{"__typename":"CheckRun","name":"test","status":"QUEUED","conclusion":null}"#,
+            r#"{"__typename":"StatusContext","context":"CodeRabbit","state":"PENDING"}"#,
+        ] {
+            assert_eq!(rollup(&format!("[{failed},{running}]")), Checks::Pending);
+        }
+    }
+
+    #[test]
+    fn a_cancelled_run_and_an_errored_status_fail() {
+        let checks = r#"[
+            {"__typename":"CheckRun","name":"test","status":"COMPLETED","conclusion":"CANCELLED"},
+            {"__typename":"StatusContext","context":"ci/other","state":"ERROR"}
+        ]"#;
+        assert_eq!(
+            rollup(checks),
+            Checks::Failed(vec!["test".into(), "ci/other".into()])
+        );
+    }
+
+    #[test]
+    fn a_state_gh_does_not_name_is_unreadable() {
+        let view = br#"{"headRefOid":"a","isDraft":false,"state":"LOCKED","statusCheckRollup":[]}"#;
+        assert!(matches!(
+            parse_pull_request(view),
+            Err(ForgeError::Unreadable(_))
+        ));
+    }
+
+    #[test]
+    fn a_merge_is_a_merge_commit_of_the_ruled_head_only() {
+        let slug = ForgeSlug::try_from("shep-pm/shep".to_owned()).unwrap();
+        let args = merge_args(&slug, "30", "1a2b");
+        assert_eq!(
+            args,
+            [
+                "pr",
+                "merge",
+                "30",
+                "--repo",
+                "shep-pm/shep",
+                "--merge",
+                "--match-head-commit",
+                "1a2b"
+            ]
+        );
+        for never in ["--squash", "-s", "--rebase", "-r", "--auto", "--admin"] {
+            assert!(!args.contains(&never), "{never}");
+        }
     }
 
     #[test]
