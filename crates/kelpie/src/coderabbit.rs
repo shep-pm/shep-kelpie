@@ -77,6 +77,10 @@ const STICKY: [&str; 3] = [
     "Files selected for processing",
 ];
 const LIMIT: &str = "Review limit reached";
+
+// A refusal stamped this long before the summon is still its answer. One a
+// minute older quotes the same window, so misreading it costs nothing.
+const CLOCK_SLACK: u64 = 60;
 const WAITS: [&str; 2] = [
     "Next included review available in ",
     "next included review will be available in ",
@@ -98,11 +102,13 @@ impl Activity {
             return Reading::Processing;
         }
         // Listed by creation, and the walkthrough is edited in place, so
-        // the newest refusal is found by when it was last edited.
+        // the newest refusal is found by when it was last edited. GitHub's
+        // clock is not this machine's, hence the slack.
+        let from = since.0.saturating_sub(CLOCK_SLACK);
         let refusal = self
             .comments
             .iter()
-            .filter(|c| c.at >= since)
+            .filter(|c| c.at.0 >= from)
             .filter_map(|c| Some((c.at, wait(&c.body)?)))
             .max_by_key(|(at, _)| *at);
         refusal.map_or(Reading::Silent, |(at, wait)| Reading::Refused {
@@ -333,6 +339,15 @@ mod tests {
             seen.read(HEAD_598, iso("2026-09-22T23:00:00Z")),
             Reading::Silent
         );
+    }
+
+    #[test]
+    fn a_refusal_stamped_just_before_the_summon_by_githubs_clock_still_answers_it() {
+        let seen = activity(COMMENTS_598, REVIEWS_598, NO_THREADS);
+        assert!(matches!(
+            seen.read(HEAD_598, iso("2026-09-22T22:30:30Z")),
+            Reading::Refused { .. }
+        ));
     }
 
     #[test]
