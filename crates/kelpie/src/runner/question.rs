@@ -4,6 +4,7 @@
 //! final message with the question between [`OPEN`] and [`CLOSE`], as
 //! kelpie's worker instructions describe. Only a block that ends the
 //! message counts, so a worker that quotes the tags mid-message asks nothing.
+//! A block a worker wrapped in a code fence anyway still counts.
 
 /// Opens a question block
 pub(crate) const OPEN: &str = "<kelpie-question>";
@@ -12,7 +13,14 @@ pub(crate) const CLOSE: &str = "</kelpie-question>";
 
 /// The question `text` ends on, verbatim, if it ends on one
 pub(super) fn asked(text: &str) -> Option<String> {
-    let body = text.trim_end().strip_suffix(CLOSE)?;
+    let text = text.trim_end();
+    let body = text.strip_suffix(CLOSE).or_else(|| {
+        let (rest, last) = text.rsplit_once('\n')?;
+        let fence = last.trim();
+        let fenced = fence.len() >= 3
+            && (fence.bytes().all(|b| b == b'`') || fence.bytes().all(|b| b == b'~'));
+        rest.trim_end().strip_suffix(CLOSE).filter(|_| fenced)
+    })?;
     let start = body.rfind(OPEN)? + OPEN.len();
     let question = body[start..].trim();
     (!question.is_empty()).then(|| question.to_owned())
@@ -54,7 +62,17 @@ mod tests {
         );
         let last = "<kelpie-question>old</kelpie-question> <kelpie-question>new</kelpie-question>";
         assert_eq!(asked(last).as_deref(), Some("new"));
+        for fenced in [
+            "Asking.\n\n```\n<kelpie-question>\nwhy?\n</kelpie-question>\n```\n",
+            "```text\n<kelpie-question>why?</kelpie-question>\n  ````  ",
+            "~~~\n<kelpie-question>why?</kelpie-question>\n~~~",
+        ] {
+            assert_eq!(asked(fenced).as_deref(), Some("why?"), "{fenced:?}");
+        }
         for none in [
+            "<kelpie-question>why?</kelpie-question>\n```\nThen I pushed.",
+            "<kelpie-question>why?</kelpie-question>\n``",
+            "<kelpie-question>why?</kelpie-question>\n`~`",
             "done",
             "<kelpie-question>why?</kelpie-question>\nThen I pushed.",
             "<kelpie-question>\n  \n</kelpie-question>",
