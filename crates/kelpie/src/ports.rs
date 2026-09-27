@@ -432,10 +432,13 @@ impl std::error::Error for AlertError {}
 pub trait Relay: Send + Sync {
     /// Sends `message`, starting the relay first if none is running
     ///
+    /// `model` and `effort` are passed to `--model`/`--effort` only when a
+    /// start is needed: a relay already running keeps what it started with.
+    ///
     /// # Errors
     ///
     /// [`RelayError`] when the relay cannot be started or reached.
-    fn send(&self, message: &str) -> Result<(), RelayError>;
+    fn send(&self, message: &str, model: &str, effort: Effort) -> Result<(), RelayError>;
 
     /// Stops the relay, if one is running, so kelpie starts a fresh one
     /// next time and its context does not grow without bound

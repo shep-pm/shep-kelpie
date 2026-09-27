@@ -12,6 +12,7 @@ use super::Runner;
 use super::report::StepReport;
 use crate::ports::{Alert, AlertError, Timestamp};
 use crate::relay;
+use crate::settings::Effort;
 use crate::state::StateError;
 use crate::webhook::Webhook;
 
@@ -39,6 +40,10 @@ pub(super) struct Due {
     pub(super) id: u64,
     /// What the relay is sent, best-effort, alongside the webhook
     pub(super) relay_message: String,
+    /// Passed to the relay's `--model`, only spent if it needs starting
+    pub(super) relay_model: String,
+    /// Passed to the relay's `--effort`, only spent if it needs starting
+    pub(super) relay_effort: Effort,
     pub(super) webhook: Webhook,
     pub(super) alert: Alert,
 }
@@ -54,6 +59,8 @@ impl Runner {
         Some(Due {
             id: ruling.id,
             relay_message: relay::message(self.project.as_str(), ruling.id, &ruling.question),
+            relay_model: self.settings.models.relay.model.as_str().to_owned(),
+            relay_effort: self.settings.models.relay.effort,
             webhook: self.webhook.clone(),
             alert: Alert {
                 title: format!("kelpie: {} ruling {}", self.project.as_str(), ruling.id),
@@ -276,12 +283,16 @@ mod tests {
         let (rig, runner, head) = Rig::parked("shep");
         rig.relay.set_up(true);
         assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
-        let [sent] = rig.relay.sent().try_into().unwrap();
+        let [(sent, model, effort)] = rig.relay.sent().try_into().unwrap();
         assert!(
             sent.starts_with("[kelpie]\nproject=shep ruling=1\n\n"),
             "{sent}"
         );
         assert!(sent.contains(&head[..7]), "{sent}");
+        assert_eq!(
+            (model.as_str(), effort),
+            ("claude-haiku-4-5-20251001", Effort::Low)
+        );
         assert_eq!(rig.alerts.posts().len(), 1, "the webhook still posts");
     }
 
@@ -290,7 +301,7 @@ mod tests {
         let (rig, runner, _) = Rig::parked("koji");
         // The rig's relay starts down, as if the relay were stopped.
         assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
-        assert_eq!(rig.relay.sent(), Vec::<String>::new());
+        assert_eq!(rig.relay.sent(), []);
         assert_eq!(rig.alerts.posts().len(), 1);
         assert_eq!(
             rig.ask(&runner, "status", None)["rulings"][0]["alerted"],

@@ -53,7 +53,7 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
         if lock(runner).relay_clear_due() {
             let _ = relay.clear();
         }
-        let _ = relay.send(&due.relay_message);
+        let _ = relay.send(&due.relay_message, &due.relay_model, due.relay_effort);
         let sent = alerts.post(&due.webhook, &due.alert);
         return lock(runner).alert_sent(due.id, sent).map(Some);
     }

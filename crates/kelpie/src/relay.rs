@@ -10,12 +10,6 @@ use serde_json::{Value, json};
 /// The relay's fixed `--name`, so a lookup always finds the same session
 pub const NAME: &str = "kelpie-relay";
 
-/// Passed to `--model`
-pub const MODEL: &str = "claude-haiku-4-5";
-
-/// Passed to `--effort`
-pub const EFFORT: &str = "low";
-
 /// Kelpie's instructions to the relay, appended to its system prompt
 pub const INSTRUCTIONS: &str = include_str!("relay-instructions.md");
 
@@ -40,10 +34,12 @@ pub fn settings() -> Value {
 ///
 /// The question already carries the exact `shep trigger` command a
 /// maintainer typing by hand would use; the relay uses its own
-/// `kelpie relay-*` subcommands instead, keyed off `project` and `id` on
-/// their own line so it never has to parse the question to find them.
-pub fn message(project: &str, id: u64, question: &str) -> String {
-    format!("[kelpie]\nproject={project} ruling={id}\n\n{question}")
+/// `kelpie relay-*` subcommands instead, keyed off `project` and
+/// `ruling_id` on their own line so it never has to parse the question to
+/// find them. `project` is a [`crate::runner::ProjectName`], which cannot
+/// carry a newline or `=`, so it never breaks that line.
+pub fn message(project: &str, ruling_id: u64, question: &str) -> String {
+    format!("[kelpie]\nproject={project} ruling={ruling_id}\n\n{question}")
 }
 
 #[cfg(test)]

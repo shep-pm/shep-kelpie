@@ -22,7 +22,8 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::ports::{Relay, RelayError};
-use crate::relay::{self, EFFORT, MODEL, NAME};
+use crate::relay::{self, NAME};
+use crate::settings::Effort;
 
 mod lock;
 
@@ -33,6 +34,18 @@ use lock::StartLock;
 /// register, with room to spare.
 const APPEAR_TRIES: u32 = 20;
 const APPEAR_POLL: Duration = Duration::from_millis(250);
+
+/// Once a fresh relay appears in the agent listing, how much longer its
+/// messaging socket is given before the first write to it: measured live
+/// on #14, a message sent the moment a brand-new session appeared never
+/// reached it, though the same session took a message minutes later.
+const SOCKET_GRACE: Duration = Duration::from_secs(2);
+
+/// How many times a session's registry or peer-token file is looked for
+/// before giving up, and how long to wait between looks: the listing can
+/// name a pid before that pid has written its own files.
+const SESSION_FILE_TRIES: u32 = 10;
+const SESSION_FILE_POLL: Duration = Duration::from_millis(200);
 
 /// The running relay session `find` located
 struct Found {
@@ -78,7 +91,7 @@ impl RelayCli {
         Ok(pid_of_the_relay(&agents).map(|pid| Found { pid }))
     }
 
-    fn start(&self) -> Result<(), RelayError> {
+    fn start(&self, model: &str, effort: Effort) -> Result<(), RelayError> {
         fs::create_dir_all(&self.folder).map_err(|e| RelayError::CannotStart(e.to_string()))?;
         let settings = self.folder.join("settings.json");
         let instructions = self.folder.join("instructions.md");
@@ -89,7 +102,7 @@ impl RelayCli {
         let mut command = Command::new("claude");
         relay_env(&mut command);
         let output = command
-            .args(start_argv(&settings, &instructions))
+            .args(start_argv(&settings, &instructions, model, effort))
             .current_dir(&self.home)
             .stdin(Stdio::null())
             .output()
@@ -101,22 +114,25 @@ impl RelayCli {
         Ok(())
     }
 
-    fn ensure_running(&self) -> Result<Found, RelayError> {
+    // Whether a fresh relay had to be started, alongside where it is: a
+    // freshly started one is given `SOCKET_GRACE` longer before the first
+    // write to its socket, past what it took to appear in the listing.
+    fn ensure_running(&self, model: &str, effort: Effort) -> Result<(Found, bool), RelayError> {
         if let Some(found) = self.find()? {
-            return Ok(found);
+            return Ok((found, false));
         }
         let _held = self.start_lock().acquire()?;
         // Another process may have started one while this one waited.
         if let Some(found) = self.find()? {
-            return Ok(found);
+            return Ok((found, false));
         }
-        self.start()?;
+        self.start(model, effort)?;
         for _ in 0..APPEAR_TRIES {
             thread::sleep(APPEAR_POLL);
             // A transient hiccup in `claude agents` here is not the relay
             // failing to start: only running out of tries is.
             if let Ok(Some(found)) = self.find() {
-                return Ok(found);
+                return Ok((found, true));
             }
         }
         Err(RelayError::NeverAppeared)
@@ -126,29 +142,36 @@ impl RelayCli {
         self.home.join(".claude/sessions")
     }
 
+    // Retried: `claude agents` can name a pid before that pid has written
+    // its own registry file.
     fn registry(&self, pid: u32) -> Result<Registry, RelayError> {
-        read_json(&self.sessions().join(format!("{pid}.json")))
+        retry_session_file(|| read_json(&self.sessions().join(format!("{pid}.json"))))
     }
 
     fn peer_token(&self, pid: u32) -> Result<PeerToken, RelayError> {
         let prefix = format!("{pid}.");
-        let entries =
-            fs::read_dir(self.sessions()).map_err(|e| RelayError::Unreachable(e.to_string()))?;
-        let key = entries
-            .filter_map(Result::ok)
-            .map(|e| e.path())
-            .find(|p| {
-                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-                name.starts_with(&prefix) && name.ends_with(".key")
-            })
-            .ok_or_else(|| RelayError::Unreachable("no peer-token file".into()))?;
-        read_json::<Key>(&key).map(|k| k.peer_token)
+        retry_session_file(|| {
+            let entries = fs::read_dir(self.sessions())
+                .map_err(|e| RelayError::Unreachable(e.to_string()))?;
+            let key = entries
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .find(|p| {
+                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+                    name.starts_with(&prefix) && name.ends_with(".key")
+                })
+                .ok_or_else(|| RelayError::Unreachable("no peer-token file".into()))?;
+            read_json::<Key>(&key).map(|k| k.peer_token)
+        })
     }
 }
 
 impl Relay for RelayCli {
-    fn send(&self, message: &str) -> Result<(), RelayError> {
-        let found = self.ensure_running()?;
+    fn send(&self, message: &str, model: &str, effort: Effort) -> Result<(), RelayError> {
+        let (found, fresh) = self.ensure_running(model, effort)?;
+        if fresh {
+            thread::sleep(SOCKET_GRACE);
+        }
         let registry = self.registry(found.pid)?;
         let token = self.peer_token(found.pid)?;
         let mut stream = UnixStream::connect(&registry.messaging_socket_path)
@@ -199,7 +222,7 @@ fn pid_of_the_relay(agents: &[Value]) -> Option<u32> {
         .and_then(|pid| u32::try_from(pid).ok())
 }
 
-fn start_argv(settings: &Path, instructions: &Path) -> Vec<OsString> {
+fn start_argv(settings: &Path, instructions: &Path, model: &str, effort: Effort) -> Vec<OsString> {
     vec![
         "--bg".into(),
         "--remote-control".into(),
@@ -207,9 +230,9 @@ fn start_argv(settings: &Path, instructions: &Path) -> Vec<OsString> {
         "--name".into(),
         NAME.into(),
         "--model".into(),
-        MODEL.into(),
+        model.into(),
         "--effort".into(),
-        EFFORT.into(),
+        effort.as_str().into(),
         "--setting-sources".into(),
         "".into(),
         "--settings".into(),
@@ -217,6 +240,25 @@ fn start_argv(settings: &Path, instructions: &Path) -> Vec<OsString> {
         "--append-system-prompt-file".into(),
         instructions.to_owned().into(),
     ]
+}
+
+// A session file the listing can name before its own pid has written it.
+fn retry_session_file<T>(read: impl FnMut() -> Result<T, RelayError>) -> Result<T, RelayError> {
+    retry(SESSION_FILE_TRIES, SESSION_FILE_POLL, read)
+}
+
+fn retry<T>(
+    tries: u32,
+    poll: Duration,
+    mut attempt: impl FnMut() -> Result<T, RelayError>,
+) -> Result<T, RelayError> {
+    for _ in 0..tries.saturating_sub(1) {
+        if let Ok(value) = attempt() {
+            return Ok(value);
+        }
+        thread::sleep(poll);
+    }
+    attempt()
 }
 
 // What the relay needs from kelpie's own environment: a home to find its
@@ -310,6 +352,8 @@ mod tests {
         let argv: Vec<String> = start_argv(
             Path::new("/k/relay/settings.json"),
             Path::new("/k/relay/instructions.md"),
+            "claude-haiku-4-5-20251001",
+            Effort::Low,
         )
         .into_iter()
         .map(|a| a.into_string().unwrap())
@@ -323,9 +367,9 @@ mod tests {
                 "--name",
                 NAME,
                 "--model",
-                MODEL,
+                "claude-haiku-4-5-20251001",
                 "--effort",
-                EFFORT,
+                "low",
                 "--setting-sources",
                 "",
                 "--settings",
@@ -344,6 +388,8 @@ mod tests {
         let argv: Vec<String> = start_argv(
             Path::new("/k/relay/settings.json"),
             Path::new("/k/relay/instructions.md"),
+            "claude-haiku-4-5-20251001",
+            Effort::Low,
         )
         .into_iter()
         .map(|a| a.into_string().unwrap())
@@ -376,6 +422,45 @@ mod tests {
         // A var this process carries but `relay_env` does not name never
         // reaches the child: `env_clear` ran before the allowed set was applied.
         assert!(!names.contains(&"KELPIE_HOME"));
+    }
+
+    #[test]
+    fn retry_succeeds_once_the_attempt_stops_failing() {
+        let tries = std::cell::Cell::new(0);
+        let result = retry(5, Duration::from_millis(1), || {
+            tries.set(tries.get() + 1);
+            if tries.get() < 3 {
+                Err(RelayError::Unreachable("not yet".into()))
+            } else {
+                Ok(tries.get())
+            }
+        });
+        assert_eq!(result, Ok(3));
+    }
+
+    #[test]
+    fn retry_gives_up_after_its_tries_and_surfaces_the_last_error() {
+        let calls = std::cell::Cell::new(0);
+        let result = retry(3, Duration::from_millis(1), || {
+            calls.set(calls.get() + 1);
+            Err::<(), _>(RelayError::Unreachable("still not there".into()))
+        });
+        assert_eq!(calls.get(), 3);
+        assert_eq!(
+            result,
+            Err(RelayError::Unreachable("still not there".into()))
+        );
+    }
+
+    #[test]
+    fn retry_with_zero_tries_still_makes_the_one_attempt() {
+        let calls = std::cell::Cell::new(0);
+        let result = retry(0, Duration::from_millis(1), || {
+            calls.set(calls.get() + 1);
+            Err::<(), _>(RelayError::Unreachable("no".into()))
+        });
+        assert_eq!(calls.get(), 1, "a bad tries count must not hang or panic");
+        assert_eq!(result, Err(RelayError::Unreachable("no".into())));
     }
 
     #[test]
@@ -447,6 +532,9 @@ mod tests {
     }
 
     // Pid 123's prefix must not match pid 1234's key file.
+    //
+    // Real time: peer_token retries a missing file for the whole session-
+    // file wait before giving up, about 1.8s here.
     #[test]
     fn a_pid_never_takes_another_pids_key() {
         let dir = tempfile::tempdir().unwrap();
