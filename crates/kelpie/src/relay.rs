@@ -36,8 +36,9 @@ pub fn settings() -> Value {
 /// maintainer typing by hand would use; the relay uses its own
 /// `kelpie relay-*` subcommands instead, keyed off `project` and
 /// `ruling_id` on their own line so it never has to parse the question to
-/// find them. `project` is a [`crate::runner::ProjectName`], which cannot
-/// carry a newline or `=`, so it never breaks that line.
+/// find them. `project` must not carry a newline or `=`, or it breaks that
+/// line; every caller today passes a project name already validated to
+/// exclude both.
 pub fn message(project: &str, ruling_id: u64, question: &str) -> String {
     format!("[kelpie]\nproject={project} ruling={ruling_id}\n\n{question}")
 }
