@@ -64,6 +64,22 @@ const PM_ONLY: [&str; 5] = [
 // worker does needs it.
 const GH_API: [&str; 2] = ["Bash(gh api)", "Bash(gh api *)"];
 
+// Pushes that rewrite or delete branches on the remote whatever they name:
+// `--mirror` and `--all` push every local branch, and a `+` refspec forces.
+// A rule's `*` needs something to match, so a flag straight after `push`
+// takes a rule of its own.
+const PUSH_FLAGS: [&str; 9] = [
+    "Bash(git push *--mirror*)",
+    "Bash(git push *--all*)",
+    "Bash(git push *--delete*)",
+    "Bash(git push -d*)",
+    "Bash(git push * -d*)",
+    "Bash(git push *--force*)",
+    "Bash(git push -f*)",
+    "Bash(git push * -f*)",
+    "Bash(git push * +*)",
+];
+
 // What `git push` and `gh` reach. A project adds its own, such as a registry.
 const GITHUB: [&str; 2] = ["github.com", "api.github.com"];
 
@@ -108,13 +124,19 @@ impl WorkerProfile<'_> {
             with_suffix(&tracking_ref, ".lock"),
             tracking_ref,
         ];
-        let deny_write: Vec<PathBuf> = GIT_DENY.iter().map(|p| git(p)).collect();
+        // The clone's own base branch, which a push of every branch would carry.
+        let deny_write: Vec<PathBuf> = GIT_DENY
+            .iter()
+            .map(|p| git(p))
+            .chain([git("refs/heads").join(BASE)])
+            .collect();
         let deny: Vec<String> = CREDENTIALS
             .iter()
             .map(|p| format!("Read({p})"))
             .chain(PM_ONLY.iter().map(|&r| r.to_owned()))
             .chain(GH_API.iter().map(|&r| r.to_owned()))
             .chain(push_to_base())
+            .chain(PUSH_FLAGS.iter().map(|&r| r.to_owned()))
             .collect();
         let domains: Vec<&str> = GITHUB
             .into_iter()
@@ -172,7 +194,7 @@ impl WorkerProfile<'_> {
 // `HEAD:main` or `refs/heads/main`. A repo without branch protection
 // would otherwise take them.
 fn push_to_base() -> impl Iterator<Item = String> {
-    [" {b}", " {b} *", ":{b}*", "/{b}*", " +{b}*"]
+    [" {b}", " {b} *", ":{b}*", "/{b}*"]
         .into_iter()
         .map(|p| format!("Bash(git push *{})", p.replace("{b}", BASE)))
 }
@@ -282,6 +304,7 @@ mod tests {
                 "/k/repos/shep/.git/index",
                 "/k/repos/shep/.git/packed-refs",
                 "/k/repos/shep/.git/refs/tags",
+                "/k/repos/shep/.git/refs/heads/main",
             ]
         );
         assert_eq!(s["env"]["CARGO_TARGET_DIR"], "/k/targets/shep/7");
@@ -366,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn a_push_to_the_base_branch_is_denied_however_it_is_spelt() {
+    fn a_push_to_the_base_branch_or_with_a_forcing_flag_is_denied() {
         let deny = settings(&[])["permissions"]["deny"].clone();
         assert_eq!(
             strings(&deny)
@@ -378,9 +401,29 @@ mod tests {
                 "Bash(git push * main *)",
                 "Bash(git push *:main*)",
                 "Bash(git push */main*)",
-                "Bash(git push * +main*)",
+                "Bash(git push *--mirror*)",
+                "Bash(git push *--all*)",
+                "Bash(git push *--delete*)",
+                "Bash(git push -d*)",
+                "Bash(git push * -d*)",
+                "Bash(git push *--force*)",
+                "Bash(git push -f*)",
+                "Bash(git push * -f*)",
+                "Bash(git push * +*)",
             ]
         );
+    }
+
+    #[test]
+    fn the_clones_base_branch_is_not_writable() {
+        let s = settings(&[]);
+        let deny = strings(&s["sandbox"]["filesystem"]["denyWrite"]);
+        assert!(
+            deny.contains(&"/k/repos/shep/.git/refs/heads/main"),
+            "{deny:?}"
+        );
+        let allow = strings(&s["sandbox"]["filesystem"]["allowWrite"]);
+        assert!(!allow.iter().any(|p| p.ends_with("/main")), "{allow:?}");
     }
 
     #[test]
