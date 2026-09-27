@@ -231,28 +231,38 @@ pub fn rebase(
     branch: &str,
     head: &str,
 ) -> Result<Rebase, WorktreeError> {
-    let git = trusted(repo, worktree)?;
+    let in_worktree = trusted(repo, worktree)?;
     let full_ref = format!("refs/heads/{branch}");
-    let on_branch = git(&["symbolic-ref", "--quiet", "HEAD"]).ok().as_deref() == Some(&full_ref);
-    if !on_branch || git(&["rev-parse", "HEAD"])? != head {
+    let on_branch = in_worktree(&["symbolic-ref", "--quiet", "HEAD"])
+        .ok()
+        .as_deref()
+        == Some(&full_ref);
+    if !on_branch || in_worktree(&["rev-parse", "HEAD"])? != head {
         let short = head.get(..7).unwrap_or(head);
         return Ok(Rebase::Refused(format!(
             "its worktree is not at the pull request's head {short}"
         )));
     }
-    if !git(&["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
+    if !in_worktree(&["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
         return Ok(Rebase::Refused(
             "its worktree has changes that are not committed".into(),
         ));
     }
     // The rebased commits keep the committer they had, so the rebase needs
     // no identity of its own.
-    let name = format!("user.name={}", git(&["log", "-1", "--format=%cn", head])?);
-    let email = format!("user.email={}", git(&["log", "-1", "--format=%ce", head])?);
+    let name = format!(
+        "user.name={}",
+        in_worktree(&["log", "-1", "--format=%cn", head])?
+    );
+    let email = format!(
+        "user.email={}",
+        in_worktree(&["log", "-1", "--format=%ce", head])?
+    );
     let base = format!("origin/{BASE}");
-    if let Err(e) = git(&["-c", &name, "-c", &email, "rebase", "--quiet", &base]) {
-        let conflicts = git(&["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();
-        let aborted = git(&["rebase", "--abort"]);
+    if let Err(e) = in_worktree(&["-c", &name, "-c", &email, "rebase", "--quiet", &base]) {
+        let conflicts =
+            in_worktree(&["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();
+        let aborted = in_worktree(&["rebase", "--abort"]);
         if conflicts.is_empty() {
             return Err(e);
         }
@@ -263,11 +273,12 @@ pub fn rebase(
             files.join(", ")
         )));
     }
-    let rebased = git(&["rev-parse", "HEAD"])?;
+    let rebased = in_worktree(&["rev-parse", "HEAD"])?;
     let lease = format!("--force-with-lease={full_ref}:{head}");
     let target = format!("HEAD:{full_ref}");
-    if let Err(e) = git(&["push", "--quiet", &lease, "origin", &target]) {
-        git(&["reset", "--quiet", "--hard", head])?;
+    if let Err(e) = in_worktree(&["push", "--quiet", &lease, "origin", &target]) {
+        // Best effort: a branch left off the head is refused on the next look.
+        let _ = in_worktree(&["reset", "--quiet", "--hard", head]);
         return Err(e);
     }
     Ok(Rebase::Pushed(rebased))
