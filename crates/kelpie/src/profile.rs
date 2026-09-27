@@ -60,9 +60,14 @@ const PM_ONLY: [&str; 5] = [
     "Bash(gh *review please*)",
 ];
 
-// `gh api` could merge or relabel around the rules above, and nothing else a
-// worker does needs it.
-const GH_API: [&str; 2] = ["Bash(gh api)", "Bash(gh api *)"];
+// `gh api` could merge or relabel around the rules above, and `gh auth token`
+// prints the maintainer's token. No worker needs either.
+const GH_DENY: [&str; 4] = [
+    "Bash(gh api)",
+    "Bash(gh api *)",
+    "Bash(gh auth)",
+    "Bash(gh auth *)",
+];
 
 // Pushes that rewrite or delete branches on the remote whatever they name:
 // `--mirror` and `--all` push every local branch, and a `+` refspec forces.
@@ -134,7 +139,7 @@ impl WorkerProfile<'_> {
             .iter()
             .map(|p| format!("Read({p})"))
             .chain(PM_ONLY.iter().map(|&r| r.to_owned()))
-            .chain(GH_API.iter().map(|&r| r.to_owned()))
+            .chain(GH_DENY.iter().map(|&r| r.to_owned()))
             .chain(push_to_base())
             .chain(PUSH_FLAGS.iter().map(|&r| r.to_owned()))
             .collect();
@@ -381,11 +386,17 @@ mod tests {
     }
 
     #[test]
-    fn gh_api_is_denied() {
+    fn gh_api_and_gh_auth_are_denied() {
         let deny = settings(&[])["permissions"]["deny"].clone();
         let deny = strings(&deny);
-        assert!(deny.contains(&"Bash(gh api)"));
-        assert!(deny.contains(&"Bash(gh api *)"));
+        for rule in [
+            "Bash(gh api)",
+            "Bash(gh api *)",
+            "Bash(gh auth)",
+            "Bash(gh auth *)",
+        ] {
+            assert!(deny.contains(&rule), "{rule}");
+        }
     }
 
     #[test]
