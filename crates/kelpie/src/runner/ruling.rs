@@ -11,7 +11,7 @@ use super::Runner;
 use super::gate::short;
 use super::report::{Begin, StepReport};
 use crate::state::{Ruling, RulingKind, StateError};
-use crate::work_item::{Phase, Turn, WorkItem};
+use crate::work_item::{Phase, Review, Turn, WorkItem};
 
 /// The maintainer's answer to a ruling
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +73,12 @@ impl Runner {
                     };
                 }
                 (Answer::Yes, RulingKind::Closed) => item.phase = Phase::Done { merged: false },
+                (Answer::Yes, RulingKind::ReviewGuard { review }) => {
+                    item.phase = Phase::Review(Review {
+                        guard_cleared: true,
+                        ..review
+                    });
+                }
                 (Answer::No(note), _) => {
                     item.turn = Turn::Next {
                         prompt: note_prompt(item.pull_request, &note),
@@ -152,6 +158,11 @@ fn question(project: &str, id: u64, number: u64, kind: &RulingKind) -> String {
         RulingKind::Closed => format!(
             "Pull request #{number} was closed without merging. {yes} drops the work \
              item and keeps its branch on the forge"
+        ),
+        RulingKind::ReviewGuard { review } => format!(
+            "The qwen-review loop on pull request #{number} has run {} rounds without \
+             settling. {yes} lets it keep going",
+            review.round - 1
         ),
     };
     format!("{ask}, and {no} sends the worker your note.")
@@ -264,8 +275,13 @@ mod tests {
         let runner = rig.open().unwrap();
         rig.ask(&runner, "add", Some("7"));
         rig.forge.open_pull_request(72, "kelpie/7", &[7]);
-        rig.claude.script([Scripted::Push("again.txt", "again\n")]);
-        step(&runner).unwrap();
+        rig.claude.script([
+            Scripted::Push("again.txt", "again\n"),
+            Scripted::Text("CLEAN"),
+        ]);
+        step(&runner).unwrap(); // the worker's first turn: opens the pull request
+        step(&runner).unwrap(); // review round 1, qwen: clean by default
+        step(&runner).unwrap(); // review round 2, claude: scripted clean above
         let head = rig.forge.head_of("kelpie/7").unwrap();
         rig.forge.set_checks(&head, Checks::Passed);
         assert!(matches!(

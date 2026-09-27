@@ -11,8 +11,8 @@ use tempfile::TempDir;
 
 use crate::board::WorkerModel;
 use crate::ports::{
-    Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Meter, MeterError, Ports,
-    Role, SessionId, Timestamp, Usage, Utilization, Window,
+    Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Finding, Meter, MeterError,
+    Ports, Reviewer, ReviewerError, Role, SessionId, Timestamp, Usage, Utilization, Window,
 };
 use crate::runner::{
     CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
@@ -83,6 +83,9 @@ pub(crate) enum Scripted {
     /// Commits this file with this text on the worktree's branch, pushes
     /// it the way a worker does, and answers
     Push(&'static str, &'static str),
+    /// Answers with this exact text and no cost: a review round or judge
+    /// one-shot, whose reply is read rather than acted on
+    Text(&'static str),
 }
 
 /// A call as the stand-in Claude saw it
@@ -105,11 +108,26 @@ pub(crate) struct FakeClaude {
 }
 
 impl FakeClaude {
+    /// The worker's own calls, in order: what every test before the review
+    /// loop existed already asserted on, so a reviewer or judge call never
+    /// shows up and shifts their counts.
     pub(crate) fn calls(&self) -> Vec<ClaudeCall> {
         self.seen().into_iter().map(|s| s.call).collect()
     }
 
     pub(crate) fn seen(&self) -> Vec<Seen> {
+        self.all_seen()
+            .into_iter()
+            .filter(|s| s.call.role == Role::Worker)
+            .collect()
+    }
+
+    /// Every call, worker, reviewer and judge alike, in order
+    pub(crate) fn all_calls(&self) -> Vec<ClaudeCall> {
+        self.all_seen().into_iter().map(|s| s.call).collect()
+    }
+
+    pub(crate) fn all_seen(&self) -> Vec<Seen> {
         self.seen.lock().unwrap().clone()
     }
 
@@ -154,6 +172,12 @@ impl Claude for FakeClaude {
                 std::fs::write(call.cwd.join(LEFT_BEHIND), "work in progress\n").unwrap();
                 panic!("the runner is killed mid-turn");
             }
+            Some(Scripted::Text(text)) => Ok(ClaudeReply {
+                session_id: call.session.id().clone(),
+                text: text.to_owned(),
+                usage: Usage::default(),
+                session_cost: Cost(0),
+            }),
             Some(Scripted::Push(file, text)) => {
                 std::fs::write(call.cwd.join(file), text).unwrap();
                 git(&call.cwd, &["add", file]);
@@ -232,6 +256,61 @@ impl Clock for FakeClock {
     }
 }
 
+/// What the stand-in reviewer answers for its next round
+#[derive(Debug, Clone)]
+pub(crate) enum ScriptedRound {
+    /// These findings
+    Findings(Vec<Finding>),
+    /// Fails with this error
+    Fail(ReviewerError),
+}
+
+/// One round as the stand-in reviewer saw it
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SeenRound {
+    pub(crate) worktree: PathBuf,
+    pub(crate) out: PathBuf,
+    pub(crate) round: u32,
+}
+
+/// A qwen-review stand-in. Clean (no findings) once its script runs out, so
+/// tests that do not care about the review loop see it pass straight through.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FakeReviewer {
+    seen: Arc<Mutex<Vec<SeenRound>>>,
+    script: Arc<Mutex<VecDeque<ScriptedRound>>>,
+}
+
+impl FakeReviewer {
+    pub(crate) fn seen(&self) -> Vec<SeenRound> {
+        self.seen.lock().unwrap().clone()
+    }
+
+    pub(crate) fn script(&self, rounds: impl IntoIterator<Item = ScriptedRound>) {
+        self.script.lock().unwrap().extend(rounds);
+    }
+}
+
+impl Reviewer for FakeReviewer {
+    fn round(
+        &self,
+        worktree: &Path,
+        out: &Path,
+        round: u32,
+    ) -> Result<Vec<Finding>, ReviewerError> {
+        self.seen.lock().unwrap().push(SeenRound {
+            worktree: worktree.to_owned(),
+            out: out.to_owned(),
+            round,
+        });
+        match self.script.lock().unwrap().pop_front() {
+            Some(ScriptedRound::Findings(findings)) => Ok(findings),
+            Some(ScriptedRound::Fail(e)) => Err(e),
+            None => Ok(Vec::new()),
+        }
+    }
+}
+
 /// One project's world: kelpie's home, the maintainer's home, and the
 /// project's repo cloned from a bare origin
 #[derive(Debug)]
@@ -241,6 +320,7 @@ pub(crate) struct Rig {
     pub(crate) claude: FakeClaude,
     pub(crate) forge: FakeForge,
     pub(crate) meter: FakeMeter,
+    pub(crate) reviewer: FakeReviewer,
     pub(crate) clock: FakeClock,
 }
 
@@ -281,6 +361,7 @@ impl Rig {
             },
             forge: FakeForge::new(home.path().join("origin.git")),
             meter,
+            reviewer: FakeReviewer::default(),
             clock: FakeClock::at(Self::EPOCH),
             home,
         };
@@ -360,6 +441,7 @@ impl Rig {
             claude: Arc::new(self.claude.clone()),
             forge: Box::new(self.forge.clone()),
             meter: Box::new(self.meter.clone()),
+            reviewer: Arc::new(self.reviewer.clone()),
             clock: Box::new(self.clock.clone()),
         };
         Runner::open(
@@ -385,16 +467,24 @@ impl Rig {
     /// A running project whose worker's first turn pushed `work.txt` on
     /// `kelpie/7` and opened draft pull request 71, with CI not yet reported
     ///
-    /// Returns the pull request's head. The gate tests all start here, since
-    /// the gate begins where the worker's pull request is open.
+    /// Its qwen-review loop ran two clean rounds first, so the gate tests
+    /// all start where the gate itself begins: the worker's pull request
+    /// open and its review settled.
+    ///
+    /// Returns the pull request's head.
     pub(crate) fn with_pull_request(project: &str) -> (Self, Mutex<Runner>, String) {
         let rig = Self::new(project);
         let runner = rig.open().unwrap();
         rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-        rig.claude.script([Scripted::Push("work.txt", "work\n")]);
-        step(&runner).unwrap();
+        rig.claude.script([
+            Scripted::Push("work.txt", "work\n"),
+            Scripted::Text("CLEAN"),
+        ]);
+        step(&runner).unwrap(); // the worker's first turn: opens the pull request
+        step(&runner).unwrap(); // review round 1, qwen: clean by default
+        step(&runner).unwrap(); // review round 2, claude: scripted clean above
         let head = rig.forge.head_of("kelpie/7").expect("the worker pushed");
         (rig, runner, head)
     }

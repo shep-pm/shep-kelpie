@@ -22,6 +22,7 @@ mod merge;
 mod pace;
 mod paths;
 mod report;
+mod review;
 mod ruling;
 mod trigger;
 mod turn;

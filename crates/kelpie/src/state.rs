@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
 use crate::ports::Timestamp;
-use crate::work_item::WorkItem;
+use crate::work_item::{Review, WorkItem};
 
 /// The state file's format version
 const VERSION: u32 = 1;
@@ -114,6 +114,12 @@ pub enum RulingKind {
     /// Someone closed the pull request without merging it. A yes drops the
     /// work item and keeps its branch on the forge.
     Closed,
+    /// The qwen-review loop passed its round guard without settling. A yes
+    /// lets it past the guard for the rest of this work item.
+    ReviewGuard {
+        /// The review, at the round the guard stopped it on
+        review: Review,
+    },
 }
 
 /// A lease the dog granted this project

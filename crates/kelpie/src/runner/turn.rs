@@ -12,12 +12,13 @@ use std::sync::{Arc, Mutex};
 
 use super::Runner;
 use super::report::{Begin, StepReport};
+use super::review::{self, run_review_call};
 use super::trigger::lock;
 use crate::pacer::Scope;
 use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session};
 use crate::profile::{INSTRUCTIONS, WorkerProfile};
 use crate::state::{RunState, StateError};
-use crate::work_item::{CallRecord, Phase, Turn, WorkItem};
+use crate::work_item::{CallRecord, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree;
 
 /// The prompt for a turn resumed after the runner restarted
@@ -32,20 +33,32 @@ const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
 ///
 /// [`StateError`] when the turn's start or end cannot be saved.
 pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
-    let claude = Arc::clone(&lock(runner).ports.claude);
+    let (claude, reviewer) = {
+        let runner = lock(runner);
+        (
+            Arc::clone(&runner.ports.claude),
+            Arc::clone(&runner.ports.reviewer),
+        )
+    };
     let mut start_over = false;
     loop {
-        let call = match lock(runner).begin_turn(start_over)? {
+        let begin = lock(runner).begin_turn(start_over)?;
+        match begin {
             Begin::Idle => return Ok(None),
             Begin::Report(report) => return Ok(Some(report)),
-            Begin::Call(call) => call,
-        };
-        let result = claude.run(&call);
-        if !start_over && matches!(result, Err(ClaudeError::NoSession(_))) {
-            start_over = true;
-            continue;
+            Begin::Call(call) => {
+                let result = claude.run(&call);
+                if !start_over && matches!(result, Err(ClaudeError::NoSession(_))) {
+                    start_over = true;
+                    continue;
+                }
+                return lock(runner).end_turn(result);
+            }
+            Begin::Review(action) => {
+                let outcome = run_review_call(claude.as_ref(), reviewer.as_ref(), action);
+                return lock(runner).end_review(outcome);
+            }
         }
-        return lock(runner).end_turn(result);
     }
 }
 
@@ -67,6 +80,8 @@ impl Runner {
         };
         match &item.phase {
             Phase::Implement => {}
+            Phase::Review(review) if matches!(review.stage, ReviewStage::Fixing { .. }) => {}
+            Phase::Review(_) => return self.review_step(),
             Phase::Ci { .. } => return self.check_ci(),
             Phase::Ruling { .. } => return Ok(Begin::Idle),
             Phase::Merge { .. } => return self.merge(),
@@ -186,7 +201,11 @@ impl Runner {
         };
         let report = match result {
             Ok(reply) => {
-                if item.pull_request.is_none() {
+                // Only true the very first time: the pull request is
+                // discovered once, and every later turn that reaches here
+                // (a CI-failure fix, most often) already knows it.
+                let discovering = item.pull_request.is_none();
+                if discovering {
                     item.pull_request = self.pull_request_from(&item.branch);
                 }
                 let before = item.session_cost(&item.session);
@@ -200,11 +219,23 @@ impl Runner {
                     session_cost: reply.session_cost,
                 });
                 item.turn = Turn::Ended { at: now };
-                if item.pull_request.is_some() {
-                    item.phase = Phase::Ci {
-                        head: None,
-                        since: now,
-                    };
+                match item.phase.clone() {
+                    Phase::Implement if discovering && item.pull_request.is_some() => {
+                        item.phase = Phase::Review(Review::first());
+                    }
+                    Phase::Implement if item.pull_request.is_some() => {
+                        item.phase = Phase::Ci {
+                            head: None,
+                            since: now,
+                        };
+                    }
+                    Phase::Review(review) => {
+                        let ReviewStage::Fixing { clean } = review.stage else {
+                            unreachable!("only a fix turn drives the worker while reviewing");
+                        };
+                        item.phase = review::advance(review, clean, now);
+                    }
+                    _ => {}
                 }
                 StepReport::Ended {
                     issue: item.issue,
@@ -245,7 +276,7 @@ impl Runner {
     }
 }
 
-fn write(folder: &Path, file: &Path, text: &str) -> Result<(), String> {
+pub(super) fn write(folder: &Path, file: &Path, text: &str) -> Result<(), String> {
     fs::create_dir_all(folder)
         .and_then(|()| fs::write(file, text))
         .map_err(|e| format!("cannot write {}: {}", file.display(), e.kind()))

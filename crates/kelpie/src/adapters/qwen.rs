@@ -1,0 +1,195 @@
+//! The maintainer's qwen-review script, run as a subprocess
+//!
+//! The script takes the GPU lock itself and waits in line for it, up to an
+//! hour; kelpie never takes or holds that lock itself, so a long wait here
+//! is normal, not a hang. A round's findings and its
+//! completion marker both come from disk, never from stdout: a round killed
+//! mid-flight can leave a `round-N.txt` behind with no `.done` beside it,
+//! and only the marker tells the two apart.
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+use super::process::{Processes, RunError};
+use crate::ports::{Finding, Reviewer, ReviewerError, Severity, parse_findings};
+use crate::worktree;
+
+/// `qwen-review.sh`, under the maintainer's `~/.claude/scripts/`
+const SCRIPT: &str = ".claude/scripts/qwen-review.sh";
+
+/// The maintainer's qwen-review script
+///
+/// Clones share their rounds in flight, so one clone can stop them all.
+#[derive(Debug, Clone)]
+pub struct QwenReviewer {
+    script: PathBuf,
+    processes: Processes,
+}
+
+impl QwenReviewer {
+    /// A reviewer running the script under the maintainer's `home`
+    pub fn new(home: &Path) -> Self {
+        Self {
+            script: home.join(SCRIPT),
+            processes: Processes::default(),
+        }
+    }
+
+    /// Ends every round in flight, and refuses new ones, as the runner stops
+    pub fn stop(&self) {
+        self.processes.stop();
+    }
+
+    fn run(
+        &self,
+        worktree: &Path,
+        out: &Path,
+        round: u32,
+        files: Option<&str>,
+    ) -> Result<Vec<Finding>, ReviewerError> {
+        let mut command = Command::new(&self.script);
+        command
+            .arg("--dir")
+            .arg(worktree)
+            .arg("--round")
+            .arg(round.to_string())
+            .env("QWEN_REVIEW_OUT", out);
+        match files {
+            Some(files) => {
+                command.arg("--files").arg(files);
+            }
+            None => {
+                command
+                    .arg("--diff")
+                    .arg(format!("origin/{}", worktree::BASE));
+            }
+        }
+        let output = self.processes.output(&mut command).map_err(|e| match e {
+            RunError::Io(e) => ReviewerError::Spawn(e.to_string()),
+            RunError::Stopped => ReviewerError::Stopped,
+            // `output` never sets a deadline, so this never fires.
+            RunError::TimedOut => ReviewerError::Failed("timed out".into()),
+        })?;
+        if !output.status.success() {
+            return Err(ReviewerError::Failed(format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout).trim(),
+                String::from_utf8_lossy(&output.stderr).trim(),
+            )));
+        }
+        let done = out.join(format!("round-{round}.txt.done"));
+        if !done.is_file() {
+            return Err(ReviewerError::Incomplete);
+        }
+        let report = out.join(format!("round-{round}.txt"));
+        let text = std::fs::read_to_string(&report).unwrap_or_default();
+        Ok(parse_findings(&text))
+    }
+
+    // A file the script skipped for size is reviewed again on its own, as a
+    // `-U25` hunk against `origin/main`: the skill's own way of feeding it a
+    // file small enough for the chunk limit. Findings against the hunk file
+    // are folded back in against the original path.
+    fn hunk_round(
+        &self,
+        worktree: &Path,
+        out: &Path,
+        round: u32,
+        skipped: &Finding,
+    ) -> Result<Vec<Finding>, ReviewerError> {
+        let base = format!("origin/{}", worktree::BASE);
+        let diff = Command::new("git")
+            .arg("-C")
+            .arg(worktree)
+            .args(["diff", &base, "-U25", "--"])
+            .arg(&skipped.file)
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| ReviewerError::Spawn(e.to_string()))?;
+        if !diff.status.success() {
+            // The file kelpie cannot cut a hunk for keeps its placeholder,
+            // rather than failing the whole round over one file.
+            return Ok(vec![skipped.clone()]);
+        }
+        let hunk_dir = out.join("hunks").join(round.to_string());
+        std::fs::create_dir_all(&hunk_dir).map_err(|e| {
+            ReviewerError::Failed(format!("cannot create {}: {e}", hunk_dir.display()))
+        })?;
+        let name = Path::new(&skipped.file)
+            .file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new("hunk"));
+        let hunk_path = hunk_dir.join(name);
+        std::fs::write(&hunk_path, &diff.stdout).map_err(|e| {
+            ReviewerError::Failed(format!("cannot write {}: {e}", hunk_path.display()))
+        })?;
+        let hunk_out = out.join("hunks").join(format!("{round}-out"));
+        let files = hunk_path.to_string_lossy().into_owned();
+        let findings = self.run(worktree, &hunk_out, round, Some(&files))?;
+        Ok(findings
+            .into_iter()
+            .map(|f| Finding {
+                file: skipped.file.clone(),
+                ..f
+            })
+            .collect())
+    }
+}
+
+impl Reviewer for QwenReviewer {
+    fn round(
+        &self,
+        worktree: &Path,
+        out: &Path,
+        round: u32,
+    ) -> Result<Vec<Finding>, ReviewerError> {
+        let findings = self.run(worktree, out, round, None)?;
+        let mut combined = Vec::with_capacity(findings.len());
+        for finding in findings {
+            if is_skipped_for_size(&finding) {
+                combined.extend(self.hunk_round(worktree, out, round, &finding)?);
+            } else {
+                combined.push(finding);
+            }
+        }
+        Ok(combined)
+    }
+}
+
+fn is_skipped_for_size(finding: &Finding) -> bool {
+    finding.severity == Severity::Low
+        && finding.line == 0
+        && finding.what.starts_with("not reviewed: ")
+        && finding.what.contains("exceeds the chunk limit")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_scripts_own_skip_placeholder_is_treated_as_skipped_for_size() {
+        let skip = Finding {
+            severity: Severity::Low,
+            file: "big.rs".into(),
+            line: 0,
+            what: "not reviewed: 900 lines exceeds the chunk limit".into(),
+            why: "split the file or review it by hand".into(),
+        };
+        assert!(is_skipped_for_size(&skip));
+
+        let real_low = Finding {
+            what: "unused import".into(),
+            ..skip.clone()
+        };
+        assert!(!is_skipped_for_size(&real_low));
+
+        let wrong_severity = Finding {
+            severity: Severity::High,
+            ..skip.clone()
+        };
+        assert!(!is_skipped_for_size(&wrong_severity));
+
+        let has_a_line = Finding { line: 4, ..skip };
+        assert!(!is_skipped_for_size(&has_a_line));
+    }
+}

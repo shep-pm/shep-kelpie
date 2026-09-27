@@ -3,11 +3,14 @@
 //! A step dispatches from the board, runs a worker's turn, or moves the
 //! work item through the gate: CI, a rebase, a ruling, the merge.
 
+use std::path::PathBuf;
+
 use serde::Serialize;
 
 use crate::board::{Skip, WorkerModel};
 use crate::pacer::HoldKind;
-use crate::ports::{ClaudeCall, SessionId, Timestamp, Usage};
+use crate::ports::{ClaudeCall, Finding, SessionId, Severity, Timestamp, Usage, Verdict};
+use crate::work_item::ReviewerKind;
 
 /// What one step of the runner did, for its log
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -124,6 +127,43 @@ pub enum StepReport {
         /// Why
         reason: String,
     },
+    /// A review round ran and reported its raw findings
+    ReviewRound {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The round
+        round: u32,
+        /// Which reviewer ran it
+        reviewer: ReviewerKind,
+        /// How many findings it reported
+        findings: usize,
+    },
+    /// The judge ruled on one finding
+    FindingJudged {
+        /// The work item's issue
+        issue: u64,
+        /// The round the finding came from
+        round: u32,
+        /// Whether it held
+        holds: bool,
+        /// The judge's severity
+        severity: Severity,
+    },
+    /// The round's held findings were sent to the worker's next turn
+    ReviewFindingsSent {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The round
+        round: u32,
+        /// How many findings held
+        held: usize,
+        /// Whether every one was a nit (LOW)
+        clean: bool,
+    },
 }
 
 impl StepReport {
@@ -140,4 +180,27 @@ pub(super) enum Begin {
     Idle,
     Report(StepReport),
     Call(ClaudeCall),
+    Review(ReviewCall),
+}
+
+/// Something the qwen-review loop needs run outside the runner's lock
+pub(super) enum ReviewCall {
+    /// One round of the maintainer's script
+    Qwen {
+        worktree: PathBuf,
+        out: PathBuf,
+        round: u32,
+    },
+    /// A fresh Claude review round
+    ClaudeRound(ClaudeCall),
+    /// The judge's one-shot on a single finding
+    Judge(ClaudeCall),
+}
+
+/// What a [`ReviewCall`] came back with
+pub(super) enum ReviewResult {
+    /// A round's raw findings, from qwen or a Claude round
+    Findings(Result<Vec<Finding>, String>),
+    /// The judge's verdict on one finding
+    Verdict(Result<Verdict, String>),
 }

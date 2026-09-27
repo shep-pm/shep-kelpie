@@ -378,6 +378,129 @@ impl fmt::Display for MeterError {
 
 impl std::error::Error for MeterError {}
 
+/// How serious a review finding is
+///
+/// Qwen and the Claude review round report only these three; the judge may
+/// regrade to any of them but never invents a fourth. LOW is the nit level.
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    /// A nit
+    Low,
+    /// Worth fixing before merge
+    Medium,
+    /// A real defect
+    High,
+}
+
+/// One review finding, as a reviewer reports it
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Finding {
+    /// How serious the reviewer thinks it is
+    pub severity: Severity,
+    /// The file it is in
+    pub file: String,
+    /// The line, or 0 when the reviewer names none
+    pub line: u32,
+    /// What is wrong
+    pub what: String,
+    /// Why it matters
+    pub why: String,
+}
+
+/// Parses reviewer output in qwen's `SEVERITY|file:line|what|why` format
+///
+/// A line that does not fit the shape is skipped rather than failing the
+/// whole round: the script itself only ever writes well-formed lines, so one
+/// that does not fit is safer to drop than to invent a location for.
+pub fn parse_findings(text: &str) -> Vec<Finding> {
+    text.lines().filter_map(parse_finding_line).collect()
+}
+
+fn parse_finding_line(line: &str) -> Option<Finding> {
+    let mut parts = line.splitn(4, '|');
+    let severity = match parts.next()? {
+        "LOW" => Severity::Low,
+        "MEDIUM" => Severity::Medium,
+        "HIGH" => Severity::High,
+        _ => return None,
+    };
+    let location = parts.next()?;
+    let what = parts.next()?;
+    let why = parts.next()?;
+    let (file, line_number) = location.rsplit_once(':')?;
+    Some(Finding {
+        severity,
+        file: file.to_owned(),
+        line: line_number.parse().ok()?,
+        what: what.to_owned(),
+        why: why.to_owned(),
+    })
+}
+
+/// The judge's ruling on one finding
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Verdict {
+    /// Whether the finding holds
+    pub holds: bool,
+    /// The judge's severity, which may regrade the reviewer's in either
+    /// direction. Meaningless when the finding does not hold.
+    pub severity: Severity,
+    /// One sentence
+    pub reason: String,
+}
+
+/// Runs one round of the maintainer's qwen-review script
+pub trait Reviewer: Send + Sync {
+    /// Runs round `round` against `worktree`'s diff from `origin/main`,
+    /// writing the script's own findings under `out`
+    ///
+    /// Feeds hunk files for anything the script skips as too large, folding
+    /// their findings back in against the original file.
+    ///
+    /// # Errors
+    ///
+    /// [`ReviewerError`] when the script cannot be run or its round did not
+    /// finish.
+    fn round(
+        &self,
+        worktree: &std::path::Path,
+        out: &std::path::Path,
+        round: u32,
+    ) -> Result<Vec<Finding>, ReviewerError>;
+}
+
+/// Why a qwen-review round did not produce findings
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReviewerError {
+    /// The script could not be started, with the OS's reason
+    Spawn(String),
+    /// The script ran and exited unsuccessfully, with this on stderr
+    Failed(String),
+    /// The script exited successfully but left no completion marker
+    Incomplete,
+    /// The round was ended because the runner is stopping
+    Stopped,
+}
+
+impl fmt::Display for ReviewerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Spawn(error) => write!(f, "cannot run qwen-review.sh: {error}"),
+            Self::Failed(stderr) => write!(f, "qwen-review.sh failed: {}", stderr.trim()),
+            Self::Incomplete => f.write_str("qwen-review.sh left no completion marker"),
+            Self::Stopped => f.write_str("qwen-review.sh was stopped with the runner"),
+        }
+    }
+}
+
+impl std::error::Error for ReviewerError {}
+
 /// Every port the runner uses, as one bundle
 pub struct Ports {
     /// Headless Claude, shared so a turn runs without holding the runner
@@ -386,6 +509,8 @@ pub struct Ports {
     pub forge: Box<dyn Forge>,
     /// The account's usage
     pub meter: Box<dyn Meter>,
+    /// The qwen-review script, shared so a round runs without holding the runner
+    pub reviewer: Arc<dyn Reviewer>,
     /// The clock
     pub clock: Box<dyn Clock>,
 }
@@ -393,5 +518,62 @@ pub struct Ports {
 impl fmt::Debug for Ports {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Ports").finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod findings_tests {
+    use super::*;
+
+    #[test]
+    fn well_formed_lines_parse_in_order() {
+        let text = "HIGH|src/lib.rs:42|does the bad thing|breaks prod\n\
+                    LOW|src/main.rs:0|not reviewed: 900 lines exceeds the chunk limit|split the file or review it by hand";
+        assert_eq!(
+            parse_findings(text),
+            vec![
+                Finding {
+                    severity: Severity::High,
+                    file: "src/lib.rs".into(),
+                    line: 42,
+                    what: "does the bad thing".into(),
+                    why: "breaks prod".into(),
+                },
+                Finding {
+                    severity: Severity::Low,
+                    file: "src/main.rs".into(),
+                    line: 0,
+                    what: "not reviewed: 900 lines exceeds the chunk limit".into(),
+                    why: "split the file or review it by hand".into(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn blank_and_malformed_lines_are_skipped() {
+        let text = "\nCLEAN\nnot a finding at all\nMEDIUM|only|two|fields|extra\nMEDIUM|a.rs:no-number|what|why";
+        assert_eq!(parse_findings(text), vec![]);
+    }
+
+    #[test]
+    fn severities_order_low_to_high() {
+        assert!(Severity::Low < Severity::Medium);
+        assert!(Severity::Medium < Severity::High);
+    }
+
+    // Recorded shape of a real round-N.txt, one line per severity plus a
+    // skipped-file placeholder.
+    #[test]
+    fn a_recorded_findings_file_parses() {
+        let text = include_str!("../fixtures/qwen-round.txt");
+        let findings = parse_findings(text);
+        assert_eq!(findings.len(), 4);
+        assert_eq!(findings[0].severity, Severity::High);
+        assert_eq!(findings[0].file, "src/pricing.rs");
+        assert_eq!(
+            findings[3].what,
+            "not reviewed: 900 lines exceeds the chunk limit"
+        );
     }
 }

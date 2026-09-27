@@ -12,7 +12,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::adapters::{ClaudeCli, Gh, SystemClock};
+use crate::adapters::{ClaudeCli, Gh, QwenReviewer, SystemClock};
 use crate::ports::Ports;
 use crate::runner::{ACTIONS, ProjectName, ProjectPaths, Runner, answer, step};
 
@@ -48,10 +48,12 @@ fn serve(project: &str) -> Result<(), String> {
     let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
     let paths = ProjectPaths::under(&kelpie_home, &project);
     let claude = ClaudeCli::default();
+    let reviewer = QwenReviewer::new(&home);
     let ports = Ports {
         claude: Arc::new(claude.clone()),
         forge: Box::new(Gh),
         meter: Box::new(claude.meter()),
+        reviewer: Arc::new(reviewer.clone()),
         clock: Box::new(SystemClock),
     };
     let runner = Runner::open(project, &paths, &home, &kelpie, ports).map_err(|e| e.to_string())?;
@@ -93,6 +95,7 @@ fn serve(project: &str) -> Result<(), String> {
     // the message skips shep's stop ladder, so the worker is stopped here.
     let why = stopped.recv();
     claude.stop();
+    reviewer.stop();
     shepherd.flush(FLUSH_TIMEOUT).map_err(|e| e.to_string())?;
     match why {
         Ok(Stop::WorkerDied) => {
