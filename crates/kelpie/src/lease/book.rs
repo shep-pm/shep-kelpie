@@ -3,12 +3,14 @@
 //! One holder per kind at a time. Waiters queue in arrival order, except
 //! that the maintainer goes ahead of every queued runner. Nobody is ever
 //! preempted: a holder keeps its lease until it gives it back or its
-//! runner is gone.
+//! runner is gone. A kind with a [`Window`] is granted only while the
+//! window is open, and [`LeaseBook::tick`] grants it once it opens.
 
 use std::collections::{BTreeMap, VecDeque};
 
 use serde::Serialize;
 
+use super::window::{Window, WindowStatus};
 use super::{Epoch, Holder, LeaseKind};
 use crate::ports::{Clock, Timestamp};
 use crate::runner::ProjectName;
@@ -47,12 +49,22 @@ pub struct LeaseStatus {
     pub since: Option<Timestamp>,
     /// Who waits, next first
     pub queue: Vec<Holder>,
+    /// Its review window, for a kind that has one
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window: Option<WindowStatus>,
 }
 
 #[derive(Debug, Default)]
 struct Lease {
     held: Option<(Holder, Timestamp)>,
     queue: VecDeque<Holder>,
+    window: Option<Window>,
+}
+
+impl Lease {
+    fn open(&self, now: Timestamp) -> bool {
+        self.window.as_ref().is_none_or(|w| w.opens(now).is_none())
+    }
 }
 
 /// Every book lease, who holds each and who waits
@@ -78,6 +90,56 @@ impl LeaseBook {
         }
     }
 
+    /// Gives `kind` a review window, so it is granted only while that is open
+    pub fn open_window(&mut self, kind: LeaseKind) {
+        self.leases.entry(kind).or_default().window = Some(Window::default());
+    }
+
+    /// Takes the quota a review footer states for `kind`'s window
+    pub fn quota(&mut self, kind: &LeaseKind, per_hour: u32) -> Vec<Grant> {
+        self.with_window(kind, |window, _| window.quota(per_hour))
+    }
+
+    /// Counts a summon of `kind`'s window accepted at `at`
+    pub fn summoned(&mut self, kind: &LeaseKind, at: Timestamp) -> Vec<Grant> {
+        self.with_window(kind, |window, _| window.summoned(at))
+    }
+
+    /// Takes a refusal that quotes `kind`'s window opening at `opens`
+    pub fn refused(&mut self, kind: &LeaseKind, opens: Timestamp) -> Vec<Grant> {
+        self.with_window(kind, |window, now| window.refused(now, opens))
+    }
+
+    /// Grants every free lease whose window has opened to its next waiter
+    pub fn tick(&mut self) -> Vec<Grant> {
+        let now = self.clock.now();
+        let mut grants = Vec::new();
+        for (kind, lease) in &mut self.leases {
+            if let Some(window) = &mut lease.window {
+                window.prune(now);
+            }
+            if lease.held.is_none() {
+                grants.extend(grant_next(kind, lease, now));
+            }
+        }
+        grants
+    }
+
+    // A window change can open it, so it grants whatever that allows.
+    fn with_window(
+        &mut self,
+        kind: &LeaseKind,
+        change: impl FnOnce(&mut Window, Timestamp),
+    ) -> Vec<Grant> {
+        let now = self.clock.now();
+        let lease = self.leases.get_mut(kind);
+        let Some(window) = lease.and_then(|l| l.window.as_mut()) else {
+            return Vec::new();
+        };
+        change(window, now);
+        self.tick()
+    }
+
     /// Asks for `kind` on behalf of `holder`
     ///
     /// Asking again while waiting keeps the place already in the queue.
@@ -85,10 +147,11 @@ impl LeaseBook {
         let now = self.clock.now();
         let lease = self.leases.entry(kind.clone()).or_default();
         match &lease.held {
-            None => {
-                lease.held = Some((holder, now));
+            None if lease.queue.is_empty() && lease.open(now) => {
+                granted(lease, holder, now);
                 return Asked::Granted;
             }
+            None => {}
             Some((held, _)) if *held == holder => return Asked::AlreadyHeld,
             Some(_) => {}
         }
@@ -146,6 +209,7 @@ impl LeaseBook {
 
     /// Who holds and waits for each kind anyone has asked for, by kind
     pub fn status(&self) -> Vec<LeaseStatus> {
+        let now = self.clock.now();
         self.leases
             .iter()
             .map(|(kind, lease)| LeaseStatus {
@@ -153,18 +217,31 @@ impl LeaseBook {
                 holder: lease.held.as_ref().map(|(h, _)| h.clone()),
                 since: lease.held.as_ref().map(|(_, since)| *since),
                 queue: lease.queue.iter().cloned().collect(),
+                window: lease.window.as_ref().map(|w| w.status(now)),
             })
             .collect()
     }
 }
 
 fn grant_next(kind: &LeaseKind, lease: &mut Lease, now: Timestamp) -> Option<Grant> {
+    if !lease.open(now) {
+        return None;
+    }
     let holder = lease.queue.pop_front()?;
-    lease.held = Some((holder.clone(), now));
+    granted(lease, holder.clone(), now);
     Some(Grant {
         kind: kind.clone(),
         holder,
     })
+}
+
+// The dog cannot see what the maintainer summons, so a grant to them
+// counts as a summon at once. A refusal they meet corrects it.
+fn granted(lease: &mut Lease, holder: Holder, now: Timestamp) {
+    if let (Holder::Maintainer, Some(window)) = (&holder, &mut lease.window) {
+        window.summoned(now);
+    }
+    lease.held = Some((holder, now));
 }
 
 #[cfg(test)]
@@ -355,6 +432,106 @@ mod tests {
         book.ask(&stand_in(), runner("reactmap", 1));
         assert_eq!(book.reclaim(&project("koji"), None), []);
         assert_eq!(status(&book)[0]["queue"], json!([{ "runner": "reactmap" }]));
+    }
+
+    fn windowed() -> (LeaseBook, FakeClock, LeaseKind) {
+        let (mut book, clock) = book();
+        let kind = LeaseKind::try_from("reviews").unwrap();
+        book.open_window(kind.clone());
+        (book, clock, kind)
+    }
+
+    #[test]
+    fn a_windowed_lease_given_back_after_a_summon_waits_out_the_hour() {
+        let (mut book, clock, kind) = windowed();
+        assert_eq!(book.ask(&kind, runner("koji", 1)), Asked::Granted);
+        assert_eq!(book.summoned(&kind, Timestamp(EPOCH)), []);
+        assert_eq!(
+            book.ask(&kind, runner("reactmap", 1)),
+            Asked::Queued { ahead: 0 }
+        );
+        clock.advance(300);
+        assert_eq!(book.give_back(&kind, &runner("koji", 1)), None);
+        assert_eq!(status(&book)[0]["window"]["opens"], json!(EPOCH + 3600));
+
+        clock.advance(3299);
+        assert_eq!(book.tick(), []);
+        clock.advance(1);
+        assert_eq!(
+            book.tick(),
+            [Grant {
+                kind: kind.clone(),
+                holder: runner("reactmap", 1)
+            }]
+        );
+        assert_eq!(status(&book)[0]["since"], EPOCH + 3600);
+    }
+
+    #[test]
+    fn a_closed_window_queues_even_a_free_lease() {
+        let (mut book, clock, kind) = windowed();
+        book.refused(&kind, Timestamp(EPOCH + 600));
+        assert_eq!(
+            book.ask(&kind, runner("koji", 1)),
+            Asked::Queued { ahead: 0 }
+        );
+        assert_eq!(status(&book)[0]["holder"], json!(null));
+        clock.advance(600);
+        assert_eq!(book.tick().len(), 1);
+        assert_eq!(status(&book)[0]["holder"], json!({ "runner": "koji" }));
+    }
+
+    #[test]
+    fn a_refusal_while_held_reschedules_the_next_grant_from_its_quote() {
+        let (mut book, clock, kind) = windowed();
+        book.ask(&kind, runner("koji", 1));
+        book.ask(&kind, runner("reactmap", 1));
+        clock.advance(60);
+        book.refused(&kind, Timestamp(EPOCH + 60 + 10 * 60));
+        assert_eq!(book.give_back(&kind, &runner("koji", 1)), None);
+        clock.advance(599);
+        assert_eq!(book.tick(), []);
+        clock.advance(1);
+        assert_eq!(book.tick()[0].holder, runner("reactmap", 1));
+    }
+
+    #[test]
+    fn a_higher_quota_read_from_a_footer_grants_at_once() {
+        let (mut book, clock, kind) = windowed();
+        book.ask(&kind, runner("koji", 1));
+        book.summoned(&kind, Timestamp(EPOCH));
+        book.give_back(&kind, &runner("koji", 1));
+        book.ask(&kind, runner("reactmap", 1));
+        clock.advance(60);
+        assert_eq!(
+            book.quota(&kind, 10),
+            [Grant {
+                kind: kind.clone(),
+                holder: runner("reactmap", 1)
+            }]
+        );
+    }
+
+    #[test]
+    fn a_grant_to_the_maintainer_counts_as_a_summon() {
+        let (mut book, clock, kind) = windowed();
+        assert_eq!(book.ask(&kind, Holder::Maintainer), Asked::Granted);
+        book.ask(&kind, runner("koji", 1));
+        clock.advance(120);
+        assert_eq!(book.give_back(&kind, &Holder::Maintainer), None);
+        assert_eq!(
+            status(&book)[0]["window"],
+            json!({ "quota": 1, "summons": [EPOCH], "opens": EPOCH + 3600 })
+        );
+    }
+
+    #[test]
+    fn a_window_fact_for_a_kind_without_a_window_changes_nothing() {
+        let (mut book, _) = book();
+        book.ask(&stand_in(), runner("koji", 1));
+        assert_eq!(book.refused(&stand_in(), Timestamp(EPOCH + 600)), []);
+        assert_eq!(book.ask(&stand_in(), runner("koji", 1)), Asked::AlreadyHeld);
+        assert!(status(&book)[0].get("window").is_none());
     }
 
     #[test]

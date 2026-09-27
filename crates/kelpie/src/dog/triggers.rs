@@ -103,6 +103,12 @@ mod tests {
                 "lock": lock.path(),
                 "since": null,
                 "holder": null,
+            }, {
+                "kind": "coderabbit",
+                "holder": null,
+                "since": null,
+                "queue": [],
+                "window": { "quota": 1, "summons": [], "opens": null },
             }] })
         );
         let me = std::process::id();

@@ -36,6 +36,10 @@ pub const NAME: &str = "kelpie";
 /// How long queued replies get to reach the shepherd before the dog exits
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// How often the dog looks for a review window that has opened. CodeRabbit
+/// quotes waits to the minute, so a few seconds late costs nothing.
+const WINDOW_TICK: Duration = Duration::from_secs(10);
+
 /// Runs the dog until the shepherd stops it
 pub fn run() -> ExitCode {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -116,6 +120,7 @@ async fn serve() -> Result<(), String> {
     let mut names = flock(&client).await?.names;
     shepherd.ready().map_err(|e| e.to_string())?;
     println!("up");
+    let mut ticks = tokio::time::interval(WINDOW_TICK);
     let ended = loop {
         let grants = tokio::select! {
             event = events.next() => match on_event(event, &desk, &client, &mut names).await {
@@ -123,6 +128,7 @@ async fn serve() -> Result<(), String> {
                 Err(e) => break Err(e),
             },
             Some(grants) = to_deliver.recv() => grants,
+            _ = ticks.tick() => lock_desk(&desk).tick(),
             _ = stopped.recv() => break Ok(()),
         };
         for grant in grants {
