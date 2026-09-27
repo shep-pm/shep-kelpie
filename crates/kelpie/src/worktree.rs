@@ -180,6 +180,119 @@ pub fn remove(
     }
 }
 
+/// Fetches `origin`, and says whether `head` already has the latest `main`
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn has_latest_base(repo: &Path, branch: &str, head: &str) -> Result<bool, WorktreeError> {
+    git(repo, ["fetch", "--quiet", "origin", BASE, branch])?;
+    let base = format!("origin/{BASE}");
+    let is_ancestor = ["merge-base", "--is-ancestor", &base, head];
+    match git(repo, is_ancestor) {
+        Ok(_) => Ok(true),
+        Err(WorktreeError::Git { stderr, .. }) if stderr.trim().is_empty() => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// What a rebase onto `origin/main` came to
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Rebase {
+    /// Rebased and pushed: the branch's new head
+    Pushed(String),
+    /// Left as it was, for this reason, which only the maintainer can settle
+    Refused(String),
+}
+
+/// Rebases the worktree's branch, at `head`, onto `origin/main` and pushes it
+///
+/// The push is forced with a lease on `head`, so it fails rather than drop a
+/// commit pushed since. A conflict aborts the rebase, and a failed push
+/// puts the branch back at `head`. Run [`has_latest_base`] first, which fetches.
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn rebase(
+    repo: &Path,
+    worktree: &Path,
+    branch: &str,
+    head: &str,
+) -> Result<Rebase, WorktreeError> {
+    let git = trusted(repo, worktree)?;
+    let full_ref = format!("refs/heads/{branch}");
+    let on_branch = git(&["symbolic-ref", "--quiet", "HEAD"]).ok().as_deref() == Some(&full_ref);
+    if !on_branch || git(&["rev-parse", "HEAD"])? != head {
+        let short = head.get(..7).unwrap_or(head);
+        return Ok(Rebase::Refused(format!(
+            "its worktree is not at the pull request's head {short}"
+        )));
+    }
+    if !git(&["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
+        return Ok(Rebase::Refused(
+            "its worktree has changes that are not committed".into(),
+        ));
+    }
+    // The rebased commits keep the committer they had, so the rebase needs
+    // no identity of its own.
+    let name = format!("user.name={}", git(&["log", "-1", "--format=%cn", head])?);
+    let email = format!("user.email={}", git(&["log", "-1", "--format=%ce", head])?);
+    let base = format!("origin/{BASE}");
+    if let Err(e) = git(&["-c", &name, "-c", &email, "rebase", "--quiet", &base]) {
+        let conflicts = git(&["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();
+        git(&["rebase", "--abort"])?;
+        if conflicts.is_empty() {
+            return Err(e);
+        }
+        let files: Vec<&str> = conflicts.lines().collect();
+        return Ok(Rebase::Refused(format!(
+            "it conflicts with main in {}",
+            files.join(", ")
+        )));
+    }
+    let rebased = git(&["rev-parse", "HEAD"])?;
+    let lease = format!("--force-with-lease={full_ref}:{head}");
+    let target = format!("HEAD:{full_ref}");
+    if let Err(e) = git(&["push", "--quiet", &lease, "origin", &target]) {
+        git(&["reset", "--quiet", "--hard", head])?;
+        return Err(e);
+    }
+    Ok(Rebase::Pushed(rebased))
+}
+
+// Git for the worktree, with its git dirs named rather than found. The
+// worker can write the worktree's own git dir, so its `commondir` is checked
+// against the repo's, and hooks are off: none of them is kelpie's to run.
+fn trusted<'a>(
+    repo: &Path,
+    worktree: &'a Path,
+) -> Result<impl Fn(&[&str]) -> Result<String, WorktreeError> + 'a, WorktreeError> {
+    let foreign = || WorktreeError::Foreign(worktree.to_owned());
+    let common = git(
+        repo,
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
+    let common = canonical(Path::new(&common));
+    let own = own_git_dir(&common, worktree).ok_or_else(foreign)?;
+    let named = std::fs::read_to_string(own.join("commondir")).map_err(|_| foreign())?;
+    if canonical(&own.join(named.trim())) != common {
+        return Err(foreign());
+    }
+    let prefix = [
+        "--git-dir".into(),
+        own.into_os_string(),
+        "--work-tree".into(),
+        worktree.as_os_str().to_owned(),
+        "-c".into(),
+        "core.hooksPath=/dev/null".into(),
+    ];
+    Ok(move |args: &[&str]| {
+        let args = prefix.iter().cloned().chain(args.iter().map(Into::into));
+        git(worktree, args.collect::<Vec<std::ffi::OsString>>())
+    })
+}
+
 // Everything about the worktree is read from the project's repo, never from
 // inside the worktree. The worker can rewrite its worktree's `.git` file,
 // and git run there would believe it.

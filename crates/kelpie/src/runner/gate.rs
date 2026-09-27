@@ -1,15 +1,17 @@
 //! The gate between the worker's pull request and the merge ruling
 //!
-//! Each step looks once at the pull request's head. A pending run waits for
-//! the next step. A red run is the worker's next turn, naming the checks
-//! that failed. A green run, on a branch that already has the latest
-//! `main`, raises the merge ruling.
+//! Each step looks once at the pull request's head. A branch without the
+//! latest `main` is rebased and pushed, and a conflict parks the worker on a
+//! ruling. A pending run waits for the next step. A red run is the worker's
+//! next turn, naming the checks that failed. A green run raises the merge
+//! ruling.
 
 use super::Runner;
 use super::turn::{Begin, StepReport};
 use crate::ports::{Checks, PullRequestState, Timestamp};
 use crate::state::{RulingKind, StateError};
 use crate::work_item::{Phase, Turn};
+use crate::worktree::{self, Rebase};
 
 // GitHub registers a push's checks within seconds. A head that still has
 // none two minutes after kelpie first saw it is taken to have no CI.
@@ -49,6 +51,11 @@ impl Runner {
             self.update(|item| item.phase = Phase::Ci { head, since: now })?;
             now
         };
+        match self.has_latest_base(&pr.head) {
+            Ok(true) => {}
+            Ok(false) => return self.rebase(number, &pr.head),
+            Err(reason) => return Ok(self.gate_failed(reason)),
+        }
         match pr.checks {
             Checks::Pending => Ok(Begin::Idle),
             Checks::None if !grace_over(since, now) => Ok(Begin::Idle),
@@ -87,6 +94,42 @@ impl Runner {
             head,
             checks,
         }))
+    }
+
+    /// Whether `head` has the latest `main`, or why git could not say
+    pub(super) fn has_latest_base(&self, head: &str) -> Result<bool, String> {
+        let item = self
+            .state
+            .work_item
+            .as_ref()
+            .expect("a base is of a work item");
+        worktree::has_latest_base(&self.settings.repo, &item.branch, head)
+            .map_err(|e| format!("cannot fetch main: {e}"))
+    }
+
+    // `main` moved since the branch was cut or last rebased: rebase and push,
+    // and CI runs again on the new head before anyone is asked.
+    fn rebase(&mut self, number: u64, head: &str) -> Result<Begin, StateError> {
+        let item = self
+            .state
+            .work_item
+            .as_ref()
+            .expect("a rebase is of a work item");
+        let issue = item.issue;
+        let rebased = worktree::rebase(&self.settings.repo, &item.worktree, &item.branch, head);
+        match rebased {
+            Ok(Rebase::Pushed(head)) => {
+                let (seen, since) = (Some(head.clone()), self.ports.clock.now());
+                self.update(|item| item.phase = Phase::Ci { head: seen, since })?;
+                Ok(Begin::Report(StepReport::Rebased {
+                    issue,
+                    pull_request: number,
+                    head,
+                }))
+            }
+            Ok(Rebase::Refused(reason)) => self.raise(RulingKind::Rebase { reason }),
+            Err(e) => Ok(self.gate_failed(format!("cannot rebase #{number}: {e}"))),
+        }
     }
 
     pub(super) fn gate_failed(&self, reason: String) -> Begin {
@@ -216,6 +259,85 @@ mod tests {
         assert!(question.starts_with(&parked), "{question}");
         assert_eq!(rig.claude.calls().len(), 2, "the red run went out once");
         assert_eq!(step(&runner).unwrap(), None);
+    }
+
+    #[test]
+    fn a_branch_behind_main_is_rebased_and_asked_about_only_after_ci_on_the_new_head() {
+        let (rig, runner, head) = Rig::with_pull_request("shep");
+        let landed = rig.land_on_origin("landed.txt");
+        rig.forge.set_checks(&head, Checks::Passed);
+        let Some(StepReport::Rebased { head: rebased, .. }) = step(&runner).unwrap() else {
+            panic!("the branch was not rebased");
+        };
+        assert_eq!(rig.forge.head_of("kelpie/7").as_ref(), Some(&rebased));
+        let worktree = rig.worktree_7();
+        assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), rebased);
+        assert_eq!(git(&worktree, &["rev-parse", "HEAD~1"]), landed);
+        assert_eq!(git(&worktree, &["show", "HEAD:work.txt"]), "work");
+
+        assert_eq!(
+            step(&runner).unwrap(),
+            None,
+            "CI on the rebased head is pending"
+        );
+        assert_eq!(rig.forge.comments(), []);
+        rig.forge.set_checks(&rebased, Checks::Passed);
+        ruling_report(step(&runner).unwrap());
+        assert_eq!(
+            rig.ask(&runner, "status", None)["rulings"][0]["kind"],
+            json!({ "kind": "merge", "head": rebased })
+        );
+    }
+
+    #[test]
+    fn a_rebase_that_conflicts_parks_the_worker_and_leaves_the_branch_as_it_was() {
+        let (rig, runner, head) = Rig::with_pull_request("koji");
+        rig.land_on_origin("work.txt");
+        let (_, question) = ruling_report(step(&runner).unwrap());
+        assert!(
+            question.starts_with(
+                "Kelpie cannot rebase pull request #71 onto main: \
+                 it conflicts with main in work.txt. Once the branch is fixed, \
+                 `shep trigger koji rule '1 yes'` has kelpie look again"
+            ),
+            "{question}"
+        );
+        assert_eq!(rig.forge.head_of("kelpie/7"), Some(head.clone()));
+        let worktree = rig.worktree_7();
+        assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), head);
+        assert_eq!(git(&worktree, &["status", "--porcelain"]), "");
+        assert_eq!(rig.claude.calls().len(), 1);
+    }
+
+    #[test]
+    fn a_worktree_with_uncommitted_changes_is_not_rebased() {
+        let (rig, runner, head) = Rig::with_pull_request("zeus");
+        std::fs::write(rig.worktree_7().join("work.txt"), "half done\n").unwrap();
+        rig.land_on_origin("landed.txt");
+        let (_, question) = ruling_report(step(&runner).unwrap());
+        assert!(
+            question.contains("onto main: its worktree has changes that are not committed."),
+            "{question}"
+        );
+        assert_eq!(rig.forge.head_of("kelpie/7"), Some(head));
+    }
+
+    #[test]
+    fn a_worker_that_repoints_its_common_git_dir_gets_no_rebase_run_there() {
+        let (rig, runner, head) = Rig::with_pull_request("golbat");
+        let wanted = rig.home.path().join("wanted");
+        std::fs::create_dir_all(wanted.join("hooks")).unwrap();
+        let own = rig.repo().join(".git/worktrees/7");
+        std::fs::write(own.join("commondir"), format!("{}\n", wanted.display())).unwrap();
+        rig.land_on_origin("landed.txt");
+        let Some(StepReport::GateFailed { reason, .. }) = step(&runner).unwrap() else {
+            panic!("kelpie ran git in a folder the worker chose");
+        };
+        assert!(
+            reason.ends_with("is not this work item's worktree"),
+            "{reason}"
+        );
+        assert_eq!(rig.forge.head_of("kelpie/7"), Some(head));
     }
 
     #[test]

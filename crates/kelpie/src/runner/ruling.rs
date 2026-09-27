@@ -138,7 +138,11 @@ impl Runner {
         } else if !matches!(pr.checks, Checks::Passed | Checks::None) {
             Some(format!("CI on #{number} is no longer green"))
         } else {
-            None
+            match self.has_latest_base(&head) {
+                Ok(true) => None,
+                Ok(false) => Some("main moved since the question".to_owned()),
+                Err(reason) => return Ok(self.gate_failed(reason)),
+            }
         };
         if let Some(reason) = stale {
             return self.withdraw(issue, number, reason);
@@ -403,6 +407,22 @@ mod tests {
         assert!(matches!(
             step(&runner).unwrap(),
             Some(StepReport::YesWithdrawn { reason, .. }) if reason == "CI on #71 is no longer green"
+        ));
+        assert_eq!(rig.forge.merges(), []);
+    }
+
+    #[test]
+    fn a_yes_after_main_moved_is_withdrawn_and_the_branch_rebased() {
+        let (rig, runner, _) = parked("rotom");
+        rig.land_on_origin("landed.txt");
+        rig.ask(&runner, "rule", Some("1 yes"));
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::YesWithdrawn { reason, .. }) if reason == "main moved since the question"
+        ));
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Rebased { .. })
         ));
         assert_eq!(rig.forge.merges(), []);
     }
