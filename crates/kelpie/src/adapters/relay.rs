@@ -9,7 +9,6 @@
 //! send, since the relay can restart between rulings.
 
 use std::ffi::OsString;
-use std::fmt;
 use std::fs;
 use std::io::Write;
 use std::os::unix::net::UnixStream;
@@ -18,7 +17,6 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
-use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::ports::{Relay, RelayError};
@@ -26,6 +24,7 @@ use crate::relay::{self, NAME};
 use crate::settings::Effort;
 
 mod lock;
+mod session;
 
 use lock::StartLock;
 
@@ -40,12 +39,6 @@ const APPEAR_POLL: Duration = Duration::from_millis(250);
 /// on #14, a message sent the moment a brand-new session appeared never
 /// reached it, though the same session took a message minutes later.
 const SOCKET_GRACE: Duration = Duration::from_secs(2);
-
-/// How many times a session's registry or peer-token file is looked for
-/// before giving up, and how long to wait between looks: the listing can
-/// name a pid before that pid has written its own files.
-const SESSION_FILE_TRIES: u32 = 10;
-const SESSION_FILE_POLL: Duration = Duration::from_millis(200);
 
 /// The running relay session `find` located
 struct Found {
@@ -164,29 +157,6 @@ impl RelayCli {
     fn sessions(&self) -> PathBuf {
         self.home.join(".claude/sessions")
     }
-
-    // Retried: `claude agents` can name a pid before that pid has written
-    // its own registry file.
-    fn registry(&self, pid: u32) -> Result<Registry, RelayError> {
-        retry_session_file(|| read_json(&self.sessions().join(format!("{pid}.json"))))
-    }
-
-    fn peer_token(&self, pid: u32) -> Result<PeerToken, RelayError> {
-        let prefix = format!("{pid}.");
-        retry_session_file(|| {
-            let entries = fs::read_dir(self.sessions())
-                .map_err(|e| RelayError::Unreachable(e.to_string()))?;
-            let key = entries
-                .filter_map(Result::ok)
-                .map(|e| e.path())
-                .find(|p| {
-                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-                    name.starts_with(&prefix) && name.ends_with(".key")
-                })
-                .ok_or_else(|| RelayError::Unreachable("no peer-token file".into()))?;
-            read_json::<Key>(&key).map(|k| k.peer_token)
-        })
-    }
 }
 
 impl Relay for RelayCli {
@@ -196,8 +166,8 @@ impl Relay for RelayCli {
         if fresh {
             thread::sleep(SOCKET_GRACE);
         }
-        let registry = self.registry(found.pid)?;
-        let token = self.peer_token(found.pid)?;
+        let registry = session::registry(&self.sessions(), found.pid)?;
+        let token = session::peer_token(&self.sessions(), found.pid)?;
         let mut stream = UnixStream::connect(&registry.messaging_socket_path)
             .map_err(|e| RelayError::Unreachable(e.to_string()))?;
         write_line(
@@ -266,25 +236,6 @@ fn start_argv(settings: &Path, instructions: &Path, model: &str, effort: Effort)
     ]
 }
 
-// A session file the listing can name before its own pid has written it.
-fn retry_session_file<T>(read: impl FnMut() -> Result<T, RelayError>) -> Result<T, RelayError> {
-    retry(SESSION_FILE_TRIES, SESSION_FILE_POLL, read)
-}
-
-fn retry<T>(
-    tries: u32,
-    poll: Duration,
-    mut attempt: impl FnMut() -> Result<T, RelayError>,
-) -> Result<T, RelayError> {
-    for _ in 0..tries.saturating_sub(1) {
-        if let Ok(value) = attempt() {
-            return Ok(value);
-        }
-        thread::sleep(poll);
-    }
-    attempt()
-}
-
 // What the relay needs from kelpie's own environment: a home to find its
 // trust and sessions under, a shell to run in, a temporary folder, and
 // whose account it is, mirroring the minimal set a pinned shep sheep
@@ -307,44 +258,6 @@ fn write_line(stream: &mut UnixStream, value: &Value) -> Result<(), RelayError> 
     stream
         .write_all(line.as_bytes())
         .map_err(|e| RelayError::Unreachable(e.to_string()))
-}
-
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, RelayError> {
-    let text = fs::read_to_string(path).map_err(|e| RelayError::Unreachable(e.to_string()))?;
-    // The parser's own message is never surfaced: a malformed key file's
-    // error could otherwise quote the token it failed on.
-    serde_json::from_str(&text)
-        .map_err(|_| RelayError::Unreachable("malformed session file".into()))
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Registry {
-    messaging_socket_path: PathBuf,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Key {
-    peer_token: PeerToken,
-}
-
-/// A relay session's peer token: a credential, since anyone holding it can
-/// send it messages. `Debug` does not leak it.
-#[derive(Clone, Deserialize)]
-#[serde(transparent)]
-struct PeerToken(String);
-
-impl PeerToken {
-    fn expose(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Debug for PeerToken {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("PeerToken(..)")
-    }
 }
 
 #[cfg(test)]
@@ -469,51 +382,6 @@ mod tests {
         assert!(!names.contains(&"KELPIE_HOME"));
     }
 
-    #[test]
-    fn retry_succeeds_once_the_attempt_stops_failing() {
-        let tries = std::cell::Cell::new(0);
-        let result = retry(5, Duration::from_millis(1), || {
-            tries.set(tries.get() + 1);
-            if tries.get() < 3 {
-                Err(RelayError::Unreachable("not yet".into()))
-            } else {
-                Ok(tries.get())
-            }
-        });
-        assert_eq!(result, Ok(3));
-    }
-
-    #[test]
-    fn retry_gives_up_after_its_tries_and_surfaces_the_last_error() {
-        let calls = std::cell::Cell::new(0);
-        let result = retry(3, Duration::from_millis(1), || {
-            calls.set(calls.get() + 1);
-            Err::<(), _>(RelayError::Unreachable("still not there".into()))
-        });
-        assert_eq!(calls.get(), 3);
-        assert_eq!(
-            result,
-            Err(RelayError::Unreachable("still not there".into()))
-        );
-    }
-
-    #[test]
-    fn retry_with_zero_tries_still_makes_the_one_attempt() {
-        let calls = std::cell::Cell::new(0);
-        let result = retry(0, Duration::from_millis(1), || {
-            calls.set(calls.get() + 1);
-            Err::<(), _>(RelayError::Unreachable("no".into()))
-        });
-        assert_eq!(calls.get(), 1, "a bad tries count must not hang or panic");
-        assert_eq!(result, Err(RelayError::Unreachable("no".into())));
-    }
-
-    #[test]
-    fn debug_does_not_leak_the_peer_token() {
-        let token = PeerToken("s3cr3t-token".into());
-        assert_eq!(format!("{token:?}"), "PeerToken(..)");
-    }
-
     // Framed the way the experiments repo's `relay_inject.py send` framed
     // it: an auth line naming the peer token, then one user message, each
     // one newline-delimited JSON.
@@ -553,53 +421,6 @@ mod tests {
                     "content": "[kelpie]\nproject=shep ruling=1\n\nq",
                 },
             })
-        );
-    }
-
-    #[test]
-    fn registry_and_peer_token_are_read_from_the_pids_own_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let sessions = dir.path().join(".claude/sessions");
-        fs::create_dir_all(&sessions).unwrap();
-        fs::write(
-            sessions.join("123.json"),
-            r#"{"messagingSocketPath":"/tmp/x.sock","sessionId":"abc"}"#,
-        )
-        .unwrap();
-        fs::write(sessions.join("123.xyz.key"), r#"{"peerToken":"s3cr3t"}"#).unwrap();
-
-        let relay = RelayCli::new(dir.path().to_owned(), dir.path().join("relay"));
-        assert_eq!(
-            relay.registry(123).unwrap().messaging_socket_path,
-            PathBuf::from("/tmp/x.sock")
-        );
-        assert_eq!(relay.peer_token(123).unwrap().expose(), "s3cr3t");
-    }
-
-    // Pid 123's prefix must not match pid 1234's key file.
-    //
-    // Real time: peer_token retries a missing file for the whole session-
-    // file wait before giving up, about 1.8s here.
-    #[test]
-    fn a_pid_never_takes_another_pids_key() {
-        let dir = tempfile::tempdir().unwrap();
-        let sessions = dir.path().join(".claude/sessions");
-        fs::create_dir_all(&sessions).unwrap();
-        fs::write(sessions.join("1234.abc.key"), r#"{"peerToken":"wrong"}"#).unwrap();
-
-        let relay = RelayCli::new(dir.path().to_owned(), dir.path().join("relay"));
-        assert!(relay.peer_token(123).is_err());
-    }
-
-    #[test]
-    fn a_key_file_that_fails_to_parse_never_names_its_contents() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("bad.key");
-        fs::write(&path, "not json, but s3cr3t-token if it were").unwrap();
-        let err = read_json::<Key>(&path).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "cannot reach the relay: malformed session file"
         );
     }
 }
