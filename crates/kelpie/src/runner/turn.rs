@@ -254,8 +254,8 @@ impl Runner {
         Ok(Some(report))
     }
 
-    // The open pull request from `branch`. A forge that cannot be asked is
-    // asked again when the next turn ends.
+    // The open pull request from `branch`. A forge that cannot be asked
+    // leaves it unrecorded, and status shows none.
     fn pull_request_from(&self, branch: &str) -> Option<u64> {
         let open = self
             .ports
