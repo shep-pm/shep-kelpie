@@ -41,7 +41,10 @@ const APPEAR_POLL: Duration = Duration::from_millis(250);
 const SOCKET_GRACE: Duration = Duration::from_secs(2);
 
 /// The running relay session `find` located
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Found {
+    /// The short id `claude stop`/`claude rm` take
+    id: String,
     pid: u32,
 }
 
@@ -69,6 +72,11 @@ impl RelayCli {
         StartLock::under(&self.folder)
     }
 
+    // Kelpie owns exactly one relay. If more than one is live under the
+    // fixed name, kelpie is not the only one that made it so (this crate
+    // never starts a second while it can find the first), so the newest is
+    // kept and every older one is stopped and removed rather than left to
+    // answer messages kelpie no longer expects it to see.
     fn find(&self) -> Result<Option<Found>, RelayError> {
         let output = Command::new("claude")
             .args(["agents", "--json", "--all"])
@@ -81,7 +89,35 @@ impl RelayCli {
         }
         let agents: Vec<Value> = serde_json::from_slice(&output.stdout)
             .map_err(|_| RelayError::Unreachable("unreadable agent list".into()))?;
-        Ok(pid_of_the_relay(&agents).map(|pid| Found { pid }))
+        let (newest, extras) = newest_and_extras(&agents);
+        for id in extras {
+            let _ = self.stop_and_remove(&id);
+        }
+        Ok(newest)
+    }
+
+    // `stop` only parks a session: Claude Code's own background handling
+    // can bring a stopped or killed session back under the same id with
+    // its conversation intact, which defeats the daily clear's whole
+    // point of dropping whatever a worker's question tried to carry into
+    // it. `rm` is the verb that actually deletes it.
+    fn stop_and_remove(&self, id: &str) -> Result<(), RelayError> {
+        let _ = Command::new("claude")
+            .args(["stop", id])
+            .stdin(Stdio::null())
+            .status();
+        let status = Command::new("claude")
+            .args(["rm", id])
+            .stdin(Stdio::null())
+            .status()
+            .map_err(|e| RelayError::CannotStop(e.to_string()))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(RelayError::CannotStop(format!(
+                "claude rm exited with {status}"
+            )))
+        }
     }
 
     // Kelpie is not the only thing that can bring the relay's process back:
@@ -207,33 +243,35 @@ impl Relay for RelayCli {
         let Some(found) = self.find()? else {
             return Ok(());
         };
-        let status = Command::new("kill")
-            .arg(found.pid.to_string())
-            .stdin(Stdio::null())
-            .status()
-            .map_err(|e| RelayError::CannotStop(e.to_string()))?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(RelayError::CannotStop(format!("kill exited with {status}")))
-        }
+        self.stop_and_remove(&found.id)
     }
 }
 
 // `--remote-control` and `--name` share `NAME`: the first names the remote
 // control channel, the second is what `claude agents --json --all` shows,
 // and both must match for the same relay to be found again.
-// A finished relay with the same fixed name stays in `claude agents --json
-// --all`'s listing, pid-less, so the first name match is not necessarily a
-// live one: every match is checked for a pid before one still running is
-// given up on. Measured live on #14: taking only the first name match found
-// a done session ahead of a live one and started a second relay.
-fn pid_of_the_relay(agents: &[Value]) -> Option<u32> {
-    agents
+//
+// A finished relay with the same fixed name stays in the listing, pid-less,
+// so a name match without a pid is never live. Measured live on #14: taking
+// the first name match regardless found a done session ahead of a live one
+// and started a second relay. Among the live matches, the newest by
+// `startedAt` is kept; any other is an extra kelpie itself never started
+// and is returned to be stopped and removed.
+fn newest_and_extras(agents: &[Value]) -> (Option<Found>, Vec<String>) {
+    let mut live: Vec<(String, u32, i64)> = agents
         .iter()
         .filter(|a| a["name"] == json!(NAME))
-        .find_map(|a| a["pid"].as_u64())
-        .and_then(|pid| u32::try_from(pid).ok())
+        .filter_map(|a| {
+            let pid = u32::try_from(a["pid"].as_u64()?).ok()?;
+            let id = a["id"].as_str()?.to_owned();
+            let started = a["startedAt"].as_i64().unwrap_or(0);
+            Some((id, pid, started))
+        })
+        .collect();
+    live.sort_by_key(|(_, _, started)| *started);
+    let newest = live.pop().map(|(id, pid, _)| Found { id, pid });
+    let extras = live.into_iter().map(|(id, ..)| id).collect();
+    (newest, extras)
 }
 
 fn start_argv(settings: &Path, instructions: &Path, model: &str, effort: Effort) -> Vec<OsString> {
@@ -283,13 +321,41 @@ mod tests {
             json!({ "id": "2b8edbf5", "name": NAME, "state": "done" }),
             json!({ "pid": 3145, "id": "a3069699", "name": NAME, "status": "idle" }),
         ];
-        assert_eq!(pid_of_the_relay(&agents), Some(3145));
+        let (found, extras) = newest_and_extras(&agents);
+        assert_eq!(
+            found,
+            Some(Found {
+                id: "a3069699".into(),
+                pid: 3145
+            })
+        );
+        assert_eq!(extras, Vec::<String>::new());
     }
 
     #[test]
     fn no_matching_name_is_none() {
         let agents = vec![json!({ "pid": 1, "name": "something-else" })];
-        assert_eq!(pid_of_the_relay(&agents), None);
+        assert_eq!(newest_and_extras(&agents), (None, Vec::new()));
+    }
+
+    // Measured live on #14: more than one live relay under the fixed name
+    // at once, both with a pid. The newest is kept; the other is an extra
+    // to stop and remove.
+    #[test]
+    fn more_than_one_live_relay_keeps_only_the_newest() {
+        let agents = vec![
+            json!({ "pid": 111, "id": "older", "name": NAME, "startedAt": 100 }),
+            json!({ "pid": 222, "id": "newer", "name": NAME, "startedAt": 200 }),
+        ];
+        let (found, extras) = newest_and_extras(&agents);
+        assert_eq!(
+            found,
+            Some(Found {
+                id: "newer".into(),
+                pid: 222
+            })
+        );
+        assert_eq!(extras, ["older"]);
     }
 
     #[test]

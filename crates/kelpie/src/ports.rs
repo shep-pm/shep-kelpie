@@ -440,12 +440,13 @@ pub trait Relay: Send + Sync {
     /// [`RelayError`] when the relay cannot be started or reached.
     fn send(&self, message: &str, model: &str, effort: Effort) -> Result<(), RelayError>;
 
-    /// Stops the relay, if one is running, so kelpie starts a fresh one
-    /// next time and its context does not grow without bound
+    /// Deletes the relay, if one exists, conversation included, so kelpie
+    /// starts a fresh one next time and nothing a worker's question tried
+    /// to carry into it survives the clear
     ///
     /// # Errors
     ///
-    /// [`RelayError`] when a running relay could not be stopped. Not an
+    /// [`RelayError`] when a running relay could not be deleted. Not an
     /// error when none was running.
     fn clear(&self) -> Result<(), RelayError>;
 }
