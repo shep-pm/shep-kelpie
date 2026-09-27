@@ -337,9 +337,9 @@ async fn ask_dog(action: &str, params: &str) -> Result<Value, String> {
     let value: Value =
         serde_json::from_str(&body).map_err(|e| format!("the dog answered {body:?} ({e})"))?;
     match value.get("error") {
+        None | Some(Value::Null) => Ok(value),
         Some(Value::String(error)) => Err(format!("the dog refused: {error}")),
         Some(error) => Err(format!("the dog refused: {error}")),
-        None => Ok(value),
     }
 }
 

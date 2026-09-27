@@ -194,9 +194,9 @@ async fn resync(
     client: &Client,
     names: &mut HashMap<u32, String>,
 ) -> Result<Vec<Delivery>, String> {
-    let flock = flock(client).await?;
-    *names = flock.names;
-    Ok(lock_desk(desk).resync(&flock.live))
+    let listed = flock(client).await?;
+    *names = listed.names;
+    Ok(lock_desk(desk).resync(&listed.live))
 }
 
 struct Flock {

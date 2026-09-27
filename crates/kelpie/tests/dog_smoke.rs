@@ -294,7 +294,7 @@ async fn the_lease_round_trip_runs_through_a_real_shepherd() {
         book(&client).await["queue"] == json!(["maintainer", { "runner": "koji" }])
     })
     .await;
-    assert!(holds(&client, "reactmap").await, "the maintainer preempted");
+    assert!(holds(&client, "reactmap").await, "reactmap lost its lease");
 
     // A runner that restarts loses its lease; the maintainer is next.
     shepherd.shep_ok(&["restart", "reactmap"]);
@@ -334,7 +334,12 @@ async fn the_lease_round_trip_runs_through_a_real_shepherd() {
     );
     let status: Value = serde_json::from_slice(&status.stdout).unwrap();
     let lock = shepherd.home.path().join("qwen-review/gpu.lock");
-    assert_eq!(status["leases"][0]["lock"], lock.display().to_string());
+    let leases = status["leases"].as_array().unwrap();
+    let gpu = leases
+        .iter()
+        .find(|l| l["kind"] == "gpu")
+        .expect("a GPU line");
+    assert_eq!(gpu["lock"], lock.display().to_string());
     assert_eq!(stand_in(&status)["holder"], json!({ "runner": "koji" }));
     assert!(stand_in(&status)["since"].as_u64().is_some());
 
