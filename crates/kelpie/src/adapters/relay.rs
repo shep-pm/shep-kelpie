@@ -15,7 +15,6 @@ use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
@@ -24,6 +23,10 @@ use serde_json::{Value, json};
 
 use crate::ports::{Relay, RelayError};
 use crate::relay::{self, EFFORT, MODEL, NAME};
+
+mod lock;
+
+use lock::StartLock;
 
 /// How many times a started relay is looked for before giving up, and how
 /// long to wait between looks: about the 2 seconds a real session took to
@@ -45,19 +48,19 @@ pub struct RelayCli {
     /// Where the relay's own settings and instructions files are written,
     /// under kelpie's home
     folder: PathBuf,
-    /// Held across a start, so two calls racing to find none running
-    /// never both start one
-    starting: Arc<Mutex<()>>,
 }
 
 impl RelayCli {
     /// A relay whose settings and instructions live under `folder`
     pub fn new(home: PathBuf, folder: PathBuf) -> Self {
-        Self {
-            home,
-            folder,
-            starting: Arc::default(),
-        }
+        Self { home, folder }
+    }
+
+    // Every project is its own process, and all of them target the one
+    // fixed relay name, so an in-process guard alone cannot stop two
+    // processes racing to find none running and both start one.
+    fn start_lock(&self) -> StartLock {
+        StartLock::under(&self.folder)
     }
 
     fn find(&self) -> Result<Option<Found>, RelayError> {
@@ -87,7 +90,9 @@ impl RelayCli {
         fs::write(&settings, text).map_err(|e| RelayError::CannotStart(e.to_string()))?;
         fs::write(&instructions, relay::INSTRUCTIONS)
             .map_err(|e| RelayError::CannotStart(e.to_string()))?;
-        let output = Command::new("claude")
+        let mut command = Command::new("claude");
+        relay_env(&mut command);
+        let output = command
             .args(start_argv(&settings, &instructions))
             .current_dir(&self.home)
             .stdin(Stdio::null())
@@ -104,8 +109,8 @@ impl RelayCli {
         if let Some(found) = self.find()? {
             return Ok(found);
         }
-        let _starting = self.starting.lock().unwrap_or_else(PoisonError::into_inner);
-        // Another call may have started one while this one waited for the lock.
+        let _held = self.start_lock().acquire()?;
+        // Another process may have started one while this one waited.
         if let Some(found) = self.find()? {
             return Ok(found);
         }
@@ -205,6 +210,22 @@ fn start_argv(settings: &Path, instructions: &Path) -> Vec<OsString> {
     ]
 }
 
+// What the relay needs from kelpie's own environment: a home to find its
+// trust and sessions under, a shell to run in, a temporary folder, and
+// whose account it is, mirroring the minimal set a pinned shep sheep
+// itself starts with (see docs/design-log.md). Everything else kelpie's
+// own process happens to carry stays out of the relay's.
+const RELAY_ENV: [&str; 5] = ["HOME", "PATH", "TMPDIR", "USER", "LANG"];
+
+fn relay_env(command: &mut Command) {
+    command.env_clear();
+    for var in RELAY_ENV {
+        if let Ok(value) = std::env::var(var) {
+            command.env(var, value);
+        }
+    }
+}
+
 fn write_line(stream: &mut UnixStream, value: &Value) -> Result<(), RelayError> {
     let mut line = value.to_string();
     line.push('\n');
@@ -287,6 +308,48 @@ mod tests {
                 "/k/relay/instructions.md",
             ]
         );
+    }
+
+    // The `ask` rule on `relay-yes`, and the prompt for anything the
+    // settings do not name, are the whole fence: a permissive permission
+    // mode here would let the relay run past either one.
+    #[test]
+    fn the_relay_never_starts_in_a_permissive_permission_mode() {
+        let argv: Vec<String> = start_argv(
+            Path::new("/k/relay/settings.json"),
+            Path::new("/k/relay/instructions.md"),
+        )
+        .into_iter()
+        .map(|a| a.into_string().unwrap())
+        .collect();
+        assert!(!argv.contains(&"--permission-mode".to_owned()), "{argv:?}");
+        assert!(
+            !argv.iter().any(|a| a == "bypassPermissions" || a == "auto"),
+            "{argv:?}"
+        );
+        assert!(
+            !argv.contains(&"--dangerously-skip-permissions".to_owned()),
+            "{argv:?}"
+        );
+    }
+
+    #[test]
+    fn the_relay_gets_only_the_minimal_environment() {
+        let mut command = Command::new("true");
+        relay_env(&mut command);
+        let names: Vec<&str> = command
+            .get_envs()
+            .map(|(name, _)| name.to_str().unwrap())
+            .collect();
+        for name in &names {
+            assert!(
+                RELAY_ENV.contains(name),
+                "{name} should not reach the relay"
+            );
+        }
+        // A var this process carries but `relay_env` does not name never
+        // reaches the child: `env_clear` ran before the allowed set was applied.
+        assert!(!names.contains(&"KELPIE_HOME"));
     }
 
     #[test]
