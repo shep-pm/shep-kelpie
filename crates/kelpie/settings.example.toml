@@ -7,6 +7,10 @@ forge = "shep-pm/shep"
 # `ask` is the only merge authority the first build accepts.
 merge_authority = "ask"
 
+# Whether the repo runs CI on pull requests. GitHub cannot tell a repo
+# with no CI from checks not registered yet, so a repo without CI says so.
+ci = true
+
 # Left out of a pull request's changed-line count.
 generated = [
     "Cargo.lock",

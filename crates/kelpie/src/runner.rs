@@ -13,16 +13,27 @@ use crate::board::{LabelError, WorkerModel, worker_override};
 use crate::ports::{ForgeError, Ports, Visibility};
 use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
-use crate::work_item::{Turn, WorkItem, new_session_id};
+use crate::work_item::{Phase, Turn, WorkItem, new_session_id};
 
 mod dispatch;
+mod gate;
+mod merge;
 mod paths;
+mod report;
+mod ruling;
 mod trigger;
 mod turn;
 
+pub use merge::DropError;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
+pub use report::StepReport;
+pub use ruling::{Answer, RuleError};
+pub use trigger::GateError;
 pub use trigger::{ACTIONS, Status, WorkItemStatus, answer};
-pub use turn::{TurnReport, step};
+pub use turn::step;
+
+#[cfg(test)]
+pub(crate) use gate::CHECKS_SETTLE;
 
 /// Why a runner could not start
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,6 +218,8 @@ impl Runner {
             session,
             turn: Turn::Due,
             pull_request: None,
+            phase: Phase::Implement,
+            red_head: None,
             calls: Vec::new(),
         });
         self.save(next).map_err(AddError::State)?;

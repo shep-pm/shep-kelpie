@@ -5,7 +5,7 @@
 //! one in flight is gone.
 
 use super::Runner;
-use super::turn::{Begin, TurnReport};
+use super::report::{Begin, StepReport};
 use crate::board;
 use crate::state::StateError;
 
@@ -19,23 +19,23 @@ impl Runner {
         let (ready, open) = match listed {
             Ok(listed) => listed,
             Err(e) => {
-                return Ok(Begin::Report(TurnReport::BoardFailed {
+                return Ok(Begin::Report(StepReport::BoardFailed {
                     reason: format!("cannot read the board: {e}"),
                 }));
             }
         };
-        let pick = board::pick(&ready, &open);
+        let pick = board::pick(&ready, &open, &self.state.finished);
         let Some(issue) = pick.issue else {
             return Ok(Begin::Idle);
         };
         let report = match self.add(issue) {
-            Ok(worker) => TurnReport::Dispatched {
+            Ok(worker) => StepReport::Dispatched {
                 issue,
                 worker,
                 skipped: pick.skipped,
             },
             Err(super::AddError::State(e)) => return Err(e),
-            Err(e) => TurnReport::BoardFailed {
+            Err(e) => StepReport::BoardFailed {
                 reason: format!("cannot dispatch #{issue}: {e}"),
             },
         };
@@ -52,7 +52,7 @@ mod tests {
     use super::*;
     use crate::board::{Skip, WorkerModel};
     use crate::ports::{ClaudeError, Cost, Usage};
-    use crate::runner::{step, turn::TurnReport};
+    use crate::runner::{StepReport, step};
     use crate::settings::Effort;
     use crate::test::{Rig, Scripted};
 
@@ -78,7 +78,7 @@ mod tests {
 
         assert_eq!(
             step(&runner).unwrap(),
-            Some(TurnReport::Dispatched {
+            Some(StepReport::Dispatched {
                 issue: 9,
                 worker: sonnet_medium(),
                 skipped: vec![],
@@ -106,7 +106,7 @@ mod tests {
 
         assert_eq!(
             step(&runner).unwrap(),
-            Some(TurnReport::Dispatched {
+            Some(StepReport::Dispatched {
                 issue: 5,
                 worker: sonnet_medium(),
                 skipped: vec![
@@ -200,7 +200,7 @@ mod tests {
         rig.forge.set_board_down(true);
         assert_eq!(
             step(&runner).unwrap(),
-            Some(TurnReport::BoardFailed {
+            Some(StepReport::BoardFailed {
                 reason: "cannot read the board: gh failed: the board is down".into()
             })
         );
@@ -209,7 +209,7 @@ mod tests {
         rig.forge.set_board_down(false);
         assert!(matches!(
             step(&runner).unwrap(),
-            Some(TurnReport::Dispatched { issue: 2, .. })
+            Some(StepReport::Dispatched { issue: 2, .. })
         ));
     }
 
@@ -234,7 +234,7 @@ mod tests {
         rig.forge.remove_issue(4);
         assert_eq!(
             step(&runner).unwrap(),
-            Some(TurnReport::BoardFailed {
+            Some(StepReport::BoardFailed {
                 reason: "cannot dispatch #4: cannot read the issue: gh failed: no issue #4".into()
             })
         );
@@ -251,7 +251,7 @@ mod tests {
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
         rig.claude
             .script([Scripted::Reply(Usage::default(), Cost(1))]);
-        let Some(TurnReport::Ended { pull_request, .. }) = step(&runner).unwrap() else {
+        let Some(StepReport::Ended { pull_request, .. }) = step(&runner).unwrap() else {
             panic!("the turn did not end");
         };
         assert_eq!(pull_request, Some(71));

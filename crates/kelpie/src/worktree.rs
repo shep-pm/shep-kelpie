@@ -45,6 +45,13 @@ pub enum WorktreeError {
         /// What creating it failed with
         kind: io::ErrorKind,
     },
+    /// A build folder could not be removed
+    Remove {
+        /// The folder
+        path: PathBuf,
+        /// What removing it failed with
+        kind: io::ErrorKind,
+    },
 }
 
 impl fmt::Display for WorktreeError {
@@ -62,6 +69,9 @@ impl fmt::Display for WorktreeError {
             }
             Self::Folder { path, kind } => {
                 write!(f, "cannot create {}: {kind}", path.display())
+            }
+            Self::Remove { path, kind } => {
+                write!(f, "cannot remove {}: {kind}", path.display())
             }
         }
     }
@@ -123,6 +133,202 @@ pub fn prepare(
     Ok(Worktree {
         git_common_dir,
         git_dir,
+    })
+}
+
+/// Removes a work item's worktree, its branch and its build folder
+///
+/// `remote` also deletes the branch on `origin`. Whatever is already gone
+/// is skipped, so a removal cut short can run again.
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command or folder that failed.
+pub fn remove(
+    repo: &Path,
+    worktree: &Path,
+    branch: &str,
+    build: &Path,
+    remote: bool,
+) -> Result<(), WorktreeError> {
+    if worktree.exists() {
+        let wt = worktree.as_os_str();
+        git(
+            repo,
+            [
+                "worktree".as_ref(),
+                "remove".as_ref(),
+                "--force".as_ref(),
+                wt,
+            ],
+        )?;
+    }
+    git(repo, ["worktree", "prune"])?;
+    let full_ref = format!("refs/heads/{branch}");
+    if git(repo, ["rev-parse", "--verify", "--quiet", &full_ref]).is_ok() {
+        git(repo, ["branch", "--quiet", "-D", branch])?;
+    }
+    if remote && !git(repo, ["ls-remote", "--heads", "origin", &full_ref])?.is_empty() {
+        git(repo, ["push", "--quiet", "origin", "--delete", &full_ref])?;
+    }
+    match std::fs::remove_dir_all(build) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(WorktreeError::Remove {
+            path: build.to_owned(),
+            kind: e.kind(),
+        }),
+        _ => Ok(()),
+    }
+}
+
+/// Where a pull request's head stands against `origin`, just fetched
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Base {
+    /// The head is the branch on `origin`, and has the latest `main`
+    Current,
+    /// The head is the branch on `origin`, and lacks the latest `main`
+    Behind,
+    /// The branch on `origin` is not the head the forge reported, which
+    /// lags a push by a moment
+    Lagging,
+}
+
+/// Fetches `origin`, and says where `head`, the forge's head of `branch`, stands
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn base_of(repo: &Path, branch: &str, head: &str) -> Result<Base, WorktreeError> {
+    git(repo, ["fetch", "--quiet", "origin", BASE, branch])?;
+    let tracking = format!("refs/remotes/origin/{branch}");
+    if git(repo, ["rev-parse", "--verify", "--quiet", &tracking])? != head {
+        return Ok(Base::Lagging);
+    }
+    // `--is-ancestor` answers no with exit 1, and fails with any other code.
+    let base = format!("origin/{BASE}");
+    let args = ["merge-base", "--is-ancestor", &base, head];
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| WorktreeError::Spawn(e.to_string()))?;
+    match output.status.code() {
+        Some(0) => Ok(Base::Current),
+        Some(1) => Ok(Base::Behind),
+        _ => Err(WorktreeError::Git {
+            args: args.join(" "),
+            stderr: String::from_utf8_lossy(&output.stderr).into(),
+        }),
+    }
+}
+
+/// What a rebase onto `origin/main` came to
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Rebase {
+    /// Rebased and pushed: the branch's new head
+    Pushed(String),
+    /// Left as it was, for this reason, which only the maintainer can settle
+    Refused(String),
+}
+
+/// Rebases the worktree's branch, at `head`, onto `origin/main` and pushes it
+///
+/// The push is forced with a lease on `head`, so it fails rather than drop a
+/// commit pushed since. A conflict aborts the rebase, and a failed push
+/// puts the branch back at `head`. Run [`base_of`] first, which fetches.
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn rebase(
+    repo: &Path,
+    worktree: &Path,
+    branch: &str,
+    head: &str,
+) -> Result<Rebase, WorktreeError> {
+    let in_worktree = trusted(repo, worktree)?;
+    let full_ref = format!("refs/heads/{branch}");
+    let on_branch = in_worktree(&["symbolic-ref", "--quiet", "HEAD"])
+        .ok()
+        .as_deref()
+        == Some(&full_ref);
+    if !on_branch || in_worktree(&["rev-parse", "HEAD"])? != head {
+        let short = head.get(..7).unwrap_or(head);
+        return Ok(Rebase::Refused(format!(
+            "its worktree is not at the pull request's head {short}"
+        )));
+    }
+    if !in_worktree(&["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
+        return Ok(Rebase::Refused(
+            "its worktree has changes that are not committed".into(),
+        ));
+    }
+    // The rebased commits take the head's committer, the worker's one
+    // identity, so the rebase needs no identity of its own.
+    let name = format!(
+        "user.name={}",
+        in_worktree(&["log", "-1", "--format=%cn", head])?
+    );
+    let email = format!(
+        "user.email={}",
+        in_worktree(&["log", "-1", "--format=%ce", head])?
+    );
+    let base = format!("origin/{BASE}");
+    if let Err(e) = in_worktree(&["-c", &name, "-c", &email, "rebase", "--quiet", &base]) {
+        let conflicts =
+            in_worktree(&["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();
+        let aborted = in_worktree(&["rebase", "--abort"]);
+        if conflicts.is_empty() {
+            return Err(e);
+        }
+        aborted?;
+        let files: Vec<&str> = conflicts.lines().collect();
+        return Ok(Rebase::Refused(format!(
+            "it conflicts with main in {}",
+            files.join(", ")
+        )));
+    }
+    let rebased = in_worktree(&["rev-parse", "HEAD"])?;
+    let lease = format!("--force-with-lease={full_ref}:{head}");
+    let target = format!("HEAD:{full_ref}");
+    if let Err(e) = in_worktree(&["push", "--quiet", &lease, "origin", &target]) {
+        // Best effort: a branch left off the head is refused on the next look.
+        let _ = in_worktree(&["reset", "--quiet", "--hard", head]);
+        return Err(e);
+    }
+    Ok(Rebase::Pushed(rebased))
+}
+
+// Git for the worktree, with its git dirs named rather than found. The
+// worker can write the worktree's own git dir, so its `commondir` is checked
+// against the repo's, and hooks are off: none of them is kelpie's to run.
+fn trusted<'a>(
+    repo: &Path,
+    worktree: &'a Path,
+) -> Result<impl Fn(&[&str]) -> Result<String, WorktreeError> + 'a, WorktreeError> {
+    let foreign = || WorktreeError::Foreign(worktree.to_owned());
+    let common = git(
+        repo,
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
+    let common = canonical(Path::new(&common));
+    let own = own_git_dir(&common, worktree).ok_or_else(foreign)?;
+    let named = std::fs::read_to_string(own.join("commondir")).map_err(|_| foreign())?;
+    if canonical(&own.join(named.trim())) != common {
+        return Err(foreign());
+    }
+    let prefix = [
+        "--git-dir".into(),
+        own.into_os_string(),
+        "--work-tree".into(),
+        worktree.as_os_str().to_owned(),
+        "-c".into(),
+        "core.hooksPath=/dev/null".into(),
+    ];
+    Ok(move |args: &[&str]| {
+        let args = prefix.iter().cloned().chain(args.iter().map(Into::into));
+        git(worktree, args.collect::<Vec<std::ffi::OsString>>())
     })
 }
 

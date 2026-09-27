@@ -1,22 +1,28 @@
 //! The main seam's rig: a runner on stand-ins for Claude, the forge and the
 //! clock, over a real git repo in a throwaway home
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tempfile::TempDir;
 
-use crate::board::{OpenPullRequest, READY, ReadyIssue, WorkerModel};
+use crate::board::WorkerModel;
 use crate::ports::{
-    Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Forge, ForgeError, Issue, Ports,
-    Role, SessionId, Timestamp, Usage, Visibility,
+    Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Ports, Role, SessionId,
+    Timestamp, Usage,
 };
-use crate::runner::{OpenError, ProjectName, ProjectPaths, Runner, answer};
-use crate::settings::{Effort, ForgeSlug};
-use crate::work_item::{CallRecord, Turn, WorkItem};
+use crate::runner::{
+    CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
+};
+use crate::settings::Effort;
+use crate::work_item::{CallRecord, Phase, Turn, WorkItem};
+
+mod forge;
+
+pub(crate) use forge::FakeForge;
 
 /// A work item with one call, so every field of its format shows
 pub(crate) fn a_work_item() -> WorkItem {
@@ -35,6 +41,11 @@ pub(crate) fn a_work_item() -> WorkItem {
             since: Timestamp(9),
         },
         pull_request: Some(51),
+        phase: Phase::Ci {
+            head: Some("c0ffee".into()),
+            since: Timestamp(11),
+        },
+        red_head: Some("bad".into()),
         calls: vec![CallRecord {
             role: Role::Worker,
             at: Timestamp(10),
@@ -66,6 +77,9 @@ pub(crate) enum Scripted {
     Fail(ClaudeError),
     /// Leaves [`LEFT_BEHIND`] in the worktree, then dies with the runner
     Kill,
+    /// Commits this file with this text on the worktree's branch, pushes
+    /// it the way a worker does, and answers
+    Push(&'static str, &'static str),
 }
 
 /// A call as the stand-in Claude saw it
@@ -126,113 +140,20 @@ impl Claude for FakeClaude {
                 std::fs::write(call.cwd.join(LEFT_BEHIND), "work in progress\n").unwrap();
                 panic!("the runner is killed mid-turn");
             }
+            Some(Scripted::Push(file, text)) => {
+                std::fs::write(call.cwd.join(file), text).unwrap();
+                git(&call.cwd, &["add", file]);
+                git(&call.cwd, &["commit", "--quiet", "-m", file]);
+                git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);
+                Ok(ClaudeReply {
+                    session_id: call.session.id().clone(),
+                    text: "pushed".into(),
+                    usage: Usage::default(),
+                    session_cost: Cost(0),
+                })
+            }
             None => Err(ClaudeError::Failed("the rig scripts no reply".into())),
         }
-    }
-}
-
-/// A forge whose repo is public and whose every issue exists, unless a
-/// test says otherwise. Its board is empty until a test lists issues on it.
-#[derive(Debug, Clone)]
-pub(crate) struct FakeForge {
-    visibility: Arc<Mutex<Visibility>>,
-    missing: Arc<Mutex<HashSet<u64>>>,
-    labels: Arc<Mutex<HashMap<u64, Vec<String>>>>,
-    ready: Arc<Mutex<Vec<ReadyIssue>>>,
-    open: Arc<Mutex<Vec<OpenPullRequest>>>,
-    board_down: Arc<AtomicBool>,
-    calls: Arc<AtomicUsize>,
-}
-
-impl FakeForge {
-    pub(crate) fn set_visibility(&self, visibility: Visibility) {
-        *self.visibility.lock().unwrap() = visibility;
-    }
-
-    pub(crate) fn remove_issue(&self, number: u64) {
-        self.missing.lock().unwrap().insert(number);
-    }
-
-    /// Labels issue `number` with `label`, on the board and when viewed
-    pub(crate) fn label(&self, number: u64, label: &str) {
-        let mut labels = self.labels.lock().unwrap();
-        labels.entry(number).or_default().push(label.to_owned());
-    }
-
-    /// Lists issue `number` as ready, with whether anyone is assigned
-    pub(crate) fn list_ready(&self, number: u64, assigned: bool) {
-        self.label(number, READY);
-        self.ready.lock().unwrap().push(ReadyIssue {
-            number,
-            assigned,
-            labels: Vec::new(),
-        });
-    }
-
-    /// Opens pull request `number` from `head`, closing `closes`
-    pub(crate) fn open_pull_request(&self, number: u64, head: &str, closes: &[u64]) {
-        self.open.lock().unwrap().push(OpenPullRequest {
-            number,
-            head: head.to_owned(),
-            closes: closes.to_vec(),
-        });
-    }
-
-    /// Makes listing the board fail, or work again
-    pub(crate) fn set_board_down(&self, down: bool) {
-        self.board_down.store(down, Ordering::SeqCst);
-    }
-
-    /// How many times the repo's visibility was asked
-    pub(crate) fn calls(&self) -> usize {
-        self.calls.load(Ordering::SeqCst)
-    }
-
-    fn labels_of(&self, number: u64) -> Vec<String> {
-        let labels = self.labels.lock().unwrap();
-        labels.get(&number).cloned().unwrap_or_default()
-    }
-
-    fn board(&self) -> Result<(), ForgeError> {
-        if self.board_down.load(Ordering::SeqCst) {
-            return Err(ForgeError::Failed("the board is down".into()));
-        }
-        Ok(())
-    }
-}
-
-impl Forge for FakeForge {
-    fn visibility(&self, _repo: &ForgeSlug) -> Result<Visibility, ForgeError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(*self.visibility.lock().unwrap())
-    }
-
-    fn issue(&self, _repo: &ForgeSlug, number: u64) -> Result<Issue, ForgeError> {
-        if self.missing.lock().unwrap().contains(&number) {
-            return Err(ForgeError::Failed(format!("no issue #{number}")));
-        }
-        Ok(Issue {
-            title: format!("Title of #{number}"),
-            body: format!("Body of #{number}.\n"),
-            labels: self.labels_of(number),
-        })
-    }
-
-    fn ready_issues(&self, _repo: &ForgeSlug) -> Result<Vec<ReadyIssue>, ForgeError> {
-        self.board()?;
-        let ready = self.ready.lock().unwrap().clone();
-        Ok(ready
-            .into_iter()
-            .map(|i| ReadyIssue {
-                labels: self.labels_of(i.number),
-                ..i
-            })
-            .collect())
-    }
-
-    fn open_pull_requests(&self, _repo: &ForgeSlug) -> Result<Vec<OpenPullRequest>, ForgeError> {
-        self.board()?;
-        Ok(self.open.lock().unwrap().clone())
     }
 }
 
@@ -276,20 +197,13 @@ impl Rig {
 
     /// A project with the example settings, pointed at a fresh repo
     pub(crate) fn new(project: &str) -> Self {
+        let home = tempfile::tempdir().unwrap();
         let rig = Self {
-            home: tempfile::tempdir().unwrap(),
             project: ProjectName::try_from(project).unwrap(),
             claude: FakeClaude::default(),
-            forge: FakeForge {
-                visibility: Arc::new(Mutex::new(Visibility::Public)),
-                missing: Arc::default(),
-                labels: Arc::default(),
-                ready: Arc::default(),
-                open: Arc::default(),
-                board_down: Arc::default(),
-                calls: Arc::default(),
-            },
+            forge: FakeForge::new(home.path().join("origin.git")),
             clock: FakeClock::at(Self::EPOCH),
+            home,
         };
         rig.make_repo();
 
@@ -386,6 +300,54 @@ impl Rig {
         params: Option<&str>,
     ) -> serde_json::Value {
         serde_json::from_str(&answer(runner, action, params)).expect("a JSON reply")
+    }
+
+    /// A running project whose worker's first turn pushed `work.txt` on
+    /// `kelpie/7` and opened draft pull request 71, with CI not yet reported
+    ///
+    /// Returns the pull request's head. The gate tests all start here, since
+    /// the gate begins where the worker's pull request is open.
+    pub(crate) fn with_pull_request(project: &str) -> (Self, Mutex<Runner>, String) {
+        let rig = Self::new(project);
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "start", None);
+        rig.ask(&runner, "add", Some("7"));
+        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+        rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+        step(&runner).unwrap();
+        let head = rig.forge.head_of("kelpie/7").expect("the worker pushed");
+        (rig, runner, head)
+    }
+
+    /// [`Rig::with_pull_request`], with CI green and the worker parked on
+    /// merge ruling 1 about the returned head
+    pub(crate) fn parked(project: &str) -> (Self, Mutex<Runner>, String) {
+        let (rig, runner, head) = Self::with_pull_request(project);
+        rig.forge.set_checks(&head, Checks::Passed);
+        assert!(matches!(
+            rig.verdict(&runner),
+            Some(StepReport::Ruling { id: 1, .. })
+        ));
+        (rig, runner, head)
+    }
+
+    /// Steps once and, if nothing happened, waits out CI's settling and
+    /// steps again: how a CI verdict is reached
+    pub(crate) fn verdict(&self, runner: &Mutex<Runner>) -> Option<StepReport> {
+        if let Some(report) = step(runner).unwrap() {
+            return Some(report);
+        }
+        self.clock.advance(CHECKS_SETTLE);
+        step(runner).unwrap()
+    }
+
+    /// The worktree kelpie makes for issue 7
+    pub(crate) fn worktree_7(&self) -> PathBuf {
+        self.home
+            .path()
+            .join("kelpie/wt")
+            .join(self.project.as_str())
+            .join("7")
     }
 }
 
