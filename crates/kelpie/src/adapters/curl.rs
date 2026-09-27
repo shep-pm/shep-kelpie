@@ -91,6 +91,7 @@ fn config(webhook: &Webhook, alert: &Alert) -> String {
         ("max-time", MAX_TIME.to_string()),
         ("output", "/dev/null".to_owned()),
         ("write-out", "%{http_code}".to_owned()),
+        // curl reads a literal `\n` in a value as a newline, so no worker text goes in a header.
         ("header", header),
         ("data-raw", body),
     ];
