@@ -15,7 +15,7 @@ impl Runner {
         let repo = &self.settings.forge;
         let listed = forge
             .ready_issues(repo)
-            .and_then(|ready| Ok((ready, forge.open_pull_requests(repo)?)));
+            .and_then(|ready| forge.open_pull_requests(repo).map(|open| (ready, open)));
         let (ready, open) = match listed {
             Ok(listed) => listed,
             Err(e) => {
