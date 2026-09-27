@@ -8,11 +8,13 @@ mod claude;
 mod curl;
 mod gh;
 mod process;
+mod relay;
 mod usage;
 
 pub use claude::ClaudeCli;
 pub use curl::Curl;
 pub use gh::Gh;
+pub use relay::RelayCli;
 pub use usage::UsageMeter;
 
 /// The machine's wall clock

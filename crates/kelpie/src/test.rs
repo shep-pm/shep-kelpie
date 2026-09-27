@@ -12,7 +12,7 @@ use tempfile::TempDir;
 use crate::board::WorkerModel;
 use crate::ports::{
     Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Meter, MeterError, Ports,
-    Role, SessionId, Timestamp, Usage, Utilization, Window,
+    Relay, Role, SessionId, Timestamp, Usage, Utilization, Window,
 };
 use crate::runner::{
     CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
@@ -23,9 +23,11 @@ use crate::work_item::{CallRecord, Phase, Turn, WorkItem};
 
 mod alerts;
 mod forge;
+mod relay;
 
 pub(crate) use alerts::FakeAlerts;
 pub(crate) use forge::FakeForge;
+pub(crate) use relay::FakeRelay;
 
 /// A work item with one call, so every field of its format shows
 pub(crate) fn a_work_item() -> WorkItem {
@@ -252,6 +254,7 @@ pub(crate) struct Rig {
     pub(crate) claude: FakeClaude,
     pub(crate) forge: FakeForge,
     pub(crate) meter: FakeMeter,
+    pub(crate) relay: Arc<FakeRelay>,
     pub(crate) alerts: FakeAlerts,
     pub(crate) clock: FakeClock,
 }
@@ -299,6 +302,7 @@ impl Rig {
             },
             forge: FakeForge::new(home.path().join("origin.git")),
             meter,
+            relay: Arc::new(FakeRelay::default()),
             alerts: FakeAlerts::default(),
             clock: FakeClock::at(Self::EPOCH),
             home,
@@ -391,6 +395,7 @@ impl Rig {
             claude: Arc::new(self.claude.clone()),
             forge: Box::new(self.forge.clone()),
             meter: Box::new(self.meter.clone()),
+            relay: Arc::clone(&self.relay) as Arc<dyn Relay>,
             alerts: Arc::new(self.alerts.clone()),
             clock: Box::new(self.clock.clone()),
         };
