@@ -157,6 +157,9 @@ impl Runner {
             ReviewResult::Findings(Err(reason)) => StepReport::GateFailed { issue, reason },
             // Nothing to judge: the round is clean at once.
             ReviewResult::Findings(Ok(findings)) if findings.is_empty() => {
+                if !matches!(review.stage, ReviewStage::Round) {
+                    unreachable!("a round's findings only arrive while awaiting that round");
+                }
                 item.phase = advance(review, true, now);
                 StepReport::ReviewFindingsSent {
                     issue,
@@ -167,6 +170,9 @@ impl Runner {
                 }
             }
             ReviewResult::Findings(Ok(findings)) => {
+                if !matches!(review.stage, ReviewStage::Round) {
+                    unreachable!("a round's findings only arrive while awaiting that round");
+                }
                 let reviewer = review.reviewer();
                 let count = findings.len();
                 item.phase = Phase::Review(Review {

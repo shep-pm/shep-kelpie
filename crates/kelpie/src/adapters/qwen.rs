@@ -159,7 +159,14 @@ impl Reviewer for QwenReviewer {
         let mut skipped_index = 0u32;
         for finding in findings {
             if is_skipped_for_size(&finding) {
-                combined.extend(self.hunk_round(worktree, out, round, skipped_index, &finding)?);
+                // A hunk kelpie could not run keeps its placeholder, the
+                // same as a hunk whose own `git diff` failed: one file's
+                // trouble never costs the round every other finding it
+                // already has.
+                match self.hunk_round(worktree, out, round, skipped_index, &finding) {
+                    Ok(found) => combined.extend(found),
+                    Err(_) => combined.push(finding),
+                }
                 skipped_index += 1;
             } else {
                 combined.push(finding);
@@ -338,6 +345,72 @@ esac
             why: "split the file or review it by hand".into(),
         };
         assert_eq!(reviewer.round(&worktree, &out, 1).unwrap(), vec![skip]);
+    }
+
+    // The hunk's own script invocation fails outright (not the `git diff`
+    // step): the placeholder survives, and so does everything else the
+    // round already found.
+    #[test]
+    fn a_hunk_script_failure_keeps_the_skip_placeholder_and_the_rounds_other_findings() {
+        let home = tempfile::tempdir().unwrap();
+        let script_dir = home.path().join(".claude/scripts");
+        std::fs::create_dir_all(&script_dir).unwrap();
+        let script = script_dir.join("qwen-review.sh");
+        let contents = "#!/bin/sh
+mkdir -p \"$QWEN_REVIEW_OUT\"
+case \"$*\" in
+  *--files*)
+    exit 1
+    ;;
+  *)
+    printf 'MEDIUM|src/lib.rs:9|a real finding|it matters\\n' > \"$QWEN_REVIEW_OUT/round-1.txt\"
+    printf 'LOW|sub/big.rs:0|not reviewed: 900 lines exceeds the chunk limit|split the file or review it by hand\\n' \\
+      >> \"$QWEN_REVIEW_OUT/round-1.txt\"
+    ;;
+esac
+: > \"$QWEN_REVIEW_OUT/round-1.txt.done\"
+";
+        std::fs::write(&script, contents).unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        let worktree = home.path().join("repo");
+        std::fs::create_dir_all(worktree.join("sub")).unwrap();
+        crate::test::git(&worktree, &["init", "--quiet", "-b", "main"]);
+        std::fs::write(worktree.join("sub/big.rs"), "fn big() {}\n").unwrap();
+        crate::test::git(&worktree, &["add", "."]);
+        crate::test::git(&worktree, &["commit", "--quiet", "-m", "init"]);
+        let base = crate::test::git(&worktree, &["rev-parse", "HEAD"]);
+        crate::test::git(
+            &worktree,
+            &["update-ref", "refs/remotes/origin/main", &base],
+        );
+        std::fs::write(worktree.join("sub/big.rs"), "fn big() {}\nfn more() {}\n").unwrap();
+        crate::test::git(&worktree, &["commit", "--quiet", "-am", "change"]);
+
+        let out = home.path().join("out");
+        let reviewer = QwenReviewer::new(home.path());
+        let findings = reviewer.round(&worktree, &out, 1).unwrap();
+        assert_eq!(
+            findings,
+            vec![
+                Finding {
+                    severity: Severity::Medium,
+                    file: "src/lib.rs".into(),
+                    line: 9,
+                    what: "a real finding".into(),
+                    why: "it matters".into(),
+                },
+                Finding {
+                    severity: Severity::Low,
+                    file: "sub/big.rs".into(),
+                    line: 0,
+                    what: "not reviewed: 900 lines exceeds the chunk limit".into(),
+                    why: "split the file or review it by hand".into(),
+                },
+            ]
+        );
     }
 
     // Two files skipped in the same round, sharing a basename in different

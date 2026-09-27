@@ -46,17 +46,13 @@ pub(super) fn reviewer_call(
 ) -> Result<ClaudeCall, String> {
     let diff = diff_against_base(worktree)?;
     let settings = review_settings(worker_folder)?;
-    let session = new_session_id().map_err(|e| format!("cannot draw a session id: {e}"))?;
-    Ok(ClaudeCall {
-        role: Role::Reviewer,
-        model: model.model.as_str().to_owned(),
-        effort: model.effort,
-        session: Session::New(session),
-        cwd: worktree.to_owned(),
+    build_call(
+        Role::Reviewer,
+        worktree,
+        model,
         settings,
-        instructions: None,
-        prompt: reviewer_prompt(&diff),
-    })
+        reviewer_prompt(&base_ref(), &diff),
+    )
 }
 
 pub(super) fn judge_call(
@@ -67,16 +63,35 @@ pub(super) fn judge_call(
 ) -> Result<ClaudeCall, String> {
     let diff = diff_against_base(worktree)?;
     let settings = judge_settings(worker_folder)?;
+    build_call(
+        Role::Judge,
+        worktree,
+        model,
+        settings,
+        judge_prompt(&base_ref(), &diff, finding),
+    )
+}
+
+// The shape every call the review loop makes itself shares: a fresh
+// session, the worktree as its folder, no instructions file, and whatever
+// role, settings and prompt its caller worked out.
+fn build_call(
+    role: Role,
+    worktree: &Path,
+    model: &RoleModel,
+    settings: PathBuf,
+    prompt: String,
+) -> Result<ClaudeCall, String> {
     let session = new_session_id().map_err(|e| format!("cannot draw a session id: {e}"))?;
     Ok(ClaudeCall {
-        role: Role::Judge,
+        role,
         model: model.model.as_str().to_owned(),
         effort: model.effort,
         session: Session::New(session),
         cwd: worktree.to_owned(),
         settings,
         instructions: None,
-        prompt: judge_prompt(&diff, finding),
+        prompt,
     })
 }
 
@@ -94,12 +109,16 @@ fn judge_settings(worker_folder: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// `origin/main`: the ref every call in this loop diffs against
+fn base_ref() -> String {
+    format!("origin/{}", crate::worktree::BASE)
+}
+
 fn diff_against_base(worktree: &Path) -> Result<String, String> {
-    let base = format!("origin/{}", crate::worktree::BASE);
     let output = Command::new("git")
         .arg("-C")
         .arg(worktree)
-        .args(["diff", &base])
+        .args(["diff", &base_ref()])
         .stdin(Stdio::null())
         .output()
         .map_err(|e| format!("cannot run git diff: {e}"))?;
@@ -112,11 +131,11 @@ fn diff_against_base(worktree: &Path) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-fn reviewer_prompt(diff: &str) -> String {
+fn reviewer_prompt(base: &str, diff: &str) -> String {
     format!(
         "You are a founding engineer reviewing a junior developer's pull request. Be \
          extremely critical and check every line of the diff below, against \
-         `origin/main`. You may open any file in this worktree with Read, Grep or Glob \
+         `{base}`. You may open any file in this worktree with Read, Grep or Glob \
          to check your work; do not run any command and do not edit anything.\n\n\
          Look for: code smells; duplicated code, types or logic; non-performant code; \
          non-idiomatic code for this language; hard-to-follow logic; poorly named \
@@ -129,11 +148,11 @@ fn reviewer_prompt(diff: &str) -> String {
          SEVERITY|file:line|what is wrong|why it matters\n\n\
          SEVERITY must be HIGH, MEDIUM or LOW. If the diff is genuinely fine, output \
          exactly CLEAN and nothing else.\n\n\
-         --- diff against origin/main ---\n{diff}\n--- end ---"
+         --- diff against {base} ---\n{diff}\n--- end ---"
     )
 }
 
-fn judge_prompt(diff: &str, finding: &Finding) -> String {
+fn judge_prompt(base: &str, diff: &str, finding: &Finding) -> String {
     format!(
         "You are judging one code-review finding on a pull request. You did not write \
          the finding and will not fix it; you only decide whether it holds against the \
@@ -146,7 +165,7 @@ fn judge_prompt(diff: &str, finding: &Finding) -> String {
          Decide whether it holds. You may regrade its severity in either direction, \
          whether or not it holds. Output exactly one line of JSON and nothing else:\n\
          {{\"holds\": true|false, \"severity\": \"low\"|\"medium\"|\"high\", \"reason\": \"<one sentence>\"}}\n\n\
-         --- diff against origin/main ---\n{diff}\n--- end ---",
+         --- diff against {base} ---\n{diff}\n--- end ---",
         severity_tag(finding.severity),
         finding.file,
         finding.line,
@@ -260,12 +279,7 @@ mod tests {
             .iter()
             .map(|v| v.as_str().unwrap())
             .collect();
-        for tool in ["Bash", "Read", "Edit", "Write", "WebFetch"] {
-            assert!(
-                denied.contains(&tool),
-                "{tool} should be denied to the judge"
-            );
-        }
+        assert_eq!(denied, NO_TOOLS, "every tool denied, nothing more or less");
     }
 
     #[test]

@@ -138,6 +138,7 @@ impl FakeClaude {
         self.seen.lock().unwrap().clone()
     }
 
+    /// Queues answers for its next calls, oldest first
     pub(crate) fn script(&self, steps: impl IntoIterator<Item = Scripted>) {
         self.script.lock().unwrap().extend(steps);
     }
