@@ -17,7 +17,7 @@ use crate::work_item::{Phase, Turn, WorkItem};
 pub const ACTIONS: [&str; 7] = ["status", "start", "pause", "add", "rule", "gate", "drop"];
 
 /// What `rule` takes, as its refusals say
-const RULE_USAGE: &str = "`rule` takes `<id> yes` or `<id> no <note>`";
+const RULE_USAGE: &str = "`rule` takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`";
 
 /// What `status` answers
 #[derive(Debug, Serialize)]
@@ -97,7 +97,8 @@ enum Request {
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
 ///
 /// Blank params count as none. `add` takes an issue number, `rule` takes
-/// `<id> yes` or `<id> no <note>`, and every other action takes nothing.
+/// `<id> yes`, `<id> no <note>` or `<id> answer <text>`, and every other
+/// action takes nothing.
 pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> String {
     let error = |message: String| serde_json::json!({ "error": message }).to_string();
     let request = match read(action, params.map(str::trim).filter(|p| !p.is_empty())) {
@@ -147,6 +148,7 @@ fn read_rule(params: &str) -> Option<Request> {
     let answer = match rest.split_once(char::is_whitespace) {
         None if rest == "yes" => Answer::Yes,
         Some(("no", note)) if !note.trim().is_empty() => Answer::No(note.trim().to_owned()),
+        Some(("answer", text)) if !text.trim().is_empty() => Answer::Text(text.trim().to_owned()),
         _ => return None,
     };
     Some(Request::Rule(id, answer))

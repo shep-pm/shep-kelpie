@@ -4,20 +4,23 @@
 //! Claude works: begin (prepare the worktree and profile, mark the turn
 //! running, save), the call, and end (record the call, save). A turn still
 //! marked running when the runner starts was cut short, and its session is
-//! resumed. A session cut short before it wrote anything starts over.
+//! resumed. A session cut short before it wrote anything starts over. A turn
+//! that ends on a question block parks the worker on a ruling.
 
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use super::Runner;
+use super::question::asked;
 use super::report::{Begin, StepReport};
 use super::review::{self, run_review_call};
+use super::ruling::park;
 use super::trigger::lock;
 use crate::pacer::Scope;
 use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session};
 use crate::profile::{INSTRUCTIONS, WorkerProfile};
-use crate::state::{RunState, StateError};
+use crate::state::{RulingKind, RunState, StateError};
 use crate::work_item::{CallRecord, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree;
 
@@ -25,21 +28,29 @@ use crate::worktree;
 const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
                         Carry on with the work item from where you left off.";
 
-/// Runs the worker's next turn, if one is due and the project is running
+/// Posts a ruling to the webhook, or runs the worker's next turn if one is
+/// due and the project is running
 ///
-/// Returns what happened, or `None` when there was nothing to do.
+/// Returns what happened, or `None` when there was nothing to do. A ruling
+/// is posted whether the project runs or not.
 ///
 /// # Errors
 ///
-/// [`StateError`] when the turn's start or end cannot be saved.
+/// [`StateError`] when the turn's start or end, or a post, cannot be saved.
 pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
-    let (claude, reviewer) = {
+    let (claude, reviewer, alerts) = {
         let runner = lock(runner);
         (
             Arc::clone(&runner.ports.claude),
             Arc::clone(&runner.ports.reviewer),
+            Arc::clone(&runner.ports.alerts),
         )
     };
+    let due = lock(runner).alert_due();
+    if let Some(due) = due {
+        let sent = alerts.post(&due.webhook, &due.alert);
+        return lock(runner).alert_sent(due.id, sent).map(Some);
+    }
     let mut start_over = false;
     loop {
         let begin = lock(runner).begin_turn(start_over)?;
@@ -201,6 +212,7 @@ impl Runner {
         };
         let report = match result {
             Ok(reply) => {
+                let question = asked(&reply.text);
                 // Only true the very first time: the pull request is
                 // discovered once, and every later turn that reaches here
                 // (a CI-failure fix, most often) already knows it.
@@ -237,13 +249,33 @@ impl Runner {
                     }
                     _ => {}
                 }
-                StepReport::Ended {
-                    issue: item.issue,
-                    session: item.session.clone(),
-                    usage: reply.usage,
-                    cost_usd: cost.usd(),
-                    work_item_cost_usd: item.cost().usd(),
-                    pull_request: item.pull_request,
+                let (issue, session) = (item.issue, item.session.clone());
+                let (work_item_cost_usd, pull_request) = (item.cost().usd(), item.pull_request);
+                match question {
+                    None => StepReport::Ended {
+                        issue,
+                        session,
+                        usage: reply.usage,
+                        cost_usd: cost.usd(),
+                        work_item_cost_usd,
+                        pull_request,
+                    },
+                    Some(text) => {
+                        let kind = RulingKind::Question { asked: text };
+                        let project = self.project.as_str();
+                        let (_, id, question) = park(project, &mut next, pull_request, kind);
+                        StepReport::Asked {
+                            issue,
+                            session,
+                            usage: reply.usage,
+                            cost_usd: cost.usd(),
+                            work_item_cost_usd,
+                            pull_request,
+                            id,
+                            question,
+                            comment_failed: None,
+                        }
+                    }
                 }
             }
             Err(e) => {
@@ -259,6 +291,16 @@ impl Runner {
             }
         };
         self.save(next)?;
+        let mut report = report;
+        if let StepReport::Asked {
+            pull_request,
+            question,
+            comment_failed,
+            ..
+        } = &mut report
+        {
+            *comment_failed = self.post_ruling(*pull_request, question);
+        }
         Ok(Some(report))
     }
 

@@ -1,4 +1,5 @@
-//! The runner's ports: Claude, the forge, the account's usage and the clock
+//! The runner's ports: Claude, the forge, the account's usage, the
+//! maintainer's webhook and the clock
 //!
 //! The work-item loop reaches the outside world only through these traits.
 //! [`crate::adapters`] holds the real ones and the test rig holds stand-ins,
@@ -14,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::board::READY;
 use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::settings::{Effort, ForgeSlug};
+use crate::webhook::Webhook;
 
 /// Seconds since the Unix epoch
 // wire format: changing this is a breaking change to the state file
@@ -378,6 +380,49 @@ impl fmt::Display for MeterError {
 
 impl std::error::Error for MeterError {}
 
+/// One alert for the maintainer, away from the terminal
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Alert {
+    /// A one-line title naming the project and the ruling
+    pub title: String,
+    /// The ruling's question, with the triggers that answer it
+    pub text: String,
+}
+
+/// Posts alerts to the maintainer's webhook
+pub trait Alerts: Send + Sync {
+    /// Posts `alert` to `webhook`
+    ///
+    /// # Errors
+    ///
+    /// [`AlertError`] when the post cannot be made or is refused. Its text
+    /// never carries the webhook's URL.
+    fn post(&self, webhook: &Webhook, alert: &Alert) -> Result<(), AlertError>;
+}
+
+/// Why an alert was not posted. None of these carry the webhook's URL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AlertError {
+    /// `curl` could not be started, with the OS's reason
+    Spawn(String),
+    /// `curl` could not reach the webhook, with its exit code
+    Unreachable(i32),
+    /// The webhook answered with this HTTP status, not a success
+    Refused(u16),
+}
+
+impl fmt::Display for AlertError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Spawn(error) => write!(f, "cannot run curl: {error}"),
+            Self::Unreachable(code) => write!(f, "curl could not post it (exit {code})"),
+            Self::Refused(status) => write!(f, "the webhook answered HTTP {status}"),
+        }
+    }
+}
+
+impl std::error::Error for AlertError {}
+
 /// How serious a review finding is
 ///
 /// Qwen and the Claude review round report only these three; the judge may
@@ -511,6 +556,8 @@ pub struct Ports {
     pub meter: Box<dyn Meter>,
     /// The qwen-review script, shared so a round runs without holding the runner
     pub reviewer: Arc<dyn Reviewer>,
+    /// The maintainer's webhook, shared so a post runs without holding the runner
+    pub alerts: Arc<dyn Alerts>,
     /// The clock
     pub clock: Box<dyn Clock>,
 }

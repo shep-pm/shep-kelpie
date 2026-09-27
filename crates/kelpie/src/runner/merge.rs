@@ -184,9 +184,9 @@ impl Runner {
         };
         let mut next = self.state.clone();
         next.work_item = None;
-        // Rulings about this work item's pull request go with it.
-        next.rulings
-            .retain(|r| r.pull_request.is_none() || r.pull_request != item.pull_request);
+        // Rulings about this work item go with it, a question asked before
+        // its pull request included.
+        next.rulings.retain(|r| r.pull_request != item.pull_request);
         if !next.finished.contains(&item.issue) {
             next.finished.push(item.issue);
         }

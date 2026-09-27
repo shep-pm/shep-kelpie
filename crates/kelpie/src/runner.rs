@@ -14,13 +14,16 @@ use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Ports, Timestamp, Visibility};
 use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
+use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{Phase, Turn, WorkItem, new_session_id};
 
+mod alert;
 mod dispatch;
 mod gate;
 mod merge;
 mod pace;
 mod paths;
+mod question;
 mod report;
 mod review;
 mod ruling;
@@ -121,10 +124,14 @@ pub struct Runner {
     ports: Ports,
     // The pacer's last reading of usage and when it was read, kept in memory only
     pacing: Option<(Timestamp, Assessment)>,
+    webhook: Webhook,
+    // The last failed webhook post, kept in memory so a restart tries at once
+    retry: Option<alert::Retry>,
 }
 
 impl Runner {
-    /// Reads the project's settings and state and checks the settings hold
+    /// Reads kelpie's settings, the project's settings and its state, and
+    /// checks the settings hold
     ///
     /// `home` is the maintainer's home folder, for `~/` in settings.
     /// `kelpie` is the kelpie binary, which each worker's file-tool hook runs.
@@ -139,6 +146,7 @@ impl Runner {
         kelpie: &Path,
         ports: Ports,
     ) -> Result<Self, OpenError> {
+        let webhook = KelpieSettings::load(&paths.kelpie_settings)?.webhook;
         let settings = Settings::load(&paths.settings, home)?;
         check_repo(&settings)?;
         check_coderabbit(&settings, &ports)?;
@@ -155,6 +163,8 @@ impl Runner {
             state,
             ports,
             pacing: None,
+            webhook,
+            retry: None,
         })
     }
 
