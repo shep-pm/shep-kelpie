@@ -82,7 +82,7 @@ pub(super) fn resolve(thread: &str) -> Result<(), ForgeError> {
         "graphql",
         "-f",
         &format!("query={RESOLVE}"),
-        "-F",
+        "-f",
         &format!("id={thread}"),
     ])?;
     #[derive(Deserialize)]

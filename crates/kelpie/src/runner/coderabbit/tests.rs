@@ -225,7 +225,7 @@ fn a_refusal_gives_the_lease_back_with_its_quoted_wait_and_the_label_comes_off()
         })
     );
     let told = rig.leases.told();
-    assert!(told.contains(&Told::Window(WindowFact::Opens, refused_at + 720)));
+    assert!(told.contains(&Told::Window(WindowFact::Opens, refused_at + 12 * 60)));
     assert_eq!(told.last(), Some(&Told::Return(cr())));
     assert_eq!(labels(&rig), [on(), off()]);
     assert_eq!(rig.ask(&runner, "status", None)["leases"], json!([]));
@@ -429,7 +429,10 @@ fn the_cap_leaves_generated_files_out_and_parks_the_worker_with_findings_open() 
     git(&worktree, &["push", "--quiet", "origin", "HEAD"]);
     let head = rig.forge.head_of("kelpie/7").unwrap();
     rig.forge.set_checks(&head, Checks::Passed);
-    rig.verdict(&runner);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::Summoned { .. })
+    ));
 
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "First."),

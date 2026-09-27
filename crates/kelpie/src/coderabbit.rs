@@ -212,18 +212,25 @@ pub fn finding(thread: &Thread) -> Finding {
         Severity::Medium
     };
     let prose = outside_details(&thread.body);
-    let mut paragraphs = prose.split("\n\n").map(str::trim).filter(|p| !p.is_empty());
-    let mut what = String::new();
-    let mut why = String::new();
-    for paragraph in paragraphs.by_ref() {
-        if let Some(title) = paragraph.strip_prefix("**") {
-            what = one_line(title.trim_end_matches("**"));
-            break;
-        }
-    }
-    if let Some(next) = paragraphs.next() {
-        why = one_line(next);
-    }
+    let paragraphs: Vec<&str> = prose
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
+    // Without a bold title the judge still gets the text, past the label.
+    let (what, why) = match paragraphs.iter().position(|p| p.starts_with("**")) {
+        Some(at) => (
+            one_line(paragraphs[at].trim_matches('*')),
+            paragraphs
+                .get(at + 1)
+                .map(|p| one_line(p))
+                .unwrap_or_default(),
+        ),
+        None => (
+            one_line(&paragraphs[1.min(paragraphs.len())..].join(" ")),
+            String::new(),
+        ),
+    };
     Finding {
         severity,
         file: thread.path.clone(),
@@ -413,6 +420,49 @@ mod tests {
             finding.why
         );
         assert!(!finding.why.contains('\n') && !finding.why.contains('|'));
+    }
+
+    #[test]
+    fn a_thread_without_a_bold_title_still_gives_the_judge_its_text() {
+        let thread = Thread {
+            id: "t".into(),
+            resolved: false,
+            path: "a.rs".into(),
+            line: Some(3),
+            body: "_🟡 Minor_\n\nThis drops the error.\n\nIt matters.".into(),
+        };
+        assert_eq!(finding(&thread).what, "This drops the error. It matters.");
+    }
+
+    // shep#550's walkthrough, older than the coverage marker, names its
+    // commit only in the change assessment and its own range.
+    #[test]
+    fn an_older_walkthrough_is_read_from_its_change_assessment() {
+        let head = "3886dbd25007f9cfa45bcc31b27044dcd0e48137";
+        let body = format!(
+            "## Walkthrough\n\n<!-- change_assessment_commit:\"{head}\" -->\n\n\
+             Reviewing files that changed from the base of the PR and between \
+             dd9b89c and 0000000."
+        );
+        let seen = Activity {
+            comments: vec![Comment {
+                body,
+                at: Timestamp(1),
+            }],
+            ..Activity::default()
+        };
+        assert!(seen.covers(head));
+        let range_only = Activity {
+            comments: vec![Comment {
+                body: format!(
+                    "## Walkthrough\n\nReviewing files that changed from the base of \
+                     the PR and between dd9b89c and {head}."
+                ),
+                at: Timestamp(1),
+            }],
+            ..Activity::default()
+        };
+        assert!(range_only.covers(head));
     }
 
     #[test]

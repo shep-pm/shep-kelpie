@@ -1,5 +1,6 @@
 //! The real ports: the system clock, `gh`, `curl`, the `claude` command
-//! line, its `/usage`, and the maintainer's qwen-review script
+//! line, its `/usage`, the relay session, the maintainer's qwen-review
+//! script, and the dog's leases over the shepherd channel
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

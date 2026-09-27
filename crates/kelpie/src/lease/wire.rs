@@ -455,6 +455,7 @@ mod tests {
             "window.coderabbit.closes.7",
             "lease.coderabbit.opens.7",
             "window.gpu.quota.7",
+            "window.coderabbit.quota.-7",
         ] {
             assert_eq!(WindowMetric::parse(other), None, "{other}");
         }

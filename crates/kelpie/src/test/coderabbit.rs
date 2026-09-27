@@ -133,8 +133,19 @@ impl FakeCodeRabbit {
         Ok(activity.get(&number).cloned().unwrap_or_default())
     }
 
-    pub(super) fn resolve(&self, id: &str) {
+    // Refuses a thread that does not exist, as GitHub does.
+    pub(super) fn resolve(&self, id: &str) -> Result<(), ForgeError> {
+        let activity = self.activity.lock().unwrap();
+        let known = activity
+            .values()
+            .flat_map(|a| &a.threads)
+            .any(|t| t.id == id);
+        drop(activity);
+        if !known {
+            return Err(ForgeError::Failed(format!("no thread {id}")));
+        }
         self.settle(id);
         self.resolved.lock().unwrap().push(id.to_owned());
+        Ok(())
     }
 }

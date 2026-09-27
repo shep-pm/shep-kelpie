@@ -192,6 +192,7 @@ mod tests {
         window.summoned(at(0));
         window.refused(at(60), at(120));
         assert_eq!(window.opens(at(60)), Some(at(120)), "sooner than the hour");
+        assert_eq!(window.opens(at(120)), None, "though the summon is recent");
 
         let mut window = Window::default();
         window.quota(10);

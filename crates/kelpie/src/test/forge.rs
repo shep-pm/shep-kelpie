@@ -295,8 +295,7 @@ impl Forge for FakeForge {
     }
 
     fn resolve_thread(&self, _repo: &ForgeSlug, thread: &str) -> Result<(), ForgeError> {
-        self.coderabbit.resolve(thread);
-        Ok(())
+        self.coderabbit.resolve(thread)
     }
 
     // Refuses what GitHub refuses: a draft, a pull request that is not open,
