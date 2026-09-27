@@ -11,8 +11,8 @@ use tempfile::TempDir;
 
 use crate::board::{OpenPullRequest, READY, ReadyIssue, WorkerModel};
 use crate::ports::{
-    Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Forge, ForgeError, Issue, Ports,
-    Role, SessionId, Timestamp, Usage, Visibility,
+    Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Forge, ForgeError, Issue,
+    Ports, PullRequest, PullRequestState, Role, SessionId, Timestamp, Usage, Visibility,
 };
 use crate::runner::{OpenError, ProjectName, ProjectPaths, Runner, answer};
 use crate::settings::{Effort, ForgeSlug};
@@ -142,6 +142,22 @@ pub(crate) struct FakeForge {
     open: Arc<Mutex<Vec<OpenPullRequest>>>,
     board_down: Arc<AtomicBool>,
     calls: Arc<AtomicUsize>,
+    origin: PathBuf,
+    pull_requests: Arc<Mutex<HashMap<u64, FakePullRequest>>>,
+    checks: Arc<Mutex<HashMap<String, Checks>>>,
+    comments: Arc<Mutex<Vec<(u64, String)>>>,
+    comments_down: Arc<AtomicBool>,
+    readied: Arc<Mutex<Vec<u64>>>,
+    merges: Arc<Mutex<Vec<(u64, String)>>>,
+}
+
+/// A pull request on the fake forge. Its head is its branch on the rig's
+/// origin, so a push the runner makes moves it.
+#[derive(Debug, Clone)]
+struct FakePullRequest {
+    branch: String,
+    state: PullRequestState,
+    draft: bool,
 }
 
 impl FakeForge {
@@ -169,13 +185,71 @@ impl FakeForge {
         });
     }
 
-    /// Opens pull request `number` from `head`, closing `closes`
+    /// Opens draft pull request `number` from `head`, closing `closes`
     pub(crate) fn open_pull_request(&self, number: u64, head: &str, closes: &[u64]) {
         self.open.lock().unwrap().push(OpenPullRequest {
             number,
             head: head.to_owned(),
             closes: closes.to_vec(),
         });
+        let pr = FakePullRequest {
+            branch: head.to_owned(),
+            state: PullRequestState::Open,
+            draft: true,
+        };
+        self.pull_requests.lock().unwrap().insert(number, pr);
+    }
+
+    /// Reports `checks` for commit `head`. A head with none reported is pending.
+    pub(crate) fn set_checks(&self, head: &str, checks: Checks) {
+        self.checks.lock().unwrap().insert(head.to_owned(), checks);
+    }
+
+    /// Merges or closes pull request `number` as someone other than kelpie would
+    pub(crate) fn set_state(&self, number: u64, state: PullRequestState) {
+        let mut prs = self.pull_requests.lock().unwrap();
+        prs.get_mut(&number).expect("an opened pull request").state = state;
+    }
+
+    /// Makes posting comments fail, or work again
+    pub(crate) fn set_comments_down(&self, down: bool) {
+        self.comments_down.store(down, Ordering::SeqCst);
+    }
+
+    /// Every comment posted, oldest first, with its pull request
+    pub(crate) fn comments(&self) -> Vec<(u64, String)> {
+        self.comments.lock().unwrap().clone()
+    }
+
+    /// Every pull request marked ready, in order
+    pub(crate) fn readied(&self) -> Vec<u64> {
+        self.readied.lock().unwrap().clone()
+    }
+
+    /// Every merge made, with the head it was held to
+    pub(crate) fn merges(&self) -> Vec<(u64, String)> {
+        self.merges.lock().unwrap().clone()
+    }
+
+    /// The commit `branch` points at on origin, if it exists there
+    pub(crate) fn head_of(&self, branch: &str) -> Option<String> {
+        let output = Command::new("git")
+            .arg("--git-dir")
+            .arg(&self.origin)
+            .args(["rev-parse", "--verify", "--quiet"])
+            .arg(format!("refs/heads/{branch}"))
+            .output()
+            .unwrap();
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    }
+
+    fn opened(&self, number: u64) -> Result<FakePullRequest, ForgeError> {
+        let prs = self.pull_requests.lock().unwrap();
+        let pr = prs.get(&number).cloned();
+        pr.ok_or_else(|| ForgeError::Failed(format!("no pull request #{number}")))
     }
 
     /// Makes listing the board fail, or work again
@@ -232,7 +306,60 @@ impl Forge for FakeForge {
 
     fn open_pull_requests(&self, _repo: &ForgeSlug) -> Result<Vec<OpenPullRequest>, ForgeError> {
         self.board()?;
-        Ok(self.open.lock().unwrap().clone())
+        let prs = self.pull_requests.lock().unwrap();
+        let open = self.open.lock().unwrap().clone();
+        Ok(open
+            .into_iter()
+            .filter(|pr| prs[&pr.number].state == PullRequestState::Open)
+            .collect())
+    }
+
+    fn pull_request(&self, _repo: &ForgeSlug, number: u64) -> Result<PullRequest, ForgeError> {
+        let pr = self.opened(number)?;
+        let head = self
+            .head_of(&pr.branch)
+            .ok_or_else(|| ForgeError::Failed(format!("no branch {} on origin", pr.branch)))?;
+        let checks = self.checks.lock().unwrap().get(&head).cloned();
+        Ok(PullRequest {
+            state: pr.state,
+            draft: pr.draft,
+            checks: checks.unwrap_or(Checks::Pending),
+            head,
+        })
+    }
+
+    fn comment(&self, _repo: &ForgeSlug, number: u64, body: &str) -> Result<(), ForgeError> {
+        if self.comments_down.load(Ordering::SeqCst) {
+            return Err(ForgeError::Failed("comments are down".into()));
+        }
+        self.opened(number)?;
+        self.comments
+            .lock()
+            .unwrap()
+            .push((number, body.to_owned()));
+        Ok(())
+    }
+
+    fn mark_ready(&self, _repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
+        self.opened(number)?;
+        let mut prs = self.pull_requests.lock().unwrap();
+        prs.get_mut(&number).expect("checked above").draft = false;
+        self.readied.lock().unwrap().push(number);
+        Ok(())
+    }
+
+    // Refuses what GitHub refuses: a draft, a pull request that is not open,
+    // and a head that moved since the caller looked.
+    fn merge(&self, repo: &ForgeSlug, number: u64, head: &str) -> Result<(), ForgeError> {
+        let now = self.pull_request(repo, number)?;
+        if now.draft || now.state != PullRequestState::Open || now.head != head {
+            return Err(ForgeError::Failed(format!(
+                "cannot merge #{number}: {now:?}"
+            )));
+        }
+        self.merges.lock().unwrap().push((number, head.to_owned()));
+        self.set_state(number, PullRequestState::Merged);
+        Ok(())
     }
 }
 
@@ -276,8 +403,8 @@ impl Rig {
 
     /// A project with the example settings, pointed at a fresh repo
     pub(crate) fn new(project: &str) -> Self {
+        let home = tempfile::tempdir().unwrap();
         let rig = Self {
-            home: tempfile::tempdir().unwrap(),
             project: ProjectName::try_from(project).unwrap(),
             claude: FakeClaude::default(),
             forge: FakeForge {
@@ -288,8 +415,16 @@ impl Rig {
                 open: Arc::default(),
                 board_down: Arc::default(),
                 calls: Arc::default(),
+                origin: home.path().join("origin.git"),
+                pull_requests: Arc::default(),
+                checks: Arc::default(),
+                comments: Arc::default(),
+                comments_down: Arc::default(),
+                readied: Arc::default(),
+                merges: Arc::default(),
             },
             clock: FakeClock::at(Self::EPOCH),
+            home,
         };
         rig.make_repo();
 
