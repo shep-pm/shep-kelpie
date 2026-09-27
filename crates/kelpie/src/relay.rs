@@ -20,9 +20,16 @@ pub const INSTRUCTIONS: &str = include_str!("relay-instructions.md");
 /// carry a merge ruling's yes, so it needs the maintainer's tap every time;
 /// the rule names the exact subcommand, never a pattern a free-text answer
 /// could widen.
+///
+/// `agentPushNotifEnabled` and `inputNeededNotifEnabled` live in the
+/// maintainer's own `~/.claude/settings.json` and are dropped along with
+/// everything else by `--setting-sources ""`, so the relay carries both
+/// itself: without them its `PushNotification` calls never reach a phone.
 pub fn settings() -> Value {
     json!({
         "crossSessionInbound": "accept",
+        "agentPushNotifEnabled": true,
+        "inputNeededNotifEnabled": true,
         "permissions": {
             "allow": ["Bash(kelpie relay-answer *)"],
             "ask": ["Bash(kelpie relay-yes *)"],
@@ -60,6 +67,16 @@ mod tests {
     #[test]
     fn cross_session_messages_are_accepted() {
         assert_eq!(settings()["crossSessionInbound"], "accept");
+    }
+
+    // Measured live on #14: without these, `--setting-sources ""` drops
+    // whatever registers the maintainer's phone, and the relay's own
+    // `PushNotification` calls fail with "mobile push is disabled".
+    #[test]
+    fn push_notifications_are_turned_on() {
+        let s = settings();
+        assert_eq!(s["agentPushNotifEnabled"], true);
+        assert_eq!(s["inputNeededNotifEnabled"], true);
     }
 
     #[test]
