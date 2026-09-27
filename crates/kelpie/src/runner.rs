@@ -154,9 +154,19 @@ impl Runner {
         check_repo(&settings)?;
         check_coderabbit(&settings, &ports)?;
         let store = StateStore::new(paths.state.clone());
-        let state = store
+        let mut state = store
             .load()?
             .unwrap_or_else(|| ProjectState::new(ports.clock.now()));
+        // A review call in flight when the runner stopped never resumes on
+        // its own, unlike a turn: nothing reruns review_step to naturally
+        // clear it, so a restart clears it here instead of leaving it stuck
+        // running forever and refusing every later drop.
+        if let Some(item) = &mut state.work_item
+            && matches!(item.review_call, ReviewCallState::Running { .. })
+        {
+            item.review_call = ReviewCallState::Idle;
+            store.save(&state)?;
+        }
         Ok(Self {
             project,
             settings,

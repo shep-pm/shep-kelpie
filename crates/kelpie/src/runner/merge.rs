@@ -483,9 +483,11 @@ mod tests {
     // panicked the runner (`end_review`'s `.expect` on a work item that
     // was no longer there). Recording it in state the way a running turn
     // is, and refusing `drop` while it is set, keeps the call from ever
-    // outliving its own work item.
+    // outliving its own work item. Unlike a turn, nothing ever reruns a
+    // review call on restart, so the marker cannot be left running: `open`
+    // clears it, rather than resuming it, before this drop can even ask.
     #[test]
-    fn drop_refuses_while_a_review_call_is_running() {
+    fn a_restart_clears_a_stale_review_call_so_drop_no_longer_refuses() {
         let (rig, runner, _) = Rig::with_pull_request("shep");
         drop(runner);
         let state = rig.paths().state;
@@ -493,13 +495,15 @@ mod tests {
         let mut saved: serde_json::Value = serde_json::from_str(&text).unwrap();
         saved["work_item"]["review_call"] = json!({ "state": "running", "since": Rig::EPOCH });
         std::fs::write(&state, saved.to_string()).unwrap();
-        let runner = rig.open().unwrap();
 
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "pause", None);
         assert_eq!(
-            rig.ask(&runner, "drop", None),
-            json!({ "error": "the qwen-review loop's round on #7 is running" })
+            rig.ask(&runner, "drop", None)["work_item"],
+            json!(null),
+            "the restart cleared the stale marker, so the drop goes through"
         );
-        assert!(rig.worktree_7().exists());
+        assert!(!rig.worktree_7().exists());
     }
 
     // Seen live on the playground: the board polled a second after the
