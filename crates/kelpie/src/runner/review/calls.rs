@@ -183,6 +183,9 @@ pub(super) fn severity_tag(severity: Severity) -> &'static str {
     }
 }
 
+/// The judge's verdict, from a one-line JSON reply that may be wrapped in
+/// prose or a code fence; `None` if no well-formed JSON object with the
+/// expected shape can be found in it
 pub(super) fn parse_verdict(text: &str) -> Option<Verdict> {
     #[derive(serde::Deserialize)]
     struct Raw {
