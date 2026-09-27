@@ -11,8 +11,8 @@ use tempfile::TempDir;
 
 use crate::board::WorkerModel;
 use crate::ports::{
-    Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Ports, Role, SessionId, Timestamp,
-    Usage,
+    Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Ports, Role, SessionId,
+    Timestamp, Usage,
 };
 use crate::runner::{
     CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
@@ -316,6 +316,18 @@ impl Rig {
         rig.claude.script([Scripted::Push("work.txt", "work\n")]);
         step(&runner).unwrap();
         let head = rig.forge.head_of("kelpie/7").expect("the worker pushed");
+        (rig, runner, head)
+    }
+
+    /// [`Rig::with_pull_request`], with CI green and the worker parked on
+    /// merge ruling 1 about the returned head
+    pub(crate) fn parked(project: &str) -> (Self, Mutex<Runner>, String) {
+        let (rig, runner, head) = Self::with_pull_request(project);
+        rig.forge.set_checks(&head, Checks::Passed);
+        assert!(matches!(
+            rig.verdict(&runner),
+            Some(StepReport::Ruling { id: 1, .. })
+        ));
         (rig, runner, head)
     }
 

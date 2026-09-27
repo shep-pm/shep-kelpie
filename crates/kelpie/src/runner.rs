@@ -17,6 +17,7 @@ use crate::work_item::{Phase, Turn, WorkItem, new_session_id};
 
 mod dispatch;
 mod gate;
+mod merge;
 mod paths;
 mod report;
 mod ruling;
