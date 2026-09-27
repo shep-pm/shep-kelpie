@@ -386,7 +386,7 @@ mod tests {
         };
         let store = store_in(Path::new(&dir));
         let mut out = io::stdout().lock();
-        for n in 0.. {
+        for n in 0..=u64::MAX {
             store.save(&big_state(n)).unwrap();
             writeln!(out, "saved {n}").unwrap();
             out.flush().unwrap();
