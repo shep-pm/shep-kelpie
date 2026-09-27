@@ -35,13 +35,13 @@ const GIT_DENY: [&str; 8] = [
 ];
 
 // Read and written by no worker. Also denied to sandboxed Bash, which takes
-// `Read` deny rules as its own.
-const CREDENTIALS: [&str; 11] = [
+// `Read` deny rules as its own. `~/.config/gh` stays readable: `gh` will not
+// start without its config, and the worker opens its own pull request.
+const CREDENTIALS: [&str; 10] = [
     "~/.ssh/**",
     "~/.aws/**",
     "~/.gnupg/**",
     "~/.docker/**",
-    "~/.config/gh/**",
     "~/.netrc",
     "~/.git-credentials",
     "~/.npmrc",
@@ -334,13 +334,13 @@ mod tests {
     fn credential_paths_are_unreadable() {
         let deny = settings(&[])["permissions"]["deny"].clone();
         let deny = strings(&deny);
-        for rule in [
-            "Read(~/.ssh/**)",
-            "Read(~/.config/gh/**)",
-            "Read(~/.kelpie/projects/**)",
-        ] {
+        for rule in ["Read(~/.ssh/**)", "Read(~/.kelpie/projects/**)"] {
             assert!(deny.contains(&rule), "{rule}");
         }
+        assert!(
+            !deny.iter().any(|r| r.contains(".config/gh")),
+            "gh cannot start without its config"
+        );
     }
 
     #[test]
