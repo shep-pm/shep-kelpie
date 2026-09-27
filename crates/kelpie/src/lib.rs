@@ -16,6 +16,7 @@ pub mod lease;
 pub mod pacer;
 pub mod ports;
 pub mod profile;
+pub mod relay;
 pub mod runner;
 pub mod settings;
 pub mod sheep;

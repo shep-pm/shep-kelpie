@@ -10,12 +10,14 @@ mod curl;
 mod gh;
 mod process;
 mod qwen;
+mod relay;
 mod usage;
 
 pub use claude::ClaudeCli;
 pub use curl::Curl;
 pub use gh::Gh;
 pub use qwen::QwenReviewer;
+pub use relay::RelayCli;
 pub use usage::UsageMeter;
 
 /// The machine's wall clock

@@ -36,7 +36,7 @@ pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
 pub use report::StepReport;
 pub use ruling::{Answer, RuleError};
 pub use trigger::GateError;
-pub use trigger::{ACTIONS, Status, WorkItemStatus, answer};
+pub use trigger::{ACTIONS, Status, WorkItemStatus, answer, is_no_or_answer};
 pub use turn::step;
 
 #[cfg(test)]
@@ -127,6 +127,9 @@ pub struct Runner {
     webhook: Webhook,
     // The last failed webhook post, kept in memory so a restart tries at once
     retry: Option<alert::Retry>,
+    // When the relay was last cleared, kept in memory only: a restart may
+    // clear a session sooner than a full day, never later.
+    relay_cleared: Option<Timestamp>,
 }
 
 impl Runner {
@@ -165,6 +168,7 @@ impl Runner {
             pacing: None,
             webhook,
             retry: None,
+            relay_cleared: None,
         })
     }
 
