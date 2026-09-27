@@ -28,6 +28,7 @@ pub(crate) struct FakeForge {
     comments: Arc<Mutex<Vec<(u64, String)>>>,
     comments_down: Arc<AtomicBool>,
     merges_down: Arc<AtomicBool>,
+    lagging: Arc<Mutex<HashMap<u64, String>>>,
     readied: Arc<Mutex<Vec<u64>>>,
     merges: Arc<Mutex<Vec<(u64, String)>>>,
 }
@@ -58,6 +59,7 @@ impl FakeForge {
             comments: Arc::default(),
             comments_down: Arc::default(),
             merges_down: Arc::default(),
+            lagging: Arc::default(),
             readied: Arc::default(),
             merges: Arc::default(),
         }
@@ -116,6 +118,16 @@ impl FakeForge {
     /// Makes posting comments fail, or work again
     pub(crate) fn set_comments_down(&self, down: bool) {
         self.comments_down.store(down, Ordering::SeqCst);
+    }
+
+    /// Makes pull request `number` report `head` whatever origin holds, as
+    /// GitHub does for a moment after a push, or stop doing so
+    pub(crate) fn set_lagging(&self, number: u64, head: Option<&str>) {
+        let mut lagging = self.lagging.lock().unwrap();
+        match head {
+            Some(head) => lagging.insert(number, head.to_owned()),
+            None => lagging.remove(&number),
+        };
     }
 
     /// Makes merging fail, or work again
@@ -223,9 +235,13 @@ impl Forge for FakeForge {
 
     fn pull_request(&self, _repo: &ForgeSlug, number: u64) -> Result<PullRequest, ForgeError> {
         let pr = self.opened(number)?;
-        let head = self
-            .head_of(&pr.branch)
-            .ok_or_else(|| ForgeError::Failed(format!("no branch {} on origin", pr.branch)))?;
+        let lagging = self.lagging.lock().unwrap().get(&number).cloned();
+        let head = match lagging {
+            Some(head) => head,
+            None => self
+                .head_of(&pr.branch)
+                .ok_or_else(|| ForgeError::Failed(format!("no branch {} on origin", pr.branch)))?,
+        };
         let checks = self.checks.lock().unwrap().get(&head).cloned();
         Ok(PullRequest {
             state: pr.state,

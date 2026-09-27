@@ -11,7 +11,7 @@ use super::report::{Begin, StepReport};
 use crate::ports::{Checks, PullRequestState};
 use crate::state::{RulingKind, StateError};
 use crate::work_item::Phase;
-use crate::worktree;
+use crate::worktree::{self, Base};
 
 impl Runner {
     // Marking the draft ready can start a fresh CI run on the same head, so
@@ -61,9 +61,10 @@ impl Runner {
                 return self.withdraw(issue, number, reason);
             }
         };
-        match self.has_latest_base(&head) {
-            Ok(true) => {}
-            Ok(false) => {
+        match self.base_of(&head) {
+            Ok(Base::Current) => {}
+            Ok(Base::Lagging) => return Ok(Begin::Idle),
+            Ok(Base::Behind) => {
                 let reason = "main moved since the question".to_owned();
                 return self.withdraw(issue, number, reason);
             }

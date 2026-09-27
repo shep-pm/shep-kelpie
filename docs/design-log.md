@@ -154,6 +154,7 @@ Read 2026-09-26 with gh 2.96.
 - `gh pr view --json statusCheckRollup` lists two kinds of check: a `CheckRun` (GitHub Actions, with `status` and `conclusion`) and a `StatusContext` (a commit status such as CodeRabbit's, with `state`). shep's checks include `SKIPPED` runs, which count as passing.
 - The playground's pull requests carry no checks at all: an empty rollup. GitHub cannot tell that from CI not registered yet, so a project says whether it runs CI with `ci` in its settings. With it on, an empty rollup is pending, never green; with it off, kelpie reads no checks. The playground's settings have `ci = false`, set 2026-09-27.
 - A check set registers a check at a time, so kelpie reads a verdict from a head's rollup only two minutes after it first saw that head, and merges two minutes after marking a draft ready, which can start a fresh run on the same head.
+- `gh pr view` lags a push. Seen live 2026-09-27 on the playground: two seconds after kelpie pushed a rebase, it still reported the old head. Kelpie now reads the branch on `origin` after each fetch and waits while the forge's head differs.
 - `gh pr merge --delete-branch` also deletes and switches branches in the checkout gh runs from, so kelpie leaves it out and removes the branch with `git push origin --delete`.
 - The runner's own `gh` and `git` calls are plain child processes. The worker's settings file, its sandbox and its denylist apply only to `claude` sessions started with it, so they never reach the project manager's merge, rebase or `--force-with-lease` push.
 

@@ -180,13 +180,29 @@ pub fn remove(
     }
 }
 
-/// Fetches `origin`, and says whether `head` already has the latest `main`
+/// Where a pull request's head stands against `origin`, just fetched
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Base {
+    /// The head is the branch on `origin`, and has the latest `main`
+    Current,
+    /// The head is the branch on `origin`, and lacks the latest `main`
+    Behind,
+    /// The branch on `origin` is not the head the forge reported, which
+    /// lags a push by a moment
+    Lagging,
+}
+
+/// Fetches `origin`, and says where `head`, the forge's head of `branch`, stands
 ///
 /// # Errors
 ///
 /// [`WorktreeError`] naming the git command that failed.
-pub fn has_latest_base(repo: &Path, branch: &str, head: &str) -> Result<bool, WorktreeError> {
+pub fn base_of(repo: &Path, branch: &str, head: &str) -> Result<Base, WorktreeError> {
     git(repo, ["fetch", "--quiet", "origin", BASE, branch])?;
+    let tracking = format!("refs/remotes/origin/{branch}");
+    if git(repo, ["rev-parse", "--verify", "--quiet", &tracking])? != head {
+        return Ok(Base::Lagging);
+    }
     // `--is-ancestor` answers no with exit 1, and fails with any other code.
     let base = format!("origin/{BASE}");
     let args = ["merge-base", "--is-ancestor", &base, head];
@@ -198,8 +214,8 @@ pub fn has_latest_base(repo: &Path, branch: &str, head: &str) -> Result<bool, Wo
         .output()
         .map_err(|e| WorktreeError::Spawn(e.to_string()))?;
     match output.status.code() {
-        Some(0) => Ok(true),
-        Some(1) => Ok(false),
+        Some(0) => Ok(Base::Current),
+        Some(1) => Ok(Base::Behind),
         _ => Err(WorktreeError::Git {
             args: args.join(" "),
             stderr: String::from_utf8_lossy(&output.stderr).into(),

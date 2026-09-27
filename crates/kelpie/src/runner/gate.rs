@@ -11,7 +11,7 @@ use super::report::{Begin, StepReport};
 use crate::ports::{Checks, PullRequestState, Timestamp};
 use crate::state::{RulingKind, StateError};
 use crate::work_item::{Phase, Turn};
-use crate::worktree::{self, Rebase};
+use crate::worktree::{self, Base, Rebase};
 
 // GitHub registers the checks a push or a ready pull request starts within
 // seconds, one at a time. Kelpie trusts a rollup once two minutes have passed.
@@ -51,9 +51,10 @@ impl Runner {
             self.update(|item| item.phase = Phase::Ci { head, since: now })?;
             now
         };
-        match self.has_latest_base(&pr.head) {
-            Ok(true) => {}
-            Ok(false) => return self.rebase(number, &pr.head),
+        match self.base_of(&pr.head) {
+            Ok(Base::Current) => {}
+            Ok(Base::Lagging) => return Ok(Begin::Idle),
+            Ok(Base::Behind) => return self.rebase(number, &pr.head),
             Err(reason) => return Ok(self.gate_failed(reason)),
         }
         if !self.settings.ci {
@@ -103,14 +104,14 @@ impl Runner {
         }))
     }
 
-    /// Whether `head` has the latest `main`, or why git could not say
-    pub(super) fn has_latest_base(&self, head: &str) -> Result<bool, String> {
+    /// Where `head` stands against `origin`, or why git could not say
+    pub(super) fn base_of(&self, head: &str) -> Result<Base, String> {
         let item = self
             .state
             .work_item
             .as_ref()
             .expect("a base is of a work item");
-        worktree::has_latest_base(&self.settings.repo, &item.branch, head)
+        worktree::base_of(&self.settings.repo, &item.branch, head)
             .map_err(|e| format!("cannot fetch main: {e}"))
     }
 
@@ -288,6 +289,31 @@ mod tests {
             "CI on the rebased head is pending"
         );
         assert_eq!(rig.forge.comments(), []);
+        rig.forge.set_checks(&rebased, Checks::Passed);
+        ruling_report(rig.verdict(&runner));
+        assert_eq!(
+            rig.ask(&runner, "status", None)["rulings"][0]["kind"],
+            json!({ "kind": "merge", "head": rebased })
+        );
+    }
+
+    // Seen live on the playground: the step after a rebase read the head
+    // from before the push, and parked the worker on a false ruling.
+    #[test]
+    fn a_forge_still_showing_the_head_from_before_a_push_is_waited_out() {
+        let (rig, runner, head) = Rig::with_pull_request("hazels-lab");
+        rig.land_on_origin("landed.txt");
+        let Some(StepReport::Rebased { head: rebased, .. }) = step(&runner).unwrap() else {
+            panic!("the branch was not rebased");
+        };
+        rig.forge.set_lagging(71, Some(&head));
+        rig.forge.set_checks(&head, Checks::Passed);
+        rig.clock.advance(CHECKS_SETTLE);
+        assert_eq!(step(&runner).unwrap(), None);
+        assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
+        assert_eq!(rig.forge.head_of("kelpie/7"), Some(rebased.clone()));
+
+        rig.forge.set_lagging(71, None);
         rig.forge.set_checks(&rebased, Checks::Passed);
         ruling_report(rig.verdict(&runner));
         assert_eq!(
