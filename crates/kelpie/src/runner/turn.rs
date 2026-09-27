@@ -40,7 +40,8 @@ pub enum TurnReport {
         /// Older ready issues the board passed over, and why
         skipped: Vec<Skip>,
     },
-    /// The board could not be read, so nothing was dispatched
+    /// Nothing was dispatched: the board could not be read, or the issue it
+    /// picked could not be taken
     BoardFailed {
         /// Why
         reason: String,
