@@ -65,7 +65,7 @@ impl Runner {
             let wait = RETRY_FIRST
                 .saturating_mul(1 << (failures - 1).min(16))
                 .min(RETRY_MAX);
-            let at = Timestamp(self.ports.clock.now().0 + wait);
+            let at = Timestamp(self.ports.clock.now().0.saturating_add(wait));
             self.retry = Some(Retry { id, failures, at });
             return Ok(StepReport::AlertFailed {
                 id,
