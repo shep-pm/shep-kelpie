@@ -176,6 +176,7 @@ impl StepReport {
     }
 }
 
+/// What a step found there was to do, before the outer loop runs it
 pub(super) enum Begin {
     Idle,
     Report(StepReport),

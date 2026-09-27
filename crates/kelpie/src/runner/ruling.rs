@@ -162,7 +162,7 @@ fn question(project: &str, id: u64, number: u64, kind: &RulingKind) -> String {
         RulingKind::ReviewGuard { review } => format!(
             "The qwen-review loop on pull request #{number} has run {} rounds without \
              settling. {yes} lets it keep going",
-            review.round - 1
+            review.round.saturating_sub(1)
         ),
     };
     format!("{ask}, and {no} sends the worker your note.")

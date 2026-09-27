@@ -1,6 +1,6 @@
 # Design log
 
-Decisions from the design sessions of 2026-09-24 to 2026-09-26, and the facts behind them. The hard-to-reverse ones are also ADRs in `docs/adr/`. The vocabulary is in `CONTEXT.md`.
+Decisions from the design sessions starting 2026-09-24, and the facts behind them. The hard-to-reverse ones are also ADRs in `docs/adr/`. The vocabulary is in `CONTEXT.md`.
 
 ## Why kelpie exists
 

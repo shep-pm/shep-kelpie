@@ -84,7 +84,8 @@ impl QwenReviewer {
             return Err(ReviewerError::Incomplete);
         }
         let report = out.join(format!("round-{round}.txt"));
-        let text = std::fs::read_to_string(&report).unwrap_or_default();
+        let text = std::fs::read_to_string(&report)
+            .map_err(|e| ReviewerError::Failed(format!("cannot read {}: {e}", report.display())))?;
         Ok(parse_findings(&text))
     }
 
@@ -117,9 +118,10 @@ impl QwenReviewer {
         std::fs::create_dir_all(&hunk_dir).map_err(|e| {
             ReviewerError::Failed(format!("cannot create {}: {e}", hunk_dir.display()))
         })?;
-        let name = Path::new(&skipped.file)
-            .file_name()
-            .unwrap_or_else(|| std::ffi::OsStr::new("hunk"));
+        // The whole relative path, flattened: two skipped files that share a
+        // basename in different folders (the script's own `raw/` responses
+        // use the same convention) must not overwrite each other's hunk.
+        let name = skipped.file.replace('/', "_");
         let hunk_path = hunk_dir.join(name);
         std::fs::write(&hunk_path, &diff.stdout).map_err(|e| {
             ReviewerError::Failed(format!("cannot write {}: {e}", hunk_path.display()))
@@ -203,6 +205,69 @@ mod tests {
             !lock.exists(),
             "the script's own lock is released once it finishes, \
              and kelpie never created or left it behind"
+        );
+    }
+
+    // A fake script whose main round reports one file as skipped for size,
+    // and whose hunk round (given `--files`) reports one real finding
+    // against whatever path it was handed. Proves the hunk's own finding is
+    // folded back in against the ORIGINAL file, whatever the hunk round
+    // named it, and that a real `-U25` diff runs without error.
+    #[test]
+    fn a_skipped_file_is_cut_into_a_hunk_and_its_findings_are_remapped() {
+        let home = tempfile::tempdir().unwrap();
+        let script_dir = home.path().join(".claude/scripts");
+        std::fs::create_dir_all(&script_dir).unwrap();
+        let script = script_dir.join("qwen-review.sh");
+        let contents = "#!/bin/sh
+mkdir -p \"$QWEN_REVIEW_OUT\"
+case \"$*\" in
+  *--files*)
+    printf 'MEDIUM|whatever-the-hunk-file-is-called:5|leftover debug print|noisy logs\\n' \\
+      > \"$QWEN_REVIEW_OUT/round-1.txt\"
+    ;;
+  *)
+    printf 'LOW|sub/dir/big.rs:0|not reviewed: 900 lines exceeds the chunk limit|split the file or review it by hand\\n' \\
+      > \"$QWEN_REVIEW_OUT/round-1.txt\"
+    ;;
+esac
+: > \"$QWEN_REVIEW_OUT/round-1.txt.done\"
+";
+        std::fs::write(&script, contents).unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        let worktree = home.path().join("repo");
+        std::fs::create_dir_all(worktree.join("sub/dir")).unwrap();
+        crate::test::git(&worktree, &["init", "--quiet", "-b", "main"]);
+        std::fs::write(worktree.join("sub/dir/big.rs"), "fn old() {}\n").unwrap();
+        crate::test::git(&worktree, &["add", "."]);
+        crate::test::git(&worktree, &["commit", "--quiet", "-m", "init"]);
+        let base = crate::test::git(&worktree, &["rev-parse", "HEAD"]);
+        crate::test::git(
+            &worktree,
+            &["update-ref", "refs/remotes/origin/main", &base],
+        );
+        std::fs::write(
+            worktree.join("sub/dir/big.rs"),
+            "fn old() {}\nfn new_one() {}\n",
+        )
+        .unwrap();
+        crate::test::git(&worktree, &["commit", "--quiet", "-am", "change"]);
+
+        let out = home.path().join("out");
+        let reviewer = QwenReviewer::new(home.path());
+
+        assert_eq!(
+            reviewer.round(&worktree, &out, 1).unwrap(),
+            vec![Finding {
+                severity: Severity::Medium,
+                file: "sub/dir/big.rs".into(),
+                line: 5,
+                what: "leftover debug print".into(),
+                why: "noisy logs".into(),
+            }]
         );
     }
 

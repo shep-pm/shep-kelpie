@@ -456,8 +456,8 @@ fn write_findings_file(
     findings: &[Finding],
 ) -> Result<(), String> {
     let mut text = format!(
-        "Round {round}'s held findings, judged by the reviewer's severity. Fix each \
-         one, then commit and push.\n\n"
+        "Round {round}'s held findings, at the judge's severity. Fix each one, then \
+         commit and push.\n\n"
     );
     for f in findings {
         text.push_str(&format!(
@@ -483,11 +483,39 @@ fn fix_prompt(number: u64, round: u32, count: usize, path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use serde_json::json;
 
     use super::*;
     use crate::runner::step;
     use crate::test::{Rig, Scripted, ScriptedRound};
+
+    #[test]
+    fn a_findings_file_that_cannot_be_written_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("readonly");
+        std::fs::create_dir(&folder).unwrap();
+        let mut perms = std::fs::metadata(&folder).unwrap().permissions();
+        perms.set_mode(0o555);
+        std::fs::set_permissions(&folder, perms).unwrap();
+
+        let finding = Finding {
+            severity: Severity::Low,
+            file: "a.rs".into(),
+            line: 1,
+            what: "nit".into(),
+            why: "style".into(),
+        };
+        let err = write_findings_file(&folder, &folder.join("review-findings.md"), 1, &[finding])
+            .unwrap_err();
+        assert!(err.contains("review-findings.md"), "{err}");
+
+        // Restore write access so the tempdir can clean itself up.
+        let mut perms = std::fs::metadata(&folder).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&folder, perms).unwrap();
+    }
 
     #[test]
     fn a_judge_reply_wrapped_in_prose_or_fences_still_parses() {
