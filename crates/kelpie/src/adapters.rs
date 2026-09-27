@@ -1,4 +1,5 @@
-//! The real ports: the system clock, `gh` and the `claude` command line
+//! The real ports: the system clock, `gh`, the `claude` command line, its
+//! `/usage`, and the maintainer's qwen-review script
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
