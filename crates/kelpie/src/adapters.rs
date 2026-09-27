@@ -1,15 +1,17 @@
-//! The real ports: the system clock, `gh` and the `claude` command line
+//! The real ports: the system clock, `gh`, `curl` and the `claude` command line
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::ports::{Clock, Timestamp};
 
 mod claude;
+mod curl;
 mod gh;
 mod process;
 mod usage;
 
 pub use claude::ClaudeCli;
+pub use curl::Curl;
 pub use gh::Gh;
 pub use usage::UsageMeter;
 

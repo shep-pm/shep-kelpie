@@ -1,5 +1,5 @@
-//! The main seam's rig: a runner on stand-ins for Claude, the forge and the
-//! clock, over a real git repo in a throwaway home
+//! The main seam's rig: a runner on stand-ins for Claude, the forge, the
+//! webhook and the clock, over a real git repo in a throwaway home
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -18,10 +18,13 @@ use crate::runner::{
     CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
 };
 use crate::settings::Effort;
+use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{CallRecord, Phase, Turn, WorkItem};
 
+mod alerts;
 mod forge;
 
+pub(crate) use alerts::FakeAlerts;
 pub(crate) use forge::FakeForge;
 
 /// A work item with one call, so every field of its format shows
@@ -83,6 +86,8 @@ pub(crate) enum Scripted {
     /// Commits this file with this text on the worktree's branch, pushes
     /// it the way a worker does, and answers
     Push(&'static str, &'static str),
+    /// Answers with this final message
+    Say(&'static str),
 }
 
 /// A call as the stand-in Claude saw it
@@ -154,6 +159,12 @@ impl Claude for FakeClaude {
                 std::fs::write(call.cwd.join(LEFT_BEHIND), "work in progress\n").unwrap();
                 panic!("the runner is killed mid-turn");
             }
+            Some(Scripted::Say(text)) => Ok(ClaudeReply {
+                session_id: call.session.id().clone(),
+                text: text.into(),
+                usage: Usage::default(),
+                session_cost: Cost(0),
+            }),
             Some(Scripted::Push(file, text)) => {
                 std::fs::write(call.cwd.join(file), text).unwrap();
                 git(&call.cwd, &["add", file]);
@@ -241,6 +252,7 @@ pub(crate) struct Rig {
     pub(crate) claude: FakeClaude,
     pub(crate) forge: FakeForge,
     pub(crate) meter: FakeMeter,
+    pub(crate) alerts: FakeAlerts,
     pub(crate) clock: FakeClock,
 }
 
@@ -269,6 +281,12 @@ impl Rig {
     /// Where the rig says the kelpie binary is
     pub(crate) const KELPIE: &str = "/opt/kelpie/bin/kelpie";
 
+    /// The rig's webhook URL: a credential, so finding it anywhere else is a leak
+    pub(crate) const WEBHOOK_URL: &str = "https://alerts.example.invalid/hook/kelpie-s3cr3t";
+
+    /// The part of [`Self::WEBHOOK_URL`] no output may carry
+    pub(crate) const WEBHOOK_SECRET: &str = "s3cr3t";
+
     /// A project with the example settings, pointed at a fresh repo
     pub(crate) fn new(project: &str) -> Self {
         let home = tempfile::tempdir().unwrap();
@@ -281,6 +299,7 @@ impl Rig {
             },
             forge: FakeForge::new(home.path().join("origin.git")),
             meter,
+            alerts: FakeAlerts::default(),
             clock: FakeClock::at(Self::EPOCH),
             home,
         };
@@ -292,7 +311,19 @@ impl Rig {
         let paths = rig.paths();
         std::fs::create_dir_all(paths.settings.parent().unwrap()).unwrap();
         std::fs::write(&paths.settings, settings).unwrap();
+        let kelpie = format!(
+            "[webhook]\nkind = \"ntfy\"\nurl = \"{}\"\n",
+            Self::WEBHOOK_URL
+        );
+        std::fs::write(&paths.kelpie_settings, kelpie).unwrap();
         rig
+    }
+
+    /// The webhook the rig's kelpie settings name
+    pub(crate) fn webhook(&self) -> Webhook {
+        KelpieSettings::load(&self.paths().kelpie_settings)
+            .unwrap()
+            .webhook
     }
 
     fn make_repo(&self) {
@@ -360,6 +391,7 @@ impl Rig {
             claude: Arc::new(self.claude.clone()),
             forge: Box::new(self.forge.clone()),
             meter: Box::new(self.meter.clone()),
+            alerts: Arc::new(self.alerts.clone()),
             clock: Box::new(self.clock.clone()),
         };
         Runner::open(
