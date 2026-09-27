@@ -475,6 +475,20 @@ mod tests {
     }
 
     #[test]
+    fn every_effort_parses_from_what_claude_takes() {
+        for effort in [
+            Effort::Low,
+            Effort::Medium,
+            Effort::High,
+            Effort::Xhigh,
+            Effort::Max,
+        ] {
+            assert_eq!(Effort::parse(effort.as_str()), Some(effort));
+        }
+        assert_eq!(Effort::parse("Medium"), None);
+    }
+
+    #[test]
     fn an_unknown_effort_is_refused() {
         let text = EXAMPLE.replacen("effort = \"medium\"", "effort = \"huge\"", 1);
         assert!(parse_err(&text).contains("unknown variant `huge`"));

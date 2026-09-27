@@ -98,7 +98,7 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
     let changed = match (action, issue) {
         ("start", _) => runner.start().map_err(|e| e.to_string()),
         ("pause", _) => runner.pause().map_err(|e| e.to_string()),
-        ("add", Some(issue)) => runner.add(issue).map_err(|e| e.to_string()),
+        ("add", Some(issue)) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
         _ => Ok(()),
     };
     match changed {

@@ -29,14 +29,11 @@ impl Runner {
             return Ok(Begin::Idle);
         };
         let report = match self.add(issue) {
-            Ok(()) => {
-                let item = self.state.work_item.as_ref().expect("the item just added");
-                TurnReport::Dispatched {
-                    issue,
-                    worker: item.worker.clone(),
-                    skipped: pick.skipped,
-                }
-            }
+            Ok(worker) => TurnReport::Dispatched {
+                issue,
+                worker,
+                skipped: pick.skipped,
+            },
             Err(super::AddError::State(e)) => return Err(e),
             Err(e) => TurnReport::BoardFailed {
                 reason: format!("cannot dispatch #{issue}: {e}"),
@@ -214,6 +211,21 @@ mod tests {
             step(&runner).unwrap(),
             Some(TurnReport::Dispatched { issue: 2, .. })
         ));
+    }
+
+    #[test]
+    fn a_ready_issue_the_forge_cannot_show_is_reported_and_not_taken() {
+        let (rig, runner) = running("golbat");
+        rig.forge.list_ready(4, false);
+        rig.forge.remove_issue(4);
+        assert_eq!(
+            step(&runner).unwrap(),
+            Some(TurnReport::BoardFailed {
+                reason: "cannot dispatch #4: cannot read the issue: gh failed: no issue #4".into()
+            })
+        );
+        assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
+        assert_eq!(rig.claude.calls(), []);
     }
 
     #[test]

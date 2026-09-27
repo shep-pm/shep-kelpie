@@ -175,15 +175,15 @@ impl Runner {
         self.set_run(RunState::Paused)
     }
 
-    /// Makes `issue` the work item in flight. Its first turn runs once the
-    /// project is running.
+    /// Makes `issue` the work item in flight, and returns the model and
+    /// effort its worker runs on. Its first turn runs once the project is running.
     ///
     /// # Errors
     ///
     /// [`AddError`] when a work item is in flight, the issue cannot be read
     /// or its `worker:` label understood, or the change cannot be saved.
     /// Nothing changes then.
-    pub fn add(&mut self, issue: u64) -> Result<(), AddError> {
+    pub fn add(&mut self, issue: u64) -> Result<WorkerModel, AddError> {
         if let Some(item) = &self.state.work_item {
             return Err(AddError::InFlight(item.issue));
         }
@@ -203,13 +203,14 @@ impl Runner {
             branch: format!("kelpie/{issue}"),
             worktree: self.paths.worktree(issue),
             build: self.paths.build(issue),
-            worker,
+            worker: worker.clone(),
             session,
             turn: Turn::Due,
             pull_request: None,
             calls: Vec::new(),
         });
-        self.save(next).map_err(AddError::State)
+        self.save(next).map_err(AddError::State)?;
+        Ok(worker)
     }
 
     fn set_run(&mut self, run: RunState) -> Result<(), StateError> {
