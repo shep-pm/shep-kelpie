@@ -15,8 +15,9 @@ use serde::Serialize;
 use super::Runner;
 use super::trigger::lock;
 use crate::board::{Skip, WorkerModel};
+use crate::pacer::{HoldKind, Scope};
 use crate::ports::{
-    ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session, SessionId, Usage,
+    ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session, SessionId, Timestamp, Usage,
 };
 use crate::profile::{INSTRUCTIONS, WorkerProfile};
 use crate::state::{RunState, StateError};
@@ -45,6 +46,15 @@ pub enum TurnReport {
     BoardFailed {
         /// Why
         reason: String,
+    },
+    /// The pacer found a limit reached, so nothing new started
+    Held {
+        /// Which limit
+        kind: HoldKind,
+        /// Why, as `status` shows it
+        reason: String,
+        /// When the pacer reads usage again at the latest
+        until: Timestamp,
     },
     /// A turn ended and its call was recorded
     Ended {
@@ -114,9 +124,16 @@ impl Runner {
         if self.state.run != RunState::Running {
             return Ok(Begin::Idle);
         }
-        let Some(item) = &self.state.work_item else {
-            return self.dispatch();
+        // Only a turn that has not begun waits on the pacer: one cut short by
+        // a restart carries on, since a turn is never interrupted.
+        let due = match &self.state.work_item {
+            Some(item) => matches!(item.turn, Turn::Due),
+            None => return self.dispatch(),
         };
+        if due && let Some(held) = self.pace(Scope::Turn)?.holds() {
+            return Ok(held);
+        }
+        let item = self.state.work_item.as_ref().expect("checked above");
         let session = match &item.turn {
             Turn::Due => Session::New(item.session.clone()),
             Turn::Running { .. } if start_over => Session::New(item.session.clone()),

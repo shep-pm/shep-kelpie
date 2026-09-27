@@ -50,6 +50,7 @@ fn serve(project: &str) -> Result<(), String> {
     let ports = Ports {
         claude: Arc::new(claude.clone()),
         forge: Box::new(Gh),
+        meter: Box::new(claude.meter()),
         clock: Box::new(SystemClock),
     };
     let runner = Runner::open(project, &paths, &home, &kelpie, ports).map_err(|e| e.to_string())?;
@@ -116,7 +117,10 @@ fn work(runner: &Mutex<Runner>, woken: &Receiver<()>) {
             Ok(Some(report)) => {
                 let line = serde_json::to_string(&report).expect("a report serializes to JSON");
                 println!("{line}");
-                if !matches!(report, TurnReport::BoardFailed { .. }) {
+                if !matches!(
+                    report,
+                    TurnReport::BoardFailed { .. } | TurnReport::Held { .. }
+                ) {
                     continue;
                 }
             }

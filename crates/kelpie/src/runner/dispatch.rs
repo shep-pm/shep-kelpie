@@ -7,6 +7,7 @@
 use super::Runner;
 use super::turn::{Begin, TurnReport};
 use crate::board;
+use crate::pacer::Scope;
 use crate::state::StateError;
 
 impl Runner {
@@ -28,6 +29,9 @@ impl Runner {
         let Some(issue) = pick.issue else {
             return Ok(Begin::Idle);
         };
+        if let Some(held) = self.pace(Scope::Dispatch)?.holds() {
+            return Ok(held);
+        }
         let report = match self.add(issue) {
             Ok(worker) => TurnReport::Dispatched {
                 issue,

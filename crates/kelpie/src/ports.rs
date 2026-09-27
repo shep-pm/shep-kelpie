@@ -1,4 +1,4 @@
-//! The runner's ports: Claude, the forge and the clock
+//! The runner's ports: Claude, the forge, the account's usage and the clock
 //!
 //! The work-item loop reaches the outside world only through these traits.
 //! [`crate::adapters`] holds the real ones and the test rig holds stand-ins,
@@ -253,12 +253,71 @@ impl fmt::Display for ClaudeError {
 
 impl std::error::Error for ClaudeError {}
 
+/// How much of one usage window the account has spent
+// wire format: changing this is a breaking change to the pacer's status
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Window {
+    /// Whole percent of the window used
+    pub used_pct: u32,
+    /// When the window resets
+    pub resets_at: Timestamp,
+}
+
+/// The account's usage: the 5-hour session window and the weekly window
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Utilization {
+    /// The 5-hour session window
+    pub session: Window,
+    /// The weekly window across all models
+    pub week: Window,
+}
+
+/// Reads the account's usage
+pub trait Meter: Send + Sync {
+    /// The account's usage at `now`
+    ///
+    /// `now` places the reset times, which the account prints without a year.
+    ///
+    /// # Errors
+    ///
+    /// [`MeterError`] when usage cannot be read.
+    fn read(&self, now: Timestamp) -> Result<Utilization, MeterError>;
+}
+
+/// Why the account's usage could not be read
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MeterError {
+    /// `claude` could not be started, with the OS's reason
+    Spawn(String),
+    /// `claude` did not answer in time
+    TimedOut,
+    /// The runner is stopping
+    Stopped,
+    /// `claude` answered, but not with usage kelpie can read
+    Unreadable(String),
+}
+
+impl fmt::Display for MeterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Spawn(error) => write!(f, "cannot run claude: {error}"),
+            Self::TimedOut => f.write_str("claude did not answer /usage in time"),
+            Self::Stopped => f.write_str("claude was stopped with the runner"),
+            Self::Unreadable(output) => write!(f, "unreadable /usage output: {}", output.trim()),
+        }
+    }
+}
+
+impl std::error::Error for MeterError {}
+
 /// Every port the runner uses, as one bundle
 pub struct Ports {
     /// Headless Claude, shared so a turn runs without holding the runner
     pub claude: Arc<dyn Claude>,
     /// The forge
     pub forge: Box<dyn Forge>,
+    /// The account's usage
+    pub meter: Box<dyn Meter>,
     /// The clock
     pub clock: Box<dyn Clock>,
 }
