@@ -112,7 +112,12 @@ struct Shepherd {
 
 impl Drop for Shepherd {
     fn drop(&mut self) {
-        let _ = self.shep(&["kill"]);
+        // No unwrap: a panic here while a failed test unwinds would abort.
+        let _ = Command::new(shep_binary())
+            .arg("kill")
+            .env("SHEP_HOME", self.home.path())
+            .stdin(Stdio::null())
+            .output();
     }
 }
 

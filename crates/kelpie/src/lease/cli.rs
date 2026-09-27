@@ -178,7 +178,11 @@ async fn return_book(kind: &LeaseKind) -> Result<ExitCode, String> {
 async fn wait_for_grant(kind: &LeaseKind, signals: &mut Signals) -> Result<Option<Caught>, String> {
     let mut last_ahead = None;
     loop {
-        let reply = ask_dog("take", kind.as_str()).await?;
+        // A signal cuts the ask short too, not only the nap between asks.
+        let reply = tokio::select! {
+            reply = ask_dog("take", kind.as_str()) => reply?,
+            caught = signals.recv() => return Ok(Some(withdraw(kind, caught).await)),
+        };
         if reply["granted"] == true {
             return Ok(None);
         }
@@ -190,14 +194,17 @@ async fn wait_for_grant(kind: &LeaseKind, signals: &mut Signals) -> Result<Optio
         }
         tokio::select! {
             () = tokio::time::sleep(DOG_POLL) => {}
-            caught = signals.recv() => {
-                if let Err(e) = ask_dog("return", kind.as_str()).await {
-                    eprintln!("kelpie lease: {e}: run `kelpie lease return {kind}`");
-                }
-                return Ok(Some(caught));
-            }
+            caught = signals.recv() => return Ok(Some(withdraw(kind, caught).await)),
         }
     }
+}
+
+// Withdraws the ask, or says how to, and hands the signal back.
+async fn withdraw(kind: &LeaseKind, caught: Caught) -> Caught {
+    if let Err(e) = ask_dog("return", kind.as_str()).await {
+        eprintln!("kelpie lease: {e}: run `kelpie lease return {kind}`");
+    }
+    caught
 }
 
 fn take_gpu() -> Result<(), String> {
