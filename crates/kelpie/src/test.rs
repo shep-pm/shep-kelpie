@@ -49,6 +49,8 @@ pub(crate) fn a_work_item() -> WorkItem {
             since: Timestamp(11),
         },
         red_head: Some("bad".into()),
+        resume: None,
+        review_call: crate::work_item::ReviewCallState::Idle,
         calls: vec![CallRecord {
             role: Role::Worker,
             at: Timestamp(10),

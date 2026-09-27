@@ -15,7 +15,7 @@ use crate::ports::{ForgeError, Ports, Timestamp, Visibility};
 use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
-use crate::work_item::{Phase, Turn, WorkItem, new_session_id};
+use crate::work_item::{Phase, ReviewCallState, Turn, WorkItem, new_session_id};
 
 mod alert;
 mod dispatch;
@@ -238,6 +238,8 @@ impl Runner {
             pull_request: None,
             phase: Phase::Implement,
             red_head: None,
+            resume: None,
+            review_call: ReviewCallState::default(),
             calls: Vec::new(),
         });
         self.save(next).map_err(AddError::State)?;

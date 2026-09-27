@@ -38,6 +38,15 @@ pub struct WorkItem {
     /// The head whose red CI run last went to the worker
     #[serde(default)]
     pub red_head: Option<String>,
+    /// What phase to force once the turn now running ends, overriding the
+    /// ordinary rule that a known pull request goes straight to CI. Set by
+    /// a ruling's answer that needs the qwen-review loop to run again;
+    /// cleared once applied.
+    #[serde(default)]
+    pub resume: Option<Phase>,
+    /// Whether a review round or judge call is in flight
+    #[serde(default)]
+    pub review_call: ReviewCallState,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
 }
@@ -80,6 +89,25 @@ pub enum Phase {
     Done {
         /// Whether the pull request merged, so its branch on the forge goes too
         merged: bool,
+    },
+}
+
+/// Whether a review round or judge call is in flight
+///
+/// Recorded in state the way a running turn is: `drop` refuses while a
+/// call is running, since it runs outside the runner's lock and a dropped
+/// work item would leave nothing for the result to land on.
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ReviewCallState {
+    /// Nothing is running
+    #[default]
+    Idle,
+    /// A round or a judge call is running, started at this time
+    Running {
+        /// When it started
+        since: Timestamp,
     },
 }
 
@@ -255,6 +283,8 @@ mod tests {
                 "pull_request": 51,
                 "phase": { "state": "ci", "head": "c0ffee", "since": 11 },
                 "red_head": "bad",
+                "resume": null,
+                "review_call": { "state": "idle" },
                 "calls": [{
                     "role": "worker",
                     "at": 10,
@@ -372,6 +402,21 @@ mod tests {
         assert_eq!(
             Review { round: 2, ..review }.reviewer(),
             ReviewerKind::Claude
+        );
+    }
+
+    #[test]
+    fn review_call_state_is_pinned() {
+        assert_eq!(
+            serde_json::to_value(ReviewCallState::Idle).unwrap(),
+            json!({ "state": "idle" })
+        );
+        assert_eq!(
+            serde_json::to_value(ReviewCallState::Running {
+                since: Timestamp(9)
+            })
+            .unwrap(),
+            json!({ "state": "running", "since": 9 })
         );
     }
 

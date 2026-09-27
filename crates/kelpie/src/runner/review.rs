@@ -16,7 +16,7 @@ use super::Runner;
 use super::report::{Begin, ReviewCall, ReviewResult, StepReport};
 use crate::ports::{Claude, Finding, Reviewer, Severity, Verdict, parse_findings};
 use crate::state::{RulingKind, StateError};
-use crate::work_item::{Phase, Review, ReviewStage, ReviewerKind, Turn};
+use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, ReviewerKind, Turn};
 
 impl Runner {
     pub(super) fn review_step(&mut self) -> Result<Begin, StateError> {
@@ -32,6 +32,7 @@ impl Runner {
             .pull_request
             .expect("review starts once a pull request is known");
         let worktree = item.worktree.clone();
+        let build = item.build.clone();
         let worker_folder = self.paths.worker.clone();
 
         match review.stage.clone() {
@@ -40,15 +41,21 @@ impl Runner {
                     return self.raise(number, RulingKind::ReviewGuard { review });
                 }
                 match review.reviewer() {
-                    ReviewerKind::Qwen => Ok(Begin::Review(ReviewCall::Qwen {
-                        worktree,
-                        out: item.build.join("qwen-review"),
-                        round: review.round,
-                    })),
+                    ReviewerKind::Qwen => {
+                        self.mark_review_call_running()?;
+                        Ok(Begin::Review(ReviewCall::Qwen {
+                            worktree,
+                            out: build.join("qwen-review"),
+                            round: review.round,
+                        }))
+                    }
                     ReviewerKind::Claude => {
                         let model = self.settings.models.reviewer.clone();
                         match calls::reviewer_call(&worktree, &worker_folder, &model) {
-                            Ok(call) => Ok(Begin::Review(ReviewCall::ClaudeRound(call))),
+                            Ok(call) => {
+                                self.mark_review_call_running()?;
+                                Ok(Begin::Review(ReviewCall::ClaudeRound(call)))
+                            }
                             Err(reason) => Ok(self.gate_failed(reason)),
                         }
                     }
@@ -61,7 +68,10 @@ impl Runner {
                 let finding = findings[verdicts.len()].clone();
                 let model = self.settings.models.judge.clone();
                 match calls::judge_call(&worktree, &worker_folder, &model, &finding) {
-                    Ok(call) => Ok(Begin::Review(ReviewCall::Judge(call))),
+                    Ok(call) => {
+                        self.mark_review_call_running()?;
+                        Ok(Begin::Review(ReviewCall::Judge(call)))
+                    }
                     Err(reason) => Ok(self.gate_failed(reason)),
                 }
             }
@@ -69,6 +79,15 @@ impl Runner {
                 unreachable!("begin_turn drives a fix turn directly")
             }
         }
+    }
+
+    // Recorded in state before the runner's lock is released for the call
+    // itself, the same as a worker's turn marks `Turn::Running`: `drop`
+    // refuses while this is set, so a call in flight always has a work
+    // item to land its result on.
+    fn mark_review_call_running(&mut self) -> Result<(), StateError> {
+        let since = self.ports.clock.now();
+        self.update(|item| item.review_call = ReviewCallState::Running { since })
     }
 
     // Every held finding holds the judge's own severity, since the nit rule
@@ -140,10 +159,15 @@ impl Runner {
     ) -> Result<Option<StepReport>, StateError> {
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
-        let item = next
-            .work_item
-            .as_mut()
-            .expect("a review result is of a work item");
+        // Tolerated the same way `end_turn` tolerates a turn's result
+        // arriving with nothing (or something else) to apply it to: the
+        // guard on `drop` keeps this from happening today, but a result
+        // for a work item that is no longer this one, or gone outright,
+        // is silently discarded rather than panicking the runner.
+        let Some(item) = next.work_item.as_mut() else {
+            return Ok(None);
+        };
+        item.review_call = ReviewCallState::Idle;
         let Phase::Review(review) = item.phase.clone() else {
             return Ok(None);
         };
@@ -286,6 +310,22 @@ mod tests {
     use crate::ports::{Role, Session};
     use crate::runner::step;
     use crate::test::{Rig, Scripted, ScriptedRound};
+
+    // `drop` refuses while a call is running (see merge.rs's own test for
+    // that), but `end_review` tolerates a work item that is gone anyway,
+    // the same defensive shape as `end_turn`'s equivalent guard, rather
+    // than panicking the runner on the `.expect` this replaced.
+    #[test]
+    fn end_review_tolerates_a_work_item_that_is_gone() {
+        let (_rig, runner, _) = Rig::with_pull_request("shep");
+        runner.lock().unwrap().state.work_item = None;
+        let report = runner
+            .lock()
+            .unwrap()
+            .end_review(ReviewResult::Findings(Ok(vec![])))
+            .unwrap();
+        assert_eq!(report, None);
+    }
 
     #[test]
     fn advancing_a_clean_round_extends_the_streak_and_settles_at_two() {
