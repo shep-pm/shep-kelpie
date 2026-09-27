@@ -248,8 +248,8 @@ pub fn rebase(
             "its worktree has changes that are not committed".into(),
         ));
     }
-    // The rebased commits keep the committer they had, so the rebase needs
-    // no identity of its own.
+    // The rebased commits take the head's committer, the worker's one
+    // identity, so the rebase needs no identity of its own.
     let name = format!(
         "user.name={}",
         in_worktree(&["log", "-1", "--format=%cn", head])?
