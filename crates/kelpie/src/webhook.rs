@@ -66,19 +66,34 @@ impl TryFrom<String> for WebhookUrl {
     type Error = &'static str;
 
     // Plain `http` is only for a stand-in on this machine: anything else
-    // would send the question, and the URL's secret, in the clear.
+    // would send the question, and the URL's secret, in the clear. The whole
+    // host and port are checked, since `127.0.0.1@elsewhere` names elsewhere.
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        let local = ["http://127.0.0.1", "http://localhost", "http://[::1]"];
-        let host_end = |rest: &str| rest.is_empty() || rest.starts_with([':', '/']);
-        let allowed = value.starts_with("https://")
-            || local
-                .iter()
-                .any(|l| value.strip_prefix(l).is_some_and(host_end));
+        let local = |authority: &str| {
+            ["127.0.0.1", "localhost", "[::1]"].iter().any(|host| {
+                authority.strip_prefix(host).is_some_and(|port| {
+                    port.is_empty()
+                        || port
+                            .strip_prefix(':')
+                            .is_some_and(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+                })
+            })
+        };
+        let allowed = match value.split_once("://") {
+            Some(("https", rest)) => !authority(rest).is_empty(),
+            Some(("http", rest)) => local(authority(rest)),
+            _ => false,
+        };
         if !allowed || value.chars().any(|c| c.is_whitespace() || c.is_control()) {
             return Err("must be an `https://` URL with no spaces");
         }
         Ok(Self(value))
     }
+}
+
+// The host and port: what comes before the path, query or fragment.
+fn authority(rest: &str) -> &str {
+    rest.split(['/', '?', '#']).next().unwrap_or_default()
 }
 
 /// What a malformed file is told, since the parser's own message could quote the URL
@@ -107,7 +122,7 @@ impl KelpieSettings {
         toml::from_str(text).map_err(|e: toml::de::Error| {
             let line = e
                 .span()
-                .map(|span| text[..span.start].lines().count().max(1));
+                .map(|span| text[..span.start].matches('\n').count() + 1);
             match line {
                 Some(line) => format!("line {line} is not right: {SHAPE}"),
                 None => SHAPE.to_owned(),
@@ -139,6 +154,7 @@ mod tests {
     // A derived Debug would print the URL wherever settings are debugged.
     #[test]
     fn debug_does_not_leak_the_url() {
+        assert!(EXAMPLE.contains("https://ntfy.sh/your-private-topic"));
         let text = EXAMPLE.replace("https://ntfy.sh/your-private-topic", SECRET);
         let s = KelpieSettings::parse(&text).unwrap();
         assert_eq!(format!("{:?}", s.webhook.url), "WebhookUrl(..)");
@@ -167,6 +183,10 @@ mod tests {
             "[webhook]\nkind = \"slack\"\nurl = \"{SECRET}\"\n"
         ));
         assert!(err.starts_with("line 2 is not right"), "{err}");
+        let err = parse_err(&format!(
+            "[webhook]\nkind = \"ntfy\"\nurl = \"{SECRET}\"\ntoken = \"x\"\n"
+        ));
+        assert!(err.starts_with("line 4 is not right"), "{err}");
     }
 
     #[test]
@@ -190,6 +210,10 @@ mod tests {
             "http://ntfy.sh/topic",
             "http://localhost.example.com/x",
             "http://127.0.0.10/x",
+            "http://127.0.0.1:80@attacker.example/x",
+            "http://localhost@attacker.example/x",
+            "http://127.0.0.1:/x",
+            "https:///x",
             "ftp://x",
             "https://ntfy.sh/a b",
             "https://ntfy.sh/a\nb",

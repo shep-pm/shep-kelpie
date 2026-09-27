@@ -34,14 +34,14 @@ impl Alerts for Curl {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| AlertError::Spawn(e.kind().to_string()))?;
+            .map_err(|e| AlertError::Spawn(e.to_string()))?;
         let config = config(webhook, alert);
         let mut stdin = child.stdin.take().expect("stdin was piped");
         let written = stdin.write_all(config.as_bytes());
         drop(stdin);
         let output = child
             .wait_with_output()
-            .map_err(|e| AlertError::Spawn(e.kind().to_string()))?;
+            .map_err(|e| AlertError::Spawn(e.to_string()))?;
         if written.is_err() || !output.status.success() {
             return Err(AlertError::Unreachable(output.status.code().unwrap_or(-1)));
         }
@@ -120,14 +120,15 @@ fn fit(text: &str, max: usize) -> String {
     if text.len() <= max {
         return text.to_owned();
     }
-    let floor = |mut at: usize| {
-        while !text.is_char_boundary(at) {
-            at -= 1;
-        }
-        at
-    };
-    let tail = floor(text.len() - KEEP_TAIL);
-    let head = floor(max - KEEP_TAIL - CUT.len());
+    // The head rounds down and the tail's start rounds up, so both only shrink.
+    let mut head = max - KEEP_TAIL - CUT.len();
+    while !text.is_char_boundary(head) {
+        head -= 1;
+    }
+    let mut tail = text.len() - KEEP_TAIL;
+    while !text.is_char_boundary(tail) {
+        tail += 1;
+    }
     format!("{}{CUT}{}", &text[..head], &text[tail..])
 }
 
@@ -301,8 +302,12 @@ mod tests {
         assert!(fitted.contains("[…cut; the whole question is in status]"));
         assert_eq!(fit("short", DISCORD_MAX), "short");
 
-        let wide = "é".repeat(3000);
-        let fitted = fit(&wide, DISCORD_MAX);
-        assert!(fitted.len() <= DISCORD_MAX);
+        for pad in 0..4 {
+            let wide = format!("{}{}", "a".repeat(pad), "€".repeat(1500));
+            for max in [DISCORD_MAX, NTFY_MAX] {
+                let fitted = fit(&wide, max);
+                assert!(fitted.len() <= max, "{pad} {max}: {}", fitted.len());
+            }
+        }
     }
 }

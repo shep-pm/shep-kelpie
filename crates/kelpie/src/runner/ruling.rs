@@ -149,16 +149,16 @@ pub(super) fn park(
         .expect("a ruling is about a work item");
     item.phase = Phase::Ruling { id };
     let issue = item.issue;
-    let question = question(project, id, issue, pull_request, &kind);
+    let text = question(project, id, issue, pull_request, &kind);
     next.last_ruling = id;
     next.rulings.push(Ruling {
         id,
-        question: question.clone(),
+        question: text.clone(),
         pull_request,
         kind,
         alerted: false,
     });
-    (issue, id, question)
+    (issue, id, text)
 }
 
 // A yes, a no or an answer that does not fit the ruling is refused.

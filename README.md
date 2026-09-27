@@ -8,6 +8,8 @@ First build under way. A project runner reads its settings, keeps its state, and
 
 Settings live at `~/.kelpie/projects/<project>/settings.toml`. Start from `crates/kelpie/settings.example.toml`, which holds the defaults for shep.
 
+Every runner also reads `~/.kelpie/settings.toml`, which names the webhook every ruling is posted to. Start from `crates/kelpie/kelpie-settings.example.toml`, and keep the file private: the URL is a credential.
+
 The runner is a sheep under kelpie's own shepherd, with a flock entry like this:
 
 ```toml

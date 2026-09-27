@@ -234,8 +234,8 @@ impl Runner {
                         work_item_cost_usd,
                         pull_request,
                     },
-                    Some(asked) => {
-                        let kind = RulingKind::Question { asked };
+                    Some(text) => {
+                        let kind = RulingKind::Question { asked: text };
                         let project = self.project.as_str();
                         let (_, id, question) = park(project, &mut next, pull_request, kind);
                         StepReport::Asked {
