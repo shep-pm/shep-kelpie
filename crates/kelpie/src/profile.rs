@@ -6,11 +6,12 @@
 //! `kelpie confine` holds those to the same folders. Deny rules keep what
 //! only the project manager does, and credential paths, out of reach.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::settings::{GuardHook, HookEvent, NonBlank};
+use crate::settings::{BuildDir, EnvName, GuardHook, HookEvent, NonBlank};
 
 /// Kelpie's instructions to every worker, appended to its system prompt
 pub const INSTRUCTIONS: &str = include_str!("worker-instructions.md");
@@ -19,9 +20,10 @@ pub const INSTRUCTIONS: &str = include_str!("worker-instructions.md");
 const FILE_TOOLS: &str = "Edit|Write|MultiEdit|NotebookEdit";
 
 // Claude Code opens a worktree's whole common git dir to sandboxed writes.
-// These are the parts a commit does not need, and whose change would run
-// code outside the sandbox or move what kelpie cuts branches from.
-const GIT_DENY: [&str; 9] = [
+// These are the parts a commit and a push do not need, and whose change
+// would run code outside the sandbox. `refs/remotes` stays open for the
+// push's tracking ref; kelpie fetches `origin/main` before cutting from it.
+const GIT_DENY: [&str; 8] = [
     "config",
     "hooks",
     "info",
@@ -29,7 +31,6 @@ const GIT_DENY: [&str; 9] = [
     "HEAD",
     "index",
     "packed-refs",
-    "refs/remotes",
     "refs/tags",
 ];
 
@@ -80,6 +81,8 @@ pub struct WorkerProfile<'a> {
     pub guard_hooks: &'a [GuardHook],
     /// The domains the project's settings add to GitHub's
     pub allowed_domains: &'a [NonBlank],
+    /// Variables the project's settings point into the build folder
+    pub build_env: &'a BTreeMap<EnvName, BuildDir>,
 }
 
 impl WorkerProfile<'_> {
@@ -87,15 +90,19 @@ impl WorkerProfile<'_> {
     pub fn settings(&self) -> Value {
         let git = |p: &str| self.git_common_dir.join(p);
         let branch_ref = git("refs/heads").join(self.branch);
-        let mut allow_write = vec![
+        let tracking_ref = git("refs/remotes/origin").join(self.branch);
+        let allow_write = vec![
             self.worktree.to_owned(),
             self.build.to_owned(),
             git("objects"),
             self.git_dir.to_owned(),
             git("logs/refs/heads").join(self.branch),
+            with_suffix(&branch_ref, ".lock"),
+            branch_ref,
+            git("logs/refs/remotes/origin").join(self.branch),
+            with_suffix(&tracking_ref, ".lock"),
+            tracking_ref,
         ];
-        allow_write.push(with_suffix(&branch_ref, ".lock"));
-        allow_write.push(branch_ref);
         let deny_write: Vec<PathBuf> = GIT_DENY.iter().map(|p| git(p)).collect();
         let deny: Vec<String> = CREDENTIALS
             .iter()
@@ -116,8 +123,16 @@ impl WorkerProfile<'_> {
             },
             "permissions": { "deny": deny },
             "hooks": self.hooks(),
-            "env": { "CARGO_TARGET_DIR": self.build },
+            "env": self.env(),
         })
+    }
+
+    fn env(&self) -> Value {
+        let mut env = json!({ "CARGO_TARGET_DIR": self.build });
+        for (name, dir) in self.build_env {
+            env[name.as_str()] = json!(self.build.join(dir.as_path()));
+        }
+        env
     }
 
     fn hooks(&self) -> Value {
@@ -190,6 +205,7 @@ mod tests {
             kelpie: Path::new("/opt/kelpie's bin/kelpie"),
             guard_hooks: hooks,
             allowed_domains: domains,
+            build_env: &BTreeMap::new(),
         }
         .settings()
     }
@@ -211,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_go_only_to_the_worktree_the_build_folder_and_what_a_commit_needs() {
+    fn writes_go_only_to_the_worktree_the_build_folder_and_what_a_commit_and_push_need() {
         let s = settings(&[]);
         assert_eq!(
             strings(&s["sandbox"]["filesystem"]["allowWrite"]),
@@ -223,6 +239,9 @@ mod tests {
                 "/k/repos/shep/.git/logs/refs/heads/kelpie/7",
                 "/k/repos/shep/.git/refs/heads/kelpie/7.lock",
                 "/k/repos/shep/.git/refs/heads/kelpie/7",
+                "/k/repos/shep/.git/logs/refs/remotes/origin/kelpie/7",
+                "/k/repos/shep/.git/refs/remotes/origin/kelpie/7.lock",
+                "/k/repos/shep/.git/refs/remotes/origin/kelpie/7",
             ]
         );
         assert_eq!(
@@ -235,11 +254,37 @@ mod tests {
                 "/k/repos/shep/.git/HEAD",
                 "/k/repos/shep/.git/index",
                 "/k/repos/shep/.git/packed-refs",
-                "/k/repos/shep/.git/refs/remotes",
                 "/k/repos/shep/.git/refs/tags",
             ]
         );
         assert_eq!(s["env"]["CARGO_TARGET_DIR"], "/k/targets/shep/7");
+    }
+
+    #[test]
+    fn build_env_points_into_the_build_folder_beside_cargo() {
+        let build_env = BTreeMap::from([(
+            EnvName::try_from("BUN_INSTALL_CACHE_DIR".to_owned()).unwrap(),
+            BuildDir::try_from("bun".to_owned()).unwrap(),
+        )]);
+        let s = WorkerProfile {
+            worktree: Path::new("/k/wt/lab/7"),
+            build: Path::new("/k/targets/lab/7"),
+            git_common_dir: Path::new("/k/repos/lab/.git"),
+            git_dir: Path::new("/k/repos/lab/.git/worktrees/7"),
+            branch: "kelpie/7",
+            kelpie: Path::new("/opt/kelpie"),
+            guard_hooks: &[],
+            allowed_domains: &[],
+            build_env: &build_env,
+        }
+        .settings();
+        assert_eq!(
+            s["env"],
+            json!({
+                "CARGO_TARGET_DIR": "/k/targets/lab/7",
+                "BUN_INSTALL_CACHE_DIR": "/k/targets/lab/7/bun",
+            })
+        );
     }
 
     #[test]

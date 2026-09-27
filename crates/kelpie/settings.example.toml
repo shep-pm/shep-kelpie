@@ -44,9 +44,12 @@ divisor = 1000
 kickoff_hours = 8
 
 # Domains a worker's sandbox may reach besides GitHub: here the crates
-# registry, for a cold cargo cache.
+# registry, for a cold cargo cache. `build_env` points tool caches into the
+# worker's build folder, such as `BUN_INSTALL_CACHE_DIR = "bun"` for bun.
+# `CARGO_TARGET_DIR` is always the build folder itself.
 [worker]
 allowed_domains = ["crates.io", "index.crates.io", "static.crates.io"]
+build_env = {}
 
 [[worker.guard_hooks]]
 event = "PreToolUse"

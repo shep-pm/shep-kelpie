@@ -5,6 +5,7 @@
 //! or malformed setting stops the runner with a message naming it.
 //! `settings.example.toml` beside this crate holds the defaults.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::io;
 use std::num::NonZeroU32;
@@ -144,6 +145,9 @@ pub struct Worker {
     /// Domains the worker's sandbox may reach besides GitHub, such as a
     /// package registry
     pub allowed_domains: Vec<NonBlank>,
+    /// Environment variables set to a folder inside the worker's build
+    /// folder, for tool caches the sandbox would refuse elsewhere
+    pub build_env: BTreeMap<EnvName, BuildDir>,
     /// Hooks copied into each worker's own settings file
     pub guard_hooks: Vec<GuardHook>,
 }
@@ -167,6 +171,62 @@ pub enum HookEvent {
     PreToolUse,
     /// After a tool call
     PostToolUse,
+}
+
+/// An environment variable's name: capitals, digits and `_`, not starting with a digit
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(try_from = "String")]
+pub struct EnvName(String);
+
+impl EnvName {
+    /// The name as written
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for EnvName {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let mut chars = value.chars();
+        let first = chars
+            .next()
+            .is_some_and(|c| c.is_ascii_uppercase() || c == '_');
+        if !first || !chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_') {
+            return Err("must be an environment variable name like `BUN_INSTALL_CACHE_DIR`");
+        }
+        Ok(Self(value))
+    }
+}
+
+/// A folder inside the build folder: relative, with no `..`
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct BuildDir(PathBuf);
+
+impl BuildDir {
+    /// The folder, relative to the build folder
+    #[inline]
+    pub fn as_path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for BuildDir {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let path = PathBuf::from(value);
+        let inside = path
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)));
+        if path.as_os_str().is_empty() || !inside {
+            return Err("must be a relative folder inside the build folder, with no `..`");
+        }
+        Ok(Self(path))
+    }
 }
 
 /// A string with something other than whitespace in it
@@ -438,6 +498,42 @@ mod tests {
     fn a_blank_model_is_refused() {
         let text = EXAMPLE.replacen("model = \"claude-sonnet-5\"", "model = \" \"", 1);
         assert!(parse_err(&text).contains("must not be blank"));
+    }
+
+    #[test]
+    fn build_env_names_folders_inside_the_build_folder() {
+        let text = EXAMPLE.replace(
+            "build_env = {}",
+            r#"build_env = { BUN_INSTALL_CACHE_DIR = "bun/cache" }"#,
+        );
+        let s = parse(&text).unwrap();
+        let [(name, dir)] = s
+            .worker
+            .build_env
+            .iter()
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        assert_eq!(
+            (name.as_str(), dir.as_path()),
+            ("BUN_INSTALL_CACHE_DIR", Path::new("bun/cache"))
+        );
+        for bad in [
+            "\"\"",
+            "\"/tmp/bun\"",
+            "\"../bun\"",
+            "\"bun/../..\"",
+            "\"./bun\"",
+        ] {
+            let line = format!("build_env = {{ BUN = {bad} }}");
+            let err = parse_err(&EXAMPLE.replace("build_env = {}", &line));
+            assert!(err.contains("inside the build folder"), "{bad}: {err}");
+        }
+        for bad in ["bun", "1BUN", "BUN-DIR"] {
+            let line = format!("build_env = {{ {bad} = \"bun\" }}");
+            let err = parse_err(&EXAMPLE.replace("build_env = {}", &line));
+            assert!(err.contains("environment variable name"), "{bad}: {err}");
+        }
     }
 
     #[test]
