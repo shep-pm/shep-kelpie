@@ -262,10 +262,17 @@ impl Forge for FakeForge {
             return Err(ForgeError::Failed("merges are down".into()));
         }
         let now = self.pull_request(repo, number)?;
-        if now.draft || now.state != PullRequestState::Open || now.head != head {
-            return Err(ForgeError::Failed(format!(
-                "cannot merge #{number}: {now:?}"
-            )));
+        let refused = if now.draft {
+            Some("it is a draft".to_owned())
+        } else if now.state != PullRequestState::Open {
+            Some(format!("it is {:?}", now.state))
+        } else if now.head != head {
+            Some(format!("its head is {}, not {head}", now.head))
+        } else {
+            None
+        };
+        if let Some(why) = refused {
+            return Err(ForgeError::Failed(format!("cannot merge #{number}: {why}")));
         }
         self.merges.lock().unwrap().push((number, head.to_owned()));
         self.set_state(number, PullRequestState::Merged);

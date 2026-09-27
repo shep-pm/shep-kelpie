@@ -428,6 +428,22 @@ mod tests {
     }
 
     #[test]
+    fn a_pull_request_closed_after_the_yes_is_not_merged_and_parks_the_worker() {
+        let (rig, runner, _) = parked("koji");
+        rig.ask(&runner, "rule", Some("1 yes"));
+        rig.forge.set_state(71, PullRequestState::Closed);
+        let Some(StepReport::Ruling { id, question, .. }) = step(&runner).unwrap() else {
+            panic!("no ruling was raised");
+        };
+        assert_eq!(id, 2);
+        assert!(
+            question.starts_with("Pull request #71 was closed"),
+            "{question}"
+        );
+        assert_eq!(rig.forge.merges(), []);
+    }
+
+    #[test]
     fn a_runner_restarted_after_a_yes_still_merges() {
         let (rig, runner, head) = parked("zeus");
         rig.ask(&runner, "rule", Some("1 yes"));

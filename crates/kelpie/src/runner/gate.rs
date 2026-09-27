@@ -310,6 +310,32 @@ mod tests {
     }
 
     #[test]
+    fn a_yes_after_the_maintainer_fixes_a_conflict_looks_at_ci_again() {
+        let (rig, runner, _) = Rig::with_pull_request("rotom");
+        let landed = rig.land_on_origin("work.txt");
+        let (id, _) = ruling_report(step(&runner).unwrap());
+
+        let worktree = rig.worktree_7();
+        git(&worktree, &["fetch", "--quiet", "origin", "main"]);
+        git(&worktree, &["reset", "--quiet", "--hard", &landed]);
+        std::fs::write(worktree.join("work.txt"), "both\n").unwrap();
+        git(&worktree, &["commit", "--quiet", "-am", "resolve"]);
+        git(&worktree, &["push", "--quiet", "--force", "origin", "HEAD"]);
+        let fixed = rig.forge.head_of("kelpie/7").unwrap();
+
+        rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+        assert_eq!(
+            step(&runner).unwrap(),
+            None,
+            "CI on the fixed head is pending"
+        );
+        rig.forge.set_checks(&fixed, Checks::Passed);
+        let (next, question) = ruling_report(step(&runner).unwrap());
+        assert_eq!(next, id + 1);
+        assert!(question.starts_with("Merge pull request #71"), "{question}");
+    }
+
+    #[test]
     fn a_worktree_with_uncommitted_changes_is_not_rebased() {
         let (rig, runner, head) = Rig::with_pull_request("zeus");
         std::fs::write(rig.worktree_7().join("work.txt"), "half done\n").unwrap();

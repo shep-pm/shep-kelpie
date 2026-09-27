@@ -187,12 +187,23 @@ pub fn remove(
 /// [`WorktreeError`] naming the git command that failed.
 pub fn has_latest_base(repo: &Path, branch: &str, head: &str) -> Result<bool, WorktreeError> {
     git(repo, ["fetch", "--quiet", "origin", BASE, branch])?;
+    // `--is-ancestor` answers no with exit 1, and fails with any other code.
     let base = format!("origin/{BASE}");
-    let is_ancestor = ["merge-base", "--is-ancestor", &base, head];
-    match git(repo, is_ancestor) {
-        Ok(_) => Ok(true),
-        Err(WorktreeError::Git { stderr, .. }) if stderr.trim().is_empty() => Ok(false),
-        Err(e) => Err(e),
+    let args = ["merge-base", "--is-ancestor", &base, head];
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| WorktreeError::Spawn(e.to_string()))?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(WorktreeError::Git {
+            args: args.join(" "),
+            stderr: String::from_utf8_lossy(&output.stderr).into(),
+        }),
     }
 }
 
@@ -241,10 +252,11 @@ pub fn rebase(
     let base = format!("origin/{BASE}");
     if let Err(e) = git(&["-c", &name, "-c", &email, "rebase", "--quiet", &base]) {
         let conflicts = git(&["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();
-        git(&["rebase", "--abort"])?;
+        let aborted = git(&["rebase", "--abort"]);
         if conflicts.is_empty() {
             return Err(e);
         }
+        aborted?;
         let files: Vec<&str> = conflicts.lines().collect();
         return Ok(Rebase::Refused(format!(
             "it conflicts with main in {}",
