@@ -7,7 +7,9 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use super::coderabbit::FakeCodeRabbit;
 use crate::board::{OpenPullRequest, READY, ReadyIssue};
+use crate::coderabbit::Activity;
 use crate::ports::{Checks, Forge, ForgeError, Issue, PullRequest, PullRequestState, Visibility};
 use crate::settings::ForgeSlug;
 
@@ -31,6 +33,8 @@ pub(crate) struct FakeForge {
     lagging: Arc<Mutex<HashMap<u64, String>>>,
     readied: Arc<Mutex<Vec<u64>>>,
     merges: Arc<Mutex<Vec<(u64, String)>>>,
+    /// Labels, and what CodeRabbit posts
+    pub(crate) coderabbit: FakeCodeRabbit,
 }
 
 /// A pull request on the fake forge. Its head is its branch on the rig's
@@ -62,6 +66,7 @@ impl FakeForge {
             lagging: Arc::default(),
             readied: Arc::default(),
             merges: Arc::default(),
+            coderabbit: FakeCodeRabbit::default(),
         }
     }
 
@@ -248,6 +253,7 @@ impl Forge for FakeForge {
             draft: pr.draft,
             checks: checks.unwrap_or(Checks::Pending),
             head,
+            labels: self.coderabbit.labels(number),
         })
     }
 
@@ -268,6 +274,28 @@ impl Forge for FakeForge {
         let mut prs = self.pull_requests.lock().unwrap();
         prs.get_mut(&number).expect("checked above").draft = false;
         self.readied.lock().unwrap().push(number);
+        Ok(())
+    }
+
+    fn set_label(
+        &self,
+        _repo: &ForgeSlug,
+        number: u64,
+        label: &str,
+        on: bool,
+    ) -> Result<(), ForgeError> {
+        self.opened(number)?;
+        self.coderabbit.set_label(number, label, on);
+        Ok(())
+    }
+
+    fn coderabbit(&self, _repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError> {
+        self.opened(number)?;
+        self.coderabbit.activity(number)
+    }
+
+    fn resolve_thread(&self, _repo: &ForgeSlug, thread: &str) -> Result<(), ForgeError> {
+        self.coderabbit.resolve(thread);
         Ok(())
     }
 

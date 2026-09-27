@@ -22,10 +22,12 @@ use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{CallRecord, Phase, Turn, WorkItem};
 
 mod alerts;
+mod coderabbit;
 mod forge;
 mod relay;
 
 pub(crate) use alerts::FakeAlerts;
+pub(crate) use coderabbit::finding_body;
 pub(crate) use forge::FakeForge;
 pub(crate) use relay::FakeRelay;
 

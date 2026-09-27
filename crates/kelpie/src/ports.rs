@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(doc)]
 use crate::board::READY;
 use crate::board::{OpenPullRequest, ReadyIssue};
+use crate::coderabbit::Activity;
 use crate::settings::{Effort, ForgeSlug};
 use crate::webhook::Webhook;
 
@@ -93,6 +94,33 @@ pub trait Forge: Send {
     /// [`ForgeError`] when the forge refuses or cannot be asked.
     fn mark_ready(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError>;
 
+    /// Adds `label` to pull request `number`, or takes it off
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses or cannot be asked.
+    fn set_label(
+        &self,
+        repo: &ForgeSlug,
+        number: u64,
+        label: &str,
+        on: bool,
+    ) -> Result<(), ForgeError>;
+
+    /// What CodeRabbit has posted on pull request `number`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn coderabbit(&self, repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError>;
+
+    /// Resolves review thread `thread`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses or cannot be asked.
+    fn resolve_thread(&self, repo: &ForgeSlug, thread: &str) -> Result<(), ForgeError>;
+
     /// Merges pull request `number` with a merge commit, only while its head is `head`
     ///
     /// Never a squash or a rebase: the branch's history survives the merge.
@@ -114,6 +142,8 @@ pub struct PullRequest {
     pub head: String,
     /// Where CI stands on its head
     pub checks: Checks,
+    /// Its labels' names
+    pub labels: Vec<String>,
 }
 
 /// Whether a pull request is open, merged or closed without merging

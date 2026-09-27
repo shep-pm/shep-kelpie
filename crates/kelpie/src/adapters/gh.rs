@@ -1,10 +1,13 @@
 //! GitHub, through the `gh` command line
 
+pub(crate) mod coderabbit;
+
 use std::process::{Command, Stdio};
 
 use serde::Deserialize;
 
 use crate::board::{OpenPullRequest, READY, ReadyIssue};
+use crate::coderabbit::Activity;
 use crate::ports::{Checks, Forge, ForgeError, Issue, PullRequest, PullRequestState, Visibility};
 use crate::settings::ForgeSlug;
 
@@ -80,7 +83,7 @@ impl Forge for Gh {
             "--repo",
             repo.as_str(),
             "--json",
-            "state,isDraft,headRefOid,statusCheckRollup",
+            "state,isDraft,headRefOid,statusCheckRollup,labels",
         ])?)
     }
 
@@ -101,6 +104,24 @@ impl Forge for Gh {
     fn mark_ready(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
         let number = number.to_string();
         gh(&["pr", "ready", &number, "--repo", repo.as_str()]).map(drop)
+    }
+
+    fn set_label(
+        &self,
+        repo: &ForgeSlug,
+        number: u64,
+        label: &str,
+        on: bool,
+    ) -> Result<(), ForgeError> {
+        coderabbit::label(repo, number, label, on)
+    }
+
+    fn coderabbit(&self, repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError> {
+        coderabbit::activity(repo, number)
+    }
+
+    fn resolve_thread(&self, _repo: &ForgeSlug, thread: &str) -> Result<(), ForgeError> {
+        coderabbit::resolve(thread)
     }
 
     fn merge(&self, repo: &ForgeSlug, number: u64, head: &str) -> Result<(), ForgeError> {
@@ -252,6 +273,9 @@ fn parse_pull_request(stdout: &[u8]) -> Result<PullRequest, ForgeError> {
         is_draft: bool,
         head_ref_oid: String,
         status_check_rollup: Vec<Check>,
+        // Recorded before labels were asked for, some fixtures carry none.
+        #[serde(default)]
+        labels: Vec<Label>,
     }
     let view: View = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
     let state = match view.state.as_str() {
@@ -265,6 +289,7 @@ fn parse_pull_request(stdout: &[u8]) -> Result<PullRequest, ForgeError> {
         draft: view.is_draft,
         head: view.head_ref_oid,
         checks: checks(&view.status_check_rollup),
+        labels: view.labels.into_iter().map(|l| l.name).collect(),
     })
 }
 
@@ -451,8 +476,18 @@ mod tests {
                 draft: false,
                 head: "baea925a2ed5358932b3506e99ecb9f20cba5e2c".into(),
                 checks: Checks::Passed,
+                labels: vec![],
             }
         );
+    }
+
+    // Recorded the same way, labels included, from shep-pm/shep#598.
+    const PR_LABELLED: &str = include_str!("../../fixtures/gh-pr-view-labelled.json");
+
+    #[test]
+    fn a_pull_request_is_read_with_its_labels() {
+        let pr = parse_pull_request(PR_LABELLED.as_bytes()).unwrap();
+        assert_eq!(pr.labels, ["review please"]);
     }
 
     #[test]

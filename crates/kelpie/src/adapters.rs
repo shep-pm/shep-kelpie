@@ -7,7 +7,7 @@ use crate::ports::{Clock, Timestamp};
 
 mod claude;
 mod curl;
-mod gh;
+pub(crate) mod gh;
 mod process;
 mod qwen;
 mod relay;

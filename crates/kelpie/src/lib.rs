@@ -10,6 +10,7 @@
 
 pub mod adapters;
 pub mod board;
+pub mod coderabbit;
 pub mod confine;
 pub mod dog;
 pub mod lease;
