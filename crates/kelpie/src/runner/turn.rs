@@ -10,6 +10,7 @@
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use super::Runner;
 use super::question::asked;
@@ -202,6 +203,9 @@ impl Runner {
             settings,
             instructions: Some(instructions),
             prompt,
+            timeout: Some(Duration::from_secs(
+                u64::from(self.settings.worker.turn_timeout.get()) * 60,
+            )),
         })
     }
 
@@ -306,6 +310,22 @@ impl Runner {
                     }
                 }
             }
+            Err(ClaudeError::TimedOut) => {
+                item.turn = Turn::Ended { at: now };
+                let (issue, session, pull_request) =
+                    (item.issue, item.session.clone(), item.pull_request);
+                let project = self.project.as_str();
+                let (_, id, question) =
+                    park(project, &mut next, pull_request, RulingKind::TurnTimeout);
+                StepReport::TimedOut {
+                    issue,
+                    session,
+                    pull_request,
+                    id,
+                    question,
+                    comment_failed: None,
+                }
+            }
             Err(e) => {
                 let reason = e.to_string();
                 item.turn = Turn::Failed {
@@ -320,14 +340,22 @@ impl Runner {
         };
         self.save(next)?;
         let mut report = report;
-        if let StepReport::Asked {
-            pull_request,
-            question,
-            comment_failed,
-            ..
-        } = &mut report
-        {
-            *comment_failed = self.post_ruling(*pull_request, question);
+        match &mut report {
+            StepReport::Asked {
+                pull_request,
+                question,
+                comment_failed,
+                ..
+            }
+            | StepReport::TimedOut {
+                pull_request,
+                question,
+                comment_failed,
+                ..
+            } => {
+                *comment_failed = self.post_ruling(*pull_request, question);
+            }
+            _ => {}
         }
         Ok(Some(report))
     }
@@ -619,6 +647,76 @@ mod tests {
         );
         assert_eq!(step(&runner).unwrap(), None);
         assert_eq!(rig.claude.calls().len(), 1);
+    }
+
+    #[test]
+    fn a_turn_past_its_ceiling_is_stopped_and_a_yes_resumes_its_session() {
+        let (rig, runner) = with_issue_7("zeus");
+        rig.claude.script([Scripted::Fail(ClaudeError::TimedOut)]);
+        let Some(StepReport::TimedOut {
+            issue,
+            session,
+            pull_request,
+            id,
+            question,
+            ..
+        }) = step(&runner).unwrap()
+        else {
+            panic!("the timed-out turn raised no ruling");
+        };
+        assert_eq!((issue, pull_request, id), (7, None, 1));
+        assert!(
+            question.starts_with(
+                "The worker on issue #7 has been running past its turn's time limit, \
+                 and kelpie stopped it."
+            ),
+            "{question}"
+        );
+        assert_eq!(
+            rig.ask(&runner, "status", None)["work_item"]["phase"],
+            json!({ "state": "ruling", "id": 1 })
+        );
+
+        rig.ask(&runner, "rule", Some("1 yes"));
+        rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Ended { .. })
+        ));
+        let [_, resumed] = rig.claude.calls().try_into().unwrap();
+        assert_eq!(resumed.session, Session::Resume(session));
+        assert_eq!(
+            resumed.prompt,
+            "Kelpie stopped your last turn: it ran past its time limit. \
+             Carry on with the work item from where you left off."
+        );
+    }
+
+    #[test]
+    fn a_no_on_a_timed_out_turn_stops_the_work_item_keeping_nothing_of_its_own() {
+        let (rig, runner) = with_issue_7("rotom");
+        rig.claude.script([Scripted::Fail(ClaudeError::TimedOut)]);
+        step(&runner).unwrap();
+        rig.ask(&runner, "rule", Some("1 no not worth waiting for"));
+        assert_eq!(
+            step(&runner).unwrap(),
+            Some(StepReport::Finished {
+                issue: 7,
+                pull_request: None,
+                merged: false,
+            })
+        );
+        assert!(!rig.worktree_7().exists());
+        assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
+    }
+
+    #[test]
+    fn a_worker_turn_carries_the_projects_timeout() {
+        let (rig, runner) = with_issue_7("golbat");
+        rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
+        step(&runner).unwrap();
+        let [seen] = rig.claude.calls().try_into().unwrap();
+        assert_eq!(seen.timeout, Some(std::time::Duration::from_secs(3600)));
     }
 
     #[test]

@@ -80,7 +80,7 @@ impl Forge for Gh {
             "--repo",
             repo.as_str(),
             "--json",
-            "state,isDraft,headRefOid,statusCheckRollup",
+            "state,isDraft,headRefOid,statusCheckRollup,labels",
         ])?)
     }
 
@@ -252,6 +252,8 @@ fn parse_pull_request(stdout: &[u8]) -> Result<PullRequest, ForgeError> {
         is_draft: bool,
         head_ref_oid: String,
         status_check_rollup: Vec<Check>,
+        #[serde(default)]
+        labels: Vec<Label>,
     }
     let view: View = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
     let state = match view.state.as_str() {
@@ -265,6 +267,7 @@ fn parse_pull_request(stdout: &[u8]) -> Result<PullRequest, ForgeError> {
         draft: view.is_draft,
         head: view.head_ref_oid,
         checks: checks(&view.status_check_rollup),
+        labels: view.labels.into_iter().map(|l| l.name).collect(),
     })
 }
 
@@ -451,7 +454,25 @@ mod tests {
                 draft: false,
                 head: "baea925a2ed5358932b3506e99ecb9f20cba5e2c".into(),
                 checks: Checks::Passed,
+                labels: vec![],
             }
+        );
+    }
+
+    #[test]
+    fn a_pull_requests_labels_are_read() {
+        let view = br#"{"headRefOid":"abc","isDraft":false,"state":"OPEN",
+            "statusCheckRollup":[],"labels":[{"name":"review please"},{"name":"bug"}]}"#;
+        let pr = parse_pull_request(view).unwrap();
+        assert_eq!(pr.labels, ["review please", "bug"]);
+    }
+
+    #[test]
+    fn a_pull_request_recorded_before_labels_were_read_has_none() {
+        let view = br#"{"headRefOid":"abc","isDraft":false,"state":"OPEN","statusCheckRollup":[]}"#;
+        assert_eq!(
+            parse_pull_request(view).unwrap().labels,
+            Vec::<String>::new()
         );
     }
 

@@ -156,6 +156,9 @@ pub struct Worker {
     pub build_env: BTreeMap<EnvName, BuildDir>,
     /// Hooks copied into each worker's own settings file
     pub guard_hooks: Vec<GuardHook>,
+    /// Minutes a worker's turn may run before kelpie stops it and parks it
+    /// on a ruling, keeping its session
+    pub turn_timeout: NonZeroU32,
 }
 
 /// One of the maintainer's guard hooks, run by path
@@ -423,6 +426,7 @@ mod tests {
         assert!(s.coderabbit.enabled);
         assert_eq!(s.coderabbit.divisor.get(), 1000);
         assert_eq!(s.pacing.kickoff_hours.get(), 8);
+        assert_eq!(s.worker.turn_timeout.get(), 60);
         assert!(s.generated.iter().any(|g| g == "Cargo.lock"));
         assert_eq!(s.worker.guard_hooks[0].event, HookEvent::PreToolUse);
         let domains: Vec<&str> = s

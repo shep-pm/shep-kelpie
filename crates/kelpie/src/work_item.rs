@@ -47,8 +47,65 @@ pub struct WorkItem {
     /// Whether a review round or judge call is in flight
     #[serde(default)]
     pub review_call: ReviewCallState,
+    /// The pull request's labels and ready state, as kelpie's own changes
+    /// leave them. A mismatch at the gate is a change kelpie did not make.
+    #[serde(default)]
+    pub known: Known,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
+}
+
+/// The labels and ready state kelpie believes a pull request carries
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Known {
+    /// Its labels' names
+    pub labels: Vec<String>,
+    /// Whether it is marked ready for review (not a draft)
+    pub ready: bool,
+}
+
+/// Whether `labels` and `ready`, as seen on the forge, differ from `known`,
+/// and if so what changed, named plainly enough to answer from a phone
+pub fn foreign_change(known: &Known, labels: &[String], ready: bool) -> Option<(Known, String)> {
+    let added: Vec<&String> = labels
+        .iter()
+        .filter(|l| !known.labels.contains(l))
+        .collect();
+    let removed: Vec<&String> = known
+        .labels
+        .iter()
+        .filter(|l| !labels.contains(l))
+        .collect();
+    let mut parts = Vec::new();
+    if !added.is_empty() {
+        parts.push(format!("the `{}` label was added", joined(&added)));
+    }
+    if !removed.is_empty() {
+        parts.push(format!("the `{}` label was removed", joined(&removed)));
+    }
+    if ready && !known.ready {
+        parts.push("it was marked ready for review".to_owned());
+    } else if !ready && known.ready {
+        parts.push("it was marked a draft again".to_owned());
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    let seen = Known {
+        labels: labels.to_vec(),
+        ready,
+    };
+    Some((seen, parts.join("; ")))
+}
+
+fn joined(labels: &[&String]) -> String {
+    labels
+        .iter()
+        .map(|l| l.as_str())
+        .collect::<Vec<_>>()
+        .join("`, `")
 }
 
 /// Where a work item stands between the worker's turns and the merge
@@ -285,6 +342,7 @@ mod tests {
                 "red_head": "bad",
                 "resume": null,
                 "review_call": { "state": "idle" },
+                "known": { "labels": ["review please"], "ready": false },
                 "calls": [{
                     "role": "worker",
                     "at": 10,

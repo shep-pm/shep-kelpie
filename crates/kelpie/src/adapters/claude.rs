@@ -33,19 +33,17 @@ impl ClaudeCli {
 impl Claude for ClaudeCli {
     fn run(&self, call: &ClaudeCall) -> Result<ClaudeReply, ClaudeError> {
         // Stdin is closed: a `claude -p` with an open stdin waits on it.
-        let output = self
-            .processes
-            .output(
-                Command::new("claude")
-                    .args(argv(call))
-                    .current_dir(&call.cwd),
-            )
-            .map_err(|e| match e {
-                RunError::Io(e) => ClaudeError::Spawn(e.to_string()),
-                RunError::Stopped => ClaudeError::Stopped,
-                // A call has no limit, so this cannot arrive.
-                RunError::TimedOut => ClaudeError::Failed("claude ran past its limit".into()),
-            })?;
+        let mut command = Command::new("claude");
+        command.args(argv(call)).current_dir(&call.cwd);
+        let run = match call.timeout {
+            Some(limit) => self.processes.output_within(&mut command, limit),
+            None => self.processes.output(&mut command),
+        };
+        let output = run.map_err(|e| match e {
+            RunError::Io(e) => ClaudeError::Spawn(e.to_string()),
+            RunError::Stopped => ClaudeError::Stopped,
+            RunError::TimedOut => ClaudeError::TimedOut,
+        })?;
         parse_result(&output, &call.session)
     }
 }
@@ -180,6 +178,7 @@ mod tests {
             settings: PathBuf::from("/k/worker/settings.json"),
             instructions: Some(PathBuf::from("/k/worker/instructions.md")),
             prompt: "implement #6".into(),
+            timeout: None,
         }
     }
 

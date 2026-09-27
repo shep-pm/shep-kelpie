@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
 use crate::ports::Timestamp;
-use crate::work_item::{Review, WorkItem};
+use crate::work_item::{Known, Review, WorkItem};
 
 /// The state file's format version
 const VERSION: u32 = 1;
@@ -132,6 +132,17 @@ pub enum RulingKind {
         /// it, so the answer resumes the right place instead of the
         /// ordinary rule (a known pull request goes straight to CI)
         resume: Resume,
+    },
+    /// A worker's turn ran past its ceiling and kelpie stopped it, keeping
+    /// its session. A yes resumes it; a no stops the work item.
+    TurnTimeout,
+    /// The pull request's labels or ready state changed outside kelpie. A
+    /// yes accepts the change and kelpie carries on watching it.
+    ForeignChange {
+        /// What changed, named plainly enough to answer from a phone
+        description: String,
+        /// The labels and ready state kelpie adopts as its own on a yes
+        known: Known,
     },
 }
 
@@ -442,8 +453,19 @@ mod tests {
                     resume: Resume::Nothing,
                 },
             ),
+            ruling(6, RulingKind::TurnTimeout),
+            ruling(
+                7,
+                RulingKind::ForeignChange {
+                    description: "the `bug` label was added".into(),
+                    known: Known {
+                        labels: vec!["bug".into()],
+                        ready: false,
+                    },
+                },
+            ),
         ];
-        state.last_ruling = 5;
+        state.last_ruling = 7;
         state.finished = vec![22, 30];
         state.pacing = Some(DayStart {
             week_resets_at: Timestamp(9),
@@ -482,8 +504,14 @@ mod tests {
                             "resume": { "state": "nothing" },
                         }),
                     ),
+                    pinned(6, serde_json::json!({ "kind": "turn-timeout" })),
+                    pinned(7, serde_json::json!({
+                        "kind": "foreign-change",
+                        "description": "the `bug` label was added",
+                        "known": { "labels": ["bug"], "ready": false },
+                    })),
                 ],
-                "last_ruling": 5,
+                "last_ruling": 7,
                 "finished": [22, 30],
                 "leases": [{ "resource": "coderabbit", "since": 8 }],
                 "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
