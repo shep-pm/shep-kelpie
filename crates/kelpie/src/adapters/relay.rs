@@ -75,11 +75,7 @@ impl RelayCli {
         }
         let agents: Vec<Value> = serde_json::from_slice(&output.stdout)
             .map_err(|_| RelayError::Unreachable("unreadable agent list".into()))?;
-        let found = agents.iter().find(|a| a["name"] == json!(NAME));
-        Ok(found
-            .and_then(|a| a["pid"].as_u64())
-            .and_then(|pid| u32::try_from(pid).ok())
-            .map(|pid| Found { pid }))
+        Ok(pid_of_the_relay(&agents).map(|pid| Found { pid }))
     }
 
     fn start(&self) -> Result<(), RelayError> {
@@ -190,6 +186,19 @@ impl Relay for RelayCli {
 // `--remote-control` and `--name` share `NAME`: the first names the remote
 // control channel, the second is what `claude agents --json --all` shows,
 // and both must match for the same relay to be found again.
+// A finished relay with the same fixed name stays in `claude agents --json
+// --all`'s listing, pid-less, so the first name match is not necessarily a
+// live one: every match is checked for a pid before one still running is
+// given up on. Measured live on #14: taking only the first name match found
+// a done session ahead of a live one and started a second relay.
+fn pid_of_the_relay(agents: &[Value]) -> Option<u32> {
+    agents
+        .iter()
+        .filter(|a| a["name"] == json!(NAME))
+        .find_map(|a| a["pid"].as_u64())
+        .and_then(|pid| u32::try_from(pid).ok())
+}
+
 fn start_argv(settings: &Path, instructions: &Path) -> Vec<OsString> {
     vec![
         "--bg".into(),
@@ -278,6 +287,23 @@ mod tests {
     use std::os::unix::net::UnixListener;
 
     use super::*;
+
+    // Recorded live on #14: a finished relay with no `pid` field, listed
+    // before a live one with the same name.
+    #[test]
+    fn a_finished_relay_ahead_of_a_live_one_is_not_mistaken_for_none_running() {
+        let agents = vec![
+            json!({ "id": "2b8edbf5", "name": NAME, "state": "done" }),
+            json!({ "pid": 3145, "id": "a3069699", "name": NAME, "status": "idle" }),
+        ];
+        assert_eq!(pid_of_the_relay(&agents), Some(3145));
+    }
+
+    #[test]
+    fn no_matching_name_is_none() {
+        let agents = vec![json!({ "pid": 1, "name": "something-else" })];
+        assert_eq!(pid_of_the_relay(&agents), None);
+    }
 
     #[test]
     fn the_relay_starts_isolated_and_findable_by_its_fixed_name() {
