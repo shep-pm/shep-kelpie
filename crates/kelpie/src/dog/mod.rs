@@ -7,6 +7,7 @@
 //! `channel = true`, and `shutdown_with_message = true` for a clean stop.
 
 pub mod desk;
+pub mod triggers;
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -26,7 +27,8 @@ use tokio::sync::mpsc;
 use crate::adapters::SystemClock;
 use crate::lease::gpu::{self, GpuLock};
 use crate::lease::wire::{GRANT, grant_params};
-use desk::{ACTIONS, Delivery, Desk};
+use desk::{Delivery, Desk};
+use triggers::ACTIONS;
 
 /// The dog's sheep name, which `kelpie lease` triggers
 pub const NAME: &str = "kelpie";

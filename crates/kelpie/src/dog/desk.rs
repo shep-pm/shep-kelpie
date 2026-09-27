@@ -1,22 +1,18 @@
 //! The dog's desk: what it makes of what shep tells it
 //!
-//! Pure. Runner metrics, runner processes and the maintainer's triggers
-//! go in, and the grants the dog must deliver come out. The shell in
-//! [`super`] feeds it from shep and delivers its grants as triggers.
+//! Pure. Runner metrics and runner processes go in, and the grants the
+//! dog must deliver come out. The maintainer's triggers are answered in
+//! [`super::triggers`]. The shell in [`super`] feeds it from shep and
+//! delivers its grants as triggers.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-
-use serde_json::json;
 
 use crate::lease::book::{Asked, Grant, LeaseBook};
 use crate::lease::gpu::GpuLock;
 use crate::lease::wire::{MetricName, Total, Totals};
-use crate::lease::{Epoch, GPU, Holder, LeaseKind};
+use crate::lease::{Epoch, Holder, LeaseKind};
 use crate::ports::Clock;
 use crate::runner::ProjectName;
-
-/// The triggers the dog answers for the maintainer
-pub const ACTIONS: [&str; 3] = ["status", "take", "return"];
 
 /// A grant the dog must deliver to a runner as a `grant` trigger
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,8 +35,8 @@ struct Run {
 /// The lease book and everything the dog knows about each runner's run
 #[derive(Debug)]
 pub struct Desk {
-    book: LeaseBook,
-    gpu: GpuLock,
+    pub(super) book: LeaseBook,
+    pub(super) gpu: GpuLock,
     runs: HashMap<String, Run>,
     // Runs already replaced. Pids are not ordered, so a late metric from
     // one is known only by having seen it retired.
@@ -139,55 +135,6 @@ impl Desk {
             .flat_map(|name| self.runner_is(name, live.get(name).copied()))
             .collect()
     }
-
-    /// Answers one of the maintainer's triggers with a JSON body
-    ///
-    /// `status` lists every lease, the GPU's read from its lock. `take`
-    /// and `return` name a book lease and act for the maintainer. Asking
-    /// with `take` again is how a waiting maintainer learns of the grant.
-    pub fn answer(&mut self, action: &str, params: Option<&str>) -> (String, Vec<Delivery>) {
-        let error = |message: String| (json!({ "error": message }).to_string(), Vec::new());
-        let params = params.map(str::trim).filter(|p| !p.is_empty());
-        let kind = match (action, params) {
-            ("status", None) => return (self.status().to_string(), Vec::new()),
-            ("status", Some(_)) => return error("`status` takes no params".into()),
-            ("take" | "return", Some(GPU)) => {
-                return error(format!(
-                    "the GPU lease is the qwen scripts' lock: run `kelpie lease {action} gpu`"
-                ));
-            }
-            ("take" | "return", Some(kind)) => match LeaseKind::try_from(kind) {
-                Ok(kind) => kind,
-                Err(e) => return error(e.to_string()),
-            },
-            ("take" | "return", None) => return error(format!("`{action}` takes a lease kind")),
-            _ => return error(format!("unknown action `{action}`")),
-        };
-        if action == "return" {
-            let held = self.book.holder(&kind) == Some(&Holder::Maintainer);
-            let grants = self.book.give_back(&kind, &Holder::Maintainer);
-            let body = json!({ "kind": kind, "returned": held });
-            return (body.to_string(), deliveries(grants));
-        }
-        let body = match self.book.ask(&kind, Holder::Maintainer) {
-            Asked::Granted | Asked::AlreadyHeld => json!({ "kind": kind, "granted": true }),
-            Asked::Queued { ahead } => json!({ "kind": kind, "queued": ahead }),
-        };
-        (body.to_string(), Vec::new())
-    }
-
-    fn status(&self) -> serde_json::Value {
-        let holder = self.gpu.holder();
-        let gpu = json!({
-            "kind": GPU,
-            "lock": self.gpu.path(),
-            "since": holder.as_ref().and_then(|h| h.since),
-            "holder": holder,
-        });
-        let mut leases = vec![gpu];
-        leases.extend(self.book.status().iter().map(|l| json!(l)));
-        json!({ "leases": leases })
-    }
 }
 
 // A total is whole, not negative, and exact in an f64: at most 2^53.
@@ -197,7 +144,7 @@ fn count(value: f64) -> Option<u64> {
     whole.then_some(value as u64)
 }
 
-fn deliveries(grants: impl IntoIterator<Item = Grant>) -> Vec<Delivery> {
+pub(super) fn deliveries(grants: impl IntoIterator<Item = Grant>) -> Vec<Delivery> {
     grants
         .into_iter()
         .filter_map(|grant| match grant.holder {
@@ -212,7 +159,7 @@ fn deliveries(grants: impl IntoIterator<Item = Grant>) -> Vec<Delivery> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use serde_json::{Value, json};
 
     use super::*;
@@ -221,24 +168,24 @@ mod tests {
 
     const EPOCH: u64 = 1_790_000_000;
 
-    struct World {
-        desk: Desk,
-        clock: FakeClock,
+    pub(crate) struct World {
+        pub(crate) desk: Desk,
+        pub(crate) clock: FakeClock,
         _temp: tempfile::TempDir,
     }
 
-    fn world() -> World {
+    pub(crate) fn world() -> World {
         let _temp = tempfile::tempdir().unwrap();
         let clock = FakeClock::at(EPOCH);
         let desk = Desk::new(Box::new(clock.clone()), GpuLock::under(_temp.path()));
         World { desk, clock, _temp }
     }
 
-    fn stand_in() -> LeaseKind {
+    pub(crate) fn stand_in() -> LeaseKind {
         LeaseKind::try_from("stand-in").unwrap()
     }
 
-    fn grant(project: &str, pid: u64) -> Delivery {
+    pub(crate) fn grant(project: &str, pid: u64) -> Delivery {
         Delivery {
             project: ProjectName::try_from(project).unwrap(),
             kind: stand_in(),
@@ -248,16 +195,16 @@ mod tests {
 
     impl World {
         // Raises a metric the way a runner's channel would reach the dog.
-        fn raise(&mut self, sheep: &str, (name, value): (String, f64)) -> Vec<Delivery> {
+        pub(crate) fn raise(&mut self, sheep: &str, (name, value): (String, f64)) -> Vec<Delivery> {
             self.desk.metric(sheep, &name, value)
         }
 
-        fn ask(&mut self, action: &str, params: Option<&str>) -> (Value, Vec<Delivery>) {
+        pub(crate) fn ask(&mut self, action: &str, params: Option<&str>) -> (Value, Vec<Delivery>) {
             let (body, out) = self.desk.answer(action, params);
             (serde_json::from_str(&body).unwrap(), out)
         }
 
-        fn book_line(&mut self) -> Value {
+        pub(crate) fn book_line(&mut self) -> Value {
             self.ask("status", None).0["leases"][1].clone()
         }
     }
@@ -320,29 +267,6 @@ mod tests {
             [grant("reactmap", 202)]
         );
         assert_eq!(w.book_line()["queue"], json!([{ "runner": "koji" }]));
-    }
-
-    #[test]
-    fn the_maintainer_goes_ahead_of_queued_runners_without_preempting() {
-        let mut w = world();
-        let (mut koji, mut reactmap) = (Asker::new(Epoch(101)), Asker::new(Epoch(202)));
-        w.raise("koji", koji.want(&stand_in()));
-        w.raise("reactmap", reactmap.want(&stand_in()));
-        let (body, out) = w.ask("take", Some("stand-in"));
-        assert_eq!(
-            (body, out),
-            (json!({ "kind": "stand-in", "queued": 0 }), vec![])
-        );
-        assert_eq!(w.book_line()["holder"], json!({ "runner": "koji" }));
-
-        assert_eq!(w.raise("koji", koji.give_back(&stand_in())), []);
-        let (body, _) = w.ask("take", Some("stand-in"));
-        assert_eq!(body, json!({ "kind": "stand-in", "granted": true }));
-        let (body, out) = w.ask("return", Some("stand-in"));
-        assert_eq!(body, json!({ "kind": "stand-in", "returned": true }));
-        assert_eq!(out, [grant("reactmap", 202)]);
-        let (body, _) = w.ask("return", Some("stand-in"));
-        assert_eq!(body, json!({ "kind": "stand-in", "returned": false }));
     }
 
     #[test]
@@ -450,64 +374,5 @@ mod tests {
             1,
             "the GPU alone: {leases}"
         );
-    }
-
-    #[test]
-    fn status_reads_the_gpu_from_its_lock() {
-        let mut w = world();
-        let lock = w.desk.gpu.clone();
-        assert_eq!(
-            w.ask("status", None).0,
-            json!({ "leases": [{
-                "kind": "gpu",
-                "lock": lock.path(),
-                "since": null,
-                "holder": null,
-            }] })
-        );
-        let me = std::process::id();
-        let claim = crate::lease::gpu::Claim {
-            pid: me,
-            what: "round 1 in /tmp/hunks".into(),
-        };
-        lock.try_take(&claim).unwrap();
-        let gpu = &w.ask("status", None).0["leases"][0];
-        assert_eq!(
-            gpu["holder"],
-            json!({
-                "pid": me,
-                "live": true,
-                "what": "round 1 in /tmp/hunks",
-                "session": std::env::var("CLAUDE_CODE_MESSAGING_SOCKET").unwrap_or_default(),
-                "since": gpu["since"],
-            })
-        );
-        assert!(gpu["since"].as_u64().is_some(), "{gpu}");
-    }
-
-    #[test]
-    fn the_maintainer_is_sent_to_the_lock_for_the_gpu() {
-        let mut w = world();
-        for action in ["take", "return"] {
-            let (body, _) = w.ask(action, Some("gpu"));
-            assert_eq!(
-                body["error"],
-                format!("the GPU lease is the qwen scripts' lock: run `kelpie lease {action} gpu`")
-            );
-        }
-    }
-
-    #[test]
-    fn a_malformed_trigger_is_refused() {
-        let mut w = world();
-        for (action, params, error) in [
-            ("status", Some("now"), "`status` takes no params"),
-            ("take", None, "`take` takes a lease kind"),
-            ("return", Some("  "), "`return` takes a lease kind"),
-            ("grant", Some("stand-in"), "unknown action `grant`"),
-        ] {
-            assert_eq!(w.ask(action, params).0, json!({ "error": error }));
-        }
-        assert!(w.ask("take", Some("Stand In")).0["error"].is_string());
     }
 }
