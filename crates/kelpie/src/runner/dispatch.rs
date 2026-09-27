@@ -24,7 +24,7 @@ impl Runner {
                 }));
             }
         };
-        let pick = board::pick(&ready, &open);
+        let pick = board::pick(&ready, &open, &self.state.finished);
         let Some(issue) = pick.issue else {
             return Ok(Begin::Idle);
         };

@@ -101,7 +101,8 @@ impl Runner {
         }))
     }
 
-    // Removes the worktree, branch and build folder, then the work item.
+    // Removes the worktree, branch and build folder, then the work item, and
+    // records its issue so the board never takes it again.
     pub(super) fn finish(&mut self, merged: bool) -> Result<Begin, StateError> {
         let item = self
             .state
@@ -128,6 +129,9 @@ impl Runner {
         // Rulings about this work item's pull request go with it.
         next.rulings
             .retain(|r| r.pull_request.is_none() || r.pull_request != item.pull_request);
+        if !next.finished.contains(&item.issue) {
+            next.finished.push(item.issue);
+        }
         self.save(next)?;
         Ok(Begin::Report(report))
     }
@@ -344,5 +348,25 @@ mod tests {
         rig.forge.set_merges_down(false);
         assert_eq!(step(&runner).unwrap(), finished());
         assert_eq!(rig.forge.merges(), [(71, head)]);
+    }
+
+    // Seen live on the playground: the board polled a second after the
+    // merge, before GitHub closed the issue, and dispatched it again.
+    #[test]
+    fn an_issue_whose_work_item_finished_is_never_dispatched_again() {
+        let (rig, runner, _) = Rig::parked("hazels-lab");
+        rig.forge.list_ready(7, false);
+        rig.forge.list_ready(8, true);
+        rig.ask(&runner, "rule", Some("1 yes"));
+        assert_eq!(ready_then_merge(&rig, &runner), finished());
+
+        let calls = rig.claude.calls().len();
+        assert_eq!(step(&runner).unwrap(), None);
+        drop(runner);
+        let runner = rig.open().unwrap();
+        assert_eq!(step(&runner).unwrap(), None, "and not after a restart");
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["work_item"], json!(null));
+        assert_eq!(rig.claude.calls().len(), calls);
     }
 }

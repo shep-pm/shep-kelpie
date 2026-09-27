@@ -35,6 +35,9 @@ pub struct ProjectState {
     /// The id of the last ruling raised, so no id is ever given twice
     #[serde(default)]
     pub last_ruling: u64,
+    /// Issues whose work items kelpie finished, which the board never takes again
+    #[serde(default)]
+    pub finished: Vec<u64>,
     /// Leases this project holds
     pub leases: Vec<LeaseHeld>,
 }
@@ -49,6 +52,7 @@ impl ProjectState {
             work_item: None,
             rulings: Vec::new(),
             last_ruling: 0,
+            finished: Vec::new(),
             leases: Vec::new(),
         }
     }
@@ -374,6 +378,7 @@ mod tests {
             ruling(4, RulingKind::Closed),
         ];
         state.last_ruling = 4;
+        state.finished = vec![22, 30];
         store.save(&state).unwrap();
         let text = fs::read_to_string(dir.path().join("state.json")).unwrap();
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -392,6 +397,7 @@ mod tests {
                     pinned(4, serde_json::json!({ "kind": "closed" })),
                 ],
                 "last_ruling": 4,
+                "finished": [22, 30],
                 "leases": [{ "resource": "coderabbit", "since": 8 }],
             })
         );
@@ -406,7 +412,8 @@ mod tests {
             r#"{"version":1,"run":"running","since":3,"work_item":null,"rulings":[],"leases":[]}"#,
         )
         .unwrap();
-        assert_eq!(store.load().unwrap().unwrap().last_ruling, 0);
+        let state = store.load().unwrap().unwrap();
+        assert_eq!((state.last_ruling, state.finished), (0, vec![]));
     }
 
     #[test]
