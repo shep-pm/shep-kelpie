@@ -1,20 +1,21 @@
 //! The main seam's rig: a runner on stand-ins for Claude, the forge and the
 //! clock, over a real git repo in a throwaway home
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tempfile::TempDir;
 
+use crate::board::{OpenPullRequest, READY, ReadyIssue, WorkerModel};
 use crate::ports::{
     Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Forge, ForgeError, Issue, Ports,
     Role, SessionId, Timestamp, Usage, Visibility,
 };
 use crate::runner::{OpenError, ProjectName, ProjectPaths, Runner, answer};
-use crate::settings::ForgeSlug;
+use crate::settings::{Effort, ForgeSlug};
 use crate::work_item::{CallRecord, Turn, WorkItem};
 
 /// A work item with one call, so every field of its format shows
@@ -25,10 +26,15 @@ pub(crate) fn a_work_item() -> WorkItem {
         branch: "kelpie/42".into(),
         worktree: "/k/wt/shep/42".into(),
         build: "/k/targets/shep/42".into(),
+        worker: WorkerModel {
+            model: "claude-opus-5-5".into(),
+            effort: Effort::Medium,
+        },
         session: SessionId("5e55".into()),
         turn: Turn::Running {
             since: Timestamp(9),
         },
+        pull_request: Some(51),
         calls: vec![CallRecord {
             role: Role::Worker,
             at: Timestamp(10),
@@ -126,11 +132,15 @@ impl Claude for FakeClaude {
 }
 
 /// A forge whose repo is public and whose every issue exists, unless a
-/// test says otherwise
+/// test says otherwise. Its board is empty until a test lists issues on it.
 #[derive(Debug, Clone)]
 pub(crate) struct FakeForge {
     visibility: Arc<Mutex<Visibility>>,
     missing: Arc<Mutex<HashSet<u64>>>,
+    labels: Arc<Mutex<HashMap<u64, Vec<String>>>>,
+    ready: Arc<Mutex<Vec<ReadyIssue>>>,
+    open: Arc<Mutex<Vec<OpenPullRequest>>>,
+    board_down: Arc<AtomicBool>,
     calls: Arc<AtomicUsize>,
 }
 
@@ -143,17 +153,51 @@ impl FakeForge {
         self.missing.lock().unwrap().insert(number);
     }
 
+    /// Labels issue `number` with `label`, on the board and when viewed
+    pub(crate) fn label(&self, number: u64, label: &str) {
+        let mut labels = self.labels.lock().unwrap();
+        labels.entry(number).or_default().push(label.to_owned());
+    }
+
+    /// Lists issue `number` as ready, with whether anyone is assigned
+    pub(crate) fn list_ready(&self, number: u64, assigned: bool) {
+        self.label(number, READY);
+        self.ready.lock().unwrap().push(ReadyIssue {
+            number,
+            assigned,
+            labels: Vec::new(),
+        });
+    }
+
+    /// Opens pull request `number` from `head`, closing `closes`
+    pub(crate) fn open_pull_request(&self, number: u64, head: &str, closes: &[u64]) {
+        self.open.lock().unwrap().push(OpenPullRequest {
+            number,
+            head: head.to_owned(),
+            closes: closes.to_vec(),
+        });
+    }
+
+    /// Makes listing the board fail, or work again
+    pub(crate) fn set_board_down(&self, down: bool) {
+        self.board_down.store(down, Ordering::SeqCst);
+    }
+
     /// How many times the repo's visibility was asked
     pub(crate) fn calls(&self) -> usize {
         self.calls.load(Ordering::SeqCst)
     }
 
-    /// The issue every present number has
-    pub(crate) fn issue_for(number: u64) -> Issue {
-        Issue {
-            title: format!("Title of #{number}"),
-            body: format!("Body of #{number}.\n"),
+    fn labels_of(&self, number: u64) -> Vec<String> {
+        let labels = self.labels.lock().unwrap();
+        labels.get(&number).cloned().unwrap_or_default()
+    }
+
+    fn board(&self) -> Result<(), ForgeError> {
+        if self.board_down.load(Ordering::SeqCst) {
+            return Err(ForgeError::Failed("the board is down".into()));
         }
+        Ok(())
     }
 }
 
@@ -167,7 +211,28 @@ impl Forge for FakeForge {
         if self.missing.lock().unwrap().contains(&number) {
             return Err(ForgeError::Failed(format!("no issue #{number}")));
         }
-        Ok(Self::issue_for(number))
+        Ok(Issue {
+            title: format!("Title of #{number}"),
+            body: format!("Body of #{number}.\n"),
+            labels: self.labels_of(number),
+        })
+    }
+
+    fn ready_issues(&self, _repo: &ForgeSlug) -> Result<Vec<ReadyIssue>, ForgeError> {
+        self.board()?;
+        let ready = self.ready.lock().unwrap().clone();
+        Ok(ready
+            .into_iter()
+            .map(|i| ReadyIssue {
+                labels: self.labels_of(i.number),
+                ..i
+            })
+            .collect())
+    }
+
+    fn open_pull_requests(&self, _repo: &ForgeSlug) -> Result<Vec<OpenPullRequest>, ForgeError> {
+        self.board()?;
+        Ok(self.open.lock().unwrap().clone())
     }
 }
 
@@ -218,6 +283,10 @@ impl Rig {
             forge: FakeForge {
                 visibility: Arc::new(Mutex::new(Visibility::Public)),
                 missing: Arc::default(),
+                labels: Arc::default(),
+                ready: Arc::default(),
+                open: Arc::default(),
+                board_down: Arc::default(),
                 calls: Arc::default(),
             },
             clock: FakeClock::at(Self::EPOCH),

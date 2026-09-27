@@ -119,6 +119,20 @@ Measured 2026-09-26 on Claude Code 2.1.283.
 - Live on the pinned worker repo's commit (#7's demo), two workers committed on their branches inside the sandbox. One ran cargo into a cold build folder with a warm registry, 2.4 GB of it. Writes outside were refused through Bash and through Write, and so were `.git/config`, `~/.ssh` and `gh pr merge`.
 - The pinned worker repo, `~/.kelpie/repos/shep`, has no `origin` remote, so kelpie cannot cut branches in it. A runner now refuses to start on a repo without one. The demo ran on a clone whose origin held the pinned commit as `main`.
 
+### A worker's push, `gh` and package installs
+
+Measured 2026-09-26 on Claude Code 2.1.283, gh 2.96 and bun 1.4.0, from a sandboxed worker on a private bun, Vite and TypeScript project, the playground.
+
+- `git push origin <branch>` reaches GitHub through the system's osxkeychain credential helper. With `refs/remotes` denied, the push lands but the tracking ref fails to write. So `refs/remotes` is no longer denied: kelpie fetches `origin/main` before cutting a branch, and a fetch forces tracking refs.
+- `git push -u` cannot write `config`, which stays denied. Workers push with `git push origin HEAD`.
+- `gh` will not start without `~/.config/gh/config.yml`, so that folder is no longer read-denied. It holds no token on the maintainer's machine; the token is in the keychain. Writes there are still refused. `gh` will not start without `hosts.yml` either, so it cannot be denied alone. On a machine where `gh` keeps its token in a file rather than the keychain, `hosts.yml` holds the token, and the folder must stay denied.
+- `gh auth` is denied, since `gh auth token` prints the maintainer's token.
+- Inside the sandbox, `gh` fails TLS verification with `x509: OSStatus -26276`. Claude Code's docs name this for Go tools on macOS. `sandbox.enableWeakerNetworkIsolation` fixes it and keeps `gh` inside the write fence and the domain allowlist. `excludedCommands` would have run `gh` unsandboxed.
+- A cold `bun install` reaches only `registry.npmjs.org`. Inside the sandbox it fails with "unable to write files to tempdir: EPERM", because bun stages downloads in `~/.bun/install/cache`. With `BUN_INSTALL_CACHE_DIR` in the build folder it installed 733 packages in 9.7 seconds, and the project's tests and typecheck passed.
+- The sandbox refused deleting `.idea` folders that a bun install outside it had left in `node_modules`. Installing them from inside worked.
+- Final fence, for every worker. Writable: the worktree, the build folder, the common git dir's `objects`, the worktree's own git dir, and the branch's ref, lock and reflog under both `refs/heads` and `refs/remotes/origin`. Denied inside the git dir: `config`, `hooks`, `info`, `modules`, `HEAD`, `index`, `packed-refs` and `refs/tags`. Domains: `github.com` and `api.github.com`. Also denied: the clone's `refs/heads/main`. Denied commands, besides merge, ready and the `review please` label: `gh api`, `gh auth`, a push naming `main` as `origin main`, `HEAD:main` or `refs/heads/main`, and a push carrying `--mirror`, `--all`, `--delete`, `-d`, `--force`, `-f` or a `+` refspec. Those are pattern rules over the command text, so a script can get past them; a token scoped to a worker's needs would be a real fence.
+- Per project, `worker.allowed_domains` adds domains (shep: `crates.io`, `index.crates.io`, `static.crates.io`; the playground: `registry.npmjs.org`), and `worker.build_env` points tool caches into the build folder (the playground: `BUN_INSTALL_CACHE_DIR`).
+
 ### The relay
 
 Measured 2026-09-26 in the experiments repo.

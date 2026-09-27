@@ -10,6 +10,9 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(doc)]
+use crate::board::READY;
+use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::settings::{Effort, ForgeSlug};
 
 /// Seconds since the Unix epoch
@@ -51,6 +54,20 @@ pub trait Forge: Send {
     /// [`ForgeError`] when the forge cannot be asked, has no such issue, or
     /// its answer cannot be read.
     fn issue(&self, repo: &ForgeSlug, number: u64) -> Result<Issue, ForgeError>;
+
+    /// The open issues on `repo` labelled [`READY`]
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn ready_issues(&self, repo: &ForgeSlug) -> Result<Vec<ReadyIssue>, ForgeError>;
+
+    /// The open pull requests on `repo`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn open_pull_requests(&self, repo: &ForgeSlug) -> Result<Vec<OpenPullRequest>, ForgeError>;
 }
 
 /// An issue as the forge holds it
@@ -60,6 +77,8 @@ pub struct Issue {
     pub title: String,
     /// Its body, as written
     pub body: String,
+    /// Its labels' names
+    pub labels: Vec<String>,
 }
 
 /// Why a forge call failed

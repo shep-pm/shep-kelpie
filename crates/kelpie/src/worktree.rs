@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// The branch every work item is cut from, on `origin`
-const BASE: &str = "main";
+pub const BASE: &str = "main";
 
 /// A prepared worktree, and the git dirs a commit from it writes to
 #[derive(Debug, Clone, PartialEq, Eq)]

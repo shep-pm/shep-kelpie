@@ -3,21 +3,25 @@
 //! The runner's flock entry needs `channel = true`, and
 //! `shutdown_with_message = true` so a stop reaches it as a message.
 //! Triggers are answered at once; the worker's turns run on a thread of
-//! their own, woken by each trigger.
+//! their own, woken by each trigger and by a look at the board every minute.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::adapters::{ClaudeCli, Gh, SystemClock};
 use crate::ports::Ports;
-use crate::runner::{ACTIONS, ProjectName, ProjectPaths, Runner, answer, step};
+use crate::runner::{ACTIONS, ProjectName, ProjectPaths, Runner, TurnReport, answer, step};
 
 /// How long queued replies get to reach the shepherd before the runner exits
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
+
+// How often an idle runner looks at the board. Each look is two `gh` calls,
+// 120 an hour, against GitHub's 5,000 an hour for the maintainer's login.
+const BOARD_POLL: Duration = Duration::from_secs(60);
 
 /// Runs `project`'s runner until the shepherd stops it
 ///
@@ -104,20 +108,22 @@ enum Stop {
     WorkerDied,
 }
 
-// Runs turns while there are any, then sleeps until a trigger may have
-// brought more. A turn cut short by a restart is resumed on the first pass.
+// Runs steps while there are any, then sleeps until a trigger or the next
+// look at the board. A turn cut short by a restart is resumed on the first pass.
 fn work(runner: &Mutex<Runner>, woken: &Receiver<()>) {
     loop {
         match step(runner) {
             Ok(Some(report)) => {
                 let line = serde_json::to_string(&report).expect("a report serializes to JSON");
                 println!("{line}");
-                continue;
+                if !matches!(report, TurnReport::BoardFailed { .. }) {
+                    continue;
+                }
             }
             Ok(None) => {}
             Err(e) => eprintln!("cannot save the worker's turn: {e}"),
         }
-        if woken.recv().is_err() {
+        if let Err(RecvTimeoutError::Disconnected) = woken.recv_timeout(BOARD_POLL) {
             return;
         }
     }

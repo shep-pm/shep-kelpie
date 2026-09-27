@@ -14,6 +14,7 @@ use serde::Serialize;
 
 use super::Runner;
 use super::trigger::lock;
+use crate::board::{Skip, WorkerModel};
 use crate::ports::{
     ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session, SessionId, Usage,
 };
@@ -26,10 +27,25 @@ use crate::worktree;
 const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
                         Carry on with the work item from where you left off.";
 
-/// What one step of the worker did, for the runner's log
+/// What one step of the runner did, for its log
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "turn", rename_all = "lowercase")]
+#[serde(tag = "turn", rename_all = "kebab-case")]
 pub enum TurnReport {
+    /// The board's oldest free issue became the work item in flight
+    Dispatched {
+        /// The work item's issue
+        issue: u64,
+        /// The model and effort its worker runs on
+        worker: WorkerModel,
+        /// Older ready issues the board passed over, and why
+        skipped: Vec<Skip>,
+    },
+    /// Nothing was dispatched: the board could not be read, or the issue it
+    /// picked could not be taken
+    BoardFailed {
+        /// Why
+        reason: String,
+    },
     /// A turn ended and its call was recorded
     Ended {
         /// The work item's issue
@@ -42,6 +58,8 @@ pub enum TurnReport {
         cost_usd: f64,
         /// What the work item has cost so far, in US dollars
         work_item_cost_usd: f64,
+        /// The worker's draft pull request, once it has opened one
+        pull_request: Option<u64>,
     },
     /// A turn could not run
     Failed {
@@ -52,9 +70,9 @@ pub enum TurnReport {
     },
 }
 
-enum Begin {
+pub(super) enum Begin {
     Idle,
-    Failed(TurnReport),
+    Report(TurnReport),
     Call(ClaudeCall),
 }
 
@@ -71,7 +89,7 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<TurnReport>, StateError> {
     loop {
         let call = match lock(runner).begin_turn(start_over)? {
             Begin::Idle => return Ok(None),
-            Begin::Failed(report) => return Ok(Some(report)),
+            Begin::Report(report) => return Ok(Some(report)),
             Begin::Call(call) => call,
         };
         let result = claude.run(&call);
@@ -97,7 +115,7 @@ impl Runner {
             return Ok(Begin::Idle);
         }
         let Some(item) = &self.state.work_item else {
-            return Ok(Begin::Idle);
+            return self.dispatch();
         };
         let session = match &item.turn {
             Turn::Due => Session::New(item.session.clone()),
@@ -122,7 +140,7 @@ impl Runner {
                     at: now,
                     reason: reason.clone(),
                 };
-                Begin::Failed(TurnReport::Failed {
+                Begin::Report(TurnReport::Failed {
                     issue: item.issue,
                     reason,
                 })
@@ -150,6 +168,8 @@ impl Runner {
             branch: &item.branch,
             kelpie: &self.kelpie,
             guard_hooks: &self.settings.worker.guard_hooks,
+            allowed_domains: &self.settings.worker.allowed_domains,
+            build_env: &self.settings.worker.build_env,
         };
         let folder = &self.paths.worker;
         let settings = folder.join("settings.json");
@@ -168,11 +188,10 @@ impl Runner {
             }
             Session::Resume(_) => CONTINUE.to_owned(),
         };
-        let worker = &self.settings.models.worker;
         Ok(ClaudeCall {
             role: Role::Worker,
-            model: worker.model.as_str().to_owned(),
-            effort: worker.effort,
+            model: item.worker.model.clone(),
+            effort: item.worker.effort,
             session,
             cwd: item.worktree.clone(),
             settings,
@@ -196,6 +215,9 @@ impl Runner {
         };
         let report = match result {
             Ok(reply) => {
+                if item.pull_request.is_none() {
+                    item.pull_request = self.pull_request_from(&item.branch);
+                }
                 let before = item.session_cost(&item.session);
                 let cost = Cost(reply.session_cost.0.saturating_sub(before.0));
                 item.calls.push(CallRecord {
@@ -213,6 +235,7 @@ impl Runner {
                     usage: reply.usage,
                     cost_usd: cost.usd(),
                     work_item_cost_usd: item.cost().usd(),
+                    pull_request: item.pull_request,
                 }
             }
             Err(e) => {
@@ -229,6 +252,19 @@ impl Runner {
         };
         self.save(next)?;
         Ok(Some(report))
+    }
+
+    // The open pull request from `branch`. A forge that cannot be asked
+    // leaves it unrecorded, and status shows none.
+    fn pull_request_from(&self, branch: &str) -> Option<u64> {
+        let open = self
+            .ports
+            .forge
+            .open_pull_requests(&self.settings.forge)
+            .ok()?;
+        open.into_iter()
+            .find(|pr| pr.head == branch)
+            .map(|pr| pr.number)
     }
 }
 
@@ -356,6 +392,7 @@ mod tests {
                 usage: usage(2),
                 cost_usd: 0.0200853,
                 work_item_cost_usd: 0.0200853,
+                pull_request: None,
             }
         );
         let item = &rig.ask(&runner, "status", None)["work_item"];

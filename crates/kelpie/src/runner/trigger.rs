@@ -6,6 +6,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use serde::Serialize;
 
 use super::Runner;
+use crate::board::WorkerModel;
 use crate::ports::{SessionId, Timestamp};
 use crate::state::{LeaseHeld, Ruling, RunState};
 use crate::work_item::{Turn, WorkItem};
@@ -41,10 +42,14 @@ pub struct WorkItemStatus<'a> {
     pub branch: &'a str,
     /// Its worktree
     pub worktree: &'a Path,
+    /// The model and effort its worker runs on
+    pub worker: &'a WorkerModel,
     /// The worker's session, which the maintainer can resume by hand
     pub session: &'a SessionId,
     /// Where the worker's turn stands
     pub turn: &'a Turn,
+    /// The worker's draft pull request, once kelpie has seen it
+    pub pull_request: Option<u64>,
     /// Claude calls made for it so far
     pub calls: usize,
     /// What they have cost, in US dollars
@@ -58,8 +63,10 @@ impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
             title: &item.title,
             branch: &item.branch,
             worktree: &item.worktree,
+            worker: &item.worker,
             session: &item.session,
             turn: &item.turn,
+            pull_request: item.pull_request,
             calls: item.calls.len(),
             cost_usd: item.cost().usd(),
         }
@@ -91,7 +98,7 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
     let changed = match (action, issue) {
         ("start", _) => runner.start().map_err(|e| e.to_string()),
         ("pause", _) => runner.pause().map_err(|e| e.to_string()),
-        ("add", Some(issue)) => runner.add(issue).map_err(|e| e.to_string()),
+        ("add", Some(issue)) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
         _ => Ok(()),
     };
     match changed {
