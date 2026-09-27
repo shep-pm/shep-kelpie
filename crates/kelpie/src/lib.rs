@@ -10,6 +10,8 @@
 
 pub mod adapters;
 pub mod confine;
+pub mod dog;
+pub mod lease;
 pub mod ports;
 pub mod profile;
 pub mod runner;

@@ -12,6 +12,8 @@ publish.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shep-channel.workspace = true
+shep-client.workspace = true
+tokio.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
