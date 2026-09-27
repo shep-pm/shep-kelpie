@@ -7,7 +7,7 @@
 //! ruling.
 
 use super::Runner;
-use super::turn::{Begin, StepReport};
+use super::report::{Begin, StepReport};
 use crate::ports::{Checks, PullRequestState, Timestamp};
 use crate::state::{RulingKind, StateError};
 use crate::work_item::{Phase, Turn};

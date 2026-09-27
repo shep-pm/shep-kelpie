@@ -18,14 +18,16 @@ use crate::work_item::{Phase, Turn, WorkItem, new_session_id};
 mod dispatch;
 mod gate;
 mod paths;
+mod report;
 mod ruling;
 mod trigger;
 mod turn;
 
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
+pub use report::StepReport;
 pub use ruling::{Answer, RuleError};
 pub use trigger::{ACTIONS, Status, WorkItemStatus, answer};
-pub use turn::{StepReport, step};
+pub use turn::step;
 
 /// Why a runner could not start
 #[derive(Debug, Clone, PartialEq, Eq)]

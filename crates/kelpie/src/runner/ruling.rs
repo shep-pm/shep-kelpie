@@ -10,7 +10,7 @@ use std::fmt;
 
 use super::Runner;
 use super::gate::short;
-use super::turn::{Begin, StepReport};
+use super::report::{Begin, StepReport};
 use crate::ports::{Checks, PullRequestState};
 use crate::state::{Ruling, RulingKind, StateError};
 use crate::work_item::{Phase, Turn, WorkItem};

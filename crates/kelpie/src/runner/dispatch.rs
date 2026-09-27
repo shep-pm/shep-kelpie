@@ -5,7 +5,7 @@
 //! one in flight is gone.
 
 use super::Runner;
-use super::turn::{Begin, StepReport};
+use super::report::{Begin, StepReport};
 use crate::board;
 use crate::state::StateError;
 
@@ -52,7 +52,7 @@ mod tests {
     use super::*;
     use crate::board::{Skip, WorkerModel};
     use crate::ports::{ClaudeError, Cost, Usage};
-    use crate::runner::{step, turn::StepReport};
+    use crate::runner::{StepReport, step};
     use crate::settings::Effort;
     use crate::test::{Rig, Scripted};
 
