@@ -222,6 +222,17 @@ mod tests {
     }
 
     #[test]
+    fn a_ruling_answered_while_its_post_is_out_is_not_posted_again() {
+        let (rig, runner, _) = Rig::parked("reactmap");
+        let due = runner.lock().unwrap().alert_due().unwrap();
+        rig.ask(&runner, "rule", Some("1 no not yet"));
+        let report = runner.lock().unwrap().alert_sent(due.id, Ok(())).unwrap();
+        assert_eq!(report, StepReport::Alerted { id: 1 });
+        assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
+        assert!(runner.lock().unwrap().alert_due().is_none());
+    }
+
+    #[test]
     fn a_restart_tries_a_failed_post_at_once() {
         let (rig, runner, _) = Rig::parked("koji");
         rig.alerts.set_down(true);

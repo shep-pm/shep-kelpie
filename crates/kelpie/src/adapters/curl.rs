@@ -18,6 +18,12 @@ const NTFY_MAX: usize = 4096;
 /// How much of a cut text's end is kept, where a ruling's triggers are
 const KEEP_TAIL: usize = 400;
 
+/// What stands in for the middle of a cut text
+const CUT: &str = "\n[…cut; the whole question is in status]\n";
+
+// `fit` needs room for a head beside the tail and the cut.
+const _: () = assert!(DISCORD_MAX > KEEP_TAIL + CUT.len() && NTFY_MAX > DISCORD_MAX);
+
 /// Seconds curl gets to connect, and to finish the whole post
 const CONNECT_TIMEOUT: u32 = 5;
 const MAX_TIME: u32 = 15;
@@ -116,7 +122,6 @@ fn quote(value: &str) -> String {
 // Cuts the middle of `text` to fit in `max` bytes, keeping its start and
 // its end, where a ruling's triggers are.
 fn fit(text: &str, max: usize) -> String {
-    const CUT: &str = "\n[…cut; the whole question is in status]\n";
     if text.len() <= max {
         return text.to_owned();
     }
