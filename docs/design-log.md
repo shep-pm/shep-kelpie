@@ -38,7 +38,7 @@ So kelpie moves the control room's rules (gates, locks, rate windows) into code,
 - The calculator runs as needed. Kelpie code reads every call's usage, which is free, and acts only at a phase boundary or a threshold. Inside a turn, a skill plus a hook that fires before an agent spawn or past a context threshold.
 - Agents never see budget numbers. Budget talk makes models stop after every task. Budgets live in kelpie's code, and the in-turn hook hands a worker a decision ("delegate the next chunk"), never a cost figure.
 - Workers start with `--setting-sources project,local` plus a settings file kelpie writes for each one. They get the project's CLAUDE.md and project skills, and none of the maintainer's hooks, plugins or skills. The guard hooks the project settings name go into kelpie's file.
-- Permissions: `bypassPermissions` with three layers under it. The project's `main` ruleset (shep's already blocks direct pushes, force-pushes and deletion, and requires a PR and passing checks). Claude Code's sandbox, confining Bash writes to the worktree (`sandbox.filesystem.allowWrite`, `failIfUnavailable`). A short denylist of what only the project manager does: `gh pr merge`, `gh pr ready`, adding the `review please` label, reading credential paths. Kelpie flags any label or ready change it did not make and parks that worker. No auto mode: classifier outages have blocked work before.
+- Permissions: `bypassPermissions` with three layers under it. The project's `main` ruleset (shep's already blocks direct pushes, force-pushes and deletion, and requires a PR and passing checks). Claude Code's sandbox, confining Bash writes to the worktree (`sandbox.filesystem.allowWrite`, `failIfUnavailable`, `allowUnsandboxedCommands: false`), with kelpie's `confine` hook holding the file tools to the same folders. A short denylist of what only the project manager does: `gh pr merge`, `gh pr ready`, adding the `review please` label, reading credential paths. Kelpie flags any label or ready change it did not make and parks that worker. No auto mode: classifier outages have blocked work before.
 - Model defaults, settled 2026-09-26 and kept as project settings: workers on Sonnet 5 at medium effort, implementing inline. Claude review rounds on Sonnet 5 at medium effort. Judging findings on Opus 5.5 at low effort. The relay on Haiku 4.5 at low effort. A `worker:<model>-<effort>` label on an issue overrides the worker's defaults for that item. Planning stays on Opus.
 
 ## Review and merge
@@ -79,7 +79,8 @@ Measured 2026-09-24 on Claude Code 2.1.282, `--model sonnet`, one sample each. F
 - `--bare` refuses subscription login. It reads only an API key.
 - Two identical fresh calls share the whole prefix: the second reads 41,010 from cache. A different working directory shares only about 10k.
 - The first `--resume` onto a fresh session rewrote about 29k of cache in one early probe. Seven runs in the transport series wrote only the new turn (about 5.3k), so it did not reproduce.
-- `total_cost_usd` is cumulative across a resumed session. `usage` is per call.
+- `total_cost_usd` is cumulative across a resumed session. `usage` is per call. Measured again 2026-09-26 on 2.1.283: `modelUsage` is cumulative too, and the top-level `usage` sums every request inside one call. The recorded pair is in `crates/kelpie/fixtures/`.
+- A call killed within its first second leaves no transcript. `--resume` onto it prints "No conversation found with session ID" and exits 1 with no JSON, and `--session-id` can take the same id again. Once a transcript exists, `--session-id` refuses the id as already in use.
 - `/compact` works under `-p`. The result carries `local_command: "compact"` and `num_turns: 0`. Context went from 125,122 to 54,484 on the next turn, which wrote a fresh 42.6k cache. `/compact <instructions>` is accepted.
 - Two concurrent `--resume` calls on one session both succeed and run one after the other. `--fork-session` gives a new session id and a separate transcript.
 - Flags missing from `--help` but present in the binary: `--max-budget-usd`, `--task-budget`, `--autocompact`, `--session-id`, `--resume-session-at`, `--channels`, `--dangerously-load-development-channels`.
@@ -110,6 +111,12 @@ Measured 2026-09-26 on Claude Code 2.1.283.
 - A hook passed through `--settings` still runs under `project,local`.
 - The sandbox keys exist as named: `sandbox.enabled`, `sandbox.failIfUnavailable`, `sandbox.filesystem.allowWrite` and `sandbox.network.allowedDomains`. With only the worktree and the build folder writable, a warm-cache `cargo check` passed and a write to the home folder was refused.
 - The build folder must exist before the worker starts.
+- The sandbox confines Bash and its children only. Claude's Edit and Write tools go through permissions, and under `bypassPermissions` only deny rules and hooks stop them. So kelpie adds a PreToolUse hook, `kelpie confine`, that holds the file tools to the worktree and the build folder. Live, it refused a Write to the home folder under `bypassPermissions`.
+- When the working folder is a git worktree, Claude Code opens the repo's whole common git dir to sandboxed writes, `config` and `hooks` included, whatever `allowWrite` says. A worker could plant a hook that kelpie later runs unsandboxed.
+- `denyWrite` beats `allowWrite`, so the git dir cannot be narrowed by allowing less. Denying `config`, `hooks`, `info`, `HEAD`, `index`, `packed-refs`, `refs/remotes` and `refs/tags` still lets a commit from the worktree land, and refuses writes to all of them. A wildcard deny spans `/`: denying `refs/heads/*` also refused the work item's own `refs/heads/kelpie/7`.
+- The worker's settings file still lists what a commit writes (`objects`, the worktree's own git dir, and its branch's ref, lock and reflog), in case a later Claude Code stops opening the git dir itself. On this version that list cannot be shown minimal, since the whole dir is open anyway.
+- Live on the pinned worker repo's commit (#7's demo), two workers committed on their branches inside the sandbox. One ran cargo into a cold build folder with a warm registry, 2.4 GB of it. Writes outside were refused through Bash and through Write, and so were `.git/config`, `~/.ssh` and `gh pr merge`.
+- The pinned worker repo, `~/.kelpie/repos/shep`, has no `origin` remote, so kelpie cannot cut branches in it. A runner now refuses to start on a repo without one. The demo ran on a clone whose origin held the pinned commit as `main`.
 
 ### The relay
 
@@ -130,6 +137,7 @@ Measured 2026-09-26 in the experiments repo.
 - `Request::Trigger` becomes an `action` message on a sheep's shepherd channel (fd 3), answered with an `action-reply`. `ready`, `metric` and `action-reply` are all republished on the bus as `channel.*`.
 - `SendLine` (`shep whisper`) writes one line to a sheep's stdin.
 - A lamb is a pid and an executable name, found by walking the process tree, never argv. The stop ladder kills the process group.
+- A sheep with `shutdown_with_message` that exits on the message never reaches the stop ladder, so its lambs are orphaned. Seen 2026-09-26: `shep restart` left the worker running beside the resumed one. The runner now stops its `claude` children itself before it exits: SIGTERM, then SIGKILL after 3 seconds.
 - A dog is an ordinary sheep with a marker. Wildcard selectors never touch a dog. A dog's `--schema` feeds lookout's settings pane.
 - Open against shep: shep-pm/shep#623 (an opaque per-dog settings table on a sheep) and shep-pm/shep#624 (a sheep labels its own lambs).
 

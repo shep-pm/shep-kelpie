@@ -2,15 +2,19 @@
 //!
 //! The runner's flock entry needs `channel = true`, and
 //! `shutdown_with_message = true` so a stop reaches it as a message.
+//! Triggers are answered at once; the worker's turns run on a thread of
+//! their own, woken by each trigger.
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::adapters::{ClaudeCli, Gh, SystemClock};
 use crate::ports::Ports;
-use crate::runner::{ACTIONS, ProjectName, ProjectPaths, Runner, answer};
+use crate::runner::{ACTIONS, ProjectName, ProjectPaths, Runner, answer, step};
 
 /// How long queued replies get to reach the shepherd before the runner exits
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
@@ -36,13 +40,15 @@ fn serve(project: &str) -> Result<(), String> {
     let kelpie_home = std::env::var_os("KELPIE_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".kelpie"));
+    let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
     let paths = ProjectPaths::under(&kelpie_home, &project);
+    let claude = ClaudeCli::default();
     let ports = Ports {
-        claude: Box::new(ClaudeCli),
+        claude: Arc::new(claude.clone()),
         forge: Box::new(Gh),
         clock: Box::new(SystemClock),
     };
-    let runner = Runner::open(project, &paths, &home, ports).map_err(|e| e.to_string())?;
+    let runner = Runner::open(project, &paths, &home, &kelpie, ports).map_err(|e| e.to_string())?;
 
     let shepherd = shep_channel::serve();
     if !shepherd.is_active() {
@@ -52,18 +58,67 @@ fn serve(project: &str) -> Result<(), String> {
     println!("up: {status}");
 
     let runner = Arc::new(Mutex::new(runner));
+    let (wake, woken) = mpsc::channel();
     for action in ACTIONS {
         let runner = Arc::clone(&runner);
-        shepherd.on_action(action, move |params, name| answer(&runner, name, params));
+        let wake = wake.clone();
+        shepherd.on_action(action, move |params, name| {
+            let reply = answer(&runner, name, params);
+            let _ = wake.send(());
+            reply
+        });
     }
     let (stop, stopped) = mpsc::channel();
+    let worker = Arc::clone(&runner);
+    let died = stop.clone();
+    std::thread::spawn(move || {
+        // A runner with no worker thread would answer triggers and never work.
+        if catch_unwind(AssertUnwindSafe(|| work(&worker, &woken))).is_err() {
+            let _ = died.send(Stop::WorkerDied);
+        }
+    });
     shepherd.on_shutdown(move || {
-        let _ = stop.send(());
+        let _ = stop.send(Stop::Shutdown);
     });
     shepherd.ready().map_err(|e| e.to_string())?;
 
-    // Only a shutdown message ends the wait. Without one, the shepherd's
-    // stop signal ends the process instead.
-    let _ = stopped.recv();
-    shepherd.flush(FLUSH_TIMEOUT).map_err(|e| e.to_string())
+    // Only a shutdown message or a dead worker thread ends the wait. Without
+    // either, the shepherd's stop signal ends the process instead. Exiting on
+    // the message skips shep's stop ladder, so the worker is stopped here.
+    let why = stopped.recv();
+    claude.stop();
+    shepherd.flush(FLUSH_TIMEOUT).map_err(|e| e.to_string())?;
+    match why {
+        Ok(Stop::WorkerDied) => {
+            Err("the worker's thread panicked; the turn resumes on restart".into())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Why the runner stops
+enum Stop {
+    /// The shepherd sent its shutdown message
+    Shutdown,
+    /// The thread that runs turns panicked
+    WorkerDied,
+}
+
+// Runs turns while there are any, then sleeps until a trigger may have
+// brought more. A turn cut short by a restart is resumed on the first pass.
+fn work(runner: &Mutex<Runner>, woken: &Receiver<()>) {
+    loop {
+        match step(runner) {
+            Ok(Some(report)) => {
+                let line = serde_json::to_string(&report).expect("a report serializes to JSON");
+                println!("{line}");
+                continue;
+            }
+            Ok(None) => {}
+            Err(e) => eprintln!("cannot save the worker's turn: {e}"),
+        }
+        if woken.recv().is_err() {
+            return;
+        }
+    }
 }

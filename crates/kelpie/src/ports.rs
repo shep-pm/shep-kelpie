@@ -6,6 +6,7 @@
 
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +43,23 @@ pub trait Forge: Send {
     ///
     /// [`ForgeError`] when the forge cannot be asked or its answer read.
     fn visibility(&self, repo: &ForgeSlug) -> Result<Visibility, ForgeError>;
+
+    /// Issue `number` on `repo`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked, has no such issue, or
+    /// its answer cannot be read.
+    fn issue(&self, repo: &ForgeSlug, number: u64) -> Result<Issue, ForgeError>;
+}
+
+/// An issue as the forge holds it
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Issue {
+    /// Its title
+    pub title: String,
+    /// Its body, as written
+    pub body: String,
 }
 
 /// Why a forge call failed
@@ -68,7 +86,9 @@ impl fmt::Display for ForgeError {
 impl std::error::Error for ForgeError {}
 
 /// Which role a Claude call is made for
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Role {
     /// A turn of the worker's session
     Worker,
@@ -79,9 +99,28 @@ pub enum Role {
 }
 
 /// A Claude session's id
+// wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SessionId(pub String);
+
+/// Which session a call runs in
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Session {
+    /// A new session that takes this id
+    New(SessionId),
+    /// The existing session with this id
+    Resume(SessionId),
+}
+
+impl Session {
+    /// The session's id, new or resumed
+    pub fn id(&self) -> &SessionId {
+        match self {
+            Self::New(id) | Self::Resume(id) => id,
+        }
+    }
+}
 
 /// One headless Claude call
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,12 +131,55 @@ pub struct ClaudeCall {
     pub model: String,
     /// Passed to `--effort`
     pub effort: Effort,
-    /// The session to continue, or a fresh one when `None`
-    pub resume: Option<SessionId>,
+    /// The session it runs in
+    pub session: Session,
     /// The folder the session runs in
     pub cwd: PathBuf,
+    /// The settings file kelpie wrote for the call
+    pub settings: PathBuf,
+    /// Kelpie's instructions, appended to the system prompt
+    ///
+    /// A resumed session keeps the instructions it started with, so they
+    /// are passed only when the session is new.
+    pub instructions: Option<PathBuf>,
     /// The turn's prompt
     pub prompt: String,
+}
+
+/// Tokens one call used, as `claude -p` reports them
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Usage {
+    /// Uncached input tokens
+    pub input: u64,
+    /// Tokens written to the prompt cache
+    pub cache_write: u64,
+    /// Tokens read from the prompt cache
+    pub cache_read: u64,
+    /// Output tokens, thinking included
+    pub output: u64,
+}
+
+/// An amount of money in billionths of a US dollar
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Cost(pub u64);
+
+impl Cost {
+    const PER_USD: f64 = 1e9;
+
+    /// The nearest amount to `usd` dollars, or `None` when it is negative or not a number
+    pub fn from_usd(usd: f64) -> Option<Self> {
+        // The cast saturates, so an absurd figure cannot wrap.
+        (usd.is_finite() && usd >= 0.0).then(|| Self((usd * Self::PER_USD).round() as u64))
+    }
+
+    /// The amount in dollars
+    pub fn usd(self) -> f64 {
+        self.0 as f64 / Self::PER_USD
+    }
 }
 
 /// What a Claude call answered
@@ -107,10 +189,14 @@ pub struct ClaudeReply {
     pub session_id: SessionId,
     /// The final message's text
     pub text: String,
+    /// What this call used
+    pub usage: Usage,
+    /// What the session has cost so far, this call included
+    pub session_cost: Cost,
 }
 
 /// Runs headless Claude calls
-pub trait Claude: Send {
+pub trait Claude: Send + Sync {
     /// Runs one call to its end
     ///
     /// # Errors
@@ -124,6 +210,10 @@ pub trait Claude: Send {
 pub enum ClaudeError {
     /// `claude` could not be started, with the OS's reason
     Spawn(String),
+    /// The session to resume has no transcript, so it never started
+    NoSession(SessionId),
+    /// The call was ended because the runner is stopping
+    Stopped,
     /// `claude` exited without a result it reports as a success
     Failed(String),
     /// `claude`'s output was not the JSON result asked for
@@ -134,6 +224,8 @@ impl fmt::Display for ClaudeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Spawn(error) => write!(f, "cannot run claude: {error}"),
+            Self::NoSession(id) => write!(f, "claude has no session {}", id.0),
+            Self::Stopped => f.write_str("claude was stopped with the runner"),
             Self::Failed(detail) => write!(f, "claude failed: {}", detail.trim()),
             Self::Unreadable(output) => write!(f, "unreadable claude output: {}", output.trim()),
         }
@@ -144,8 +236,8 @@ impl std::error::Error for ClaudeError {}
 
 /// Every port the runner uses, as one bundle
 pub struct Ports {
-    /// Headless Claude
-    pub claude: Box<dyn Claude>,
+    /// Headless Claude, shared so a turn runs without holding the runner
+    pub claude: Arc<dyn Claude>,
     /// The forge
     pub forge: Box<dyn Forge>,
     /// The clock
