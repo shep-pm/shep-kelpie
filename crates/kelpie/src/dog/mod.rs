@@ -27,9 +27,11 @@ use shep_client::shep_core::status::ProcStatus;
 use tokio::sync::mpsc;
 
 use crate::adapters::SystemClock;
+use crate::lease::LeaseKind;
 use crate::lease::gpu::{self, GpuLock};
 use crate::lease::saved::{BookFile, SavedBook};
 use crate::lease::wire::{GRANT, grant_params};
+use crate::ports::Clock;
 use desk::{Delivery, Desk};
 use triggers::ACTIONS;
 
@@ -125,18 +127,28 @@ impl Kept {
     }
 }
 
-// Another build's file, or none, starts an empty book. So does one that
-// cannot be read: the dog still runs, and says why.
-fn load(file: &BookFile) -> SavedBook {
+// Another build's file, or none, starts an empty book. One that claims
+// this build's format and cannot be read may have held a summon, so its
+// empty book starts with the CodeRabbit window closed for the hour, as if
+// a summon had just been accepted. The first change overwrites the file.
+fn open(file: BookFile, clock: Box<dyn Clock>, gpu: GpuLock) -> Kept {
     let empty = || SavedBook::new(Vec::new(), Vec::new(), Vec::new());
-    match file.load() {
-        Ok(Some(saved)) => saved,
-        Ok(None) => empty(),
+    let (last, unread) = match file.load() {
+        Ok(Some(saved)) => (saved, false),
+        Ok(None) => (empty(), false),
         Err(e) => {
-            println!("{e}: starting with an empty book");
-            empty()
+            println!(
+                "{e}: starting with an empty book and the CodeRabbit window closed for an hour"
+            );
+            (empty(), true)
         }
+    };
+    let now = clock.now();
+    let mut desk = Desk::restore(clock, gpu, last.clone());
+    if unread {
+        desk.book.summoned(&LeaseKind::coderabbit(), now);
     }
+    Kept { desk, file, last }
 }
 
 async fn serve() -> Result<(), String> {
@@ -170,9 +182,7 @@ async fn serve() -> Result<(), String> {
             .map_err(|e| format!("cannot make {}: {e}", folder.display()))?;
     }
     println!("the book is {}", file.path().display());
-    let last = load(&file);
-    let desk = Desk::restore(Box::new(SystemClock), lock, last.clone());
-    let desk = Arc::new(Mutex::new(Kept { desk, file, last }));
+    let desk = Arc::new(Mutex::new(open(file, Box::new(SystemClock), lock)));
     let (deliver, mut to_deliver) = mpsc::unbounded_channel::<Vec<Delivery>>();
     for action in ACTIONS {
         let (desk, deliver) = (Arc::clone(&desk), deliver.clone());
@@ -341,8 +351,21 @@ async fn deliver_grant(client: &Client, grant: &Delivery) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lease::LeaseKind;
     use crate::test::FakeClock;
+
+    const NOW: u64 = 1_790_000_000;
+
+    fn opened(dir: &std::path::Path, file: BookFile) -> Kept {
+        open(file, Box::new(FakeClock::at(NOW)), GpuLock::under(dir))
+    }
+
+    fn window(kept: &mut Kept) -> serde_json::Value {
+        let (body, _) = kept.desk.answer("status", None);
+        let status: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let leases = status["leases"].as_array().unwrap();
+        let line = leases.iter().find(|l| l["kind"] == "coderabbit").unwrap();
+        line["window"].clone()
+    }
 
     fn kept(dir: &std::path::Path, file: BookFile) -> Kept {
         let desk = Desk::new(Box::new(FakeClock::at(1_790_000_000)), GpuLock::under(dir));
@@ -360,7 +383,7 @@ mod tests {
         let file = BookFile::new(dir.path().join("book.json"));
         let mut kept = kept(dir.path(), file.clone());
         kept.change(take);
-        let saved = load(&file);
+        let saved = file.load().unwrap().unwrap();
         assert_eq!(saved, kept.desk.saved());
         let stand_in = LeaseKind::try_from("stand-in").unwrap();
         assert!(saved.leases.iter().any(|l| l.kind == stand_in));
@@ -384,7 +407,10 @@ mod tests {
         assert!(!file.path().exists(), "no dog folder yet");
         std::fs::create_dir(dir.path().join("dog")).unwrap();
         kept.change(|d| d.answer("take", Some("other")));
-        let kinds: Vec<String> = load(&file)
+        let kinds: Vec<String> = file
+            .load()
+            .unwrap()
+            .unwrap()
             .leases
             .iter()
             .map(|l| l.kind.to_string())
@@ -393,13 +419,40 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_or_unreadable_book_starts_empty() {
+    fn a_missing_or_older_book_starts_empty_with_the_window_open() {
         let dir = tempfile::tempdir().unwrap();
         let file = BookFile::new(dir.path().join("book.json"));
-        let empty = SavedBook::new(Vec::new(), Vec::new(), Vec::new());
-        assert_eq!(load(&file), empty);
+        let mut kept = opened(dir.path(), file.clone());
+        assert_eq!(
+            kept.desk.book.status().len(),
+            1,
+            "the CodeRabbit window alone"
+        );
+        assert_eq!(window(&mut kept)["opens"], serde_json::Value::Null);
+
+        std::fs::write(file.path(), r#"{"leases": {"coderabbit": "koji"}}"#).unwrap();
+        let mut kept = opened(dir.path(), file);
+        assert_eq!(window(&mut kept)["opens"], serde_json::Value::Null);
+    }
+
+    // A broken book may have held a summon: losing it is the double summon
+    // the book file exists to prevent.
+    #[test]
+    fn a_malformed_book_starts_with_the_window_closed_for_the_hour() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = BookFile::new(dir.path().join("book.json"));
         std::fs::write(file.path(), r#"{"version": 1, "leases": "#).unwrap();
-        assert_eq!(load(&file), empty);
+        let mut kept = opened(dir.path(), file.clone());
+        assert_eq!(
+            window(&mut kept),
+            serde_json::json!({ "quota": 1, "summons": [NOW], "opens": NOW + 3600 })
+        );
+        kept.change(Desk::tick);
+        assert_eq!(
+            file.load().unwrap().unwrap(),
+            kept.desk.saved(),
+            "the first change replaces the broken file"
+        );
     }
 
     #[test]
