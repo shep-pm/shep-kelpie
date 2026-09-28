@@ -19,7 +19,10 @@ script = "/path/to/kelpie"
 args = ["runner", "shep"]
 channel = true
 shutdown_with_message = true
+kill_timeout = "10s"
 ```
+
+`kill_timeout` matters. `shep stop` and `restart` give a runner only that long after the shutdown message, 1.6s by default, then SIGKILL. A runner needs about 7s to stop cleanly, so set it to `10s` or more.
 
 Then `SHEP_HOME=~/.kelpie/shep shep trigger shep status`.
 
