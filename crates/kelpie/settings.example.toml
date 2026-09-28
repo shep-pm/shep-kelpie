@@ -1,5 +1,7 @@
 # A project's settings, read once when its runner starts. Every key is
-# required. This file holds the first build's defaults, for shep.
+# required except `worker.allowed_domains`, `worker.build_env` and
+# `worker.turn_timeout`, which a file written before them may leave out.
+# This file holds the first build's defaults, for shep.
 
 repo = "~/.kelpie/repos/shep"
 forge = "shep-pm/shep"
