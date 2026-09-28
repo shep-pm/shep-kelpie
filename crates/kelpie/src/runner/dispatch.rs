@@ -26,11 +26,13 @@ impl Runner {
                 }));
             }
         };
-        // A pull request asking for a rework goes before any ready issue.
-        if let Some(begin) = self.rework_asked(&open)? {
+        // A pull request asking for a rework goes before any ready issue, and
+        // one whose rework cannot start is passed over like one.
+        let (begin, mut failed) = self.rework_asked(&open)?;
+        if let Some(begin) = begin {
+            self.skipped = failed;
             return Ok(begin);
         }
-        let mut failed: Vec<Skip> = Vec::new();
         let mut paced = false;
         loop {
             let pick = board::pick(&ready, &open, &self.state.finished);
@@ -44,6 +46,11 @@ impl Runner {
                         Skip::Failed { issue, error } => {
                             Some(format!("cannot dispatch #{issue}: {error}"))
                         }
+                        Skip::Rework {
+                            pull_request,
+                            error,
+                            ..
+                        } => Some(format!("cannot rework #{pull_request}: {error}")),
                         _ => None,
                     })
                     .collect::<Vec<_>>()

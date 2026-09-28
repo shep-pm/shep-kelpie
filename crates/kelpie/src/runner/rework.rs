@@ -15,7 +15,7 @@ use super::Runner;
 use super::report::{Begin, ReworkBy, StepReport};
 use super::trigger;
 use super::turn;
-use crate::board::{LabelError, OpenPullRequest, READY, WorkerModel, worker_override};
+use crate::board::{LabelError, OpenPullRequest, READY, Skip, WorkerModel, worker_override};
 use crate::pacer::Scope;
 use crate::ports::{ForgeError, MaintainerReview, PullRequestState, Reviewed};
 use crate::state::StateError;
@@ -122,33 +122,38 @@ impl Runner {
         self.start_rework(number, pr)
     }
 
-    // Starts the rework one of `open` asks for, lowest number first. A
+    // Starts the rework one of `open` asks for, lowest number first, and
+    // returns each pull request that asked but could not start this poll. A
     // refusal that asking again would not change takes the label off,
     // records the review and goes to the pull request as a comment.
     pub(super) fn rework_asked(
         &mut self,
         open: &[OpenPullRequest],
-    ) -> Result<Option<Begin>, StateError> {
+    ) -> Result<(Option<Begin>, Vec<Skip>), StateError> {
+        let mut skipped = Vec::new();
         // A second ask waits for the work item in flight to end.
         if self.state.work_item.is_some() {
-            return Ok(None);
+            return Ok((None, skipped));
         }
-        let mut ours: Vec<u64> = open
+        let mut ours: Vec<(u64, u64)> = open
             .iter()
-            .filter(|pr| {
-                let issue = pr.head.strip_prefix("kelpie/");
-                issue.is_some_and(|n| trigger::number(n).is_some())
+            .filter_map(|pr| {
+                let issue = pr.head.strip_prefix("kelpie/").and_then(trigger::number)?;
+                Some((pr.number, issue))
             })
-            .map(|pr| pr.number)
             .collect();
         ours.sort_unstable();
-        // One pull request the forge cannot show holds up none of the others.
-        let mut failed = None;
-        for number in ours {
+        // One pull request that fails holds up none of the others, nor the board.
+        let skip = |issue, pull_request, error: ReworkError| Skip::Rework {
+            issue,
+            pull_request,
+            error: error.to_string(),
+        };
+        for (number, issue) in ours {
             let pr = match self.ports.forge.reviewed(&self.settings.forge, number) {
                 Ok(pr) => pr,
                 Err(e) => {
-                    failed.get_or_insert(ReworkError::PullRequest(number, e).to_string());
+                    skipped.push(skip(issue, number, ReworkError::PullRequest(number, e)));
                     continue;
                 }
             };
@@ -171,43 +176,51 @@ impl Runner {
                 Ok(me) if pr.author == me => {}
                 Ok(_) => continue,
                 Err(e) => {
-                    failed.get_or_insert(ReworkError::Viewer(e).to_string());
+                    skipped.push(skip(issue, number, ReworkError::Viewer(e)));
                     continue;
                 }
             }
             if let Some(held) = self.pace(Scope::Dispatch)?.holds() {
-                return Ok(Some(held));
+                return Ok((Some(held), skipped));
             }
             let review = pr.review.as_ref().map(|r| r.id.clone());
             let begin = match self.start_rework(number, pr) {
                 Ok(worker) => Begin::Report(StepReport::Reworked {
-                    issue: self.state.work_item.as_ref().map_or(0, |item| item.issue),
+                    issue,
                     pull_request: number,
                     worker,
                     by,
                 }),
                 Err(ReworkError::State(e)) => return Err(e),
-                Err(e) if e.settled() => self.refuse_rework(number, labelled, review, &e)?,
-                Err(e) => Begin::Report(StepReport::BoardFailed {
-                    reason: e.to_string(),
-                }),
+                Err(e) if e.settled() => match self.refuse_rework(number, labelled, review, &e)? {
+                    Ok(begin) => begin,
+                    Err(e) => {
+                        skipped.push(skip(issue, number, e));
+                        continue;
+                    }
+                },
+                Err(e) => {
+                    skipped.push(skip(issue, number, e));
+                    continue;
+                }
             };
-            return Ok(Some(begin));
+            return Ok((Some(begin), skipped));
         }
-        Ok(failed.map(|reason| Begin::Report(StepReport::BoardFailed { reason })))
+        Ok((None, skipped))
     }
 
+    // The outer error is a save that failed; the inner, a label that would
+    // not come off, which leaves the refusal to the next poll.
     fn refuse_rework(
         &mut self,
         number: u64,
         labelled: bool,
         review: Option<String>,
         refused: &ReworkError,
-    ) -> Result<Begin, StateError> {
+    ) -> Result<Result<Begin, ReworkError>, StateError> {
         let repo = &self.settings.forge;
         if labelled && let Err(e) = self.ports.forge.set_label(repo, number, READY, false) {
-            let reason = ReworkError::Unlabel(number, READY, e).to_string();
-            return Ok(Begin::Report(StepReport::BoardFailed { reason }));
+            return Ok(Err(ReworkError::Unlabel(number, READY, e)));
         }
         if let Some(review) = review.filter(|r| !self.state.reworked.contains(r)) {
             let mut next = self.state.clone();
@@ -222,11 +235,11 @@ impl Runner {
             .comment(&self.settings.forge, number, &comment)
             .err()
             .map(|e| e.to_string());
-        Ok(Begin::Report(StepReport::ReworkRefused {
+        Ok(Ok(Begin::Report(StepReport::ReworkRefused {
             pull_request: number,
             reason,
             comment_failed,
-        }))
+        })))
     }
 
     // The login kelpie opens pull requests as, asked once a run

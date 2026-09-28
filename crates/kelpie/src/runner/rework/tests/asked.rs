@@ -88,6 +88,48 @@ fn a_pull_request_the_forge_cannot_show_holds_up_none_of_the_others() {
 }
 
 #[test]
+fn a_rework_that_cannot_start_is_passed_over_for_the_next_and_the_board() {
+    let rig = Rig::new("reactmap");
+    rig.push_by_hand("kelpie/6", "work.txt");
+    rig.forge.open_pull_request(70, "kelpie/6", &[6]);
+    rig.forge.review(70, review());
+    rig.forge.label_pull_request(70, READY);
+    rig.forge.remove_issue(6);
+    reviewed_71(&rig);
+    rig.forge.label_pull_request(71, READY);
+    rig.forge.list_ready(9, false);
+    let runner = running(&rig);
+    let skip = json!([{
+        "reason": "rework",
+        "issue": 6,
+        "pull_request": 70,
+        "error": "cannot read issue #6: gh failed: no issue #6",
+    }]);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Reworked {
+            pull_request: 71,
+            ..
+        })
+    ));
+    assert_eq!(rig.ask(&runner, "status", None)["skipped"], skip);
+    assert_eq!(
+        rig.forge.pull_request_labels(70),
+        [READY],
+        "asked again next poll"
+    );
+
+    rig.ask(&runner, "drop", None);
+    let Some(StepReport::Dispatched {
+        issue: 9, skipped, ..
+    }) = step(&runner).unwrap()
+    else {
+        panic!("the board never got its turn");
+    };
+    assert_eq!(serde_json::to_value(skipped).unwrap(), skip);
+}
+
+#[test]
 fn a_collaborators_pull_request_on_a_kelpie_branch_is_left_alone() {
     let rig = Rig::new("koji");
     reviewed_71(&rig);
@@ -140,14 +182,12 @@ fn a_label_that_will_not_come_off_starts_nothing_until_it_does() {
     let Some(StepReport::BoardFailed { reason }) = step(&runner).unwrap() else {
         panic!("a rework started with its label stuck on");
     };
-    assert_eq!(
-        reason,
-        "cannot take the `ready-for-agent` label off #71: gh failed: labels are down"
-    );
+    let unlabel = "cannot take the `ready-for-agent` label off #71: gh failed: labels are down";
+    assert_eq!(reason, format!("cannot rework #71: {unlabel}"));
     assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
     assert_eq!(
         rig.ask(&runner, "rework", Some("71")),
-        json!({ "error": reason })
+        json!({ "error": unlabel })
     );
     assert_eq!(
         rig.ask(&runner, "drop", None)["error"],
