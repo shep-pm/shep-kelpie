@@ -70,8 +70,12 @@ impl Runner {
         // worker's push still arriving. A rework asked for mid-flight waits.
         let mut labels = pr.labels;
         labels.retain(|l| l != READY);
-        if let Some((known, description)) = foreign_change(&known, &labels, !pr.draft, &pr.head) {
-            return self.raise(number, RulingKind::ForeignChange { description, known });
+        if let Some((seen, description)) = foreign_change(&known, &labels, !pr.draft, &pr.head) {
+            let kind = RulingKind::ForeignChange {
+                description,
+                known: seen,
+            };
+            return self.raise(number, kind);
         }
         if known.head.is_none() {
             let head = Some(pr.head.clone());
