@@ -622,6 +622,29 @@ fn a_failed_run_at_the_merge_is_on_the_comment_and_the_ruling_still_comes() {
 }
 
 #[test]
+fn a_post_that_failed_is_tried_again_while_the_ruling_waits() {
+    let (rig, runner, head) = green("lab");
+    rig.forge.set_comments_down(true);
+    rig.verdict(&runner); // ShotsNotPosted
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Ruling { id: 1, .. })
+    ));
+    rig.forge.set_comments_down(false);
+    assert!(matches!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 })));
+    assert_eq!(step(&runner).unwrap(), None, "not before its retry is due");
+    rig.clock.advance(60);
+    let Some(StepReport::ShotsPosted { head: of, .. }) = step(&runner).unwrap() else {
+        panic!("the failed post was not tried again");
+    };
+    assert_eq!(of, head);
+    assert_eq!(step(&runner).unwrap(), None, "posted once");
+    rig.clock.advance(600);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(shots_comments(&rig).len(), 1);
+}
+
+#[test]
 fn a_comment_that_cannot_be_posted_does_not_hold_the_ruling() {
     let (rig, runner, _) = green("lab");
     rig.forge.set_comments_down(true);

@@ -115,7 +115,7 @@ impl Runner {
                 if !matches!(item.turn, Turn::Ended { .. }) => {}
             Phase::Ci { .. } => return self.check_ci(),
             Phase::CodeRabbit(_) => return self.coderabbit_step(),
-            Phase::Ruling { .. } => return Ok(Begin::Idle),
+            Phase::Ruling { .. } => return self.retry_shots(),
             Phase::Merge { .. } => return self.merge(),
             Phase::Done { merged } => return self.finish(*merged),
         }

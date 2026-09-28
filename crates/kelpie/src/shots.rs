@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::ports::Timestamp;
 use crate::preview::{Launch, Route};
 
 pub mod mcp;
@@ -242,6 +243,9 @@ pub struct ShotsRecord {
     /// Whether it is on the pull request's shots comment
     #[serde(default)]
     pub posted: bool,
+    /// When a post that failed is tried again, once one has
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_at: Option<Timestamp>,
 }
 
 /// Routes the worker named through the shots tool, kept beside its shots

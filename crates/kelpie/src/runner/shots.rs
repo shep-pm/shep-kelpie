@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use super::Runner;
 use super::gate::short;
 use super::report::{Begin, StepReport};
-use crate::ports::ForgeError;
+use crate::ports::{ForgeError, Timestamp};
 use crate::preview;
 use crate::settings::NonBlank;
 use crate::shots::{ShotsJob, ShotsRecord, ShotsRun, named_routes, publish, routes};
@@ -19,6 +19,9 @@ use crate::work_item::{ReviewCallState, WorkItem};
 
 #[cfg(test)]
 mod tests;
+
+/// Seconds before a shots post that failed is tried again
+const SHOTS_RETRY: u64 = 60;
 
 /// What `gh api` says of a comment that no longer exists
 const GONE: &str = "HTTP 404";
@@ -124,6 +127,7 @@ impl Runner {
             head,
             run,
             posted: false,
+            retry_at: None,
         });
         self.save(next)?;
         Ok(Some(report))
@@ -142,10 +146,43 @@ impl Runner {
             return Ok(Some(begin));
         }
         let item = self.state.work_item.as_ref().expect("checked above");
-        let record = item.shots.clone().expect("a run of this head");
-        if record.posted {
+        let record = item.shots.as_ref().expect("a run of this head");
+        // A post that failed does not hold the ruling; `retry_shots` tries again.
+        if record.posted || record.retry_at.is_some() {
             return Ok(None);
         }
+        self.post_shots(number)
+            .map(|report| Some(Begin::Report(report)))
+    }
+
+    /// While parked on a ruling: posts shots whose post failed, once it is due
+    pub(super) fn retry_shots(&mut self) -> Result<Begin, StateError> {
+        let item = self
+            .state
+            .work_item
+            .as_ref()
+            .expect("a ruling is a work item's");
+        let now = self.ports.clock.now();
+        let due = item
+            .shots
+            .as_ref()
+            .is_some_and(|r| !r.posted && r.retry_at.is_some_and(|at| at <= now));
+        match item.pull_request {
+            Some(number) if due => self.post_shots(number).map(Begin::Report),
+            _ => Ok(Begin::Idle),
+        }
+    }
+
+    // Pushes the work item's shots and puts them on the pull request's one
+    // shots comment, recording whether that worked.
+    fn post_shots(&mut self, number: u64) -> Result<StepReport, StateError> {
+        let item = self
+            .state
+            .work_item
+            .as_ref()
+            .expect("shots are a work item's");
+        let record = item.shots.clone().expect("a run to post");
+        let head = record.head.as_str();
         let (issue, comment) = (item.issue, item.shots_comment);
         let mut failures = Vec::new();
         let commit = if record.run.files().next().is_some() {
@@ -174,14 +211,17 @@ impl Runner {
             None => self.ports.forge.post_comment(forge, number, &body),
         };
         let posted = posted.map_err(|e| failures.push(e.to_string())).ok();
+        let done = posted.is_some() && failures.is_empty();
+        let retry_at = Timestamp(self.ports.clock.now().0 + SHOTS_RETRY);
         self.update(|item| {
             if let Some(shots) = item.shots.as_mut() {
-                shots.posted = true;
+                shots.posted = done;
+                shots.retry_at = (!done).then_some(retry_at);
             }
             item.shots_comment = posted.or(item.shots_comment);
         })?;
-        let report = match posted {
-            Some(comment) if failures.is_empty() => StepReport::ShotsPosted {
+        Ok(match posted {
+            Some(comment) if done => StepReport::ShotsPosted {
                 issue,
                 pull_request: number,
                 head: head.to_owned(),
@@ -192,7 +232,6 @@ impl Runner {
                 pull_request: number,
                 reason: failures.join("; "),
             },
-        };
-        Ok(Some(Begin::Report(report)))
+        })
     }
 }
