@@ -56,7 +56,6 @@ impl Runner {
                     ReviewerKind::Claude => {
                         let shots = match self.round_shots()? {
                             RoundShots::Take(begin) => return Ok(begin),
-                            RoundShots::Failed(reason) => return Ok(self.gate_failed(reason)),
                             RoundShots::Ready(shots) => shots,
                         };
                         let model = self.settings.models.reviewer.clone();

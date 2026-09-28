@@ -255,6 +255,48 @@ fn a_finding_on_a_file_is_judged_with_every_tool_denied_as_before() {
 }
 
 #[test]
+fn a_head_that_cannot_be_fetched_leaves_the_round_a_note_not_a_failure() {
+    let rig = with_preview("lab");
+    let runner = started(&rig);
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    step(&runner).unwrap(); // the worker's turn
+    step(&runner).unwrap(); // round 1, qwen: clean
+    let origin = rig.home.path().join("origin.git");
+    let moved = rig.home.path().join("origin-away.git");
+    std::fs::rename(&origin, &moved).unwrap();
+    let report = step(&runner).unwrap(); // round 2, claude, with no fetch possible
+    std::fs::rename(&moved, &origin).unwrap();
+
+    assert!(
+        matches!(
+            report,
+            Some(StepReport::ReviewFindingsSent {
+                round: 2,
+                clean: true,
+                ..
+            })
+        ),
+        "{report:?}"
+    );
+    assert_eq!(
+        rig.shots.jobs(),
+        [],
+        "no run of a head kelpie could not read"
+    );
+    let all = rig.claude.all_seen();
+    let round = all.iter().find(|s| s.call.role == Role::Reviewer).unwrap();
+    assert!(
+        round
+            .call
+            .prompt
+            .contains("The shots run failed: kelpie could not read the head to take shots of: ")
+    );
+}
+
+#[test]
 fn a_failed_shots_run_is_reported_and_the_round_goes_on() {
     let rig = with_preview("lab");
     let runner = started(&rig);

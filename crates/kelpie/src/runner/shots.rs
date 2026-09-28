@@ -27,8 +27,6 @@ const GONE: &str = "HTTP 404";
 pub(super) enum RoundShots {
     /// A run of the head is due first
     Take(Begin),
-    /// The head on `origin` could not be read
-    Failed(String),
     /// Kelpie's run of the head, or none without a launch file
     Ready(Option<ShotsRun>),
 }
@@ -92,7 +90,11 @@ impl Runner {
         }
         let head = match self.origin_head() {
             Ok(head) => head,
-            Err(reason) => return Ok(RoundShots::Failed(reason)),
+            // The round goes on without shots, and the reviewer is told why.
+            Err(reason) => {
+                let why = format!("kelpie could not read the head to take shots of: {reason}");
+                return Ok(RoundShots::Ready(Some(ShotsRun::failed(why))));
+            }
         };
         if let Some(begin) = self.shots_due(&head)? {
             return Ok(RoundShots::Take(begin));
