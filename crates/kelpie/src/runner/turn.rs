@@ -20,10 +20,10 @@ use super::rework;
 use super::ruling::park;
 use super::trigger::lock;
 use crate::pacer::Scope;
-use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session, Timestamp};
+use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Issue, Role, Session, Timestamp};
 use crate::profile::{INSTRUCTIONS, WorkerProfile};
 use crate::state::{ProjectState, Resume, RulingKind, RunState, StateError};
-use crate::work_item::{CallRecord, CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
+use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree::{self, Start};
 
 /// The prompt for a turn resumed after the runner restarted
@@ -76,8 +76,8 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
                 return lock(runner).end_turn(result);
             }
             Begin::Review(action) => {
-                let outcome = run_review_call(claude.as_ref(), reviewer.as_ref(), action);
-                return lock(runner).end_review(outcome);
+                let reviewed = run_review_call(claude.as_ref(), reviewer.as_ref(), action);
+                return lock(runner).end_review(reviewed);
             }
         }
     }
@@ -269,16 +269,9 @@ impl Runner {
                 if discovering {
                     item.pull_request = self.pull_request_from(&item.branch);
                 }
-                let before = item.session_cost(&item.session);
-                let cost = Cost(reply.session_cost.0.saturating_sub(before.0));
-                item.calls.push(CallRecord {
-                    role: Role::Worker,
-                    at: now,
-                    session: item.session.clone(),
-                    usage: reply.usage,
-                    cost,
-                    session_cost: reply.session_cost,
-                });
+                let session = item.session.clone();
+                let cost =
+                    item.record_call(Role::Worker, now, session, reply.usage, reply.session_cost);
                 item.turn = Turn::Ended { at: now };
                 // The turn may have changed the code CodeRabbit was satisfied with.
                 item.coderabbit.satisfied = false;
@@ -469,7 +462,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::ports::Usage;
+    use crate::ports::{Cost, Usage};
     use crate::settings::Effort;
     use crate::test::{LEFT_BEHIND, Rig, Scripted, git};
 
@@ -810,14 +803,15 @@ mod tests {
             .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
         step(&runner).unwrap();
         rig.ask(&runner, "rule", Some("1 no not worth another go"));
-        assert_eq!(
+        assert!(matches!(
             step(&runner).unwrap(),
             Some(StepReport::Finished {
                 issue: 7,
                 pull_request: None,
                 merged: false,
+                ..
             })
-        );
+        ));
         assert!(!rig.worktree_7().exists());
         assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
     }
@@ -871,14 +865,15 @@ mod tests {
         rig.claude.script([Scripted::Fail(ClaudeError::TimedOut)]);
         step(&runner).unwrap();
         rig.ask(&runner, "rule", Some("1 no not worth waiting for"));
-        assert_eq!(
+        assert!(matches!(
             step(&runner).unwrap(),
             Some(StepReport::Finished {
                 issue: 7,
                 pull_request: None,
                 merged: false,
+                ..
             })
-        );
+        ));
         assert!(!rig.worktree_7().exists());
         assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
     }

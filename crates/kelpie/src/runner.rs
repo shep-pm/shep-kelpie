@@ -16,7 +16,7 @@ use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{
-    CodeRabbitTally, Known, Phase, ReviewCallState, Turn, WorkItem, new_session_id,
+    CodeRabbitTally, Known, Phase, QwenTally, ReviewCallState, Turn, WorkItem, new_session_id,
 };
 
 mod alert;
@@ -289,6 +289,7 @@ impl Runner {
             review_call: ReviewCallState::default(),
             coderabbit: CodeRabbitTally::default(),
             known: Known::default(),
+            qwen: QwenTally::default(),
             calls: Vec::new(),
         }
     }

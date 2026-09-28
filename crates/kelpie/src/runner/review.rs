@@ -15,12 +15,13 @@ pub(super) mod findings;
 use std::path::Path;
 
 use super::Runner;
-use super::report::{Begin, ReviewCall, ReviewResult, StepReport};
+use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, Spent, StepReport};
 use crate::ports::{
-    Claude, ClaudeError, Finding, Reviewer, ReviewerError, Severity, Verdict, parse_findings,
+    Claude, ClaudeCall, ClaudeError, ClaudeReply, Finding, Reviewer, ReviewerError, Severity,
+    Timestamp, Verdict, parse_findings,
 };
 use crate::state::{Fix, RulingKind, StateError};
-use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, ReviewerKind, Turn};
+use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, ReviewerKind, Turn, WorkItem};
 use crate::worktree;
 
 impl Runner {
@@ -218,8 +219,9 @@ impl Runner {
 
     pub(super) fn end_review(
         &mut self,
-        result: ReviewResult,
+        reviewed: Reviewed,
     ) -> Result<Option<StepReport>, StateError> {
+        let Reviewed { result, spent } = reviewed;
         // A call stopped with the runner saves nothing, the same as a turn
         // in `end_turn`: its round or judge call is still due, and runs
         // again once a restart clears `review_call`.
@@ -232,7 +234,7 @@ impl Runner {
             .as_ref()
             .is_some_and(|item| matches!(item.phase, Phase::CodeRabbit(_)));
         if in_coderabbit_round {
-            return self.coderabbit_verdict(result);
+            return self.coderabbit_verdict(result, spent);
         }
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
@@ -244,7 +246,7 @@ impl Runner {
         let Some(item) = next.work_item.as_mut() else {
             return Ok(None);
         };
-        item.review_call = ReviewCallState::Idle;
+        record_spent(item, spent, now);
         let Phase::Review(review) = item.phase.clone() else {
             return Ok(None);
         };
@@ -354,32 +356,97 @@ pub(super) fn run_review_call(
     claude: &dyn Claude,
     reviewer: &dyn Reviewer,
     action: ReviewCall,
-) -> ReviewResult {
+) -> Reviewed {
     match action {
         ReviewCall::Qwen {
             worktree,
             out,
             round,
         } => match reviewer.round(&worktree, &out, round) {
-            Err(ReviewerError::Stopped) => ReviewResult::Stopped,
-            result => ReviewResult::Findings(result.map_err(|e| e.to_string())),
+            Err(ReviewerError::Stopped) => stopped(),
+            result => Reviewed {
+                result: ReviewResult::Findings(result.map_err(|e| e.to_string())),
+                spent: Some(Spent::Qwen),
+            },
         },
-        ReviewCall::ClaudeRound(call) => match claude.run(&call) {
-            Err(ClaudeError::Stopped) => ReviewResult::Stopped,
-            result => ReviewResult::Findings(
-                result
-                    .map(|reply| parse_findings(&reply.text))
-                    .map_err(|e| e.to_string()),
-            ),
-        },
-        ReviewCall::Judge(call) => match claude.run(&call) {
-            Err(ClaudeError::Stopped) => ReviewResult::Stopped,
-            result => ReviewResult::Verdict(result.map_err(|e| e.to_string()).and_then(|reply| {
-                calls::parse_verdict(&reply.text)
-                    .ok_or_else(|| format!("unreadable judge output: {}", reply.text.trim()))
-            })),
-        },
+        ReviewCall::ClaudeRound(call) => {
+            let (reply, spent) = run_claude(claude, &call);
+            match reply {
+                Err(ClaudeError::Stopped) => stopped(),
+                reply => Reviewed {
+                    result: ReviewResult::Findings(
+                        reply
+                            .map(|reply| parse_findings(&reply.text))
+                            .map_err(|e| e.to_string()),
+                    ),
+                    spent,
+                },
+            }
+        }
+        ReviewCall::Judge(call) => {
+            let (reply, spent) = run_claude(claude, &call);
+            match reply {
+                Err(ClaudeError::Stopped) => stopped(),
+                reply => Reviewed {
+                    result: ReviewResult::Verdict(reply.map_err(|e| e.to_string()).and_then(
+                        |reply| {
+                            calls::parse_verdict(&reply.text).ok_or_else(|| {
+                                format!("unreadable judge output: {}", reply.text.trim())
+                            })
+                        },
+                    )),
+                    spent,
+                },
+            }
+        }
     }
+}
+
+/// Adds what a review call spent to the work item's record, and marks no
+/// call in flight
+///
+/// A qwen round's time runs from when the call was marked running.
+pub(super) fn record_spent(item: &mut WorkItem, spent: Option<Spent>, now: Timestamp) {
+    match spent {
+        Some(Spent::Claude {
+            role,
+            session,
+            usage,
+            session_cost,
+        }) => {
+            item.record_call(role, now, session, usage, session_cost);
+        }
+        Some(Spent::Qwen) => {
+            item.qwen.rounds += 1;
+            if let ReviewCallState::Running { since } = item.review_call {
+                item.qwen.seconds += now.0.saturating_sub(since.0);
+            }
+        }
+        None => {}
+    }
+    item.review_call = ReviewCallState::Idle;
+}
+
+fn stopped() -> Reviewed {
+    Reviewed {
+        result: ReviewResult::Stopped,
+        spent: None,
+    }
+}
+
+// A reply that came back cost something even if what it said is unusable.
+fn run_claude(
+    claude: &dyn Claude,
+    call: &ClaudeCall,
+) -> (Result<ClaudeReply, ClaudeError>, Option<Spent>) {
+    let reply = claude.run(call);
+    let spent = reply.as_ref().ok().map(|reply| Spent::Claude {
+        role: call.role,
+        session: call.session.id().clone(),
+        usage: reply.usage,
+        session_cost: reply.session_cost,
+    });
+    (reply, spent)
 }
 
 #[cfg(test)]
@@ -387,7 +454,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::ports::{Role, Session};
+    use crate::ports::{Cost, Role, Session};
     use crate::runner::step;
     use crate::test::{Rig, Scripted, ScriptedRound};
 
@@ -402,7 +469,10 @@ mod tests {
         let report = runner
             .lock()
             .unwrap()
-            .end_review(ReviewResult::Findings(Ok(vec![])))
+            .end_review(Reviewed {
+                result: ReviewResult::Findings(Ok(vec![])),
+                spent: None,
+            })
             .unwrap();
         assert_eq!(report, None);
     }
@@ -682,6 +752,95 @@ mod tests {
         rig.claude.script([Scripted::Push("work.txt", "work\n")]);
         step(&runner).unwrap();
         (rig, runner)
+    }
+
+    #[test]
+    fn a_claude_round_with_a_finding_records_a_reviewer_call_and_a_judge_call() {
+        let (rig, runner) = at_round_1("shep");
+        step(&runner).unwrap(); // round 1, qwen: clean by default
+        rig.claude.script([
+            Scripted::Billed(
+                "MEDIUM|src/lib.rs:3|unused variable|dead code",
+                Cost(50_000_000),
+            ),
+            Scripted::Billed(
+                r#"{"holds": false, "severity": "low", "reason": "it is used"}"#,
+                Cost(7_000_000),
+            ),
+        ]);
+        step(&runner).unwrap(); // round 2, claude: one finding
+        step(&runner).unwrap(); // the judge rejects it
+
+        let status = rig.ask(&runner, "status", None);
+        let item = &status["work_item"];
+        assert_eq!(
+            item["calls"], 3,
+            "the worker's turn, the reviewer's and the judge's"
+        );
+        assert_eq!(
+            item["by_role"]["reviewer"],
+            json!({ "calls": 1, "cost_usd": 0.05 })
+        );
+        assert_eq!(
+            item["by_role"]["judge"],
+            json!({ "calls": 1, "cost_usd": 0.007 })
+        );
+        assert_eq!(
+            item["by_role"]["worker"],
+            json!({ "calls": 1, "cost_usd": 0.0 }),
+            "the worker's turn cost nothing here, and is not the reviewer's"
+        );
+        assert_eq!(item["qwen"]["rounds"], 1);
+    }
+
+    #[test]
+    fn a_judge_reply_that_cannot_be_read_is_still_recorded() {
+        let (rig, runner) = at_round_1("shep");
+        step(&runner).unwrap(); // round 1, qwen: clean by default
+        rig.claude.script([
+            Scripted::Billed("HIGH|src/lib.rs:9|racy|two writers", Cost(1)),
+            Scripted::Billed("not json", Cost(9)),
+        ]);
+        step(&runner).unwrap(); // round 2, claude: one finding
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::GateFailed { .. })
+        ));
+
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["work_item"]["by_role"]["judge"]["calls"], 1);
+    }
+
+    #[test]
+    fn a_qwen_rounds_time_runs_from_when_it_was_marked_running() {
+        let mut item = crate::test::a_work_item();
+        item.review_call = ReviewCallState::Running {
+            since: Timestamp(100),
+        };
+        record_spent(&mut item, Some(Spent::Qwen), Timestamp(190));
+        record_spent(&mut item, Some(Spent::Qwen), Timestamp(200));
+        assert_eq!(item.qwen.rounds, 2);
+        assert_eq!(
+            item.qwen.seconds, 90,
+            "the second had no start to measure from"
+        );
+        assert_eq!(item.review_call, ReviewCallState::Idle);
+    }
+
+    #[test]
+    fn a_finished_work_items_report_carries_its_totals() {
+        let (rig, runner) = at_round_1("shep");
+        step(&runner).unwrap(); // round 1, qwen: clean by default
+        rig.claude
+            .script([Scripted::Billed("CLEAN", Cost(20_000_000))]);
+        step(&runner).unwrap(); // round 2, claude: clean, so CI is next
+        rig.forge
+            .set_state(71, crate::ports::PullRequestState::Merged);
+        let Some(StepReport::Finished { spend, qwen, .. }) = step(&runner).unwrap() else {
+            panic!("the merged work item did not finish");
+        };
+        assert_eq!(spend.reviewer.calls, 1);
+        assert_eq!(qwen.rounds, 1);
     }
 
     #[test]

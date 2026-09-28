@@ -7,7 +7,7 @@ use serde_json::json;
 use super::{ANSWER_WAIT, LABEL, REVIEW_WAIT};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
-use crate::ports::{Checks, ClaudeError, Role};
+use crate::ports::{Checks, ClaudeError, Cost, Role};
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::test::{Rig, Scripted, Told, git};
 
@@ -837,6 +837,32 @@ fn a_pull_request_merged_by_hand_mid_round_ends_the_work_item() {
         Some(StepReport::Finished { merged: true, .. })
     ));
     assert!(!rig.leases.held(&cr()));
+}
+
+#[test]
+fn a_round_with_a_held_finding_records_a_judge_call_that_the_finished_totals_carry() {
+    let (rig, runner, head) = summoned("shep");
+    rig.forge
+        .coderabbit
+        .review(71, &head, now(&rig) + 60, &["Name the flag."]);
+    rig.clock.advance(60);
+    step(&runner).unwrap(); // the review covers the head
+    rig.claude
+        .script([Scripted::Billed(HOLDS, Cost(12_000_000))]);
+    step(&runner).unwrap(); // the judge holds the finding
+
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(
+        status["work_item"]["by_role"]["judge"],
+        json!({ "calls": 1, "cost_usd": 0.012 })
+    );
+
+    rig.forge
+        .set_state(71, crate::ports::PullRequestState::Merged);
+    let Some(StepReport::Finished { spend, .. }) = step(&runner).unwrap() else {
+        panic!("the merged work item did not finish");
+    };
+    assert_eq!(spend.judge.calls, 1);
 }
 
 #[test]
