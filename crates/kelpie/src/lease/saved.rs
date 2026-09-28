@@ -12,7 +12,7 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::num::NonZeroU32;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -238,7 +238,7 @@ impl BookFile {
 
     /// Where it is
     #[inline]
-    pub fn path(&self) -> &std::path::Path {
+    pub fn path(&self) -> &Path {
         &self.path
     }
 
@@ -297,7 +297,7 @@ mod tests {
 
     use super::*;
 
-    fn file_in(dir: &std::path::Path) -> BookFile {
+    fn file_in(dir: &Path) -> BookFile {
         BookFile::new(dir.join("book.json"))
     }
 
