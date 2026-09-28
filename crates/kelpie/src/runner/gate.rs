@@ -443,9 +443,9 @@ mod tests {
             conflict.prompt
         );
         let merged = rig.forge.head_of("kelpie/7").unwrap();
+        assert_eq!(git(&rig.worktree_7(), &["rev-parse", "HEAD"]), merged);
         assert_eq!(git(&rig.worktree_7(), &["rev-parse", "HEAD^2"]), main);
         assert_eq!(git(&rig.worktree_7(), &["rev-parse", "HEAD^1"]), head);
-        assert_eq!(rig.forge.head_of("kelpie/7").as_ref(), Some(&merged));
     }
 
     #[test]
