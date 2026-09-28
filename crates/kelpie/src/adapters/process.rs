@@ -15,8 +15,9 @@ use std::time::{Duration, Instant};
 /// How often a running child is checked for its exit
 const POLL: Duration = Duration::from_millis(50);
 
-// Time for a child to exit on SIGTERM before it gets SIGKILL. Shep gives a
-// runner 8s after its shutdown message, and the runner flushes for 2s after.
+// Time for a child to exit on SIGTERM before it gets SIGKILL. A stop gives
+// the runner shep's `kill_timeout` after its shutdown message, which its
+// Flockfile entry must set to 10s or more, and the runner flushes for 2s after.
 const STOP_GRACE: Duration = Duration::from_secs(3);
 
 /// Why a stoppable child did not run to its end

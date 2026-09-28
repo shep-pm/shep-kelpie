@@ -28,9 +28,11 @@ const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 // hour for the maintainer's login.
 const BOARD_POLL: Duration = Duration::from_secs(60);
 
-// How long a stopping runner waits for its worker's thread to end. Shep
-// allows 8s after the shutdown message, and 3s of stop ladder and 2s of
-// flush follow, so 2s leaves a second spare.
+// How long a stopping runner waits for its worker's thread to end. A stop or
+// restart gives the runner shep's `kill_timeout` after the shutdown message,
+// 1.6s unless its Flockfile entry says more, and 3s of stop ladder and 2s of
+// flush follow this wait. The whole stop needs about 7s, so the entry needs
+// `kill_timeout = "10s"` or more.
 const JOIN_BOUND: Duration = Duration::from_secs(2);
 
 /// Runs `project`'s runner until the shepherd stops it
