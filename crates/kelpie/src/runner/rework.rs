@@ -104,7 +104,8 @@ impl Runner {
     /// # Errors
     ///
     /// [`ReworkError`] naming why the pull request cannot be reworked, or
-    /// the change cannot be saved. Nothing changes then.
+    /// the change cannot be saved. A refusal changes nothing. A label or
+    /// save that fails after the triage labels began coming off leaves them off.
     pub fn rework(&mut self, number: u64) -> Result<WorkerModel, ReworkError> {
         if let Some(item) = &self.state.work_item {
             return Err(ReworkError::InFlight(item.issue));
