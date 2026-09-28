@@ -39,6 +39,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         issue: 42,
         title: "Add a thing".into(),
         branch: "kelpie/42".into(),
+        rework: false,
         worktree: "/k/wt/shep/42".into(),
         build: "/k/targets/shep/42".into(),
         worker: WorkerModel {
@@ -548,6 +549,54 @@ impl Rig {
         git(&other, &["rev-parse", "HEAD"])
     }
 
+    /// Pushes a commit of `file` to `branch` on origin from another clone,
+    /// as the maintainer would by hand, and returns its hash
+    pub(crate) fn push_by_hand(&self, branch: &str, file: &str) -> String {
+        let hand = self.home.path().join("by-hand");
+        if !hand.exists() {
+            git(
+                self.home.path(),
+                &["clone", "--quiet", path(&self.origin()), path(&hand)],
+            );
+        }
+        git(&hand, &["fetch", "--quiet", "origin"]);
+        let start = match self.forge.head_of(branch) {
+            Some(_) => format!("origin/{branch}"),
+            None => "origin/main".to_owned(),
+        };
+        git(&hand, &["checkout", "--quiet", "-B", branch, &start]);
+        std::fs::write(hand.join(file), "pushed by hand\n").unwrap();
+        git(&hand, &["add", file]);
+        git(&hand, &["commit", "--quiet", "-m", file]);
+        git(&hand, &["push", "--quiet", "origin", branch]);
+        git(&hand, &["rev-parse", "HEAD"])
+    }
+
+    /// Asserts the worker reads `path` under the settings of the call `seen`,
+    /// and that a commit from its worktree would not carry it
+    pub(crate) fn assert_worker_reads(&self, seen: &Seen, path: &Path) {
+        assert!(
+            !path.starts_with(&seen.call.cwd),
+            "a commit would carry {path:?}"
+        );
+        // The worker's rules name kelpie's home as `~/.kelpie`.
+        let home = self.home.path().join("kelpie");
+        let as_written = format!("~/.kelpie/{}", path.strip_prefix(&home).unwrap().display());
+        let as_is = path.to_str().unwrap();
+        let deny = seen.settings["permissions"]["deny"].as_array().unwrap();
+        for rule in deny.iter().map(|r| r.as_str().unwrap()) {
+            assert!(
+                !denies(rule, &as_written) && !denies(rule, as_is),
+                "{rule} hides {as_written}"
+            );
+        }
+        let deny_read = &seen.settings["sandbox"]["filesystem"]["denyRead"];
+        for folder in deny_read.as_array().into_iter().flatten() {
+            let folder = folder.as_str().unwrap();
+            assert!(!path.starts_with(folder), "the sandbox hides it: {folder}");
+        }
+    }
+
     /// The project's checkout
     pub(crate) fn repo(&self) -> PathBuf {
         self.home.path().join("repos").join(self.project.as_str())
@@ -655,6 +704,18 @@ impl Rig {
     /// The build folder kelpie makes for issue 7
     pub(crate) fn build_7(&self) -> PathBuf {
         self.paths().build(7)
+    }
+}
+
+// Whether a `Read(...)` deny rule covers `path`, written as the rule writes it
+fn denies(rule: &str, path: &str) -> bool {
+    let Some(glob) = rule.strip_prefix("Read(").and_then(|r| r.strip_suffix(')')) else {
+        return false;
+    };
+    match glob.strip_suffix("**") {
+        Some(folder) if !folder.contains('*') => path.starts_with(folder),
+        None if !glob.contains('*') => path == glob,
+        _ => panic!("teach this test to read {rule}"),
     }
 }
 

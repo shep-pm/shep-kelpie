@@ -16,6 +16,7 @@ use super::Runner;
 use super::question::asked;
 use super::report::{Begin, StepReport};
 use super::review::run_review_call;
+use super::rework;
 use super::ruling::park;
 use super::trigger::lock;
 use crate::pacer::Scope;
@@ -23,7 +24,7 @@ use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Sess
 use crate::profile::{INSTRUCTIONS, WorkerProfile};
 use crate::state::{ProjectState, Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CallRecord, CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
-use crate::worktree;
+use crate::worktree::{self, Start};
 
 /// The prompt for a turn resumed after the runner restarted
 const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
@@ -185,7 +186,7 @@ impl Runner {
 
     // Everything the worker needs on disk before it starts: its worktree, its
     // build folder, its settings file and kelpie's instructions. A turn with
-    // no prompt of its own is the first, and takes the issue.
+    // no prompt of its own is the first, and takes the issue or the review.
     fn prepare(
         &self,
         item: &WorkItem,
@@ -193,10 +194,16 @@ impl Runner {
         prompt: Option<String>,
         timeout: Duration,
     ) -> Result<ClaudeCall, String> {
+        let start = if item.rework {
+            Start::Pushed
+        } else {
+            Start::Main
+        };
         let dirs = worktree::prepare(
             &self.settings.repo,
             &item.worktree,
             &item.branch,
+            start,
             &item.build,
         )
         .map_err(|e| e.to_string())?;
@@ -219,6 +226,7 @@ impl Runner {
         write(folder, &instructions, INSTRUCTIONS)?;
         let prompt = match prompt {
             Some(prompt) => prompt,
+            None if item.rework => rework::first_prompt(item),
             None => {
                 let issue = self
                     .ports

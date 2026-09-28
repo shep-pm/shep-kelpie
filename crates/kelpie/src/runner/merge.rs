@@ -54,7 +54,8 @@ impl Runner {
     /// Ends the work item in flight without merging it
     ///
     /// Its worktree, local branch and build folder go, and its issue is
-    /// recorded as finished. Its pull request and branch on the forge stay.
+    /// recorded as finished. Its pull request and branch on the forge stay,
+    /// the pull request labelled `ready-for-human`.
     /// It works whether the project runs or not.
     ///
     /// # Errors
@@ -181,7 +182,8 @@ impl Runner {
     }
 
     // Removes the worktree, branch and build folder, then the work item, and
-    // records its issue so the board never takes it again.
+    // records its issue so the board never takes it again. A pull request
+    // left unmerged is handed back to the maintainer first.
     pub(super) fn finish(&mut self, merged: bool) -> Result<Begin, StateError> {
         self.release()?;
         let item = self
@@ -189,6 +191,11 @@ impl Runner {
             .work_item
             .as_ref()
             .expect("a finish is of a work item");
+        if let (false, Some(number)) = (merged, item.pull_request)
+            && let Err(reason) = self.hand_back(number)
+        {
+            return Ok(self.gate_failed(reason));
+        }
         let removed = worktree::remove(
             &self.settings.repo,
             &item.worktree,

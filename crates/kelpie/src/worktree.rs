@@ -1,8 +1,9 @@
 //! A work item's worktree and build folder
 //!
 //! Each work item gets its own git worktree, on a branch cut from the latest
-//! `origin/main`, and its own build folder. Preparing is idempotent, so a
-//! restarted runner finds the worktree it made before and keeps it.
+//! `origin/main`, and its own build folder. A rework's branch starts from
+//! itself on `origin` instead. Preparing is idempotent, so a restarted runner
+//! finds the worktree it made before and keeps it.
 
 use std::ffi::OsStr;
 use std::fmt;
@@ -12,6 +13,15 @@ use std::process::{Command, Stdio};
 
 /// The branch every work item is cut from, on `origin`
 pub const BASE: &str = "main";
+
+/// Where a new worktree's branch starts
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Start {
+    /// Cut from `origin/main`
+    Main,
+    /// The branch as `origin` holds it, whoever pushed to it
+    Pushed,
+}
 
 /// A prepared worktree, and the git dirs a commit from it writes to
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,7 +91,7 @@ impl std::error::Error for WorktreeError {}
 
 /// Makes sure `worktree` is a worktree of `repo` on `branch`, and `build` exists
 ///
-/// A new worktree's branch is cut from `origin/main` just fetched, and does
+/// A new worktree's branch starts where `start` says, just fetched, and does
 /// not track it.
 ///
 /// # Errors
@@ -91,6 +101,7 @@ pub fn prepare(
     repo: &Path,
     worktree: &Path,
     branch: &str,
+    start: Start,
     build: &Path,
 ) -> Result<Worktree, WorktreeError> {
     let foreign = || WorktreeError::Foreign(worktree.to_owned());
@@ -106,8 +117,12 @@ pub fn prepare(
         if let Some(parent) = worktree.parent() {
             create(parent)?;
         }
-        git(repo, ["fetch", "--quiet", "origin", BASE])?;
-        let base = format!("origin/{BASE}");
+        let from = match start {
+            Start::Main => BASE,
+            Start::Pushed => branch,
+        };
+        git(repo, ["fetch", "--quiet", "origin", from])?;
+        let base = format!("origin/{from}");
         let wt = worktree.as_os_str();
         git(
             repo,

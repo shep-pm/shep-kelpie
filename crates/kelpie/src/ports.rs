@@ -83,6 +83,22 @@ pub trait Forge: Send {
     /// request, or its answer cannot be read.
     fn pull_request(&self, repo: &ForgeSlug, number: u64) -> Result<PullRequest, ForgeError>;
 
+    /// Pull request `number` on `repo` as a rework reads it: its branch and
+    /// the maintainer's latest review
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked, has no such pull
+    /// request, or its answer cannot be read.
+    fn reviewed(&self, repo: &ForgeSlug, number: u64) -> Result<Reviewed, ForgeError>;
+
+    /// The login of the account kelpie acts as, which opens its pull requests
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn viewer(&self) -> Result<String, ForgeError>;
+
     /// Posts `body` as a comment on pull request `number`
     ///
     /// # Errors
@@ -147,6 +163,51 @@ pub struct PullRequest {
     pub checks: Checks,
     /// Its labels' names
     pub labels: Vec<String>,
+}
+
+/// A pull request as a rework reads it
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reviewed {
+    /// Open, merged or closed
+    pub state: PullRequestState,
+    /// The branch it merges from
+    pub branch: String,
+    /// Whether that branch is on a fork rather than the repo itself
+    pub from_fork: bool,
+    /// Its author's login, empty for a deleted account
+    pub author: String,
+    /// Whether it is still a draft
+    pub draft: bool,
+    /// Its labels' names
+    pub labels: Vec<String>,
+    /// The maintainer's latest review: the latest one a person left, since
+    /// kelpie's own reviewers post none and bots are left out
+    pub review: Option<MaintainerReview>,
+}
+
+/// One review the maintainer left, as written
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MaintainerReview {
+    /// The forge's id for it
+    pub id: String,
+    /// Whether it requests changes, which only a reviewer other than the
+    /// pull request's author can do
+    pub changes_requested: bool,
+    /// Its body, empty when it has none
+    pub body: String,
+    /// Its comments whose threads are still unresolved, in the forge's order
+    pub comments: Vec<ReviewComment>,
+}
+
+/// One comment on a line of a pull request's diff
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewComment {
+    /// The file it is on
+    pub file: String,
+    /// The line, when the forge still places it
+    pub line: Option<u32>,
+    /// What it says
+    pub body: String,
 }
 
 /// Whether a pull request is open, merged or closed without merging

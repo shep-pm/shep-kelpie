@@ -26,6 +26,8 @@ kill_timeout = "10s"
 
 Then `SHEP_HOME=~/.kelpie/shep shep trigger shep status`.
 
+Kelpie never creates labels in a project's repo. Create `ready-for-agent` and `ready-for-human` there before its first run. Issues labelled `ready-for-agent` are the board. On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep trigger <project> rework <pr>`. Kelpie puts `ready-for-human` on each pull request it hands back.
+
 - `CONTEXT.md`: the vocabulary
 - `docs/adr/`: decisions that are hard to reverse
 - `docs/design-log.md`: every decision so far, the facts behind them, and the test plan

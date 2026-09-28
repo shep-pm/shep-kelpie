@@ -10,7 +10,10 @@ use std::sync::{Arc, Mutex};
 use super::coderabbit::FakeCodeRabbit;
 use crate::board::{Blocker, OpenPullRequest, READY, ReadyIssue};
 use crate::coderabbit::Activity;
-use crate::ports::{Checks, Forge, ForgeError, Issue, PullRequest, PullRequestState, Visibility};
+use crate::ports::{
+    Checks, Forge, ForgeError, Issue, MaintainerReview, PullRequest, PullRequestState, Reviewed,
+    Visibility,
+};
 use crate::settings::ForgeSlug;
 
 /// A forge whose repo is public and whose every issue exists, unless a
@@ -32,9 +35,13 @@ pub(crate) struct FakeForge {
     comments: Arc<Mutex<Vec<(u64, String)>>>,
     comments_down: Arc<AtomicBool>,
     merges_down: Arc<AtomicBool>,
+    labels_down: Arc<AtomicBool>,
+    unreadable: Arc<Mutex<HashSet<u64>>>,
+    viewer_reads: Arc<AtomicUsize>,
     lagging: Arc<Mutex<HashMap<u64, String>>>,
     readied: Arc<Mutex<Vec<u64>>>,
     merges: Arc<Mutex<Vec<(u64, String)>>>,
+    reviews: Arc<Mutex<HashMap<u64, MaintainerReview>>>,
     /// Pull requests' labels, and what CodeRabbit posts
     pub(crate) coderabbit: FakeCodeRabbit,
 }
@@ -46,7 +53,12 @@ struct FakePullRequest {
     branch: String,
     state: PullRequestState,
     draft: bool,
+    from_fork: bool,
+    author: String,
 }
+
+/// The account the fake forge says kelpie acts as, and opens pull requests as
+pub(crate) const VIEWER: &str = "the-maintainer";
 
 impl FakeForge {
     /// A public repo whose pull requests' branches live on `origin`, a bare repo
@@ -67,9 +79,13 @@ impl FakeForge {
             comments: Arc::default(),
             comments_down: Arc::default(),
             merges_down: Arc::default(),
+            labels_down: Arc::default(),
+            unreadable: Arc::default(),
+            viewer_reads: Arc::default(),
             lagging: Arc::default(),
             readied: Arc::default(),
             merges: Arc::default(),
+            reviews: Arc::default(),
             coderabbit: FakeCodeRabbit::default(),
         }
     }
@@ -77,6 +93,11 @@ impl FakeForge {
     /// Adds `label` to pull request `number`, as someone other than kelpie would
     pub(crate) fn label_pull_request(&self, number: u64, label: &str) {
         self.coderabbit.put_label(number, label, true);
+    }
+
+    /// Pull request `number`'s labels, in the order they went on
+    pub(crate) fn pull_request_labels(&self, number: u64) -> Vec<String> {
+        self.coderabbit.labels(number)
     }
 
     /// Removes `label` from pull request `number`, as someone other than kelpie would
@@ -132,8 +153,21 @@ impl FakeForge {
             branch: head.to_owned(),
             state: PullRequestState::Open,
             draft: true,
+            from_fork: false,
+            author: VIEWER.to_owned(),
         };
         self.pull_requests.lock().unwrap().insert(number, pr);
+    }
+
+    /// Makes pull request `number` one `login` opened, not kelpie's account
+    pub(crate) fn set_author(&self, number: u64, login: &str) {
+        let mut prs = self.pull_requests.lock().unwrap();
+        prs.get_mut(&number).expect("an opened pull request").author = login.to_owned();
+    }
+
+    /// How many times the account kelpie acts as was asked
+    pub(crate) fn viewer_reads(&self) -> usize {
+        self.viewer_reads.load(Ordering::SeqCst)
     }
 
     /// Reports `checks` for commit `head`. A head with none reported is pending.
@@ -151,6 +185,26 @@ impl FakeForge {
     pub(crate) fn ready_pull_request(&self, number: u64) {
         let mut prs = self.pull_requests.lock().unwrap();
         prs.get_mut(&number).expect("an opened pull request").draft = false;
+    }
+
+    /// Makes pull request `number` come from a fork's branch
+    pub(crate) fn set_from_fork(&self, number: u64) {
+        let mut prs = self.pull_requests.lock().unwrap();
+        prs.get_mut(&number)
+            .expect("an opened pull request")
+            .from_fork = true;
+    }
+
+    /// Makes reading pull request `number`'s review fail
+    pub(crate) fn set_unreadable(&self, number: u64) {
+        self.unreadable.lock().unwrap().insert(number);
+    }
+
+    /// Leaves `review` on pull request `number`, as the maintainer would
+    pub(crate) fn review(&self, number: u64, review: MaintainerReview) {
+        let prs = self.pull_requests.lock().unwrap();
+        assert!(prs.contains_key(&number), "an opened pull request");
+        self.reviews.lock().unwrap().insert(number, review);
     }
 
     /// Makes posting comments fail, or work again
@@ -171,6 +225,11 @@ impl FakeForge {
     /// Makes merging fail, or work again
     pub(crate) fn set_merges_down(&self, down: bool) {
         self.merges_down.store(down, Ordering::SeqCst);
+    }
+
+    /// Makes changing a pull request's labels fail, or work again
+    pub(crate) fn set_labels_down(&self, down: bool) {
+        self.labels_down.store(down, Ordering::SeqCst);
     }
 
     /// Every comment posted, oldest first, with its pull request
@@ -303,6 +362,27 @@ impl Forge for FakeForge {
         })
     }
 
+    fn reviewed(&self, _repo: &ForgeSlug, number: u64) -> Result<Reviewed, ForgeError> {
+        if self.unreadable.lock().unwrap().contains(&number) {
+            return Err(ForgeError::Failed(format!("#{number} is unreadable")));
+        }
+        let pr = self.opened(number)?;
+        Ok(Reviewed {
+            state: pr.state,
+            branch: pr.branch,
+            from_fork: pr.from_fork,
+            author: pr.author,
+            draft: pr.draft,
+            labels: self.coderabbit.labels(number),
+            review: self.reviews.lock().unwrap().get(&number).cloned(),
+        })
+    }
+
+    fn viewer(&self) -> Result<String, ForgeError> {
+        self.viewer_reads.fetch_add(1, Ordering::SeqCst);
+        Ok(VIEWER.to_owned())
+    }
+
     fn comment(&self, _repo: &ForgeSlug, number: u64, body: &str) -> Result<(), ForgeError> {
         if self.comments_down.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("comments are down".into()));
@@ -330,6 +410,9 @@ impl Forge for FakeForge {
         label: &str,
         on: bool,
     ) -> Result<(), ForgeError> {
+        if self.labels_down.load(Ordering::SeqCst) {
+            return Err(ForgeError::Failed("labels are down".into()));
+        }
         self.opened(number)?;
         self.coderabbit.set_label(number, label, on);
         Ok(())
