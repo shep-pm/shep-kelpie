@@ -582,11 +582,7 @@ impl Rig {
 
     /// The worktree kelpie makes for issue 7
     pub(crate) fn worktree_7(&self) -> PathBuf {
-        self.home
-            .path()
-            .join("kelpie/wt")
-            .join(self.project.as_str())
-            .join("7")
+        self.paths().worktree(7)
     }
 
     /// The build folder kelpie makes for issue 7
