@@ -13,8 +13,8 @@ use super::gate::short;
 use super::report::{Begin, StepReport};
 use super::rework::HUMAN;
 use crate::ports::Timestamp;
-use crate::state::{ProjectState, Resume, Ruling, RulingKind, StateError};
-use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
+use crate::state::{Fix, ProjectState, Resume, Ruling, RulingKind, StateError};
+use crate::work_item::{CodeRabbitStage, Known, Phase, Review, Turn, WorkItem};
 
 /// The prompt for a turn resumed after the maintainer accepts a timed-out
 /// turn's ruling with a yes
@@ -219,6 +219,7 @@ fn decide(id: u64, answer: Answer, ruling: Ruling, now: Timestamp) -> Result<Mov
                 Resume::Nothing => (Phase::Implement, None),
                 Resume::ReviewFirst => (Phase::Implement, Some(Phase::Review(Review::first()))),
                 Resume::Review(review) => (Phase::Review(review), None),
+                Resume::CodeRabbitFix { head } => (fixing(Some(head)), None),
             };
             return Ok(Move::Turn {
                 prompt: answer_prompt(&text),
@@ -228,14 +229,15 @@ fn decide(id: u64, answer: Answer, ruling: Ruling, now: Timestamp) -> Result<Mov
         }
         (_, RulingKind::Question { .. }) => return Err(RuleError::WantsAnswer(id)),
         (Answer::Text(_), _) => return Err(RuleError::NotAQuestion(id)),
-        (Answer::Yes, RulingKind::TurnTimeout) => {
+        // A fix turn resumes in its round, which checks it pushed.
+        (Answer::Yes, RulingKind::TurnTimeout { phase }) => {
             return Ok(Move::Turn {
                 prompt: TIMEOUT_CONTINUE.to_owned(),
-                phase: Phase::Implement,
+                phase: phase.unwrap_or(Phase::Implement),
                 force: None,
             });
         }
-        (Answer::No(_), RulingKind::TurnTimeout) => Phase::Done { merged: false },
+        (Answer::No(_), RulingKind::TurnTimeout { .. }) => Phase::Done { merged: false },
         (Answer::Yes, RulingKind::ForeignChange { known, .. }) => return Ok(Move::Accept(known)),
         // A no's fix is new code, unreviewed: it goes through the
         // qwen-review loop again before CI, whatever ruling this answers.
@@ -259,19 +261,22 @@ fn decide(id: u64, answer: Answer, ruling: Ruling, now: Timestamp) -> Result<Mov
             guard_cleared: true,
             ..review
         }),
-        // The fix ends under the same review, which checks the head again.
-        (Answer::Yes, RulingKind::FixNotPushed { review, prompt }) => {
+        // The fix ends under the same round, which checks the head again.
+        (Answer::Yes, RulingKind::FixNotPushed { fix, prompt }) => {
+            let phase = match fix {
+                Fix::Review(review) => Phase::Review(review),
+                Fix::CodeRabbit { head, .. } => fixing(Some(head)),
+            };
             return Ok(Move::Turn {
                 prompt,
-                phase: Phase::Review(review),
+                phase,
                 force: None,
             });
         }
-        // The fix ends under Implement, which takes it to CI and the next round.
-        (Answer::Yes, RulingKind::CodeRabbitCap { prompt, .. }) => {
+        (Answer::Yes, RulingKind::CodeRabbitCap { prompt, head, .. }) => {
             return Ok(Move::Turn {
                 prompt,
-                phase: Phase::Implement,
+                phase: fixing(head),
                 force: None,
             });
         }
@@ -317,12 +322,16 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
              settling. {yes} lets it keep going",
             review.round.saturating_sub(1)
         ),
-        RulingKind::FixNotPushed { review, .. } => format!(
-            "The worker on {about} ended its fix for round {} of the qwen-review \
-             loop without pushing, so those findings still hold. {yes} sends it \
-             the findings again",
-            review.round
-        ),
+        RulingKind::FixNotPushed { fix, .. } => {
+            let round = match fix {
+                Fix::Review(review) => format!("round {} of the qwen-review loop", review.round),
+                Fix::CodeRabbit { round, .. } => format!("CodeRabbit round {round}"),
+            };
+            format!(
+                "The worker on {about} ended its fix for {round} without pushing, \
+                 so those findings still hold. {yes} sends it the findings again"
+            )
+        }
         RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
             "CodeRabbit has run {rounds} rounds on {about}, its cap, and the judge \
              still holds {held} of its findings. {yes} sends the worker those \
@@ -339,7 +348,7 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
                 trigger("answer <text>")
             );
         }
-        RulingKind::TurnTimeout => {
+        RulingKind::TurnTimeout { .. } => {
             return format!(
                 "The worker on {about} has been running past its turn's ceiling, \
                  and kelpie stopped it. {yes} resumes its session for another turn, \
@@ -356,6 +365,15 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
         }
     };
     format!("{ask}, and {no} sends the worker your note.")
+}
+
+// A CodeRabbit fix ends back in its round, which checks it moved `head`.
+// With no head, from an older state file, it ends under Implement and
+// goes straight to CI.
+fn fixing(head: Option<String>) -> Phase {
+    head.map_or(Phase::Implement, |head| {
+        Phase::CodeRabbit(CodeRabbitStage::Fixing { head })
+    })
 }
 
 fn capitalized(text: &str) -> String {

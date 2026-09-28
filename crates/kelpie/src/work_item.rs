@@ -102,6 +102,11 @@ pub enum CodeRabbitStage {
         /// The judge's verdict on each thread judged so far, same order
         verdicts: Vec<Verdict>,
     },
+    /// The findings the judge held were sent to the worker; waiting for its fix
+    Fixing {
+        /// The head the findings are on, which a fix moves
+        head: String,
+    },
 }
 
 /// A CodeRabbit thread still open, as the judge reads it
