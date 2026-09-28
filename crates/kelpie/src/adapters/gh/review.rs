@@ -6,13 +6,13 @@ use super::{Label, gh, pull_request_state, unreadable};
 use crate::ports::{ForgeError, MaintainerReview, ReviewComment, Reviewed};
 use crate::settings::ForgeSlug;
 
-// Reads the latest 100 reviews, the first 100 threads and 100 comments a
-// thread. A pull request past those is not expected.
+// Reads the latest 100 reviews, threads, and comments a thread, so on a
+// longer pull request the oldest fall out, never the latest review's.
 const QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
     repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
     state isDraft headRefName isCrossRepository labels(first: 100) { nodes { name } } \
     reviews(last: 100) { nodes { id state body author { __typename } } } \
-    reviewThreads(first: 100) { nodes { isResolved comments(first: 100) { nodes { \
+    reviewThreads(last: 100) { nodes { isResolved comments(last: 100) { nodes { \
     body path line pullRequestReview { id } } } } } } } }";
 
 pub(super) fn reviewed(repo: &ForgeSlug, number: u64) -> Result<Reviewed, ForgeError> {
@@ -145,12 +145,25 @@ mod tests {
     use crate::ports::PullRequestState;
 
     // Recorded from gh 2.96: `gh api graphql` with `QUERY` on shep-pm/shep#617.
-    // The maintainer's four reviews there are replies whose threads are resolved,
-    // and CodeRabbit's review is the last one, with three threads open.
+    // The maintainer's reviews there are replies with empty bodies, and
+    // CodeRabbit's reviews come after them, with every thread resolved.
     const PR_617: &str = include_str!("../../../fixtures/gh-pr-reviewed-617.json");
 
     fn reply(pr: &str) -> String {
         format!(r#"{{"data":{{"repository":{{"pullRequest":{pr}}}}}}}"#)
+    }
+
+    #[test]
+    fn the_query_reads_the_latest_reviews_threads_and_comments() {
+        for latest in [
+            "reviews(last: 100)",
+            "reviewThreads(last: 100)",
+            "comments(last: 100)",
+        ] {
+            assert!(QUERY.contains(latest), "{latest}");
+        }
+        assert!(!QUERY.contains("reviewThreads(first"));
+        assert!(!QUERY.contains("comments(first"));
     }
 
     #[test]
@@ -168,7 +181,7 @@ mod tests {
         assert_eq!(
             pr.review,
             Some(MaintainerReview {
-                id: "PRR_kwDOTytUD88AAAABPEH1Ug".into(),
+                id: "PRR_kwDOTytUD88AAAABPoL1yQ".into(),
                 changes_requested: false,
                 body: String::new(),
                 comments: vec![],
