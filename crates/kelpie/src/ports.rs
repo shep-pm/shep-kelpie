@@ -92,6 +92,13 @@ pub trait Forge: Send {
     /// request, or its answer cannot be read.
     fn reviewed(&self, repo: &ForgeSlug, number: u64) -> Result<Reviewed, ForgeError>;
 
+    /// The login of the account kelpie acts as, which opens its pull requests
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn viewer(&self) -> Result<String, ForgeError>;
+
     /// Posts `body` as a comment on pull request `number`
     ///
     /// # Errors
@@ -167,6 +174,8 @@ pub struct Reviewed {
     pub branch: String,
     /// Whether that branch is on a fork rather than the repo itself
     pub from_fork: bool,
+    /// Its author's login, empty for a deleted account
+    pub author: String,
     /// Whether it is still a draft
     pub draft: bool,
     /// Its labels' names

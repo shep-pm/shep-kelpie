@@ -37,6 +37,7 @@ pub(crate) struct FakeForge {
     merges_down: Arc<AtomicBool>,
     labels_down: Arc<AtomicBool>,
     unreadable: Arc<Mutex<HashSet<u64>>>,
+    viewer_reads: Arc<AtomicUsize>,
     lagging: Arc<Mutex<HashMap<u64, String>>>,
     readied: Arc<Mutex<Vec<u64>>>,
     merges: Arc<Mutex<Vec<(u64, String)>>>,
@@ -53,7 +54,11 @@ struct FakePullRequest {
     state: PullRequestState,
     draft: bool,
     from_fork: bool,
+    author: String,
 }
+
+/// The account the fake forge says kelpie acts as, and opens pull requests as
+pub(crate) const VIEWER: &str = "the-maintainer";
 
 impl FakeForge {
     /// A public repo whose pull requests' branches live on `origin`, a bare repo
@@ -76,6 +81,7 @@ impl FakeForge {
             merges_down: Arc::default(),
             labels_down: Arc::default(),
             unreadable: Arc::default(),
+            viewer_reads: Arc::default(),
             lagging: Arc::default(),
             readied: Arc::default(),
             merges: Arc::default(),
@@ -148,8 +154,20 @@ impl FakeForge {
             state: PullRequestState::Open,
             draft: true,
             from_fork: false,
+            author: VIEWER.to_owned(),
         };
         self.pull_requests.lock().unwrap().insert(number, pr);
+    }
+
+    /// Makes pull request `number` one `login` opened, not kelpie's account
+    pub(crate) fn set_author(&self, number: u64, login: &str) {
+        let mut prs = self.pull_requests.lock().unwrap();
+        prs.get_mut(&number).expect("an opened pull request").author = login.to_owned();
+    }
+
+    /// How many times the account kelpie acts as was asked
+    pub(crate) fn viewer_reads(&self) -> usize {
+        self.viewer_reads.load(Ordering::SeqCst)
     }
 
     /// Reports `checks` for commit `head`. A head with none reported is pending.
@@ -353,10 +371,16 @@ impl Forge for FakeForge {
             state: pr.state,
             branch: pr.branch,
             from_fork: pr.from_fork,
+            author: pr.author,
             draft: pr.draft,
             labels: self.coderabbit.labels(number),
             review: self.reviews.lock().unwrap().get(&number).cloned(),
         })
+    }
+
+    fn viewer(&self) -> Result<String, ForgeError> {
+        self.viewer_reads.fetch_add(1, Ordering::SeqCst);
+        Ok(VIEWER.to_owned())
     }
 
     fn comment(&self, _repo: &ForgeSlug, number: u64, body: &str) -> Result<(), ForgeError> {

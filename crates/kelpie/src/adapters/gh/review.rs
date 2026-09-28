@@ -10,7 +10,8 @@ use crate::settings::ForgeSlug;
 // longer pull request the oldest fall out, never the latest review's.
 const QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
     repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
-    state isDraft headRefName isCrossRepository labels(first: 100) { nodes { name } } \
+    state isDraft headRefName isCrossRepository author { login } \
+    labels(first: 100) { nodes { name } } \
     reviews(last: 100) { nodes { id state body author { __typename } } } \
     reviewThreads(last: 100) { nodes { isResolved comments(last: 100) { nodes { \
     body path line pullRequestReview { id } } } } } } } }";
@@ -31,6 +32,16 @@ pub(super) fn reviewed(repo: &ForgeSlug, number: u64) -> Result<Reviewed, ForgeE
     ])?)
 }
 
+pub(super) fn viewer() -> Result<String, ForgeError> {
+    parse_viewer(&gh(&["api", "user", "--jq", ".login"])?)
+}
+
+fn parse_viewer(stdout: &[u8]) -> Result<String, ForgeError> {
+    let login = String::from_utf8_lossy(stdout).trim().to_owned();
+    let plain = !login.is_empty() && !login.contains(char::is_whitespace);
+    plain.then_some(login).ok_or_else(|| unreadable(stdout))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Pr {
@@ -38,9 +49,15 @@ struct Pr {
     is_draft: bool,
     head_ref_name: String,
     is_cross_repository: bool,
+    author: Option<Login>,
     labels: Nodes<Label>,
     reviews: Nodes<Review>,
     review_threads: Nodes<Thread>,
+}
+
+#[derive(Deserialize)]
+struct Login {
+    login: String,
 }
 
 #[derive(Deserialize)]
@@ -133,6 +150,7 @@ pub(crate) fn parse_reviewed(stdout: &[u8]) -> Result<Reviewed, ForgeError> {
         state: pull_request_state(&pr.state, stdout)?,
         branch: pr.head_ref_name,
         from_fork: pr.is_cross_repository,
+        author: pr.author.map(|a| a.login).unwrap_or_default(),
         draft: pr.is_draft,
         labels: pr.labels.nodes.into_iter().map(|l| l.name).collect(),
         review,
@@ -154,6 +172,14 @@ mod tests {
     }
 
     #[test]
+    fn the_viewer_is_the_plain_login_gh_prints() {
+        assert_eq!(parse_viewer(b"TurtIeSocks\n"), Ok("TurtIeSocks".to_owned()));
+        for bad in [&b""[..], b"\n", b"two words\n"] {
+            assert!(matches!(parse_viewer(bad), Err(ForgeError::Unreadable(_))));
+        }
+    }
+
+    #[test]
     fn the_query_reads_the_latest_reviews_threads_and_comments() {
         for latest in [
             "reviews(last: 100)",
@@ -169,6 +195,7 @@ mod tests {
     #[test]
     fn a_bots_later_review_and_resolved_threads_are_not_the_maintainers() {
         let pr = parse_reviewed(PR_617.as_bytes()).unwrap();
+        assert_eq!(pr.author, "TurtIeSocks");
         assert_eq!(
             (pr.state, pr.branch.as_str(), pr.from_fork, pr.draft),
             (

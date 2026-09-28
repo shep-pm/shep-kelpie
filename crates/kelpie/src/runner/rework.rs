@@ -38,8 +38,11 @@ pub enum ReworkError {
     PullRequest(u64, ForgeError),
     /// The pull request is merged or closed, as named
     NotOpen(u64, &'static str),
-    /// The pull request is not from a `kelpie/<issue>` branch on the repo itself
+    /// The pull request is not from a `kelpie/<issue>` branch on the repo
+    /// itself, opened by the account kelpie acts as
     NotKelpies(u64),
+    /// The forge could not say which account kelpie acts as
+    Viewer(ForgeError),
     /// The latest review has no body and no unresolved comment
     NothingToRework(u64),
     /// The forge could not show the pull request's issue
@@ -70,6 +73,7 @@ impl fmt::Display for ReworkError {
                 "nothing to rework: the latest review of #{number} has no body \
                  and no unresolved comment"
             ),
+            Self::Viewer(e) => write!(f, "cannot read the account kelpie acts as: {e}"),
             Self::Issue(issue, e) => write!(f, "cannot read issue #{issue}: {e}"),
             Self::Label(e) => e.fmt(f),
             Self::Session(e) => write!(f, "cannot draw a session id: {e}"),
@@ -148,7 +152,8 @@ impl Runner {
                     continue;
                 }
             };
-            // A fork's branch can take kelpie's name, and is none of its business.
+            // A fork's branch, or a collaborator's, can take kelpie's name,
+            // and is none of its business.
             if pr.from_fork {
                 continue;
             }
@@ -162,6 +167,14 @@ impl Runner {
             } else {
                 continue;
             };
+            match self.viewer() {
+                Ok(me) if pr.author == me => {}
+                Ok(_) => continue,
+                Err(e) => {
+                    failed.get_or_insert(ReworkError::Viewer(e).to_string());
+                    continue;
+                }
+            }
             if let Some(held) = self.pace(Scope::Dispatch)?.holds() {
                 return Ok(Some(held));
             }
@@ -216,6 +229,16 @@ impl Runner {
         }))
     }
 
+    // The login kelpie opens pull requests as, asked once a run
+    fn viewer(&mut self) -> Result<String, ForgeError> {
+        if let Some(me) = &self.viewer {
+            return Ok(me.clone());
+        }
+        let me = self.ports.forge.viewer()?;
+        self.viewer = Some(me.clone());
+        Ok(me)
+    }
+
     // Puts `ready-for-human` on pull request `number` and takes
     // `ready-for-agent` off, as its labels on the forge stand now.
     pub(super) fn hand_back(&self, number: u64) -> Result<(), String> {
@@ -245,17 +268,18 @@ impl Runner {
     // Checks `pr` can be reworked, then writes its review for the worker,
     // takes the triage labels off and saves the work item, in that order.
     fn start_rework(&mut self, number: u64, pr: Reviewed) -> Result<WorkerModel, ReworkError> {
-        let repo = &self.settings.forge;
         match pr.state {
             PullRequestState::Open => {}
             PullRequestState::Merged => return Err(ReworkError::NotOpen(number, "merged")),
             PullRequestState::Closed => return Err(ReworkError::NotOpen(number, "closed")),
         }
+        let me = self.viewer().map_err(ReworkError::Viewer)?;
+        let repo = &self.settings.forge;
         let issue = pr
             .branch
             .strip_prefix("kelpie/")
             .and_then(trigger::number)
-            .filter(|_| !pr.from_fork)
+            .filter(|_| !pr.from_fork && pr.author == me)
             .ok_or(ReworkError::NotKelpies(number))?;
         let review = pr
             .review

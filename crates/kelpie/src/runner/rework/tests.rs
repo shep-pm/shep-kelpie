@@ -167,6 +167,10 @@ fn a_pull_request_that_is_not_kelpies_open_one_is_refused_and_nothing_starts() {
         rig.forge.review(number, review());
     }
     rig.forge.open_pull_request(83, "kelpie/x", &[]);
+    rig.push_by_hand("kelpie/10", "theirs.txt");
+    rig.forge.open_pull_request(84, "kelpie/10", &[10]);
+    rig.forge.review(84, review());
+    rig.forge.set_author(84, "a-collaborator");
     rig.forge.set_from_fork(81);
     rig.forge.set_state(82, PullRequestState::Merged);
     let runner = running(&rig);
@@ -174,6 +178,7 @@ fn a_pull_request_that_is_not_kelpies_open_one_is_refused_and_nothing_starts() {
         ("80", "pull request #80 is not one kelpie opened"),
         ("81", "pull request #81 is not one kelpie opened"),
         ("83", "pull request #83 is not one kelpie opened"),
+        ("84", "pull request #84 is not one kelpie opened"),
         ("82", "pull request #82 is merged"),
         (
             "90",

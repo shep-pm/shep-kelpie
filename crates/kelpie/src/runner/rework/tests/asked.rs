@@ -88,6 +88,36 @@ fn a_pull_request_the_forge_cannot_show_holds_up_none_of_the_others() {
 }
 
 #[test]
+fn a_collaborators_pull_request_on_a_kelpie_branch_is_left_alone() {
+    let rig = Rig::new("koji");
+    reviewed_71(&rig);
+    rig.forge.review(71, requesting_changes());
+    rig.forge.label_pull_request(71, READY);
+    rig.forge.set_author(71, "a-collaborator");
+    rig.push_by_hand("kelpie/8", "work.txt");
+    rig.forge.open_pull_request(72, "kelpie/8", &[8]);
+    rig.forge.review(72, review());
+    rig.forge.label_pull_request(72, READY);
+    let runner = running(&rig);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Reworked {
+            pull_request: 72,
+            ..
+        })
+    ));
+    rig.ask(&runner, "drop", None);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(rig.forge.comments(), []);
+    assert_eq!(rig.forge.pull_request_labels(71), [READY]);
+    assert_eq!(
+        rig.forge.viewer_reads(),
+        1,
+        "the account is read once a run"
+    );
+}
+
+#[test]
 fn a_forks_pull_request_on_a_kelpie_branch_is_left_alone() {
     let rig = Rig::new("chelone");
     reviewed_71(&rig);

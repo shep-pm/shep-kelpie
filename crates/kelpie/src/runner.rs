@@ -137,6 +137,8 @@ pub struct Runner {
     // When the relay was last cleared, kept in memory only: a restart may
     // clear a session sooner than a full day, never later.
     relay_cleared: Option<Timestamp>,
+    // The account kelpie acts as, read once a run when a rework first needs it
+    viewer: Option<String>,
 }
 
 impl Runner {
@@ -192,6 +194,7 @@ impl Runner {
             webhook,
             retry: None,
             relay_cleared: None,
+            viewer: None,
         })
     }
 

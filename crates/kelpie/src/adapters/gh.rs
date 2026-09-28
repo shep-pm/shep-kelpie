@@ -68,6 +68,10 @@ impl Forge for Gh {
         review::reviewed(repo, number)
     }
 
+    fn viewer(&self) -> Result<String, ForgeError> {
+        review::viewer()
+    }
+
     fn comment(&self, repo: &ForgeSlug, number: u64, body: &str) -> Result<(), ForgeError> {
         let number = number.to_string();
         let args = [
