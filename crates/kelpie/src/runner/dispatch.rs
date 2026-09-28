@@ -337,7 +337,8 @@ mod tests {
                 worker: sonnet_medium(),
                 skipped: vec![Skip::Blocked {
                     issue: 8,
-                    by: vec![32]
+                    by: vec![32],
+                    unlisted: 0
                 }],
             })
         );

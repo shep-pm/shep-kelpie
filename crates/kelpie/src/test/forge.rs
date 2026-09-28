@@ -106,6 +106,7 @@ impl FakeForge {
             assigned,
             labels: Vec::new(),
             blocked_by: Vec::new(),
+            unlisted_blockers: 0,
         });
     }
 

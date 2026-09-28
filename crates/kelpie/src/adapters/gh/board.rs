@@ -47,7 +47,7 @@ pub(super) fn open_pull_requests(repo: &ForgeSlug) -> Result<Vec<OpenPullRequest
     )
 }
 
-// `gh` reads an issue's first 50 blockers; more is not expected.
+// `gh` lists an issue's first 50 blockers and counts them all.
 fn parse_ready_issues(stdout: &[u8]) -> Result<Vec<ReadyIssue>, ForgeError> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -58,8 +58,10 @@ fn parse_ready_issues(stdout: &[u8]) -> Result<Vec<ReadyIssue>, ForgeError> {
         blocked_by: BlockedBy,
     }
     #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
     struct BlockedBy {
         nodes: Vec<Blocking>,
+        total_count: u64,
     }
     #[derive(Deserialize)]
     struct Blocking {
@@ -79,6 +81,10 @@ fn parse_ready_issues(stdout: &[u8]) -> Result<Vec<ReadyIssue>, ForgeError> {
             number: i.number,
             assigned: !i.assignees.is_empty(),
             labels: i.labels.into_iter().map(|l| l.name).collect(),
+            unlisted_blockers: i
+                .blocked_by
+                .total_count
+                .saturating_sub(i.blocked_by.nodes.len() as u64),
             blocked_by: i
                 .blocked_by
                 .nodes
@@ -186,6 +192,15 @@ mod tests {
         let listed = br#"[{"assignees":[{"id":"MDQ","login":"someone","name":""}],"labels":[],
             "number":3,"blockedBy":{"nodes":[],"totalCount":0}}]"#;
         assert!(parse_ready_issues(listed).unwrap()[0].assigned);
+    }
+
+    #[test]
+    fn blockers_counted_past_the_listed_ones_are_unlisted() {
+        let issues = parse_ready_issues(READY_LIST.as_bytes()).unwrap();
+        assert!(issues.iter().all(|i| i.unlisted_blockers == 0));
+        let listed = br#"[{"assignees":[],"labels":[],"number":3,
+            "blockedBy":{"nodes":[{"number":2,"state":"CLOSED"}],"totalCount":51}}]"#;
+        assert_eq!(parse_ready_issues(listed).unwrap()[0].unlisted_blockers, 50);
     }
 
     #[test]

@@ -39,8 +39,10 @@ pub struct ReadyIssue {
     pub assigned: bool,
     /// Its labels' names
     pub labels: Vec<String>,
-    /// The issues it is blocked by
+    /// The issues it is blocked by, as far as the forge lists them
     pub blocked_by: Vec<Blocker>,
+    /// How many more blockers the forge counted but did not list
+    pub unlisted_blockers: u64,
 }
 
 /// An issue a ready issue is blocked by
@@ -90,6 +92,9 @@ pub enum Skip {
         issue: u64,
         /// Its open blockers, lowest first
         by: Vec<u64>,
+        /// Blockers the forge did not list, each taken as open
+        #[serde(skip_serializing_if = "is_zero")]
+        unlisted: u64,
     },
     /// Its `worker:` label cannot be read
     Label {
@@ -119,6 +124,10 @@ impl Skip {
             | Self::Failed { issue, .. } => *issue,
         }
     }
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// What the board picked, and what it passed over on the way
@@ -157,8 +166,12 @@ pub fn pick(ready: &[ReadyIssue], open: &[OpenPullRequest], finished: &[u64]) ->
             });
         } else if issue.assigned {
             skipped.push(Skip::Assigned { issue: number });
-        } else if !by.is_empty() {
-            skipped.push(Skip::Blocked { issue: number, by });
+        } else if !by.is_empty() || issue.unlisted_blockers > 0 {
+            skipped.push(Skip::Blocked {
+                issue: number,
+                by,
+                unlisted: issue.unlisted_blockers,
+            });
         } else if let Err(error) = worker_override(&issue.labels) {
             skipped.push(Skip::Label {
                 issue: number,
@@ -263,6 +276,7 @@ mod tests {
             assigned: false,
             labels: vec![READY.into()],
             blocked_by: vec![],
+            unlisted_blockers: 0,
         }
     }
 
@@ -362,7 +376,8 @@ mod tests {
             pick.skipped,
             [Skip::Blocked {
                 issue: 8,
-                by: vec![32]
+                by: vec![32],
+                unlisted: 0
             }]
         );
     }
@@ -383,9 +398,31 @@ mod tests {
                 issue: None,
                 skipped: vec![Skip::Blocked {
                     issue: 27,
-                    by: vec![19, 37, 40]
+                    by: vec![19, 37, 40],
+                    unlisted: 0
                 }]
             }
+        );
+    }
+
+    #[test]
+    fn blockers_the_forge_did_not_list_count_as_open() {
+        let mut long = blocked(8, &[(12, false)]);
+        long.unlisted_blockers = 3;
+        let pick = pick(&[long, ready(9)], &[], &[]);
+        assert_eq!(pick.issue, Some(9));
+        assert_eq!(
+            pick.skipped,
+            [Skip::Blocked {
+                issue: 8,
+                by: vec![],
+                unlisted: 3
+            }]
+        );
+        let json = serde_json::to_value(&pick.skipped[0]).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "reason": "blocked", "issue": 8, "by": [], "unlisted": 3 })
         );
     }
 

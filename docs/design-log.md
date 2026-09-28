@@ -189,7 +189,7 @@ Read 2026-09-26 with gh 2.96.
 
 Read 2026-09-27 with gh 2.96.
 
-- `gh issue list --json blockedBy` lists each issue's blockers with their `number` and `state` (`OPEN` or `CLOSED`), plus a `totalCount`. No GraphQL call is needed. gh's own query asks for the first 50 blockers (`api/query_builder.go` at v2.96.0).
+- `gh issue list --json blockedBy` lists each issue's blockers with their `number` and `state` (`OPEN` or `CLOSED`), plus a `totalCount`. No GraphQL call is needed. gh's own query asks for the first 50 blockers (`api/query_builder.go` at v2.96.0), so the board takes any blocker counted but not listed as open.
 - A blocker's state is its issue's, never its pull request's. The board skips an issue while any blocker reads `OPEN`, however far that blocker's pull request has got.
 - On this repo, shep-pm/shep-kelpie#27 listed eight blockers, seven open and one closed. The recording is `crates/kelpie/fixtures/gh-issue-list.json`.
 
