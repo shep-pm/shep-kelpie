@@ -1,0 +1,42 @@
+[
+  {
+    "id": "1b2cf60f",
+    "name": "kelpie-54",
+    "pid": 35255,
+    "kind": "background",
+    "startedAt": 1790618981420,
+    "sessionId": "1b2cf60f-2c6e-4b1f-9c0a-6f1d1f0b8a11",
+    "cwd": "/home/maintainer/kelpie-54",
+    "state": "done",
+    "status": "busy"
+  },
+  {
+    "id": "de905a17",
+    "name": "kelpie-relay",
+    "kind": "background",
+    "startedAt": 1790628640548,
+    "sessionId": "de905a17-e577-42ee-87bd-875e36e4c443",
+    "cwd": "/home/maintainer",
+    "state": "done"
+  },
+  {
+    "id": "51b1967b",
+    "name": "kelpie-relay",
+    "kind": "background",
+    "startedAt": 1790628654744,
+    "sessionId": "51b1967b-95c8-4c9d-badc-f1c63eb175d5",
+    "cwd": "/home/maintainer",
+    "state": "stopped"
+  },
+  {
+    "id": "e9a38e1e",
+    "name": "kelpie-relay",
+    "pid": 76409,
+    "kind": "background",
+    "startedAt": 1790628387749,
+    "sessionId": "e9a38e1e-f83d-419f-9bc8-a3c3695d394e",
+    "cwd": "/home/maintainer",
+    "state": "blocked",
+    "status": "idle"
+  }
+]

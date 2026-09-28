@@ -57,12 +57,18 @@ pub struct RelayCli {
     /// Where the relay's own settings and instructions files are written,
     /// under kelpie's home
     folder: PathBuf,
+    /// The `claude` program every call runs
+    claude: PathBuf,
 }
 
 impl RelayCli {
     /// A relay whose settings and instructions live under `folder`
     pub fn new(home: PathBuf, folder: PathBuf) -> Self {
-        Self { home, folder }
+        Self {
+            home,
+            folder,
+            claude: PathBuf::from("claude"),
+        }
     }
 
     // Every project is its own process, and all of them target the one
@@ -72,13 +78,14 @@ impl RelayCli {
         StartLock::under(&self.folder)
     }
 
-    // Kelpie owns exactly one relay. If more than one is live under the
-    // fixed name, kelpie is not the only one that made it so (this crate
-    // never starts a second while it can find the first), so the newest is
-    // kept and every older one is stopped and removed rather than left to
-    // answer messages kelpie no longer expects it to see.
+    // Kelpie owns exactly one relay. Any other session under the fixed name
+    // is stopped and removed on the way: an older live one (kelpie never
+    // starts a second while it can find the first) would answer messages
+    // kelpie no longer expects it to see, and a stale one, listed with no
+    // process, looks just like the live one under the same Remote Control
+    // name on the maintainer's phone.
     fn find(&self) -> Result<Option<Found>, RelayError> {
-        let output = Command::new("claude")
+        let output = Command::new(&self.claude)
             .args(["agents", "--json", "--all"])
             .stdin(Stdio::null())
             .output()
@@ -104,11 +111,11 @@ impl RelayCli {
     // point of dropping whatever a worker's question tried to carry into
     // it. `rm` is the verb that actually deletes it.
     fn stop_and_remove(&self, id: &str) -> Result<(), RelayError> {
-        let _ = Command::new("claude")
+        let _ = Command::new(&self.claude)
             .args(["stop", id])
             .stdin(Stdio::null())
             .status();
-        let status = Command::new("claude")
+        let status = Command::new(&self.claude)
             .args(["rm", id])
             .stdin(Stdio::null())
             .status()
@@ -147,7 +154,7 @@ impl RelayCli {
         model: &str,
         effort: Effort,
     ) -> Result<(), RelayError> {
-        let mut command = Command::new("claude");
+        let mut command = Command::new(&self.claude);
         self.relay_env(&mut command);
         let output = command
             .args(start_argv(settings, instructions, model, effort))
@@ -254,26 +261,34 @@ impl Relay for RelayCli {
 // control channel, the second is what `claude agents --json --all` shows,
 // and both must match for the same relay to be found again.
 //
-// A finished relay with the same fixed name stays in the listing, pid-less,
-// so a name match without a pid is never live. Measured live on #14: taking
-// the first name match regardless found a done session ahead of a live one
-// and started a second relay. Among the live matches, the newest by
-// `startedAt` is kept; any other is an extra kelpie itself never started
-// and is returned to be stopped and removed.
+// A finished or stopped relay with the same fixed name stays in the
+// listing, pid-less, so a name match without a pid is never live. Measured
+// live on #14: taking the first name match regardless found a done session
+// ahead of a live one and started a second relay. Among the live matches,
+// the newest by `startedAt` is kept. Every other match is an extra, a
+// stale one or an older live one, returned to be stopped and removed. A
+// match whose pid cannot be read is neither, and is left alone.
 fn newest_and_extras(agents: &[Value]) -> (Option<Found>, Vec<String>) {
-    let mut live: Vec<(String, u32, i64)> = agents
-        .iter()
-        .filter(|a| a["name"] == json!(NAME))
-        .filter_map(|a| {
-            let pid = u32::try_from(a["pid"].as_u64()?).ok()?;
-            let id = a["id"].as_str()?.to_owned();
-            let started = a["startedAt"].as_i64().unwrap_or(0);
-            Some((id, pid, started))
-        })
-        .collect();
+    let mut live: Vec<(String, u32, i64)> = Vec::new();
+    let mut extras: Vec<String> = Vec::new();
+    for agent in agents.iter().filter(|a| a["name"] == json!(NAME)) {
+        let Some(id) = agent["id"].as_str() else {
+            continue;
+        };
+        match &agent["pid"] {
+            Value::Null => extras.push(id.to_owned()),
+            pid => {
+                let Some(pid) = pid.as_u64().and_then(|p| u32::try_from(p).ok()) else {
+                    continue;
+                };
+                let started = agent["startedAt"].as_i64().unwrap_or(0);
+                live.push((id.to_owned(), pid, started));
+            }
+        }
+    }
     live.sort_by_key(|(_, _, started)| *started);
     let newest = live.pop().map(|(id, pid, _)| Found { id, pid });
-    let extras = live.into_iter().map(|(id, ..)| id).collect();
+    extras.extend(live.into_iter().map(|(id, ..)| id));
     (newest, extras)
 }
 
@@ -332,7 +347,85 @@ mod tests {
                 pid: 3145
             })
         );
-        assert_eq!(extras, Vec::<String>::new());
+        assert_eq!(extras, ["2b8edbf5"]);
+    }
+
+    // A fake `claude` on disk: `agents` prints the recorded listing, every
+    // call is logged one line each, and the calls are what the test reads.
+    fn fake_claude(dir: &Path) -> RelayCli {
+        let listing = dir.join("agents.json");
+        fs::write(&listing, ROSTER).unwrap();
+        let program = dir.join("claude");
+        let script = format!(
+            "#!/bin/sh\necho \"$@\" >> '{log}'\n[ \"$1\" = agents ] && cat '{listing}'\nexit 0\n",
+            log = dir.join("calls").display(),
+            listing = listing.display(),
+        );
+        fs::write(&program, script).unwrap();
+        fs::set_permissions(
+            &program,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .unwrap();
+        let mut relay = RelayCli::new(dir.to_owned(), dir.join("relay"));
+        relay.claude = program;
+        relay
+    }
+
+    fn calls(dir: &Path) -> Vec<String> {
+        fs::read_to_string(dir.join("calls"))
+            .unwrap()
+            .lines()
+            .skip(1)
+            .map(str::to_owned)
+            .collect()
+    }
+
+    // Recorded from `claude agents --json --all` on a scratch session of
+    // this branch's own, renamed to the relay's: a done and a stopped one
+    // (no `pid`), the live one, and an unrelated session that must never
+    // be touched.
+    const ROSTER: &str = include_str!("../../fixtures/claude-agents-relay.json");
+
+    #[test]
+    fn the_lookup_takes_the_running_relay_and_removes_the_stale_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let found = fake_claude(dir.path()).find().unwrap();
+        assert_eq!(
+            found,
+            Some(Found {
+                id: "e9a38e1e".into(),
+                pid: 76409
+            })
+        );
+        assert_eq!(
+            calls(dir.path()),
+            [
+                "stop de905a17",
+                "rm de905a17",
+                "stop 51b1967b",
+                "rm 51b1967b"
+            ]
+        );
+    }
+
+    #[test]
+    fn the_clear_stops_then_removes_the_running_relay_after_the_stale_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        fake_claude(dir.path()).clear().unwrap();
+        let calls = calls(dir.path());
+        assert_eq!(
+            calls,
+            [
+                "stop de905a17",
+                "rm de905a17",
+                "stop 51b1967b",
+                "rm 51b1967b",
+                "stop e9a38e1e",
+                "rm e9a38e1e",
+            ]
+        );
+        assert!(calls.iter().all(|c| !c.contains("1b2cf60f")));
     }
 
     #[test]
