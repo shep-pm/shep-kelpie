@@ -74,24 +74,34 @@ impl fmt::Display for MetricName {
 /// What a runner saw of a kind's review window, raised as
 /// `window.<kind>.<fact>.<epoch>`
 ///
-/// Each carries a latest value rather than a total, so a repeat changes
-/// nothing and a dropped one is covered by the next raise.
+/// Each carries a Unix time as its value, and a latest value rather than a
+/// total, so a repeat changes nothing and a dropped one is covered by the
+/// next raise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum WindowFact {
-    /// A summon was accepted at this Unix time
+    /// A summon was accepted at this time
     Summoned,
-    /// A refusal quoted the window opening at this Unix time
+    /// A refusal quoted the window opening at this time
     Opens,
-    /// The latest review footer allows this many reviews an hour
-    Quota,
+    /// A review footer posted at this time allows this many reviews an hour
+    Quota(u32),
 }
 
 impl WindowFact {
-    fn as_str(self) -> &'static str {
+    fn name(self) -> String {
         match self {
-            Self::Summoned => "summoned",
-            Self::Opens => "opens",
-            Self::Quota => "quota",
+            Self::Summoned => "summoned".into(),
+            Self::Opens => "opens".into(),
+            Self::Quota(per_hour) => format!("quota-{per_hour}"),
+        }
+    }
+
+    // A run keeps one latest value of each sort, whatever quota it states.
+    fn sort(self) -> u8 {
+        match self {
+            Self::Summoned => 0,
+            Self::Opens => 1,
+            Self::Quota(_) => 2,
         }
     }
 }
@@ -116,8 +126,13 @@ impl WindowMetric {
         let fact = match fact {
             "summoned" => WindowFact::Summoned,
             "opens" => WindowFact::Opens,
-            "quota" => WindowFact::Quota,
-            _ => return None,
+            _ => {
+                let per_hour = fact.strip_prefix("quota-")?;
+                if !per_hour.bytes().all(|b| b.is_ascii_digit()) {
+                    return None;
+                }
+                WindowFact::Quota(per_hour.parse().ok()?)
+            }
         };
         Some(Self {
             kind: LeaseKind::try_from(kind).ok()?,
@@ -130,7 +145,7 @@ impl WindowMetric {
 impl fmt::Display for WindowMetric {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { kind, fact, epoch } = self;
-        write!(f, "window.{kind}.{}.{}", fact.as_str(), epoch.0)
+        write!(f, "window.{kind}.{}.{}", fact.name(), epoch.0)
     }
 }
 
@@ -165,7 +180,7 @@ pub struct Asker {
     epoch: Epoch,
     totals: BTreeMap<LeaseKind, Totals>,
     held: Vec<LeaseKind>,
-    seen: BTreeMap<(LeaseKind, WindowFact), u64>,
+    seen: BTreeMap<(LeaseKind, u8), (WindowFact, u64)>,
 }
 
 impl Asker {
@@ -182,7 +197,7 @@ impl Asker {
     /// Tells the dog what this run saw of `kind`'s window: the metric to raise
     #[must_use = "the dog hears of the window only through this metric"]
     pub fn window(&mut self, kind: &LeaseKind, fact: WindowFact, value: u64) -> (String, f64) {
-        self.seen.insert((kind.clone(), fact), value);
+        self.seen.insert((kind.clone(), fact.sort()), (fact, value));
         self.window_metric(kind, fact, value)
     }
 
@@ -257,7 +272,7 @@ impl Asker {
         let seen = self
             .seen
             .iter()
-            .map(|((kind, fact), value)| self.window_metric(kind, *fact, *value));
+            .map(|((kind, _), (fact, at))| self.window_metric(kind, *fact, *at));
         totals.chain(seen).collect()
     }
 
@@ -428,14 +443,15 @@ mod tests {
             asker.window(&coderabbit, WindowFact::Summoned, 1_790_000_000),
             ("window.coderabbit.summoned.9".into(), 1_790_000_000.0)
         );
-        let _ = asker.window(&coderabbit, WindowFact::Quota, 1);
-        let _ = asker.window(&coderabbit, WindowFact::Quota, 10);
+        let _ = asker.window(&coderabbit, WindowFact::Quota(1), 1_790_000_100);
+        let _ = asker.window(&coderabbit, WindowFact::Quota(10), 1_790_000_200);
         assert_eq!(
             asker.metrics(),
             [
                 ("window.coderabbit.summoned.9".into(), 1_790_000_000.0),
-                ("window.coderabbit.quota.9".into(), 10.0),
-            ]
+                ("window.coderabbit.quota-10.9".into(), 1_790_000_200.0),
+            ],
+            "one latest quota, carrying its footer's time"
         );
     }
 
@@ -449,12 +465,19 @@ mod tests {
                 epoch: Epoch(7)
             })
         );
+        assert_eq!(
+            WindowMetric::parse("window.coderabbit.quota-10.7").map(|m| m.fact),
+            Some(WindowFact::Quota(10))
+        );
         for other in [
             "window.coderabbit.opens",
             "window.coderabbit.closes.7",
             "lease.coderabbit.opens.7",
-            "window.gpu.quota.7",
-            "window.coderabbit.quota.-7",
+            "window.gpu.quota-1.7",
+            "window.coderabbit.quota-1.-7",
+            "window.coderabbit.quota.7",
+            "window.coderabbit.quota-+1.7",
+            "window.coderabbit.quota-x.7",
         ] {
             assert_eq!(WindowMetric::parse(other), None, "{other}");
         }

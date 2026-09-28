@@ -116,16 +116,15 @@ impl Activity {
         })
     }
 
-    /// The quota the latest footer states: included reviews an hour
-    pub fn quota(&self) -> Option<u32> {
+    /// The quota the latest footer states, included reviews an hour, and
+    /// when that footer was posted
+    pub fn quota(&self) -> Option<(u32, Timestamp)> {
         let reviews = self.reviews.iter().map(|r| (r.at, r.body.as_str()));
         let comments = self.comments.iter().map(|c| (c.at, c.body.as_str()));
-        let mut footers: Vec<_> = reviews
+        reviews
             .chain(comments)
-            .filter_map(|(at, body)| Some((at, quota(body)?)))
-            .collect();
-        footers.sort_by_key(|(at, _)| *at);
-        footers.last().map(|(_, quota)| *quota)
+            .filter_map(|(at, body)| Some((quota(body)?, at)))
+            .max_by_key(|(_, at)| *at)
     }
 
     /// Its threads not yet resolved
@@ -374,7 +373,7 @@ mod tests {
     #[test]
     fn the_quota_comes_from_the_latest_footer() {
         let seen = activity(COMMENTS_598, REVIEWS_598, NO_THREADS);
-        assert_eq!(seen.quota(), Some(1));
+        assert_eq!(seen.quota(), Some((1, iso("2026-09-22T21:38:33Z"))));
         let mut seen = activity(COMMENTS_615, "", NO_THREADS);
         seen.reviews.push(Review {
             commit: "c0ffee".into(),
@@ -383,7 +382,7 @@ mod tests {
                 .into(),
             at: iso("2026-09-25T00:00:00Z"),
         });
-        assert_eq!(seen.quota(), Some(10));
+        assert_eq!(seen.quota(), Some((10, iso("2026-09-25T00:00:00Z"))));
         assert_eq!(Activity::default().quota(), None);
     }
 

@@ -95,12 +95,12 @@ impl LeaseBook {
         self.leases.entry(kind).or_default().window = Some(Window::default());
     }
 
-    /// Takes the quota a review footer states for `kind`'s window
+    /// Takes the quota a review footer posted at `at` states for `kind`'s window
     ///
     /// This and the other window changes return every grant a
     /// [`LeaseBook::tick`] makes afterwards, whatever its kind.
-    pub fn quota(&mut self, kind: &LeaseKind, per_hour: u32) -> Vec<Grant> {
-        self.with_window(kind, |window, _| window.quota(per_hour))
+    pub fn quota(&mut self, kind: &LeaseKind, per_hour: u32, at: Timestamp) -> Vec<Grant> {
+        self.with_window(kind, |window, _| window.quota(per_hour, at))
     }
 
     /// Counts a summon of `kind`'s window accepted at `at`
@@ -507,7 +507,7 @@ mod tests {
         book.ask(&kind, runner("reactmap", 1));
         clock.advance(60);
         assert_eq!(
-            book.quota(&kind, 10),
+            book.quota(&kind, 10, Timestamp(EPOCH + 60)),
             [Grant {
                 kind: kind.clone(),
                 holder: runner("reactmap", 1)

@@ -19,6 +19,8 @@ const FIRST_QUOTA: u32 = 1;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Window {
     quota: u32,
+    // When the footer that stated the quota was posted.
+    quota_at: Option<Timestamp>,
     summons: Vec<Timestamp>,
     refusal: Option<Refusal>,
 }
@@ -45,6 +47,7 @@ impl Default for Window {
     fn default() -> Self {
         Self {
             quota: FIRST_QUOTA,
+            quota_at: None,
             summons: Vec::new(),
             refusal: None,
         }
@@ -52,12 +55,16 @@ impl Default for Window {
 }
 
 impl Window {
-    /// Takes the quota a review footer states
+    /// Takes the quota a review footer posted at `at` states
     ///
-    /// A footer that states none is not read, so the quota is never zero.
-    pub fn quota(&mut self, per_hour: u32) {
-        if per_hour > 0 {
+    /// The newest footer wins, whichever runner reports it last: each one
+    /// reads only its own pull request's footers. A footer that states no
+    /// quota is not read, so the quota is never zero.
+    pub fn quota(&mut self, per_hour: u32, at: Timestamp) {
+        let older = self.quota_at.is_some_and(|newest| at < newest);
+        if per_hour > 0 && !older {
             self.quota = per_hour;
+            self.quota_at = Some(at);
         }
     }
 
@@ -145,7 +152,7 @@ mod tests {
     #[test]
     fn a_footer_quota_of_ten_lets_ten_summons_through_an_hour() {
         let mut window = Window::default();
-        window.quota(10);
+        window.quota(10, at(0));
         for minute in 0..10 {
             assert_eq!(window.opens(at(minute * 60)), None, "summon {minute}");
             window.summoned(at(minute * 60));
@@ -159,18 +166,32 @@ mod tests {
     #[test]
     fn a_lower_quota_read_later_closes_the_window_at_once() {
         let mut window = Window::default();
-        window.quota(10);
+        window.quota(10, at(0));
         window.summoned(at(0));
         window.summoned(at(60));
         assert_eq!(window.opens(at(120)), None);
-        window.quota(1);
+        window.quota(1, at(60));
         assert_eq!(window.opens(at(120)), Some(at(HOUR + 60)));
+    }
+
+    // Two runners, each reading its own pull request's footers: the one
+    // whose footer is older reports last, and must not win.
+    #[test]
+    fn the_newest_footer_wins_whatever_order_it_arrives_in() {
+        let mut window = Window::default();
+        window.quota(1, at(3000));
+        window.quota(10, at(1000));
+        assert_eq!(window.status(at(3000)).quota, 1);
+
+        window.quota(10, at(4000));
+        window.quota(1, at(3000));
+        assert_eq!(window.status(at(4000)).quota, 10);
     }
 
     #[test]
     fn a_footer_without_a_quota_leaves_it_as_it_was() {
         let mut window = Window::default();
-        window.quota(0);
+        window.quota(0, at(0));
         window.summoned(at(0));
         assert_eq!(window.opens(at(1)), Some(at(HOUR)));
     }
@@ -195,7 +216,7 @@ mod tests {
         assert_eq!(window.opens(at(120)), None, "though the summon is recent");
 
         let mut window = Window::default();
-        window.quota(10);
+        window.quota(10, at(0));
         window.summoned(at(0));
         window.refused(at(60), at(1800));
         assert_eq!(window.opens(at(60)), Some(at(1800)), "though quota remains");
@@ -225,7 +246,7 @@ mod tests {
     #[test]
     fn the_same_summon_counts_once() {
         let mut window = Window::default();
-        window.quota(2);
+        window.quota(2, at(0));
         window.summoned(at(0));
         window.summoned(at(0));
         assert_eq!(window.opens(at(1)), None);
@@ -234,7 +255,7 @@ mod tests {
     #[test]
     fn status_shows_the_last_hours_summons_and_when_it_opens() {
         let mut window = Window::default();
-        window.quota(2);
+        window.quota(2, at(0));
         window.summoned(at(0));
         window.summoned(at(1200));
         assert_eq!(

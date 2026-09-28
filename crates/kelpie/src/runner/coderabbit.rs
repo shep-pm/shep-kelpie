@@ -379,11 +379,11 @@ impl Runner {
             .forge
             .coderabbit(&self.settings.forge, number)
             .map_err(|e| format!("cannot read CodeRabbit on #{number}: {e}"))?;
-        if let Some(quota) = activity.quota() {
+        if let Some((per_hour, at)) = activity.quota() {
             let kind = LeaseKind::coderabbit();
             self.ports
                 .leases
-                .window(&kind, WindowFact::Quota, quota.into());
+                .window(&kind, WindowFact::Quota(per_hour), at.0);
         }
         Ok(activity)
     }

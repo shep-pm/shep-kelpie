@@ -72,13 +72,7 @@ impl Desk {
             let window = match fact.fact {
                 WindowFact::Summoned => self.book.summoned(&fact.kind, at),
                 WindowFact::Opens => self.book.refused(&fact.kind, at),
-                WindowFact::Quota => {
-                    // No footer states a quota past u32, so one is not read.
-                    let Ok(quota) = u32::try_from(value) else {
-                        return deliveries(grants);
-                    };
-                    self.book.quota(&fact.kind, quota)
-                }
+                WindowFact::Quota(per_hour) => self.book.quota(&fact.kind, per_hour, at),
             };
             grants.extend(window);
             return deliveries(grants);
@@ -490,10 +484,27 @@ pub(super) mod tests {
         let mut w = world();
         let cr = LeaseKind::coderabbit();
         let mut koji = Asker::new(Epoch(101));
-        w.raise("koji", koji.window(&cr, WindowFact::Quota, 10));
+        w.raise("koji", koji.window(&cr, WindowFact::Quota(10), EPOCH));
         assert_eq!(w.line("coderabbit")["window"]["quota"], 10);
-        w.raise("koji", koji.window(&cr, WindowFact::Quota, 1 << 40));
-        assert_eq!(w.line("coderabbit")["window"]["quota"], 10, "not a quota");
+    }
+
+    // Each runner reads its own pull request's footers, and raises its
+    // quota again every look, so an older footer keeps arriving late.
+    #[test]
+    fn two_runners_reporting_footers_out_of_order_leave_the_newest_quota() {
+        let mut w = world();
+        let cr = LeaseKind::coderabbit();
+        let (mut koji, mut reactmap) = (Asker::new(Epoch(101)), Asker::new(Epoch(202)));
+        w.raise(
+            "reactmap",
+            reactmap.window(&cr, WindowFact::Quota(1), EPOCH + 600),
+        );
+        w.raise("koji", koji.window(&cr, WindowFact::Quota(10), EPOCH));
+        assert_eq!(w.line("coderabbit")["window"]["quota"], 1);
+        for metric in koji.metrics() {
+            w.raise("koji", metric);
+        }
+        assert_eq!(w.line("coderabbit")["window"]["quota"], 1, "raised again");
     }
 
     #[test]

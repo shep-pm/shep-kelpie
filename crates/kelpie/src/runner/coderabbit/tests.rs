@@ -169,8 +169,8 @@ fn a_round_counts_only_once_a_review_covers_the_head() {
     assert!(
         rig.leases
             .told()
-            .contains(&Told::Window(WindowFact::Quota, 1)),
-        "the footer's quota reaches the dog"
+            .contains(&Told::Window(WindowFact::Quota(1), summon + 1500)),
+        "the footer's quota reaches the dog, with when it was posted"
     );
 }
 
@@ -199,14 +199,18 @@ fn once_coderabbit_is_satisfied_the_work_item_goes_on_to_the_merge_ruling() {
 #[test]
 fn a_head_already_reviewed_is_not_summoned_again() {
     let (rig, runner, head) = reviewed_by_qwen("koji");
-    rig.forge.coderabbit.review(71, &head, now(&rig), &[]);
+    let reviewed_at = now(&rig);
+    rig.forge.coderabbit.review(71, &head, reviewed_at, &[]);
     rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
         rig.verdict(&runner),
         Some(StepReport::CodeRabbitSatisfied { rounds: 1, .. })
     ));
     assert_eq!(labels(&rig), []);
-    assert_eq!(rig.leases.told(), [Told::Window(WindowFact::Quota, 1)]);
+    assert_eq!(
+        rig.leases.told(),
+        [Told::Window(WindowFact::Quota(1), reviewed_at)]
+    );
 }
 
 #[test]
