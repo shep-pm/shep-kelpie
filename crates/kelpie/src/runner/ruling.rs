@@ -11,6 +11,7 @@ use std::fmt;
 use super::Runner;
 use super::gate::short;
 use super::report::{Begin, StepReport};
+use super::rework::HUMAN;
 use crate::ports::Timestamp;
 use crate::state::{ProjectState, Resume, Ruling, RulingKind, StateError};
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
@@ -40,6 +41,8 @@ pub enum RuleError {
     WantsAnswer(u64),
     /// The ruling is not a question, and was given an answer
     NotAQuestion(u64),
+    /// The `ready-for-human` label could not come off this pull request
+    Unlabel(u64, String),
     /// The answer could not be saved
     State(StateError),
 }
@@ -56,6 +59,9 @@ impl fmt::Display for RuleError {
                 f,
                 "ruling {id} takes `{id} yes` or `{id} no <note>`, not an answer"
             ),
+            Self::Unlabel(number, e) => {
+                write!(f, "cannot take the `{HUMAN}` label off #{number}: {e}")
+            }
             Self::State(e) => e.fmt(f),
         }
     }
@@ -113,6 +119,15 @@ impl Runner {
                     item.phase = phase;
                     // A turn the ruling interrupted may still owe the review loop.
                     item.resume = force.or(item.resume.take());
+                    // The worker's turn again, so the hand-back label comes off.
+                    if let Some(number) = item.pull_request
+                        && item.known.labels.iter().any(|l| l == HUMAN)
+                    {
+                        let repo = &self.settings.forge;
+                        let off = self.ports.forge.set_label(repo, number, HUMAN, false);
+                        off.map_err(|e| RuleError::Unlabel(number, e.to_string()))?;
+                        item.known.labels.retain(|l| l != HUMAN);
+                    }
                 }
                 Move::Accept(known) => {
                     item.known = known;

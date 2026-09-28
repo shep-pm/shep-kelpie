@@ -179,6 +179,11 @@ pub struct Reviewed {
 /// One review the maintainer left, as written
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaintainerReview {
+    /// The forge's id for it
+    pub id: String,
+    /// Whether it requests changes, which only a reviewer other than the
+    /// pull request's author can do
+    pub changes_requested: bool,
     /// Its body, empty when it has none
     pub body: String,
     /// Its comments whose threads are still unresolved, in the forge's order

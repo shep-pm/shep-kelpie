@@ -123,7 +123,9 @@ pub(crate) fn parse_reviewed(stdout: &[u8]) -> Result<Reviewed, ForgeError> {
             })
             .collect();
         MaintainerReview {
+            changes_requested: latest.state == "CHANGES_REQUESTED",
             body: latest.body.unwrap_or_default(),
+            id: latest.id,
             comments,
         }
     });
@@ -166,6 +168,8 @@ mod tests {
         assert_eq!(
             pr.review,
             Some(MaintainerReview {
+                id: "PRR_kwDOTytUD88AAAABPEH1Ug".into(),
+                changes_requested: false,
                 body: String::new(),
                 comments: vec![],
             })
@@ -179,7 +183,7 @@ mod tests {
             "isCrossRepository":false,"labels":{"nodes":[{"name":"review please"}]},
             "reviews":{"nodes":[
               {"id":"R1","state":"CHANGES_REQUESTED","body":"old","author":{"__typename":"User"}},
-              {"id":"R2","state":"COMMENTED","body":"Redesign the timeline.","author":{"__typename":"User"}},
+              {"id":"R2","state":"CHANGES_REQUESTED","body":"Redesign the timeline.","author":{"__typename":"User"}},
               {"id":"R3","state":"PENDING","body":"draft","author":{"__typename":"User"}}]},
             "reviewThreads":{"nodes":[
               {"isResolved":false,"comments":{"nodes":[
@@ -195,6 +199,8 @@ mod tests {
         assert_eq!(
             pr.review,
             Some(MaintainerReview {
+                id: "R2".into(),
+                changes_requested: true,
                 body: "Redesign the timeline.".into(),
                 comments: vec![
                     ReviewComment {

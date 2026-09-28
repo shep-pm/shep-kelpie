@@ -10,6 +10,8 @@
 
 use super::Runner;
 use super::report::{Begin, StepReport};
+use super::rework::HUMAN;
+use crate::board::READY;
 use crate::ports::{Checks, PullRequestState, Timestamp};
 use crate::state::{RulingKind, StateError};
 use crate::work_item::{Phase, Turn, foreign_change};
@@ -45,7 +47,9 @@ impl Runner {
             }
             PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
         }
-        if let Some((known, description)) = foreign_change(&item.known, &pr.labels, !pr.draft) {
+        // A rework asked for while one is in flight waits until it ends.
+        let labels: Vec<String> = pr.labels.into_iter().filter(|l| l != READY).collect();
+        if let Some((known, description)) = foreign_change(&item.known, &labels, !pr.draft) {
             return self.raise(number, RulingKind::ForeignChange { description, known });
         }
         let now = self.ports.clock.now();
@@ -82,6 +86,13 @@ impl Runner {
         if self.coderabbit_due() {
             return self.start_round(head);
         }
+        if let Err(reason) = self.hand_back(number) {
+            return Ok(self.gate_failed(reason));
+        }
+        self.update(|item| {
+            item.known.labels.retain(|l| l != READY && l != HUMAN);
+            item.known.labels.push(HUMAN.to_owned());
+        })?;
         self.raise(number, RulingKind::Merge { head })
     }
 

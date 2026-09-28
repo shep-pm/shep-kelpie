@@ -58,8 +58,10 @@ fn now(rig: &Rig) -> u64 {
     rig.clock.now().0
 }
 
+// Kelpie's changes to the summon label, leaving out the triage labels
 fn labels(rig: &Rig) -> Vec<(u64, String, bool)> {
-    rig.forge.coderabbit.label_log()
+    let log = rig.forge.coderabbit.label_log();
+    log.into_iter().filter(|(_, l, _)| l == LABEL).collect()
 }
 
 fn on() -> (u64, String, bool) {

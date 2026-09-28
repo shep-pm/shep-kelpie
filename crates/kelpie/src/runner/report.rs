@@ -13,6 +13,16 @@ use crate::pacer::HoldKind;
 use crate::ports::{ClaudeCall, Finding, SessionId, Severity, Timestamp, Usage, Verdict};
 use crate::work_item::ReviewerKind;
 
+/// What asked for a rework on the pull request itself
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReworkBy {
+    /// The `rework please` label
+    Label,
+    /// A review requesting changes
+    Review,
+}
+
 /// What one step of the runner did, for its log
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "step", rename_all = "kebab-case")]
@@ -25,6 +35,29 @@ pub enum StepReport {
         worker: WorkerModel,
         /// Older ready issues the board passed over, and why
         skipped: Vec<Skip>,
+    },
+    /// A pull request kelpie opened asked for a rework, which became the
+    /// work item in flight
+    Reworked {
+        /// The work item's issue
+        issue: u64,
+        /// The pull request
+        pull_request: u64,
+        /// The model and effort its worker runs on
+        worker: WorkerModel,
+        /// What asked for it: the `rework please` label, or a review
+        /// requesting changes
+        by: ReworkBy,
+    },
+    /// A pull request asked for a rework that cannot start, and the refusal
+    /// went to it as a comment
+    ReworkRefused {
+        /// The pull request
+        pull_request: u64,
+        /// Why, as the refusal reads
+        reason: String,
+        /// Why the comment could not be posted, if it could not
+        comment_failed: Option<String>,
     },
     /// Nothing was dispatched: the board could not be read, or the issue it
     /// picked could not be taken

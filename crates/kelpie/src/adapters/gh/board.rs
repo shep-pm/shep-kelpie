@@ -13,7 +13,13 @@ use crate::settings::ForgeSlug;
 const LIST_LIMIT: &str = "1000";
 
 pub(super) fn ready_issues(repo: &ForgeSlug) -> Result<Vec<ReadyIssue>, ForgeError> {
-    parse_ready_issues(&gh(&[
+    parse_ready_issues(&gh(&ready_args(repo))?)
+}
+
+// `gh issue list` lists issues only, so a pull request labelled
+// `ready-for-agent` to ask for a rework never reads as new work.
+fn ready_args(repo: &ForgeSlug) -> [&str; 12] {
+    [
         "issue",
         "list",
         "--repo",
@@ -26,7 +32,7 @@ pub(super) fn ready_issues(repo: &ForgeSlug) -> Result<Vec<ReadyIssue>, ForgeErr
         LIST_LIMIT,
         "--json",
         "number,assignees,labels,blockedBy",
-    ])?)
+    ]
 }
 
 pub(super) fn open_pull_requests(repo: &ForgeSlug) -> Result<Vec<OpenPullRequest>, ForgeError> {
@@ -150,6 +156,18 @@ mod tests {
 
     // Recorded from gh 2.96 on this repo with the `ready_issues` arguments.
     const READY_LIST: &str = include_str!("../../../fixtures/gh-issue-list.json");
+
+    #[test]
+    fn the_board_lists_issues_so_a_labelled_pull_request_is_never_new_work() {
+        let repo = ForgeSlug::try_from("shep-pm/shep".to_owned()).unwrap();
+        let args = ready_args(&repo);
+        assert_eq!(args[..2], ["issue", "list"]);
+        assert!(
+            !args
+                .iter()
+                .any(|a| a.contains("search") || a.contains("api"))
+        );
+    }
 
     // Recorded from gh 2.96 on this repo with the `open_pull_requests` arguments.
     const PR_LIST: &str = include_str!("../../../fixtures/gh-pr-list.json");

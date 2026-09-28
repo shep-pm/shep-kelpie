@@ -85,6 +85,11 @@ impl FakeForge {
         self.coderabbit.put_label(number, label, true);
     }
 
+    /// Pull request `number`'s labels, in the order they went on
+    pub(crate) fn pull_request_labels(&self, number: u64) -> Vec<String> {
+        self.coderabbit.labels(number)
+    }
+
     /// Removes `label` from pull request `number`, as someone other than kelpie would
     pub(crate) fn unlabel_pull_request(&self, number: u64, label: &str) {
         self.coderabbit.put_label(number, label, false);

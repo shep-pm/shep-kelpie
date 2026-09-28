@@ -1,23 +1,32 @@
-//! Reworking an open pull request kelpie opened, from the maintainer's review
+//! Reworking an open pull request kelpie opened, from its latest review
 //!
-//! `rework <pr>` makes a work item of a pull request whose work item kelpie
-//! finished or dropped. Its worker starts on the pull request's branch as
-//! `origin` holds it, and its first turn is the maintainer's latest review,
-//! verbatim, in a file in its build folder. The work item then runs every
-//! gate again. Its issue stays finished: only this trigger brings a rework.
+//! A pull request asks for one with the `ready-for-agent` label or a review
+//! requesting changes, seen on the board's poll, and `rework <pr>` asks by
+//! hand. The worker starts on the pull request's branch as `origin` holds
+//! it, and its first turn is the latest review, verbatim, in a file in its
+//! build folder. The work item then runs every gate again. Its issue stays
+//! finished, so the board never brings it back. Kelpie labels each pull
+//! request it hands back `ready-for-human`, so its labels say whose turn it is.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::Runner;
+use super::report::{Begin, ReworkBy, StepReport};
 use super::trigger;
 use super::turn;
-use crate::board::{LabelError, WorkerModel, worker_override};
-use crate::ports::{ForgeError, MaintainerReview, PullRequestState};
+use crate::board::{LabelError, OpenPullRequest, READY, WorkerModel, worker_override};
+use crate::pacer::Scope;
+use crate::ports::{ForgeError, MaintainerReview, PullRequestState, Reviewed};
 use crate::state::StateError;
 use crate::work_item::{Known, Phase, Review, WorkItem, new_session_id};
 
-/// The file in the build folder that carries the maintainer's review
+/// The label on a pull request kelpie handed back to the maintainer
+///
+/// Kelpie never creates it: the maintainer makes it in the project's repo.
+pub const HUMAN: &str = "ready-for-human";
+
+/// The file in the build folder that carries the review
 const REVIEW_FILE: &str = "maintainer-review.md";
 
 /// Why `rework` was refused
@@ -31,7 +40,7 @@ pub enum ReworkError {
     NotOpen(u64, &'static str),
     /// The pull request is not from a `kelpie/<issue>` branch on the repo itself
     NotKelpies(u64),
-    /// The maintainer's latest review has no body and no unresolved comment
+    /// The latest review has no body and no unresolved comment
     NothingToRework(u64),
     /// The forge could not show the pull request's issue
     Issue(u64, ForgeError),
@@ -41,6 +50,8 @@ pub enum ReworkError {
     Session(String),
     /// The review could not be written for the worker, with the reason
     ReviewFile(String),
+    /// A label could not be taken off the pull request
+    Unlabel(u64, &'static str, ForgeError),
     /// The work item could not be saved
     State(StateError),
 }
@@ -63,12 +74,26 @@ impl fmt::Display for ReworkError {
             Self::Label(e) => e.fmt(f),
             Self::Session(e) => write!(f, "cannot draw a session id: {e}"),
             Self::ReviewFile(e) => f.write_str(e),
+            Self::Unlabel(number, label, e) => {
+                write!(f, "cannot take the `{label}` label off #{number}: {e}")
+            }
             Self::State(e) => e.fmt(f),
         }
     }
 }
 
 impl std::error::Error for ReworkError {}
+
+impl ReworkError {
+    // Whether asking again, with nothing changed on the pull request, is
+    // refused the same way
+    fn settled(&self) -> bool {
+        matches!(
+            self,
+            Self::NotOpen(..) | Self::NotKelpies(_) | Self::NothingToRework(_) | Self::Label(_)
+        )
+    }
+}
 
 impl Runner {
     /// Makes open pull request `number`, which kelpie opened, the work item
@@ -84,12 +109,132 @@ impl Runner {
         if let Some(item) = &self.state.work_item {
             return Err(ReworkError::InFlight(item.issue));
         }
-        let repo = &self.settings.forge;
         let pr = self
             .ports
             .forge
-            .reviewed(repo, number)
+            .reviewed(&self.settings.forge, number)
             .map_err(|e| ReworkError::PullRequest(number, e))?;
+        self.start_rework(number, pr)
+    }
+
+    // Starts the rework one of `open` asks for, lowest number first. A
+    // refusal that asking again would not change takes the label off,
+    // records the review and goes to the pull request as a comment.
+    pub(super) fn rework_asked(
+        &mut self,
+        open: &[OpenPullRequest],
+    ) -> Result<Option<Begin>, StateError> {
+        let mut ours: Vec<u64> = open
+            .iter()
+            .filter(|pr| {
+                let issue = pr.head.strip_prefix("kelpie/");
+                issue.is_some_and(|n| trigger::number(n).is_some())
+            })
+            .map(|pr| pr.number)
+            .collect();
+        ours.sort_unstable();
+        for number in ours {
+            let pr = match self.ports.forge.reviewed(&self.settings.forge, number) {
+                Ok(pr) => pr,
+                Err(e) => {
+                    let reason = ReworkError::PullRequest(number, e).to_string();
+                    return Ok(Some(Begin::Report(StepReport::BoardFailed { reason })));
+                }
+            };
+            let labelled = pr.labels.iter().any(|l| l == READY);
+            let asked =
+                |r: &MaintainerReview| r.changes_requested && !self.state.reworked.contains(&r.id);
+            let by = if labelled {
+                ReworkBy::Label
+            } else if pr.review.as_ref().is_some_and(asked) {
+                ReworkBy::Review
+            } else {
+                continue;
+            };
+            if let Some(held) = self.pace(Scope::Dispatch)?.holds() {
+                return Ok(Some(held));
+            }
+            let review = pr.review.as_ref().map(|r| r.id.clone());
+            let begin = match self.start_rework(number, pr) {
+                Ok(worker) => Begin::Report(StepReport::Reworked {
+                    issue: self.state.work_item.as_ref().map_or(0, |item| item.issue),
+                    pull_request: number,
+                    worker,
+                    by,
+                }),
+                Err(ReworkError::State(e)) => return Err(e),
+                Err(e) if e.settled() => self.refuse_rework(number, labelled, review, &e)?,
+                Err(e) => Begin::Report(StepReport::BoardFailed {
+                    reason: e.to_string(),
+                }),
+            };
+            return Ok(Some(begin));
+        }
+        Ok(None)
+    }
+
+    fn refuse_rework(
+        &mut self,
+        number: u64,
+        labelled: bool,
+        review: Option<String>,
+        refused: &ReworkError,
+    ) -> Result<Begin, StateError> {
+        let repo = &self.settings.forge;
+        if labelled && let Err(e) = self.ports.forge.set_label(repo, number, READY, false) {
+            let reason = ReworkError::Unlabel(number, READY, e).to_string();
+            return Ok(Begin::Report(StepReport::BoardFailed { reason }));
+        }
+        if let Some(review) = review.filter(|r| !self.state.reworked.contains(r)) {
+            let mut next = self.state.clone();
+            next.reworked.push(review);
+            self.save(next)?;
+        }
+        let reason = refused.to_string();
+        let comment = format!("Kelpie cannot rework this pull request: {reason}.");
+        let comment_failed = self
+            .ports
+            .forge
+            .comment(&self.settings.forge, number, &comment)
+            .err()
+            .map(|e| e.to_string());
+        Ok(Begin::Report(StepReport::ReworkRefused {
+            pull_request: number,
+            reason,
+            comment_failed,
+        }))
+    }
+
+    // Puts `ready-for-human` on pull request `number` and takes
+    // `ready-for-agent` off, as its labels on the forge stand now.
+    pub(super) fn hand_back(&self, number: u64) -> Result<(), String> {
+        let repo = &self.settings.forge;
+        let failed = |e: ForgeError| format!("cannot hand #{number} back: {e}");
+        let labels = self
+            .ports
+            .forge
+            .pull_request(repo, number)
+            .map_err(failed)?
+            .labels;
+        if !labels.iter().any(|l| l == HUMAN) {
+            self.ports
+                .forge
+                .set_label(repo, number, HUMAN, true)
+                .map_err(failed)?;
+        }
+        if labels.iter().any(|l| l == READY) {
+            self.ports
+                .forge
+                .set_label(repo, number, READY, false)
+                .map_err(failed)?;
+        }
+        Ok(())
+    }
+
+    // Checks `pr` can be reworked, then writes its review for the worker,
+    // takes the triage labels off and saves the work item, in that order.
+    fn start_rework(&mut self, number: u64, pr: Reviewed) -> Result<WorkerModel, ReworkError> {
+        let repo = &self.settings.forge;
         match pr.state {
             PullRequestState::Open => {}
             PullRequestState::Merged => return Err(ReworkError::NotOpen(number, "merged")),
@@ -118,7 +263,20 @@ impl Runner {
         let text = review_text(number, &review);
         turn::write(&fresh.build, &review_path(&fresh.build), &text)
             .map_err(ReworkError::ReviewFile)?;
+        let mut labels = pr.labels;
+        for label in [READY, HUMAN] {
+            if labels.iter().any(|l| l == label) {
+                self.ports
+                    .forge
+                    .set_label(repo, number, label, false)
+                    .map_err(|e| ReworkError::Unlabel(number, label, e))?;
+                labels.retain(|l| l != label);
+            }
+        }
         let mut next = self.state.clone();
+        if !next.reworked.contains(&review.id) {
+            next.reworked.push(review.id);
+        }
         next.work_item = Some(WorkItem {
             branch: pr.branch,
             rework: true,
@@ -126,7 +284,7 @@ impl Runner {
             // The fix is new code, so the qwen-review loop runs before CI.
             resume: Some(Phase::Review(Review::first())),
             known: Known {
-                labels: pr.labels,
+                labels,
                 ready: !pr.draft,
             },
             ..fresh
@@ -141,9 +299,9 @@ fn review_path(build: &Path) -> PathBuf {
     build.join(REVIEW_FILE)
 }
 
-// The maintainer's words go in as written: nothing here rewords them.
+// The reviewer's words go in as written: nothing here rewords them.
 fn review_text(number: u64, review: &MaintainerReview) -> String {
-    let mut text = format!("# The maintainer's review of pull request #{number}\n");
+    let mut text = format!("# The latest review of pull request #{number}\n");
     if !review.body.trim().is_empty() {
         text.push('\n');
         push_verbatim(&mut text, &review.body);
@@ -171,7 +329,7 @@ pub(super) fn first_prompt(item: &WorkItem) -> String {
     let number = item.pull_request.unwrap_or_default();
     format!(
         "Your work item reworks your pull request #{number} for issue #{}: {}\n\n\
-         The maintainer reviewed it and asked for changes. Their review is in {}. \
+         Its latest review asks for changes, and is in {}. \
          Make the changes it asks for, then commit and push with `git push origin HEAD`. \
          Your branch is the pull request's as `origin` holds it, with any commits the \
          maintainer pushed. The pull request is already open, so do not open another.\n",
