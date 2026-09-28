@@ -9,12 +9,13 @@
 pub mod book;
 pub mod cli;
 pub mod gpu;
+pub mod saved;
 pub mod window;
 pub mod wire;
 
 use std::fmt;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::runner::ProjectName;
 
@@ -58,6 +59,14 @@ impl TryFrom<&str> for LeaseKind {
     }
 }
 
+// A kind read back from the book file passes the same check as one asked for.
+impl<'de> Deserialize<'de> for LeaseKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let name = String::deserialize(deserializer)?;
+        Self::try_from(name.as_str()).map_err(serde::de::Error::custom)
+    }
+}
+
 impl fmt::Display for LeaseKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
@@ -93,7 +102,7 @@ impl std::error::Error for LeaseKindError {}
 /// the old run held. shep's process events carry the pid too, so the dog
 /// tells runs apart without relying on event order.
 // wire format: changing this is a breaking change to runner metrics
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Epoch(pub u64);
 

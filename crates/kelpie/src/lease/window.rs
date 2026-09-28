@@ -5,8 +5,11 @@
 //! review it bought. A refusal quotes when the window opens, and that quote
 //! overrides the book's own count until a later summon is accepted.
 
+use std::num::NonZeroU32;
+
 use serde::Serialize;
 
+use super::saved::{SavedRefusal, SavedWindow};
 use crate::ports::Timestamp;
 
 /// How long one accepted summon holds its place in the window, in seconds
@@ -50,6 +53,23 @@ impl Default for Window {
             quota_at: None,
             summons: Vec::new(),
             refusal: None,
+        }
+    }
+}
+
+impl From<SavedWindow> for Window {
+    fn from(saved: SavedWindow) -> Self {
+        let mut summons = saved.summons;
+        summons.sort_unstable();
+        summons.dedup();
+        Self {
+            quota: saved.quota.get(),
+            quota_at: saved.quota_at,
+            summons,
+            refusal: saved.refusal.map(|r| Refusal {
+                heard: r.heard,
+                opens: r.opens,
+            }),
         }
     }
 }
@@ -111,6 +131,19 @@ impl Window {
     /// Forgets summons older than an hour before `now`
     pub fn prune(&mut self, now: Timestamp) {
         self.summons.retain(|at| at.0 + HOUR > now.0);
+    }
+
+    /// The window as the book file keeps it
+    pub fn saved(&self) -> SavedWindow {
+        SavedWindow {
+            quota: NonZeroU32::new(self.quota).expect("a window's quota is never zero"),
+            quota_at: self.quota_at,
+            summons: self.summons.clone(),
+            refusal: self.refusal.map(|r| SavedRefusal {
+                heard: r.heard,
+                opens: r.opens,
+            }),
+        }
     }
 
     fn recent(&self, now: Timestamp) -> &[Timestamp] {
@@ -250,6 +283,20 @@ mod tests {
         window.summoned(at(0));
         window.summoned(at(0));
         assert_eq!(window.opens(at(1)), None);
+    }
+
+    #[test]
+    fn a_saved_window_opens_when_the_one_it_was_saved_from_would() {
+        let mut window = Window::default();
+        window.quota(2, at(0));
+        window.summoned(at(0));
+        window.summoned(at(60));
+        window.refused(at(120), at(1800));
+        let restored = Window::from(window.saved());
+        for now in [at(120), at(1799), at(1800), at(HOUR + 60)] {
+            assert_eq!(restored.opens(now), window.opens(now), "{now:?}");
+        }
+        assert_eq!(restored.status(at(120)), window.status(at(120)));
     }
 
     #[test]

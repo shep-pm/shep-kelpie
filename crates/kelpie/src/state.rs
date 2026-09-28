@@ -326,7 +326,7 @@ impl StateStore {
     }
 }
 
-fn temporary_path(path: &Path) -> PathBuf {
+pub(crate) fn temporary_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_owned();
     name.push(".tmp");
     path.with_file_name(name)
@@ -334,7 +334,7 @@ fn temporary_path(path: &Path) -> PathBuf {
 
 // The rename is the commit point. Syncing the file first means the name
 // never points at unwritten bytes; syncing the folder keeps the rename.
-fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let temporary = temporary_path(path);
     let mut file = File::create(&temporary)?;
     file.write_all(bytes)?;

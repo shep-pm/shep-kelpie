@@ -5,6 +5,8 @@
 //! `grant` trigger on the runner. The maintainer reaches it with
 //! `shep trigger kelpie <status|take|return>`. Its flock entry needs
 //! `channel = true`, and `shutdown_with_message = true` for a clean stop.
+//! The book is saved to `<kelpie home>/dog/book.json` after every change
+//! and loaded on start.
 
 pub mod desk;
 pub mod triggers;
@@ -26,6 +28,7 @@ use tokio::sync::mpsc;
 
 use crate::adapters::SystemClock;
 use crate::lease::gpu::{self, GpuLock};
+use crate::lease::saved::{BookFile, SavedBook};
 use crate::lease::wire::{GRANT, grant_params};
 use desk::{Delivery, Desk};
 use triggers::ACTIONS;
@@ -77,6 +80,65 @@ fn socket_from(shep_home: Option<OsString>, home: Option<OsString>) -> Result<Pa
     Ok(shep_home.join("run/shep.sock"))
 }
 
+/// The dog's book file: `<kelpie home>/dog/book.json`, where kelpie's
+/// home is `KELPIE_HOME`, or `~/.kelpie` when that is unset
+///
+/// # Errors
+///
+/// A message when neither `KELPIE_HOME` nor `HOME` is set.
+pub fn book_path() -> Result<PathBuf, String> {
+    book_path_from(std::env::var_os("KELPIE_HOME"), std::env::var_os("HOME"))
+}
+
+fn book_path_from(
+    kelpie_home: Option<OsString>,
+    home: Option<OsString>,
+) -> Result<PathBuf, String> {
+    let kelpie_home = match (kelpie_home, home) {
+        (Some(kelpie_home), _) => PathBuf::from(kelpie_home),
+        (None, Some(home)) => PathBuf::from(home).join(".kelpie"),
+        (None, None) => return Err("neither KELPIE_HOME nor HOME is set".into()),
+    };
+    Ok(kelpie_home.join("dog/book.json"))
+}
+
+// The desk and the file it is saved to, written whenever the book changes.
+struct Kept {
+    desk: Desk,
+    file: BookFile,
+    last: SavedBook,
+}
+
+impl Kept {
+    // A save that fails leaves the previous book standing, and the next
+    // change tries again.
+    fn change<T>(&mut self, act: impl FnOnce(&mut Desk) -> T) -> T {
+        let out = act(&mut self.desk);
+        let saved = self.desk.saved();
+        if saved != self.last {
+            match self.file.save(&saved) {
+                Ok(()) => self.last = saved,
+                Err(e) => println!("{e}"),
+            }
+        }
+        out
+    }
+}
+
+// Another build's file, or none, starts an empty book. So does one that
+// cannot be read: the dog still runs, and says why.
+fn load(file: &BookFile) -> SavedBook {
+    let empty = || SavedBook::new(Vec::new(), Vec::new(), Vec::new());
+    match file.load() {
+        Ok(Some(saved)) => saved,
+        Ok(None) => empty(),
+        Err(e) => {
+            println!("{e}: starting with an empty book");
+            empty()
+        }
+    }
+}
+
 async fn serve() -> Result<(), String> {
     let shepherd = shep_channel::serve();
     if !shepherd.is_active() {
@@ -102,12 +164,20 @@ async fn serve() -> Result<(), String> {
 
     let lock = GpuLock::under(&gpu::temp_dir());
     println!("the GPU lock is {}", lock.path().display());
-    let desk = Arc::new(Mutex::new(Desk::new(Box::new(SystemClock), lock)));
+    let file = BookFile::new(book_path()?);
+    if let Some(folder) = file.path().parent() {
+        std::fs::create_dir_all(folder)
+            .map_err(|e| format!("cannot make {}: {e}", folder.display()))?;
+    }
+    println!("the book is {}", file.path().display());
+    let last = load(&file);
+    let desk = Desk::restore(Box::new(SystemClock), lock, last.clone());
+    let desk = Arc::new(Mutex::new(Kept { desk, file, last }));
     let (deliver, mut to_deliver) = mpsc::unbounded_channel::<Vec<Delivery>>();
     for action in ACTIONS {
         let (desk, deliver) = (Arc::clone(&desk), deliver.clone());
         shepherd.on_action(action, move |params, name| {
-            let (body, grants) = lock_desk(&desk).answer(name, params);
+            let (body, grants) = lock_desk(&desk).change(|d| d.answer(name, params));
             let _ = deliver.send(grants);
             body
         });
@@ -117,9 +187,16 @@ async fn serve() -> Result<(), String> {
         let _ = stop.send(());
     });
 
-    let mut names = flock(&client).await?.names;
+    // Runners in the saved book that have since died or restarted are
+    // reclaimed before the dog takes anything new.
+    let listed = flock(&client).await?;
+    let mut names = listed.names;
+    let restored = lock_desk(&desk).change(|d| d.resync(&listed.live));
     shepherd.ready().map_err(|e| e.to_string())?;
     println!("up");
+    for grant in restored {
+        deliver_grant(&client, &grant).await;
+    }
     let mut ticks = tokio::time::interval(WINDOW_TICK);
     let ended = loop {
         let grants = tokio::select! {
@@ -128,7 +205,7 @@ async fn serve() -> Result<(), String> {
                 Err(e) => break Err(e),
             },
             Some(grants) = to_deliver.recv() => grants,
-            _ = ticks.tick() => lock_desk(&desk).tick(),
+            _ = ticks.tick() => lock_desk(&desk).change(Desk::tick),
             _ = stopped.recv() => break Ok(()),
         };
         for grant in grants {
@@ -142,7 +219,7 @@ async fn serve() -> Result<(), String> {
 
 // The shepherd channel's handlers run on its own threads, and nothing
 // holding the desk can leave it half changed, so a poisoned lock is fine.
-fn lock_desk(desk: &Mutex<Desk>) -> std::sync::MutexGuard<'_, Desk> {
+fn lock_desk(desk: &Mutex<Kept>) -> std::sync::MutexGuard<'_, Kept> {
     desk.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -150,7 +227,7 @@ type Event = Option<Result<BusEvent, shep_client::Lagged>>;
 
 async fn on_event(
     event: Event,
-    desk: &Mutex<Desk>,
+    desk: &Mutex<Kept>,
     client: &Client,
     names: &mut HashMap<u32, String>,
 ) -> Result<Vec<Delivery>, String> {
@@ -173,7 +250,7 @@ async fn on_event(
             let Some(sheep) = names.get(&id) else {
                 return Ok(Vec::new());
             };
-            Ok(lock_desk(desk).metric(sheep, &name, value))
+            Ok(lock_desk(desk).change(|d| d.metric(sheep, &name, value)))
         }
         BusEvent::Process { event, info, .. } => {
             names.insert(info.id, info.name.clone());
@@ -185,7 +262,7 @@ async fn on_event(
                 | ProcessEventKind::Delete => None,
                 _ => return Ok(Vec::new()),
             };
-            Ok(lock_desk(desk).runner_is(&info.name, live))
+            Ok(lock_desk(desk).change(|d| d.runner_is(&info.name, live)))
         }
         BusEvent::Dropped { count } => {
             println!("the bus dropped {count} events: checking every runner");
@@ -196,13 +273,13 @@ async fn on_event(
 }
 
 async fn resync(
-    desk: &Mutex<Desk>,
+    desk: &Mutex<Kept>,
     client: &Client,
     names: &mut HashMap<u32, String>,
 ) -> Result<Vec<Delivery>, String> {
     let listed = flock(client).await?;
     *names = listed.names;
-    Ok(lock_desk(desk).resync(&listed.live))
+    Ok(lock_desk(desk).change(|d| d.resync(&listed.live)))
 }
 
 struct Flock {
@@ -279,5 +356,21 @@ mod tests {
             Ok(PathBuf::from("/home/m/.kelpie/shep/run/shep.sock"))
         );
         assert!(socket(None, None).is_err());
+    }
+
+    #[test]
+    fn the_book_is_under_kelpie_home_or_the_home_folder() {
+        let book = |kelpie_home: Option<&str>, home: Option<&str>| {
+            book_path_from(kelpie_home.map(Into::into), home.map(Into::into))
+        };
+        assert_eq!(
+            book(Some("/k"), Some("/home/m")),
+            Ok(PathBuf::from("/k/dog/book.json"))
+        );
+        assert_eq!(
+            book(None, Some("/home/m")),
+            Ok(PathBuf::from("/home/m/.kelpie/dog/book.json"))
+        );
+        assert!(book(None, None).is_err());
     }
 }
