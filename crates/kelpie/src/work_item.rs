@@ -74,6 +74,8 @@ pub struct Conflict {
     pub head: String,
     /// The `origin/main` commit it conflicted with
     pub main: String,
+    /// How many conflict turns this work item has had, this one included
+    pub turns: u32,
 }
 
 /// A work item's CodeRabbit rounds so far
@@ -439,7 +441,7 @@ mod tests {
                 "pull_request": 51,
                 "phase": { "state": "ci", "head": "c0ffee", "since": 11 },
                 "red_head": "bad",
-                "conflict": { "head": "c0ffee", "main": "a11ce" },
+                "conflict": { "head": "c0ffee", "main": "a11ce", "turns": 1 },
                 "resume": null,
                 "review_call": { "state": "idle" },
                 "coderabbit": { "rounds": 0, "cap_cleared": false, "satisfied": false },

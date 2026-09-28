@@ -22,6 +22,10 @@ use crate::worktree::{self, Base, Rebase};
 // seconds, one at a time. Kelpie trusts a rollup once two minutes have passed.
 pub(crate) const CHECKS_SETTLE: u64 = 120;
 
+// The most conflict turns one work item gets before the maintainer decides,
+// so a `main` that moves before every check cannot loop the worker.
+const CONFLICT_TURNS: u32 = 3;
+
 impl Runner {
     pub(super) fn check_ci(&mut self) -> Result<Begin, StateError> {
         let item = self
@@ -172,7 +176,8 @@ impl Runner {
 
     // The worker merges `main` in, so nothing is force-pushed. A conflict the
     // worker was already sent for this head, or for this `main`, is one it
-    // did not resolve, and the maintainer decides.
+    // did not resolve, and the maintainer decides. So does a work item that
+    // has had `CONFLICT_TURNS` of them, whatever `main` does.
     fn conflicted(
         &mut self,
         number: u64,
@@ -185,19 +190,19 @@ impl Runner {
             .work_item
             .as_ref()
             .expect("a conflict is of a work item");
-        if item
-            .conflict
-            .as_ref()
-            .is_some_and(|sent| sent.head == head || sent.main == main)
-        {
+        if item.conflict.as_ref().is_some_and(|sent| {
+            sent.head == head || sent.main == main || sent.turns >= CONFLICT_TURNS
+        }) {
             let reason = format!("it conflicts with main in {}", files.join(", "));
             return self.raise(number, RulingKind::Rebase { reason });
         }
         let issue = item.issue;
         let prompt = conflict_prompt(number, &files);
+        let turns = item.conflict.as_ref().map_or(0, |sent| sent.turns) + 1;
         let sent = Conflict {
             head: head.clone(),
             main,
+            turns,
         };
         self.update(|item| {
             item.conflict = Some(sent);
@@ -544,6 +549,32 @@ mod tests {
             "{question}"
         );
         assert_eq!(rig.claude.calls().len(), 2, "no third turn, no loop");
+    }
+
+    #[test]
+    fn a_main_that_moves_before_every_check_gets_the_worker_three_conflict_turns_then_parks() {
+        let (rig, runner, _) = Rig::with_pull_request("xilriws");
+        rig.land_on_origin("work.txt");
+        let other = rig.home.path().join("other");
+        for (turn, file) in [(1, "one.txt"), (2, "two.txt"), (3, "three.txt")] {
+            assert!(
+                matches!(step(&runner).unwrap(), Some(StepReport::Conflicted { .. })),
+                "conflict turn {turn}"
+            );
+            // The worker pushes, so the head moved, and main moves again.
+            rig.claude.script([Scripted::Push(file, "extra\n")]);
+            step(&runner).unwrap();
+            git(&other, &["pull", "--quiet", "origin", "main"]);
+            std::fs::write(other.join("work.txt"), format!("landed {turn}\n")).unwrap();
+            git(&other, &["commit", "--quiet", "-am", "landed again"]);
+            git(&other, &["push", "--quiet", "origin", "main"]);
+        }
+        let (_, question) = ruling_report(step(&runner).unwrap());
+        assert!(
+            question.contains("it conflicts with main in work.txt"),
+            "{question}"
+        );
+        assert_eq!(rig.claude.calls().len(), 4, "the first turn and three more");
     }
 
     #[test]

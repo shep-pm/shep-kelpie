@@ -59,6 +59,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         conflict: Some(crate::work_item::Conflict {
             head: "c0ffee".into(),
             main: "a11ce".into(),
+            turns: 1,
         }),
         resume: None,
         review_call: crate::work_item::ReviewCallState::Idle,
