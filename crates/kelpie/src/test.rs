@@ -19,7 +19,7 @@ use crate::runner::{
 };
 use crate::settings::Effort;
 use crate::webhook::{KelpieSettings, Webhook};
-use crate::work_item::{CallRecord, Phase, Turn, WorkItem};
+use crate::work_item::{CallRecord, Known, Phase, Turn, WorkItem};
 
 mod alerts;
 mod forge;
@@ -53,6 +53,10 @@ pub(crate) fn a_work_item() -> WorkItem {
         red_head: Some("bad".into()),
         resume: None,
         review_call: crate::work_item::ReviewCallState::Idle,
+        known: Known {
+            labels: vec!["review please".into()],
+            ready: false,
+        },
         calls: vec![CallRecord {
             role: Role::Worker,
             at: Timestamp(10),

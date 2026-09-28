@@ -31,6 +31,7 @@ pub(crate) struct FakeForge {
     lagging: Arc<Mutex<HashMap<u64, String>>>,
     readied: Arc<Mutex<Vec<u64>>>,
     merges: Arc<Mutex<Vec<(u64, String)>>>,
+    pr_labels: Arc<Mutex<HashMap<u64, Vec<String>>>>,
 }
 
 /// A pull request on the fake forge. Its head is its branch on the rig's
@@ -62,6 +63,20 @@ impl FakeForge {
             lagging: Arc::default(),
             readied: Arc::default(),
             merges: Arc::default(),
+            pr_labels: Arc::default(),
+        }
+    }
+
+    /// Adds `label` to pull request `number`, as someone other than kelpie would
+    pub(crate) fn label_pull_request(&self, number: u64, label: &str) {
+        let mut labels = self.pr_labels.lock().unwrap();
+        labels.entry(number).or_default().push(label.to_owned());
+    }
+
+    /// Removes `label` from pull request `number`
+    pub(crate) fn unlabel_pull_request(&self, number: u64, label: &str) {
+        if let Some(labels) = self.pr_labels.lock().unwrap().get_mut(&number) {
+            labels.retain(|l| l != label);
         }
     }
 
@@ -113,6 +128,12 @@ impl FakeForge {
     pub(crate) fn set_state(&self, number: u64, state: PullRequestState) {
         let mut prs = self.pull_requests.lock().unwrap();
         prs.get_mut(&number).expect("an opened pull request").state = state;
+    }
+
+    /// Marks pull request `number` ready, as someone other than kelpie would
+    pub(crate) fn ready_pull_request(&self, number: u64) {
+        let mut prs = self.pull_requests.lock().unwrap();
+        prs.get_mut(&number).expect("an opened pull request").draft = false;
     }
 
     /// Makes posting comments fail, or work again
@@ -243,11 +264,13 @@ impl Forge for FakeForge {
                 .ok_or_else(|| ForgeError::Failed(format!("no branch {} on origin", pr.branch)))?,
         };
         let checks = self.checks.lock().unwrap().get(&head).cloned();
+        let labels = self.pr_labels.lock().unwrap().get(&number).cloned();
         Ok(PullRequest {
             state: pr.state,
             draft: pr.draft,
             checks: checks.unwrap_or(Checks::Pending),
             head,
+            labels: labels.unwrap_or_default(),
         })
     }
 

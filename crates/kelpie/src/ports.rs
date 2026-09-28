@@ -8,6 +8,7 @@
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -114,6 +115,8 @@ pub struct PullRequest {
     pub head: String,
     /// Where CI stands on its head
     pub checks: Checks,
+    /// Its labels' names
+    pub labels: Vec<String>,
 }
 
 /// Whether a pull request is open, merged or closed without merging
@@ -233,6 +236,9 @@ pub struct ClaudeCall {
     pub instructions: Option<PathBuf>,
     /// The turn's prompt
     pub prompt: String,
+    /// Kills the call, and returns [`ClaudeError::TimedOut`], once it has
+    /// run this long
+    pub timeout: Option<Duration>,
 }
 
 /// Tokens one call used, as `claude -p` reports them
@@ -303,6 +309,8 @@ pub enum ClaudeError {
     NoSession(SessionId),
     /// The call was ended because the runner is stopping
     Stopped,
+    /// The call ran past its turn's ceiling and was stopped
+    TimedOut,
     /// `claude` exited without a result it reports as a success
     Failed(String),
     /// `claude`'s output was not the JSON result asked for
@@ -315,6 +323,7 @@ impl fmt::Display for ClaudeError {
             Self::Spawn(error) => write!(f, "cannot run claude: {error}"),
             Self::NoSession(id) => write!(f, "claude has no session {}", id.0),
             Self::Stopped => f.write_str("claude was stopped with the runner"),
+            Self::TimedOut => f.write_str("claude ran past its turn's ceiling"),
             Self::Failed(detail) => write!(f, "claude failed: {}", detail.trim()),
             Self::Unreadable(output) => write!(f, "unreadable claude output: {}", output.trim()),
         }

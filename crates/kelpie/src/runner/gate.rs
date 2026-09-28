@@ -1,16 +1,18 @@
 //! The gate between the worker's pull request and the merge ruling
 //!
-//! Each step looks once at the pull request's head. A branch without the
-//! latest `main` is rebased and pushed, and a conflict parks the worker on a
-//! ruling. A pending run, or none yet, waits for the next step. A red run is
-//! the worker's next turn, naming the checks that failed. A green run raises
-//! the merge ruling. A project without CI skips the checks.
+//! Each step looks once at the pull request's head. A label or ready change
+//! kelpie did not make parks the worker first, before anything else. A
+//! branch without the latest `main` is rebased and pushed, and a conflict
+//! parks the worker on a ruling. A pending run, or none yet, waits for the
+//! next step. A red run is the worker's next turn, naming the checks that
+//! failed. A green run raises the merge ruling. A project without CI skips
+//! the checks.
 
 use super::Runner;
 use super::report::{Begin, StepReport};
 use crate::ports::{Checks, PullRequestState, Timestamp};
 use crate::state::{RulingKind, StateError};
-use crate::work_item::{Phase, Turn};
+use crate::work_item::{Phase, Turn, foreign_change};
 use crate::worktree::{self, Base, Rebase};
 
 // GitHub registers the checks a push or a ready pull request starts within
@@ -42,6 +44,9 @@ impl Runner {
                 return self.finish(true);
             }
             PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
+        }
+        if let Some((known, description)) = foreign_change(&item.known, &pr.labels, !pr.draft) {
+            return self.raise(number, RulingKind::ForeignChange { description, known });
         }
         let now = self.ports.clock.now();
         let since = if seen.as_deref() == Some(pr.head.as_str()) {
@@ -517,6 +522,102 @@ mod tests {
         assert_eq!(rig.forge.head_of("kelpie/7"), Some(head));
         assert!(!rig.worktree_7().exists());
         assert_eq!(git(&rig.repo(), &["branch", "--list", "kelpie/7"]), "");
+    }
+
+    #[test]
+    fn a_label_added_outside_kelpie_parks_the_worker_naming_it() {
+        let (rig, runner, head) = Rig::with_pull_request("shep");
+        rig.forge.label_pull_request(71, "bug");
+        let (id, question) = ruling_report(step(&runner).unwrap());
+        assert_eq!(id, 1);
+        assert_eq!(
+            question,
+            "Pull request #71 changed outside kelpie: the `bug` label was added. \
+             `shep trigger shep rule '1 yes'` accepts it and kelpie carries on, and \
+             `shep trigger shep rule '1 no <note>'` sends the worker your note."
+        );
+        assert_eq!(
+            rig.ask(&runner, "status", None)["rulings"][0]["kind"],
+            json!({
+                "kind": "foreign-change",
+                "description": "the `bug` label was added",
+                "known": { "labels": ["bug"], "ready": false },
+            })
+        );
+
+        // A yes accepts it, and kelpie carries on watching the same pull request.
+        rig.ask(&runner, "rule", Some("1 yes"));
+        rig.forge.set_checks(&head, Checks::Passed);
+        let (next, merge_question) = ruling_report(rig.verdict(&runner));
+        assert_eq!(next, 2);
+        assert!(merge_question.starts_with("Merge pull request #71"));
+        // Kelpie's own record now matches, so the accepted label is not asked again.
+        assert_eq!(rig.forge.merges(), []);
+    }
+
+    #[test]
+    fn marking_a_pull_request_ready_outside_kelpie_parks_the_worker() {
+        let (rig, runner, _) = Rig::with_pull_request("koji");
+        rig.forge.ready_pull_request(71);
+        let (_, question) = ruling_report(step(&runner).unwrap());
+        assert!(
+            question.starts_with(
+                "Pull request #71 changed outside kelpie: it was marked ready for review."
+            ),
+            "{question}"
+        );
+    }
+
+    #[test]
+    fn a_no_on_a_foreign_change_sends_the_worker_a_note_and_asks_again_once_it_reaches_ci() {
+        let (rig, runner, head) = Rig::with_pull_request("rotom");
+        rig.forge.label_pull_request(71, "bug");
+        ruling_report(step(&runner).unwrap());
+        rig.ask(&runner, "rule", Some("1 no  remove that label yourself "));
+        rig.claude.script([
+            Scripted::Push("rename.txt", "renamed\n"),
+            Scripted::Text("CLEAN"),
+        ]);
+        step(&runner).unwrap(); // the noted turn: pushes, enters round 1
+        let [first, noted] = rig.claude.calls().try_into().unwrap();
+        assert_eq!(noted.session, Session::Resume(first.session.id().clone()));
+        assert_eq!(
+            noted.prompt,
+            "The maintainer answered no on pull request #71, with this note:\n\n\
+             remove that label yourself\n"
+        );
+        assert_ne!(rig.forge.head_of("kelpie/7"), Some(head));
+
+        step(&runner).unwrap(); // review round 1, qwen: clean by default
+        step(&runner).unwrap(); // review round 2, claude: scripted clean above
+        // The label is still there, and unaccepted, so the next look parks again.
+        let (id, _) = ruling_report(step(&runner).unwrap());
+        assert_eq!(id, 2);
+    }
+
+    #[test]
+    fn a_label_removed_after_a_yes_accepted_it_parks_the_worker_again() {
+        let (rig, runner, _) = Rig::with_pull_request("chelone");
+        rig.forge.label_pull_request(71, "bug");
+        ruling_report(step(&runner).unwrap());
+        rig.ask(&runner, "rule", Some("1 yes"));
+        rig.forge.unlabel_pull_request(71, "bug");
+        let (id, question) = ruling_report(step(&runner).unwrap());
+        assert_eq!(id, 2);
+        assert!(
+            question.starts_with(
+                "Pull request #71 changed outside kelpie: the `bug` label was removed."
+            ),
+            "{question}"
+        );
+    }
+
+    #[test]
+    fn a_normal_gate_run_with_nothing_changed_outside_kelpie_asks_nothing_about_it() {
+        let (rig, runner, head) = Rig::with_pull_request("zeus");
+        rig.forge.set_checks(&head, Checks::Passed);
+        let (_, question) = ruling_report(rig.verdict(&runner));
+        assert!(question.starts_with("Merge pull request #71"), "{question}");
     }
 
     #[test]
