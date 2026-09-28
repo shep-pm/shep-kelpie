@@ -350,6 +350,15 @@ fn the_judge_reads_every_open_thread_rejected_ones_are_resolved_and_held_ones_go
     // The fix goes through CI, then round two, whose review CodeRabbit
     // wrote after seeing the fix and resolving its own thread.
     let fixed = rig.forge.head_of("kelpie/7").unwrap();
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::FixPushed {
+            issue: 7,
+            pull_request: 71,
+            round: 1,
+            head: Some(fixed.clone()),
+        })
+    );
     assert_eq!(step(&runner).unwrap(), None, "CI on the fix is pending");
     assert_eq!(labels(&rig), [on(), off()]);
     rig.forge.set_checks(&fixed, Checks::Passed);
@@ -411,12 +420,104 @@ fn fixed(rig: &Rig, runner: &Mutex<Runner>, file: &'static str) -> String {
     rig.claude.script([Scripted::Push(file, "fixed\n")]);
     step(runner).unwrap();
     let head = rig.forge.head_of("kelpie/7").unwrap();
+    assert!(matches!(
+        step(runner).unwrap(),
+        Some(StepReport::FixPushed { .. })
+    ));
     rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
         rig.verdict(runner),
         Some(StepReport::Summoned { .. })
     ));
     head
+}
+
+#[test]
+fn a_fix_turn_that_pushes_nothing_parks_instead_of_opening_round_two() {
+    let (rig, runner, head) = summoned("shep");
+    assert!(matches!(
+        hold_a_finding(&rig, &runner, &head, "Name the flag."),
+        Some(StepReport::CodeRabbitJudged { round: 1, .. })
+    ));
+    rig.claude
+        .script([Scripted::Say("I can't push from this sandbox.")]);
+    step(&runner).unwrap(); // the fix turn ends with nothing pushed
+
+    let Some(StepReport::Ruling { id, question, .. }) = step(&runner).unwrap() else {
+        panic!("a fix with nothing pushed raised no ruling");
+    };
+    assert!(
+        question.starts_with(
+            "The worker on pull request #71 ended its fix for CodeRabbit round 1 \
+             without pushing, so those findings still hold."
+        ),
+        "{question}"
+    );
+    let status = rig.ask(&runner, "status", None);
+    let path = rig.build_7().join("review-findings.md");
+    let again = format!(
+        "Your last turn on pull request #71 pushed nothing, so round 1's \
+         findings in {} still hold. Fix each one, then commit and push with \
+         `git push origin HEAD`.",
+        path.display()
+    );
+    assert_eq!(
+        status["rulings"][0]["kind"],
+        json!({
+            "kind": "fix-not-pushed",
+            "coderabbit": { "round": 1, "head": head },
+            "prompt": again,
+        })
+    );
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id }));
+    assert_eq!(step(&runner).unwrap(), None, "parked, not summoning");
+    assert_eq!(labels(&rig), [on(), off()], "no second summon");
+
+    // A yes sends the same findings, and a fix that pushes goes on to CI.
+    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+    rig.claude.script([Scripted::Push("flag.txt", "named\n")]);
+    step(&runner).unwrap();
+    assert_eq!(rig.claude.calls().pop().unwrap().prompt, again);
+    let fixed = rig.forge.head_of("kelpie/7");
+    assert_ne!(fixed.as_deref(), Some(head.as_str()));
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::FixPushed {
+            issue: 7,
+            pull_request: 71,
+            round: 1,
+            head: fixed,
+        })
+    );
+    assert_eq!(phase(&rig, &runner)["state"], "ci");
+}
+
+#[test]
+fn a_fix_past_the_cap_that_pushes_nothing_still_parks() {
+    // A few changed lines under the default divisor: a cap of two rounds.
+    let (rig, runner, head) = summoned("rotom");
+    assert!(matches!(
+        hold_a_finding(&rig, &runner, &head, "First."),
+        Some(StepReport::CodeRabbitJudged { round: 1, .. })
+    ));
+    let head = fixed(&rig, &runner, "one.txt");
+    rig.forge.coderabbit.settle("PRRT_71_0");
+    let Some(StepReport::Ruling { id, .. }) = hold_a_finding(&rig, &runner, &head, "Second.")
+    else {
+        panic!("round two did not reach the cap");
+    };
+    step(&runner).unwrap(); // the alert
+    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+    rig.claude.script([Scripted::Say("Nothing to change.")]);
+    step(&runner).unwrap(); // the fix turn ends with nothing pushed
+
+    let Some(StepReport::Ruling { question, .. }) = step(&runner).unwrap() else {
+        panic!("a fix past the cap with nothing pushed raised no ruling");
+    };
+    assert!(
+        question.contains("CodeRabbit round 2 without pushing"),
+        "{question}"
+    );
 }
 
 #[test]

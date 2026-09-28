@@ -22,7 +22,7 @@ use crate::pacer::Scope;
 use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session, Timestamp};
 use crate::profile::{INSTRUCTIONS, WorkerProfile};
 use crate::state::{ProjectState, Resume, RulingKind, RunState, StateError};
-use crate::work_item::{CallRecord, Phase, Review, ReviewStage, Turn, WorkItem};
+use crate::work_item::{CallRecord, CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree;
 
 /// The prompt for a turn resumed after the runner restarted
@@ -100,11 +100,13 @@ impl Runner {
         };
         match &item.phase {
             Phase::Implement => {}
-            // A fix turn that ended goes back to the review, to check it pushed.
+            // A fix turn that ended goes back to its round, to check it pushed.
             Phase::Review(review)
                 if matches!(review.stage, ReviewStage::Fixing { .. })
                     && !matches!(item.turn, Turn::Ended { .. }) => {}
             Phase::Review(_) => return self.review_step(),
+            Phase::CodeRabbit(CodeRabbitStage::Fixing { .. })
+                if !matches!(item.turn, Turn::Ended { .. }) => {}
             Phase::Ci { .. } => return self.check_ci(),
             Phase::CodeRabbit(_) => return self.coderabbit_step(),
             Phase::Ruling { .. } => return Ok(Begin::Idle),
@@ -312,7 +314,9 @@ impl Runner {
                     Some(text) => {
                         let resume = match &item.phase {
                             Phase::Review(review) => Resume::Review(review.clone()),
-                            Phase::Implement if pull_request.is_some() => Resume::ReviewFirst,
+                            Phase::Implement | Phase::CodeRabbit(_) if pull_request.is_some() => {
+                                Resume::ReviewFirst
+                            }
                             _ => Resume::Nothing,
                         };
                         let kind = RulingKind::Question {

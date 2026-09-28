@@ -48,7 +48,7 @@ pub(super) fn fix_prompt(number: u64, round: u32, count: usize, path: &Path) -> 
     )
 }
 
-pub(super) fn again_prompt(number: u64, round: u32, path: &Path) -> String {
+pub(in crate::runner) fn again_prompt(number: u64, round: u32, path: &Path) -> String {
     format!(
         "Your last turn on pull request #{number} pushed nothing, so round {round}'s \
          findings in {} still hold. Fix each one, then commit and push with \

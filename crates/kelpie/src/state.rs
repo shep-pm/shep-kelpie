@@ -127,8 +127,9 @@ pub enum RulingKind {
     /// The worker's fix turn for held findings ended with nothing pushed. A
     /// yes sends it the same findings again.
     FixNotPushed {
-        /// The review, still fixing the round whose findings hold
-        review: Review,
+        /// The round whose findings hold, still fixing
+        #[serde(flatten)]
+        fix: Fix,
         /// The fix turn a yes starts
         prompt: String,
     },
@@ -143,6 +144,10 @@ pub enum RulingKind {
         held: u32,
         /// The fix turn a yes starts
         prompt: String,
+        /// The head the findings are on, which the fix must move. None in
+        /// an older state file, whose fix is not checked.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        head: Option<String>,
     },
     /// CodeRabbit never reviewed this head after a summon. A yes looks at
     /// CI again, and summons again once it is green.
@@ -170,6 +175,23 @@ pub enum RulingKind {
         description: String,
         /// The labels and ready state kelpie adopts as its own on a yes
         known: Known,
+    },
+}
+
+/// The round a fix that pushed nothing was for
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Fix {
+    /// A qwen-review round: the review, still fixing it
+    Review(Review),
+    /// A CodeRabbit round
+    #[serde(rename = "coderabbit")]
+    CodeRabbit {
+        /// Its number
+        round: u32,
+        /// The head its findings are on, which the fix must move
+        head: String,
     },
 }
 
@@ -552,21 +574,84 @@ mod tests {
             rounds: 2,
             held: 1,
             prompt: "fix".into(),
+            head: Some("c0ffee".into()),
         };
         let silent = RulingKind::CodeRabbitSilent {
             head: "c0ffee".into(),
         };
-        for kind in [&cap, &silent] {
+        let unpushed = RulingKind::FixNotPushed {
+            fix: Fix::CodeRabbit {
+                round: 3,
+                head: "c0ffee".into(),
+            },
+            prompt: "again".into(),
+        };
+        for kind in [&cap, &silent, &unpushed] {
             let saved = serde_json::to_value(kind).unwrap();
             assert_eq!(&serde_json::from_value::<RulingKind>(saved).unwrap(), kind);
         }
         assert_eq!(
-            serde_json::to_value([&cap, &silent]).unwrap(),
+            serde_json::to_value([&cap, &silent, &unpushed]).unwrap(),
             serde_json::json!([
-                { "kind": "coderabbit-cap", "rounds": 2, "held": 1, "prompt": "fix" },
+                {
+                    "kind": "coderabbit-cap",
+                    "rounds": 2,
+                    "held": 1,
+                    "prompt": "fix",
+                    "head": "c0ffee",
+                },
                 { "kind": "coderabbit-silent", "head": "c0ffee" },
+                {
+                    "kind": "fix-not-pushed",
+                    "coderabbit": { "round": 3, "head": "c0ffee" },
+                    "prompt": "again",
+                },
             ])
         );
+        let saved_before_the_head: RulingKind = serde_json::from_value(serde_json::json!(
+            { "kind": "coderabbit-cap", "rounds": 2, "held": 1, "prompt": "fix" }
+        ))
+        .unwrap();
+        assert_eq!(
+            saved_before_the_head,
+            RulingKind::CodeRabbitCap {
+                rounds: 2,
+                held: 1,
+                prompt: "fix".into(),
+                head: None,
+            }
+        );
+    }
+
+    #[test]
+    fn a_qwen_fix_not_pushed_keeps_its_wire_shape() {
+        let saved = serde_json::json!({
+            "kind": "fix-not-pushed",
+            "review": {
+                "round": 1,
+                "consecutive_clean": 0,
+                "guard_cleared": false,
+                "stage": { "stage": "fixing", "clean": false, "head": "c0ffee" },
+            },
+            "prompt": "again",
+        });
+        let kind: RulingKind = serde_json::from_value(saved.clone()).unwrap();
+        let RulingKind::FixNotPushed {
+            fix: Fix::Review(review),
+            ..
+        } = &kind
+        else {
+            panic!("read as {kind:?}");
+        };
+        assert_eq!(review.round, 1);
+        assert_eq!(serde_json::to_value(&kind).unwrap(), saved);
+        let stray = serde_json::json!({
+            "kind": "fix-not-pushed",
+            "coderabbit": { "round": 3, "head": "c0ffee" },
+            "prompt": "again",
+            "extra": true,
+        });
+        assert!(serde_json::from_value::<RulingKind>(stray).is_err());
     }
 
     #[test]

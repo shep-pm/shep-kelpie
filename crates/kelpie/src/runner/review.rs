@@ -17,7 +17,7 @@ use std::path::Path;
 use super::Runner;
 use super::report::{Begin, ReviewCall, ReviewResult, StepReport};
 use crate::ports::{Claude, Finding, Reviewer, Severity, Verdict, parse_findings};
-use crate::state::{RulingKind, StateError};
+use crate::state::{Fix, RulingKind, StateError};
 use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, ReviewerKind, Turn};
 use crate::worktree;
 
@@ -107,7 +107,8 @@ impl Runner {
                 Ok(now) if now == before => {
                     let path = findings::findings_path(build);
                     let prompt = findings::again_prompt(number, round, &path);
-                    return self.raise(number, RulingKind::FixNotPushed { review, prompt });
+                    let fix = Fix::Review(review);
+                    return self.raise(number, RulingKind::FixNotPushed { fix, prompt });
                 }
                 Ok(now) => Some(now),
                 Err(reason) => return Ok(self.gate_failed(reason)),
@@ -125,7 +126,7 @@ impl Runner {
     }
 
     // Asks git rather than the forge: the forge's head lags a push by a moment.
-    fn origin_head(&self) -> Result<String, String> {
+    pub(super) fn origin_head(&self) -> Result<String, String> {
         let item = self
             .state
             .work_item
