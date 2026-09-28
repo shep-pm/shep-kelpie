@@ -158,6 +158,17 @@ pub enum StepReport {
         /// The rebased head
         head: String,
     },
+    /// The branch conflicts with `main`, and the conflict is the worker's next turn
+    Conflicted {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The head that conflicts
+        head: String,
+        /// The files that conflict
+        files: Vec<String>,
+    },
     /// A ruling was raised, and the worker is parked on it
     Ruling {
         /// The work item's issue

@@ -56,6 +56,11 @@ pub(crate) fn a_work_item() -> WorkItem {
             since: Timestamp(11),
         },
         red_head: Some("bad".into()),
+        conflict: Some(crate::work_item::Conflict {
+            head: "c0ffee".into(),
+            main: "a11ce".into(),
+            turns: 1,
+        }),
         resume: None,
         review_call: crate::work_item::ReviewCallState::Idle,
         coderabbit: crate::work_item::CodeRabbitTally::default(),
@@ -104,6 +109,10 @@ pub(crate) enum Scripted {
     /// Commits this file with this text on the worktree's branch, pushes
     /// it the way a worker does, and answers
     Push(&'static str, &'static str),
+    /// Merges `origin/main` into the worktree's branch, keeping main's
+    /// side of any conflict, and pushes it without force, as a worker
+    /// resolving a conflict does
+    MergeMain,
     /// Answers with this exact text and no cost: a review round or judge
     /// one-shot, whose reply is read rather than acted on
     Text(&'static str),
@@ -284,6 +293,27 @@ impl Claude for FakeClaude {
                 Ok(ClaudeReply {
                     session_id: call.session.id().clone(),
                     text: "pushed".into(),
+                    usage: Usage::default(),
+                    session_cost: Cost(0),
+                })
+            }
+            Some(Scripted::MergeMain) => {
+                git(&call.cwd, &["fetch", "--quiet", "origin", "main"]);
+                git(
+                    &call.cwd,
+                    &[
+                        "merge",
+                        "--quiet",
+                        "-X",
+                        "theirs",
+                        "--no-edit",
+                        "origin/main",
+                    ],
+                );
+                git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);
+                Ok(ClaudeReply {
+                    session_id: call.session.id().clone(),
+                    text: "merged".into(),
                     usage: Usage::default(),
                     session_cost: Cost(0),
                 })
