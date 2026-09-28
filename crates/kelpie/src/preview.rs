@@ -1,6 +1,6 @@
 //! Letting workers and reviewers see the UI a work item builds
 //!
-//! A project opts in by carrying `.claude/launch.json`, the file Claude
+//! A project opts in by carrying `.claude/launch.json` on `main`, the file Claude
 //! Desktop's preview reads. Kelpie starts the named configuration's dev
 //! server itself for its shots, and gives each worker the Playwright MCP
 //! server. `[preview]` in the project's settings names the configuration,
@@ -131,9 +131,20 @@ impl fmt::Display for LaunchError {
 
 impl std::error::Error for LaunchError {}
 
-/// Whether `worktree` carries a launch file, which turns the preview on
-pub fn enabled(worktree: &Path) -> bool {
-    worktree.join(LAUNCH_FILE).is_file()
+/// Whether `repo`'s `origin/main` carries a launch file, which turns the preview on
+///
+/// Read from `main`, not the work item's branch, so a worker cannot widen
+/// its own sandbox by adding the file.
+pub fn enabled(repo: &Path) -> bool {
+    let spec = format!("origin/{}:{LAUNCH_FILE}", crate::worktree::BASE);
+    Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["cat-file", "-e", &spec])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 /// The configuration named `name` in `worktree`'s launch file, or its first
@@ -340,7 +351,6 @@ mod tests {
     #[test]
     fn the_named_configuration_or_the_first_is_read() {
         let dir = worktree_with(PLAYGROUND);
-        assert!(enabled(dir.path()));
         let first = launch(dir.path(), None).unwrap();
         assert_eq!(
             first,
@@ -369,8 +379,8 @@ mod tests {
     }
 
     #[test]
-    fn a_worktree_without_the_file_has_no_preview() {
-        let dir = tempfile::tempdir().unwrap();
+    fn a_folder_that_is_not_a_repo_has_no_preview() {
+        let dir = worktree_with(PLAYGROUND);
         assert!(!enabled(dir.path()));
     }
 

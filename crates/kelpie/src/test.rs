@@ -283,7 +283,9 @@ impl Claude for FakeClaude {
                 })
             }
             Some(Scripted::Push(file, text)) => {
-                std::fs::write(call.cwd.join(file), text).unwrap();
+                let path = call.cwd.join(file);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, text).unwrap();
                 git(&call.cwd, &["add", file]);
                 git(&call.cwd, &["commit", "--quiet", "-m", file]);
                 git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);

@@ -206,7 +206,7 @@ impl Runner {
             &item.build,
         )
         .map_err(|e| e.to_string())?;
-        let preview = preview::enabled(&item.worktree);
+        let preview = preview::enabled(&self.settings.repo);
         let profile = WorkerProfile {
             worktree: &item.worktree,
             build: &item.build,

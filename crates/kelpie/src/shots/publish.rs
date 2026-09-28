@@ -113,7 +113,8 @@ pub fn comment(
     if !problems.is_empty() {
         body.push_str("\nWhat went wrong:\n\n");
         for problem in problems {
-            let _ = writeln!(body, "- {problem}");
+            // The page wrote some of this, so it is shown, never rendered.
+            let _ = writeln!(body, "- `{}`", problem.replace('`', "'"));
         }
     }
     body

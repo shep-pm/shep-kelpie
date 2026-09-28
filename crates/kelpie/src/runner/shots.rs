@@ -30,12 +30,9 @@ pub(super) enum RoundShots {
 }
 
 impl Runner {
-    /// Whether the work item's worktree has a launch file
+    /// Whether the project's `main` has a launch file, with a work item in flight
     pub(super) fn preview_on(&self) -> bool {
-        self.state
-            .work_item
-            .as_ref()
-            .is_some_and(|item| preview::enabled(&item.worktree))
+        self.state.work_item.is_some() && preview::enabled(&self.settings.repo)
     }
 
     /// The job for a run into `out`, on the settings' routes and the worker's

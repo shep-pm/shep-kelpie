@@ -237,7 +237,8 @@ fn parse_report(text: &str) -> Result<Vec<Page>, String> {
 }
 
 // The sandbox runtime's settings for the dev server: the worker's own write
-// fence and credential denies, and the preview's domains only.
+// fence and credential denies, and the preview's domains only. The shots
+// folder stays out of its reach, so the server cannot touch what kelpie posts.
 fn sandbox(job: &ShotsJob) -> serde_json::Value {
     let deny_read: Vec<&str> = CREDENTIALS
         .iter()
@@ -252,7 +253,7 @@ fn sandbox(job: &ShotsJob) -> serde_json::Value {
         },
         "filesystem": {
             "denyRead": deny_read,
-            "allowWrite": [job.worktree, job.build, job.out],
+            "allowWrite": [job.worktree, job.build],
             "denyWrite": [],
         },
     })
@@ -368,7 +369,7 @@ mod tests {
         let s = sandbox(&job);
         assert_eq!(
             s["filesystem"]["allowWrite"],
-            json!(["/k/wt/lab/7", "/k/targets/lab/7", "/k/shots/lab/7/abc1234"])
+            json!(["/k/wt/lab/7", "/k/targets/lab/7"])
         );
         assert_eq!(s["network"]["allowedDomains"], json!(["leekduck.com"]));
         let deny = s["filesystem"]["denyRead"].as_array().unwrap();

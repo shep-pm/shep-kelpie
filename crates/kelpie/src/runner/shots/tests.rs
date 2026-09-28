@@ -53,6 +53,24 @@ fn a_project_without_a_launch_file_behaves_as_before() {
 }
 
 #[test]
+fn a_launch_file_the_worker_adds_on_its_branch_opens_nothing() {
+    let rig = Rig::new("koji");
+    let runner = started(&rig);
+    rig.claude.script([
+        Scripted::Push(".claude/launch.json", r#"{"configurations": []}"#),
+        Scripted::Text("CLEAN"),
+    ]);
+    step(&runner).unwrap(); // the worker's turn adds the file
+    step(&runner).unwrap(); // round 1, qwen
+    step(&runner).unwrap(); // round 2, claude: no shots first
+    assert!(rig.worktree_7().join(".claude/launch.json").is_file());
+    assert_eq!(rig.shots.jobs(), []);
+    let all = rig.claude.all_seen();
+    let round = all.iter().find(|s| s.call.role == Role::Reviewer).unwrap();
+    assert!(!round.call.prompt.contains("--- shots ---"));
+}
+
+#[test]
 fn a_worker_with_a_launch_file_gets_playwright_and_the_shots_tool() {
     let rig = with_preview("lab");
     let runner = started(&rig);
@@ -418,7 +436,7 @@ fn a_page_that_calls_a_domain_off_the_list_says_so_on_the_comment() {
     let [body] = shots_comments(&rig).try_into().unwrap();
     assert!(
         body.contains(&format!(
-            "What went wrong:\n\n- / at mobile, light: {blocked}\n"
+            "What went wrong:\n\n- `/ at mobile, light: {blocked}`\n"
         )),
         "{body}"
     );
