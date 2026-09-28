@@ -5,7 +5,7 @@
 //! [`super::triggers`]. The shell in [`super`] feeds it from shep and
 //! delivers its grants as triggers.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 use crate::lease::book::{Asked, Grant, LeaseBook};
 use crate::lease::gpu::GpuLock;
@@ -33,15 +33,44 @@ struct Run {
     totals: BTreeMap<LeaseKind, Totals>,
 }
 
+/// How many replaced runs the desk remembers per runner, newest kept. A
+/// late metric comes from a run replaced moments before, so a few cover it,
+/// and the book file stops growing with every restart.
+const RETIRED_PER_RUNNER: usize = 8;
+
+// Runs already replaced, per runner, oldest first. Pids are not ordered,
+// so a late metric from one is known only by having seen it retired.
+#[derive(Debug, Default)]
+struct Retired(BTreeMap<String, VecDeque<Epoch>>);
+
+impl Retired {
+    fn contains(&self, sheep: &str, epoch: Epoch) -> bool {
+        self.0.get(sheep).is_some_and(|runs| runs.contains(&epoch))
+    }
+
+    fn insert(&mut self, sheep: &str, epoch: Epoch) {
+        let runs = self.0.entry(sheep.to_owned()).or_default();
+        runs.retain(|e| *e != epoch);
+        runs.push_back(epoch);
+        if runs.len() > RETIRED_PER_RUNNER {
+            runs.pop_front();
+        }
+    }
+
+    fn remove(&mut self, sheep: &str, epoch: Epoch) {
+        if let Some(runs) = self.0.get_mut(sheep) {
+            runs.retain(|e| *e != epoch);
+        }
+    }
+}
+
 /// The lease book and everything the dog knows about each runner's run
 #[derive(Debug)]
 pub struct Desk {
     pub(super) book: LeaseBook,
     pub(super) gpu: GpuLock,
     runs: HashMap<String, Run>,
-    // Runs already replaced. Pids are not ordered, so a late metric from
-    // one is known only by having seen it retired.
-    retired: HashSet<(String, Epoch)>,
+    retired: Retired,
 }
 
 impl Desk {
@@ -79,12 +108,15 @@ impl Desk {
                 (run.sheep, restored)
             })
             .collect();
-        let retired = saved.retired.into_iter().map(|r| (r.sheep, r.epoch));
+        let mut retired = Retired::default();
+        for run in saved.retired {
+            retired.insert(&run.sheep, run.epoch);
+        }
         Self {
             book,
             gpu,
             runs,
-            retired: retired.collect(),
+            retired,
         }
     }
 
@@ -108,16 +140,13 @@ impl Desk {
             })
             .collect();
         runs.sort_by(|a, b| a.sheep.cmp(&b.sheep));
-        let mut retired: Vec<SavedRunId> = self
-            .retired
-            .iter()
-            .map(|(sheep, epoch)| SavedRunId {
+        let retired = self.retired.0.iter().flat_map(|(sheep, runs)| {
+            runs.iter().map(|epoch| SavedRunId {
                 sheep: sheep.clone(),
                 epoch: *epoch,
             })
-            .collect();
-        retired.sort_unstable();
-        SavedBook::new(self.book.saved(), runs, retired)
+        });
+        SavedBook::new(self.book.saved(), runs, retired.collect())
     }
 
     /// Takes one channel metric from sheep `sheep`
@@ -183,7 +212,7 @@ impl Desk {
     // The run `epoch` of `sheep`, started if it is new. `None` for a run
     // already replaced; otherwise the grants a new run's reclaim made.
     fn run_of(&mut self, sheep: &str, project: &ProjectName, epoch: Epoch) -> Option<Vec<Grant>> {
-        if self.retired.contains(&(sheep.to_owned(), epoch)) {
+        if self.retired.contains(sheep, epoch) {
             return None;
         }
         let run = self.runs.entry(sheep.to_owned()).or_insert_with(|| Run {
@@ -193,7 +222,7 @@ impl Desk {
         if run.epoch == epoch {
             return Some(Vec::new());
         }
-        self.retired.insert((sheep.to_owned(), run.epoch));
+        self.retired.insert(sheep, run.epoch);
         *run = Run {
             epoch,
             totals: BTreeMap::new(),
@@ -211,10 +240,10 @@ impl Desk {
         let keep = pid.map(|pid| Epoch(u64::from(pid)));
         // A live pid is a live run, even one reusing a retired pid.
         if let Some(epoch) = keep {
-            self.retired.remove(&(sheep.to_owned(), epoch));
+            self.retired.remove(sheep, epoch);
         }
         if let Some(run) = self.runs.get(sheep).filter(|run| Some(run.epoch) != keep) {
-            self.retired.insert((sheep.to_owned(), run.epoch));
+            self.retired.insert(sheep, run.epoch);
             self.runs.remove(sheep);
         }
         deliveries(self.book.reclaim(&project, keep))
@@ -706,5 +735,24 @@ pub(super) mod tests {
         assert_eq!(w.raise("koji", koji.want(&cr)), []);
         w.clock.advance(600);
         assert_eq!(w.desk.tick(), [coderabbit_grant("koji", 101)]);
+    }
+
+    #[test]
+    fn a_runner_restarted_many_times_is_remembered_for_its_newest_runs() {
+        let mut w = world();
+        for pid in 1..=20 {
+            w.desk.runner_is("koji", Some(pid));
+            w.raise("koji", Asker::new(Epoch(u64::from(pid))).want(&stand_in()));
+        }
+        w.desk.runner_is("koji", Some(21));
+        w.restart();
+        let retired: Vec<u64> = w.desk.saved().retired.iter().map(|r| r.epoch.0).collect();
+        assert_eq!(retired, (13..=20).collect::<Vec<_>>());
+        let mut newest_replaced = Asker::new(Epoch(20));
+        assert_eq!(
+            w.raise("koji", newest_replaced.want(&stand_in())),
+            [],
+            "a late metric from a recent run still changes nothing"
+        );
     }
 }
