@@ -352,4 +352,7 @@ pub(super) enum ReviewResult {
     Findings(Result<Vec<Finding>, String>),
     /// The judge's verdict on one finding
     Verdict(Result<Verdict, String>),
+    /// The call was ended because the runner is stopping, before it came
+    /// back with anything
+    Stopped,
 }

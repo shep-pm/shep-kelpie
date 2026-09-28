@@ -16,7 +16,9 @@ use std::path::Path;
 
 use super::Runner;
 use super::report::{Begin, ReviewCall, ReviewResult, StepReport};
-use crate::ports::{Claude, Finding, Reviewer, Severity, Verdict, parse_findings};
+use crate::ports::{
+    Claude, ClaudeError, Finding, Reviewer, ReviewerError, Severity, Verdict, parse_findings,
+};
 use crate::state::{Fix, RulingKind, StateError};
 use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, ReviewerKind, Turn};
 use crate::worktree;
@@ -218,6 +220,12 @@ impl Runner {
         &mut self,
         result: ReviewResult,
     ) -> Result<Option<StepReport>, StateError> {
+        // A call stopped with the runner saves nothing, the same as a turn
+        // in `end_turn`: its round or judge call is still due, and runs
+        // again once a restart clears `review_call`.
+        if matches!(result, ReviewResult::Stopped) {
+            return Ok(None);
+        }
         let in_coderabbit_round = self
             .state
             .work_item
@@ -284,6 +292,7 @@ impl Runner {
                 }
             }
             ReviewResult::Verdict(Err(reason)) => StepReport::GateFailed { issue, reason },
+            ReviewResult::Stopped => unreachable!("a stopped call returns above"),
             ReviewResult::Verdict(Ok(verdict)) => {
                 let ReviewStage::Judging {
                     findings,
@@ -338,6 +347,9 @@ pub(super) fn advance(review: Review, clean: bool, now: crate::ports::Timestamp)
 
 /// Runs `action` outside the runner's lock: the qwen script, or a fresh
 /// Claude call for a review round or the judge
+///
+/// A call stopped with the runner comes back as [`ReviewResult::Stopped`]
+/// rather than an error, so `end_review` can tell it from a failed gate.
 pub(super) fn run_review_call(
     claude: &dyn Claude,
     reviewer: &dyn Reviewer,
@@ -348,26 +360,25 @@ pub(super) fn run_review_call(
             worktree,
             out,
             round,
-        } => ReviewResult::Findings(
-            reviewer
-                .round(&worktree, &out, round)
-                .map_err(|e| e.to_string()),
-        ),
-        ReviewCall::ClaudeRound(call) => ReviewResult::Findings(
-            claude
-                .run(&call)
-                .map(|reply| parse_findings(&reply.text))
-                .map_err(|e| e.to_string()),
-        ),
-        ReviewCall::Judge(call) => ReviewResult::Verdict(
-            claude
-                .run(&call)
-                .map_err(|e| e.to_string())
-                .and_then(|reply| {
-                    calls::parse_verdict(&reply.text)
-                        .ok_or_else(|| format!("unreadable judge output: {}", reply.text.trim()))
-                }),
-        ),
+        } => match reviewer.round(&worktree, &out, round) {
+            Err(ReviewerError::Stopped) => ReviewResult::Stopped,
+            result => ReviewResult::Findings(result.map_err(|e| e.to_string())),
+        },
+        ReviewCall::ClaudeRound(call) => match claude.run(&call) {
+            Err(ClaudeError::Stopped) => ReviewResult::Stopped,
+            result => ReviewResult::Findings(
+                result
+                    .map(|reply| parse_findings(&reply.text))
+                    .map_err(|e| e.to_string()),
+            ),
+        },
+        ReviewCall::Judge(call) => match claude.run(&call) {
+            Err(ClaudeError::Stopped) => ReviewResult::Stopped,
+            result => ReviewResult::Verdict(result.map_err(|e| e.to_string()).and_then(|reply| {
+                calls::parse_verdict(&reply.text)
+                    .ok_or_else(|| format!("unreadable judge output: {}", reply.text.trim()))
+            })),
+        },
     }
 }
 
@@ -675,6 +686,109 @@ mod tests {
                 "guard_cleared": true,
                 "stage": { "stage": "round" },
             }),
+        );
+    }
+
+    // Where round 1 stands before its qwen call runs: the worker's first
+    // turn opened the pull request.
+    fn at_round_1(project: &str) -> (Rig, std::sync::Mutex<crate::runner::Runner>) {
+        let rig = Rig::new(project);
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "start", None);
+        rig.ask(&runner, "add", Some("7"));
+        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+        rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+        step(&runner).unwrap();
+        (rig, runner)
+    }
+
+    #[test]
+    fn a_qwen_round_stopped_with_the_runner_runs_again_on_restart() {
+        let (rig, runner) = at_round_1("shep");
+        rig.reviewer
+            .script([ScriptedRound::Fail(crate::ports::ReviewerError::Stopped)]);
+        assert_eq!(step(&runner).unwrap(), None, "no failed gate is reported");
+        drop(runner);
+
+        let runner = rig.open().unwrap();
+        assert_eq!(
+            step(&runner).unwrap(), // clean by default this time
+            Some(StepReport::ReviewFindingsSent {
+                issue: 7,
+                pull_request: 71,
+                round: 1,
+                held: 0,
+                clean: true,
+            })
+        );
+        assert_eq!(rig.reviewer.seen().len(), 2, "round 1 ran again");
+    }
+
+    #[test]
+    fn a_claude_round_stopped_with_the_runner_runs_again_on_restart() {
+        let (rig, runner) = at_round_1("shep");
+        step(&runner).unwrap(); // round 1, qwen: clean by default
+        rig.claude.script([Scripted::Fail(ClaudeError::Stopped)]);
+        assert_eq!(step(&runner).unwrap(), None, "no failed gate is reported");
+        drop(runner);
+
+        let runner = rig.open().unwrap();
+        assert_eq!(
+            rig.ask(&runner, "status", None)["work_item"]["phase"],
+            json!({
+                "state": "review",
+                "round": 2,
+                "consecutive_clean": 1,
+                "guard_cleared": false,
+                "stage": { "stage": "round" },
+            }),
+            "round 2 is still due, and round 1's clean still counts"
+        );
+        rig.claude.script([Scripted::Text("CLEAN")]);
+        step(&runner).unwrap();
+        let reviewers = rig.claude.all_calls();
+        let reviewers: Vec<_> = reviewers
+            .iter()
+            .filter(|c| c.role == Role::Reviewer)
+            .collect();
+        assert_eq!(reviewers.len(), 2, "round 2 ran again");
+        assert_eq!(
+            rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+            "ci"
+        );
+    }
+
+    #[test]
+    fn a_judge_call_stopped_with_the_runner_runs_again_on_restart() {
+        let (rig, runner) = at_round_1("shep");
+        rig.reviewer.script([ScriptedRound::Findings(vec![Finding {
+            severity: Severity::High,
+            file: "src/lib.rs".into(),
+            line: 9,
+            what: "looks racy".into(),
+            why: "two threads write the same field".into(),
+        }])]);
+        step(&runner).unwrap(); // round 1's qwen call
+        rig.claude.script([Scripted::Fail(ClaudeError::Stopped)]);
+        assert_eq!(step(&runner).unwrap(), None, "no failed gate is reported");
+        drop(runner);
+
+        let runner = rig.open().unwrap();
+        assert_eq!(
+            rig.ask(&runner, "status", None)["work_item"]["phase"]["stage"]["verdicts"],
+            json!([]),
+        );
+        rig.claude.script([Scripted::Text(
+            r#"{"holds": false, "severity": "high", "reason": "the field is behind a mutex"}"#,
+        )]);
+        assert_eq!(
+            step(&runner).unwrap(),
+            Some(StepReport::FindingJudged {
+                issue: 7,
+                round: 1,
+                holds: false,
+                severity: Severity::High,
+            })
         );
     }
 }
