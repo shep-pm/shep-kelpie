@@ -152,11 +152,11 @@ pub struct Pacing {
 #[serde(deny_unknown_fields)]
 pub struct Worker {
     /// Domains the worker's sandbox may reach besides GitHub, such as a
-    /// package registry. None when absent.
+    /// package registry. Empty when absent.
     #[serde(default)]
     pub allowed_domains: Vec<NonBlank>,
     /// Environment variables set to a folder inside the worker's build
-    /// folder, for tool caches the sandbox would refuse elsewhere. None when
+    /// folder, for tool caches the sandbox would refuse elsewhere. Empty when
     /// absent.
     #[serde(default)]
     pub build_env: BTreeMap<EnvName, BuildDir>,
