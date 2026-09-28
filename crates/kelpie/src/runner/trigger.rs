@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use super::pace::PacerStatus;
 use super::{Answer, Runner};
-use crate::board::WorkerModel;
+use crate::board::{Skip, WorkerModel};
 use crate::ports::{SessionId, Timestamp};
 use crate::state::{LeaseHeld, Ruling, RunState, StateError};
 use crate::work_item::{CodeRabbitTally, Phase, Turn, WorkItem};
@@ -30,6 +30,8 @@ pub struct Status<'a> {
     pub since: Timestamp,
     /// The work item in flight
     pub work_item: Option<WorkItemStatus<'a>>,
+    /// Ready issues the board passed over on its last poll, and why
+    pub skipped: &'a [Skip],
     /// Rulings waiting on the maintainer, oldest first
     pub rulings: &'a [Ruling],
     /// Leases held
@@ -297,6 +299,7 @@ mod tests {
                 "run": "paused",
                 "since": Rig::EPOCH,
                 "work_item": null,
+                "skipped": [],
                 "rulings": [],
                 "leases": [],
                 "pacer": { "reading": null, "holding": null },

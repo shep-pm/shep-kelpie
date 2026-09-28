@@ -4,7 +4,10 @@
 //! The oldest one, by issue number, is dispatched next. An issue that already
 //! has an open pull request or an assignee is someone's work in progress, and
 //! is skipped. So is one whose `worker:` label cannot be read, since kelpie
-//! would not know which model to run it on.
+//! would not know which model to run it on. An issue the runner picks but
+//! cannot take, because the forge cannot show it or its `worker:` label
+//! fails when `add` reads it, is skipped too, so it cannot stall the issues
+//! behind it.
 
 use std::fmt;
 
@@ -76,6 +79,26 @@ pub enum Skip {
         /// Why
         error: LabelError,
     },
+    /// The forge could not show it when the runner came to take it
+    Failed {
+        /// The issue
+        issue: u64,
+        /// Why, as the refusal reads
+        error: String,
+    },
+}
+
+impl Skip {
+    /// The issue passed over
+    pub fn issue(&self) -> u64 {
+        match self {
+            Self::PullRequest { issue, .. }
+            | Self::Finished { issue }
+            | Self::Assigned { issue }
+            | Self::Label { issue, .. }
+            | Self::Failed { issue, .. } => *issue,
+        }
+    }
 }
 
 /// What the board picked, and what it passed over on the way

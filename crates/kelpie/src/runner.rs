@@ -9,7 +9,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::board::{LabelError, WorkerModel, worker_override};
+use crate::board::{LabelError, Skip, WorkerModel, worker_override};
 use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Ports, Timestamp, Visibility};
 use crate::settings::{Settings, SettingsError};
@@ -127,6 +127,8 @@ pub struct Runner {
     ports: Ports,
     // The pacer's last reading of usage and when it was read, kept in memory only
     pacing: Option<(Timestamp, Assessment)>,
+    // What the board passed over on its last poll, kept in memory only
+    skipped: Vec<Skip>,
     webhook: Webhook,
     // The last failed webhook post, kept in memory so a restart tries at once
     retry: Option<alert::Retry>,
@@ -184,6 +186,7 @@ impl Runner {
             state,
             ports,
             pacing: None,
+            skipped: Vec::new(),
             webhook,
             retry: None,
             relay_cleared: None,
@@ -202,6 +205,7 @@ impl Runner {
             run: self.state.run,
             since: self.state.since,
             work_item: self.state.work_item.as_ref().map(WorkItemStatus::from),
+            skipped: &self.skipped,
             rulings: &self.state.rulings,
             leases: &self.state.leases,
             pacer: self.pacer_status(self.ports.clock.now()),
