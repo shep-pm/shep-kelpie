@@ -328,12 +328,8 @@ mod tests {
         hold.release();
         eventually("the review round", || !rig.reviewer.seen().is_empty());
 
-        let started = Instant::now();
-        let let_go = worker.stop(PATIENCE, || {});
-
-        assert!(let_go);
         assert!(
-            started.elapsed() < PATIENCE,
+            worker.stop(JOIN_BOUND, || {}),
             "the worker slept through the stop"
         );
     }
