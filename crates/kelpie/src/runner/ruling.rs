@@ -105,7 +105,8 @@ impl Runner {
     /// # Errors
     ///
     /// [`RuleError`] when no such ruling is pending, the answer does not fit
-    /// it, or the answer cannot be saved. Nothing changes then.
+    /// it, or the answer cannot be saved. The ruling stays pending then, and
+    /// answering again is safe: a worktree already at an accepted head is left.
     pub fn rule(&mut self, id: u64, answer: Answer) -> Result<(), RuleError> {
         let at = self.state.rulings.iter().position(|r| r.id == id);
         let at = at.ok_or(RuleError::NoSuchRuling(id))?;
