@@ -715,6 +715,14 @@ fn the_cap_leaves_generated_files_out_and_parks_the_worker_with_findings_open() 
     git(&worktree, &["push", "--quiet", "origin", "HEAD"]);
     let head = rig.forge.head_of("kelpie/7").unwrap();
     rig.forge.set_checks(&head, Checks::Passed);
+    // Not the worker's push, so it waits on a yes and a clean review loop.
+    let Some(StepReport::Ruling { id, .. }) = step(&runner).unwrap() else {
+        panic!("the lockfile commit did not park the worker");
+    };
+    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+    rig.claude.script([Scripted::Text("CLEAN")]);
+    step(&runner).unwrap(); // review round 1, qwen: clean by default
+    step(&runner).unwrap(); // review round 2, claude: scripted clean above
     assert!(matches!(
         rig.verdict(&runner),
         Some(StepReport::MarkedReady { .. })
@@ -856,4 +864,69 @@ fn coderabbit_that_cannot_be_read_is_tried_again_later() {
         step(&runner).unwrap(),
         Some(StepReport::CodeRabbitSatisfied { .. })
     ));
+}
+
+// The round a hand push lands after: CodeRabbit read `head` and left nothing.
+fn satisfied(project: &str) -> (Rig, Mutex<Runner>, String) {
+    let (rig, runner, head) = summoned(project);
+    rig.forge.coderabbit.review(71, &head, now(&rig) + 60, &[]);
+    rig.clock.advance(60);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::CodeRabbitSatisfied { .. })
+    ));
+    (rig, runner, head)
+}
+
+#[test]
+fn a_commit_pushed_by_hand_after_the_round_parks_rather_than_reaching_the_merge_ruling() {
+    let (rig, runner, _) = satisfied("koji");
+    let by_hand = rig.push_by_hand("kelpie/7", "by-hand.txt");
+    rig.forge.set_checks(&by_hand, Checks::Passed);
+    let Some(StepReport::Ruling { id, question, .. }) = rig.verdict(&runner) else {
+        panic!("the commit pushed by hand parked nothing");
+    };
+    assert_eq!(
+        question,
+        format!(
+            "Pull request #71 changed outside kelpie: its head moved to {}, a commit \
+             the worker did not push. `shep trigger koji rule '{id} yes'` accepts it \
+             and kelpie carries on, and `shep trigger koji rule '{id} no <note>'` \
+             sends the worker your note.",
+            &by_hand[..7]
+        )
+    );
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id }));
+    rig.clock.advance(CHECKS_SETTLE);
+    assert_eq!(step(&runner).unwrap(), None, "a parked worker waits");
+    assert_eq!(rig.forge.merges(), []);
+}
+
+#[test]
+fn a_yes_on_a_commit_pushed_by_hand_runs_the_review_loop_and_coderabbit_on_it() {
+    let (rig, runner, _) = satisfied("zeus");
+    let by_hand = rig.push_by_hand("kelpie/7", "by-hand.txt");
+    let Some(StepReport::Ruling { id, .. }) = rig.verdict(&runner) else {
+        panic!("the commit pushed by hand parked nothing");
+    };
+    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+    assert_eq!(git(&rig.worktree_7(), &["rev-parse", "HEAD"]), by_hand);
+
+    let reviewed = rig.reviewer.seen().len();
+    rig.claude.script([Scripted::Text("CLEAN")]);
+    step(&runner).unwrap(); // review round 1, qwen: clean by default
+    step(&runner).unwrap(); // review round 2, claude: scripted clean above
+    assert_eq!(rig.reviewer.seen().len(), reviewed + 1);
+    let claude = rig.claude.all_calls().pop().unwrap();
+    assert!(claude.prompt.contains("by-hand.txt"), "{}", claude.prompt);
+
+    rig.forge.set_checks(&by_hand, Checks::Passed);
+    assert_eq!(
+        rig.verdict(&runner),
+        Some(StepReport::Summoned {
+            issue: 7,
+            pull_request: 71,
+            head: by_hand,
+        })
+    );
 }

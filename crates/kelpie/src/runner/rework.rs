@@ -334,6 +334,7 @@ impl Runner {
             known: Known {
                 labels,
                 ready: !pr.draft,
+                head: None,
             },
             ..fresh
         });

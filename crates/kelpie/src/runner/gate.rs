@@ -1,7 +1,7 @@
 //! The gate between the worker's pull request and the merge ruling
 //!
-//! Each step looks once at the pull request's head. A label or ready change
-//! kelpie did not make parks the worker first, before anything else. A
+//! Each step looks once at the pull request's head. A label, ready or head
+//! change kelpie did not make parks the worker before anything else. A
 //! branch without the latest `main` is rebased and pushed, and a conflict is
 //! the worker's next turn, naming the files. A conflict the worker left
 //! standing parks it on a ruling. A pending run, or none yet, waits for the
@@ -52,12 +52,7 @@ impl Runner {
             }
             PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
         }
-        // A rework asked for while one is in flight waits until it ends.
-        let mut labels = pr.labels;
-        labels.retain(|l| l != READY);
-        if let Some((known, description)) = foreign_change(&item.known, &labels, !pr.draft) {
-            return self.raise(number, RulingKind::ForeignChange { description, known });
-        }
+        let known = item.known.clone();
         let now = self.ports.clock.now();
         let since = if seen.as_deref() == Some(pr.head.as_str()) {
             since
@@ -66,11 +61,24 @@ impl Runner {
             self.update(|item| item.phase = Phase::Ci { head, since: now })?;
             now
         };
-        match self.base_of(&pr.head) {
-            Ok(Base::Current) => {}
+        let base = match self.base_of(&pr.head) {
             Ok(Base::Lagging) => return Ok(Begin::Idle),
-            Ok(Base::Behind) => return self.rebase(number, &pr.head),
+            Ok(base) => base,
             Err(reason) => return Ok(self.gate_failed(reason)),
+        };
+        // Past the lag, the forge's head is the branch on `origin`, not a
+        // worker's push still arriving. A rework asked for mid-flight waits.
+        let mut labels = pr.labels;
+        labels.retain(|l| l != READY);
+        if let Some((known, description)) = foreign_change(&known, &labels, !pr.draft, &pr.head) {
+            return self.raise(number, RulingKind::ForeignChange { description, known });
+        }
+        if known.head.is_none() {
+            let head = Some(pr.head.clone());
+            self.update(|item| item.known.head = head)?;
+        }
+        if base == Base::Behind {
+            return self.rebase(number, &pr.head);
         }
         if !self.settings.ci {
             return self.passed(number, pr.head);
@@ -159,7 +167,10 @@ impl Runner {
         match outcome {
             Ok(Rebase::Pushed(rebased)) => {
                 let (seen, since) = (Some(rebased.clone()), self.ports.clock.now());
-                self.update(|item| item.phase = Phase::Ci { head: seen, since })?;
+                self.update(|item| {
+                    item.known.head.clone_from(&seen);
+                    item.phase = Phase::Ci { head: seen, since };
+                })?;
                 Ok(Begin::Report(StepReport::Rebased {
                     issue,
                     pull_request: number,
@@ -788,7 +799,7 @@ mod tests {
             json!({
                 "kind": "foreign-change",
                 "description": "the `bug` label was added",
-                "known": { "labels": ["bug"], "ready": false },
+                "known": { "labels": ["bug"], "ready": false, "head": head },
             })
         );
 

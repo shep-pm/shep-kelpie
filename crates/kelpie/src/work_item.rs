@@ -57,8 +57,8 @@ pub struct WorkItem {
     /// Its CodeRabbit rounds so far
     #[serde(default)]
     pub coderabbit: CodeRabbitTally,
-    /// The pull request's labels and ready state, as kelpie's own changes
-    /// leave them. A mismatch at the gate is a change kelpie did not make.
+    /// The pull request's labels, ready state and head, as kelpie and its
+    /// worker leave them. A mismatch at the gate is a change kelpie did not make.
     #[serde(default)]
     pub known: Known,
     /// Every Claude call made for it, oldest first
@@ -139,7 +139,7 @@ pub struct OpenThread {
     pub finding: Finding,
 }
 
-/// The labels and ready state kelpie believes a pull request carries
+/// The labels, ready state and head kelpie believes a pull request carries
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -148,11 +148,22 @@ pub struct Known {
     pub labels: Vec<String>,
     /// Whether it is marked ready for review (not a draft)
     pub ready: bool,
+    /// Its head as the worker's turn or kelpie's own push left it, once
+    /// kelpie has read one
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
 }
 
-/// Whether `labels` and `ready`, as seen on the forge, differ from `known`,
-/// and if so what changed, named plainly enough to answer from a phone
-pub fn foreign_change(known: &Known, labels: &[String], ready: bool) -> Option<(Known, String)> {
+/// Whether `labels`, `ready` and `head`, as seen on the forge, differ from
+/// `known`, and if so what changed, named plainly enough to answer from a phone
+///
+/// A `known` with no head makes no claim about it.
+pub fn foreign_change(
+    known: &Known,
+    labels: &[String],
+    ready: bool,
+    head: &str,
+) -> Option<(Known, String)> {
     let added: Vec<&String> = labels
         .iter()
         .filter(|l| !known.labels.contains(l))
@@ -182,12 +193,19 @@ pub fn foreign_change(known: &Known, labels: &[String], ready: bool) -> Option<(
     } else if !ready && known.ready {
         parts.push("it was marked a draft again".to_owned());
     }
+    if known.head.as_deref().is_some_and(|h| h != head) {
+        let short = head.get(..7).unwrap_or(head);
+        parts.push(format!(
+            "its head moved to {short}, a commit the worker did not push"
+        ));
+    }
     if parts.is_empty() {
         return None;
     }
     let seen = Known {
         labels: labels.to_vec(),
         ready,
+        head: Some(head.to_owned()),
     };
     Some((seen, parts.join("; ")))
 }
@@ -658,20 +676,25 @@ mod tests {
         let known = Known {
             labels: vec!["bug".into()],
             ready: true,
+            head: None,
         };
-        assert_eq!(foreign_change(&known, &["bug".to_owned()], true), None);
+        assert_eq!(
+            foreign_change(&known, &["bug".to_owned()], true, "c0ffee"),
+            None
+        );
     }
 
     #[test]
     fn one_label_added_is_named_in_the_singular() {
         let known = Known::default();
-        let (seen, text) = foreign_change(&known, &["bug".to_owned()], false).unwrap();
+        let (seen, text) = foreign_change(&known, &["bug".to_owned()], false, "c0ffee").unwrap();
         assert_eq!(text, "the `bug` label was added");
         assert_eq!(
             seen,
             Known {
                 labels: vec!["bug".into()],
                 ready: false,
+                head: Some("c0ffee".into()),
             }
         );
     }
@@ -680,7 +703,7 @@ mod tests {
     fn two_labels_added_are_named_in_the_plural() {
         let known = Known::default();
         let labels = ["urgent".to_owned(), "bug".to_owned()];
-        let (_, text) = foreign_change(&known, &labels, false).unwrap();
+        let (_, text) = foreign_change(&known, &labels, false, "c0ffee").unwrap();
         assert_eq!(text, "the `urgent`, `bug` labels were added");
     }
 
@@ -689,30 +712,33 @@ mod tests {
         let known = Known {
             labels: vec!["bug".into()],
             ready: false,
+            head: None,
         };
-        let (_, text) = foreign_change(&known, &[], false).unwrap();
+        let (_, text) = foreign_change(&known, &[], false, "c0ffee").unwrap();
         assert_eq!(text, "the `bug` label was removed");
 
         let known = Known {
             labels: vec!["urgent".into(), "bug".into()],
             ready: false,
+            head: None,
         };
-        let (_, text) = foreign_change(&known, &[], false).unwrap();
+        let (_, text) = foreign_change(&known, &[], false, "c0ffee").unwrap();
         assert_eq!(text, "the `urgent`, `bug` labels were removed");
     }
 
     #[test]
     fn marking_ready_or_a_draft_again_is_named() {
         let known = Known::default();
-        let (seen, text) = foreign_change(&known, &[], true).unwrap();
+        let (seen, text) = foreign_change(&known, &[], true, "c0ffee").unwrap();
         assert_eq!(text, "it was marked ready for review");
         assert!(seen.ready);
 
         let known = Known {
             labels: vec![],
             ready: true,
+            head: None,
         };
-        let (seen, text) = foreign_change(&known, &[], false).unwrap();
+        let (seen, text) = foreign_change(&known, &[], false, "c0ffee").unwrap();
         assert_eq!(text, "it was marked a draft again");
         assert!(!seen.ready);
     }
@@ -722,12 +748,38 @@ mod tests {
         let known = Known {
             labels: vec!["bug".into()],
             ready: false,
+            head: Some("a11ce".into()),
         };
-        let (_, text) = foreign_change(&known, &["urgent".to_owned()], true).unwrap();
+        let (_, text) = foreign_change(&known, &["urgent".to_owned()], true, "c0ffee").unwrap();
         assert_eq!(
             text,
             "the `urgent` label was added; the `bug` label was removed; \
-             it was marked ready for review"
+             it was marked ready for review; \
+             its head moved to c0ffee, a commit the worker did not push"
+        );
+    }
+
+    #[test]
+    fn a_head_the_worker_did_not_push_is_named_by_its_short_hash() {
+        let known = Known {
+            head: Some("a11ce".into()),
+            ..Known::default()
+        };
+        let head = "4887ecf0123456789";
+        let (seen, text) = foreign_change(&known, &[], false, head).unwrap();
+        assert_eq!(
+            text,
+            "its head moved to 4887ecf, a commit the worker did not push"
+        );
+        assert_eq!(seen.head.as_deref(), Some(head));
+        assert_eq!(foreign_change(&seen, &[], false, head), None);
+    }
+
+    #[test]
+    fn a_known_with_no_head_makes_no_claim_about_it() {
+        assert_eq!(
+            foreign_change(&Known::default(), &[], false, "c0ffee"),
+            None
         );
     }
 

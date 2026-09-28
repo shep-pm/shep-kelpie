@@ -15,6 +15,7 @@ use super::rework::HUMAN;
 use crate::ports::Timestamp;
 use crate::state::{Fix, ProjectState, Resume, Ruling, RulingKind, StateError};
 use crate::work_item::{CodeRabbitStage, Known, Phase, Review, Turn, WorkItem};
+use crate::worktree;
 
 /// The prompt for a turn resumed after the maintainer accepts a timed-out
 /// turn's ruling with a yes
@@ -48,6 +49,8 @@ pub enum RuleError {
     NotAQuestion(u64),
     /// The `ready-for-human` label could not come off this pull request
     Unlabel(u64, String),
+    /// The worktree could not be brought to the head a yes accepted
+    Adopt(String, String),
     /// The answer could not be saved
     State(StateError),
 }
@@ -66,6 +69,9 @@ impl fmt::Display for RuleError {
             ),
             Self::Unlabel(number, e) => {
                 write!(f, "cannot take the `{HUMAN}` label off #{number}: {e}")
+            }
+            Self::Adopt(head, e) => {
+                write!(f, "cannot bring the worktree to {}: {e}", short(head))
             }
             Self::State(e) => e.fmt(f),
         }
@@ -88,7 +94,8 @@ enum Move {
     },
     /// A yes on a failed turn: the turn goes back as it stood, under its phase
     Retry { turn: Turn, phase: Phase },
-    /// A yes on a foreign change: kelpie adopts it and watches CI again
+    /// A yes on a foreign change: kelpie adopts it. A new head goes
+    /// through the qwen-review loop, and anything else back to CI.
     Accept(Known),
 }
 
@@ -109,12 +116,23 @@ impl Runner {
             (&answer, &ruling.kind),
             (Answer::Yes, RulingKind::CodeRabbitCap { .. })
         );
+        // These ask the maintainer to fix the branch, so a yes vouches for its head.
+        let vouches = matches!(
+            (&answer, &ruling.kind),
+            (
+                Answer::Yes,
+                RulingKind::Rebase { .. } | RulingKind::StillRed { .. }
+            )
+        );
         let moved = decide(id, answer, ruling, now)?;
         // Only the ruling the work item is parked on moves it. Any other,
         // which nothing leaves behind today, is answered by clearing it.
         let parked_on = |item: &WorkItem| item.phase == Phase::Ruling { id };
         if let Some(item) = next.work_item.as_mut().filter(|item| parked_on(item)) {
             item.coderabbit.cap_cleared |= lifts_cap;
+            if vouches {
+                item.known.head = None;
+            }
             let worker = match moved {
                 Move::Phase(phase) => {
                     item.phase = phase;
@@ -127,11 +145,21 @@ impl Runner {
                 } => Some((Turn::Next { prompt }, phase, force)),
                 Move::Retry { turn, phase } => Some((turn, phase, None)),
                 Move::Accept(known) => {
-                    item.known = known;
-                    item.phase = Phase::Ci {
-                        head: None,
-                        since: now,
+                    let (from, to) = (item.known.head.take(), known.head.clone());
+                    item.phase = match (from, to) {
+                        (Some(from), Some(to)) if from != to => {
+                            let (repo, branch) = (&self.settings.repo, &item.branch);
+                            worktree::adopt(repo, &item.worktree, branch, &from, &to)
+                                .map_err(|e| RuleError::Adopt(to, e.to_string()))?;
+                            item.coderabbit.satisfied = false;
+                            Phase::Review(Review::first())
+                        }
+                        _ => Phase::Ci {
+                            head: None,
+                            since: now,
+                        },
                     };
+                    item.known = known;
                     None
                 }
             };
@@ -557,6 +585,31 @@ mod tests {
         assert_eq!(
             rig.ask(&runner, "rule", Some("1 yes")),
             json!({ "error": "no ruling 1 is pending" })
+        );
+    }
+
+    #[test]
+    fn a_yes_on_a_head_is_refused_while_the_worktree_holds_work_not_pushed() {
+        let (rig, runner, head) = Rig::with_pull_request("chelone");
+        let by_hand = rig.push_by_hand("kelpie/7", "by-hand.txt");
+        assert!(matches!(
+            rig.verdict(&runner),
+            Some(StepReport::Ruling { id: 1, .. })
+        ));
+        std::fs::write(rig.worktree_7().join("work.txt"), "unsaved\n").unwrap();
+        let reply = rig.ask(&runner, "rule", Some("1 yes"));
+        let error = reply["error"].as_str().unwrap();
+        assert!(
+            error.starts_with(&format!("cannot bring the worktree to {}: ", &by_hand[..7])),
+            "{error}"
+        );
+        assert_eq!(
+            rig.ask(&runner, "status", None)["work_item"]["phase"],
+            json!({ "state": "ruling", "id": 1 })
+        );
+        assert_eq!(
+            crate::test::git(&rig.worktree_7(), &["rev-parse", "HEAD"]),
+            head
         );
     }
 }
