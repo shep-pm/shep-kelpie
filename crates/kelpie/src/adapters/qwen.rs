@@ -201,9 +201,8 @@ fn is_skipped_for_size(finding: &Finding) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
-
     use super::*;
+    use crate::test::write_script;
 
     // A stand-in for the real script: it takes and releases a lock of its
     // own around the round, the way the maintainer's script takes the GPU
@@ -223,10 +222,7 @@ mod tests {
              : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n",
             lock = lock.display(),
         );
-        std::fs::write(&script, contents).unwrap();
-        let mut perms = std::fs::metadata(&script).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&script, perms).unwrap();
+        write_script(&script, &contents);
 
         let worktree = home.path().join("wt");
         std::fs::create_dir_all(&worktree).unwrap();
@@ -249,16 +245,12 @@ mod tests {
         let script_dir = home.path().join(".claude/scripts");
         std::fs::create_dir_all(&script_dir).unwrap();
         let script = script_dir.join("qwen-review.sh");
-        std::fs::write(
+        write_script(
             &script,
             "#!/bin/sh\nmkdir -p \"$QWEN_REVIEW_OUT\"\n\
              printf 'LOW|%s:1|seen|seen\\n' \"$TMPDIR\" > \"$QWEN_REVIEW_OUT/round-1.txt\"\n\
              : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n",
-        )
-        .unwrap();
-        let mut perms = std::fs::metadata(&script).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&script, perms).unwrap();
+        );
 
         let worktree = home.path().join("wt");
         std::fs::create_dir_all(&worktree).unwrap();
@@ -279,14 +271,10 @@ mod tests {
         let script_dir = home.path().join(".claude/scripts");
         std::fs::create_dir_all(&script_dir).unwrap();
         let script = script_dir.join("qwen-review.sh");
-        std::fs::write(
+        write_script(
             &script,
             "#!/bin/sh\nmkdir -p \"$QWEN_REVIEW_OUT\"\nexit 0\n",
-        )
-        .unwrap();
-        let mut perms = std::fs::metadata(&script).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&script, perms).unwrap();
+        );
 
         let worktree = home.path().join("wt");
         std::fs::create_dir_all(&worktree).unwrap();
@@ -324,10 +312,7 @@ case \"$*\" in
 esac
 : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"
 ";
-        std::fs::write(&script, contents).unwrap();
-        let mut perms = std::fs::metadata(&script).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&script, perms).unwrap();
+        write_script(&script, contents);
 
         let worktree = home.path().join("repo");
         std::fs::create_dir_all(worktree.join("sub/dir")).unwrap();
@@ -373,10 +358,7 @@ esac
              printf 'LOW|nope.rs:0|not reviewed: 900 lines exceeds the chunk limit|split the file or review it by hand\\n' \\
              > \"$QWEN_REVIEW_OUT/round-1.txt\"\n\
              : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n";
-        std::fs::write(&script, contents).unwrap();
-        let mut perms = std::fs::metadata(&script).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&script, perms).unwrap();
+        write_script(&script, contents);
 
         let worktree = home.path().join("not-a-repo");
         std::fs::create_dir_all(&worktree).unwrap();
@@ -416,10 +398,7 @@ case \"$*\" in
 esac
 : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"
 ";
-        std::fs::write(&script, contents).unwrap();
-        let mut perms = std::fs::metadata(&script).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&script, perms).unwrap();
+        write_script(&script, contents);
 
         let worktree = home.path().join("repo");
         std::fs::create_dir_all(worktree.join("sub")).unwrap();
@@ -482,10 +461,7 @@ case \"$*\" in
 esac
 : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"
 ";
-        std::fs::write(&script, contents).unwrap();
-        let mut perms = std::fs::metadata(&script).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&script, perms).unwrap();
+        write_script(&script, contents);
 
         let worktree = home.path().join("repo");
         std::fs::create_dir_all(worktree.join("sub/a")).unwrap();
