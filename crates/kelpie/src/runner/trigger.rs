@@ -310,7 +310,7 @@ mod tests {
                 "skipped": [],
                 "rulings": [],
                 "leases": [],
-                "pacer": { "reading": null, "holding": null },
+                "pacer": { "enabled": true, "reading": null, "holding": null },
             })
         );
     }

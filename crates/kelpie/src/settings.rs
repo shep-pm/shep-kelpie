@@ -3,9 +3,10 @@
 //! One TOML file per project, read once when the runner starts. Unknown keys
 //! are refused, so a misspelt or malformed setting stops the runner with a
 //! message naming it. Every setting is required except the ones added after
-//! the first build (`worker.allowed_domains`, `worker.build_env` and
-//! `worker.turn_timeout`): a file written before them loads with the
-//! documented default, so an upgrade never breaks an existing project.
+//! the first build (`pacing.enabled`, `worker.allowed_domains`,
+//! `worker.build_env` and `worker.turn_timeout`): a file written before them
+//! loads with the documented default, so an upgrade never breaks an existing
+//! project.
 //! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
@@ -143,8 +144,18 @@ pub struct CodeRabbit {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Pacing {
+    /// Whether the daily allowance and the 5-hour window hold anything
+    ///
+    /// Off, usage is still read for `status`, but nothing is held. On when
+    /// absent.
+    #[serde(default = "default_pacing_enabled")]
+    pub enabled: bool,
     /// Hours a day the daily allowance is spread over
     pub kickoff_hours: KickoffHours,
+}
+
+fn default_pacing_enabled() -> bool {
+    true
 }
 
 /// What every worker is started with
@@ -437,6 +448,7 @@ mod tests {
         assert_eq!(s.review.loop_guard.get(), 8);
         assert!(s.coderabbit.enabled);
         assert_eq!(s.coderabbit.divisor.get(), 1000);
+        assert!(s.pacing.enabled);
         assert_eq!(s.pacing.kickoff_hours.get(), 8);
         assert_eq!(s.worker.turn_timeout.get(), 60);
         assert!(s.generated.iter().any(|g| g == "Cargo.lock"));
@@ -494,6 +506,19 @@ mod tests {
         assert_eq!(s.worker.turn_timeout.get(), 60);
         assert!(s.worker.allowed_domains.is_empty());
         assert!(s.worker.build_env.is_empty());
+    }
+
+    #[test]
+    fn pacing_is_on_when_the_file_does_not_say() {
+        let before = EXAMPLE.replace("enabled = true\nkickoff_hours", "kickoff_hours");
+        assert!(!before.contains("[pacing]\nenabled"));
+        assert!(parse(&before).unwrap().pacing.enabled);
+    }
+
+    #[test]
+    fn pacing_can_be_turned_off() {
+        let off = EXAMPLE.replace("[pacing]\nenabled = true", "[pacing]\nenabled = false");
+        assert!(!parse(&off).unwrap().pacing.enabled);
     }
 
     #[test]

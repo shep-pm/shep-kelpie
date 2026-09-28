@@ -1,6 +1,7 @@
 # A project's settings, read once when its runner starts. Every key is
-# required except `worker.allowed_domains`, `worker.build_env` and
-# `worker.turn_timeout`, which a file written before them may leave out.
+# required except `pacing.enabled`, `worker.allowed_domains`,
+# `worker.build_env` and `worker.turn_timeout`, which a file written before
+# them may leave out.
 # This file holds the first build's defaults, for shep.
 
 repo = "~/.kelpie/repos/shep"
@@ -46,7 +47,11 @@ loop_guard = 8
 enabled = true
 divisor = 1000
 
+# Turn `enabled` off for a stretch when usage limits do not matter: neither
+# the daily allowance nor the 5-hour window then holds anything, and `status`
+# says pacing is off. Usage is still read and shown.
 [pacing]
+enabled = true
 kickoff_hours = 8
 
 # Domains a worker's sandbox may reach besides GitHub: here the crates
