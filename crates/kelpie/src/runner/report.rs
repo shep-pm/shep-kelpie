@@ -182,7 +182,7 @@ pub enum StepReport {
         /// Why the question could not be posted on the pull request, if it could not
         comment_failed: Option<String>,
     },
-    /// The draft was marked ready after a yes; the merge waits for CI to settle
+    /// The draft was marked ready, before a CodeRabbit round or after a yes
     MarkedReady {
         /// The work item's issue
         issue: u64,

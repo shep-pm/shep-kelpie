@@ -39,7 +39,9 @@ pub(crate) struct FakeForge {
     unreadable: Arc<Mutex<HashSet<u64>>>,
     viewer_reads: Arc<AtomicUsize>,
     lagging: Arc<Mutex<HashMap<u64, String>>>,
+    lagging_drafts: Arc<Mutex<HashSet<u64>>>,
     readied: Arc<Mutex<Vec<u64>>>,
+    skipped: Arc<Mutex<Vec<u64>>>,
     merges: Arc<Mutex<Vec<(u64, String)>>>,
     reviews: Arc<Mutex<HashMap<u64, MaintainerReview>>>,
     /// Pull requests' labels, and what CodeRabbit posts
@@ -83,7 +85,9 @@ impl FakeForge {
             unreadable: Arc::default(),
             viewer_reads: Arc::default(),
             lagging: Arc::default(),
+            lagging_drafts: Arc::default(),
             readied: Arc::default(),
+            skipped: Arc::default(),
             merges: Arc::default(),
             reviews: Arc::default(),
             coderabbit: FakeCodeRabbit::default(),
@@ -222,6 +226,17 @@ impl FakeForge {
         };
     }
 
+    /// Makes pull request `number` keep reading as a draft after it is marked
+    /// ready, as GitHub does for a moment, or stop doing so
+    pub(crate) fn set_lagging_draft(&self, number: u64, lagging: bool) {
+        let mut drafts = self.lagging_drafts.lock().unwrap();
+        if lagging {
+            drafts.insert(number);
+        } else {
+            drafts.remove(&number);
+        }
+    }
+
     /// Makes merging fail, or work again
     pub(crate) fn set_merges_down(&self, down: bool) {
         self.merges_down.store(down, Ordering::SeqCst);
@@ -240,6 +255,12 @@ impl FakeForge {
     /// Every pull request marked ready, in order
     pub(crate) fn readied(&self) -> Vec<u64> {
         self.readied.lock().unwrap().clone()
+    }
+
+    /// Every pull request the summon label went on while it was a draft, which
+    /// CodeRabbit answers with "Draft PR not reviewed" and never reviews
+    pub(crate) fn skipped_as_drafts(&self) -> Vec<u64> {
+        self.skipped.lock().unwrap().clone()
     }
 
     /// Every merge made, with the head it was held to
@@ -355,7 +376,7 @@ impl Forge for FakeForge {
         let checks = self.checks.lock().unwrap().get(&head).cloned();
         Ok(PullRequest {
             state: pr.state,
-            draft: pr.draft,
+            draft: pr.draft || self.lagging_drafts.lock().unwrap().contains(&number),
             checks: checks.unwrap_or(Checks::Pending),
             head,
             labels: self.coderabbit.labels(number),
@@ -414,6 +435,10 @@ impl Forge for FakeForge {
             return Err(ForgeError::Failed("labels are down".into()));
         }
         self.opened(number)?;
+        let draft = self.pull_requests.lock().unwrap()[&number].draft;
+        if on && draft && label == "review please" {
+            self.skipped.lock().unwrap().push(number);
+        }
         self.coderabbit.set_label(number, label, on);
         Ok(())
     }
