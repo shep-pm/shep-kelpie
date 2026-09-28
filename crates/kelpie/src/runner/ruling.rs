@@ -111,7 +111,8 @@ impl Runner {
                 } => {
                     item.turn = Turn::Next { prompt };
                     item.phase = phase;
-                    item.resume = force;
+                    // A turn the ruling interrupted may still owe the review loop.
+                    item.resume = force.or(item.resume.take());
                 }
                 Move::Accept(known) => {
                     item.known = known;

@@ -123,6 +123,26 @@ fn a_reworked_pull_request_goes_through_every_gate_to_the_merge_ruling() {
 }
 
 #[test]
+fn a_rework_turn_past_its_ceiling_still_owes_the_review_loop_after_a_yes() {
+    let rig = Rig::new("zeus");
+    reviewed_71(&rig);
+    let runner = running(&rig);
+    rig.ask(&runner, "rework", Some("71"));
+    rig.claude
+        .script([Scripted::Fail(crate::ports::ClaudeError::TimedOut)]);
+    let Some(StepReport::TimedOut { id, .. }) = step(&runner).unwrap() else {
+        panic!("the timed-out turn raised no ruling");
+    };
+    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+    rig.claude.script([Scripted::Push("fix.txt", "fixed\n")]);
+    step(&runner).unwrap();
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+        "review"
+    );
+}
+
+#[test]
 fn a_branch_the_maintainer_pushed_to_since_is_where_the_worker_starts() {
     let rig = Rig::new("koji");
     reviewed_71(&rig);

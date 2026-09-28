@@ -105,9 +105,8 @@ enum Request {
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
 ///
 /// Blank params count as none. `add` takes an issue number, `rework` a pull
-/// request number, `rule` takes
-/// `<id> yes`, `<id> no <note>` or `<id> answer <text>`, and every other
-/// action takes nothing.
+/// request number, `rule` takes `<id> yes`, `<id> no <note>` or
+/// `<id> answer <text>`, and every other action takes nothing.
 pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> String {
     let error = |message: String| serde_json::json!({ "error": message }).to_string();
     let request = match read(action, params.map(str::trim).filter(|p| !p.is_empty())) {
