@@ -270,12 +270,14 @@ mod tests {
         rig.claude.script([Scripted::Push("fixed.txt", "fixed\n")]);
         step(&runner).unwrap(); // the fix turn again
         let again = rig.claude.calls().pop().unwrap();
-        assert!(
-            again
-                .prompt
-                .starts_with("Your last turn on pull request #71 pushed nothing"),
-            "{}",
-            again.prompt
+        assert_eq!(
+            again.prompt,
+            format!(
+                "Your last turn on pull request #71 pushed nothing, so round 1's \
+                 findings in {} still hold. Fix each one, then commit and push with \
+                 `git push origin HEAD`.",
+                rig.build_7().join("review-findings.md").display()
+            )
         );
         assert_eq!(
             step(&runner).unwrap(),

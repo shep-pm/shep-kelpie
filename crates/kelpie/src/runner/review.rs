@@ -95,7 +95,12 @@ impl Runner {
         clean: bool,
         head: Option<String>,
     ) -> Result<Begin, StateError> {
-        let issue = self.state.work_item.as_ref().map_or(0, |item| item.issue);
+        let issue = self
+            .state
+            .work_item
+            .as_ref()
+            .expect("a fix is a work item's")
+            .issue;
         let round = review.round;
         let pushed = match head {
             Some(before) => match self.pushed_head() {

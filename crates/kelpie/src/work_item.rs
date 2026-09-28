@@ -563,6 +563,10 @@ mod tests {
                 head: None
             }
         );
+        assert_eq!(
+            value(saved_before_the_head),
+            json!({ "stage": "fixing", "clean": true })
+        );
     }
 
     #[test]
