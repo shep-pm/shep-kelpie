@@ -154,9 +154,17 @@ impl Processes {
 
 // Sends `signal` ("TERM" or "KILL") to the process group `pid` leads, which
 // `process_group(0)` at spawn made it the leader of.
-fn signal_group(pid: u32, signal: &str) {
-    let _ = Command::new("kill")
-        .args([format!("-{signal}"), format!("-{pid}")])
+//
+// Not `kill -<signal> -<pid>`: measured on procps-ng 4.0.2 (Debian
+// bookworm), that parses without error and signals nothing, because a
+// second `-N`-shaped argument after a signal spec is read as another signal
+// spec, leaving no pid to send to at all. `pkill -<signal> -g <pgid>` names
+// the process group through its own flag instead of through a negative pid,
+// and was measured to reach the group leader and a process it had spawned,
+// on both procps-ng 4.0.2 and macOS's BSD pkill.
+fn signal_group(pgid: u32, signal: &str) {
+    let _ = Command::new("pkill")
+        .args([format!("-{signal}"), "-g".to_owned(), pgid.to_string()])
         .stdin(Stdio::null())
         .status();
 }
@@ -259,11 +267,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(2);
         let mut alive = true;
         while Instant::now() < deadline {
-            alive = Command::new("kill")
-                .args(["-0", &grandchild.to_string()])
-                .status()
-                .unwrap()
-                .success();
+            alive = process_is_alive(grandchild);
             if !alive {
                 break;
             }
@@ -274,6 +278,19 @@ mod tests {
 
     fn shell_quote(path: &std::path::Path) -> String {
         format!("'{}'", path.display())
+    }
+
+    // `kill -0` succeeds on a zombie: SIGKILL ended it, but nothing has
+    // reaped it yet. `ps`'s state column reports `Z` for exactly that case,
+    // and nothing at all once it is gone.
+    fn process_is_alive(pid: u32) -> bool {
+        let output = Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        let stat = String::from_utf8_lossy(&output.stdout);
+        let stat = stat.trim();
+        !stat.is_empty() && !stat.starts_with('Z')
     }
 
     // Real time: the child is a real process, and the test bounds its own
