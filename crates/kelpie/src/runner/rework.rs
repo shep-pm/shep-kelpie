@@ -124,6 +124,10 @@ impl Runner {
         &mut self,
         open: &[OpenPullRequest],
     ) -> Result<Option<Begin>, StateError> {
+        // A second ask waits for the work item in flight to end.
+        if self.state.work_item.is_some() {
+            return Ok(None);
+        }
         let mut ours: Vec<u64> = open
             .iter()
             .filter(|pr| {
