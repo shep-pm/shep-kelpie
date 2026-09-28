@@ -17,7 +17,7 @@ use std::path::Path;
 use super::Runner;
 use super::report::{Begin, ReviewCall, ReviewResult, StepReport};
 use crate::ports::{Claude, Finding, Reviewer, Severity, Verdict, parse_findings};
-use crate::state::{RulingKind, StateError};
+use crate::state::{Fix, RulingKind, StateError};
 use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, ReviewerKind, Turn};
 use crate::worktree;
 
@@ -103,11 +103,12 @@ impl Runner {
             .issue;
         let round = review.round;
         let pushed = match head {
-            Some(before) => match self.pushed_head() {
+            Some(before) => match self.origin_head() {
                 Ok(now) if now == before => {
                     let path = findings::findings_path(build);
                     let prompt = findings::again_prompt(number, round, &path);
-                    return self.raise(number, RulingKind::FixNotPushed { review, prompt });
+                    let fix = Fix::Review(review);
+                    return self.raise(number, RulingKind::FixNotPushed { fix, prompt });
                 }
                 Ok(now) => Some(now),
                 Err(reason) => return Ok(self.gate_failed(reason)),
@@ -124,14 +125,14 @@ impl Runner {
         }))
     }
 
-    // Git's own answer, since the forge's head lags a push by a moment.
-    fn pushed_head(&self) -> Result<String, String> {
+    // Asks git rather than the forge: the forge's head lags a push by a moment.
+    pub(super) fn origin_head(&self) -> Result<String, String> {
         let item = self
             .state
             .work_item
             .as_ref()
             .expect("a head is a work item's");
-        worktree::pushed_head(&self.settings.repo, &item.branch).map_err(|e| e.to_string())
+        worktree::origin_head(&self.settings.repo, &item.branch).map_err(|e| e.to_string())
     }
 
     // Recorded in state before the runner's lock is released for the call
@@ -183,7 +184,7 @@ impl Runner {
             }));
         }
         let clean = held.iter().all(|f| f.severity <= Severity::Low);
-        let head = match self.pushed_head() {
+        let head = match self.origin_head() {
             Ok(head) => head,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };

@@ -18,7 +18,7 @@ use crate::coderabbit::{self, Activity, Reading};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
 use crate::ports::{Finding, PullRequestState, Timestamp, Verdict};
-use crate::state::{LeaseHeld, Resource, RulingKind, StateError};
+use crate::state::{Fix, LeaseHeld, Resource, RulingKind, StateError};
 use crate::work_item::{CodeRabbitStage, OpenThread, Phase, ReviewCallState, Turn, WorkItem};
 
 /// The label shep's `.coderabbit.yaml` gates auto review on: the summon
@@ -69,6 +69,7 @@ impl Runner {
             CodeRabbitStage::Judging {
                 threads, verdicts, ..
             } => self.judge_threads(&threads, &verdicts),
+            CodeRabbitStage::Fixing { head } => self.fix_turn_ended(head),
         }
     }
 
@@ -166,7 +167,7 @@ impl Runner {
         };
         let head = match stage {
             CodeRabbitStage::Lease { head } | CodeRabbitStage::Summoned { head, .. } => head,
-            CodeRabbitStage::Judging { head, .. } => head,
+            CodeRabbitStage::Judging { head, .. } | CodeRabbitStage::Fixing { head } => head,
         };
         let threads: Vec<OpenThread> = activity
             .open_threads()
@@ -253,6 +254,10 @@ impl Runner {
             return Ok(self.gate_failed(reason));
         }
         let prompt = fix_prompt(number, round, held.len(), &path);
+        let head = match self.origin_head() {
+            Ok(head) => head,
+            Err(reason) => return Ok(self.gate_failed(reason)),
+        };
         let changed = cap::changed_lines(&self.item().worktree, &self.settings.generated);
         let cap = match changed {
             Ok(changed) => cap::cap(changed, self.settings.coderabbit.divisor),
@@ -263,12 +268,13 @@ impl Runner {
                 rounds: round,
                 held: u32::try_from(held.len()).unwrap_or(u32::MAX),
                 prompt,
+                head: Some(head),
             };
             return self.raise(number, kind);
         }
         self.update(|item| {
             item.turn = Turn::Next { prompt };
-            item.phase = Phase::Implement;
+            item.phase = Phase::CodeRabbit(CodeRabbitStage::Fixing { head });
         })?;
         Ok(Begin::Report(StepReport::CodeRabbitJudged {
             issue: self.item().issue,
@@ -276,6 +282,31 @@ impl Runner {
             round,
             held: held.len(),
             resolved,
+        }))
+    }
+
+    // A fix turn that pushed nothing fixed nothing, whatever it says: the
+    // held findings still stand, and CI would pass the same head again.
+    fn fix_turn_ended(&mut self, head: String) -> Result<Begin, StateError> {
+        let number = self.number();
+        let round = self.item().coderabbit.rounds;
+        let pushed = match self.origin_head() {
+            Ok(pushed) => pushed,
+            Err(reason) => return Ok(self.gate_failed(reason)),
+        };
+        if pushed == head {
+            let path = findings::findings_path(&self.item().build);
+            let prompt = findings::again_prompt(number, round, &path);
+            let fix = Fix::CodeRabbit { round, head };
+            return self.raise(number, RulingKind::FixNotPushed { fix, prompt });
+        }
+        let since = self.ports.clock.now();
+        self.update(|item| item.phase = Phase::Ci { head: None, since })?;
+        Ok(Begin::Report(StepReport::FixPushed {
+            issue: self.item().issue,
+            pull_request: number,
+            round,
+            head: Some(pushed),
         }))
     }
 
