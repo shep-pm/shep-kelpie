@@ -7,7 +7,7 @@
 //! judge has every tool denied, so its answer is exactly the JSON it was
 //! asked for and nothing it read on the side.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::ports::{ClaudeCall, Finding, Role, Session, Severity, Verdict};
@@ -72,7 +72,7 @@ pub(in crate::runner) fn judge_call(
     shots: Option<&Path>,
 ) -> Result<ClaudeCall, String> {
     let diff = diff_against_base(worktree)?;
-    let shot = shots.filter(|dir| Path::new(&finding.file).starts_with(dir));
+    let shot = shots.filter(|dir| is_shot(&finding.file, dir));
     let settings = judge_settings(worker_folder, shot)?;
     let mut prompt = judge_prompt(&base_ref(), &diff, finding);
     if shot.is_some() {
@@ -82,6 +82,21 @@ pub(in crate::runner) fn judge_call(
         ));
     }
     build_call(Role::Judge, worktree, model, settings, prompt)
+}
+
+// Whether `file` is a PNG really inside `dir`, kelpie's shots folder. A
+// reviewer writes `file`, so `..` and symlinks must not reach past `dir`.
+fn is_shot(file: &str, dir: &Path) -> bool {
+    let path = Path::new(file);
+    if path.extension().is_none_or(|e| e != "png")
+        || path.components().any(|c| c == Component::ParentDir)
+    {
+        return false;
+    }
+    match (path.canonicalize(), dir.canonicalize()) {
+        (Ok(file), Ok(dir)) => file.starts_with(dir) && file.is_file(),
+        _ => false,
+    }
 }
 
 // The shape every call the review loop makes itself shares: a fresh
@@ -256,6 +271,27 @@ mod tests {
     use super::*;
     use crate::runner::step;
     use crate::test::{Rig, Scripted, ScriptedRound};
+
+    #[test]
+    fn only_a_png_really_inside_the_shots_folder_is_a_shot() {
+        let home = tempfile::tempdir().unwrap();
+        let shots = home.path().join("shots/lab/7");
+        std::fs::create_dir_all(shots.join("abc1234")).unwrap();
+        let png = shots.join("abc1234/root-mobile-dark.png");
+        std::fs::write(&png, "png").unwrap();
+        let secret = home.path().join("settings.toml");
+        std::fs::write(&secret, "url").unwrap();
+        std::os::unix::fs::symlink(&secret, shots.join("abc1234/leak.png")).unwrap();
+        std::fs::write(home.path().join("outside.png"), "png").unwrap();
+
+        let cited = |file: &Path| is_shot(&file.display().to_string(), &shots);
+        assert!(cited(&png));
+        assert!(!cited(&shots.join("../../../settings.toml")));
+        assert!(!cited(&shots.join("../../../outside.png")));
+        assert!(!cited(&shots.join("abc1234/leak.png")), "a symlink out");
+        assert!(!cited(&shots.join("abc1234/missing.png")));
+        assert!(!cited(Path::new("src/app.tsx")));
+    }
 
     #[test]
     fn a_judge_reply_wrapped_in_prose_or_fences_still_parses() {
