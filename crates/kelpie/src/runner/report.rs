@@ -17,7 +17,7 @@ use crate::work_item::ReviewerKind;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ReworkBy {
-    /// The `rework please` label
+    /// The `ready-for-agent` label
     Label,
     /// A review requesting changes
     Review,
@@ -45,7 +45,7 @@ pub enum StepReport {
         pull_request: u64,
         /// The model and effort its worker runs on
         worker: WorkerModel,
-        /// What asked for it: the `rework please` label, or a review
+        /// What asked for it: the `ready-for-agent` label, or a review
         /// requesting changes
         by: ReworkBy,
     },

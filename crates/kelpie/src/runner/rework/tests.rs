@@ -388,6 +388,47 @@ fn a_forks_pull_request_on_a_kelpie_branch_is_left_alone() {
 }
 
 #[test]
+fn a_label_that_will_not_come_off_starts_nothing_until_it_does() {
+    let rig = Rig::new("zeus");
+    reviewed_71(&rig);
+    rig.forge.label_pull_request(71, READY);
+    rig.forge.set_labels_down(true);
+    let runner = running(&rig);
+    let Some(StepReport::BoardFailed { reason }) = step(&runner).unwrap() else {
+        panic!("a rework started with its label stuck on");
+    };
+    assert_eq!(
+        reason,
+        "cannot take the `ready-for-agent` label off #71: gh failed: labels are down"
+    );
+    assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
+    assert_eq!(
+        rig.ask(&runner, "rework", Some("71")),
+        json!({ "error": reason })
+    );
+    assert_eq!(
+        rig.ask(&runner, "drop", None)["error"],
+        "no work item is in flight"
+    );
+
+    rig.forge.set_labels_down(false);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Reworked { .. })
+    ));
+    rig.forge.set_labels_down(true);
+    let reply = rig.ask(&runner, "drop", None);
+    assert!(
+        reply["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("cannot hand #71 back: "),
+        "{reply}"
+    );
+    assert_eq!(rig.ask(&runner, "status", None)["work_item"]["issue"], 7);
+}
+
+#[test]
 fn a_manual_rework_uses_up_the_review_it_took() {
     let rig = Rig::new("golbat");
     reviewed_71(&rig);

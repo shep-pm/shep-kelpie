@@ -35,6 +35,7 @@ pub(crate) struct FakeForge {
     comments: Arc<Mutex<Vec<(u64, String)>>>,
     comments_down: Arc<AtomicBool>,
     merges_down: Arc<AtomicBool>,
+    labels_down: Arc<AtomicBool>,
     lagging: Arc<Mutex<HashMap<u64, String>>>,
     readied: Arc<Mutex<Vec<u64>>>,
     merges: Arc<Mutex<Vec<(u64, String)>>>,
@@ -72,6 +73,7 @@ impl FakeForge {
             comments: Arc::default(),
             comments_down: Arc::default(),
             merges_down: Arc::default(),
+            labels_down: Arc::default(),
             lagging: Arc::default(),
             readied: Arc::default(),
             merges: Arc::default(),
@@ -196,6 +198,11 @@ impl FakeForge {
     /// Makes merging fail, or work again
     pub(crate) fn set_merges_down(&self, down: bool) {
         self.merges_down.store(down, Ordering::SeqCst);
+    }
+
+    /// Makes changing a pull request's labels fail, or work again
+    pub(crate) fn set_labels_down(&self, down: bool) {
+        self.labels_down.store(down, Ordering::SeqCst);
     }
 
     /// Every comment posted, oldest first, with its pull request
@@ -367,6 +374,9 @@ impl Forge for FakeForge {
         label: &str,
         on: bool,
     ) -> Result<(), ForgeError> {
+        if self.labels_down.load(Ordering::SeqCst) {
+            return Err(ForgeError::Failed("labels are down".into()));
+        }
         self.opened(number)?;
         self.coderabbit.set_label(number, label, on);
         Ok(())
