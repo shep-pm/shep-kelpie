@@ -254,6 +254,7 @@ fn sandbox(job: &ShotsJob) -> serde_json::Value {
         "network": {
             "allowedDomains": job.domains,
             "deniedDomains": [],
+            "strictAllowlist": true,
             "allowLocalBinding": true,
             "allowMachLookup": ["com.apple.FSEvents"],
         },
@@ -378,6 +379,7 @@ mod tests {
             json!(["/k/wt/lab/7", "/k/targets/lab/7"])
         );
         assert_eq!(s["network"]["allowedDomains"], json!(["leekduck.com"]));
+        assert_eq!(s["network"]["strictAllowlist"], true);
         let deny = s["filesystem"]["denyRead"].as_array().unwrap();
         assert!(deny.contains(&json!("~/.ssh")));
         assert!(deny.contains(&json!("~/.kelpie/settings.toml")));
