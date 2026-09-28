@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use super::process::{Processes, RunError};
+use crate::lease::gpu;
 use crate::ports::{Finding, Reviewer, ReviewerError, Severity, parse_findings};
 use crate::worktree;
 
@@ -30,6 +31,7 @@ fn base_ref() -> String {
 #[derive(Debug, Clone)]
 pub struct QwenReviewer {
     script: PathBuf,
+    temp_dir: PathBuf,
     processes: Processes,
 }
 
@@ -38,8 +40,21 @@ impl QwenReviewer {
     pub fn new(home: &Path) -> Self {
         Self {
             script: home.join(SCRIPT),
+            temp_dir: gpu::temp_dir(),
             processes: Processes::default(),
         }
+    }
+
+    /// Runs every round with `TMPDIR` set to `temp_dir`
+    ///
+    /// A reviewer starts with [`gpu::temp_dir`], the folder the dog's own GPU
+    /// lock is under. The script builds its GPU lock under `${TMPDIR:-/tmp}`, and the runner
+    /// under shep has no `TMPDIR`. Without this, its rounds lock `/tmp` while
+    /// every interactive session locks the per-user temp folder, and the two
+    /// queues run the GPU at once.
+    pub fn with_temp_dir(mut self, temp_dir: PathBuf) -> Self {
+        self.temp_dir = temp_dir;
+        self
     }
 
     /// Ends every round in flight, and refuses new ones, as the runner stops
@@ -61,6 +76,7 @@ impl QwenReviewer {
             .arg("--round")
             .arg(round.to_string())
             .env("QWEN_REVIEW_OUT", out);
+        command.env("TMPDIR", &self.temp_dir);
         match files {
             Some(files) => {
                 command.arg("--files").arg(files);
@@ -223,6 +239,36 @@ mod tests {
             "the script's own lock is released once it finishes, \
              and kelpie never created or left it behind"
         );
+    }
+
+    // A stand-in that records the `TMPDIR` it was started with, as the real
+    // script would build its GPU lock from it.
+    #[test]
+    fn a_round_runs_with_the_given_temp_folder() {
+        let home = tempfile::tempdir().unwrap();
+        let script_dir = home.path().join(".claude/scripts");
+        std::fs::create_dir_all(&script_dir).unwrap();
+        let script = script_dir.join("qwen-review.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nmkdir -p \"$QWEN_REVIEW_OUT\"\n\
+             printf 'LOW|%s:1|seen|seen\\n' \"$TMPDIR\" > \"$QWEN_REVIEW_OUT/round-1.txt\"\n\
+             : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        let worktree = home.path().join("wt");
+        std::fs::create_dir_all(&worktree).unwrap();
+        let out = home.path().join("out");
+        let reviewer =
+            QwenReviewer::new(home.path()).with_temp_dir(PathBuf::from("/var/folders/xx/yy/T/"));
+
+        let findings = reviewer.round(&worktree, &out, 1).unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].file, "/var/folders/xx/yy/T/");
     }
 
     // A script that exits 0 but never wrote the marker: a round killed
