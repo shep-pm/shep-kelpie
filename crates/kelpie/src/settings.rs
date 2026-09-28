@@ -1,8 +1,11 @@
 //! The project's settings file
 //!
-//! One TOML file per project, read once when the runner starts. Every
-//! setting is required and unknown keys are refused, so a missing, misspelt
-//! or malformed setting stops the runner with a message naming it.
+//! One TOML file per project, read once when the runner starts. Unknown keys
+//! are refused, so a misspelt or malformed setting stops the runner with a
+//! message naming it. Every setting is required except the ones added after
+//! the first build (`worker.allowed_domains`, `worker.build_env` and
+//! `worker.turn_timeout`): a file written before them loads with the
+//! documented default, so an upgrade never breaks an existing project.
 //! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
@@ -149,16 +152,25 @@ pub struct Pacing {
 #[serde(deny_unknown_fields)]
 pub struct Worker {
     /// Domains the worker's sandbox may reach besides GitHub, such as a
-    /// package registry
+    /// package registry. None when absent.
+    #[serde(default)]
     pub allowed_domains: Vec<NonBlank>,
     /// Environment variables set to a folder inside the worker's build
-    /// folder, for tool caches the sandbox would refuse elsewhere
+    /// folder, for tool caches the sandbox would refuse elsewhere. None when
+    /// absent.
+    #[serde(default)]
     pub build_env: BTreeMap<EnvName, BuildDir>,
     /// Hooks copied into each worker's own settings file
     pub guard_hooks: Vec<GuardHook>,
     /// Minutes a worker's turn may run before kelpie stops it and parks it
-    /// on a ruling, keeping its session
+    /// on a ruling, keeping its session. 60 when absent.
+    #[serde(default = "default_turn_timeout")]
     pub turn_timeout: NonZeroU32,
+}
+
+/// The design log's default for `worker.turn_timeout`, in minutes
+fn default_turn_timeout() -> NonZeroU32 {
+    NonZeroU32::MIN.saturating_add(59)
 }
 
 /// One of the maintainer's guard hooks, run by path
@@ -464,6 +476,30 @@ mod tests {
                 .unwrap()
                 .ci
         );
+    }
+
+    #[test]
+    fn a_file_written_before_the_worker_keys_loads_with_their_defaults() {
+        let before = EXAMPLE
+            .replace(
+                "allowed_domains = [\"crates.io\", \"index.crates.io\", \"static.crates.io\"]\n",
+                "",
+            )
+            .replace("build_env = {}\n", "")
+            .replace("turn_timeout = 60\n", "");
+        for key in ["turn_timeout =", "allowed_domains =", "build_env ="] {
+            assert!(!before.contains(key), "{key}");
+        }
+        let s = parse(&before).unwrap();
+        assert_eq!(s.worker.turn_timeout.get(), 60);
+        assert!(s.worker.allowed_domains.is_empty());
+        assert!(s.worker.build_env.is_empty());
+    }
+
+    #[test]
+    fn a_zero_turn_timeout_is_still_refused() {
+        let err = parse_err(&EXAMPLE.replace("turn_timeout = 60", "turn_timeout = 0"));
+        assert!(err.contains("turn_timeout = 0"), "{err}");
     }
 
     #[test]
