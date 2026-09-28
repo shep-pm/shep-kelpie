@@ -371,6 +371,13 @@ mod tests {
             Some(StepReport::Alerted { .. })
         ));
         assert_eq!(step(&runner).unwrap(), None);
+
+        // The maintainer's fix and yes vouch for the head: no foreign-change ruling.
+        let fixed = rig.push_by_hand("kelpie/7", "lint.txt");
+        rig.ask(&runner, "rule", Some("1 yes"));
+        rig.forge.set_checks(&fixed, Checks::Passed);
+        let (_, question) = ruling_report(rig.verdict(&runner));
+        assert!(question.starts_with("Merge pull request #71"), "{question}");
     }
 
     #[test]

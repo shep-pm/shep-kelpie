@@ -611,5 +611,14 @@ mod tests {
             crate::test::git(&rig.worktree_7(), &["rev-parse", "HEAD"]),
             head
         );
+
+        // A commit kelpie never saw pushed is the worker's too.
+        let worktree = rig.worktree_7();
+        crate::test::git(&worktree, &["commit", "--quiet", "-am", "not pushed"]);
+        let reply = rig.ask(&runner, "rule", Some("1 yes"));
+        assert!(
+            reply["error"].as_str().unwrap().contains("holds work"),
+            "{reply}"
+        );
     }
 }
