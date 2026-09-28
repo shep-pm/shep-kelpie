@@ -631,7 +631,10 @@ fn a_post_that_failed_is_tried_again_while_the_ruling_waits() {
         Some(StepReport::Ruling { id: 1, .. })
     ));
     rig.forge.set_comments_down(false);
-    assert!(matches!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 })));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Alerted { id: 1 })
+    ));
     assert_eq!(step(&runner).unwrap(), None, "not before its retry is due");
     rig.clock.advance(60);
     let Some(StepReport::ShotsPosted { head: of, .. }) = step(&runner).unwrap() else {
@@ -689,4 +692,20 @@ fn a_finished_work_item_takes_its_shots_with_it() {
     }
     assert_eq!(rig.forge.merges().len(), 1);
     assert!(!rig.home.path().join("kelpie/shots/lab/7").exists());
+    assert_eq!(rig.forge.head_of("kelpie-shots/71"), None, "its branch too");
+}
+
+#[test]
+fn a_dropped_work_item_deletes_its_shots_branch_too() {
+    let (rig, runner, _) = green("lab");
+    rig.verdict(&runner); // the shots comment
+    assert!(rig.forge.head_of("kelpie-shots/71").is_some());
+    step(&runner).unwrap(); // merge ruling 1
+    let status = rig.ask(&runner, "drop", None);
+    assert_eq!(status["work_item"], Value::Null, "{status}");
+    assert_eq!(rig.forge.head_of("kelpie-shots/71"), None);
+    assert!(
+        rig.forge.head_of("kelpie/7").is_some(),
+        "a drop keeps the work item's own branch"
+    );
 }

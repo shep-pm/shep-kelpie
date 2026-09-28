@@ -66,6 +66,25 @@ pub fn push(repo: &Path, branch: &str, run: &ShotsRun, message: &str) -> Result<
     Ok(commit)
 }
 
+/// Deletes `branch` from `origin`, if it is there
+///
+/// # Errors
+///
+/// The git command that failed and what it said.
+pub fn delete(repo: &Path, branch: &str) -> Result<(), String> {
+    let remote = format!("refs/heads/{branch}");
+    let listed = git(repo, &["ls-remote", "origin", &remote], None)?;
+    if listed.is_empty() {
+        return Ok(());
+    }
+    git(
+        repo,
+        &["push", "--quiet", "origin", "--delete", &remote],
+        None,
+    )
+    .map(drop)
+}
+
 /// The comment for `run`, taken of `head`, its images read from `commit`
 pub fn comment(
     forge: &ForgeSlug,
@@ -82,7 +101,7 @@ pub fn comment(
     }
     let _ = writeln!(
         body,
-        "Kelpie's shots of {short}. They live on the `{}` branch, not this pull request's.\n",
+        "Kelpie's shots of {short}. They live on the `{}` branch, not this pull request's, until it closes.\n",
         branch(number)
     );
     body.push_str("| Route |");

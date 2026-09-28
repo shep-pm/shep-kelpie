@@ -11,6 +11,7 @@ use super::Runner;
 use super::gate::{settled, short};
 use super::report::{Begin, StepReport};
 use crate::ports::{Checks, PullRequestState};
+use crate::shots::publish;
 use crate::state::{RulingKind, StateError};
 use crate::work_item::{Phase, ReviewCallState, Turn};
 use crate::worktree::{self, Base};
@@ -189,6 +190,12 @@ impl Runner {
             .work_item
             .as_ref()
             .expect("a finish is of a work item");
+        // First, so a failure here leaves everything else for the retry.
+        if let Some(number) = item.pull_request
+            && let Err(e) = publish::delete(&self.settings.repo, &publish::branch(number))
+        {
+            return Ok(self.gate_failed(format!("cannot delete the shots branch: {e}")));
+        }
         let removed = worktree::remove(
             &self.settings.repo,
             &item.worktree,
