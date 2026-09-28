@@ -213,8 +213,8 @@ impl RelayCli {
     // resolve on `PATH`, a temporary folder, and whose account it is,
     // mirroring the minimal set a pinned shep sheep itself starts with
     // (see docs/design-log.md). Everything else kelpie's own process
-    // happens to carry stays out of the relay's. `SHEP_HOME` is the one
-    // exception, kelpie's shepherd from `self.shep_home`.
+    // happens to carry stays out of the relay's. The session's shell gets
+    // `SHEP_HOME` from the settings' `env` block, not from this environment.
     //
     // `HOME` comes from `self.home`, not the ambient environment: `find`,
     // `current_dir` and the relay's own `~/.claude/sessions` all key off
@@ -223,7 +223,6 @@ impl RelayCli {
     fn relay_env(&self, command: &mut Command) {
         command.env_clear();
         command.env("HOME", &self.home);
-        command.env("SHEP_HOME", &self.shep_home);
         for var in RELAY_ENV {
             if let Ok(value) = std::env::var(var) {
                 command.env(var, value);
@@ -565,7 +564,7 @@ mod tests {
             .collect();
         for (name, _) in &envs {
             assert!(
-                *name == "HOME" || *name == "SHEP_HOME" || RELAY_ENV.contains(name),
+                *name == "HOME" || RELAY_ENV.contains(name),
                 "{name} should not reach the relay"
             );
         }
@@ -574,10 +573,6 @@ mod tests {
         assert_eq!(
             envs.iter().find(|(n, _)| *n == "HOME"),
             Some(&("HOME", "/k/maintainer-home"))
-        );
-        assert_eq!(
-            envs.iter().find(|(n, _)| *n == "SHEP_HOME"),
-            Some(&("SHEP_HOME", "/k/shep"))
         );
         // A var this process carries but `relay_env` does not name never
         // reaches the child: `env_clear` ran before the allowed set was applied.
