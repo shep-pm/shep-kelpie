@@ -206,7 +206,7 @@ impl Runner {
             &item.build,
         )
         .map_err(|e| e.to_string())?;
-        let preview = preview::enabled(&self.settings.repo);
+        let previewed = preview::enabled(&self.settings.repo);
         let profile = WorkerProfile {
             worktree: &item.worktree,
             build: &item.build,
@@ -217,14 +217,14 @@ impl Runner {
             guard_hooks: &self.settings.worker.guard_hooks,
             allowed_domains: &self.settings.worker.allowed_domains,
             build_env: &self.settings.worker.build_env,
-            preview: preview.then_some(self.settings.preview.domains.as_slice()),
+            preview: previewed.then_some(self.settings.preview.domains.as_slice()),
         };
         let folder = &self.paths.worker;
         let settings = folder.join("settings.json");
         let instructions = folder.join("instructions.md");
         let text = serde_json::to_string_pretty(&profile.settings()).expect("settings are JSON");
         write(folder, &settings, &text)?;
-        let mcp_config = if preview {
+        let mcp_config = if previewed {
             write(
                 folder,
                 &instructions,

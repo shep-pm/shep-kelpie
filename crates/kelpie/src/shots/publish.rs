@@ -53,11 +53,11 @@ pub fn push(repo: &Path, branch: &str, run: &ShotsRun, message: &str) -> Result<
             )
         })
         .ok();
-    let mut commit = vec!["commit-tree", &tree, "-m", message];
+    let mut args = vec!["commit-tree", &tree, "-m", message];
     if let Some(parent) = &parent {
-        commit.extend(["-p", parent]);
+        args.extend(["-p", parent]);
     }
-    let commit = git(repo, &commit, None)?;
+    let commit = git(repo, &args, None)?;
     git(
         repo,
         &["push", "--quiet", "origin", &format!("{commit}:{remote}")],
@@ -85,8 +85,17 @@ pub fn comment(
         "Kelpie's shots of {short}. They live on the `{}` branch, not this pull request's.\n",
         branch(number)
     );
-    body.push_str("| Route | Mobile, light | Mobile, dark | Desktop, light | Desktop, dark |\n");
-    body.push_str("| --- | --- | --- | --- | --- |\n");
+    body.push_str("| Route |");
+    for (viewport, scheme) in VARIANTS {
+        let _ = write!(
+            body,
+            " {viewport:?}, {} |",
+            format!("{scheme:?}").to_lowercase()
+        );
+    }
+    body.push_str("\n| --- |");
+    body.push_str(&" --- |".repeat(VARIANTS.len()));
+    body.push('\n');
     for route in run.shots.chunks(VARIANTS.len()) {
         let Some(first) = route.first() else { continue };
         let _ = write!(body, "| `{}` |", first.route.as_str());

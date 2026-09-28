@@ -180,7 +180,7 @@ impl Runner {
         }))
     }
 
-    // Removes the worktree, branch and build folder, then the work item, and
+    // Removes the worktree, branch, build and shots folders, then the work item, and
     // records its issue so the board never takes it again.
     pub(super) fn finish(&mut self, merged: bool) -> Result<Begin, StateError> {
         self.release()?;

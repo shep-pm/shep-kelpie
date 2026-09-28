@@ -95,8 +95,8 @@ impl Processes {
         })
     }
 
-    /// Starts `command` in its own process group and leaves it running,
-    /// its output going where the caller pointed it
+    /// Starts `command` in its own process group, stdin closed, and leaves
+    /// it running, its output going where the caller pointed it
     ///
     /// [`Self::end`] stops it, and so does [`Self::stop`].
     pub(super) fn start(&self, command: &mut Command) -> Result<u64, RunError> {

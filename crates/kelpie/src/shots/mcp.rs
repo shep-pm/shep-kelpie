@@ -225,6 +225,19 @@ mod tests {
     }
 
     #[test]
+    fn a_call_naming_no_route_runs_nothing() {
+        let (_dir, recorder, replies) = session(&[json!({
+            "jsonrpc": "2.0", "id": 6, "method": "tools/call",
+            "params": { "name": "shots", "arguments": { "routes": [] } },
+        })]);
+        assert!(recorder.0.lock().unwrap().is_empty());
+        assert_eq!(
+            replies[0]["result"]["content"][0]["text"],
+            "name at least one route"
+        );
+    }
+
+    #[test]
     fn an_unknown_method_is_an_error_not_silence() {
         let (_dir, _, replies) =
             session(&[json!({"jsonrpc": "2.0", "id": 5, "method": "resources/list"})]);

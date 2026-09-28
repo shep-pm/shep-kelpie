@@ -78,7 +78,13 @@ impl ShotsCli {
                 launch.port
             ));
         }
-        let _ = fs::remove_dir_all(&job.out);
+        // A folder left from a run of other routes would mix its shots into this one.
+        match fs::remove_dir_all(&job.out) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(format!("cannot clear the shots folder: {e}"));
+            }
+            _ => {}
+        }
         fs::create_dir_all(&job.out).map_err(|e| format!("cannot make the shots folder: {e}"))?;
         let log = job.out.join("dev-server.log");
         let server = self.start_server(job, &launch, &log)?;

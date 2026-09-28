@@ -447,6 +447,8 @@ mod tests {
         assert!(!network.contains_key("allowLocalBinding"), "{network:?}");
         assert!(!network.contains_key("allowMachLookup"), "{network:?}");
         assert_eq!(s["env"]["NODE_USE_ENV_PROXY"], Value::Null);
+        let deny = s["permissions"]["deny"].to_string();
+        assert!(!deny.contains("mcp__playwright"), "{deny}");
     }
 
     #[test]

@@ -16,24 +16,8 @@ const MAX_PROBLEMS = 20;
 const allowed = (host) =>
   plan.hosts.some((h) => (h.startsWith('*.') ? host.endsWith(h.slice(1)) : host === h));
 
-const browser = await chromium.launch({ headless: true });
-const report = [];
-for (const shot of plan.shots) {
-  const problems = [];
-  const note = (p) => problems.push(p);
-  const context = await browser.newContext({
-    viewport: { width: shot.width, height: shot.height },
-    deviceScaleFactor: shot.mobile ? 2 : 1,
-    isMobile: shot.mobile,
-    hasTouch: shot.mobile,
-    colorScheme: shot.scheme,
-  });
-  await context.route('**', (route) => {
-    const url = new URL(route.request().url());
-    if (!url.protocol.startsWith('http') || allowed(url.hostname)) return route.continue();
-    note(`blocked ${url.href}: ${url.hostname} is not a preview domain`);
-    return route.abort('blockedbyclient');
-  });
+// One shot in its own context: its status, and whether a screenshot was taken.
+async function capture(context, shot, note) {
   const page = await context.newPage();
   page.on('pageerror', (e) => note(`error: ${e.message.split('\n')[0]}`));
   // A bare format string such as `%o` carries nothing; the page error beside it does.
@@ -63,19 +47,43 @@ for (const shot of plan.shots) {
   } catch (e) {
     note(`did not settle in ${SETTLE_MS / 1000}s: ${e.message.split('\n')[0]}`);
   }
-  let taken = true;
   try {
     await page.screenshot({ path: shot.file });
+    return { status, taken: true };
   } catch (e) {
-    taken = false;
     note(`no screenshot: ${e.message.split('\n')[0]}`);
+    return { status, taken: false };
   }
-  await context.close();
+}
+
+const browser = await chromium.launch({ headless: true });
+const report = [];
+for (const shot of plan.shots) {
+  const problems = [];
+  const note = (p) => problems.push(p);
+  const context = await browser.newContext({
+    viewport: { width: shot.width, height: shot.height },
+    deviceScaleFactor: shot.mobile ? 2 : 1,
+    isMobile: shot.mobile,
+    hasTouch: shot.mobile,
+    colorScheme: shot.scheme,
+  });
+  await context.route('**', (route) => {
+    const url = new URL(route.request().url());
+    if (!url.protocol.startsWith('http') || allowed(url.hostname)) return route.continue();
+    note(`blocked ${url.href}: ${url.hostname} is not a preview domain`);
+    return route.abort('blockedbyclient');
+  });
+  let taken = { status: null, taken: false };
+  try {
+    taken = await capture(context, shot, note);
+  } finally {
+    await context.close();
+  }
   const listed = [...new Set(problems)];
   const more = listed.length - MAX_PROBLEMS;
   report.push({
-    status,
-    taken,
+    ...taken,
     problems: more > 0 ? [...listed.slice(0, MAX_PROBLEMS), `and ${more} more`] : listed,
   });
 }

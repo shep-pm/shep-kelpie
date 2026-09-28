@@ -545,6 +545,10 @@ impl Rig {
     /// Lands a commit on origin's `main` from another clone, as a merge
     /// elsewhere would, and returns its hash
     pub(crate) fn land_on_origin(&self, file: &str) -> String {
+        self.land(file, "landed elsewhere\n")
+    }
+
+    fn land(&self, file: &str, text: &str) -> String {
         let other = self.home.path().join("other");
         if !other.exists() {
             git(
@@ -552,7 +556,9 @@ impl Rig {
                 &["clone", "--quiet", path(&self.origin()), path(&other)],
             );
         }
-        std::fs::write(other.join(file), "landed elsewhere\n").unwrap();
+        let at = other.join(file);
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::fs::write(at, text).unwrap();
         git(&other, &["add", file]);
         git(&other, &["commit", "--quiet", "-m", "landed elsewhere"]);
         git(&other, &["push", "--quiet", "origin", "main"]);
@@ -562,19 +568,7 @@ impl Rig {
     /// Lands `.claude/launch.json` on origin's `main`, as a repo with a
     /// preview carries it, and returns the commit
     pub(crate) fn land_launch_file(&self) -> String {
-        let other = self.home.path().join("other");
-        if !other.exists() {
-            git(
-                self.home.path(),
-                &["clone", "--quiet", path(&self.origin()), path(&other)],
-            );
-        }
-        std::fs::create_dir_all(other.join(".claude")).unwrap();
-        std::fs::write(other.join(crate::preview::LAUNCH_FILE), LAUNCH).unwrap();
-        git(&other, &["add", crate::preview::LAUNCH_FILE]);
-        git(&other, &["commit", "--quiet", "-m", "a launch file"]);
-        git(&other, &["push", "--quiet", "origin", "main"]);
-        git(&other, &["rev-parse", "HEAD"])
+        self.land(crate::preview::LAUNCH_FILE, LAUNCH)
     }
 
     /// The project's checkout

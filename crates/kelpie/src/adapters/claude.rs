@@ -229,6 +229,17 @@ mod tests {
     }
 
     #[test]
+    fn a_call_with_mcp_servers_names_their_config() {
+        let mut with = call(Role::Worker, fresh());
+        with.mcp_config = Some(PathBuf::from("/k/worker/mcp.json"));
+        let argv = strings(&with);
+        let at = argv.iter().position(|a| a == "--mcp-config").unwrap();
+        assert_eq!(argv[at + 1], "/k/worker/mcp.json");
+        let argv = strings(&call(Role::Worker, fresh()));
+        assert!(!argv.iter().any(|a| a == "--mcp-config"));
+    }
+
+    #[test]
     fn only_a_worker_bypasses_permissions() {
         for role in [Role::Reviewer, Role::Judge] {
             let argv = strings(&call(role, fresh()));

@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use serde_json::{Value, json};
 
 use crate::ports::{Checks, Finding, Role, Severity};
@@ -556,5 +554,19 @@ fn routes_the_worker_names_join_kelpies_next_run() {
     let [job] = rig.shots.jobs().try_into().unwrap();
     let routes: Vec<&str> = job.routes.iter().map(|r| r.as_str()).collect();
     assert_eq!(routes, ["/", "/events", "/raids"]);
-    let _: PathBuf = job.out;
+}
+
+#[test]
+fn a_finished_work_item_takes_its_shots_with_it() {
+    let (rig, runner, _) = green("lab");
+    rig.verdict(&runner); // the shots comment
+    step(&runner).unwrap(); // merge ruling 1
+    assert!(rig.home.path().join("kelpie/shots/lab/7").is_dir());
+    rig.ask(&runner, "rule", Some("1 yes"));
+    for _ in 0..4 {
+        rig.clock.advance(crate::runner::CHECKS_SETTLE);
+        step(&runner).unwrap();
+    }
+    assert_eq!(rig.forge.merges().len(), 1);
+    assert!(!rig.home.path().join("kelpie/shots/lab/7").exists());
 }
