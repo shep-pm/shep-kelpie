@@ -12,8 +12,10 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::adapters::{ClaudeCli, Curl, Gh, QwenReviewer, RelayCli, SystemClock};
-use crate::ports::Ports;
+use crate::adapters::{ClaudeCli, Curl, Gh, QwenReviewer, RelayCli, ShepLeases, SystemClock};
+use crate::lease::Epoch;
+use crate::lease::wire::{Asker, GRANT};
+use crate::ports::{Leases, Ports};
 use crate::runner::{ACTIONS, ProjectName, ProjectPaths, Runner, answer, step};
 
 /// How long queued replies get to reach the shepherd before the runner exits
@@ -47,8 +49,11 @@ fn serve(project: &str) -> Result<(), String> {
         .unwrap_or_else(|| home.join(".kelpie"));
     let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
     let paths = ProjectPaths::under(&kelpie_home, &project);
+    let shepherd = shep_channel::serve();
     let claude = ClaudeCli::default();
     let reviewer = QwenReviewer::new(&home);
+    let epoch = Epoch(u64::from(std::process::id()));
+    let leases = Arc::new(ShepLeases::new(shepherd.clone(), Asker::new(epoch)));
     let ports = Ports {
         claude: Arc::new(claude.clone()),
         forge: Box::new(Gh),
@@ -56,11 +61,11 @@ fn serve(project: &str) -> Result<(), String> {
         reviewer: Arc::new(reviewer.clone()),
         relay: Arc::new(RelayCli::new(home.clone(), kelpie_home.join("relay"))),
         alerts: Arc::new(Curl),
+        leases: Arc::clone(&leases) as Arc<dyn Leases>,
         clock: Box::new(SystemClock),
     };
     let runner = Runner::open(project, &paths, &home, &kelpie, ports).map_err(|e| e.to_string())?;
 
-    let shepherd = shep_channel::serve();
     if !shepherd.is_active() {
         return Err("no shepherd channel: run it under shep with `channel = true`".into());
     }
@@ -78,6 +83,16 @@ fn serve(project: &str) -> Result<(), String> {
             reply
         });
     }
+    // A grant lands in the lease adapter, and the step it wakes reads it.
+    let granted = wake.clone();
+    shepherd.on_action(GRANT, move |params, _| {
+        let reply = match leases.grant(params.unwrap_or_default()) {
+            Ok(kind) => serde_json::json!({ "granted": kind }),
+            Err(e) => serde_json::json!({ "error": e.to_string() }),
+        };
+        let _ = granted.send(());
+        reply.to_string()
+    });
     let (stop, stopped) = mpsc::channel();
     let worker = Arc::clone(&runner);
     let died = stop.clone();

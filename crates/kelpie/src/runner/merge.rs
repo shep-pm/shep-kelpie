@@ -75,6 +75,9 @@ impl Runner {
         ) {
             return Err(DropError::Merging(item.issue));
         }
+        if matches!(item.phase, Phase::CodeRabbit(_)) {
+            self.leave_round();
+        }
         match self.finish(false).map_err(DropError::State)? {
             Begin::Report(StepReport::GateFailed { reason, .. }) => Err(DropError::Cleanup(reason)),
             _ => Ok(()),
@@ -180,6 +183,7 @@ impl Runner {
     // Removes the worktree, branch and build folder, then the work item, and
     // records its issue so the board never takes it again.
     pub(super) fn finish(&mut self, merged: bool) -> Result<Begin, StateError> {
+        self.release()?;
         let item = self
             .state
             .work_item

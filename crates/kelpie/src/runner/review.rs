@@ -9,8 +9,8 @@
 //! Past the round guard the worker parks for a ruling; a yes clears the
 //! guard for the rest of this work item.
 
-mod calls;
-mod findings;
+pub(super) mod calls;
+pub(super) mod findings;
 
 use super::Runner;
 use super::report::{Begin, ReviewCall, ReviewResult, StepReport};
@@ -85,7 +85,7 @@ impl Runner {
     // itself, the same as a worker's turn marks `Turn::Running`: `drop`
     // refuses while this is set, so a call in flight always has a work
     // item to land its result on.
-    fn mark_review_call_running(&mut self) -> Result<(), StateError> {
+    pub(super) fn mark_review_call_running(&mut self) -> Result<(), StateError> {
         let since = self.ports.clock.now();
         self.update(|item| item.review_call = ReviewCallState::Running { since })
     }
@@ -157,6 +157,14 @@ impl Runner {
         &mut self,
         result: ReviewResult,
     ) -> Result<Option<StepReport>, StateError> {
+        let in_coderabbit_round = self
+            .state
+            .work_item
+            .as_ref()
+            .is_some_and(|item| matches!(item.phase, Phase::CodeRabbit(_)));
+        if in_coderabbit_round {
+            return self.coderabbit_verdict(result);
+        }
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
         // Tolerated the same way `end_turn` tolerates a turn's result

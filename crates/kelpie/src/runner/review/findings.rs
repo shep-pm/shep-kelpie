@@ -10,11 +10,11 @@ use crate::runner::turn;
 const FINDINGS_FILE: &str = "review-findings.md";
 
 /// The findings file's path, inside the project's worker folder
-pub(super) fn findings_path(worker_folder: &Path) -> PathBuf {
+pub(in crate::runner) fn findings_path(worker_folder: &Path) -> PathBuf {
     worker_folder.join(FINDINGS_FILE)
 }
 
-pub(super) fn write_findings_file(
+pub(in crate::runner) fn write_findings_file(
     folder: &Path,
     path: &Path,
     round: u32,

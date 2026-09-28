@@ -9,9 +9,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::lease::book::{Asked, Grant, LeaseBook};
 use crate::lease::gpu::GpuLock;
-use crate::lease::wire::{MetricName, Total, Totals};
+use crate::lease::wire::{MetricName, Total, Totals, WindowFact, WindowMetric};
 use crate::lease::{Epoch, Holder, LeaseKind};
-use crate::ports::Clock;
+use crate::ports::{Clock, Timestamp};
 use crate::runner::ProjectName;
 
 /// A grant the dog must deliver to a runner as a `grant` trigger
@@ -46,8 +46,10 @@ pub struct Desk {
 impl Desk {
     /// A desk with an empty book, reading the GPU lock at `gpu`
     pub fn new(clock: Box<dyn Clock>, gpu: GpuLock) -> Self {
+        let mut book = LeaseBook::new(clock);
+        book.add_window(LeaseKind::coderabbit());
         Self {
-            book: LeaseBook::new(clock),
+            book,
             gpu,
             runs: HashMap::new(),
             retired: HashSet::new(),
@@ -59,29 +61,29 @@ impl Desk {
     /// Anything that is not a lease metric from a runner is ignored. A new
     /// epoch reclaims what the runner's earlier run held.
     pub fn metric(&mut self, sheep: &str, name: &str, value: f64) -> Vec<Delivery> {
-        let (Some(metric), Ok(project), Some(value)) = (
-            MetricName::parse(name),
-            ProjectName::try_from(sheep),
-            count(value),
-        ) else {
+        let (Ok(project), Some(value)) = (ProjectName::try_from(sheep), count(value)) else {
             return Vec::new();
         };
-        if self.retired.contains(&(sheep.to_owned(), metric.epoch)) {
-            return Vec::new();
-        }
-        let mut grants = Vec::new();
-        let run = self.runs.entry(sheep.to_owned()).or_insert_with(|| Run {
-            epoch: metric.epoch,
-            totals: BTreeMap::new(),
-        });
-        if run.epoch != metric.epoch {
-            self.retired.insert((sheep.to_owned(), run.epoch));
-            *run = Run {
-                epoch: metric.epoch,
-                totals: BTreeMap::new(),
+        if let Some(fact) = WindowMetric::parse(name) {
+            let Some(mut grants) = self.run_of(sheep, &project, fact.epoch) else {
+                return Vec::new();
             };
-            grants.extend(self.book.reclaim(&project, Some(metric.epoch)));
+            let at = Timestamp(value);
+            let window = match fact.fact {
+                WindowFact::Summoned => self.book.summoned(&fact.kind, at),
+                WindowFact::Opens => self.book.refused(&fact.kind, at),
+                WindowFact::Quota(per_hour) => self.book.quota(&fact.kind, per_hour, at),
+            };
+            grants.extend(window);
+            return deliveries(grants);
         }
+        let Some(metric) = MetricName::parse(name) else {
+            return Vec::new();
+        };
+        let Some(mut grants) = self.run_of(sheep, &project, metric.epoch) else {
+            return Vec::new();
+        };
+        let run = self.runs.get_mut(sheep).expect("run_of keeps the run");
         let holder = Holder::Runner {
             project,
             epoch: metric.epoch,
@@ -107,6 +109,32 @@ impl Desk {
             Total::Want | Total::Return => {}
         }
         deliveries(grants)
+    }
+
+    /// Grants whatever an opened review window now allows
+    pub fn tick(&mut self) -> Vec<Delivery> {
+        deliveries(self.book.tick())
+    }
+
+    // The run `epoch` of `sheep`, started if it is new. `None` for a run
+    // already replaced; otherwise the grants a new run's reclaim made.
+    fn run_of(&mut self, sheep: &str, project: &ProjectName, epoch: Epoch) -> Option<Vec<Grant>> {
+        if self.retired.contains(&(sheep.to_owned(), epoch)) {
+            return None;
+        }
+        let run = self.runs.entry(sheep.to_owned()).or_insert_with(|| Run {
+            epoch,
+            totals: BTreeMap::new(),
+        });
+        if run.epoch == epoch {
+            return Some(Vec::new());
+        }
+        self.retired.insert((sheep.to_owned(), run.epoch));
+        *run = Run {
+            epoch,
+            totals: BTreeMap::new(),
+        };
+        Some(self.book.reclaim(project, Some(epoch)))
     }
 
     /// Takes what shep says of sheep `sheep`: its live process, if any
@@ -210,7 +238,17 @@ pub(super) mod tests {
         }
 
         pub(crate) fn book_line(&mut self) -> Value {
-            self.ask("status", None).0["leases"][1].clone()
+            self.line("stand-in")
+        }
+
+        pub(crate) fn line(&mut self, kind: &str) -> Value {
+            let leases = self.ask("status", None).0["leases"].clone();
+            let found = leases
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|l| l["kind"] == kind);
+            found.cloned().unwrap_or_default()
         }
     }
 
@@ -390,8 +428,93 @@ pub(super) mod tests {
         let leases = &w.ask("status", None).0["leases"];
         assert_eq!(
             leases.as_array().unwrap().len(),
-            1,
-            "the GPU alone: {leases}"
+            2,
+            "the GPU and the CodeRabbit window alone: {leases}"
         );
+    }
+
+    fn coderabbit_grant(project: &str, pid: u64) -> Delivery {
+        Delivery {
+            kind: LeaseKind::coderabbit(),
+            ..grant(project, pid)
+        }
+    }
+
+    #[test]
+    fn a_runner_that_saw_its_summon_accepted_holds_the_window_for_the_hour() {
+        let mut w = world();
+        let cr = LeaseKind::coderabbit();
+        let (mut koji, mut reactmap) = (Asker::new(Epoch(101)), Asker::new(Epoch(202)));
+        assert_eq!(
+            w.raise("koji", koji.want(&cr)),
+            [coderabbit_grant("koji", 101)]
+        );
+        w.raise("reactmap", reactmap.want(&cr));
+        w.clock.advance(20);
+        assert_eq!(
+            w.raise("koji", koji.window(&cr, WindowFact::Summoned, EPOCH)),
+            []
+        );
+        assert_eq!(w.raise("koji", koji.give_back(&cr)), []);
+        assert_eq!(w.line("coderabbit")["window"]["opens"], EPOCH + 3600);
+
+        w.clock.advance(3600 - 20);
+        assert_eq!(w.desk.tick(), [coderabbit_grant("reactmap", 202)]);
+    }
+
+    #[test]
+    fn a_refusal_a_runner_heard_reschedules_the_window() {
+        let mut w = world();
+        let cr = LeaseKind::coderabbit();
+        let mut koji = Asker::new(Epoch(101));
+        w.raise("koji", koji.want(&cr));
+        let opens = EPOCH + 12 * 60;
+        w.raise("koji", koji.window(&cr, WindowFact::Opens, opens));
+        w.raise("koji", koji.give_back(&cr));
+        assert_eq!(w.raise("koji", koji.want(&cr)), []);
+        for metric in koji.metrics() {
+            assert_eq!(w.raise("koji", metric), [], "a repeat changes nothing");
+        }
+        w.clock.advance(12 * 60);
+        assert_eq!(w.desk.tick(), [coderabbit_grant("koji", 101)]);
+    }
+
+    #[test]
+    fn a_footer_quota_reaches_the_window() {
+        let mut w = world();
+        let cr = LeaseKind::coderabbit();
+        let mut koji = Asker::new(Epoch(101));
+        w.raise("koji", koji.window(&cr, WindowFact::Quota(10), EPOCH));
+        assert_eq!(w.line("coderabbit")["window"]["quota"], 10);
+    }
+
+    // Each runner reads its own pull request's footers, and raises its
+    // quota again every look, so an older footer keeps arriving late.
+    #[test]
+    fn two_runners_reporting_footers_out_of_order_leave_the_newest_quota() {
+        let mut w = world();
+        let cr = LeaseKind::coderabbit();
+        let (mut koji, mut reactmap) = (Asker::new(Epoch(101)), Asker::new(Epoch(202)));
+        w.raise(
+            "reactmap",
+            reactmap.window(&cr, WindowFact::Quota(1), EPOCH + 600),
+        );
+        w.raise("koji", koji.window(&cr, WindowFact::Quota(10), EPOCH));
+        assert_eq!(w.line("coderabbit")["window"]["quota"], 1);
+        for metric in koji.metrics() {
+            w.raise("koji", metric);
+        }
+        assert_eq!(w.line("coderabbit")["window"]["quota"], 1, "raised again");
+    }
+
+    #[test]
+    fn a_window_fact_from_a_replaced_run_changes_nothing() {
+        let mut w = world();
+        let cr = LeaseKind::coderabbit();
+        let (mut old, mut new) = (Asker::new(Epoch(101)), Asker::new(Epoch(303)));
+        w.raise("koji", old.want(&cr));
+        w.raise("koji", new.want(&cr));
+        w.raise("koji", old.window(&cr, WindowFact::Opens, EPOCH + 600));
+        assert_eq!(w.line("coderabbit")["window"]["opens"], json!(null));
     }
 }

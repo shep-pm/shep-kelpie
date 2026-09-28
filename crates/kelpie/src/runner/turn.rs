@@ -103,6 +103,7 @@ impl Runner {
             Phase::Review(review) if matches!(review.stage, ReviewStage::Fixing { .. }) => {}
             Phase::Review(_) => return self.review_step(),
             Phase::Ci { .. } => return self.check_ci(),
+            Phase::CodeRabbit(_) => return self.coderabbit_step(),
             Phase::Ruling { .. } => return Ok(Begin::Idle),
             Phase::Merge { .. } => return self.merge(),
             Phase::Done { merged } => return self.finish(*merged),
@@ -269,6 +270,8 @@ impl Runner {
                     session_cost: reply.session_cost,
                 });
                 item.turn = Turn::Ended { at: now };
+                // The turn may have changed the code CodeRabbit was satisfied with.
+                item.coderabbit.satisfied = false;
                 // A question leaves the phase untouched: it interrupted
                 // whatever was running, before that turn could be said to
                 // have ended normally, and the answer resumes exactly this,

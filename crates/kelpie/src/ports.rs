@@ -15,6 +15,9 @@ use serde::{Deserialize, Serialize};
 #[cfg(doc)]
 use crate::board::READY;
 use crate::board::{OpenPullRequest, ReadyIssue};
+use crate::coderabbit::Activity;
+use crate::lease::LeaseKind;
+use crate::lease::wire::WindowFact;
 use crate::settings::{Effort, ForgeSlug};
 use crate::webhook::Webhook;
 
@@ -93,6 +96,33 @@ pub trait Forge: Send {
     ///
     /// [`ForgeError`] when the forge refuses or cannot be asked.
     fn mark_ready(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError>;
+
+    /// Adds `label` to pull request `number`, or takes it off
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses or cannot be asked.
+    fn set_label(
+        &self,
+        repo: &ForgeSlug,
+        number: u64,
+        label: &str,
+        on: bool,
+    ) -> Result<(), ForgeError>;
+
+    /// What CodeRabbit has posted on pull request `number`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn coderabbit(&self, repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError>;
+
+    /// Resolves review thread `thread`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses or cannot be asked.
+    fn resolve_thread(&self, repo: &ForgeSlug, thread: &str) -> Result<(), ForgeError>;
 
     /// Merges pull request `number` with a merge commit, only while its head is `head`
     ///
@@ -609,6 +639,25 @@ impl fmt::Display for ReviewerError {
 
 impl std::error::Error for ReviewerError {}
 
+/// A runner's side of the dog's book leases
+///
+/// Asking never blocks: the dog grants later, and [`Leases::holds`] says
+/// when it has. Each method only raises what the dog should hear.
+pub trait Leases: Send + Sync {
+    /// Asks for `kind`, or asks again for one already asked for, which
+    /// covers an ask the shepherd dropped
+    fn want(&self, kind: &LeaseKind);
+
+    /// Whether this run holds `kind`
+    fn holds(&self, kind: &LeaseKind) -> bool;
+
+    /// Gives `kind` back, or withdraws the ask
+    fn give_back(&self, kind: &LeaseKind);
+
+    /// Tells the dog what this run saw of `kind`'s review window
+    fn window(&self, kind: &LeaseKind, fact: WindowFact, value: u64);
+}
+
 /// Every port the runner uses, as one bundle
 pub struct Ports {
     /// Headless Claude, shared so a turn runs without holding the runner
@@ -623,6 +672,8 @@ pub struct Ports {
     pub relay: Arc<dyn Relay>,
     /// The maintainer's webhook, shared so a post runs without holding the runner
     pub alerts: Arc<dyn Alerts>,
+    /// The dog's book leases, which the runner's `grant` trigger fills
+    pub leases: Arc<dyn Leases>,
     /// The clock
     pub clock: Box<dyn Clock>,
 }

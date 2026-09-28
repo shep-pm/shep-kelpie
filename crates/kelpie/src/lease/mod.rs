@@ -9,6 +9,7 @@
 pub mod book;
 pub mod cli;
 pub mod gpu;
+pub mod window;
 pub mod wire;
 
 use std::fmt;
@@ -20,6 +21,9 @@ use crate::runner::ProjectName;
 /// The GPU lease's name on the command line
 pub const GPU: &str = "gpu";
 
+/// The CodeRabbit lease's name: one review window for the whole account
+pub const CODERABBIT: &str = "coderabbit";
+
 /// What a book lease is for, as a runner and the dog name it
 // wire format: changing this is a breaking change to runner metrics
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -27,6 +31,11 @@ pub const GPU: &str = "gpu";
 pub struct LeaseKind(String);
 
 impl LeaseKind {
+    /// The CodeRabbit window's lease
+    pub fn coderabbit() -> Self {
+        Self(CODERABBIT.to_owned())
+    }
+
     /// The name as written
     #[inline]
     pub fn as_str(&self) -> &str {

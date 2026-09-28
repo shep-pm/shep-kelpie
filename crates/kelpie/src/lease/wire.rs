@@ -4,7 +4,8 @@
 //! `lease.<kind>.want.<epoch>` and `lease.<kind>.return.<epoch>`. Totals
 //! survive a dropped metric, since the next one carries the count. The
 //! epoch in the name ties each total to one run of the runner. The dog
-//! grants with a `grant` trigger whose params are `<kind> <epoch>`.
+//! grants with a `grant` trigger whose params are `<kind> <epoch>`. What a
+//! runner sees of a review window goes up as `window.<kind>.<fact>.<epoch>`.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -70,6 +71,84 @@ impl fmt::Display for MetricName {
     }
 }
 
+/// What a runner saw of a kind's review window, raised as
+/// `window.<kind>.<fact>.<epoch>`
+///
+/// Each carries a Unix time as its value, and a latest value rather than a
+/// total, so a repeat changes nothing and a dropped one is covered by the
+/// next raise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum WindowFact {
+    /// A summon was accepted at this time
+    Summoned,
+    /// A refusal quoted the window opening at this time
+    Opens,
+    /// A review footer posted at this time allows this many reviews an hour
+    Quota(u32),
+}
+
+impl WindowFact {
+    fn name(self) -> String {
+        match self {
+            Self::Summoned => "summoned".into(),
+            Self::Opens => "opens".into(),
+            Self::Quota(per_hour) => format!("quota-{per_hour}"),
+        }
+    }
+
+    // A run keeps one latest value of each sort, whatever quota it states.
+    fn sort(self) -> u8 {
+        match self {
+            Self::Summoned => 0,
+            Self::Opens => 1,
+            Self::Quota(_) => 2,
+        }
+    }
+}
+
+/// A window metric's name, read back
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowMetric {
+    /// The kind whose window it is about
+    pub kind: LeaseKind,
+    /// What was seen
+    pub fact: WindowFact,
+    /// The run that raised it
+    pub epoch: Epoch,
+}
+
+impl WindowMetric {
+    /// Reads `window.<kind>.<fact>.<epoch>`, or `None` for any other metric
+    pub fn parse(name: &str) -> Option<Self> {
+        let rest = name.strip_prefix("window.")?;
+        let (rest, epoch) = rest.rsplit_once('.')?;
+        let (kind, fact) = rest.rsplit_once('.')?;
+        let fact = match fact {
+            "summoned" => WindowFact::Summoned,
+            "opens" => WindowFact::Opens,
+            _ => {
+                let per_hour = fact.strip_prefix("quota-")?;
+                if !per_hour.bytes().all(|b| b.is_ascii_digit()) {
+                    return None;
+                }
+                WindowFact::Quota(per_hour.parse().ok()?)
+            }
+        };
+        Some(Self {
+            kind: LeaseKind::try_from(kind).ok()?,
+            fact,
+            epoch: Epoch(epoch.parse().ok()?),
+        })
+    }
+}
+
+impl fmt::Display for WindowMetric {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { kind, fact, epoch } = self;
+        write!(f, "window.{kind}.{}.{}", fact.name(), epoch.0)
+    }
+}
+
 /// The params of a `grant` trigger: `<kind> <epoch>`
 pub fn grant_params(kind: &LeaseKind, epoch: Epoch) -> String {
     format!("{kind} {}", epoch.0)
@@ -101,6 +180,7 @@ pub struct Asker {
     epoch: Epoch,
     totals: BTreeMap<LeaseKind, Totals>,
     held: Vec<LeaseKind>,
+    seen: BTreeMap<(LeaseKind, u8), (WindowFact, u64)>,
 }
 
 impl Asker {
@@ -110,7 +190,26 @@ impl Asker {
             epoch,
             totals: BTreeMap::new(),
             held: Vec::new(),
+            seen: BTreeMap::new(),
         }
+    }
+
+    /// Tells the dog what this run saw of `kind`'s window: the metric to raise
+    #[must_use = "the dog hears of the window only through this metric"]
+    pub fn window(&mut self, kind: &LeaseKind, fact: WindowFact, value: u64) -> (String, f64) {
+        self.seen.insert((kind.clone(), fact.sort()), (fact, value));
+        self.window_metric(kind, fact, value)
+    }
+
+    fn window_metric(&self, kind: &LeaseKind, fact: WindowFact, value: u64) -> (String, f64) {
+        let name = WindowMetric {
+            kind: kind.clone(),
+            fact,
+            epoch: self.epoch,
+        };
+        // Exact: Unix times and quotas stay far below 2^53.
+        #[allow(clippy::cast_precision_loss)]
+        (name.to_string(), value as f64)
     }
 
     /// Asks for `kind`: the metric to raise, and its value
@@ -144,8 +243,7 @@ impl Asker {
         if epoch != self.epoch {
             return Err(GrantError::OtherRun(epoch));
         }
-        let asking = self.totals.get(&kind).is_some_and(|t| t.asking());
-        if !asking {
+        if !self.asking(&kind) {
             return Err(GrantError::NotAsked(kind));
         }
         if !self.held.contains(&kind) {
@@ -159,13 +257,23 @@ impl Asker {
         self.held.contains(kind)
     }
 
+    /// Whether this run has asked for `kind` and not given it back
+    pub fn asking(&self, kind: &LeaseKind) -> bool {
+        self.totals.get(kind).is_some_and(|t| t.asking())
+    }
+
     /// Every metric this run has raised, at its current value
     pub fn metrics(&self) -> Vec<(String, f64)> {
         let both = [Total::Want, Total::Return];
-        self.totals
+        let totals = self
+            .totals
             .keys()
-            .flat_map(|kind| both.map(|total| self.metric(kind, total)))
-            .collect()
+            .flat_map(|kind| both.map(|total| self.metric(kind, total)));
+        let seen = self
+            .seen
+            .iter()
+            .map(|((kind, _), (fact, at))| self.window_metric(kind, *fact, *at));
+        totals.chain(seen).collect()
     }
 
     fn metric(&self, kind: &LeaseKind, total: Total) -> (String, f64) {
@@ -325,6 +433,54 @@ mod tests {
         asker.grant("stand-in 9").unwrap();
         let _ = asker.give_back(&stand_in());
         assert!(!asker.holds(&stand_in()));
+    }
+
+    #[test]
+    fn window_facts_go_up_as_latest_values_and_are_raised_again() {
+        let coderabbit = LeaseKind::coderabbit();
+        let mut asker = Asker::new(Epoch(9));
+        assert_eq!(
+            asker.window(&coderabbit, WindowFact::Summoned, 1_790_000_000),
+            ("window.coderabbit.summoned.9".into(), 1_790_000_000.0)
+        );
+        let _ = asker.window(&coderabbit, WindowFact::Quota(1), 1_790_000_100);
+        let _ = asker.window(&coderabbit, WindowFact::Quota(10), 1_790_000_200);
+        assert_eq!(
+            asker.metrics(),
+            [
+                ("window.coderabbit.summoned.9".into(), 1_790_000_000.0),
+                ("window.coderabbit.quota-10.9".into(), 1_790_000_200.0),
+            ],
+            "one latest quota, carrying its footer's time"
+        );
+    }
+
+    #[test]
+    fn a_window_metric_name_reads_back() {
+        assert_eq!(
+            WindowMetric::parse("window.coderabbit.opens.7"),
+            Some(WindowMetric {
+                kind: LeaseKind::coderabbit(),
+                fact: WindowFact::Opens,
+                epoch: Epoch(7)
+            })
+        );
+        assert_eq!(
+            WindowMetric::parse("window.coderabbit.quota-10.7").map(|m| m.fact),
+            Some(WindowFact::Quota(10))
+        );
+        for other in [
+            "window.coderabbit.opens",
+            "window.coderabbit.closes.7",
+            "lease.coderabbit.opens.7",
+            "window.gpu.quota-1.7",
+            "window.coderabbit.quota-1.-7",
+            "window.coderabbit.quota.7",
+            "window.coderabbit.quota-+1.7",
+            "window.coderabbit.quota-x.7",
+        ] {
+            assert_eq!(WindowMetric::parse(other), None, "{other}");
+        }
     }
 
     #[test]

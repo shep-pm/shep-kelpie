@@ -11,7 +11,7 @@ use super::{Answer, Runner};
 use crate::board::WorkerModel;
 use crate::ports::{SessionId, Timestamp};
 use crate::state::{LeaseHeld, Ruling, RunState, StateError};
-use crate::work_item::{Phase, Turn, WorkItem};
+use crate::work_item::{CodeRabbitTally, Phase, Turn, WorkItem};
 
 /// The triggers a runner answers
 pub const ACTIONS: [&str; 7] = ["status", "start", "pause", "add", "rule", "gate", "drop"];
@@ -59,6 +59,8 @@ pub struct WorkItemStatus<'a> {
     pub phase: &'a Phase,
     /// The worker's draft pull request, once kelpie has seen it
     pub pull_request: Option<u64>,
+    /// Its CodeRabbit rounds so far
+    pub coderabbit: CodeRabbitTally,
     /// Claude calls made for it so far
     pub calls: usize,
     /// What they have cost, in US dollars
@@ -77,6 +79,7 @@ impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
             turn: &item.turn,
             phase: &item.phase,
             pull_request: item.pull_request,
+            coderabbit: item.coderabbit,
             calls: item.calls.len(),
             cost_usd: item.cost().usd(),
         }

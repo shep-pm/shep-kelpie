@@ -7,7 +7,9 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use super::coderabbit::FakeCodeRabbit;
 use crate::board::{OpenPullRequest, READY, ReadyIssue};
+use crate::coderabbit::Activity;
 use crate::ports::{Checks, Forge, ForgeError, Issue, PullRequest, PullRequestState, Visibility};
 use crate::settings::ForgeSlug;
 
@@ -31,7 +33,8 @@ pub(crate) struct FakeForge {
     lagging: Arc<Mutex<HashMap<u64, String>>>,
     readied: Arc<Mutex<Vec<u64>>>,
     merges: Arc<Mutex<Vec<(u64, String)>>>,
-    pr_labels: Arc<Mutex<HashMap<u64, Vec<String>>>>,
+    /// Pull requests' labels, and what CodeRabbit posts
+    pub(crate) coderabbit: FakeCodeRabbit,
 }
 
 /// A pull request on the fake forge. Its head is its branch on the rig's
@@ -63,21 +66,18 @@ impl FakeForge {
             lagging: Arc::default(),
             readied: Arc::default(),
             merges: Arc::default(),
-            pr_labels: Arc::default(),
+            coderabbit: FakeCodeRabbit::default(),
         }
     }
 
     /// Adds `label` to pull request `number`, as someone other than kelpie would
     pub(crate) fn label_pull_request(&self, number: u64, label: &str) {
-        let mut labels = self.pr_labels.lock().unwrap();
-        labels.entry(number).or_default().push(label.to_owned());
+        self.coderabbit.put_label(number, label, true);
     }
 
-    /// Removes `label` from pull request `number`
+    /// Removes `label` from pull request `number`, as someone other than kelpie would
     pub(crate) fn unlabel_pull_request(&self, number: u64, label: &str) {
-        if let Some(labels) = self.pr_labels.lock().unwrap().get_mut(&number) {
-            labels.retain(|l| l != label);
-        }
+        self.coderabbit.put_label(number, label, false);
     }
 
     pub(crate) fn set_visibility(&self, visibility: Visibility) {
@@ -264,13 +264,12 @@ impl Forge for FakeForge {
                 .ok_or_else(|| ForgeError::Failed(format!("no branch {} on origin", pr.branch)))?,
         };
         let checks = self.checks.lock().unwrap().get(&head).cloned();
-        let labels = self.pr_labels.lock().unwrap().get(&number).cloned();
         Ok(PullRequest {
             state: pr.state,
             draft: pr.draft,
             checks: checks.unwrap_or(Checks::Pending),
             head,
-            labels: labels.unwrap_or_default(),
+            labels: self.coderabbit.labels(number),
         })
     }
 
@@ -292,6 +291,27 @@ impl Forge for FakeForge {
         prs.get_mut(&number).expect("checked above").draft = false;
         self.readied.lock().unwrap().push(number);
         Ok(())
+    }
+
+    fn set_label(
+        &self,
+        _repo: &ForgeSlug,
+        number: u64,
+        label: &str,
+        on: bool,
+    ) -> Result<(), ForgeError> {
+        self.opened(number)?;
+        self.coderabbit.set_label(number, label, on);
+        Ok(())
+    }
+
+    fn coderabbit(&self, _repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError> {
+        self.opened(number)?;
+        self.coderabbit.activity(number)
+    }
+
+    fn resolve_thread(&self, _repo: &ForgeSlug, thread: &str) -> Result<(), ForgeError> {
+        self.coderabbit.resolve(thread)
     }
 
     // Refuses what GitHub refuses: a draft, a pull request that is not open,

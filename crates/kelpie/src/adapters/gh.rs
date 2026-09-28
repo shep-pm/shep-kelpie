@@ -1,10 +1,13 @@
 //! GitHub, through the `gh` command line
 
+pub(crate) mod coderabbit;
+
 use std::process::{Command, Stdio};
 
 use serde::Deserialize;
 
 use crate::board::{OpenPullRequest, READY, ReadyIssue};
+use crate::coderabbit::Activity;
 use crate::ports::{Checks, Forge, ForgeError, Issue, PullRequest, PullRequestState, Visibility};
 use crate::settings::ForgeSlug;
 
@@ -101,6 +104,24 @@ impl Forge for Gh {
     fn mark_ready(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
         let number = number.to_string();
         gh(&["pr", "ready", &number, "--repo", repo.as_str()]).map(drop)
+    }
+
+    fn set_label(
+        &self,
+        repo: &ForgeSlug,
+        number: u64,
+        label: &str,
+        on: bool,
+    ) -> Result<(), ForgeError> {
+        coderabbit::label(repo, number, label, on)
+    }
+
+    fn coderabbit(&self, repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError> {
+        coderabbit::activity(repo, number)
+    }
+
+    fn resolve_thread(&self, _repo: &ForgeSlug, thread: &str) -> Result<(), ForgeError> {
+        coderabbit::resolve(thread)
     }
 
     fn merge(&self, repo: &ForgeSlug, number: u64, head: &str) -> Result<(), ForgeError> {
@@ -457,6 +478,15 @@ mod tests {
                 labels: vec![],
             }
         );
+    }
+
+    // Recorded the same way, labels included, from shep-pm/shep#598.
+    const PR_LABELLED: &str = include_str!("../../fixtures/gh-pr-view-labelled.json");
+
+    #[test]
+    fn a_pull_request_is_read_with_its_labels() {
+        let pr = parse_pull_request(PR_LABELLED.as_bytes()).unwrap();
+        assert_eq!(pr.labels, ["review please"]);
     }
 
     #[test]

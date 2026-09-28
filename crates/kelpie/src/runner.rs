@@ -15,9 +15,12 @@ use crate::ports::{ForgeError, Ports, Timestamp, Visibility};
 use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
-use crate::work_item::{Known, Phase, ReviewCallState, Turn, WorkItem, new_session_id};
+use crate::work_item::{
+    CodeRabbitTally, Known, Phase, ReviewCallState, Turn, WorkItem, new_session_id,
+};
 
 mod alert;
+mod coderabbit;
 mod dispatch;
 mod gate;
 mod merge;
@@ -167,6 +170,11 @@ impl Runner {
             item.review_call = ReviewCallState::Idle;
             store.save(&state)?;
         }
+        // A new run is a new epoch, and the dog reclaims what the old one held.
+        if !state.leases.is_empty() {
+            state.leases.clear();
+            store.save(&state)?;
+        }
         Ok(Self {
             project,
             settings,
@@ -254,6 +262,7 @@ impl Runner {
             red_head: None,
             resume: None,
             review_call: ReviewCallState::default(),
+            coderabbit: CodeRabbitTally::default(),
             known: Known::default(),
             calls: Vec::new(),
         });
@@ -441,6 +450,7 @@ mod tests {
             (Visibility::Internal, "internal"),
         ] {
             let rig = Rig::new("shep");
+            rig.coderabbit_on();
             rig.forge.set_visibility(visibility);
             assert_eq!(
                 rig.open().unwrap_err().to_string(),
@@ -455,6 +465,7 @@ mod tests {
     #[test]
     fn coderabbit_on_for_a_public_repo_asks_the_forge_once() {
         let rig = Rig::new("shep");
+        rig.coderabbit_on();
         rig.open().unwrap();
         assert_eq!(rig.forge.calls(), 1);
     }
@@ -463,7 +474,6 @@ mod tests {
     fn coderabbit_off_never_asks_the_forge() {
         let rig = Rig::new("zeus");
         rig.forge.set_visibility(Visibility::Private);
-        rig.edit_settings(|s| s.replace("enabled = true", "enabled = false"));
         rig.open().unwrap();
         assert_eq!(rig.forge.calls(), 0);
     }

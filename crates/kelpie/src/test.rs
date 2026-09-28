@@ -22,11 +22,14 @@ use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{CallRecord, Known, Phase, Turn, WorkItem};
 
 mod alerts;
+mod coderabbit;
 mod forge;
+mod leases;
 mod relay;
 
 pub(crate) use alerts::FakeAlerts;
 pub(crate) use forge::FakeForge;
+pub(crate) use leases::{FakeLeases, Told};
 pub(crate) use relay::FakeRelay;
 
 /// A work item with one call, so every field of its format shows
@@ -53,6 +56,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         red_head: Some("bad".into()),
         resume: None,
         review_call: crate::work_item::ReviewCallState::Idle,
+        coderabbit: crate::work_item::CodeRabbitTally::default(),
         known: Known {
             labels: vec!["review please".into()],
             ready: false,
@@ -75,6 +79,10 @@ pub(crate) fn a_work_item() -> WorkItem {
 
 /// The `repo` in `settings.example.toml`, which the rig points at its own
 const EXAMPLE_REPO: &str = "~/.kelpie/repos/shep";
+
+/// The CodeRabbit gate as `settings.example.toml` sets it, and turned off
+pub(crate) const CODERABBIT_ON: &str = "[coderabbit]\nenabled = true\n";
+const CODERABBIT_OFF: &str = "[coderabbit]\nenabled = false\n";
 
 /// The file a killed worker leaves in its worktree, to find after a restart
 pub(crate) const LEFT_BEHIND: &str = "left-behind.txt";
@@ -347,6 +355,7 @@ pub(crate) struct Rig {
     pub(crate) reviewer: FakeReviewer,
     pub(crate) relay: Arc<FakeRelay>,
     pub(crate) alerts: FakeAlerts,
+    pub(crate) leases: FakeLeases,
     pub(crate) clock: FakeClock,
 }
 
@@ -396,14 +405,20 @@ impl Rig {
             reviewer: FakeReviewer::default(),
             relay: Arc::new(FakeRelay::default()),
             alerts: FakeAlerts::default(),
+            leases: FakeLeases::default(),
             clock: FakeClock::at(Self::EPOCH),
             home,
         };
         rig.make_repo();
 
+        // CodeRabbit is off unless a test turns it on: most tests are about
+        // what comes before it or does not involve it.
         let example = include_str!("../settings.example.toml");
         assert!(example.contains(EXAMPLE_REPO), "the example's repo moved");
-        let settings = example.replace(EXAMPLE_REPO, &rig.repo().display().to_string());
+        assert!(example.contains(CODERABBIT_ON), "the example's gate moved");
+        let settings = example
+            .replace(EXAMPLE_REPO, &rig.repo().display().to_string())
+            .replace(CODERABBIT_ON, CODERABBIT_OFF);
         let paths = rig.paths();
         std::fs::create_dir_all(paths.settings.parent().unwrap()).unwrap();
         std::fs::write(&paths.settings, settings).unwrap();
@@ -475,6 +490,11 @@ impl Rig {
         ProjectPaths::under(&self.home.path().join("kelpie"), &self.project)
     }
 
+    /// Turns the CodeRabbit gate on, as the example settings have it for shep
+    pub(crate) fn coderabbit_on(&self) {
+        self.edit_settings(|s| s.replace(CODERABBIT_OFF, CODERABBIT_ON));
+    }
+
     pub(crate) fn edit_settings(&self, edit: impl FnOnce(String) -> String) {
         let file = self.paths().settings;
         let text = std::fs::read_to_string(&file).unwrap();
@@ -490,6 +510,7 @@ impl Rig {
             reviewer: Arc::new(self.reviewer.clone()),
             relay: Arc::clone(&self.relay) as Arc<dyn Relay>,
             alerts: Arc::new(self.alerts.clone()),
+            leases: Arc::new(self.leases.clone()),
             clock: Box::new(self.clock.clone()),
         };
         Runner::open(
