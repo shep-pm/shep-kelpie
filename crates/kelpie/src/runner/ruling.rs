@@ -13,7 +13,12 @@ use super::gate::short;
 use super::report::{Begin, StepReport};
 use crate::ports::Timestamp;
 use crate::state::{ProjectState, Resume, Ruling, RulingKind, StateError};
-use crate::work_item::{Phase, Review, Turn, WorkItem};
+use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
+
+/// The prompt for a turn resumed after the maintainer accepts a timed-out
+/// turn's ruling with a yes
+const TIMEOUT_CONTINUE: &str = "Kelpie stopped your last turn: it ran past its ceiling. \
+                                Carry on with the work item from where you left off.";
 
 /// The maintainer's answer to a ruling
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +75,8 @@ enum Move {
         phase: Phase,
         force: Option<Phase>,
     },
+    /// A yes on a foreign change: kelpie adopts it and watches CI again
+    Accept(Known),
 }
 
 impl Runner {
@@ -105,6 +112,13 @@ impl Runner {
                     item.turn = Turn::Next { prompt };
                     item.phase = phase;
                     item.resume = force;
+                }
+                Move::Accept(known) => {
+                    item.known = known;
+                    item.phase = Phase::Ci {
+                        head: None,
+                        since: now,
+                    };
                 }
             }
         }
@@ -198,6 +212,15 @@ fn decide(id: u64, answer: Answer, ruling: Ruling, now: Timestamp) -> Result<Mov
         }
         (_, RulingKind::Question { .. }) => return Err(RuleError::WantsAnswer(id)),
         (Answer::Text(_), _) => return Err(RuleError::NotAQuestion(id)),
+        (Answer::Yes, RulingKind::TurnTimeout) => {
+            return Ok(Move::Turn {
+                prompt: TIMEOUT_CONTINUE.to_owned(),
+                phase: Phase::Implement,
+                force: None,
+            });
+        }
+        (Answer::No(_), RulingKind::TurnTimeout) => Phase::Done { merged: false },
+        (Answer::Yes, RulingKind::ForeignChange { known, .. }) => return Ok(Move::Accept(known)),
         // A no's fix is new code, unreviewed: it goes through the
         // qwen-review loop again before CI, whatever ruling this answers.
         (Answer::No(note), _) => {
@@ -284,6 +307,21 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
             return format!(
                 "The worker on {about} asks:\n\n{asked}\n\n{} sends the worker your answer.",
                 trigger("answer <text>")
+            );
+        }
+        RulingKind::TurnTimeout => {
+            return format!(
+                "The worker on {about} has been running past its turn's ceiling, \
+                 and kelpie stopped it. {yes} resumes its session for another turn, \
+                 and {no} stops the work item, keeping its branch and pull request \
+                 on the forge."
+            );
+        }
+        RulingKind::ForeignChange { description, .. } => {
+            return format!(
+                "{} changed outside kelpie: {description}. {yes} accepts it and kelpie \
+                 carries on, and {no} sends the worker your note.",
+                capitalized(&about)
             );
         }
     };

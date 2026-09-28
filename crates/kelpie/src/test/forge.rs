@@ -33,7 +33,7 @@ pub(crate) struct FakeForge {
     lagging: Arc<Mutex<HashMap<u64, String>>>,
     readied: Arc<Mutex<Vec<u64>>>,
     merges: Arc<Mutex<Vec<(u64, String)>>>,
-    /// Labels, and what CodeRabbit posts
+    /// Pull requests' labels, and what CodeRabbit posts
     pub(crate) coderabbit: FakeCodeRabbit,
 }
 
@@ -68,6 +68,16 @@ impl FakeForge {
             merges: Arc::default(),
             coderabbit: FakeCodeRabbit::default(),
         }
+    }
+
+    /// Adds `label` to pull request `number`, as someone other than kelpie would
+    pub(crate) fn label_pull_request(&self, number: u64, label: &str) {
+        self.coderabbit.put_label(number, label, true);
+    }
+
+    /// Removes `label` from pull request `number`, as someone other than kelpie would
+    pub(crate) fn unlabel_pull_request(&self, number: u64, label: &str) {
+        self.coderabbit.put_label(number, label, false);
     }
 
     pub(crate) fn set_visibility(&self, visibility: Visibility) {
@@ -118,6 +128,12 @@ impl FakeForge {
     pub(crate) fn set_state(&self, number: u64, state: PullRequestState) {
         let mut prs = self.pull_requests.lock().unwrap();
         prs.get_mut(&number).expect("an opened pull request").state = state;
+    }
+
+    /// Marks pull request `number` ready, as someone other than kelpie would
+    pub(crate) fn ready_pull_request(&self, number: u64) {
+        let mut prs = self.pull_requests.lock().unwrap();
+        prs.get_mut(&number).expect("an opened pull request").draft = false;
     }
 
     /// Makes posting comments fail, or work again

@@ -273,7 +273,6 @@ fn parse_pull_request(stdout: &[u8]) -> Result<PullRequest, ForgeError> {
         is_draft: bool,
         head_ref_oid: String,
         status_check_rollup: Vec<Check>,
-        // Recorded before labels were asked for, some fixtures carry none.
         #[serde(default)]
         labels: Vec<Label>,
     }
@@ -488,6 +487,23 @@ mod tests {
     fn a_pull_request_is_read_with_its_labels() {
         let pr = parse_pull_request(PR_LABELLED.as_bytes()).unwrap();
         assert_eq!(pr.labels, ["review please"]);
+    }
+
+    #[test]
+    fn a_pull_requests_labels_are_read() {
+        let view = br#"{"headRefOid":"abc","isDraft":false,"state":"OPEN",
+            "statusCheckRollup":[],"labels":[{"name":"review please"},{"name":"bug"}]}"#;
+        let pr = parse_pull_request(view).unwrap();
+        assert_eq!(pr.labels, ["review please", "bug"]);
+    }
+
+    #[test]
+    fn a_pull_request_recorded_before_labels_were_read_has_none() {
+        let view = br#"{"headRefOid":"abc","isDraft":false,"state":"OPEN","statusCheckRollup":[]}"#;
+        assert_eq!(
+            parse_pull_request(view).unwrap().labels,
+            Vec::<String>::new()
+        );
     }
 
     #[test]

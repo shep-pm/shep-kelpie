@@ -84,6 +84,21 @@ pub enum StepReport {
         /// Why
         reason: String,
     },
+    /// A turn ran past its ceiling, was stopped, and is parked on a ruling
+    TimedOut {
+        /// The work item's issue
+        issue: u64,
+        /// The worker's session, which the ruling's yes resumes
+        session: SessionId,
+        /// The worker's draft pull request, once it has opened one
+        pull_request: Option<u64>,
+        /// The ruling's id
+        id: u64,
+        /// The question, with the triggers that answer it
+        question: String,
+        /// Why the question could not be posted on the pull request, if it could not
+        comment_failed: Option<String>,
+    },
     /// CI failed, and the failure is the worker's next turn
     CiFailed {
         /// The work item's issue

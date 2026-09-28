@@ -6,6 +6,7 @@
 //! them, and only under the lock, so a signalled pid is never a reused one.
 
 use std::io::{self, Read};
+use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
@@ -56,10 +57,14 @@ impl Processes {
     }
 
     fn run(&self, command: &mut Command, deadline: Option<Instant>) -> Result<Output, RunError> {
+        // Its own process group, led by its own pid, so a program it spawns
+        // and leaves behind (a build, a test run) is reachable by signalling
+        // the group, not just the one pid this struct tracks.
         let mut child = command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .process_group(0)
             .spawn()
             .map_err(RunError::Io)?;
         let stdout = drain(child.stdout.take());
@@ -98,10 +103,7 @@ impl Processes {
             let mut running = self.lock();
             running.stopping = true;
             for (_, child) in &running.children {
-                let _ = Command::new("kill")
-                    .arg(child.id().to_string())
-                    .stdin(Stdio::null())
-                    .status();
+                signal_group(child.id(), "TERM");
             }
         }
         let deadline = Instant::now() + STOP_GRACE;
@@ -109,29 +111,37 @@ impl Processes {
             thread::sleep(POLL);
         }
         for (_, child) in &mut self.lock().children {
+            signal_group(child.id(), "KILL");
             let _ = child.kill();
         }
     }
 
     fn wait(&self, id: u64, deadline: Option<Instant>) -> Result<ExitStatus, RunError> {
         loop {
-            {
+            let past_deadline = {
                 let mut running = self.lock();
                 let at = running
                     .children
                     .iter()
                     .position(|(i, _)| *i == id)
                     .expect("only wait removes a child");
+                // Checked before the deadline below, so a child that has
+                // already exited by the time a poll lands is never reported
+                // as timed out, however close the two were.
                 if let Some(status) = running.children[at].1.try_wait().map_err(RunError::Io)? {
                     running.children.remove(at);
                     return Ok(status);
                 }
-                if deadline.is_some_and(|d| Instant::now() >= d) {
-                    let (_, mut child) = running.children.remove(at);
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(RunError::TimedOut);
-                }
+                deadline
+                    .is_some_and(|d| Instant::now() >= d)
+                    .then(|| running.children.remove(at).1)
+            };
+            if let Some(mut child) = past_deadline {
+                // The same stop ladder `stop` uses, so a build or test the
+                // worker started and left running past the ceiling is ended
+                // too, not just the `claude` process this struct tracked.
+                stop_child(&mut child, STOP_GRACE);
+                return Err(RunError::TimedOut);
             }
             thread::sleep(POLL);
         }
@@ -140,6 +150,42 @@ impl Processes {
     fn lock(&self) -> MutexGuard<'_, Running> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+// Sends `signal` ("TERM" or "KILL") to the process group `pid` leads, which
+// `process_group(0)` at spawn made it the leader of.
+//
+// Not `kill -<signal> -<pid>`: measured on procps-ng 4.0.2 (Debian
+// bookworm), that parses without error and signals nothing, because a
+// second `-N`-shaped argument after a signal spec is read as another signal
+// spec, leaving no pid to send to at all. `pkill -<signal> -g <pgid>` names
+// the process group through its own flag instead of through a negative pid,
+// and was measured to reach the group leader and a process it had spawned,
+// on both procps-ng 4.0.2 and macOS's BSD pkill.
+fn signal_group(pgid: u32, signal: &str) {
+    let _ = Command::new("pkill")
+        .args([format!("-{signal}"), "-g".to_owned(), pgid.to_string()])
+        .stdin(Stdio::null())
+        .status();
+}
+
+// SIGTERM to `child`'s whole process group, then SIGKILL once `grace` has
+// passed with it still running. `child.kill()` also runs as a fallback for a
+// system with no `kill` binary on `PATH`, though that alone would miss
+// anything the child had spawned.
+fn stop_child(child: &mut Child, grace: Duration) {
+    let pid = child.id();
+    signal_group(pid, "TERM");
+    let deadline = Instant::now() + grace;
+    while Instant::now() < deadline {
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        thread::sleep(POLL);
+    }
+    signal_group(pid, "KILL");
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn drain(pipe: Option<impl Read + Send + 'static>) -> thread::JoinHandle<Vec<u8>> {
@@ -181,6 +227,70 @@ mod tests {
         assert!(matches!(result, Err(RunError::TimedOut)), "{result:?}");
         assert!(started.elapsed() < Duration::from_secs(10));
         assert!(processes.lock().children.is_empty());
+    }
+
+    // Real time: models a worker whose build or test process outlives it.
+    // The child and its grandchild both ignore SIGTERM, so only the group
+    // SIGKILL after the grace period ends either of them.
+    #[test]
+    fn a_child_past_its_limit_takes_its_ignoring_grandchild_down_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("grandchild-started");
+        let pid_file = dir.path().join("grandchild.pid");
+        let processes = Processes::default();
+        let script = format!(
+            "trap '' TERM
+             sh -c 'trap \"\" TERM; touch \"$1\"; sleep 30' _ {marker} &
+             echo $! > {pid_file}
+             wait",
+            marker = shell_quote(&marker),
+            pid_file = shell_quote(&pid_file),
+        );
+        let started = Instant::now();
+        let result = processes.output_within(
+            Command::new("sh").args(["-c", &script]),
+            Duration::from_millis(200),
+        );
+        assert!(matches!(result, Err(RunError::TimedOut)), "{result:?}");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(marker.exists(), "the grandchild never started");
+
+        let grandchild: u32 = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut alive = true;
+        while Instant::now() < deadline {
+            alive = process_is_alive(grandchild);
+            if !alive {
+                break;
+            }
+            thread::sleep(POLL);
+        }
+        assert!(!alive, "the grandchild survived the ceiling");
+    }
+
+    fn shell_quote(path: &std::path::Path) -> String {
+        format!("'{}'", path.display())
+    }
+
+    // `kill -0` succeeds on a zombie: SIGKILL ended it, but nothing has
+    // reaped it yet. `ps`'s state column reports `Z` for exactly that case,
+    // and nothing at all once it is gone.
+    fn process_is_alive(pid: u32) -> bool {
+        let output = Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        let stat = String::from_utf8_lossy(&output.stdout);
+        let stat = stat.trim();
+        !stat.is_empty() && !stat.starts_with('Z')
     }
 
     // Real time: the child is a real process, and the test bounds its own

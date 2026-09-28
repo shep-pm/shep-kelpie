@@ -10,6 +10,7 @@
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use super::Runner;
 use super::question::asked;
@@ -18,9 +19,9 @@ use super::review::{self, run_review_call};
 use super::ruling::park;
 use super::trigger::lock;
 use crate::pacer::Scope;
-use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session};
+use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session, Timestamp};
 use crate::profile::{INSTRUCTIONS, WorkerProfile};
-use crate::state::{Resume, RulingKind, RunState, StateError};
+use crate::state::{ProjectState, Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CallRecord, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree;
 
@@ -116,15 +117,27 @@ impl Runner {
         }
         let item = self.state.work_item.as_ref().expect("checked above");
         let id = item.session.clone();
-        let (session, prompt) = match &item.turn {
-            Turn::Due => (Session::New(id), None),
-            Turn::Running { .. } if start_over => (Session::New(id), None),
-            Turn::Running { .. } => (Session::Resume(id), Some(CONTINUE.to_owned())),
-            Turn::Next { prompt } => (Session::Resume(id), Some(prompt.clone())),
+        let now = self.ports.clock.now();
+        // A turn already running when the runner starts keeps the start it
+        // was saved with, so a restart can never buy it a fresh ceiling: the
+        // call it resumes gets only however much of the ceiling is left.
+        let (session, prompt, since) = match &item.turn {
+            Turn::Due => (Session::New(id), None, now),
+            Turn::Running { since } if start_over => (Session::New(id), None, *since),
+            Turn::Running { since } => (Session::Resume(id), Some(CONTINUE.to_owned()), *since),
+            Turn::Next { prompt } => (Session::Resume(id), Some(prompt.clone()), now),
             Turn::Ended { .. } | Turn::Failed { .. } => return Ok(Begin::Idle),
         };
-        let prepared = self.prepare(item, session, prompt);
-        let now = self.ports.clock.now();
+        let ceiling = self.turn_ceiling();
+        let elapsed = Duration::from_secs(now.0.saturating_sub(since.0));
+        let remaining = ceiling.saturating_sub(elapsed);
+        if remaining.is_zero() {
+            // The ceiling passed while kelpie was down, before a new call
+            // could even be tried: park it as a call that hit
+            // `ClaudeError::TimedOut` would, with no call spent.
+            return self.park_ceiling_passed(now);
+        }
+        let prepared = self.prepare(item, session, prompt, remaining);
         let mut next = self.state.clone();
         let item = next
             .work_item
@@ -132,7 +145,7 @@ impl Runner {
             .expect("the work item checked above");
         let begin = match prepared {
             Ok(call) => {
-                item.turn = Turn::Running { since: now };
+                item.turn = Turn::Running { since };
                 Begin::Call(call)
             }
             Err(reason) => {
@@ -150,6 +163,21 @@ impl Runner {
         Ok(begin)
     }
 
+    fn turn_ceiling(&self) -> Duration {
+        Duration::from_secs(u64::from(self.settings.worker.turn_timeout.get()) * 60)
+    }
+
+    fn park_ceiling_passed(&mut self, now: Timestamp) -> Result<Begin, StateError> {
+        let mut next = self.state.clone();
+        if let Some(item) = next.work_item.as_mut() {
+            item.turn = Turn::Ended { at: now };
+        }
+        let mut report = timed_out(self.project.as_str(), &mut next);
+        self.save(next)?;
+        self.fill_comment_failed(&mut report);
+        Ok(Begin::Report(report))
+    }
+
     // Everything the worker needs on disk before it starts: its worktree, its
     // build folder, its settings file and kelpie's instructions. A turn with
     // no prompt of its own is the first, and takes the issue.
@@ -158,6 +186,7 @@ impl Runner {
         item: &WorkItem,
         session: Session,
         prompt: Option<String>,
+        timeout: Duration,
     ) -> Result<ClaudeCall, String> {
         let dirs = worktree::prepare(
             &self.settings.repo,
@@ -203,6 +232,7 @@ impl Runner {
             settings,
             instructions: Some(instructions),
             prompt,
+            timeout: Some(timeout),
         })
     }
 
@@ -309,6 +339,10 @@ impl Runner {
                     }
                 }
             }
+            Err(ClaudeError::TimedOut) => {
+                item.turn = Turn::Ended { at: now };
+                timed_out(self.project.as_str(), &mut next)
+            }
             Err(e) => {
                 let reason = e.to_string();
                 item.turn = Turn::Failed {
@@ -323,16 +357,30 @@ impl Runner {
         };
         self.save(next)?;
         let mut report = report;
-        if let StepReport::Asked {
-            pull_request,
-            question,
-            comment_failed,
-            ..
-        } = &mut report
-        {
-            *comment_failed = self.post_ruling(*pull_request, question);
-        }
+        self.fill_comment_failed(&mut report);
         Ok(Some(report))
+    }
+
+    // A ruling just raised is posted as a comment on its pull request, if it
+    // has one; only these two reports carry a ruling and need the outcome.
+    fn fill_comment_failed(&self, report: &mut StepReport) {
+        match report {
+            StepReport::Asked {
+                pull_request,
+                question,
+                comment_failed,
+                ..
+            }
+            | StepReport::TimedOut {
+                pull_request,
+                question,
+                comment_failed,
+                ..
+            } => {
+                *comment_failed = self.post_ruling(*pull_request, question);
+            }
+            _ => {}
+        }
     }
 
     // The open pull request from `branch`. A forge that cannot be asked
@@ -346,6 +394,28 @@ impl Runner {
         open.into_iter()
             .find(|pr| pr.head == branch)
             .map(|pr| pr.number)
+    }
+}
+
+// Parks the work item on a turn-ceiling ruling and builds its report. Shared
+// by a call that actually hit `ClaudeError::TimedOut` and by a restart that
+// finds a turn already past its ceiling with no call spent. The caller sets
+// `item.turn` beforehand: this only raises the ruling. `comment_failed` is
+// filled in afterwards, once the ruling has actually been posted.
+fn timed_out(project: &str, next: &mut ProjectState) -> StepReport {
+    let item = next
+        .work_item
+        .as_mut()
+        .expect("a turn ceiling is about a work item");
+    let (issue, session, pull_request) = (item.issue, item.session.clone(), item.pull_request);
+    let (_, id, question) = park(project, next, pull_request, RulingKind::TurnTimeout);
+    StepReport::TimedOut {
+        issue,
+        session,
+        pull_request,
+        id,
+        question,
+        comment_failed: None,
     }
 }
 
@@ -622,6 +692,120 @@ mod tests {
         );
         assert_eq!(step(&runner).unwrap(), None);
         assert_eq!(rig.claude.calls().len(), 1);
+    }
+
+    #[test]
+    fn a_turn_past_its_ceiling_is_stopped_and_a_yes_resumes_its_session() {
+        let (rig, runner) = with_issue_7("zeus");
+        rig.claude.script([Scripted::Fail(ClaudeError::TimedOut)]);
+        let Some(StepReport::TimedOut {
+            issue,
+            session,
+            pull_request,
+            id,
+            question,
+            ..
+        }) = step(&runner).unwrap()
+        else {
+            panic!("the timed-out turn raised no ruling");
+        };
+        assert_eq!((issue, pull_request, id), (7, None, 1));
+        assert!(
+            question.starts_with(
+                "The worker on issue #7 has been running past its turn's ceiling, \
+                 and kelpie stopped it."
+            ),
+            "{question}"
+        );
+        assert_eq!(
+            rig.ask(&runner, "status", None)["work_item"]["phase"],
+            json!({ "state": "ruling", "id": 1 })
+        );
+
+        rig.ask(&runner, "rule", Some("1 yes"));
+        rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Ended { .. })
+        ));
+        let [_, resumed] = rig.claude.calls().try_into().unwrap();
+        assert_eq!(resumed.session, Session::Resume(session));
+        assert_eq!(
+            resumed.prompt,
+            "Kelpie stopped your last turn: it ran past its ceiling. \
+             Carry on with the work item from where you left off."
+        );
+    }
+
+    #[test]
+    fn a_no_on_a_timed_out_turn_stops_the_work_item_keeping_nothing_of_its_own() {
+        let (rig, runner) = with_issue_7("rotom");
+        rig.claude.script([Scripted::Fail(ClaudeError::TimedOut)]);
+        step(&runner).unwrap();
+        rig.ask(&runner, "rule", Some("1 no not worth waiting for"));
+        assert_eq!(
+            step(&runner).unwrap(),
+            Some(StepReport::Finished {
+                issue: 7,
+                pull_request: None,
+                merged: false,
+            })
+        );
+        assert!(!rig.worktree_7().exists());
+        assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
+    }
+
+    #[test]
+    fn a_worker_turn_carries_the_projects_timeout() {
+        let (rig, runner) = with_issue_7("golbat");
+        rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
+        step(&runner).unwrap();
+        let [seen] = rig.claude.calls().try_into().unwrap();
+        assert_eq!(seen.timeout, Some(std::time::Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn a_restart_before_the_ceiling_passes_resumes_with_only_the_time_left() {
+        let (rig, runner) = with_issue_7("zeus");
+        rig.claude.script([Scripted::Kill]);
+        let _ = catch_unwind(AssertUnwindSafe(|| step(&runner)));
+        drop(runner);
+
+        rig.clock.advance(2000);
+        let runner = rig.open().unwrap();
+        rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
+        step(&runner).unwrap();
+        let [_, resumed] = rig.claude.calls().try_into().unwrap();
+        assert_eq!(
+            resumed.timeout,
+            Some(std::time::Duration::from_secs(1600)),
+            "the restart must not reset the ceiling to a fresh hour"
+        );
+    }
+
+    #[test]
+    fn a_restart_after_the_ceiling_passed_parks_it_with_no_call_spent() {
+        let (rig, runner) = with_issue_7("chelone");
+        rig.claude.script([Scripted::Kill]);
+        let _ = catch_unwind(AssertUnwindSafe(|| step(&runner)));
+        drop(runner);
+
+        // The whole ceiling, and then some, passes while kelpie is down.
+        rig.clock.advance(3601);
+        let runner = rig.open().unwrap();
+        let Some(StepReport::TimedOut { id, .. }) = step(&runner).unwrap() else {
+            panic!("a turn found past its ceiling on restart raised no ruling");
+        };
+        assert_eq!(id, 1);
+        assert_eq!(
+            rig.claude.calls().len(),
+            1,
+            "the killed call, and no second one"
+        );
+        assert_eq!(
+            rig.ask(&runner, "status", None)["work_item"]["phase"],
+            json!({ "state": "ruling", "id": 1 })
+        );
     }
 
     #[test]

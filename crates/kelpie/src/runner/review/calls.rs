@@ -92,6 +92,7 @@ fn build_call(
         settings,
         instructions: None,
         prompt,
+        timeout: None,
     })
 }
 

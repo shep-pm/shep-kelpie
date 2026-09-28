@@ -55,6 +55,10 @@ kickoff_hours = 8
 allowed_domains = ["crates.io", "index.crates.io", "static.crates.io"]
 build_env = {}
 
+# A worker turn still running at this ceiling is more likely stuck than
+# busy: kelpie stops it, parks it and asks. A yes resumes the same session.
+turn_timeout = 60
+
 [[worker.guard_hooks]]
 event = "PreToolUse"
 matcher = "Bash"

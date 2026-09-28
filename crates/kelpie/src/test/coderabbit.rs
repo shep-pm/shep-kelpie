@@ -114,15 +114,21 @@ impl FakeCodeRabbit {
         labels.get(&number).cloned().unwrap_or_default()
     }
 
+    // Kelpie's own label change, which the log keeps.
     pub(super) fn set_label(&self, number: u64, label: &str, on: bool) {
+        self.put_label(number, label, on);
+        let entry = (number, label.to_owned(), on);
+        self.label_log.lock().unwrap().push(entry);
+    }
+
+    // Anyone's label change, kelpie's or someone else's.
+    pub(super) fn put_label(&self, number: u64, label: &str, on: bool) {
         let mut labels = self.labels.lock().unwrap();
         let on_pr = labels.entry(number).or_default();
         on_pr.retain(|l| l != label);
         if on {
             on_pr.push(label.to_owned());
         }
-        let entry = (number, label.to_owned(), on);
-        self.label_log.lock().unwrap().push(entry);
     }
 
     pub(super) fn activity(&self, number: u64) -> Result<Activity, ForgeError> {

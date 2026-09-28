@@ -15,7 +15,9 @@ use crate::ports::{ForgeError, Ports, Timestamp, Visibility};
 use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
-use crate::work_item::{CodeRabbitTally, Phase, ReviewCallState, Turn, WorkItem, new_session_id};
+use crate::work_item::{
+    CodeRabbitTally, Known, Phase, ReviewCallState, Turn, WorkItem, new_session_id,
+};
 
 mod alert;
 mod coderabbit;
@@ -261,6 +263,7 @@ impl Runner {
             resume: None,
             review_call: ReviewCallState::default(),
             coderabbit: CodeRabbitTally::default(),
+            known: Known::default(),
             calls: Vec::new(),
         });
         self.save(next).map_err(AddError::State)?;

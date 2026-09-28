@@ -99,9 +99,8 @@ impl Runner {
         let Phase::Merge { head, readied } = item.phase.clone() else {
             return Ok(Begin::Idle);
         };
-        let forge = &self.ports.forge;
-        let repo = &self.settings.forge;
-        let pr = match forge.pull_request(repo, number) {
+        let repo = self.settings.forge.clone();
+        let pr = match self.ports.forge.pull_request(&repo, number) {
             Ok(pr) => pr,
             Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}: {e}"))),
         };
@@ -141,20 +140,30 @@ impl Runner {
             Err(reason) => return Ok(self.gate_failed(reason)),
         }
         if pr.draft {
-            if let Err(e) = self.ports.forge.mark_ready(repo, number) {
+            if let Err(e) = self.ports.forge.mark_ready(&repo, number) {
                 return Ok(self.gate_failed(format!("cannot mark #{number} ready: {e}")));
             }
             let readied = Some(now);
-            self.update(|item| item.phase = Phase::Merge { head, readied })?;
+            self.update(|item| {
+                item.phase = Phase::Merge { head, readied };
+                item.known.ready = true;
+            })?;
             return Ok(Begin::Report(StepReport::MarkedReady {
                 issue,
                 pull_request: number,
             }));
         }
+        // The forge already shows it ready: either this pass just read that
+        // back, or a restart landed between the call above and its update.
+        // Either way it is kelpie's own doing, not a foreign change, and the
+        // gate must not mistake it for one on its next look.
+        if !item.known.ready {
+            self.update(|item| item.known.ready = true)?;
+        }
         if settling || !green {
             return Ok(Begin::Idle);
         }
-        if let Err(e) = self.ports.forge.merge(repo, number, &head) {
+        if let Err(e) = self.ports.forge.merge(&repo, number, &head) {
             return Ok(self.gate_failed(format!("cannot merge #{number}: {e}")));
         }
         self.update(|item| item.phase = Phase::Done { merged: true })?;
@@ -380,6 +389,31 @@ mod tests {
             Some(StepReport::YesWithdrawn { reason, .. }) if reason == "CI on #71 is no longer green"
         ));
         assert_eq!(rig.forge.merges(), []);
+    }
+
+    #[test]
+    fn marking_ready_is_kelpies_own_change_so_a_withdrawn_yes_is_not_parked_on_it() {
+        let (rig, runner, head) = Rig::parked("koji");
+        rig.ask(&runner, "rule", Some("1 yes"));
+        assert_eq!(step(&runner).unwrap(), marked_ready());
+        rig.forge
+            .set_checks(&head, Checks::Failed(vec!["test".into()]));
+        rig.clock.advance(CHECKS_SETTLE);
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::YesWithdrawn { .. })
+        ));
+        // The gate's next look must treat kelpie's own mark-ready as known,
+        // not raise a foreign-change ruling that recurs forever.
+        assert_eq!(
+            rig.verdict(&runner),
+            Some(StepReport::CiFailed {
+                issue: 7,
+                pull_request: 71,
+                head: head.clone(),
+                checks: vec!["test".into()],
+            })
+        );
     }
 
     #[test]
