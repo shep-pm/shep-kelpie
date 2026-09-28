@@ -157,7 +157,8 @@ impl WorkerProfile<'_> {
                 // Without it, `gh` fails TLS verification on macOS: x509 OSStatus -26276.
                 "enableWeakerNetworkIsolation": true,
                 "filesystem": { "allowWrite": allow_write, "denyWrite": deny_write },
-                "network": { "allowedDomains": domains },
+                // Without it, `bypassPermissions` lets a host outside the list through.
+                "network": { "allowedDomains": domains, "strictAllowlist": true },
             },
             "permissions": { "deny": deny },
             "hooks": self.hooks(),
@@ -354,6 +355,14 @@ mod tests {
         assert_eq!(
             strings(&with_domains(&[], &npm)["sandbox"]["network"]["allowedDomains"]),
             ["github.com", "api.github.com", "registry.npmjs.org"]
+        );
+    }
+
+    #[test]
+    fn a_host_outside_the_list_is_refused_not_asked_about() {
+        assert_eq!(
+            settings(&[])["sandbox"]["network"]["strictAllowlist"],
+            true
         );
     }
 
