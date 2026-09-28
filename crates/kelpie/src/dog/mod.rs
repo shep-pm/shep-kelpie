@@ -32,6 +32,7 @@ use crate::lease::gpu::{self, GpuLock};
 use crate::lease::saved::{BookFile, SavedBook};
 use crate::lease::wire::{GRANT, grant_params};
 use crate::ports::Clock;
+use crate::shep_home;
 use desk::{Delivery, Desk};
 use triggers::ACTIONS;
 
@@ -152,11 +153,11 @@ fn open(file: BookFile, clock: Box<dyn Clock>, gpu: GpuLock) -> Kept {
 }
 
 async fn serve() -> Result<(), String> {
+    let socket = shep_home::required(shep_home::FLOCKFILE_FIX)?.join("run/shep.sock");
     let shepherd = shep_channel::serve();
     if !shepherd.is_active() {
         return Err("no shepherd channel: run it under shep with `channel = true`".into());
     }
-    let socket = shepherd_socket()?;
     let connect = |what: &'static str| {
         let socket = socket.clone();
         async move {

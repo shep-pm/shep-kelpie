@@ -19,6 +19,7 @@ use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
 use crate::ports::{Leases, Ports};
 use crate::runner::{ACTIONS, ProjectName, ProjectPaths, Runner, answer, step};
+use crate::shep_home;
 
 /// How long queued replies get to reach the shepherd before the runner exits
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
@@ -50,6 +51,7 @@ pub fn run(project: &str) -> ExitCode {
 
 fn serve(project: &str) -> Result<(), String> {
     let project = ProjectName::try_from(project).map_err(|e| e.to_string())?;
+    let shep_home = shep_home::required(shep_home::FLOCKFILE_FIX)?;
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or("HOME is not set")?;
@@ -68,7 +70,11 @@ fn serve(project: &str) -> Result<(), String> {
         forge: Box::new(Gh),
         meter: Box::new(claude.meter()),
         reviewer: Arc::new(reviewer.clone()),
-        relay: Arc::new(RelayCli::new(home.clone(), kelpie_home.join("relay"))),
+        relay: Arc::new(RelayCli::new(
+            home.clone(),
+            kelpie_home.join("relay"),
+            shep_home,
+        )),
         alerts: Arc::new(Curl),
         leases: Arc::clone(&leases) as Arc<dyn Leases>,
         clock: Box::new(SystemClock),

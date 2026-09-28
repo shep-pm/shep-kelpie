@@ -57,16 +57,20 @@ pub struct RelayCli {
     /// Where the relay's own settings and instructions files are written,
     /// under kelpie's home
     folder: PathBuf,
+    /// Kelpie's shepherd, which the relay's commands must reach
+    shep_home: PathBuf,
     /// The `claude` program every call runs
     claude: PathBuf,
 }
 
 impl RelayCli {
-    /// A relay whose settings and instructions live under `folder`
-    pub fn new(home: PathBuf, folder: PathBuf) -> Self {
+    /// A relay whose settings and instructions live under `folder`, and
+    /// whose commands trigger the shepherd at `shep_home`
+    pub fn new(home: PathBuf, folder: PathBuf, shep_home: PathBuf) -> Self {
         Self {
             home,
             folder,
+            shep_home,
             claude: PathBuf::from("claude"),
         }
     }
@@ -140,7 +144,8 @@ impl RelayCli {
         fs::create_dir_all(&self.folder).map_err(|e| RelayError::CannotStart(e.to_string()))?;
         let settings = self.folder.join("settings.json");
         let instructions = self.folder.join("instructions.md");
-        let text = serde_json::to_string_pretty(&relay::settings()).expect("settings are JSON");
+        let text = serde_json::to_string_pretty(&relay::settings(&self.shep_home))
+            .expect("settings are JSON");
         fs::write(&settings, text).map_err(|e| RelayError::CannotStart(e.to_string()))?;
         fs::write(&instructions, relay::INSTRUCTIONS)
             .map_err(|e| RelayError::CannotStart(e.to_string()))?;
@@ -208,7 +213,8 @@ impl RelayCli {
     // resolve on `PATH`, a temporary folder, and whose account it is,
     // mirroring the minimal set a pinned shep sheep itself starts with
     // (see docs/design-log.md). Everything else kelpie's own process
-    // happens to carry stays out of the relay's.
+    // happens to carry stays out of the relay's. `SHEP_HOME` is the one
+    // exception, kelpie's shepherd from `self.shep_home`.
     //
     // `HOME` comes from `self.home`, not the ambient environment: `find`,
     // `current_dir` and the relay's own `~/.claude/sessions` all key off
@@ -217,6 +223,7 @@ impl RelayCli {
     fn relay_env(&self, command: &mut Command) {
         command.env_clear();
         command.env("HOME", &self.home);
+        command.env("SHEP_HOME", &self.shep_home);
         for var in RELAY_ENV {
             if let Ok(value) = std::env::var(var) {
                 command.env(var, value);
@@ -367,7 +374,7 @@ mod tests {
             std::os::unix::fs::PermissionsExt::from_mode(0o755),
         )
         .unwrap();
-        let mut relay = RelayCli::new(dir.to_owned(), dir.join("relay"));
+        let mut relay = RelayCli::new(dir.to_owned(), dir.join("relay"), dir.join("shep"));
         relay.claude = program;
         relay
     }
@@ -537,10 +544,10 @@ mod tests {
         )
         .unwrap();
 
-        let relay = RelayCli::new(dir.path().to_owned(), folder.clone());
+        let relay = RelayCli::new(dir.path().to_owned(), folder.clone(), "/k/shep".into());
         let (settings, _) = relay.write_relay_files().unwrap();
         let written: Value = serde_json::from_str(&fs::read_to_string(settings).unwrap()).unwrap();
-        assert_eq!(written, relay::settings());
+        assert_eq!(written, relay::settings(Path::new("/k/shep")));
     }
 
     #[test]
@@ -548,6 +555,7 @@ mod tests {
         let relay = RelayCli::new(
             PathBuf::from("/k/maintainer-home"),
             PathBuf::from("/k/relay"),
+            PathBuf::from("/k/shep"),
         );
         let mut command = Command::new("true");
         relay.relay_env(&mut command);
@@ -557,7 +565,7 @@ mod tests {
             .collect();
         for (name, _) in &envs {
             assert!(
-                *name == "HOME" || RELAY_ENV.contains(name),
+                *name == "HOME" || *name == "SHEP_HOME" || RELAY_ENV.contains(name),
                 "{name} should not reach the relay"
             );
         }
@@ -566,6 +574,10 @@ mod tests {
         assert_eq!(
             envs.iter().find(|(n, _)| *n == "HOME"),
             Some(&("HOME", "/k/maintainer-home"))
+        );
+        assert_eq!(
+            envs.iter().find(|(n, _)| *n == "SHEP_HOME"),
+            Some(&("SHEP_HOME", "/k/shep"))
         );
         // A var this process carries but `relay_env` does not name never
         // reaches the child: `env_clear` ran before the allowed set was applied.
