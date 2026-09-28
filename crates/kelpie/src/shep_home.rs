@@ -20,16 +20,24 @@ pub const RELAY_FIX: &str =
 ///
 /// # Errors
 ///
-/// A message naming `fix` when the variable is unset or empty.
+/// A message naming `fix` when the variable is unset, empty or not an
+/// absolute path: shep expands `~` in a script or folder, never in `env`.
 pub fn required(fix: &str) -> Result<PathBuf, String> {
     from(std::env::var_os("SHEP_HOME"), fix)
 }
 
 fn from(value: Option<OsString>, fix: &str) -> Result<PathBuf, String> {
-    match value.filter(|v| !v.is_empty()) {
-        Some(value) => Ok(PathBuf::from(value)),
-        None => Err(format!("SHEP_HOME is not set: {fix}")),
+    let Some(value) = value.filter(|v| !v.is_empty()) else {
+        return Err(format!("SHEP_HOME is not set: {fix}"));
+    };
+    let path = PathBuf::from(value);
+    if !path.is_absolute() {
+        return Err(format!(
+            "SHEP_HOME is {} and must be an absolute path, since shep does not expand `~` in env: {fix}",
+            path.display()
+        ));
     }
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -42,6 +50,16 @@ mod tests {
             from(Some("/k/shep".into()), "x"),
             Ok(PathBuf::from("/k/shep"))
         );
+    }
+
+    #[test]
+    fn a_tilde_or_relative_path_is_refused_by_name() {
+        for value in ["~/.kelpie/shep", "shep", "./shep"] {
+            let error = from(Some(value.into()), "add the env line").unwrap_err();
+            assert!(error.contains(value), "{error}");
+            assert!(error.contains("absolute path"), "{error}");
+            assert!(error.contains("add the env line"), "{error}");
+        }
     }
 
     #[test]
