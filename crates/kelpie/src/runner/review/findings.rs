@@ -48,14 +48,25 @@ pub(super) fn fix_prompt(number: u64, round: u32, count: usize, path: &Path) -> 
     )
 }
 
+pub(super) fn again_prompt(number: u64, round: u32, path: &Path) -> String {
+    format!(
+        "Your last turn on pull request #{number} pushed nothing, so round {round}'s \
+         findings in {} still hold. Fix each one, then commit and push with \
+         `git push origin HEAD`.",
+        path.display()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::sync::Mutex;
 
+    use serde_json::json;
+
     use super::*;
     use crate::ports::Severity;
-    use crate::runner::{Runner, step};
+    use crate::runner::{Runner, StepReport, step};
     use crate::test::{Rig, Scripted, ScriptedRound};
 
     #[test]
@@ -206,5 +217,85 @@ mod tests {
             .iter()
             .map(|s| s.as_str().unwrap())
             .collect()
+    }
+
+    #[test]
+    fn a_fix_the_forge_has_not_shown_yet_still_counts() {
+        let (rig, runner) = findings_sent();
+        let before = rig.forge.head_of("kelpie/7").unwrap();
+        rig.forge.set_lagging(71, Some(&before));
+        rig.claude.script([Scripted::Push("fixed.txt", "fixed\n")]);
+        step(&runner).unwrap(); // the fix turn
+        let fixed = rig.forge.head_of("kelpie/7");
+        assert_ne!(fixed.as_deref(), Some(before.as_str()));
+        assert_eq!(
+            step(&runner).unwrap(),
+            Some(StepReport::FixPushed {
+                issue: 7,
+                pull_request: 71,
+                round: 1,
+                head: fixed,
+            })
+        );
+    }
+
+    #[test]
+    fn a_fix_turn_that_pushes_nothing_parks_and_a_yes_sends_the_findings_again() {
+        let (rig, runner) = findings_sent();
+        rig.claude
+            .script([Scripted::Say("I can't read the findings file.")]);
+        step(&runner).unwrap(); // the fix turn ends with nothing pushed
+
+        let Some(StepReport::Ruling { id, question, .. }) = step(&runner).unwrap() else {
+            panic!("a fix with nothing pushed raised no ruling");
+        };
+        assert!(
+            question.starts_with(
+                "The worker on pull request #71 ended its fix for round 1 of the \
+                 qwen-review loop without pushing, so those findings still hold."
+            ),
+            "{question}"
+        );
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["work_item"]["phase"]["state"], "ruling");
+        assert_eq!(status["rulings"][0]["kind"]["kind"], "fix-not-pushed");
+        assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id }));
+        assert_eq!(
+            step(&runner).unwrap(),
+            None,
+            "parked until the maintainer rules"
+        );
+
+        rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+        rig.claude.script([Scripted::Push("fixed.txt", "fixed\n")]);
+        step(&runner).unwrap(); // the fix turn again
+        let again = rig.claude.calls().pop().unwrap();
+        assert!(
+            again
+                .prompt
+                .starts_with("Your last turn on pull request #71 pushed nothing"),
+            "{}",
+            again.prompt
+        );
+        assert_eq!(
+            step(&runner).unwrap(),
+            Some(StepReport::FixPushed {
+                issue: 7,
+                pull_request: 71,
+                round: 1,
+                head: rig.forge.head_of("kelpie/7"),
+            })
+        );
+        assert_eq!(
+            rig.ask(&runner, "status", None)["work_item"]["phase"],
+            json!({
+                "state": "review",
+                "round": 2,
+                "consecutive_clean": 0,
+                "guard_cleared": false,
+                "stage": { "stage": "round" },
+            }),
+            "a MEDIUM finding, fixed, still resets the streak"
+        );
     }
 }

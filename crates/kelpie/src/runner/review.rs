@@ -12,11 +12,14 @@
 pub(super) mod calls;
 pub(super) mod findings;
 
+use std::path::Path;
+
 use super::Runner;
 use super::report::{Begin, ReviewCall, ReviewResult, StepReport};
 use crate::ports::{Claude, Finding, Reviewer, Severity, Verdict, parse_findings};
 use crate::state::{RulingKind, StateError};
 use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, ReviewerKind, Turn};
+use crate::worktree;
 
 impl Runner {
     pub(super) fn review_step(&mut self) -> Result<Begin, StateError> {
@@ -75,10 +78,55 @@ impl Runner {
                     Err(reason) => Ok(self.gate_failed(reason)),
                 }
             }
-            ReviewStage::Fixing { .. } => {
-                unreachable!("begin_turn drives a fix turn directly")
+            // begin_turn drives the fix turn itself, and comes here once it ends.
+            ReviewStage::Fixing { clean, head } => {
+                self.fix_ended(number, &build, review, clean, head)
             }
         }
+    }
+
+    // A fix turn that pushed nothing fixed nothing, whatever it says: the
+    // held findings still stand, so the round cannot count.
+    fn fix_ended(
+        &mut self,
+        number: u64,
+        build: &Path,
+        review: Review,
+        clean: bool,
+        head: Option<String>,
+    ) -> Result<Begin, StateError> {
+        let issue = self.state.work_item.as_ref().map_or(0, |item| item.issue);
+        let round = review.round;
+        let pushed = match head {
+            Some(before) => match self.pushed_head() {
+                Ok(now) if now == before => {
+                    let path = findings::findings_path(build);
+                    let prompt = findings::again_prompt(number, round, &path);
+                    return self.raise(number, RulingKind::FixNotPushed { review, prompt });
+                }
+                Ok(now) => Some(now),
+                Err(reason) => return Ok(self.gate_failed(reason)),
+            },
+            None => None,
+        };
+        let now = self.ports.clock.now();
+        self.update(|item| item.phase = advance(review, clean, now))?;
+        Ok(Begin::Report(StepReport::FixPushed {
+            issue,
+            pull_request: number,
+            round,
+            head: pushed,
+        }))
+    }
+
+    // Git's own answer, since the forge's head lags a push by a moment.
+    fn pushed_head(&self) -> Result<String, String> {
+        let item = self
+            .state
+            .work_item
+            .as_ref()
+            .expect("a head is a work item's");
+        worktree::pushed_head(&self.settings.repo, &item.branch).map_err(|e| e.to_string())
     }
 
     // Recorded in state before the runner's lock is released for the call
@@ -130,6 +178,10 @@ impl Runner {
             }));
         }
         let clean = held.iter().all(|f| f.severity <= Severity::Low);
+        let head = match self.pushed_head() {
+            Ok(head) => head,
+            Err(reason) => return Ok(self.gate_failed(reason)),
+        };
         let build = &item.build;
         let path = findings::findings_path(build);
         if let Err(reason) = findings::write_findings_file(build, &path, round, &held) {
@@ -140,7 +192,10 @@ impl Runner {
         self.update(|item| {
             item.turn = Turn::Next { prompt };
             item.phase = Phase::Review(Review {
-                stage: ReviewStage::Fixing { clean },
+                stage: ReviewStage::Fixing {
+                    clean,
+                    head: Some(head),
+                },
                 ..review
             });
         })?;
@@ -431,6 +486,16 @@ mod tests {
             Scripted::Text("CLEAN"),
         ]);
         step(&runner).unwrap(); // the worker's fix turn
+        let fixed = rig.forge.head_of("kelpie/7");
+        assert_eq!(
+            step(&runner).unwrap(),
+            Some(StepReport::FixPushed {
+                issue: 7,
+                pull_request: 71,
+                round: 1,
+                head: fixed,
+            })
+        );
         step(&runner).unwrap(); // round 2, claude: scripted clean above
 
         assert_eq!(

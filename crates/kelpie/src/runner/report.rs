@@ -267,6 +267,18 @@ pub enum StepReport {
         /// Whether every one was a nit (LOW)
         clean: bool,
     },
+    /// The worker's fix turn for a round's held findings ended, and the
+    /// round counts
+    FixPushed {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The round whose findings it fixed
+        round: u32,
+        /// The head it pushed; none when an older state file kept no head
+        head: Option<String>,
+    },
 }
 
 impl StepReport {

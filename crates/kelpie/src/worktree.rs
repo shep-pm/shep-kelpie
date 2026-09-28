@@ -223,6 +223,19 @@ pub fn base_of(repo: &Path, branch: &str, head: &str) -> Result<Base, WorktreeEr
     }
 }
 
+/// Fetches `branch` from `origin`, and returns its head there
+///
+/// Git's own answer, which the forge's lags by a moment after a push.
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn pushed_head(repo: &Path, branch: &str) -> Result<String, WorktreeError> {
+    git(repo, ["fetch", "--quiet", "origin", branch])?;
+    let tracking = format!("refs/remotes/origin/{branch}");
+    git(repo, ["rev-parse", "--verify", "--quiet", &tracking])
+}
+
 /// What a rebase onto `origin/main` came to
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rebase {

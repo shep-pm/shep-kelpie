@@ -15,7 +15,7 @@ use std::time::Duration;
 use super::Runner;
 use super::question::asked;
 use super::report::{Begin, StepReport};
-use super::review::{self, run_review_call};
+use super::review::run_review_call;
 use super::ruling::park;
 use super::trigger::lock;
 use crate::pacer::Scope;
@@ -100,7 +100,10 @@ impl Runner {
         };
         match &item.phase {
             Phase::Implement => {}
-            Phase::Review(review) if matches!(review.stage, ReviewStage::Fixing { .. }) => {}
+            // A fix turn that ended goes back to the review, to check it pushed.
+            Phase::Review(review)
+                if matches!(review.stage, ReviewStage::Fixing { .. })
+                    && !matches!(item.turn, Turn::Ended { .. }) => {}
             Phase::Review(_) => return self.review_step(),
             Phase::Ci { .. } => return self.check_ci(),
             Phase::CodeRabbit(_) => return self.coderabbit_step(),
@@ -290,14 +293,7 @@ impl Runner {
                                     since: now,
                                 };
                             }
-                            Phase::Review(review) => {
-                                let ReviewStage::Fixing { clean } = review.stage else {
-                                    unreachable!(
-                                        "only a fix turn drives the worker while reviewing"
-                                    );
-                                };
-                                item.phase = review::advance(review, clean, now);
-                            }
+                            // A fix turn stays fixing: the next step checks it pushed.
                             _ => {}
                         }
                     }

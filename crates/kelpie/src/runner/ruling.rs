@@ -243,6 +243,14 @@ fn decide(id: u64, answer: Answer, ruling: Ruling, now: Timestamp) -> Result<Mov
             guard_cleared: true,
             ..review
         }),
+        // The fix ends under the same review, which checks the head again.
+        (Answer::Yes, RulingKind::FixNotPushed { review, prompt }) => {
+            return Ok(Move::Turn {
+                prompt,
+                phase: Phase::Review(review),
+                force: None,
+            });
+        }
         // The fix ends under Implement, which takes it to CI and the next round.
         (Answer::Yes, RulingKind::CodeRabbitCap { prompt, .. }) => {
             return Ok(Move::Turn {
@@ -292,6 +300,12 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
             "The qwen-review loop on {about} has run {} rounds without \
              settling. {yes} lets it keep going",
             review.round.saturating_sub(1)
+        ),
+        RulingKind::FixNotPushed { review, .. } => format!(
+            "The worker on {about} ended its fix for round {} of the qwen-review \
+             loop without pushing, so those findings still hold. {yes} sends it \
+             the findings again",
+            review.round
         ),
         RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
             "CodeRabbit has run {rounds} rounds on {about}, its cap, and the judge \
