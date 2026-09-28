@@ -6,7 +6,7 @@
 
 use super::Runner;
 use super::report::{Begin, StepReport};
-use crate::board;
+use crate::board::{self, Skip};
 use crate::pacer::Scope;
 use crate::state::StateError;
 
@@ -17,7 +17,7 @@ impl Runner {
         let listed = forge
             .ready_issues(repo)
             .and_then(|ready| forge.open_pull_requests(repo).map(|open| (ready, open)));
-        let (ready, open) = match listed {
+        let (mut ready, open) = match listed {
             Ok(listed) => listed,
             Err(e) => {
                 return Ok(Begin::Report(StepReport::BoardFailed {
@@ -25,25 +25,63 @@ impl Runner {
                 }));
             }
         };
-        let pick = board::pick(&ready, &open, &self.state.finished);
-        let Some(issue) = pick.issue else {
-            return Ok(Begin::Idle);
-        };
-        if let Some(held) = self.pace(Scope::Dispatch)?.holds() {
-            return Ok(held);
+        let mut failed: Vec<Skip> = Vec::new();
+        let mut paced = false;
+        loop {
+            let pick = board::pick(&ready, &open, &self.state.finished);
+            let mut skipped = pick.skipped;
+            skipped.extend(failed.iter().cloned());
+            skipped.sort_by_key(Skip::issue);
+            let Some(issue) = pick.issue else {
+                let reason = failed
+                    .iter()
+                    .filter_map(|skip| match skip {
+                        Skip::Failed { issue, error } => {
+                            Some(format!("cannot dispatch #{issue}: {error}"))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                self.skipped = skipped;
+                return Ok(if failed.is_empty() {
+                    Begin::Idle
+                } else {
+                    Begin::Report(StepReport::BoardFailed { reason })
+                });
+            };
+            if !paced {
+                if let Some(held) = self.pace(Scope::Dispatch)?.holds() {
+                    self.skipped = skipped;
+                    return Ok(held);
+                }
+                paced = true;
+            }
+            match self.add(issue) {
+                Ok(worker) => {
+                    self.skipped.clone_from(&skipped);
+                    return Ok(Begin::Report(StepReport::Dispatched {
+                        issue,
+                        worker,
+                        skipped,
+                    }));
+                }
+                Err(e @ (super::AddError::Forge(_) | super::AddError::Label(_))) => {
+                    failed.push(Skip::Failed {
+                        issue,
+                        error: e.to_string(),
+                    });
+                    ready.retain(|i| i.number != issue);
+                }
+                Err(super::AddError::State(e)) => return Err(e),
+                Err(e) => {
+                    self.skipped = skipped;
+                    return Ok(Begin::Report(StepReport::BoardFailed {
+                        reason: format!("cannot dispatch #{issue}: {e}"),
+                    }));
+                }
+            }
         }
-        let report = match self.add(issue) {
-            Ok(worker) => StepReport::Dispatched {
-                issue,
-                worker,
-                skipped: pick.skipped,
-            },
-            Err(super::AddError::State(e)) => return Err(e),
-            Err(e) => StepReport::BoardFailed {
-                reason: format!("cannot dispatch #{issue}: {e}"),
-            },
-        };
-        Ok(Begin::Report(report))
     }
 }
 
@@ -232,17 +270,55 @@ mod tests {
     }
 
     #[test]
-    fn a_ready_issue_the_forge_cannot_show_is_reported_and_not_taken() {
+    fn a_ready_issue_the_forge_cannot_show_is_skipped_for_the_next_oldest() {
         let (rig, runner) = running("golbat");
         rig.forge.list_ready(4, false);
+        rig.forge.list_ready(6, false);
         rig.forge.remove_issue(4);
+        let skip = Skip::Failed {
+            issue: 4,
+            error: "cannot read the issue: gh failed: no issue #4".into(),
+        };
+        assert_eq!(
+            step(&runner).unwrap(),
+            Some(StepReport::Dispatched {
+                issue: 6,
+                worker: sonnet_medium(),
+                skipped: vec![skip],
+            })
+        );
+        assert_eq!(rig.meter.reads(), 1);
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["work_item"]["issue"], 6);
+        assert_eq!(
+            status["skipped"],
+            json!([{
+                "reason": "failed",
+                "issue": 4,
+                "error": "cannot read the issue: gh failed: no issue #4"
+            }])
+        );
+    }
+
+    #[test]
+    fn a_board_of_issues_the_forge_cannot_show_reports_each_and_takes_nothing() {
+        let (rig, runner) = running("golbat");
+        rig.forge.list_ready(4, false);
+        rig.forge.list_ready(5, false);
+        rig.forge.remove_issue(4);
+        rig.forge.remove_issue(5);
         assert_eq!(
             step(&runner).unwrap(),
             Some(StepReport::BoardFailed {
-                reason: "cannot dispatch #4: cannot read the issue: gh failed: no issue #4".into()
+                reason: "cannot dispatch #4: cannot read the issue: gh failed: no issue #4; \
+                         cannot dispatch #5: cannot read the issue: gh failed: no issue #5"
+                    .into()
             })
         );
-        assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["work_item"], json!(null));
+        assert_eq!(status["skipped"].as_array().unwrap().len(), 2);
+        assert_eq!(rig.meter.reads(), 1);
         assert_eq!(rig.claude.calls(), []);
     }
 
