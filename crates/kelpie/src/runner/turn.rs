@@ -19,9 +19,7 @@ use super::review::{self, run_review_call};
 use super::ruling::park;
 use super::trigger::lock;
 use crate::pacer::Scope;
-use crate::ports::{
-    ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session, SessionId, Timestamp,
-};
+use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session, Timestamp};
 use crate::profile::{INSTRUCTIONS, WorkerProfile};
 use crate::state::{ProjectState, Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CallRecord, Phase, Review, ReviewStage, Turn, WorkItem};
@@ -173,18 +171,10 @@ impl Runner {
         if let Some(item) = next.work_item.as_mut() {
             item.turn = Turn::Ended { at: now };
         }
-        let project = self.project.as_str();
-        let (issue, session, pull_request, id, question) = timed_out(project, &mut next);
+        let mut report = timed_out(self.project.as_str(), &mut next);
         self.save(next)?;
-        let comment_failed = self.post_ruling(pull_request, &question);
-        Ok(Begin::Report(StepReport::TimedOut {
-            issue,
-            session,
-            pull_request,
-            id,
-            question,
-            comment_failed,
-        }))
+        self.fill_comment_failed(&mut report);
+        Ok(Begin::Report(report))
     }
 
     // Everything the worker needs on disk before it starts: its worktree, its
@@ -348,16 +338,7 @@ impl Runner {
             }
             Err(ClaudeError::TimedOut) => {
                 item.turn = Turn::Ended { at: now };
-                let project = self.project.as_str();
-                let (issue, session, pull_request, id, question) = timed_out(project, &mut next);
-                StepReport::TimedOut {
-                    issue,
-                    session,
-                    pull_request,
-                    id,
-                    question,
-                    comment_failed: None,
-                }
+                timed_out(self.project.as_str(), &mut next)
             }
             Err(e) => {
                 let reason = e.to_string();
@@ -373,7 +354,14 @@ impl Runner {
         };
         self.save(next)?;
         let mut report = report;
-        match &mut report {
+        self.fill_comment_failed(&mut report);
+        Ok(Some(report))
+    }
+
+    // A ruling just raised is posted as a comment on its pull request, if it
+    // has one; only these two reports carry a ruling and need the outcome.
+    fn fill_comment_failed(&self, report: &mut StepReport) {
+        match report {
             StepReport::Asked {
                 pull_request,
                 question,
@@ -390,7 +378,6 @@ impl Runner {
             }
             _ => {}
         }
-        Ok(Some(report))
     }
 
     // The open pull request from `branch`. A forge that cannot be asked
@@ -407,18 +394,26 @@ impl Runner {
     }
 }
 
-// Parks the work item on a turn-ceiling ruling and returns what its report
-// needs. Shared by a call that actually hit `ClaudeError::TimedOut` and by a
-// restart that finds a turn already past its ceiling with no call spent.
-// The caller sets `item.turn` beforehand: this only raises the ruling.
-fn timed_out(project: &str, next: &mut ProjectState) -> (u64, SessionId, Option<u64>, u64, String) {
+// Parks the work item on a turn-ceiling ruling and builds its report. Shared
+// by a call that actually hit `ClaudeError::TimedOut` and by a restart that
+// finds a turn already past its ceiling with no call spent. The caller sets
+// `item.turn` beforehand: this only raises the ruling. `comment_failed` is
+// filled in afterwards, once the ruling has actually been posted.
+fn timed_out(project: &str, next: &mut ProjectState) -> StepReport {
     let item = next
         .work_item
         .as_mut()
         .expect("a turn ceiling is about a work item");
     let (issue, session, pull_request) = (item.issue, item.session.clone(), item.pull_request);
     let (_, id, question) = park(project, next, pull_request, RulingKind::TurnTimeout);
-    (issue, session, pull_request, id, question)
+    StepReport::TimedOut {
+        issue,
+        session,
+        pull_request,
+        id,
+        question,
+        comment_failed: None,
+    }
 }
 
 pub(super) fn write(folder: &Path, file: &Path, text: &str) -> Result<(), String> {
@@ -714,7 +709,7 @@ mod tests {
         assert_eq!((issue, pull_request, id), (7, None, 1));
         assert!(
             question.starts_with(
-                "The worker on issue #7 has been running past its turn's time limit, \
+                "The worker on issue #7 has been running past its turn's ceiling, \
                  and kelpie stopped it."
             ),
             "{question}"
@@ -734,7 +729,7 @@ mod tests {
         assert_eq!(resumed.session, Session::Resume(session));
         assert_eq!(
             resumed.prompt,
-            "Kelpie stopped your last turn: it ran past its time limit. \
+            "Kelpie stopped your last turn: it ran past its ceiling. \
              Carry on with the work item from where you left off."
         );
     }

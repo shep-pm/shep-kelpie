@@ -323,7 +323,7 @@ impl fmt::Display for ClaudeError {
             Self::Spawn(error) => write!(f, "cannot run claude: {error}"),
             Self::NoSession(id) => write!(f, "claude has no session {}", id.0),
             Self::Stopped => f.write_str("claude was stopped with the runner"),
-            Self::TimedOut => f.write_str("claude ran past its turn's time limit"),
+            Self::TimedOut => f.write_str("claude ran past its turn's ceiling"),
             Self::Failed(detail) => write!(f, "claude failed: {}", detail.trim()),
             Self::Unreadable(output) => write!(f, "unreadable claude output: {}", output.trim()),
         }

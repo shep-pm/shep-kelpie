@@ -17,7 +17,7 @@ use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
 
 /// The prompt for a turn resumed after the maintainer accepts a timed-out
 /// turn's ruling with a yes
-const TIMEOUT_CONTINUE: &str = "Kelpie stopped your last turn: it ran past its time limit. \
+const TIMEOUT_CONTINUE: &str = "Kelpie stopped your last turn: it ran past its ceiling. \
                                 Carry on with the work item from where you left off.";
 
 /// The maintainer's answer to a ruling
@@ -284,7 +284,7 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
         }
         RulingKind::TurnTimeout => {
             return format!(
-                "The worker on {about} has been running past its turn's time limit, \
+                "The worker on {about} has been running past its turn's ceiling, \
                  and kelpie stopped it. {yes} resumes its session for another turn, \
                  and {no} stops the work item, keeping its branch and pull request \
                  on the forge."
