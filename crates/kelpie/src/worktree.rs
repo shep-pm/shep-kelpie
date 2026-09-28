@@ -278,6 +278,14 @@ pub fn origin_head(repo: &Path, branch: &str) -> Result<String, WorktreeError> {
 pub enum Rebase {
     /// Rebased and pushed: the branch's new head
     Pushed(String),
+    /// Aborted, the branch left as it was: it conflicts with `main`, which
+    /// the worker can resolve
+    Conflicts {
+        /// The `origin/main` commit it conflicts with
+        main: String,
+        /// The files that conflict
+        files: Vec<String>,
+    },
     /// Left as it was, for this reason, which only the maintainer can settle
     Refused(String),
 }
@@ -285,7 +293,7 @@ pub enum Rebase {
 /// Rebases the worktree's branch, at `head`, onto `origin/main` and pushes it
 ///
 /// The push is forced with a lease on `head`, so it fails rather than drop a
-/// commit pushed since. A conflict aborts the rebase, and a failed push
+/// commit pushed since. A conflict aborts the rebase and names its files, and a failed push
 /// puts the branch back at `head`. Run [`base_of`] first, which fetches.
 ///
 /// # Errors
@@ -333,11 +341,10 @@ pub fn rebase(
             return Err(e);
         }
         aborted?;
-        let files: Vec<&str> = conflicts.lines().collect();
-        return Ok(Rebase::Refused(format!(
-            "it conflicts with main in {}",
-            files.join(", ")
-        )));
+        return Ok(Rebase::Conflicts {
+            main: git(repo, ["rev-parse", &base])?,
+            files: conflicts.lines().map(str::to_owned).collect(),
+        });
     }
     let rebased = in_worktree(&["rev-parse", "HEAD"])?;
     let lease = format!("--force-with-lease={full_ref}:{head}");

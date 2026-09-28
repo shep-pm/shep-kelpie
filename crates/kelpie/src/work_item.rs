@@ -42,6 +42,9 @@ pub struct WorkItem {
     /// The head whose red CI run last went to the worker
     #[serde(default)]
     pub red_head: Option<String>,
+    /// The conflict with `main` that last went to the worker
+    #[serde(default)]
+    pub conflict: Option<Conflict>,
     /// What phase to force once the turn now running ends, overriding the
     /// ordinary rule that a known pull request goes straight to CI. Set by
     /// a ruling's answer that needs the qwen-review loop to run again, or by
@@ -60,6 +63,17 @@ pub struct WorkItem {
     pub known: Known,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
+}
+
+/// A conflict with `main` that went to the worker as its next turn
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Conflict {
+    /// The branch's head when it conflicted
+    pub head: String,
+    /// The `origin/main` commit it conflicted with
+    pub main: String,
 }
 
 /// A work item's CodeRabbit rounds so far
@@ -425,6 +439,7 @@ mod tests {
                 "pull_request": 51,
                 "phase": { "state": "ci", "head": "c0ffee", "since": 11 },
                 "red_head": "bad",
+                "conflict": { "head": "c0ffee", "main": "a11ce" },
                 "resume": null,
                 "review_call": { "state": "idle" },
                 "coderabbit": { "rounds": 0, "cap_cleared": false, "satisfied": false },
