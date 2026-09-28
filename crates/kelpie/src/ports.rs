@@ -171,7 +171,8 @@ pub struct Reviewed {
     pub draft: bool,
     /// Its labels' names
     pub labels: Vec<String>,
-    /// The latest review a person left on it, not a bot
+    /// The maintainer's latest review: the latest one a person left, since
+    /// kelpie's own reviewers post none and bots are left out
     pub review: Option<MaintainerReview>,
 }
 

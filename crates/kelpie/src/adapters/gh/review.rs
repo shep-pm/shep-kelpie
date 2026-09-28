@@ -6,8 +6,8 @@ use super::{Label, gh, pull_request_state, unreadable};
 use crate::ports::{ForgeError, MaintainerReview, ReviewComment, Reviewed};
 use crate::settings::ForgeSlug;
 
-// A pull request past 100 reviews, threads or comments a thread is not
-// expected; the latest 100 reviews are the ones read.
+// Reads the latest 100 reviews, the first 100 threads and 100 comments a
+// thread. A pull request past those is not expected.
 const QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
     repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
     state isDraft headRefName isCrossRepository labels(first: 100) { nodes { name } } \
