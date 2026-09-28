@@ -94,10 +94,7 @@ fn with_the_gate_off_green_ci_goes_straight_to_the_merge_ruling_and_no_lease_is_
     ));
     assert_eq!(rig.leases.told(), []);
     assert_eq!(labels(&rig), []);
-    assert!(
-        rig.forge.readied().is_empty(),
-        "ready waits for the merge ruling"
-    );
+    assert_eq!(rig.forge.readied(), [], "ready waits for the merge ruling");
 }
 
 #[test]
@@ -231,6 +228,10 @@ fn a_draft_is_marked_ready_before_the_label_goes_on_and_the_summon_waits_a_pass(
     assert_eq!(rig.forge.readied(), [71]);
     assert_eq!(labels(&rig), [], "no label in the pass that marks ready");
     assert_eq!(rig.leases.told(), []);
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["known"]["ready"],
+        true
+    );
 
     assert!(matches!(
         step(&runner).unwrap(),
@@ -238,10 +239,20 @@ fn a_draft_is_marked_ready_before_the_label_goes_on_and_the_summon_waits_a_pass(
     ));
     assert_eq!(labels(&rig), [on()]);
     assert_eq!(rig.forge.readied(), [71], "marked once");
-    assert!(
-        rig.forge.skipped_as_drafts().is_empty(),
-        "no draft was summoned"
-    );
+    assert_eq!(rig.forge.skipped_as_drafts(), [], "no draft was summoned");
+}
+
+#[test]
+fn a_pull_request_already_ready_is_summoned_at_once_and_left_ready() {
+    let (rig, runner, head) = reviewed_by_qwen("shep");
+    rig.forge.ready_pull_request(71);
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::Summoned { .. })
+    ));
+    assert_eq!(rig.forge.readied(), [], "nothing left to mark");
+    assert_eq!(rig.forge.skipped_as_drafts(), []);
 }
 
 #[test]
@@ -253,7 +264,7 @@ fn a_rework_on_a_ready_pull_request_leaves_it_ready_and_summons_at_once() {
     ));
     fixed(&rig, &runner, "flag.txt");
     assert_eq!(rig.forge.readied(), [71], "marked once, before round one");
-    assert!(rig.forge.skipped_as_drafts().is_empty());
+    assert_eq!(rig.forge.skipped_as_drafts(), []);
     assert_eq!(labels(&rig), [on(), off(), on()]);
 }
 

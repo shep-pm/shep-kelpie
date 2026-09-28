@@ -1,6 +1,7 @@
 //! CodeRabbit rounds, between green CI and the merge ruling
 //!
-//! A round takes the CodeRabbit lease, puts the `review please` label on,
+//! A round marks a draft pull request ready, since CodeRabbit skips drafts,
+//! takes the CodeRabbit lease, puts the `review please` label on,
 //! and gives the lease back once CodeRabbit answers. A refusal reschedules
 //! the dog's window and the round asks again. Once a review covers the
 //! head the label comes off, the judge reads every open thread, rejected
@@ -74,7 +75,9 @@ impl Runner {
     }
 
     // No summon without the lease, and none for a head already reviewed:
-    // that one costs the hour and buys nothing.
+    // that one costs the hour and buys nothing. CodeRabbit skips a draft, so
+    // a draft is marked ready first and the summon waits for the next pass:
+    // the forge can show the old state for a few seconds after.
     fn summon(&mut self, head: String) -> Result<Begin, StateError> {
         let number = self.number();
         let activity = match self.activity(number) {
@@ -83,6 +86,9 @@ impl Runner {
         };
         if activity.covers(&head) {
             return self.review_landed(number, &activity);
+        }
+        if let Some(begin) = self.ready_for_review(number)? {
+            return Ok(begin);
         }
         let kind = LeaseKind::coderabbit();
         self.ports.leases.want(&kind);
@@ -115,6 +121,35 @@ impl Runner {
             pull_request: number,
             head,
         }))
+    }
+
+    // Ends the pass when it marks a draft ready. A pull request the forge
+    // already shows ready is recorded as kelpie's own, so the gate never reads
+    // it as someone else's change.
+    fn ready_for_review(&mut self, number: u64) -> Result<Option<Begin>, StateError> {
+        let repo = self.settings.forge.clone();
+        let pr = match self.ports.forge.pull_request(&repo, number) {
+            Ok(pr) => pr,
+            Err(e) => {
+                let reason = format!("cannot read #{number}: {e}");
+                return Ok(Some(self.gate_failed(reason)));
+            }
+        };
+        if !pr.draft {
+            if !self.item().known.ready {
+                self.update(|item| item.known.ready = true)?;
+            }
+            return Ok(None);
+        }
+        if let Err(e) = self.ports.forge.mark_ready(&repo, number) {
+            let reason = format!("cannot mark #{number} ready: {e}");
+            return Ok(Some(self.gate_failed(reason)));
+        }
+        self.update(|item| item.known.ready = true)?;
+        Ok(Some(Begin::Report(StepReport::MarkedReady {
+            issue: self.item().issue,
+            pull_request: number,
+        })))
     }
 
     fn await_review(&mut self, head: String, at: Timestamp) -> Result<Begin, StateError> {

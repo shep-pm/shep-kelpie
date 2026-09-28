@@ -40,6 +40,7 @@ pub(crate) struct FakeForge {
     viewer_reads: Arc<AtomicUsize>,
     lagging: Arc<Mutex<HashMap<u64, String>>>,
     readied: Arc<Mutex<Vec<u64>>>,
+    skipped: Arc<Mutex<Vec<u64>>>,
     merges: Arc<Mutex<Vec<(u64, String)>>>,
     reviews: Arc<Mutex<HashMap<u64, MaintainerReview>>>,
     /// Pull requests' labels, and what CodeRabbit posts
@@ -84,6 +85,7 @@ impl FakeForge {
             viewer_reads: Arc::default(),
             lagging: Arc::default(),
             readied: Arc::default(),
+            skipped: Arc::default(),
             merges: Arc::default(),
             reviews: Arc::default(),
             coderabbit: FakeCodeRabbit::default(),
@@ -240,6 +242,12 @@ impl FakeForge {
     /// Every pull request marked ready, in order
     pub(crate) fn readied(&self) -> Vec<u64> {
         self.readied.lock().unwrap().clone()
+    }
+
+    /// Every pull request the summon label went on while it was a draft, which
+    /// CodeRabbit answers with "Draft PR not reviewed" and never reviews
+    pub(crate) fn skipped_as_drafts(&self) -> Vec<u64> {
+        self.skipped.lock().unwrap().clone()
     }
 
     /// Every merge made, with the head it was held to
@@ -414,6 +422,10 @@ impl Forge for FakeForge {
             return Err(ForgeError::Failed("labels are down".into()));
         }
         self.opened(number)?;
+        let draft = self.pull_requests.lock().unwrap()[&number].draft;
+        if on && draft && label == "review please" {
+            self.skipped.lock().unwrap().push(number);
+        }
         self.coderabbit.set_label(number, label, on);
         Ok(())
     }
