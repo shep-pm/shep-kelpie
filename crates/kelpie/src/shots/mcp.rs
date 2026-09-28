@@ -162,7 +162,7 @@ mod tests {
             worktree: dir.path().join("wt"),
             build: dir.path().join("build"),
             out: dir.path().join("shots"),
-            configuration: None,
+            launch: Err("not started in this test".into()),
             routes: vec![Route::try_from("/".to_owned()).unwrap()],
             domains: vec![],
             env: BTreeMap::new(),

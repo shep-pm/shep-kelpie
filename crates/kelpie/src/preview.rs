@@ -105,7 +105,8 @@ impl fmt::Display for RouteError {
 impl std::error::Error for RouteError {}
 
 /// One configuration from `.claude/launch.json`
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+// wire format: changing this is a breaking change to the job file
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Launch {
     /// Its name
@@ -159,19 +160,37 @@ pub fn enabled(repo: &Path) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// The configuration named `name` in `worktree`'s launch file, or its first
+/// The configuration named `name` in the launch file on `repo`'s
+/// `origin/main`, or its first
+///
+/// Never the work item's branch: the worker writes that, and the dev server's
+/// command would be its own to choose.
 ///
 /// # Errors
 ///
 /// [`LaunchError`] when the file cannot be read or parsed, or lacks the configuration.
-pub fn launch(worktree: &Path, name: Option<&str>) -> Result<Launch, LaunchError> {
+pub fn launch(repo: &Path, name: Option<&str>) -> Result<Launch, LaunchError> {
+    let spec = format!("origin/{}:{LAUNCH_FILE}", crate::worktree::BASE);
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["show", &spec])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| LaunchError::Read(e.to_string()))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(LaunchError::Read(stderr.trim().to_owned()));
+    }
+    parse_launch(&String::from_utf8_lossy(&output.stdout), name)
+}
+
+fn parse_launch(text: &str, name: Option<&str>) -> Result<Launch, LaunchError> {
     #[derive(Deserialize)]
     struct File {
         configurations: Vec<Launch>,
     }
-    let text = std::fs::read_to_string(worktree.join(LAUNCH_FILE))
-        .map_err(|e| LaunchError::Read(e.kind().to_string()))?;
-    let file: File = serde_json::from_str(&text).map_err(|e| LaunchError::Parse(e.to_string()))?;
+    let file: File = serde_json::from_str(text).map_err(|e| LaunchError::Parse(e.to_string()))?;
     let found = match name {
         Some(name) => file.configurations.into_iter().find(|c| c.name == name),
         None => file.configurations.into_iter().next(),
@@ -365,8 +384,7 @@ mod tests {
 
     #[test]
     fn the_named_configuration_or_the_first_is_read() {
-        let dir = worktree_with(PLAYGROUND);
-        let first = launch(dir.path(), None).unwrap();
+        let first = parse_launch(PLAYGROUND, None).unwrap();
         assert_eq!(
             first,
             Launch {
@@ -376,9 +394,12 @@ mod tests {
                 port: 3000,
             }
         );
-        assert_eq!(launch(dir.path(), Some("preview")).unwrap().port, 4173);
         assert_eq!(
-            launch(dir.path(), Some("storybook"))
+            parse_launch(PLAYGROUND, Some("preview")).unwrap().port,
+            4173
+        );
+        assert_eq!(
+            parse_launch(PLAYGROUND, Some("storybook"))
                 .unwrap_err()
                 .to_string(),
             ".claude/launch.json has no configuration \"storybook\""

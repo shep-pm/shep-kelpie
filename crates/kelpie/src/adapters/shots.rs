@@ -18,7 +18,7 @@ use serde_json::json;
 
 use super::process::{Processes, RunError};
 use crate::ports::Shots;
-use crate::preview::{self, LOCAL_HOSTS, Launch, Tools};
+use crate::preview::{LOCAL_HOSTS, Launch, Tools};
 use crate::profile::CREDENTIALS;
 use crate::shots::{Scheme, ShotsJob, ShotsRun, Viewport, plan};
 
@@ -62,8 +62,7 @@ impl ShotsCli {
     }
 
     fn run(&self, job: &ShotsJob) -> Result<ShotsRun, String> {
-        let launch = preview::launch(&job.worktree, job.configuration.as_deref())
-            .map_err(|e| e.to_string())?;
+        let launch = job.launch.clone()?;
         for tool in [self.tools.sandbox(), self.tools.playwright_cli()] {
             if !tool.is_file() {
                 return Err(format!(
@@ -323,6 +322,33 @@ mod tests {
     use super::*;
     use crate::preview::Route;
 
+    fn launch(port: u16) -> Launch {
+        Launch {
+            name: "dev".into(),
+            runtime_executable: "true".into(),
+            runtime_args: vec![],
+            port,
+        }
+    }
+
+    #[test]
+    fn a_launch_main_could_not_give_fails_the_run_saying_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = ShotsCli::new(Tools::under(dir.path())).take(&ShotsJob {
+            worktree: dir.path().join("wt"),
+            build: dir.path().join("build"),
+            out: dir.path().join("out"),
+            launch: Err("cannot read .claude/launch.json: bad revision".into()),
+            routes: vec![],
+            domains: vec![],
+            env: BTreeMap::new(),
+        });
+        assert_eq!(
+            run.failed.as_deref(),
+            Some("cannot read .claude/launch.json: bad revision")
+        );
+    }
+
     #[test]
     fn a_recorded_report_reads_page_by_page() {
         let pages = parse_report(include_str!("../../fixtures/shots-report.json")).unwrap();
@@ -368,7 +394,7 @@ mod tests {
             worktree: "/k/wt/lab/7".into(),
             build: "/k/targets/lab/7".into(),
             out: "/k/shots/lab/7/abc1234".into(),
-            configuration: None,
+            launch: Ok(launch(1)),
             routes: vec![Route::try_from("/".to_owned()).unwrap()],
             domains: vec!["leekduck.com".into()],
             env: BTreeMap::new(),
@@ -391,14 +417,6 @@ mod tests {
         let held = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = held.local_addr().unwrap().port();
         let worktree = dir.path().join("wt");
-        fs::create_dir_all(worktree.join(".claude")).unwrap();
-        fs::write(
-            worktree.join(".claude/launch.json"),
-            format!(
-                r#"{{"configurations": [{{"name": "dev", "runtimeExecutable": "true", "port": {port}}}]}}"#
-            ),
-        )
-        .unwrap();
         let tools = dir.path().join("tools");
         let cli = Tools::under(dir.path());
         for tool in [cli.sandbox(), cli.playwright_cli()] {
@@ -409,7 +427,7 @@ mod tests {
             worktree,
             build: dir.path().join("build"),
             out: dir.path().join("out"),
-            configuration: None,
+            launch: Ok(launch(port)),
             routes: vec![Route::try_from("/".to_owned()).unwrap()],
             domains: vec![],
             env: BTreeMap::new(),
@@ -428,17 +446,11 @@ mod tests {
     fn missing_tools_say_how_to_install_them() {
         let dir = tempfile::tempdir().unwrap();
         let worktree = dir.path().join("wt");
-        fs::create_dir_all(worktree.join(".claude")).unwrap();
-        fs::write(
-            worktree.join(".claude/launch.json"),
-            r#"{"configurations": [{"name": "dev", "runtimeExecutable": "true", "port": 1}]}"#,
-        )
-        .unwrap();
         let run = ShotsCli::new(Tools::under(dir.path())).take(&ShotsJob {
             worktree,
             build: dir.path().join("build"),
             out: dir.path().join("out"),
-            configuration: None,
+            launch: Ok(launch(1)),
             routes: vec![],
             domains: vec![],
             env: BTreeMap::new(),

@@ -40,6 +40,7 @@ impl Runner {
     /// The job for a run into `out`, on the settings' routes and the worker's
     pub(super) fn shots_job(&self, item: &WorkItem, out: PathBuf) -> ShotsJob {
         let preview = &self.settings.preview;
+        let config = preview.configuration.as_ref().map(NonBlank::as_str);
         let named = named_routes(&self.paths.shots(item.issue));
         let env = self
             .settings
@@ -52,10 +53,7 @@ impl Runner {
             worktree: item.worktree.clone(),
             build: item.build.clone(),
             out,
-            configuration: preview
-                .configuration
-                .as_ref()
-                .map(|c| c.as_str().to_owned()),
+            launch: preview::launch(&self.settings.repo, config).map_err(|e| e.to_string()),
             routes: routes(&preview.routes, &named),
             domains: preview
                 .domains

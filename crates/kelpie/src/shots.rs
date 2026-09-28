@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::preview::Route;
+use crate::preview::{Launch, Route};
 
 pub mod mcp;
 pub mod publish;
@@ -29,8 +29,9 @@ pub struct ShotsJob {
     pub build: PathBuf,
     /// The folder the shots and the dev server's log go in
     pub out: PathBuf,
-    /// The launch configuration to start, or the file's first
-    pub configuration: Option<String>,
+    /// The configuration to start, from the launch file on `main`, or why
+    /// it could not be read
+    pub launch: Result<Launch, String>,
     /// The routes to capture
     pub routes: Vec<Route>,
     /// Domains the app calls, besides the dev server itself
