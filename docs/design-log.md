@@ -80,6 +80,7 @@ So kelpie moves the control room's rules (gates, locks, rate windows) into code,
 - A maintainer's `add` is not held by the daily allowance, the way it already skips the board's screening. The 5-hour window still holds its turns.
 - Decided 2026-09-27 on #15: the allowance is one figure for the day, not spread by the hour. The kickoff hours only produce the per-hour figure `status` shows, given the gates already in place: the 5-hour window and the board's own screening.
 - The 50% mark stops a turn from starting, dispatch included, until the window resets. Usage is read only before a dispatch and before a turn that has not begun, never mid-turn, and a turn resumed after a restart is not held. A hold is trusted for at most 10 minutes, since reset times are printed to the minute and a window can reset mid-read.
+- Decided 2026-09-28 on #67: `pacing.enabled` (on when absent) turns both limits off for a stretch when usage does not matter, such as a free reset coming. Nothing is held, including on an unreadable reading, but usage is still read before each dispatch and turn, so `status` shows `pacer.enabled: false` beside the live numbers.
 - When usage cannot be read, the pacer holds both limits and says so in `status`. A pacer that guessed would spend the account it exists to protect.
 - The pacer sets concurrency, and logs utilization per unit by hour of day. A peak-hour effect, if one returns, shows up in the data rather than being hard-coded.
 - "Do n work items today" comes later, once per-item costs are measured.
