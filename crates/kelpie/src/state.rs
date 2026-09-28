@@ -181,7 +181,7 @@ pub enum RulingKind {
 /// The round a fix that pushed nothing was for
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Fix {
     /// A qwen-review round: the review, still fixing it
     Review(Review),
@@ -652,6 +652,12 @@ mod tests {
             "extra": true,
         });
         assert!(serde_json::from_value::<RulingKind>(stray).is_err());
+        let misspelt = serde_json::json!({
+            "kind": "fix-not-pushed",
+            "coderabbit": { "round": 3, "head": "c0ffee", "heade": "c0ffee" },
+            "prompt": "again",
+        });
+        assert!(serde_json::from_value::<RulingKind>(misspelt).is_err());
     }
 
     #[test]
