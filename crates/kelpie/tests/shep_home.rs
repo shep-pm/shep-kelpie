@@ -1,5 +1,5 @@
 //! A runner, the dog and the relay's commands without `SHEP_HOME`, against
-//! the real binary: each refuses, and says which Flockfile line fixes it.
+//! the real binary: each refuses, and says what sets it.
 
 use std::process::{Command, Output, Stdio};
 
@@ -47,10 +47,14 @@ fn the_relay_commands_without_shep_home_refuse() {
     ] {
         let output = kelpie(args);
         assert!(!output.status.success(), "{args:?}");
+        let stderr = stderr(&output);
         assert!(
-            stderr(&output).contains("SHEP_HOME is not set"),
-            "{args:?}: {}",
-            stderr(&output)
+            stderr.contains("SHEP_HOME is not set"),
+            "{args:?}: {stderr}"
+        );
+        assert!(
+            stderr.contains("the relay's settings"),
+            "{args:?}: {stderr}"
         );
     }
 }
