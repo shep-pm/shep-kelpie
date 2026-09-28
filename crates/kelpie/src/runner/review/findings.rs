@@ -9,9 +9,11 @@ use crate::runner::turn;
 /// Where a round's held findings are written for the worker's next turn
 const FINDINGS_FILE: &str = "review-findings.md";
 
-/// The findings file's path, inside the project's worker folder
-pub(in crate::runner) fn findings_path(worker_folder: &Path) -> PathBuf {
-    worker_folder.join(FINDINGS_FILE)
+// The worker can read its build folder, and a commit never carries it. The
+// project's folder holds its settings, so the worker is denied it.
+/// The findings file's path, in the work item's build folder
+pub(in crate::runner) fn findings_path(build: &Path) -> PathBuf {
+    build.join(FINDINGS_FILE)
 }
 
 pub(in crate::runner) fn write_findings_file(
@@ -49,9 +51,12 @@ pub(super) fn fix_prompt(number: u64, round: u32, count: usize, path: &Path) -> 
 #[cfg(test)]
 mod tests {
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::Mutex;
 
     use super::*;
     use crate::ports::Severity;
+    use crate::runner::{Runner, step};
+    use crate::test::{Rig, Scripted, ScriptedRound};
 
     #[test]
     fn the_file_lists_one_finding_per_line_in_qwens_own_format() {
@@ -91,11 +96,11 @@ mod tests {
 
     #[test]
     fn the_fix_prompt_names_the_round_the_pull_request_and_the_file() {
-        let prompt = fix_prompt(71, 3, 2, Path::new("/k/worker/review-findings.md"));
+        let prompt = fix_prompt(71, 3, 2, Path::new("/k/targets/shep/7/review-findings.md"));
         assert_eq!(
             prompt,
             "Round 3 of the qwen-review loop on your pull request #71 held 2 \
-             finding(s), in /k/worker/review-findings.md. Fix each one, then \
+             finding(s), in /k/targets/shep/7/review-findings.md. Fix each one, then \
              commit and push with `git push origin HEAD`."
         );
     }
@@ -124,5 +129,82 @@ mod tests {
         let mut perms = std::fs::metadata(&folder).unwrap().permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&folder, perms).unwrap();
+    }
+
+    // Round 1 on pull request 71 held one MEDIUM finding, and its fix turn is next.
+    fn findings_sent() -> (Rig, Mutex<Runner>) {
+        let rig = Rig::new("shep");
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "start", None);
+        rig.ask(&runner, "add", Some("7"));
+        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+        rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+        step(&runner).unwrap(); // opens the pull request, enters round 1 (qwen)
+        rig.reviewer.script([ScriptedRound::Findings(vec![Finding {
+            severity: Severity::Medium,
+            file: "src/lib.rs".into(),
+            line: 3,
+            what: "the flag is misnamed".into(),
+            why: "it reads as its opposite".into(),
+        }])]);
+        step(&runner).unwrap(); // round 1's qwen call
+        rig.claude.script([Scripted::Text(
+            r#"{"holds": true, "severity": "medium", "reason": "it does"}"#,
+        )]);
+        step(&runner).unwrap(); // the judge holds it
+        step(&runner).unwrap(); // the round finalizes: the fix turn is next
+        (rig, runner)
+    }
+
+    // Whether a `Read(...)` deny rule covers `path`, written as the rule writes it
+    fn denies(rule: &str, path: &str) -> bool {
+        let Some(glob) = rule.strip_prefix("Read(").and_then(|r| r.strip_suffix(')')) else {
+            return false;
+        };
+        match glob.strip_suffix("**") {
+            Some(folder) if !folder.contains('*') => path.starts_with(folder),
+            None if !glob.contains('*') => path == glob,
+            _ => panic!("teach this test to read {rule}"),
+        }
+    }
+
+    #[test]
+    fn the_worker_can_read_its_findings_under_the_settings_it_runs_with() {
+        let (rig, runner) = findings_sent();
+        rig.claude.script([Scripted::Push("fixed.txt", "fixed\n")]);
+        step(&runner).unwrap(); // the fix turn
+        let fix = rig.claude.seen().pop().unwrap();
+        let named = fix.call.prompt.split(" in ").nth(1).unwrap();
+        let path = Path::new(named.split(". Fix").next().unwrap());
+
+        let text = std::fs::read_to_string(path).unwrap();
+        assert!(text.contains("the flag is misnamed"), "{text}");
+        assert!(
+            !path.starts_with(rig.worktree_7()),
+            "a commit would carry {path:?}"
+        );
+        // The worker's rules name kelpie's home as `~/.kelpie`.
+        let home = rig.home.path().join("kelpie");
+        let as_written = format!("~/.kelpie/{}", path.strip_prefix(&home).unwrap().display());
+        let as_is = path.to_str().unwrap();
+        for rule in strings(&fix.settings["permissions"]["deny"]) {
+            assert!(
+                !denies(rule, &as_written) && !denies(rule, as_is),
+                "{rule} hides {as_written}"
+            );
+        }
+        let deny_read = &fix.settings["sandbox"]["filesystem"]["denyRead"];
+        for folder in deny_read.as_array().into_iter().flatten() {
+            let folder = folder.as_str().unwrap();
+            assert!(!path.starts_with(folder), "the sandbox hides it: {folder}");
+        }
+    }
+
+    fn strings(v: &serde_json::Value) -> Vec<&str> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap())
+            .collect()
     }
 }

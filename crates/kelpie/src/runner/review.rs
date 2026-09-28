@@ -130,9 +130,9 @@ impl Runner {
             }));
         }
         let clean = held.iter().all(|f| f.severity <= Severity::Low);
-        let path = findings::findings_path(&self.paths.worker);
-        if let Err(reason) = findings::write_findings_file(&self.paths.worker, &path, round, &held)
-        {
+        let build = &item.build;
+        let path = findings::findings_path(build);
+        if let Err(reason) = findings::write_findings_file(build, &path, round, &held) {
             return Ok(self.gate_failed(reason));
         }
         let held_count = held.len();
