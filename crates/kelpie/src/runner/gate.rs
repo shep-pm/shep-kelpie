@@ -470,6 +470,42 @@ mod tests {
     }
 
     #[test]
+    fn a_branch_holding_the_workers_merge_is_caught_up_by_merging_never_rebased() {
+        let (rig, runner, _) = Rig::with_pull_request("chelone");
+        rig.land_on_origin("work.txt");
+        step(&runner).unwrap();
+        rig.claude.script([Scripted::MergeMain]);
+        step(&runner).unwrap();
+        let resolved = rig.forge.head_of("kelpie/7").unwrap();
+        assert_eq!(
+            git(&rig.worktree_7(), &["show", "HEAD:work.txt"]),
+            "landed elsewhere"
+        );
+
+        // Main deletes the file the worker resolved. Replaying the branch's
+        // own commits over that applies cleanly, and would bring back the
+        // branch's side of the conflict the worker settled.
+        let other = rig.home.path().join("other");
+        git(&other, &["pull", "--quiet", "origin", "main"]);
+        git(&other, &["rm", "--quiet", "work.txt"]);
+        git(&other, &["commit", "--quiet", "-m", "drop work.txt"]);
+        git(&other, &["push", "--quiet", "origin", "main"]);
+
+        let Some(StepReport::Rebased {
+            head: caught_up, ..
+        }) = step(&runner).unwrap()
+        else {
+            panic!("the branch was not caught up");
+        };
+        let worktree = rig.worktree_7();
+        assert_eq!(rig.forge.head_of("kelpie/7").as_ref(), Some(&caught_up));
+        assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), caught_up);
+        assert_eq!(git(&worktree, &["rev-parse", "HEAD^1"]), resolved);
+        assert!(!git(&worktree, &["ls-tree", "--name-only", "HEAD"]).contains("work.txt"));
+        assert_eq!(rig.claude.calls().len(), 2, "no turn for a clean catch-up");
+    }
+
+    #[test]
     fn a_conflict_the_worker_left_unresolved_parks_it_on_the_rebase_ruling() {
         let (rig, runner, head) = Rig::with_pull_request("shep");
         rig.land_on_origin("work.txt");

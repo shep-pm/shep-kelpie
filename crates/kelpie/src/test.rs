@@ -108,7 +108,7 @@ pub(crate) enum Scripted {
     /// Commits this file with this text on the worktree's branch, pushes
     /// it the way a worker does, and answers
     Push(&'static str, &'static str),
-    /// Merges `origin/main` into the worktree's branch, keeping the branch's
+    /// Merges `origin/main` into the worktree's branch, keeping main's
     /// side of any conflict, and pushes it without force, as a worker
     /// resolving a conflict does
     MergeMain,
@@ -300,7 +300,14 @@ impl Claude for FakeClaude {
                 git(&call.cwd, &["fetch", "--quiet", "origin", "main"]);
                 git(
                     &call.cwd,
-                    &["merge", "--quiet", "-X", "ours", "--no-edit", "origin/main"],
+                    &[
+                        "merge",
+                        "--quiet",
+                        "-X",
+                        "theirs",
+                        "--no-edit",
+                        "origin/main",
+                    ],
                 );
                 git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);
                 Ok(ClaudeReply {
