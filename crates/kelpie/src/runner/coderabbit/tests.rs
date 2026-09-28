@@ -340,7 +340,7 @@ fn the_judge_reads_every_open_thread_rejected_ones_are_resolved_and_held_ones_go
         "{}",
         fix.prompt
     );
-    let file = std::fs::read_to_string(rig.paths().worker.join("review-findings.md")).unwrap();
+    let file = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
     assert!(file.contains("Name the flag."), "{file}");
     assert!(
         !file.contains("Guard the index."),

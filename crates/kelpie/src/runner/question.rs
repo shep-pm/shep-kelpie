@@ -261,7 +261,8 @@ mod tests {
             Scripted::Push("fixed.txt", "fixed\n"),
             Scripted::Text("CLEAN"),
         ]);
-        step(&runner).unwrap(); // the answered fix turn: pushes, round 1 ends
+        step(&runner).unwrap(); // the answered fix turn: pushes
+        step(&runner).unwrap(); // the head moved, so round 1 ends
         assert_eq!(
             rig.ask(&runner, "status", None)["work_item"]["phase"],
             json!({

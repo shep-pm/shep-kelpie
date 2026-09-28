@@ -124,6 +124,14 @@ pub enum RulingKind {
         /// The review, at the round the guard stopped it on
         review: Review,
     },
+    /// The worker's fix turn for held findings ended with nothing pushed. A
+    /// yes sends it the same findings again.
+    FixNotPushed {
+        /// The review, still fixing the round whose findings hold
+        review: Review,
+        /// The fix turn a yes starts
+        prompt: String,
+    },
     /// CodeRabbit's rounds reached their cap with findings the judge held.
     /// A yes sends the worker those findings and lifts the cap for the rest
     /// of this work item.

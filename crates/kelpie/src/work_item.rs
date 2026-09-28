@@ -308,6 +308,10 @@ pub enum ReviewStage {
         /// Whether every held finding was a nit (LOW), so a clean fix keeps
         /// or extends the consecutive-clean streak
         clean: bool,
+        /// The pull request's head when the findings were sent, which a fix
+        /// moves. None in an older state file, whose fix is not checked.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        head: Option<String>,
     },
 }
 
@@ -544,7 +548,23 @@ mod tests {
             })
         );
         assert_eq!(
-            value(ReviewStage::Fixing { clean: true }),
+            value(ReviewStage::Fixing {
+                clean: true,
+                head: Some("c0ffee".into())
+            }),
+            json!({ "stage": "fixing", "clean": true, "head": "c0ffee" })
+        );
+        let saved_before_the_head: ReviewStage =
+            serde_json::from_value(json!({ "stage": "fixing", "clean": true })).unwrap();
+        assert_eq!(
+            saved_before_the_head,
+            ReviewStage::Fixing {
+                clean: true,
+                head: None
+            }
+        );
+        assert_eq!(
+            value(saved_before_the_head),
             json!({ "stage": "fixing", "clean": true })
         );
     }

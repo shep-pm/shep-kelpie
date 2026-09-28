@@ -246,10 +246,10 @@ impl Runner {
         if held.is_empty() {
             return self.satisfied(number, tally.rounds);
         }
-        let path = findings::findings_path(&self.paths.worker);
+        let build = &self.item().build;
+        let path = findings::findings_path(build);
         let round = tally.rounds;
-        if let Err(reason) = findings::write_findings_file(&self.paths.worker, &path, round, &held)
-        {
+        if let Err(reason) = findings::write_findings_file(build, &path, round, &held) {
             return Ok(self.gate_failed(reason));
         }
         let prompt = fix_prompt(number, round, held.len(), &path);
