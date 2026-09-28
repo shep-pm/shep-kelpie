@@ -306,8 +306,11 @@ pub fn mcp_config(files: McpFiles<'_>) -> serde_json::Value {
 }
 
 /// The Playwright MCP server's config: a headless, throwaway Chromium that
-/// resolves only the dev server and `domains`, writing its files under `build`
-pub fn browser_config(build: &Path, domains: &[NonBlank]) -> serde_json::Value {
+/// resolves only the dev server and `domains`, writing its files to `out`
+///
+/// The server lets a tool reach `out` and its own working folder, resolving
+/// symlinks, so `out` must be a folder the worker cannot write or replace.
+pub fn browser_config(out: &Path, domains: &[NonBlank]) -> serde_json::Value {
     let rules = resolver_rules(domains.iter().map(NonBlank::as_str));
     serde_json::json!({
         "browser": {
@@ -318,7 +321,7 @@ pub fn browser_config(build: &Path, domains: &[NonBlank]) -> serde_json::Value {
                 "args": [format!("--host-resolver-rules={rules}")],
             },
         },
-        "outputDir": build.join("playwright"),
+        "outputDir": out,
     })
 }
 

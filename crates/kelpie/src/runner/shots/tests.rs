@@ -127,6 +127,39 @@ fn a_worker_with_a_launch_file_gets_playwright_and_the_shots_tool() {
 }
 
 #[test]
+fn playwrights_output_folder_is_kelpies_and_a_symlink_there_stops_the_turn() {
+    let rig = with_preview("lab");
+    let runner = started(&rig);
+    let out = rig.home.path().join("kelpie/shots/lab/7/playwright");
+    std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(rig.home.path(), &out).unwrap();
+    let Some(StepReport::Failed { reason, .. }) = step(&runner).unwrap() else {
+        panic!("the turn ran with a symlinked output folder");
+    };
+    assert!(
+        reason.ends_with("is a symlink, not kelpie's own folder"),
+        "{reason}"
+    );
+    assert_eq!(rig.claude.calls(), [], "no worker started");
+
+    std::fs::remove_file(&out).unwrap();
+    rig.ask(&runner, "drop", None);
+    step(&runner).unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+    step(&runner).unwrap();
+    let browser = read_json(&rig.paths().worker.join("playwright.json"));
+    assert_eq!(browser["outputDir"], json!(out));
+    assert!(std::fs::symlink_metadata(&out).unwrap().is_dir());
+    let seen = &rig.claude.seen()[0].settings;
+    let allow = seen["sandbox"]["filesystem"]["allowWrite"].to_string();
+    assert!(
+        !allow.contains("kelpie/shots"),
+        "the worker cannot write it: {allow}"
+    );
+}
+
+#[test]
 fn the_claude_round_gets_the_latest_shots_and_may_open_them() {
     let rig = with_preview("lab");
     let runner = started(&rig);

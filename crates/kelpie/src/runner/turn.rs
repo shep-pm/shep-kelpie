@@ -271,13 +271,15 @@ impl Runner {
         );
         let shots = self.shots_job(item, self.paths.shots(item.issue));
         let domains = &self.settings.preview.domains;
+        let out = self.paths.shots(item.issue).join("playwright");
+        own_folder(&out)?;
         let json = |v: &serde_json::Value| serde_json::to_string_pretty(v).expect("config is JSON");
         let job_text = serde_json::to_string_pretty(&shots).expect("the job is JSON");
         write(folder, &job, &job_text)?;
         write(
             folder,
             &browser,
-            &json(&preview::browser_config(&item.build, domains)),
+            &json(&preview::browser_config(&out, domains)),
         )?;
         let files = McpFiles {
             tools: &self.paths.tools,
@@ -472,6 +474,21 @@ fn timed_out(project: &str, next: &mut ProjectState) -> StepReport {
         question,
         comment_failed: None,
     }
+}
+
+// Makes `dir` if it is missing, and refuses it if it is a symlink: whatever it
+// points at would join the Playwright server's file fence.
+fn own_folder(dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| format!("cannot make {}: {}", dir.display(), e.kind()))?;
+    let meta = fs::symlink_metadata(dir)
+        .map_err(|e| format!("cannot read {}: {}", dir.display(), e.kind()))?;
+    if !meta.is_dir() {
+        return Err(format!(
+            "{} is a symlink, not kelpie's own folder",
+            dir.display()
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn write(folder: &Path, file: &Path, text: &str) -> Result<(), String> {

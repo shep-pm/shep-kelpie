@@ -90,11 +90,13 @@ const PUSH_FLAGS: [&str; 9] = [
 // The mach service a dev server's file watcher looks up on macOS
 const DEV_SERVER_MACH: [&str; 1] = ["com.apple.FSEvents"];
 
-// The Playwright MCP server runs outside the sandbox: these would run code in
-// it, and hand the page a local file.
-const PLAYWRIGHT_DENY: [&str; 2] = [
+// The Playwright MCP server runs outside the sandbox. These tools read a local
+// file (or run code that could), so none is the worker's.
+const PLAYWRIGHT_DENY: [&str; 4] = [
     "mcp__playwright__browser_run_code_unsafe",
     "mcp__playwright__browser_file_upload",
+    "mcp__playwright__browser_drop",
+    "mcp__playwright__browser_set_storage_state",
 ];
 
 // What `git push` and `gh` reach. A project adds its own, such as a registry.
@@ -436,8 +438,15 @@ mod tests {
     fn a_preview_denies_the_playwright_tools_that_reach_past_the_page() {
         let deny = with_preview(&[])["permissions"]["deny"].clone();
         let deny = strings(&deny);
-        assert!(deny.contains(&"mcp__playwright__browser_run_code_unsafe"));
-        assert!(deny.contains(&"mcp__playwright__browser_file_upload"));
+        for tool in [
+            "browser_run_code_unsafe",
+            "browser_file_upload",
+            "browser_drop",
+            "browser_set_storage_state",
+        ] {
+            let rule = format!("mcp__playwright__{tool}");
+            assert!(deny.contains(&rule.as_str()), "{rule}");
+        }
     }
 
     #[test]
