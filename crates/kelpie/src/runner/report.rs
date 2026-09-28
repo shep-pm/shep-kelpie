@@ -110,12 +110,18 @@ pub enum StepReport {
         /// Why the question could not be posted on the pull request, if it could not
         comment_failed: Option<String>,
     },
-    /// A turn could not run
+    /// A turn could not run, and is parked on a ruling
     Failed {
         /// The work item's issue
         issue: u64,
-        /// Why
-        reason: String,
+        /// The worker's draft pull request, once it has opened one
+        pull_request: Option<u64>,
+        /// The ruling's id
+        id: u64,
+        /// The question, carrying why the turn failed and the triggers that answer it
+        question: String,
+        /// Why the question could not be posted on the pull request, if it could not
+        comment_failed: Option<String>,
     },
     /// A turn ran past its ceiling, was stopped, and is parked on a ruling
     TimedOut {

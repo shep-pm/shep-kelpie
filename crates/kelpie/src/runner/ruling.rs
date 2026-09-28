@@ -81,6 +81,8 @@ enum Move {
         phase: Phase,
         force: Option<Phase>,
     },
+    /// A yes on a failed turn: the turn goes back as it stood, under its phase
+    Retry { turn: Turn, phase: Phase },
     /// A yes on a foreign change: kelpie adopts it and watches CI again
     Accept(Known),
 }
@@ -108,33 +110,39 @@ impl Runner {
         let parked_on = |item: &WorkItem| item.phase == Phase::Ruling { id };
         if let Some(item) = next.work_item.as_mut().filter(|item| parked_on(item)) {
             item.coderabbit.cap_cleared |= lifts_cap;
-            match moved {
-                Move::Phase(phase) => item.phase = phase,
+            let worker = match moved {
+                Move::Phase(phase) => {
+                    item.phase = phase;
+                    None
+                }
                 Move::Turn {
                     prompt,
                     phase,
                     force,
-                } => {
-                    item.turn = Turn::Next { prompt };
-                    item.phase = phase;
-                    // A turn the ruling interrupted may still owe the review loop.
-                    item.resume = force.or(item.resume.take());
-                    // The worker's turn again, so the hand-back label comes off.
-                    if let Some(number) = item.pull_request
-                        && item.known.labels.iter().any(|l| l == HUMAN)
-                    {
-                        let repo = &self.settings.forge;
-                        let off = self.ports.forge.set_label(repo, number, HUMAN, false);
-                        off.map_err(|e| RuleError::Unlabel(number, e.to_string()))?;
-                        item.known.labels.retain(|l| l != HUMAN);
-                    }
-                }
+                } => Some((Turn::Next { prompt }, phase, force)),
+                Move::Retry { turn, phase } => Some((turn, phase, None)),
                 Move::Accept(known) => {
                     item.known = known;
                     item.phase = Phase::Ci {
                         head: None,
                         since: now,
                     };
+                    None
+                }
+            };
+            if let Some((turn, phase, force)) = worker {
+                item.turn = turn;
+                item.phase = phase;
+                // A turn the ruling interrupted may still owe the review loop.
+                item.resume = force.or(item.resume.take());
+                // The worker's turn again, so the hand-back label comes off.
+                if let Some(number) = item.pull_request
+                    && item.known.labels.iter().any(|l| l == HUMAN)
+                {
+                    let repo = &self.settings.forge;
+                    let off = self.ports.forge.set_label(repo, number, HUMAN, false);
+                    off.map_err(|e| RuleError::Unlabel(number, e.to_string()))?;
+                    item.known.labels.retain(|l| l != HUMAN);
                 }
             }
         }
@@ -237,7 +245,17 @@ fn decide(id: u64, answer: Answer, ruling: Ruling, now: Timestamp) -> Result<Mov
                 force: None,
             });
         }
-        (Answer::No(_), RulingKind::TurnTimeout { .. }) => Phase::Done { merged: false },
+        // A turn that ran before is resumed, so it is not owed a fresh ceiling.
+        (Answer::Yes, RulingKind::TurnFailed { phase, retry, .. }) => {
+            let turn = match retry {
+                Turn::Running { .. } => Turn::Running { since: now },
+                other => other,
+            };
+            return Ok(Move::Retry { turn, phase });
+        }
+        (Answer::No(_), RulingKind::TurnTimeout { .. } | RulingKind::TurnFailed { .. }) => {
+            Phase::Done { merged: false }
+        }
         (Answer::Yes, RulingKind::ForeignChange { known, .. }) => return Ok(Move::Accept(known)),
         // A no's fix is new code, unreviewed: it goes through the
         // qwen-review loop again before CI, whatever ruling this answers.
@@ -354,6 +372,14 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
                  and kelpie stopped it. {yes} resumes its session for another turn, \
                  and {no} stops the work item, keeping its branch and pull request \
                  on the forge."
+            );
+        }
+        RulingKind::TurnFailed { reason, .. } => {
+            return format!(
+                "The worker's turn on {about} failed: {}. {yes} tries that step again, \
+                 and {no} stops the work item, keeping its branch and pull request \
+                 on the forge.",
+                reason.trim()
             );
         }
         RulingKind::ForeignChange { description, .. } => {

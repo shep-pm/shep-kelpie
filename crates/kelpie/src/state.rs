@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
 use crate::ports::Timestamp;
-use crate::work_item::{Known, Phase, Review, WorkItem};
+use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
 
 /// The state file's format version
 const VERSION: u32 = 1;
@@ -177,6 +177,16 @@ pub enum RulingKind {
         /// older state file, which resumes under Implement.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         phase: Option<Phase>,
+    },
+    /// A worker's turn could not run, or its call failed. A yes retries the
+    /// step that failed; a no stops the work item.
+    TurnFailed {
+        /// Why it failed
+        reason: String,
+        /// The phase the turn ran in, which a yes goes back to
+        phase: Phase,
+        /// The turn as it stood before it failed, which a yes puts back
+        retry: Turn,
     },
     /// The pull request's labels or ready state changed outside kelpie. A
     /// yes accepts the change and kelpie carries on watching it.
@@ -651,6 +661,26 @@ mod tests {
         assert_eq!(
             saved,
             serde_json::json!({ "kind": "turn-timeout", "phase": { "state": "implement" } })
+        );
+        assert_eq!(serde_json::from_value::<RulingKind>(saved).unwrap(), kind);
+    }
+
+    #[test]
+    fn a_failed_turn_keeps_its_phase_and_the_turn_to_retry() {
+        let kind = RulingKind::TurnFailed {
+            reason: "no worktree".into(),
+            phase: Phase::Implement,
+            retry: Turn::Due,
+        };
+        let saved = serde_json::to_value(&kind).unwrap();
+        assert_eq!(
+            saved,
+            serde_json::json!({
+                "kind": "turn-failed",
+                "reason": "no worktree",
+                "phase": { "state": "implement" },
+                "retry": { "state": "due" },
+            })
         );
         assert_eq!(serde_json::from_value::<RulingKind>(saved).unwrap(), kind);
     }

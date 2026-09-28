@@ -159,6 +159,62 @@ fn a_branch_the_maintainer_pushed_to_since_is_where_the_worker_starts() {
 }
 
 #[test]
+fn a_local_branch_left_behind_that_matches_origin_is_reused() {
+    let rig = Rig::new("hazels-lab");
+    let by_hand = reviewed_71(&rig);
+    git(&rig.repo(), &["fetch", "--quiet", "origin", "kelpie/7"]);
+    git(&rig.repo(), &["branch", "kelpie/7", &by_hand]);
+    let runner = running(&rig);
+    rig.ask(&runner, "rework", Some("71"));
+
+    rig.claude.script([Scripted::Push("fix.txt", "fixed\n")]);
+    step(&runner).unwrap();
+    assert_eq!(rig.claude.calls().len(), 1);
+    assert!(rig.worktree_7().join("by-hand.txt").exists());
+    let fixed = rig.forge.head_of("kelpie/7").unwrap();
+    assert_eq!(
+        git(&rig.worktree_7(), &["rev-parse", &format!("{fixed}~1")]),
+        by_hand
+    );
+}
+
+#[test]
+fn a_local_branch_with_commits_origin_lacks_stays_a_refusal() {
+    let rig = Rig::new("hazels-lab");
+    let by_hand = reviewed_71(&rig);
+    git(&rig.repo(), &["fetch", "--quiet", "origin", "kelpie/7"]);
+    let tree = format!("{by_hand}^{{tree}}");
+    let ahead = git(
+        &rig.repo(),
+        &[
+            "-c",
+            "user.name=kelpie",
+            "-c",
+            "user.email=kelpie@example.invalid",
+            "commit-tree",
+            &tree,
+            "-p",
+            &by_hand,
+            "-m",
+            "not pushed",
+        ],
+    );
+    git(&rig.repo(), &["branch", "kelpie/7", &ahead]);
+    let runner = running(&rig);
+    rig.ask(&runner, "rework", Some("71"));
+
+    let Some(StepReport::Failed { question, .. }) = step(&runner).unwrap() else {
+        panic!("the rework took a branch holding work origin lacks");
+    };
+    assert!(
+        question.contains("branch kelpie/7 already exists without its worktree"),
+        "{question}"
+    );
+    assert_eq!(rig.claude.calls(), []);
+    assert_eq!(git(&rig.repo(), &["rev-parse", "kelpie/7"]), ahead);
+}
+
+#[test]
 fn a_pull_request_that_is_not_kelpies_open_one_is_refused_and_nothing_starts() {
     let rig = Rig::new("golbat");
     for (number, branch) in [(80, "feat/timeline"), (81, "kelpie/8"), (82, "kelpie/9")] {
