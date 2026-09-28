@@ -4,10 +4,11 @@
 //! The oldest one, by issue number, is dispatched next. An issue that already
 //! has an open pull request or an assignee is someone's work in progress, and
 //! is skipped. So is one whose `worker:` label cannot be read, since kelpie
-//! would not know which model to run it on. An issue the runner picks but
-//! cannot take, because the forge cannot show it or its `worker:` label
-//! fails when `add` reads it, is skipped too, so it cannot stall the issues
-//! behind it.
+//! would not know which model to run it on. An issue waits while any issue it
+//! is blocked by is open, even one with a pull request. An issue the runner
+//! picks but cannot take, because the forge cannot show it or its `worker:`
+//! label fails when `add` reads it, is skipped too, so it cannot stall the
+//! issues behind it.
 
 use std::fmt;
 
@@ -38,6 +39,19 @@ pub struct ReadyIssue {
     pub assigned: bool,
     /// Its labels' names
     pub labels: Vec<String>,
+    /// The issues it is blocked by, as far as the forge lists them
+    pub blocked_by: Vec<Blocker>,
+    /// How many more blockers the forge counted but did not list
+    pub unlisted_blockers: u64,
+}
+
+/// An issue a ready issue is blocked by
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Blocker {
+    /// Its number
+    pub number: u64,
+    /// Whether the forge shows it open
+    pub open: bool,
 }
 
 /// An open pull request, as the forge lists it
@@ -72,6 +86,16 @@ pub enum Skip {
         /// The issue
         issue: u64,
     },
+    /// An issue it is blocked by is still open
+    Blocked {
+        /// The issue
+        issue: u64,
+        /// Its open blockers, lowest first
+        by: Vec<u64>,
+        /// Blockers the forge did not list, each taken as open
+        #[serde(skip_serializing_if = "is_zero")]
+        unlisted: u64,
+    },
     /// Its `worker:` label cannot be read
     Label {
         /// The issue
@@ -95,10 +119,15 @@ impl Skip {
             Self::PullRequest { issue, .. }
             | Self::Finished { issue }
             | Self::Assigned { issue }
+            | Self::Blocked { issue, .. }
             | Self::Label { issue, .. }
             | Self::Failed { issue, .. } => *issue,
         }
     }
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// What the board picked, and what it passed over on the way
@@ -121,6 +150,13 @@ pub fn pick(ready: &[ReadyIssue], open: &[OpenPullRequest], finished: &[u64]) ->
     let mut skipped = Vec::new();
     for issue in ready {
         let number = issue.number;
+        let mut by: Vec<u64> = issue
+            .blocked_by
+            .iter()
+            .filter(|b| b.open)
+            .map(|b| b.number)
+            .collect();
+        by.sort_unstable();
         if finished.contains(&number) {
             skipped.push(Skip::Finished { issue: number });
         } else if let Some(pr) = open.iter().find(|pr| pr.closes.contains(&number)) {
@@ -130,6 +166,12 @@ pub fn pick(ready: &[ReadyIssue], open: &[OpenPullRequest], finished: &[u64]) ->
             });
         } else if issue.assigned {
             skipped.push(Skip::Assigned { issue: number });
+        } else if !by.is_empty() || issue.unlisted_blockers > 0 {
+            skipped.push(Skip::Blocked {
+                issue: number,
+                by,
+                unlisted: issue.unlisted_blockers,
+            });
         } else if let Err(error) = worker_override(&issue.labels) {
             skipped.push(Skip::Label {
                 issue: number,
@@ -233,6 +275,16 @@ mod tests {
             number,
             assigned: false,
             labels: vec![READY.into()],
+            blocked_by: vec![],
+            unlisted_blockers: 0,
+        }
+    }
+
+    fn blocked(number: u64, by: &[(u64, bool)]) -> ReadyIssue {
+        let blocked_by = by.iter().map(|&(number, open)| Blocker { number, open });
+        ReadyIssue {
+            blocked_by: blocked_by.collect(),
+            ..ready(number)
         }
     }
 
@@ -313,6 +365,64 @@ mod tests {
                 issue: 1,
                 error: LabelError::Unreadable("worker:gpt-high".into())
             }]
+        );
+    }
+
+    #[test]
+    fn an_issue_with_an_open_blocker_is_passed_over_for_the_next_oldest() {
+        let pick = pick(&[blocked(8, &[(32, true)]), ready(9)], &[], &[]);
+        assert_eq!(pick.issue, Some(9));
+        assert_eq!(
+            pick.skipped,
+            [Skip::Blocked {
+                issue: 8,
+                by: vec![32],
+                unlisted: 0
+            }]
+        );
+    }
+
+    #[test]
+    fn an_issue_whose_blockers_are_all_closed_is_picked() {
+        let pick = pick(&[blocked(8, &[(32, false), (33, false)])], &[], &[]);
+        assert_eq!(pick.issue, Some(8));
+        assert_eq!(pick.skipped, []);
+    }
+
+    #[test]
+    fn a_skip_for_blockers_names_only_the_open_ones_lowest_first() {
+        let mixed = blocked(27, &[(40, true), (24, false), (19, true), (37, true)]);
+        assert_eq!(
+            pick(&[mixed], &[], &[]),
+            Pick {
+                issue: None,
+                skipped: vec![Skip::Blocked {
+                    issue: 27,
+                    by: vec![19, 37, 40],
+                    unlisted: 0
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn blockers_the_forge_did_not_list_count_as_open() {
+        let mut long = blocked(8, &[(12, false)]);
+        long.unlisted_blockers = 3;
+        let pick = pick(&[long, ready(9)], &[], &[]);
+        assert_eq!(pick.issue, Some(9));
+        assert_eq!(
+            pick.skipped,
+            [Skip::Blocked {
+                issue: 8,
+                by: vec![],
+                unlisted: 3
+            }]
+        );
+        let json = serde_json::to_value(&pick.skipped[0]).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "reason": "blocked", "issue": 8, "by": [], "unlisted": 3 })
         );
     }
 
