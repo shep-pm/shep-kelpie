@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn an_issue_with_an_open_blocker_is_skipped_for_the_next_oldest() {
-        let (rig, runner) = running("hazel");
+        let (rig, runner) = running("eevee");
         rig.forge.list_ready(8, false);
         rig.forge.list_ready(9, false);
         rig.forge.block(8, 32);
@@ -349,7 +349,7 @@ mod tests {
 
     #[test]
     fn a_blocked_issue_waits_through_its_blockers_pull_request_until_the_blocker_closes() {
-        let (rig, runner) = running("hazel");
+        let (rig, runner) = running("ditto");
         rig.forge.list_ready(8, false);
         rig.forge.block(8, 32);
         rig.forge.open_pull_request(40, "kelpie/32", &[32]);
