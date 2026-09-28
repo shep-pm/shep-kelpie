@@ -20,8 +20,8 @@ pub struct WorkItem {
     pub title: String,
     /// Its branch, cut from `origin/main` unless it is a rework
     pub branch: String,
-    /// Whether it reworks a pull request kelpie opened before, from the
-    /// maintainer's review. Its branch starts as `origin` holds it.
+    /// Whether it reworks a pull request kelpie opened before, from its
+    /// latest review. Its worktree starts at the branch's head on `origin`.
     #[serde(default)]
     pub rework: bool,
     /// Its worktree
