@@ -407,6 +407,53 @@ fn a_rework_edits_the_shots_comment_in_place() {
     );
 }
 
+// Posted once, then a rework whose head is green, ready for its shots comment
+fn reworked(project: &str) -> (Rig, std::sync::Mutex<Runner>, u64) {
+    let (rig, runner, _) = green(project);
+    let Some(StepReport::ShotsPosted { comment, .. }) = rig.verdict(&runner) else {
+        panic!("no shots were posted");
+    };
+    step(&runner).unwrap(); // merge ruling 1
+    rig.ask(&runner, "rule", Some("1 no make the header darker"));
+    rig.claude.script([
+        Scripted::Push("header.css", "dark\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    for _ in 0..4 {
+        step(&runner).unwrap(); // the fix, qwen, the shots, claude
+    }
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+    (rig, runner, comment)
+}
+
+#[test]
+fn a_shots_comment_someone_deleted_is_posted_again() {
+    let (rig, runner, comment) = reworked("lab");
+    rig.forge.delete_comment(comment);
+    let Some(StepReport::ShotsPosted { comment: again, .. }) = rig.verdict(&runner) else {
+        panic!("the shots were not posted again");
+    };
+    assert_ne!(again, comment);
+}
+
+#[test]
+fn an_edit_that_fails_posts_no_second_comment() {
+    let (rig, runner, _) = reworked("lab");
+    rig.forge.set_comments_down(true);
+    let report = rig.verdict(&runner);
+    assert!(
+        matches!(report, Some(StepReport::ShotsNotPosted { .. })),
+        "{report:?}"
+    );
+    rig.forge.set_comments_down(false);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Ruling { id: 2, .. })
+    ));
+    assert_eq!(shots_comments(&rig).len(), 1);
+}
+
 #[test]
 fn a_page_that_calls_a_domain_off_the_list_says_so_on_the_comment() {
     let rig = with_preview("lab");

@@ -183,6 +183,11 @@ impl FakeForge {
         self.comments.lock().unwrap().clone()
     }
 
+    /// Deletes comment `id`, as someone other than kelpie would
+    pub(crate) fn delete_comment(&self, id: u64) {
+        self.comment_ids.lock().unwrap().retain(|(i, _)| *i != id);
+    }
+
     /// Every comment edit, by the comment's id, oldest first
     pub(crate) fn edits(&self) -> Vec<u64> {
         self.edits.lock().unwrap().clone()
@@ -329,7 +334,7 @@ impl Forge for FakeForge {
         self.comment(repo, number, body)?;
         let at = self.comments.lock().unwrap().len() - 1;
         let mut ids = self.comment_ids.lock().unwrap();
-        let id = 9000 + ids.len() as u64;
+        let id = 9000 + at as u64;
         ids.push((id, at));
         Ok(id)
     }
@@ -340,7 +345,7 @@ impl Forge for FakeForge {
         }
         let ids = self.comment_ids.lock().unwrap();
         let Some(&(_, at)) = ids.iter().find(|(i, _)| *i == id) else {
-            return Err(ForgeError::Failed(format!("no comment {id}")));
+            return Err(ForgeError::Failed("gh: Not Found (HTTP 404)".into()));
         };
         self.comments.lock().unwrap()[at].1 = body.to_owned();
         self.edits.lock().unwrap().push(id);

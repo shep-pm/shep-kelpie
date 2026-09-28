@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use super::Runner;
 use super::gate::short;
 use super::report::{Begin, StepReport};
+use crate::ports::ForgeError;
 use crate::preview;
 use crate::settings::NonBlank;
 use crate::shots::{ShotsJob, ShotsRecord, ShotsRun, named_routes, publish, routes};
@@ -18,6 +19,9 @@ use crate::work_item::{ReviewCallState, WorkItem};
 
 #[cfg(test)]
 mod tests;
+
+/// What `gh api` says of a comment that no longer exists
+const GONE: &str = "HTTP 404";
 
 /// What a Claude review round has to go on
 pub(super) enum RoundShots {
@@ -158,13 +162,15 @@ impl Runner {
         };
         let forge = &self.settings.forge;
         let body = publish::comment(forge, number, head, commit.as_deref(), &record.run);
+        // Only a comment someone deleted gets a new one: any other failure
+        // would leave two shots comments on the pull request.
         let posted = match comment {
-            Some(id) => self
-                .ports
-                .forge
-                .edit_comment(forge, id, &body)
-                .map(|()| id)
-                .or_else(|_| self.ports.forge.post_comment(forge, number, &body)),
+            Some(id) => match self.ports.forge.edit_comment(forge, id, &body) {
+                Err(ForgeError::Failed(e)) if e.contains(GONE) => {
+                    self.ports.forge.post_comment(forge, number, &body)
+                }
+                edited => edited.map(|()| id),
+            },
             None => self.ports.forge.post_comment(forge, number, &body),
         };
         let posted = posted.map_err(|e| failures.push(e.to_string())).ok();
