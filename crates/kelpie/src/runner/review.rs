@@ -452,13 +452,7 @@ mod tests {
 
     #[test]
     fn a_round_with_only_nits_is_clean_once_the_worker_fixes_them() {
-        let rig = Rig::new("shep");
-        let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
-        rig.ask(&runner, "add", Some("7"));
-        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-        rig.claude.script([Scripted::Push("work.txt", "work\n")]);
-        step(&runner).unwrap(); // opens the pull request, enters round 1 (qwen)
+        let (rig, runner) = at_round_1("shep");
 
         rig.reviewer.script([ScriptedRound::Findings(vec![Finding {
             severity: Severity::Medium,
@@ -524,13 +518,7 @@ mod tests {
 
     #[test]
     fn a_round_the_script_could_not_finish_is_reported_and_retried() {
-        let rig = Rig::new("shep");
-        let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
-        rig.ask(&runner, "add", Some("7"));
-        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-        rig.claude.script([Scripted::Push("work.txt", "work\n")]);
-        step(&runner).unwrap(); // opens the pull request, enters round 1 (qwen)
+        let (rig, runner) = at_round_1("shep");
 
         rig.reviewer
             .script([ScriptedRound::Fail(crate::ports::ReviewerError::Incomplete)]);
@@ -567,13 +555,7 @@ mod tests {
 
     #[test]
     fn a_rejected_finding_never_reaches_the_worker() {
-        let rig = Rig::new("shep");
-        let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
-        rig.ask(&runner, "add", Some("7"));
-        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-        rig.claude.script([Scripted::Push("work.txt", "work\n")]);
-        step(&runner).unwrap(); // opens the pull request, enters round 1 (qwen)
+        let (rig, runner) = at_round_1("shep");
 
         rig.reviewer.script([ScriptedRound::Findings(vec![Finding {
             severity: Severity::High,
@@ -746,12 +728,9 @@ mod tests {
         );
         rig.claude.script([Scripted::Text("CLEAN")]);
         step(&runner).unwrap();
-        let reviewers = rig.claude.all_calls();
-        let reviewers: Vec<_> = reviewers
-            .iter()
-            .filter(|c| c.role == Role::Reviewer)
-            .collect();
-        assert_eq!(reviewers.len(), 2, "round 2 ran again");
+        let rounds = rig.claude.all_calls();
+        let rounds = rounds.iter().filter(|c| c.role == Role::Reviewer).count();
+        assert_eq!(rounds, 2, "round 2 ran again");
         assert_eq!(
             rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
             "ci"
