@@ -153,7 +153,7 @@ impl Shepherd {
         format!(
             "[[app]]\nname = \"kelpie\"\nscript = {KELPIE:?}\nargs = [\"dog\"]\n\
              channel = true\nshutdown_with_message = true\nautorestart = false\n\
-             env = {{ SHEP_HOME = \"{home}\", TMPDIR = \"{home}\" }}\n\n{}{}",
+             env = {{ SHEP_HOME = \"{home}\", TMPDIR = \"{home}\", KELPIE_HOME = \"{home}\" }}\n\n{}{}",
             runner("koji"),
             runner("reactmap")
         )
@@ -349,4 +349,51 @@ async fn the_lease_round_trip_runs_through_a_real_shepherd() {
     assert!(stand_in(&status)["since"].as_u64().is_some());
 
     eprintln!("want to grant {round_trip} ms, killed to next grant {reclaim} ms");
+}
+
+// A dog that restarts while a runner holds a lease keeps its book: the
+// holder keeps the lease, the waiter keeps its place, and a holder whose
+// sheep restarted while the dog was down is reclaimed on start.
+#[tokio::test]
+#[ignore = "needs the pinned shepherd at ~/.kelpie/bin/shep"]
+async fn a_restarted_dog_keeps_its_book() {
+    let shepherd = Shepherd::start();
+    let client = shepherd.client().await;
+    let dog_up = async || trigger(&client, "kelpie", "status", None).await["leases"].is_array();
+    until("the dog and both runners", async || {
+        dog_up().await
+            && trigger(&client, "koji", "status", None).await.is_object()
+            && trigger(&client, "reactmap", "status", None)
+                .await
+                .is_object()
+    })
+    .await;
+    trigger(&client, "koji", "want", Some("stand-in")).await;
+    until("koji's grant", async || holds(&client, "koji").await).await;
+    trigger(&client, "reactmap", "want", Some("stand-in")).await;
+    until("reactmap in the queue", async || {
+        book(&client).await["queue"] == json!([{ "runner": "reactmap" }])
+    })
+    .await;
+    let before = book(&client).await;
+
+    shepherd.shep_ok(&["restart", "kelpie"]);
+    until("the dog back", dog_up).await;
+    assert_eq!(book(&client).await, before, "the book came back whole");
+    assert!(holds(&client, "koji").await);
+    assert!(!holds(&client, "reactmap").await, "no second grant");
+
+    // koji restarts while the dog is down: its lease goes to reactmap.
+    shepherd.shep_ok(&["stop", "kelpie"]);
+    shepherd.shep_ok(&["restart", "koji"]);
+    shepherd.shep_ok(&["restart", "kelpie"]);
+    until("reactmap's grant", async || {
+        holds(&client, "reactmap").await
+    })
+    .await;
+    assert_eq!(
+        book(&client).await["holder"],
+        json!({ "runner": "reactmap" })
+    );
+    assert_eq!(book(&client).await["queue"], json!([]));
 }

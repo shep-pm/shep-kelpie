@@ -6,10 +6,11 @@
 //! runner is gone. A kind with a [`Window`] is granted only while the
 //! window is open, and [`LeaseBook::tick`] grants it once it opens.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::Serialize;
 
+use super::saved::{SavedHeld, SavedLease};
 use super::window::{Window, WindowStatus};
 use super::{Epoch, Holder, LeaseKind};
 use crate::ports::{Clock, Timestamp};
@@ -90,9 +91,43 @@ impl LeaseBook {
         }
     }
 
-    /// Gives `kind` a review window, so it is granted only while that is open
+    /// A book on `clock` holding what [`LeaseBook::saved`] kept
+    pub fn restore(clock: Box<dyn Clock>, saved: Vec<SavedLease>) -> Self {
+        let leases = saved
+            .into_iter()
+            .map(|lease| {
+                let restored = Lease {
+                    held: lease.held.map(|h| (h.holder.into(), h.since)),
+                    queue: lease.queue.into_iter().map(Into::into).collect(),
+                    window: lease.window.map(Window::from),
+                };
+                (lease.kind, restored)
+            })
+            .collect();
+        Self { clock, leases }
+    }
+
+    /// Every lease as the book file keeps it
+    pub fn saved(&self) -> Vec<SavedLease> {
+        self.leases
+            .iter()
+            .map(|(kind, lease)| SavedLease {
+                kind: kind.clone(),
+                held: lease.held.as_ref().map(|(holder, since)| SavedHeld {
+                    holder: holder.into(),
+                    since: *since,
+                }),
+                queue: lease.queue.iter().map(Into::into).collect(),
+                window: lease.window.as_ref().map(Window::saved),
+            })
+            .collect()
+    }
+
+    /// Gives `kind` a review window, so it is granted only while that is
+    /// open. A window it already has is kept.
     pub fn add_window(&mut self, kind: LeaseKind) {
-        self.leases.entry(kind).or_default().window = Some(Window::default());
+        let lease = self.leases.entry(kind).or_default();
+        lease.window.get_or_insert_with(Window::default);
     }
 
     /// Takes the quota a review footer posted at `at` states for `kind`'s window
@@ -203,6 +238,20 @@ impl LeaseBook {
             }
         }
         grants
+    }
+
+    /// Every project whose runner holds or waits for a lease
+    pub fn runners(&self) -> BTreeSet<ProjectName> {
+        let named = self.leases.values().flat_map(|lease| {
+            let held = lease.held.iter().map(|(h, _)| h);
+            held.chain(&lease.queue)
+        });
+        named
+            .filter_map(|holder| match holder {
+                Holder::Maintainer => None,
+                Holder::Runner { project, .. } => Some(project.clone()),
+            })
+            .collect()
     }
 
     /// Who holds `kind`, if anyone
@@ -547,6 +596,99 @@ mod tests {
         assert_eq!(book.refused(&stand_in(), Timestamp(EPOCH + 600)), []);
         assert_eq!(book.ask(&stand_in(), runner("koji", 1)), Asked::AlreadyHeld);
         assert!(status(&book)[0].get("window").is_none());
+    }
+
+    // The dog restarting is a new book on the same clock from the file.
+    fn restarted(book: &LeaseBook, clock: &FakeClock) -> LeaseBook {
+        LeaseBook::restore(Box::new(clock.clone()), book.saved())
+    }
+
+    #[test]
+    fn a_restored_book_keeps_holders_queues_and_their_order() {
+        let (mut book, clock) = book();
+        book.ask(&stand_in(), runner("koji", 1));
+        book.ask(&stand_in(), runner("reactmap", 1));
+        book.ask(&stand_in(), Holder::Maintainer);
+        clock.advance(30);
+        let mut book = restarted(&book, &clock);
+        assert_eq!(
+            status(&book),
+            json!([{
+                "kind": "stand-in",
+                "holder": { "runner": "koji" },
+                "since": EPOCH,
+                "queue": ["maintainer", { "runner": "reactmap" }],
+            }])
+        );
+        assert_eq!(book.ask(&stand_in(), runner("koji", 1)), Asked::AlreadyHeld);
+        assert_eq!(
+            book.give_back(&stand_in(), &runner("koji", 1)),
+            Some(Grant {
+                kind: stand_in(),
+                holder: Holder::Maintainer
+            })
+        );
+    }
+
+    #[test]
+    fn a_restored_book_still_reclaims_by_epoch() {
+        let (mut book, clock) = book();
+        book.ask(&stand_in(), runner("koji", 1));
+        book.ask(&stand_in(), runner("reactmap", 1));
+        let mut book = restarted(&book, &clock);
+        assert_eq!(
+            book.runners(),
+            BTreeSet::from([project("koji"), project("reactmap")])
+        );
+        assert_eq!(
+            book.reclaim(&project("koji"), Some(Epoch(2))),
+            [Grant {
+                kind: stand_in(),
+                holder: runner("reactmap", 1)
+            }]
+        );
+    }
+
+    // The point of saving the window: a restart must not open it early.
+    #[test]
+    fn a_restored_window_waits_out_the_summon_it_counted() {
+        let (mut book, clock, kind) = windowed();
+        book.quota(&kind, 2, Timestamp(EPOCH));
+        book.ask(&kind, runner("koji", 1));
+        book.summoned(&kind, Timestamp(EPOCH));
+        book.give_back(&kind, &runner("koji", 1));
+        book.ask(&kind, runner("reactmap", 1));
+        book.summoned(&kind, Timestamp(EPOCH + 60));
+        book.give_back(&kind, &runner("reactmap", 1));
+        clock.advance(120);
+
+        let mut book = restarted(&book, &clock);
+        book.add_window(kind.clone());
+        assert_eq!(
+            book.ask(&kind, runner("golbat", 1)),
+            Asked::Queued { ahead: 0 }
+        );
+        assert_eq!(
+            status(&book)[0]["window"],
+            json!({ "quota": 2, "summons": [EPOCH, EPOCH + 60], "opens": EPOCH + 3600 })
+        );
+        clock.advance(3600 - 121);
+        assert_eq!(book.tick(), []);
+        clock.advance(1);
+        assert_eq!(book.tick()[0].holder, runner("golbat", 1));
+    }
+
+    #[test]
+    fn a_restored_window_keeps_a_refusals_quoted_wait() {
+        let (mut book, clock, kind) = windowed();
+        book.refused(&kind, Timestamp(EPOCH + 900));
+        let mut book = restarted(&book, &clock);
+        assert_eq!(
+            book.ask(&kind, runner("koji", 1)),
+            Asked::Queued { ahead: 0 }
+        );
+        clock.advance(900);
+        assert_eq!(book.tick()[0].holder, runner("koji", 1));
     }
 
     #[test]

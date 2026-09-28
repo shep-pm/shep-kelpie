@@ -5,6 +5,8 @@
 //! `grant` trigger on the runner. The maintainer reaches it with
 //! `shep trigger kelpie <status|take|return>`. Its flock entry needs
 //! `channel = true`, and `shutdown_with_message = true` for a clean stop.
+//! The book is saved to `<kelpie home>/dog/book.json` after every change
+//! and loaded on start.
 
 pub mod desk;
 pub mod triggers;
@@ -25,8 +27,11 @@ use shep_client::shep_core::status::ProcStatus;
 use tokio::sync::mpsc;
 
 use crate::adapters::SystemClock;
+use crate::lease::LeaseKind;
 use crate::lease::gpu::{self, GpuLock};
+use crate::lease::saved::{BookFile, SavedBook};
 use crate::lease::wire::{GRANT, grant_params};
+use crate::ports::Clock;
 use desk::{Delivery, Desk};
 use triggers::ACTIONS;
 
@@ -77,6 +82,75 @@ fn socket_from(shep_home: Option<OsString>, home: Option<OsString>) -> Result<Pa
     Ok(shep_home.join("run/shep.sock"))
 }
 
+/// The dog's book file: `<kelpie home>/dog/book.json`, where kelpie's
+/// home is `KELPIE_HOME`, or `~/.kelpie` when that is unset
+///
+/// # Errors
+///
+/// A message when neither `KELPIE_HOME` nor `HOME` is set.
+pub fn book_path() -> Result<PathBuf, String> {
+    book_path_from(std::env::var_os("KELPIE_HOME"), std::env::var_os("HOME"))
+}
+
+fn book_path_from(
+    kelpie_home: Option<OsString>,
+    home: Option<OsString>,
+) -> Result<PathBuf, String> {
+    let kelpie_home = match (kelpie_home, home) {
+        (Some(kelpie_home), _) => PathBuf::from(kelpie_home),
+        (None, Some(home)) => PathBuf::from(home).join(".kelpie"),
+        (None, None) => return Err("neither KELPIE_HOME nor HOME is set".into()),
+    };
+    Ok(kelpie_home.join("dog/book.json"))
+}
+
+// The desk and the file it is saved to, written whenever the book changes.
+struct Kept {
+    desk: Desk,
+    file: BookFile,
+    last: SavedBook,
+}
+
+impl Kept {
+    // A save that fails leaves the previous book standing, and the next
+    // change tries again.
+    fn change<T>(&mut self, act: impl FnOnce(&mut Desk) -> T) -> T {
+        let out = act(&mut self.desk);
+        let saved = self.desk.saved();
+        if saved != self.last {
+            match self.file.save(&saved) {
+                Ok(()) => self.last = saved,
+                Err(e) => println!("{e}"),
+            }
+        }
+        out
+    }
+}
+
+// Another build's file, or none, starts an empty book. One that claims
+// this build's format and cannot be read may have held a summon, so its
+// empty book starts with the CodeRabbit window closed for the hour, as if
+// a summon had just been accepted. The first change overwrites the file.
+fn open(file: BookFile, clock: Box<dyn Clock>, gpu: GpuLock) -> Kept {
+    let empty = || SavedBook::new(Vec::new(), Vec::new(), Vec::new());
+    let (last, unread) = match file.load() {
+        Ok(Some(saved)) => (saved, false),
+        Ok(None) => (empty(), false),
+        Err(e) => {
+            println!(
+                "{e}: starting with an empty book and the CodeRabbit window closed for an hour"
+            );
+            (empty(), true)
+        }
+    };
+    let now = clock.now();
+    let mut desk = Desk::restore(clock, gpu, last.clone());
+    if unread {
+        desk.book.summoned(&LeaseKind::coderabbit(), now);
+    }
+    Kept { desk, file, last }
+}
+
 async fn serve() -> Result<(), String> {
     let shepherd = shep_channel::serve();
     if !shepherd.is_active() {
@@ -102,12 +176,18 @@ async fn serve() -> Result<(), String> {
 
     let lock = GpuLock::under(&gpu::temp_dir());
     println!("the GPU lock is {}", lock.path().display());
-    let desk = Arc::new(Mutex::new(Desk::new(Box::new(SystemClock), lock)));
+    let file = BookFile::new(book_path()?);
+    if let Some(folder) = file.path().parent() {
+        std::fs::create_dir_all(folder)
+            .map_err(|e| format!("cannot make {}: {e}", folder.display()))?;
+    }
+    println!("the book is {}", file.path().display());
+    let desk = Arc::new(Mutex::new(open(file, Box::new(SystemClock), lock)));
     let (deliver, mut to_deliver) = mpsc::unbounded_channel::<Vec<Delivery>>();
     for action in ACTIONS {
         let (desk, deliver) = (Arc::clone(&desk), deliver.clone());
         shepherd.on_action(action, move |params, name| {
-            let (body, grants) = lock_desk(&desk).answer(name, params);
+            let (body, grants) = lock_desk(&desk).change(|d| d.answer(name, params));
             let _ = deliver.send(grants);
             body
         });
@@ -117,9 +197,16 @@ async fn serve() -> Result<(), String> {
         let _ = stop.send(());
     });
 
-    let mut names = flock(&client).await?.names;
+    // Runners in the saved book that have since died or restarted are
+    // reclaimed before the dog takes anything new.
+    let listed = flock(&client).await?;
+    let mut names = listed.names;
+    let restored = lock_desk(&desk).change(|d| d.resync(&listed.live));
     shepherd.ready().map_err(|e| e.to_string())?;
     println!("up");
+    for grant in restored {
+        deliver_grant(&client, &grant).await;
+    }
     let mut ticks = tokio::time::interval(WINDOW_TICK);
     let ended = loop {
         let grants = tokio::select! {
@@ -128,7 +215,7 @@ async fn serve() -> Result<(), String> {
                 Err(e) => break Err(e),
             },
             Some(grants) = to_deliver.recv() => grants,
-            _ = ticks.tick() => lock_desk(&desk).tick(),
+            _ = ticks.tick() => lock_desk(&desk).change(Desk::tick),
             _ = stopped.recv() => break Ok(()),
         };
         for grant in grants {
@@ -142,7 +229,7 @@ async fn serve() -> Result<(), String> {
 
 // The shepherd channel's handlers run on its own threads, and nothing
 // holding the desk can leave it half changed, so a poisoned lock is fine.
-fn lock_desk(desk: &Mutex<Desk>) -> std::sync::MutexGuard<'_, Desk> {
+fn lock_desk(desk: &Mutex<Kept>) -> std::sync::MutexGuard<'_, Kept> {
     desk.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -150,7 +237,7 @@ type Event = Option<Result<BusEvent, shep_client::Lagged>>;
 
 async fn on_event(
     event: Event,
-    desk: &Mutex<Desk>,
+    desk: &Mutex<Kept>,
     client: &Client,
     names: &mut HashMap<u32, String>,
 ) -> Result<Vec<Delivery>, String> {
@@ -173,7 +260,7 @@ async fn on_event(
             let Some(sheep) = names.get(&id) else {
                 return Ok(Vec::new());
             };
-            Ok(lock_desk(desk).metric(sheep, &name, value))
+            Ok(lock_desk(desk).change(|d| d.metric(sheep, &name, value)))
         }
         BusEvent::Process { event, info, .. } => {
             names.insert(info.id, info.name.clone());
@@ -185,7 +272,7 @@ async fn on_event(
                 | ProcessEventKind::Delete => None,
                 _ => return Ok(Vec::new()),
             };
-            Ok(lock_desk(desk).runner_is(&info.name, live))
+            Ok(lock_desk(desk).change(|d| d.runner_is(&info.name, live)))
         }
         BusEvent::Dropped { count } => {
             println!("the bus dropped {count} events: checking every runner");
@@ -196,13 +283,13 @@ async fn on_event(
 }
 
 async fn resync(
-    desk: &Mutex<Desk>,
+    desk: &Mutex<Kept>,
     client: &Client,
     names: &mut HashMap<u32, String>,
 ) -> Result<Vec<Delivery>, String> {
     let listed = flock(client).await?;
     *names = listed.names;
-    Ok(lock_desk(desk).resync(&listed.live))
+    Ok(lock_desk(desk).change(|d| d.resync(&listed.live)))
 }
 
 struct Flock {
@@ -264,6 +351,109 @@ async fn deliver_grant(client: &Client, grant: &Delivery) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test::FakeClock;
+
+    const NOW: u64 = 1_790_000_000;
+
+    fn opened(dir: &std::path::Path, file: BookFile) -> Kept {
+        open(file, Box::new(FakeClock::at(NOW)), GpuLock::under(dir))
+    }
+
+    fn window(kept: &mut Kept) -> serde_json::Value {
+        let (body, _) = kept.desk.answer("status", None);
+        let status: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let leases = status["leases"].as_array().unwrap();
+        let line = leases.iter().find(|l| l["kind"] == "coderabbit").unwrap();
+        line["window"].clone()
+    }
+
+    fn kept(dir: &std::path::Path, file: BookFile) -> Kept {
+        let desk = Desk::new(Box::new(FakeClock::at(1_790_000_000)), GpuLock::under(dir));
+        let last = desk.saved();
+        Kept { desk, file, last }
+    }
+
+    fn take(desk: &mut Desk) {
+        desk.answer("take", Some("stand-in"));
+    }
+
+    #[test]
+    fn a_change_is_saved_and_loads_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = BookFile::new(dir.path().join("book.json"));
+        let mut kept = kept(dir.path(), file.clone());
+        kept.change(take);
+        let saved = file.load().unwrap().unwrap();
+        assert_eq!(saved, kept.desk.saved());
+        let stand_in = LeaseKind::try_from("stand-in").unwrap();
+        assert!(saved.leases.iter().any(|l| l.kind == stand_in));
+    }
+
+    #[test]
+    fn nothing_changed_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = BookFile::new(dir.path().join("book.json"));
+        let mut kept = kept(dir.path(), file.clone());
+        kept.change(|d| d.answer("status", None));
+        assert!(!file.path().exists());
+    }
+
+    #[test]
+    fn a_failed_save_is_tried_again_on_the_next_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = BookFile::new(dir.path().join("dog/book.json"));
+        let mut kept = kept(dir.path(), file.clone());
+        kept.change(take);
+        assert!(!file.path().exists(), "no dog folder yet");
+        std::fs::create_dir(dir.path().join("dog")).unwrap();
+        kept.change(|d| d.answer("take", Some("other")));
+        let kinds: Vec<String> = file
+            .load()
+            .unwrap()
+            .unwrap()
+            .leases
+            .iter()
+            .map(|l| l.kind.to_string())
+            .collect();
+        assert_eq!(kinds, ["coderabbit", "other", "stand-in"]);
+    }
+
+    #[test]
+    fn a_missing_or_older_book_starts_empty_with_the_window_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = BookFile::new(dir.path().join("book.json"));
+        let mut kept = opened(dir.path(), file.clone());
+        assert_eq!(
+            kept.desk.book.status().len(),
+            1,
+            "the CodeRabbit window alone"
+        );
+        assert_eq!(window(&mut kept)["opens"], serde_json::Value::Null);
+
+        std::fs::write(file.path(), r#"{"leases": {"coderabbit": "koji"}}"#).unwrap();
+        let mut kept = opened(dir.path(), file);
+        assert_eq!(window(&mut kept)["opens"], serde_json::Value::Null);
+    }
+
+    // A broken book may have held a summon: losing it is the double summon
+    // the book file exists to prevent.
+    #[test]
+    fn a_malformed_book_starts_with_the_window_closed_for_the_hour() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = BookFile::new(dir.path().join("book.json"));
+        std::fs::write(file.path(), r#"{"version": 1, "leases": "#).unwrap();
+        let mut kept = opened(dir.path(), file.clone());
+        assert_eq!(
+            window(&mut kept),
+            serde_json::json!({ "quota": 1, "summons": [NOW], "opens": NOW + 3600 })
+        );
+        kept.change(Desk::tick);
+        assert_eq!(
+            file.load().unwrap().unwrap(),
+            kept.desk.saved(),
+            "the first change replaces the broken file"
+        );
+    }
 
     #[test]
     fn the_socket_is_under_shep_home_or_kelpies_shepherd() {
@@ -279,5 +469,21 @@ mod tests {
             Ok(PathBuf::from("/home/m/.kelpie/shep/run/shep.sock"))
         );
         assert!(socket(None, None).is_err());
+    }
+
+    #[test]
+    fn the_book_is_under_kelpie_home_or_the_home_folder() {
+        let book = |kelpie_home: Option<&str>, home: Option<&str>| {
+            book_path_from(kelpie_home.map(Into::into), home.map(Into::into))
+        };
+        assert_eq!(
+            book(Some("/k"), Some("/home/m")),
+            Ok(PathBuf::from("/k/dog/book.json"))
+        );
+        assert_eq!(
+            book(None, Some("/home/m")),
+            Ok(PathBuf::from("/home/m/.kelpie/dog/book.json"))
+        );
+        assert!(book(None, None).is_err());
     }
 }

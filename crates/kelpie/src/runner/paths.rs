@@ -3,8 +3,11 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+
 /// A project's name, which is also its sheep's name
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
 pub struct ProjectName(String);
 
 impl ProjectName {
@@ -24,6 +27,14 @@ impl TryFrom<&str> for ProjectName {
             return Err(ProjectNameError(value.to_owned()));
         }
         Ok(Self(value.to_owned()))
+    }
+}
+
+// A name read back from the dog's book file passes the same check.
+impl<'de> Deserialize<'de> for ProjectName {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let name = String::deserialize(deserializer)?;
+        Self::try_from(name.as_str()).map_err(serde::de::Error::custom)
     }
 }
 
