@@ -13,6 +13,7 @@ mod cap;
 mod tests;
 
 use super::Runner;
+use super::gate::settled;
 use super::report::{Begin, ReviewCall, ReviewResult, StepReport};
 use super::review::{calls, findings};
 use crate::coderabbit::{self, Activity, Reading};
@@ -41,7 +42,12 @@ impl Runner {
 
     /// Starts a round on `head`, which CI has just passed
     pub(super) fn start_round(&mut self, head: String) -> Result<Begin, StateError> {
-        self.update(|item| item.phase = Phase::CodeRabbit(CodeRabbitStage::Lease { head }))?;
+        self.update(|item| {
+            item.phase = Phase::CodeRabbit(CodeRabbitStage::Lease {
+                head,
+                readied: None,
+            })
+        })?;
         self.coderabbit_step()
     }
 
@@ -65,7 +71,7 @@ impl Runner {
             Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}: {e}"))),
         }
         match stage {
-            CodeRabbitStage::Lease { head } => self.summon(head),
+            CodeRabbitStage::Lease { head, readied } => self.summon(head, readied),
             CodeRabbitStage::Summoned { head, at } => self.await_review(head, at),
             CodeRabbitStage::Judging {
                 threads, verdicts, ..
@@ -78,7 +84,7 @@ impl Runner {
     // that one costs the hour and buys nothing. CodeRabbit skips a draft, so
     // a draft is marked ready first and the summon waits for the next pass:
     // the forge can show the old state for a few seconds after.
-    fn summon(&mut self, head: String) -> Result<Begin, StateError> {
+    fn summon(&mut self, head: String, readied: Option<Timestamp>) -> Result<Begin, StateError> {
         let number = self.number();
         let activity = match self.activity(number) {
             Ok(activity) => activity,
@@ -87,7 +93,7 @@ impl Runner {
         if activity.covers(&head) {
             return self.review_landed(number, &activity);
         }
-        if let Some(begin) = self.ready_for_review(number)? {
+        if let Some(begin) = self.ready_for_review(number, &head, readied)? {
             return Ok(begin);
         }
         let kind = LeaseKind::coderabbit();
@@ -123,10 +129,18 @@ impl Runner {
         }))
     }
 
-    // Ends the pass when it marks a draft ready. A pull request the forge
-    // already shows ready is recorded as kelpie's own, so the gate never reads
-    // it as someone else's change.
-    fn ready_for_review(&mut self, number: u64) -> Result<Option<Begin>, StateError> {
+    // A draft is marked ready once, and the round then waits out the settle
+    // for the forge to read it so: marking again on every stale read would
+    // loop with no backoff. A forge still reading draft after the settle is
+    // marked again, since a draft cannot be summoned. A pull request the forge
+    // shows ready is recorded as kelpie's own, so the gate never reads it as
+    // someone else's change.
+    fn ready_for_review(
+        &mut self,
+        number: u64,
+        head: &str,
+        readied: Option<Timestamp>,
+    ) -> Result<Option<Begin>, StateError> {
         let repo = self.settings.forge.clone();
         let pr = match self.ports.forge.pull_request(&repo, number) {
             Ok(pr) => pr,
@@ -141,11 +155,22 @@ impl Runner {
             }
             return Ok(None);
         }
+        let now = self.ports.clock.now();
+        if readied.is_some_and(|at| !settled(at, now)) {
+            return Ok(Some(Begin::Idle));
+        }
         if let Err(e) = self.ports.forge.mark_ready(&repo, number) {
             let reason = format!("cannot mark #{number} ready: {e}");
             return Ok(Some(self.gate_failed(reason)));
         }
-        self.update(|item| item.known.ready = true)?;
+        let head = head.to_owned();
+        self.update(|item| {
+            item.known.ready = true;
+            item.phase = Phase::CodeRabbit(CodeRabbitStage::Lease {
+                head,
+                readied: Some(now),
+            });
+        })?;
         Ok(Some(Begin::Report(StepReport::MarkedReady {
             issue: self.item().issue,
             pull_request: number,
@@ -174,7 +199,10 @@ impl Runner {
                 if let Err(reason) = self.label(number, false) {
                     return Ok(self.gate_failed(reason));
                 }
-                let stage = CodeRabbitStage::Lease { head };
+                let stage = CodeRabbitStage::Lease {
+                    head,
+                    readied: None,
+                };
                 self.update(|item| item.phase = Phase::CodeRabbit(stage))?;
                 Ok(Begin::Report(StepReport::SummonRefused {
                     issue: self.item().issue,
@@ -201,7 +229,7 @@ impl Runner {
             unreachable!("a review lands in a CodeRabbit round")
         };
         let head = match stage {
-            CodeRabbitStage::Lease { head } | CodeRabbitStage::Summoned { head, .. } => head,
+            CodeRabbitStage::Lease { head, .. } | CodeRabbitStage::Summoned { head, .. } => head,
             CodeRabbitStage::Judging { head, .. } | CodeRabbitStage::Fixing { head } => head,
         };
         let threads: Vec<OpenThread> = activity

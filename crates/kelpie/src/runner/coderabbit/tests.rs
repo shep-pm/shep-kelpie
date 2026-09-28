@@ -8,7 +8,7 @@ use super::{ANSWER_WAIT, LABEL, REVIEW_WAIT};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
 use crate::ports::{Checks, ClaudeError, Role};
-use crate::runner::{Runner, StepReport, step};
+use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::test::{Rig, Scripted, Told, git};
 
 const HOLDS: &str = r#"{"holds": true, "severity": "medium", "reason": "real"}"#;
@@ -130,7 +130,7 @@ fn nothing_summons_without_the_lease() {
     assert_eq!(labels(&rig), []);
     assert_eq!(
         phase(&rig, &runner),
-        json!({ "state": "coderabbit", "stage": "lease", "head": head })
+        json!({ "state": "coderabbit", "stage": "lease", "head": head, "readied": now(&rig) })
     );
 
     rig.leases.withhold(false);
@@ -242,6 +242,66 @@ fn a_draft_is_marked_ready_before_the_label_goes_on_and_the_summon_waits_a_pass(
         rig.forge.skipped_as_drafts().is_empty(),
         "no draft was summoned"
     );
+}
+
+// The forge can read a pull request as a draft for a few seconds after it is
+// marked ready. The pass that marked it ends the step, and the runner's next
+// step must neither mark it again nor summon a draft.
+fn marked_while_the_forge_lags() -> (Rig, Mutex<Runner>) {
+    let (rig, runner, head) = reviewed_by_qwen("shep");
+    rig.forge.set_lagging_draft(71, true);
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::MarkedReady { .. })
+    ));
+    (rig, runner)
+}
+
+#[test]
+fn a_forge_still_reading_draft_is_neither_marked_again_nor_summoned() {
+    let (rig, runner) = marked_while_the_forge_lags();
+    for _ in 0..3 {
+        assert_eq!(step(&runner).unwrap(), None);
+    }
+    rig.clock.advance(CHECKS_SETTLE - 1);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(rig.forge.readied(), [71], "marked once");
+    assert!(labels(&rig).is_empty(), "nothing summoned yet");
+    assert_eq!(rig.leases.told(), []);
+
+    // Once the forge reads it ready, the summon needs no more waiting.
+    rig.forge.set_lagging_draft(71, false);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Summoned { .. })
+    ));
+    assert_eq!(labels(&rig), [on()]);
+    assert_eq!(rig.forge.readied(), [71]);
+    assert!(rig.forge.skipped_as_drafts().is_empty());
+}
+
+#[test]
+fn a_forge_reading_draft_past_the_settle_is_marked_again_not_summoned() {
+    let (rig, runner) = marked_while_the_forge_lags();
+    rig.clock.advance(CHECKS_SETTLE);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::MarkedReady { .. })
+    ));
+    assert_eq!(rig.forge.readied(), [71, 71]);
+    assert!(labels(&rig).is_empty());
+    assert_eq!(step(&runner).unwrap(), None, "a new settle starts");
+    assert_eq!(rig.forge.readied(), [71, 71]);
+}
+
+#[test]
+fn a_restart_during_the_settle_does_not_mark_again() {
+    let (rig, runner) = marked_while_the_forge_lags();
+    drop(runner);
+    let runner = rig.open().unwrap();
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(rig.forge.readied(), [71]);
 }
 
 #[test]

@@ -39,6 +39,7 @@ pub(crate) struct FakeForge {
     unreadable: Arc<Mutex<HashSet<u64>>>,
     viewer_reads: Arc<AtomicUsize>,
     lagging: Arc<Mutex<HashMap<u64, String>>>,
+    lagging_drafts: Arc<Mutex<HashSet<u64>>>,
     readied: Arc<Mutex<Vec<u64>>>,
     skipped: Arc<Mutex<Vec<u64>>>,
     merges: Arc<Mutex<Vec<(u64, String)>>>,
@@ -84,6 +85,7 @@ impl FakeForge {
             unreadable: Arc::default(),
             viewer_reads: Arc::default(),
             lagging: Arc::default(),
+            lagging_drafts: Arc::default(),
             readied: Arc::default(),
             skipped: Arc::default(),
             merges: Arc::default(),
@@ -222,6 +224,17 @@ impl FakeForge {
             Some(head) => lagging.insert(number, head.to_owned()),
             None => lagging.remove(&number),
         };
+    }
+
+    /// Makes pull request `number` keep reading as a draft after it is marked
+    /// ready, as GitHub does for a moment, or stop doing so
+    pub(crate) fn set_lagging_draft(&self, number: u64, lagging: bool) {
+        let mut drafts = self.lagging_drafts.lock().unwrap();
+        if lagging {
+            drafts.insert(number);
+        } else {
+            drafts.remove(&number);
+        }
     }
 
     /// Makes merging fail, or work again
@@ -363,7 +376,7 @@ impl Forge for FakeForge {
         let checks = self.checks.lock().unwrap().get(&head).cloned();
         Ok(PullRequest {
             state: pr.state,
-            draft: pr.draft,
+            draft: pr.draft || self.lagging_drafts.lock().unwrap().contains(&number),
             checks: checks.unwrap_or(Checks::Pending),
             head,
             labels: self.coderabbit.labels(number),

@@ -85,6 +85,9 @@ pub enum CodeRabbitStage {
     Lease {
         /// The head CI passed on
         head: String,
+        /// When kelpie marked the draft ready, until the forge reads it so
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        readied: Option<Timestamp>,
     },
     /// The label went on at `at`. The lease goes back once CodeRabbit answers.
     Summoned {
