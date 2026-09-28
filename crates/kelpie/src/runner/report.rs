@@ -10,8 +10,10 @@ use serde::Serialize;
 
 use crate::board::{Skip, WorkerModel};
 use crate::pacer::HoldKind;
-use crate::ports::{ClaudeCall, Finding, SessionId, Severity, Timestamp, Usage, Verdict};
-use crate::work_item::ReviewerKind;
+use crate::ports::{
+    ClaudeCall, Cost, Finding, Role, SessionId, Severity, Timestamp, Usage, Verdict,
+};
+use crate::work_item::{QwenTally, ReviewerKind, Spend};
 
 /// What asked for a rework on the pull request itself
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -206,6 +208,10 @@ pub enum StepReport {
         pull_request: Option<u64>,
         /// Whether the pull request merged
         merged: bool,
+        /// What its Claude calls cost, by role
+        spend: Spend,
+        /// Its qwen rounds
+        qwen: QwenTally,
     },
     /// A ruling was posted to the maintainer's webhook
     Alerted {
@@ -361,6 +367,27 @@ pub(super) enum ReviewCall {
     ClaudeRound(ClaudeCall),
     /// The judge's one-shot on a single finding
     Judge(ClaudeCall),
+}
+
+/// What a [`ReviewCall`] cost, for the work item's record
+pub(super) enum Spent {
+    /// A Claude call that came back, in `session`
+    Claude {
+        role: Role,
+        session: SessionId,
+        usage: Usage,
+        session_cost: Cost,
+    },
+    /// A qwen round that ran, however it ended
+    Qwen,
+}
+
+/// What a [`ReviewCall`] came back with, and what it spent
+pub(super) struct Reviewed {
+    pub result: ReviewResult,
+    /// `None` when nothing ran to the end: a stopped call, or a Claude call
+    /// that failed and so reported no cost
+    pub spent: Option<Spent>,
 }
 
 /// What a [`ReviewCall`] came back with

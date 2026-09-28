@@ -14,14 +14,14 @@ mod tests;
 
 use super::Runner;
 use super::gate::settled;
-use super::report::{Begin, ReviewCall, ReviewResult, StepReport};
-use super::review::{calls, findings};
+use super::report::{Begin, ReviewCall, ReviewResult, Spent, StepReport};
+use super::review::{calls, findings, record_spent};
 use crate::coderabbit::{self, Activity, Reading};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
 use crate::ports::{Finding, PullRequestState, Timestamp, Verdict};
 use crate::state::{Fix, LeaseHeld, Resource, RulingKind, StateError};
-use crate::work_item::{CodeRabbitStage, OpenThread, Phase, ReviewCallState, Turn, WorkItem};
+use crate::work_item::{CodeRabbitStage, OpenThread, Phase, Turn, WorkItem};
 
 /// The label shep's `.coderabbit.yaml` gates auto review on: the summon
 pub const LABEL: &str = "review please";
@@ -392,12 +392,14 @@ impl Runner {
     pub(super) fn coderabbit_verdict(
         &mut self,
         result: ReviewResult,
+        spent: Option<Spent>,
     ) -> Result<Option<StepReport>, StateError> {
+        let now = self.ports.clock.now();
         let mut next = self.state.clone();
         let Some(item) = next.work_item.as_mut() else {
             return Ok(None);
         };
-        item.review_call = ReviewCallState::Idle;
+        record_spent(item, spent, now);
         let issue = item.issue;
         let round = item.coderabbit.rounds;
         let report = match (result, &mut item.phase) {

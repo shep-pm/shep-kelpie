@@ -68,6 +68,7 @@ pub(crate) fn a_work_item() -> WorkItem {
             labels: vec!["review please".into()],
             ready: false,
         },
+        qwen: crate::work_item::QwenTally::default(),
         calls: vec![CallRecord {
             role: Role::Worker,
             at: Timestamp(10),
@@ -116,6 +117,8 @@ pub(crate) enum Scripted {
     /// Answers with this exact text and no cost: a review round or judge
     /// one-shot, whose reply is read rather than acted on
     Text(&'static str),
+    /// Answers like [`Self::Text`], with this cost for the session
+    Billed(&'static str, Cost),
     /// Answers with this final message
     Say(&'static str),
     /// Blocks until the test releases it, then answers
@@ -269,6 +272,12 @@ impl Claude for FakeClaude {
                 text: text.to_owned(),
                 usage: Usage::default(),
                 session_cost: Cost(0),
+            }),
+            Some(Scripted::Billed(text, cost)) => Ok(ClaudeReply {
+                session_id: call.session.id().clone(),
+                text: text.to_owned(),
+                usage: Usage::default(),
+                session_cost: cost,
             }),
             Some(Scripted::Say(text)) => Ok(ClaudeReply {
                 session_id: call.session.id().clone(),

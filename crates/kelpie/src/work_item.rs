@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use crate::board::WorkerModel;
 use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage, Verdict};
 
+mod spend;
+
+pub use spend::{QwenTally, RoleSpend, Spend};
+
 /// The work item in flight
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,6 +65,9 @@ pub struct WorkItem {
     /// leave them. A mismatch at the gate is a change kelpie did not make.
     #[serde(default)]
     pub known: Known,
+    /// Its qwen rounds so far
+    #[serde(default)]
+    pub qwen: QwenTally,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
 }
@@ -449,6 +456,7 @@ mod tests {
                 "review_call": { "state": "idle" },
                 "coderabbit": { "rounds": 0, "cap_cleared": false, "satisfied": false },
                 "known": { "labels": ["review please"], "ready": false },
+                "qwen": { "rounds": 0, "seconds": 0 },
                 "calls": [{
                     "role": "worker",
                     "at": 10,

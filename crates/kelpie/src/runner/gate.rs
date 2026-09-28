@@ -705,14 +705,15 @@ mod tests {
             step(&runner).unwrap(),
             Some(StepReport::MarkedReady { .. })
         ));
-        assert_eq!(
+        assert!(matches!(
             step(&runner).unwrap(),
             Some(StepReport::Finished {
                 issue: 7,
                 pull_request: Some(71),
-                merged: true
+                merged: true,
+                ..
             })
-        );
+        ));
         assert_eq!(rig.forge.merges(), [(71, head)]);
     }
 
@@ -735,14 +736,15 @@ mod tests {
     fn a_pull_request_merged_by_hand_ends_the_work_item_with_no_merge_by_kelpie() {
         let (rig, runner, _) = Rig::with_pull_request("zeus");
         rig.forge.set_state(71, PullRequestState::Merged);
-        assert_eq!(
+        assert!(matches!(
             step(&runner).unwrap(),
             Some(StepReport::Finished {
                 issue: 7,
                 pull_request: Some(71),
-                merged: true
+                merged: true,
+                ..
             })
-        );
+        ));
         assert_eq!(rig.forge.merges(), []);
         assert!(!rig.worktree_7().exists());
         assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
@@ -758,14 +760,15 @@ mod tests {
             "{question}"
         );
         rig.ask(&runner, "rule", Some(&format!("{id} yes")));
-        assert_eq!(
+        assert!(matches!(
             step(&runner).unwrap(),
             Some(StepReport::Finished {
                 issue: 7,
                 pull_request: Some(71),
-                merged: false
+                merged: false,
+                ..
             })
-        );
+        ));
         assert_eq!(rig.forge.head_of("kelpie/7"), Some(head));
         assert!(!rig.worktree_7().exists());
         assert_eq!(git(&rig.repo(), &["branch", "--list", "kelpie/7"]), "");
