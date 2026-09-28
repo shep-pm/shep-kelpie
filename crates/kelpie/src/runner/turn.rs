@@ -409,7 +409,13 @@ fn timed_out(project: &str, next: &mut ProjectState) -> StepReport {
         .as_mut()
         .expect("a turn ceiling is about a work item");
     let (issue, session, pull_request) = (item.issue, item.session.clone(), item.pull_request);
-    let (_, id, question) = park(project, next, pull_request, RulingKind::TurnTimeout);
+    let phase = Some(item.phase.clone());
+    let (_, id, question) = park(
+        project,
+        next,
+        pull_request,
+        RulingKind::TurnTimeout { phase },
+    );
     StepReport::TimedOut {
         issue,
         session,

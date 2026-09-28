@@ -7,7 +7,7 @@ use serde_json::json;
 use super::{ANSWER_WAIT, LABEL, REVIEW_WAIT};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
-use crate::ports::{Checks, Role};
+use crate::ports::{Checks, ClaudeError, Role};
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{Rig, Scripted, Told, git};
 
@@ -490,6 +490,28 @@ fn a_fix_turn_that_pushes_nothing_parks_instead_of_opening_round_two() {
         })
     );
     assert_eq!(phase(&rig, &runner)["state"], "ci");
+}
+
+#[test]
+fn a_timed_out_fix_turn_resumes_that_round() {
+    let (rig, runner, head) = summoned("mew");
+    hold_a_finding(&rig, &runner, &head, "Name the flag.");
+    rig.claude.script([Scripted::Fail(ClaudeError::TimedOut)]);
+    let Some(StepReport::TimedOut { id, .. }) = step(&runner).unwrap() else {
+        panic!("the fix turn did not time out");
+    };
+    step(&runner).unwrap(); // the alert
+
+    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+    rig.claude.script([Scripted::Say("Still thinking.")]);
+    step(&runner).unwrap(); // the resumed fix turn ends with nothing pushed
+    let Some(StepReport::Ruling { question, .. }) = step(&runner).unwrap() else {
+        panic!("the resumed fix was not checked for a push");
+    };
+    assert!(
+        question.contains("CodeRabbit round 1 without pushing"),
+        "{question}"
+    );
 }
 
 #[test]

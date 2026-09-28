@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
 use crate::ports::Timestamp;
-use crate::work_item::{Known, Review, WorkItem};
+use crate::work_item::{Known, Phase, Review, WorkItem};
 
 /// The state file's format version
 const VERSION: u32 = 1;
@@ -167,7 +167,12 @@ pub enum RulingKind {
     },
     /// A worker's turn ran past its ceiling and kelpie stopped it, keeping
     /// its session. A yes resumes it; a no stops the work item.
-    TurnTimeout,
+    TurnTimeout {
+        /// The phase the turn ran in, which a yes resumes. None in an
+        /// older state file, which resumes under Implement.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        phase: Option<Phase>,
+    },
     /// The pull request's labels or ready state changed outside kelpie. A
     /// yes accepts the change and kelpie carries on watching it.
     ForeignChange {
@@ -509,7 +514,7 @@ mod tests {
                     resume: Resume::Nothing,
                 },
             ),
-            ruling(6, RulingKind::TurnTimeout),
+            ruling(6, RulingKind::TurnTimeout { phase: None }),
             ruling(
                 7,
                 RulingKind::ForeignChange {
@@ -628,6 +633,19 @@ mod tests {
                 head: None,
             }
         );
+    }
+
+    #[test]
+    fn a_timeout_keeps_the_phase_its_turn_ran_in() {
+        let kind = RulingKind::TurnTimeout {
+            phase: Some(Phase::Implement),
+        };
+        let saved = serde_json::to_value(&kind).unwrap();
+        assert_eq!(
+            saved,
+            serde_json::json!({ "kind": "turn-timeout", "phase": { "state": "implement" } })
+        );
+        assert_eq!(serde_json::from_value::<RulingKind>(saved).unwrap(), kind);
     }
 
     #[test]

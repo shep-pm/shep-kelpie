@@ -213,14 +213,15 @@ fn decide(id: u64, answer: Answer, ruling: Ruling, now: Timestamp) -> Result<Mov
         }
         (_, RulingKind::Question { .. }) => return Err(RuleError::WantsAnswer(id)),
         (Answer::Text(_), _) => return Err(RuleError::NotAQuestion(id)),
-        (Answer::Yes, RulingKind::TurnTimeout) => {
+        // A fix turn resumes in its round, which checks it pushed.
+        (Answer::Yes, RulingKind::TurnTimeout { phase }) => {
             return Ok(Move::Turn {
                 prompt: TIMEOUT_CONTINUE.to_owned(),
-                phase: Phase::Implement,
+                phase: phase.unwrap_or(Phase::Implement),
                 force: None,
             });
         }
-        (Answer::No(_), RulingKind::TurnTimeout) => Phase::Done { merged: false },
+        (Answer::No(_), RulingKind::TurnTimeout { .. }) => Phase::Done { merged: false },
         (Answer::Yes, RulingKind::ForeignChange { known, .. }) => return Ok(Move::Accept(known)),
         // A no's fix is new code, unreviewed: it goes through the
         // qwen-review loop again before CI, whatever ruling this answers.
@@ -331,7 +332,7 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
                 trigger("answer <text>")
             );
         }
-        RulingKind::TurnTimeout => {
+        RulingKind::TurnTimeout { .. } => {
             return format!(
                 "The worker on {about} has been running past its turn's ceiling, \
                  and kelpie stopped it. {yes} resumes its session for another turn, \

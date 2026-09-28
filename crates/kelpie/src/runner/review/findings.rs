@@ -65,7 +65,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::ports::Severity;
+    use crate::ports::{ClaudeError, Severity};
     use crate::runner::{Runner, StepReport, step};
     use crate::test::{Rig, Scripted, ScriptedRound};
 
@@ -315,6 +315,27 @@ mod tests {
                 "stage": { "stage": "round" },
             }),
             "a MEDIUM finding, fixed, still resets the streak"
+        );
+    }
+
+    #[test]
+    fn a_timed_out_fix_turn_resumes_that_round() {
+        let (rig, runner) = findings_sent();
+        rig.claude.script([Scripted::Fail(ClaudeError::TimedOut)]);
+        let Some(StepReport::TimedOut { id, .. }) = step(&runner).unwrap() else {
+            panic!("the fix turn did not time out");
+        };
+        step(&runner).unwrap(); // the alert
+
+        rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+        rig.claude.script([Scripted::Say("Still thinking.")]);
+        step(&runner).unwrap(); // the resumed fix turn ends with nothing pushed
+        let Some(StepReport::Ruling { question, .. }) = step(&runner).unwrap() else {
+            panic!("the resumed fix was not checked for a push");
+        };
+        assert!(
+            question.contains("round 1 of the qwen-review loop without pushing"),
+            "{question}"
         );
     }
 }
