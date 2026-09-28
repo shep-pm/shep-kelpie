@@ -258,7 +258,24 @@ mod tests {
         );
         let status = rig.ask(&runner, "status", None);
         assert_eq!(status["work_item"]["phase"]["state"], "ruling");
-        assert_eq!(status["rulings"][0]["kind"]["kind"], "fix-not-pushed");
+        let path = rig.build_7().join("review-findings.md");
+        assert_eq!(
+            status["rulings"][0]["kind"],
+            json!({
+                "kind": "fix-not-pushed",
+                "review": {
+                    "round": 1,
+                    "consecutive_clean": 0,
+                    "guard_cleared": false,
+                    "stage": {
+                        "stage": "fixing",
+                        "clean": false,
+                        "head": rig.forge.head_of("kelpie/7"),
+                    },
+                },
+                "prompt": again_prompt(71, 1, &path),
+            })
+        );
         assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id }));
         assert_eq!(
             step(&runner).unwrap(),
