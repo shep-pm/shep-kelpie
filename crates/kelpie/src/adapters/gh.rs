@@ -77,8 +77,10 @@ impl Forge for Gh {
 
     fn post_comment(&self, repo: &ForgeSlug, number: u64, body: &str) -> Result<u64, ForgeError> {
         let path = format!("repos/{}/issues/{number}/comments", repo.as_str());
-        let body = format!("body={body}");
-        let args = ["api", "--method", "POST", &path, "-f", &body, "--jq", ".id"];
+        let field = format!("body={body}");
+        let args = [
+            "api", "--method", "POST", &path, "-f", &field, "--jq", ".id",
+        ];
         let out = gh(&args)?;
         let text = String::from_utf8_lossy(&out);
         text.trim()
@@ -88,8 +90,8 @@ impl Forge for Gh {
 
     fn edit_comment(&self, repo: &ForgeSlug, id: u64, body: &str) -> Result<(), ForgeError> {
         let path = format!("repos/{}/issues/comments/{id}", repo.as_str());
-        let body = format!("body={body}");
-        let args = ["api", "--method", "PATCH", &path, "-f", &body, "--silent"];
+        let field = format!("body={body}");
+        let args = ["api", "--method", "PATCH", &path, "-f", &field, "--silent"];
         gh(&args).map(drop)
     }
 

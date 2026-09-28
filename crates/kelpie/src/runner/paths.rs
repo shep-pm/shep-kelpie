@@ -77,8 +77,9 @@ pub struct ProjectPaths {
 impl ProjectPaths {
     /// `<kelpie home>/projects/<project>/`, beside kelpie's own
     /// `<kelpie home>/settings.toml`, with worktrees under
-    /// `<kelpie home>/wt/<project>/` and build folders under
-    /// `<kelpie home>/targets/<project>/`
+    /// `<kelpie home>/wt/<project>/`, build folders under
+    /// `<kelpie home>/targets/<project>/`, shots under
+    /// `<kelpie home>/shots/<project>/`, and the shared `<kelpie home>/tools/`
     pub fn under(kelpie_home: &Path, project: &ProjectName) -> Self {
         let folder = kelpie_home.join("projects").join(project.as_str());
         Self {

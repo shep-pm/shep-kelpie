@@ -1,5 +1,5 @@
 //! The runner's ports: Claude, the forge, the account's usage, the
-//! maintainer's webhook and the clock
+//! maintainer's webhook, kelpie's shots and the clock
 //!
 //! The work-item loop reaches the outside world only through these traits.
 //! [`crate::adapters`] holds the real ones and the test rig holds stand-ins,
