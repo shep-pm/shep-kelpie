@@ -287,6 +287,7 @@ mod tests {
                 skipped: vec![skip],
             })
         );
+        assert_eq!(rig.meter.reads(), 1);
         let status = rig.ask(&runner, "status", None);
         assert_eq!(status["work_item"]["issue"], 6);
         assert_eq!(
@@ -317,6 +318,7 @@ mod tests {
         let status = rig.ask(&runner, "status", None);
         assert_eq!(status["work_item"], json!(null));
         assert_eq!(status["skipped"].as_array().unwrap().len(), 2);
+        assert_eq!(rig.meter.reads(), 1);
         assert_eq!(rig.claude.calls(), []);
     }
 

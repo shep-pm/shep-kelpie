@@ -5,8 +5,9 @@
 //! has an open pull request or an assignee is someone's work in progress, and
 //! is skipped. So is one whose `worker:` label cannot be read, since kelpie
 //! would not know which model to run it on. An issue the runner picks but
-//! cannot take, because the forge cannot show it, is skipped too, so it
-//! cannot stall the issues behind it.
+//! cannot take, because the forge cannot show it or its `worker:` label
+//! fails when `add` reads it, is skipped too, so it cannot stall the issues
+//! behind it.
 
 use std::fmt;
 
