@@ -173,6 +173,10 @@ impl Runner {
             item.review_call = ReviewCallState::Idle;
             store.save(&state)?;
         }
+        // A dev server the last run's worker left behind holds its port.
+        if let Some(item) = &state.work_item {
+            ports.shots.stop_left(&paths.shots(item.issue));
+        }
         // A new run is a new epoch, and the dog reclaims what the old one held.
         if !state.leases.is_empty() {
             state.leases.clear();

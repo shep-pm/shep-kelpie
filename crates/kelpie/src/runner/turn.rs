@@ -295,6 +295,10 @@ impl Runner {
         &mut self,
         result: Result<ClaudeReply, ClaudeError>,
     ) -> Result<Option<StepReport>, StateError> {
+        // However the turn ended, a dev server its shots tool started is done.
+        if let Some(item) = &self.state.work_item {
+            self.ports.shots.stop_left(&self.paths.shots(item.issue));
+        }
         // A turn stopped with the runner stays running, to resume on restart.
         if matches!(result, Err(ClaudeError::Stopped)) {
             return Ok(None);

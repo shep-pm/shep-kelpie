@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use serde_json::json;
 
-use super::process::{Processes, RunError};
+use super::process::{Processes, RunError, stop_group};
 use crate::ports::Shots;
 use crate::preview::{LOCAL_HOSTS, Launch, Tools};
 use crate::profile::CREDENTIALS;
@@ -34,6 +34,9 @@ const CAPTURE: Duration = Duration::from_secs(600);
 
 /// How often a starting dev server is checked
 const POLL: Duration = Duration::from_millis(250);
+
+/// A running dev server's process group, recorded in its run's folder
+const SERVER_PID: &str = "dev-server.pid";
 
 /// What `srt -d` prints for a connection its proxy refused
 const REFUSED: &str = "Connection blocked to ";
@@ -87,10 +90,16 @@ impl ShotsCli {
         fs::create_dir_all(&job.out).map_err(|e| format!("cannot make the shots folder: {e}"))?;
         let log = job.out.join("dev-server.log");
         let server = self.start_server(job, &launch, &log)?;
+        // Kept while the server runs, so a kelpie that did not see it end can.
+        let recorded = job.out.join(SERVER_PID);
+        if let Some(pid) = self.processes.pid(server) {
+            let _ = fs::write(&recorded, pid.to_string());
+        }
         let taken = self
             .wait_for(server, launch.port, &log)
             .and_then(|()| self.capture(job, launch.port));
         self.processes.end(server);
+        let _ = fs::remove_file(&recorded);
         let mut run = taken?;
         run.problems.extend(refused_hosts(&log));
         Ok(run)
@@ -227,6 +236,20 @@ impl Shots for ShotsCli {
     fn take(&self, job: &ShotsJob) -> ShotsRun {
         self.run(job).unwrap_or_else(ShotsRun::failed)
     }
+
+    fn stop_left(&self, shots: &Path) {
+        let Ok(runs) = fs::read_dir(shots) else {
+            return;
+        };
+        for run in runs.filter_map(Result::ok) {
+            let recorded = run.path().join(SERVER_PID);
+            let pid = fs::read_to_string(&recorded).ok();
+            if let Some(pid) = pid.and_then(|p| p.trim().parse::<u32>().ok()) {
+                stop_group(pid);
+            }
+            let _ = fs::remove_file(&recorded);
+        }
+    }
 }
 
 /// One page as the capture script reports it
@@ -319,6 +342,8 @@ fn last_lines(text: &str, n: usize) -> String {
 mod tests {
     use std::collections::BTreeMap;
 
+    use std::os::unix::process::CommandExt;
+
     use super::*;
     use crate::preview::Route;
 
@@ -364,6 +389,37 @@ mod tests {
             "{:?}",
             pages[0].problems
         );
+    }
+
+    #[test]
+    fn a_server_a_run_left_behind_is_stopped_with_its_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = dir.path().join("worker");
+        fs::create_dir_all(&run).unwrap();
+        let mut left = std::process::Command::new("sh")
+            .args(["-c", "sleep 60 & sleep 60"])
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        fs::write(run.join(SERVER_PID), left.id().to_string()).unwrap();
+        ShotsCli::new(Tools::under(dir.path())).stop_left(dir.path());
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let ended = loop {
+            if let Some(status) = left.try_wait().unwrap() {
+                break Some(status);
+            }
+            if std::time::Instant::now() > deadline {
+                break None;
+            }
+            thread::sleep(Duration::from_millis(50));
+        };
+        assert!(ended.is_some(), "the server was left running");
+        let group = std::process::Command::new("pgrep")
+            .args(["-g", &left.id().to_string()])
+            .status()
+            .unwrap();
+        assert!(!group.success(), "its child was left running");
+        assert!(!run.join(SERVER_PID).exists());
     }
 
     #[test]

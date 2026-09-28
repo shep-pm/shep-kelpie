@@ -69,6 +69,20 @@ fn a_launch_file_the_worker_adds_on_its_branch_opens_nothing() {
 }
 
 #[test]
+fn a_dev_server_the_worker_left_is_stopped_when_its_turn_ends_and_on_restart() {
+    let rig = with_preview("lab");
+    let runner = started(&rig);
+    rig.claude
+        .script([Scripted::Fail(crate::ports::ClaudeError::TimedOut)]);
+    step(&runner).unwrap(); // a turn killed at its ceiling
+    let shots = rig.home.path().join("kelpie/shots/lab/7");
+    assert_eq!(rig.shots.stopped(), std::slice::from_ref(&shots));
+    drop(runner);
+    rig.open().unwrap();
+    assert_eq!(rig.shots.stopped(), [shots.clone(), shots]);
+}
+
+#[test]
 fn a_worker_with_a_launch_file_gets_playwright_and_the_shots_tool() {
     let rig = with_preview("lab");
     let runner = started(&rig);

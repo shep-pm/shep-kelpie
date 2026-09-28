@@ -147,6 +147,8 @@ mod tests {
     struct Recorder(Mutex<Vec<ShotsJob>>);
 
     impl Shots for Recorder {
+        fn stop_left(&self, _shots: &Path) {}
+
         fn take(&self, job: &ShotsJob) -> ShotsRun {
             self.0.lock().unwrap().push(job.clone());
             ShotsRun {

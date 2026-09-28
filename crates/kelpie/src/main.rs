@@ -47,6 +47,7 @@ fn main() -> ExitCode {
         [command, sub] if command == "tools" && sub == "install" => install_tools(),
         [role, tools, job] if role == "shots-mcp" => {
             let shots = ShotsCli::new(Tools::at(PathBuf::from(tools)));
+            stop_on_signal(shots.clone());
             let (stdin, stdout) = (std::io::stdin().lock(), std::io::stdout().lock());
             match kelpie::shots::mcp::serve(Path::new(job), &shots, stdin, stdout) {
                 Ok(()) => ExitCode::SUCCESS,
@@ -68,6 +69,39 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+// A signal ends the shots tool's run, dev server included, then the tool: its
+// server runs in its own process group, which a signal to this one misses.
+fn stop_on_signal(shots: ShotsCli) {
+    std::thread::spawn(move || {
+        use tokio::signal::unix::{SignalKind, signal};
+        let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .build()
+        else {
+            return;
+        };
+        runtime.block_on(async {
+            let kinds = [
+                SignalKind::terminate(),
+                SignalKind::interrupt(),
+                SignalKind::hangup(),
+            ];
+            let (Ok(mut term), Ok(mut int), Ok(mut hup)) =
+                (signal(kinds[0]), signal(kinds[1]), signal(kinds[2]))
+            else {
+                return;
+            };
+            tokio::select! {
+                _ = term.recv() => {}
+                _ = int.recv() => {}
+                _ = hup.recv() => {}
+            }
+            shots.stop();
+            std::process::exit(143);
+        });
+    });
 }
 
 // Kelpie's home is `KELPIE_HOME`, or `~/.kelpie`, as the runner reads it.

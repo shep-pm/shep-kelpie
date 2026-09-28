@@ -22,6 +22,7 @@ pub(crate) enum ScriptedShots {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FakeShots {
     jobs: Arc<Mutex<Vec<ShotsJob>>>,
+    stopped: Arc<Mutex<Vec<std::path::PathBuf>>>,
     script: Arc<Mutex<VecDeque<ScriptedShots>>>,
 }
 
@@ -31,6 +32,11 @@ impl FakeShots {
         self.jobs.lock().unwrap().clone()
     }
 
+    /// Every shots folder it was asked to stop leftover servers under, in order
+    pub(crate) fn stopped(&self) -> Vec<std::path::PathBuf> {
+        self.stopped.lock().unwrap().clone()
+    }
+
     /// Queues answers for its next runs, oldest first
     pub(crate) fn script(&self, runs: impl IntoIterator<Item = ScriptedShots>) {
         self.script.lock().unwrap().extend(runs);
@@ -38,6 +44,10 @@ impl FakeShots {
 }
 
 impl Shots for FakeShots {
+    fn stop_left(&self, shots: &std::path::Path) {
+        self.stopped.lock().unwrap().push(shots.to_owned());
+    }
+
     fn take(&self, job: &ShotsJob) -> ShotsRun {
         self.jobs.lock().unwrap().push(job.clone());
         let problems = match self.script.lock().unwrap().pop_front() {

@@ -116,6 +116,16 @@ impl Processes {
         Ok(id)
     }
 
+    /// The process id of child `id` from [`Self::start`], also its group's id
+    pub(super) fn pid(&self, id: u64) -> Option<u32> {
+        let running = self.lock();
+        running
+            .children
+            .iter()
+            .find(|(i, _)| *i == id)
+            .map(|(_, c)| c.id())
+    }
+
     /// Whether child `id` from [`Self::start`] is still running
     pub(super) fn alive(&self, id: u64) -> bool {
         let mut running = self.lock();
@@ -210,6 +220,25 @@ fn signal_group(pgid: u32, signal: &str) {
         .args([format!("-{signal}"), "-g".to_owned(), pgid.to_string()])
         .stdin(Stdio::null())
         .status();
+}
+
+/// Stops process group `pgid`, which no `Processes` holds: SIGTERM, then
+/// SIGKILL once [`STOP_GRACE`] has passed with any of it still running
+pub(super) fn stop_group(pgid: u32) {
+    let alive = || {
+        Command::new("pgrep")
+            .args(["-g", &pgid.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    signal_group(pgid, "TERM");
+    let deadline = Instant::now() + STOP_GRACE;
+    while Instant::now() < deadline && alive() {
+        thread::sleep(POLL);
+    }
+    signal_group(pgid, "KILL");
 }
 
 // SIGTERM to `child`'s whole process group, then SIGKILL once `grace` has

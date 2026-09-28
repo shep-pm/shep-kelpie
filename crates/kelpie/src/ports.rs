@@ -668,6 +668,11 @@ pub trait Shots: Send + Sync {
     /// Never fails: whatever went wrong, the whole run included, is in the
     /// run it returns, since a shots run never holds a gate.
     fn take(&self, job: &ShotsJob) -> ShotsRun;
+
+    /// Stops any dev server a run under `shots`, a work item's shots folder,
+    /// left behind, such as one the worker's shots tool started before its
+    /// `claude` was killed
+    fn stop_left(&self, shots: &std::path::Path);
 }
 
 /// A runner's side of the dog's book leases
