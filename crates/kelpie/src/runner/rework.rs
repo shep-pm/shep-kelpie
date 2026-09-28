@@ -133,12 +133,14 @@ impl Runner {
             .map(|pr| pr.number)
             .collect();
         ours.sort_unstable();
+        // One pull request the forge cannot show holds up none of the others.
+        let mut failed = None;
         for number in ours {
             let pr = match self.ports.forge.reviewed(&self.settings.forge, number) {
                 Ok(pr) => pr,
                 Err(e) => {
-                    let reason = ReworkError::PullRequest(number, e).to_string();
-                    return Ok(Some(Begin::Report(StepReport::BoardFailed { reason })));
+                    failed.get_or_insert(ReworkError::PullRequest(number, e).to_string());
+                    continue;
                 }
             };
             // A fork's branch can take kelpie's name, and is none of its business.
@@ -174,7 +176,7 @@ impl Runner {
             };
             return Ok(Some(begin));
         }
-        Ok(None)
+        Ok(failed.map(|reason| Begin::Report(StepReport::BoardFailed { reason })))
     }
 
     fn refuse_rework(

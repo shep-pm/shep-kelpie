@@ -48,7 +48,8 @@ impl Runner {
             PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
         }
         // A rework asked for while one is in flight waits until it ends.
-        let labels: Vec<String> = pr.labels.into_iter().filter(|l| l != READY).collect();
+        let mut labels = pr.labels;
+        labels.retain(|l| l != READY);
         if let Some((known, description)) = foreign_change(&item.known, &labels, !pr.draft) {
             return self.raise(number, RulingKind::ForeignChange { description, known });
         }
@@ -81,7 +82,8 @@ impl Runner {
         }
     }
 
-    // Green CI goes to a CodeRabbit round while one is owed, then to the merge.
+    // Green CI goes to a CodeRabbit round while one is owed, then to the merge
+    // ruling, with the pull request handed back `ready-for-human`.
     fn passed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
         if self.coderabbit_due() {
             return self.start_round(head);

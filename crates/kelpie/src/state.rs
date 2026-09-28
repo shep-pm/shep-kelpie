@@ -39,8 +39,8 @@ pub struct ProjectState {
     /// Issues whose work items kelpie finished, which the board never takes again
     #[serde(default)]
     pub finished: Vec<u64>,
-    /// The forge's ids of the reviews a rework was started or refused on,
-    /// which never start one again
+    /// The forge's ids of the reviews that started a rework or were refused
+    /// one. None of them starts another.
     #[serde(default)]
     pub reworked: Vec<String>,
     /// Leases this project holds

@@ -36,6 +36,7 @@ pub(crate) struct FakeForge {
     comments_down: Arc<AtomicBool>,
     merges_down: Arc<AtomicBool>,
     labels_down: Arc<AtomicBool>,
+    unreadable: Arc<Mutex<HashSet<u64>>>,
     lagging: Arc<Mutex<HashMap<u64, String>>>,
     readied: Arc<Mutex<Vec<u64>>>,
     merges: Arc<Mutex<Vec<(u64, String)>>>,
@@ -74,6 +75,7 @@ impl FakeForge {
             comments_down: Arc::default(),
             merges_down: Arc::default(),
             labels_down: Arc::default(),
+            unreadable: Arc::default(),
             lagging: Arc::default(),
             readied: Arc::default(),
             merges: Arc::default(),
@@ -175,8 +177,15 @@ impl FakeForge {
             .from_fork = true;
     }
 
+    /// Makes reading pull request `number`'s review fail
+    pub(crate) fn set_unreadable(&self, number: u64) {
+        self.unreadable.lock().unwrap().insert(number);
+    }
+
     /// Leaves `review` on pull request `number`, as the maintainer would
     pub(crate) fn review(&self, number: u64, review: MaintainerReview) {
+        let prs = self.pull_requests.lock().unwrap();
+        assert!(prs.contains_key(&number), "an opened pull request");
         self.reviews.lock().unwrap().insert(number, review);
     }
 
@@ -336,6 +345,9 @@ impl Forge for FakeForge {
     }
 
     fn reviewed(&self, _repo: &ForgeSlug, number: u64) -> Result<Reviewed, ForgeError> {
+        if self.unreadable.lock().unwrap().contains(&number) {
+            return Err(ForgeError::Failed(format!("#{number} is unreadable")));
+        }
         let pr = self.opened(number)?;
         Ok(Reviewed {
             state: pr.state,

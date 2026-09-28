@@ -71,6 +71,23 @@ fn a_review_requesting_changes_starts_a_rework_once() {
 }
 
 #[test]
+fn a_pull_request_the_forge_cannot_show_holds_up_none_of_the_others() {
+    let rig = Rig::new("golbat");
+    rig.forge.open_pull_request(70, "kelpie/6", &[6]);
+    rig.forge.set_unreadable(70);
+    reviewed_71(&rig);
+    rig.forge.label_pull_request(71, READY);
+    let runner = running(&rig);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Reworked {
+            pull_request: 71,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn a_forks_pull_request_on_a_kelpie_branch_is_left_alone() {
     let rig = Rig::new("chelone");
     reviewed_71(&rig);
