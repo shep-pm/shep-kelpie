@@ -492,6 +492,46 @@ fn a_restart_mid_summon_reads_on_and_holds_no_stale_lease() {
     assert_eq!(labels(&rig), [on(), off()]);
 }
 
+// The label went on, then the runner died before the summon was saved: on
+// disk the round still waits for its lease.
+#[test]
+fn a_restart_between_the_label_and_its_save_does_not_summon_twice() {
+    let (rig, runner, head) = summoned("rotom");
+    drop(runner);
+    let state = rig.paths().state;
+    let mut saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
+    saved["work_item"]["phase"] = json!({ "state": "coderabbit", "stage": "lease", "head": head });
+    std::fs::write(&state, saved.to_string()).unwrap();
+
+    let runner = rig.open().unwrap();
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Summoned {
+            issue: 7,
+            pull_request: 71,
+            head: head.clone()
+        })
+    );
+    assert_eq!(labels(&rig), [on()], "the label was not toggled again");
+    assert_eq!(phase(&rig, &runner)["stage"], "summoned");
+}
+
+#[test]
+fn a_label_someone_else_left_on_is_toggled_to_summon() {
+    let (rig, runner, head) = reviewed_by_qwen("zeus");
+    rig.forge.set_checks(&head, Checks::Passed);
+    rig.leases.withhold(true);
+    rig.verdict(&runner);
+    rig.forge.label_pull_request(71, LABEL);
+    rig.leases.withhold(false);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Summoned { .. })
+    ));
+    assert_eq!(labels(&rig), [off(), on()]);
+}
+
 #[test]
 fn dropping_a_work_item_mid_round_returns_the_lease_and_takes_the_label_off() {
     let (rig, runner, _) = summoned("chelone");

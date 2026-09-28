@@ -90,10 +90,17 @@ impl Runner {
         }
         let now = self.ports.clock.now();
         self.hold(now)?;
-        // A label already on sends no event, so it comes off first.
-        if let Err(reason) = self
-            .label(number, false)
-            .and_then(|()| self.label(number, true))
+        // A label kelpie put on is a summon made before a restart could save
+        // it. Any other label on sends no event, so it comes off first.
+        let ours = self.item().known.labels.iter().any(|l| l == LABEL);
+        let summoned = match self.labelled(number) {
+            Ok(on) => ours && on,
+            Err(reason) => return Ok(self.gate_failed(reason)),
+        };
+        if !summoned
+            && let Err(reason) = self
+                .label(number, false)
+                .and_then(|()| self.label(number, true))
         {
             return Ok(self.gate_failed(reason));
         }
@@ -382,20 +389,31 @@ impl Runner {
     }
 
     // Changes the label only when it is not already as asked.
-    fn label(&self, number: u64, on: bool) -> Result<(), String> {
-        let forge = &self.settings.forge;
+    // Records the label as kelpie's own, so the gate never reads it as a
+    // change someone else made.
+    fn label(&mut self, number: u64, on: bool) -> Result<(), String> {
+        if self.labelled(number)? != on {
+            self.ports
+                .forge
+                .set_label(&self.settings.forge, number, LABEL, on)
+                .map_err(|e| format!("cannot change `{LABEL}` on #{number}: {e}"))?;
+        }
+        self.update(|item| {
+            item.known.labels.retain(|l| l != LABEL);
+            if on {
+                item.known.labels.push(LABEL.to_owned());
+            }
+        })
+        .map_err(|e| e.to_string())
+    }
+
+    fn labelled(&self, number: u64) -> Result<bool, String> {
         let pr = self
             .ports
             .forge
-            .pull_request(forge, number)
+            .pull_request(&self.settings.forge, number)
             .map_err(|e| format!("cannot read #{number}: {e}"))?;
-        if pr.labels.iter().any(|l| l == LABEL) == on {
-            return Ok(());
-        }
-        self.ports
-            .forge
-            .set_label(forge, number, LABEL, on)
-            .map_err(|e| format!("cannot change `{LABEL}` on #{number}: {e}"))
+        Ok(pr.labels.iter().any(|l| l == LABEL))
     }
 
     fn item(&self) -> &WorkItem {
