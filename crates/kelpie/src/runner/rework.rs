@@ -141,6 +141,10 @@ impl Runner {
                     return Ok(Some(Begin::Report(StepReport::BoardFailed { reason })));
                 }
             };
+            // A fork's branch can take kelpie's name, and is none of its business.
+            if pr.from_fork {
+                continue;
+            }
             let labelled = pr.labels.iter().any(|l| l == READY);
             let asked =
                 |r: &MaintainerReview| r.changes_requested && !self.state.reworked.contains(&r.id);

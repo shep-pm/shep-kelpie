@@ -375,6 +375,19 @@ fn a_review_requesting_changes_starts_a_rework_once() {
 }
 
 #[test]
+fn a_forks_pull_request_on_a_kelpie_branch_is_left_alone() {
+    let rig = Rig::new("chelone");
+    reviewed_71(&rig);
+    rig.forge.review(71, requesting_changes());
+    rig.forge.label_pull_request(71, READY);
+    rig.forge.set_from_fork(71);
+    let runner = running(&rig);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(rig.forge.comments(), []);
+    assert_eq!(rig.forge.pull_request_labels(71), [READY]);
+}
+
+#[test]
 fn a_manual_rework_uses_up_the_review_it_took() {
     let rig = Rig::new("golbat");
     reviewed_71(&rig);
