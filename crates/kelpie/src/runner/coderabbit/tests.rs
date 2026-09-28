@@ -418,7 +418,11 @@ fn fixed(rig: &Rig, runner: &Mutex<Runner>, file: &'static str) -> String {
 #[test]
 fn the_cap_leaves_generated_files_out_and_parks_the_worker_with_findings_open() {
     let (rig, runner, _) = reviewed_by_qwen("shep");
-    rig.edit_settings(|s| s.replace("divisor = 1000", "divisor = 2"));
+    // At the default divisor the lockfile would not move the cap either.
+    rig.edit_settings(|s| {
+        assert!(s.contains("divisor = 1000"), "the default divisor moved");
+        s.replace("divisor = 1000", "divisor = 2")
+    });
     drop(runner);
     let runner = rig.open().unwrap();
     // Five lockfile lines would lift the cap to five rounds if counted.

@@ -228,8 +228,7 @@ impl Asker {
         if epoch != self.epoch {
             return Err(GrantError::OtherRun(epoch));
         }
-        let asking = self.totals.get(&kind).is_some_and(|t| t.asking());
-        if !asking {
+        if !self.asking(&kind) {
             return Err(GrantError::NotAsked(kind));
         }
         if !self.held.contains(&kind) {

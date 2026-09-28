@@ -157,12 +157,12 @@ impl Runner {
         &mut self,
         result: ReviewResult,
     ) -> Result<Option<StepReport>, StateError> {
-        let judging_coderabbit = self
+        let in_coderabbit_round = self
             .state
             .work_item
             .as_ref()
             .is_some_and(|item| matches!(item.phase, Phase::CodeRabbit(_)));
-        if judging_coderabbit {
+        if in_coderabbit_round {
             return self.coderabbit_verdict(result);
         }
         let now = self.ports.clock.now();

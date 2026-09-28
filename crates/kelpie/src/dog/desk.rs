@@ -73,7 +73,10 @@ impl Desk {
                 WindowFact::Summoned => self.book.summoned(&fact.kind, at),
                 WindowFact::Opens => self.book.refused(&fact.kind, at),
                 WindowFact::Quota => {
-                    let quota = u32::try_from(value).unwrap_or(u32::MAX);
+                    // No footer states a quota past u32, so one is not read.
+                    let Ok(quota) = u32::try_from(value) else {
+                        return deliveries(grants);
+                    };
                     self.book.quota(&fact.kind, quota)
                 }
             };
@@ -489,6 +492,8 @@ pub(super) mod tests {
         let mut koji = Asker::new(Epoch(101));
         w.raise("koji", koji.window(&cr, WindowFact::Quota, 10));
         assert_eq!(w.line("coderabbit")["window"]["quota"], 10);
+        w.raise("koji", koji.window(&cr, WindowFact::Quota, 1 << 40));
+        assert_eq!(w.line("coderabbit")["window"]["quota"], 10, "not a quota");
     }
 
     #[test]

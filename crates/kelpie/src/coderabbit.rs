@@ -112,7 +112,7 @@ impl Activity {
             .filter_map(|c| Some((c.at, wait(&c.body)?)))
             .max_by_key(|(at, _)| *at);
         refusal.map_or(Reading::Silent, |(at, wait)| Reading::Refused {
-            opens: Timestamp(at.0 + wait),
+            opens: Timestamp(at.0.saturating_add(wait)),
         })
     }
 
@@ -181,7 +181,8 @@ fn wait(body: &str) -> Option<u64> {
             "second" => 1,
             _ => break,
         };
-        *total.get_or_insert(0) += n * scale;
+        let sum: &mut u64 = total.get_or_insert(0);
+        *sum = sum.saturating_add(n.saturating_mul(scale));
         if words.next() != Some("and") {
             break;
         }
@@ -512,5 +513,15 @@ mod tests {
         assert_eq!(read("59 seconds."), Some(59));
         assert_eq!(read("1 hour and 5 minutes."), Some(3900));
         assert_eq!(read("a moment."), None);
+        assert_eq!(read("18446744073709551615 hours."), Some(u64::MAX));
+    }
+
+    #[test]
+    fn a_long_finding_is_cut_to_one_line() {
+        let long = "word ".repeat(200);
+        let cut = one_line(&long);
+        assert_eq!(cut.chars().count(), 603);
+        assert!(cut.ends_with("..."));
+        assert_eq!(one_line("a |b\n c"), "a /b c");
     }
 }

@@ -1,5 +1,6 @@
 //! The rig's lease book: grants what is asked at once, unless a test holds
-//! the grants back, and keeps every ask, return and window fact in order
+//! the grants back, and keeps every ask, return of a held lease and window
+//! fact in order
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};

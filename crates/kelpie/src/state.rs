@@ -520,6 +520,10 @@ mod tests {
         let silent = RulingKind::CodeRabbitSilent {
             head: "c0ffee".into(),
         };
+        for kind in [&cap, &silent] {
+            let saved = serde_json::to_value(kind).unwrap();
+            assert_eq!(&serde_json::from_value::<RulingKind>(saved).unwrap(), kind);
+        }
         assert_eq!(
             serde_json::to_value([&cap, &silent]).unwrap(),
             serde_json::json!([
