@@ -21,6 +21,11 @@ use crate::work_item::{CodeRabbitStage, Known, Phase, Review, Turn, WorkItem};
 const TIMEOUT_CONTINUE: &str = "Kelpie stopped your last turn: it ran past its ceiling. \
                                 Carry on with the work item from where you left off.";
 
+/// The prompt for a turn resumed after the maintainer accepts a failed
+/// turn's ruling with a yes
+const FAILED_CONTINUE: &str = "Your last turn failed before it finished. \
+                               Carry on with the work item from where you left off.";
+
 /// The maintainer's answer to a ruling
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Answer {
@@ -245,11 +250,14 @@ fn decide(id: u64, answer: Answer, ruling: Ruling, now: Timestamp) -> Result<Mov
                 force: None,
             });
         }
-        // A turn that had started is resumed, and the yes starts its ceiling
-        // afresh: the time it spent failing and waiting is not held against it.
+        // A turn that had started is resumed with a prompt of its own, and
+        // the yes starts its ceiling afresh: the time it spent failing and
+        // waiting is not held against it.
         (Answer::Yes, RulingKind::TurnFailed { phase, retry, .. }) => {
             let turn = match retry {
-                Turn::Running { .. } => Turn::Running { since: now },
+                Turn::Running { .. } => Turn::Next {
+                    prompt: FAILED_CONTINUE.to_owned(),
+                },
                 other => other,
             };
             return Ok(Move::Retry { turn, phase });

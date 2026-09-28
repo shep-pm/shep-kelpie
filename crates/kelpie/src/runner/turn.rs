@@ -131,6 +131,9 @@ impl Runner {
             Turn::Due => (Session::New(id), None, now),
             Turn::Running { since } if start_over => (Session::New(id), None, *since),
             Turn::Running { since } => (Session::Resume(id), Some(CONTINUE.to_owned()), *since),
+            // No session to resume: the retry of a turn whose call failed
+            // before its session existed starts it over, as a killed one does.
+            Turn::Next { .. } if start_over => (Session::New(id), None, now),
             Turn::Next { prompt } => (Session::Resume(id), Some(prompt.clone()), now),
             Turn::Ended { .. } | Turn::Failed { .. } => return Ok(Begin::Idle),
         };
@@ -758,7 +761,32 @@ mod tests {
             retried.session,
             Session::Resume(failed.session.id().clone())
         );
-        assert_eq!(retried.prompt, CONTINUE);
+        assert_eq!(
+            retried.prompt,
+            "Your last turn failed before it finished. \
+             Carry on with the work item from where you left off."
+        );
+    }
+
+    #[test]
+    fn a_retry_whose_session_never_began_starts_it_over_from_the_issue() {
+        let (rig, runner) = with_issue_7("zeus");
+        rig.claude
+            .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
+        step(&runner).unwrap();
+        let first = rig.claude.calls()[0].session.id().clone();
+        rig.ask(&runner, "rule", Some("1 yes"));
+        rig.claude.script([
+            Scripted::Fail(ClaudeError::NoSession(first.clone())),
+            Scripted::Reply(usage(1), Cost(1)),
+        ]);
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Ended { .. })
+        ));
+        let [original, _, again] = rig.claude.calls().try_into().unwrap();
+        assert_eq!(again.session, Session::New(first));
+        assert_eq!(again.prompt, original.prompt);
     }
 
     #[test]
