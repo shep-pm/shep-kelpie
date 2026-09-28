@@ -185,6 +185,14 @@ Read 2026-09-26 with gh 2.96.
 - `gh pr merge --delete-branch` also deletes and switches branches in the checkout gh runs from, so kelpie leaves it out and removes the branch with `git push origin --delete`.
 - The runner's own `gh` and `git` calls are plain child processes. The worker's settings file, its sandbox and its denylist apply only to `claude` sessions started with it, so they never reach the project manager's merge, rebase or `--force-with-lease` push.
 
+### Issue dependencies
+
+Read 2026-09-27 with gh 2.96.
+
+- `gh issue list --json blockedBy` lists each issue's blockers with their `number` and `state` (`OPEN` or `CLOSED`), plus a `totalCount`. No GraphQL call is needed. gh's own query asks for the first 50 blockers (`api/query_builder.go` at v2.96.0).
+- A blocker's state is its issue's, never its pull request's. The board skips an issue while any blocker reads `OPEN`, however far that blocker's pull request has got.
+- On this repo, shep-pm/shep-kelpie#27 listed eight blockers, seven open and one closed. The recording is `crates/kelpie/fixtures/gh-issue-list.json`.
+
 ### Worker questions and the webhook
 
 Measured 2026-09-27 on Claude Code 2.1.283 and the system's curl.
