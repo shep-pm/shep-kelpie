@@ -245,7 +245,8 @@ fn decide(id: u64, answer: Answer, ruling: Ruling, now: Timestamp) -> Result<Mov
                 force: None,
             });
         }
-        // A turn that ran before is resumed, so it is not owed a fresh ceiling.
+        // A turn that had started is resumed, and the yes starts its ceiling
+        // afresh: the time it spent failing and waiting is not held against it.
         (Answer::Yes, RulingKind::TurnFailed { phase, retry, .. }) => {
             let turn = match retry {
                 Turn::Running { .. } => Turn::Running { since: now },

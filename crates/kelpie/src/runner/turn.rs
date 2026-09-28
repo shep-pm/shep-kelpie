@@ -762,6 +762,20 @@ mod tests {
     }
 
     #[test]
+    fn a_retried_turn_gets_a_whole_ceiling_however_long_the_ruling_waited() {
+        let (rig, runner) = with_issue_7("zeus");
+        rig.claude
+            .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
+        step(&runner).unwrap();
+        rig.clock.advance(2000);
+        rig.ask(&runner, "rule", Some("1 yes"));
+        rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
+        step(&runner).unwrap();
+        let [_, retried] = rig.claude.calls().try_into().unwrap();
+        assert_eq!(retried.timeout, Some(Duration::from_secs(3600)));
+    }
+
+    #[test]
     fn a_no_on_a_failed_turn_stops_the_work_item_the_way_a_timed_out_one_does() {
         let (rig, runner) = with_issue_7("rotom");
         rig.claude
