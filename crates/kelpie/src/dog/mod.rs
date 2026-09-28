@@ -341,6 +341,66 @@ async fn deliver_grant(client: &Client, grant: &Delivery) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lease::LeaseKind;
+    use crate::test::FakeClock;
+
+    fn kept(dir: &std::path::Path, file: BookFile) -> Kept {
+        let desk = Desk::new(Box::new(FakeClock::at(1_790_000_000)), GpuLock::under(dir));
+        let last = desk.saved();
+        Kept { desk, file, last }
+    }
+
+    fn take(desk: &mut Desk) {
+        desk.answer("take", Some("stand-in"));
+    }
+
+    #[test]
+    fn a_change_is_saved_and_loads_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = BookFile::new(dir.path().join("book.json"));
+        let mut kept = kept(dir.path(), file.clone());
+        kept.change(take);
+        let saved = load(&file);
+        assert_eq!(saved, kept.desk.saved());
+        let stand_in = LeaseKind::try_from("stand-in").unwrap();
+        assert!(saved.leases.iter().any(|l| l.kind == stand_in));
+    }
+
+    #[test]
+    fn nothing_changed_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = BookFile::new(dir.path().join("book.json"));
+        let mut kept = kept(dir.path(), file.clone());
+        kept.change(|d| d.answer("status", None));
+        assert!(!file.path().exists());
+    }
+
+    #[test]
+    fn a_failed_save_is_tried_again_on_the_next_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = BookFile::new(dir.path().join("dog/book.json"));
+        let mut kept = kept(dir.path(), file.clone());
+        kept.change(take);
+        assert!(!file.path().exists(), "no dog folder yet");
+        std::fs::create_dir(dir.path().join("dog")).unwrap();
+        kept.change(|d| d.answer("take", Some("other")));
+        let kinds: Vec<String> = load(&file)
+            .leases
+            .iter()
+            .map(|l| l.kind.to_string())
+            .collect();
+        assert_eq!(kinds, ["coderabbit", "other", "stand-in"]);
+    }
+
+    #[test]
+    fn a_missing_or_unreadable_book_starts_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = BookFile::new(dir.path().join("book.json"));
+        let empty = SavedBook::new(Vec::new(), Vec::new(), Vec::new());
+        assert_eq!(load(&file), empty);
+        std::fs::write(file.path(), r#"{"version": 1, "leases": "#).unwrap();
+        assert_eq!(load(&file), empty);
+    }
 
     #[test]
     fn the_socket_is_under_shep_home_or_kelpies_shepherd() {
