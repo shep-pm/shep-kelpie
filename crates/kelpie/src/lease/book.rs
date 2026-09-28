@@ -513,6 +513,18 @@ mod tests {
     }
 
     #[test]
+    fn a_dead_runners_window_lease_goes_to_the_next_waiter_only_once_it_opens() {
+        let (mut book, clock, kind) = windowed();
+        book.ask(&kind, runner("koji", 1));
+        book.summoned(&kind, Timestamp(EPOCH));
+        book.ask(&kind, runner("reactmap", 1));
+        assert_eq!(book.reclaim(&project("koji"), None), []);
+        assert_eq!(status(&book)[0]["holder"], json!(null));
+        clock.advance(3600);
+        assert_eq!(book.tick()[0].holder, runner("reactmap", 1));
+    }
+
+    #[test]
     fn a_grant_to_the_maintainer_counts_as_a_summon() {
         let (mut book, clock, kind) = windowed();
         assert_eq!(book.ask(&kind, Holder::Maintainer), Asked::Granted);

@@ -132,7 +132,7 @@ pub enum RulingKind {
         /// Rounds run
         rounds: u32,
         /// Findings the judge held
-        held: usize,
+        held: u32,
         /// The fix turn a yes starts
         prompt: String,
     },

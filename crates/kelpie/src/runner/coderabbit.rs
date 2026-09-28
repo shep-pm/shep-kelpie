@@ -254,7 +254,7 @@ impl Runner {
         if round >= cap && !tally.cap_cleared {
             let kind = RulingKind::CodeRabbitCap {
                 rounds: round,
-                held: held.len(),
+                held: u32::try_from(held.len()).unwrap_or(u32::MAX),
                 prompt,
             };
             return self.raise(number, kind);
