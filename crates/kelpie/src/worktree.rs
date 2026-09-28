@@ -2,7 +2,8 @@
 //!
 //! Each work item gets its own git worktree, on a branch cut from the latest
 //! `origin/main`, and its own build folder. A rework's branch starts from
-//! itself on `origin` instead. Preparing is idempotent, so a restarted runner
+//! itself on `origin` instead, and reuses a local branch left behind that
+//! matches it exactly. Preparing is idempotent, so a restarted runner
 //! finds the worktree it made before and keeps it.
 
 use std::ffi::OsStr;
@@ -111,7 +112,8 @@ pub fn prepare(
             return Err(foreign());
         }
     } else {
-        if git(repo, ["rev-parse", "--verify", "--quiet", &full_ref]).is_ok() {
+        let local = git(repo, ["rev-parse", "--verify", "--quiet", &full_ref]).ok();
+        if local.is_some() && start == Start::Main {
             return Err(WorktreeError::BranchTaken(branch.to_owned()));
         }
         if let Some(parent) = worktree.parent() {
@@ -124,19 +126,39 @@ pub fn prepare(
         git(repo, ["fetch", "--quiet", "origin", from])?;
         let base = format!("origin/{from}");
         let wt = worktree.as_os_str();
-        git(
-            repo,
-            [
-                "worktree".as_ref(),
-                "add".as_ref(),
-                "--quiet".as_ref(),
-                "--no-track".as_ref(),
-                "-b".as_ref(),
-                OsStr::new(branch),
-                wt,
-                base.as_ref(),
-            ],
-        )?;
+        if let Some(local) = local {
+            // A rework's branch left behind by an earlier attempt is reused
+            // when it is at the same commit as `origin`'s. One ahead holds
+            // work that is not kelpie's to throw away, and one behind is
+            // not the pull request's branch as `origin` holds it.
+            if git(repo, ["rev-parse", "--verify", "--quiet", &base])? != local {
+                return Err(WorktreeError::BranchTaken(branch.to_owned()));
+            }
+            git(
+                repo,
+                [
+                    "worktree".as_ref(),
+                    "add".as_ref(),
+                    "--quiet".as_ref(),
+                    wt,
+                    OsStr::new(branch),
+                ],
+            )?;
+        } else {
+            git(
+                repo,
+                [
+                    "worktree".as_ref(),
+                    "add".as_ref(),
+                    "--quiet".as_ref(),
+                    "--no-track".as_ref(),
+                    "-b".as_ref(),
+                    OsStr::new(branch),
+                    wt,
+                    base.as_ref(),
+                ],
+            )?;
+        }
     }
     let common = git(
         repo,
