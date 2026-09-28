@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::coderabbit::FakeCodeRabbit;
-use crate::board::{OpenPullRequest, READY, ReadyIssue};
+use crate::board::{Blocker, OpenPullRequest, READY, ReadyIssue};
 use crate::coderabbit::Activity;
 use crate::ports::{Checks, Forge, ForgeError, Issue, PullRequest, PullRequestState, Visibility};
 use crate::settings::ForgeSlug;
@@ -21,6 +21,8 @@ pub(crate) struct FakeForge {
     missing: Arc<Mutex<HashSet<u64>>>,
     labels: Arc<Mutex<HashMap<u64, Vec<String>>>>,
     ready: Arc<Mutex<Vec<ReadyIssue>>>,
+    blockers: Arc<Mutex<HashMap<u64, Vec<u64>>>>,
+    closed: Arc<Mutex<HashSet<u64>>>,
     open: Arc<Mutex<Vec<OpenPullRequest>>>,
     board_down: Arc<AtomicBool>,
     calls: Arc<AtomicUsize>,
@@ -54,6 +56,8 @@ impl FakeForge {
             missing: Arc::default(),
             labels: Arc::default(),
             ready: Arc::default(),
+            blockers: Arc::default(),
+            closed: Arc::default(),
             open: Arc::default(),
             board_down: Arc::default(),
             calls: Arc::default(),
@@ -101,7 +105,19 @@ impl FakeForge {
             number,
             assigned,
             labels: Vec::new(),
+            blocked_by: Vec::new(),
         });
+    }
+
+    /// Marks issue `number` blocked by issue `by`, which is open until closed
+    pub(crate) fn block(&self, number: u64, by: u64) {
+        let mut blockers = self.blockers.lock().unwrap();
+        blockers.entry(number).or_default().push(by);
+    }
+
+    /// Closes issue `number`, as merging its pull request or someone else would
+    pub(crate) fn close_issue(&self, number: u64) {
+        self.closed.lock().unwrap().insert(number);
     }
 
     /// Opens draft pull request `number` from `head`, closing `closes`
@@ -207,6 +223,18 @@ impl FakeForge {
         labels.get(&number).cloned().unwrap_or_default()
     }
 
+    fn blockers_of(&self, number: u64) -> Vec<Blocker> {
+        let blockers = self.blockers.lock().unwrap();
+        let closed = self.closed.lock().unwrap();
+        let by = blockers.get(&number).map(Vec::as_slice).unwrap_or_default();
+        by.iter()
+            .map(|&number| Blocker {
+                number,
+                open: !closed.contains(&number),
+            })
+            .collect()
+    }
+
     fn board(&self) -> Result<(), ForgeError> {
         if self.board_down.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("the board is down".into()));
@@ -239,6 +267,7 @@ impl Forge for FakeForge {
             .into_iter()
             .map(|i| ReadyIssue {
                 labels: self.labels_of(i.number),
+                blocked_by: self.blockers_of(i.number),
                 ..i
             })
             .collect())

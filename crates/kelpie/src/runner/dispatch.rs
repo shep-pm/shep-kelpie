@@ -93,7 +93,7 @@ mod tests {
 
     use super::*;
     use crate::board::{Skip, WorkerModel};
-    use crate::ports::{ClaudeError, Cost, Usage};
+    use crate::ports::{ClaudeError, Cost, PullRequestState, Usage};
     use crate::runner::{StepReport, step};
     use crate::settings::Effort;
     use crate::test::{Rig, Scripted};
@@ -320,6 +320,53 @@ mod tests {
         assert_eq!(status["skipped"].as_array().unwrap().len(), 2);
         assert_eq!(rig.meter.reads(), 1);
         assert_eq!(rig.claude.calls(), []);
+    }
+
+    #[test]
+    fn an_issue_with_an_open_blocker_is_skipped_for_the_next_oldest() {
+        let (rig, runner) = running("hazel");
+        rig.forge.list_ready(8, false);
+        rig.forge.list_ready(9, false);
+        rig.forge.block(8, 32);
+        rig.forge.block(8, 12);
+        rig.forge.close_issue(12);
+        assert_eq!(
+            step(&runner).unwrap(),
+            Some(StepReport::Dispatched {
+                issue: 9,
+                worker: sonnet_medium(),
+                skipped: vec![Skip::Blocked {
+                    issue: 8,
+                    by: vec![32]
+                }],
+            })
+        );
+        assert_eq!(
+            rig.ask(&runner, "status", None)["skipped"],
+            json!([{ "reason": "blocked", "issue": 8, "by": [32] }])
+        );
+    }
+
+    #[test]
+    fn a_blocked_issue_waits_through_its_blockers_pull_request_until_the_blocker_closes() {
+        let (rig, runner) = running("hazel");
+        rig.forge.list_ready(8, false);
+        rig.forge.block(8, 32);
+        rig.forge.open_pull_request(40, "kelpie/32", &[32]);
+        assert_eq!(step(&runner).unwrap(), None);
+        rig.forge.set_state(40, PullRequestState::Merged);
+        assert_eq!(step(&runner).unwrap(), None);
+        assert_eq!(
+            rig.ask(&runner, "status", None)["skipped"],
+            json!([{ "reason": "blocked", "issue": 8, "by": [32] }])
+        );
+
+        rig.forge.close_issue(32);
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Dispatched { issue: 8, .. })
+        ));
+        assert_eq!(rig.ask(&runner, "status", None)["skipped"], json!([]));
     }
 
     #[test]

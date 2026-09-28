@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 
 use serde::Deserialize;
 
-use crate::board::{OpenPullRequest, READY, ReadyIssue};
+use crate::board::{Blocker, OpenPullRequest, READY, ReadyIssue};
 use crate::coderabbit::Activity;
 use crate::ports::{Checks, Forge, ForgeError, Issue, PullRequest, PullRequestState, Visibility};
 use crate::settings::ForgeSlug;
@@ -52,7 +52,7 @@ impl Forge for Gh {
             "--limit",
             LIST_LIMIT,
             "--json",
-            "number,assignees,labels",
+            "number,assignees,labels,blockedBy",
         ])?)
     }
 
@@ -201,12 +201,30 @@ struct Label {
     name: String,
 }
 
+// `gh` reads an issue's first 50 blockers; more is not expected.
 fn parse_ready_issues(stdout: &[u8]) -> Result<Vec<ReadyIssue>, ForgeError> {
     #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
     struct Listed {
         number: u64,
         assignees: Vec<serde::de::IgnoredAny>,
         labels: Vec<Label>,
+        blocked_by: BlockedBy,
+    }
+    #[derive(Deserialize)]
+    struct BlockedBy {
+        nodes: Vec<Blocking>,
+    }
+    #[derive(Deserialize)]
+    struct Blocking {
+        number: u64,
+        state: State,
+    }
+    #[derive(Deserialize, PartialEq)]
+    #[serde(rename_all = "UPPERCASE")]
+    enum State {
+        Open,
+        Closed,
     }
     let listed: Vec<Listed> = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
     Ok(listed
@@ -215,6 +233,15 @@ fn parse_ready_issues(stdout: &[u8]) -> Result<Vec<ReadyIssue>, ForgeError> {
             number: i.number,
             assigned: !i.assignees.is_empty(),
             labels: i.labels.into_iter().map(|l| l.name).collect(),
+            blocked_by: i
+                .blocked_by
+                .nodes
+                .into_iter()
+                .map(|b| Blocker {
+                    number: b.number,
+                    open: b.state == State::Open,
+                })
+                .collect(),
         })
         .collect())
 }
@@ -368,8 +395,7 @@ mod tests {
     // Recorded from gh 2.96 on this repo: `gh issue view 6 --json title,body,labels`.
     const ISSUE: &str = include_str!("../../fixtures/gh-issue-view.json");
 
-    // Recorded from gh 2.96 on this repo with the `ready_issues` arguments,
-    // `--limit 3`.
+    // Recorded from gh 2.96 on this repo with the `ready_issues` arguments.
     const READY_LIST: &str = include_str!("../../fixtures/gh-issue-list.json");
 
     // Recorded from gh 2.96 on this repo with the `open_pull_requests` arguments.
@@ -416,20 +442,54 @@ mod tests {
         ));
     }
 
+    fn blocker(number: u64, open: bool) -> Blocker {
+        Blocker { number, open }
+    }
+
     #[test]
     fn ready_issues_are_read() {
         let issues = parse_ready_issues(READY_LIST.as_bytes()).unwrap();
         let numbers: Vec<u64> = issues.iter().map(|i| i.number).collect();
-        assert_eq!(numbers, [16, 15, 14]);
+        assert_eq!(numbers, [40, 38, 37, 33, 32, 30, 27, 19, 5]);
         assert!(issues.iter().all(|i| !i.assigned));
-        assert_eq!(issues[0].labels, ["ready-for-agent"]);
+        assert_eq!(issues[0].labels, ["bug", "ready-for-agent"]);
+    }
+
+    #[test]
+    fn each_ready_issue_carries_its_blockers_open_or_closed() {
+        let issues = parse_ready_issues(READY_LIST.as_bytes()).unwrap();
+        assert_eq!(issues[0].blocked_by, []);
+        assert_eq!(issues[1].blocked_by, [blocker(12, false)]);
+        assert_eq!(
+            issues[6].blocked_by,
+            [
+                blocker(40, true),
+                blocker(37, true),
+                blocker(38, true),
+                blocker(33, true),
+                blocker(32, true),
+                blocker(30, true),
+                blocker(24, false),
+                blocker(19, true),
+            ]
+        );
     }
 
     #[test]
     fn an_issue_with_an_assignee_is_assigned() {
-        let listed =
-            br#"[{"assignees":[{"id":"MDQ","login":"someone","name":""}],"labels":[],"number":3}]"#;
+        let listed = br#"[{"assignees":[{"id":"MDQ","login":"someone","name":""}],"labels":[],
+            "number":3,"blockedBy":{"nodes":[],"totalCount":0}}]"#;
         assert!(parse_ready_issues(listed).unwrap()[0].assigned);
+    }
+
+    #[test]
+    fn a_blocker_in_a_state_not_known_is_unreadable() {
+        let listed = br#"[{"assignees":[],"labels":[],"number":3,
+            "blockedBy":{"nodes":[{"number":2,"state":"MERGED"}],"totalCount":1}}]"#;
+        assert!(matches!(
+            parse_ready_issues(listed),
+            Err(ForgeError::Unreadable(_))
+        ));
     }
 
     #[test]
