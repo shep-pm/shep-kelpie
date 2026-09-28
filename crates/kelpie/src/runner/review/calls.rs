@@ -13,6 +13,7 @@ use std::process::{Command, Stdio};
 use crate::ports::{ClaudeCall, Finding, Role, Session, Severity, Verdict};
 use crate::runner::turn;
 use crate::settings::RoleModel;
+use crate::shots::ShotsRun;
 use crate::work_item::new_session_id;
 
 /// The Claude round's throwaway settings: no sandbox fencing, no bypassed
@@ -39,37 +40,48 @@ const NO_TOOLS: [&str; 11] = [
     "Task",
 ];
 
+/// Kelpie's shots for a Claude round, and the folder they sit under
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Screens<'a> {
+    pub(super) dir: &'a Path,
+    pub(super) run: &'a ShotsRun,
+}
+
 pub(super) fn reviewer_call(
     worktree: &Path,
     worker_folder: &Path,
     model: &RoleModel,
+    shots: Option<Screens<'_>>,
 ) -> Result<ClaudeCall, String> {
     let diff = diff_against_base(worktree)?;
-    let settings = review_settings(worker_folder)?;
-    build_call(
-        Role::Reviewer,
-        worktree,
-        model,
-        settings,
-        reviewer_prompt(&base_ref(), &diff),
-    )
+    let settings = review_settings(worker_folder, shots.map(|s| s.dir))?;
+    let mut prompt = reviewer_prompt(&base_ref(), &diff);
+    if let Some(shots) = shots {
+        prompt.push_str(&shots_prompt(shots.run));
+    }
+    build_call(Role::Reviewer, worktree, model, settings, prompt)
 }
 
+// A finding that names a PNG under `shots` is about a screenshot, and its
+// judge may open that folder with Read and nothing else.
 pub(in crate::runner) fn judge_call(
     worktree: &Path,
     worker_folder: &Path,
     model: &RoleModel,
     finding: &Finding,
+    shots: Option<&Path>,
 ) -> Result<ClaudeCall, String> {
     let diff = diff_against_base(worktree)?;
-    let settings = judge_settings(worker_folder)?;
-    build_call(
-        Role::Judge,
-        worktree,
-        model,
-        settings,
-        judge_prompt(&base_ref(), &diff, finding),
-    )
+    let shot = shots.filter(|dir| Path::new(&finding.file).starts_with(dir));
+    let settings = judge_settings(worker_folder, shot)?;
+    let mut prompt = judge_prompt(&base_ref(), &diff, finding);
+    if shot.is_some() {
+        prompt.push_str(&format!(
+            "\n\nThe finding is about the screenshot {}. Open it with Read before you decide.",
+            finding.file
+        ));
+    }
+    build_call(Role::Judge, worktree, model, settings, prompt)
 }
 
 // The shape every call the review loop makes itself shares: a fresh
@@ -93,21 +105,45 @@ fn build_call(
         instructions: None,
         prompt,
         timeout: None,
+        mcp_config: None,
     })
 }
 
-fn review_settings(worker_folder: &Path) -> Result<PathBuf, String> {
+fn review_settings(worker_folder: &Path, shots: Option<&Path>) -> Result<PathBuf, String> {
     let path = worker_folder.join(REVIEW_SETTINGS_FILE);
-    turn::write(worker_folder, &path, "{}\n")?;
+    let settings = match shots {
+        // Read outside the worktree is refused under `-p` unless the folder is added.
+        Some(dir) => serde_json::json!({ "permissions": { "additionalDirectories": [dir] } }),
+        None => serde_json::json!({}),
+    };
+    let text = serde_json::to_string_pretty(&settings).expect("settings are JSON");
+    turn::write(worker_folder, &path, &text)?;
     Ok(path)
 }
 
-fn judge_settings(worker_folder: &Path) -> Result<PathBuf, String> {
+fn judge_settings(worker_folder: &Path, shot: Option<&Path>) -> Result<PathBuf, String> {
     let path = worker_folder.join(JUDGE_SETTINGS_FILE);
-    let deny = serde_json::json!({ "permissions": { "deny": NO_TOOLS } });
-    let text = serde_json::to_string_pretty(&deny).expect("settings are JSON");
+    let settings = match shot {
+        Some(dir) => {
+            let deny: Vec<&str> = NO_TOOLS.into_iter().filter(|t| *t != "Read").collect();
+            serde_json::json!({ "permissions": { "deny": deny, "additionalDirectories": [dir] } })
+        }
+        None => serde_json::json!({ "permissions": { "deny": NO_TOOLS } }),
+    };
+    let text = serde_json::to_string_pretty(&settings).expect("settings are JSON");
     turn::write(worker_folder, &path, &text)?;
     Ok(path)
+}
+
+fn shots_prompt(run: &ShotsRun) -> String {
+    format!(
+        "\n\nKelpie took screenshots of this branch's UI from its dev server, at a \
+         phone and a desktop width, light and dark. Open the ones the diff touches \
+         with Read, and check the change looks right and nothing broke. A finding \
+         about a screenshot gives its location as the PNG's full path and `:0`.\n\n\
+         --- shots ---\n{}--- end ---",
+        run.text()
+    )
 }
 
 /// `origin/main`: the ref every call in this loop diffs against

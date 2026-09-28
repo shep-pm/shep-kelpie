@@ -5,6 +5,12 @@
 //! `kelpie confine <folder>...`: the hook that holds a worker's file tools
 //! to its folders. Claude Code runs it; it is not for the maintainer.
 //!
+//! `kelpie tools install`: installs the tools kelpie shows a work item's UI
+//! with, under kelpie's home.
+//!
+//! `kelpie shots-mcp <tools> <job>`: a worker's shots tool, an MCP server
+//! Claude Code starts from the worker's MCP config.
+//!
 //! `kelpie relay-yes <project> <id>`, `kelpie relay-answer <project>
 //! <params>`: what the relay's own settings gate on. Both run
 //! `shep trigger <project> rule <params>` verbatim; the relay runs them,
@@ -12,10 +18,12 @@
 
 #![forbid(unsafe_code)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
+use kelpie::adapters::ShotsCli;
 use kelpie::confine::{Verdict, judge};
+use kelpie::preview::Tools;
 
 /// A PreToolUse hook's exit code that refuses the tool call
 const REFUSE: u8 = 2;
@@ -36,16 +44,50 @@ fn main() -> ExitCode {
                 }
             }
         }
+        [command, sub] if command == "tools" && sub == "install" => install_tools(),
+        [role, tools, job] if role == "shots-mcp" => {
+            let shots = ShotsCli::new(Tools::at(PathBuf::from(tools)));
+            let (stdin, stdout) = (std::io::stdin().lock(), std::io::stdout().lock());
+            match kelpie::shots::mcp::serve(Path::new(job), &shots, stdin, stdout) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("{e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         [role, project, id] if role == "relay-yes" => rule_trigger(project, &format!("{id} yes")),
         [role, project, params] if role == "relay-answer" => {
             relay_answer(Command::new("shep"), project, params)
         }
         _ => {
             eprintln!(
-                "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>",
+                "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie tools install\n       kelpie shots-mcp <tools> <job>\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>",
                 kelpie::lease::cli::USAGE
             );
             ExitCode::from(2)
+        }
+    }
+}
+
+// Kelpie's home is `KELPIE_HOME`, or `~/.kelpie`, as the runner reads it.
+fn install_tools() -> ExitCode {
+    let home = std::env::var_os("KELPIE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".kelpie")));
+    let Some(home) = home else {
+        eprintln!("HOME is not set");
+        return ExitCode::FAILURE;
+    };
+    let tools = Tools::under(&home);
+    match tools.install() {
+        Ok(()) => {
+            println!("installed kelpie's tools in {}", tools.dir().display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
         }
     }
 }

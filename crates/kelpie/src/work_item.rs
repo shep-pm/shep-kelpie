@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::board::WorkerModel;
 use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage, Verdict};
+use crate::shots::ShotsRecord;
 
 /// The work item in flight
 // wire format: changing this is a breaking change to the state file
@@ -54,6 +55,12 @@ pub struct WorkItem {
     /// leave them. A mismatch at the gate is a change kelpie did not make.
     #[serde(default)]
     pub known: Known,
+    /// Kelpie's last shots run, for a worktree with a launch file
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shots: Option<ShotsRecord>,
+    /// The pull request's shots comment, once posted
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shots_comment: Option<u64>,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
 }

@@ -8,7 +8,7 @@
 //! that ends on a question block parks the worker on a ruling.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -20,6 +20,7 @@ use super::ruling::park;
 use super::trigger::lock;
 use crate::pacer::Scope;
 use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session, Timestamp};
+use crate::preview::{self, McpFiles, WORKER_INSTRUCTIONS};
 use crate::profile::{INSTRUCTIONS, WorkerProfile};
 use crate::state::{ProjectState, Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CallRecord, CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
@@ -39,13 +40,14 @@ const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
 ///
 /// [`StateError`] when the turn's start or end, or a post, cannot be saved.
 pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
-    let (claude, reviewer, relay, alerts) = {
+    let (claude, reviewer, relay, alerts, shots) = {
         let runner = lock(runner);
         (
             Arc::clone(&runner.ports.claude),
             Arc::clone(&runner.ports.reviewer),
             Arc::clone(&runner.ports.relay),
             Arc::clone(&runner.ports.alerts),
+            Arc::clone(&runner.ports.shots),
         )
     };
     let due = lock(runner).alert_due();
@@ -77,6 +79,10 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
             Begin::Review(action) => {
                 let outcome = run_review_call(claude.as_ref(), reviewer.as_ref(), action);
                 return lock(runner).end_review(outcome);
+            }
+            Begin::Shots(job, head) => {
+                let run = shots.take(&job);
+                return lock(runner).end_shots(head, run);
             }
         }
     }
@@ -200,6 +206,7 @@ impl Runner {
             &item.build,
         )
         .map_err(|e| e.to_string())?;
+        let preview = preview::enabled(&item.worktree);
         let profile = WorkerProfile {
             worktree: &item.worktree,
             build: &item.build,
@@ -210,13 +217,24 @@ impl Runner {
             guard_hooks: &self.settings.worker.guard_hooks,
             allowed_domains: &self.settings.worker.allowed_domains,
             build_env: &self.settings.worker.build_env,
+            preview: preview.then_some(self.settings.preview.domains.as_slice()),
         };
         let folder = &self.paths.worker;
         let settings = folder.join("settings.json");
         let instructions = folder.join("instructions.md");
         let text = serde_json::to_string_pretty(&profile.settings()).expect("settings are JSON");
         write(folder, &settings, &text)?;
-        write(folder, &instructions, INSTRUCTIONS)?;
+        let mcp_config = if preview {
+            write(
+                folder,
+                &instructions,
+                &format!("{INSTRUCTIONS}{WORKER_INSTRUCTIONS}"),
+            )?;
+            Some(self.write_mcp_config(item)?)
+        } else {
+            write(folder, &instructions, INSTRUCTIONS)?;
+            None
+        };
         let prompt = match prompt {
             Some(prompt) => prompt,
             None => {
@@ -238,7 +256,37 @@ impl Runner {
             instructions: Some(instructions),
             prompt,
             timeout: Some(timeout),
+            mcp_config,
         })
+    }
+
+    // The worker's MCP servers: Playwright's, fenced to the preview's
+    // domains, and kelpie's shots tool with the job it runs.
+    fn write_mcp_config(&self, item: &WorkItem) -> Result<PathBuf, String> {
+        let folder = &self.paths.worker;
+        let (job, browser, mcp) = (
+            folder.join("shots-job.json"),
+            folder.join("playwright.json"),
+            folder.join("mcp.json"),
+        );
+        let shots = self.shots_job(item, self.paths.shots(item.issue));
+        let domains = &self.settings.preview.domains;
+        let json = |v: &serde_json::Value| serde_json::to_string_pretty(v).expect("config is JSON");
+        let job_text = serde_json::to_string_pretty(&shots).expect("the job is JSON");
+        write(folder, &job, &job_text)?;
+        write(
+            folder,
+            &browser,
+            &json(&preview::browser_config(&item.build, domains)),
+        )?;
+        let files = McpFiles {
+            tools: &self.paths.tools,
+            kelpie: &self.kelpie,
+            job: &job,
+            browser: &browser,
+        };
+        write(folder, &mcp, &json(&preview::mcp_config(files)))?;
+        Ok(mcp)
     }
 
     fn end_turn(

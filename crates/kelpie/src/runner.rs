@@ -30,6 +30,7 @@ mod question;
 mod report;
 mod review;
 mod ruling;
+mod shots;
 mod trigger;
 mod turn;
 
@@ -268,6 +269,8 @@ impl Runner {
             review_call: ReviewCallState::default(),
             coderabbit: CodeRabbitTally::default(),
             known: Known::default(),
+            shots: None,
+            shots_comment: None,
             calls: Vec::new(),
         });
         self.save(next).map_err(AddError::State)?;

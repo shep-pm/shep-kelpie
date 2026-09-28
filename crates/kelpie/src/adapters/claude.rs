@@ -68,6 +68,9 @@ fn argv(call: &ClaudeCall) -> Vec<OsString> {
     if call.role == Role::Worker {
         argv.extend(["--permission-mode".into(), "bypassPermissions".into()]);
     }
+    if let Some(config) = &call.mcp_config {
+        argv.extend(["--mcp-config".into(), config.into()]);
+    }
     match &call.session {
         Session::New(id) => {
             argv.extend(["--session-id".into(), id.0.as_str().into()]);
@@ -179,6 +182,7 @@ mod tests {
             instructions: Some(PathBuf::from("/k/worker/instructions.md")),
             prompt: "implement #6".into(),
             timeout: None,
+            mcp_config: None,
         }
     }
 

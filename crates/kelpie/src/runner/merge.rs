@@ -199,6 +199,16 @@ impl Runner {
         if let Err(e) = removed {
             return Ok(self.gate_failed(format!("cannot clean up: {e}")));
         }
+        let shots = self.paths.shots(item.issue);
+        if let Err(e) = std::fs::remove_dir_all(&shots)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            return Ok(self.gate_failed(format!(
+                "cannot remove {}: {}",
+                shots.display(),
+                e.kind()
+            )));
+        }
         let report = StepReport::Finished {
             issue: item.issue,
             pull_request: item.pull_request,

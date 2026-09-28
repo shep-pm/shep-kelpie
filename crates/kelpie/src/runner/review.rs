@@ -16,6 +16,7 @@ use std::path::Path;
 
 use super::Runner;
 use super::report::{Begin, ReviewCall, ReviewResult, StepReport};
+use super::shots::RoundShots;
 use crate::ports::{Claude, Finding, Reviewer, Severity, Verdict, parse_findings};
 use crate::state::{Fix, RulingKind, StateError};
 use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, ReviewerKind, Turn};
@@ -34,7 +35,7 @@ impl Runner {
         let number = item
             .pull_request
             .expect("review starts once a pull request is known");
-        let worktree = item.worktree.clone();
+        let (issue, worktree) = (item.issue, item.worktree.clone());
         let build = item.build.clone();
         let worker_folder = self.paths.worker.clone();
 
@@ -53,8 +54,15 @@ impl Runner {
                         }))
                     }
                     ReviewerKind::Claude => {
+                        let shots = match self.round_shots()? {
+                            RoundShots::Take(begin) => return Ok(begin),
+                            RoundShots::Failed(reason) => return Ok(self.gate_failed(reason)),
+                            RoundShots::Ready(shots) => shots,
+                        };
                         let model = self.settings.models.reviewer.clone();
-                        match calls::reviewer_call(&worktree, &worker_folder, &model) {
+                        let dir = self.paths.shots(issue);
+                        let shots = shots.as_ref().map(|run| calls::Screens { dir: &dir, run });
+                        match calls::reviewer_call(&worktree, &worker_folder, &model, shots) {
                             Ok(call) => {
                                 self.mark_review_call_running()?;
                                 Ok(Begin::Review(ReviewCall::ClaudeRound(call)))
@@ -70,7 +78,14 @@ impl Runner {
                 }
                 let finding = findings[verdicts.len()].clone();
                 let model = self.settings.models.judge.clone();
-                match calls::judge_call(&worktree, &worker_folder, &model, &finding) {
+                let shots = self.preview_on().then(|| self.paths.shots(issue));
+                match calls::judge_call(
+                    &worktree,
+                    &worker_folder,
+                    &model,
+                    &finding,
+                    shots.as_deref(),
+                ) {
                     Ok(call) => {
                         self.mark_review_call_running()?;
                         Ok(Begin::Review(ReviewCall::Judge(call)))

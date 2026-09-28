@@ -31,6 +31,9 @@ pub(crate) struct FakeForge {
     checks: Arc<Mutex<HashMap<String, Checks>>>,
     comments: Arc<Mutex<Vec<(u64, String)>>>,
     comments_down: Arc<AtomicBool>,
+    // A posted comment's id, and where it sits in `comments`
+    comment_ids: Arc<Mutex<Vec<(u64, usize)>>>,
+    edits: Arc<Mutex<Vec<u64>>>,
     merges_down: Arc<AtomicBool>,
     lagging: Arc<Mutex<HashMap<u64, String>>>,
     readied: Arc<Mutex<Vec<u64>>>,
@@ -66,6 +69,8 @@ impl FakeForge {
             checks: Arc::default(),
             comments: Arc::default(),
             comments_down: Arc::default(),
+            comment_ids: Arc::default(),
+            edits: Arc::default(),
             merges_down: Arc::default(),
             lagging: Arc::default(),
             readied: Arc::default(),
@@ -176,6 +181,11 @@ impl FakeForge {
     /// Every comment posted, oldest first, with its pull request
     pub(crate) fn comments(&self) -> Vec<(u64, String)> {
         self.comments.lock().unwrap().clone()
+    }
+
+    /// Every comment edit, by the comment's id, oldest first
+    pub(crate) fn edits(&self) -> Vec<u64> {
+        self.edits.lock().unwrap().clone()
     }
 
     /// Every pull request marked ready, in order
@@ -312,6 +322,28 @@ impl Forge for FakeForge {
             .lock()
             .unwrap()
             .push((number, body.to_owned()));
+        Ok(())
+    }
+
+    fn post_comment(&self, repo: &ForgeSlug, number: u64, body: &str) -> Result<u64, ForgeError> {
+        self.comment(repo, number, body)?;
+        let at = self.comments.lock().unwrap().len() - 1;
+        let mut ids = self.comment_ids.lock().unwrap();
+        let id = 9000 + ids.len() as u64;
+        ids.push((id, at));
+        Ok(id)
+    }
+
+    fn edit_comment(&self, _repo: &ForgeSlug, id: u64, body: &str) -> Result<(), ForgeError> {
+        if self.comments_down.load(Ordering::SeqCst) {
+            return Err(ForgeError::Failed("comments are down".into()));
+        }
+        let ids = self.comment_ids.lock().unwrap();
+        let Some(&(_, at)) = ids.iter().find(|(i, _)| *i == id) else {
+            return Err(ForgeError::Failed(format!("no comment {id}")));
+        };
+        self.comments.lock().unwrap()[at].1 = body.to_owned();
+        self.edits.lock().unwrap().push(id);
         Ok(())
     }
 

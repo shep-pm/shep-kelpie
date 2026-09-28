@@ -3,9 +3,9 @@
 //! One TOML file per project, read once when the runner starts. Unknown keys
 //! are refused, so a misspelt or malformed setting stops the runner with a
 //! message naming it. Every setting is required except the ones added after
-//! the first build (`worker.allowed_domains`, `worker.build_env` and
-//! `worker.turn_timeout`): a file written before them loads with the
-//! documented default, so an upgrade never breaks an existing project.
+//! the first build (`worker.allowed_domains`, `worker.build_env`,
+//! `worker.turn_timeout` and `[preview]`): a file written before them loads
+//! with the documented default, so an upgrade never breaks an existing project.
 //! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
@@ -15,6 +15,8 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+use crate::preview::Preview;
 
 /// Everything kelpie reads about one project
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -44,6 +46,9 @@ pub struct Settings {
     pub pacing: Pacing,
     /// What every worker is started with
     pub worker: Worker,
+    /// Showing a work item's UI, for a repo with a launch file
+    #[serde(default)]
+    pub preview: Preview,
 }
 
 /// Who decides a merge

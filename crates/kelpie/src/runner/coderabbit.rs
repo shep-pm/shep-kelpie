@@ -208,7 +208,7 @@ impl Runner {
         let item = self.item();
         let (worktree, folder) = (item.worktree.clone(), self.paths.worker.clone());
         let model = self.settings.models.judge.clone();
-        match calls::judge_call(&worktree, &folder, &model, &next.finding) {
+        match calls::judge_call(&worktree, &folder, &model, &next.finding, None) {
             Ok(call) => {
                 self.mark_review_call_running()?;
                 Ok(Begin::Review(ReviewCall::Judge(call)))

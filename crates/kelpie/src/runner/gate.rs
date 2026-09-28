@@ -82,6 +82,9 @@ impl Runner {
         if self.coderabbit_due() {
             return self.start_round(head);
         }
+        if let Some(begin) = self.shots_before_merge(number, &head)? {
+            return Ok(begin);
+        }
         self.raise(number, RulingKind::Merge { head })
     }
 
