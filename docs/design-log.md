@@ -155,6 +155,11 @@ Measured 2026-09-26 on Claude Code 2.1.283, gh 2.96 and bun 1.4.0, from a sandbo
 - Final fence, for every worker. Writable: the worktree, the build folder, the common git dir's `objects`, the worktree's own git dir, and the branch's ref, lock and reflog under both `refs/heads` and `refs/remotes/origin`. Denied inside the git dir: `config`, `hooks`, `info`, `modules`, `HEAD`, `index`, `packed-refs` and `refs/tags`. Domains: `github.com` and `api.github.com`. Also denied: the clone's `refs/heads/main`. Denied commands, besides merge, ready and the `review please` label: `gh api`, `gh auth`, a push naming `main` as `origin main`, `HEAD:main` or `refs/heads/main`, and a push carrying `--mirror`, `--all`, `--delete`, `-d`, `--force`, `-f` or a `+` refspec. Those are pattern rules over the command text, so a script can get past them; a token scoped to a worker's needs would be a real fence.
 - Per project, `worker.allowed_domains` adds domains (shep: `crates.io`, `index.crates.io`, `static.crates.io`; the playground: `registry.npmjs.org`), and `worker.build_env` points tool caches into the build folder (the playground: `BUN_INSTALL_CACHE_DIR`).
 
+### The qwen GPU lock
+
+- `qwen-review.sh` builds its GPU lock from `${TMPDIR:-/tmp}/qwen-review/gpu.lock`, so the lock's path depends on `TMPDIR`. An interactive Claude session gets the per-user temp folder as `TMPDIR` (`getconf DARWIN_USER_TEMP_DIR`). A runner under shep gets none, so it locked `/tmp` and its rounds ran on the GPU beside the sessions' rounds. Another session's model calls hit the 1800s timeout, seen on the playground on 2026-09-28.
+- Every qwen round now runs with `TMPDIR` set to the folder the dog's own lock is under (`lease::gpu::temp_dir`: `TMPDIR` if set, else `getconf DARWIN_USER_TEMP_DIR`, else `/tmp`), so kelpie and the sessions queue on one lock.
+
 ### The relay
 
 Measured 2026-09-26 in the experiments repo.
