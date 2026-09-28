@@ -8,8 +8,10 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::adapters::{ClaudeCli, Curl, Gh, QwenReviewer, RelayCli, ShepLeases, SystemClock};
@@ -25,6 +27,11 @@ const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 // A look is at most two `gh` calls, 120 an hour, against GitHub's 5,000 an
 // hour for the maintainer's login.
 const BOARD_POLL: Duration = Duration::from_secs(60);
+
+// How long a stopping runner waits for its worker's thread to end. Shep
+// allows 8s after the shutdown message, and 3s of stop ladder and 2s of
+// flush follow, so 2s leaves a second spare.
+const JOIN_BOUND: Duration = Duration::from_secs(2);
 
 /// Runs `project`'s runner until the shepherd stops it
 ///
@@ -94,14 +101,7 @@ fn serve(project: &str) -> Result<(), String> {
         reply.to_string()
     });
     let (stop, stopped) = mpsc::channel();
-    let worker = Arc::clone(&runner);
-    let died = stop.clone();
-    std::thread::spawn(move || {
-        // A runner with no worker thread would answer triggers and never work.
-        if catch_unwind(AssertUnwindSafe(|| work(&worker, &woken))).is_err() {
-            let _ = died.send(Stop::WorkerDied);
-        }
-    });
+    let worker = Worker::spawn(Arc::clone(&runner), wake.clone(), woken, stop.clone());
     shepherd.on_shutdown(move || {
         let _ = stop.send(Stop::Shutdown);
     });
@@ -111,8 +111,16 @@ fn serve(project: &str) -> Result<(), String> {
     // either, the shepherd's stop signal ends the process instead. Exiting on
     // the message skips shep's stop ladder, so the worker is stopped here.
     let why = stopped.recv();
-    claude.stop();
-    reviewer.stop();
+    let let_go = worker.stop(JOIN_BOUND, || {
+        claude.stop();
+        reviewer.stop();
+    });
+    if !let_go {
+        eprintln!(
+            "the worker was still in a step {}s after the stop; its calls are ended under it",
+            JOIN_BOUND.as_secs()
+        );
+    }
     shepherd.flush(FLUSH_TIMEOUT).map_err(|e| e.to_string())?;
     match why {
         Ok(Stop::WorkerDied) => {
@@ -130,10 +138,65 @@ enum Stop {
     WorkerDied,
 }
 
+/// The thread that runs the worker's turns, and the means to stop it
+struct Worker {
+    stopping: Arc<AtomicBool>,
+    wake: Sender<()>,
+    // Disconnects when the thread ends, however it ends.
+    ended: Receiver<()>,
+    thread: JoinHandle<()>,
+}
+
+impl Worker {
+    /// Starts the thread, which tells `died` if it panics
+    fn spawn(
+        runner: Arc<Mutex<Runner>>,
+        wake: Sender<()>,
+        woken: Receiver<()>,
+        died: Sender<Stop>,
+    ) -> Self {
+        let stopping = Arc::new(AtomicBool::new(false));
+        let (ending, ended) = mpsc::channel::<()>();
+        let flag = Arc::clone(&stopping);
+        let thread = std::thread::spawn(move || {
+            let _ending = ending;
+            // A runner with no worker thread would answer triggers and never work.
+            if catch_unwind(AssertUnwindSafe(|| work(&runner, &woken, &flag))).is_err() {
+                let _ = died.send(Stop::WorkerDied);
+            }
+        });
+        Self {
+            stopping,
+            wake,
+            ended,
+            thread,
+        }
+    }
+
+    /// Asks the thread to stop, waits up to `bound` for it, then runs `stop_ports`
+    ///
+    /// A step in flight runs to its end first, so the ports stop only once
+    /// the worker has let go of them. Returns whether it let go in time.
+    fn stop(self, bound: Duration, stop_ports: impl FnOnce()) -> bool {
+        self.stopping.store(true, Ordering::SeqCst);
+        let _ = self.wake.send(());
+        let let_go = matches!(
+            self.ended.recv_timeout(bound),
+            Err(RecvTimeoutError::Disconnected)
+        );
+        if let_go {
+            // It has returned already, and caught its own panic.
+            let _ = self.thread.join();
+        }
+        stop_ports();
+        let_go
+    }
+}
+
 // Runs steps while there are any, then sleeps until a trigger or the next
 // look at the board. A turn cut short by a restart is resumed on the first pass.
-fn work(runner: &Mutex<Runner>, woken: &Receiver<()>) {
-    loop {
+fn work(runner: &Mutex<Runner>, woken: &Receiver<()>, stopping: &AtomicBool) {
+    while !stopping.load(Ordering::SeqCst) {
         match step(runner) {
             Ok(Some(report)) => {
                 let line = serde_json::to_string(&report).expect("a report serializes to JSON");
@@ -148,5 +211,130 @@ fn work(runner: &Mutex<Runner>, woken: &Receiver<()>) {
         if let Err(RecvTimeoutError::Disconnected) = woken.recv_timeout(BOARD_POLL) {
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::time::Instant;
+
+    use super::*;
+    use crate::ports::ReviewerError;
+    use crate::test::{Hold, Rig, Scripted, ScriptedRound};
+
+    // The worker is a real thread on real time, so every wait has this ceiling.
+    const PATIENCE: Duration = Duration::from_secs(10);
+
+    /// A worker whose first turn on issue 7 is held open by `hold`
+    fn in_a_turn(rig: &Rig, hold: &Hold) -> Worker {
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "start", None);
+        rig.ask(&runner, "add", Some("7"));
+        rig.claude.script([Scripted::Hold(hold.clone())]);
+        let worker = spawn(runner);
+        assert!(hold.entered(PATIENCE), "the worker's turn never began");
+        worker
+    }
+
+    fn spawn(runner: Mutex<Runner>) -> Worker {
+        let (wake, woken) = mpsc::channel();
+        let (died, _) = mpsc::channel();
+        Worker::spawn(Arc::new(runner), wake, woken, died)
+    }
+
+    fn eventually(what: &str, done: impl Fn() -> bool) {
+        let deadline = Instant::now() + PATIENCE;
+        while !done() {
+            assert!(Instant::now() < deadline, "never saw {what}");
+            std::thread::yield_now();
+        }
+    }
+
+    /// How many calls the state file records for the work item
+    fn saved_calls(state: &Path) -> usize {
+        let text = std::fs::read_to_string(state).unwrap();
+        let state: serde_json::Value = serde_json::from_str(&text).unwrap();
+        state["work_item"]["calls"].as_array().map_or(0, Vec::len)
+    }
+
+    #[test]
+    fn the_ports_stop_after_the_turn_in_flight_has_ended_and_been_saved() {
+        let rig = Rig::new("shep");
+        let hold = Hold::default();
+        let worker = in_a_turn(&rig, &hold);
+        let signalled = Arc::clone(&worker.stopping);
+        let at_stop = Arc::new(Mutex::new(None));
+        let stopping = std::thread::spawn({
+            let (hold, state, at_stop) = (hold.clone(), rig.paths().state, Arc::clone(&at_stop));
+            move || {
+                worker.stop(PATIENCE, || {
+                    *at_stop.lock().unwrap() = Some((hold.returned(), saved_calls(&state)));
+                })
+            }
+        });
+        // The turn ends only once the stop has been asked for.
+        eventually("the stop's signal", || signalled.load(Ordering::SeqCst));
+        hold.release();
+
+        assert!(
+            stopping.join().unwrap(),
+            "the worker did not let go in time"
+        );
+        assert_eq!(*at_stop.lock().unwrap(), Some((true, 1)));
+        assert_eq!(
+            rig.claude.all_calls().len(),
+            1,
+            "a step began after the stop"
+        );
+        assert!(
+            rig.reviewer.seen().is_empty(),
+            "a review began after the stop"
+        );
+    }
+
+    #[test]
+    fn a_turn_that_outlasts_the_bound_has_its_ports_stopped_under_it() {
+        let rig = Rig::new("shep");
+        let hold = Hold::default();
+        let worker = in_a_turn(&rig, &hold);
+        let at_stop = Arc::new(Mutex::new(None));
+
+        let started = Instant::now();
+        let let_go = worker.stop(Duration::from_millis(50), || {
+            *at_stop.lock().unwrap() = Some(hold.returned());
+            // Stopping the real ports ends a call in flight.
+            hold.release();
+        });
+
+        assert!(!let_go);
+        assert!(
+            started.elapsed() < PATIENCE,
+            "the stop waited past its bound"
+        );
+        assert_eq!(*at_stop.lock().unwrap(), Some(false));
+        assert!(hold.answered(PATIENCE));
+    }
+
+    #[test]
+    fn a_worker_waiting_for_its_next_look_lets_go_as_soon_as_it_is_asked() {
+        let rig = Rig::new("shep");
+        let hold = Hold::default();
+        let worker = in_a_turn(&rig, &hold);
+        // A failed review round is a step the worker waits after.
+        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+        let down = ReviewerError::Failed("the GPU is gone".into());
+        rig.reviewer.script([ScriptedRound::Fail(down)]);
+        hold.release();
+        eventually("the review round", || !rig.reviewer.seen().is_empty());
+
+        let started = Instant::now();
+        let let_go = worker.stop(PATIENCE, || {});
+
+        assert!(let_go);
+        assert!(
+            started.elapsed() < PATIENCE,
+            "the worker slept through the stop"
+        );
     }
 }
