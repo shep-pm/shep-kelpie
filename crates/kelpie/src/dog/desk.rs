@@ -47,7 +47,7 @@ impl Desk {
     /// A desk with an empty book, reading the GPU lock at `gpu`
     pub fn new(clock: Box<dyn Clock>, gpu: GpuLock) -> Self {
         let mut book = LeaseBook::new(clock);
-        book.open_window(LeaseKind::coderabbit());
+        book.add_window(LeaseKind::coderabbit());
         Self {
             book,
             gpu,

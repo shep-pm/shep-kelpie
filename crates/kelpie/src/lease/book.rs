@@ -91,11 +91,14 @@ impl LeaseBook {
     }
 
     /// Gives `kind` a review window, so it is granted only while that is open
-    pub fn open_window(&mut self, kind: LeaseKind) {
+    pub fn add_window(&mut self, kind: LeaseKind) {
         self.leases.entry(kind).or_default().window = Some(Window::default());
     }
 
     /// Takes the quota a review footer states for `kind`'s window
+    ///
+    /// This and the other window changes return every grant a
+    /// [`LeaseBook::tick`] makes afterwards, whatever its kind.
     pub fn quota(&mut self, kind: &LeaseKind, per_hour: u32) -> Vec<Grant> {
         self.with_window(kind, |window, _| window.quota(per_hour))
     }
@@ -437,7 +440,7 @@ mod tests {
     fn windowed() -> (LeaseBook, FakeClock, LeaseKind) {
         let (mut book, clock) = book();
         let kind = LeaseKind::try_from("reviews").unwrap();
-        book.open_window(kind.clone());
+        book.add_window(kind.clone());
         (book, clock, kind)
     }
 
