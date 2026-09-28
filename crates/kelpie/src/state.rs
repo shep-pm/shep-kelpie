@@ -209,6 +209,13 @@ pub enum Resume {
     /// The loop had already reached this round and stage; once answered,
     /// resume exactly there
     Review(Review),
+    /// A CodeRabbit round's fix turn from `head`; once answered, the fix
+    /// ends back in that round, which checks it moved the head
+    #[serde(rename = "coderabbit-fix")]
+    CodeRabbitFix {
+        /// The head the findings are on
+        head: String,
+    },
 }
 
 /// A lease the dog granted this project
@@ -621,6 +628,19 @@ mod tests {
                 head: None,
             }
         );
+    }
+
+    #[test]
+    fn a_question_during_a_coderabbit_fix_is_pinned() {
+        let resume = Resume::CodeRabbitFix {
+            head: "c0ffee".into(),
+        };
+        let saved = serde_json::to_value(&resume).unwrap();
+        assert_eq!(
+            saved,
+            serde_json::json!({ "state": "coderabbit-fix", "head": "c0ffee" })
+        );
+        assert_eq!(serde_json::from_value::<Resume>(saved).unwrap(), resume);
     }
 
     #[test]

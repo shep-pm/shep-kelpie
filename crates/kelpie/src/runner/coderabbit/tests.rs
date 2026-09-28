@@ -493,6 +493,40 @@ fn a_fix_turn_that_pushes_nothing_parks_instead_of_opening_round_two() {
 }
 
 #[test]
+fn a_question_during_a_fix_turn_resumes_that_round() {
+    let (rig, runner, head) = summoned("koji");
+    hold_a_finding(&rig, &runner, &head, "Name the flag.");
+    let rounds = rig.reviewer.seen().len();
+    rig.claude.script([Scripted::Say(
+        "<kelpie-question>\nShould it be `--dry-run`?\n</kelpie-question>\n",
+    )]);
+    let Some(StepReport::Asked { id, .. }) = step(&runner).unwrap() else {
+        panic!("the fix turn's question raised no ruling");
+    };
+    step(&runner).unwrap(); // the alert
+
+    rig.ask(
+        &runner,
+        "rule",
+        Some(&format!("{id} answer yes, --dry-run")),
+    );
+    rig.claude.script([Scripted::Say("Done, I think.")]);
+    step(&runner).unwrap(); // the answered fix turn ends with nothing pushed
+    let Some(StepReport::Ruling { question, .. }) = step(&runner).unwrap() else {
+        panic!("the answered fix was not checked for a push");
+    };
+    assert!(
+        question.contains("CodeRabbit round 1 without pushing"),
+        "{question}"
+    );
+    assert_eq!(
+        rig.reviewer.seen().len(),
+        rounds,
+        "the qwen-review loop never restarted"
+    );
+}
+
+#[test]
 fn a_fix_past_the_cap_that_pushes_nothing_still_parks() {
     // A few changed lines under the default divisor: a cap of two rounds.
     let (rig, runner, head) = summoned("rotom");

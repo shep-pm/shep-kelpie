@@ -314,9 +314,10 @@ impl Runner {
                     Some(text) => {
                         let resume = match &item.phase {
                             Phase::Review(review) => Resume::Review(review.clone()),
-                            Phase::Implement | Phase::CodeRabbit(_) if pull_request.is_some() => {
-                                Resume::ReviewFirst
+                            Phase::CodeRabbit(CodeRabbitStage::Fixing { head }) => {
+                                Resume::CodeRabbitFix { head: head.clone() }
                             }
+                            Phase::Implement if pull_request.is_some() => Resume::ReviewFirst,
                             _ => Resume::Nothing,
                         };
                         let kind = RulingKind::Question {

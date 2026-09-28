@@ -203,6 +203,7 @@ fn decide(id: u64, answer: Answer, ruling: Ruling, now: Timestamp) -> Result<Mov
                 Resume::Nothing => (Phase::Implement, None),
                 Resume::ReviewFirst => (Phase::Implement, Some(Phase::Review(Review::first()))),
                 Resume::Review(review) => (Phase::Review(review), None),
+                Resume::CodeRabbitFix { head } => (fixing(Some(head)), None),
             };
             return Ok(Move::Turn {
                 prompt: answer_prompt(&text),
