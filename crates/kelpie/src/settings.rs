@@ -459,6 +459,17 @@ mod tests {
     }
 
     #[test]
+    fn a_file_with_no_preview_table_captures_the_root() {
+        assert!(
+            !EXAMPLE.contains("\n[preview]"),
+            "the example sets no preview"
+        );
+        let s = parse(EXAMPLE).unwrap();
+        assert_eq!(s.preview.routes.len(), 1);
+        assert_eq!(s.preview.routes[0].as_str(), "/");
+    }
+
+    #[test]
     fn a_missing_setting_is_named() {
         let text = EXAMPLE.replace("forge = \"shep-pm/shep\"\n", "");
         assert!(parse_err(&text).contains("missing field `forge`"));

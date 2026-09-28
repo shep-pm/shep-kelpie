@@ -22,7 +22,7 @@ pub const LAUNCH_FILE: &str = ".claude/launch.json";
 pub const LOCAL_HOSTS: [&str; 2] = ["localhost", "127.0.0.1"];
 
 /// The `[preview]` table of a project's settings. Every key is optional.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preview {
     /// The launch configuration kelpie starts, by name. The file's first
@@ -36,6 +36,18 @@ pub struct Preview {
     /// Domains the app calls, open to its dev server and its browser alike
     #[serde(default)]
     pub domains: Vec<NonBlank>,
+}
+
+// A settings file with no `[preview]` table at all takes this, not a derived
+// default, so it captures `/` as an empty table does.
+impl Default for Preview {
+    fn default() -> Self {
+        Self {
+            configuration: None,
+            routes: default_routes(),
+            domains: Vec::new(),
+        }
+    }
 }
 
 fn default_routes() -> Vec<Route> {
