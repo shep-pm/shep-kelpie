@@ -70,7 +70,7 @@ So kelpie moves the control room's rules (gates, locks, rate windows) into code,
 
 ## Budget
 
-- Kelpie paces against the account's weekly window. The daily allowance is what is left of the week divided by the days until reset (100/7 on a fresh week), spread over the hours set at kickoff (default 8, about 1.8% an hour). It covers all account usage, the maintainer's own sessions included.
+- Kelpie paces against the account's weekly window. The daily allowance is what is left of the week divided by the days until reset (100/7 on a fresh week), one figure for the day, not spread by the hour. The hours set at kickoff (default 8, about 1.8% an hour) only produce the per-hour figure `status` shows. It covers all account usage, the maintainer's own sessions included.
 - The 5-hour window is a local limiter: pause near 50% until it resets.
 - Built in #15. A day is 24 hours counted from the weekly reset, so the days until reset are always whole. The allowance is fixed when the day begins (what the week had left, over the days left) and kept in the state file, so a restart keeps it. Today's spend is the week's utilization now minus its utilization at that read, the maintainer's own sessions included. Once spend reaches the allowance, no work item is dispatched and the one in flight continues. The kickoff hours only divide the allowance into the per-hour figure `status` shows.
 - A maintainer's `add` is not held by the daily allowance, the way it already skips the board's screening. The 5-hour window still holds its turns.
