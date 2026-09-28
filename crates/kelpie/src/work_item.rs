@@ -18,8 +18,12 @@ pub struct WorkItem {
     pub issue: u64,
     /// The issue's title when it was added
     pub title: String,
-    /// Its branch, cut from `origin/main`
+    /// Its branch, cut from `origin/main` unless it is a rework
     pub branch: String,
+    /// Whether it reworks a pull request kelpie opened before, from the
+    /// maintainer's review. Its branch starts as `origin` holds it.
+    #[serde(default)]
+    pub rework: bool,
     /// Its worktree
     pub worktree: PathBuf,
     /// Its worker's build folder
@@ -40,8 +44,8 @@ pub struct WorkItem {
     pub red_head: Option<String>,
     /// What phase to force once the turn now running ends, overriding the
     /// ordinary rule that a known pull request goes straight to CI. Set by
-    /// a ruling's answer that needs the qwen-review loop to run again;
-    /// cleared once applied.
+    /// a ruling's answer that needs the qwen-review loop to run again, or by
+    /// a rework; cleared once applied.
     #[serde(default)]
     pub resume: Option<Phase>,
     /// Whether a review round or judge call is in flight
@@ -407,6 +411,7 @@ mod tests {
                 "issue": 42,
                 "title": "Add a thing",
                 "branch": "kelpie/42",
+                "rework": false,
                 "worktree": "/k/wt/shep/42",
                 "build": "/k/targets/shep/42",
                 "worker": { "model": "claude-opus-5-5", "effort": "medium" },
@@ -602,6 +607,14 @@ mod tests {
         fields.remove("red_head");
         let item: WorkItem = serde_json::from_value(value).unwrap();
         assert_eq!((item.phase, item.red_head), (Phase::Implement, None));
+    }
+
+    #[test]
+    fn a_work_item_saved_before_reworks_is_not_one() {
+        let mut value = serde_json::to_value(a_work_item()).unwrap();
+        value.as_object_mut().unwrap().remove("rework");
+        let item: WorkItem = serde_json::from_value(value).unwrap();
+        assert!(!item.rework);
     }
 
     #[test]

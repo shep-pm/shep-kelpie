@@ -10,7 +10,10 @@ use std::sync::{Arc, Mutex};
 use super::coderabbit::FakeCodeRabbit;
 use crate::board::{Blocker, OpenPullRequest, READY, ReadyIssue};
 use crate::coderabbit::Activity;
-use crate::ports::{Checks, Forge, ForgeError, Issue, PullRequest, PullRequestState, Visibility};
+use crate::ports::{
+    Checks, Forge, ForgeError, Issue, MaintainerReview, PullRequest, PullRequestState, Reviewed,
+    Visibility,
+};
 use crate::settings::ForgeSlug;
 
 /// A forge whose repo is public and whose every issue exists, unless a
@@ -35,6 +38,7 @@ pub(crate) struct FakeForge {
     lagging: Arc<Mutex<HashMap<u64, String>>>,
     readied: Arc<Mutex<Vec<u64>>>,
     merges: Arc<Mutex<Vec<(u64, String)>>>,
+    reviews: Arc<Mutex<HashMap<u64, MaintainerReview>>>,
     /// Pull requests' labels, and what CodeRabbit posts
     pub(crate) coderabbit: FakeCodeRabbit,
 }
@@ -46,6 +50,7 @@ struct FakePullRequest {
     branch: String,
     state: PullRequestState,
     draft: bool,
+    from_fork: bool,
 }
 
 impl FakeForge {
@@ -70,6 +75,7 @@ impl FakeForge {
             lagging: Arc::default(),
             readied: Arc::default(),
             merges: Arc::default(),
+            reviews: Arc::default(),
             coderabbit: FakeCodeRabbit::default(),
         }
     }
@@ -132,6 +138,7 @@ impl FakeForge {
             branch: head.to_owned(),
             state: PullRequestState::Open,
             draft: true,
+            from_fork: false,
         };
         self.pull_requests.lock().unwrap().insert(number, pr);
     }
@@ -151,6 +158,19 @@ impl FakeForge {
     pub(crate) fn ready_pull_request(&self, number: u64) {
         let mut prs = self.pull_requests.lock().unwrap();
         prs.get_mut(&number).expect("an opened pull request").draft = false;
+    }
+
+    /// Makes pull request `number` come from a fork's branch
+    pub(crate) fn set_from_fork(&self, number: u64) {
+        let mut prs = self.pull_requests.lock().unwrap();
+        prs.get_mut(&number)
+            .expect("an opened pull request")
+            .from_fork = true;
+    }
+
+    /// Leaves `review` on pull request `number`, as the maintainer would
+    pub(crate) fn review(&self, number: u64, review: MaintainerReview) {
+        self.reviews.lock().unwrap().insert(number, review);
     }
 
     /// Makes posting comments fail, or work again
@@ -300,6 +320,18 @@ impl Forge for FakeForge {
             checks: checks.unwrap_or(Checks::Pending),
             head,
             labels: self.coderabbit.labels(number),
+        })
+    }
+
+    fn reviewed(&self, _repo: &ForgeSlug, number: u64) -> Result<Reviewed, ForgeError> {
+        let pr = self.opened(number)?;
+        Ok(Reviewed {
+            state: pr.state,
+            branch: pr.branch,
+            from_fork: pr.from_fork,
+            draft: pr.draft,
+            labels: self.coderabbit.labels(number),
+            review: self.reviews.lock().unwrap().get(&number).cloned(),
         })
     }
 

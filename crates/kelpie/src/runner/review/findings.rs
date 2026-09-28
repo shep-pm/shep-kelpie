@@ -167,18 +167,6 @@ mod tests {
         (rig, runner)
     }
 
-    // Whether a `Read(...)` deny rule covers `path`, written as the rule writes it
-    fn denies(rule: &str, path: &str) -> bool {
-        let Some(glob) = rule.strip_prefix("Read(").and_then(|r| r.strip_suffix(')')) else {
-            return false;
-        };
-        match glob.strip_suffix("**") {
-            Some(folder) if !folder.contains('*') => path.starts_with(folder),
-            None if !glob.contains('*') => path == glob,
-            _ => panic!("teach this test to read {rule}"),
-        }
-    }
-
     #[test]
     fn the_worker_can_read_its_findings_under_the_settings_it_runs_with() {
         let (rig, runner) = findings_sent();
@@ -190,33 +178,7 @@ mod tests {
 
         let text = std::fs::read_to_string(path).unwrap();
         assert!(text.contains("the flag is misnamed"), "{text}");
-        assert!(
-            !path.starts_with(rig.worktree_7()),
-            "a commit would carry {path:?}"
-        );
-        // The worker's rules name kelpie's home as `~/.kelpie`.
-        let home = rig.home.path().join("kelpie");
-        let as_written = format!("~/.kelpie/{}", path.strip_prefix(&home).unwrap().display());
-        let as_is = path.to_str().unwrap();
-        for rule in strings(&fix.settings["permissions"]["deny"]) {
-            assert!(
-                !denies(rule, &as_written) && !denies(rule, as_is),
-                "{rule} hides {as_written}"
-            );
-        }
-        let deny_read = &fix.settings["sandbox"]["filesystem"]["denyRead"];
-        for folder in deny_read.as_array().into_iter().flatten() {
-            let folder = folder.as_str().unwrap();
-            assert!(!path.starts_with(folder), "the sandbox hides it: {folder}");
-        }
-    }
-
-    fn strings(v: &serde_json::Value) -> Vec<&str> {
-        v.as_array()
-            .unwrap()
-            .iter()
-            .map(|s| s.as_str().unwrap())
-            .collect()
+        rig.assert_worker_reads(&fix, path);
     }
 
     #[test]

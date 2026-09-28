@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
 
 use crate::board::{LabelError, Skip, WorkerModel, worker_override};
 use crate::pacer::Assessment;
-use crate::ports::{ForgeError, Ports, Timestamp, Visibility};
+use crate::ports::{ForgeError, Ports, SessionId, Timestamp, Visibility};
 use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
@@ -29,6 +29,7 @@ mod paths;
 mod question;
 mod report;
 mod review;
+mod rework;
 mod ruling;
 mod trigger;
 mod turn;
@@ -37,6 +38,7 @@ pub use merge::DropError;
 pub use pace::PacerStatus;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
 pub use report::StepReport;
+pub use rework::ReworkError;
 pub use ruling::{Answer, RuleError};
 pub use trigger::GateError;
 pub use trigger::{ACTIONS, Status, WorkItemStatus, answer, is_no_or_answer};
@@ -252,13 +254,28 @@ impl Runner {
             .unwrap_or_else(|| WorkerModel::from(&self.settings.models.worker));
         let session = new_session_id().map_err(|e| AddError::Session(e.to_string()))?;
         let mut next = self.state.clone();
-        next.work_item = Some(WorkItem {
+        next.work_item = Some(self.fresh(issue, found.title, worker.clone(), session));
+        self.save(next).map_err(AddError::State)?;
+        Ok(worker)
+    }
+
+    // A work item on `kelpie/<issue>` whose first turn is due, with nothing
+    // recorded yet
+    fn fresh(
+        &self,
+        issue: u64,
+        title: String,
+        worker: WorkerModel,
+        session: SessionId,
+    ) -> WorkItem {
+        WorkItem {
             issue,
-            title: found.title,
+            title,
             branch: format!("kelpie/{issue}"),
+            rework: false,
             worktree: self.paths.worktree(issue),
             build: self.paths.build(issue),
-            worker: worker.clone(),
+            worker,
             session,
             turn: Turn::Due,
             pull_request: None,
@@ -269,9 +286,7 @@ impl Runner {
             coderabbit: CodeRabbitTally::default(),
             known: Known::default(),
             calls: Vec::new(),
-        });
-        self.save(next).map_err(AddError::State)?;
-        Ok(worker)
+        }
     }
 
     fn set_run(&mut self, run: RunState) -> Result<(), StateError> {

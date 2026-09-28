@@ -2,6 +2,7 @@
 
 mod board;
 pub(crate) mod coderabbit;
+mod review;
 
 use std::process::{Command, Stdio};
 
@@ -9,7 +10,9 @@ use serde::Deserialize;
 
 use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::coderabbit::Activity;
-use crate::ports::{Checks, Forge, ForgeError, Issue, PullRequest, PullRequestState, Visibility};
+use crate::ports::{
+    Checks, Forge, ForgeError, Issue, PullRequest, PullRequestState, Reviewed, Visibility,
+};
 use crate::settings::ForgeSlug;
 
 /// GitHub, through the `gh` command line
@@ -59,6 +62,10 @@ impl Forge for Gh {
             "--json",
             "state,isDraft,headRefOid,statusCheckRollup,labels",
         ])?)
+    }
+
+    fn reviewed(&self, repo: &ForgeSlug, number: u64) -> Result<Reviewed, ForgeError> {
+        review::reviewed(repo, number)
     }
 
     fn comment(&self, repo: &ForgeSlug, number: u64, body: &str) -> Result<(), ForgeError> {
@@ -171,6 +178,15 @@ struct Label {
     name: String,
 }
 
+fn pull_request_state(state: &str, stdout: &[u8]) -> Result<PullRequestState, ForgeError> {
+    match state {
+        "OPEN" => Ok(PullRequestState::Open),
+        "MERGED" => Ok(PullRequestState::Merged),
+        "CLOSED" => Ok(PullRequestState::Closed),
+        _ => Err(unreadable(stdout)),
+    }
+}
+
 fn parse_pull_request(stdout: &[u8]) -> Result<PullRequest, ForgeError> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -183,14 +199,8 @@ fn parse_pull_request(stdout: &[u8]) -> Result<PullRequest, ForgeError> {
         labels: Vec<Label>,
     }
     let view: View = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
-    let state = match view.state.as_str() {
-        "OPEN" => PullRequestState::Open,
-        "MERGED" => PullRequestState::Merged,
-        "CLOSED" => PullRequestState::Closed,
-        _ => return Err(unreadable(stdout)),
-    };
     Ok(PullRequest {
-        state,
+        state: pull_request_state(&view.state, stdout)?,
         draft: view.is_draft,
         head: view.head_ref_oid,
         checks: checks(&view.status_check_rollup),
