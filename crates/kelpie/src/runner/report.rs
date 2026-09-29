@@ -259,7 +259,7 @@ pub enum StepReport {
         /// The ruling's id
         id: u64,
     },
-    /// A ruling could not be posted to the webhook, and is tried again later
+    /// A ruling could not be sent, and is tried again later
     AlertFailed {
         /// The ruling's id
         id: u64,
@@ -268,7 +268,7 @@ pub enum StepReport {
         /// When the post is tried again at the earliest
         retry_at: Timestamp,
     },
-    /// The notice of an automatic merge was posted to the webhook
+    /// The notice of an automatic merge was sent to the webhook, or the relay where the webhook is off
     Noticed {
         /// The work item's issue
         issue: u64,
@@ -319,6 +319,16 @@ pub enum StepReport {
     },
     /// Kelpie put the `review please` label on, holding the CodeRabbit lease
     Summoned {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The head the summon is for
+        head: String,
+    },
+    /// CodeRabbit gave no sign of the summon in fifteen minutes, so kelpie
+    /// sent it once more, in the same round
+    SummonedAgain {
         /// The work item's issue
         issue: u64,
         /// Its pull request

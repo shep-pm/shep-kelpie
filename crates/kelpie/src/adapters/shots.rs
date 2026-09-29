@@ -63,6 +63,7 @@ impl ShotsCli {
 
     fn run(&self, job: &ShotsJob) -> Result<ShotsRun, String> {
         let launch = job.launch.clone()?;
+        let dir = launch.dir(&job.worktree)?;
         for tool in [self.tools.sandbox(), self.tools.playwright_cli()] {
             if !tool.is_file() {
                 return Err(format!(
@@ -86,7 +87,7 @@ impl ShotsCli {
         }
         fs::create_dir_all(&job.out).map_err(|e| format!("cannot make the shots folder: {e}"))?;
         let log = job.out.join("dev-server.log");
-        let server = self.start_server(job, &launch, &log)?;
+        let server = self.start_server(job, &launch, &dir, &log)?;
         // Kept while the server runs, so a kelpie that did not see it end can.
         let recorded = &job.server_pid;
         if let Some(pid) = self.processes.pid(server) {
@@ -102,7 +103,13 @@ impl ShotsCli {
         Ok(run)
     }
 
-    fn start_server(&self, job: &ShotsJob, launch: &Launch, log: &Path) -> Result<u64, String> {
+    fn start_server(
+        &self,
+        job: &ShotsJob,
+        launch: &Launch,
+        dir: &Path,
+        log: &Path,
+    ) -> Result<u64, String> {
         let settings = job.out.join("sandbox.json");
         let text = serde_json::to_string_pretty(&sandbox(job)).expect("settings are JSON");
         fs::write(&settings, text)
@@ -121,7 +128,7 @@ impl ShotsCli {
             .arg("--")
             .arg(&launch.runtime_executable)
             .args(&launch.runtime_args)
-            .current_dir(&job.worktree)
+            .current_dir(dir)
             .envs(&job.env)
             // Node's fetch ignores the sandbox's proxy without it.
             .env("NODE_USE_ENV_PROXY", "1")
@@ -378,6 +385,7 @@ mod tests {
             runtime_executable: "true".into(),
             runtime_args: vec![],
             port,
+            cwd: None,
         }
     }
 
@@ -399,6 +407,25 @@ mod tests {
             run.failed.as_deref(),
             Some("cannot read .claude/launch.json: bad revision")
         );
+    }
+
+    #[test]
+    fn a_cwd_linked_out_of_the_worktree_fails_the_run_before_any_server_starts() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let mut job = job_in(dir.path(), &[]);
+        fs::create_dir(&job.worktree).unwrap();
+        std::os::unix::fs::symlink(outside.path(), job.worktree.join("web")).unwrap();
+        job.launch = Ok(Launch {
+            cwd: Some("web".into()),
+            ..launch(1)
+        });
+        let run = ShotsCli::new(Tools::under(dir.path())).take(&job);
+        assert_eq!(
+            run.failed.as_deref(),
+            Some(".claude/launch.json's cwd \"web\" leaves the worktree")
+        );
+        assert!(!dir.path().join("dev-server.log").exists());
     }
 
     fn job_in(out: &Path, domains: &[&str]) -> ShotsJob {
@@ -675,6 +702,7 @@ mod tests {
         let held = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = held.local_addr().unwrap().port();
         let worktree = dir.path().join("wt");
+        fs::create_dir(&worktree).unwrap();
         let tools = dir.path().join("tools");
         let cli = Tools::under(dir.path());
         for tool in [cli.sandbox(), cli.playwright_cli()] {
@@ -706,6 +734,7 @@ mod tests {
     fn missing_tools_say_how_to_install_them() {
         let dir = tempfile::tempdir().unwrap();
         let worktree = dir.path().join("wt");
+        fs::create_dir(&worktree).unwrap();
         let run = ShotsCli::new(Tools::under(dir.path())).take(&ShotsJob {
             worktree,
             build: dir.path().join("build"),

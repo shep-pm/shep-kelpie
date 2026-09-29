@@ -304,6 +304,21 @@ pub fn origin_head(repo: &Path, branch: &str) -> Result<String, WorktreeError> {
     git(repo, ["rev-parse", "--verify", "--quiet", &tracking])
 }
 
+/// Whether `head` changes any file under `dir` since it left `main`, or
+/// any file at all without a `dir`
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn changes_under(repo: &Path, head: &str, dir: Option<&str>) -> Result<bool, WorktreeError> {
+    let range = format!("origin/{BASE}...{head}");
+    let names = git(
+        repo,
+        ["diff", "--name-only", &range, "--", dir.unwrap_or(".")],
+    )?;
+    Ok(!names.is_empty())
+}
+
 /// The commit `worktree` has checked out
 ///
 /// # Errors

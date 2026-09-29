@@ -39,7 +39,7 @@ mod unfinished;
 const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
                         Carry on with the work item from where you left off.";
 
-/// Posts a ruling or a notice to the webhook, or runs the worker's next
+/// Posts a ruling or a notice, or runs the worker's next
 /// turn if one is due and the project is running
 ///
 /// Each open work item is stepped in turn, starting after the one that did
@@ -291,7 +291,7 @@ impl Runner {
         if let Some(reason) = self.claude_files_refusal() {
             return Err(reason);
         }
-        let previewed = preview::enabled(&self.settings.repo);
+        let previewed = self.previewed();
         let profile = WorkerProfile {
             worktree: &item.worktree,
             build: &item.build,

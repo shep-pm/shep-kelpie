@@ -157,7 +157,7 @@ mod tests {
 
     fn alert(text: &str) -> Alert {
         Alert {
-            title: "kelpie: hazels-lab ruling 3".into(),
+            title: "kelpie: webapp ruling 3".into(),
             text: text.into(),
         }
     }
@@ -238,7 +238,7 @@ mod tests {
             body,
             serde_json::json!({
                 "username": "kelpie",
-                "content": format!("kelpie: hazels-lab ruling 3\n{text}"),
+                "content": format!("kelpie: webapp ruling 3\n{text}"),
                 "allowed_mentions": { "parse": [] },
             })
         );
@@ -258,7 +258,7 @@ mod tests {
         );
         assert!(
             got.headers
-                .contains(&"Title: kelpie: hazels-lab ruling 3".to_owned()),
+                .contains(&"Title: kelpie: webapp ruling 3".to_owned()),
             "{got:?}"
         );
         assert_eq!(got.body, text);

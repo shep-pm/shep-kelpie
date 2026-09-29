@@ -21,8 +21,8 @@ repo = "~/.kelpie/repos/shep"
 forge = "shep-pm/shep"
 
 # `ask` raises a ruling before every merge. `auto` merges once every gate
-# passes and posts a notice to the webhook after; every other ruling still
-# asks.
+# passes and sends a notice after, to the webhook or the relay; every other
+# ruling still asks.
 merge_authority = "ask"
 
 # Whether the repo runs CI on pull requests. GitHub cannot tell a repo
@@ -127,11 +127,13 @@ event = "PreToolUse"
 matcher = "Bash"
 command = "node ~/.claude/hooks/git-gh-guard.js"
 
-# Only for a repo with `.claude/launch.json`, which shep has none of. Kelpie
-# starts that file's dev server to take its shots, and gives workers the
-# Playwright MCP server. `configuration` is the file's first when absent,
-# `routes` is ["/"], and `domains`, the hosts the app itself calls, is empty.
+# Off unless `enabled = true`, and then only for a repo with
+# `.claude/launch.json` on `main`. Kelpie starts that file's dev server to
+# take its shots, and gives workers the Playwright MCP server.
+# `configuration` is the file's first when absent, `routes` is ["/"], and
+# `domains`, the hosts the app itself calls, is empty.
 # [app.dogs.kelpie.preview]
+# enabled = true
 # configuration = "dev"
 # routes = ["/", "/events"]
 # domains = ["pokemon-go-api.github.io", "leekduck.com", "*.leekduck.com"]

@@ -12,7 +12,7 @@ use std::process::{Command, Stdio};
 use crate::board::{LabelError, Skip, WorkerModel, worker_override};
 use crate::channels::{Channel, Channels};
 use crate::pacer::Assessment;
-use crate::ports::{ForgeError, Ports, SessionId, Timestamp, Visibility};
+use crate::ports::{ForgeError, Guarded, Ports, SessionId, Timestamp, Visibility};
 use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
@@ -179,7 +179,7 @@ impl Runner {
     ///
     /// `settings` and `kelpie_settings` are as [`crate::settings::source::load`]
     /// read them. `kelpie` is the kelpie binary, which each worker's file-tool
-    /// hook runs.
+    /// hook runs. No forge post may name `home`, kelpie's home or the checkout.
     ///
     /// # Errors
     ///
@@ -189,9 +189,12 @@ impl Runner {
         settings: Settings,
         kelpie_settings: KelpieSettings,
         paths: &ProjectPaths,
+        home: &Path,
         kelpie: &Path,
-        ports: Ports,
+        mut ports: Ports,
     ) -> Result<Self, OpenError> {
+        let local = [home, paths.kelpie_home.as_path(), settings.repo.as_path()];
+        ports.forge = Box::new(Guarded::new(ports.forge, local));
         let (channels, webhook) = ruling_channels(&settings, kelpie_settings)?;
         check_repo(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;

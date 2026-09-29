@@ -90,6 +90,9 @@ pub struct WorkItemStatus<'a> {
     pub by_role: Spend,
     /// Its qwen rounds, which cost no money
     pub qwen: QwenTally,
+    /// Why kelpie's last shots run failed, when it did
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shots_failed: Option<&'a str>,
 }
 
 impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
@@ -110,6 +113,7 @@ impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
             cost_usd: item.cost().usd(),
             by_role: item.spend(),
             qwen: item.qwen,
+            shots_failed: item.shots.as_ref().and_then(|r| r.run.failed.as_deref()),
         }
     }
 }
@@ -533,7 +537,7 @@ mod tests {
 
     #[test]
     fn gate_sends_a_work_item_saved_before_the_gate_to_its_merge_ruling() {
-        let (rig, runner, head) = Rig::with_pull_request("hazels-lab");
+        let (rig, runner, head) = Rig::with_pull_request("webapp");
         drop(runner);
         let state = rig.paths().state;
         let text = std::fs::read_to_string(&state).unwrap();

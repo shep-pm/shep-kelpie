@@ -1,14 +1,14 @@
 //! Letting workers and reviewers see the UI a work item builds
 //!
-//! A project opts in by carrying `.claude/launch.json` on `main`, the file Claude
-//! Desktop's preview reads. Kelpie starts the named configuration's dev
-//! server itself for its shots, and gives each worker the Playwright MCP
-//! server. `[preview]` in the project's settings names the configuration,
-//! the default routes, and the domains the app really calls. Without the
-//! file, nothing here runs.
+//! A project opts in with `enabled = true` under `[preview]` in its settings,
+//! and carries `.claude/launch.json` on `main`, the file Claude Desktop's
+//! preview reads. Kelpie starts the named configuration's dev server itself
+//! for its shots, and gives each worker the Playwright MCP server. The table
+//! also names the configuration, the default routes, and the domains the app
+//! really calls. Without both, nothing here runs.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use serde::Deserialize;
@@ -25,6 +25,10 @@ pub const LOCAL_HOSTS: [&str; 2] = ["localhost", "127.0.0.1"];
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Preview {
+    /// Whether the project takes shots and gives its workers the preview's
+    /// tools. A launch file on `main` alone turns nothing on.
+    #[serde(default)]
+    pub enabled: bool,
     /// The launch configuration kelpie starts, by name. The file's first
     /// when absent.
     #[serde(default)]
@@ -43,6 +47,7 @@ pub struct Preview {
 impl Default for Preview {
     fn default() -> Self {
         Self {
+            enabled: false,
             configuration: None,
             routes: default_routes(),
             domains: Vec::new(),
@@ -129,6 +134,36 @@ pub struct Launch {
     pub runtime_args: Vec<String>,
     /// The local port the dev server answers on
     pub port: u16,
+    /// The folder the dev server starts in, relative to the worktree
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+}
+
+impl Launch {
+    /// The folder in `worktree` the dev server starts in: `cwd`, or the worktree
+    ///
+    /// Symlinks are resolved first, so a folder the worker swapped for a link
+    /// out of the worktree is refused too.
+    ///
+    /// # Errors
+    ///
+    /// Why the folder cannot be found, or that it lies outside `worktree`.
+    pub fn dir(&self, worktree: &Path) -> Result<PathBuf, String> {
+        let root = worktree
+            .canonicalize()
+            .map_err(|e| format!("cannot find the worktree: {e}"))?;
+        let Some(cwd) = &self.cwd else {
+            return Ok(root);
+        };
+        let dir = root
+            .join(cwd)
+            .canonicalize()
+            .map_err(|e| format!("cannot find {LAUNCH_FILE}'s cwd {cwd:?}: {e}"))?;
+        if !dir.starts_with(&root) {
+            return Err(LaunchError::Cwd(cwd.clone()).to_string());
+        }
+        Ok(dir)
+    }
 }
 
 /// Why a launch configuration could not be read
@@ -140,6 +175,8 @@ pub enum LaunchError {
     Parse(String),
     /// No configuration has the settings' name, or the file lists none
     Missing(Option<String>),
+    /// The configuration's `cwd` leaves the worktree
+    Cwd(String),
 }
 
 impl fmt::Display for LaunchError {
@@ -149,17 +186,18 @@ impl fmt::Display for LaunchError {
             Self::Parse(e) => write!(f, "cannot parse {LAUNCH_FILE}: {e}"),
             Self::Missing(Some(name)) => write!(f, "{LAUNCH_FILE} has no configuration {name:?}"),
             Self::Missing(None) => write!(f, "{LAUNCH_FILE} lists no configuration"),
+            Self::Cwd(cwd) => write!(f, "{LAUNCH_FILE}'s cwd {cwd:?} leaves the worktree"),
         }
     }
 }
 
 impl core::error::Error for LaunchError {}
 
-/// Whether `repo`'s `origin/main` carries a launch file, which turns the preview on
+/// Whether `repo`'s `origin/main` carries a launch file, which the preview needs
 ///
 /// Read from `main`, not the work item's branch, so a worker cannot widen
 /// its own sandbox by adding the file.
-pub fn enabled(repo: &Path) -> bool {
+pub fn launch_file_on_main(repo: &Path) -> bool {
     let spec = format!("origin/{}:{LAUNCH_FILE}", crate::worktree::BASE);
     Command::new("git")
         .arg("-C")
@@ -206,7 +244,16 @@ fn parse_launch(text: &str, name: Option<&str>) -> Result<Launch, LaunchError> {
         Some(name) => file.configurations.into_iter().find(|c| c.name == name),
         None => file.configurations.into_iter().next(),
     };
-    found.ok_or_else(|| LaunchError::Missing(name.map(str::to_owned)))
+    let found = found.ok_or_else(|| LaunchError::Missing(name.map(str::to_owned)))?;
+    if let Some(cwd) = &found.cwd {
+        let inside = Path::new(cwd)
+            .components()
+            .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+        if !inside {
+            return Err(LaunchError::Cwd(cwd.clone()));
+        }
+    }
+    Ok(found)
 }
 
 /// Chromium's `--host-resolver-rules`: every host fails to resolve but the
@@ -302,7 +349,7 @@ fn run(command: &mut Command) -> Result<(), String> {
     Ok(())
 }
 
-/// Appended to kelpie's instructions for a worker whose worktree has a launch file
+/// Appended to kelpie's instructions for a worker on a project with the preview on
 pub const WORKER_INSTRUCTIONS: &str = include_str!("preview/worker-instructions.md");
 
 /// Where one worker's MCP servers find what they run
@@ -375,6 +422,7 @@ mod tests {
         assert_eq!(preview.routes, [Route("/".into())]);
         assert_eq!(preview.domains, []);
         assert_eq!(preview.configuration, None);
+        assert!(!preview.enabled);
     }
 
     // The playground's own file, as Claude Desktop's preview reads it
@@ -403,6 +451,7 @@ mod tests {
                 runtime_executable: "bun".into(),
                 runtime_args: vec!["run".into(), "dev".into()],
                 port: 3000,
+                cwd: None,
             }
         );
         assert_eq!(
@@ -417,6 +466,45 @@ mod tests {
         );
     }
 
+    // shep's own file, whose dev server lives in `web/`
+    const SHEP: &str = r#"{
+        "configurations": [
+            { "name": "web", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 5173, "cwd": "web" }
+        ]
+    }"#;
+
+    #[test]
+    fn the_dev_server_starts_in_the_configurations_cwd() {
+        let worktree = worktree_with(SHEP);
+        std::fs::create_dir(worktree.path().join("web")).unwrap();
+        let launch = parse_launch(SHEP, None).unwrap();
+        let root = worktree.path().canonicalize().unwrap();
+        assert_eq!(launch.dir(worktree.path()), Ok(root.join("web")));
+        let no_cwd = parse_launch(PLAYGROUND, None).unwrap();
+        assert_eq!(no_cwd.dir(worktree.path()), Ok(root));
+    }
+
+    #[test]
+    fn a_cwd_that_leaves_the_worktree_is_refused() {
+        for cwd in ["..", "../other", "web/../..", "/tmp"] {
+            let text = SHEP.replace("\"cwd\": \"web\"", &format!("\"cwd\": {cwd:?}"));
+            assert_eq!(
+                parse_launch(&text, None),
+                Err(LaunchError::Cwd(cwd.to_owned())),
+                "{cwd}"
+            );
+        }
+        // A folder the worker swapped for a link out of the worktree
+        let worktree = worktree_with(SHEP);
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), worktree.path().join("web")).unwrap();
+        let launch = parse_launch(SHEP, None).unwrap();
+        assert_eq!(
+            launch.dir(worktree.path()),
+            Err(".claude/launch.json's cwd \"web\" leaves the worktree".to_owned())
+        );
+    }
+
     #[test]
     fn the_preview_instructions_never_mention_money_or_limits() {
         let text = WORKER_INSTRUCTIONS.to_lowercase();
@@ -428,7 +516,7 @@ mod tests {
     #[test]
     fn a_folder_that_is_not_a_repo_has_no_preview() {
         let dir = worktree_with(PLAYGROUND);
-        assert!(!enabled(dir.path()));
+        assert!(!launch_file_on_main(dir.path()));
     }
 
     #[test]
