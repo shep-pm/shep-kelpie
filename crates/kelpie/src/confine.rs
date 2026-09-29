@@ -4,12 +4,15 @@
 //! Claude Code's sandbox covers Bash only, and `bypassPermissions` lets the
 //! file tools write anywhere. The hook reads the tool call on stdin and
 //! refuses a write outside the folders, following symlinks, so a worker's
-//! Edit and Write stop where its Bash does. Anything unreadable is refused.
+//! Edit and Write stop where its Bash does. Claude Code's own files inside
+//! the folders are refused too. Anything unreadable is refused.
 
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
+
+use crate::fence;
 
 /// What the hook tells Claude Code
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,20 +43,38 @@ pub fn judge(input: impl Read, folders: &[PathBuf]) -> Verdict {
         return Verdict::Allow;
     };
     let target = call.cwd.join(target);
-    let inside = resolve(&target).is_some_and(|resolved| {
+    let canonical: Vec<PathBuf> = folders
+        .iter()
+        .map(|f| f.canonicalize().unwrap_or_else(|_| f.clone()))
+        .collect();
+    let within = |path: &Path| -> Vec<PathBuf> {
         folders
             .iter()
-            .any(|f| resolved.starts_with(f.canonicalize().unwrap_or_else(|_| f.clone())))
-    });
-    if inside {
-        return Verdict::Allow;
+            .chain(&canonical)
+            .filter_map(|f| path.strip_prefix(f).ok().map(Path::to_owned))
+            .collect()
+    };
+    let Some(resolved) = resolve(&target).filter(|r| canonical.iter().any(|f| r.starts_with(f)))
+    else {
+        let allowed: Vec<_> = folders.iter().map(|f| f.display().to_string()).collect();
+        return Verdict::Refuse(format!(
+            "{} is outside the folders this worker may write: {}",
+            target.display(),
+            allowed.join(", ")
+        ));
+    };
+    // As written and as resolved, so a link to or from `.claude` changes nothing.
+    if within(&target)
+        .iter()
+        .chain(&within(&resolved))
+        .any(|p| fence::fenced(p))
+    {
+        return Verdict::Refuse(format!(
+            "{} is Claude Code's own configuration, which only the maintainer changes",
+            target.display()
+        ));
     }
-    let allowed: Vec<_> = folders.iter().map(|f| f.display().to_string()).collect();
-    Verdict::Refuse(format!(
-        "{} is outside the folders this worker may write: {}",
-        target.display(),
-        allowed.join(", ")
-    ))
+    Verdict::Allow
 }
 
 // The deepest part of `path` that exists, with symlinks followed, and the
@@ -110,11 +131,15 @@ mod tests {
         }
 
         fn judge(&self, tool_input: serde_json::Value) -> Verdict {
+            self.judge_tool("Write", tool_input)
+        }
+
+        fn judge_tool(&self, tool: &str, tool_input: serde_json::Value) -> Verdict {
             let call = json!({
                 "session_id": "s",
                 "cwd": self.root.join("wt"),
                 "hook_event_name": "PreToolUse",
-                "tool_name": "Write",
+                "tool_name": tool,
                 "tool_input": tool_input,
             });
             judge(call.to_string().as_bytes(), &self.folders())
@@ -168,6 +193,56 @@ mod tests {
         let w = world();
         symlink(w.root.join("home"), w.root.join("wt/escape")).unwrap();
         let verdict = w.judge(json!({ "file_path": w.path("wt/escape/.zshrc") }));
+        assert!(matches!(verdict, Verdict::Refuse(_)), "{verdict:?}");
+    }
+
+    #[test]
+    fn claude_codes_own_files_are_refused_to_write_and_edit() {
+        let w = world();
+        std::fs::create_dir_all(w.root.join("wt/.claude")).unwrap();
+        for p in [
+            "wt/.claude/settings.local.json",
+            "wt/.claude/settings.json",
+            "wt/.claude/agents/escape.md",
+            "wt/.CLAUDE/settings.json",
+            "wt/src/.claude/skills/x/SKILL.md",
+            "wt/.mcp.json",
+            "wt/.MCP.json",
+            "wt/.mcp.j\u{17f}on",
+            "target/.claude/settings.json",
+        ] {
+            for tool in ["Write", "Edit"] {
+                let Verdict::Refuse(why) = w.judge_tool(tool, json!({ "file_path": w.path(p) }))
+                else {
+                    panic!("{tool} of {p} went ahead");
+                };
+                assert!(why.contains("Claude Code's own configuration"), "{why}");
+            }
+        }
+        assert_eq!(
+            w.judge(json!({ "file_path": ".claude/settings.local.json" })),
+            w.judge(json!({ "file_path": w.path("wt/.claude/settings.local.json") })),
+        );
+        for p in ["wt/src/mcp.json", "wt/src/.mcp.json", "wt/claude/notes.md"] {
+            assert_eq!(
+                w.judge(json!({ "file_path": w.path(p) })),
+                Verdict::Allow,
+                "{p}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_link_to_or_from_claudes_own_folder_is_refused() {
+        let w = world();
+        std::fs::create_dir_all(w.root.join("wt/.claude")).unwrap();
+        symlink(w.root.join("wt/.claude"), w.root.join("wt/cfg")).unwrap();
+        let verdict = w.judge(json!({ "file_path": w.path("wt/cfg/settings.local.json") }));
+        assert!(matches!(verdict, Verdict::Refuse(_)), "{verdict:?}");
+
+        let w = world();
+        symlink(w.root.join("wt/src"), w.root.join("wt/.claude")).unwrap();
+        let verdict = w.judge(json!({ "file_path": w.path("wt/.claude/settings.json") }));
         assert!(matches!(verdict, Verdict::Refuse(_)), "{verdict:?}");
     }
 

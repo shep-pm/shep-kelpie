@@ -15,6 +15,7 @@ use std::time::Duration;
 use super::Runner;
 use super::adopt;
 use super::alert::{post_due, tell_settled};
+use super::claude_files::Unchecked;
 use super::instructions;
 use super::question::asked;
 use super::report::{Begin, StepReport};
@@ -100,11 +101,21 @@ impl Runner {
             Phase::Review(review)
                 if matches!(review.stage, ReviewStage::Fixing { .. })
                     && !matches!(item.turn, Turn::Ended { .. }) => {}
-            Phase::Review(_) => return self.review_step(),
+            Phase::Review(_) => {
+                if let Some(parked) = self.fence_gate()? {
+                    return Ok(parked);
+                }
+                return self.review_step();
+            }
             Phase::CodeRabbit(CodeRabbitStage::Fixing { .. })
                 if !matches!(item.turn, Turn::Ended { .. }) => {}
             Phase::Ci { .. } => return self.check_ci(),
-            Phase::CodeRabbit(_) => return self.coderabbit_step(),
+            Phase::CodeRabbit(_) => {
+                if let Some(parked) = self.fence_gate()? {
+                    return Ok(parked);
+                }
+                return self.coderabbit_step();
+            }
             Phase::Ruling { .. } => return Ok(Begin::Idle),
             Phase::Merge { .. } => return self.merge(),
             Phase::Done { merged } => return self.finish(*merged),
@@ -115,6 +126,10 @@ impl Runner {
         let due = matches!(item.turn, Turn::Due | Turn::Next { .. });
         if let Some(begin) = self.pushed_by_someone_else()? {
             return Ok(begin);
+        }
+        // A rework can start on a branch that already changes them.
+        if due && let Some(parked) = self.claude_files_changed(Unchecked::CarryOn)? {
+            return Ok(parked);
         }
         if due && let Some(held) = self.pace(Scope::Turn)?.holds() {
             return Ok(held);
@@ -208,6 +223,9 @@ impl Runner {
             &item.build,
         )
         .map_err(|e| e.to_string())?;
+        if let Some(reason) = self.claude_files_refusal() {
+            return Err(reason);
+        }
         let profile = WorkerProfile {
             worktree: &item.worktree,
             build: &item.build,
@@ -364,7 +382,7 @@ impl Runner {
 
     // A ruling just raised is posted as a comment on its pull request, if it
     // has one; only these three reports carry a ruling and need the outcome.
-    fn fill_comment_failed(&self, report: &mut StepReport) {
+    pub(super) fn fill_comment_failed(&self, report: &mut StepReport) {
         match report {
             StepReport::Asked {
                 pull_request,
@@ -435,7 +453,12 @@ fn timed_out(project: &str, next: &mut ProjectState) -> StepReport {
 // Marks the turn failed and parks the work item on a ruling carrying why,
 // keeping the turn as it stood so a yes can put it back. `comment_failed` is
 // filled in afterwards, once the ruling has actually been posted.
-fn failed(project: &str, next: &mut ProjectState, at: Timestamp, reason: String) -> StepReport {
+pub(super) fn failed(
+    project: &str,
+    next: &mut ProjectState,
+    at: Timestamp,
+    reason: String,
+) -> StepReport {
     let item = next
         .work_item
         .as_mut()

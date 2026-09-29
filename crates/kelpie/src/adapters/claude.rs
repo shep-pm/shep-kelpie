@@ -48,8 +48,9 @@ impl Claude for ClaudeCli {
     }
 }
 
-// `--setting-sources project,local` keeps the project's CLAUDE.md and skills
-// and drops the maintainer's own hooks, plugins and skills.
+// `--setting-sources project` keeps the project's CLAUDE.md and skills and
+// drops the maintainer's own hooks, plugins and skills. It also drops the
+// worktree's `settings.local.json`, which nothing kelpie runs needs.
 fn argv(call: &ClaudeCall) -> Vec<OsString> {
     let mut argv: Vec<OsString> = vec![
         "-p".into(),
@@ -59,7 +60,7 @@ fn argv(call: &ClaudeCall) -> Vec<OsString> {
         "--effort".into(),
         call.effort.as_str().into(),
         "--setting-sources".into(),
-        "project,local".into(),
+        "project".into(),
         "--settings".into(),
         call.settings.clone().into(),
         "--output-format".into(),
@@ -201,7 +202,7 @@ mod tests {
                 "--effort",
                 "medium",
                 "--setting-sources",
-                "project,local",
+                "project",
                 "--settings",
                 "/k/worker/settings.json",
                 "--output-format",

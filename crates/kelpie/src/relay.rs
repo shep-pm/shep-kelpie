@@ -114,6 +114,7 @@ impl Wants {
             | RulingKind::CodeRabbitSilent { .. }
             | RulingKind::TurnTimeout { .. }
             | RulingKind::TurnFailed { .. }
+            | RulingKind::ClaudeFiles { .. }
             | RulingKind::ForeignChange { .. } => Self::YesOrNo,
         }
     }

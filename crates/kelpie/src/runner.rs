@@ -21,6 +21,7 @@ use crate::work_item::{
 
 mod adopt;
 mod alert;
+mod claude_files;
 mod coderabbit;
 mod dispatch;
 mod gate;
@@ -308,6 +309,7 @@ impl Runner {
             review_call: ReviewCallState::default(),
             coderabbit: CodeRabbitTally::default(),
             known: Known::default(),
+            claude_files_accepted: None,
             qwen: QwenTally::default(),
             merge_refused: false,
             merge_tried: None,
