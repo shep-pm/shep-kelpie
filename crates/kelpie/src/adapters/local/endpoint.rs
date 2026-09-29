@@ -163,7 +163,12 @@ impl LocalReviewer {
                 String::from_utf8_lossy(&output.stderr).trim()
             )));
         }
-        let body = std::fs::read_to_string(reply).unwrap_or_default();
+        // No file means a reply with no body, since the old one was removed.
+        let body = match std::fs::read_to_string(reply) {
+            Ok(body) => body,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(failed(reply, "read", &e)),
+        };
         let status = String::from_utf8_lossy(&output.stdout);
         if !status.trim().starts_with('2') {
             return Err(ReviewerError::Failed(format!(
