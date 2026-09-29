@@ -309,7 +309,7 @@ Measured 2026-09-28 and 2026-09-29 on kelpie-scratch (shep-pm/kelpie-scratch, pu
 - The webhook (ntfy) delivered the alerts for ruling 1 (21:06Z) and ruling 2 (21:31Z) to the maintainer's phone, confirmed by the maintainer.
 - Cost by role: before run 2's merge, `status` showed 2 calls, all the worker's, since Claude review rounds and judge calls were not recorded. Filed as #70. Run 4's `status` before its merge did show it: worker 1 call, review 1 call, judge 0 calls, and one qwen round of 1131 s, mostly the GPU queue.
 - CodeRabbit's refusal path (#12) ran live in run 3. The hour counted from the hand comment's summon at 22:04:28Z. Kelpie took the label off at 23:05:28Z and summoned again at 23:05:36Z. It read the same refusal, whose quoted time (23:04:44Z) was already past (`summon-refused` at 23:05:39Z), and summoned a third time at 23:05:46Z, which landed. That cost one wasted label toggle from re-reading a stale refusal. CodeRabbit reviewed at 23:10:57Z with one thread, the judge did not hold it (low), and one round satisfied it.
-- At 19:16 local on 2026-09-28, kelpie's 0.10.1 shepherd was replaced by a 0.8.2 one (`~/.cargo/bin/shep`, first on `PATH`) on the same home, and the old shepherd's children survived as orphans: a second hazels-lab runner and a second dispatcher. The likely path is `kelpie relay-yes` and `kelpie relay-answer` running bare `shep` from `PATH`, which since #64 carry kelpie's `SHEP_HOME`. The orphans were killed, and the shepherd stayed on 0.8.2 until #77 landed. Filed as #77.
+- Kelpie's 0.10.1 shepherd was replaced by a 0.8.2 one (`~/.cargo/bin/shep`, first on `PATH`) on the same home twice on 2026-09-28, at 19:16 and again at 21:01 local, and the old shepherd's children survived as orphans: a second hazels-lab runner and a second dispatcher. The second is proven from the relay's own transcript. Kelpie was not on the relay's `PATH`, so `kelpie relay-yes` failed with command not found. The relay improvised `shep trigger` with the 0.8.2 shep, got a version-skew error that said "Run: shep daemon reload", and ran it, which re-executed the older binary and orphaned the runners. The first takeover most likely went the same way. Each time the orphans were killed and the shepherd was restarted on 0.10.1 by hand. Filed as #77 (the relay answers over the shepherd's socket) and #80 (the relay is held to its two kelpie commands by absolute path, and everything else is refused).
 
 ### The shep surface kelpie leans on
 
@@ -360,8 +360,8 @@ The model to fit: one session's cache reads grow with the square of its length. 
 
 ### Other checks
 
-- Claude Code's sandbox with cargo, which writes to `~/.cargo`. A warm cache passes (see Worker profile and sandbox). A cold cache waits for the hands-on run.
-- Whether removing `review please` after a review stops a later push from spending the next window.
+- Claude Code's sandbox with cargo, which writes to `~/.cargo`. A warm cache passes (see Worker profile and sandbox). A cold cache passes too: settled by #17's hands-on run, see The first hands-on run.
+- Whether removing `review please` after a review stops a later push from spending the next window: it does, settled by the same run.
 
 ## Waiting on the tests
 
