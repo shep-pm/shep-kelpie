@@ -6,7 +6,7 @@ set -eu
 
 status=0
 
-paths=$(git grep -noE '/Users/[A-Za-z]+' -- . ':!scripts/check-private.sh' | grep -v ':/Users/me$' || true)
+paths=$(git grep -noE '/Users/[A-Za-z0-9_-]+' -- . ':!scripts/check-private.sh' | grep -v ':/Users/me$' || true)
 if [ -n "$paths" ]; then
     echo "home folder path other than /Users/me:"
     echo "$paths"
