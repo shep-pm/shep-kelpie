@@ -1,9 +1,11 @@
-//! Kelpie's shots of a work item with a launch file
+//! Kelpie's shots of a work item, for a project with the preview on
 //!
 //! A run is taken outside the runner's lock, like a review call, of the head
 //! on `origin`: before each Claude review round, and before the merge ruling.
 //! The merge ruling's run goes on the pull request's shots comment first.
-//! A run that fails is reported and kept, so it never holds a gate.
+//! A head that changes nothing under the launch configuration's `cwd` gets none.
+//! A run that fails is reported and kept, so it never holds a gate. It never
+//! goes on the pull request: the merge ruling or notice says it failed.
 
 use std::path::PathBuf;
 
@@ -16,6 +18,7 @@ use crate::settings::NonBlank;
 use crate::shots::{SERVER_PID, ShotsJob, ShotsRecord, ShotsRun, named_routes, publish, routes};
 use crate::state::StateError;
 use crate::work_item::{ReviewCallState, WorkItem};
+use crate::worktree;
 
 #[cfg(test)]
 mod tests;
@@ -30,14 +33,30 @@ const GONE: &str = "HTTP 404";
 pub(super) enum RoundShots {
     /// A run of the head is due first
     Take(Begin),
-    /// Kelpie's run of the head, or none without a launch file
+    /// Kelpie's run of the head, or none with the preview off or nothing to see
     Ready(Option<ShotsRun>),
 }
 
 impl Runner {
-    /// Whether the project's `main` has a launch file, with a work item in flight
+    /// Whether the settings turn the preview on and `main` has a launch file
+    pub(super) fn previewed(&self) -> bool {
+        self.settings.preview.enabled && preview::launch_file_on_main(&self.settings.repo)
+    }
+
+    /// Whether the preview is on, with a work item in flight
     pub(super) fn preview_on(&self) -> bool {
-        self.current().is_some() && preview::enabled(&self.settings.repo)
+        self.current().is_some() && self.previewed()
+    }
+
+    // Whether `head` changes anything under the launch configuration's `cwd`.
+    // A file or diff kelpie cannot read says yes, so the run says why.
+    fn touches_preview(&self, head: &str) -> bool {
+        let preview = &self.settings.preview;
+        let config = preview.configuration.as_ref().map(NonBlank::as_str);
+        let Ok(launch) = preview::launch(&self.settings.repo, config) else {
+            return true;
+        };
+        worktree::changes_under(&self.settings.repo, head, launch.cwd.as_deref()).unwrap_or(true)
     }
 
     /// The job for a run into `out`, on the settings' routes and the worker's
@@ -95,6 +114,9 @@ impl Runner {
                 return Ok(RoundShots::Ready(Some(ShotsRun::failed(why))));
             }
         };
+        if !self.touches_preview(&head) {
+            return Ok(RoundShots::Ready(None));
+        }
         if let Some(begin) = self.shots_due(&head)? {
             return Ok(RoundShots::Take(begin));
         }
@@ -102,6 +124,12 @@ impl Runner {
         Ok(RoundShots::Ready(
             item.shots.as_ref().map(|r| r.run.clone()),
         ))
+    }
+
+    /// Whether kelpie's run of `head` failed, so its shots are not on the pull request
+    pub(super) fn shots_failed(&self, head: &str) -> bool {
+        let record = self.current().and_then(|item| item.shots.as_ref());
+        record.is_some_and(|r| r.head == head && r.run.failed.is_some())
     }
 
     /// Keeps a run of `head` on the work item
@@ -137,7 +165,7 @@ impl Runner {
         number: u64,
         head: &str,
     ) -> Result<Option<Begin>, StateError> {
-        if !self.preview_on() {
+        if !self.preview_on() || !self.touches_preview(head) {
             return Ok(None);
         }
         if let Some(begin) = self.shots_due(head)? {
@@ -146,7 +174,8 @@ impl Runner {
         let item = self.current().expect("checked above");
         let record = item.shots.as_ref().expect("a run of this head");
         // A post that failed does not hold the ruling; `retry_shots` tries again.
-        if record.posted || record.retry_at.is_some() {
+        // A failed run is the ruling's to mention, never the pull request's.
+        if record.posted || record.retry_at.is_some() || record.run.failed.is_some() {
             return Ok(None);
         }
         self.post_shots(number)
@@ -200,13 +229,19 @@ impl Runner {
             },
             None => self.ports.forge.post_comment(forge, number, &body),
         };
+        // A body naming a local folder would be refused again, so the run
+        // counts as failed: the ruling says so, and nothing retries.
+        let refused = matches!(posted, Err(ForgeError::LocalPath));
         let posted = posted.map_err(|e| failures.push(e.to_string())).ok();
         let done = posted.is_some() && failures.is_empty();
         let retry_at = Timestamp(self.ports.clock.now().0 + SHOTS_RETRY);
         self.update(|item| {
             if let Some(shots) = item.shots.as_mut() {
                 shots.posted = done;
-                shots.retry_at = (!done).then_some(retry_at);
+                shots.retry_at = (!done && !refused).then_some(retry_at);
+                if refused {
+                    shots.run.failed = Some(ForgeError::LocalPath.to_string());
+                }
             }
             item.shots_comment = posted.or(item.shots_comment);
         })?;

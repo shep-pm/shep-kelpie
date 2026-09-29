@@ -291,7 +291,7 @@ impl Runner {
         if let Some(reason) = self.claude_files_refusal() {
             return Err(reason);
         }
-        let previewed = preview::enabled(&self.settings.repo);
+        let previewed = self.previewed();
         let profile = WorkerProfile {
             worktree: &item.worktree,
             build: &item.build,

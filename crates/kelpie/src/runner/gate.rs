@@ -132,7 +132,8 @@ impl Runner {
             item.known.labels.retain(|l| l != READY && l != HUMAN);
             item.known.labels.push(HUMAN.to_owned());
         })?;
-        self.raise(number, RulingKind::Merge { head })
+        let shots_failed = self.shots_failed(&head);
+        self.raise(number, RulingKind::Merge { head, shots_failed })
     }
 
     // A worker that pushed nothing after its last red run would get the

@@ -176,6 +176,9 @@ pub struct Notice {
     pub pull_request: u64,
     /// The head it merged at
     pub head: String,
+    /// Whether kelpie's shots of that head failed, so none were on the pull request
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shots_failed: bool,
 }
 
 /// What raised a ruling. A no's note, or an answer, always goes to the worker.
@@ -187,6 +190,9 @@ pub enum RulingKind {
     Merge {
         /// The head the question is about
         head: String,
+        /// Whether kelpie's shots of that head failed, so none are on the pull request
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        shots_failed: bool,
     },
     /// Kelpie could not rebase the branch onto `main`. A yes looks again.
     Rebase {

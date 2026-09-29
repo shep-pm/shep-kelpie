@@ -106,8 +106,16 @@ fn serve(project: &str) -> Result<(), String> {
         eprintln!("{notice}");
     }
     let (settings, kelpie_settings) = (loaded.settings, loaded.kelpie);
-    let runner = Runner::open(project, settings, kelpie_settings, &paths, &kelpie, ports)
-        .map_err(|e| e.to_string())?;
+    let runner = Runner::open(
+        project,
+        settings,
+        kelpie_settings,
+        &paths,
+        &home,
+        &kelpie,
+        ports,
+    )
+    .map_err(|e| e.to_string())?;
 
     if !shepherd.is_active() {
         return Err("no shepherd channel: run it under shep with `channel = true`".into());
