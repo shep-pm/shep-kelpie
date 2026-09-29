@@ -4,6 +4,7 @@ use std::time::Duration;
 use serde_json::json;
 
 use super::*;
+use crate::coderabbit::LABEL;
 use crate::ports::{Checks, PullRequestState, Session};
 use crate::runner::{StepReport, step};
 use crate::settings::Effort;

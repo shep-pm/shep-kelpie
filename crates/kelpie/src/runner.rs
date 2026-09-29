@@ -23,6 +23,7 @@ use crate::work_item::{
 mod adopt;
 mod alert;
 mod claude_files;
+#[cfg(test)]
 mod coderabbit;
 mod dispatch;
 mod gate;
@@ -34,6 +35,7 @@ mod question;
 mod report;
 mod reread;
 mod review;
+mod review_bot;
 mod rework;
 mod ruling;
 #[cfg(test)]

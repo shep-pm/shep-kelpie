@@ -363,7 +363,7 @@ pub struct LeaseHeld {
 pub enum Resource {
     /// The GPU the qwen-review loop runs on
     Gpu,
-    /// The CodeRabbit review window
+    /// The review bot's window, which is CodeRabbit's
     Coderabbit,
 }
 

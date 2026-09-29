@@ -10,7 +10,7 @@ use std::path::Path;
 
 use super::{Forge, ForgeError, Issue, PullRequest, Reviewed, Visibility};
 use crate::board::{OpenPullRequest, ReadyIssue};
-use crate::coderabbit::Activity;
+use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
 
 /// A forge that refuses to post any text naming a local folder
@@ -110,8 +110,13 @@ impl Forge for Guarded {
         self.forge.set_label(repo, number, label, on)
     }
 
-    fn coderabbit(&self, repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError> {
-        self.forge.coderabbit(repo, number)
+    fn review_bot(
+        &self,
+        repo: &ForgeSlug,
+        number: u64,
+        login: Login<'_>,
+    ) -> Result<Activity, ForgeError> {
+        self.forge.review_bot(repo, number, login)
     }
 
     fn resolve_thread(&self, repo: &ForgeSlug, thread: &str) -> Result<(), ForgeError> {

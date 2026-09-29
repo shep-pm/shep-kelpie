@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::coderabbit::{Activity, Comment, Review, Status, Thread};
 use crate::ports::{ForgeError, Timestamp};
+use crate::review_bot::{Activity, Comment, Review, Status, Thread};
 
 /// Labels on pull requests, CodeRabbit's activity on them, and every
 /// label change and resolved thread, in order
@@ -61,6 +61,15 @@ impl FakeCodeRabbit {
                 line: Some(1),
                 body: finding_body(title),
             }));
+    }
+
+    /// Posts `review` on pull request `number` with `threads`, in whatever
+    /// shape the bot a test stands in for posts them
+    pub(crate) fn post(&self, number: u64, review: Review, threads: &[Thread]) {
+        let mut activity = self.activity.lock().unwrap();
+        let seen = activity.entry(number).or_default();
+        seen.reviews.push(review);
+        seen.threads.extend_from_slice(threads);
     }
 
     /// Refuses a summon on pull request `number` at `at`, quoting `minutes`

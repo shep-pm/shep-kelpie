@@ -15,9 +15,9 @@ use serde::{Deserialize, Serialize};
 #[cfg(doc)]
 use crate::board::READY;
 use crate::board::{OpenPullRequest, ReadyIssue};
-use crate::coderabbit::Activity;
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
+use crate::review_bot::{Activity, Login, Profile};
 use crate::settings::{Effort, ForgeSlug, LocalRound};
 use crate::shots::{ShotsJob, ShotsRun};
 use crate::webhook::Webhook;
@@ -145,12 +145,17 @@ pub trait Forge: Send {
         on: bool,
     ) -> Result<(), ForgeError>;
 
-    /// What CodeRabbit has posted on pull request `number`
+    /// What the review bot `login` has posted on pull request `number`
     ///
     /// # Errors
     ///
     /// [`ForgeError`] when the forge cannot be asked or its answer read.
-    fn coderabbit(&self, repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError>;
+    fn review_bot(
+        &self,
+        repo: &ForgeSlug,
+        number: u64,
+        login: Login<'_>,
+    ) -> Result<Activity, ForgeError>;
 
     /// Resolves review thread `thread`
     ///
@@ -829,6 +834,8 @@ pub struct Ports {
     pub meter: Box<dyn Meter>,
     /// The local round's runner, shared so a round runs without holding the runner
     pub reviewer: Arc<dyn Reviewer>,
+    /// The pull request reviewer a review bot round summons
+    pub review_bot: Arc<dyn Profile>,
     /// The maintainer's relay session, sent every ruling alongside the webhook
     pub relay: Arc<dyn Relay>,
     /// The maintainer's webhook, shared so a post runs without holding the runner

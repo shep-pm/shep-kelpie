@@ -191,7 +191,7 @@ impl Runner {
                 if let Some(parked) = self.fence_gate()? {
                     return Ok(parked);
                 }
-                return self.coderabbit_step();
+                return self.review_bot_step();
             }
             Phase::Ruling { .. } => return self.retry_shots(),
             Phase::Merge { .. } => return self.merge(),

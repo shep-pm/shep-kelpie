@@ -1,4 +1,4 @@
-//! How many CodeRabbit rounds a pull request gets: ceil(changed / divisor)
+//! How many review bot rounds a pull request gets: ceil(changed / divisor)
 //! + 1, where changed is added plus removed lines outside generated files
 
 use std::num::NonZeroU32;
