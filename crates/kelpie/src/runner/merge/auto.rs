@@ -261,6 +261,46 @@ fn a_merge_the_forge_refuses_is_caught_up_once_then_parks_and_a_yes_looks_again(
 }
 
 #[test]
+fn a_merge_that_lands_though_the_forge_answers_an_error_still_gets_its_notice() {
+    let (rig, runner, head) = Rig::with_pull_request("golbat");
+    let runner = under_auto(&rig, runner);
+    rig.forge.set_checks(&head, Checks::Passed);
+    rig.verdict(&runner);
+    rig.clock.advance(CHECKS_SETTLE);
+    rig.forge.set_merge_answers_lost(true);
+    assert!(merged(step(&runner).unwrap()));
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Noticed {
+            issue: 7,
+            pull_request: 71,
+        })
+    );
+    assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
+}
+
+#[test]
+fn a_merge_a_restart_hid_still_gets_its_notice() {
+    let (rig, runner, head) = Rig::with_pull_request("xilriws");
+    let runner = under_auto(&rig, runner);
+    rig.forge.set_checks(&head, Checks::Passed);
+    rig.verdict(&runner);
+    rig.clock.advance(CHECKS_SETTLE);
+    // The merge landed, and the runner stopped before it could save that.
+    rig.forge.set_state(71, PullRequestState::Merged);
+    drop(runner);
+    let runner = rig.open().unwrap();
+    assert!(merged(step(&runner).unwrap()));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Noticed {
+            pull_request: 71,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn a_label_added_outside_kelpie_still_parks_on_a_ruling() {
     let (rig, runner, head) = Rig::with_pull_request("shep");
     let runner = under_auto(&rig, runner);

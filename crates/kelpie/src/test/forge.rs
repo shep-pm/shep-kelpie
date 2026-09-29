@@ -35,6 +35,7 @@ pub(crate) struct FakeForge {
     comments: Arc<Mutex<Vec<(u64, String)>>>,
     comments_down: Arc<AtomicBool>,
     merges_down: Arc<AtomicBool>,
+    merge_answers_lost: Arc<AtomicBool>,
     labels_down: Arc<AtomicBool>,
     unreadable: Arc<Mutex<HashSet<u64>>>,
     viewer_reads: Arc<AtomicUsize>,
@@ -81,6 +82,7 @@ impl FakeForge {
             comments: Arc::default(),
             comments_down: Arc::default(),
             merges_down: Arc::default(),
+            merge_answers_lost: Arc::default(),
             labels_down: Arc::default(),
             unreadable: Arc::default(),
             viewer_reads: Arc::default(),
@@ -240,6 +242,11 @@ impl FakeForge {
     /// Makes merging fail, or work again
     pub(crate) fn set_merges_down(&self, down: bool) {
         self.merges_down.store(down, Ordering::SeqCst);
+    }
+
+    /// Makes a merge land but answer an error, as a timed-out call would
+    pub(crate) fn set_merge_answers_lost(&self, lost: bool) {
+        self.merge_answers_lost.store(lost, Ordering::SeqCst);
     }
 
     /// Makes changing a pull request's labels fail, or work again
@@ -473,6 +480,9 @@ impl Forge for FakeForge {
         }
         self.merges.lock().unwrap().push((number, head.to_owned()));
         self.set_state(number, PullRequestState::Merged);
+        if self.merge_answers_lost.load(Ordering::SeqCst) {
+            return Err(ForgeError::Failed("the answer was lost".into()));
+        }
         Ok(())
     }
 }

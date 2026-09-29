@@ -114,9 +114,11 @@ impl Runner {
         };
         match pr.state {
             PullRequestState::Open => {}
+            // Kelpie's own merge at this head, when a restart or a lost
+            // answer hid it, still gets its notice under `auto`.
             PullRequestState::Merged => {
-                self.update(|item| item.phase = Phase::Done { merged: true })?;
-                return self.finish(true);
+                let notice = auto && pr.head == head;
+                return self.merged(issue, number, head, notice);
             }
             PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
         }
@@ -182,17 +184,30 @@ impl Runner {
         }
         if let Err(e) = self.ports.forge.merge(&repo, number, &head) {
             let reason = format!("cannot merge #{number}: {e}");
-            if auto {
+            if !auto {
+                return Ok(self.gate_failed(reason));
+            }
+            let landed = self.ports.forge.pull_request(&repo, number);
+            if !landed.is_ok_and(|pr| pr.state == PullRequestState::Merged && pr.head == head) {
                 return self.refused(issue, number, head, reason);
             }
-            return Ok(self.gate_failed(reason));
         }
-        // The notice is saved with the merge, so it goes out exactly once.
+        self.merged(issue, number, head, auto)
+    }
+
+    // The notice is saved with the merge, so it goes out exactly once.
+    fn merged(
+        &mut self,
+        issue: u64,
+        number: u64,
+        head: String,
+        notice: bool,
+    ) -> Result<Begin, StateError> {
         let mut next = self.state.clone();
         if let Some(item) = next.work_item.as_mut() {
             item.phase = Phase::Done { merged: true };
         }
-        if auto {
+        if notice {
             next.notices.push(Notice {
                 issue,
                 pull_request: number,
