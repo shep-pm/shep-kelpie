@@ -1,6 +1,8 @@
+use crate::ports::Checks;
 use crate::ports::{Clock, Timestamp};
-use crate::runner::{OpenError, StepReport, step};
+use crate::runner::{CHECKS_SETTLE, OpenError, Runner, StepReport, step};
 use crate::test::Rig;
+use std::sync::Mutex;
 
 const NO_WEBHOOK: &str = "";
 
@@ -134,4 +136,90 @@ fn the_webhook_is_required_only_when_rulings_go_to_it() {
         .expect_err("no file to hold the webhook")
         .to_string();
     assert!(err.contains("`webhook` table"), "{err}");
+}
+
+// A project under `auto` with `channels` chosen and its pull request's
+// merge just landed, so the next step is the merge's notice
+fn just_merged(channels: &str, no_webhook: bool) -> (Rig, Mutex<Runner>, String) {
+    let (rig, runner, head) = Rig::with_pull_request_set("shep", |rig| {
+        rig.relay.set_up(true);
+        rig.merge_auto();
+        rig.set_ruling_channels(channels);
+        if no_webhook {
+            rig.set_kelpie_settings(NO_WEBHOOK);
+        }
+    });
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::MarkedReady { .. })
+    ));
+    rig.clock.advance(CHECKS_SETTLE);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Finished { merged: true, .. })
+    ));
+    (rig, runner, head)
+}
+
+#[test]
+fn relay_only_sends_the_merge_notice_to_the_relay() {
+    let (rig, runner, head) = just_merged(r#"["relay"]"#, true);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Noticed {
+            issue: 7,
+            pull_request: 71,
+        })
+    );
+    assert!(rig.alerts.posts().is_empty());
+    let [(text, _, _)] = rig.relay.sent().try_into().unwrap();
+    assert_eq!(
+        text,
+        format!(
+            "[kelpie]\nproject=shep notice=merged\n\n\
+             Pull request #71 for issue #7 merged into main at {} on shep, \
+             every gate passed. Nothing to answer.",
+            &head[..7]
+        )
+    );
+    assert_eq!(rig.relay.clears(), 0, "a notice never ends a question");
+    assert_eq!(step(&runner).unwrap(), None, "and is sent once");
+    assert_eq!(rig.relay.sent().len(), 1);
+}
+
+#[test]
+fn a_notice_the_relay_cannot_take_is_kept_and_tried_again() {
+    let (rig, runner, _) = just_merged(r#"["relay"]"#, true);
+    rig.relay.set_up(false);
+    let offset = rig.clock.now().0 - Rig::EPOCH;
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::NoticeFailed {
+            issue: 7,
+            pull_request: 71,
+            reason: "cannot reach the relay: the rig's relay is down".into(),
+            retry_at: Timestamp(Rig::EPOCH + offset + 60),
+        })
+    );
+    rig.relay.set_up(true);
+    rig.clock.advance(60);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Noticed { .. })
+    ));
+    assert_eq!(rig.relay.sent().len(), 1);
+}
+
+#[test]
+fn both_channels_keep_the_merge_notice_on_the_webhook_alone() {
+    let (rig, runner, _) = just_merged(r#"["webhook", "relay"]"#, false);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Noticed { .. })
+    ));
+    let [(webhook, alert)] = rig.alerts.posts().try_into().unwrap();
+    assert_eq!(webhook, rig.webhook());
+    assert_eq!(alert.title, "kelpie: shep merged #71");
+    assert!(rig.relay.sent().is_empty());
 }

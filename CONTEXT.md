@@ -104,8 +104,9 @@ every merge. `auto` has the project manager merge once every gate passes,
 and replaces only that ruling: every other ruling still asks.
 
 **Notice**:
-What kelpie posts to the webhook after a merge under `auto`. Not a ruling:
-it has no id and takes no answer.
+What kelpie sends after a merge under `auto`: a post to the webhook, or where
+the webhook is off a push through the relay. Not a ruling: it has no id and
+takes no answer.
 
 **Relay**:
 The Claude Code session through which kelpie asks the maintainer for

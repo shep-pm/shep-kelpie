@@ -259,7 +259,7 @@ pub enum StepReport {
         /// The ruling's id
         id: u64,
     },
-    /// A ruling could not be posted to the webhook, and is tried again later
+    /// A ruling could not be sent, and is tried again later
     AlertFailed {
         /// The ruling's id
         id: u64,
@@ -268,7 +268,7 @@ pub enum StepReport {
         /// When the post is tried again at the earliest
         retry_at: Timestamp,
     },
-    /// The notice of an automatic merge was posted to the webhook
+    /// The notice of an automatic merge was sent to the webhook, or the relay where the webhook is off
     Noticed {
         /// The work item's issue
         issue: u64,
