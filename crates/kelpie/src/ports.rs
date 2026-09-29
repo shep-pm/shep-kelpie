@@ -304,6 +304,17 @@ pub enum Role {
     Judge,
 }
 
+impl Role {
+    /// The role's name, as a lamb's label carries it
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Worker => "worker",
+            Self::Reviewer => "reviewer",
+            Self::Judge => "judge",
+        }
+    }
+}
+
 /// A Claude session's id
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -333,6 +344,8 @@ impl Session {
 pub struct ClaudeCall {
     /// The role it is made for
     pub role: Role,
+    /// The issue of the work item it is made for, which its lamb is labelled with
+    pub issue: u64,
     /// Passed to `--model` as written
     pub model: String,
     /// Passed to `--effort`

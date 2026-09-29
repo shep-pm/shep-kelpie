@@ -1,4 +1,4 @@
-//! The review loop's local round, `[review.local]`
+//! The review loop's local round, `[app.dogs.kelpie.review.local]`
 //!
 //! The local round alternates with the Claude round, local first. A project
 //! turns it off, points kelpie's own reviewer at an OpenAI-compatible
@@ -7,11 +7,12 @@
 
 use std::path::PathBuf;
 
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::NonBlank;
 
-/// The maintainer's qwen-review script, which a file without `[review.local]` runs
+/// The maintainer's qwen-review script, which a file without `[app.dogs.kelpie.review.local]` runs
 const QWEN_REVIEW: &str = "~/.claude/scripts/qwen-review.sh";
 
 // The smallest context the endpoint reviewer accepts, in tokens. At 4096 a
@@ -19,7 +20,7 @@ const QWEN_REVIEW: &str = "~/.claude/scripts/qwen-review.sh";
 const MIN_CONTEXT: u32 = 4096;
 
 /// Which local round a project runs
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum LocalRound {
     /// No local round: every round is the Claude round
@@ -56,7 +57,7 @@ impl LocalRound {
 }
 
 /// An OpenAI-compatible server and the model kelpie's reviewer asks
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Endpoint {
     /// The server's base URL, up to and including its `/v1`
@@ -71,7 +72,7 @@ pub struct Endpoint {
 }
 
 /// A command run for each local round
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LocalCommand {
     /// Its path. A leading `~/` is the home folder, and a relative path is
@@ -84,8 +85,10 @@ pub struct LocalCommand {
 }
 
 /// An `http://` or `https://` URL, kept without a trailing `/`
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(try_from = "String")]
+// schemars describes a `try_from` type by its source, so the bound goes here.
+#[schemars(extend("pattern" = "^https?://[^\\s/]"))]
 pub struct EndpointUrl(String);
 
 impl EndpointUrl {
@@ -114,8 +117,10 @@ impl TryFrom<String> for EndpointUrl {
 }
 
 /// A model's context size in tokens, at least 4096
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(try_from = "i64")]
+// schemars describes a `try_from` type by its source, so the bound goes here.
+#[schemars(extend("minimum" = MIN_CONTEXT, "maximum" = u32::MAX))]
 pub struct ContextSize(u32);
 
 impl ContextSize {
@@ -147,16 +152,16 @@ mod tests {
 
     const EXAMPLE: &str = include_str!("../../settings.example.toml");
 
-    const TABLE: &str = "[review.local]\n\
+    const TABLE: &str = "[app.dogs.kelpie.review.local]\n\
                          kind = \"command\"\n\
                          command = \"~/.claude/scripts/qwen-review.sh\"\n";
 
+    // The example's runner entry with `table` for its local round.
     fn with_table(table: &str) -> Result<Settings, String> {
         assert!(EXAMPLE.contains(TABLE), "the example's local round moved");
-        Settings::parse(
-            &EXAMPLE.replace(TABLE, table),
-            Path::new("/home/maintainer"),
-        )
+        let entry = crate::test::project_table(&EXAMPLE.replace(TABLE, table));
+        let (home, folder) = (Path::new("/home/maintainer"), Path::new("/p"));
+        Settings::from_table(&entry, "shep", home, folder).map_err(|e| e.to_string())
     }
 
     fn command(path: &str) -> LocalRound {
@@ -184,14 +189,14 @@ mod tests {
 
     #[test]
     fn the_local_round_can_be_off() {
-        let s = with_table("[review.local]\nkind = \"off\"\n").unwrap();
+        let s = with_table("[app.dogs.kelpie.review.local]\nkind = \"off\"\n").unwrap();
         assert_eq!(s.review.local, LocalRound::Off {});
         assert!(!s.review.local.is_on());
     }
 
     #[test]
     fn an_endpoint_names_its_server_model_and_context() {
-        let table = "[review.local]\nkind = \"endpoint\"\n\
+        let table = "[app.dogs.kelpie.review.local]\nkind = \"endpoint\"\n\
                      url = \"http://localhost:11434/v1/\"\n\
                      model = \"qwen2.5-coder:14b\"\ncontext = 32768\ngpu_lease = true\n";
         let LocalRound::Endpoint(e) = with_table(table).unwrap().review.local else {
@@ -205,7 +210,8 @@ mod tests {
 
     #[test]
     fn the_gpu_lease_is_off_unless_asked_for() {
-        let table = "[review.local]\nkind = \"command\"\ncommand = \"/opt/review\"\n";
+        let table =
+            "[app.dogs.kelpie.review.local]\nkind = \"command\"\ncommand = \"/opt/review\"\n";
         assert!(!with_table(table).unwrap().review.local.gpu_lease());
         let table = format!("{table}gpu_lease = true\n");
         assert!(with_table(&table).unwrap().review.local.gpu_lease());
@@ -216,7 +222,7 @@ mod tests {
     fn a_malformed_endpoint_is_named() {
         let endpoint = |url: &str, context: &str| {
             format!(
-                "[review.local]\nkind = \"endpoint\"\nurl = \"{url}\"\n\
+                "[app.dogs.kelpie.review.local]\nkind = \"endpoint\"\nurl = \"{url}\"\n\
                  model = \"m\"\ncontext = {context}\n"
             )
         };
@@ -236,15 +242,17 @@ mod tests {
         }
         let err = with_table(&endpoint("http://x", "5000000000")).unwrap_err();
         assert!(err.contains("is too large"), "{err}");
-        let err = with_table("[review.local]\nkind = \"endpoint\"\nurl = \"http://x\"\n");
+        let err =
+            with_table("[app.dogs.kelpie.review.local]\nkind = \"endpoint\"\nurl = \"http://x\"\n");
         assert!(err.unwrap_err().contains("missing field `model`"));
     }
 
     #[test]
     fn an_unknown_kind_or_key_is_named() {
-        let err = with_table("[review.local]\nkind = \"qwen\"\n").unwrap_err();
+        let err = with_table("[app.dogs.kelpie.review.local]\nkind = \"qwen\"\n").unwrap_err();
         assert!(err.contains("unknown variant `qwen`"), "{err}");
-        let err = with_table("[review.local]\nkind = \"off\"\ncommand = \"x\"\n").unwrap_err();
+        let err = with_table("[app.dogs.kelpie.review.local]\nkind = \"off\"\ncommand = \"x\"\n")
+            .unwrap_err();
         assert!(err.contains("unknown field `command`"), "{err}");
     }
 
@@ -252,8 +260,9 @@ mod tests {
     fn a_relative_command_is_taken_from_the_settings_folder() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("settings.toml");
-        let table = "[review.local]\nkind = \"command\"\ncommand = \"review.sh\"\n";
-        std::fs::write(&file, EXAMPLE.replace(TABLE, table)).unwrap();
+        let table = "[app.dogs.kelpie.review.local]\nkind = \"command\"\ncommand = \"review.sh\"\n";
+        let old_file = crate::test::project_table(&EXAMPLE.replace(TABLE, table));
+        std::fs::write(&file, toml::to_string(&old_file).unwrap()).unwrap();
         let s = Settings::load(&file, Path::new("/home/maintainer")).unwrap();
         assert_eq!(
             s.review.local,

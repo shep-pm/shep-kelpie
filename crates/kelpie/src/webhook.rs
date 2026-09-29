@@ -1,21 +1,25 @@
 //! Kelpie's own settings: the webhook, and the channels rulings go to
 //!
-//! One TOML file under kelpie's home, shared by every project and read when
-//! a runner starts. Both parts are optional: the `[webhook]` table, whose
-//! keys are both required, is needed only by a project whose rulings go to
-//! the webhook. The URL is a credential, so no error, log line or status
-//! carries it. `kelpie-settings.example.toml` beside this crate shows the file.
+//! Kelpie's `[kelpie]` section of `dogs.toml`, or the file under kelpie's
+//! home it had before one, shared by every project. Both parts are
+//! optional: the `webhook` table, whose keys are both required, is needed
+//! only by a project whose rulings go to the webhook. The URL is a
+//! credential, so no error, log line or status carries it.
+//! `kelpie-settings.example.toml` beside this crate shows the section.
 
 use std::fmt;
 use std::path::Path;
 
+use schemars::JsonSchema;
 use serde::Deserialize;
+use shep_client::dogs::dog_config;
 
 use crate::channels::Channels;
 use crate::settings::SettingsError;
 
 /// What every project shares
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[dog_config]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KelpieSettings {
     /// Where rulings are posted, so the maintainer hears of them away from
@@ -29,17 +33,19 @@ pub struct KelpieSettings {
 }
 
 /// The maintainer's webhook
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[dog_config]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Webhook {
     /// What kind of service it is, which decides the post's shape
     pub kind: WebhookKind,
     /// Where to post
+    #[shep(secret)]
     pub url: WebhookUrl,
 }
 
 /// A service kelpie can post an alert to
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum WebhookKind {
     /// A Discord channel's webhook, which takes JSON
@@ -51,7 +57,7 @@ pub enum WebhookKind {
 /// A webhook's URL: a credential, since anyone holding it can post
 ///
 /// `Debug` does not leak the URL, and nothing else prints it.
-#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(try_from = "String")]
 pub struct WebhookUrl(String);
 
@@ -126,6 +132,15 @@ impl KelpieSettings {
         })
     }
 
+    /// Reads and checks kelpie's `[kelpie]` section, as shep hands it over
+    ///
+    /// # Errors
+    ///
+    /// [`SettingsError::Section`] naming the line that is wrong, never its text.
+    pub fn from_section(text: &str) -> Result<Self, SettingsError> {
+        Self::parse(text).map_err(|message| SettingsError::Section { message })
+    }
+
     fn parse(text: &str) -> Result<Self, String> {
         toml::from_str(text).map_err(|e: toml::de::Error| {
             let line = e
@@ -144,7 +159,12 @@ mod tests {
     use super::*;
     use crate::channels::Channel;
 
-    const EXAMPLE: &str = include_str!("../kelpie-settings.example.toml");
+    // The example's section as shep hands it over: re-rooted, so `[webhook]`.
+    fn example() -> String {
+        include_str!("../kelpie-settings.example.toml")
+            .replace("[kelpie]\n", "")
+            .replace("[kelpie.webhook]", "[webhook]")
+    }
 
     // A URL no test would print by chance, so finding it anywhere is a leak
     const SECRET: &str = "https://ntfy.example.invalid/kelpie-s3cr3t-topic";
@@ -155,7 +175,7 @@ mod tests {
 
     #[test]
     fn the_example_reads() {
-        let s = KelpieSettings::parse(EXAMPLE).unwrap();
+        let s = KelpieSettings::parse(&example()).unwrap();
         let webhook = s.webhook.expect("the example names a webhook");
         assert_eq!(webhook.kind, WebhookKind::Ntfy);
         assert!(webhook.url.expose().starts_with("https://ntfy.sh/"));
@@ -182,8 +202,8 @@ mod tests {
     // A derived Debug would print the URL wherever settings are debugged.
     #[test]
     fn debug_does_not_leak_the_url() {
-        assert!(EXAMPLE.contains("https://ntfy.sh/your-private-topic"));
-        let text = EXAMPLE.replace("https://ntfy.sh/your-private-topic", SECRET);
+        assert!(example().contains("https://ntfy.sh/your-private-topic"));
+        let text = example().replace("https://ntfy.sh/your-private-topic", SECRET);
         let s = KelpieSettings::parse(&text).unwrap();
         let url = s.webhook.as_ref().unwrap().url.clone();
         assert_eq!(format!("{url:?}"), "WebhookUrl(..)");
@@ -216,6 +236,20 @@ mod tests {
             "[webhook]\nkind = \"ntfy\"\nurl = \"{SECRET}\"\ntoken = \"x\"\n"
         ));
         assert!(err.starts_with("line 4 is not right"), "{err}");
+    }
+
+    #[test]
+    fn a_malformed_section_is_named_and_never_quoted() {
+        let err = KelpieSettings::from_section(&format!(
+            "[webhook]\nkind = \"slack\"\nurl = \"{SECRET}\"\n"
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.starts_with("the [kelpie] section of dogs.toml: line 2"),
+            "{err}"
+        );
+        assert!(!err.contains("s3cr3t"), "{err}");
     }
 
     #[test]

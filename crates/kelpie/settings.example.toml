@@ -1,10 +1,22 @@
-# A project's settings, read once when its runner starts. Every key is
+# A project's runner, as its entry in kelpie's Flockfile. The project's
+# settings are the sheep's `[app.dogs.kelpie]` table: shep keeps it and hands
+# it to the runner, and lookout edits it in the sheep's pane. Every key is
 # required except `max_items`, `review.local`, `pacing.enabled`,
 # `worker.allowed_domains`, `worker.build_env`, `worker.instructions_file`,
-# `worker.turn_timeout`, `ruling_channels` and `[preview]`, which a file
-# written before them may leave out.
-# This file holds the first build's defaults, for shep.
+# `worker.turn_timeout`, `ruling_channels` and `preview`, which a table
+# written before them may leave out. This entry holds the first build's
+# defaults, for shep.
 
+[[app]]
+name = "shep"
+script = "/path/to/kelpie"
+args = ["runner", "shep"]
+env = { SHEP_HOME = "/path/to/home/.kelpie/shep" }
+channel = true
+shutdown_with_message = true
+kill_timeout = "10s"
+
+[app.dogs.kelpie]
 repo = "~/.kelpie/repos/shep"
 forge = "shep-pm/shep"
 
@@ -22,9 +34,9 @@ ci = true
 max_items = 1
 
 # How rulings reach the maintainer: `webhook`, `relay` (the Claude app on the
-# phone) or both. Over `ruling_channels` in `~/.kelpie/settings.toml`, and both
-# when neither says. A project with no `webhook` in it needs no webhook in
-# that file, and one with no `relay` never starts a relay.
+# phone) or both. Over `ruling_channels` in kelpie's `[kelpie]` section of
+# `dogs.toml`, and both when neither says. A project with no `webhook` in it
+# needs no webhook there, and one with no `relay` never starts a relay.
 # ruling_channels = ["webhook", "relay"]
 
 # Left out of a pull request's changed-line count.
@@ -34,23 +46,23 @@ generated = [
     "web/src/data/cli-reference.generated.txt",
 ]
 
-[models.worker]
+[app.dogs.kelpie.models.worker]
 model = "claude-sonnet-5"
 effort = "medium"
 
-[models.reviewer]
+[app.dogs.kelpie.models.reviewer]
 model = "claude-sonnet-5"
 effort = "medium"
 
-[models.judge]
+[app.dogs.kelpie.models.judge]
 model = "claude-opus-5-5"
 effort = "low"
 
-[models.relay]
+[app.dogs.kelpie.models.relay]
 model = "claude-haiku-4-5-20251001"
 effort = "low"
 
-[review]
+[app.dogs.kelpie.review]
 loop_guard = 8
 
 # The local round, which alternates with the Claude round, local first. The
@@ -61,33 +73,33 @@ loop_guard = 8
 # README's contract, here the maintainer's own qwen-review script, as one
 # example. `gpu_lease = true` has kelpie hold the GPU lock around each round;
 # leave it off for a command that takes the lock itself, as that script does.
-# A missing command or an unreachable endpoint stops the runner. A file
-# without this table runs `~/.claude/scripts/qwen-review.sh`.
-[review.local]
+# A missing command or an unreachable endpoint stops the runner. A table
+# without this one runs `~/.claude/scripts/qwen-review.sh`.
+[app.dogs.kelpie.review.local]
 kind = "command"
 command = "~/.claude/scripts/qwen-review.sh"
 
-# [review.local]
+# [app.dogs.kelpie.review.local]
 # kind = "endpoint"
 # url = "http://localhost:11434/v1"
 # model = "qwen2.5-coder:14b"
 # context = 32768
 # gpu_lease = true
 
-# [review.local]
+# [app.dogs.kelpie.review.local]
 # kind = "off"
 
 # CodeRabbit's free plan reviews public repos only. Turn this off for a
 # private repo, which then goes from the review loop and CI straight
 # to the merge ruling.
-[coderabbit]
+[app.dogs.kelpie.coderabbit]
 enabled = true
 divisor = 1000
 
 # Turn `enabled` off for a stretch when usage limits do not matter: neither
 # the daily allowance nor the 5-hour window then holds anything, and `status`
 # says pacing is off. Usage is still read and shown.
-[pacing]
+[app.dogs.kelpie.pacing]
 enabled = true
 kickoff_hours = 8
 
@@ -95,13 +107,14 @@ kickoff_hours = 8
 # registry, for a cold cargo cache. `build_env` points tool caches into the
 # worker's build folder, such as `BUN_INSTALL_CACHE_DIR = "bun"` for bun.
 # `CARGO_TARGET_DIR` is always the build folder itself.
-[worker]
+[app.dogs.kelpie.worker]
 allowed_domains = ["crates.io", "index.crates.io", "static.crates.io"]
 build_env = {}
 
 # A file of extra worker instructions, appended to kelpie's own: rules the
 # repo's docs don't carry. `~/` is the home folder, and a relative path is
-# taken from this file's folder. A missing file stops the runner. Left out
+# taken from the project's folder,
+# `~/.kelpie/projects/<project>/`. A missing file stops the runner. Left out
 # here, so shep's first-build defaults carry none.
 # instructions_file = "~/.kelpie/projects/shep/worker-instructions.md"
 
@@ -109,7 +122,7 @@ build_env = {}
 # busy: kelpie stops it, parks it and asks. A yes resumes the same session.
 turn_timeout = 60
 
-[[worker.guard_hooks]]
+[[app.dogs.kelpie.worker.guard_hooks]]
 event = "PreToolUse"
 matcher = "Bash"
 command = "node ~/.claude/hooks/git-gh-guard.js"
@@ -118,7 +131,7 @@ command = "node ~/.claude/hooks/git-gh-guard.js"
 # starts that file's dev server to take its shots, and gives workers the
 # Playwright MCP server. `configuration` is the file's first when absent,
 # `routes` is ["/"], and `domains`, the hosts the app itself calls, is empty.
-# [preview]
+# [app.dogs.kelpie.preview]
 # configuration = "dev"
 # routes = ["/", "/events"]
 # domains = ["pokemon-go-api.github.io", "leekduck.com", "*.leekduck.com"]

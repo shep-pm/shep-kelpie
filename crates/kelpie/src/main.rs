@@ -1,9 +1,14 @@
+//! `kelpie --schema` and `--version`: shep's probes, answered for lookout
+//!
 //! `kelpie runner <project>`: a project's runner, run as a sheep
 //! `kelpie dog`: the kelpie dog, run as a sheep
 //! `kelpie lease ...`: the maintainer's lease commands
 //!
 //! `kelpie confine <folder>...`: the hook that holds a worker's file tools
 //! to its folders. Claude Code runs it; it is not for the maintainer.
+//!
+//! `kelpie settings move <project> [<sheep>]`: moves a project's settings
+//! file, and kelpie's own, into their tables on kelpie's shepherd.
 //!
 //! `kelpie tools install`: installs the tools kelpie shows a work item's UI
 //! with, under kelpie's home.
@@ -34,12 +39,16 @@ use kelpie::confine::{Verdict, judge};
 use kelpie::preview::Tools;
 use kelpie::relay::gate;
 use kelpie::relay::rule::{self, Ruling};
-use kelpie::shep_home;
+use kelpie::runner::{ProjectName, ProjectPaths};
+use kelpie::settings::moving;
+use kelpie::settings::source::Files;
+use kelpie::{shep_home, shepherd};
 
 /// A PreToolUse hook's exit code that refuses the tool call
 const REFUSE: u8 = 2;
 
 fn main() -> ExitCode {
+    kelpie::schema::probe();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.as_slice() {
         [role, project] if role == "runner" => kelpie::sheep::run(project),
@@ -59,6 +68,11 @@ fn main() -> ExitCode {
         [command] if command == "totp" => totp(false),
         [command, flag] if command == "totp" && flag == "--rotate" => totp(true),
         [command, flag] if command == "totp" && flag == "--unlock" => unlock(),
+        [command, sub, project, sheep @ ..]
+            if command == "settings" && sub == "move" && sheep.len() < 2 =>
+        {
+            move_settings(project, sheep.first().unwrap_or(project))
+        }
         [role, tools, job] if role == "shots-mcp" => {
             let shots = ShotsCli::new(Tools::at(PathBuf::from(tools)));
             stop_on_signal(shots.clone());
@@ -72,14 +86,27 @@ fn main() -> ExitCode {
             }
         }
         [role, project, id] if role == "relay-yes" => {
-            with_shep_home(role, |home| rule::send(home, project, Ruling::Yes(id)))
+            with_shep_home(role, shep_home::RELAY_FIX, |home| {
+                rule::send(home, project, Ruling::Yes(id))
+            })
         }
-        [role, project, params] if role == "relay-answer" => with_shep_home(role, |home| {
-            rule::send(home, project, Ruling::NoOrAnswer(params))
-        }),
+        [role, project, params] if role == "relay-answer" => {
+            with_shep_home(role, shep_home::RELAY_FIX, |home| {
+                rule::send(home, project, Ruling::NoOrAnswer(params))
+            })
+        }
+        // Adopted for lookout's settings panes, shep starts kelpie with no
+        // arguments. The dog still runs from the Flockfile.
+        [] if std::env::var_os("SHEP_DOG_NAME").is_some() => {
+            eprintln!(
+                "kelpie is adopted so lookout can edit its settings, and its dog runs from \
+                 the Flockfile: run `shep disable kelpie` to stop this start"
+            );
+            ExitCode::from(2)
+        }
         _ => {
             eprintln!(
-                "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie browse-guard <domain>...\n       kelpie tools install\n       kelpie totp [--rotate | --unlock]\n       kelpie shots-mcp <tools> <job>\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>\n       kelpie relay-gate <kelpie>",
+                "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie browse-guard <domain>...\n       kelpie settings move <project> [<sheep>]\n       kelpie tools install\n       kelpie totp [--rotate | --unlock]\n       kelpie shots-mcp <tools> <job>\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>\n       kelpie relay-gate <kelpie>",
                 kelpie::lease::cli::USAGE
             );
             ExitCode::from(2)
@@ -161,6 +188,42 @@ fn unlock() -> ExitCode {
     }
 }
 
+fn move_settings(project: &str, sheep: &str) -> ExitCode {
+    let (Some(home), Some(kelpie_home)) = (std::env::var_os("HOME"), kelpie_home()) else {
+        eprintln!("HOME is not set");
+        return ExitCode::FAILURE;
+    };
+    let project = match ProjectName::try_from(project) {
+        Ok(project) => project,
+        Err(e) => {
+            eprintln!("kelpie settings move: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let paths = ProjectPaths::under(&kelpie_home, &project);
+    let files = Files {
+        project: project.as_str(),
+        sheep,
+        settings: &paths.settings,
+        kelpie_settings: &paths.kelpie_settings,
+    };
+    with_shep_home("settings move", shep_home::MOVE_FIX, |shep_home| {
+        let moved = shepherd::block_on(moving::move_files(shep_home, files, Path::new(&home)));
+        match moved {
+            Ok(lines) => {
+                for line in lines {
+                    println!("{line}");
+                }
+                ExitCode::SUCCESS
+            }
+            Err(message) => {
+                eprintln!("kelpie settings move: {message}");
+                ExitCode::FAILURE
+            }
+        }
+    })
+}
+
 fn install_tools() -> ExitCode {
     let Some(home) = kelpie_home() else {
         eprintln!("HOME is not set");
@@ -190,10 +253,10 @@ fn hook(verdict: Verdict) -> ExitCode {
     }
 }
 
-// A relay command with no `SHEP_HOME` would trigger the default shepherd,
-// where no runner is, so it refuses instead.
-fn with_shep_home(role: &str, run: impl FnOnce(&Path) -> ExitCode) -> ExitCode {
-    match shep_home::required(shep_home::RELAY_FIX) {
+// A command with no `SHEP_HOME` would reach the default shepherd, where no
+// runner is, so it refuses instead.
+fn with_shep_home(role: &str, fix: &str, run: impl FnOnce(&Path) -> ExitCode) -> ExitCode {
+    match shep_home::required(fix) {
         Ok(home) => run(&home),
         Err(message) => {
             eprintln!("kelpie {role}: {message}");

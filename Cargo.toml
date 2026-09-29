@@ -18,12 +18,15 @@ hmac = { version = "0.13", default-features = false }
 sha1 = { version = "0.11", default-features = false }
 # The terminal QR code `kelpie totp` prints for an authenticator app to scan
 qrcode = { version = "0.14", default-features = false }
+# The settings' JSON Schema, in the version shep-client builds it with
+schemars = { version = "1.2.2", default-features = false, features = ["derive", "std"] }
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
-shep-client = { version = "=0.10.1", default-features = false }
-shep-channel = { version = "=0.10.1", default-features = false, features = ["client"] }
+# `schema` answers shep's `--schema` probe, which lookout edits kelpie's settings from
+shep-client = { version = "=0.11.0", default-features = false, features = ["schema"] }
+shep-channel = { version = "=0.11.0", default-features = false, features = ["client"] }
 tokio = { version = "1", default-features = false, features = ["macros", "process", "rt", "signal", "sync", "time"] }
-toml = { version = "0.9", default-features = false, features = ["std", "parse", "serde"] }
+toml = { version = "0.9", default-features = false, features = ["std", "parse", "display", "serde"] }
 # Only for throwaway homes and repos in tests
 tempfile = { version = "3", default-features = false }
 

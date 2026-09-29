@@ -1,13 +1,12 @@
-//! The project's settings file
+//! A project's settings
 //!
-//! One TOML file per project, read once when the runner starts. Unknown keys
-//! are refused, so a misspelt or malformed setting stops the runner with a
-//! message naming it. Every setting is required except the ones added after
-//! the first build (`max_items`, `review.local`, `pacing.enabled`,
-//! `worker.allowed_domains`, `worker.build_env`, `worker.instructions_file`,
-//! `worker.turn_timeout`, `ruling_channels` and `[preview]`): a file written
-//! before them loads with the documented default, so an upgrade never breaks
-//! an existing project.
+//! Its runner sheep's `[app.dogs.kelpie]` table, or the settings file a
+//! project had before one. Unknown keys are refused, so a misspelt or
+//! malformed setting stops the runner with a message naming it. Every
+//! setting is required except the ones added after the first build
+//! (`max_items`, `review.local`, `pacing.enabled`, `worker.allowed_domains`,
+//! `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout`,
+//! `ruling_channels` and `[preview]`).
 //! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
@@ -16,17 +15,25 @@ use std::io;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use shep_client::dogs::dog_config;
 
 use crate::channels::Channels;
 use crate::preview::Preview;
 
+pub mod moving;
+pub mod source;
+mod table;
+
+pub use table::table_of;
 mod local;
 
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 
 /// Everything kelpie reads about one project
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[dog_config]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
     /// The project's own checkout. A leading `~/` is the home folder.
@@ -71,7 +78,7 @@ pub struct Settings {
 ///
 /// `auto` replaces only the merge ruling: every other ruling still asks.
 /// `ask-surface` is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum MergeAuthority {
     /// Kelpie asks for a ruling before every merge
@@ -81,7 +88,7 @@ pub enum MergeAuthority {
 }
 
 /// The model and effort for each role that calls Claude
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Models {
     /// The worker's sessions
@@ -95,7 +102,7 @@ pub struct Models {
 }
 
 /// One role's model and effort
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RoleModel {
     /// A model id or alias, passed to `claude --model` as written
@@ -106,7 +113,7 @@ pub struct RoleModel {
 
 /// A Claude effort level
 // wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Effort {
     /// `low`
@@ -142,7 +149,7 @@ impl Effort {
 }
 
 /// The review loop's settings
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Review {
     /// Rounds after which the worker is parked for a ruling
@@ -154,7 +161,7 @@ pub struct Review {
 }
 
 /// The CodeRabbit gate's settings
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CodeRabbit {
     /// Whether pull requests go through CodeRabbit rounds at all
@@ -167,7 +174,7 @@ pub struct CodeRabbit {
 }
 
 /// Usage pacing settings
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Pacing {
     /// Whether the daily allowance and the 5-hour window hold anything
@@ -185,7 +192,7 @@ fn default_pacing_enabled() -> bool {
 }
 
 /// What every worker is started with
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Worker {
     /// Domains the worker's sandbox may reach besides GitHub, such as a
@@ -222,7 +229,7 @@ fn default_turn_timeout() -> NonZeroU32 {
 }
 
 /// One of the maintainer's guard hooks, run by path
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GuardHook {
     /// The Claude Code hook event it runs on
@@ -234,7 +241,7 @@ pub struct GuardHook {
 }
 
 /// A Claude Code hook event a guard can run on
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 pub enum HookEvent {
     /// Before a tool call, which the hook can refuse
     PreToolUse,
@@ -243,7 +250,7 @@ pub enum HookEvent {
 }
 
 /// An environment variable's name: capitals, digits and `_`, not starting with a digit
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, JsonSchema)]
 #[serde(try_from = "String")]
 pub struct EnvName(String);
 
@@ -271,7 +278,7 @@ impl TryFrom<String> for EnvName {
 }
 
 /// A folder inside the build folder: relative, with no `..`
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(try_from = "String")]
 pub struct BuildDir(PathBuf);
 
@@ -299,7 +306,7 @@ impl TryFrom<String> for BuildDir {
 }
 
 /// A string with something other than whitespace in it
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(try_from = "String")]
 pub struct NonBlank(String);
 
@@ -323,7 +330,7 @@ impl TryFrom<String> for NonBlank {
 }
 
 /// A forge repo as `owner/name`
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(try_from = "String")]
 pub struct ForgeSlug(String);
 
@@ -352,8 +359,10 @@ impl TryFrom<String> for ForgeSlug {
 }
 
 /// Hours in a working day, from 1 to 24
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(try_from = "i64")]
+// schemars describes a `try_from` type by its source, so the range goes here.
+#[schemars(extend("minimum" = 1, "maximum" = 24))]
 pub struct KickoffHours(u8);
 
 impl KickoffHours {
@@ -392,6 +401,25 @@ pub enum SettingsError {
         /// The parser's message, which names the setting and its line
         message: String,
     },
+    /// Neither the table nor the file it stands in for is there
+    Unset {
+        /// The table, as `[app.dogs.kelpie] table on the <sheep> sheep`
+        table: String,
+        /// The file
+        path: PathBuf,
+    },
+    /// A sheep's table has a setting missing, unknown or malformed
+    Table {
+        /// The runner sheep carrying the table
+        sheep: String,
+        /// Names the setting as a dotted key, and what is wrong with it
+        message: String,
+    },
+    /// Kelpie's `[kelpie]` section of `dogs.toml` is malformed
+    Section {
+        /// Names the line that is wrong, never its text
+        message: String,
+    },
     /// A well-formed setting that does not hold on this machine
     Invalid {
         /// The setting's dotted name
@@ -409,6 +437,15 @@ impl fmt::Display for SettingsError {
             }
             Self::Parse { path, message } => {
                 write!(f, "settings file {}: {message}", path.display())
+            }
+            Self::Unset { table, path } => {
+                write!(f, "there is no {table}, and no {}", path.display())
+            }
+            Self::Table { sheep, message } => {
+                write!(f, "the [app.dogs.kelpie] table on {sheep}: {message}")
+            }
+            Self::Section { message } => {
+                write!(f, "the [kelpie] section of dogs.toml: {message}")
             }
             Self::Invalid { setting, reason } => write!(f, "setting `{setting}`: {reason}"),
         }
@@ -434,27 +471,37 @@ impl Settings {
             message,
         })?;
         if let Some(folder) = path.parent() {
-            for file in settings.files_mut().filter(|file| file.is_relative()) {
-                *file = folder.join(&*file);
-            }
+            settings.relative_to(folder);
         }
         Ok(settings)
     }
 
-    fn parse(text: &str, home: &Path) -> Result<Self, String> {
+    pub(crate) fn parse(text: &str, home: &Path) -> Result<Self, String> {
         let mut settings: Self = toml::from_str(text).map_err(|e| e.to_string())?;
-        if let Ok(rest) = settings.repo.strip_prefix("~") {
-            settings.repo = home.join(rest);
+        settings.expand(home);
+        Ok(settings)
+    }
+
+    // `~/` in a path setting is the home folder.
+    fn expand(&mut self, home: &Path) {
+        if let Ok(rest) = self.repo.strip_prefix("~") {
+            self.repo = home.join(rest);
         }
-        for file in settings.files_mut() {
+        for file in self.files_mut() {
             if let Ok(rest) = file.strip_prefix("~") {
                 *file = home.join(rest);
             }
         }
-        Ok(settings)
     }
 
-    // The paths that expand `~/` and are taken from the settings file's folder.
+    // A relative path setting is taken from the project's folder.
+    fn relative_to(&mut self, folder: &Path) {
+        for file in self.files_mut().filter(|file| file.is_relative()) {
+            *file = folder.join(&*file);
+        }
+    }
+
+    // The paths that expand `~/` and are taken from the project's folder.
     fn files_mut(&mut self) -> impl Iterator<Item = &mut PathBuf> {
         let local = match &mut self.review.local {
             LocalRound::Command(local) => Some(&mut local.command),
@@ -467,288 +514,4 @@ impl Settings {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const EXAMPLE: &str = include_str!("../settings.example.toml");
-
-    fn parse(text: &str) -> Result<Settings, String> {
-        Settings::parse(text, Path::new("/home/maintainer"))
-    }
-
-    fn parse_err(text: &str) -> String {
-        parse(text).expect_err("the settings should be refused")
-    }
-
-    #[test]
-    fn the_example_holds_the_first_build_defaults() {
-        let s = parse(EXAMPLE).unwrap();
-        assert_eq!(s.repo, Path::new("/home/maintainer/.kelpie/repos/shep"));
-        assert_eq!(s.forge.as_str(), "shep-pm/shep");
-        assert_eq!(s.merge_authority, MergeAuthority::Ask);
-        assert!(s.ci);
-        assert_eq!(s.max_items.get(), 1);
-        let role = |r: &RoleModel| (r.model.as_str().to_owned(), r.effort);
-        assert_eq!(
-            role(&s.models.worker),
-            ("claude-sonnet-5".into(), Effort::Medium)
-        );
-        assert_eq!(
-            role(&s.models.reviewer),
-            ("claude-sonnet-5".into(), Effort::Medium)
-        );
-        assert_eq!(
-            role(&s.models.judge),
-            ("claude-opus-5-5".into(), Effort::Low)
-        );
-        assert_eq!(
-            role(&s.models.relay),
-            ("claude-haiku-4-5-20251001".into(), Effort::Low)
-        );
-        assert_eq!(s.review.loop_guard.get(), 8);
-        assert!(s.coderabbit.enabled);
-        assert_eq!(s.coderabbit.divisor.get(), 1000);
-        assert!(s.pacing.enabled);
-        assert_eq!(s.pacing.kickoff_hours.get(), 8);
-        assert_eq!(s.worker.turn_timeout.get(), 60);
-        assert!(s.generated.iter().any(|g| g == "Cargo.lock"));
-        assert_eq!(s.worker.guard_hooks[0].event, HookEvent::PreToolUse);
-        let domains: Vec<&str> = s
-            .worker
-            .allowed_domains
-            .iter()
-            .map(NonBlank::as_str)
-            .collect();
-        assert_eq!(
-            domains,
-            ["crates.io", "index.crates.io", "static.crates.io"]
-        );
-    }
-
-    #[test]
-    fn a_file_with_no_preview_table_captures_the_root() {
-        assert!(
-            !EXAMPLE.contains("\n[preview]"),
-            "the example sets no preview"
-        );
-        let s = parse(EXAMPLE).unwrap();
-        assert_eq!(s.preview.routes.len(), 1);
-        assert_eq!(s.preview.routes[0].as_str(), "/");
-    }
-
-    #[test]
-    fn the_instructions_file_expands_the_home_folder_and_defaults_to_none() {
-        assert_eq!(parse(EXAMPLE).unwrap().worker.instructions_file, None);
-        let text = EXAMPLE.replace("build_env = {}\n", "instructions_file = \"~/w.md\"\n");
-        let file = parse(&text).unwrap().worker.instructions_file;
-        assert_eq!(file.as_deref(), Some(Path::new("/home/maintainer/w.md")));
-    }
-
-    #[test]
-    fn a_missing_setting_is_named() {
-        let text = EXAMPLE.replace("forge = \"shep-pm/shep\"\n", "");
-        assert!(parse_err(&text).contains("missing field `forge`"));
-    }
-
-    #[test]
-    fn a_missing_nested_setting_is_named_with_its_table() {
-        let text = EXAMPLE.replace("divisor = 1000\n", "");
-        let err = parse_err(&text);
-        assert!(err.contains("missing field `divisor`"), "{err}");
-        assert!(err.contains("[coderabbit]"), "{err}");
-    }
-
-    #[test]
-    fn ci_must_be_said_either_way() {
-        let err = parse_err(&EXAMPLE.replace("ci = true\n", ""));
-        assert!(err.contains("missing field `ci`"), "{err}");
-        assert!(
-            !parse(&EXAMPLE.replace("ci = true", "ci = false"))
-                .unwrap()
-                .ci
-        );
-    }
-
-    #[test]
-    fn a_file_written_before_the_worker_keys_loads_with_their_defaults() {
-        let before = EXAMPLE
-            .replace(
-                "allowed_domains = [\"crates.io\", \"index.crates.io\", \"static.crates.io\"]\n",
-                "",
-            )
-            .replace("build_env = {}\n", "")
-            .replace("turn_timeout = 60\n", "");
-        for key in ["turn_timeout =", "allowed_domains =", "build_env ="] {
-            assert!(!before.contains(key), "{key}");
-        }
-        let s = parse(&before).unwrap();
-        assert_eq!(s.worker.turn_timeout.get(), 60);
-        assert!(s.worker.allowed_domains.is_empty());
-        assert!(s.worker.build_env.is_empty());
-    }
-
-    #[test]
-    fn one_work_item_is_open_at_a_time_when_the_file_does_not_say() {
-        let before = EXAMPLE.replace("max_items = 1\n", "");
-        assert!(!before.contains("max_items ="));
-        assert_eq!(parse(&before).unwrap().max_items.get(), 1);
-        let text = EXAMPLE.replace("max_items = 1", "max_items = 3");
-        assert_eq!(parse(&text).unwrap().max_items.get(), 3);
-        let err = parse_err(&EXAMPLE.replace("max_items = 1", "max_items = 0"));
-        assert!(err.contains("max_items"), "{err}");
-    }
-
-    #[test]
-    fn pacing_is_on_when_the_file_does_not_say() {
-        let before = EXAMPLE.replace("enabled = true\nkickoff_hours", "kickoff_hours");
-        assert!(!before.contains("[pacing]\nenabled"));
-        assert!(parse(&before).unwrap().pacing.enabled);
-    }
-
-    #[test]
-    fn pacing_can_be_turned_off() {
-        let off = EXAMPLE.replace("[pacing]\nenabled = true", "[pacing]\nenabled = false");
-        assert!(!parse(&off).unwrap().pacing.enabled);
-    }
-
-    #[test]
-    fn a_zero_turn_timeout_is_still_refused() {
-        let err = parse_err(&EXAMPLE.replace("turn_timeout = 60", "turn_timeout = 0"));
-        assert!(err.contains("turn_timeout = 0"), "{err}");
-    }
-
-    #[test]
-    fn a_misspelt_setting_is_named() {
-        let text = EXAMPLE.replace("loop_guard", "loop_gaurd");
-        assert!(parse_err(&text).contains("unknown field `loop_gaurd`"));
-    }
-
-    #[test]
-    fn merge_authority_auto_is_accepted() {
-        let text = EXAMPLE.replace("merge_authority = \"ask\"", "merge_authority = \"auto\"");
-        assert_eq!(parse(&text).unwrap().merge_authority, MergeAuthority::Auto);
-    }
-
-    #[test]
-    fn merge_authority_ask_surface_is_refused() {
-        let text = EXAMPLE.replace(
-            "merge_authority = \"ask\"",
-            "merge_authority = \"ask-surface\"",
-        );
-        let err = parse_err(&text);
-        assert!(err.contains("merge_authority"), "{err}");
-        assert!(err.contains("unknown variant `ask-surface`"), "{err}");
-    }
-
-    #[test]
-    fn a_zero_loop_guard_is_refused() {
-        let text = EXAMPLE.replace("loop_guard = 8", "loop_guard = 0");
-        assert!(parse_err(&text).contains("loop_guard = 0"));
-    }
-
-    #[test]
-    fn kickoff_hours_outside_a_day_are_refused() {
-        for hours in ["0", "25", "300", "-1"] {
-            let line = format!("kickoff_hours = {hours}");
-            let err = parse_err(&EXAMPLE.replace("kickoff_hours = 8", &line));
-            assert!(err.contains(&line), "{err}");
-            assert!(err.contains("must be from 1 to 24"), "{err}");
-        }
-    }
-
-    #[test]
-    fn every_effort_parses_from_what_claude_takes() {
-        for effort in [
-            Effort::Low,
-            Effort::Medium,
-            Effort::High,
-            Effort::Xhigh,
-            Effort::Max,
-        ] {
-            assert_eq!(Effort::parse(effort.as_str()), Some(effort));
-        }
-        assert_eq!(Effort::parse("Medium"), None);
-    }
-
-    #[test]
-    fn an_unknown_effort_is_refused() {
-        let text = EXAMPLE.replacen("effort = \"medium\"", "effort = \"huge\"", 1);
-        assert!(parse_err(&text).contains("unknown variant `huge`"));
-    }
-
-    #[test]
-    fn a_forge_slug_needs_an_owner_and_a_name() {
-        for slug in [
-            "shep",
-            "/shep",
-            "shep-pm/",
-            "shep-pm/shep/x",
-            "shep pm/shep",
-        ] {
-            let text = EXAMPLE.replace("\"shep-pm/shep\"", &format!("{slug:?}"));
-            assert!(parse_err(&text).contains("must be `owner/name`"), "{slug}");
-        }
-    }
-
-    #[test]
-    fn a_blank_model_is_refused() {
-        let text = EXAMPLE.replacen("model = \"claude-sonnet-5\"", "model = \" \"", 1);
-        assert!(parse_err(&text).contains("must not be blank"));
-    }
-
-    #[test]
-    fn build_env_names_folders_inside_the_build_folder() {
-        let text = EXAMPLE.replace(
-            "build_env = {}",
-            r#"build_env = { BUN_INSTALL_CACHE_DIR = "bun/cache" }"#,
-        );
-        let s = parse(&text).unwrap();
-        let [(name, dir)] = s
-            .worker
-            .build_env
-            .iter()
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-        assert_eq!(
-            (name.as_str(), dir.as_path()),
-            ("BUN_INSTALL_CACHE_DIR", Path::new("bun/cache"))
-        );
-        for bad in [
-            "\"\"",
-            "\"/tmp/bun\"",
-            "\"../bun\"",
-            "\"bun/../..\"",
-            "\"./bun\"",
-        ] {
-            let line = format!("build_env = {{ BUN = {bad} }}");
-            let err = parse_err(&EXAMPLE.replace("build_env = {}", &line));
-            assert!(err.contains("inside the build folder"), "{bad}: {err}");
-        }
-        for bad in ["bun", "1BUN", "BUN-DIR"] {
-            let line = format!("build_env = {{ {bad} = \"bun\" }}");
-            let err = parse_err(&EXAMPLE.replace("build_env = {}", &line));
-            assert!(err.contains("environment variable name"), "{bad}: {err}");
-        }
-    }
-
-    #[test]
-    fn a_repo_path_without_a_tilde_is_kept() {
-        let text = EXAMPLE.replace("\"~/.kelpie/repos/shep\"", "\"/srv/shep\"");
-        assert_eq!(parse(&text).unwrap().repo, Path::new("/srv/shep"));
-    }
-
-    #[test]
-    fn an_unreadable_file_names_its_path() {
-        let err = Settings::load(Path::new("/nonexistent/settings.toml"), Path::new("/"));
-        let err = err.unwrap_err();
-        assert_eq!(
-            err,
-            SettingsError::Read {
-                path: "/nonexistent/settings.toml".into(),
-                kind: io::ErrorKind::NotFound,
-            }
-        );
-        assert!(err.to_string().contains("/nonexistent/settings.toml"));
-    }
-}
+mod tests;

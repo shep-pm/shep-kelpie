@@ -19,7 +19,7 @@ use crate::ports::{
 use crate::runner::{
     CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
 };
-use crate::settings::{Effort, LocalRound};
+use crate::settings::{Effort, LocalRound, Settings, SettingsError};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{CallRecord, Known, Phase, Turn, WorkItem};
 
@@ -138,12 +138,22 @@ pub(crate) fn a_work_item() -> WorkItem {
     }
 }
 
+/// The `[app.dogs.kelpie]` table of a runner's Flockfile entry, such as
+/// `settings.example.toml`, as shep hands it to the runner
+pub(crate) fn project_table(entry: &str) -> serde_json::Map<String, serde_json::Value> {
+    let parsed: toml::Table = toml::from_str(entry).unwrap();
+    match serde_json::to_value(&parsed["app"][0]["dogs"]["kelpie"]).unwrap() {
+        serde_json::Value::Object(table) => table,
+        other => panic!("the entry's kelpie table is {other}"),
+    }
+}
+
 /// The `repo` in `settings.example.toml`, which the rig points at its own
 const EXAMPLE_REPO: &str = "~/.kelpie/repos/shep";
 
 /// The CodeRabbit gate as `settings.example.toml` sets it, and turned off
-pub(crate) const CODERABBIT_ON: &str = "[coderabbit]\nenabled = true\n";
-const CODERABBIT_OFF: &str = "[coderabbit]\nenabled = false\n";
+pub(crate) const CODERABBIT_ON: &str = "[app.dogs.kelpie.coderabbit]\nenabled = true\n";
+pub(crate) const CODERABBIT_OFF: &str = "[app.dogs.kelpie.coderabbit]\nenabled = false\n";
 
 /// A launch file like the playground's
 const LAUNCH: &str = r#"{"version": "0.0.1", "configurations": [{"name": "dev", "runtimeExecutable": "bun", "runtimeArgs": ["run", "dev"], "port": 3000}]}"#;
@@ -630,31 +640,8 @@ impl Rig {
             Self::WEBHOOK_URL
         );
         std::fs::write(&paths.kelpie_settings, kelpie).unwrap();
-        crate::totp::private_dir(&paths.totp).unwrap();
-        let secret = paths.totp.join("secret");
-        std::fs::write(&secret, format!("{}\n", Self::TOTP_SECRET)).unwrap();
-        let owner_only = std::os::unix::fs::PermissionsExt::from_mode(0o600);
-        std::fs::set_permissions(&secret, owner_only).unwrap();
+        rig.write_totp_secret();
         rig
-    }
-
-    /// The rig's authenticator secret: RFC 6238's SHA-1 key, in base32
-    pub(crate) const TOTP_SECRET: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
-
-    /// The maintainer's authenticator code at `at`
-    pub(crate) fn code_at(&self, at: Timestamp) -> String {
-        let secret = crate::totp::Secret::load(&self.paths().totp.join("secret"));
-        let secret = secret.unwrap().expect("the rig writes a secret");
-        format!("{:06}", secret.code(crate::totp::step_of(at)))
-    }
-
-    /// Writes `text` ending with the code of the moment to the topic, as the
-    /// maintainer's phone would, and returns the code
-    pub(crate) fn reply(&self, text: &str) -> String {
-        let now = self.clock.now();
-        let code = self.code_at(now);
-        self.alerts.reply(&format!("{text} {code}"), now);
-        code
     }
 
     /// The webhook the rig's kelpie settings name
@@ -665,6 +652,19 @@ impl Rig {
             .expect("the rig's kelpie settings name a webhook")
     }
 
+    /// Kelpie's own settings as the rig's file holds them, empty when it is gone
+    pub(crate) fn kelpie_settings(&self) -> KelpieSettings {
+        self.try_kelpie_settings().unwrap()
+    }
+
+    fn try_kelpie_settings(&self) -> Result<KelpieSettings, SettingsError> {
+        match std::fs::read_to_string(self.paths().kelpie_settings) {
+            Ok(text) => KelpieSettings::from_section(&text),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(KelpieSettings::default()),
+            Err(e) => panic!("cannot read the rig's kelpie settings: {e}"),
+        }
+    }
+
     /// Replaces the rig's kelpie settings file with `text`
     pub(crate) fn set_kelpie_settings(&self, text: &str) {
         std::fs::write(self.paths().kelpie_settings, text).unwrap();
@@ -672,7 +672,11 @@ impl Rig {
 
     /// Sets the project's `ruling_channels`, as its settings file would
     pub(crate) fn set_ruling_channels(&self, list: &str) {
-        self.edit_settings(|s| format!("ruling_channels = {list}\n{s}"));
+        let table = "[app.dogs.kelpie]\n";
+        self.edit_settings(|s| {
+            assert!(s.contains(table), "the rig's entry has no kelpie table");
+            s.replacen(table, &format!("{table}ruling_channels = {list}\n"), 1)
+        });
     }
 
     fn make_repo(&self) {
@@ -780,7 +784,10 @@ impl Rig {
     }
 
     pub(crate) fn paths(&self) -> ProjectPaths {
-        ProjectPaths::under(&self.home.path().join("kelpie"), &self.project)
+        let mut paths = ProjectPaths::under(&self.home.path().join("kelpie"), &self.project);
+        // A shepherd outside kelpie's home, as the user's own would be.
+        paths.shep_home = self.home.path().join("shep");
+        paths
     }
 
     /// Turns the CodeRabbit gate on, as the example settings have it for shep
@@ -803,6 +810,20 @@ impl Rig {
         std::fs::write(&file, edit(text)).unwrap();
     }
 
+    /// The project's settings as its table now stands
+    pub(crate) fn settings(&self) -> Settings {
+        self.try_settings().unwrap()
+    }
+
+    // The rig keeps the runner's Flockfile entry where the old settings file was.
+    fn try_settings(&self) -> Result<Settings, SettingsError> {
+        let paths = self.paths();
+        let entry = std::fs::read_to_string(&paths.settings).unwrap();
+        let folder = paths.settings.parent().unwrap();
+        let (project, home) = (self.project.as_str(), self.home.path());
+        Settings::from_table(&project_table(&entry), project, home, folder)
+    }
+
     /// Starts a runner, as a restarted sheep would, on the rig's stand-ins
     pub(crate) fn open(&self) -> Result<Mutex<Runner>, OpenError> {
         let ports = Ports {
@@ -816,10 +837,12 @@ impl Rig {
             shots: Arc::new(self.shots.clone()),
             clock: Box::new(self.clock.clone()),
         };
+        let paths = self.paths();
         Runner::open(
             self.project.clone(),
-            &self.paths(),
-            self.home.path(),
+            self.try_settings()?,
+            self.try_kelpie_settings()?,
+            &paths,
             Path::new(Self::KELPIE),
             ports,
         )

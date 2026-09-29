@@ -8,7 +8,7 @@ use crate::runner::step;
 use crate::settings::LocalRound;
 use crate::test::{Answer, Rig, Scripted, StandInEndpoint, unreachable_url};
 
-const TABLE: &str = "[review.local]\n\
+const TABLE: &str = "[app.dogs.kelpie.review.local]\n\
                      kind = \"command\"\n\
                      command = \"~/.claude/scripts/qwen-review.sh\"\n";
 
@@ -24,14 +24,14 @@ fn rig_with(table: &str) -> Rig {
 
 fn endpoint(url: &str) -> String {
     format!(
-        "[review.local]\nkind = \"endpoint\"\nurl = \"{url}\"\n\
+        "[app.dogs.kelpie.review.local]\nkind = \"endpoint\"\nurl = \"{url}\"\n\
          model = \"stand-in\"\ncontext = 8192\n"
     )
 }
 
 #[test]
 fn with_the_local_round_off_one_clean_claude_round_reaches_ci() {
-    let rig = rig_with("[review.local]\nkind = \"off\"\n");
+    let rig = rig_with("[app.dogs.kelpie.review.local]\nkind = \"off\"\n");
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
@@ -59,7 +59,7 @@ fn with_the_local_round_off_one_clean_claude_round_reaches_ci() {
 
 #[test]
 fn with_the_local_round_off_a_round_after_a_fix_is_claudes_again() {
-    let rig = rig_with("[review.local]\nkind = \"off\"\n");
+    let rig = rig_with("[app.dogs.kelpie.review.local]\nkind = \"off\"\n");
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
@@ -150,7 +150,7 @@ fn a_named_command_runs_in_place_of_the_script() {
          : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n",
     );
     let table = format!(
-        "[review.local]\nkind = \"command\"\ncommand = \"{}\"\n",
+        "[app.dogs.kelpie.review.local]\nkind = \"command\"\ncommand = \"{}\"\n",
         command.display()
     );
     rig.edit_settings(|s| s.replace(TABLE, &table));
@@ -179,7 +179,7 @@ fn a_named_command_runs_in_place_of_the_script() {
 
 #[test]
 fn a_claude_round_that_says_neither_findings_nor_clean_fails() {
-    let rig = rig_with("[review.local]\nkind = \"off\"\n");
+    let rig = rig_with("[app.dogs.kelpie.review.local]\nkind = \"off\"\n");
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
@@ -208,7 +208,8 @@ fn a_claude_round_that_says_neither_findings_nor_clean_fails() {
 
 #[test]
 fn a_missing_command_stops_the_runner_naming_it() {
-    let table = "[review.local]\nkind = \"command\"\ncommand = \"~/bin/no-such-review\"\n";
+    let table =
+        "[app.dogs.kelpie.review.local]\nkind = \"command\"\ncommand = \"~/bin/no-such-review\"\n";
     let err = rig_with(table).open().unwrap_err().to_string();
     assert!(
         err.starts_with("setting `review.local`: cannot run "),
@@ -237,6 +238,6 @@ fn with_the_local_round_off_no_command_is_needed() {
     let rig = Rig::new("koji");
     std::fs::remove_file(rig.home.path().join(".claude/scripts/qwen-review.sh")).unwrap();
     assert!(rig.open().is_err(), "the default command is checked");
-    rig.edit_settings(|s| s.replace(TABLE, "[review.local]\nkind = \"off\"\n"));
+    rig.edit_settings(|s| s.replace(TABLE, "[app.dogs.kelpie.review.local]\nkind = \"off\"\n"));
     assert!(rig.open().is_ok());
 }
