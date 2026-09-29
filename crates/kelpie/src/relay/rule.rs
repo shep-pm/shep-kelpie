@@ -99,8 +99,8 @@ async fn deliver(shep_home: &Path, project: &str, ruling: Ruling<'_>) -> Result<
     }
 }
 
-// Names nothing to run: a reload with the wrong `shep` is how an older
-// shepherd once replaced kelpie's.
+// Names nothing to run: shep's own advice for a skew is a reload, and a
+// relay that ran it with the wrong `shep` could replace kelpie's shepherd.
 fn skew(shep_home: &Path, running: Option<&str>) -> String {
     let running = running.map_or_else(
         || "a shep version it did not name".to_owned(),
@@ -246,6 +246,20 @@ mod tests {
             .await
             .unwrap_err();
         assert!(failed.contains("shep's runner did not answer"), "{failed}");
+    }
+
+    #[tokio::test]
+    async fn a_project_the_shepherd_does_not_run_is_named() {
+        let home = scratch_home();
+        let socket = home.path().join("run/shep.sock");
+        let _sent = fake_daemon_answering_with_ack(&socket, ack(SHEP_VERSION), |_| {
+            Response::Triggered(Vec::new())
+        })
+        .await;
+        let failed = deliver_in_time(home.path(), Ruling::Yes("3"))
+            .await
+            .unwrap_err();
+        assert_eq!(failed, "kelpie's shepherd runs no sheep named shep");
     }
 
     #[tokio::test]
