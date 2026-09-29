@@ -47,7 +47,7 @@ Kelpie refuses a shepherd on another shep minor or major than the pinned one, na
 
 An install from before `shep kelpie` runs its runners and dog from a Flockfile under `SHEP_HOME=~/.kelpie/shep`. It keeps working as it is. To move it into your own shepherd:
 
-1. Stop the old shepherd, so no project runs twice: `SHEP_HOME=~/.kelpie/shep shep kill`
+1. Take the runners and the dog out of the old shepherd, so no project runs twice, and stop it: `SHEP_HOME=~/.kelpie/shep shep delete all`, then `SHEP_HOME=~/.kelpie/shep shep kill`. A `kill` alone leaves them in its saved roll, and a later `shep muster` there would start them beside the new ones. Their state files stay under `~/.kelpie/projects`
 2. Adopt kelpie in your own shepherd, as above
 3. For each project: `cd ~/.kelpie/repos/<project> && shep kelpie add <project> && shep kelpie start`. `add` makes the project's table from `~/.kelpie/projects/<project>/settings.toml`, and the runner keeps its state file
 4. Once: `shep kelpie settings move <project>`, which moves `~/.kelpie/settings.toml` into the `[kelpie]` section
