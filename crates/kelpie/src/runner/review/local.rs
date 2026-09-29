@@ -296,3 +296,25 @@ fn past_its_local_rounds_every_round_is_claudes_and_one_clean_one_ends_the_loop(
     assert_eq!(status["work_item"]["phase"]["state"], "ci");
     assert_eq!(rig.reviewer.seen().len(), 1, "one local round");
 }
+
+#[test]
+fn local_rounds_spent_before_a_no_stay_spent_in_the_next_pass() {
+    let (rig, runner, _) = Rig::parked_set("koji", |rig| {
+        rig.edit_settings(|s| s.replace("loop_guard = 8\n", "loop_guard = 8\nlocal_rounds = 1\n"));
+    });
+    assert_eq!(
+        rig.reviewer.seen().len(),
+        1,
+        "the first pass ran its local round"
+    );
+    rig.ask(&runner, "rule", Some("1 no rename it"));
+    rig.claude.script([
+        Scripted::Push("rename.txt", "renamed\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    step(&runner).unwrap(); // the noted turn: pushes, enters round 1
+    step(&runner).unwrap(); // round 1, claude: scripted clean above
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["phase"]["state"], "ci");
+    assert_eq!(rig.reviewer.seen().len(), 1, "no second local round");
+}

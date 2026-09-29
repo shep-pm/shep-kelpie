@@ -206,6 +206,8 @@ fn the_review_budget_is_unset_until_a_table_sets_it() {
     assert_eq!(s.coderabbit.rounds.map(NonZeroU32::get), Some(1));
     let err = parse_err(&EXAMPLE.replace("divisor = 1000\n", "divisor = 1000\nrounds = 0\n"));
     assert!(err.contains("`coderabbit.rounds = 0`"), "{err}");
+    let err = parse_err(&EXAMPLE.replace("loop_guard = 8\n", "loop_guard = 8\nlocal_rounds = 0\n"));
+    assert!(err.contains("`review.local_rounds = 0`"), "{err}");
 }
 
 #[test]

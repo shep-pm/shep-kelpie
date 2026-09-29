@@ -47,6 +47,10 @@ pub struct WorkItem {
     /// so the next summon asks it for a full review.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub rebased: bool,
+    /// Local rounds finished in every pass of its review loop so far, which
+    /// `review.local_rounds` caps
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub local_rounds: u32,
     /// Its worktree
     pub worktree: PathBuf,
     /// Its worker's build folder
@@ -266,6 +270,10 @@ pub fn foreign_change(
     Some((seen, parts.join("; ")))
 }
 
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
 fn label_or_labels(n: usize) -> &'static str {
     if n == 1 { "label was" } else { "labels were" }
 }
@@ -376,19 +384,14 @@ impl Review {
         }
     }
 
-    /// Which reviewer runs this round, given how many local rounds a work
-    /// item may run: 0 with the local round off
-    pub fn reviewer(&self, local_rounds: u32) -> ReviewerKind {
-        if self.round % 2 == 1 && self.round.div_ceil(2) <= local_rounds {
+    /// Which reviewer runs this round, given how many local rounds the work
+    /// item has left: 0 with the local round off
+    pub fn reviewer(&self, local_left: u32) -> ReviewerKind {
+        if local_left > 0 && self.round % 2 == 1 {
             ReviewerKind::Local
         } else {
             ReviewerKind::Claude
         }
-    }
-
-    /// Whether no local round is left once this one ends
-    pub fn local_spent(&self, local_rounds: u32) -> bool {
-        self.round.div_ceil(2) >= local_rounds
     }
 }
 
@@ -745,16 +748,14 @@ mod tests {
     }
 
     #[test]
-    fn past_its_local_rounds_every_round_is_claudes() {
-        let reviewers: Vec<_> = (1..=5)
-            .map(|round| Review {
-                round,
-                ..Review::first()
-            })
-            .map(|review| review.reviewer(2))
-            .collect();
-        use ReviewerKind::{Claude, Local};
-        assert_eq!(reviewers, [Local, Claude, Local, Claude, Claude]);
+    fn with_no_local_round_left_every_round_is_claudes() {
+        let round = |round| Review {
+            round,
+            ..Review::first()
+        };
+        assert_eq!(round(3).reviewer(1), ReviewerKind::Local);
+        assert_eq!(round(3).reviewer(0), ReviewerKind::Claude);
+        assert_eq!(round(4).reviewer(1), ReviewerKind::Claude);
     }
 
     #[test]
