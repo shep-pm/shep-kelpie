@@ -36,8 +36,8 @@ mod unfinished;
 const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
                         Carry on with the work item from where you left off.";
 
-/// Posts a ruling to the webhook, or runs the worker's next turn if one is
-/// due and the project is running
+/// Posts a ruling or a notice to the webhook, or runs the worker's next
+/// turn if one is due and the project is running
 ///
 /// Returns what happened, or `None` when there was nothing to do. A ruling
 /// is posted whether the project runs or not.
@@ -61,12 +61,14 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
         // The relay is a faster, nicer path when it is reachable, but the
         // webhook is what actually keeps a ruling from being lost, so it
         // posts every ruling regardless of how the relay's send went.
-        if lock(runner).relay_clear_due() {
-            let _ = relay.clear();
+        if let Some(message) = &due.relay {
+            if lock(runner).relay_clear_due() {
+                let _ = relay.clear();
+            }
+            let _ = relay.send(&message.text, &message.model, message.effort);
         }
-        let _ = relay.send(&due.relay_message, &due.relay_model, due.relay_effort);
         let sent = alerts.post(&due.webhook, &due.alert);
-        return lock(runner).alert_sent(due.id, sent).map(Some);
+        return lock(runner).alert_sent(due.of, sent).map(Some);
     }
     let mut start_over = false;
     loop {

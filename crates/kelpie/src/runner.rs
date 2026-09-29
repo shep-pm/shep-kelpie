@@ -219,6 +219,7 @@ impl Runner {
     pub fn status(&self) -> Status<'_> {
         Status {
             project: self.project.as_str(),
+            merge_authority: self.settings.merge_authority,
             run: self.state.run,
             since: self.state.since,
             work_item: self.state.work_item.as_ref().map(WorkItemStatus::from),
@@ -305,6 +306,9 @@ impl Runner {
             coderabbit: CodeRabbitTally::default(),
             known: Known::default(),
             qwen: QwenTally::default(),
+            merge_refused: false,
+            merge_tried: None,
+            summon_owed: false,
             shots: None,
             shots_comment: None,
             calls: Vec::new(),

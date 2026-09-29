@@ -1,9 +1,11 @@
-//! The merge a yes allows, and the cleanup after it
+//! The merge a yes or `auto` allows, and the cleanup after it
 //!
-//! A yes merges only the head it was asked about, while CI on it is still
-//! green and it still has the latest `main`. Otherwise kelpie withdraws the
-//! yes, goes back to CI, and asks again. Every step is saved before the next,
-//! so a runner restarted mid-merge picks up where it stopped.
+//! A merge takes only the head it was asked about, while CI on it is still
+//! green and it still has the latest `main`. Otherwise kelpie withdraws it,
+//! goes back to CI, and asks or merges again. Under `auto` a refused merge
+//! takes that path too, and a second refusal raises a ruling. Every step is
+//! saved before the next, so a runner restarted mid-merge picks up where it
+//! stopped.
 
 use std::fmt;
 
@@ -11,9 +13,10 @@ use super::Runner;
 use super::gate::{settled, short};
 use super::report::{Begin, StepReport};
 use crate::ports::{Checks, PullRequestState};
+use crate::settings::MergeAuthority;
 use crate::shots::publish;
-use crate::state::{RulingKind, StateError};
-use crate::work_item::{Phase, ReviewCallState, Turn};
+use crate::state::{Notice, RulingKind, StateError};
+use crate::work_item::{Phase, Review, ReviewCallState, Turn};
 use crate::worktree::{self, Base};
 
 /// Why `drop` was refused
@@ -98,9 +101,15 @@ impl Runner {
         let (issue, Some(number)) = (item.issue, item.pull_request) else {
             return Ok(Begin::Idle);
         };
-        let Phase::Merge { head, readied } = item.phase.clone() else {
+        let Phase::Merge {
+            head,
+            readied,
+            auto,
+        } = item.phase.clone()
+        else {
             return Ok(Begin::Idle);
         };
+        let tried = item.merge_tried.clone();
         let repo = self.settings.forge.clone();
         let pr = match self.ports.forge.pull_request(&repo, number) {
             Ok(pr) => pr,
@@ -108,18 +117,25 @@ impl Runner {
         };
         match pr.state {
             PullRequestState::Open => {}
+            // Kelpie's own merge at this head, when a restart or a lost
+            // answer hid it, still gets its notice under `auto`.
             PullRequestState::Merged => {
-                self.update(|item| item.phase = Phase::Done { merged: true })?;
-                return self.finish(true);
+                let notice = (auto && pr.head == head) || tried == Some(pr.head.clone());
+                return self.merged(issue, number, pr.head, notice);
             }
             PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
+        }
+        // The gate asks again once the project is no longer `auto`.
+        if auto && self.settings.merge_authority != MergeAuthority::Auto {
+            let reason = "the merge authority is no longer auto".to_owned();
+            return self.withdraw(issue, number, auto, reason);
         }
         let now = self.ports.clock.now();
         let ci = self.settings.ci;
         let settling = ci && readied.is_some_and(|at| !settled(at, now));
         if pr.head != head {
             let reason = format!("#{number} moved to {}", short(&pr.head));
-            return self.withdraw(issue, number, reason);
+            return self.withdraw(issue, number, auto, reason);
         }
         // A run that marking the draft ready started is waited for; before
         // that, anything but green withdraws the yes.
@@ -129,15 +145,20 @@ impl Runner {
             Checks::None | Checks::Pending if readied.is_some() => false,
             Checks::None | Checks::Pending | Checks::Failed(_) => {
                 let reason = format!("CI on #{number} is no longer green");
-                return self.withdraw(issue, number, reason);
+                return self.withdraw(issue, number, auto, reason);
             }
         };
         match self.base_of(&head) {
             Ok(Base::Current) => {}
             Ok(Base::Lagging) => return Ok(Begin::Idle),
             Ok(Base::Behind) => {
-                let reason = "main moved since the question".to_owned();
-                return self.withdraw(issue, number, reason);
+                let since = if auto {
+                    "the gate passed"
+                } else {
+                    "the question"
+                };
+                let reason = format!("main moved since {since}");
+                return self.withdraw(issue, number, auto, reason);
             }
             Err(reason) => return Ok(self.gate_failed(reason)),
         }
@@ -147,7 +168,11 @@ impl Runner {
             }
             let readied = Some(now);
             self.update(|item| {
-                item.phase = Phase::Merge { head, readied };
+                item.phase = Phase::Merge {
+                    head,
+                    readied,
+                    auto,
+                };
                 item.known.ready = true;
             })?;
             return Ok(Begin::Report(StepReport::MarkedReady {
@@ -166,20 +191,109 @@ impl Runner {
             return Ok(Begin::Idle);
         }
         if let Err(e) = self.ports.forge.merge(&repo, number, &head) {
-            return Ok(self.gate_failed(format!("cannot merge #{number}: {e}")));
+            let reason = format!("cannot merge #{number}: {e}");
+            if !auto {
+                return Ok(self.gate_failed(reason));
+            }
+            match self.ports.forge.pull_request(&repo, number) {
+                Ok(pr) if pr.state == PullRequestState::Merged && pr.head == head => {}
+                Ok(_) => return self.refused(issue, number, head, reason),
+                Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}: {e}"))),
+            }
         }
-        self.update(|item| item.phase = Phase::Done { merged: true })?;
+        self.merged(issue, number, head, auto)
+    }
+
+    // Nobody is asked before a merge under `auto`, so a head the gates never
+    // saw is adopted into the worktree and goes back through every gate.
+    pub(super) fn regate(&mut self, from: &str, tip: &str) -> Result<(), String> {
+        let item = self
+            .state
+            .work_item
+            .as_ref()
+            .expect("a gate is of a work item");
+        let (repo, branch) = (&self.settings.repo, &item.branch);
+        worktree::adopt(repo, &item.worktree, branch, from, tip)
+            .map_err(|e| format!("cannot bring the worktree to {}: {e}", short(tip)))?;
+        let tip = Some(tip.to_owned());
+        self.update(|item| {
+            item.known.head = tip;
+            item.coderabbit.satisfied = false;
+            item.phase = Phase::Review(Review::first());
+        })
+        .map_err(|e| e.to_string())
+    }
+
+    // The notice is saved with the merge, so it goes out exactly once.
+    pub(super) fn merged(
+        &mut self,
+        issue: u64,
+        number: u64,
+        head: String,
+        notice: bool,
+    ) -> Result<Begin, StateError> {
+        let mut next = self.state.clone();
+        let item = next.work_item.as_mut().expect("a merge is of a work item");
+        item.phase = Phase::Done { merged: true };
+        if notice {
+            next.notices.push(Notice {
+                issue,
+                pull_request: number,
+                head,
+            });
+        }
+        self.save(next)?;
         self.finish(true)
     }
 
-    fn withdraw(&mut self, issue: u64, number: u64, reason: String) -> Result<Begin, StateError> {
+    fn withdraw(
+        &mut self,
+        issue: u64,
+        number: u64,
+        auto: bool,
+        reason: String,
+    ) -> Result<Begin, StateError> {
         let since = self.ports.clock.now();
         self.update(|item| item.phase = Phase::Ci { head: None, since })?;
-        Ok(Begin::Report(StepReport::YesWithdrawn {
-            issue,
-            pull_request: number,
-            reason,
+        Ok(Begin::Report(if auto {
+            StepReport::MergeWithdrawn {
+                issue,
+                pull_request: number,
+                reason,
+            }
+        } else {
+            StepReport::YesWithdrawn {
+                issue,
+                pull_request: number,
+                reason,
+            }
         }))
+    }
+
+    // The first refusal under `auto` goes back to CI, which catches the
+    // branch up with `main`. A second one, on any head, asks.
+    fn refused(
+        &mut self,
+        issue: u64,
+        number: u64,
+        head: String,
+        reason: String,
+    ) -> Result<Begin, StateError> {
+        let item = self
+            .state
+            .work_item
+            .as_ref()
+            .expect("a merge is of a work item");
+        let refused_before = item.merge_refused;
+        let tried = Some(head.clone());
+        self.update(|item| {
+            item.merge_refused = true;
+            item.merge_tried = tried;
+        })?;
+        if refused_before {
+            return self.raise(number, RulingKind::MergeRefused { head, reason });
+        }
+        self.withdraw(issue, number, true, reason)
     }
 
     // Removes the worktree, branch, build and shots folders, then the work
@@ -242,6 +356,9 @@ impl Runner {
         Ok(Begin::Report(report))
     }
 }
+
+#[cfg(test)]
+mod auto;
 
 #[cfg(test)]
 mod tests {

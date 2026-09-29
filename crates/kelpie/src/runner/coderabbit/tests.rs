@@ -20,7 +20,7 @@ fn cr() -> LeaseKind {
 
 // A running project with CodeRabbit on, whose worker opened pull request
 // 71 and whose qwen-review loop settled. CI has not reported.
-fn reviewed_by_qwen(project: &str) -> (Rig, Mutex<Runner>, String) {
+pub(in crate::runner) fn reviewed_by_qwen(project: &str) -> (Rig, Mutex<Runner>, String) {
     let rig = Rig::new(project);
     rig.coderabbit_on();
     let runner = rig.open().unwrap();
@@ -40,7 +40,7 @@ fn reviewed_by_qwen(project: &str) -> (Rig, Mutex<Runner>, String) {
 
 // Green CI on the head, the pass that marks the draft ready, and the summon
 // that follows it.
-fn summoned(project: &str) -> (Rig, Mutex<Runner>, String) {
+pub(in crate::runner) fn summoned(project: &str) -> (Rig, Mutex<Runner>, String) {
     let (rig, runner, head) = reviewed_by_qwen(project);
     rig.forge.set_checks(&head, Checks::Passed);
     assert_eq!(
@@ -61,7 +61,7 @@ fn summoned(project: &str) -> (Rig, Mutex<Runner>, String) {
     (rig, runner, head)
 }
 
-fn now(rig: &Rig) -> u64 {
+pub(in crate::runner) fn now(rig: &Rig) -> u64 {
     use crate::ports::Clock;
     rig.clock.now().0
 }
@@ -520,7 +520,7 @@ fn a_thread_the_judge_holds_nothing_on_leaves_coderabbit_satisfied() {
 }
 
 // Round one's fix, CI, and round two, each holding a finding.
-fn hold_a_finding(
+pub(in crate::runner) fn hold_a_finding(
     rig: &Rig,
     runner: &Mutex<Runner>,
     head: &str,
@@ -537,7 +537,7 @@ fn hold_a_finding(
 }
 
 // The worker's fix: a new commit, CI green on it, and the next summon.
-fn fixed(rig: &Rig, runner: &Mutex<Runner>, file: &'static str) -> String {
+pub(in crate::runner) fn fixed(rig: &Rig, runner: &Mutex<Runner>, file: &'static str) -> String {
     rig.claude.script([Scripted::Push(file, "fixed\n")]);
     step(runner).unwrap();
     let head = rig.forge.head_of("kelpie/7").unwrap();

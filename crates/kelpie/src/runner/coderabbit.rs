@@ -10,7 +10,7 @@
 
 mod cap;
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 
 use super::Runner;
 use super::gate::settled;
@@ -28,11 +28,11 @@ pub const LABEL: &str = "review please";
 
 // A summon neither taken up nor refused in ten minutes is counted as spent,
 // so the lease goes back.
-const ANSWER_WAIT: u64 = 600;
+pub(super) const ANSWER_WAIT: u64 = 600;
 
 // A full review of a long branch took 24 minutes on shep. Two hours with
 // none is the maintainer's to look at.
-const REVIEW_WAIT: u64 = 2 * 3600;
+pub(super) const REVIEW_WAIT: u64 = 2 * 3600;
 
 impl Runner {
     /// Whether the work item owes CodeRabbit a round before its merge ruling
@@ -90,7 +90,9 @@ impl Runner {
             Ok(activity) => activity,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
-        if activity.covers(&head) {
+        // A review from before an adoption lands only to hand on its findings.
+        let owed = self.item().summon_owed;
+        if activity.covers(&head) && (!owed || activity.open_threads().next().is_some()) {
             return self.review_landed(number, &activity);
         }
         if let Some(begin) = self.ready_for_review(number, &head, readied)? {
@@ -184,9 +186,18 @@ impl Runner {
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
         let waited = self.ports.clock.now().0.saturating_sub(at.0);
+        // A head reviewed before an adoption needs a review of kelpie's own.
+        let activity = if self.item().summon_owed {
+            activity.since(at)
+        } else {
+            activity
+        };
         match activity.read(&head, at) {
             Reading::Reviewed => {
                 self.accepted(at)?;
+                if self.item().summon_owed {
+                    self.update(|item| item.summon_owed = false)?;
+                }
                 if let Err(reason) = self.label(number, false) {
                     return Ok(self.gate_failed(reason));
                 }
@@ -377,6 +388,9 @@ impl Runner {
 
     // The merge ruling still waits for CI, which a ready or rebased head reruns.
     fn satisfied(&mut self, number: u64, rounds: u32) -> Result<Begin, StateError> {
+        if self.item().summon_owed {
+            return self.summon_owed(rounds);
+        }
         let since = self.ports.clock.now();
         self.update(|item| {
             item.coderabbit.rounds = rounds;
@@ -388,6 +402,27 @@ impl Runner {
             pull_request: number,
             rounds,
         }))
+    }
+
+    // Reviews from before an adoption count toward the cap but never satisfy
+    // a round, so the round summons instead.
+    fn summon_owed(&mut self, rounds: u32) -> Result<Begin, StateError> {
+        let Phase::CodeRabbit(stage) = self.item().phase.clone() else {
+            unreachable!("a round is satisfied in a CodeRabbit round")
+        };
+        let head = match stage {
+            CodeRabbitStage::Lease { head, .. } | CodeRabbitStage::Summoned { head, .. } => head,
+            CodeRabbitStage::Judging { head, .. } | CodeRabbitStage::Fixing { head } => head,
+        };
+        let lease = CodeRabbitStage::Lease {
+            head: head.clone(),
+            readied: None,
+        };
+        self.update(|item| {
+            item.coderabbit.rounds = rounds;
+            item.phase = Phase::CodeRabbit(lease);
+        })?;
+        self.summon(head, None)
     }
 
     /// Takes the judge's verdict on one open thread

@@ -78,6 +78,32 @@ fn the_merge_ruling_puts_the_shots_on_one_comment_off_the_branch() {
 }
 
 #[test]
+fn under_auto_the_shots_comment_lands_before_the_merge() {
+    let rig = with_preview("lab");
+    rig.merge_auto();
+    let runner = started(&rig);
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    for _ in 0..4 {
+        step(&runner).unwrap(); // the turn, qwen, the shots, claude
+    }
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+    let Some(StepReport::ShotsPosted { .. }) = rig.verdict(&runner) else {
+        panic!("auto went to merge without posting the shots");
+    };
+    assert_eq!(rig.forge.merges(), [], "not merged before the comment");
+    for _ in 0..6 {
+        rig.clock.advance(crate::runner::CHECKS_SETTLE);
+        step(&runner).unwrap();
+    }
+    assert_eq!(rig.forge.merges(), [(71, head)]);
+    assert_eq!(shots_comments(&rig).len(), 1);
+}
+
+#[test]
 fn a_rework_edits_the_shots_comment_in_place() {
     let (rig, runner, first) = green("lab");
     let Some(StepReport::ShotsPosted { comment, .. }) = rig.verdict(&runner) else {
