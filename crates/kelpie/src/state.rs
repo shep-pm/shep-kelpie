@@ -772,6 +772,26 @@ mod tests {
     }
 
     #[test]
+    fn a_change_to_claudes_files_keeps_its_head_files_and_phase() {
+        let kind = RulingKind::ClaudeFiles {
+            head: "c0ffee".into(),
+            files: vec![".mcp.json".into()],
+            phase: Phase::Implement,
+        };
+        let saved = serde_json::to_value(&kind).unwrap();
+        assert_eq!(
+            saved,
+            serde_json::json!({
+                "kind": "claude-files",
+                "head": "c0ffee",
+                "files": [".mcp.json"],
+                "phase": { "state": "implement" },
+            })
+        );
+        assert_eq!(serde_json::from_value::<RulingKind>(saved).unwrap(), kind);
+    }
+
+    #[test]
     fn a_question_during_a_coderabbit_fix_is_pinned() {
         let resume = Resume::CodeRabbitFix {
             head: "c0ffee".into(),
