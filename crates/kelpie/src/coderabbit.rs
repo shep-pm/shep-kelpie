@@ -4,7 +4,9 @@
 //! CodeRabbit liked, so a clean review is read from its walkthrough comment.
 //! And the rate-limit notice quotes the commit range it would have read, so
 //! the reviewed commit comes from the walkthrough's own markers, never from
-//! that range. Pure: the forge fetches, this reads.
+//! that range. A third: a summon CodeRabbit finds nothing new in is marked
+//! done on the head's commit status, and posts nothing at all. Pure: the
+//! forge fetches, this reads.
 
 use crate::ports::{Finding, Severity, Timestamp};
 
@@ -17,6 +19,8 @@ pub struct Activity {
     pub reviews: Vec<Review>,
     /// The review threads it opened
     pub threads: Vec<Thread>,
+    /// The commit statuses it set on the pull request's head, newest first
+    pub statuses: Vec<Status>,
 }
 
 /// One of CodeRabbit's conversation comments, as last edited
@@ -54,6 +58,17 @@ pub struct Thread {
     pub body: String,
 }
 
+/// A commit status CodeRabbit set
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Status {
+    /// The commit it is on
+    pub commit: String,
+    /// What it says, such as "Review completed"
+    pub description: String,
+    /// When it was set
+    pub at: Timestamp,
+}
+
 /// What became of a summon, read at one moment
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reading {
@@ -66,6 +81,12 @@ pub enum Reading {
         /// When the window opens
         opens: Timestamp,
     },
+    /// CodeRabbit marked the head done and posted nothing that covers it:
+    /// it found nothing new to read
+    Completed {
+        /// When it marked the head done
+        at: Timestamp,
+    },
     /// Nothing yet
     Silent,
 }
@@ -77,6 +98,8 @@ const STICKY: [&str; 3] = [
     "Files selected for processing",
 ];
 const LIMIT: &str = "Review limit reached";
+// A rate limit and a skip are marked done too, under other words.
+const COMPLETED: &str = "Review completed";
 
 // A refusal stamped this long before the summon is still its answer. One a
 // minute older quotes the same window, so misreading it costs nothing.
@@ -111,9 +134,18 @@ impl Activity {
             .filter(|c| c.at.0 >= from)
             .filter_map(|c| Some((c.at, wait(&c.body)?)))
             .max_by_key(|(at, _)| *at);
-        refusal.map_or(Reading::Silent, |(at, wait)| Reading::Refused {
-            opens: Timestamp(at.0.saturating_add(wait)),
-        })
+        if let Some((at, wait)) = refusal {
+            return Reading::Refused {
+                opens: Timestamp(at.0.saturating_add(wait)),
+            };
+        }
+        let done = self
+            .statuses
+            .iter()
+            .filter(|s| s.commit == head && s.at.0 >= from && s.description == COMPLETED);
+        done.map(|s| s.at)
+            .max()
+            .map_or(Reading::Silent, |at| Reading::Completed { at })
     }
 
     /// The quota the latest footer states, included reviews an hour, and
@@ -158,6 +190,12 @@ impl Activity {
                 .cloned()
                 .collect(),
             threads: self.threads.clone(),
+            statuses: self
+                .statuses
+                .iter()
+                .filter(|s| s.at.0 >= from)
+                .cloned()
+                .collect(),
         }
     }
 
@@ -304,7 +342,9 @@ fn one_line(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::gh::coderabbit::{parse_comments, parse_reviews, parse_threads};
+    use crate::adapters::gh::coderabbit::{
+        parse_comments, parse_reviews, parse_statuses, parse_threads,
+    };
 
     // Recorded from shep with the gh adapter's own calls: its sticky holds
     // a walkthrough up to ce143d9 and a limit block quoting the head.
@@ -321,11 +361,19 @@ mod tests {
     const THREADS_617: &str = include_str!("../fixtures/coderabbit-threads-617.json");
     const HEAD_617: &str = "f642b8aca0a37c3044166a8f384458b7ecc381be";
 
+    // shep#614 after kelpie's owed summon by label at 05:53:21: its head only
+    // merged `main`, which changed nothing CodeRabbit reads. It marked the
+    // head done 24 seconds on and posted nothing but a skip notice.
+    const COMMENTS_614: &str = include_str!("../fixtures/coderabbit-comments-614.jsonl");
+    const STATUSES_614: &str = include_str!("../fixtures/coderabbit-statuses-614.jsonl");
+    const HEAD_614: &str = "7d30d0f6f8d03314fe9f060b4627643bb32db8cc";
+
     fn activity(comments: &str, reviews: &str, threads: &str) -> Activity {
         Activity {
             comments: parse_comments(comments.as_bytes()).unwrap(),
             reviews: parse_reviews(reviews.as_bytes()).unwrap(),
             threads: parse_threads(threads.as_bytes()).unwrap(),
+            statuses: Vec::new(),
         }
     }
 
@@ -347,6 +395,51 @@ mod tests {
             Reading::Reviewed
         );
         assert_eq!(seen.open_threads().count(), 0);
+    }
+
+    #[test]
+    fn a_summon_marked_done_with_nothing_posted_is_completed_not_reviewed() {
+        let seen = Activity {
+            statuses: parse_statuses(STATUSES_614.as_bytes()).unwrap(),
+            ..activity(COMMENTS_614, "", NO_THREADS)
+        };
+        let summoned = iso("2026-09-29T05:53:21Z");
+        assert!(
+            !seen.covers(HEAD_614),
+            "the walkthrough is of an older head"
+        );
+        assert!(
+            seen.reviewed_besides(HEAD_614) > 0,
+            "it read the pull request before"
+        );
+        let done = Reading::Completed {
+            at: iso("2026-09-29T05:53:45Z"),
+        };
+        assert_eq!(seen.read(HEAD_614, summoned), done);
+        assert_eq!(seen.since(summoned).read(HEAD_614, summoned), done);
+        assert_eq!(
+            seen.read(HEAD_614, iso("2026-09-29T06:10:00Z")),
+            Reading::Silent,
+            "done before a later summon is no answer to it"
+        );
+        assert_eq!(seen.read("0ther", summoned), Reading::Silent);
+    }
+
+    #[test]
+    fn a_rate_limit_or_a_skip_marked_on_the_head_is_not_completed() {
+        let status = |description: &str| Status {
+            commit: "c0ffee".into(),
+            description: description.into(),
+            at: Timestamp(100),
+        };
+        let seen = Activity {
+            statuses: vec![
+                status("Review rate limited"),
+                status("Review skipped: excluded by label configuration"),
+            ],
+            ..Activity::default()
+        };
+        assert_eq!(seen.read("c0ffee", Timestamp(0)), Reading::Silent);
     }
 
     #[test]

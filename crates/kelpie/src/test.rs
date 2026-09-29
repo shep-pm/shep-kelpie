@@ -116,6 +116,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         merge_refused: false,
         merge_tried: None,
         summon_owed: false,
+        rebased: false,
         shots: None,
         shots_comment: None,
         calls: vec![CallRecord {

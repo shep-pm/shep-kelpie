@@ -7,6 +7,12 @@
 //! head the label comes off, the judge reads every open thread, rejected
 //! ones are resolved and held ones go to the worker. Satisfied means no
 //! thread open and nothing held. Past the cap, held findings park the worker.
+//!
+//! On a pull request CodeRabbit read before, the label asks only for what is
+//! new, and after an adoption or a catch-up with `main` it finds nothing.
+//! Those summons ask for a full review by comment instead. A head CodeRabbit
+//! marks done with nothing posted was read and found clean, unless a summon
+//! is owed: that one asks once more, for a full review.
 
 mod cap;
 #[cfg(test)]
@@ -26,6 +32,9 @@ use crate::work_item::{CodeRabbitStage, OpenThread, Phase, Turn, WorkItem};
 /// The label shep's `.coderabbit.yaml` gates auto review on: the summon
 pub const LABEL: &str = "review please";
 
+/// The comment that asks CodeRabbit to read the whole pull request again
+pub const FULL_REVIEW: &str = "@coderabbitai full review";
+
 // A summon neither taken up nor refused in ten minutes is counted as spent,
 // so the lease goes back.
 pub(super) const ANSWER_WAIT: u64 = 600;
@@ -33,6 +42,10 @@ pub(super) const ANSWER_WAIT: u64 = 600;
 // A full review of a long branch took 24 minutes on shep. Two hours with
 // none is the maintainer's to look at.
 pub(super) const REVIEW_WAIT: u64 = 2 * 3600;
+
+// CodeRabbit posts a review a few seconds before it marks the head done
+// (nine on shep#614), so done with nothing posted is read a minute on.
+pub(super) const DONE_SETTLE: u64 = 60;
 
 impl Runner {
     /// Whether the work item owes CodeRabbit a round before its merge ruling
@@ -46,6 +59,7 @@ impl Runner {
             item.phase = Phase::CodeRabbit(CodeRabbitStage::Lease {
                 head,
                 readied: None,
+                full: false,
             })
         })?;
         self.coderabbit_step()
@@ -71,8 +85,12 @@ impl Runner {
             Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}: {e}"))),
         }
         match stage {
-            CodeRabbitStage::Lease { head, readied } => self.summon(head, readied),
-            CodeRabbitStage::Summoned { head, at } => self.await_review(head, at),
+            CodeRabbitStage::Lease {
+                head,
+                readied,
+                full,
+            } => self.summon(head, readied, full),
+            CodeRabbitStage::Summoned { head, at, full } => self.await_review(head, at, full),
             CodeRabbitStage::Judging {
                 threads, verdicts, ..
             } => self.judge_threads(&threads, &verdicts),
@@ -83,8 +101,14 @@ impl Runner {
     // No summon without the lease, and none for a head already reviewed:
     // that one costs the hour and buys nothing. CodeRabbit skips a draft, so
     // a draft is marked ready first and the summon waits for the next pass:
-    // the forge can show the old state for a few seconds after.
-    fn summon(&mut self, head: String, readied: Option<Timestamp>) -> Result<Begin, StateError> {
+    // the forge can show the old state for a few seconds after. `full` asks
+    // for a full review whatever CodeRabbit read before.
+    fn summon(
+        &mut self,
+        head: String,
+        readied: Option<Timestamp>,
+        full: bool,
+    ) -> Result<Begin, StateError> {
         let number = self.number();
         let activity = match self.activity(number) {
             Ok(activity) => activity,
@@ -95,7 +119,7 @@ impl Runner {
         if activity.covers(&head) && (!owed || activity.open_threads().next().is_some()) {
             return self.review_landed(number, &activity);
         }
-        if let Some(begin) = self.ready_for_review(number, &head, readied)? {
+        if let Some(begin) = self.ready_for_review(number, &head, readied, full)? {
             return Ok(begin);
         }
         let kind = LeaseKind::coderabbit();
@@ -105,6 +129,11 @@ impl Runner {
         }
         let now = self.ports.clock.now();
         self.hold(now)?;
+        let item = self.item();
+        let read_before = activity.reviewed_besides("") > 0;
+        if full || (read_before && (item.summon_owed || item.rebased)) {
+            return self.ask_full(number, head, now);
+        }
         // A label kelpie put on is a summon made before a restart could save
         // it. Any other label on sends no event, so it comes off first.
         let ours = self.item().known.labels.iter().any(|l| l == LABEL);
@@ -122,8 +151,44 @@ impl Runner {
         let stage = CodeRabbitStage::Summoned {
             head: head.clone(),
             at: now,
+            full: false,
         };
         self.update(|item| item.phase = Phase::CodeRabbit(stage))?;
+        Ok(Begin::Report(StepReport::Summoned {
+            issue: self.item().issue,
+            pull_request: number,
+            head,
+        }))
+    }
+
+    // The summon is saved before the comment goes out, so a restart never
+    // posts it twice. A comment the forge refused leaves the round waiting
+    // for the lease again. The label comes off first, since a push while it
+    // is on would summon outside the lease.
+    fn ask_full(&mut self, number: u64, head: String, now: Timestamp) -> Result<Begin, StateError> {
+        if let Err(reason) = self.label(number, false) {
+            return Ok(self.gate_failed(reason));
+        }
+        let stage = CodeRabbitStage::Summoned {
+            head: head.clone(),
+            at: now,
+            full: true,
+        };
+        self.update(|item| item.phase = Phase::CodeRabbit(stage))?;
+        let posted = self
+            .ports
+            .forge
+            .comment(&self.settings.forge, number, FULL_REVIEW);
+        if let Err(e) = posted {
+            let stage = CodeRabbitStage::Lease {
+                head,
+                readied: None,
+                full: true,
+            };
+            self.update(|item| item.phase = Phase::CodeRabbit(stage))?;
+            let reason = format!("cannot ask CodeRabbit for a full review on #{number}: {e}");
+            return Ok(self.gate_failed(reason));
+        }
         Ok(Begin::Report(StepReport::Summoned {
             issue: self.item().issue,
             pull_request: number,
@@ -142,6 +207,7 @@ impl Runner {
         number: u64,
         head: &str,
         readied: Option<Timestamp>,
+        full: bool,
     ) -> Result<Option<Begin>, StateError> {
         let repo = self.settings.forge.clone();
         let pr = match self.ports.forge.pull_request(&repo, number) {
@@ -171,6 +237,7 @@ impl Runner {
             item.phase = Phase::CodeRabbit(CodeRabbitStage::Lease {
                 head,
                 readied: Some(now),
+                full,
             });
         })?;
         Ok(Some(Begin::Report(StepReport::MarkedReady {
@@ -179,29 +246,41 @@ impl Runner {
         })))
     }
 
-    fn await_review(&mut self, head: String, at: Timestamp) -> Result<Begin, StateError> {
+    fn await_review(
+        &mut self,
+        head: String,
+        at: Timestamp,
+        full: bool,
+    ) -> Result<Begin, StateError> {
         let number = self.number();
         let activity = match self.activity(number) {
             Ok(activity) => activity,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
-        let waited = self.ports.clock.now().0.saturating_sub(at.0);
+        let now = self.ports.clock.now().0;
+        let waited = now.saturating_sub(at.0);
         // A head reviewed before an adoption needs a review of kelpie's own.
-        let activity = if self.item().summon_owed {
-            activity.since(at)
-        } else {
-            activity
-        };
+        let owed = self.item().summon_owed;
+        let activity = if owed { activity.since(at) } else { activity };
         match activity.read(&head, at) {
-            Reading::Reviewed => {
+            Reading::Reviewed => self.answered(number, &activity, at),
+            Reading::Completed { at: done } if now.saturating_sub(done.0) < DONE_SETTLE => {
+                self.accepted(at).map(|()| Begin::Idle)
+            }
+            Reading::Completed { .. } if !owed => self.answered(number, &activity, at),
+            // An owed summon found nothing new: ask once more, for a full review.
+            Reading::Completed { .. } if !full => {
                 self.accepted(at)?;
-                if self.item().summon_owed {
-                    self.update(|item| item.summon_owed = false)?;
-                }
                 if let Err(reason) = self.label(number, false) {
                     return Ok(self.gate_failed(reason));
                 }
-                self.review_landed(number, &activity)
+                let stage = CodeRabbitStage::Lease {
+                    head: head.clone(),
+                    readied: None,
+                    full: true,
+                };
+                self.update(|item| item.phase = Phase::CodeRabbit(stage))?;
+                self.summon(head, None, true)
             }
             Reading::Refused { opens } => {
                 let kind = LeaseKind::coderabbit();
@@ -213,6 +292,7 @@ impl Runner {
                 let stage = CodeRabbitStage::Lease {
                     head,
                     readied: None,
+                    full,
                 };
                 self.update(|item| item.phase = Phase::CodeRabbit(stage))?;
                 Ok(Begin::Report(StepReport::SummonRefused {
@@ -221,21 +301,45 @@ impl Runner {
                     opens,
                 }))
             }
-            Reading::Silent if waited >= REVIEW_WAIT => {
+            Reading::Silent | Reading::Completed { .. } if waited >= REVIEW_WAIT => {
                 self.accepted(at)?;
                 if let Err(reason) = self.label(number, false) {
                     return Ok(self.gate_failed(reason));
                 }
                 self.raise(number, RulingKind::CodeRabbitSilent { head })
             }
-            Reading::Processing => self.accepted(at).map(|()| Begin::Idle),
+            Reading::Processing | Reading::Completed { .. } => {
+                self.accepted(at).map(|()| Begin::Idle)
+            }
             Reading::Silent if waited >= ANSWER_WAIT => self.accepted(at).map(|()| Begin::Idle),
             Reading::Silent => Ok(Begin::Idle),
         }
     }
 
-    // A round counts only here, once a review covers the head.
+    // A summon answered, by a review of the head or by CodeRabbit finding
+    // nothing new in it, which is a clean read.
+    fn answered(
+        &mut self,
+        number: u64,
+        activity: &Activity,
+        at: Timestamp,
+    ) -> Result<Begin, StateError> {
+        self.accepted(at)?;
+        if self.item().summon_owed {
+            self.update(|item| item.summon_owed = false)?;
+        }
+        if let Err(reason) = self.label(number, false) {
+            return Ok(self.gate_failed(reason));
+        }
+        self.review_landed(number, activity)
+    }
+
+    // A round counts only here, once CodeRabbit has read the head, which
+    // also reads whatever a catch-up with `main` brought.
     fn review_landed(&mut self, number: u64, activity: &Activity) -> Result<Begin, StateError> {
+        if self.item().rebased {
+            self.update(|item| item.rebased = false)?;
+        }
         let Phase::CodeRabbit(stage) = self.item().phase.clone() else {
             unreachable!("a review lands in a CodeRabbit round")
         };
@@ -417,12 +521,13 @@ impl Runner {
         let lease = CodeRabbitStage::Lease {
             head: head.clone(),
             readied: None,
+            full: false,
         };
         self.update(|item| {
             item.coderabbit.rounds = rounds;
             item.phase = Phase::CodeRabbit(lease);
         })?;
-        self.summon(head, None)
+        self.summon(head, None, false)
     }
 
     /// Takes the judge's verdict on one open thread

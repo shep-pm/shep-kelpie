@@ -42,6 +42,11 @@ pub struct WorkItem {
     /// kelpie summoned. Until one lands, no round is satisfied.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub summon_owed: bool,
+    /// Whether kelpie caught the branch up with `main` since CodeRabbit last
+    /// answered a summon. CodeRabbit finds nothing new in a caught-up branch,
+    /// so the next summon asks it for a full review.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rebased: bool,
     /// Its worktree
     pub worktree: PathBuf,
     /// Its worker's build folder
@@ -144,13 +149,21 @@ pub enum CodeRabbitStage {
         /// When kelpie marked the draft ready, until the forge reads it so
         #[serde(default, skip_serializing_if = "Option::is_none")]
         readied: Option<Timestamp>,
+        /// Whether the summon asks for a full review whatever CodeRabbit read
+        /// before, because the last one was answered with nothing new
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        full: bool,
     },
-    /// The label went on at `at`. The lease goes back once CodeRabbit answers.
+    /// The label went on, or the comment asking for a full review was
+    /// posted, at `at`. The lease goes back once CodeRabbit answers.
     Summoned {
         /// The head the summon is for
         head: String,
-        /// When the label went on
+        /// When the summon was made
         at: Timestamp,
+        /// Whether it asked for a full review
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        full: bool,
     },
     /// The open threads of a review of `head`, judged in order
     Judging {
@@ -405,6 +418,13 @@ pub enum ReviewStage {
 }
 
 impl WorkItem {
+    /// Records the head kelpie's own catch-up with `main` pushed, which
+    /// CodeRabbit has not read
+    pub fn caught_up(&mut self, head: Option<String>) {
+        self.known.head = head;
+        self.rebased = true;
+    }
+
     /// The commit its qwen-review loop diffs against: `origin/main`, or the
     /// head an adopted pull request arrived with, so none of that is reviewed
     pub fn review_base(&self) -> String {
@@ -572,8 +592,20 @@ mod tests {
             value(Phase::CodeRabbit(CodeRabbitStage::Summoned {
                 head: "c0ffee".into(),
                 at: Timestamp(12),
+                full: false,
             })),
             json!({ "state": "coderabbit", "stage": "summoned", "head": "c0ffee", "at": 12 })
+        );
+        let full = json!({ "state": "coderabbit", "stage": "summoned", "head": "c0ffee", "at": 12, "full": true });
+        let asked: Phase = serde_json::from_value(full.clone()).unwrap();
+        assert_eq!(value(asked), full);
+        assert_eq!(
+            value(Phase::CodeRabbit(CodeRabbitStage::Lease {
+                head: "c0ffee".into(),
+                readied: None,
+                full: true,
+            })),
+            json!({ "state": "coderabbit", "stage": "lease", "head": "c0ffee", "full": true })
         );
         let judging = Phase::CodeRabbit(CodeRabbitStage::Judging {
             head: "c0ffee".into(),
