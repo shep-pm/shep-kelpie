@@ -538,7 +538,7 @@ impl Runner {
     ) -> Result<Option<StepReport>, StateError> {
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
-        let Some(item) = next.work_item.as_mut() else {
+        let Some(item) = self.current_in(&mut next) else {
             return Ok(None);
         };
         record_spent(item, spent, now);
@@ -570,7 +570,7 @@ impl Runner {
     /// Gives the CodeRabbit lease back and takes the label off, when the
     /// work item leaves a round for good
     pub(super) fn leave_round(&mut self) {
-        let Some(number) = self.state.work_item.as_ref().and_then(|i| i.pull_request) else {
+        let Some(number) = self.current().and_then(|i| i.pull_request) else {
             return;
         };
         let _ = self.release();
@@ -589,6 +589,7 @@ impl Runner {
         next.leases.retain(|l| l.resource != Resource::Coderabbit);
         next.leases.push(LeaseHeld {
             resource: Resource::Coderabbit,
+            issue: Some(self.item().issue),
             since,
         });
         self.save(next)
@@ -655,9 +656,7 @@ impl Runner {
     }
 
     fn item(&self) -> &WorkItem {
-        self.state
-            .work_item
-            .as_ref()
+        self.current()
             .expect("a CodeRabbit round is of a work item")
     }
 

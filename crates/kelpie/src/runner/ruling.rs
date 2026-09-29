@@ -142,7 +142,7 @@ impl Runner {
         // Only the ruling the work item is parked on moves it. Any other,
         // which nothing leaves behind today, is answered by clearing it.
         let parked_on = |item: &WorkItem| item.phase == Phase::Ruling { id };
-        let parked = next.work_item.as_ref().filter(|item| parked_on(item));
+        let parked = next.work_items.iter().find(|item| parked_on(item));
         let head_moved = match (parked, &ruling.kind) {
             (Some(item), RulingKind::ForeignChange { known: seen, .. }) => {
                 match (&item.known.head, &seen.head) {
@@ -160,11 +160,12 @@ impl Runner {
                 .map_err(|e| RuleError::Adopt(to.clone(), e.to_string()))?;
             if tip != *to {
                 let change = foreign_change(&item.known, &seen.labels, seen.ready, &tip);
-                return self.ask_again(next, ruling.pull_request, change, now);
+                let issue = item.issue;
+                return self.ask_again(next, issue, ruling.pull_request, change, now);
             }
         }
         let moved = decide(id, answer, ruling, now, head_moved)?;
-        if let Some(item) = next.work_item.as_mut().filter(|item| parked_on(item)) {
+        if let Some(item) = self.current_in(&mut next).filter(|item| parked_on(item)) {
             item.coderabbit.cap_cleared |= lifts_cap;
             if accepts.is_some() {
                 item.claude_files_accepted = accepts;
@@ -246,12 +247,13 @@ impl Runner {
     fn ask_again(
         &mut self,
         mut next: ProjectState,
+        issue: u64,
         number: Option<u64>,
         change: Option<(Known, String)>,
         now: Timestamp,
     ) -> Result<(), RuleError> {
         let Some((known, description)) = change else {
-            if let Some(item) = next.work_item.as_mut() {
+            if let Some(item) = next.item_mut(issue) {
                 item.phase = Phase::Ci {
                     head: None,
                     since: now,
@@ -260,7 +262,7 @@ impl Runner {
             return self.save(next).map_err(RuleError::State);
         };
         let kind = RulingKind::ForeignChange { description, known };
-        let (_, id, _) = park(self.project.as_str(), &mut next, number, kind);
+        let (_, id, _) = park(self.project.as_str(), &mut next, issue, number, kind);
         self.save(next).map_err(RuleError::State)?;
         // A comment that fails loses nothing: the ruling is saved and alerted.
         let _ = self.post_ruling(number, id);
@@ -271,7 +273,9 @@ impl Runner {
     // request `number`.
     pub(super) fn raise(&mut self, number: u64, kind: RulingKind) -> Result<Begin, StateError> {
         let mut next = self.state.clone();
-        let (issue, id, question) = park(self.project.as_str(), &mut next, Some(number), kind);
+        let issue = self.current().expect("a ruling is about a work item").issue;
+        let (issue, id, question) =
+            park(self.project.as_str(), &mut next, issue, Some(number), kind);
         self.save(next)?;
         let comment_failed = self.post_ruling(Some(number), id);
         Ok(Begin::Report(StepReport::Ruling {
@@ -300,8 +304,7 @@ impl Runner {
     pub(super) fn update(&mut self, change: impl FnOnce(&mut WorkItem)) -> Result<(), StateError> {
         let mut next = self.state.clone();
         change(
-            next.work_item
-                .as_mut()
+            self.current_in(&mut next)
                 .expect("a change to the work item in flight"),
         );
         self.save(next)
@@ -336,20 +339,20 @@ fn regate(repo: &std::path::Path, item: &mut WorkItem) -> Result<bool, RuleError
 pub(super) fn park(
     project: &str,
     next: &mut ProjectState,
+    issue: u64,
     pull_request: Option<u64>,
     kind: RulingKind,
 ) -> (u64, u64, String) {
     let id = next.last_ruling + 1;
     let item = next
-        .work_item
-        .as_mut()
-        .expect("a ruling is about a work item");
+        .item_mut(issue)
+        .expect("a ruling is about an open work item");
     item.phase = Phase::Ruling { id };
-    let issue = item.issue;
     let text = question(project, id, issue, pull_request, &kind);
     next.last_ruling = id;
     next.rulings.push(Ruling {
         id,
+        issue: Some(issue),
         question: text.clone(),
         pull_request,
         kind,

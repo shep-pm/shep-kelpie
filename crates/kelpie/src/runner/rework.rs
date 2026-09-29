@@ -111,7 +111,7 @@ impl Runner {
     /// the change cannot be saved. A refusal changes nothing. A label or
     /// save that fails after the triage labels began coming off leaves them off.
     pub fn rework(&mut self, number: u64) -> Result<WorkerModel, ReworkError> {
-        if let Some(item) = &self.state.work_item {
+        if let Some(item) = self.current() {
             return Err(ReworkError::InFlight(item.issue));
         }
         let pr = self
@@ -132,7 +132,7 @@ impl Runner {
     ) -> Result<(Option<Begin>, Vec<Skip>), StateError> {
         let mut skipped = Vec::new();
         // A second ask waits for the work item in flight to end.
-        if self.state.work_item.is_some() {
+        if self.current().is_some() {
             return Ok((None, skipped));
         }
         let mut ours: Vec<(u64, u64)> = open
@@ -325,7 +325,7 @@ impl Runner {
         if !next.reworked.contains(&review.id) {
             next.reworked.push(review.id);
         }
-        next.work_item = Some(WorkItem {
+        next.work_items.push(WorkItem {
             branch: pr.branch,
             rework: true,
             pull_request: Some(number),

@@ -20,10 +20,11 @@ impl Runner {
 
     pub(super) fn park_ceiling_passed(&mut self, now: Timestamp) -> Result<Begin, StateError> {
         let mut next = self.state.clone();
-        if let Some(item) = next.work_item.as_mut() {
+        let issue = self.current().expect("a turn is a work item's").issue;
+        if let Some(item) = next.item_mut(issue) {
             item.turn = Turn::Ended { at: now };
         }
-        let mut report = timed_out(self.project.as_str(), &mut next);
+        let mut report = timed_out(self.project.as_str(), &mut next, issue);
         self.save(next)?;
         self.fill_comment_failed(&mut report);
         Ok(Begin::Report(report))
@@ -35,16 +36,16 @@ impl Runner {
 // finds a turn already past its ceiling with no call spent. The caller sets
 // `item.turn` beforehand: this only raises the ruling. `comment_failed` is
 // filled in afterwards, once the ruling has actually been posted.
-pub(super) fn timed_out(project: &str, next: &mut ProjectState) -> StepReport {
+pub(super) fn timed_out(project: &str, next: &mut ProjectState, issue: u64) -> StepReport {
     let item = next
-        .work_item
-        .as_mut()
-        .expect("a turn ceiling is about a work item");
-    let (issue, session, pull_request) = (item.issue, item.session.clone(), item.pull_request);
+        .item_mut(issue)
+        .expect("a turn ceiling is about an open work item");
+    let (session, pull_request) = (item.session.clone(), item.pull_request);
     let phase = Some(item.phase.clone());
     let (_, id, question) = park(
         project,
         next,
+        issue,
         pull_request,
         RulingKind::TurnTimeout { phase },
     );
@@ -64,25 +65,25 @@ pub(super) fn timed_out(project: &str, next: &mut ProjectState) -> StepReport {
 pub(in crate::runner) fn failed(
     project: &str,
     next: &mut ProjectState,
+    issue: u64,
     at: Timestamp,
     reason: String,
 ) -> StepReport {
     let item = next
-        .work_item
-        .as_mut()
-        .expect("a failed turn is about a work item");
+        .item_mut(issue)
+        .expect("a failed turn is about an open work item");
     let failure = Turn::Failed {
         at,
         reason: reason.clone(),
     };
     let retry = std::mem::replace(&mut item.turn, failure);
-    let (issue, pull_request) = (item.issue, item.pull_request);
+    let pull_request = item.pull_request;
     let kind = RulingKind::TurnFailed {
         reason,
         phase: item.phase.clone(),
         retry,
     };
-    let (_, id, question) = park(project, next, pull_request, kind);
+    let (_, id, question) = park(project, next, issue, pull_request, kind);
     StepReport::Failed {
         issue,
         pull_request,

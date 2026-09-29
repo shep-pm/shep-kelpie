@@ -184,14 +184,16 @@ impl Runner {
         // its own, unlike a turn: nothing reruns review_step to naturally
         // clear it, so a restart clears it here instead of leaving it stuck
         // running forever and refusing every later drop.
-        if let Some(item) = &mut state.work_item
-            && matches!(item.review_call, ReviewCallState::Running { .. })
-        {
-            item.review_call = ReviewCallState::Idle;
+        let cut_short =
+            |item: &WorkItem| matches!(item.review_call, ReviewCallState::Running { .. });
+        if state.work_items.iter().any(cut_short) {
+            for item in state.work_items.iter_mut().filter(|item| cut_short(item)) {
+                item.review_call = ReviewCallState::Idle;
+            }
             store.save(&state)?;
         }
         // A dev server the last run's worker left behind holds its port.
-        if let Some(item) = &state.work_item {
+        for item in &state.work_items {
             ports
                 .shots
                 .stop_left(&paths.shots(item.issue).join(crate::shots::SERVER_PID));
@@ -233,7 +235,7 @@ impl Runner {
             merge_authority: self.settings.merge_authority,
             run: self.state.run,
             since: self.state.since,
-            work_item: self.state.work_item.as_ref().map(WorkItemStatus::from),
+            work_item: self.current().map(WorkItemStatus::from),
             adopted: &self.state.adopted,
             skipped: &self.skipped,
             rulings: &self.state.rulings,
@@ -269,7 +271,7 @@ impl Runner {
     /// or its `worker:` label understood, or the change cannot be saved.
     /// Nothing changes then.
     pub fn add(&mut self, issue: u64) -> Result<WorkerModel, AddError> {
-        if let Some(item) = &self.state.work_item {
+        if let Some(item) = self.current() {
             return Err(AddError::InFlight(item.issue));
         }
         let found = self
@@ -282,7 +284,8 @@ impl Runner {
             .unwrap_or_else(|| WorkerModel::from(&self.settings.models.worker));
         let session = new_session_id().map_err(|e| AddError::Session(e.to_string()))?;
         let mut next = self.state.clone();
-        next.work_item = Some(self.fresh(issue, found.title, worker.clone(), session));
+        next.work_items
+            .push(self.fresh(issue, found.title, worker.clone(), session));
         self.save(next).map_err(AddError::State)?;
         Ok(worker)
     }
@@ -326,6 +329,16 @@ impl Runner {
             shots_comment: None,
             calls: Vec::new(),
         }
+    }
+
+    // The work item the runner is working on
+    pub(super) fn current(&self) -> Option<&WorkItem> {
+        self.state.work_items.first()
+    }
+
+    // The work item the runner is working on, in a state about to be saved
+    pub(super) fn current_in<'a>(&self, next: &'a mut ProjectState) -> Option<&'a mut WorkItem> {
+        next.work_items.first_mut()
     }
 
     fn set_run(&mut self, run: RunState) -> Result<(), StateError> {

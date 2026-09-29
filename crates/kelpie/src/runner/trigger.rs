@@ -277,7 +277,7 @@ impl Runner {
     /// [`GateError`] naming why the work item cannot enter the gate. Nothing
     /// changes then.
     pub fn gate(&mut self) -> Result<(), GateError> {
-        let item = self.state.work_item.as_ref().ok_or(GateError::NoWorkItem)?;
+        let item = self.current().ok_or(GateError::NoWorkItem)?;
         let issue = item.issue;
         if item.phase != Phase::Implement {
             return Err(GateError::AlreadyGated(issue));
@@ -460,7 +460,7 @@ mod tests {
         let state = rig.paths().state;
         let text = std::fs::read_to_string(&state).unwrap();
         let mut saved: serde_json::Value = serde_json::from_str(&text).unwrap();
-        let item = saved["work_item"].as_object_mut().unwrap();
+        let item = saved["work_items"][0].as_object_mut().unwrap();
         item.remove("phase");
         item.remove("red_head");
         std::fs::write(&state, saved.to_string()).unwrap();

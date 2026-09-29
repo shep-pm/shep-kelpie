@@ -67,7 +67,7 @@ impl Runner {
     /// [`DropError`] when nothing is in flight, a turn, a review round or a
     /// merge is under way, or the cleanup fails. The work item stays then.
     pub fn drop_work_item(&mut self) -> Result<(), DropError> {
-        let item = self.state.work_item.as_ref().ok_or(DropError::NoWorkItem)?;
+        let item = self.current().ok_or(DropError::NoWorkItem)?;
         if matches!(item.turn, Turn::Running { .. }) {
             return Err(DropError::TurnRunning(item.issue));
         }
@@ -93,11 +93,7 @@ impl Runner {
     // that pass ends there. A later pass, once the checks have had time to
     // register, merges only on a green run.
     pub(super) fn merge(&mut self) -> Result<Begin, StateError> {
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("a merge is of a work item");
+        let item = self.current().expect("a merge is of a work item");
         let (issue, Some(number)) = (item.issue, item.pull_request) else {
             return Ok(Begin::Idle);
         };
@@ -207,11 +203,7 @@ impl Runner {
     // Nobody is asked before a merge under `auto`, so a head the gates never
     // saw is adopted into the worktree and goes back through every gate.
     pub(super) fn regate(&mut self, from: &str, tip: &str) -> Result<(), String> {
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("a gate is of a work item");
+        let item = self.current().expect("a gate is of a work item");
         let (repo, branch) = (&self.settings.repo, &item.branch);
         worktree::adopt(repo, &item.worktree, branch, from, tip)
             .map_err(|e| format!("cannot bring the worktree to {}: {e}", short(tip)))?;
@@ -233,7 +225,9 @@ impl Runner {
         notice: bool,
     ) -> Result<Begin, StateError> {
         let mut next = self.state.clone();
-        let item = next.work_item.as_mut().expect("a merge is of a work item");
+        let item = self
+            .current_in(&mut next)
+            .expect("a merge is of a work item");
         item.phase = Phase::Done { merged: true };
         if notice {
             next.notices.push(Notice {
@@ -279,11 +273,7 @@ impl Runner {
         head: String,
         reason: String,
     ) -> Result<Begin, StateError> {
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("a merge is of a work item");
+        let item = self.current().expect("a merge is of a work item");
         let refused_before = item.merge_refused;
         let tried = Some(head.clone());
         self.update(|item| {
@@ -301,11 +291,7 @@ impl Runner {
     // request left unmerged is handed back to the maintainer first.
     pub(super) fn finish(&mut self, merged: bool) -> Result<Begin, StateError> {
         self.release()?;
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("a finish is of a work item");
+        let item = self.current().expect("a finish is of a work item");
         // First, so a failure here leaves everything else for the retry.
         if let Some(number) = item.pull_request
             && let Err(e) = publish::delete(&self.settings.repo, &publish::branch(number))
@@ -349,10 +335,10 @@ impl Runner {
             qwen: item.qwen,
         };
         let mut next = self.state.clone();
-        next.work_item = None;
+        next.work_items.retain(|open| open.issue != item.issue);
         // Rulings about this work item go with it, a question asked before
         // its pull request included.
-        next.rulings.retain(|r| r.pull_request != item.pull_request);
+        next.rulings.retain(|r| r.issue != Some(item.issue));
         if !next.finished.contains(&item.issue) {
             next.finished.push(item.issue);
         }
@@ -725,7 +711,7 @@ mod tests {
         let state = rig.paths().state;
         let text = std::fs::read_to_string(&state).unwrap();
         let mut saved: serde_json::Value = serde_json::from_str(&text).unwrap();
-        saved["work_item"]["review_call"] = json!({ "state": "running", "since": Rig::EPOCH });
+        saved["work_items"][0]["review_call"] = json!({ "state": "running", "since": Rig::EPOCH });
         std::fs::write(&state, saved.to_string()).unwrap();
 
         let runner = rig.open().unwrap();

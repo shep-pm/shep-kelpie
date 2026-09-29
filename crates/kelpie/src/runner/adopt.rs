@@ -130,7 +130,7 @@ impl Runner {
     /// also goes to it as a comment, or why the change cannot be saved.
     /// Nothing is adopted then.
     pub fn adopt(&mut self, number: u64) -> Result<(), AdoptError> {
-        let in_flight = self.state.work_item.as_ref().and_then(|i| i.pull_request);
+        let in_flight = self.current().and_then(|i| i.pull_request);
         if in_flight == Some(number) || self.waiting(number) {
             return Ok(());
         }
@@ -167,7 +167,7 @@ impl Runner {
         open: &[OpenPullRequest],
     ) -> Result<(Option<Begin>, Vec<Skip>), StateError> {
         let mut skipped = Vec::new();
-        if self.state.work_item.is_some() {
+        if self.current().is_some() {
             return Ok((None, skipped));
         }
         let mut labelled: Vec<u64> = open
@@ -410,7 +410,7 @@ impl Runner {
         };
         item.coderabbit.rounds = rounds;
         item.summon_owed = self.settings.coderabbit.enabled;
-        next.work_item = Some(item);
+        next.work_items.push(item);
         self.save(next).map_err(AdoptError::State)?;
         Ok((issue, worker))
     }
@@ -423,7 +423,7 @@ impl Runner {
     /// when the worktree holds it. `None` keeps the head kelpie knew, which
     /// errs toward parking.
     pub(super) fn own_push(&self) -> Option<String> {
-        let item = self.state.work_item.as_ref()?;
+        let item = self.current()?;
         let head = self.origin_head().ok()?;
         if !item.adopted {
             return Some(head);
@@ -435,7 +435,7 @@ impl Runner {
     // A push by anyone else to an adopted branch since kelpie last looked
     // goes to the gate, which parks it, before a worker's turn builds on it.
     pub(super) fn pushed_by_someone_else(&mut self) -> Result<Option<Begin>, StateError> {
-        let Some(item) = self.state.work_item.as_ref() else {
+        let Some(item) = self.current() else {
             return Ok(None);
         };
         let due = matches!(item.turn, Turn::Due | Turn::Next { .. });

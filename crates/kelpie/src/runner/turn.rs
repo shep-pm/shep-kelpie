@@ -102,7 +102,7 @@ impl Runner {
         if self.state.run != RunState::Running {
             return Ok(Begin::Idle);
         }
-        let Some(item) = &self.state.work_item else {
+        let Some(item) = self.current() else {
             return self.dispatch();
         };
         match &item.phase {
@@ -144,7 +144,7 @@ impl Runner {
         if due && let Some(held) = self.pace(Scope::Turn)?.holds() {
             return Ok(held);
         }
-        let item = self.state.work_item.as_ref().expect("checked above");
+        let item = self.current().expect("checked above");
         let id = item.session.clone();
         let now = self.ports.clock.now();
         // A turn already running when the runner starts keeps the start it
@@ -174,18 +174,21 @@ impl Runner {
             // `ClaudeError::TimedOut` would, with no call spent.
             return self.park_ceiling_passed(now);
         }
+        let issue = item.issue;
         let prepared = self.prepare(item, session, prompt, remaining);
         let mut next = self.state.clone();
         let mut begin = match prepared {
             Ok(call) => {
-                let item = next
-                    .work_item
-                    .as_mut()
+                let item = self
+                    .current_in(&mut next)
                     .expect("the work item checked above");
                 item.turn = Turn::Running { since };
                 Begin::Call(call)
             }
-            Err(reason) => Begin::Report(failed(self.project.as_str(), &mut next, now, reason)),
+            Err(reason) => {
+                let project = self.project.as_str();
+                Begin::Report(failed(project, &mut next, issue, now, reason))
+            }
         };
         self.save(next)?;
         if let Begin::Report(report) = &mut begin {
@@ -310,7 +313,7 @@ impl Runner {
         result: Result<ClaudeReply, ClaudeError>,
     ) -> Result<Option<StepReport>, StateError> {
         // However the turn ended, a dev server its shots tool started is done.
-        if let Some(item) = &self.state.work_item {
+        if let Some(item) = self.current() {
             self.ports
                 .shots
                 .stop_left(&self.paths.shots(item.issue).join(crate::shots::SERVER_PID));
@@ -322,11 +325,12 @@ impl Runner {
         let now = self.ports.clock.now();
         // Whatever the turn left on `origin` is the worker's own. A head
         // that cannot be read keeps the last one, which errs toward parking.
-        let pushed = self.state.work_item.as_ref().and_then(|_| self.own_push());
+        let pushed = self.current().and_then(|_| self.own_push());
         let mut next = self.state.clone();
-        let Some(item) = next.work_item.as_mut() else {
+        let Some(item) = self.current_in(&mut next) else {
             return Ok(None);
         };
+        let issue = item.issue;
         if pushed.is_some() {
             item.known.head = pushed;
         }
@@ -369,7 +373,7 @@ impl Runner {
                         }
                     }
                 }
-                let (issue, session) = (item.issue, item.session.clone());
+                let session = item.session.clone();
                 let (work_item_cost_usd, pull_request) = (item.cost().usd(), item.pull_request);
                 match question {
                     None => StepReport::Ended {
@@ -394,7 +398,7 @@ impl Runner {
                             resume,
                         };
                         let project = self.project.as_str();
-                        let (_, id, question) = park(project, &mut next, pull_request, kind);
+                        let (_, id, question) = park(project, &mut next, issue, pull_request, kind);
                         StepReport::Asked {
                             issue,
                             session,
@@ -411,9 +415,9 @@ impl Runner {
             }
             Err(ClaudeError::TimedOut) => {
                 item.turn = Turn::Ended { at: now };
-                timed_out(self.project.as_str(), &mut next)
+                timed_out(self.project.as_str(), &mut next, issue)
             }
-            Err(e) => failed(self.project.as_str(), &mut next, now, e.to_string()),
+            Err(e) => failed(self.project.as_str(), &mut next, issue, now, e.to_string()),
         };
         self.save(next)?;
         let mut report = report;
