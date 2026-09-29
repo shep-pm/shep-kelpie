@@ -21,7 +21,8 @@ use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
 use crate::ports::{Leases, Ports};
 use crate::runner::{ACTIONS, ProjectName, ProjectPaths, Runner, answer, step};
-use crate::shep_home;
+use crate::settings::source::{self, Files};
+use crate::{shep_home, shepherd};
 
 /// How long queued replies get to reach the shepherd before the runner exits
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
@@ -77,14 +78,31 @@ fn serve(project: &str) -> Result<(), String> {
         relay: Arc::new(RelayCli::new(
             home.clone(),
             kelpie_home.join("relay"),
-            shep_home,
+            shep_home.clone(),
             kelpie.clone(),
         )),
         alerts: Arc::new(Curl),
         leases: Arc::clone(&leases) as Arc<dyn Leases>,
         clock: Box::new(SystemClock),
     };
-    let runner = Runner::open(project, &paths, &home, &kelpie, ports).map_err(|e| e.to_string())?;
+    let sheep = std::env::var("SHEP_NAME")
+        .ok()
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| project.as_str().to_owned());
+    let tables = shepherd::block_on(shepherd::read_tables(&shep_home, &sheep))?;
+    let files = Files {
+        project: project.as_str(),
+        sheep: &sheep,
+        settings: &paths.settings,
+        kelpie_settings: &paths.kelpie_settings,
+    };
+    let loaded = source::load(&tables, files, &home).map_err(|e| e.to_string())?;
+    for notice in &loaded.notices {
+        eprintln!("{notice}");
+    }
+    let (settings, webhook) = (loaded.settings, loaded.webhook);
+    let runner = Runner::open(project, settings, webhook, &paths, &kelpie, ports)
+        .map_err(|e| e.to_string())?;
 
     if !shepherd.is_active() {
         return Err("no shepherd channel: run it under shep with `channel = true`".into());

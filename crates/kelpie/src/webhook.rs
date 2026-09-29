@@ -1,9 +1,10 @@
 //! Kelpie's own settings: the webhook every ruling also goes to
 //!
-//! One TOML file under kelpie's home, shared by every project and read when
-//! a runner starts. It holds one `[webhook]` table, and both its keys are
-//! required. The URL is a credential, so no error, log line or status
-//! carries it. `kelpie-settings.example.toml` beside this crate shows the file.
+//! Kelpie's `[kelpie]` section of `dogs.toml`, or the file under kelpie's
+//! home it had before one, shared by every project. It holds one `webhook`
+//! table, and both its keys are required. The URL is a credential, so no
+//! error, log line or status carries it. `kelpie-settings.example.toml`
+//! beside this crate shows the section.
 
 use std::fmt;
 use std::path::Path;
@@ -123,6 +124,15 @@ impl KelpieSettings {
         })
     }
 
+    /// Reads and checks kelpie's `[kelpie]` section, as shep hands it over
+    ///
+    /// # Errors
+    ///
+    /// [`SettingsError::Section`] naming the line that is wrong, never its text.
+    pub fn from_section(text: &str) -> Result<Self, SettingsError> {
+        Self::parse(text).map_err(|message| SettingsError::Section { message })
+    }
+
     fn parse(text: &str) -> Result<Self, String> {
         toml::from_str(text).map_err(|e: toml::de::Error| {
             let line = e
@@ -140,7 +150,10 @@ impl KelpieSettings {
 mod tests {
     use super::*;
 
-    const EXAMPLE: &str = include_str!("../kelpie-settings.example.toml");
+    // The example's section as shep hands it over: re-rooted, so `[webhook]`.
+    fn example() -> String {
+        include_str!("../kelpie-settings.example.toml").replace("[kelpie.webhook]", "[webhook]")
+    }
 
     // A URL no test would print by chance, so finding it anywhere is a leak
     const SECRET: &str = "https://ntfy.example.invalid/kelpie-s3cr3t-topic";
@@ -151,7 +164,7 @@ mod tests {
 
     #[test]
     fn the_example_reads() {
-        let s = KelpieSettings::parse(EXAMPLE).unwrap();
+        let s = KelpieSettings::parse(&example()).unwrap();
         assert_eq!(s.webhook.kind, WebhookKind::Ntfy);
         assert!(s.webhook.url.expose().starts_with("https://ntfy.sh/"));
     }
@@ -159,8 +172,8 @@ mod tests {
     // A derived Debug would print the URL wherever settings are debugged.
     #[test]
     fn debug_does_not_leak_the_url() {
-        assert!(EXAMPLE.contains("https://ntfy.sh/your-private-topic"));
-        let text = EXAMPLE.replace("https://ntfy.sh/your-private-topic", SECRET);
+        assert!(example().contains("https://ntfy.sh/your-private-topic"));
+        let text = example().replace("https://ntfy.sh/your-private-topic", SECRET);
         let s = KelpieSettings::parse(&text).unwrap();
         assert_eq!(format!("{:?}", s.webhook.url), "WebhookUrl(..)");
         assert!(!format!("{s:?}").contains("s3cr3t"), "{s:?}");
@@ -192,6 +205,20 @@ mod tests {
             "[webhook]\nkind = \"ntfy\"\nurl = \"{SECRET}\"\ntoken = \"x\"\n"
         ));
         assert!(err.starts_with("line 4 is not right"), "{err}");
+    }
+
+    #[test]
+    fn a_malformed_section_is_named_and_never_quoted() {
+        let err = KelpieSettings::from_section(&format!(
+            "[webhook]\nkind = \"slack\"\nurl = \"{SECRET}\"\n"
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.starts_with("the [kelpie] section of dogs.toml: line 2"),
+            "{err}"
+        );
+        assert!(!err.contains("s3cr3t"), "{err}");
     }
 
     #[test]

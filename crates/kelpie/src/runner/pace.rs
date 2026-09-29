@@ -125,7 +125,10 @@ mod tests {
         let rig = Rig::new(project);
         if !enabled {
             rig.edit_settings(|s| {
-                s.replace("[pacing]\nenabled = true", "[pacing]\nenabled = false")
+                s.replace(
+                    "[app.dogs.kelpie.pacing]\nenabled = true",
+                    "[app.dogs.kelpie.pacing]\nenabled = false",
+                )
             });
         }
         let mut state = ProjectState::new(Timestamp(Rig::EPOCH));

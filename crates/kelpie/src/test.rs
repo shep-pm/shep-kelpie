@@ -18,7 +18,7 @@ use crate::ports::{
 use crate::runner::{
     CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
 };
-use crate::settings::Effort;
+use crate::settings::{Effort, Settings};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{CallRecord, Known, Phase, Turn, WorkItem};
 
@@ -135,12 +135,22 @@ pub(crate) fn a_work_item() -> WorkItem {
     }
 }
 
+/// The `[app.dogs.kelpie]` table of a runner's Flockfile entry, such as
+/// `settings.example.toml`, as shep hands it to the runner
+pub(crate) fn project_table(entry: &str) -> serde_json::Map<String, serde_json::Value> {
+    let entry: toml::Table = toml::from_str(entry).unwrap();
+    match serde_json::to_value(&entry["app"][0]["dogs"]["kelpie"]).unwrap() {
+        serde_json::Value::Object(table) => table,
+        other => panic!("the entry's kelpie table is {other}"),
+    }
+}
+
 /// The `repo` in `settings.example.toml`, which the rig points at its own
 const EXAMPLE_REPO: &str = "~/.kelpie/repos/shep";
 
 /// The CodeRabbit gate as `settings.example.toml` sets it, and turned off
-pub(crate) const CODERABBIT_ON: &str = "[coderabbit]\nenabled = true\n";
-const CODERABBIT_OFF: &str = "[coderabbit]\nenabled = false\n";
+pub(crate) const CODERABBIT_ON: &str = "[app.dogs.kelpie.coderabbit]\nenabled = true\n";
+const CODERABBIT_OFF: &str = "[app.dogs.kelpie.coderabbit]\nenabled = false\n";
 
 /// A launch file like the playground's
 const LAUNCH: &str = r#"{"version": "0.0.1", "configurations": [{"name": "dev", "runtimeExecutable": "bun", "runtimeArgs": ["run", "dev"], "port": 3000}]}"#;
@@ -755,10 +765,17 @@ impl Rig {
             shots: Arc::new(self.shots.clone()),
             clock: Box::new(self.clock.clone()),
         };
+        let paths = self.paths();
+        let entry = std::fs::read_to_string(&paths.settings).unwrap();
+        let folder = paths.settings.parent().unwrap();
+        let project = self.project.as_str();
+        let settings =
+            Settings::from_table(&project_table(&entry), project, self.home.path(), folder)?;
         Runner::open(
             self.project.clone(),
-            &self.paths(),
-            self.home.path(),
+            settings,
+            self.webhook(),
+            &paths,
             Path::new(Self::KELPIE),
             ports,
         )

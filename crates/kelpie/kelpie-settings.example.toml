@@ -1,10 +1,11 @@
-# Kelpie's own settings, shared by every project, at `~/.kelpie/settings.toml`.
-# Read when a runner starts. Every key is required.
+# Kelpie's own settings, shared by every project: its `[kelpie]` section of
+# `dogs.toml` in kelpie's shepherd's home, which lookout edits in the dog's
+# pane and draws the URL `<set>`. Every key is required.
 
 # Every ruling is also posted here, so the maintainer hears of it away from
 # the terminal. `kind` is `discord` (a channel's webhook URL) or `ntfy` (a
 # topic's URL). The URL is a credential: anyone holding it can post, or read
-# an ntfy topic. Keep this file private.
-[webhook]
+# an ntfy topic. Keep `dogs.toml` private.
+[kelpie.webhook]
 kind = "ntfy"
 url = "https://ntfy.sh/your-private-topic"

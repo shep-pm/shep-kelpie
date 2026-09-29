@@ -26,6 +26,7 @@ pub mod schema;
 pub mod settings;
 pub mod sheep;
 pub mod shep_home;
+pub mod shepherd;
 pub mod shots;
 pub mod state;
 pub mod webhook;

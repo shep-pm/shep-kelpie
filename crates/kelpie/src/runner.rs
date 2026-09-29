@@ -1,7 +1,7 @@
 //! The project runner
 //!
 //! One runner per project, run as a sheep under kelpie's own shepherd. It
-//! reads the project's settings when it starts, keeps the project's state
+//! checks the project's settings when it starts, keeps the project's state
 //! file, answers the maintainer's triggers, and runs the worker's turns.
 //! Every change is saved before it takes effect in memory.
 
@@ -14,7 +14,7 @@ use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Ports, SessionId, Timestamp, Visibility};
 use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
-use crate::webhook::{KelpieSettings, Webhook};
+use crate::webhook::Webhook;
 use crate::work_item::{
     CodeRabbitTally, Known, Phase, QwenTally, ReviewCallState, Turn, WorkItem, new_session_id,
 };
@@ -155,10 +155,8 @@ pub struct Runner {
 }
 
 impl Runner {
-    /// Reads kelpie's settings, the project's settings and its state, and
-    /// checks the settings hold
+    /// Checks the project's settings hold, and reads its state
     ///
-    /// `home` is the maintainer's home folder, for `~/` in settings.
     /// `kelpie` is the kelpie binary, which each worker's file-tool hook runs.
     ///
     /// # Errors
@@ -166,13 +164,12 @@ impl Runner {
     /// [`OpenError`] naming the setting, forge call or file that failed.
     pub fn open(
         project: ProjectName,
+        settings: Settings,
+        webhook: Webhook,
         paths: &ProjectPaths,
-        home: &Path,
         kelpie: &Path,
         ports: Ports,
     ) -> Result<Self, OpenError> {
-        let webhook = KelpieSettings::load(&paths.kelpie_settings)?.webhook;
-        let settings = Settings::load(&paths.settings, home)?;
         check_repo(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;
         check_coderabbit(&settings, &ports)?;
@@ -534,14 +531,5 @@ mod tests {
         rig.forge.set_visibility(Visibility::Private);
         rig.open().unwrap();
         assert_eq!(rig.forge.calls(), 0);
-    }
-
-    #[test]
-    fn a_missing_settings_file_stops_the_runner_naming_it() {
-        let rig = Rig::new("koji");
-        std::fs::remove_file(&rig.paths().settings).unwrap();
-        let err = rig.open().unwrap_err().to_string();
-        assert!(err.starts_with("cannot read settings file "), "{err}");
-        assert!(err.contains("projects/koji/settings.toml"), "{err}");
     }
 }

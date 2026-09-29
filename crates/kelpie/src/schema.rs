@@ -97,19 +97,17 @@ mod tests {
 
     // The example with every optional key set, so each one is counted.
     fn every_project_key() -> String {
-        let example = include_str!("../settings.example.toml");
-        let text = example
+        let text = include_str!("../settings.example.toml")
             .replace("build_env = {}", "build_env = { BUN = \"bun\" }")
             .replace(
                 "# instructions_file = \"~/.kelpie/projects/shep/worker-instructions.md\"",
                 "instructions_file = \"worker.md\"",
             )
-            .replace("# [preview]", "[preview]")
+            .replace("# [app.dogs.kelpie.preview]", "[app.dogs.kelpie.preview]")
             .replace("# configuration =", "configuration =")
             .replace("# routes =", "routes =")
             .replace("# domains =", "domains =");
-        Settings::parse(&text, std::path::Path::new("/home/maintainer")).unwrap();
-        text
+        toml::to_string(&crate::test::project_table(&text)).unwrap()
     }
 
     #[test]
@@ -128,8 +126,10 @@ mod tests {
     fn the_kelpie_schema_round_trips_every_key() {
         let mut root = schema();
         root.as_object_mut().unwrap().remove(SHEEP_SCHEMA_KEY);
-        let example = include_str!("../kelpie-settings.example.toml");
-        assert_eq!(keys_of_schema(&root), keys_of_table(&root, &root, example));
+        let example: toml::Table =
+            toml::from_str(include_str!("../kelpie-settings.example.toml")).unwrap();
+        let section = toml::to_string(&example["kelpie"]).unwrap();
+        assert_eq!(keys_of_schema(&root), keys_of_table(&root, &root, &section));
     }
 
     #[test]

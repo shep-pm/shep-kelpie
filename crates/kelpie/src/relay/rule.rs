@@ -1,22 +1,19 @@
 //! `kelpie relay-yes` and `relay-answer`: a ruling sent to kelpie's shepherd
 //!
-//! Both reach the shepherd over its socket through the shep client kelpie
-//! is built with, never through a `shep` binary. A `shep` found on `PATH`
-//! can be another version, and an older one can take over a newer
-//! shepherd. A shepherd on another shep major or minor is refused with the
-//! reason and nothing to run, since shep's own advice for a skew is a reload.
+//! Both reach the shepherd through [`crate::shepherd`], never a `shep`
+//! binary: an older one found on `PATH` can take over a newer shepherd. A
+//! shepherd on another shep major or minor is refused with the reason and
+//! nothing to run, since shep's own advice for a skew is a reload.
 
 use std::path::Path;
 use std::process::ExitCode;
 
 use shep_client::shep_core::protocol::Request;
 use shep_client::shep_core::protocol::request::{ActionOutcome, Response, SelectorSpec};
-use shep_client::{Client, ConnectError, TRIGGER_DEADLINE};
+use shep_client::{Client, TRIGGER_DEADLINE};
 
 use crate::runner::{RELAY_RULE, is_no_or_answer};
-
-/// The shep version kelpie is built with, pinned in the workspace manifest
-pub const SHEP_VERSION: &str = "0.11.0";
+use crate::shepherd::{self, ConnectRefused};
 
 /// A ruling the relay passes on to a runner's `relay-rule` action
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,21 +63,15 @@ pub fn send(shep_home: &Path, project: &str, ruling: Ruling<'_>) -> ExitCode {
 
 async fn deliver(shep_home: &Path, project: &str, ruling: Ruling<'_>) -> Result<String, String> {
     let params = ruling.params()?;
-    let client = Client::connect(&shep_home.join("run/shep.sock"))
-        .await
-        .map_err(|e| match e {
-            ConnectError::ProtocolMismatch { daemon_version, .. } => {
-                skew(shep_home, daemon_version.as_deref())
-            }
-            other => format!(
-                "cannot reach kelpie's shepherd at {}: {other}",
-                shep_home.display()
-            ),
-        })?;
-    let running = client.daemon().daemon_version.as_str();
-    if release_line(running) != release_line(SHEP_VERSION) {
-        return Err(skew(shep_home, Some(running)));
-    }
+    // Names nothing to run: a relay that ran shep's advice with the wrong
+    // `shep` could replace kelpie's shepherd.
+    let client = shepherd::connect(shep_home).await.map_err(|e| match e {
+        ConnectRefused::Skew(_) => format!(
+            "{}, so the ruling was not sent. Tell the maintainer, and leave the shepherd as it is.",
+            e.describe(shep_home)
+        ),
+        ConnectRefused::Unreachable(_) => e.describe(shep_home),
+    })?;
     let mut outcome = trigger(&client, project, RELAY_RULE, &params).await?;
     // shep-channel answers an action a runner never registered itself, in
     // plain text: a runner started before `relay-rule` takes it as `rule`.
@@ -141,31 +132,6 @@ fn refusal(reply: &serde_json::Value) -> Option<String> {
     }
 }
 
-// A version's major and minor. A patch release of the pinned line is
-// accepted, so shep's patch releases never need a kelpie rebuild.
-fn release_line(version: &str) -> (Option<&str>, Option<&str>) {
-    let mut parts = version.split('.');
-    (parts.next(), parts.next())
-}
-
-// Names nothing to run: shep's own advice for a skew is a reload, and a
-// relay that ran it with the wrong `shep` could replace kelpie's shepherd.
-fn skew(shep_home: &Path, running: Option<&str>) -> String {
-    let running = running.map_or_else(
-        || "a shep version it did not name".to_owned(),
-        |v| format!("shep {v}"),
-    );
-    let (major, minor) = release_line(SHEP_VERSION);
-    format!(
-        "kelpie's shepherd at {} runs {running}, and kelpie is built for shep {SHEP_VERSION} \
-         and takes only a {}.{}.x shepherd, so the ruling was not sent. \
-         Tell the maintainer, and leave the shepherd as it is.",
-        shep_home.display(),
-        major.unwrap_or_default(),
-        minor.unwrap_or_default(),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -176,6 +142,7 @@ mod tests {
     use tokio::sync::mpsc::UnboundedReceiver;
 
     use super::*;
+    use crate::shepherd::SHEP_VERSION;
 
     // Bounds every call against a fake shepherd, so a hang fails by name.
     const PATIENCE: Duration = Duration::from_secs(10);
@@ -317,18 +284,6 @@ mod tests {
                 .await
                 .unwrap_err();
             assert!(refused.starts_with("relay-answer refuses"), "{refused}");
-        }
-    }
-
-    #[test]
-    fn the_checked_version_is_the_one_the_manifest_pins() {
-        let manifest = include_str!("../../../../Cargo.toml");
-        for krate in ["shep-client", "shep-channel"] {
-            let pin = format!("{krate} = {{ version = \"={SHEP_VERSION}\"");
-            assert!(
-                manifest.contains(&pin),
-                "{krate} is not pinned to {SHEP_VERSION}"
-            );
         }
     }
 

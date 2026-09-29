@@ -658,6 +658,7 @@ mod tests {
         let deny = s["filesystem"]["denyRead"].as_array().unwrap();
         assert!(deny.contains(&json!("~/.ssh")));
         assert!(deny.contains(&json!("~/.kelpie/settings.toml")));
+        assert!(deny.contains(&json!("~/.kelpie/shep")));
     }
 
     #[test]

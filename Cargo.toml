@@ -21,7 +21,7 @@ serde_json = { version = "1", default-features = false, features = ["std"] }
 shep-client = { version = "=0.11.0", default-features = false, features = ["schema"] }
 shep-channel = { version = "=0.11.0", default-features = false, features = ["client"] }
 tokio = { version = "1", default-features = false, features = ["macros", "process", "rt", "signal", "sync", "time"] }
-toml = { version = "0.9", default-features = false, features = ["std", "parse", "serde"] }
+toml = { version = "0.9", default-features = false, features = ["std", "parse", "display", "serde"] }
 # Only for throwaway homes and repos in tests
 tempfile = { version = "3", default-features = false }
 
