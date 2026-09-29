@@ -167,7 +167,7 @@ impl Runner {
             }
         }
         let moved = decide(id, answer, ruling, now, head_moved)?;
-        if let Some(item) = self.current_in(&mut next) {
+        if let Some(item) = next.work_items.iter_mut().find(|item| parked_on(item)) {
             item.coderabbit.cap_cleared |= lifts_cap;
             if accepts.is_some() {
                 item.claude_files_accepted = accepts;
@@ -264,7 +264,7 @@ impl Runner {
             return self.save(next).map_err(RuleError::State);
         };
         let kind = RulingKind::ForeignChange { description, known };
-        let (_, id, _) = park(self.project.as_str(), &mut next, issue, number, kind);
+        let (id, _) = park(self.project.as_str(), &mut next, issue, number, kind);
         self.save(next).map_err(RuleError::State)?;
         // A comment that fails loses nothing: the ruling is saved and alerted.
         let _ = self.post_ruling(number, id);
@@ -276,8 +276,7 @@ impl Runner {
     pub(super) fn raise(&mut self, number: u64, kind: RulingKind) -> Result<Begin, StateError> {
         let mut next = self.state.clone();
         let issue = self.current().expect("a ruling is about a work item").issue;
-        let (issue, id, question) =
-            park(self.project.as_str(), &mut next, issue, Some(number), kind);
+        let (id, question) = park(self.project.as_str(), &mut next, issue, Some(number), kind);
         self.save(next)?;
         let comment_failed = self.post_ruling(Some(number), id);
         Ok(Begin::Report(StepReport::Ruling {
@@ -335,16 +334,16 @@ fn regate(repo: &std::path::Path, item: &mut WorkItem) -> Result<bool, RuleError
     Ok(true)
 }
 
-/// Adds a ruling to `next` and parks its work item on it
+/// Adds a ruling to `next` and parks the work item for `issue` on it
 ///
-/// Returns the work item's issue, and the ruling's id and question.
+/// Returns the ruling's id and question.
 pub(super) fn park(
     project: &str,
     next: &mut ProjectState,
     issue: u64,
     pull_request: Option<u64>,
     kind: RulingKind,
-) -> (u64, u64, String) {
+) -> (u64, String) {
     let id = next.last_ruling + 1;
     let item = next
         .item_mut(issue)
@@ -361,7 +360,7 @@ pub(super) fn park(
         alerted: false,
         relayed: false,
     });
-    (issue, id, text)
+    (id, text)
 }
 
 // What a reader of the pull request is told of a ruling: what happened and

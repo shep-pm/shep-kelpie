@@ -21,9 +21,9 @@ impl Runner {
     pub(super) fn park_ceiling_passed(&mut self, now: Timestamp) -> Result<Begin, StateError> {
         let mut next = self.state.clone();
         let issue = self.current().expect("a turn is a work item's").issue;
-        if let Some(item) = next.item_mut(issue) {
-            item.turn = Turn::Ended { at: now };
-        }
+        next.item_mut(issue)
+            .expect("the work item checked above")
+            .turn = Turn::Ended { at: now };
         let mut report = timed_out(self.project.as_str(), &mut next, issue);
         self.save(next)?;
         self.fill_comment_failed(&mut report);
@@ -42,7 +42,7 @@ pub(super) fn timed_out(project: &str, next: &mut ProjectState, issue: u64) -> S
         .expect("a turn ceiling is about an open work item");
     let (session, pull_request) = (item.session.clone(), item.pull_request);
     let phase = Some(item.phase.clone());
-    let (_, id, question) = park(
+    let (id, question) = park(
         project,
         next,
         issue,
@@ -83,7 +83,7 @@ pub(in crate::runner) fn failed(
         phase: item.phase.clone(),
         retry,
     };
-    let (_, id, question) = park(project, next, issue, pull_request, kind);
+    let (id, question) = park(project, next, issue, pull_request, kind);
     StepReport::Failed {
         issue,
         pull_request,

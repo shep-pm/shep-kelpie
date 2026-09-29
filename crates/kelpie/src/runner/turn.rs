@@ -465,7 +465,7 @@ impl Runner {
                             resume,
                         };
                         let project = self.project.as_str();
-                        let (_, id, question) = park(project, &mut next, issue, pull_request, kind);
+                        let (id, question) = park(project, &mut next, issue, pull_request, kind);
                         StepReport::Asked {
                             issue,
                             session,
