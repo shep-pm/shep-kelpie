@@ -1,4 +1,4 @@
-//! `kelpie guard`: the PreToolUse hook on every worker's Bash calls
+//! `kelpie guard`: the PreToolUse hook on every worker's Bash and Agent calls
 //!
 //! Kelpie adds it to every worker, before any hook a project names. It
 //! refuses two things a worker's commit or pull request would carry out:
@@ -6,13 +6,15 @@
 //! worktree sits under, and a pull request title that is not a
 //! conventional commit. It reads the command's own text and, for a commit
 //! or a push in the worker's worktree, the lines it adds or sends. It never
-//! echoes what it matched.
+//! echoes what it matched. A command it cannot read is refused.
 //!
 //! The hook runs outside the sandbox, so it runs git the way kelpie's own
 //! worktree steps do, with the worktree's git dirs named and checked. A
 //! repo the worker made could name any program in its own config.
 
+mod git;
 mod shell;
+mod wrap;
 
 use std::fs;
 use std::io::Read;
@@ -21,8 +23,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::confine::Verdict;
-use crate::worktree::{self, WorktreeError};
-use shell::Command;
+use wrap::{SHELLS, program, script};
 
 /// Where the worker's own git lives
 #[derive(Debug, Clone, Copy)]
@@ -41,7 +42,14 @@ const TYPES: [&str; 11] = [
 // A message file larger than this is not a message.
 const MESSAGE_FILE_MAX: u64 = 1 << 20;
 
-/// Judges the Bash call in `input`, with `home` the home folder whose path stays in
+// A shell run inside a shell this many times over is not a worker's command.
+const MAX_SHELLS: usize = 4;
+
+// More commands than this in one call are refused rather than each judged:
+// a command nested in parentheses is judged once per level around it.
+const MAX_COMMANDS: usize = 200;
+
+/// Judges the tool call in `input`, with `home` the home folder whose path stays in
 pub fn judge(input: impl Read, home: Option<&Path>, checkout: Checkout<'_>) -> Verdict {
     #[derive(Deserialize)]
     struct Call {
@@ -53,11 +61,23 @@ pub fn judge(input: impl Read, home: Option<&Path>, checkout: Checkout<'_>) -> V
     #[derive(Deserialize, Default)]
     struct ToolInput {
         command: Option<String>,
+        isolation: Option<String>,
     }
     let call: Call = match serde_json::from_reader(input) {
         Ok(call) => call,
         Err(e) => return Verdict::Refuse(format!("kelpie cannot read this tool call: {e}")),
     };
+    // Kelpie gives each worker its worktree; a subagent gets no other.
+    if matches!(call.tool_name.as_str(), "Agent" | "Task")
+        && matches!(
+            call.tool_input.isolation.as_deref(),
+            Some("worktree" | "remote")
+        )
+    {
+        return Verdict::Refuse(
+            "a worker's subagents run in its own worktree: leave out `isolation`.".into(),
+        );
+    }
     let Some(line) = call.tool_input.command.filter(|_| call.tool_name == "Bash") else {
         return Verdict::Allow;
     };
@@ -65,19 +85,13 @@ pub fn judge(input: impl Read, home: Option<&Path>, checkout: Checkout<'_>) -> V
         home: home.and_then(Home::new),
         checkout,
     };
-    let mut refusals = Vec::new();
-    judging.line(&line, Some(call.cwd), 0, &mut refusals);
-    if refusals.is_empty() {
+    let mut call_state = CallState::default();
+    judging.line(&line, Some(call.cwd), 0, &mut call_state);
+    if call_state.refusals.is_empty() {
         return Verdict::Allow;
     }
-    Verdict::Refuse(refusals.join("\n\n"))
+    Verdict::Refuse(call_state.refusals.join("\n\n"))
 }
-
-// A shell run inside a shell this many times over is not a worker's command.
-const MAX_SHELLS: usize = 4;
-
-// The shells whose `-c` script the guard reads as a command line of its own.
-const SHELLS: [&str; 4] = ["sh", "bash", "zsh", "dash"];
 
 /// One Bash call being judged
 struct Judging<'a> {
@@ -85,145 +99,105 @@ struct Judging<'a> {
     checkout: Checkout<'a>,
 }
 
+/// What judging one call has found and done so far
+#[derive(Debug, Default)]
+struct CallState {
+    refusals: Vec<String>,
+    commands: usize,
+    reads: git::Reads,
+}
+
+impl CallState {
+    // Each refusal once, however many commands earn it.
+    fn refuse(&mut self, refusal: String) {
+        if !self.refusals.contains(&refusal) {
+            self.refusals.push(refusal);
+        }
+    }
+}
+
 impl Judging<'_> {
     // `cwd` is `None` once a `cd` goes somewhere the guard cannot follow.
-    fn line(&self, line: &str, mut cwd: Option<PathBuf>, shells: usize, out: &mut Vec<String>) {
+    fn line(&self, line: &str, mut cwd: Option<PathBuf>, shells: usize, state: &mut CallState) {
         let commands = match shell::commands(line) {
             Ok(commands) if shells <= MAX_SHELLS => commands,
-            Ok(_) => return refuse(out, "kelpie cannot check this command: it runs a shell inside a shell too many times over. Run it as plain commands.".into()),
-            Err(e) => return refuse(out, format!("kelpie cannot check this command: {e}. Split it into plain commands.")),
+            Ok(_) => {
+                return state.refuse(
+                    "kelpie cannot check this command: it runs a shell inside a shell too \
+                     many times over. Run it as plain commands."
+                        .into(),
+                );
+            }
+            Err(e) => {
+                return state.refuse(format!(
+                    "kelpie cannot check this command: {e}. Split it into plain commands."
+                ));
+            }
         };
         let home = self.home.as_ref();
-        for command in commands {
-            let found = match program(&command.words[0]) {
-                "cd" => {
-                    cwd = match command.words.get(1) {
+        for command in &commands {
+            state.commands += 1;
+            if state.commands > MAX_COMMANDS {
+                return state.refuse(
+                    "kelpie cannot check this command: it runs too many commands at once. \
+                     Split it into plain commands."
+                        .into(),
+                );
+            }
+            if command.defines_function {
+                state.refuse(wrap::FUNCTION.into());
+                continue;
+            }
+            let run = match wrap::unwrap(&command.words) {
+                Ok(Some(run)) => run,
+                Ok(None) => continue,
+                Err(refusal) => {
+                    state.refuse(refusal);
+                    continue;
+                }
+            };
+            if run.moved {
+                cwd = None;
+            }
+            let found = match program(&run.words[0]) {
+                "cd" | "pushd" => {
+                    cwd = match run.words.get(1) {
                         Some(to) => moved(cwd.as_deref(), to, home),
                         None => home.map(|h| h.path.clone()),
                     };
                     Vec::new()
                 }
-                "git" => git(&command, cwd.as_deref(), home, self.checkout),
-                "gh" => gh(&command, cwd.as_deref(), home),
+                // Where `popd` returns to is not in the command.
+                "popd" => {
+                    cwd = None;
+                    Vec::new()
+                }
+                "git" => {
+                    let git = git::Git {
+                        words: run.words,
+                        heredocs: &command.heredocs,
+                        redirected: run.git_redirected,
+                    };
+                    git::judge(git, cwd.as_deref(), home, self.checkout, &mut state.reads)
+                }
+                "gh" => gh(run.words, &command.heredocs, cwd.as_deref(), home),
                 name if SHELLS.contains(&name) => {
-                    if let Some(script) = script(&command.words) {
-                        self.line(script, cwd.clone(), shells + 1, out);
+                    if let Some(script) = script(run.words) {
+                        self.line(script, cwd.clone(), shells + 1, state);
+                    }
+                    // A shell reading its commands from a heredoc.
+                    for body in &command.heredocs {
+                        self.line(body, cwd.clone(), shells + 1, state);
                     }
                     Vec::new()
                 }
                 _ => Vec::new(),
             };
             for refusal in found {
-                refuse(out, refusal);
+                state.refuse(refusal);
             }
         }
     }
-}
-
-// Each refusal once, however many commands earn it.
-fn refuse(out: &mut Vec<String>, refusal: String) {
-    if !out.contains(&refusal) {
-        out.push(refusal);
-    }
-}
-
-// A command's program, by name: `/usr/bin/git` is `git`.
-fn program(word: &str) -> &str {
-    word.rsplit('/').next().unwrap_or(word)
-}
-
-// The script a shell runs with `-c`, `-lc` and the like.
-fn script(words: &[String]) -> Option<&str> {
-    let at = words[1..]
-        .iter()
-        .position(|w| w.starts_with('-') && !w.starts_with("--") && w.contains('c'))?;
-    words.get(at + 2).map(String::as_str)
-}
-
-// `git commit`, `git tag` and `git push`: their messages, and the lines they add or send.
-fn git(
-    command: &Command,
-    cwd: Option<&Path>,
-    home: Option<&Home>,
-    checkout: Checkout<'_>,
-) -> Vec<String> {
-    let mut words = command.words[1..].iter();
-    let mut dir = cwd.map(Path::to_owned);
-    let sub = loop {
-        match words.next().map(String::as_str) {
-            Some("-C") => {
-                let to = words.next().map_or("", String::as_str);
-                dir = moved(dir.as_deref(), to, home);
-            }
-            Some("-c") => {
-                words.next();
-            }
-            Some(w) if w.starts_with('-') => {}
-            Some(w) => break w,
-            None => return Vec::new(),
-        }
-    };
-    let Some(home) = home else {
-        return Vec::new();
-    };
-    let args: Vec<String> = words.cloned().collect();
-    let mut out = Vec::new();
-    if sub == "commit" || sub == "tag" {
-        let messages = values(&args, &["--message"], &['m'])
-            .into_iter()
-            .chain(files(&args, &["--file"], &['F'], dir.as_deref()))
-            .chain(command.heredocs.iter().cloned());
-        if messages.into_iter().any(|m| home.is_in(&m)) {
-            out.push(home.refusal(&format!("this {sub}'s message"), WRITE));
-        }
-    }
-    if !matches!(sub, "commit" | "push") || !in_own_repo(checkout.worktree, dir.as_deref()) {
-        return out;
-    }
-    let found = worktree::trusted(checkout.git_common_dir, checkout.worktree)
-        .and_then(|run| read_git(sub, &args, home, run));
-    match found {
-        Ok(found) => out.extend(found),
-        // Git that cannot be read is refused, not let through unchecked.
-        Err(e) => out.push(format!(
-            "kelpie cannot read this worktree's git to check this {sub}: {e}"
-        )),
-    }
-    out
-}
-
-// What a commit adds, or a push sends, that names the home folder.
-fn read_git(
-    sub: &str,
-    args: &[String],
-    home: &Home,
-    run: impl Fn(&[&str]) -> Result<String, WorktreeError>,
-) -> Result<Vec<String>, WorktreeError> {
-    // `--unified` alone makes `git log` print patches, so only patch reads take these.
-    let patches = |args: &[&str]| run(&[args, &PLAIN].concat());
-    let mut out = Vec::new();
-    if sub == "push" {
-        // A file written and committed in one call is not staged when the
-        // commit is judged, so the push reads what it sends.
-        let log = run(&["log", "--format=%B", "HEAD", "--not", "--remotes"])?;
-        if home.is_in(&log) {
-            out.push(home.refusal("a message in the commits this push sends", REWRITE));
-        }
-        let sent = patches(&["log", "-p", "--format=", "HEAD", "--not", "--remotes"])?;
-        for file in home.added(&sent) {
-            out.push(home.refusal(&format!("{file} in the commits this push sends"), REWRITE));
-        }
-        return Ok(out);
-    }
-    let all = args
-        .iter()
-        .take_while(|a| *a != "--")
-        .any(|a| a == "--all" || a.starts_with('-') && !a.starts_with("--") && a.contains('a'));
-    let range = if all { "HEAD" } else { "--cached" };
-    for file in home.added(&patches(&["diff", range])?) {
-        out.push(home.refusal(&format!("this commit's {file}"), WRITE));
-    }
-    Ok(out)
 }
 
 // Where `cd` or `git -C` moves from `cwd`: `None` when it cannot be told.
@@ -237,33 +211,13 @@ fn moved(cwd: Option<&Path>, to: &str, home: Option<&Home>) -> Option<PathBuf> {
     }
 }
 
-// Plain patches: no colour, and no program the repo's config names.
-const PLAIN: [&str; 4] = [
-    "--unified=0",
-    "--no-color",
-    "--no-ext-diff",
-    "--no-textconv",
-];
-
-// Whether `dir` is the worker's own repo: in the worktree and in no repo it
-// made there. A folder the guard cannot follow or see is judged as the worktree.
-fn in_own_repo(worktree: &Path, dir: Option<&Path>) -> bool {
-    let Ok(worktree) = worktree.canonicalize() else {
-        return false;
-    };
-    let Some(Ok(dir)) = dir.map(Path::canonicalize) else {
-        return true;
-    };
-    dir.starts_with(&worktree)
-        && dir
-            .ancestors()
-            .take_while(|a| *a != worktree)
-            .all(|a| a.join(".git").symlink_metadata().is_err())
-}
-
 // `gh` publishing verbs: their titles, bodies and notes, and a pull request's title.
-fn gh(command: &Command, cwd: Option<&Path>, home: Option<&Home>) -> Vec<String> {
-    let words = &command.words;
+fn gh(
+    words: &[String],
+    heredocs: &[String],
+    cwd: Option<&Path>,
+    home: Option<&Home>,
+) -> Vec<String> {
     // The group and verb are the first two words that are not flags, which
     // may come before them: `gh pr -R owner/repo create`.
     let mut positions = Vec::new();
@@ -319,7 +273,7 @@ fn gh(command: &Command, cwd: Option<&Path>, home: Option<&Home>) -> Vec<String>
             .into_iter()
             .chain(values(args, &["--body", "--notes"], &['b', 'n']))
             .chain(files(args, &["--body-file", "--notes-file"], &['F'], cwd))
-            .chain(command.heredocs.iter().cloned());
+            .chain(heredocs.iter().cloned());
         if texts.into_iter().any(|t| home.is_in(&t)) {
             out.push(home.refusal(&format!("this `gh {} {}`", verb.0, verb.1), WRITE));
         }

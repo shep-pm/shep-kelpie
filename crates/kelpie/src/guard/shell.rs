@@ -14,15 +14,17 @@ pub(super) struct Command {
     pub words: Vec<String>,
     /// The heredoc bodies its text reads
     pub heredocs: Vec<String>,
+    /// Whether it defines a shell function, as `name() { ... }`
+    pub defines_function: bool,
 }
 
 // A heredoc's place in the lifted text: `<<`, then its index between these.
 const MARK: char = '\u{0}';
 
-// Words a command can hide behind: `if gh pr create`, `env git commit`.
-const LEADS: [&str; 18] = [
-    "if", "while", "until", "do", "then", "else", "elif", "time", "command", "builtin", "exec",
-    "env", "nohup", "nice", "setsid", "!", "{", "}",
+// Keywords a command can follow: `if gh pr create`, `do git commit`. The
+// programs a command can run behind, such as `env`, are the guard's `wrap`.
+const LEADS: [&str; 10] = [
+    "if", "while", "until", "do", "then", "else", "elif", "!", "{", "}",
 ];
 
 /// A command line the guard will not read
@@ -67,7 +69,9 @@ pub(super) fn commands(line: &str) -> Result<Vec<Command>, Unreadable> {
                 .map(|w| w.split(MARK).step_by(2).collect())
                 .collect();
             let words = lead_stripped(words);
+            let text: String = segment.iter().collect();
             (!words.is_empty()).then(|| Command {
+                defines_function: defines_function(&text),
                 heredocs: marks(&segment)
                     .into_iter()
                     .filter_map(|i| bodies.get(i).cloned())
@@ -379,23 +383,31 @@ fn words(segment: &[char]) -> Vec<String> {
     out
 }
 
-// Drops the keywords and `NAME=value` assignments in front of a command.
+// Drops the keywords in front of a command. Assignments stay, for `wrap`.
 fn lead_stripped(mut words: Vec<String>) -> Vec<String> {
     let lead = words
         .iter()
-        .take_while(|w| LEADS.contains(&w.as_str()) || is_assignment(w))
+        .take_while(|w| LEADS.contains(&w.as_str()))
         .count();
     words.drain(..lead);
     words
 }
 
-fn is_assignment(word: &str) -> bool {
-    word.split_once('=').is_some_and(|(name, _)| {
-        name.chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-    })
+// `name() ...` or `name () ...`, after any keywords in front.
+fn defines_function(text: &str) -> bool {
+    let mut rest = text.trim_start();
+    while let Some(word) = LEADS.iter().find_map(|k| {
+        rest.strip_prefix(k)
+            .filter(|r| r.starts_with(char::is_whitespace))
+    }) {
+        rest = word.trim_start();
+    }
+    let name_end = rest
+        .find(|c: char| {
+            !(c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' || c == ':')
+        })
+        .unwrap_or(rest.len());
+    name_end > 0 && rest[name_end..].trim_start().starts_with("()")
 }
 
 #[cfg(test)]
@@ -432,7 +444,6 @@ mod tests {
         for line in [
             "if gh pr create -t x; then echo; fi",
             "for i in 1; do gh pr create -t x; done",
-            "GH_PAGER= gh pr create -t x",
             "x=$(gh pr create -t x)",
             "echo `gh pr create -t x`",
             "(gh pr create -t x)",
@@ -444,6 +455,15 @@ mod tests {
                 words_of(line)
             );
         }
+    }
+
+    #[test]
+    fn a_function_definition_is_seen() {
+        let all = commands("f() { git push; }; f").unwrap();
+        assert!(all[0].defines_function, "{all:?}");
+        assert!(commands("if g () { x; }").unwrap()[0].defines_function);
+        assert!(!commands("echo \"f()\"").unwrap()[0].defines_function);
+        assert!(!commands("git commit -m 'a()'").unwrap()[0].defines_function);
     }
 
     #[test]

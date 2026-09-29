@@ -17,7 +17,7 @@ fn call(cwd: &Path, command: &str, checkout: Checkout<'_>) -> Verdict {
     judge(call.to_string().as_bytes(), Some(Path::new(HOME)), checkout)
 }
 
-// For what the command's own text carries: no git is read.
+// For a call with no worktree: every commit and push in it is refused.
 fn nowhere() -> Checkout<'static> {
     Checkout {
         git_common_dir: Path::new("/nowhere"),
@@ -29,8 +29,9 @@ fn bash_in(cwd: &Path, command: &str) -> Verdict {
     call(cwd, command, nowhere())
 }
 
+// A call in a fresh worker's worktree, with nothing staged or unpushed.
 fn bash(command: &str) -> Verdict {
-    bash_in(Path::new("/nowhere"), command)
+    WorkerTree::new().bash(command)
 }
 
 fn refusal(verdict: Verdict) -> String {
@@ -50,7 +51,8 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(status.success(), "git {args:?}");
 }
 
-// A project repo and a worker's worktree on its own branch, as kelpie cuts one.
+// A project repo with `origin/main`, and a worker's worktree on its own
+// branch, as kelpie cuts one.
 struct WorkerTree(TempDir);
 
 impl WorkerTree {
@@ -58,10 +60,17 @@ impl WorkerTree {
         let tree = Self(tempfile::tempdir().unwrap());
         let repo = tree.repo();
         fs::create_dir(&repo).unwrap();
+        git(tree.0.path(), &["init", "--quiet", "--bare", "origin.git"]);
         git(&repo, &["init", "--quiet"]);
         fs::write(repo.join("README.md"), "a project\n").unwrap();
         git(&repo, &["add", "README.md"]);
         git(&repo, &["commit", "--quiet", "-m", "first"]);
+        git(&repo, &["remote", "add", "origin", "../origin.git"]);
+        git(
+            &repo,
+            &["push", "--quiet", "origin", "HEAD:refs/heads/main"],
+        );
+        git(&repo, &["fetch", "--quiet", "origin"]);
         git(
             &repo,
             &["worktree", "add", "--quiet", "-b", "kelpie/7", "../wt"],
@@ -265,7 +274,7 @@ fn a_commit_from_a_folder_in_the_worktree_reads_its_repo() {
 // The hook runs outside the sandbox: git run in a repo the worker made
 // would start the program its config names.
 #[test]
-fn a_repo_the_worker_made_is_never_read() {
+fn a_repo_the_worker_made_is_refused_and_never_read() {
     let tree = WorkerTree::new();
     let evil = tree.path().join("evil");
     let ran = tree.0.path().join("ran");
@@ -289,7 +298,11 @@ fn a_repo_the_worker_made_is_never_read() {
         "git -C evil commit -am 'docs: a'",
         "cd evil && git commit -am 'docs: a' && git push",
     ] {
-        assert_eq!(tree.bash(command), Verdict::Allow, "{command}");
+        let why = refusal(tree.bash(command));
+        assert!(
+            why.contains("outside this worktree's own repo"),
+            "{command}: {why}"
+        );
     }
     assert!(!ran.exists(), "the guard ran the repo's program");
     let plain = Process::new("git")
@@ -303,14 +316,10 @@ fn a_repo_the_worker_made_is_never_read() {
 #[test]
 fn a_push_sending_the_home_folder_is_refused_naming_where() {
     let tree = WorkerTree::new();
-    let origin = tempfile::tempdir().unwrap();
-    git(origin.path(), &["init", "--quiet", "--bare"]);
-    let url = origin.path().to_str().unwrap();
-    tree.git(&["remote", "add", "origin", url]);
     tree.write("old.md", "/home/tester/pushed\n");
     tree.git(&["add", "old.md"]);
     tree.git(&["commit", "--quiet", "-m", "docs: already out"]);
-    tree.git(&["push", "--quiet", "origin", "HEAD:refs/heads/x"]);
+    tree.git(&["push", "--quiet", "origin", "HEAD:main"]);
     assert_eq!(tree.bash("git push origin HEAD"), Verdict::Allow);
 
     tree.write("notes.md", "built in /home/tester/wt\n");
@@ -327,6 +336,123 @@ fn a_push_sending_the_home_folder_is_refused_naming_where() {
     assert!(!why.contains("a message"), "no message names it: {why}");
     assert!(!why.contains("old.md"), "{why}");
     assert!(!why.contains(HOME), "{why}");
+
+    // The worker can write its own branch's tracking ref, not `origin/main`.
+    tree.git(&["update-ref", "refs/remotes/origin/kelpie/7", "HEAD"]);
+    let why = refusal(tree.bash("git push origin HEAD"));
+    assert!(why.contains("`notes.md`"), "{why}");
+}
+
+#[test]
+fn a_commit_or_push_outside_the_worktree_is_refused() {
+    let tree = WorkerTree::new();
+    let outside = tempfile::tempdir().unwrap();
+    let away = outside.path().display();
+    for command in [
+        format!("(cd {away} && ls); git push origin HEAD"),
+        format!("cd {away}; git push"),
+        format!("pushd sub; cd {away}; popd; cd {away}; git commit -m 'fix: x'"),
+        format!("git -C {away} push"),
+        format!("env -C {away} true; cd {away} && git push"),
+    ] {
+        let why = refusal(tree.bash(&command));
+        assert!(
+            why.contains("outside this worktree's own repo"),
+            "{command}: {why}"
+        );
+        assert!(!why.contains(&away.to_string()), "{command}: {why}");
+    }
+}
+
+#[test]
+fn git_pointed_at_another_repo_or_run_by_alias_is_refused() {
+    for command in [
+        "git --work-tree . push",
+        "git --git-dir .git push",
+        "git --git-dir=.git commit -m 'fix: x'",
+        "GIT_DIR=.git git push",
+        "env GIT_WORK_TREE=. git commit -m 'fix: x'",
+        "git -c 'alias.p=!git push' p",
+        "git --config-env alias.p=P p",
+    ] {
+        assert!(matches!(bash(command), Verdict::Refuse(_)), "{command}");
+    }
+    let tree = WorkerTree::new();
+    tree.write("notes.md", "/home/tester/x\n");
+    tree.git(&["add", "notes.md"]);
+    tree.git(&["commit", "--quiet", "-m", "docs: notes"]);
+    for command in [
+        "git -c alias.p=push p",
+        "git -c alias.sh=push sh origin HEAD",
+    ] {
+        let why = refusal(tree.bash(command));
+        assert!(why.contains("`notes.md`"), "{command}: {why}");
+    }
+    assert_eq!(bash("git -c alias.st=status st"), Verdict::Allow);
+}
+
+#[test]
+fn what_runs_a_command_the_guard_cannot_read_is_refused() {
+    for command in [
+        "eval git push",
+        "ksh -c 'git push'",
+        "f() { git push; }; f",
+        "function f { git push; }",
+        "echo HEAD | xargs git push origin",
+    ] {
+        assert!(matches!(bash(command), Verdict::Refuse(_)), "{command}");
+    }
+    let tree = WorkerTree::new();
+    tree.write("notes.md", "/home/tester/x\n");
+    tree.git(&["add", "notes.md"]);
+    tree.git(&["commit", "--quiet", "-m", "docs: notes"]);
+    for command in [
+        "timeout 60 git push",
+        "env -i PATH=/bin git push",
+        "nice -n 5 git push",
+        "bash <<'EOF'\ngit push\nEOF",
+    ] {
+        let why = refusal(tree.bash(command));
+        assert!(why.contains("`notes.md`"), "{command}: {why}");
+    }
+}
+
+// A slow guard fails open: a hook that times out does not block the call.
+#[test]
+fn a_call_with_too_many_commands_is_refused_fast() {
+    let tree = WorkerTree::new();
+    let nested = format!("{}git push{}", "(".repeat(30), ")".repeat(30));
+    let line = format!("bash -c \"bash -c '{nested}'\"");
+    let started = std::time::Instant::now();
+    assert_eq!(tree.bash(&line), Verdict::Allow, "nothing is unpushed");
+    assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
+    let why = refusal(tree.bash(&"true; ".repeat(MAX_COMMANDS + 1)));
+    assert!(why.contains("too many commands"), "{why}");
+    let many = "git push; ".repeat(60);
+    let started = std::time::Instant::now();
+    assert_eq!(tree.bash(&many), Verdict::Allow);
+    assert!(
+        started.elapsed().as_secs() < 5,
+        "one read serves every push: {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn a_subagent_in_a_worktree_of_its_own_is_refused() {
+    let agent = |isolation: serde_json::Value| {
+        let call = json!({ "tool_name": "Agent", "cwd": "/x", "tool_input": {
+            "prompt": "go", "isolation": isolation,
+        } });
+        judge(
+            call.to_string().as_bytes(),
+            Some(Path::new(HOME)),
+            nowhere(),
+        )
+    };
+    assert!(matches!(agent(json!("worktree")), Verdict::Refuse(_)));
+    assert!(matches!(agent(json!("remote")), Verdict::Refuse(_)));
+    assert_eq!(agent(serde_json::Value::Null), Verdict::Allow);
 }
 
 #[test]
