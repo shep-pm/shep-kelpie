@@ -112,6 +112,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         qwen: crate::work_item::QwenTally::default(),
         merge_refused: false,
         merge_tried: None,
+        summon_owed: false,
         calls: vec![CallRecord {
             role: Role::Worker,
             at: Timestamp(10),

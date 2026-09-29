@@ -308,7 +308,11 @@ fn regate(repo: &std::path::Path, item: &mut WorkItem) -> Result<bool, RuleError
     let known = item.known.head.clone();
     let tip = worktree::origin_head(repo, &item.branch)
         .map_err(|e| RuleError::Adopt(known.clone().unwrap_or_default(), e.to_string()))?;
-    let from = known.unwrap_or_else(|| tip.clone());
+    let from = match known {
+        Some(known) => known,
+        None => worktree::head(repo, &item.worktree)
+            .map_err(|e| RuleError::Adopt(tip.clone(), e.to_string()))?,
+    };
     if from == tip && item.known.head.is_some() {
         return Ok(false);
     }

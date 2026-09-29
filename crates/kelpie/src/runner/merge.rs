@@ -15,7 +15,7 @@ use super::report::{Begin, StepReport};
 use crate::ports::{Checks, PullRequestState};
 use crate::settings::MergeAuthority;
 use crate::state::{Notice, RulingKind, StateError};
-use crate::work_item::{Phase, ReviewCallState, Turn};
+use crate::work_item::{Phase, Review, ReviewCallState, Turn};
 use crate::worktree::{self, Base};
 
 /// Why `drop` was refused
@@ -108,11 +108,6 @@ impl Runner {
         else {
             return Ok(Begin::Idle);
         };
-        // The gate asks again once the project is no longer `auto`.
-        if auto && self.settings.merge_authority != MergeAuthority::Auto {
-            let reason = "the merge authority is no longer auto".to_owned();
-            return self.withdraw(issue, number, auto, reason);
-        }
         let tried = item.merge_tried.clone();
         let repo = self.settings.forge.clone();
         let pr = match self.ports.forge.pull_request(&repo, number) {
@@ -128,6 +123,11 @@ impl Runner {
                 return self.merged(issue, number, pr.head, notice);
             }
             PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
+        }
+        // The gate asks again once the project is no longer `auto`.
+        if auto && self.settings.merge_authority != MergeAuthority::Auto {
+            let reason = "the merge authority is no longer auto".to_owned();
+            return self.withdraw(issue, number, auto, reason);
         }
         let now = self.ports.clock.now();
         let ci = self.settings.ci;
@@ -201,6 +201,26 @@ impl Runner {
             }
         }
         self.merged(issue, number, head, auto)
+    }
+
+    // Nobody is asked before a merge under `auto`, so a head the gates never
+    // saw is adopted into the worktree and goes back through every gate.
+    pub(super) fn regate(&mut self, from: &str, tip: &str) -> Result<(), String> {
+        let item = self
+            .state
+            .work_item
+            .as_ref()
+            .expect("a gate is of a work item");
+        let (repo, branch) = (&self.settings.repo, &item.branch);
+        worktree::adopt(repo, &item.worktree, branch, from, tip)
+            .map_err(|e| format!("cannot bring the worktree to {}: {e}", short(tip)))?;
+        let tip = Some(tip.to_owned());
+        self.update(|item| {
+            item.known.head = tip;
+            item.coderabbit.satisfied = false;
+            item.phase = Phase::Review(Review::first());
+        })
+        .map_err(|e| e.to_string())
     }
 
     // The notice is saved with the merge, so it goes out exactly once.

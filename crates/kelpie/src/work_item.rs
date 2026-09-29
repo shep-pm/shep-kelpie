@@ -37,6 +37,10 @@ pub struct WorkItem {
     /// loop diffs against instead of `origin/main`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arrived: Option<String>,
+    /// Whether an adopted pull request still waits for a CodeRabbit review
+    /// kelpie summoned. Until one lands, no round is satisfied.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub summon_owed: bool,
     /// Its worktree
     pub worktree: PathBuf,
     /// Its worker's build folder

@@ -12,7 +12,7 @@ use crate::runner::coderabbit::tests::{fixed, hold_a_finding, now, reviewed_by_q
 use crate::runner::coderabbit::{ANSWER_WAIT, REVIEW_WAIT};
 use crate::runner::rework::HUMAN;
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
-use crate::test::{Rig, Scripted};
+use crate::test::{Rig, Scripted, git};
 
 // The same project restarted under `auto`, as the maintainer would switch
 // it: a runner reads its settings when it opens.
@@ -623,4 +623,103 @@ fn a_yes_on_a_head_nobody_moved_goes_back_to_ci_under_auto() {
     rig.verdict(&runner); // marks the draft ready
     rig.clock.advance(CHECKS_SETTLE);
     assert!(merged(step(&runner).unwrap()));
+}
+
+#[test]
+fn a_head_a_yes_under_ask_left_unknown_is_gated_again_after_a_switch_to_auto() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge
+        .set_checks(&head, Checks::Failed(vec!["lint".into()]));
+    rig.verdict(&runner);
+    rig.claude
+        .script([Scripted::Say("Looked, changed nothing.")]);
+    step(&runner).unwrap();
+    let id = raised(rig.verdict(&runner));
+    let fixed = rig.push_by_hand("kelpie/7", "lint.txt");
+    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+
+    let runner = under_auto(&rig, runner);
+    rig.forge.set_checks(&fixed, Checks::Passed);
+    assert_eq!(
+        rig.verdict(&runner),
+        Some(StepReport::Regated {
+            issue: 7,
+            pull_request: 71,
+            head: fixed.clone(),
+        })
+    );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["phase"]["state"], "review");
+    assert_eq!(rig.forge.merges(), []);
+
+    let reviewed = rig.reviewer.seen().len();
+    rig.claude.script([Scripted::Text("CLEAN")]);
+    step(&runner).unwrap(); // review round 1, qwen: clean by default
+    step(&runner).unwrap(); // review round 2, claude: scripted clean above
+    assert_eq!(rig.reviewer.seen().len(), reviewed + 1);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::MarkedReady { .. })
+    ));
+    rig.clock.advance(CHECKS_SETTLE);
+    assert!(merged(step(&runner).unwrap()));
+    assert_eq!(rig.forge.merges(), [(71, fixed)]);
+}
+
+#[test]
+fn a_yes_on_a_refused_rebase_with_no_worker_turn_still_summons_coderabbit() {
+    let (rig, runner, head) = summoned_under_auto("koji");
+    rig.forge.coderabbit.review(71, &head, now(&rig) + 60, &[]);
+    rig.clock.advance(60);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::CodeRabbitSatisfied { .. })
+    ));
+    let worktree = rig.worktree_7();
+    std::fs::write(worktree.join("work.txt"), "half done\n").unwrap();
+    rig.land_on_origin("landed.txt");
+    let id = raised(step(&runner).unwrap());
+    step(&runner).unwrap(); // the alert
+
+    // The maintainer clears the worktree, pushes a fix and says yes.
+    git(&worktree, &["checkout", "--quiet", "--", "work.txt"]);
+    rig.push_by_hand("kelpie/7", "fix.txt");
+    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+    rig.claude.script([Scripted::Text("CLEAN")]);
+    step(&runner).unwrap(); // review round 1, qwen: clean by default
+    step(&runner).unwrap(); // review round 2, claude: scripted clean above
+    let Some(StepReport::Rebased { head: rebased, .. }) = step(&runner).unwrap() else {
+        panic!("the branch was not rebased");
+    };
+    rig.forge.set_checks(&rebased, Checks::Passed);
+    assert_eq!(
+        rig.verdict(&runner),
+        Some(StepReport::Summoned {
+            issue: 7,
+            pull_request: 71,
+            head: rebased,
+        })
+    );
+    assert_eq!(rig.forge.merges(), []);
+}
+
+#[test]
+fn a_merge_that_landed_before_a_switch_to_ask_still_gets_its_notice() {
+    let (rig, runner, head) = marked_ready_under_auto("reactmap");
+    // The merge landed, and the runner stopped before it could save that.
+    rig.forge.set_state(71, PullRequestState::Merged);
+    drop(runner);
+    rig.edit_settings(|s| s.replace("merge_authority = \"auto\"", "merge_authority = \"ask\""));
+    let runner = rig.open().unwrap();
+    rig.clock.advance(CHECKS_SETTLE);
+    assert!(merged(step(&runner).unwrap()));
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Noticed {
+            issue: 7,
+            pull_request: 71,
+        })
+    );
+    let [(_, alert)] = rig.alerts.posts().try_into().unwrap();
+    assert!(alert.text.contains(&head[..7]), "{}", alert.text);
 }

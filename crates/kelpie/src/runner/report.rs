@@ -229,6 +229,16 @@ pub enum StepReport {
         /// What changed since the gate passed, or why the forge refused
         reason: String,
     },
+    /// Under `auto`, a head no gate saw goes back through the qwen-review
+    /// loop and CodeRabbit before any merge
+    Regated {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The head adopted
+        head: String,
+    },
     /// The work item is gone: its worktree, branch and build folder removed
     Finished {
         /// The work item's issue

@@ -82,6 +82,9 @@ impl Runner {
             return self.raise(number, kind);
         }
         if known.head.is_none() {
+            if self.settings.merge_authority == MergeAuthority::Auto {
+                return self.regate_unknown(number, &pr.head);
+            }
             let head = Some(pr.head.clone());
             self.update(|item| item.known.head = head)?;
         }
@@ -252,6 +255,29 @@ impl Runner {
             pull_request: number,
             head,
             files,
+        }))
+    }
+
+    // A head no gate vouched for, such as one a yes under `ask` left before
+    // a restart onto `auto`, goes through every gate before any merge.
+    fn regate_unknown(&mut self, number: u64, head: &str) -> Result<Begin, StateError> {
+        let item = self
+            .state
+            .work_item
+            .as_ref()
+            .expect("CI runs on a work item");
+        let issue = item.issue;
+        let at = worktree::head(&self.settings.repo, &item.worktree);
+        let regated = at
+            .map_err(|e| format!("cannot read the worktree's head: {e}"))
+            .and_then(|at| self.regate(&at, head));
+        if let Err(reason) = regated {
+            return Ok(self.gate_failed(reason));
+        }
+        Ok(Begin::Report(StepReport::Regated {
+            issue,
+            pull_request: number,
+            head: head.to_owned(),
         }))
     }
 

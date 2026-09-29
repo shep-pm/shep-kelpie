@@ -303,6 +303,7 @@ impl Runner {
             qwen: QwenTally::default(),
             merge_refused: false,
             merge_tried: None,
+            summon_owed: false,
             calls: Vec::new(),
         }
     }

@@ -141,6 +141,26 @@ impl Activity {
         u32::try_from(commits.len()).unwrap_or(u32::MAX)
     }
 
+    /// Only what CodeRabbit posted or edited from `at` on, threads aside
+    pub fn since(&self, at: Timestamp) -> Self {
+        let from = at.0.saturating_sub(CLOCK_SLACK);
+        Self {
+            comments: self
+                .comments
+                .iter()
+                .filter(|c| c.at.0 >= from)
+                .cloned()
+                .collect(),
+            reviews: self
+                .reviews
+                .iter()
+                .filter(|r| r.at.0 >= from)
+                .cloned()
+                .collect(),
+            threads: self.threads.clone(),
+        }
+    }
+
     /// Its threads not yet resolved
     pub fn open_threads(&self) -> impl Iterator<Item = &Thread> {
         self.threads.iter().filter(|t| !t.resolved)
