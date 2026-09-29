@@ -248,10 +248,13 @@ mod tests {
 
     #[tokio::test]
     async fn a_shepherd_on_another_minor_is_refused_by_name() {
-        let (home, _sent) = shepherd("0.10.1").await;
-        let err = read_in_time(home.path(), "shep").await.unwrap_err();
-        assert!(err.contains("runs shep 0.10.1"), "{err}");
-        assert!(err.contains("takes only a 0.11.x shepherd"), "{err}");
+        for version in ["0.10.1", "0.12.0"] {
+            let (home, mut sent) = shepherd(version).await;
+            let err = read_in_time(home.path(), "shep").await.unwrap_err();
+            assert!(err.contains(&format!("runs shep {version}")), "{err}");
+            assert!(err.contains("takes only a 0.11.x shepherd"), "{err}");
+            assert!(sent.try_recv().is_err(), "{version} was asked for a table");
+        }
     }
 
     #[test]
