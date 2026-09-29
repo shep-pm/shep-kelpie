@@ -6,9 +6,13 @@ First build under way. A project runner reads its settings, keeps its state, and
 
 ## Running a project
 
-Settings live at `~/.kelpie/projects/<project>/settings.toml`. Start from `crates/kelpie/settings.example.toml`, which holds the defaults for shep.
+Kelpie needs shep 0.11. A project's settings are its runner sheep's `[app.dogs.kelpie]` table, in the runner's Flockfile entry. Start from `crates/kelpie/settings.example.toml`, which is that entry with the defaults for shep.
 
-Every runner also reads `~/.kelpie/settings.toml`, which names the webhook every ruling is posted to. Start from `crates/kelpie/kelpie-settings.example.toml`, and keep the file private: the URL is a credential.
+Kelpie's own settings are its `[kelpie]` section of `dogs.toml` in the shepherd's home. Start from `crates/kelpie/kelpie-settings.example.toml`, and keep `dogs.toml` private: the webhook's URL is a credential. `ruling_channels` there, or in a project's table, picks the webhook, the relay or both. Both is the default, and only a project that posts to the webhook needs a `webhook` table.
+
+Lookout edits both once kelpie is adopted as a dog, which is how shep finds its settings schema: `shep adopt /path/to/kelpie --name kelpie`, then `shep disable kelpie`, both with `SHEP_HOME=~/.kelpie/shep`. Adopting starts it, and the dog still runs from the Flockfile below, so the disable stops that start. A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start.
+
+A project set up before the tables still loads `~/.kelpie/projects/<project>/settings.toml` and `~/.kelpie/settings.toml`, and its runner logs a notice. `SHEP_HOME=~/.kelpie/shep kelpie settings move <project>` writes both into their tables, after kelpie is adopted. It never overwrites a table and never deletes a file.
 
 Kelpie runs under its own shepherd, with `SHEP_HOME=~/.kelpie/shep`. Each runner is a sheep in its flock, and so is the dog, which holds the leases every runner asks before a summon:
 
@@ -36,7 +40,29 @@ kill_timeout = "10s"
 
 `kill_timeout` matters too. `shep stop` and `restart` give a runner only that long after the shutdown message, 1.6s by default, then SIGKILL. A runner needs about 7s to stop cleanly, so set it to `10s` or more.
 
-Then `SHEP_HOME=~/.kelpie/shep shep trigger shep status`.
+Then `SHEP_HOME=~/.kelpie/shep shep trigger shep status`. `shep describe shep` labels each Claude session the runner starts with its issue and role, such as `#114 worker`.
+
+## The local round
+
+Each pull request goes through a review loop before CI. Rounds alternate between a local model and a Claude session, local first, and the loop ends once one of each in a row finds nothing above a nit. `review.local` in a project's table picks the local round:
+
+- `kind = "off"`: every round is the Claude round, and one that finds nothing above a nit ends the loop
+- `kind = "endpoint"`: kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server
+- `kind = "command"`: a command of your own that keeps the contract below
+
+A file without the table runs `~/.claude/scripts/qwen-review.sh`, the maintainer's own command. A missing command or an endpoint that doesn't answer stops the runner at start.
+
+An endpoint takes `url` (the base, up to and including `/v1`), `model`, and `context`, the context size in tokens the server gives that model. Kelpie diffs the pull request, cuts the diff to fit that context, and sends each piece with its own review prompt, `crates/kelpie/src/adapters/local/review-prompt.md`. Set `context` to what the server really uses: Ollama gives its OpenAI-compatible endpoint a small default context unless `OLLAMA_CONTEXT_LENGTH` says more, and drops whatever doesn't fit without saying so.
+
+A command is run as `<command> --dir <worktree> --round <n> --diff <base>`, with:
+
+- `QWEN_REVIEW_OUT`: the folder to write in
+- `KELPIE_REVIEW_HEAD`: the commit under review
+- `TMPDIR`: the folder the GPU lock lives under
+
+It writes `round-<n>.txt` in that folder, one finding per line as `SEVERITY|path:line|what|why` with `HIGH`, `MEDIUM` or `LOW`, and then an empty `round-<n>.txt.done`. Kelpie reads nothing without the marker, and nothing from stdout. A nonzero exit fails the round. A command that writes `LOW|<path>:0|not reviewed: <n> lines exceeds the chunk limit|...` is run again with `--files <hunk file>` in place of `--diff`, on that file alone. If that run fails, the placeholder stays as the finding.
+
+`gpu_lease = true`, on either kind, has kelpie hold the GPU lock around each round. Leave it off for a command that takes the lock itself, as `qwen-review.sh` does.
 
 Kelpie never creates labels in a project's repo. Create `ready-for-agent` and `ready-for-human` there before its first run. Issues labelled `ready-for-agent` are the board. On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep trigger <project> rework <pr>`. On any other open pull request of kelpie's account, `ready-for-agent` adopts it, the same as `shep trigger <project> adopt <pr>`. Kelpie puts `ready-for-human` on each pull request it hands back.
 

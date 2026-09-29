@@ -40,6 +40,11 @@ impl FakeLeases {
         self.withheld.store(withheld, Ordering::SeqCst);
     }
 
+    /// Grants `kind` between steps, as the dog's `grant` trigger does
+    pub(crate) fn grant(&self, kind: &LeaseKind) {
+        self.held.lock().unwrap().insert(kind.clone());
+    }
+
     /// Whether the runner holds `kind` now
     pub(crate) fn held(&self, kind: &LeaseKind) -> bool {
         self.held.lock().unwrap().contains(kind)

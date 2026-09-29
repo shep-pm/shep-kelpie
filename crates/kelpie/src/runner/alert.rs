@@ -1,15 +1,17 @@
 //! Posting each ruling to the maintainer's relay and webhook, and each notice
 //! to the webhook
 //!
-//! The relay is a faster, nicer path when it is reachable, but it is a
-//! stopgap over an undocumented protocol, so it is never what keeps a
-//! ruling from being lost: every ruling also posts to the webhook, saved
-//! before it is posted so a failed post loses nothing. A failed post is
-//! tried again, waiting longer after each failure, and the ruling counts
-//! as alerted only once the webhook post lands, whatever the relay's send
-//! did. A save that fails after a post lands leaves it to be posted again.
-//! A notice of an automatic merge takes the same path, webhook only, once
-//! no ruling is waiting to be posted.
+//! The project's ruling channels say which of the two a ruling goes to, and
+//! a channel that is off is never touched: no relay is started, no post made.
+//! With the webhook on, the relay is a faster, nicer path when reachable but
+//! a stopgap over an undocumented protocol, so the ruling counts as alerted
+//! only once the webhook post lands, whatever the relay's send did. With the
+//! webhook off, it counts once the relay's send lands. A ruling is saved
+//! before it is posted so a failed post loses nothing, and a failed post is
+//! tried again, waiting longer after each failure. A save that fails after
+//! a post lands leaves it to be posted again. A notice of an automatic merge
+//! takes the same path, webhook only, once no ruling is waiting to be
+//! posted, and is dropped where the webhook is off.
 
 use std::sync::Mutex;
 
@@ -17,6 +19,7 @@ use super::Runner;
 use super::gate::short;
 use super::report::StepReport;
 use super::trigger::lock;
+use crate::channels::Channel;
 use crate::ports::{Alert, AlertError, Alerts, Relay, Timestamp};
 use crate::relay::{self, Settled};
 use crate::settings::Effort;
@@ -69,10 +72,14 @@ pub(super) struct RelayMessage {
 #[derive(Debug)]
 pub(super) struct Due {
     pub(super) of: Posting,
-    /// None for a notice, which needs no answer, and for a ruling the relay
-    /// already holds, whose retry is for the webhook alone
+    /// None for a notice, which needs no answer, for a ruling the relay
+    /// already holds, whose retry is for the webhook alone, and where the
+    /// relay is off
     pub(super) relay: Option<RelayMessage>,
-    pub(super) webhook: Webhook,
+    /// Whether the ruling is already saved as held by the relay
+    pub(super) relay_held: bool,
+    /// None where the webhook is off
+    pub(super) webhook: Option<Webhook>,
     pub(super) alert: Alert,
 }
 
@@ -105,33 +112,37 @@ pub(super) fn tell_settled(runner: &Mutex<Runner>, relay: &dyn Relay) {
 }
 
 /// Posts the oldest ruling or notice due to the webhook, and sends a ruling
-/// to the relay unless the relay already holds it
+/// to the relay unless the relay already holds it, each where its channel
+/// is on
 ///
-/// Returns `None` when nothing is due. The relay is a faster, nicer path
-/// when it is reachable, but the webhook is what keeps a ruling from being
-/// lost, so it posts every ruling whatever the relay's send did.
+/// Returns `None` when nothing is due. With the webhook on, it is what
+/// keeps a ruling from being lost, so it posts every ruling whatever the
+/// relay's send did.
 pub(super) fn post_due(
     runner: &Mutex<Runner>,
     relay: &dyn Relay,
     alerts: &dyn Alerts,
 ) -> Option<Result<StepReport, StateError>> {
     let due = lock(runner).alert_due()?;
-    let relayed = match &due.relay {
-        None => true,
-        Some(message) => {
-            let clear_due = lock(runner).relay_clear_due();
-            if clear_due
-                && relay.clear().is_ok()
-                && let Err(e) = lock(runner).relay_emptied()
-            {
-                return Some(Err(e));
-            }
-            relay
-                .send(&message.text, &message.model, message.effort)
-                .is_ok()
+    let mut relayed = due.relay_held;
+    let mut relay_failed = None;
+    if let Some(message) = &due.relay {
+        let clear_due = lock(runner).relay_clear_due();
+        if clear_due
+            && relay.clear().is_ok()
+            && let Err(e) = lock(runner).relay_emptied()
+        {
+            return Some(Err(e));
         }
+        match relay.send(&message.text, &message.model, message.effort) {
+            Ok(()) => relayed = true,
+            Err(e) => relay_failed = Some(e),
+        }
+    }
+    let sent = match &due.webhook {
+        Some(webhook) => alerts.post(webhook, &due.alert),
+        None => relay_failed.map_or(Ok(()), |e| Err(AlertError::Relay(e.to_string()))),
     };
-    let sent = alerts.post(&due.webhook, &due.alert);
     Some(lock(runner).alert_sent(due.of, relayed, sent))
 }
 
@@ -174,16 +185,19 @@ impl Runner {
             }
             let due = Due {
                 of,
-                relay: (!ruling.relayed).then(|| RelayMessage {
-                    text: relay::message(
-                        project,
-                        ruling.id,
-                        relay::Wants::of(&ruling.kind),
-                        &ruling.question,
-                    ),
-                    model: self.settings.models.relay.model.as_str().to_owned(),
-                    effort: self.settings.models.relay.effort,
+                relay: (self.channels.has(Channel::Relay) && !ruling.relayed).then(|| {
+                    RelayMessage {
+                        text: relay::message(
+                            project,
+                            ruling.id,
+                            relay::Wants::of(&ruling.kind),
+                            &ruling.question,
+                        ),
+                        model: self.settings.models.relay.model.as_str().to_owned(),
+                        effort: self.settings.models.relay.effort,
+                    }
                 }),
+                relay_held: ruling.relayed,
                 webhook: self.webhook.clone(),
                 alert: Alert {
                     title: format!("kelpie: {project} ruling {}", ruling.id),
@@ -203,6 +217,7 @@ impl Runner {
         (!waiting(of)).then(|| Due {
             of,
             relay: None,
+            relay_held: false,
             webhook: self.webhook.clone(),
             alert: notice_alert(project, notice),
         })
@@ -328,6 +343,9 @@ fn notice_alert(project: &str, notice: &Notice) -> Alert {
         ),
     }
 }
+
+#[cfg(test)]
+mod channels;
 
 #[cfg(test)]
 mod tests {

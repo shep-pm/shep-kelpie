@@ -15,7 +15,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::adapters::{
-    ClaudeCli, Curl, Gh, QwenReviewer, RelayCli, ShepLeases, ShotsCli, SystemClock,
+    ClaudeCli, Curl, Gh, LocalReviewer, RelayCli, ShepLeases, ShotsCli, SystemClock,
 };
 use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
@@ -37,6 +37,10 @@ const BOARD_POLL: Duration = Duration::from_secs(60);
 // flush follow this wait. The whole stop needs about 7s, so the entry needs
 // `kill_timeout = "10s"` or more.
 const JOIN_BOUND: Duration = Duration::from_secs(2);
+
+mod look;
+
+use look::Look;
 
 /// Runs `project`'s runner until the shepherd stops it
 ///
@@ -61,10 +65,11 @@ fn serve(project: &str) -> Result<(), String> {
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".kelpie"));
     let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
-    let paths = ProjectPaths::under(&kelpie_home, &project);
+    let mut paths = ProjectPaths::under(&kelpie_home, &project);
+    paths.shep_home.clone_from(&shep_home);
     let shepherd = shep_channel::serve();
-    let claude = ClaudeCli::default();
-    let reviewer = QwenReviewer::new(&home);
+    let claude = ClaudeCli::labelling(Arc::new(shepherd.clone()));
+    let reviewer = LocalReviewer::default();
     let shots = ShotsCli::new(paths.tools.clone());
     let epoch = Epoch(u64::from(std::process::id()));
     let leases = Arc::new(ShepLeases::new(shepherd.clone(), Asker::new(epoch)));
@@ -77,14 +82,32 @@ fn serve(project: &str) -> Result<(), String> {
         relay: Arc::new(RelayCli::new(
             home.clone(),
             kelpie_home.join("relay"),
-            shep_home,
+            shep_home.clone(),
             kelpie.clone(),
         )),
         alerts: Arc::new(Curl),
         leases: Arc::clone(&leases) as Arc<dyn Leases>,
         clock: Box::new(SystemClock),
     };
-    let runner = Runner::open(project, &paths, &home, &kelpie, ports).map_err(|e| e.to_string())?;
+    let sheep = std::env::var("SHEP_NAME")
+        .ok()
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| project.as_str().to_owned());
+    let mut look = Look::new(
+        shep_home,
+        sheep,
+        project.as_str().to_owned(),
+        paths.settings.clone(),
+        paths.kelpie_settings.clone(),
+        home.clone(),
+    );
+    let loaded = look.read()?;
+    for notice in &loaded.notices {
+        eprintln!("{notice}");
+    }
+    let (settings, kelpie_settings) = (loaded.settings, loaded.kelpie);
+    let runner = Runner::open(project, settings, kelpie_settings, &paths, &kelpie, ports)
+        .map_err(|e| e.to_string())?;
 
     if !shepherd.is_active() {
         return Err("no shepherd channel: run it under shep with `channel = true`".into());
@@ -114,7 +137,14 @@ fn serve(project: &str) -> Result<(), String> {
         reply.to_string()
     });
     let (stop, stopped) = mpsc::channel();
-    let worker = Worker::spawn(Arc::clone(&runner), wake.clone(), woken, stop.clone());
+    let on_wake = Box::new(move |runner: &Mutex<Runner>| look.again(runner));
+    let worker = Worker::spawn(
+        Arc::clone(&runner),
+        on_wake,
+        wake.clone(),
+        woken,
+        stop.clone(),
+    );
     shepherd.on_shutdown(move || {
         let _ = stop.send(Stop::Shutdown);
     });
@@ -152,6 +182,9 @@ enum Stop {
     WorkerDied,
 }
 
+/// What the worker's thread does each time it wakes from a wait
+type OnWake = Box<dyn FnMut(&Mutex<Runner>) + Send>;
+
 /// The thread that runs the worker's turns, and the means to stop it
 struct Worker {
     stopping: Arc<AtomicBool>,
@@ -163,8 +196,11 @@ struct Worker {
 
 impl Worker {
     /// Starts the thread, which tells `died` if it panics
+    ///
+    /// `on_wake` runs each time the thread wakes from a wait, before its next step.
     fn spawn(
         runner: Arc<Mutex<Runner>>,
+        mut on_wake: OnWake,
         wake: Sender<()>,
         woken: Receiver<()>,
         died: Sender<Stop>,
@@ -175,7 +211,8 @@ impl Worker {
         let thread = std::thread::spawn(move || {
             let _ending = ending;
             // A runner with no worker thread would answer triggers and never work.
-            if catch_unwind(AssertUnwindSafe(|| work(&runner, &woken, &flag))).is_err() {
+            let run = || work(&runner, &mut on_wake, &woken, &flag);
+            if catch_unwind(AssertUnwindSafe(run)).is_err() {
                 let _ = died.send(Stop::WorkerDied);
             }
         });
@@ -209,7 +246,7 @@ impl Worker {
 
 // Runs steps while there are any, then sleeps until a trigger or the next
 // look at the board. A turn cut short by a restart is resumed on the first pass.
-fn work(runner: &Mutex<Runner>, woken: &Receiver<()>, stopping: &AtomicBool) {
+fn work(runner: &Mutex<Runner>, on_wake: &mut OnWake, woken: &Receiver<()>, stopping: &AtomicBool) {
     while !stopping.load(Ordering::SeqCst) {
         match step(runner) {
             Ok(Some(report)) => {
@@ -225,12 +262,17 @@ fn work(runner: &Mutex<Runner>, woken: &Receiver<()>, stopping: &AtomicBool) {
         if let Err(RecvTimeoutError::Disconnected) = woken.recv_timeout(BOARD_POLL) {
             return;
         }
+        // A stop has only JOIN_BOUND to be let go, so it skips the wake's work.
+        if !stopping.load(Ordering::SeqCst) {
+            on_wake(runner);
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::sync::atomic::AtomicUsize;
     use std::time::Instant;
 
     use super::*;
@@ -254,7 +296,7 @@ mod tests {
     fn spawn(runner: Mutex<Runner>) -> Worker {
         let (wake, woken) = mpsc::channel();
         let (died, _) = mpsc::channel();
-        Worker::spawn(Arc::new(runner), wake, woken, died)
+        Worker::spawn(Arc::new(runner), Box::new(|_| {}), wake, woken, died)
     }
 
     fn eventually(what: &str, done: impl Fn() -> bool) {
@@ -269,7 +311,32 @@ mod tests {
     fn saved_calls(state: &Path) -> usize {
         let text = std::fs::read_to_string(state).unwrap();
         let state: serde_json::Value = serde_json::from_str(&text).unwrap();
-        state["work_item"]["calls"].as_array().map_or(0, Vec::len)
+        state["work_items"][0]["calls"]
+            .as_array()
+            .map_or(0, Vec::len)
+    }
+
+    #[test]
+    fn a_wake_reads_the_settings_again_but_a_stop_does_not() {
+        let rig = Rig::new("shep");
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&wakes);
+        let on_wake: OnWake = Box::new(move |_| {
+            counted.fetch_add(1, Ordering::SeqCst);
+        });
+        let (wake, woken) = mpsc::channel();
+        let (died, _) = mpsc::channel();
+        let runner = Arc::new(rig.open().unwrap());
+        let worker = Worker::spawn(runner, on_wake, wake.clone(), woken, died);
+        wake.send(()).unwrap();
+        eventually("the trigger's wake", || wakes.load(Ordering::SeqCst) == 1);
+
+        assert!(worker.stop(PATIENCE, || {}));
+        assert_eq!(
+            wakes.load(Ordering::SeqCst),
+            1,
+            "the stop read the settings"
+        );
     }
 
     #[test]

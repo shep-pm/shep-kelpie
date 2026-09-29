@@ -13,6 +13,7 @@ use crate::pacer::HoldKind;
 use crate::ports::{
     ClaudeCall, Cost, Finding, Role, SessionId, Severity, Timestamp, Usage, Verdict,
 };
+use crate::settings::LocalRound;
 use crate::shots::ShotsJob;
 use crate::work_item::{QwenTally, ReviewerKind, Spend};
 
@@ -30,7 +31,7 @@ pub enum ReworkBy {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "step", rename_all = "kebab-case")]
 pub enum StepReport {
-    /// The board's oldest free issue became the work item in flight
+    /// The board's oldest free issue opened a work item
     Dispatched {
         /// The work item's issue
         issue: u64,
@@ -39,8 +40,8 @@ pub enum StepReport {
         /// Older ready issues the board passed over, and why
         skipped: Vec<Skip>,
     },
-    /// A pull request kelpie opened asked for a rework, which became the
-    /// work item in flight
+    /// A pull request kelpie opened asked for a rework, which opened a work
+    /// item
     Reworked {
         /// The work item's issue
         issue: u64,
@@ -52,7 +53,7 @@ pub enum StepReport {
         /// requesting changes
         by: ReworkBy,
     },
-    /// An adopted pull request became the work item in flight
+    /// An adopted pull request opened a work item
     Adopted {
         /// The work item's issue: the one the pull request closes
         issue: u64,
@@ -446,10 +447,11 @@ pub(super) enum Begin {
     Shots(Box<ShotsJob>, String),
 }
 
-/// Something the qwen-review loop needs run outside the runner's lock
+/// Something the review loop needs run outside the runner's lock
 pub(super) enum ReviewCall {
-    /// One round of the maintainer's script
-    Qwen {
+    /// One local round, of the project's kind
+    Local {
+        local: LocalRound,
         worktree: PathBuf,
         base: String,
         out: PathBuf,
@@ -470,8 +472,8 @@ pub(super) enum Spent {
         usage: Usage,
         session_cost: Cost,
     },
-    /// A qwen round that ran, however it ended
-    Qwen,
+    /// A local round that ran, however it ended
+    Local,
 }
 
 /// What a [`ReviewCall`] came back with, and what it spent
@@ -484,7 +486,7 @@ pub(super) struct Reviewed {
 
 /// What a [`ReviewCall`] came back with
 pub(super) enum ReviewResult {
-    /// A round's raw findings, from qwen or a Claude round
+    /// A round's raw findings, from the local round or a Claude round
     Findings(Result<Vec<Finding>, String>),
     /// The judge's verdict on one finding
     Verdict(Result<Verdict, String>),
