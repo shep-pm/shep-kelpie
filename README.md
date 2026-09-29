@@ -19,41 +19,43 @@ A project on `merge_authority = "auto"` merges its pull requests without asking 
 
 ## Running a project
 
-Kelpie needs shep 0.11. A project's settings are its runner sheep's `[app.dogs.kelpie]` table, in the runner's Flockfile entry. Start from `crates/kelpie/settings.example.toml`, which is that entry with the defaults for shep.
+Kelpie needs shep 0.11 and runs in your own shepherd, beside your other sheep. Adopt it once, then leave it disabled: it runs the dog as a sheep of its own, since an adopted dog gets no channel for the lease commands.
 
-Kelpie's own settings are its `[kelpie]` section of `dogs.toml` in the shepherd's home. Start from `crates/kelpie/kelpie-settings.example.toml`, and keep `dogs.toml` private: the webhook's URL is a credential. `ruling_channels` there, or in a project's table, picks the webhook, the relay or both. Both is the default, and only a project that posts to the webhook needs a `webhook` table. On an ntfy webhook, a ruling can be answered from the topic: run `kelpie totp` once and scan the QR code into an authenticator app, then reply with the line the alert ends on, such as `shep 14 yes <code>`, with the app's code last. Anyone who can read the topic can read rulings, but only a reply with the code of the moment answers one, and each code answers once. Five wrong codes turn answers off until `kelpie totp --unlock`, and `kelpie totp --rotate` replaces a secret that may have leaked.
-
-Lookout edits both once kelpie is adopted as a dog, which is how shep finds its settings schema: `shep adopt /path/to/kelpie --name kelpie`, then `shep disable kelpie`, both with `SHEP_HOME=~/.kelpie/shep`. Adopting starts it, and the dog still runs from the Flockfile below, so the disable stops that start. A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start.
-
-A project set up before the tables still loads `~/.kelpie/projects/<project>/settings.toml` and `~/.kelpie/settings.toml`, and its runner logs a notice. `SHEP_HOME=~/.kelpie/shep kelpie settings move <project>` writes both into their tables, after kelpie is adopted. It never overwrites a table and never deletes a file.
-
-Kelpie runs under its own shepherd, with `SHEP_HOME=~/.kelpie/shep`. Each runner is a sheep in its flock, and so is the dog, which holds the leases every runner asks before a summon:
-
-```toml
-[[app]]
-name = "shep"
-script = "/path/to/kelpie"
-args = ["runner", "shep"]
-env = { SHEP_HOME = "/path/to/home/.kelpie/shep" }
-channel = true
-shutdown_with_message = true
-kill_timeout = "10s"
-
-[[app]]
-name = "kelpie"
-script = "/path/to/kelpie"
-args = ["dog"]
-env = { SHEP_HOME = "/path/to/home/.kelpie/shep" }
-channel = true
-shutdown_with_message = true
-kill_timeout = "10s"
+```sh
+shep adopt /path/to/kelpie --name kelpie && shep disable kelpie
 ```
 
-`env` matters. A sheep starts with only `HOME`, `LANG`, `PATH`, `USER` and its `SHEP_*` variables, so `SHEP_HOME` has to be set in its entry. The value must be an absolute path, since shep does not expand `~` in `env`. A runner and the dog refuse to start without it, or with a relative one. The runner passes it on to the relay, whose `kelpie relay-*` commands send its answers to the shepherd at that home. They talk to its socket with the shep client kelpie is built with, never a `shep` on `PATH`, and refuse a shepherd on another shep minor or major than the pinned one.
+Not while a sheep named `kelpie` runs, such as a dog from an older Flockfile: shep refuses the adopt, and `disable` deletes any sheep of that name. The move below covers that case.
 
-`kill_timeout` matters too. `shep stop` and `restart` give a runner only that long after the shutdown message, 1.6s by default, then SIGKILL. A runner needs about 7s to stop cleanly, so set it to `10s` or more.
+Then, in the checkout of any GitHub repo whose default branch is `main`:
 
-Then `SHEP_HOME=~/.kelpie/shep shep trigger shep status`. `shep describe shep` labels each Claude session the runner starts with its issue and role, such as `#114 worker`.
+```sh
+shep kelpie add        # labels, settings, and the runner, stopped
+shep kelpie start      # starts the runner and the dog, then the project
+shep kelpie pause
+shep kelpie status     # every project
+```
+
+`add` names the project after the repo, or `shep kelpie add <name>`. It makes `ready-for-agent`, `ready-for-human` and `review please` where the repo lacks them, and registers two sheep: the runner, holding the project's settings as its `[app.dogs.kelpie]` table, and `kelpie-dog`, which holds the leases every runner asks before a summon. Worktrees, build folders and state go under `~/.kelpie`, never inside the checkout. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name.
+
+Lookout edits a project's table in the runner's pane, and kelpie's own settings in its `[kelpie]` section of `dogs.toml`. Start that section from `crates/kelpie/kelpie-settings.example.toml`, and keep `dogs.toml` private: the webhook's URL is a credential. `ruling_channels` there, or in a project's table, picks the webhook, the relay or both. Both is the default, and only a project that posts to the webhook needs a `webhook` table. On an ntfy webhook, a ruling can be answered from the topic: run `kelpie totp` once and scan the QR code into an authenticator app, then reply with the line the alert ends on, such as `shep 14 yes <code>`, with the app's code last. Anyone who can read the topic can read rulings, but only a reply with the code of the moment answers one, and each code answers once. Five wrong codes turn answers off until `kelpie totp --unlock`, and `kelpie totp --rotate` replaces a secret that may have leaked. A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start.
+
+`shep describe <project>` labels each Claude session the runner starts with its issue and role, such as `#114 worker`.
+
+Kelpie refuses a shepherd on another shep minor or major than the pinned one, naming both versions. The relay's `kelpie relay-*` commands talk to the shepherd's socket with the shep client kelpie is built with, never a `shep` on `PATH`.
+
+### Moving an install from `~/.kelpie/shep`
+
+An install from before `shep kelpie` runs its runners and dog from a Flockfile under `SHEP_HOME=~/.kelpie/shep`. It keeps working as it is. To move it into your own shepherd:
+
+1. Take the runners and the dog out of the old shepherd by name, so no project runs twice, and stop it: `SHEP_HOME=~/.kelpie/shep shep delete <project>... kelpie`, then `SHEP_HOME=~/.kelpie/shep shep kill`. Name only kelpie's sheep, since that shepherd may run others. A `kill` alone leaves them in its saved roll, and a later `shep muster` there would start them beside the new ones. Their state files stay under `~/.kelpie/projects`
+2. Adopt kelpie in your own shepherd, as above
+3. For each project: `cd ~/.kelpie/repos/<project> && shep kelpie add <project> && shep kelpie start`. `add` makes the project's table from `~/.kelpie/projects/<project>/settings.toml`, and the runner keeps its state file
+4. Once: `shep kelpie settings move <project>`, which moves `~/.kelpie/settings.toml` into the `[kelpie]` section
+
+To adopt kelpie in `~/.kelpie/shep` itself instead, run `SHEP_HOME=~/.kelpie/shep ~/.kelpie/bin/kelpie add <project>` in a project's checkout first. `shep adopt` refuses the name `kelpie` while the Flockfile's dog holds it, so `add` replaces that sheep with `kelpie-dog`, running on the same book. Then adopt as above, and drop the `kelpie` entry from the Flockfile. `add` refuses to carry `TMPDIR` or `PATH` from that entry, since this shell's may differ and the GPU lock lives under `TMPDIR`: take them out of the entry first.
+
+A runner's Flockfile entry, for a project set up by hand, is in `crates/kelpie/settings.example.toml`. It needs `SHEP_HOME` as an absolute path in `env`, since a sheep starts without it, and `kill_timeout = "10s"` or more, since a runner needs about 7s to stop cleanly.
 
 ## The local round
 
@@ -79,7 +81,7 @@ It writes `round-<n>.txt` in that folder, one finding per line as `SEVERITY|path
 
 `gpu_lease = true`, on either kind, has kelpie hold the GPU lock around each round. Leave it off for a command that takes the lock itself, as `qwen-review.sh` does.
 
-Kelpie never creates labels in a project's repo. Create `ready-for-agent` and `ready-for-human` there before its first run. Issues labelled `ready-for-agent` are the board. On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep trigger <project> rework <pr>`. On any other open pull request of kelpie's account, `ready-for-agent` adopts it, the same as `shep trigger <project> adopt <pr>`. Kelpie puts `ready-for-human` on each pull request it hands back.
+Issues labelled `ready-for-agent` are the board. On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep trigger <project> rework <pr>`. On any other open pull request of kelpie's account, `ready-for-agent` adopts it, the same as `shep trigger <project> adopt <pr>`. Kelpie puts `ready-for-human` on each pull request it hands back.
 
 - `CONTEXT.md`: the vocabulary
 - `docs/adr/`: decisions that are hard to reverse

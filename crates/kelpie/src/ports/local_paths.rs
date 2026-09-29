@@ -8,7 +8,7 @@
 use std::fmt;
 use std::path::Path;
 
-use super::{Forge, ForgeError, Issue, PullRequest, Reviewed, Visibility};
+use super::{Forge, ForgeError, Issue, NewLabel, PullRequest, Reviewed, Visibility};
 use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::coderabbit::Activity;
 use crate::settings::ForgeSlug;
@@ -55,6 +55,19 @@ impl fmt::Debug for Guarded {
 impl Forge for Guarded {
     fn visibility(&self, repo: &ForgeSlug) -> Result<Visibility, ForgeError> {
         self.forge.visibility(repo)
+    }
+
+    fn default_branch(&self, repo: &ForgeSlug) -> Result<String, ForgeError> {
+        self.forge.default_branch(repo)
+    }
+
+    fn repo_labels(&self, repo: &ForgeSlug) -> Result<Vec<String>, ForgeError> {
+        self.forge.repo_labels(repo)
+    }
+
+    // A label's text is kelpie's own constants, which name no folder.
+    fn create_label(&self, repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError> {
+        self.forge.create_label(repo, label)
     }
 
     fn issue(&self, repo: &ForgeSlug, number: u64) -> Result<Issue, ForgeError> {

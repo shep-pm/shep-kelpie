@@ -44,12 +44,13 @@ mod trigger;
 mod turn;
 
 pub use adopt::AdoptError;
+pub use coderabbit::LABEL as SUMMON_LABEL;
 pub use merge::DropError;
 pub use pace::PacerStatus;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
 pub use replies::READ_EVERY;
 pub use report::StepReport;
-pub use rework::ReworkError;
+pub use rework::{HUMAN, ReworkError};
 pub use ruling::{Answer, RuleError};
 use trigger::issue_list;
 pub use trigger::{ACTIONS, RELAY_RULE, Status, WorkItemStatus, answer, is_no_or_answer};
@@ -553,7 +554,10 @@ mod tests {
     fn a_failed_save_is_reported_and_changes_nothing() {
         let rig = Rig::new("xilriws");
         let runner = rig.open().unwrap();
-        std::fs::remove_dir_all(rig.paths().state.parent().unwrap()).unwrap();
+        let folder = rig.paths().state.parent().unwrap().to_owned();
+        std::fs::remove_dir_all(&folder).unwrap();
+        // A file where the folder was, which a save cannot make a folder of.
+        std::fs::write(&folder, "").unwrap();
         let reply = rig.ask(&runner, "start", None);
         assert!(
             reply["error"]

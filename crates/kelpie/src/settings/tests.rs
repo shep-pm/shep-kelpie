@@ -372,3 +372,9 @@ fn a_table_s_local_command_expands_the_home_folder_and_takes_the_project_folder(
     assert_eq!(command("review.sh"), Path::new(FOLDER).join("review.sh"));
     assert_eq!(command("/opt/review.sh"), Path::new("/opt/review.sh"));
 }
+
+#[test]
+fn a_forge_slug_s_name_is_the_repo_without_its_owner() {
+    let slug = ForgeSlug::try_from("shep-pm/koji-website".to_owned()).unwrap();
+    assert_eq!(slug.name(), "koji-website");
+}
