@@ -1,19 +1,19 @@
 //! Answering rulings from the webhook's topic
 //!
-//! On an ntfy webhook a reply on the topic answers a ruling when its last
-//! word is the maintainer's authenticator code (see [`crate::totp`]):
-//! `<id> yes <code>`, `<id> no <note> <code>` or `<id> answer <text> <code>`,
-//! the rest read by `rule`'s own parser. The code is checked against the
-//! time ntfy took the reply, which no sender can set. The code is never on
-//! the topic before the maintainer sends it, so a reader of the topic can
-//! read rulings but not answer them. Every code the maintainer sends is on
-//! the topic afterwards, so each step answers once, across every ruling of
-//! every project. A reply with the right code for a ruling already settled
-//! runs nothing and gets a line on the topic saying so, and so do a used
-//! code and a refusal from `rule`. Anything else is ignored.
+//! On an ntfy webhook a reply on the topic answers a ruling when it names
+//! the project and ends with the maintainer's authenticator code (see
+//! [`crate::totp`]): `<project> <id> yes <code>`, `<project> <id> no <note>
+//! <code>` or `<project> <id> answer <text> <code>`, the part after the
+//! project read by `rule`'s own parser. The code is checked against the time
+//! ntfy took the reply, which no sender can set. It is never on the topic
+//! before the maintainer sends it, so a reader of the topic can read rulings
+//! but not answer them, and each step's code answers once, whatever the
+//! reply that first sent it said: a right code is claimed before anything
+//! else about the reply is read. After [`FAILURES`] wrong codes, answers
+//! from the topic are off for every project until `kelpie totp --unlock`.
 
 use std::collections::VecDeque;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use super::alert::backoff;
@@ -24,7 +24,8 @@ use crate::ports::{Alert, AlertError, Alerts, Reply, ReplyWith, Since, Takes, Ti
 use crate::relay::Wants;
 use crate::settings::SettingsError;
 use crate::state::{LastRead, RulingKind, StateError};
-use crate::totp::{Secret, Used};
+use crate::totp::Secret;
+use crate::totp::answers::{Answers, Claim, FAILURES, Failure};
 use crate::webhook::{Webhook, WebhookKind};
 
 /// Seconds between reads of the topic while a ruling waits on it
@@ -54,6 +55,15 @@ pub(super) struct Reading {
     failures: u32,
 }
 
+/// What a runner checks replies against: the secret's file, read afresh for
+/// each reply so a rotated secret counts at once, and what every runner
+/// shares about the codes sent
+#[derive(Debug)]
+pub(super) struct Authenticator {
+    secret: PathBuf,
+    answers: Answers,
+}
+
 /// A line for the topic, and where to post it
 type Line = (Webhook, Alert);
 
@@ -62,27 +72,31 @@ type Line = (Webhook, Alert);
 type Handled = Option<(StepReport, Option<Line>)>;
 
 /// The authenticator a runner checks replies against: on an ntfy webhook,
-/// the secret `kelpie totp` wrote under `folder`, and the codes used there
+/// the one `kelpie totp` keeps under `folder`
 ///
-/// `None` elsewhere, and on ntfy before the secret exists, when rulings are
-/// answered some other way.
+/// `None` elsewhere. The secret need not exist yet: until it does, alerts
+/// say nothing of replies and the topic is not read.
 ///
 /// # Errors
 ///
-/// [`SettingsError::Invalid`] when the secret's file cannot be read or is
-/// not one kelpie wrote.
+/// [`SettingsError::Invalid`] when the secret's file cannot be read, others
+/// may read it, or it is not one kelpie wrote.
 pub(super) fn authenticator(
     webhook: Option<&Webhook>,
     folder: &Path,
-) -> Result<Option<(Secret, Used)>, SettingsError> {
+) -> Result<Option<Authenticator>, SettingsError> {
     if !webhook.is_some_and(|w| w.kind == WebhookKind::Ntfy) {
         return Ok(None);
     }
-    let secret = Secret::load(&folder.join("secret")).map_err(|e| SettingsError::Invalid {
+    let secret = folder.join("secret");
+    Secret::load(&secret).map_err(|e| SettingsError::Invalid {
         setting: "webhook",
         reason: e.to_string(),
     })?;
-    Ok(secret.map(|secret| (secret, Used::in_folder(folder.join("used")))))
+    Ok(Some(Authenticator {
+        secret,
+        answers: Answers::in_folder(folder.to_owned()),
+    }))
 }
 
 /// Handles the oldest reply read, reading the topic first when none is
@@ -113,11 +127,12 @@ pub(super) fn answer_replies(
     }
 }
 
-/// A reply's text read as `rule`'s params and the code after them
-fn read_reply(text: &str) -> Option<(u64, Answer, &str)> {
-    let (params, code) = text.trim().rsplit_once(char::is_whitespace)?;
-    let (id, answer) = read_rule(params.trim_end())?;
-    Some((id, answer, code))
+/// A reply's text without its code, read as the project it names and
+/// `rule`'s params
+fn read_reply(text: &str) -> Option<(&str, u64, Answer)> {
+    let (project, params) = text.trim().split_once(char::is_whitespace)?;
+    let (id, answer) = read_rule(params.trim())?;
+    Some((project, id, answer))
 }
 
 impl StepReport {
@@ -125,7 +140,8 @@ impl StepReport {
     fn with_line_failed(mut self, failed: Option<AlertError>) -> Self {
         if let Self::ReplyRefused { line_failed, .. }
         | Self::ReplyToSettled { line_failed, .. }
-        | Self::ReplyCodeUsed { line_failed, .. } = &mut self
+        | Self::ReplyCodeUsed { line_failed, .. }
+        | Self::RepliesLocked { line_failed } = &mut self
         {
             *line_failed = failed.map(|e| e.to_string());
         }
@@ -141,9 +157,13 @@ impl Runner {
         self.replies_on().is_some() && self.state.rulings.iter().any(|r| r.alerted)
     }
 
-    // The topic, where replies to it are read
+    // The topic, where replies to it are read: an ntfy webhook, a secret,
+    // and answers not turned off
     fn replies_on(&self) -> Option<&Webhook> {
-        self.totp.as_ref()?;
+        let auth = self.totp.as_ref()?;
+        if !auth.secret.exists() || auth.answers.locked() {
+            return None;
+        }
         self.webhook
             .as_ref()
             .filter(|w| w.kind == WebhookKind::Ntfy)
@@ -156,7 +176,8 @@ impl Runner {
             Wants::Answer => Takes::Answer,
             Wants::YesOrNo => Takes::YesOrNo,
         };
-        Some(ReplyWith { id, takes })
+        let project = self.project.as_str().to_owned();
+        Some(ReplyWith { project, id, takes })
     }
 
     /// Keeps reading the topic until [`LATE`] after `now`: a ruling's alert
@@ -211,11 +232,11 @@ impl Runner {
     }
 
     // Handles the oldest reply read, then moves past it. A save that fails
-    // between the two leaves the reply to be read again, when its code is
-    // found used.
+    // between the two leaves the reply to be read again, when its step is
+    // found claimed by it and it is handled again.
     fn handle_next(&mut self) -> Option<Result<Handled, StateError>> {
         let reply = self.reading.queue.pop_front()?;
-        let handled = (reply.text.as_deref()).map(|text| self.handle(text, reply.time));
+        let handled = (reply.text.as_deref()).map(|text| self.handle(text, &reply));
         let mut next = self.state.clone();
         next.replies.last = Some(LastRead {
             id: reply.id,
@@ -227,40 +248,54 @@ impl Runner {
         Some(Ok(handled))
     }
 
-    fn handle(&mut self, text: &str, sent: Timestamp) -> (StepReport, Option<Line>) {
+    fn handle(&mut self, text: &str, reply: &Reply) -> (StepReport, Option<Line>) {
         let ignored = (StepReport::ReplyIgnored, None);
-        let Some((id, answer, typed)) = read_reply(text) else {
+        let Some(webhook) = self.replies_on().cloned() else {
             return ignored;
         };
-        let Some((secret, used)) = &self.totp else {
+        let Some(auth) = &self.totp else {
             return ignored;
         };
-        let Some(step) = secret.verify(typed, sent) else {
+        let Some((rest, typed)) = text.trim().rsplit_once(char::is_whitespace) else {
             return ignored;
         };
-        let pending = self.state.rulings.iter().any(|r| r.id == id);
-        if !pending && id > self.state.last_ruling {
+        if typed.len() != 6 || !typed.bytes().all(|b| b.is_ascii_digit()) {
             return ignored;
         }
         let project = self.project.as_str().to_owned();
-        let webhook = self
-            .replies_on()
-            .cloned()
-            .expect("replies are read from ntfy");
-        let line = |text: String| {
-            let title = format!("kelpie: {project} ruling {id}");
+        let line = |id: Option<u64>, text: String| {
+            let title = match id {
+                Some(id) => format!("kelpie: {project} ruling {id}"),
+                None => "kelpie: answers are off".to_owned(),
+            };
             let reply = None;
             Some((webhook.clone(), Alert { title, text, reply }))
         };
-        if !pending {
-            let text =
-                format!("Ruling {id} on {project} is already settled, so that reply ran nothing.");
-            let report = StepReport::ReplyToSettled {
-                id,
-                line_failed: None,
-            };
-            return (report, line(text));
-        }
+        let Ok(Some(secret)) = Secret::load(&auth.secret) else {
+            return ignored;
+        };
+        // A right code is claimed before anything else is read, so no later
+        // reply can reuse it, whatever this one said.
+        let claim = match secret.verify(typed, reply.time) {
+            Some(step) => auth.answers.claim(step, &reply.id, self.ports.clock.now()),
+            None => {
+                return match auth.answers.fail(&reply.id) {
+                    Ok(Failure::LockedNow) => {
+                        let text = format!(
+                            "Answers from ntfy are off after {FAILURES} wrong codes. \
+                             Turn them back on with `kelpie totp --unlock` on the terminal."
+                        );
+                        let report = StepReport::RepliesLocked { line_failed: None };
+                        (report, line(None, text))
+                    }
+                    Ok(Failure::Counted) | Err(_) => ignored,
+                };
+            }
+        };
+        let named = read_reply(rest).filter(|(named, ..)| *named == project);
+        let Some((_, id, answer)) = named else {
+            return ignored;
+        };
         let refused = |reason: String| {
             let text = format!("Ruling {id} was not answered: {reason}.");
             let report = StepReport::ReplyRefused {
@@ -268,11 +303,11 @@ impl Runner {
                 reason,
                 line_failed: None,
             };
-            (report, line(text))
+            (report, line(Some(id), text))
         };
-        match used.claim(step, self.ports.clock.now()) {
-            Ok(true) => {}
-            Ok(false) => {
+        match claim {
+            Ok(Claim::Ours) => {}
+            Ok(Claim::Replayed) => {
                 let text = format!(
                     "Ruling {id} was not answered: that code was used already. \
                      Send the reply again with the next one."
@@ -281,9 +316,23 @@ impl Runner {
                     id,
                     line_failed: None,
                 };
-                return (report, line(text));
+                return (report, line(Some(id), text));
             }
             Err(e) => return refused(format!("the code could not be recorded as used: {e}")),
+        }
+        let _ = auth.answers.forgive();
+        let pending = self.state.rulings.iter().any(|r| r.id == id);
+        if !pending {
+            if id > self.state.last_ruling {
+                return ignored;
+            }
+            let text =
+                format!("Ruling {id} on {project} is already settled, so that reply ran nothing.");
+            let report = StepReport::ReplyToSettled {
+                id,
+                line_failed: None,
+            };
+            return (report, line(Some(id), text));
         }
         match self.rule_and_tell(id, answer) {
             Ok(()) => (StepReport::ReplyAnswered { id }, None),

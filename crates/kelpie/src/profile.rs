@@ -40,7 +40,7 @@ const GIT_DENY: [&str; 8] = [
 // Read and written by no worker. Also denied to sandboxed Bash, which takes
 // `Read` deny rules as its own. `~/.config/gh` stays readable: `gh` will not
 // start without its config, and the worker opens its own pull request.
-pub(crate) const CREDENTIALS: [&str; 11] = [
+pub(crate) const CREDENTIALS: [&str; 12] = [
     "~/.ssh/**",
     "~/.aws/**",
     "~/.gnupg/**",
@@ -53,6 +53,8 @@ pub(crate) const CREDENTIALS: [&str; 11] = [
     "~/.kelpie/projects/**",
     // The webhook URL. Not all of `~/.kelpie`: worktrees and build folders live there.
     "~/.kelpie/settings.toml",
+    // The authenticator secret, which answers a ruling from ntfy
+    "~/.kelpie/totp/**",
 ];
 
 // What only the project manager does: merge, mark ready, and summon.
@@ -616,6 +618,7 @@ mod tests {
             "Read(~/.ssh/**)",
             "Read(~/.kelpie/projects/**)",
             "Read(~/.kelpie/settings.toml)",
+            "Read(~/.kelpie/totp/**)",
         ] {
             assert!(deny.contains(&rule), "{rule}");
         }

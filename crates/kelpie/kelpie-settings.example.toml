@@ -13,9 +13,10 @@
 # read an ntfy topic. Keep this file private.
 #
 # On ntfy a ruling is answered in the topic too: reply with the line the
-# alert ends on, with the code from your authenticator app last. Run
-# `kelpie totp` once to get the secret to scan. A reader of the topic can read
-# rulings but not answer them.
+# alert ends on, `<project> <id> yes <code>`, with the code from your
+# authenticator app last. Run `kelpie totp` once to get the secret to scan.
+# A reader of the topic can read rulings but not answer them. Five wrong
+# codes turn answers off until `kelpie totp --unlock`.
 [webhook]
 kind = "ntfy"
 url = "https://ntfy.sh/your-private-topic"

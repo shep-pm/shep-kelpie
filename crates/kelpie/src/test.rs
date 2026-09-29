@@ -605,12 +605,11 @@ impl Rig {
             Self::WEBHOOK_URL
         );
         std::fs::write(&paths.kelpie_settings, kelpie).unwrap();
-        std::fs::create_dir_all(&paths.totp).unwrap();
-        std::fs::write(
-            paths.totp.join("secret"),
-            format!("{}\n", Self::TOTP_SECRET),
-        )
-        .unwrap();
+        crate::totp::private_dir(&paths.totp).unwrap();
+        let secret = paths.totp.join("secret");
+        std::fs::write(&secret, format!("{}\n", Self::TOTP_SECRET)).unwrap();
+        let owner_only = std::os::unix::fs::PermissionsExt::from_mode(0o600);
+        std::fs::set_permissions(&secret, owner_only).unwrap();
         rig
     }
 

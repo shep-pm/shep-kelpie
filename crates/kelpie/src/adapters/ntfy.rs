@@ -14,10 +14,10 @@ pub(super) const TAG: &str = "kelpie";
 
 /// The line that ends a ruling's alert: the replies that answer it
 pub(super) fn reply_line(reply: &ReplyWith) -> String {
-    let id = reply.id;
+    let ruling = format!("{} {}", reply.project, reply.id);
     let replies = match reply.takes {
-        Takes::Answer => format!("`{id} answer <text> <code>`"),
-        Takes::YesOrNo => format!("`{id} yes <code>` or `{id} no <note> <code>`"),
+        Takes::Answer => format!("`{ruling} answer <text> <code>`"),
+        Takes::YesOrNo => format!("`{ruling} yes <code>` or `{ruling} no <note> <code>`"),
     };
     format!("\n\nReply here with {replies}, where <code> is kelpie's authenticator code.")
 }
@@ -142,18 +142,19 @@ mod tests {
     #[test]
     fn the_reply_line_names_what_the_ruling_takes() {
         let yes_or_no = ReplyWith {
+            project: "koji".into(),
             id: 3,
             takes: Takes::YesOrNo,
         };
         assert_eq!(
             reply_line(&yes_or_no),
-            "\n\nReply here with `3 yes <code>` or `3 no <note> <code>`, \
+            "\n\nReply here with `koji 3 yes <code>` or `koji 3 no <note> <code>`, \
              where <code> is kelpie's authenticator code."
         );
         let question = ReplyWith {
-            id: 3,
             takes: Takes::Answer,
+            ..yes_or_no
         };
-        assert!(reply_line(&question).contains("`3 answer <text> <code>`"));
+        assert!(reply_line(&question).contains("`koji 3 answer <text> <code>`"));
     }
 }

@@ -51,6 +51,7 @@ fn the_alert_says_how_to_reply_and_carries_no_code() {
     assert_eq!(
         alert.reply,
         Some(ReplyWith {
+            project: "koji".into(),
             id: 1,
             takes: Takes::YesOrNo
         })
@@ -64,7 +65,7 @@ fn the_alert_says_how_to_reply_and_carries_no_code() {
 fn a_reply_with_the_code_of_the_moment_answers_the_ruling() {
     let (rig, runner, head) = alerted("koji");
     assert!(lock(&runner).awaits_reply());
-    rig.reply("1 yes");
+    rig.reply("koji 1 yes");
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::ReplyAnswered { id: 1 })
@@ -82,7 +83,8 @@ fn a_code_is_taken_in_its_step_and_the_one_after() {
     let (rig, runner, _) = alerted("koji");
     let now = rig.clock.now();
     let previous = rig.code_at(Timestamp(now.0 - STEP));
-    rig.alerts.reply(&format!("1 no rename it {previous}"), now);
+    rig.alerts
+        .reply(&format!("koji 1 no rename it {previous}"), now);
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::ReplyAnswered { id: 1 })
@@ -97,7 +99,8 @@ fn a_reply_without_the_right_code_is_ignored() {
     let stale = rig.code_at(Timestamp(now.0 - 2 * STEP));
     let wrong = format!("{:06}", (code.parse::<u32>().unwrap() + 1) % 1_000_000);
     for reply in [
-        "1 yes".to_owned(),
+        "koji 1 yes".to_owned(),
+        format!("1 yes {code}"),
         format!("1 yes {wrong}"),
         format!("1 yes {stale}"),
         format!("1 yes {}", &code[..5]),
@@ -124,12 +127,13 @@ fn a_reply_without_the_right_code_is_ignored() {
 #[test]
 fn a_code_answers_once_across_every_ruling() {
     let (rig, runner) = two_rulings("koji");
-    let code = rig.reply("1 yes");
+    let code = rig.reply("koji 1 yes");
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::ReplyAnswered { id: 1 })
     );
-    rig.alerts.reply(&format!("2 yes {code}"), rig.clock.now());
+    rig.alerts
+        .reply(&format!("koji 2 yes {code}"), rig.clock.now());
     rig.clock.advance(READ_EVERY);
     assert_eq!(
         step(&runner).unwrap(),
@@ -149,7 +153,7 @@ fn a_code_answers_once_across_every_ruling() {
 
     // The next step's code answers it.
     rig.clock.advance(STEP);
-    rig.reply("2 no not yet");
+    rig.reply("koji 2 no not yet");
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::ReplyAnswered { id: 2 })
@@ -161,7 +165,7 @@ fn a_reply_to_a_settled_ruling_runs_nothing_and_the_topic_is_told() {
     let (rig, runner, _) = alerted("koji");
     rig.ask(&runner, "rule", Some("1 no rename the flag"));
     let status = rig.ask(&runner, "status", None);
-    rig.reply("1 yes");
+    rig.reply("koji 1 yes");
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::ReplyToSettled {
@@ -183,7 +187,7 @@ fn a_reply_to_a_settled_ruling_runs_nothing_and_the_topic_is_told() {
 #[test]
 fn a_reply_rule_refuses_is_told_on_the_topic() {
     let (rig, runner, _) = alerted("koji");
-    rig.reply("1 answer merge it");
+    rig.reply("koji 1 answer merge it");
     let reason = "ruling 1 is not a question, so it takes a yes, or a no with a note";
     assert_eq!(
         step(&runner).unwrap(),
@@ -200,7 +204,7 @@ fn a_reply_rule_refuses_is_told_on_the_topic() {
     assert_eq!(phase(&rig, &runner), json!({ "state": "ruling", "id": 1 }));
 
     rig.clock.advance(STEP);
-    rig.reply("1 yes");
+    rig.reply("koji 1 yes");
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::ReplyAnswered { id: 1 })
@@ -218,10 +222,10 @@ fn a_questions_answer_by_reply_is_the_workers_next_turn() {
     )]);
     step(&runner).unwrap();
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
-    let reply = rig.alerts.posts()[0].1.reply.unwrap();
+    let reply = rig.alerts.posts()[0].1.reply.clone().unwrap();
     assert_eq!(reply.takes, Takes::Answer);
 
-    rig.reply("1 answer  use --dry-run, it matches shep.");
+    rig.reply("rotom 1 answer  use --dry-run, it matches shep.");
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::ReplyAnswered { id: 1 })
@@ -244,7 +248,7 @@ fn a_relayed_ruling_answered_by_reply_is_told_to_the_relay() {
     let (rig, runner, _) = Rig::parked("golbat");
     rig.relay.set_up(true);
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
-    rig.reply("1 yes");
+    rig.reply("golbat 1 yes");
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::ReplyAnswered { id: 1 })
@@ -264,7 +268,7 @@ fn reading_resumes_after_the_last_reply_across_a_restart() {
     drop(runner);
 
     let runner = rig.open().unwrap();
-    rig.reply("1 yes");
+    rig.reply("koji 1 yes");
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::ReplyAnswered { id: 1 })
@@ -366,4 +370,102 @@ fn a_secret_kelpie_did_not_write_stops_the_runner_naming_the_file() {
     let e = e.to_string();
     assert!(e.contains(&secret.display().to_string()), "{e}");
     assert!(!e.contains("hunter2"), "{e}");
+}
+
+// Probed in review: a code in a reply that answered nothing stayed
+// unclaimed, and a reader of the topic reused it to merge.
+#[test]
+fn a_right_code_is_spent_even_when_its_reply_answers_nothing() {
+    let (rig, runner, _) = alerted("koji");
+    let code = rig.reply("koji 1 no");
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::ReplyIgnored));
+    rig.alerts
+        .reply(&format!("koji 1 yes {code}"), rig.clock.now());
+    rig.clock.advance(READ_EVERY);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReplyCodeUsed {
+            id: 1,
+            line_failed: None
+        })
+    );
+    assert_eq!(phase(&rig, &runner), json!({ "state": "ruling", "id": 1 }));
+}
+
+// Ruling ids are per project, and every project reads the one topic.
+#[test]
+fn a_reply_for_another_project_answers_nothing_here() {
+    let (rig, runner, _) = alerted("koji");
+    let code = rig.reply("rotom 1 yes");
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::ReplyIgnored));
+    assert_eq!(phase(&rig, &runner), json!({ "state": "ruling", "id": 1 }));
+    assert_eq!(lines(&rig), [""; 0]);
+
+    // Its code is spent all the same.
+    rig.alerts
+        .reply(&format!("koji 1 yes {code}"), rig.clock.now());
+    rig.clock.advance(READ_EVERY);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReplyCodeUsed { id: 1, .. })
+    ));
+}
+
+#[test]
+fn five_wrong_codes_turn_answers_off_until_the_terminal_turns_them_on() {
+    let (rig, runner, _) = alerted("koji");
+    let now = rig.clock.now();
+    let right = rig.code_at(now);
+    let wrong = |n: u32| format!("{:06}", (right.parse::<u32>().unwrap() + n) % 1_000_000);
+    for n in 1..5 {
+        rig.alerts.reply(&format!("koji 1 yes {}", wrong(n)), now);
+        assert_eq!(
+            step(&runner).unwrap(),
+            Some(StepReport::ReplyIgnored),
+            "{n}"
+        );
+        rig.clock.advance(READ_EVERY);
+    }
+    rig.alerts.reply(&format!("koji 1 yes {}", wrong(5)), now);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::RepliesLocked { line_failed: None })
+    );
+    assert_eq!(
+        lines(&rig),
+        ["Answers from ntfy are off after 5 wrong codes. \
+          Turn them back on with `kelpie totp --unlock` on the terminal."]
+    );
+    assert!(!lock(&runner).awaits_reply());
+
+    // The right code of the moment answers nothing now, and is not read.
+    rig.clock.advance(STEP);
+    rig.reply("koji 1 yes");
+    rig.clock.advance(READ_EVERY);
+    step(&runner).unwrap();
+    assert_eq!(phase(&rig, &runner), json!({ "state": "ruling", "id": 1 }));
+
+    crate::totp::answers::Answers::in_folder(rig.paths().totp)
+        .unlock()
+        .unwrap();
+    rig.clock.advance(STEP);
+    rig.reply("koji 1 yes");
+    rig.clock.advance(READ_EVERY);
+    let mut answered = false;
+    for _ in 0..4 {
+        answered |= step(&runner).unwrap() == Some(StepReport::ReplyAnswered { id: 1 });
+    }
+    assert!(answered);
+}
+
+#[test]
+fn a_secret_others_may_read_stops_the_runner() {
+    use std::os::unix::fs::PermissionsExt;
+    let rig = Rig::new("koji");
+    let secret = rig.paths().totp.join("secret");
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let Err(OpenError::Settings(e)) = rig.open() else {
+        panic!("the runner started");
+    };
+    assert!(e.to_string().contains("may be read by others"), "{e}");
 }

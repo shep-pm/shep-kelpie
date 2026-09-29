@@ -5,19 +5,20 @@
 //! once, keeps it under its home with only the owner able to read it, and
 //! never posts it anywhere: `kelpie totp` shows it to the maintainer to scan.
 //! Anyone who can read the ntfy topic sees each code the maintainer sends, so
-//! a step answers once across every ruling of every project, claimed by
-//! creating a file named for it that no second claim can create again.
+//! a step answers once across every project: see [`answers`].
 
 use std::fmt;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::{self, Read, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 use hmac::{Hmac, KeyInit, Mac};
 use sha1::Sha1;
 
 use crate::ports::Timestamp;
+
+pub mod answers;
 
 /// Seconds a code lasts
 pub const STEP: u64 = 30;
@@ -45,6 +46,8 @@ pub enum SecretError {
     Io(PathBuf, io::ErrorKind),
     /// The file does not hold a secret kelpie wrote
     Malformed(PathBuf),
+    /// Someone other than its owner may read or write the file
+    Exposed(PathBuf),
 }
 
 impl fmt::Display for SecretError {
@@ -54,6 +57,12 @@ impl fmt::Display for SecretError {
             Self::Malformed(path) => write!(
                 f,
                 "{} is not an authenticator secret kelpie wrote: remove it and run `kelpie totp`",
+                path.display()
+            ),
+            Self::Exposed(path) => write!(
+                f,
+                "{} may be read by others: `chmod 600` it, or run `kelpie totp --rotate` \
+                 if someone else may have read it",
                 path.display()
             ),
         }
@@ -67,15 +76,23 @@ impl Secret {
     ///
     /// # Errors
     ///
-    /// [`SecretError`] when the file cannot be read or is not base32 of 20 bytes.
+    /// [`SecretError`] when the file cannot be read, anyone but its owner
+    /// may read or write it, or it is not base32 of 20 bytes.
     pub fn load(path: &Path) -> Result<Option<Self>, SecretError> {
-        match fs::read_to_string(path) {
-            Ok(text) => decode(text.trim())
-                .map(|bytes| Some(Self(bytes)))
-                .ok_or_else(|| SecretError::Malformed(path.to_owned())),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(SecretError::Io(path.to_owned(), e.kind())),
+        let io = |e: io::Error| SecretError::Io(path.to_owned(), e.kind());
+        let mut file = match fs::File::open(path) {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(io(e)),
+        };
+        if file.metadata().map_err(io)?.mode() & 0o077 != 0 {
+            return Err(SecretError::Exposed(path.to_owned()));
         }
+        let mut text = String::new();
+        file.read_to_string(&mut text).map_err(io)?;
+        decode(text.trim())
+            .map(|bytes| Some(Self(bytes)))
+            .ok_or_else(|| SecretError::Malformed(path.to_owned()))
     }
 
     /// The secret in `path`, drawing one from `/dev/urandom` and writing it
@@ -88,22 +105,41 @@ impl Secret {
         if let Some(secret) = Self::load(path)? {
             return Ok(secret);
         }
+        Self::write(path)
+    }
+
+    /// A fresh secret in place of the one in `path`, for one that may have
+    /// been read: every code of the old one stops working at once
+    ///
+    /// # Errors
+    ///
+    /// [`SecretError`] when the file cannot be written.
+    pub fn rotate(path: &Path) -> Result<Self, SecretError> {
+        Self::write(path)
+    }
+
+    // Draws a secret and puts it in `path` whole: written beside it, synced,
+    // then renamed over it, so a reader sees the old secret or the new one.
+    fn write(path: &Path) -> Result<Self, SecretError> {
         let io = |e: io::Error| SecretError::Io(path.to_owned(), e.kind());
         let mut bytes = [0u8; 20];
         fs::File::open("/dev/urandom")
             .and_then(|mut random| random.read_exact(&mut bytes))
             .map_err(|e| SecretError::Io(PathBuf::from("/dev/urandom"), e.kind()))?;
-        if let Some(folder) = path.parent() {
-            fs::create_dir_all(folder).map_err(io)?;
-        }
-        // `create_new`, so two commands at once never write two secrets.
+        let folder = path.parent().unwrap_or(Path::new("."));
+        private_dir(folder).map_err(io)?;
+        let fresh = folder.join(format!(".secret.{}", std::process::id()));
+        let _ = fs::remove_file(&fresh);
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .open(path)
+            .open(&fresh)
             .map_err(io)?;
-        writeln!(file, "{}", encode(&bytes)).map_err(io)?;
+        writeln!(file, "{}", encode(&bytes))
+            .and_then(|()| file.sync_all())
+            .and_then(|()| fs::rename(&fresh, path))
+            .map_err(io)?;
         Ok(Self(bytes))
     }
 
@@ -140,16 +176,22 @@ impl Secret {
     }
 }
 
-/// What `kelpie totp` prints: the secret in `path`, drawn the first time,
-/// as the URI an authenticator app takes and a QR code of it for the terminal
+/// What `kelpie totp` prints: the secret in `path`, drawn the first time or
+/// drawn afresh when `rotate`, as the URI an authenticator app takes and a
+/// QR code of it for the terminal
 ///
 /// # Errors
 ///
 /// [`SecretError`] when the secret cannot be read or written.
-pub fn show(path: &Path) -> Result<String, SecretError> {
+pub fn show(path: &Path, rotate: bool) -> Result<String, SecretError> {
     use qrcode::QrCode;
     use qrcode::render::unicode::Dense1x2;
-    let uri = Secret::load_or_create(path)?.uri();
+    let secret = if rotate {
+        Secret::rotate(path)?
+    } else {
+        Secret::load_or_create(path)?
+    };
+    let uri = secret.uri();
     let qr = QrCode::new(uri.as_bytes()).expect("a short URI fits a QR code");
     // Light on dark, which reads on a dark terminal and a light one alike.
     let qr = qr
@@ -174,50 +216,10 @@ fn same(a: u32, b: u32) -> bool {
     (a ^ b) == 0
 }
 
-/// The steps already used to answer a ruling, as files in one folder that
-/// every project's runner shares
-#[derive(Debug, Clone)]
-pub struct Used(PathBuf);
-
-impl Used {
-    /// The steps recorded in `folder`
-    pub fn in_folder(folder: PathBuf) -> Self {
-        Self(folder)
-    }
-
-    /// Claims `step`, and whether this was its first claim. Steps too old to
-    /// be sent again are let go.
-    ///
-    /// # Errors
-    ///
-    /// The OS's error when the folder or the claim cannot be written; the
-    /// step then counts as not claimed.
-    pub fn claim(&self, step: u64, now: Timestamp) -> io::Result<bool> {
-        fs::create_dir_all(&self.0)?;
-        let claimed = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(self.0.join(step.to_string()));
-        let first = match claimed {
-            Ok(_) => true,
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => false,
-            Err(e) => return Err(e),
-        };
-        // A reply is read at most an hour after it is sent, so older steps
-        // can never be sent again.
-        let oldest = step_of(now).saturating_sub(3600 / STEP);
-        for entry in fs::read_dir(&self.0)?.flatten() {
-            let old = entry
-                .file_name()
-                .to_str()
-                .and_then(|n| n.parse::<u64>().ok());
-            if old.is_some_and(|old| old < oldest) {
-                let _ = fs::remove_file(entry.path());
-            }
-        }
-        Ok(first)
-    }
+/// Makes `folder` and any folder above it, the new ones readable by their
+/// owner alone
+pub(crate) fn private_dir(folder: &Path) -> io::Result<()> {
+    DirBuilder::new().recursive(true).mode(0o700).create(folder)
 }
 
 fn encode(bytes: &[u8]) -> String {
@@ -300,8 +302,9 @@ mod tests {
             made,
             "never redrawn"
         );
-        let mode = fs::metadata(&path).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600);
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(mode(path.parent().unwrap()), 0o700);
         let uri = made.uri();
         let text = fs::read_to_string(&path).unwrap();
         assert!(uri.contains(&format!("secret={}&", text.trim())), "{uri}");
@@ -316,14 +319,48 @@ mod tests {
     }
 
     #[test]
+    fn a_secret_others_may_read_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("totp/secret");
+        Secret::load_or_create(&path).unwrap();
+        for mode in [0o640, 0o604, 0o620] {
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            assert_eq!(
+                Secret::load(&path),
+                Err(SecretError::Exposed(path.clone())),
+                "{mode:o}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_rotated_secret_replaces_the_old_one_whole() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("totp/secret");
+        let old = Secret::load_or_create(&path).unwrap();
+        let new = Secret::rotate(&path).unwrap();
+        assert_ne!(old, new);
+        assert_eq!(Secret::load(&path), Ok(Some(new)));
+        let left: Vec<_> = fs::read_dir(path.parent().unwrap()).unwrap().collect();
+        assert_eq!(left.len(), 1, "no stray file beside it");
+    }
+
+    #[test]
     fn show_prints_the_uri_and_a_qr_code_of_one_secret() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("totp/secret");
-        let shown = show(&path).unwrap();
+        let shown = show(&path, false).unwrap();
         let uri = Secret::load(&path).unwrap().unwrap().uri();
         assert!(shown.contains(&uri), "{shown}");
         assert!(shown.contains('▀') || shown.contains('▄'), "{shown}");
-        assert_eq!(show(&path).unwrap(), shown, "the same secret every time");
+        assert_eq!(
+            show(&path, false).unwrap(),
+            shown,
+            "the same secret every time"
+        );
+        let rotated = show(&path, true).unwrap();
+        assert!(!rotated.contains(&uri), "a fresh secret");
     }
 
     #[test]
@@ -333,23 +370,5 @@ mod tests {
         assert_eq!(encode(&bytes), "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ");
         assert_eq!(decode(&encode(&bytes)), Some(bytes));
         assert_eq!(decode("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJ1"), None);
-    }
-
-    #[test]
-    fn a_step_is_claimed_once_across_every_runner() {
-        let home = tempfile::tempdir().unwrap();
-        let now = Timestamp(1_111_111_109);
-        let (one, two) = (
-            Used::in_folder(home.path().join("used")),
-            Used::in_folder(home.path().join("used")),
-        );
-        let step = step_of(now);
-        assert!(one.claim(step, now).unwrap());
-        assert!(!two.claim(step, now).unwrap());
-        assert!(two.claim(step + 1, now).unwrap());
-
-        let later = Timestamp(now.0 + 2 * 3600);
-        assert!(one.claim(step_of(later), later).unwrap());
-        assert!(!home.path().join(format!("used/{step}")).exists(), "let go");
     }
 }

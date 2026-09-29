@@ -321,6 +321,7 @@ mod tests {
         let (url, served) = stand_in(200);
         let alert = Alert {
             reply: Some(ReplyWith {
+                project: "hazels-lab".into(),
                 id: 3,
                 takes: Takes::YesOrNo,
             }),
@@ -331,8 +332,8 @@ mod tests {
         let got = served.join().unwrap();
         assert_eq!(
             got.body,
-            "Merge pull request #71?\n\nReply here with `3 yes <code>` or \
-             `3 no <note> <code>`, where <code> is kelpie's authenticator code."
+            "Merge pull request #71?\n\nReply here with `hazels-lab 3 yes <code>` or \
+             `hazels-lab 3 no <note> <code>`, where <code> is kelpie's authenticator code."
         );
     }
 
@@ -341,6 +342,7 @@ mod tests {
         let (url, served) = stand_in(200);
         let alert = Alert {
             reply: Some(ReplyWith {
+                project: "hazels-lab".into(),
                 id: 3,
                 takes: Takes::YesOrNo,
             }),
@@ -349,7 +351,7 @@ mod tests {
         Curl.post(&webhook(WebhookKind::Ntfy, &url), &alert)
             .unwrap();
         let got = served.join().unwrap();
-        assert!(got.body.len() <= NTFY_MAX, "{}", got.body.len());
+        assert!(got.body.len() <= 4095, "{}", got.body.len());
         assert!(got.body.contains("[…cut; the whole question is in status]"));
         assert!(
             got.body
@@ -387,6 +389,7 @@ mod tests {
         let now = crate::adapters::SystemClock.now();
         let alert = Alert {
             reply: Some(ReplyWith {
+                project: "hazels-lab".into(),
                 id: 3,
                 takes: Takes::YesOrNo,
             }),

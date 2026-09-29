@@ -320,6 +320,12 @@ pub enum StepReport {
     /// ignored. Its text is not logged, since anyone holding the topic can
     /// write it.
     ReplyIgnored,
+    /// A wrong code turned answers from the topic off, for every project,
+    /// until the maintainer turns them back on, and the topic was told so
+    RepliesLocked {
+        /// Why the line for the topic could not be posted, if it could not
+        line_failed: Option<String>,
+    },
     /// The webhook's topic could not be read, and is read again later
     RepliesFailed {
         /// Why, never naming the webhook's URL
