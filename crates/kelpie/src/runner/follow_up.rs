@@ -80,9 +80,9 @@ impl Runner {
             let filed = match already_filed(&open, &title, &finding) {
                 Some(known) => {
                     let body = comment_body(number, &finding);
-                    let number = known.number;
-                    let posted = self.ports.forge.post_comment(&repo, number, &body);
-                    posted.map(|_| commented.push(number))
+                    let on = known.number;
+                    let posted = self.ports.forge.post_comment(&repo, on, &body);
+                    posted.map(|_| commented.push(on))
                 }
                 None => {
                     let body = issue_body(number, &finding);
@@ -169,15 +169,16 @@ fn already_filed<'a>(
 }
 
 fn issue_body(number: u64, finding: &Finding) -> String {
-    format!(
-        "A review of #{number} confirmed this, and the pull request merged without a fix.\n\n{}",
-        details(finding)
-    )
+    report(number, "this", finding)
 }
 
 fn comment_body(number: u64, finding: &Finding) -> String {
+    report(number, "this too", finding)
+}
+
+fn report(number: u64, confirmed: &str, finding: &Finding) -> String {
     format!(
-        "A review of #{number} confirmed this too, and the pull request merged without a fix.\n\n{}",
+        "A review of #{number} confirmed {confirmed}, and the pull request merged without a fix.\n\n{}",
         details(finding)
     )
 }
