@@ -133,7 +133,7 @@ impl Runner {
         // A notice queued for a ruling answered while its send was out is
         // kept only if the relay did take the ruling.
         if !relayed {
-            self.relay_notices.retain(|(notice, _)| *notice != id);
+            self.relay_notices.retain(|(ruling, _)| *ruling != id);
         }
         let mut next = self.state.clone();
         // An answer can land while the post is out, and takes the ruling with it.
