@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
 use crate::ports::Timestamp;
-use crate::work_item::{Known, Phase, Review, WorkItem};
+use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
 
 /// The state file's format version
 const VERSION: u32 = 1;
@@ -39,6 +39,10 @@ pub struct ProjectState {
     /// Issues whose work items kelpie finished, which the board never takes again
     #[serde(default)]
     pub finished: Vec<u64>,
+    /// The forge's ids of the reviews that started a rework or were refused
+    /// one. None of them starts another.
+    #[serde(default)]
+    pub reworked: Vec<String>,
     /// Leases this project holds
     pub leases: Vec<LeaseHeld>,
     /// What the week had spent when today began, once usage has been read
@@ -57,6 +61,7 @@ impl ProjectState {
             rulings: Vec::new(),
             last_ruling: 0,
             finished: Vec::new(),
+            reworked: Vec::new(),
             leases: Vec::new(),
             pacing: None,
         }
@@ -172,6 +177,16 @@ pub enum RulingKind {
         /// older state file, which resumes under Implement.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         phase: Option<Phase>,
+    },
+    /// A worker's turn could not run, or its call failed. A yes retries the
+    /// step that failed; a no stops the work item.
+    TurnFailed {
+        /// Why it failed
+        reason: String,
+        /// The phase the turn ran in, which a yes goes back to
+        phase: Phase,
+        /// The turn as it stood before it failed, which a yes puts back
+        retry: Turn,
     },
     /// The pull request's labels or ready state changed outside kelpie. A
     /// yes accepts the change and kelpie carries on watching it.
@@ -522,12 +537,14 @@ mod tests {
                     known: Known {
                         labels: vec!["bug".into()],
                         ready: false,
+                        head: Some("c0ffee".into()),
                     },
                 },
             ),
         ];
         state.last_ruling = 7;
         state.finished = vec![22, 30];
+        state.reworked = vec!["PRR_1".into()];
         state.pacing = Some(DayStart {
             week_resets_at: Timestamp(9),
             day: 1,
@@ -569,11 +586,12 @@ mod tests {
                     pinned(7, serde_json::json!({
                         "kind": "foreign-change",
                         "description": "the `bug` label was added",
-                        "known": { "labels": ["bug"], "ready": false },
+                        "known": { "labels": ["bug"], "ready": false, "head": "c0ffee" },
                     })),
                 ],
                 "last_ruling": 7,
                 "finished": [22, 30],
+                "reworked": ["PRR_1"],
                 "leases": [{ "resource": "coderabbit", "since": 8 }],
                 "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
             })
@@ -649,6 +667,26 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_turn_keeps_its_phase_and_the_turn_to_retry() {
+        let kind = RulingKind::TurnFailed {
+            reason: "no worktree".into(),
+            phase: Phase::Implement,
+            retry: Turn::Due,
+        };
+        let saved = serde_json::to_value(&kind).unwrap();
+        assert_eq!(
+            saved,
+            serde_json::json!({
+                "kind": "turn-failed",
+                "reason": "no worktree",
+                "phase": { "state": "implement" },
+                "retry": { "state": "due" },
+            })
+        );
+        assert_eq!(serde_json::from_value::<RulingKind>(saved).unwrap(), kind);
+    }
+
+    #[test]
     fn a_question_during_a_coderabbit_fix_is_pinned() {
         let resume = Resume::CodeRabbitFix {
             head: "c0ffee".into(),
@@ -709,6 +747,7 @@ mod tests {
         .unwrap();
         let state = store.load().unwrap().unwrap();
         assert_eq!((state.last_ruling, state.finished), (0, vec![]));
+        assert!(state.reworked.is_empty());
     }
 
     #[test]

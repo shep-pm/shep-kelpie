@@ -10,9 +10,21 @@ use serde::Serialize;
 
 use crate::board::{Skip, WorkerModel};
 use crate::pacer::HoldKind;
-use crate::ports::{ClaudeCall, Finding, SessionId, Severity, Timestamp, Usage, Verdict};
+use crate::ports::{
+    ClaudeCall, Cost, Finding, Role, SessionId, Severity, Timestamp, Usage, Verdict,
+};
 use crate::shots::ShotsJob;
-use crate::work_item::ReviewerKind;
+use crate::work_item::{QwenTally, ReviewerKind, Spend};
+
+/// What asked for a rework on the pull request itself
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReworkBy {
+    /// The `ready-for-agent` label
+    Label,
+    /// A review requesting changes
+    Review,
+}
 
 /// What one step of the runner did, for its log
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -26,6 +38,29 @@ pub enum StepReport {
         worker: WorkerModel,
         /// Older ready issues the board passed over, and why
         skipped: Vec<Skip>,
+    },
+    /// A pull request kelpie opened asked for a rework, which became the
+    /// work item in flight
+    Reworked {
+        /// The work item's issue
+        issue: u64,
+        /// The pull request
+        pull_request: u64,
+        /// The model and effort its worker runs on
+        worker: WorkerModel,
+        /// What asked for it: the `ready-for-agent` label, or a review
+        /// requesting changes
+        by: ReworkBy,
+    },
+    /// A pull request asked for a rework that cannot start, and the refusal
+    /// went to it as a comment
+    ReworkRefused {
+        /// The pull request
+        pull_request: u64,
+        /// Why, as the refusal reads
+        reason: String,
+        /// Why the comment could not be posted, if it could not
+        comment_failed: Option<String>,
     },
     /// Nothing was dispatched: the board could not be read, or the issue it
     /// picked could not be taken
@@ -78,12 +113,18 @@ pub enum StepReport {
         /// Why the question could not be posted on the pull request, if it could not
         comment_failed: Option<String>,
     },
-    /// A turn could not run
+    /// A turn could not run, and is parked on a ruling
     Failed {
         /// The work item's issue
         issue: u64,
-        /// Why
-        reason: String,
+        /// The worker's draft pull request, once it has opened one
+        pull_request: Option<u64>,
+        /// The ruling's id
+        id: u64,
+        /// The question, carrying why the turn failed and the triggers that answer it
+        question: String,
+        /// Why the question could not be posted on the pull request, if it could not
+        comment_failed: Option<String>,
     },
     /// A turn ran past its ceiling, was stopped, and is parked on a ruling
     TimedOut {
@@ -120,6 +161,17 @@ pub enum StepReport {
         /// The rebased head
         head: String,
     },
+    /// The branch conflicts with `main`, and the conflict is the worker's next turn
+    Conflicted {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The head that conflicts
+        head: String,
+        /// The files that conflict
+        files: Vec<String>,
+    },
     /// A ruling was raised, and the worker is parked on it
     Ruling {
         /// The work item's issue
@@ -133,7 +185,7 @@ pub enum StepReport {
         /// Why the question could not be posted on the pull request, if it could not
         comment_failed: Option<String>,
     },
-    /// The draft was marked ready after a yes; the merge waits for CI to settle
+    /// The draft was marked ready, before a CodeRabbit round or after a yes
     MarkedReady {
         /// The work item's issue
         issue: u64,
@@ -157,6 +209,10 @@ pub enum StepReport {
         pull_request: Option<u64>,
         /// Whether the pull request merged
         merged: bool,
+        /// What its Claude calls cost, by role
+        spend: Spend,
+        /// Its qwen rounds
+        qwen: QwenTally,
     },
     /// A ruling was posted to the maintainer's webhook
     Alerted {
@@ -347,10 +403,34 @@ pub(super) enum ReviewCall {
     Judge(ClaudeCall),
 }
 
+/// What a [`ReviewCall`] cost, for the work item's record
+pub(super) enum Spent {
+    /// A Claude call that came back, in `session`
+    Claude {
+        role: Role,
+        session: SessionId,
+        usage: Usage,
+        session_cost: Cost,
+    },
+    /// A qwen round that ran, however it ended
+    Qwen,
+}
+
+/// What a [`ReviewCall`] came back with, and what it spent
+pub(super) struct Reviewed {
+    pub result: ReviewResult,
+    /// `None` when nothing ran to the end: a stopped call, or a Claude call
+    /// that failed and so reported no cost
+    pub spent: Option<Spent>,
+}
+
 /// What a [`ReviewCall`] came back with
 pub(super) enum ReviewResult {
     /// A round's raw findings, from qwen or a Claude round
     Findings(Result<Vec<Finding>, String>),
     /// The judge's verdict on one finding
     Verdict(Result<Verdict, String>),
+    /// The call was ended because the runner is stopping, before it came
+    /// back with anything
+    Stopped,
 }

@@ -1,6 +1,7 @@
 //! Dispatch: the board's next issue becomes the work item in flight
 //!
-//! A running project with nothing in flight asks the board on every step.
+//! A running project with nothing in flight asks the board on every step,
+//! after checking its open pull requests for one asking for a rework.
 //! One work item is in flight at a time, so a queued issue waits until the
 //! one in flight is gone.
 
@@ -25,7 +26,13 @@ impl Runner {
                 }));
             }
         };
-        let mut failed: Vec<Skip> = Vec::new();
+        // A pull request asking for a rework goes before any ready issue, and
+        // one whose rework cannot start is passed over like one.
+        let (begin, mut failed) = self.rework_asked(&open)?;
+        if let Some(begin) = begin {
+            self.skipped = failed;
+            return Ok(begin);
+        }
         let mut paced = false;
         loop {
             let pick = board::pick(&ready, &open, &self.state.finished);
@@ -39,6 +46,11 @@ impl Runner {
                         Skip::Failed { issue, error } => {
                             Some(format!("cannot dispatch #{issue}: {error}"))
                         }
+                        Skip::Rework {
+                            pull_request,
+                            error,
+                            ..
+                        } => Some(format!("cannot rework #{pull_request}: {error}")),
                         _ => None,
                     })
                     .collect::<Vec<_>>()

@@ -11,14 +11,21 @@ use std::fmt;
 use super::Runner;
 use super::gate::short;
 use super::report::{Begin, StepReport};
+use super::rework::HUMAN;
 use crate::ports::Timestamp;
 use crate::state::{Fix, ProjectState, Resume, Ruling, RulingKind, StateError};
-use crate::work_item::{CodeRabbitStage, Known, Phase, Review, Turn, WorkItem};
+use crate::work_item::{CodeRabbitStage, Known, Phase, Review, Turn, WorkItem, foreign_change};
+use crate::worktree;
 
 /// The prompt for a turn resumed after the maintainer accepts a timed-out
 /// turn's ruling with a yes
 const TIMEOUT_CONTINUE: &str = "Kelpie stopped your last turn: it ran past its ceiling. \
                                 Carry on with the work item from where you left off.";
+
+/// The prompt for a turn resumed after the maintainer accepts a failed
+/// turn's ruling with a yes
+const FAILED_CONTINUE: &str = "Your last turn failed before it finished. \
+                               Carry on with the work item from where you left off.";
 
 /// The maintainer's answer to a ruling
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +47,10 @@ pub enum RuleError {
     WantsAnswer(u64),
     /// The ruling is not a question, and was given an answer
     NotAQuestion(u64),
+    /// The `ready-for-human` label could not come off this pull request
+    Unlabel(u64, String),
+    /// The worktree could not be brought to the head a yes accepted
+    Adopt(String, String),
     /// The answer could not be saved
     State(StateError),
 }
@@ -56,6 +67,12 @@ impl fmt::Display for RuleError {
                 f,
                 "ruling {id} takes `{id} yes` or `{id} no <note>`, not an answer"
             ),
+            Self::Unlabel(number, e) => {
+                write!(f, "cannot take the `{HUMAN}` label off #{number}: {e}")
+            }
+            Self::Adopt(head, e) => {
+                write!(f, "cannot bring the worktree to {}: {e}", short(head))
+            }
             Self::State(e) => e.fmt(f),
         }
     }
@@ -75,8 +92,18 @@ enum Move {
         phase: Phase,
         force: Option<Phase>,
     },
-    /// A yes on a foreign change: kelpie adopts it and watches CI again
+    /// A yes on a failed turn: the turn goes back as it stood, under its phase
+    Retry { turn: Turn, phase: Phase },
+    /// A yes on a foreign change: kelpie adopts it. A new head goes
+    /// through the qwen-review loop, and anything else back to CI.
     Accept(Known),
+    /// A no on a head moved from `from` to `to`: the worker builds on `to`,
+    /// taking a turn with this prompt
+    Decline {
+        prompt: String,
+        from: String,
+        to: String,
+    },
 }
 
 impl Runner {
@@ -85,7 +112,8 @@ impl Runner {
     /// # Errors
     ///
     /// [`RuleError`] when no such ruling is pending, the answer does not fit
-    /// it, or the answer cannot be saved. Nothing changes then.
+    /// it, or the answer cannot be saved. The ruling stays pending then, and
+    /// answering again is safe: a worktree already at an accepted head is left.
     pub fn rule(&mut self, id: u64, answer: Answer) -> Result<(), RuleError> {
         let at = self.state.rulings.iter().position(|r| r.id == id);
         let at = at.ok_or(RuleError::NoSuchRuling(id))?;
@@ -96,33 +124,126 @@ impl Runner {
             (&answer, &ruling.kind),
             (Answer::Yes, RulingKind::CodeRabbitCap { .. })
         );
-        let moved = decide(id, answer, ruling, now)?;
+        // These ask the maintainer to fix the branch, so a yes vouches for its head.
+        let vouches = matches!(
+            (&answer, &ruling.kind),
+            (
+                Answer::Yes,
+                RulingKind::Rebase { .. } | RulingKind::StillRed { .. }
+            )
+        );
         // Only the ruling the work item is parked on moves it. Any other,
         // which nothing leaves behind today, is answered by clearing it.
         let parked_on = |item: &WorkItem| item.phase == Phase::Ruling { id };
+        let parked = next.work_item.as_ref().filter(|item| parked_on(item));
+        let head_moved = match (parked, &ruling.kind) {
+            (Some(item), RulingKind::ForeignChange { known: seen, .. }) => {
+                match (&item.known.head, &seen.head) {
+                    (Some(from), Some(to)) if from != to => Some((from.clone(), to.clone())),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        if let (Some((_, to)), Answer::Yes | Answer::No(_), Some(item)) =
+            (&head_moved, &answer, parked)
+            && let RulingKind::ForeignChange { known: seen, .. } = &ruling.kind
+        {
+            let tip = worktree::origin_head(&self.settings.repo, &item.branch)
+                .map_err(|e| RuleError::Adopt(to.clone(), e.to_string()))?;
+            if tip != *to {
+                let change = foreign_change(&item.known, &seen.labels, seen.ready, &tip);
+                return self.ask_again(next, ruling.pull_request, change, now);
+            }
+        }
+        let moved = decide(id, answer, ruling, now, head_moved)?;
         if let Some(item) = next.work_item.as_mut().filter(|item| parked_on(item)) {
             item.coderabbit.cap_cleared |= lifts_cap;
-            match moved {
-                Move::Phase(phase) => item.phase = phase,
+            if vouches {
+                item.known.head = None;
+            }
+            let worker = match moved {
+                Move::Phase(phase) => {
+                    item.phase = phase;
+                    None
+                }
                 Move::Turn {
                     prompt,
                     phase,
                     force,
-                } => {
-                    item.turn = Turn::Next { prompt };
-                    item.phase = phase;
-                    item.resume = force;
-                }
+                } => Some((Turn::Next { prompt }, phase, force)),
+                Move::Retry { turn, phase } => Some((turn, phase, None)),
                 Move::Accept(known) => {
-                    item.known = known;
-                    item.phase = Phase::Ci {
-                        head: None,
-                        since: now,
+                    let (from, to) = (item.known.head.take(), known.head.clone());
+                    item.phase = match (from, to) {
+                        (Some(from), Some(to)) if from != to => {
+                            let (repo, branch) = (&self.settings.repo, &item.branch);
+                            worktree::adopt(repo, &item.worktree, branch, &from, &to)
+                                .map_err(|e| RuleError::Adopt(to, e.to_string()))?;
+                            item.coderabbit.satisfied = false;
+                            Phase::Review(Review::first())
+                        }
+                        _ => Phase::Ci {
+                            head: None,
+                            since: now,
+                        },
                     };
+                    item.known = known;
+                    None
+                }
+                Move::Decline { prompt, from, to } => {
+                    let (repo, branch) = (&self.settings.repo, &item.branch);
+                    worktree::adopt(repo, &item.worktree, branch, &from, &to)
+                        .map_err(|e| RuleError::Adopt(to.clone(), e.to_string()))?;
+                    item.known.head = Some(to);
+                    let review = Some(Phase::Review(Review::first()));
+                    Some((Turn::Next { prompt }, Phase::Implement, review))
+                }
+            };
+            if let Some((turn, phase, force)) = worker {
+                item.turn = turn;
+                item.phase = phase;
+                // A turn the ruling interrupted may still owe the review loop.
+                item.resume = force.or(item.resume.take());
+                // The worker's turn again, so the hand-back label comes off.
+                if let Some(number) = item.pull_request
+                    && item.known.labels.iter().any(|l| l == HUMAN)
+                {
+                    let repo = &self.settings.forge;
+                    let off = self.ports.forge.set_label(repo, number, HUMAN, false);
+                    off.map_err(|e| RuleError::Unlabel(number, e.to_string()))?;
+                    item.known.labels.retain(|l| l != HUMAN);
                 }
             }
         }
         self.save(next).map_err(RuleError::State)
+    }
+
+    // The branch moved again while the ruling waited, so the answer was about
+    // a head that is gone. What stands now is asked about afresh, or, when
+    // nothing outside kelpie is left, the gate looks again.
+    fn ask_again(
+        &mut self,
+        mut next: ProjectState,
+        number: Option<u64>,
+        change: Option<(Known, String)>,
+        now: Timestamp,
+    ) -> Result<(), RuleError> {
+        let Some((known, description)) = change else {
+            if let Some(item) = next.work_item.as_mut() {
+                item.phase = Phase::Ci {
+                    head: None,
+                    since: now,
+                };
+            }
+            return self.save(next).map_err(RuleError::State);
+        };
+        let kind = RulingKind::ForeignChange { description, known };
+        let (_, _, question) = park(self.project.as_str(), &mut next, number, kind);
+        self.save(next).map_err(RuleError::State)?;
+        // A comment that fails loses nothing: the ruling is saved and alerted.
+        let _ = self.post_ruling(number, &question);
+        Ok(())
     }
 
     // Saves the ruling and parks the worker on it, then posts it on pull
@@ -192,7 +313,22 @@ pub(super) fn park(
 }
 
 // A yes, a no or an answer that does not fit the ruling is refused.
-fn decide(id: u64, answer: Answer, ruling: Ruling, now: Timestamp) -> Result<Move, RuleError> {
+fn decide(
+    id: u64,
+    answer: Answer,
+    ruling: Ruling,
+    now: Timestamp,
+    head_moved: Option<(String, String)>,
+) -> Result<Move, RuleError> {
+    // The declined commit stays on `origin`, so the worker must build on it
+    // or its push is refused.
+    if let (Answer::No(note), Some((from, to))) = (&answer, head_moved) {
+        return Ok(Move::Decline {
+            prompt: declined_prompt(ruling.pull_request, &to, note),
+            from,
+            to,
+        });
+    }
     let phase = match (answer, ruling.kind) {
         (Answer::Text(text), RulingKind::Question { resume, .. }) => {
             // A question resumes exactly where it interrupted the qwen-review
@@ -221,7 +357,21 @@ fn decide(id: u64, answer: Answer, ruling: Ruling, now: Timestamp) -> Result<Mov
                 force: None,
             });
         }
-        (Answer::No(_), RulingKind::TurnTimeout { .. }) => Phase::Done { merged: false },
+        // A turn that had started is resumed with a prompt of its own, and
+        // the yes starts its ceiling afresh: the time it spent failing and
+        // waiting is not held against it.
+        (Answer::Yes, RulingKind::TurnFailed { phase, retry, .. }) => {
+            let turn = match retry {
+                Turn::Running { .. } => Turn::Next {
+                    prompt: FAILED_CONTINUE.to_owned(),
+                },
+                other => other,
+            };
+            return Ok(Move::Retry { turn, phase });
+        }
+        (Answer::No(_), RulingKind::TurnTimeout { .. } | RulingKind::TurnFailed { .. }) => {
+            Phase::Done { merged: false }
+        }
         (Answer::Yes, RulingKind::ForeignChange { known, .. }) => return Ok(Move::Accept(known)),
         // A no's fix is new code, unreviewed: it goes through the
         // qwen-review loop again before CI, whatever ruling this answers.
@@ -340,6 +490,14 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
                  on the forge."
             );
         }
+        RulingKind::TurnFailed { reason, .. } => {
+            return format!(
+                "The worker's turn on {about} failed: {}. {yes} tries that step again, \
+                 and {no} stops the work item, keeping its branch and pull request \
+                 on the forge.",
+                reason.trim()
+            );
+        }
         RulingKind::ForeignChange { description, .. } => {
             return format!(
                 "{} changed outside kelpie: {description}. {yes} accepts it and kelpie \
@@ -373,6 +531,20 @@ fn note_prompt(number: Option<u64>, note: &str) -> String {
         |n| format!("pull request #{n}"),
     );
     format!("The maintainer answered no on {about}, with this note:\n\n{note}\n")
+}
+
+fn declined_prompt(number: Option<u64>, head: &str, note: &str) -> String {
+    let about = number.map_or_else(
+        || "your branch".to_owned(),
+        |n| format!("pull request #{n}"),
+    );
+    format!(
+        "Someone other than you pushed commit {} to {about}, and the maintainer \
+         declined it, with this note:\n\n{note}\n\nYour worktree is now at that commit. \
+         Revert or change it with a new commit on top, and push with \
+         `git push origin HEAD`. Do not force-push.\n",
+        short(head)
+    )
 }
 
 fn answer_prompt(text: &str) -> String {
@@ -506,6 +678,111 @@ mod tests {
         assert_eq!(
             rig.ask(&runner, "rule", Some("1 yes")),
             json!({ "error": "no ruling 1 is pending" })
+        );
+    }
+
+    #[test]
+    fn a_no_on_a_commit_pushed_by_hand_has_the_worker_build_on_it_without_force() {
+        let (rig, runner, _) = Rig::with_pull_request("rotom");
+        let by_hand = rig.push_by_hand("kelpie/7", "by-hand.txt");
+        assert!(matches!(
+            rig.verdict(&runner),
+            Some(StepReport::Ruling { id: 1, .. })
+        ));
+        rig.ask(&runner, "rule", Some("1 no revert it"));
+        // A plain push from the worktree: the stand-in panics if it is refused.
+        rig.claude.script([
+            Scripted::Push("revert.txt", "reverted\n"),
+            Scripted::Text("CLEAN"),
+        ]);
+        step(&runner).unwrap();
+        let noted = rig.claude.calls().pop().unwrap();
+        assert_eq!(
+            noted.prompt,
+            format!(
+                "Someone other than you pushed commit {} to pull request #71, and the \
+                 maintainer declined it, with this note:\n\nrevert it\n\nYour worktree is \
+                 now at that commit. Revert or change it with a new commit on top, and \
+                 push with `git push origin HEAD`. Do not force-push.\n",
+                &by_hand[..7]
+            )
+        );
+        let pushed = rig.forge.head_of("kelpie/7").unwrap();
+        let parent = crate::test::git(&rig.worktree_7(), &["rev-parse", "HEAD^"]);
+        assert_eq!(parent, by_hand);
+
+        step(&runner).unwrap(); // review round 1, qwen: clean by default
+        step(&runner).unwrap(); // review round 2, claude: scripted clean above
+        rig.forge.set_checks(&pushed, Checks::Passed);
+        let Some(StepReport::Ruling {
+            id: 2, question, ..
+        }) = rig.verdict(&runner)
+        else {
+            panic!("no second ruling");
+        };
+        assert!(question.starts_with("Merge pull request #71"), "{question}");
+    }
+
+    #[test]
+    fn a_yes_on_a_head_the_branch_moved_past_asks_about_the_new_head_instead() {
+        let (rig, runner, head) = Rig::with_pull_request("koji");
+        rig.push_by_hand("kelpie/7", "first.txt");
+        assert!(matches!(
+            rig.verdict(&runner),
+            Some(StepReport::Ruling { id: 1, .. })
+        ));
+        let second = rig.push_by_hand("kelpie/7", "second.txt");
+        let status = rig.ask(&runner, "rule", Some("1 yes"));
+        assert_eq!(
+            status["work_item"]["phase"],
+            json!({ "state": "ruling", "id": 2 })
+        );
+        assert_eq!(status["rulings"][0]["kind"]["known"]["head"], json!(second));
+        let question = status["rulings"][0]["question"].as_str().unwrap();
+        assert!(
+            question.starts_with(&format!(
+                "Pull request #71 changed outside kelpie: its head moved to {}",
+                &second[..7]
+            )),
+            "{question}"
+        );
+        assert_eq!(
+            crate::test::git(&rig.worktree_7(), &["rev-parse", "HEAD"]),
+            head
+        );
+    }
+
+    #[test]
+    fn a_yes_on_a_head_is_refused_while_the_worktree_holds_work_not_pushed() {
+        let (rig, runner, head) = Rig::with_pull_request("chelone");
+        let by_hand = rig.push_by_hand("kelpie/7", "by-hand.txt");
+        assert!(matches!(
+            rig.verdict(&runner),
+            Some(StepReport::Ruling { id: 1, .. })
+        ));
+        std::fs::write(rig.worktree_7().join("work.txt"), "unsaved\n").unwrap();
+        let reply = rig.ask(&runner, "rule", Some("1 yes"));
+        let error = reply["error"].as_str().unwrap();
+        assert!(
+            error.starts_with(&format!("cannot bring the worktree to {}: ", &by_hand[..7])),
+            "{error}"
+        );
+        assert_eq!(
+            rig.ask(&runner, "status", None)["work_item"]["phase"],
+            json!({ "state": "ruling", "id": 1 })
+        );
+        assert_eq!(
+            crate::test::git(&rig.worktree_7(), &["rev-parse", "HEAD"]),
+            head
+        );
+
+        // A commit kelpie never saw pushed is the worker's too.
+        let worktree = rig.worktree_7();
+        crate::test::git(&worktree, &["commit", "--quiet", "-am", "not pushed"]);
+        let reply = rig.ask(&runner, "rule", Some("1 yes"));
+        assert!(
+            reply["error"].as_str().unwrap().contains("holds work"),
+            "{reply}"
         );
     }
 }

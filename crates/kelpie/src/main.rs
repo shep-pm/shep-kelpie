@@ -12,18 +12,20 @@
 //! Claude Code starts from the worker's MCP config.
 //!
 //! `kelpie relay-yes <project> <id>`, `kelpie relay-answer <project>
-//! <params>`: what the relay's own settings gate on. Both run
-//! `shep trigger <project> rule <params>` verbatim; the relay runs them,
-//! never the maintainer.
+//! <params>`: what the relay's own settings gate on. Both send
+//! `rule <params>` to the project's runner on the shepherd `SHEP_HOME`
+//! names; the relay runs them, never the maintainer.
 
 #![forbid(unsafe_code)]
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::ExitCode;
 
 use kelpie::adapters::ShotsCli;
 use kelpie::confine::{Verdict, judge};
 use kelpie::preview::Tools;
+use kelpie::relay::rule::{self, Ruling};
+use kelpie::shep_home;
 
 /// A PreToolUse hook's exit code that refuses the tool call
 const REFUSE: u8 = 2;
@@ -57,10 +59,12 @@ fn main() -> ExitCode {
                 }
             }
         }
-        [role, project, id] if role == "relay-yes" => rule_trigger(project, &format!("{id} yes")),
-        [role, project, params] if role == "relay-answer" => {
-            relay_answer(Command::new("shep"), project, params)
+        [role, project, id] if role == "relay-yes" => {
+            with_shep_home(role, |home| rule::send(home, project, Ruling::Yes(id)))
         }
+        [role, project, params] if role == "relay-answer" => with_shep_home(role, |home| {
+            rule::send(home, project, Ruling::NoOrAnswer(params))
+        }),
         _ => {
             eprintln!(
                 "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie tools install\n       kelpie shots-mcp <tools> <job>\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>",
@@ -126,109 +130,14 @@ fn install_tools() -> ExitCode {
     }
 }
 
-// The relay's own path to `shep trigger`, so its permission rules can allow
-// or gate an exact subcommand instead of a pattern over free-text params.
-fn rule_trigger(project: &str, params: &str) -> ExitCode {
-    run_shep(Command::new("shep"), project, params)
-}
-
-// Refuses anything that does not read as `<id> no <note>` or `<id> answer
-// <text>`, by the same grammar `rule` itself reads, so a "yes" the relay
-// was talked into forwarding as an "answer" never reaches the pre-allowed
-// path: the settings' `ask` rule on `relay-yes` is the only way one merges.
-fn relay_answer(shep: Command, project: &str, params: &str) -> ExitCode {
-    if !kelpie::runner::is_no_or_answer(params) {
-        eprintln!(
-            "relay-answer refuses {params:?}: not a `<id> no <note>` or `<id> answer <text>`"
-        );
-        return ExitCode::FAILURE;
-    }
-    run_shep(shep, project, params)
-}
-
-fn run_shep(mut shep: Command, project: &str, params: &str) -> ExitCode {
-    let status = shep
-        .args(["trigger", project, "rule", params])
-        .stdin(Stdio::null())
-        .status();
-    match status {
-        Ok(status) if status.success() => ExitCode::SUCCESS,
-        Ok(status) => ExitCode::from(status.code().unwrap_or(1).clamp(1, 255) as u8),
-        Err(e) => {
-            eprintln!("cannot run shep trigger: {e}");
+// A relay command with no `SHEP_HOME` would trigger the default shepherd,
+// where no runner is, so it refuses instead.
+fn with_shep_home(role: &str, run: impl FnOnce(&Path) -> ExitCode) -> ExitCode {
+    match shep_home::required(shep_home::RELAY_FIX) {
+        Ok(home) => run(&home),
+        Err(message) => {
+            eprintln!("kelpie {role}: {message}");
             ExitCode::FAILURE
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::fs;
-    use std::os::unix::fs::PermissionsExt;
-
-    use super::*;
-
-    // A fake `shep` that logs the trigger it was given to `log`, so a
-    // test never depends on a real shepherd being reachable.
-    fn fake_shep() -> (tempfile::TempDir, PathBuf) {
-        let dir = tempfile::tempdir().unwrap();
-        let log = dir.path().join("log");
-        let script = dir.path().join("shep");
-        fs::write(
-            &script,
-            format!("#!/bin/sh\necho \"$@\" >> '{}'\n", log.display()),
-        )
-        .unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
-        (dir, script)
-    }
-
-    #[test]
-    fn relay_yes_passes_the_id_and_yes_to_shep_trigger() {
-        let (dir, script) = fake_shep();
-        let code = run_shep(Command::new(&script), "shep", "3 yes");
-        assert_eq!(code, ExitCode::SUCCESS);
-        assert_eq!(
-            fs::read_to_string(dir.path().join("log")).unwrap(),
-            "trigger shep rule 3 yes\n"
-        );
-    }
-
-    #[test]
-    fn relay_answer_passes_a_no_or_an_answer_through_verbatim() {
-        let (dir, script) = fake_shep();
-        relay_answer(Command::new(&script), "shep", "3 no rename the flag");
-        assert_eq!(
-            fs::read_to_string(dir.path().join("log")).unwrap(),
-            "trigger shep rule 3 no rename the flag\n"
-        );
-
-        let (dir, script) = fake_shep();
-        relay_answer(Command::new(&script), "shep", "3 answer use --dry-run");
-        assert_eq!(
-            fs::read_to_string(dir.path().join("log")).unwrap(),
-            "trigger shep rule 3 answer use --dry-run\n"
-        );
-    }
-
-    // A "yes" the relay was talked into forwarding as an "answer" must
-    // never reach `shep trigger`, whatever shape it is disguised in.
-    #[test]
-    fn relay_answer_refuses_every_shape_of_yes() {
-        for disguised in ["3 yes", "3 Yes", " 3 yes", "3  yes", "3 yes extra"] {
-            let (dir, script) = fake_shep();
-            let code = relay_answer(Command::new(&script), "shep", disguised);
-            assert_eq!(code, ExitCode::FAILURE, "{disguised:?}");
-            assert!(
-                !dir.path().join("log").exists(),
-                "{disguised:?} reached shep trigger"
-            );
-        }
-    }
-
-    #[test]
-    fn a_shep_that_cannot_run_fails_loudly() {
-        let code = run_shep(Command::new("/nonexistent/shep"), "shep", "1 yes");
-        assert_eq!(code, ExitCode::FAILURE);
     }
 }

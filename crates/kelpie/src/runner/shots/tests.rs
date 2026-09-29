@@ -149,21 +149,24 @@ fn playwrights_output_folder_is_kelpies_and_a_symlink_there_stops_the_turn() {
     let out = rig.home.path().join("kelpie/shots/lab/7/playwright");
     std::fs::create_dir_all(out.parent().unwrap()).unwrap();
     std::os::unix::fs::symlink(rig.home.path(), &out).unwrap();
-    let Some(StepReport::Failed { reason, .. }) = step(&runner).unwrap() else {
+    let Some(StepReport::Failed { id, question, .. }) = step(&runner).unwrap() else {
         panic!("the turn ran with a symlinked output folder");
     };
     assert!(
-        reason.ends_with("is a symlink, not kelpie's own folder"),
-        "{reason}"
+        question.contains("is a symlink, not kelpie's own folder"),
+        "{question}"
     );
     assert_eq!(rig.claude.calls(), [], "no worker started");
 
     std::fs::remove_file(&out).unwrap();
-    rig.ask(&runner, "drop", None);
-    step(&runner).unwrap();
-    rig.ask(&runner, "add", Some("7"));
+    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);
-    step(&runner).unwrap();
+    let mut ran = false;
+    for _ in 0..3 {
+        step(&runner).unwrap(); // the ruling's alert, then the turn again
+        ran |= !rig.claude.calls().is_empty();
+    }
+    assert!(ran, "the yes put the turn back");
     let browser = read_json(&rig.paths().worker.join("playwright.json"));
     assert_eq!(browser["outputDir"], json!(out));
     assert!(std::fs::symlink_metadata(&out).unwrap().is_dir());

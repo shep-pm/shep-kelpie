@@ -4,6 +4,9 @@
 //! hold ends, whichever comes first, so a project held for hours reads
 //! usage a few times an hour rather than on every look at the board. A
 //! reading that finds no hold is never reused.
+//!
+//! With `pacing.enabled` off the reading still runs, so `status` shows the
+//! numbers, but neither limit holds anything.
 
 use serde::Serialize;
 
@@ -16,6 +19,8 @@ use crate::state::StateError;
 /// What `status` shows of the pacer
 #[derive(Debug, Serialize)]
 pub struct PacerStatus<'a> {
+    /// Whether the limits hold anything, from `pacing.enabled`
+    pub enabled: bool,
     /// The last time usage was read, and what it makes of it
     pub reading: Option<&'a Reading>,
     /// Why nothing new is starting, while a hold lasts
@@ -58,7 +63,7 @@ impl Runner {
                 return Ok(Pace::StillHeld);
             }
         }
-        let assessment = match self.ports.meter.read(now) {
+        let mut assessment = match self.ports.meter.read(now) {
             Ok(usage) => assess(
                 now,
                 &usage,
@@ -72,6 +77,10 @@ impl Runner {
             next.pacing = assessment.day_start;
             self.save(next)?;
         }
+        if !self.settings.pacing.enabled {
+            assessment.allowance = None;
+            assessment.window = None;
+        }
         let hold = assessment.hold(scope).cloned();
         self.pacing = Some((now, assessment));
         Ok(hold.map_or(Pace::Clear, Pace::Held))
@@ -81,6 +90,7 @@ impl Runner {
     pub(super) fn pacer_status(&self, now: Timestamp) -> PacerStatus<'_> {
         let last = self.pacing.as_ref().map(|(_, last)| last);
         PacerStatus {
+            enabled: self.settings.pacing.enabled,
             reading: last.and_then(|last| last.reading.as_ref()),
             holding: last
                 .and_then(|last| last.hold(Scope::Dispatch))
@@ -108,7 +118,16 @@ mod tests {
     // A running project on a day that began with `used` percent of the week
     // spent, as a runner restarted partway through the day finds it
     fn running_since(project: &str, used: u32) -> (Rig, Mutex<Runner>) {
+        running_paced(project, used, true)
+    }
+
+    fn running_paced(project: &str, used: u32, enabled: bool) -> (Rig, Mutex<Runner>) {
         let rig = Rig::new(project);
+        if !enabled {
+            rig.edit_settings(|s| {
+                s.replace("[pacing]\nenabled = true", "[pacing]\nenabled = false")
+            });
+        }
         let mut state = ProjectState::new(Timestamp(Rig::EPOCH));
         state.run = RunState::Running;
         state.pacing = Some(DayStart {
@@ -185,6 +204,7 @@ mod tests {
         assert_eq!(
             status["pacer"],
             json!({
+                "enabled": true,
                 "reading": {
                     "at": Rig::EPOCH,
                     "session": { "used_pct": 3, "resets_at": Rig::EPOCH + 5 * 3600 },
@@ -413,5 +433,46 @@ mod tests {
         rig.meter.set(Rig::utilization(20, 60));
         let (kind, _, until) = held(step(&runner).unwrap());
         assert_eq!((kind, until), (HoldKind::Allowance, Rig::EPOCH + DAY));
+    }
+
+    #[test]
+    fn with_pacing_off_a_dispatch_goes_ahead_past_the_allowance() {
+        let (rig, runner) = running_paced("shep", 0, false);
+        rig.forge.list_ready(7, false);
+        rig.meter.set(Rig::utilization(60, 0));
+
+        assert!(dispatched(&step(&runner).unwrap()));
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["pacer"]["enabled"], false);
+        assert_eq!(status["pacer"]["holding"], json!(null));
+        let reading = &status["pacer"]["reading"];
+        assert_eq!(
+            (&reading["spent_today_pct"], &reading["allowance_pct"]),
+            (&json!(60), &json!(14.3))
+        );
+    }
+
+    #[test]
+    fn with_pacing_off_a_turn_starts_past_half_the_window() {
+        let (rig, runner) = running_paced("koji", 0, false);
+        rig.ask(&runner, "add", Some("7"));
+        rig.meter.set(Rig::utilization(0, 80));
+        rig.claude.script([reply()]);
+
+        assert!(ended(&step(&runner).unwrap()));
+        assert_eq!(rig.claude.calls().len(), 1);
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["pacer"]["reading"]["session"]["used_pct"], 80);
+    }
+
+    #[test]
+    fn with_pacing_off_usage_that_cannot_be_read_holds_nothing() {
+        let (rig, runner) = running_paced("rotom", 0, false);
+        rig.forge.list_ready(7, false);
+        rig.meter.fail(MeterError::TimedOut);
+
+        assert!(dispatched(&step(&runner).unwrap()));
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["pacer"]["holding"], json!(null));
     }
 }

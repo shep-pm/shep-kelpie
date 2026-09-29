@@ -1,8 +1,10 @@
 //! A work item's worktree and build folder
 //!
 //! Each work item gets its own git worktree, on a branch cut from the latest
-//! `origin/main`, and its own build folder. Preparing is idempotent, so a
-//! restarted runner finds the worktree it made before and keeps it.
+//! `origin/main`, and its own build folder. A rework's branch starts from
+//! itself on `origin` instead, and reuses a local branch left behind that
+//! matches it exactly. Preparing is idempotent, so a restarted runner
+//! finds the worktree it made before and keeps it.
 
 use std::ffi::OsStr;
 use std::fmt;
@@ -12,6 +14,15 @@ use std::process::{Command, Stdio};
 
 /// The branch every work item is cut from, on `origin`
 pub const BASE: &str = "main";
+
+/// Where a new worktree's branch starts
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Start {
+    /// Cut from `origin/main`
+    Main,
+    /// The branch as `origin` holds it, whoever pushed to it
+    Pushed,
+}
 
 /// A prepared worktree, and the git dirs a commit from it writes to
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +49,8 @@ pub enum WorktreeError {
     Foreign(PathBuf),
     /// The branch exists with no worktree, so it is not kelpie's to reuse
     BranchTaken(String),
+    /// The worktree is off the head kelpie knew, or has changes not committed
+    Unsettled(PathBuf),
     /// A folder could not be created
     Folder {
         /// The folder
@@ -67,6 +80,11 @@ impl fmt::Display for WorktreeError {
             Self::BranchTaken(branch) => {
                 write!(f, "branch {branch} already exists without its worktree")
             }
+            Self::Unsettled(path) => write!(
+                f,
+                "{} holds work kelpie has not seen pushed",
+                path.display()
+            ),
             Self::Folder { path, kind } => {
                 write!(f, "cannot create {}: {kind}", path.display())
             }
@@ -81,7 +99,7 @@ impl std::error::Error for WorktreeError {}
 
 /// Makes sure `worktree` is a worktree of `repo` on `branch`, and `build` exists
 ///
-/// A new worktree's branch is cut from `origin/main` just fetched, and does
+/// A new worktree's branch starts where `start` says, just fetched, and does
 /// not track it.
 ///
 /// # Errors
@@ -91,6 +109,7 @@ pub fn prepare(
     repo: &Path,
     worktree: &Path,
     branch: &str,
+    start: Start,
     build: &Path,
 ) -> Result<Worktree, WorktreeError> {
     let foreign = || WorktreeError::Foreign(worktree.to_owned());
@@ -100,28 +119,53 @@ pub fn prepare(
             return Err(foreign());
         }
     } else {
-        if git(repo, ["rev-parse", "--verify", "--quiet", &full_ref]).is_ok() {
+        let local = git(repo, ["rev-parse", "--verify", "--quiet", &full_ref]).ok();
+        if local.is_some() && start == Start::Main {
             return Err(WorktreeError::BranchTaken(branch.to_owned()));
         }
         if let Some(parent) = worktree.parent() {
             create(parent)?;
         }
-        git(repo, ["fetch", "--quiet", "origin", BASE])?;
-        let base = format!("origin/{BASE}");
+        let from = match start {
+            Start::Main => BASE,
+            Start::Pushed => branch,
+        };
+        git(repo, ["fetch", "--quiet", "origin", from])?;
+        let base = format!("origin/{from}");
         let wt = worktree.as_os_str();
-        git(
-            repo,
-            [
-                "worktree".as_ref(),
-                "add".as_ref(),
-                "--quiet".as_ref(),
-                "--no-track".as_ref(),
-                "-b".as_ref(),
-                OsStr::new(branch),
-                wt,
-                base.as_ref(),
-            ],
-        )?;
+        if let Some(local) = local {
+            // A rework's branch left behind by an earlier attempt is reused
+            // when it is at the same commit as `origin`'s. One ahead holds
+            // work that is not kelpie's to throw away, and one behind is
+            // not the pull request's branch as `origin` holds it.
+            if git(repo, ["rev-parse", "--verify", "--quiet", &base])? != local {
+                return Err(WorktreeError::BranchTaken(branch.to_owned()));
+            }
+            git(
+                repo,
+                [
+                    "worktree".as_ref(),
+                    "add".as_ref(),
+                    "--quiet".as_ref(),
+                    wt,
+                    OsStr::new(branch),
+                ],
+            )?;
+        } else {
+            git(
+                repo,
+                [
+                    "worktree".as_ref(),
+                    "add".as_ref(),
+                    "--quiet".as_ref(),
+                    "--no-track".as_ref(),
+                    "-b".as_ref(),
+                    OsStr::new(branch),
+                    wt,
+                    base.as_ref(),
+                ],
+            )?;
+        }
     }
     let common = git(
         repo,
@@ -236,19 +280,67 @@ pub fn origin_head(repo: &Path, branch: &str) -> Result<String, WorktreeError> {
     git(repo, ["rev-parse", "--verify", "--quiet", &tracking])
 }
 
+/// Moves the worktree's branch from `from`, the head kelpie knew, to `to`
+///
+/// `to` is a head on `origin` the maintainer accepted. A worktree at neither,
+/// or with changes not committed, holds work of the worker's, and is refused.
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed, or
+/// [`WorktreeError::Unsettled`] for a worktree refused.
+pub fn adopt(
+    repo: &Path,
+    worktree: &Path,
+    branch: &str,
+    from: &str,
+    to: &str,
+) -> Result<(), WorktreeError> {
+    let in_worktree = trusted(repo, worktree)?;
+    let unsettled = || WorktreeError::Unsettled(worktree.to_owned());
+    let full_ref = format!("refs/heads/{branch}");
+    let on_branch = in_worktree(&["symbolic-ref", "--quiet", "HEAD"])
+        .ok()
+        .as_deref()
+        == Some(&full_ref);
+    if !on_branch || !in_worktree(&["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
+        return Err(unsettled());
+    }
+    let at = in_worktree(&["rev-parse", "HEAD"])?;
+    if at == to {
+        return Ok(());
+    }
+    if at != from {
+        return Err(unsettled());
+    }
+    git(repo, ["fetch", "--quiet", "origin", branch])?;
+    in_worktree(&["reset", "--quiet", "--hard", to])?;
+    Ok(())
+}
+
 /// What a rebase onto `origin/main` came to
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rebase {
     /// Rebased and pushed: the branch's new head
     Pushed(String),
+    /// Aborted, the branch left as it was: it conflicts with `main`, which
+    /// the worker can resolve
+    Conflicts {
+        /// The `origin/main` commit it conflicts with
+        main: String,
+        /// The files that conflict
+        files: Vec<String>,
+    },
     /// Left as it was, for this reason, which only the maintainer can settle
     Refused(String),
 }
 
-/// Rebases the worktree's branch, at `head`, onto `origin/main` and pushes it
+/// Catches the worktree's branch, at `head`, up with `origin/main` and pushes it
 ///
-/// The push is forced with a lease on `head`, so it fails rather than drop a
-/// commit pushed since. A conflict aborts the rebase, and a failed push
+/// A branch with a merge commit in it (the worker's resolution of an earlier
+/// conflict) is merged with `origin/main`, and pushed without force. Any
+/// other is rebased, and the push is forced with a lease on `head`, so it
+/// fails rather than drop a commit pushed since. A conflict aborts the rebase and names its files, and a failed push
 /// puts the branch back at `head`. Run [`base_of`] first, which fetches.
 ///
 /// # Errors
@@ -288,24 +380,43 @@ pub fn rebase(
         in_worktree(&["log", "-1", "--format=%ce", head])?
     );
     let base = format!("origin/{BASE}");
-    if let Err(e) = in_worktree(&["-c", &name, "-c", &email, "rebase", "--quiet", &base]) {
+    // A rebase replays the branch's own commits and drops its merge commits,
+    // and with them the worker's hand resolution of an earlier conflict. A
+    // branch holding one is caught up by merging instead, and pushed plain.
+    let ahead = format!("{base}..HEAD");
+    let merging = !in_worktree(&["rev-list", "--merges", "--max-count=1", &ahead])?.is_empty();
+    let (verb, abort): (&[&str], &[&str]) = if merging {
+        (
+            &["merge", "--quiet", "--no-edit", &base],
+            &["merge", "--abort"],
+        )
+    } else {
+        (&["rebase", "--quiet", &base], &["rebase", "--abort"])
+    };
+    let mut caught_up = vec!["-c", &name, "-c", &email];
+    caught_up.extend_from_slice(verb);
+    if let Err(e) = in_worktree(&caught_up) {
         let conflicts =
             in_worktree(&["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();
-        let aborted = in_worktree(&["rebase", "--abort"]);
+        let aborted = in_worktree(abort);
         if conflicts.is_empty() {
             return Err(e);
         }
         aborted?;
-        let files: Vec<&str> = conflicts.lines().collect();
-        return Ok(Rebase::Refused(format!(
-            "it conflicts with main in {}",
-            files.join(", ")
-        )));
+        return Ok(Rebase::Conflicts {
+            main: git(repo, ["rev-parse", &base])?,
+            files: conflicts.lines().map(str::to_owned).collect(),
+        });
     }
     let rebased = in_worktree(&["rev-parse", "HEAD"])?;
     let lease = format!("--force-with-lease={full_ref}:{head}");
     let target = format!("HEAD:{full_ref}");
-    if let Err(e) = in_worktree(&["push", "--quiet", &lease, "origin", &target]) {
+    let pushed = if merging {
+        in_worktree(&["push", "--quiet", "origin", &target])
+    } else {
+        in_worktree(&["push", "--quiet", &lease, "origin", &target])
+    };
+    if let Err(e) = pushed {
         // Best effort: a branch left off the head is refused on the next look.
         let _ = in_worktree(&["reset", "--quiet", "--hard", head]);
         return Err(e);

@@ -5,7 +5,11 @@
 //! one. Its settings gate a merge yes behind a permission prompt in the
 //! settings themselves, never in the instructions a session could ignore.
 
+use std::path::Path;
+
 use serde_json::{Value, json};
+
+pub mod rule;
 
 /// The relay's fixed `--name`, so a lookup always finds the same session
 pub const NAME: &str = "kelpie-relay";
@@ -25,8 +29,13 @@ pub const INSTRUCTIONS: &str = include_str!("relay-instructions.md");
 /// maintainer's own `~/.claude/settings.json` and are dropped along with
 /// everything else by `--setting-sources ""`, so the relay carries both
 /// itself: without them its `PushNotification` calls never reach a phone.
-pub fn settings() -> Value {
+///
+/// The `env` block hands the relay's shell kelpie's `shep_home`: a session
+/// started by a runner does not inherit the runner's environment, and
+/// `kelpie relay-*` would otherwise trigger the default shepherd.
+pub fn settings(shep_home: &Path) -> Value {
     json!({
+        "env": { "SHEP_HOME": shep_home.to_string_lossy() },
         "crossSessionInbound": "accept",
         "agentPushNotifEnabled": true,
         "inputNeededNotifEnabled": true,
@@ -56,7 +65,7 @@ mod tests {
 
     #[test]
     fn a_merge_yes_needs_a_tap_and_a_note_or_answer_does_not() {
-        let s = settings();
+        let s = settings(Path::new("/k/shep"));
         assert_eq!(
             s["permissions"]["allow"],
             json!(["Bash(kelpie relay-answer *)"])
@@ -66,7 +75,18 @@ mod tests {
 
     #[test]
     fn cross_session_messages_are_accepted() {
-        assert_eq!(settings()["crossSessionInbound"], "accept");
+        assert_eq!(
+            settings(Path::new("/k/shep"))["crossSessionInbound"],
+            "accept"
+        );
+    }
+
+    #[test]
+    fn the_relays_shell_gets_kelpies_shepherd() {
+        assert_eq!(
+            settings(Path::new("/k/shep"))["env"],
+            json!({ "SHEP_HOME": "/k/shep" })
+        );
     }
 
     // Measured live on #14: without these, `--setting-sources ""` drops
@@ -74,7 +94,7 @@ mod tests {
     // `PushNotification` calls fail with "mobile push is disabled".
     #[test]
     fn push_notifications_are_turned_on() {
-        let s = settings();
+        let s = settings(Path::new("/k/shep"));
         assert_eq!(s["agentPushNotifEnabled"], true);
         assert_eq!(s["inputNeededNotifEnabled"], true);
     }

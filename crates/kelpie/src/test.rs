@@ -35,12 +35,51 @@ pub(crate) use leases::{FakeLeases, Told};
 pub(crate) use relay::FakeRelay;
 pub(crate) use shots::{FakeShots, ScriptedShots};
 
+/// Writes an executable stand-in script that is safe to run at once.
+///
+/// On Linux a child forked while the file is still open for writing holds
+/// it, and `exec` of it fails with ETXTBSY. Other tests fork all the time,
+/// so this waits until the script has been executed once, with the probe
+/// variable set, before handing it over. The script's first line after the
+/// shebang exits on the probe, so the probe run does nothing.
+pub(crate) fn write_script(path: &Path, contents: &str) {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let (shebang, rest) = contents.split_once('\n').expect("a script has a shebang");
+    assert!(shebang.starts_with("#!"), "{shebang:?}");
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o755)
+        .open(path)
+        .unwrap();
+    write!(
+        file,
+        "{shebang}\n[ -n \"$KELPIE_TEST_PROBE\" ] && exit 0\n{rest}"
+    )
+    .unwrap();
+    drop(file);
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match Command::new(path).env("KELPIE_TEST_PROBE", "1").status() {
+            Ok(_) => return,
+            Err(e) if e.raw_os_error() == Some(26) && std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(e) => panic!("cannot run the stand-in script {}: {e}", path.display()),
+        }
+    }
+}
+
 /// A work item with one call, so every field of its format shows
 pub(crate) fn a_work_item() -> WorkItem {
     WorkItem {
         issue: 42,
         title: "Add a thing".into(),
         branch: "kelpie/42".into(),
+        rework: false,
         worktree: "/k/wt/shep/42".into(),
         build: "/k/targets/shep/42".into(),
         worker: WorkerModel {
@@ -57,13 +96,20 @@ pub(crate) fn a_work_item() -> WorkItem {
             since: Timestamp(11),
         },
         red_head: Some("bad".into()),
+        conflict: Some(crate::work_item::Conflict {
+            head: "c0ffee".into(),
+            main: "a11ce".into(),
+            turns: 1,
+        }),
         resume: None,
         review_call: crate::work_item::ReviewCallState::Idle,
         coderabbit: crate::work_item::CodeRabbitTally::default(),
         known: Known {
             labels: vec!["review please".into()],
             ready: false,
+            head: None,
         },
+        qwen: crate::work_item::QwenTally::default(),
         shots: None,
         shots_comment: None,
         calls: vec![CallRecord {
@@ -110,9 +156,15 @@ pub(crate) enum Scripted {
     /// Commits this file with this text on the worktree's branch, pushes
     /// it the way a worker does, and answers
     Push(&'static str, &'static str),
+    /// Merges `origin/main` into the worktree's branch, keeping main's
+    /// side of any conflict, and pushes it without force, as a worker
+    /// resolving a conflict does
+    MergeMain,
     /// Answers with this exact text and no cost: a review round or judge
     /// one-shot, whose reply is read rather than acted on
     Text(&'static str),
+    /// Answers like [`Self::Text`], with this cost for the session
+    Billed(&'static str, Cost),
     /// Answers with this final message
     Say(&'static str),
     /// Blocks until the test releases it, then answers
@@ -267,6 +319,12 @@ impl Claude for FakeClaude {
                 usage: Usage::default(),
                 session_cost: Cost(0),
             }),
+            Some(Scripted::Billed(text, cost)) => Ok(ClaudeReply {
+                session_id: call.session.id().clone(),
+                text: text.to_owned(),
+                usage: Usage::default(),
+                session_cost: cost,
+            }),
             Some(Scripted::Say(text)) => Ok(ClaudeReply {
                 session_id: call.session.id().clone(),
                 text: text.into(),
@@ -292,6 +350,27 @@ impl Claude for FakeClaude {
                 Ok(ClaudeReply {
                     session_id: call.session.id().clone(),
                     text: "pushed".into(),
+                    usage: Usage::default(),
+                    session_cost: Cost(0),
+                })
+            }
+            Some(Scripted::MergeMain) => {
+                git(&call.cwd, &["fetch", "--quiet", "origin", "main"]);
+                git(
+                    &call.cwd,
+                    &[
+                        "merge",
+                        "--quiet",
+                        "-X",
+                        "theirs",
+                        "--no-edit",
+                        "origin/main",
+                    ],
+                );
+                git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);
+                Ok(ClaudeReply {
+                    session_id: call.session.id().clone(),
+                    text: "merged".into(),
                     usage: Usage::default(),
                     session_cost: Cost(0),
                 })
@@ -571,6 +650,54 @@ impl Rig {
         self.land(crate::preview::LAUNCH_FILE, LAUNCH)
     }
 
+    /// Pushes a commit of `file` to `branch` on origin from another clone,
+    /// as the maintainer would by hand, and returns its hash
+    pub(crate) fn push_by_hand(&self, branch: &str, file: &str) -> String {
+        let hand = self.home.path().join("by-hand");
+        if !hand.exists() {
+            git(
+                self.home.path(),
+                &["clone", "--quiet", path(&self.origin()), path(&hand)],
+            );
+        }
+        git(&hand, &["fetch", "--quiet", "origin"]);
+        let start = match self.forge.head_of(branch) {
+            Some(_) => format!("origin/{branch}"),
+            None => "origin/main".to_owned(),
+        };
+        git(&hand, &["checkout", "--quiet", "-B", branch, &start]);
+        std::fs::write(hand.join(file), "pushed by hand\n").unwrap();
+        git(&hand, &["add", file]);
+        git(&hand, &["commit", "--quiet", "-m", file]);
+        git(&hand, &["push", "--quiet", "origin", branch]);
+        git(&hand, &["rev-parse", "HEAD"])
+    }
+
+    /// Asserts the worker reads `path` under the settings of the call `seen`,
+    /// and that a commit from its worktree would not carry it
+    pub(crate) fn assert_worker_reads(&self, seen: &Seen, path: &Path) {
+        assert!(
+            !path.starts_with(&seen.call.cwd),
+            "a commit would carry {path:?}"
+        );
+        // The worker's rules name kelpie's home as `~/.kelpie`.
+        let home = self.home.path().join("kelpie");
+        let as_written = format!("~/.kelpie/{}", path.strip_prefix(&home).unwrap().display());
+        let as_is = path.to_str().unwrap();
+        let deny = seen.settings["permissions"]["deny"].as_array().unwrap();
+        for rule in deny.iter().map(|r| r.as_str().unwrap()) {
+            assert!(
+                !denies(rule, &as_written) && !denies(rule, as_is),
+                "{rule} hides {as_written}"
+            );
+        }
+        let deny_read = &seen.settings["sandbox"]["filesystem"]["denyRead"];
+        for folder in deny_read.as_array().into_iter().flatten() {
+            let folder = folder.as_str().unwrap();
+            assert!(!path.starts_with(folder), "the sandbox hides it: {folder}");
+        }
+    }
+
     /// The project's checkout
     pub(crate) fn repo(&self) -> PathBuf {
         self.home.path().join("repos").join(self.project.as_str())
@@ -679,6 +806,18 @@ impl Rig {
     /// The build folder kelpie makes for issue 7
     pub(crate) fn build_7(&self) -> PathBuf {
         self.paths().build(7)
+    }
+}
+
+// Whether a `Read(...)` deny rule covers `path`, written as the rule writes it
+fn denies(rule: &str, path: &str) -> bool {
+    let Some(glob) = rule.strip_prefix("Read(").and_then(|r| r.strip_suffix(')')) else {
+        return false;
+    };
+    match glob.strip_suffix("**") {
+        Some(folder) if !folder.contains('*') => path.starts_with(folder),
+        None if !glob.contains('*') => path == glob,
+        _ => panic!("teach this test to read {rule}"),
     }
 }
 

@@ -55,7 +55,8 @@ impl Runner {
     /// Ends the work item in flight without merging it
     ///
     /// Its worktree, local branch and build folder go, and its issue is
-    /// recorded as finished. Its pull request and branch on the forge stay.
+    /// recorded as finished. Its pull request and branch on the forge stay,
+    /// the pull request labelled `ready-for-human`.
     /// It works whether the project runs or not.
     ///
     /// # Errors
@@ -181,8 +182,9 @@ impl Runner {
         }))
     }
 
-    // Removes the worktree, branch, build and shots folders, then the work item, and
-    // records its issue so the board never takes it again.
+    // Removes the worktree, branch, build and shots folders, then the work
+    // item, and records its issue so the board never takes it again. A pull
+    // request left unmerged is handed back to the maintainer first.
     pub(super) fn finish(&mut self, merged: bool) -> Result<Begin, StateError> {
         self.release()?;
         let item = self
@@ -195,6 +197,11 @@ impl Runner {
             && let Err(e) = publish::delete(&self.settings.repo, &publish::branch(number))
         {
             return Ok(self.gate_failed(format!("cannot delete the shots branch: {e}")));
+        }
+        if let (false, Some(number)) = (merged, item.pull_request)
+            && let Err(reason) = self.hand_back(number)
+        {
+            return Ok(self.gate_failed(reason));
         }
         let removed = worktree::remove(
             &self.settings.repo,
@@ -220,6 +227,8 @@ impl Runner {
             issue: item.issue,
             pull_request: item.pull_request,
             merged,
+            spend: item.spend(),
+            qwen: item.qwen,
         };
         let mut next = self.state.clone();
         next.work_item = None;
@@ -247,12 +256,16 @@ mod tests {
     use crate::runner::step;
     use crate::test::{Rig, Scripted, git};
 
-    fn finished() -> Option<StepReport> {
-        Some(StepReport::Finished {
-            issue: 7,
-            pull_request: Some(71),
-            merged: true,
-        })
+    fn finished(report: Option<StepReport>) -> bool {
+        matches!(
+            report,
+            Some(StepReport::Finished {
+                issue: 7,
+                pull_request: Some(71),
+                merged: true,
+                ..
+            })
+        )
     }
 
     fn marked_ready() -> Option<StepReport> {
@@ -280,7 +293,7 @@ mod tests {
             json!({ "state": "merge", "head": head, "readied": null })
         );
 
-        assert_eq!(ready_then_merge(&rig, &runner), finished());
+        assert!(finished(ready_then_merge(&rig, &runner)));
         assert_eq!(rig.forge.readied(), [71]);
         assert_eq!(rig.forge.merges(), [(71, head)]);
         assert_eq!(rig.forge.head_of("kelpie/7"), None);
@@ -376,7 +389,7 @@ mod tests {
         assert_eq!(step(&runner).unwrap(), None);
         assert_eq!(rig.forge.merges(), []);
         rig.clock.advance(1);
-        assert_eq!(step(&runner).unwrap(), finished());
+        assert!(finished(step(&runner).unwrap()));
         assert_eq!(rig.forge.merges(), [(71, head)]);
     }
 
@@ -390,7 +403,7 @@ mod tests {
         assert_eq!(step(&runner).unwrap(), None);
         assert_eq!(rig.forge.merges(), []);
         rig.forge.set_checks(&head, Checks::Passed);
-        assert_eq!(step(&runner).unwrap(), finished());
+        assert!(finished(step(&runner).unwrap()));
     }
 
     #[test]
@@ -446,7 +459,7 @@ mod tests {
             "the settling survived the restart"
         );
         rig.clock.advance(CHECKS_SETTLE);
-        assert_eq!(step(&runner).unwrap(), finished());
+        assert!(finished(step(&runner).unwrap()));
         assert_eq!(rig.forge.merges(), [(71, head)]);
         assert_eq!(rig.forge.readied(), [71]);
     }
@@ -470,7 +483,7 @@ mod tests {
         assert!(rig.worktree_7().exists());
 
         rig.forge.set_merges_down(false);
-        assert_eq!(step(&runner).unwrap(), finished());
+        assert!(finished(step(&runner).unwrap()));
         assert_eq!(rig.forge.merges(), [(71, head)]);
     }
 
@@ -569,7 +582,7 @@ mod tests {
         rig.forge.list_ready(7, false);
         rig.forge.list_ready(8, true);
         rig.ask(&runner, "rule", Some("1 yes"));
-        assert_eq!(ready_then_merge(&rig, &runner), finished());
+        assert!(finished(ready_then_merge(&rig, &runner)));
 
         let calls = rig.claude.calls().len();
         assert_eq!(step(&runner).unwrap(), None);

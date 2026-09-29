@@ -110,6 +110,15 @@ pub enum Skip {
         /// Why, as the refusal reads
         error: String,
     },
+    /// Its pull request asked for a rework that could not start this poll
+    Rework {
+        /// The issue
+        issue: u64,
+        /// The pull request
+        pull_request: u64,
+        /// Why, as the refusal reads
+        error: String,
+    },
 }
 
 impl Skip {
@@ -121,7 +130,8 @@ impl Skip {
             | Self::Assigned { issue }
             | Self::Blocked { issue, .. }
             | Self::Label { issue, .. }
-            | Self::Failed { issue, .. } => *issue,
+            | Self::Failed { issue, .. }
+            | Self::Rework { issue, .. } => *issue,
         }
     }
 }

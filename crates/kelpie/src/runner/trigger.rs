@@ -11,10 +11,12 @@ use super::{Answer, Runner};
 use crate::board::{Skip, WorkerModel};
 use crate::ports::{SessionId, Timestamp};
 use crate::state::{LeaseHeld, Ruling, RunState, StateError};
-use crate::work_item::{CodeRabbitTally, Phase, Turn, WorkItem};
+use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Turn, WorkItem};
 
 /// The triggers a runner answers
-pub const ACTIONS: [&str; 7] = ["status", "start", "pause", "add", "rule", "gate", "drop"];
+pub const ACTIONS: [&str; 8] = [
+    "status", "start", "pause", "add", "rework", "rule", "gate", "drop",
+];
 
 /// What `rule` takes, as its refusals say
 const RULE_USAGE: &str = "`rule` takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`";
@@ -67,6 +69,10 @@ pub struct WorkItemStatus<'a> {
     pub calls: usize,
     /// What they have cost, in US dollars
     pub cost_usd: f64,
+    /// Calls and cost by role
+    pub by_role: Spend,
+    /// Its qwen rounds, which cost no money
+    pub qwen: QwenTally,
 }
 
 impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
@@ -84,6 +90,8 @@ impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
             coderabbit: item.coderabbit,
             calls: item.calls.len(),
             cost_usd: item.cost().usd(),
+            by_role: item.spend(),
+            qwen: item.qwen,
         }
     }
 }
@@ -94,6 +102,7 @@ enum Request {
     Start,
     Pause,
     Add(u64),
+    Rework(u64),
     Rule(u64, Answer),
     Gate,
     Drop,
@@ -101,9 +110,9 @@ enum Request {
 
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
 ///
-/// Blank params count as none. `add` takes an issue number, `rule` takes
-/// `<id> yes`, `<id> no <note>` or `<id> answer <text>`, and every other
-/// action takes nothing.
+/// Blank params count as none. `add` takes an issue number, `rework` a pull
+/// request number, `rule` takes `<id> yes`, `<id> no <note>` or
+/// `<id> answer <text>`, and every other action takes nothing.
 pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> String {
     let error = |message: String| serde_json::json!({ "error": message }).to_string();
     let request = match read(action, params.map(str::trim).filter(|p| !p.is_empty())) {
@@ -118,6 +127,7 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
         Request::Start => runner.start().map_err(|e| e.to_string()),
         Request::Pause => runner.pause().map_err(|e| e.to_string()),
         Request::Add(issue) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
+        Request::Rework(number) => runner.rework(number).map(drop).map_err(|e| e.to_string()),
         Request::Rule(id, answer) => runner.rule(id, answer).map_err(|e| e.to_string()),
         Request::Gate => runner.gate().map_err(|e| e.to_string()),
         Request::Drop => runner.drop_work_item().map_err(|e| e.to_string()),
@@ -134,6 +144,10 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
             .map(Request::Add)
             .ok_or_else(|| format!("{p:?} is not an issue number")),
         ("add", None) => Err("`add` takes an issue number".into()),
+        ("rework", Some(p)) => number(p)
+            .map(Request::Rework)
+            .ok_or_else(|| format!("{p:?} is not a pull request number")),
+        ("rework", None) => Err("`rework` takes a pull request number".into()),
         ("rule", Some(p)) => read_rule(p).ok_or_else(|| format!("{RULE_USAGE}, not {p:?}")),
         ("rule", None) => Err(RULE_USAGE.into()),
         (_, _) if !ACTIONS.contains(&action) => Err(format!("unknown action `{action}`")),
@@ -174,7 +188,7 @@ pub fn is_no_or_answer(params: &str) -> bool {
 }
 
 // Digits only, so `+7` and `#7` are refused rather than read as 7.
-fn number(text: &str) -> Option<u64> {
+pub(super) fn number(text: &str) -> Option<u64> {
     let n = text.parse::<u64>().ok()?;
     (n > 0 && text.bytes().all(|b| b.is_ascii_digit())).then_some(n)
 }
@@ -302,7 +316,7 @@ mod tests {
                 "skipped": [],
                 "rulings": [],
                 "leases": [],
-                "pacer": { "reading": null, "holding": null },
+                "pacer": { "enabled": true, "reading": null, "holding": null },
             })
         );
     }
@@ -313,7 +327,7 @@ mod tests {
         let runner = rig.open().unwrap();
         for action in ACTIONS
             .into_iter()
-            .filter(|a| !["rule", "gate", "drop"].contains(a))
+            .filter(|a| !["rework", "rule", "gate", "drop"].contains(a))
         {
             let params = (action == "add").then_some("7");
             assert_eq!(
@@ -322,6 +336,10 @@ mod tests {
                 "{action}"
             );
         }
+        assert_eq!(
+            rig.ask(&runner, "rework", Some("71")),
+            json!({ "error": "the work item for #7 is in flight" })
+        );
         assert_eq!(
             rig.ask(&runner, "rule", Some("1 yes")),
             json!({ "error": "no ruling 1 is pending" })

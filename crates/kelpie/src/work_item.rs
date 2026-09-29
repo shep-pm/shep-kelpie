@@ -10,6 +10,10 @@ use crate::board::WorkerModel;
 use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage, Verdict};
 use crate::shots::ShotsRecord;
 
+mod spend;
+
+pub use spend::{QwenTally, RoleSpend, Spend};
+
 /// The work item in flight
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,8 +23,12 @@ pub struct WorkItem {
     pub issue: u64,
     /// The issue's title when it was added
     pub title: String,
-    /// Its branch, cut from `origin/main`
+    /// Its branch, cut from `origin/main` unless it is a rework
     pub branch: String,
+    /// Whether it reworks a pull request kelpie opened before, from its
+    /// latest review. Its worktree starts at the branch's head on `origin`.
+    #[serde(default)]
+    pub rework: bool,
     /// Its worktree
     pub worktree: PathBuf,
     /// Its worker's build folder
@@ -39,10 +47,13 @@ pub struct WorkItem {
     /// The head whose red CI run last went to the worker
     #[serde(default)]
     pub red_head: Option<String>,
+    /// The conflict with `main` that last went to the worker
+    #[serde(default)]
+    pub conflict: Option<Conflict>,
     /// What phase to force once the turn now running ends, overriding the
     /// ordinary rule that a known pull request goes straight to CI. Set by
-    /// a ruling's answer that needs the qwen-review loop to run again;
-    /// cleared once applied.
+    /// a ruling's answer that needs the qwen-review loop to run again, or by
+    /// a rework; cleared once applied.
     #[serde(default)]
     pub resume: Option<Phase>,
     /// Whether a review round or judge call is in flight
@@ -51,10 +62,13 @@ pub struct WorkItem {
     /// Its CodeRabbit rounds so far
     #[serde(default)]
     pub coderabbit: CodeRabbitTally,
-    /// The pull request's labels and ready state, as kelpie's own changes
-    /// leave them. A mismatch at the gate is a change kelpie did not make.
+    /// The pull request's labels, ready state and head, as kelpie and its
+    /// worker leave them. A mismatch at the gate is a change kelpie did not make.
     #[serde(default)]
     pub known: Known,
+    /// Its qwen rounds so far
+    #[serde(default)]
+    pub qwen: QwenTally,
     /// Kelpie's last shots run, for a worktree with a launch file
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shots: Option<ShotsRecord>,
@@ -63,6 +77,19 @@ pub struct WorkItem {
     pub shots_comment: Option<u64>,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
+}
+
+/// A conflict with `main` that went to the worker as its next turn
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Conflict {
+    /// The branch's head when it conflicted
+    pub head: String,
+    /// The `origin/main` commit it conflicted with
+    pub main: String,
+    /// How many conflict turns this work item has had, this one included
+    pub turns: u32,
 }
 
 /// A work item's CodeRabbit rounds so far
@@ -88,6 +115,9 @@ pub enum CodeRabbitStage {
     Lease {
         /// The head CI passed on
         head: String,
+        /// When kelpie marked the draft ready, until the forge reads it so
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        readied: Option<Timestamp>,
     },
     /// The label went on at `at`. The lease goes back once CodeRabbit answers.
     Summoned {
@@ -123,7 +153,7 @@ pub struct OpenThread {
     pub finding: Finding,
 }
 
-/// The labels and ready state kelpie believes a pull request carries
+/// The labels, ready state and head kelpie believes a pull request carries
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -132,11 +162,22 @@ pub struct Known {
     pub labels: Vec<String>,
     /// Whether it is marked ready for review (not a draft)
     pub ready: bool,
+    /// Its head as the worker's turn or kelpie's own push left it, once
+    /// kelpie has read one
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
 }
 
-/// Whether `labels` and `ready`, as seen on the forge, differ from `known`,
-/// and if so what changed, named plainly enough to answer from a phone
-pub fn foreign_change(known: &Known, labels: &[String], ready: bool) -> Option<(Known, String)> {
+/// Whether `labels`, `ready` and `head`, as seen on the forge, differ from
+/// `known`, and if so what changed, named plainly enough to answer from a phone
+///
+/// A `known` with no head makes no claim about it.
+pub fn foreign_change(
+    known: &Known,
+    labels: &[String],
+    ready: bool,
+    head: &str,
+) -> Option<(Known, String)> {
     let added: Vec<&String> = labels
         .iter()
         .filter(|l| !known.labels.contains(l))
@@ -166,12 +207,19 @@ pub fn foreign_change(known: &Known, labels: &[String], ready: bool) -> Option<(
     } else if !ready && known.ready {
         parts.push("it was marked a draft again".to_owned());
     }
+    if known.head.as_deref().is_some_and(|h| h != head) {
+        let short = head.get(..7).unwrap_or(head);
+        parts.push(format!(
+            "its head moved to {short}, a commit the worker did not push"
+        ));
+    }
     if parts.is_empty() {
         return None;
     }
     let seen = Known {
         labels: labels.to_vec(),
         ready,
+        head: Some(head.to_owned()),
     };
     Some((seen, parts.join("; ")))
 }
@@ -419,6 +467,7 @@ mod tests {
                 "issue": 42,
                 "title": "Add a thing",
                 "branch": "kelpie/42",
+                "rework": false,
                 "worktree": "/k/wt/shep/42",
                 "build": "/k/targets/shep/42",
                 "worker": { "model": "claude-opus-5-5", "effort": "medium" },
@@ -427,10 +476,12 @@ mod tests {
                 "pull_request": 51,
                 "phase": { "state": "ci", "head": "c0ffee", "since": 11 },
                 "red_head": "bad",
+                "conflict": { "head": "c0ffee", "main": "a11ce", "turns": 1 },
                 "resume": null,
                 "review_call": { "state": "idle" },
                 "coderabbit": { "rounds": 0, "cap_cleared": false, "satisfied": false },
                 "known": { "labels": ["review please"], "ready": false },
+                "qwen": { "rounds": 0, "seconds": 0 },
                 "calls": [{
                     "role": "worker",
                     "at": 10,
@@ -617,6 +668,14 @@ mod tests {
     }
 
     #[test]
+    fn a_work_item_saved_before_reworks_is_not_one() {
+        let mut value = serde_json::to_value(a_work_item()).unwrap();
+        value.as_object_mut().unwrap().remove("rework");
+        let item: WorkItem = serde_json::from_value(value).unwrap();
+        assert!(!item.rework);
+    }
+
+    #[test]
     fn session_ids_are_distinct_version_4_uuids() {
         let a = new_session_id().unwrap().0;
         let b = new_session_id().unwrap().0;
@@ -632,20 +691,25 @@ mod tests {
         let known = Known {
             labels: vec!["bug".into()],
             ready: true,
+            head: None,
         };
-        assert_eq!(foreign_change(&known, &["bug".to_owned()], true), None);
+        assert_eq!(
+            foreign_change(&known, &["bug".to_owned()], true, "c0ffee"),
+            None
+        );
     }
 
     #[test]
     fn one_label_added_is_named_in_the_singular() {
         let known = Known::default();
-        let (seen, text) = foreign_change(&known, &["bug".to_owned()], false).unwrap();
+        let (seen, text) = foreign_change(&known, &["bug".to_owned()], false, "c0ffee").unwrap();
         assert_eq!(text, "the `bug` label was added");
         assert_eq!(
             seen,
             Known {
                 labels: vec!["bug".into()],
                 ready: false,
+                head: Some("c0ffee".into()),
             }
         );
     }
@@ -654,7 +718,7 @@ mod tests {
     fn two_labels_added_are_named_in_the_plural() {
         let known = Known::default();
         let labels = ["urgent".to_owned(), "bug".to_owned()];
-        let (_, text) = foreign_change(&known, &labels, false).unwrap();
+        let (_, text) = foreign_change(&known, &labels, false, "c0ffee").unwrap();
         assert_eq!(text, "the `urgent`, `bug` labels were added");
     }
 
@@ -663,30 +727,33 @@ mod tests {
         let known = Known {
             labels: vec!["bug".into()],
             ready: false,
+            head: None,
         };
-        let (_, text) = foreign_change(&known, &[], false).unwrap();
+        let (_, text) = foreign_change(&known, &[], false, "c0ffee").unwrap();
         assert_eq!(text, "the `bug` label was removed");
 
         let known = Known {
             labels: vec!["urgent".into(), "bug".into()],
             ready: false,
+            head: None,
         };
-        let (_, text) = foreign_change(&known, &[], false).unwrap();
+        let (_, text) = foreign_change(&known, &[], false, "c0ffee").unwrap();
         assert_eq!(text, "the `urgent`, `bug` labels were removed");
     }
 
     #[test]
     fn marking_ready_or_a_draft_again_is_named() {
         let known = Known::default();
-        let (seen, text) = foreign_change(&known, &[], true).unwrap();
+        let (seen, text) = foreign_change(&known, &[], true, "c0ffee").unwrap();
         assert_eq!(text, "it was marked ready for review");
         assert!(seen.ready);
 
         let known = Known {
             labels: vec![],
             ready: true,
+            head: None,
         };
-        let (seen, text) = foreign_change(&known, &[], false).unwrap();
+        let (seen, text) = foreign_change(&known, &[], false, "c0ffee").unwrap();
         assert_eq!(text, "it was marked a draft again");
         assert!(!seen.ready);
     }
@@ -696,12 +763,38 @@ mod tests {
         let known = Known {
             labels: vec!["bug".into()],
             ready: false,
+            head: Some("a11ce".into()),
         };
-        let (_, text) = foreign_change(&known, &["urgent".to_owned()], true).unwrap();
+        let (_, text) = foreign_change(&known, &["urgent".to_owned()], true, "c0ffee").unwrap();
         assert_eq!(
             text,
             "the `urgent` label was added; the `bug` label was removed; \
-             it was marked ready for review"
+             it was marked ready for review; \
+             its head moved to c0ffee, a commit the worker did not push"
+        );
+    }
+
+    #[test]
+    fn a_head_the_worker_did_not_push_is_named_by_its_short_hash() {
+        let known = Known {
+            head: Some("a11ce".into()),
+            ..Known::default()
+        };
+        let head = "4887ecf0123456789";
+        let (seen, text) = foreign_change(&known, &[], false, head).unwrap();
+        assert_eq!(
+            text,
+            "its head moved to 4887ecf, a commit the worker did not push"
+        );
+        assert_eq!(seen.head.as_deref(), Some(head));
+        assert_eq!(foreign_change(&seen, &[], false, head), None);
+    }
+
+    #[test]
+    fn a_known_with_no_head_makes_no_claim_about_it() {
+        assert_eq!(
+            foreign_change(&Known::default(), &[], false, "c0ffee"),
+            None
         );
     }
 

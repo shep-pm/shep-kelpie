@@ -22,6 +22,7 @@ pub mod relay;
 pub mod runner;
 pub mod settings;
 pub mod sheep;
+pub mod shep_home;
 pub mod shots;
 pub mod state;
 pub mod webhook;

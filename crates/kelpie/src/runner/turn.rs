@@ -16,15 +16,16 @@ use super::Runner;
 use super::question::asked;
 use super::report::{Begin, StepReport};
 use super::review::run_review_call;
+use super::rework;
 use super::ruling::park;
 use super::trigger::lock;
 use crate::pacer::Scope;
-use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Cost, Issue, Role, Session, Timestamp};
+use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Issue, Role, Session, Timestamp};
 use crate::preview::{self, McpFiles, WORKER_INSTRUCTIONS};
 use crate::profile::{INSTRUCTIONS, WorkerProfile};
 use crate::state::{ProjectState, Resume, RulingKind, RunState, StateError};
-use crate::work_item::{CallRecord, CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
-use crate::worktree;
+use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
+use crate::worktree::{self, Start};
 
 /// The prompt for a turn resumed after the runner restarted
 const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
@@ -77,8 +78,8 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
                 return lock(runner).end_turn(result);
             }
             Begin::Review(action) => {
-                let outcome = run_review_call(claude.as_ref(), reviewer.as_ref(), action);
-                return lock(runner).end_review(outcome);
+                let reviewed = run_review_call(claude.as_ref(), reviewer.as_ref(), action);
+                return lock(runner).end_review(reviewed);
             }
             Begin::Shots(job, head) => {
                 let run = shots.take(&job);
@@ -136,6 +137,9 @@ impl Runner {
             Turn::Due => (Session::New(id), None, now),
             Turn::Running { since } if start_over => (Session::New(id), None, *since),
             Turn::Running { since } => (Session::Resume(id), Some(CONTINUE.to_owned()), *since),
+            // No session to resume: the retry of a turn whose call failed
+            // before its session existed starts it over, as a killed one does.
+            Turn::Next { .. } if start_over => (Session::New(id), None, now),
             Turn::Next { prompt } => (Session::Resume(id), Some(prompt.clone()), now),
             Turn::Ended { .. } | Turn::Failed { .. } => return Ok(Begin::Idle),
         };
@@ -150,27 +154,21 @@ impl Runner {
         }
         let prepared = self.prepare(item, session, prompt, remaining);
         let mut next = self.state.clone();
-        let item = next
-            .work_item
-            .as_mut()
-            .expect("the work item checked above");
-        let begin = match prepared {
+        let mut begin = match prepared {
             Ok(call) => {
+                let item = next
+                    .work_item
+                    .as_mut()
+                    .expect("the work item checked above");
                 item.turn = Turn::Running { since };
                 Begin::Call(call)
             }
-            Err(reason) => {
-                item.turn = Turn::Failed {
-                    at: now,
-                    reason: reason.clone(),
-                };
-                Begin::Report(StepReport::Failed {
-                    issue: item.issue,
-                    reason,
-                })
-            }
+            Err(reason) => Begin::Report(failed(self.project.as_str(), &mut next, now, reason)),
         };
         self.save(next)?;
+        if let Begin::Report(report) = &mut begin {
+            self.fill_comment_failed(report);
+        }
         Ok(begin)
     }
 
@@ -191,7 +189,7 @@ impl Runner {
 
     // Everything the worker needs on disk before it starts: its worktree, its
     // build folder, its settings file and kelpie's instructions. A turn with
-    // no prompt of its own is the first, and takes the issue.
+    // no prompt of its own is the first, and takes the issue or the review.
     fn prepare(
         &self,
         item: &WorkItem,
@@ -199,10 +197,16 @@ impl Runner {
         prompt: Option<String>,
         timeout: Duration,
     ) -> Result<ClaudeCall, String> {
+        let start = if item.rework {
+            Start::Pushed
+        } else {
+            Start::Main
+        };
         let dirs = worktree::prepare(
             &self.settings.repo,
             &item.worktree,
             &item.branch,
+            start,
             &item.build,
         )
         .map_err(|e| e.to_string())?;
@@ -237,6 +241,7 @@ impl Runner {
         };
         let prompt = match prompt {
             Some(prompt) => prompt,
+            None if item.rework => rework::first_prompt(item),
             None => {
                 let issue = self
                     .ports
@@ -304,10 +309,20 @@ impl Runner {
             return Ok(None);
         }
         let now = self.ports.clock.now();
+        // Whatever the turn left on `origin` is the worker's own. A head
+        // that cannot be read keeps the last one, which errs toward parking.
+        let pushed = self
+            .state
+            .work_item
+            .as_ref()
+            .and_then(|_| self.origin_head().ok());
         let mut next = self.state.clone();
         let Some(item) = next.work_item.as_mut() else {
             return Ok(None);
         };
+        if pushed.is_some() {
+            item.known.head = pushed;
+        }
         let report = match result {
             Ok(reply) => {
                 let question = asked(&reply.text);
@@ -318,16 +333,9 @@ impl Runner {
                 if discovering {
                     item.pull_request = self.pull_request_from(&item.branch);
                 }
-                let before = item.session_cost(&item.session);
-                let cost = Cost(reply.session_cost.0.saturating_sub(before.0));
-                item.calls.push(CallRecord {
-                    role: Role::Worker,
-                    at: now,
-                    session: item.session.clone(),
-                    usage: reply.usage,
-                    cost,
-                    session_cost: reply.session_cost,
-                });
+                let session = item.session.clone();
+                let cost =
+                    item.record_call(Role::Worker, now, session, reply.usage, reply.session_cost);
                 item.turn = Turn::Ended { at: now };
                 // The turn may have changed the code CodeRabbit was satisfied with.
                 item.coderabbit.satisfied = false;
@@ -398,17 +406,7 @@ impl Runner {
                 item.turn = Turn::Ended { at: now };
                 timed_out(self.project.as_str(), &mut next)
             }
-            Err(e) => {
-                let reason = e.to_string();
-                item.turn = Turn::Failed {
-                    at: now,
-                    reason: reason.clone(),
-                };
-                StepReport::Failed {
-                    issue: item.issue,
-                    reason,
-                }
-            }
+            Err(e) => failed(self.project.as_str(), &mut next, now, e.to_string()),
         };
         self.save(next)?;
         let mut report = report;
@@ -427,6 +425,12 @@ impl Runner {
                 ..
             }
             | StepReport::TimedOut {
+                pull_request,
+                question,
+                comment_failed,
+                ..
+            }
+            | StepReport::Failed {
                 pull_request,
                 question,
                 comment_failed,
@@ -495,6 +499,35 @@ fn own_folder(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+// Marks the turn failed and parks the work item on a ruling carrying why,
+// keeping the turn as it stood so a yes can put it back. `comment_failed` is
+// filled in afterwards, once the ruling has actually been posted.
+fn failed(project: &str, next: &mut ProjectState, at: Timestamp, reason: String) -> StepReport {
+    let item = next
+        .work_item
+        .as_mut()
+        .expect("a failed turn is about a work item");
+    let failure = Turn::Failed {
+        at,
+        reason: reason.clone(),
+    };
+    let retry = std::mem::replace(&mut item.turn, failure);
+    let (issue, pull_request) = (item.issue, item.pull_request);
+    let kind = RulingKind::TurnFailed {
+        reason,
+        phase: item.phase.clone(),
+        retry,
+    };
+    let (_, id, question) = park(project, next, pull_request, kind);
+    StepReport::Failed {
+        issue,
+        pull_request,
+        id,
+        question,
+        comment_failed: None,
+    }
+}
+
 pub(super) fn write(folder: &Path, file: &Path, text: &str) -> Result<(), String> {
     fs::create_dir_all(folder)
         .and_then(|()| fs::write(file, text))
@@ -508,7 +541,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::ports::Usage;
+    use crate::ports::{Cost, Usage};
     use crate::settings::Effort;
     use crate::test::{LEFT_BEHIND, Rig, Scripted, git};
 
@@ -749,25 +782,117 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_turn_is_shown_and_not_retried() {
+    fn a_failed_turn_raises_a_ruling_carrying_why_and_alerts_like_the_rest() {
         let (rig, runner) = with_issue_7("zeus");
         rig.claude
             .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
-        let report = step(&runner).unwrap().unwrap();
-        let reason = "claude failed: overloaded".to_owned();
-        assert_eq!(
-            report,
-            StepReport::Failed {
-                issue: 7,
-                reason: reason.clone()
-            }
+        let Some(StepReport::Failed {
+            issue,
+            pull_request,
+            id,
+            question,
+            ..
+        }) = step(&runner).unwrap()
+        else {
+            panic!("the failed turn raised no ruling");
+        };
+        assert_eq!((issue, pull_request, id), (7, None, 1));
+        assert!(
+            question
+                .starts_with("The worker's turn on issue #7 failed: claude failed: overloaded."),
+            "{question}"
         );
+        let item = &rig.ask(&runner, "status", None)["work_item"];
         assert_eq!(
-            rig.ask(&runner, "status", None)["work_item"]["turn"],
-            json!({ "state": "failed", "at": Rig::EPOCH, "reason": reason })
+            item["turn"],
+            json!({ "state": "failed", "at": Rig::EPOCH, "reason": "claude failed: overloaded" })
         );
+        assert_eq!(item["phase"], json!({ "state": "ruling", "id": 1 }));
+
+        assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+        let [(_, alert)] = rig.alerts.posts().try_into().unwrap();
+        assert_eq!(alert.text, question);
         assert_eq!(step(&runner).unwrap(), None);
         assert_eq!(rig.claude.calls().len(), 1);
+    }
+
+    #[test]
+    fn a_yes_on_a_failed_turn_resumes_its_session() {
+        let (rig, runner) = with_issue_7("zeus");
+        rig.claude
+            .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
+        step(&runner).unwrap();
+        rig.ask(&runner, "rule", Some("1 yes"));
+        rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Ended { .. })
+        ));
+        let [failed, retried] = rig.claude.calls().try_into().unwrap();
+        assert_eq!(
+            retried.session,
+            Session::Resume(failed.session.id().clone())
+        );
+        assert_eq!(
+            retried.prompt,
+            "Your last turn failed before it finished. \
+             Carry on with the work item from where you left off."
+        );
+    }
+
+    #[test]
+    fn a_retry_whose_session_never_began_starts_it_over_from_the_issue() {
+        let (rig, runner) = with_issue_7("zeus");
+        rig.claude
+            .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
+        step(&runner).unwrap();
+        let first = rig.claude.calls()[0].session.id().clone();
+        rig.ask(&runner, "rule", Some("1 yes"));
+        rig.claude.script([
+            Scripted::Fail(ClaudeError::NoSession(first.clone())),
+            Scripted::Reply(usage(1), Cost(1)),
+        ]);
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Ended { .. })
+        ));
+        let [original, _, again] = rig.claude.calls().try_into().unwrap();
+        assert_eq!(again.session, Session::New(first));
+        assert_eq!(again.prompt, original.prompt);
+    }
+
+    #[test]
+    fn a_retried_turn_gets_a_whole_ceiling_however_long_the_ruling_waited() {
+        let (rig, runner) = with_issue_7("zeus");
+        rig.claude
+            .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
+        step(&runner).unwrap();
+        rig.clock.advance(2000);
+        rig.ask(&runner, "rule", Some("1 yes"));
+        rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
+        step(&runner).unwrap();
+        let [_, retried] = rig.claude.calls().try_into().unwrap();
+        assert_eq!(retried.timeout, Some(Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn a_no_on_a_failed_turn_stops_the_work_item_the_way_a_timed_out_one_does() {
+        let (rig, runner) = with_issue_7("rotom");
+        rig.claude
+            .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
+        step(&runner).unwrap();
+        rig.ask(&runner, "rule", Some("1 no not worth another go"));
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Finished {
+                issue: 7,
+                pull_request: None,
+                merged: false,
+                ..
+            })
+        ));
+        assert!(!rig.worktree_7().exists());
+        assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
     }
 
     #[test]
@@ -819,14 +944,15 @@ mod tests {
         rig.claude.script([Scripted::Fail(ClaudeError::TimedOut)]);
         step(&runner).unwrap();
         rig.ask(&runner, "rule", Some("1 no not worth waiting for"));
-        assert_eq!(
+        assert!(matches!(
             step(&runner).unwrap(),
             Some(StepReport::Finished {
                 issue: 7,
                 pull_request: None,
                 merged: false,
+                ..
             })
-        );
+        ));
         assert!(!rig.worktree_7().exists());
         assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
     }
@@ -887,13 +1013,44 @@ mod tests {
     #[test]
     fn a_foreign_folder_where_the_worktree_goes_fails_the_turn_before_any_call() {
         let (rig, runner) = with_issue_7("koji");
-        fs::create_dir_all(rig.home.path().join("kelpie/wt/koji/7")).unwrap();
-        let Some(StepReport::Failed { reason, .. }) = step(&runner).unwrap() else {
+        let folder = rig.home.path().join("kelpie/wt/koji/7");
+        fs::create_dir_all(&folder).unwrap();
+        let Some(StepReport::Failed { question, .. }) = step(&runner).unwrap() else {
             panic!("the turn ran in a folder kelpie did not make");
         };
         assert!(
-            reason.ends_with("is not this work item's worktree"),
-            "{reason}"
+            question.contains("is not this work item's worktree"),
+            "{question}"
+        );
+        assert_eq!(rig.claude.calls(), []);
+
+        // A yes retries the step that failed: the first turn, from the issue.
+        fs::remove_dir_all(&folder).unwrap();
+        rig.ask(&runner, "rule", Some("1 yes"));
+        rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
+        step(&runner).unwrap();
+        let [call] = rig.claude.calls().try_into().unwrap();
+        assert!(
+            matches!(call.session, Session::New(_)),
+            "{:?}",
+            call.session
+        );
+        assert_eq!(
+            call.prompt,
+            "Your work item is issue #7: Title of #7\n\nBody of #7.\n"
+        );
+    }
+
+    #[test]
+    fn a_branch_left_behind_stays_a_refusal_for_a_new_work_item_even_when_it_matches_main() {
+        let (rig, runner) = with_issue_7("golbat");
+        git(&rig.repo(), &["branch", "kelpie/7", "origin/main"]);
+        let Some(StepReport::Failed { question, .. }) = step(&runner).unwrap() else {
+            panic!("a fresh work item took a branch that was not its own");
+        };
+        assert!(
+            question.contains("branch kelpie/7 already exists without its worktree"),
+            "{question}"
         );
         assert_eq!(rig.claude.calls(), []);
     }
