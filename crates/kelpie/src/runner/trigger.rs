@@ -23,8 +23,8 @@ pub const ACTIONS: [&str; 9] = [
 /// of it, since it already knows
 pub const RELAY_RULE: &str = "relay-rule";
 
-/// What `rule` takes, as its refusals say
-const RULE_USAGE: &str = "`rule` takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`";
+/// What `rule` and `relay-rule` take, as their refusals say
+const RULE_USAGE: &str = "takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`";
 
 /// What `status` answers
 #[derive(Debug, Serialize)]
@@ -135,8 +135,8 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
         Request::Rule(_, Answer::Text(text)) => Some(Settled::Answer(text.clone())),
         Request::Drop => Some(Settled::Dropped),
         _ => None,
-    };
-    let relayed = runner.relayed();
+    }
+    .map(|how| (how, runner.relayed()));
     let changed = match request {
         Request::Status => Ok(()),
         Request::Start => runner.start().map_err(|e| e.to_string()),
@@ -149,7 +149,7 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
         Request::Gate => runner.gate().map_err(|e| e.to_string()),
         Request::Drop => runner.drop_work_item().map_err(|e| e.to_string()),
     };
-    if let (Ok(()), Some(how)) = (&changed, settled) {
+    if let (Ok(()), Some((how, relayed))) = (&changed, settled) {
         runner.settled_without_relay(&relayed, &how);
     }
     match changed {
@@ -170,11 +170,11 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
         ("rework", None) => Err("`rework` takes a pull request number".into()),
         ("rule", Some(p)) => read_rule(p)
             .map(|(id, answer)| Request::Rule(id, answer))
-            .ok_or_else(|| format!("{RULE_USAGE}, not {p:?}")),
+            .ok_or_else(|| format!("`{action}` {RULE_USAGE}, not {p:?}")),
         (RELAY_RULE, Some(p)) => read_rule(p)
             .map(|(id, answer)| Request::RelayRule(id, answer))
-            .ok_or_else(|| format!("{RULE_USAGE}, not {p:?}")),
-        ("rule" | RELAY_RULE, None) => Err(RULE_USAGE.into()),
+            .ok_or_else(|| format!("`{action}` {RULE_USAGE}, not {p:?}")),
+        ("rule" | RELAY_RULE, None) => Err(format!("`{action}` {RULE_USAGE}")),
         (_, _) if !ACTIONS.contains(&action) => Err(format!("unknown action `{action}`")),
         (_, Some(_)) => Err(format!("`{action}` takes no params")),
         ("start", None) => Ok(Request::Start),
@@ -372,6 +372,10 @@ mod tests {
         assert_eq!(
             rig.ask(&runner, RELAY_RULE, Some("1 yes")),
             json!({ "error": "no ruling 1 is pending" })
+        );
+        assert_eq!(
+            rig.ask(&runner, RELAY_RULE, None),
+            json!({ "error": "`relay-rule` takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`" })
         );
         assert_eq!(
             rig.ask(&runner, "merge", None),

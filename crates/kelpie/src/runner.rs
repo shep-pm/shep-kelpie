@@ -140,8 +140,9 @@ pub struct Runner {
     // When the relay was last cleared, kept in memory only: a restart may
     // clear a session sooner than a full day, never later.
     relay_cleared: Option<Timestamp>,
-    // What the relay is to be told of rulings settled without it, kept in
-    // memory only: after a restart, a late tap meets `rule`'s own refusal.
+    // Notices for the relay of rulings settled without it, kept in memory
+    // only: one lost to a restart leaves the question up, and `rule`
+    // refuses a tap on it.
     relay_notices: Vec<String>,
     // The account kelpie acts as, read once a run when a rework first needs it
     viewer: Option<String>,
