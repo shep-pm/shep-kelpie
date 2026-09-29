@@ -8,3 +8,5 @@ Kelpie is its own private repo, built on the published shep crates and released 
 - **Build on Vibe Kanban.** Its sunset was announced 2026-04-10 and it is community maintained since. Worth reading, not worth building on.
 - **A third flock category, or per-project "puppies", inside shep.** Every kelpie change would become a shep release, run through shep's docs trigger and review budget, and put agent policy inside a general process manager.
 - **Standalone with no shepherd.** Kelpie would supervise itself, and a kelpie crash would take its workers with it.
+
+ADR 0003 moves the runners and the dog into the maintainer's own shepherd. The rest of this decision stands.
