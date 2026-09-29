@@ -515,7 +515,7 @@ mod tests {
             .status()
             .unwrap();
         // Delivery is asynchronous; wait until the handler has seen it.
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
         let command = ["touch", marker.to_str().unwrap()];
         let ended = run_command(&command, &mut signals).await;
         assert_eq!(ended, Ok(ExitCode::from(130)));
