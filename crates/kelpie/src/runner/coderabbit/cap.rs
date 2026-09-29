@@ -1,5 +1,6 @@
-//! How many CodeRabbit rounds a pull request gets: ceil(changed / divisor)
-//! + 1, where changed is added plus removed lines outside generated files
+//! How many CodeRabbit rounds a pull request gets: a fixed number when the
+//! project sets one, or else ceil(changed / divisor) + 1, where changed is
+//! added plus removed lines outside generated files
 
 use std::num::NonZeroU32;
 use std::path::Path;
@@ -9,6 +10,11 @@ use std::process::{Command, Stdio};
 pub(super) fn cap(changed: u64, divisor: NonZeroU32) -> u32 {
     let rounds = changed.div_ceil(u64::from(divisor.get())) + 1;
     u32::try_from(rounds).unwrap_or(u32::MAX)
+}
+
+/// Whether `rounds` spent a fixed number of rounds, `fixed`
+pub(super) fn spent(rounds: u32, fixed: Option<NonZeroU32>) -> bool {
+    fixed.is_some_and(|fixed| rounds >= fixed.get())
 }
 
 /// Lines added plus removed on `worktree`'s branch since it left
