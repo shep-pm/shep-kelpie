@@ -11,7 +11,7 @@ use serde::Deserialize;
 use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::coderabbit::Activity;
 use crate::ports::{
-    Checks, Forge, ForgeError, Issue, PullRequest, PullRequestState, Reviewed, Visibility,
+    Checks, Forge, ForgeError, Issue, NewLabel, PullRequest, PullRequestState, Reviewed, Visibility,
 };
 use crate::settings::ForgeSlug;
 
@@ -28,6 +28,47 @@ impl Forge for Gh {
             "--json",
             "visibility",
         ])?)
+    }
+
+    fn default_branch(&self, repo: &ForgeSlug) -> Result<String, ForgeError> {
+        parse_default_branch(&gh(&[
+            "repo",
+            "view",
+            repo.as_str(),
+            "--json",
+            "defaultBranchRef",
+        ])?)
+    }
+
+    fn repo_labels(&self, repo: &ForgeSlug) -> Result<Vec<String>, ForgeError> {
+        let stdout = gh(&[
+            "label",
+            "list",
+            "--repo",
+            repo.as_str(),
+            "--json",
+            "name",
+            "--limit",
+            "1000",
+        ])?;
+        let labels: Vec<Label> =
+            serde_json::from_slice(&stdout).map_err(|_| unreadable(&stdout))?;
+        Ok(labels.into_iter().map(|l| l.name).collect())
+    }
+
+    fn create_label(&self, repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError> {
+        gh(&[
+            "label",
+            "create",
+            label.name,
+            "--repo",
+            repo.as_str(),
+            "--color",
+            label.color,
+            "--description",
+            label.description,
+        ])
+        .map(drop)
     }
 
     fn issue(&self, repo: &ForgeSlug, number: u64) -> Result<Issue, ForgeError> {
@@ -182,6 +223,16 @@ fn parse_visibility(stdout: &[u8]) -> Result<Visibility, ForgeError> {
     }
 }
 
+fn parse_default_branch(stdout: &[u8]) -> Result<String, ForgeError> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct View {
+        default_branch_ref: Label,
+    }
+    let view: View = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
+    Ok(view.default_branch_ref.name)
+}
+
 fn parse_issue(stdout: &[u8]) -> Result<Issue, ForgeError> {
     #[derive(Deserialize)]
     struct View {
@@ -321,6 +372,16 @@ mod tests {
             read(r#"{"visibility":"SECRET"}"#),
             Err(ForgeError::Unreadable(_))
         ));
+    }
+
+    #[test]
+    fn the_default_branch_is_read() {
+        let read = |s: &str| parse_default_branch(s.as_bytes());
+        assert_eq!(
+            read(r#"{"defaultBranchRef":{"name":"trunk"}}"#),
+            Ok("trunk".to_owned())
+        );
+        assert!(matches!(read("{}"), Err(ForgeError::Unreadable(_))));
     }
 
     #[test]

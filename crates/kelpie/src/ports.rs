@@ -54,6 +54,27 @@ pub trait Forge: Send {
     /// [`ForgeError`] when the forge cannot be asked or its answer read.
     fn visibility(&self, repo: &ForgeSlug) -> Result<Visibility, ForgeError>;
 
+    /// The branch `repo`'s pull requests merge into by default
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn default_branch(&self, repo: &ForgeSlug) -> Result<String, ForgeError>;
+
+    /// The names of the labels `repo` has
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn repo_labels(&self, repo: &ForgeSlug) -> Result<Vec<String>, ForgeError>;
+
+    /// Makes `label` on `repo`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses, such as for a label it has.
+    fn create_label(&self, repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError>;
+
     /// Issue `number` on `repo`
     ///
     /// # Errors
@@ -255,6 +276,17 @@ pub enum Checks {
     Passed,
     /// Every check finished, and these failed
     Failed(Vec<String>),
+}
+
+/// A label kelpie makes on a project's repo
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NewLabel {
+    /// Its name
+    pub name: &'static str,
+    /// Its colour, as six hex digits
+    pub color: &'static str,
+    /// What it means, shown beside it on the forge
+    pub description: &'static str,
 }
 
 /// An issue as the forge holds it
