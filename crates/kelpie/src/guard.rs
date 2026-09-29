@@ -129,7 +129,9 @@ fn git(command: &Command, cwd: &Path, home: Option<&Home>, checkout: Checkout<'_
             return out;
         }
     };
-    let read = |args: &[&str]| run(&[args, &PLAIN].concat()).unwrap_or_default();
+    let read = |args: &[&str]| run(args).unwrap_or_default();
+    // `--unified` alone makes `git log` print patches, so only patch reads take these.
+    let patches = |args: &[&str]| read(&[args, &PLAIN].concat());
     if sub == "push" {
         // A file written and committed in one call is not staged when the
         // commit is judged, so the push reads what it sends.
@@ -137,7 +139,7 @@ fn git(command: &Command, cwd: &Path, home: Option<&Home>, checkout: Checkout<'_
         if home.is_in(&log) {
             out.push(home.refusal("a message in the commits this push sends", REWRITE));
         }
-        let patches = read(&["log", "-p", "--format=", "HEAD", "--not", "--remotes"]);
+        let patches = patches(&["log", "-p", "--format=", "HEAD", "--not", "--remotes"]);
         for file in home.added(&patches) {
             out.push(home.refusal(&format!("{file} in the commits this push sends"), REWRITE));
         }
@@ -148,7 +150,7 @@ fn git(command: &Command, cwd: &Path, home: Option<&Home>, checkout: Checkout<'_
         .take_while(|a| *a != "--")
         .any(|a| a == "--all" || a.starts_with('-') && !a.starts_with("--") && a.contains('a'));
     let range = if all { "HEAD" } else { "--cached" };
-    for file in home.added(&read(&["diff", range])) {
+    for file in home.added(&patches(&["diff", range])) {
         out.push(home.refusal(&format!("this commit's {file}"), WRITE));
     }
     out

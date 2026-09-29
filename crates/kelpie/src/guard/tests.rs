@@ -317,16 +317,27 @@ fn a_push_sending_the_home_folder_is_refused_naming_where() {
     tree.git(&["add", "notes.md"]);
     tree.git(&["commit", "--quiet", "-m", "docs: notes"]);
     fs::remove_file(tree.path().join("notes.md")).unwrap();
-    tree.git(&["commit", "--quiet", "-am", "docs: from /home/tester/wt"]);
+    tree.git(&["commit", "--quiet", "-am", "docs: drop the notes"]);
     let why = refusal(tree.bash("git push -u origin HEAD"));
     assert!(
         why.contains("`notes.md` in the commits this push sends"),
         "{why}"
     );
-    assert!(why.contains("a message in the commits"), "{why}");
     assert!(why.contains("rewrite"), "{why}");
+    assert!(!why.contains("a message"), "no message names it: {why}");
     assert!(!why.contains("old.md"), "{why}");
     assert!(!why.contains(HOME), "{why}");
+}
+
+#[test]
+fn a_push_sending_a_message_naming_the_home_folder_is_refused() {
+    let tree = WorkerTree::new();
+    tree.write("notes.md", "built in ~/wt\n");
+    tree.git(&["add", "notes.md"]);
+    tree.git(&["commit", "--quiet", "-m", "docs: built in /home/tester/wt"]);
+    let why = refusal(tree.bash("git push origin HEAD"));
+    assert!(why.contains("a message in the commits"), "{why}");
+    assert!(!why.contains("notes.md"), "the file is clean: {why}");
 }
 
 // The worker can rewrite its worktree's `.git` file and its own git dir.
