@@ -1,10 +1,11 @@
-//! CodeRabbit's comments, reviews and threads on a pull request, and the
+//! CodeRabbit's comments, reviews, threads and head statuses on a pull
+//! request, and the
 //! label and thread changes the project manager makes
 
 use serde::Deserialize;
 
 use super::{gh, unreadable};
-use crate::coderabbit::{Activity, Comment, Review, Thread};
+use crate::coderabbit::{Activity, Comment, Review, Status, Thread};
 use crate::ports::{ForgeError, Timestamp};
 use crate::settings::ForgeSlug;
 
@@ -58,10 +59,22 @@ pub(super) fn activity(repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeE
         "-F",
         &format!("number={number}"),
     ])?;
+    // The pull request's own ref, so the head needs no read of its own.
+    let statuses = gh(&[
+        "api",
+        "--paginate",
+        &format!(
+            "repos/{}/commits/refs/pull/{number}/head/statuses?per_page=100",
+            repo.as_str()
+        ),
+        "--jq",
+        &format!(".[] | select(.creator.login == \"{BOT}\") | {{url, description, created_at}}"),
+    ])?;
     Ok(Activity {
         comments: parse_comments(&comments)?,
         reviews: parse_reviews(&reviews)?,
         threads: parse_threads(&threads)?,
+        statuses: parse_statuses(&statuses)?,
     })
 }
 
@@ -162,6 +175,27 @@ pub(crate) fn parse_reviews(stdout: &[u8]) -> Result<Vec<Review>, ForgeError> {
         .collect()
 }
 
+// A status names its commit only as the last part of its URL.
+pub(crate) fn parse_statuses(stdout: &[u8]) -> Result<Vec<Status>, ForgeError> {
+    #[derive(Deserialize)]
+    struct Line {
+        url: String,
+        description: Option<String>,
+        created_at: String,
+    }
+    lines::<Line>(stdout)?
+        .into_iter()
+        .map(|s| {
+            let commit = s.url.rsplit('/').next().unwrap_or_default();
+            Ok(Status {
+                commit: commit.to_owned(),
+                description: s.description.unwrap_or_default(),
+                at: time(&s.created_at, stdout)?,
+            })
+        })
+        .collect()
+}
+
 pub(crate) fn parse_threads(stdout: &[u8]) -> Result<Vec<Thread>, ForgeError> {
     #[derive(Deserialize)]
     struct Reply {
@@ -229,6 +263,7 @@ mod tests {
     fn a_page_of_nothing_is_no_comments() {
         assert_eq!(parse_comments(b"").unwrap(), []);
         assert_eq!(parse_reviews(b"\n").unwrap(), []);
+        assert_eq!(parse_statuses(b"").unwrap(), []);
     }
 
     #[test]
