@@ -5,9 +5,9 @@
 //! `kelpie confine <folder>...`: the hook that holds a worker's file tools
 //! to its folders. Claude Code runs it; it is not for the maintainer.
 //!
-//! `kelpie guard <git common dir> <worktree>`: the hook on every worker's Bash calls that keeps the home
-//! folder's path and freeform pull request titles out of what it publishes.
-//! Claude Code runs it, like `confine`.
+//! `kelpie guard <git common dir> <worktree>`: the hook on every worker's
+//! Bash calls that keeps the home folder's path and freeform pull request
+//! titles out of what it publishes. Claude Code runs it, like `confine`.
 //!
 //! `kelpie tools install`: installs the tools kelpie shows a work item's UI
 //! with, under kelpie's home.
