@@ -367,12 +367,7 @@ mod tests {
             log = dir.join("calls").display(),
             listing = listing.display(),
         );
-        fs::write(&program, script).unwrap();
-        fs::set_permissions(
-            &program,
-            std::os::unix::fs::PermissionsExt::from_mode(0o755),
-        )
-        .unwrap();
+        crate::test::write_script(&program, &script);
         let mut relay = RelayCli::new(dir.to_owned(), dir.join("relay"), dir.join("shep"));
         relay.claude = program;
         relay

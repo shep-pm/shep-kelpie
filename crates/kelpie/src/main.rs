@@ -104,7 +104,6 @@ fn run_shep(mut shep: Command, shep_home: &Path, project: &str, params: &str) ->
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
 
     use super::*;
 
@@ -112,8 +111,10 @@ mod tests {
 
     // A fake `shep` that logs the `SHEP_HOME` it ran under and the trigger
     // it was given to `log`, so a test never depends on a real shepherd
-    // being reachable.
-    fn fake_shep() -> (tempfile::TempDir, PathBuf) {
+    // being reachable. It runs as `sh <script>`: this binary's tests have
+    // no lib helper, and exec of a script written a moment ago can fail
+    // with ETXTBSY on Linux while other tests fork.
+    fn fake_shep() -> (tempfile::TempDir, Command) {
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("log");
         let script = dir.path().join("shep");
@@ -122,14 +123,15 @@ mod tests {
             format!("#!/bin/sh\necho \"$SHEP_HOME $@\" >> '{}'\n", log.display()),
         )
         .unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
-        (dir, script)
+        let mut shep = Command::new("sh");
+        shep.arg(&script);
+        (dir, shep)
     }
 
     #[test]
     fn relay_yes_passes_the_id_and_yes_to_shep_trigger() {
-        let (dir, script) = fake_shep();
-        let code = run_shep(Command::new(&script), Path::new(SHEP), "shep", "3 yes");
+        let (dir, shep) = fake_shep();
+        let code = run_shep(shep, Path::new(SHEP), "shep", "3 yes");
         assert_eq!(code, ExitCode::SUCCESS);
         assert_eq!(
             fs::read_to_string(dir.path().join("log")).unwrap(),
@@ -139,25 +141,17 @@ mod tests {
 
     #[test]
     fn relay_answer_passes_a_no_or_an_answer_through_verbatim() {
-        let (dir, script) = fake_shep();
-        relay_answer(
-            Command::new(&script),
-            Path::new(SHEP),
-            "shep",
-            "3 no rename the flag",
-        );
+        let (dir, shep) = fake_shep();
+        let code = relay_answer(shep, Path::new(SHEP), "shep", "3 no rename the flag");
+        assert_eq!(code, ExitCode::SUCCESS);
         assert_eq!(
             fs::read_to_string(dir.path().join("log")).unwrap(),
             "/k/shep trigger shep rule 3 no rename the flag\n"
         );
 
-        let (dir, script) = fake_shep();
-        relay_answer(
-            Command::new(&script),
-            Path::new(SHEP),
-            "shep",
-            "3 answer use --dry-run",
-        );
+        let (dir, shep) = fake_shep();
+        let code = relay_answer(shep, Path::new(SHEP), "shep", "3 answer use --dry-run");
+        assert_eq!(code, ExitCode::SUCCESS);
         assert_eq!(
             fs::read_to_string(dir.path().join("log")).unwrap(),
             "/k/shep trigger shep rule 3 answer use --dry-run\n"
@@ -169,8 +163,8 @@ mod tests {
     #[test]
     fn relay_answer_refuses_every_shape_of_yes() {
         for disguised in ["3 yes", "3 Yes", " 3 yes", "3  yes", "3 yes extra"] {
-            let (dir, script) = fake_shep();
-            let code = relay_answer(Command::new(&script), Path::new(SHEP), "shep", disguised);
+            let (dir, shep) = fake_shep();
+            let code = relay_answer(shep, Path::new(SHEP), "shep", disguised);
             assert_eq!(code, ExitCode::FAILURE, "{disguised:?}");
             assert!(
                 !dir.path().join("log").exists(),
