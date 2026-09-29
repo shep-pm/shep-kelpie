@@ -233,6 +233,54 @@ mod tests {
         ));
     }
 
+    // An adoption goes straight to CI, with no review step in front of it.
+    #[test]
+    fn an_adopted_branch_that_changes_them_parks_at_ci() {
+        let rig = Rig::new("shep");
+        rig.push_by_hand("fix/tools", ".mcp.json");
+        rig.forge.open_pull_request(80, "fix/tools", &[5]);
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "start", None);
+        rig.ask(&runner, "adopt", Some("80"));
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Adopted { .. })
+        ));
+        let (_, question) = ruling(step(&runner).unwrap());
+        assert!(question.contains("sandbox: .mcp.json."), "{question}");
+        assert_eq!(rig.claude.all_calls().len(), 0);
+    }
+
+    #[test]
+    fn a_settings_file_left_in_the_worktree_stops_a_coderabbit_step() {
+        let rig = Rig::new("shep");
+        rig.coderabbit_on();
+        let head = rig.push_by_hand("fix/timeline", "work.txt");
+        rig.forge.open_pull_request(80, "fix/timeline", &[5]);
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "start", None);
+        rig.ask(&runner, "adopt", Some("80"));
+        step(&runner).unwrap(); // the adoption
+        rig.forge.set_checks(&head, Checks::Passed);
+        assert!(matches!(
+            rig.verdict(&runner),
+            Some(StepReport::MarkedReady { .. })
+        ));
+        assert!(matches!(
+            rig.verdict(&runner),
+            Some(StepReport::Summoned { .. })
+        ));
+        let planted = rig.paths().worktree(5).join(".claude/settings.local.json");
+        fs::create_dir_all(planted.parent().unwrap()).unwrap();
+        fs::write(&planted, HOOK).unwrap();
+        let question = failed(step(&runner).unwrap());
+        assert!(
+            question.contains(".claude/settings.local.json"),
+            "{question}"
+        );
+        assert_eq!(rig.claude.all_calls().len(), 0);
+    }
+
     #[test]
     fn a_no_on_a_change_to_claudes_settings_stops_the_work_item() {
         let (rig, runner) = pushed(".mcp.json");
