@@ -326,3 +326,21 @@ fn a_file_moves_into_an_equal_table() {
     let old_file = toml::to_string(&table).unwrap();
     assert_eq!(table_of(&old_file), Ok(table));
 }
+
+#[test]
+fn a_table_s_local_command_expands_the_home_folder_and_takes_the_project_folder() {
+    let command = |path: &str| {
+        let line = format!("command = \"{path}\"");
+        let text = EXAMPLE.replace("command = \"~/.claude/scripts/qwen-review.sh\"", &line);
+        match parse(&text).unwrap().review.local {
+            LocalRound::Command(local) => local.command,
+            other => panic!("{other:?}"),
+        }
+    };
+    assert_eq!(
+        command("~/.claude/scripts/qwen-review.sh"),
+        Path::new("/home/maintainer/.claude/scripts/qwen-review.sh")
+    );
+    assert_eq!(command("review.sh"), Path::new(FOLDER).join("review.sh"));
+    assert_eq!(command("/opt/review.sh"), Path::new("/opt/review.sh"));
+}

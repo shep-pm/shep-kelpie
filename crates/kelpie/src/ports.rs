@@ -18,7 +18,7 @@ use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::coderabbit::Activity;
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
-use crate::settings::{Effort, ForgeSlug};
+use crate::settings::{Effort, ForgeSlug, LocalRound};
 use crate::shots::{ShotsJob, ShotsRun};
 use crate::webhook::Webhook;
 
@@ -669,6 +669,21 @@ pub fn parse_findings(text: &str) -> Vec<Finding> {
     text.lines().filter_map(parse_finding_line).collect()
 }
 
+/// Reads a model's review reply: its findings, or none when it says
+/// exactly `CLEAN`
+///
+/// # Errors
+///
+/// The reply, trimmed, when it holds no finding and is not `CLEAN`: an
+/// empty reply or prose reviewed nothing, which is not clean.
+pub fn read_review(text: &str) -> Result<Vec<Finding>, String> {
+    let findings = parse_findings(text);
+    if findings.is_empty() && text.trim() != "CLEAN" {
+        return Err(text.trim().to_owned());
+    }
+    Ok(findings)
+}
+
 fn parse_finding_line(line: &str) -> Option<Finding> {
     let mut parts = line.splitn(4, '|');
     let severity = match parts.next()? {
@@ -709,20 +724,25 @@ pub struct Verdict {
     pub reason: String,
 }
 
-/// Runs one round of the maintainer's qwen-review script
+/// Runs one local round, of the kind the project's settings choose
 pub trait Reviewer: Send + Sync {
-    /// Runs round `round` against `worktree`'s diff from `base`, usually
-    /// `origin/main`, writing the script's own findings under `out`
-    ///
-    /// Feeds hunk files for anything the script skips as too large, folding
-    /// their findings back in against the original file.
+    /// Checks, as the runner starts, that `local` can run: its command is
+    /// there, or its endpoint answers
     ///
     /// # Errors
     ///
-    /// [`ReviewerError`] when the script cannot be run or its round did not
-    /// finish.
+    /// Why it cannot, naming the command or the endpoint.
+    fn check(&self, local: &LocalRound) -> Result<(), String>;
+
+    /// Runs `local` for round `round` against `worktree`'s diff from `base`,
+    /// usually `origin/main`, writing its findings under `out`
+    ///
+    /// # Errors
+    ///
+    /// [`ReviewerError`] when the round cannot be run or did not finish.
     fn round(
         &self,
+        local: &LocalRound,
         worktree: &std::path::Path,
         base: &str,
         out: &std::path::Path,
@@ -730,26 +750,29 @@ pub trait Reviewer: Send + Sync {
     ) -> Result<Vec<Finding>, ReviewerError>;
 }
 
-/// Why a qwen-review round did not produce findings
+/// Why a local round did not produce findings
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReviewerError {
-    /// The script could not be started, with the OS's reason
+    /// The command could not be started, with the OS's reason
     Spawn(String),
-    /// The script ran and exited unsuccessfully, with this on stderr
+    /// The command ran and exited unsuccessfully, with this on stderr
     Failed(String),
-    /// The script exited successfully but left no completion marker
+    /// The command exited successfully but left no completion marker
     Incomplete,
     /// The round was ended because the runner is stopping
     Stopped,
+    /// The endpoint answered with something other than a chat completion
+    Unreadable(String),
 }
 
 impl fmt::Display for ReviewerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Spawn(error) => write!(f, "cannot run qwen-review.sh: {error}"),
-            Self::Failed(stderr) => write!(f, "qwen-review.sh failed: {}", stderr.trim()),
-            Self::Incomplete => f.write_str("qwen-review.sh left no completion marker"),
-            Self::Stopped => f.write_str("qwen-review.sh was stopped with the runner"),
+            Self::Spawn(error) => write!(f, "cannot run the local round: {error}"),
+            Self::Failed(stderr) => write!(f, "the local round failed: {}", stderr.trim()),
+            Self::Incomplete => f.write_str("the local round left no completion marker"),
+            Self::Stopped => f.write_str("the local round was stopped with the runner"),
+            Self::Unreadable(reply) => write!(f, "the local round's reply is unreadable: {reply}"),
         }
     }
 }
@@ -797,7 +820,7 @@ pub struct Ports {
     pub forge: Box<dyn Forge>,
     /// The account's usage
     pub meter: Box<dyn Meter>,
-    /// The qwen-review script, shared so a round runs without holding the runner
+    /// The local round's runner, shared so a round runs without holding the runner
     pub reviewer: Arc<dyn Reviewer>,
     /// The maintainer's relay session, sent every ruling alongside the webhook
     pub relay: Arc<dyn Relay>,

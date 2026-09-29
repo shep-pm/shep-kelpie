@@ -180,6 +180,7 @@ impl Runner {
         check_repo(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;
         check_coderabbit(&settings, &ports)?;
+        check_local(&settings, &ports)?;
         let store = StateStore::new(paths.state.clone());
         let mut state = store
             .load()?
@@ -408,6 +409,17 @@ fn ruling_channels(
                 .to_owned(),
         }),
     }
+}
+
+// The local round's command is there, or its endpoint answers.
+fn check_local(settings: &Settings, ports: &Ports) -> Result<(), SettingsError> {
+    ports
+        .reviewer
+        .check(&settings.review.local)
+        .map_err(|reason| SettingsError::Invalid {
+            setting: "review.local",
+            reason,
+        })
 }
 
 fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError> {

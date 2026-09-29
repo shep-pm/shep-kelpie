@@ -169,7 +169,7 @@ mod tests {
             "shep".into(),
             paths.settings.clone(),
             paths.kelpie_settings.clone(),
-            PathBuf::from("/home/maintainer"),
+            rig.home.path().to_owned(),
         );
         look.again(&runner);
         look.again(&runner);
@@ -194,7 +194,7 @@ mod tests {
             "shep".into(),
             paths.settings.clone(),
             paths.kelpie_settings.clone(),
-            PathBuf::from("/home/maintainer"),
+            rig.home.path().to_owned(),
         );
         look.last = Some((rig.settings(), rig.kelpie_settings()));
 
@@ -229,7 +229,7 @@ mod tests {
             "shep".into(),
             paths.settings.clone(),
             paths.kelpie_settings.clone(),
-            PathBuf::from("/home/maintainer"),
+            rig.home.path().to_owned(),
         );
         assert!(look.read().unwrap().notices.is_empty());
 

@@ -4,9 +4,9 @@
 //! project had before one. Unknown keys are refused, so a misspelt or
 //! malformed setting stops the runner with a message naming it. Every
 //! setting is required except the ones added after the first build
-//! (`pacing.enabled`, `worker.allowed_domains`, `worker.build_env`,
-//! `worker.instructions_file`, `worker.turn_timeout`, `ruling_channels`
-//! and `[preview]`).
+//! (`review.local`, `pacing.enabled`, `worker.allowed_domains`,
+//! `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout`,
+//! `ruling_channels` and `[preview]`).
 //! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
@@ -27,6 +27,9 @@ pub mod source;
 mod table;
 
 pub use table::table_of;
+mod local;
+
+pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 
 /// Everything kelpie reads about one project
 #[dog_config]
@@ -49,7 +52,7 @@ pub struct Settings {
     pub generated: Vec<String>,
     /// The model and effort for each role
     pub models: Models,
-    /// The qwen-review loop
+    /// The review loop
     pub review: Review,
     /// The CodeRabbit gate
     pub coderabbit: CodeRabbit,
@@ -140,12 +143,16 @@ impl Effort {
     }
 }
 
-/// The qwen-review loop's settings
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+/// The review loop's settings
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Review {
     /// Rounds after which the worker is parked for a ruling
     pub loop_guard: NonZeroU32,
+    /// The local round, `[review.local]`. The maintainer's qwen-review
+    /// script when absent, as every file before this table ran it.
+    #[serde(default)]
+    pub local: LocalRound,
 }
 
 /// The CodeRabbit gate's settings
@@ -470,20 +477,29 @@ impl Settings {
         if let Ok(rest) = self.repo.strip_prefix("~") {
             self.repo = home.join(rest);
         }
-        if let Some(file) = &mut self.worker.instructions_file
-            && let Ok(rest) = file.strip_prefix("~")
-        {
-            *file = home.join(rest);
+        for file in self.files_mut() {
+            if let Ok(rest) = file.strip_prefix("~") {
+                *file = home.join(rest);
+            }
         }
     }
 
-    // A relative instructions file is taken from the project's folder.
+    // A relative path setting is taken from the project's folder.
     fn relative_to(&mut self, folder: &Path) {
-        if let Some(file) = &mut self.worker.instructions_file
-            && file.is_relative()
-        {
+        for file in self.files_mut().filter(|file| file.is_relative()) {
             *file = folder.join(&*file);
         }
+    }
+
+    // The paths that expand `~/` and are taken from the project's folder.
+    fn files_mut(&mut self) -> impl Iterator<Item = &mut PathBuf> {
+        let local = match &mut self.review.local {
+            LocalRound::Command(local) => Some(&mut local.command),
+            LocalRound::Off {} | LocalRound::Endpoint(_) => None,
+        };
+        [self.worker.instructions_file.as_mut(), local]
+            .into_iter()
+            .flatten()
     }
 }
 

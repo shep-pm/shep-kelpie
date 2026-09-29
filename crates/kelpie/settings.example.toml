@@ -1,7 +1,7 @@
 # A project's runner, as its entry in kelpie's Flockfile. The project's
 # settings are the sheep's `[app.dogs.kelpie]` table: shep keeps it and hands
 # it to the runner, and lookout edits it in the sheep's pane. Every key is
-# required except `pacing.enabled`, `worker.allowed_domains`,
+# required except `review.local`, `pacing.enabled`, `worker.allowed_domains`,
 # `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout`,
 # `ruling_channels` and `preview`, which a table written before them may
 # leave out. This entry holds the first build's defaults, for shep.
@@ -60,8 +60,32 @@ effort = "low"
 [app.dogs.kelpie.review]
 loop_guard = 8
 
+# The local round, which alternates with the Claude round, local first. The
+# README says what each kind does. `off` runs the Claude round alone.
+# `endpoint` is kelpie's own reviewer: any OpenAI-compatible server (Ollama,
+# LM Studio, llama.cpp's server), its model, and the context size the server
+# gives that model, in tokens. `command` runs a command that keeps the
+# README's contract, here the maintainer's own qwen-review script, as one
+# example. `gpu_lease = true` has kelpie hold the GPU lock around each round;
+# leave it off for a command that takes the lock itself, as that script does.
+# A missing command or an unreachable endpoint stops the runner. A table
+# without this one runs `~/.claude/scripts/qwen-review.sh`.
+[app.dogs.kelpie.review.local]
+kind = "command"
+command = "~/.claude/scripts/qwen-review.sh"
+
+# [app.dogs.kelpie.review.local]
+# kind = "endpoint"
+# url = "http://localhost:11434/v1"
+# model = "qwen2.5-coder:14b"
+# context = 32768
+# gpu_lease = true
+
+# [app.dogs.kelpie.review.local]
+# kind = "off"
+
 # CodeRabbit's free plan reviews public repos only. Turn this off for a
-# private repo, which then goes from the qwen-review loop and CI straight
+# private repo, which then goes from the review loop and CI straight
 # to the merge ruling.
 [app.dogs.kelpie.coderabbit]
 enabled = true

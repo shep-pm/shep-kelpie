@@ -46,8 +46,15 @@ mod tests {
     }
 
     // Every leaf key the schema names, dotted, the way lookout lists its rows.
+    // A tagged enum's variants each add their own keys.
     fn schema_keys(root: &Value, schema: &Value, prefix: &str, keys: &mut BTreeSet<String>) {
         let schema = resolve(root, schema);
+        if let Some(variants) = schema["oneOf"].as_array() {
+            for variant in variants {
+                schema_keys(root, variant, prefix, keys);
+            }
+            return;
+        }
         match schema["properties"].as_object() {
             Some(properties) => {
                 for (key, property) in properties {
@@ -60,6 +67,20 @@ mod tests {
         }
     }
 
+    // The schema a table is read by: for a tagged enum, the variant its `kind` names.
+    fn variant<'a>(root: &'a Value, schema: &'a Value, table: &toml::Table) -> &'a Value {
+        let schema = resolve(root, schema);
+        let kind = table.get("kind").and_then(toml::Value::as_str);
+        schema["oneOf"]
+            .as_array()
+            .and_then(|variants| {
+                variants
+                    .iter()
+                    .find(|v| kind.is_some_and(|k| v["properties"]["kind"]["const"] == k))
+            })
+            .unwrap_or(schema)
+    }
+
     // Every leaf key a TOML table sets, dotted, walked beside its schema: a
     // map or an array is one key, as it is one row in lookout.
     fn table_keys(
@@ -69,12 +90,19 @@ mod tests {
         prefix: &str,
         keys: &mut BTreeSet<String>,
     ) {
-        let properties = &resolve(root, schema)["properties"];
+        let properties = &variant(root, schema, table)["properties"];
         for (key, value) in table {
-            let property = resolve(root, &properties[key]);
             match value {
-                toml::Value::Table(inner) if property["properties"].is_object() => {
-                    table_keys(root, property, inner, &format!("{prefix}{key}."), keys);
+                toml::Value::Table(inner)
+                    if variant(root, &properties[key], inner)["properties"].is_object() =>
+                {
+                    table_keys(
+                        root,
+                        &properties[key],
+                        inner,
+                        &format!("{prefix}{key}."),
+                        keys,
+                    );
                 }
                 _ => {
                     keys.insert(format!("{prefix}{key}"));
@@ -95,8 +123,9 @@ mod tests {
         keys
     }
 
-    // The example with every optional key set, so each one is counted.
-    fn example_with_every_key() -> String {
+    // The example with every optional key set, once for each kind of local
+    // round, so each key is counted.
+    fn examples_with_every_key() -> Vec<String> {
         let text = include_str!("../settings.example.toml")
             .replace("# ruling_channels =", "ruling_channels =")
             .replace("build_env = {}", "build_env = { BUN = \"bun\" }")
@@ -108,17 +137,38 @@ mod tests {
             .replace("# configuration =", "configuration =")
             .replace("# routes =", "routes =")
             .replace("# domains =", "domains =");
-        toml::to_string(&crate::test::project_table(&text)).unwrap()
+        let command = "kind = \"command\"\ncommand = \"~/.claude/scripts/qwen-review.sh\"\n";
+        assert!(text.contains(command), "the example's local round moved");
+        let endpoint = "kind = \"endpoint\"\nurl = \"http://localhost:11434/v1\"\n\
+                        model = \"m\"\ncontext = 32768\ngpu_lease = true\n";
+        let command_with_lease = format!("{command}gpu_lease = true\n");
+        [command_with_lease.as_str(), endpoint, "kind = \"off\"\n"]
+            .into_iter()
+            .map(|local| {
+                let text = text.replace(command, local);
+                toml::to_string(&crate::test::project_table(&text)).unwrap()
+            })
+            .collect()
     }
 
     #[test]
     fn the_project_schema_round_trips_every_key() {
         let root = schema();
+        let sheep_schema = &root[SHEEP_SCHEMA_KEY];
         let mut sheep = BTreeSet::new();
-        schema_keys(&root, &root[SHEEP_SCHEMA_KEY], "", &mut sheep);
-        let set = keys_of_table(&root, &root[SHEEP_SCHEMA_KEY], &example_with_every_key());
+        schema_keys(&root, sheep_schema, "", &mut sheep);
+        let set: BTreeSet<String> = examples_with_every_key()
+            .iter()
+            .flat_map(|text| keys_of_table(&root, sheep_schema, text))
+            .collect();
         assert_eq!(sheep, set);
-        for key in ["models.judge.effort", "worker.build_env", "preview.routes"] {
+        for key in [
+            "models.judge.effort",
+            "worker.build_env",
+            "preview.routes",
+            "review.local.context",
+            "review.local.command",
+        ] {
             assert!(sheep.contains(key), "{key}: {sheep:?}");
         }
     }
@@ -141,6 +191,8 @@ mod tests {
         assert_eq!(defs["KickoffHours"]["maximum"], 24);
         assert_eq!(defs["Channels"]["minItems"], 1);
         assert_eq!(defs["Route"]["pattern"], "^/");
+        assert_eq!(defs["ContextSize"]["minimum"], 4096);
+        assert!(defs["EndpointUrl"]["pattern"].is_string());
     }
 
     #[test]

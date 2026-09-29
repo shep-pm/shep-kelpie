@@ -6,7 +6,7 @@
 //! checked as a start checks it, and one that fails keeps the settings the
 //! runner has.
 
-use super::{OpenError, Runner, check_coderabbit, instructions, ruling_channels};
+use super::{OpenError, Runner, check_coderabbit, check_local, instructions, ruling_channels};
 use crate::channels::Channels;
 use crate::settings::Settings;
 use crate::webhook::{KelpieSettings, Webhook};
@@ -45,6 +45,9 @@ impl Runner {
         let extra_instructions = instructions::read_extra(&settings)?;
         if settings.coderabbit.enabled && !self.settings.coderabbit.enabled {
             check_coderabbit(&settings, &self.ports)?;
+        }
+        if settings.review.local != self.settings.review.local {
+            check_local(&settings, &self.ports)?;
         }
         self.settings = settings;
         self.extra_instructions = extra_instructions;
@@ -157,6 +160,36 @@ mod tests {
         );
         assert_eq!(runner.settings().forge.as_str(), "shep-pm/shep");
         assert_eq!(runner.settings().repo, rig.repo());
+    }
+
+    #[test]
+    fn a_local_round_change_is_checked_as_a_start_checks_it() {
+        let rig = Rig::new("shep");
+        let runner = rig.open().unwrap();
+        let before = rig.settings().review.local;
+        let missing = settings_with(&rig, |s| {
+            s.replace("~/.claude/scripts/qwen-review.sh", "/nonexistent/review.sh")
+        });
+        let mut runner = runner.lock().unwrap();
+        let err = runner.reread(missing, rig.kelpie_settings()).unwrap_err();
+        assert!(
+            err.to_string().starts_with("setting `review.local`"),
+            "{err}"
+        );
+        assert_eq!(runner.settings().review.local, before);
+
+        let off = settings_with(&rig, |s| {
+            s.replace(
+                "kind = \"command\"\ncommand = \"/nonexistent/review.sh\"",
+                "kind = \"off\"",
+            )
+        });
+        let line = runner.reread(off, rig.kelpie_settings()).unwrap();
+        assert_eq!(
+            line.as_deref(),
+            Some("settings changed: review now in effect")
+        );
+        assert!(!runner.settings().review.local.is_on());
     }
 
     #[test]
