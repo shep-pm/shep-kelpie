@@ -105,6 +105,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         known: Known {
             labels: vec!["review please".into()],
             ready: false,
+            head: None,
         },
         qwen: crate::work_item::QwenTally::default(),
         calls: vec![CallRecord {

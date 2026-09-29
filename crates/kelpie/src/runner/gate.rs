@@ -1,7 +1,7 @@
 //! The gate between the worker's pull request and the merge ruling
 //!
-//! Each step looks once at the pull request's head. A label or ready change
-//! kelpie did not make parks the worker first, before anything else. A
+//! Each step looks once at the pull request's head. A label, ready or head
+//! change kelpie did not make parks the worker before anything else. A
 //! branch without the latest `main` is rebased and pushed, and a conflict is
 //! the worker's next turn, naming the files. A conflict the worker left
 //! standing parks it on a ruling. A pending run, or none yet, waits for the
@@ -52,12 +52,7 @@ impl Runner {
             }
             PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
         }
-        // A rework asked for while one is in flight waits until it ends.
-        let mut labels = pr.labels;
-        labels.retain(|l| l != READY);
-        if let Some((known, description)) = foreign_change(&item.known, &labels, !pr.draft) {
-            return self.raise(number, RulingKind::ForeignChange { description, known });
-        }
+        let known = item.known.clone();
         let now = self.ports.clock.now();
         let since = if seen.as_deref() == Some(pr.head.as_str()) {
             since
@@ -66,11 +61,28 @@ impl Runner {
             self.update(|item| item.phase = Phase::Ci { head, since: now })?;
             now
         };
-        match self.base_of(&pr.head) {
-            Ok(Base::Current) => {}
+        let base = match self.base_of(&pr.head) {
             Ok(Base::Lagging) => return Ok(Begin::Idle),
-            Ok(Base::Behind) => return self.rebase(number, &pr.head),
+            Ok(base) => base,
             Err(reason) => return Ok(self.gate_failed(reason)),
+        };
+        // Past the lag, the forge's head is the branch on `origin`, not a
+        // worker's push still arriving. A rework asked for mid-flight waits.
+        let mut labels = pr.labels;
+        labels.retain(|l| l != READY);
+        if let Some((seen, description)) = foreign_change(&known, &labels, !pr.draft, &pr.head) {
+            let kind = RulingKind::ForeignChange {
+                description,
+                known: seen,
+            };
+            return self.raise(number, kind);
+        }
+        if known.head.is_none() {
+            let head = Some(pr.head.clone());
+            self.update(|item| item.known.head = head)?;
+        }
+        if base == Base::Behind {
+            return self.rebase(number, &pr.head);
         }
         if !self.settings.ci {
             return self.passed(number, pr.head);
@@ -159,7 +171,10 @@ impl Runner {
         match outcome {
             Ok(Rebase::Pushed(rebased)) => {
                 let (seen, since) = (Some(rebased.clone()), self.ports.clock.now());
-                self.update(|item| item.phase = Phase::Ci { head: seen, since })?;
+                self.update(|item| {
+                    item.known.head.clone_from(&seen);
+                    item.phase = Phase::Ci { head: seen, since };
+                })?;
                 Ok(Begin::Report(StepReport::Rebased {
                     issue,
                     pull_request: number,
@@ -360,6 +375,13 @@ mod tests {
             Some(StepReport::Alerted { .. })
         ));
         assert_eq!(step(&runner).unwrap(), None);
+
+        // The maintainer's fix and yes vouch for the head: no foreign-change ruling.
+        let fixed = rig.push_by_hand("kelpie/7", "lint.txt");
+        rig.ask(&runner, "rule", Some("1 yes"));
+        rig.forge.set_checks(&fixed, Checks::Passed);
+        let (_, question) = ruling_report(rig.verdict(&runner));
+        assert!(question.starts_with("Merge pull request #71"), "{question}");
     }
 
     #[test]
@@ -791,7 +813,7 @@ mod tests {
             json!({
                 "kind": "foreign-change",
                 "description": "the `bug` label was added",
-                "known": { "labels": ["bug"], "ready": false },
+                "known": { "labels": ["bug"], "ready": false, "head": head },
             })
         );
 
@@ -868,6 +890,26 @@ mod tests {
         rig.forge.set_checks(&head, Checks::Passed);
         let (_, question) = ruling_report(rig.verdict(&runner));
         assert!(question.starts_with("Merge pull request #71"), "{question}");
+    }
+
+    #[test]
+    fn a_work_item_saved_before_heads_were_known_parks_nothing_and_learns_its_head() {
+        let (rig, runner, head) = Rig::with_pull_request("chelone");
+        drop(runner);
+        let state = rig.paths().state;
+        let text = std::fs::read_to_string(&state).unwrap();
+        let mut saved: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let known = saved["work_item"]["known"].as_object_mut().unwrap();
+        assert!(known.remove("head").is_some());
+        std::fs::write(&state, saved.to_string()).unwrap();
+
+        let runner = rig.open().unwrap();
+        rig.forge.set_checks(&head, Checks::Passed);
+        let (_, question) = ruling_report(rig.verdict(&runner));
+        assert!(question.starts_with("Merge pull request #71"), "{question}");
+        let text = std::fs::read_to_string(&state).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(saved["work_item"]["known"]["head"], json!(head));
     }
 
     #[test]

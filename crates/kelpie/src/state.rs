@@ -537,6 +537,7 @@ mod tests {
                     known: Known {
                         labels: vec!["bug".into()],
                         ready: false,
+                        head: Some("c0ffee".into()),
                     },
                 },
             ),
@@ -585,7 +586,7 @@ mod tests {
                     pinned(7, serde_json::json!({
                         "kind": "foreign-change",
                         "description": "the `bug` label was added",
-                        "known": { "labels": ["bug"], "ready": false },
+                        "known": { "labels": ["bug"], "ready": false, "head": "c0ffee" },
                     })),
                 ],
                 "last_ruling": 7,

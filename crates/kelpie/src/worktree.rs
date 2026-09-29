@@ -49,6 +49,8 @@ pub enum WorktreeError {
     Foreign(PathBuf),
     /// The branch exists with no worktree, so it is not kelpie's to reuse
     BranchTaken(String),
+    /// The worktree is off the head kelpie knew, or has changes not committed
+    Unsettled(PathBuf),
     /// A folder could not be created
     Folder {
         /// The folder
@@ -78,6 +80,11 @@ impl fmt::Display for WorktreeError {
             Self::BranchTaken(branch) => {
                 write!(f, "branch {branch} already exists without its worktree")
             }
+            Self::Unsettled(path) => write!(
+                f,
+                "{} holds work kelpie has not seen pushed",
+                path.display()
+            ),
             Self::Folder { path, kind } => {
                 write!(f, "cannot create {}: {kind}", path.display())
             }
@@ -271,6 +278,44 @@ pub fn origin_head(repo: &Path, branch: &str) -> Result<String, WorktreeError> {
     git(repo, ["fetch", "--quiet", "origin", branch])?;
     let tracking = format!("refs/remotes/origin/{branch}");
     git(repo, ["rev-parse", "--verify", "--quiet", &tracking])
+}
+
+/// Moves the worktree's branch from `from`, the head kelpie knew, to `to`
+///
+/// `to` is a head on `origin` the maintainer accepted. A worktree at neither,
+/// or with changes not committed, holds work of the worker's, and is refused.
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed, or
+/// [`WorktreeError::Unsettled`] for a worktree refused.
+pub fn adopt(
+    repo: &Path,
+    worktree: &Path,
+    branch: &str,
+    from: &str,
+    to: &str,
+) -> Result<(), WorktreeError> {
+    let in_worktree = trusted(repo, worktree)?;
+    let unsettled = || WorktreeError::Unsettled(worktree.to_owned());
+    let full_ref = format!("refs/heads/{branch}");
+    let on_branch = in_worktree(&["symbolic-ref", "--quiet", "HEAD"])
+        .ok()
+        .as_deref()
+        == Some(&full_ref);
+    if !on_branch || !in_worktree(&["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
+        return Err(unsettled());
+    }
+    let at = in_worktree(&["rev-parse", "HEAD"])?;
+    if at == to {
+        return Ok(());
+    }
+    if at != from {
+        return Err(unsettled());
+    }
+    git(repo, ["fetch", "--quiet", "origin", branch])?;
+    in_worktree(&["reset", "--quiet", "--hard", to])?;
+    Ok(())
 }
 
 /// What a rebase onto `origin/main` came to
