@@ -119,6 +119,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         merge_refused: false,
         merge_tried: None,
         summon_owed: false,
+        local_rounds: 0,
         rebased: false,
         shots: None,
         shots_comment: None,

@@ -28,8 +28,14 @@ fn summoned_80(head: &str) -> Option<StepReport> {
 // Pull request 80, ready, adopted with CodeRabbit on, and green. CodeRabbit
 // reviewed its first commit clean before the adoption.
 fn adopted(project: &str) -> (Rig, Mutex<Runner>, String) {
+    adopted_set(project, |_| {})
+}
+
+// [`adopted`], after `setup` changed the rig's settings
+pub(super) fn adopted_set(project: &str, setup: impl FnOnce(&Rig)) -> (Rig, Mutex<Runner>, String) {
     let rig = Rig::new(project);
     rig.coderabbit_on();
+    setup(&rig);
     let reviewed = rig.push_by_hand("fix/timeline", "work.txt");
     rig.forge
         .coderabbit
