@@ -111,7 +111,7 @@ fn read(path: &Path) -> Result<Option<String>, String> {
 
 fn differs(file: &Path, table: &str) -> String {
     format!(
-        "{table} is already set and differs from {}, so neither was changed. \
+        "{table} is already set and differs from {}, so both were left as they are. \
          Edit the table in lookout, or remove it there to move the file.",
         file.display()
     )
@@ -266,5 +266,23 @@ mod tests {
             "{err}"
         );
         assert_eq!(scene.writes(), []);
+    }
+
+    // The project's table moves first, so it stays moved when kelpie's stops.
+    #[tokio::test]
+    async fn a_section_already_set_otherwise_is_left_alone_after_the_table_moves() {
+        let other = "[webhook]\nkind = \"discord\"\nurl = \"https://discord.example/h\"\n";
+        let mut scene = Scene::new(None, other).await;
+        let err = scene.move_in_time().await.unwrap_err();
+        assert!(
+            err.starts_with("kelpie's [kelpie] section of dogs.toml is already set"),
+            "{err}"
+        );
+        assert!(err.contains("both were left as they are"), "{err}");
+        let writes = scene.writes();
+        assert!(
+            matches!(writes.as_slice(), [Request::SetSheepDogSettings { .. }]),
+            "{writes:?}"
+        );
     }
 }
