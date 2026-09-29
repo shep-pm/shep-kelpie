@@ -162,53 +162,64 @@ pub async fn add(
         }
     }
 
+    // A failure part way says what had changed by then.
     let mut done = Vec::new();
-    let have = forge.repo_labels(repo).map_err(|e| asked("labels", &e))?;
-    for label in LABELS {
-        if have.iter().any(|l| l == label.name) {
-            done.push(format!("label `{}`: already on {slug}", label.name));
-        } else {
-            forge
-                .create_label(repo, &label)
-                .map_err(|e| format!("cannot make label `{}` on {slug}: {e}", label.name))?;
-            done.push(format!("label `{}`: made on {slug}", label.name));
+    let wrote = async {
+        let have = forge.repo_labels(repo).map_err(|e| asked("labels", &e))?;
+        for label in LABELS {
+            if have.iter().any(|l| l == label.name) {
+                done.push(format!("label `{}`: already on {slug}", label.name));
+            } else {
+                forge
+                    .create_label(repo, &label)
+                    .map_err(|e| format!("cannot make label `{}` on {slug}: {e}", label.name))?;
+                done.push(format!("label `{}`: made on {slug}", label.name));
+            }
         }
-    }
 
-    match (runner, set) {
-        (None, _) => {
-            let request = Request::Add {
-                apps: vec![launch.runner(name, table)],
-            };
-            send(client, request, |r| matches!(r, Response::Added(_))).await?;
-            done.push(format!(
-                "runner `{name}`: added with its settings, stopped until `shep kelpie start`"
-            ));
+        match (runner, set) {
+            (None, _) => {
+                let request = Request::Add {
+                    apps: vec![launch.runner(name, table)],
+                };
+                send(client, request, |r| matches!(r, Response::Added(_))).await?;
+                done.push(format!(
+                    "runner `{name}`: added with its settings, stopped until `shep kelpie start`"
+                ));
+            }
+            (Some(_), false) => {
+                let request = Request::SetSheepDogSettings {
+                    name: name.as_str().to_owned(),
+                    dog: DOG.to_owned(),
+                    table: Some(DogTable::from(table)),
+                };
+                send(client, request, |r| {
+                    matches!(r, Response::SheepDogSettingsSet { .. })
+                })
+                .await?;
+                done.push(format!(
+                    "runner `{name}`: already there, and given its settings"
+                ));
+            }
+            _ => done.push(format!("runner `{name}`: already there with its settings")),
         }
-        (Some(_), false) => {
-            let request = Request::SetSheepDogSettings {
-                name: name.as_str().to_owned(),
-                dog: DOG.to_owned(),
-                table: Some(DogTable::from(table)),
-            };
-            send(client, request, |r| {
-                matches!(r, Response::SheepDogSettingsSet { .. })
-            })
-            .await?;
-            done.push(format!(
-                "runner `{name}`: already there, and given its settings"
-            ));
-        }
-        _ => done.push(format!("runner `{name}`: already there with its settings")),
-    }
 
-    done.push(replace_dog(client, launch, old_dog, dog).await?);
-    Ok(done)
+        done.push(replace_dog(client, launch, old_dog, dog).await?);
+        Ok::<(), String>(())
+    }
+    .await;
+    match wrote {
+        Ok(()) => Ok(done),
+        Err(e) if done.is_empty() => Err(e),
+        Err(e) => Err(format!("{e}, after this much: {}", done.join("; "))),
+    }
 }
 
 // The dog's sheep, made when missing. A dog set up from a Flockfile under
 // its old name holds the name `shep adopt` needs, so it is replaced, and
 // the new one started at once when the old one ran: its book is on disk.
+// The old one goes first, so a failure leaves at most one dog, and `add`
+// again finishes the job.
 async fn replace_dog(
     client: &Client,
     launch: &Launch,
@@ -218,6 +229,12 @@ async fn replace_dog(
     // `add` refused both before it wrote anything.
     if dog.is_some() {
         return Ok(format!("dog `{}`: already there", dog::NAME));
+    }
+    if old.is_some() {
+        let delete = Request::Delete {
+            selector: SelectorSpec::Name(dog::OLD_NAME.to_owned()),
+        };
+        send(client, delete, |r| matches!(r, Response::Deleted(_))).await?;
     }
     let request = Request::Add {
         apps: vec![launch.dog()],
@@ -229,10 +246,6 @@ async fn replace_dog(
             dog::NAME
         ));
     };
-    let delete = Request::Delete {
-        selector: SelectorSpec::Name(dog::OLD_NAME.to_owned()),
-    };
-    send(client, delete, |r| matches!(r, Response::Deleted(_))).await?;
     if old.status == shep_client::shep_core::status::ProcStatus::Online {
         super::resume(client, dog::NAME).await?;
     }
@@ -291,7 +304,10 @@ fn settings(
             if let Some(Value::Object(coderabbit)) = table.get_mut("coderabbit") {
                 coderabbit.insert("enabled".into(), Value::Bool(public));
             }
-            let local = if place.home.join(&QWEN_REVIEW[2..]).is_file() {
+            let installed = QWEN_REVIEW
+                .strip_prefix("~/")
+                .is_some_and(|script| place.home.join(script).is_file());
+            let local = if installed {
                 [("kind", "command"), ("command", QWEN_REVIEW)].as_slice()
             } else {
                 [("kind", "off")].as_slice()
