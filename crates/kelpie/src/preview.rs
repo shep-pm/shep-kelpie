@@ -338,7 +338,7 @@ fn run(command: &mut Command) -> Result<(), String> {
     Ok(())
 }
 
-/// Appended to kelpie's instructions for a worker whose worktree has a launch file
+/// Appended to kelpie's instructions for a worker on a project with the preview on
 pub const WORKER_INSTRUCTIONS: &str = include_str!("preview/worker-instructions.md");
 
 /// Where one worker's MCP servers find what they run

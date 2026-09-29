@@ -1,4 +1,4 @@
-//! Kelpie's shots of a work item with a launch file
+//! Kelpie's shots of a work item, for a project with the preview on
 //!
 //! A run is taken outside the runner's lock, like a review call, of the head
 //! on `origin`: before each Claude review round, and before the merge ruling.
@@ -33,7 +33,7 @@ const GONE: &str = "HTTP 404";
 pub(super) enum RoundShots {
     /// A run of the head is due first
     Take(Begin),
-    /// Kelpie's run of the head, or none without a launch file
+    /// Kelpie's run of the head, or none with the preview off or nothing to see
     Ready(Option<ShotsRun>),
 }
 
