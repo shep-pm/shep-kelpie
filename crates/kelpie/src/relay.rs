@@ -140,6 +140,14 @@ pub fn message(project: &str, ruling_id: u64, wants: Wants, question: &str) -> S
     format!("[kelpie]\nproject={project} ruling={ruling_id} wants={wants}\n\n{question}")
 }
 
+/// What kelpie sends the relay for a notice, which is no ruling: the relay
+/// pushes `text` to the maintainer and asks nothing
+///
+/// `project` takes the same care as in [`message`].
+pub fn notice(project: &str, text: &str) -> String {
+    format!("[kelpie]\nproject={project} notice=merged\n\n{text}")
+}
+
 /// How a ruling the relay was sent was settled without it
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Settled {
@@ -349,6 +357,25 @@ mod tests {
         assert_eq!(
             message("shep", 4, Wants::Answer, "The worker asks: …"),
             "[kelpie]\nproject=shep ruling=4 wants=answer\n\nThe worker asks: …"
+        );
+    }
+
+    #[test]
+    fn a_notice_names_its_kind_where_a_ruling_names_its_id() {
+        assert_eq!(
+            notice("shep", "Pull request #71 merged."),
+            "[kelpie]\nproject=shep notice=merged\n\nPull request #71 merged."
+        );
+    }
+
+    #[test]
+    fn the_instructions_send_a_notice_as_a_push_and_ask_nothing() {
+        let text = instructions_text();
+        assert!(text.contains("`notice=merged`"), "{text}");
+        assert!(text.contains("PushNotification"), "{text}");
+        assert!(
+            text.contains("never AskUserQuestion, so nothing is left waiting"),
+            "{text}"
         );
     }
 

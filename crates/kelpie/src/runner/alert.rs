@@ -1,5 +1,4 @@
-//! Posting each ruling to the maintainer's relay and webhook, and each notice
-//! to the webhook
+//! Posting each ruling and each notice to the maintainer's relay and webhook
 //!
 //! The project's ruling channels say which of the two a ruling goes to, and
 //! a channel that is off is never touched: no relay is started, no post made.
@@ -10,8 +9,9 @@
 //! before it is posted so a failed post loses nothing, and a failed post is
 //! tried again, waiting longer after each failure. A save that fails after
 //! a post lands leaves it to be posted again. A notice of an automatic merge
-//! takes the same path, webhook only, once no ruling is waiting to be
-//! posted, and is dropped where the webhook is off.
+//! takes the same path once no ruling is waiting to be posted: to the
+//! webhook where it is on, else to the relay, which pushes it and asks
+//! nothing.
 
 use std::sync::Mutex;
 
@@ -72,8 +72,8 @@ pub(super) struct RelayMessage {
 #[derive(Debug)]
 pub(super) struct Due {
     pub(super) of: Posting,
-    /// None for a notice, which needs no answer, for a ruling the relay
-    /// already holds, whose retry is for the webhook alone, and where the
+    /// None for a ruling the relay already holds, whose retry is for the
+    /// webhook alone, for a notice where the webhook is on, and where the
     /// relay is off
     pub(super) relay: Option<RelayMessage>,
     /// Whether the ruling is already saved as held by the relay
@@ -127,7 +127,8 @@ pub(super) fn post_due(
     let mut relayed = due.relay_held;
     let mut relay_failed = None;
     if let Some(message) = &due.relay {
-        let clear_due = lock(runner).relay_clear_due();
+        // A notice never clears: a clear would end a question still up.
+        let clear_due = matches!(due.of, Posting::Ruling(_)) && lock(runner).relay_clear_due();
         if clear_due
             && relay.clear().is_ok()
             && let Err(e) = lock(runner).relay_emptied()
@@ -186,16 +187,12 @@ impl Runner {
             let due = Due {
                 of,
                 relay: (self.channels.has(Channel::Relay) && !ruling.relayed).then(|| {
-                    RelayMessage {
-                        text: relay::message(
-                            project,
-                            ruling.id,
-                            relay::Wants::of(&ruling.kind),
-                            &ruling.question,
-                        ),
-                        model: self.settings.models.relay.model.as_str().to_owned(),
-                        effort: self.settings.models.relay.effort,
-                    }
+                    self.relay_message(relay::message(
+                        project,
+                        ruling.id,
+                        relay::Wants::of(&ruling.kind),
+                        &ruling.question,
+                    ))
                 }),
                 relay_held: ruling.relayed,
                 webhook: self.webhook.clone(),
@@ -214,13 +211,23 @@ impl Runner {
             issue: notice.issue,
             pull_request: notice.pull_request,
         };
+        let alert = notice_alert(project, notice);
         (!waiting(of)).then(|| Due {
             of,
-            relay: None,
+            relay: (self.channels.has(Channel::Relay) && !self.channels.has(Channel::Webhook))
+                .then(|| self.relay_message(relay::notice(project, &alert.text))),
             relay_held: false,
             webhook: self.webhook.clone(),
-            alert: notice_alert(project, notice),
+            alert,
         })
+    }
+
+    fn relay_message(&self, text: String) -> RelayMessage {
+        RelayMessage {
+            text,
+            model: self.settings.models.relay.model.as_str().to_owned(),
+            effort: self.settings.models.relay.effort,
+        }
     }
 
     /// Whether the relay is due a daily clear, which is recorded as done

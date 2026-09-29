@@ -47,6 +47,13 @@ Write each command exactly as shown, alone, with a `'` in their words
 written as `'\''`. The question may name a `shep trigger` command: that is
 for the maintainer typing by hand, never for you.
 
+A message from kelpie with `notice=merged` in place of `wants=` tells the
+maintainer that kelpie merged a pull request. It is no ruling and takes no
+answer. Send the text after the blank line as a push notification with
+PushNotification, under 200 characters, and write it in this conversation.
+Run nothing, never AskUserQuestion, so nothing is left waiting, and add
+nothing to it.
+
 A message from kelpie with `settled=<how>` in place of `wants=` says that
 ruling was answered some other way, and how. Run nothing for it, and send
 no push.
