@@ -95,9 +95,28 @@ async fn deliver(shep_home: &Path, project: &str, ruling: Ruling<'_>) -> Result<
         return Err(format!("kelpie's shepherd answered {reply:?}"));
     };
     match rows.into_iter().next().map(|row| row.outcome) {
-        Some(ActionOutcome::Replied { body }) => Ok(body),
+        Some(ActionOutcome::Replied { body }) => match refusal(&body) {
+            None => Ok(body),
+            Some(why) => Err(format!(
+                "{project}'s runner refused the ruling: {why}. \
+                 Tell the maintainer, and send nothing else."
+            )),
+        },
         Some(other) => Err(format!("{project}'s runner did not answer: {other:?}")),
         None => Err(format!("kelpie's shepherd runs no sheep named {project}")),
+    }
+}
+
+// The `error` a runner's reply carries, if any. A reply that is not JSON
+// carries none.
+fn refusal(body: &str) -> Option<String> {
+    match serde_json::from_str::<serde_json::Value>(body)
+        .ok()?
+        .get("error")?
+    {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(why) => Some(why.clone()),
+        why => Some(why.to_string()),
     }
 }
 
@@ -278,6 +297,22 @@ mod tests {
             .unwrap_err();
         assert!(refused.contains("runs shep 0.12.0"), "{refused}");
         assert!(!refused.contains("reload"), "{refused}");
+    }
+
+    #[tokio::test]
+    async fn a_refused_ruling_fails_the_command_and_names_nothing_to_run() {
+        let home = scratch_home();
+        let error = r#"{"error":"ruling 3 is the worker's question, so it takes an answer, not a yes or no"}"#;
+        let _sent = shepherd(home.path(), SHEP_VERSION, replied(error)).await;
+        let refused = deliver_in_time(home.path(), Ruling::Yes("3"))
+            .await
+            .unwrap_err();
+        assert!(
+            refused.starts_with("shep's runner refused the ruling: ruling 3"),
+            "{refused}"
+        );
+        assert!(refused.contains("Tell the maintainer"), "{refused}");
+        assert!(!refused.contains('`'), "{refused}");
     }
 
     #[tokio::test]

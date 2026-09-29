@@ -61,11 +61,11 @@ impl fmt::Display for RuleError {
             Self::NoSuchRuling(id) => write!(f, "no ruling {id} is pending"),
             Self::WantsAnswer(id) => write!(
                 f,
-                "ruling {id} is the worker's question: answer it with `{id} answer <text>`"
+                "ruling {id} is the worker's question, so it takes an answer, not a yes or no"
             ),
             Self::NotAQuestion(id) => write!(
                 f,
-                "ruling {id} takes `{id} yes` or `{id} no <note>`, not an answer"
+                "ruling {id} is not a question, so it takes a yes, or a no with a note"
             ),
             Self::Unlabel(number, e) => {
                 write!(f, "cannot take the `{HUMAN}` label off #{number}: {e}")

@@ -79,7 +79,12 @@ impl Runner {
             return (!waiting(of)).then(|| Due {
                 of,
                 relay: Some(RelayMessage {
-                    text: relay::message(project, ruling.id, &ruling.question),
+                    text: relay::message(
+                        project,
+                        ruling.id,
+                        relay::Wants::of(&ruling.kind),
+                        &ruling.question,
+                    ),
                     model: self.settings.models.relay.model.as_str().to_owned(),
                     effort: self.settings.models.relay.effort,
                 }),
@@ -352,7 +357,7 @@ mod tests {
         assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
         let [(sent, model, effort)] = rig.relay.sent().try_into().unwrap();
         assert!(
-            sent.starts_with("[kelpie]\nproject=shep ruling=1\n\n"),
+            sent.starts_with("[kelpie]\nproject=shep ruling=1 wants=yes-or-no\n\n"),
             "{sent}"
         );
         assert!(sent.contains(&head[..7]), "{sent}");
