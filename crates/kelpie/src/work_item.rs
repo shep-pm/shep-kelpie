@@ -685,6 +685,26 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_merge_is_saved_only_while_it_stands() {
+        let mut item = a_work_item();
+        let value = serde_json::to_value(&item).unwrap();
+        assert!(value.get("merge_refused").is_none(), "{value}");
+        assert!(
+            !serde_json::from_value::<WorkItem>(value)
+                .unwrap()
+                .merge_refused
+        );
+        item.merge_refused = true;
+        let value = serde_json::to_value(&item).unwrap();
+        assert_eq!(value["merge_refused"], true);
+        assert!(
+            serde_json::from_value::<WorkItem>(value)
+                .unwrap()
+                .merge_refused
+        );
+    }
+
+    #[test]
     fn session_ids_are_distinct_version_4_uuids() {
         let a = new_session_id().unwrap().0;
         let b = new_session_id().unwrap().0;
