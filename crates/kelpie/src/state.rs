@@ -84,6 +84,11 @@ impl ProjectState {
         }
     }
 
+    /// The open work items' issues, oldest first
+    pub fn open_issues(&self) -> Vec<u64> {
+        self.work_items.iter().map(|item| item.issue).collect()
+    }
+
     /// The open work item for `issue`
     pub fn item(&self, issue: u64) -> Option<&WorkItem> {
         self.work_items.iter().find(|item| item.issue == issue)

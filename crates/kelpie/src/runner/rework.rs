@@ -118,8 +118,7 @@ impl Runner {
     /// save that fails after the triage labels began coming off leaves them off.
     pub fn rework(&mut self, number: u64) -> Result<WorkerModel, ReworkError> {
         if !self.slot_free() {
-            let open = self.state.work_items.iter().map(|i| i.issue).collect();
-            return Err(ReworkError::InFlight(open));
+            return Err(ReworkError::InFlight(self.state.open_issues()));
         }
         let pr = self
             .ports

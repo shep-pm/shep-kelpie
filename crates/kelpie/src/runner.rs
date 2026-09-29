@@ -299,8 +299,7 @@ impl Runner {
             return Err(AddError::InFlight(vec![issue]));
         }
         if !self.slot_free() {
-            let open = self.state.work_items.iter().map(|i| i.issue).collect();
-            return Err(AddError::InFlight(open));
+            return Err(AddError::InFlight(self.state.open_issues()));
         }
         let found = self
             .ports

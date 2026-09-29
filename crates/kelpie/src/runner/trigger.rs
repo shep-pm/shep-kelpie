@@ -354,7 +354,7 @@ impl Runner {
     // Works on the work item for `issue`, or on the only one open when no
     // issue is named.
     pub(super) fn choose(&mut self, issue: Option<u64>) -> Result<(), WhichItem> {
-        let open: Vec<u64> = self.state.work_items.iter().map(|i| i.issue).collect();
+        let open = self.state.open_issues();
         let chosen = match (issue, open.as_slice()) {
             (Some(issue), _) if open.contains(&issue) => issue,
             (Some(issue), _) => return Err(WhichItem::NotOpen(issue)),
