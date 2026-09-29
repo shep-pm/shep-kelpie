@@ -239,10 +239,10 @@ impl Runner {
             return self.save(next).map_err(RuleError::State);
         };
         let kind = RulingKind::ForeignChange { description, known };
-        let (_, _, question) = park(self.project.as_str(), &mut next, number, kind);
+        let (_, id, _) = park(self.project.as_str(), &mut next, number, kind);
         self.save(next).map_err(RuleError::State)?;
         // A comment that fails loses nothing: the ruling is saved and alerted.
-        let _ = self.post_ruling(number, &question);
+        let _ = self.post_ruling(number, id);
         Ok(())
     }
 
@@ -252,7 +252,7 @@ impl Runner {
         let mut next = self.state.clone();
         let (issue, id, question) = park(self.project.as_str(), &mut next, Some(number), kind);
         self.save(next)?;
-        let comment_failed = self.post_ruling(Some(number), &question);
+        let comment_failed = self.post_ruling(Some(number), id);
         Ok(Begin::Report(StepReport::Ruling {
             issue,
             pull_request: number,
@@ -262,14 +262,17 @@ impl Runner {
         }))
     }
 
-    // Posts a saved ruling's question on its pull request, if it has one,
-    // and returns why the comment failed, if it did.
-    pub(super) fn post_ruling(&self, number: Option<u64>, question: &str) -> Option<String> {
+    // Posts a saved ruling on its pull request, if it has one and has
+    // anything to say there, and returns why the comment failed, if it did.
+    // The pull request carries no question: the webhook and the relay do.
+    pub(super) fn post_ruling(&self, number: Option<u64>, id: u64) -> Option<String> {
         let number = number?;
+        let ruling = self.state.rulings.iter().find(|r| r.id == id)?;
+        let comment = comment(&ruling.kind)?;
         let posted = self
             .ports
             .forge
-            .comment(&self.settings.forge, number, question);
+            .comment(&self.settings.forge, number, &comment);
         posted.err().map(|e| e.to_string())
     }
 
@@ -311,6 +314,50 @@ pub(super) fn park(
         relayed: false,
     });
     (issue, id, text)
+}
+
+// What a reader of the pull request is told of a ruling: what happened and
+// that it waits on the maintainer, with no command and nothing of kelpie's.
+// A merge ruling says nothing, since `ready-for-human` already does.
+fn comment(kind: &RulingKind) -> Option<String> {
+    let said = match kind {
+        RulingKind::Merge { .. } => return None,
+        RulingKind::Rebase { reason } => {
+            format!("This branch could not be rebased onto main: {reason}.")
+        }
+        RulingKind::StillRed { head, checks } => format!(
+            "CI failed again at {} and no fix was pushed: {}.",
+            short(head),
+            checks.join(", ")
+        ),
+        RulingKind::Closed => "This pull request was closed without merging.".to_owned(),
+        RulingKind::ReviewGuard { review } => format!(
+            "The review of this pull request has run {} rounds without settling.",
+            review.round.saturating_sub(1)
+        ),
+        RulingKind::FixNotPushed { .. } => {
+            "A fix for review findings ended without a push, so those findings still hold."
+                .to_owned()
+        }
+        RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
+            "CodeRabbit has run {rounds} rounds here, its cap, \
+             and {held} of its findings still hold."
+        ),
+        RulingKind::CodeRabbitSilent { head } => {
+            format!("CodeRabbit never reviewed {}.", short(head))
+        }
+        RulingKind::Question { asked, .. } => asked.clone(),
+        RulingKind::TurnTimeout { .. } => {
+            "The work on this pull request ran too long and was stopped.".to_owned()
+        }
+        RulingKind::TurnFailed { .. } => {
+            "The work on this pull request hit an error and stopped.".to_owned()
+        }
+        RulingKind::ForeignChange { description, .. } => {
+            format!("This pull request was changed: {description}.")
+        }
+    };
+    Some(format!("{said}\n\nWaiting on the maintainer."))
 }
 
 // A yes, a no or an answer that does not fit the ruling is refused.
@@ -562,6 +609,66 @@ mod tests {
     use crate::runner::gate::CHECKS_SETTLE;
     use crate::runner::step;
     use crate::test::{Rig, Scripted};
+
+    // The pull request is public: it gets what happened and who it waits on,
+    // and never a command, which the webhook and the relay carry instead.
+    #[test]
+    fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
+        let review = Review::first();
+        let known = Known {
+            labels: vec![],
+            ready: false,
+            head: None,
+        };
+        let kinds = [
+            RulingKind::Rebase {
+                reason: "conflict in a.txt".into(),
+            },
+            RulingKind::StillRed {
+                head: "abcdef123".into(),
+                checks: vec!["test".into(), "lint".into()],
+            },
+            RulingKind::Closed,
+            RulingKind::ReviewGuard {
+                review: review.clone(),
+            },
+            RulingKind::FixNotPushed {
+                fix: Fix::Review(review),
+                prompt: "fix it".into(),
+            },
+            RulingKind::CodeRabbitCap {
+                rounds: 3,
+                held: 2,
+                prompt: "fix it".into(),
+                head: None,
+            },
+            RulingKind::CodeRabbitSilent {
+                head: "abcdef123".into(),
+            },
+            RulingKind::Question {
+                asked: "Which flag?".into(),
+                resume: Resume::Nothing,
+            },
+            RulingKind::TurnTimeout { phase: None },
+            RulingKind::TurnFailed {
+                reason: "boom".into(),
+                phase: Phase::Implement,
+                retry: Turn::Next { prompt: "x".into() },
+            },
+            RulingKind::ForeignChange {
+                description: "the `bug` label was added".into(),
+                known,
+            },
+        ];
+        for kind in kinds {
+            let said = comment(&kind).unwrap_or_default();
+            assert!(said.ends_with("\n\nWaiting on the maintainer."), "{said}");
+            for internal in ["shep trigger", "rule '", "ruling", "yes", "<note>"] {
+                assert!(!said.contains(internal), "{internal} in {said}");
+            }
+        }
+        assert_eq!(comment(&RulingKind::Merge { head: "abc".into() }), None);
+    }
 
     #[test]
     fn nothing_merges_without_a_yes() {
