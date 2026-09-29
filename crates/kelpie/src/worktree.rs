@@ -478,7 +478,9 @@ pub fn rebase(
 // Git for the worktree, with its git dirs named rather than found. The
 // worker can write the worktree's own git dir, so its `commondir` is checked
 // against the repo's, and hooks are off: none of them is kelpie's to run.
-fn trusted<'a>(
+// Replace refs are ignored too: a worker's `git replace` would show a read
+// one commit while a push packs another.
+pub(crate) fn trusted<'a>(
     repo: &Path,
     worktree: &'a Path,
 ) -> Result<impl Fn(&[&str]) -> Result<String, WorktreeError> + 'a, WorktreeError> {
@@ -500,6 +502,7 @@ fn trusted<'a>(
         worktree.as_os_str().to_owned(),
         "-c".into(),
         "core.hooksPath=/dev/null".into(),
+        "--no-replace-objects".into(),
     ];
     Ok(move |args: &[&str]| {
         let args = prefix.iter().cloned().chain(args.iter().map(Into::into));

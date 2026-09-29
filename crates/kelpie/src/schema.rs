@@ -133,6 +133,10 @@ mod tests {
                 "# instructions_file = \"~/.kelpie/projects/shep/worker-instructions.md\"",
                 "instructions_file = \"worker.md\"",
             )
+            .replace(
+                "# [[app.dogs.kelpie.worker.guard_hooks]]\n# event = \"PreToolUse\"\n# matcher = \"Bash\"\n# command =",
+                "[[app.dogs.kelpie.worker.guard_hooks]]\nevent = \"PreToolUse\"\nmatcher = \"Bash\"\ncommand =",
+            )
             .replace("# [app.dogs.kelpie.preview]", "[app.dogs.kelpie.preview]")
             .replace("# enabled = true", "enabled = true")
             .replace("# configuration =", "configuration =")
