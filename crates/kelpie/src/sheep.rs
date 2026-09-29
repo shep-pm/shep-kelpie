@@ -14,7 +14,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use crate::adapters::{ClaudeCli, Curl, Gh, QwenReviewer, RelayCli, ShepLeases, SystemClock};
+use crate::adapters::{
+    ClaudeCli, Curl, Gh, QwenReviewer, RelayCli, ShepLeases, ShotsCli, SystemClock,
+};
 use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
 use crate::ports::{Leases, Ports};
@@ -63,6 +65,7 @@ fn serve(project: &str) -> Result<(), String> {
     let shepherd = shep_channel::serve();
     let claude = ClaudeCli::default();
     let reviewer = QwenReviewer::new(&home);
+    let shots = ShotsCli::new(paths.tools.clone());
     let epoch = Epoch(u64::from(std::process::id()));
     let leases = Arc::new(ShepLeases::new(shepherd.clone(), Asker::new(epoch)));
     let ports = Ports {
@@ -70,6 +73,7 @@ fn serve(project: &str) -> Result<(), String> {
         forge: Box::new(Gh),
         meter: Box::new(claude.meter()),
         reviewer: Arc::new(reviewer.clone()),
+        shots: Arc::new(shots.clone()),
         relay: Arc::new(RelayCli::new(
             home.clone(),
             kelpie_home.join("relay"),
@@ -123,6 +127,7 @@ fn serve(project: &str) -> Result<(), String> {
     let let_go = worker.stop(JOIN_BOUND, || {
         claude.stop();
         reviewer.stop();
+        shots.stop();
     });
     if !let_go {
         eprintln!(

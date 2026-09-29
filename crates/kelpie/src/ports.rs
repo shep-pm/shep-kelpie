@@ -1,5 +1,5 @@
 //! The runner's ports: Claude, the forge, the account's usage, the
-//! maintainer's webhook and the clock
+//! maintainer's webhook, kelpie's shots and the clock
 //!
 //! The work-item loop reaches the outside world only through these traits.
 //! [`crate::adapters`] holds the real ones and the test rig holds stand-ins,
@@ -19,6 +19,7 @@ use crate::coderabbit::Activity;
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
 use crate::settings::{Effort, ForgeSlug};
+use crate::shots::{ShotsJob, ShotsRun};
 use crate::webhook::Webhook;
 
 /// Seconds since the Unix epoch
@@ -105,6 +106,20 @@ pub trait Forge: Send {
     ///
     /// [`ForgeError`] when the comment cannot be posted.
     fn comment(&self, repo: &ForgeSlug, number: u64, body: &str) -> Result<(), ForgeError>;
+
+    /// Posts `body` as a comment on pull request `number`, and returns its id
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the comment cannot be posted or its id read.
+    fn post_comment(&self, repo: &ForgeSlug, number: u64, body: &str) -> Result<u64, ForgeError>;
+
+    /// Replaces comment `id`'s body with `body`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the comment is gone or cannot be edited.
+    fn edit_comment(&self, repo: &ForgeSlug, id: u64, body: &str) -> Result<(), ForgeError>;
 
     /// Marks draft pull request `number` ready for review
     ///
@@ -335,6 +350,8 @@ pub struct ClaudeCall {
     pub instructions: Option<PathBuf>,
     /// The turn's prompt
     pub prompt: String,
+    /// The MCP servers the session starts with, beside any the repo names
+    pub mcp_config: Option<PathBuf>,
     /// Kills the call, and returns [`ClaudeError::TimedOut`], once it has
     /// run this long
     pub timeout: Option<Duration>,
@@ -647,11 +664,16 @@ fn parse_finding_line(line: &str) -> Option<Finding> {
     let location = parts.next()?;
     let what = parts.next()?;
     let why = parts.next()?;
-    let (file, line_number) = location.rsplit_once(':')?;
+    // A screenshot has no lines, and a Claude round names one without `:0`.
+    let (file, line) = match location.rsplit_once(':') {
+        Some((file, n)) => (file, n.parse().ok()?),
+        None if location.ends_with(".png") => (location, 0),
+        None => return None,
+    };
     Some(Finding {
         severity,
         file: file.to_owned(),
-        line: line_number.parse().ok()?,
+        line,
         what: what.to_owned(),
         why: why.to_owned(),
     })
@@ -718,6 +740,20 @@ impl fmt::Display for ReviewerError {
 
 impl std::error::Error for ReviewerError {}
 
+/// Takes a work item's shots
+pub trait Shots: Send + Sync {
+    /// Runs `job` to its end
+    ///
+    /// Never fails: whatever went wrong, the whole run included, is in the
+    /// run it returns, since a shots run never holds a gate.
+    fn take(&self, job: &ShotsJob) -> ShotsRun;
+
+    /// Stops the dev server a run recorded in `server_pid` and left behind,
+    /// such as one the worker's shots tool started before its `claude` was
+    /// killed. Reads that one file, never a folder's listing.
+    fn stop_left(&self, server_pid: &std::path::Path);
+}
+
 /// A runner's side of the dog's book leases
 ///
 /// Asking never blocks: the dog grants later, and [`Leases::holds`] says
@@ -753,6 +789,8 @@ pub struct Ports {
     pub alerts: Arc<dyn Alerts>,
     /// The dog's book leases, which the runner's `grant` trigger fills
     pub leases: Arc<dyn Leases>,
+    /// Kelpie's shots, shared so a run takes them without holding the runner
+    pub shots: Arc<dyn Shots>,
     /// The clock
     pub clock: Box<dyn Clock>,
 }
@@ -796,6 +834,16 @@ mod findings_tests {
     fn blank_and_malformed_lines_are_skipped() {
         let text = "\nCLEAN\nnot a finding at all\nMEDIUM|only|two|fields|extra\nMEDIUM|a.rs:no-number|what|why";
         assert_eq!(parse_findings(text), vec![]);
+    }
+
+    // What a live Claude round wrote, with the screenshot's path shortened
+    #[test]
+    fn a_screenshot_named_without_a_line_is_line_zero() {
+        let text = "HIGH|/k/shots/lab/7/events-mobile-dark.png|dark matches light|no dark theme\n\
+                    LOW|src/app.tsx|no line|dropped";
+        let [finding] = parse_findings(text).try_into().unwrap();
+        assert_eq!(finding.file, "/k/shots/lab/7/events-mobile-dark.png");
+        assert_eq!(finding.line, 0);
     }
 
     #[test]

@@ -69,6 +69,9 @@ fn argv(call: &ClaudeCall) -> Vec<OsString> {
     if call.role == Role::Worker {
         argv.extend(["--permission-mode".into(), "bypassPermissions".into()]);
     }
+    if let Some(config) = &call.mcp_config {
+        argv.extend(["--mcp-config".into(), config.into()]);
+    }
     match &call.session {
         Session::New(id) => {
             argv.extend(["--session-id".into(), id.0.as_str().into()]);
@@ -180,6 +183,7 @@ mod tests {
             instructions: Some(PathBuf::from("/k/worker/instructions.md")),
             prompt: "implement #6".into(),
             timeout: None,
+            mcp_config: None,
         }
     }
 
@@ -223,6 +227,17 @@ mod tests {
         assert_eq!(argv[argv.len() - 2..], ["--resume", "abc"]);
         assert!(!argv.iter().any(|a| a == "--append-system-prompt-file"));
         assert!(!argv.iter().any(|a| a == "--session-id"));
+    }
+
+    #[test]
+    fn a_call_with_mcp_servers_names_their_config() {
+        let mut with = call(Role::Worker, fresh());
+        with.mcp_config = Some(PathBuf::from("/k/worker/mcp.json"));
+        let argv = strings(&with);
+        let at = argv.iter().position(|a| a == "--mcp-config").unwrap();
+        assert_eq!(argv[at + 1], "/k/worker/mcp.json");
+        let argv = strings(&call(Role::Worker, fresh()));
+        assert!(!argv.iter().any(|a| a == "--mcp-config"));
     }
 
     #[test]

@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::preview::Tools;
+
 /// A project's name, which is also its sheep's name
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
@@ -65,15 +67,21 @@ pub struct ProjectPaths {
     pub state: PathBuf,
     /// The folder for the worker's settings file and instructions
     pub worker: PathBuf,
+    /// Kelpie's own tools for showing a work item's UI, which every project shares
+    pub tools: Tools,
     worktrees: PathBuf,
     builds: PathBuf,
+    shots: PathBuf,
+    playwright: PathBuf,
 }
 
 impl ProjectPaths {
     /// `<kelpie home>/projects/<project>/`, beside kelpie's own
     /// `<kelpie home>/settings.toml`, with worktrees under
-    /// `<kelpie home>/wt/<project>/` and build folders under
-    /// `<kelpie home>/targets/<project>/`
+    /// `<kelpie home>/wt/<project>/`, build folders under
+    /// `<kelpie home>/targets/<project>/`, shots under
+    /// `<kelpie home>/shots/<project>/`, the Playwright server's files under
+    /// `<kelpie home>/playwright/<project>/`, and the shared `<kelpie home>/tools/`
     pub fn under(kelpie_home: &Path, project: &ProjectName) -> Self {
         let folder = kelpie_home.join("projects").join(project.as_str());
         Self {
@@ -81,8 +89,11 @@ impl ProjectPaths {
             settings: folder.join("settings.toml"),
             state: folder.join("state.json"),
             worker: folder.join("worker"),
+            tools: Tools::under(kelpie_home),
             worktrees: kelpie_home.join("wt").join(project.as_str()),
             builds: kelpie_home.join("targets").join(project.as_str()),
+            shots: kelpie_home.join("shots").join(project.as_str()),
+            playwright: kelpie_home.join("playwright").join(project.as_str()),
         }
     }
 
@@ -94,6 +105,18 @@ impl ProjectPaths {
     /// The build folder for the work item that resolves `issue`
     pub fn build(&self, issue: u64) -> PathBuf {
         self.builds.join(issue.to_string())
+    }
+
+    /// Issue `issue`'s shots: out of its worker's reach for writes, not for
+    /// reads. Only kelpie's own processes write there.
+    pub fn shots(&self, issue: u64) -> PathBuf {
+        self.shots.join(issue.to_string())
+    }
+
+    /// Issue `issue`'s Playwright MCP output folder, kept apart from its shots:
+    /// a page the worker drives can download a file into it
+    pub fn playwright(&self, issue: u64) -> PathBuf {
+        self.playwright.join(issue.to_string())
     }
 }
 

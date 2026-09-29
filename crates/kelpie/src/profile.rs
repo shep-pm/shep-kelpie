@@ -40,7 +40,7 @@ const GIT_DENY: [&str; 8] = [
 // Read and written by no worker. Also denied to sandboxed Bash, which takes
 // `Read` deny rules as its own. `~/.config/gh` stays readable: `gh` will not
 // start without its config, and the worker opens its own pull request.
-const CREDENTIALS: [&str; 11] = [
+pub(crate) const CREDENTIALS: [&str; 11] = [
     "~/.ssh/**",
     "~/.aws/**",
     "~/.gnupg/**",
@@ -89,6 +89,21 @@ const PUSH_FLAGS: [&str; 9] = [
     "Bash(git push * +*)",
 ];
 
+// Every Playwright MCP tool, which `kelpie browse-guard` holds to the preview
+const PLAYWRIGHT_TOOLS: &str = "mcp__playwright__.*";
+
+// The mach service a dev server's file watcher looks up on macOS
+const DEV_SERVER_MACH: [&str; 1] = ["com.apple.FSEvents"];
+
+// The Playwright MCP server runs outside the sandbox. These tools read a local
+// file (or run code that could), so none is the worker's.
+const PLAYWRIGHT_DENY: [&str; 4] = [
+    "mcp__playwright__browser_run_code_unsafe",
+    "mcp__playwright__browser_file_upload",
+    "mcp__playwright__browser_drop",
+    "mcp__playwright__browser_set_storage_state",
+];
+
 // What `git push` and `gh` reach. A project adds its own, such as a registry.
 const GITHUB: [&str; 2] = ["github.com", "api.github.com"];
 
@@ -113,6 +128,9 @@ pub struct WorkerProfile<'a> {
     pub allowed_domains: &'a [NonBlank],
     /// Variables the project's settings point into the build folder
     pub build_env: &'a BTreeMap<EnvName, BuildDir>,
+    /// The preview's domains, for a work item whose worktree has a launch
+    /// file; `None` without one
+    pub preview: Option<&'a [NonBlank]>,
 }
 
 impl WorkerProfile<'_> {
@@ -140,7 +158,7 @@ impl WorkerProfile<'_> {
             .chain([git("refs/heads").join(BASE)])
             .chain(fence::deny_write(self.worktree))
             .collect();
-        let deny: Vec<String> = CREDENTIALS
+        let mut deny: Vec<String> = CREDENTIALS
             .iter()
             .map(|p| format!("Read({p})"))
             .chain(PM_ONLY.iter().map(|&r| r.to_owned()))
@@ -148,10 +166,20 @@ impl WorkerProfile<'_> {
             .chain(push_to_base())
             .chain(PUSH_FLAGS.iter().map(|&r| r.to_owned()))
             .collect();
+        let preview_domains = self.preview.unwrap_or_default();
         let domains: Vec<&str> = GITHUB
             .into_iter()
             .chain(self.allowed_domains.iter().map(NonBlank::as_str))
+            .chain(preview_domains.iter().map(NonBlank::as_str))
             .collect();
+        // Without `strictAllowlist`, `bypassPermissions` lets a host outside the list through.
+        let mut network = json!({ "allowedDomains": domains, "strictAllowlist": true });
+        if self.preview.is_some() {
+            // A dev server binds a local port, and its file watcher needs FSEvents.
+            network["allowLocalBinding"] = true.into();
+            network["allowMachLookup"] = json!(DEV_SERVER_MACH);
+            deny.extend(PLAYWRIGHT_DENY.iter().map(|&r| r.to_owned()));
+        }
         json!({
             "sandbox": {
                 "enabled": true,
@@ -160,7 +188,7 @@ impl WorkerProfile<'_> {
                 // Without it, `gh` fails TLS verification on macOS: x509 OSStatus -26276.
                 "enableWeakerNetworkIsolation": true,
                 "filesystem": { "allowWrite": allow_write, "denyWrite": deny_write },
-                "network": { "allowedDomains": domains },
+                "network": network,
             },
             "permissions": { "deny": deny },
             "hooks": self.hooks(),
@@ -170,6 +198,10 @@ impl WorkerProfile<'_> {
 
     fn env(&self) -> Value {
         let mut env = json!({ "CARGO_TARGET_DIR": self.build });
+        if self.preview.is_some() {
+            // Node's fetch ignores the sandbox's proxy without it.
+            env["NODE_USE_ENV_PROXY"] = "1".into();
+        }
         for (name, dir) in self.build_env {
             env[name.as_str()] = json!(self.build.join(dir.as_path()));
         }
@@ -181,6 +213,15 @@ impl WorkerProfile<'_> {
             .map(|p| shell_quote(&p.to_string_lossy()))
             .join(" ");
         let mut pre = vec![entry(Some(FILE_TOOLS), &confine)];
+        if let Some(domains) = self.preview {
+            let guard = [self.kelpie.to_string_lossy().as_ref(), "browse-guard"]
+                .into_iter()
+                .chain(domains.iter().map(NonBlank::as_str))
+                .map(shell_quote)
+                .collect::<Vec<_>>()
+                .join(" ");
+            pre.push(entry(Some(PLAYWRIGHT_TOOLS), &guard));
+        }
         let mut post = Vec::new();
         for hook in self.guard_hooks {
             let e = entry(
@@ -256,6 +297,7 @@ mod tests {
             guard_hooks: hooks,
             allowed_domains: domains,
             build_env: &BTreeMap::new(),
+            preview: None,
         }
         .settings()
     }
@@ -339,6 +381,7 @@ mod tests {
             guard_hooks: &[],
             allowed_domains: &[],
             build_env: &build_env,
+            preview: None,
         }
         .settings();
         assert_eq!(
@@ -361,6 +404,116 @@ mod tests {
             strings(&with_domains(&[], &npm)["sandbox"]["network"]["allowedDomains"]),
             ["github.com", "api.github.com", "registry.npmjs.org"]
         );
+    }
+
+    #[test]
+    fn a_host_outside_the_list_is_refused_not_asked_about() {
+        assert_eq!(settings(&[])["sandbox"]["network"]["strictAllowlist"], true);
+    }
+
+    fn with_preview(domains: &[NonBlank]) -> Value {
+        WorkerProfile {
+            worktree: Path::new("/k/wt/lab/7"),
+            build: Path::new("/k/targets/lab/7"),
+            git_common_dir: Path::new("/k/repos/lab/.git"),
+            git_dir: Path::new("/k/repos/lab/.git/worktrees/7"),
+            branch: "kelpie/7",
+            kelpie: Path::new("/opt/kelpie"),
+            guard_hooks: &[],
+            allowed_domains: &[],
+            build_env: &BTreeMap::new(),
+            preview: Some(domains),
+        }
+        .settings()
+    }
+
+    #[test]
+    fn a_preview_lets_a_dev_server_bind_and_watch_and_nothing_wider() {
+        let api = [NonBlank::try_from("pokemon-go-api.github.io".to_owned()).unwrap()];
+        let s = with_preview(&api);
+        assert_eq!(
+            s["sandbox"]["network"],
+            json!({
+                "allowedDomains": ["github.com", "api.github.com", "pokemon-go-api.github.io"],
+                "strictAllowlist": true,
+                "allowLocalBinding": true,
+                "allowMachLookup": ["com.apple.FSEvents"],
+            })
+        );
+        assert_eq!(s["env"]["NODE_USE_ENV_PROXY"], "1");
+        assert_eq!(
+            s["sandbox"]["filesystem"],
+            settings(&[])["sandbox"]["filesystem"]
+                .to_string()
+                .replace("/shep/", "/lab/")
+                .parse::<Value>()
+                .unwrap(),
+            "the write fence does not move"
+        );
+    }
+
+    #[test]
+    fn a_preview_denies_the_playwright_tools_that_reach_past_the_page() {
+        let deny = with_preview(&[])["permissions"]["deny"].clone();
+        let deny = strings(&deny);
+        for tool in [
+            "browser_run_code_unsafe",
+            "browser_file_upload",
+            "browser_drop",
+            "browser_set_storage_state",
+        ] {
+            let rule = format!("mcp__playwright__{tool}");
+            assert!(deny.contains(&rule.as_str()), "{rule}");
+        }
+    }
+
+    // The preview widens nothing the fence on Claude Code's own files holds.
+    #[test]
+    fn a_preview_keeps_the_fence_on_claude_files_beside_its_own() {
+        let s = with_preview(&[]);
+        let deny_write = strings(&s["sandbox"]["filesystem"]["denyWrite"]);
+        for path in [
+            "/k/wt/lab/7/.claude",
+            "/k/wt/lab/7/**/.claude",
+            "/k/wt/lab/7/.mcp.json",
+        ] {
+            assert!(deny_write.contains(&path), "{path}: {deny_write:?}");
+        }
+        assert!(deny_write.contains(&"/k/repos/lab/.git/config"));
+        let deny = s["permissions"]["deny"].to_string();
+        assert!(deny.contains("Read(~/.ssh/**)"), "{deny}");
+        assert!(deny.contains("mcp__playwright__browser_drop"), "{deny}");
+        let pre = s["hooks"]["PreToolUse"].to_string();
+        assert!(pre.contains("'confine'"), "{pre}");
+        assert!(pre.contains("'browse-guard'"), "{pre}");
+    }
+
+    #[test]
+    fn a_preview_holds_every_playwright_tool_to_kelpies_browse_guard() {
+        let domains = [NonBlank::try_from("*.leekduck.com".to_owned()).unwrap()];
+        assert_eq!(
+            with_preview(&domains)["hooks"]["PreToolUse"][1],
+            json!({
+                "matcher": "mcp__playwright__.*",
+                "hooks": [{
+                    "type": "command",
+                    "command": "'/opt/kelpie' 'browse-guard' '*.leekduck.com'",
+                }],
+            })
+        );
+        let hooks = settings(&[])["hooks"].to_string();
+        assert!(!hooks.contains("browse-guard"), "{hooks}");
+    }
+
+    #[test]
+    fn without_a_preview_nothing_binds_a_port() {
+        let s = settings(&[]);
+        let network = s["sandbox"]["network"].as_object().unwrap();
+        assert!(!network.contains_key("allowLocalBinding"), "{network:?}");
+        assert!(!network.contains_key("allowMachLookup"), "{network:?}");
+        assert_eq!(s["env"]["NODE_USE_ENV_PROXY"], Value::Null);
+        let deny = s["permissions"]["deny"].to_string();
+        assert!(!deny.contains("mcp__playwright"), "{deny}");
     }
 
     #[test]

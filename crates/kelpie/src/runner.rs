@@ -34,6 +34,7 @@ mod report;
 mod review;
 mod rework;
 mod ruling;
+mod shots;
 mod trigger;
 mod turn;
 
@@ -189,6 +190,12 @@ impl Runner {
             item.review_call = ReviewCallState::Idle;
             store.save(&state)?;
         }
+        // A dev server the last run's worker left behind holds its port.
+        if let Some(item) = &state.work_item {
+            ports
+                .shots
+                .stop_left(&paths.shots(item.issue).join(crate::shots::SERVER_PID));
+        }
         // A new run is a new epoch, and the dog reclaims what the old one held.
         if !state.leases.is_empty() {
             state.leases.clear();
@@ -314,6 +321,8 @@ impl Runner {
             merge_refused: false,
             merge_tried: None,
             summon_owed: false,
+            shots: None,
+            shots_comment: None,
             calls: Vec::new(),
         }
     }

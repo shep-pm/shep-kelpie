@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::board::WorkerModel;
 use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage, Verdict};
+use crate::shots::ShotsRecord;
 
 mod spend;
 
@@ -94,6 +95,12 @@ pub struct WorkItem {
     /// pull request later found merged at it is kelpie's merge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_tried: Option<String>,
+    /// Kelpie's last shots run, for a worktree with a launch file
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shots: Option<ShotsRecord>,
+    /// The pull request's shots comment, once posted
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shots_comment: Option<u64>,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
 }

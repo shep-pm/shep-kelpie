@@ -8,7 +8,7 @@
 //! that ends on a question block parks the worker on a ruling.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -24,11 +24,16 @@ use super::rework;
 use super::ruling::park;
 use super::trigger::lock;
 use crate::pacer::Scope;
-use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Issue, Role, Session, Timestamp};
+use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Issue, Role, Session};
+use crate::preview::{self, McpFiles, WORKER_INSTRUCTIONS};
 use crate::profile::WorkerProfile;
-use crate::state::{ProjectState, Resume, RulingKind, RunState, StateError};
+use crate::state::{Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree::{self, Start};
+pub(super) use unfinished::failed;
+use unfinished::timed_out;
+
+mod unfinished;
 
 /// The prompt for a turn resumed after the runner restarted
 const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
@@ -44,13 +49,14 @@ const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
 ///
 /// [`StateError`] when the turn's start or end, or a post, cannot be saved.
 pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
-    let (claude, reviewer, relay, alerts) = {
+    let (claude, reviewer, relay, alerts, shots) = {
         let runner = lock(runner);
         (
             Arc::clone(&runner.ports.claude),
             Arc::clone(&runner.ports.reviewer),
             Arc::clone(&runner.ports.relay),
             Arc::clone(&runner.ports.alerts),
+            Arc::clone(&runner.ports.shots),
         )
     };
     tell_settled(runner, relay.as_ref());
@@ -74,6 +80,10 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
             Begin::Review(action) => {
                 let reviewed = run_review_call(claude.as_ref(), reviewer.as_ref(), action);
                 return lock(runner).end_review(reviewed);
+            }
+            Begin::Shots(job, head) => {
+                let run = shots.take(&job);
+                return lock(runner).end_shots(head, run);
             }
         }
     }
@@ -116,7 +126,7 @@ impl Runner {
                 }
                 return self.coderabbit_step();
             }
-            Phase::Ruling { .. } => return Ok(Begin::Idle),
+            Phase::Ruling { .. } => return self.retry_shots(),
             Phase::Merge { .. } => return self.merge(),
             Phase::Done { merged } => return self.finish(*merged),
         }
@@ -184,21 +194,6 @@ impl Runner {
         Ok(begin)
     }
 
-    fn turn_ceiling(&self) -> Duration {
-        Duration::from_secs(u64::from(self.settings.worker.turn_timeout.get()) * 60)
-    }
-
-    fn park_ceiling_passed(&mut self, now: Timestamp) -> Result<Begin, StateError> {
-        let mut next = self.state.clone();
-        if let Some(item) = next.work_item.as_mut() {
-            item.turn = Turn::Ended { at: now };
-        }
-        let mut report = timed_out(self.project.as_str(), &mut next);
-        self.save(next)?;
-        self.fill_comment_failed(&mut report);
-        Ok(Begin::Report(report))
-    }
-
     // Everything the worker needs on disk before it starts: its worktree, its
     // build folder, its settings file and kelpie's instructions. A turn with
     // no prompt of its own is the first, and takes the issue, the review or
@@ -226,6 +221,7 @@ impl Runner {
         if let Some(reason) = self.claude_files_refusal() {
             return Err(reason);
         }
+        let previewed = preview::enabled(&self.settings.repo);
         let profile = WorkerProfile {
             worktree: &item.worktree,
             build: &item.build,
@@ -236,13 +232,20 @@ impl Runner {
             guard_hooks: &self.settings.worker.guard_hooks,
             allowed_domains: &self.settings.worker.allowed_domains,
             build_env: &self.settings.worker.build_env,
+            preview: previewed.then_some(self.settings.preview.domains.as_slice()),
         };
         let folder = &self.paths.worker;
         let settings = folder.join("settings.json");
         let instructions = folder.join("instructions.md");
         let text = serde_json::to_string_pretty(&profile.settings()).expect("settings are JSON");
         write(folder, &settings, &text)?;
-        let text = instructions::compose(self.extra_instructions.as_deref(), &item.worktree);
+        let mut text = instructions::compose(self.extra_instructions.as_deref(), &item.worktree);
+        let mcp_config = if previewed {
+            text.push_str(WORKER_INSTRUCTIONS);
+            Some(self.write_mcp_config(item)?)
+        } else {
+            None
+        };
         write(folder, &instructions, &text)?;
         let prompt = match prompt {
             Some(prompt) => prompt,
@@ -267,13 +270,51 @@ impl Runner {
             instructions: Some(instructions),
             prompt,
             timeout: Some(timeout),
+            mcp_config,
         })
+    }
+
+    // The worker's MCP servers: Playwright's, fenced to the preview's
+    // domains, and kelpie's shots tool with the job it runs.
+    fn write_mcp_config(&self, item: &WorkItem) -> Result<PathBuf, String> {
+        let folder = &self.paths.worker;
+        let (job, browser, mcp) = (
+            folder.join("shots-job.json"),
+            folder.join("playwright.json"),
+            folder.join("mcp.json"),
+        );
+        let shots = self.shots_job(item, self.paths.shots(item.issue));
+        let domains = &self.settings.preview.domains;
+        let out = self.paths.playwright(item.issue);
+        own_folder(&out)?;
+        let json = |v: &serde_json::Value| serde_json::to_string_pretty(v).expect("config is JSON");
+        let job_text = serde_json::to_string_pretty(&shots).expect("the job is JSON");
+        write(folder, &job, &job_text)?;
+        write(
+            folder,
+            &browser,
+            &json(&preview::browser_config(&out, domains)),
+        )?;
+        let files = McpFiles {
+            tools: &self.paths.tools,
+            kelpie: &self.kelpie,
+            job: &job,
+            browser: &browser,
+        };
+        write(folder, &mcp, &json(&preview::mcp_config(files)))?;
+        Ok(mcp)
     }
 
     fn end_turn(
         &mut self,
         result: Result<ClaudeReply, ClaudeError>,
     ) -> Result<Option<StepReport>, StateError> {
+        // However the turn ended, a dev server its shots tool started is done.
+        if let Some(item) = &self.state.work_item {
+            self.ports
+                .shots
+                .stop_left(&self.paths.shots(item.issue).join(crate::shots::SERVER_PID));
+        }
         // A turn stopped with the runner stays running, to resume on restart.
         if matches!(result, Err(ClaudeError::Stopped)) {
             return Ok(None);
@@ -422,66 +463,19 @@ impl Runner {
     }
 }
 
-// Parks the work item on a turn-ceiling ruling and builds its report. Shared
-// by a call that actually hit `ClaudeError::TimedOut` and by a restart that
-// finds a turn already past its ceiling with no call spent. The caller sets
-// `item.turn` beforehand: this only raises the ruling. `comment_failed` is
-// filled in afterwards, once the ruling has actually been posted.
-fn timed_out(project: &str, next: &mut ProjectState) -> StepReport {
-    let item = next
-        .work_item
-        .as_mut()
-        .expect("a turn ceiling is about a work item");
-    let (issue, session, pull_request) = (item.issue, item.session.clone(), item.pull_request);
-    let phase = Some(item.phase.clone());
-    let (_, id, question) = park(
-        project,
-        next,
-        pull_request,
-        RulingKind::TurnTimeout { phase },
-    );
-    StepReport::TimedOut {
-        issue,
-        session,
-        pull_request,
-        id,
-        question,
-        comment_failed: None,
+// Makes `dir` if it is missing, and refuses it if it is a symlink: whatever it
+// points at would join the Playwright server's file fence.
+fn own_folder(dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| format!("cannot make {}: {}", dir.display(), e.kind()))?;
+    let meta = fs::symlink_metadata(dir)
+        .map_err(|e| format!("cannot read {}: {}", dir.display(), e.kind()))?;
+    if !meta.is_dir() {
+        return Err(format!(
+            "{} is a symlink, not kelpie's own folder",
+            dir.display()
+        ));
     }
-}
-
-// Marks the turn failed and parks the work item on a ruling carrying why,
-// keeping the turn as it stood so a yes can put it back. `comment_failed` is
-// filled in afterwards, once the ruling has actually been posted.
-pub(super) fn failed(
-    project: &str,
-    next: &mut ProjectState,
-    at: Timestamp,
-    reason: String,
-) -> StepReport {
-    let item = next
-        .work_item
-        .as_mut()
-        .expect("a failed turn is about a work item");
-    let failure = Turn::Failed {
-        at,
-        reason: reason.clone(),
-    };
-    let retry = std::mem::replace(&mut item.turn, failure);
-    let (issue, pull_request) = (item.issue, item.pull_request);
-    let kind = RulingKind::TurnFailed {
-        reason,
-        phase: item.phase.clone(),
-        retry,
-    };
-    let (_, id, question) = park(project, next, pull_request, kind);
-    StepReport::Failed {
-        issue,
-        pull_request,
-        id,
-        question,
-        comment_failed: None,
-    }
+    Ok(())
 }
 
 pub(super) fn write(folder: &Path, file: &Path, text: &str) -> Result<(), String> {

@@ -27,11 +27,13 @@ mod coderabbit;
 mod forge;
 mod leases;
 mod relay;
+mod shots;
 
 pub(crate) use alerts::FakeAlerts;
 pub(crate) use forge::FakeForge;
 pub(crate) use leases::{FakeLeases, Told};
 pub(crate) use relay::FakeRelay;
+pub(crate) use shots::{FakeShots, ScriptedShots};
 
 /// Writes an executable stand-in script that is safe to run at once.
 ///
@@ -114,6 +116,8 @@ pub(crate) fn a_work_item() -> WorkItem {
         merge_refused: false,
         merge_tried: None,
         summon_owed: false,
+        shots: None,
+        shots_comment: None,
         calls: vec![CallRecord {
             role: Role::Worker,
             at: Timestamp(10),
@@ -136,6 +140,9 @@ const EXAMPLE_REPO: &str = "~/.kelpie/repos/shep";
 /// The CodeRabbit gate as `settings.example.toml` sets it, and turned off
 pub(crate) const CODERABBIT_ON: &str = "[coderabbit]\nenabled = true\n";
 const CODERABBIT_OFF: &str = "[coderabbit]\nenabled = false\n";
+
+/// A launch file like the playground's
+const LAUNCH: &str = r#"{"version": "0.0.1", "configurations": [{"name": "dev", "runtimeExecutable": "bun", "runtimeArgs": ["run", "dev"], "port": 3000}]}"#;
 
 /// The file a killed worker leaves in its worktree, to find after a restart
 pub(crate) const LEFT_BEHIND: &str = "left-behind.txt";
@@ -523,6 +530,7 @@ pub(crate) struct Rig {
     pub(crate) relay: Arc<FakeRelay>,
     pub(crate) alerts: FakeAlerts,
     pub(crate) leases: FakeLeases,
+    pub(crate) shots: FakeShots,
     pub(crate) clock: FakeClock,
 }
 
@@ -573,6 +581,7 @@ impl Rig {
             relay: Arc::new(FakeRelay::default()),
             alerts: FakeAlerts::default(),
             leases: FakeLeases::default(),
+            shots: FakeShots::default(),
             clock: FakeClock::at(Self::EPOCH),
             home,
         };
@@ -634,6 +643,10 @@ impl Rig {
     /// Lands a commit on origin's `main` from another clone, as a merge
     /// elsewhere would, and returns its hash
     pub(crate) fn land_on_origin(&self, file: &str) -> String {
+        self.land(file, "landed elsewhere\n")
+    }
+
+    fn land(&self, file: &str, text: &str) -> String {
         let other = self.home.path().join("other");
         if !other.exists() {
             git(
@@ -641,11 +654,19 @@ impl Rig {
                 &["clone", "--quiet", path(&self.origin()), path(&other)],
             );
         }
-        std::fs::write(other.join(file), "landed elsewhere\n").unwrap();
+        let at = other.join(file);
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::fs::write(at, text).unwrap();
         git(&other, &["add", file]);
         git(&other, &["commit", "--quiet", "-m", "landed elsewhere"]);
         git(&other, &["push", "--quiet", "origin", "main"]);
         git(&other, &["rev-parse", "HEAD"])
+    }
+
+    /// Lands `.claude/launch.json` on origin's `main`, as a repo with a
+    /// preview carries it, and returns the commit
+    pub(crate) fn land_launch_file(&self) -> String {
+        self.land(crate::preview::LAUNCH_FILE, LAUNCH)
     }
 
     /// Pushes a commit of `file` to `branch` on origin from another clone,
@@ -735,6 +756,7 @@ impl Rig {
             relay: Arc::clone(&self.relay) as Arc<dyn Relay>,
             alerts: Arc::new(self.alerts.clone()),
             leases: Arc::new(self.leases.clone()),
+            shots: Arc::new(self.shots.clone()),
             clock: Box::new(self.clock.clone()),
         };
         Runner::open(

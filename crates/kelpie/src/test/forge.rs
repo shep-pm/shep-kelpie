@@ -34,6 +34,9 @@ pub(crate) struct FakeForge {
     checks: Arc<Mutex<HashMap<String, Checks>>>,
     comments: Arc<Mutex<Vec<(u64, String)>>>,
     comments_down: Arc<AtomicBool>,
+    // A posted comment's id, and where it sits in `comments`
+    comment_ids: Arc<Mutex<Vec<(u64, usize)>>>,
+    edits: Arc<Mutex<Vec<u64>>>,
     merges_down: Arc<AtomicBool>,
     merge_answers_lost: Arc<AtomicBool>,
     labels_down: Arc<AtomicBool>,
@@ -82,6 +85,8 @@ impl FakeForge {
             checks: Arc::default(),
             comments: Arc::default(),
             comments_down: Arc::default(),
+            comment_ids: Arc::default(),
+            edits: Arc::default(),
             merges_down: Arc::default(),
             merge_answers_lost: Arc::default(),
             labels_down: Arc::default(),
@@ -268,6 +273,16 @@ impl FakeForge {
         self.comments.lock().unwrap().clone()
     }
 
+    /// Deletes comment `id`, as someone other than kelpie would
+    pub(crate) fn delete_comment(&self, id: u64) {
+        self.comment_ids.lock().unwrap().retain(|(i, _)| *i != id);
+    }
+
+    /// Every comment edit, by the comment's id, oldest first
+    pub(crate) fn edits(&self) -> Vec<u64> {
+        self.edits.lock().unwrap().clone()
+    }
+
     /// Every pull request marked ready, in order
     pub(crate) fn readied(&self) -> Vec<u64> {
         self.readied.lock().unwrap().clone()
@@ -443,6 +458,28 @@ impl Forge for FakeForge {
             .lock()
             .unwrap()
             .push((number, body.to_owned()));
+        Ok(())
+    }
+
+    fn post_comment(&self, repo: &ForgeSlug, number: u64, body: &str) -> Result<u64, ForgeError> {
+        self.comment(repo, number, body)?;
+        let at = self.comments.lock().unwrap().len() - 1;
+        let mut ids = self.comment_ids.lock().unwrap();
+        let id = 9000 + at as u64;
+        ids.push((id, at));
+        Ok(id)
+    }
+
+    fn edit_comment(&self, _repo: &ForgeSlug, id: u64, body: &str) -> Result<(), ForgeError> {
+        if self.comments_down.load(Ordering::SeqCst) {
+            return Err(ForgeError::Failed("comments are down".into()));
+        }
+        let ids = self.comment_ids.lock().unwrap();
+        let Some(&(_, at)) = ids.iter().find(|(i, _)| *i == id) else {
+            return Err(ForgeError::Failed("gh: Not Found (HTTP 404)".into()));
+        };
+        self.comments.lock().unwrap()[at].1 = body.to_owned();
+        self.edits.lock().unwrap().push(id);
         Ok(())
     }
 

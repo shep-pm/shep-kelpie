@@ -81,6 +81,13 @@ Anything that makes CodeRabbit spend the hourly review window. On shep that is
 adding the `review please` label, or pushing to a pull request that carries it.
 Only the project manager summons.
 
+**Shots**:
+Screenshots kelpie takes of a work item's routes, from the dev server its
+repo's `.claude/launch.json` names, at a phone and a desktop width, light and
+dark. A worker takes them with kelpie's shots tool; kelpie takes them before
+each Claude review round and the merge ruling.
+_Avoid_: preview (Claude Desktop's pane), snapshots (Playwright's page trees)
+
 **Ruling**:
 A decision only the maintainer makes. A worker waiting on one is **parked**.
 
