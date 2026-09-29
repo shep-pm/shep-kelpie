@@ -243,7 +243,7 @@ impl Runner {
     }
 
     // The login kelpie opens pull requests as, asked once a run
-    fn viewer(&mut self) -> Result<String, ForgeError> {
+    pub(super) fn viewer(&mut self) -> Result<String, ForgeError> {
         if let Some(me) = &self.viewer {
             return Ok(me.clone());
         }
@@ -349,7 +349,7 @@ fn review_path(build: &Path) -> PathBuf {
 }
 
 // The reviewer's words go in as written: nothing here rewords them.
-fn review_text(number: u64, review: &MaintainerReview) -> String {
+pub(super) fn review_text(number: u64, review: &MaintainerReview) -> String {
     let mut text = format!("# The latest review of pull request #{number}\n");
     if !review.body.trim().is_empty() {
         text.push('\n');

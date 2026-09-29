@@ -51,6 +51,25 @@ pub enum StepReport {
         /// requesting changes
         by: ReworkBy,
     },
+    /// An adopted pull request became the work item in flight
+    Adopted {
+        /// The work item's issue: the one the pull request closes
+        issue: u64,
+        /// The pull request
+        pull_request: u64,
+        /// The model and effort its worker runs on
+        worker: WorkerModel,
+    },
+    /// An adopted pull request cannot start, and the refusal went to it as a
+    /// comment
+    AdoptRefused {
+        /// The pull request
+        pull_request: u64,
+        /// Why, as the refusal reads
+        reason: String,
+        /// Why the comment could not be posted, if it could not
+        comment_failed: Option<String>,
+    },
     /// A pull request asked for a rework that cannot start, and the refusal
     /// went to it as a comment
     ReworkRefused {
@@ -360,6 +379,7 @@ pub(super) enum ReviewCall {
     /// One round of the maintainer's script
     Qwen {
         worktree: PathBuf,
+        base: String,
         out: PathBuf,
         round: u32,
     },

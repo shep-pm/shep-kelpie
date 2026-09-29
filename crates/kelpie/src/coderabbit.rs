@@ -127,6 +127,20 @@ impl Activity {
             .max_by_key(|(_, at)| *at)
     }
 
+    /// How many commits other than `head` it reviewed: each a posted review
+    /// is of, and the one a clean review's walkthrough covers
+    ///
+    /// A reply in a thread posts a review with no body, which is not one.
+    pub fn reviewed_besides(&self, head: &str) -> u32 {
+        let posted = self.reviews.iter().filter(|r| !r.body.trim().is_empty());
+        let mut commits: Vec<&str> = posted.map(|r| r.commit.as_str()).collect();
+        commits.extend(self.sticky().and_then(|c| covered(&c.body)));
+        commits.sort_unstable();
+        commits.dedup();
+        commits.retain(|c| *c != head);
+        u32::try_from(commits.len()).unwrap_or(u32::MAX)
+    }
+
     /// Its threads not yet resolved
     pub fn open_threads(&self) -> impl Iterator<Item = &Thread> {
         self.threads.iter().filter(|t| !t.resolved)
@@ -313,6 +327,21 @@ mod tests {
             Reading::Reviewed
         );
         assert_eq!(seen.open_threads().count(), 0);
+    }
+
+    #[test]
+    fn each_reviewed_commit_counts_once_and_a_reply_is_no_review() {
+        assert_eq!(
+            activity(COMMENTS_615, "", NO_THREADS).reviewed_besides(""),
+            1
+        );
+        let seen = activity(COMMENTS_598, REVIEWS_598, NO_THREADS);
+        assert!(seen.reviews[1].body.is_empty(), "the second is a reply");
+        assert_eq!(seen.reviewed_besides(""), 1, "all of it is ce143d9");
+        let later_clean = activity(COMMENTS_615, REVIEWS_617, NO_THREADS);
+        assert_eq!(later_clean.reviewed_besides(""), 2, "one posted, one clean");
+        assert_eq!(later_clean.reviewed_besides(HEAD_615), 1);
+        assert_eq!(activity("", "", NO_THREADS).reviewed_besides(""), 0);
     }
 
     #[test]
