@@ -182,6 +182,37 @@ struct Label {
     name: String,
 }
 
+/// An issue a pull request closes, on whichever repo it is
+#[derive(Deserialize)]
+struct Closes {
+    number: u64,
+    repository: Repository,
+}
+
+#[derive(Deserialize)]
+struct Repository {
+    name: String,
+    owner: Owner,
+}
+
+#[derive(Deserialize)]
+struct Owner {
+    login: String,
+}
+
+// A pull request can close issues on other repos, which are not this board's.
+fn closed_here(closes: Vec<Closes>, repo: &ForgeSlug) -> Vec<u64> {
+    let (owner, name) = repo.as_str().split_once('/').unwrap_or_default();
+    closes
+        .into_iter()
+        .filter(|c| {
+            let r = &c.repository;
+            r.owner.login.eq_ignore_ascii_case(owner) && r.name.eq_ignore_ascii_case(name)
+        })
+        .map(|c| c.number)
+        .collect()
+}
+
 fn pull_request_state(state: &str, stdout: &[u8]) -> Result<PullRequestState, ForgeError> {
     match state {
         "OPEN" => Ok(PullRequestState::Open),

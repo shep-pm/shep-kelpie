@@ -83,8 +83,8 @@ pub trait Forge: Send {
     /// request, or its answer cannot be read.
     fn pull_request(&self, repo: &ForgeSlug, number: u64) -> Result<PullRequest, ForgeError>;
 
-    /// Pull request `number` on `repo` as a rework reads it: its branch and
-    /// the maintainer's latest review
+    /// Pull request `number` on `repo` as a rework or an adoption reads it:
+    /// its branch, what it closes and the maintainer's latest review
     ///
     /// # Errors
     ///
@@ -165,11 +165,17 @@ pub struct PullRequest {
     pub labels: Vec<String>,
 }
 
-/// A pull request as a rework reads it
+/// A pull request as a rework or an adoption reads it
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reviewed {
     /// Open, merged or closed
     pub state: PullRequestState,
+    /// Its title
+    pub title: String,
+    /// Its body, as written
+    pub body: String,
+    /// The issues on the same repo that it closes when it merges
+    pub closes: Vec<u64>,
     /// The branch it merges from
     pub branch: String,
     /// Whether that branch is on a fork rather than the repo itself

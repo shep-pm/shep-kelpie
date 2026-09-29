@@ -152,6 +152,7 @@ impl FakeForge {
             number,
             head: head.to_owned(),
             closes: closes.to_vec(),
+            labels: Vec::new(),
         });
         let pr = FakePullRequest {
             branch: head.to_owned(),
@@ -361,6 +362,10 @@ impl Forge for FakeForge {
         Ok(open
             .into_iter()
             .filter(|pr| prs[&pr.number].state == PullRequestState::Open)
+            .map(|pr| OpenPullRequest {
+                labels: self.coderabbit.labels(pr.number),
+                ..pr
+            })
             .collect())
     }
 
@@ -388,8 +393,13 @@ impl Forge for FakeForge {
             return Err(ForgeError::Failed(format!("#{number} is unreadable")));
         }
         let pr = self.opened(number)?;
+        let open = self.open.lock().unwrap();
+        let listed = open.iter().find(|listed| listed.number == number);
         Ok(Reviewed {
             state: pr.state,
+            title: format!("Title of pull request #{number}"),
+            body: format!("Body of pull request #{number}.\n"),
+            closes: listed.map(|l| l.closes.clone()).unwrap_or_default(),
             branch: pr.branch,
             from_fork: pr.from_fork,
             author: pr.author,

@@ -1,8 +1,9 @@
-//! A pull request's branch and the maintainer's latest review, for a rework
+//! A pull request's branch, what it closes and the maintainer's latest
+//! review, for a rework or an adoption
 
 use serde::Deserialize;
 
-use super::{Label, gh, pull_request_state, unreadable};
+use super::{Closes, Label, closed_here, gh, pull_request_state, unreadable};
 use crate::ports::{ForgeError, MaintainerReview, ReviewComment, Reviewed};
 use crate::settings::ForgeSlug;
 
@@ -10,7 +11,8 @@ use crate::settings::ForgeSlug;
 // longer pull request the oldest fall out, never the latest review's.
 const QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
     repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
-    state isDraft headRefName isCrossRepository author { login } \
+    state title body isDraft headRefName isCrossRepository author { login } \
+    closingIssuesReferences(first: 50) { nodes { number repository { name owner { login } } } } \
     labels(first: 100) { nodes { name } } \
     reviews(last: 100) { nodes { id state body author { __typename } } } \
     reviewThreads(last: 100) { nodes { isResolved comments(last: 100) { nodes { \
@@ -18,7 +20,8 @@ const QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
 
 pub(super) fn reviewed(repo: &ForgeSlug, number: u64) -> Result<Reviewed, ForgeError> {
     let (owner, name) = repo.as_str().split_once('/').unwrap_or_default();
-    parse_reviewed(&gh(&[
+    parse_reviewed(
+        &gh(&[
         "api",
         "graphql",
         "-f",
@@ -29,7 +32,9 @@ pub(super) fn reviewed(repo: &ForgeSlug, number: u64) -> Result<Reviewed, ForgeE
         &format!("name={name}"),
         "-F",
         &format!("number={number}"),
-    ])?)
+        ])?,
+        repo,
+    )
 }
 
 pub(super) fn viewer() -> Result<String, ForgeError> {
@@ -46,6 +51,9 @@ fn parse_viewer(stdout: &[u8]) -> Result<String, ForgeError> {
 #[serde(rename_all = "camelCase")]
 struct Pr {
     state: String,
+    title: String,
+    body: String,
+    closing_issues_references: Nodes<Closes>,
     is_draft: bool,
     head_ref_name: String,
     is_cross_repository: bool,
@@ -102,7 +110,7 @@ struct ReviewId {
 
 // A pending review is a draft only its author sees, and a bot's is never
 // the maintainer's.
-pub(crate) fn parse_reviewed(stdout: &[u8]) -> Result<Reviewed, ForgeError> {
+pub(crate) fn parse_reviewed(stdout: &[u8], repo: &ForgeSlug) -> Result<Reviewed, ForgeError> {
     #[derive(Deserialize)]
     struct Reply {
         data: Data,
@@ -148,6 +156,9 @@ pub(crate) fn parse_reviewed(stdout: &[u8]) -> Result<Reviewed, ForgeError> {
     });
     Ok(Reviewed {
         state: pull_request_state(&pr.state, stdout)?,
+        title: pr.title,
+        body: pr.body,
+        closes: closed_here(pr.closing_issues_references.nodes, repo),
         branch: pr.head_ref_name,
         from_fork: pr.is_cross_repository,
         author: pr.author.map(|a| a.login).unwrap_or_default(),
@@ -166,6 +177,10 @@ mod tests {
     // The maintainer's reviews there are replies with empty bodies, and
     // CodeRabbit's reviews come after them, with every thread resolved.
     const PR_617: &str = include_str!("../../../fixtures/gh-pr-reviewed-617.json");
+
+    fn shep() -> ForgeSlug {
+        ForgeSlug::try_from("shep-pm/shep".to_owned()).unwrap()
+    }
 
     fn reply(pr: &str) -> String {
         format!(r#"{{"data":{{"repository":{{"pullRequest":{pr}}}}}}}"#)
@@ -194,8 +209,14 @@ mod tests {
 
     #[test]
     fn a_bots_later_review_and_resolved_threads_are_not_the_maintainers() {
-        let pr = parse_reviewed(PR_617.as_bytes()).unwrap();
+        let pr = parse_reviewed(PR_617.as_bytes(), &shep()).unwrap();
         assert_eq!(pr.author, "TurtIeSocks");
+        assert_eq!(
+            pr.title,
+            "feat(bench): judge versus-pm2 runs against a committed baseline"
+        );
+        assert!(pr.body.contains("#367"), "{}", pr.body);
+        assert_eq!(pr.closes, [367]);
         assert_eq!(
             (pr.state, pr.branch.as_str(), pr.from_fork, pr.draft),
             (
@@ -219,7 +240,8 @@ mod tests {
     #[test]
     fn the_latest_reviews_unresolved_comments_are_read_with_their_file_and_line() {
         let pr = reply(
-            r#"{"state":"OPEN","isDraft":true,"headRefName":"kelpie/33",
+            r#"{"state":"OPEN","title":"t","body":"","isDraft":true,"headRefName":"kelpie/33",
+            "closingIssuesReferences":{"nodes":[]},
             "isCrossRepository":false,"labels":{"nodes":[{"name":"review please"}]},
             "reviews":{"nodes":[
               {"id":"R1","state":"CHANGES_REQUESTED","body":"old","author":{"__typename":"User"}},
@@ -234,7 +256,7 @@ mod tests {
               {"isResolved":false,"comments":{"nodes":[
                 {"body":"Outdated now.","path":"src/old.ts","line":null,"pullRequestReview":{"id":"R2"}}]}}]}}"#,
         );
-        let pr = parse_reviewed(pr.as_bytes()).unwrap();
+        let pr = parse_reviewed(pr.as_bytes(), &shep()).unwrap();
         assert_eq!(pr.labels, ["review please"]);
         assert_eq!(
             pr.review,
@@ -259,15 +281,30 @@ mod tests {
     }
 
     #[test]
+    fn only_the_issues_it_closes_on_the_same_repo_are_its_own() {
+        let pr = reply(
+            r#"{"state":"OPEN","title":"Fix it","body":"Resolves #3","isDraft":false,
+            "headRefName":"fix/3","isCrossRepository":false,"author":{"login":"TurtIeSocks"},
+            "closingIssuesReferences":{"nodes":[
+              {"number":3,"repository":{"name":"Shep","owner":{"login":"shep-pm"}}},
+              {"number":9,"repository":{"name":"shep-kelpie","owner":{"login":"shep-pm"}}}]},
+            "labels":{"nodes":[]},"reviews":{"nodes":[]},"reviewThreads":{"nodes":[]}}"#,
+        );
+        let pr = parse_reviewed(pr.as_bytes(), &shep()).unwrap();
+        assert_eq!((pr.title.as_str(), pr.closes), ("Fix it", vec![3]));
+    }
+
+    #[test]
     fn a_pull_request_with_no_review_from_a_person_has_none() {
         let pr = reply(
-            r#"{"state":"CLOSED","isDraft":false,"headRefName":"kelpie/3",
+            r#"{"state":"CLOSED","title":"t","body":"","isDraft":false,"headRefName":"kelpie/3",
+            "closingIssuesReferences":{"nodes":[]},
             "isCrossRepository":true,"labels":{"nodes":[]},
             "reviews":{"nodes":[{"id":"R1","state":"COMMENTED","body":"bot","author":{"__typename":"Bot"}},
               {"id":"R2","state":"COMMENTED","body":"ghost","author":null}]},
             "reviewThreads":{"nodes":[]}}"#,
         );
-        let pr = parse_reviewed(pr.as_bytes()).unwrap();
+        let pr = parse_reviewed(pr.as_bytes(), &shep()).unwrap();
         assert_eq!((pr.state, pr.from_fork), (PullRequestState::Closed, true));
         assert_eq!(pr.review, None);
     }
@@ -284,7 +321,7 @@ mod tests {
     #[test]
     fn a_reply_without_a_pull_request_is_unreadable() {
         assert!(matches!(
-            parse_reviewed(br#"{"data":{"repository":{"pullRequest":null}}}"#),
+            parse_reviewed(br#"{"data":{"repository":{"pullRequest":null}}}"#, &shep()),
             Err(ForgeError::Unreadable(_))
         ));
     }

@@ -63,6 +63,8 @@ pub struct OpenPullRequest {
     pub head: String,
     /// The issues on the same repo that it closes when it merges
     pub closes: Vec<u64>,
+    /// Its labels' names
+    pub labels: Vec<String>,
 }
 
 /// Why the board passed over a ready issue
@@ -328,6 +330,7 @@ mod tests {
             number: 40,
             head: "feat/2".into(),
             closes: vec![2],
+            labels: vec![],
         }];
         let pick = pick(&[ready(2), taken, ready(5)], &open, &[]);
         assert_eq!(pick.issue, Some(5));
