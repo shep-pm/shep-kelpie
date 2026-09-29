@@ -115,6 +115,10 @@ pub struct Ruling {
     /// webhooks existed is posted once.
     #[serde(default)]
     pub alerted: bool,
+    /// Whether it reached a running relay, which is told if it is settled
+    /// any other way
+    #[serde(default)]
+    pub relayed: bool,
 }
 
 /// A merge kelpie made under `auto`, told to the maintainer after it lands
@@ -481,6 +485,7 @@ mod tests {
                 pull_request: Some(n),
                 kind: RulingKind::Closed,
                 alerted: false,
+                relayed: false,
             })
             .collect();
         state
@@ -512,6 +517,7 @@ mod tests {
                 head: "c0ffee".into(),
             },
             alerted: true,
+            relayed: true,
         });
         state.last_ruling = 1;
         state.leases.push(LeaseHeld {
@@ -553,6 +559,7 @@ mod tests {
             pull_request: Some(30),
             kind,
             alerted: id.is_multiple_of(2),
+            relayed: id.is_multiple_of(3),
         };
         state.rulings = vec![
             ruling(
@@ -635,6 +642,7 @@ mod tests {
                 "pull_request": 30,
                 "kind": kind,
                 "alerted": id.is_multiple_of(2),
+                "relayed": id.is_multiple_of(3),
             })
         };
         assert_eq!(

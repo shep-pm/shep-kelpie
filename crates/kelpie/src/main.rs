@@ -7,7 +7,7 @@
 //!
 //! `kelpie relay-yes <project> <id>`, `kelpie relay-answer <project>
 //! <params>`: what the relay's own settings gate on. Both send
-//! `rule <params>` to the project's runner on the shepherd `SHEP_HOME`
+//! `relay-rule <params>` to the project's runner on the shepherd `SHEP_HOME`
 //! names; the relay runs them, never the maintainer.
 //!
 //! `kelpie relay-gate <kelpie>`: the hook that refuses the relay every

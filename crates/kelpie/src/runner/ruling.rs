@@ -354,6 +354,7 @@ pub(super) fn park(
         pull_request,
         kind,
         alerted: false,
+        relayed: false,
     });
     (issue, id, text)
 }

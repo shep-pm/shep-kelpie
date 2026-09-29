@@ -45,7 +45,7 @@ pub use report::StepReport;
 pub use rework::ReworkError;
 pub use ruling::{Answer, RuleError};
 pub use trigger::GateError;
-pub use trigger::{ACTIONS, Status, WorkItemStatus, answer, is_no_or_answer};
+pub use trigger::{ACTIONS, RELAY_RULE, Status, WorkItemStatus, answer, is_no_or_answer};
 pub use turn::step;
 
 #[cfg(test)]
@@ -143,6 +143,12 @@ pub struct Runner {
     // When the relay was last cleared, kept in memory only: a restart may
     // clear a session sooner than a full day, never later.
     relay_cleared: Option<Timestamp>,
+    // Notices for the relay of rulings settled without it, kept in memory
+    // only: one lost to a restart leaves the question up, and `rule`
+    // refuses a tap on it.
+    relay_notices: Vec<alert::SettledNotice>,
+    // The ruling whose relay send is out, which an answer can settle first
+    relaying: Option<u64>,
     // The account kelpie acts as, read once a run when a rework first needs it
     viewer: Option<String>,
 }
@@ -202,6 +208,8 @@ impl Runner {
             webhook,
             retry: None,
             relay_cleared: None,
+            relay_notices: Vec::new(),
+            relaying: None,
             viewer: None,
         })
     }
