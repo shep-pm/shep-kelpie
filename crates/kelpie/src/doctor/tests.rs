@@ -287,7 +287,9 @@ async fn no_shepherd_is_a_missing_shepherd_naming_its_home() {
         kelpie_settings: &scene.kelpie_home.join("settings.toml"),
     };
     let done = check(elsewhere.path(), probes, here, Ask::default());
-    let report = tokio::time::timeout(PATIENCE, done).await.unwrap();
+    let report = tokio::time::timeout(PATIENCE, done)
+        .await
+        .expect("doctor neither ended nor failed in time");
     let (what, fix) = missing(&report, "shepherd");
     assert!(
         what.contains(&elsewhere.path().display().to_string()),
@@ -402,6 +404,15 @@ async fn rulings_for_a_webhook_kelpie_has_none_of_are_missing_a_webhook() {
 }
 
 #[tokio::test]
+async fn kelpie_settings_come_from_the_old_file_while_the_section_is_empty() {
+    let scene = Scene::new().await;
+    scene.shepherd.holds_section("");
+    std::fs::write(scene.kelpie_home.join("settings.toml"), WEBHOOK).unwrap();
+    let found = ok(&scene.report().await, "koji: rulings");
+    assert_eq!(found, "rulings post to the ntfy webhook");
+}
+
+#[tokio::test]
 async fn a_test_alert_posts_once_to_the_webhook_and_only_when_asked() {
     let scene = Scene::new().await;
     scene.report().await;
@@ -496,7 +507,8 @@ async fn preview_tools_are_checked_only_for_a_project_that_shows_its_ui() {
     );
 
     std::fs::create_dir_all(tools.browsers().join("chromium-headless-shell")).unwrap();
-    ok(&scene.report().await, "golbat: preview tools");
+    let found = ok(&scene.report().await, "golbat: preview tools");
+    assert!(found.starts_with("installed under "), "{found}");
 }
 
 #[tokio::test]
