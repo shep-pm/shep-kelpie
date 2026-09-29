@@ -21,8 +21,8 @@ repo = "~/.kelpie/repos/shep"
 forge = "shep-pm/shep"
 
 # `ask` raises a ruling before every merge. `auto` merges once every gate
-# passes and posts a notice to the webhook after; every other ruling still
-# asks.
+# passes and sends a notice after, to the webhook or the relay; every other
+# ruling still asks.
 merge_authority = "ask"
 
 # Whether the repo runs CI on pull requests. GitHub cannot tell a repo

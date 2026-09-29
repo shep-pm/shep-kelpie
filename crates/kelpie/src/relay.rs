@@ -377,6 +377,12 @@ mod tests {
             text.contains("never AskUserQuestion, so nothing is left waiting"),
             "{text}"
         );
+        assert!(
+            text.contains("A reply to a notice answers no ruling"),
+            "{text}"
+        );
+        assert!(text.contains("ask which one they mean"), "{text}");
+        assert!(text.contains("`wants`, `settled` and `notice`"), "{text}");
     }
 
     #[test]

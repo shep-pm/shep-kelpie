@@ -58,7 +58,7 @@ pub(super) struct Retry {
     at: Timestamp,
 }
 
-/// What the relay is sent, best-effort, alongside a ruling's webhook post
+/// What the relay is sent, best-effort, alongside a ruling's webhook post, or alone for a notice
 #[derive(Debug)]
 pub(super) struct RelayMessage {
     pub(super) text: String,
@@ -112,8 +112,8 @@ pub(super) fn tell_settled(runner: &Mutex<Runner>, relay: &dyn Relay) {
 }
 
 /// Posts the oldest ruling or notice due to the webhook, and sends a ruling
-/// to the relay unless the relay already holds it, each where its channel
-/// is on
+/// to the relay unless the relay already holds it, or a notice where the
+/// webhook is off, each where its channel is on
 ///
 /// Returns `None` when nothing is due. With the webhook on, it is what
 /// keeps a ruling from being lost, so it posts every ruling whatever the
@@ -232,7 +232,7 @@ impl Runner {
 
     /// Whether the relay is due a daily clear, which is recorded as done
     /// once this returns true: called only when a ruling is about to be
-    /// sent, since an idle relay never grows and needs no clearing.
+    /// sent, since a notice never clears: a clear ends a question still up.
     pub(super) fn relay_clear_due(&mut self) -> bool {
         let now = self.ports.clock.now();
         let due = self
