@@ -4,15 +4,16 @@ use std::sync::Mutex;
 
 use serde_json::json;
 
-use super::super::FULL_REVIEW;
-use super::{LABEL, fixed, hold_a_finding, labels, now, off, on, summoned};
+use super::super::{FULL_REVIEW, HEARD_WAIT};
+use super::{LABEL, fixed, hold_a_finding, labels, now, off, on, reviewed_by_qwen};
 use crate::ports::Checks;
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::test::{Rig, Scripted};
 
-// A summoned round on a project that allows `rounds` of them.
+// A summoned round on a project that allows `rounds` of them. The runner
+// restarts before the summon, since a restart clears the lease rows.
 fn summoned_with(project: &str, rounds: u32) -> (Rig, Mutex<Runner>, String) {
-    let (rig, runner, head) = summoned(project);
+    let (rig, runner, head) = reviewed_by_qwen(project);
     rig.edit_settings(|s| {
         assert!(s.contains("divisor = 1000\n"), "the default divisor moved");
         s.replace(
@@ -22,6 +23,15 @@ fn summoned_with(project: &str, rounds: u32) -> (Rig, Mutex<Runner>, String) {
     });
     drop(runner);
     let runner = rig.open().unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::MarkedReady { .. })
+    ));
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::Summoned { .. })
+    ));
     (rig, runner, head)
 }
 
@@ -110,4 +120,25 @@ fn two_rounds_summon_once_more_after_the_first_fix_and_not_after_the_second() {
         Some(StepReport::Ruling { id: 1, .. })
     ));
     assert_eq!(labels(&rig), [on(), off(), on(), off()]);
+}
+
+#[test]
+fn a_re_send_in_the_one_round_is_that_round_and_the_fix_still_reaches_the_merge() {
+    let (rig, runner, head) = summoned_with("xilriws", 1);
+    rig.clock.advance(HEARD_WAIT);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::SummonedAgain { .. })
+    ));
+    assert!(matches!(
+        hold_a_finding(&rig, &runner, &head, "Name the flag."),
+        Some(StepReport::CodeRabbitJudged { round: 1, .. })
+    ));
+    assert!(matches!(
+        last_fix(&rig, &runner),
+        Some(StepReport::Ruling { id: 1, .. })
+    ));
+    assert_eq!(labels(&rig), [on(), off(), on(), off()]);
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["coderabbit"]["rounds"], json!(1));
 }
