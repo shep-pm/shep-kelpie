@@ -11,22 +11,28 @@ use super::turn::failed;
 use crate::fence;
 use crate::state::{RulingKind, StateError};
 
+/// What a step does when the branch cannot be checked
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Unchecked {
+    /// Stops the step: CI, which leads to the merge
+    Stop,
+    /// Carries on: the worktree check still guards every call it makes
+    CarryOn,
+}
+
 impl Runner {
     /// Parks the worker before a gate step that may call Claude in the worktree
     pub(super) fn fence_gate(&mut self) -> Result<Option<Begin>, StateError> {
-        if let Some(parked) = self.claude_files_changed(false)? {
+        if let Some(parked) = self.claude_files_changed(Unchecked::CarryOn)? {
             return Ok(Some(parked));
         }
         self.refuse_differing()
     }
 
     /// Parks the worker if the branch on `origin` changes Claude Code's own files
-    ///
-    /// When the check itself fails, a `strict` caller stops the step, and
-    /// any other carries on: the worktree check still guards its calls.
     pub(super) fn claude_files_changed(
         &mut self,
-        strict: bool,
+        unchecked: Unchecked,
     ) -> Result<Option<Begin>, StateError> {
         let item = self
             .state
@@ -44,7 +50,7 @@ impl Runner {
                 let kind = RulingKind::ClaudeFiles { head, files, phase };
                 self.raise(number, kind).map(Some)
             }
-            Err(e) if strict => Ok(Some(self.gate_failed(format!(
+            Err(e) if unchecked == Unchecked::Stop => Ok(Some(self.gate_failed(format!(
                 "cannot check #{number} for changes to Claude Code's own files: {e}"
             )))),
             Err(_) => Ok(None),
@@ -52,7 +58,7 @@ impl Runner {
     }
 
     /// Why no Claude call may run in the work item's worktree, if one may not
-    pub(super) fn claude_files_differ(&self) -> Option<String> {
+    pub(super) fn claude_files_refusal(&self) -> Option<String> {
         let item = self.state.work_item.as_ref()?;
         let accepted = item.claude_files_accepted.as_deref();
         match fence::differ(&self.settings.repo, &item.worktree, accepted) {
@@ -67,9 +73,9 @@ impl Runner {
         }
     }
 
-    /// Fails the step, parking the worker, when [`Self::claude_files_differ`] says so
+    /// Fails the step, parking the worker, when [`Self::claude_files_refusal`] says so
     pub(super) fn refuse_differing(&mut self) -> Result<Option<Begin>, StateError> {
-        let Some(reason) = self.claude_files_differ() else {
+        let Some(reason) = self.claude_files_refusal() else {
             return Ok(None);
         };
         let now = self.ports.clock.now();

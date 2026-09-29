@@ -1,8 +1,8 @@
 //! The gate between the worker's pull request and the merge ruling
 //!
 //! Each step looks once at the pull request's head. A label, ready or head
-//! change kelpie did not make parks the worker before anything else, and a
-//! change to Claude Code's own files right after. A
+//! change kelpie did not make parks the worker before anything else. A
+//! branch that changes Claude Code's own files parks it next. A
 //! branch without the latest `main` is rebased and pushed, or merged when
 //! it is adopted or holds a merge already, and a conflict is
 //! the worker's next turn, naming the files. A conflict the worker left
@@ -13,6 +13,7 @@
 //! without CI skips the checks.
 
 use super::Runner;
+use super::claude_files::Unchecked;
 use super::report::{Begin, StepReport};
 use super::rework::HUMAN;
 use crate::board::READY;
@@ -82,7 +83,7 @@ impl Runner {
             };
             return self.raise(number, kind);
         }
-        if let Some(parked) = self.claude_files_changed(true)? {
+        if let Some(parked) = self.claude_files_changed(Unchecked::Stop)? {
             return Ok(parked);
         }
         if known.head.is_none() {

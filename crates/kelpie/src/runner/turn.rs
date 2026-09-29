@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use super::Runner;
 use super::adopt;
+use super::claude_files::Unchecked;
 use super::instructions;
 use super::question::asked;
 use super::report::{Begin, StepReport};
@@ -136,7 +137,7 @@ impl Runner {
             return Ok(begin);
         }
         // A rework can start on a branch that already changes them.
-        if due && let Some(parked) = self.claude_files_changed(false)? {
+        if due && let Some(parked) = self.claude_files_changed(Unchecked::CarryOn)? {
             return Ok(parked);
         }
         if due && let Some(held) = self.pace(Scope::Turn)?.holds() {
@@ -231,7 +232,7 @@ impl Runner {
             &item.build,
         )
         .map_err(|e| e.to_string())?;
-        if let Some(reason) = self.claude_files_differ() {
+        if let Some(reason) = self.claude_files_refusal() {
             return Err(reason);
         }
         let profile = WorkerProfile {
