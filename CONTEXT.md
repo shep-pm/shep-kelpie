@@ -84,6 +84,15 @@ Only the project manager summons.
 **Ruling**:
 A decision only the maintainer makes. A worker waiting on one is **parked**.
 
+**Merge authority**:
+A project's setting for who decides a merge. `ask` raises a ruling before
+every merge. `auto` has the project manager merge once every gate passes,
+and replaces only that ruling: every other ruling still asks.
+
+**Notice**:
+What kelpie posts to the webhook after a merge under `auto`. Not a ruling:
+it has no id and takes no answer.
+
 **Relay**:
 The Claude Code session through which kelpie asks the maintainer for
 rulings and passes the answers back. A stopgap for the first build.

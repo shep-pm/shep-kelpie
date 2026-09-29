@@ -409,6 +409,7 @@ impl Runner {
             ..fresh
         };
         item.coderabbit.rounds = rounds;
+        item.summon_owed = self.settings.coderabbit.enabled;
         next.work_item = Some(item);
         self.save(next).map_err(AdoptError::State)?;
         Ok((issue, worker))

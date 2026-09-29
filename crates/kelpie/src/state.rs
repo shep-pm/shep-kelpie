@@ -51,6 +51,9 @@ pub struct ProjectState {
     /// What the week had spent when today began, once usage has been read
     #[serde(default)]
     pub pacing: Option<DayStart>,
+    /// Automatic merges not yet posted to the webhook, oldest first
+    #[serde(default)]
+    pub notices: Vec<Notice>,
 }
 
 impl ProjectState {
@@ -68,6 +71,7 @@ impl ProjectState {
             adopted: Vec::new(),
             leases: Vec::new(),
             pacing: None,
+            notices: Vec::new(),
         }
     }
 }
@@ -113,6 +117,22 @@ pub struct Ruling {
     pub alerted: bool,
 }
 
+/// A merge kelpie made under `auto`, told to the maintainer after it lands
+///
+/// Not a ruling: it has no id and takes no answer. It goes once the
+/// webhook post lands.
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Notice {
+    /// The work item's issue
+    pub issue: u64,
+    /// The pull request merged
+    pub pull_request: u64,
+    /// The head it merged at
+    pub head: String,
+}
+
 /// What raised a ruling. A no's note, or an answer, always goes to the worker.
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,6 +154,14 @@ pub enum RulingKind {
         head: String,
         /// The checks that failed
         checks: Vec<String>,
+    },
+    /// The forge refused an automatic merge again after a catch-up. A yes
+    /// looks again.
+    MergeRefused {
+        /// The head the second refusal was about
+        head: String,
+        /// The forge's reason
+        reason: String,
     },
     /// Someone closed the pull request without merging it. A yes drops the
     /// work item and keeps its branch on the forge.
@@ -556,8 +584,20 @@ mod tests {
                     },
                 },
             ),
+            ruling(
+                8,
+                RulingKind::MergeRefused {
+                    head: "c0ffee".into(),
+                    reason: "a ruleset".into(),
+                },
+            ),
         ];
-        state.last_ruling = 7;
+        state.last_ruling = 8;
+        state.notices = vec![Notice {
+            issue: 22,
+            pull_request: 30,
+            head: "c0ffee".into(),
+        }];
         state.finished = vec![22, 30];
         state.reworked = vec!["PRR_1".into()];
         state.adopted = vec![
@@ -613,8 +653,13 @@ mod tests {
                         "description": "the `bug` label was added",
                         "known": { "labels": ["bug"], "ready": false, "head": "c0ffee" },
                     })),
+                    pinned(8, serde_json::json!({
+                        "kind": "merge-refused",
+                        "head": "c0ffee",
+                        "reason": "a ruleset",
+                    })),
                 ],
-                "last_ruling": 7,
+                "last_ruling": 8,
                 "finished": [22, 30],
                 "reworked": ["PRR_1"],
                 "adopted": [
@@ -623,6 +668,7 @@ mod tests {
                 ],
                 "leases": [{ "resource": "coderabbit", "since": 8 }],
                 "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
+                "notices": [{ "issue": 22, "pull_request": 30, "head": "c0ffee" }],
             })
         );
     }
