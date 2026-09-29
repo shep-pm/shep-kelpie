@@ -133,7 +133,7 @@ async fn run_gpu(command: &[&str]) -> Result<ExitCode, String> {
     let released = lock
         .release(pid)
         .map_err(|e| format!("cannot remove {}: {e}", lock.path().display()));
-    Ok(exit_code(both(ran, released)?))
+    both(ran, released)
 }
 
 async fn run_book(kind: &LeaseKind, command: &[&str]) -> Result<ExitCode, String> {
@@ -145,13 +145,13 @@ async fn run_book(kind: &LeaseKind, command: &[&str]) -> Result<ExitCode, String
     let returned = ask_dog("return", kind.as_str())
         .await
         .map_err(|e| format!("{e}: run `kelpie lease return {kind}`"));
-    Ok(exit_code(both(ran, returned)?))
+    both(ran, returned)
 }
 
 // The command's outcome and its lease's return, with both errors if both failed.
-fn both<T>(ran: Result<ExitStatus, String>, back: Result<T, String>) -> Result<ExitStatus, String> {
+fn both<R, T>(ran: Result<R, String>, back: Result<T, String>) -> Result<R, String> {
     match (ran, back) {
-        (Ok(status), Ok(_)) => Ok(status),
+        (Ok(outcome), Ok(_)) => Ok(outcome),
         (Err(e), Ok(_)) | (Ok(_), Err(e)) => Err(e),
         (Err(ran), Err(back)) => Err(format!("{ran}, and {back}")),
     }
@@ -365,16 +365,23 @@ async fn ask_dog(action: &str, params: &str) -> Result<Value, String> {
 }
 
 // Runs `command` to its end. A hangup or terminate is passed on to it; an
-// interrupt from the terminal has already reached it.
-async fn run_command(command: &[&str], signals: &mut Signals) -> Result<ExitStatus, String> {
+// interrupt from the terminal has already reached it. A signal that came
+// before the command started reached no one else, so it ends the run
+// without starting it.
+async fn run_command(command: &[&str], signals: &mut Signals) -> Result<ExitCode, String> {
     let (program, args) = command.split_first().ok_or("no command to run")?;
+    tokio::select! {
+        biased;
+        caught = signals.recv() => return Ok(caught.exit_code()),
+        () = std::future::ready(()) => {}
+    }
     let mut child = tokio::process::Command::new(program)
         .args(args)
         .spawn()
         .map_err(|e| format!("cannot run {program}: {e}"))?;
     loop {
         tokio::select! {
-            status = child.wait() => return status.map_err(|e| e.to_string()),
+            status = child.wait() => return status.map(exit_code).map_err(|e| e.to_string()),
             caught = signals.recv() => {
                 if let (Some(pid), Some(name)) = (child.id(), caught.forward()) {
                     signal_process(pid, name);
@@ -469,12 +476,15 @@ mod tests {
         let ok = || Ok::<_, String>(exited(0));
         assert_eq!(both(ok(), Ok::<(), String>(())), Ok(exited(0)));
         assert_eq!(
-            both(Err("ran".into()), Ok::<(), String>(())),
+            both(Err::<ExitStatus, _>("ran".into()), Ok::<(), String>(())),
             Err("ran".into())
         );
         assert_eq!(both(ok(), Err::<(), _>("back".into())), Err("back".into()));
         assert_eq!(
-            both(Err("ran".into()), Err::<(), _>("back".into())),
+            both(
+                Err::<ExitStatus, _>("ran".into()),
+                Err::<(), _>("back".into())
+            ),
             Err("ran, and back".into())
         );
     }
@@ -491,5 +501,24 @@ mod tests {
             "the terminal already sent it"
         );
         assert_eq!(Caught::Terminate.forward(), Some("TERM"));
+    }
+
+    // The signal lands after the handler exists and before the command
+    // does, which is the gap between taking a lease and spawning.
+    #[tokio::test]
+    async fn an_interrupt_before_the_command_starts_ends_the_run_without_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let marker = temp.path().join("ran");
+        let mut signals = Signals::new().unwrap();
+        std::process::Command::new("kill")
+            .args(["-INT", &std::process::id().to_string()])
+            .status()
+            .unwrap();
+        // Delivery is asynchronous; wait until the handler has seen it.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let command = ["touch", marker.to_str().unwrap()];
+        let ended = run_command(&command, &mut signals).await;
+        assert_eq!(ended, Ok(ExitCode::from(130)));
+        assert!(!marker.exists(), "the command started anyway");
     }
 }
