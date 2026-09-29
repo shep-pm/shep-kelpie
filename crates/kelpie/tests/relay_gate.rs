@@ -12,8 +12,8 @@ const KELPIE: &str = env!("CARGO_BIN_EXE_kelpie");
 
 // Claude Code runs a hook's command through the shell, with the call on stdin.
 fn hook(tool: &str, command: &str) -> Output {
-    let kelpie = BarePath::of(Path::new(KELPIE)).unwrap();
-    let settings = kelpie::relay::settings(Path::new("/k/shep"), kelpie);
+    let program = BarePath::of(Path::new(KELPIE)).unwrap();
+    let settings = kelpie::relay::settings(Path::new("/k/shep"), program);
     let line = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
         .as_str()
         .unwrap()
