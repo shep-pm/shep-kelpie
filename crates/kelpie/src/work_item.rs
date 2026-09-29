@@ -164,6 +164,9 @@ pub enum CodeRabbitStage {
         /// Whether it asked for a full review
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         full: bool,
+        /// Whether CodeRabbit gave no sign of it and it went out once more
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        resent: bool,
     },
     /// The open threads of a review of `head`, judged in order
     Judging {
@@ -602,9 +605,13 @@ mod tests {
                 head: "c0ffee".into(),
                 at: Timestamp(12),
                 full: false,
+                resent: false,
             })),
             json!({ "state": "coderabbit", "stage": "summoned", "head": "c0ffee", "at": 12 })
         );
+        let again = json!({ "state": "coderabbit", "stage": "summoned", "head": "c0ffee", "at": 12, "resent": true });
+        let sent: Phase = serde_json::from_value(again.clone()).unwrap();
+        assert_eq!(value(sent), again);
         let full = json!({ "state": "coderabbit", "stage": "summoned", "head": "c0ffee", "at": 12, "full": true });
         let asked: Phase = serde_json::from_value(full.clone()).unwrap();
         assert_eq!(value(asked), full);
