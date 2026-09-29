@@ -208,6 +208,7 @@ mod tests {
             "wt/src/.claude/skills/x/SKILL.md",
             "wt/.mcp.json",
             "wt/.MCP.json",
+            "wt/.mcp.j\u{17f}on",
             "target/.claude/settings.json",
         ] {
             for tool in ["Write", "Edit"] {
