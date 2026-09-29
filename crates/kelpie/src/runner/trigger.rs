@@ -38,7 +38,8 @@ pub struct Status<'a> {
     pub run: RunState,
     /// When it last started or paused
     pub since: Timestamp,
-    /// The oldest open work item, as a status before `work_items` showed it
+    /// The first of `work_items`, where a status read before they existed
+    /// finds the work item
     pub work_item: Option<WorkItemStatus<'a>>,
     /// Every open work item, oldest first
     pub work_items: Vec<WorkItemStatus<'a>>,
@@ -133,8 +134,10 @@ enum Request {
 /// `adopt` a pull request number, `rule` and `relay-rule` take `<id> yes`,
 /// `<id> no <note>` or `<id> answer <text>`, `gate` and `drop` take the
 /// issue of the work item they are about when more than one is open, and
-/// every other action takes nothing. A ruling the relay was sent, settled by anything but
-/// `relay-rule`, is told to it.
+/// every other action takes nothing.
+///
+/// A ruling the relay was sent, settled by anything but `relay-rule`, is
+/// told to it.
 pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> String {
     let error = |message: String| serde_json::json!({ "error": message }).to_string();
     let request = match read(action, params.map(str::trim).filter(|p| !p.is_empty())) {

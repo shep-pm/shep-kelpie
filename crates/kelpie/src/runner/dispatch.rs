@@ -13,6 +13,8 @@ use crate::pacer::Scope;
 use crate::state::StateError;
 
 impl Runner {
+    // The step runs this only while a slot is free, and it opens at most one
+    // work item, so nothing here checks `max_items` again.
     pub(super) fn dispatch(&mut self) -> Result<Begin, StateError> {
         let forge = &self.ports.forge;
         let repo = &self.settings.forge;
