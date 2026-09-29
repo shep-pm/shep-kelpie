@@ -47,7 +47,7 @@ impl LocalReviewer {
 
 // Ollama names a model with its tag, and takes the bare name for `:latest`.
 fn names(loaded: &str, asked: &str) -> bool {
-    bare(loaded) == bare(asked)
+    bare(loaded).eq_ignore_ascii_case(bare(asked))
 }
 
 fn bare(name: &str) -> &str {
@@ -89,9 +89,19 @@ fn read_seats(host: &str) -> Result<Option<Vec<ModelSeat>>, ReviewerError> {
     }
     // A server that answers any path with a page is not Ollama either.
     let value: Value = serde_json::from_str(body).unwrap_or(Value::Null);
-    Ok(value["models"]
-        .as_array()
-        .map(|models| models.iter().filter_map(seat).collect()))
+    let Some(models) = value["models"].as_array() else {
+        return Ok(None);
+    };
+    let seats: Vec<ModelSeat> = models.iter().filter_map(seat).collect();
+    if seats.len() < models.len() {
+        // Ollama-shaped, so not skipped quietly. The host stays out of the line.
+        eprintln!(
+            "the Ollama host's /api/ps listed {} model(s) with no readable size, \
+             which are not checked",
+            models.len() - seats.len()
+        );
+    }
+    Ok(Some(seats))
 }
 
 fn seat(model: &Value) -> Option<ModelSeat> {

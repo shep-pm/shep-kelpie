@@ -190,6 +190,7 @@ mod tests {
             command: script.to_owned(),
             gpu_lease: false,
             ollama: None,
+            ollama_model: None,
         })
     }
 

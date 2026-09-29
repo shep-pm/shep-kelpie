@@ -212,6 +212,7 @@ mod tests {
             command: path.to_owned(),
             gpu_lease,
             ollama: None,
+            ollama_model: None,
         })
     }
 
