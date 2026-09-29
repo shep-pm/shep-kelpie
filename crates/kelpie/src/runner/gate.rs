@@ -890,6 +890,26 @@ mod tests {
     }
 
     #[test]
+    fn a_work_item_saved_before_heads_were_known_parks_nothing_and_learns_its_head() {
+        let (rig, runner, head) = Rig::with_pull_request("chelone");
+        drop(runner);
+        let state = rig.paths().state;
+        let text = std::fs::read_to_string(&state).unwrap();
+        let mut saved: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let known = saved["work_item"]["known"].as_object_mut().unwrap();
+        assert!(known.remove("head").is_some());
+        std::fs::write(&state, saved.to_string()).unwrap();
+
+        let runner = rig.open().unwrap();
+        rig.forge.set_checks(&head, Checks::Passed);
+        let (_, question) = ruling_report(rig.verdict(&runner));
+        assert!(question.starts_with("Merge pull request #71"), "{question}");
+        let text = std::fs::read_to_string(&state).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(saved["work_item"]["known"]["head"], json!(head));
+    }
+
+    #[test]
     fn a_work_item_saved_before_the_gate_existed_is_left_alone() {
         let (rig, runner, head) = Rig::with_pull_request("xilriws");
         drop(runner);
