@@ -186,7 +186,10 @@ pub(crate) fn parse_statuses(stdout: &[u8]) -> Result<Vec<Status>, ForgeError> {
     lines::<Line>(stdout)?
         .into_iter()
         .map(|s| {
-            let commit = s.url.rsplit('/').next().unwrap_or_default();
+            let commit = match s.url.rsplit_once('/') {
+                Some((_, commit)) if !commit.is_empty() => commit,
+                _ => return Err(unreadable(stdout)),
+            };
             Ok(Status {
                 commit: commit.to_owned(),
                 description: s.description.unwrap_or_default(),
@@ -284,10 +287,17 @@ mod tests {
         let parsed = parse_statuses(line).unwrap();
         assert_eq!(parsed[0].commit, "7d30d0f6f8d03314fe9f060b4627643bb32db8cc");
         assert_eq!(parsed[0].description, "Review completed");
-        assert!(matches!(
-            parse_statuses(br#"{"url":"x","created_at":"soon"}"#),
-            Err(ForgeError::Unreadable(_))
-        ));
+        let at = r#""created_at":"2026-09-29T05:53:45Z""#;
+        for url in ["x", "https://api.github.com/repos/o/r/statuses/"] {
+            let line = format!(r#"{{"url":"{url}",{at}}}"#);
+            assert!(
+                matches!(
+                    parse_statuses(line.as_bytes()),
+                    Err(ForgeError::Unreadable(_))
+                ),
+                "{url}"
+            );
+        }
     }
 
     #[test]
