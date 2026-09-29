@@ -326,18 +326,24 @@ async fn ask_dog(action: &str, params: &str) -> Result<Value, String> {
     let client = Client::connect(&socket)
         .await
         .map_err(|e| format!("cannot reach the shepherd at {}: {e}", socket.display()))?;
-    let reply = client
-        .request(Request::Trigger {
-            selector: SelectorSpec::Name(dog::NAME.into()),
+    let ask = |name: &str| {
+        client.request(Request::Trigger {
+            selector: SelectorSpec::Name(name.into()),
             action: action.into(),
             params: Some(params.to_owned()).filter(|p| !p.is_empty()),
         })
-        .await
-        .map_err(|e| format!("cannot ask the dog: {e}"))?;
-    let Response::Triggered(rows) = reply else {
-        return Err(format!("the shepherd answered {reply:?}"));
     };
-    let body = match rows.into_iter().next().map(|row| row.outcome) {
+    let rows = |reply: Result<Response, _>| match reply {
+        Ok(Response::Triggered(rows)) => Ok(rows),
+        Ok(other) => Err(format!("the shepherd answered {other:?}")),
+        Err(e) => Err(format!("cannot ask the dog: {e}")),
+    };
+    // A dog set up from a Flockfile before `shep kelpie add` has its old name.
+    let mut found = rows(ask(dog::NAME).await)?;
+    if found.is_empty() {
+        found = rows(ask(dog::OLD_NAME).await)?;
+    }
+    let body = match found.into_iter().next().map(|row| row.outcome) {
         Some(ActionOutcome::Replied { body }) => body,
         Some(other) => return Err(format!("the dog did not answer: {other:?}")),
         None => return Err(format!("no sheep named {} is running", dog::NAME)),

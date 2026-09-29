@@ -151,7 +151,7 @@ impl Shepherd {
             )
         };
         format!(
-            "[[app]]\nname = \"kelpie\"\nscript = {KELPIE:?}\nargs = [\"dog\"]\n\
+            "[[app]]\nname = \"kelpie-dog\"\nscript = {KELPIE:?}\nargs = [\"dog\"]\n\
              channel = true\nshutdown_with_message = true\nautorestart = false\n\
              env = {{ SHEP_HOME = \"{home}\", TMPDIR = \"{home}\", KELPIE_HOME = \"{home}\" }}\n\n{}{}",
             runner("koji"),
@@ -225,7 +225,7 @@ async fn holds(client: &Client, runner: &str) -> bool {
 }
 
 async fn book(client: &Client) -> Value {
-    stand_in(&trigger(client, "kelpie", "status", None).await)
+    stand_in(&trigger(client, "kelpie-dog", "status", None).await)
 }
 
 fn stand_in(status: &Value) -> Value {
@@ -241,7 +241,7 @@ async fn the_lease_round_trip_runs_through_a_real_shepherd() {
     let shepherd = Shepherd::start();
     let client = shepherd.client().await;
     until("the dog and both runners", async || {
-        trigger(&client, "kelpie", "status", None).await["leases"].is_array()
+        trigger(&client, "kelpie-dog", "status", None).await["leases"].is_array()
             && trigger(&client, "koji", "status", None).await.is_object()
             && trigger(&client, "reactmap", "status", None)
                 .await
@@ -359,7 +359,7 @@ async fn the_lease_round_trip_runs_through_a_real_shepherd() {
 async fn a_restarted_dog_keeps_its_book() {
     let shepherd = Shepherd::start();
     let client = shepherd.client().await;
-    let dog_up = async || trigger(&client, "kelpie", "status", None).await["leases"].is_array();
+    let dog_up = async || trigger(&client, "kelpie-dog", "status", None).await["leases"].is_array();
     until("the dog and both runners", async || {
         dog_up().await
             && trigger(&client, "koji", "status", None).await.is_object()
@@ -377,16 +377,16 @@ async fn a_restarted_dog_keeps_its_book() {
     .await;
     let before = book(&client).await;
 
-    shepherd.shep_ok(&["restart", "kelpie"]);
+    shepherd.shep_ok(&["restart", "kelpie-dog"]);
     until("the dog back", dog_up).await;
     assert_eq!(book(&client).await, before, "the book came back whole");
     assert!(holds(&client, "koji").await);
     assert!(!holds(&client, "reactmap").await, "no second grant");
 
     // koji restarts while the dog is down: its lease goes to reactmap.
-    shepherd.shep_ok(&["stop", "kelpie"]);
+    shepherd.shep_ok(&["stop", "kelpie-dog"]);
     shepherd.shep_ok(&["restart", "koji"]);
-    shepherd.shep_ok(&["restart", "kelpie"]);
+    shepherd.shep_ok(&["restart", "kelpie-dog"]);
     until("reactmap's grant", async || {
         holds(&client, "reactmap").await
     })

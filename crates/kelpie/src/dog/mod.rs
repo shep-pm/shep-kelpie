@@ -37,7 +37,13 @@ use desk::{Delivery, Desk};
 use triggers::ACTIONS;
 
 /// The dog's sheep name, which `kelpie lease` triggers
-pub const NAME: &str = "kelpie";
+///
+/// Not `kelpie`, which is the adopted dog's: `shep disable kelpie` deletes a
+/// sheep of that name, and `shep adopt` refuses one.
+pub const NAME: &str = "kelpie-dog";
+
+/// The dog's sheep name in a Flockfile written before `shep kelpie add`
+pub const OLD_NAME: &str = "kelpie";
 
 /// How long queued replies get to reach the shepherd before the dog exits
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
