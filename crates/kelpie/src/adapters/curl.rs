@@ -117,9 +117,9 @@ fn config(webhook: &Webhook, alert: &Alert) -> String {
             ];
             let mut text = alert.text.clone();
             if let Some(reply) = &alert.reply {
-                // The reply line goes last, where a cut keeps it.
-                text.push_str(&ntfy::reply_line(reply));
                 let actions = ntfy::actions(webhook.url.expose(), reply);
+                // The reply line goes last, where a cut keeps it.
+                text.push_str(&ntfy::reply_line(reply, actions.is_some()));
                 headers.extend(actions.map(|a| format!("Actions: {a}")));
             }
             (headers, fit(&text, NTFY_MAX))

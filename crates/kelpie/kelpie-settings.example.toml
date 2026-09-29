@@ -16,6 +16,8 @@
 # or reply with the line the alert ends on, which carries the ruling's
 # one-time code. Anyone who can read the topic can read the code, so keep
 # the topic's name unguessable, or protect it with an `?auth=` token in `url`.
+# A `url` with a token gets no buttons, since every reader would see it:
+# answer those rulings by typed reply.
 [webhook]
 kind = "ntfy"
 url = "https://ntfy.sh/your-private-topic"

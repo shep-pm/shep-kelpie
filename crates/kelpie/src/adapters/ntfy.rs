@@ -17,29 +17,39 @@ pub(super) const TAG: &str = "kelpie";
 pub(super) const SEND_BACK_NOTE: &str =
     "Sent back from ntfy with no note. Ask the maintainer what to change.";
 
-/// The line that ends a ruling's alert: the replies that answer it
-pub(super) fn reply_line(reply: &ReplyWith) -> String {
+/// The line that ends a ruling's alert: the replies that answer it, and
+/// whether it has buttons
+pub(super) fn reply_line(reply: &ReplyWith, buttons: bool) -> String {
     let (id, code) = (reply.id, reply.code.expose());
+    let tap = if buttons {
+        "Tap a button, or reply"
+    } else {
+        "Reply"
+    };
     match reply.takes {
         Takes::Answer => format!("\n\nReply here with `{id} answer <text> {code}`."),
         Takes::YesOrNo { .. } => {
-            format!(
-                "\n\nTap a button, or reply here with `{id} yes {code}` or `{id} no <note> {code}`."
-            )
+            format!("\n\n{tap} here with `{id} yes {code}` or `{id} no <note> {code}`.")
         }
     }
 }
 
 /// The `Actions` header's JSON for a ruling's buttons, or `None` for a
-/// ruling that takes a typed answer
+/// ruling that takes a typed answer, or a topic whose URL carries a query
 ///
 /// Each button posts to the topic itself at the lowest priority, so the
 /// reply does not buzz the phone again, and clears the alert. Leave posts
-/// a line tagged as kelpie's, which a read skips.
+/// a line tagged as kelpie's, which a read skips. A button's URL is on the
+/// message for every reader, so a URL with a query, such as an `auth`
+/// token that can publish, gets no buttons: a reader who may only read
+/// would otherwise be handed that token.
 pub(super) fn actions(url: &str, reply: &ReplyWith) -> Option<String> {
     let Takes::YesOrNo { yes } = reply.takes else {
         return None;
     };
+    if url.contains('?') {
+        return None;
+    }
     let (id, code) = (reply.id, reply.code.expose());
     let button = |label: &str, body: String, tags: Option<&str>| {
         let mut headers = json!({ "X-Priority": "1" });
@@ -191,11 +201,12 @@ mod tests {
     fn every_reply_and_button_carries_the_rulings_code() {
         let yes_or_no = reply(Takes::YesOrNo { yes: "Merge" });
         let code = yes_or_no.code.expose().to_owned();
-        let line = reply_line(&yes_or_no);
+        let line = reply_line(&yes_or_no, true);
+        assert!(line.starts_with("\n\nTap a button, or reply"), "{line}");
         assert!(line.contains(&format!("`3 yes {code}`")), "{line}");
         assert!(line.contains(&format!("`3 no <note> {code}`")), "{line}");
 
-        let url = "https://ntfy.sh/topic?auth=abc";
+        let url = "https://ntfy.sh/topic";
         let buttons: Value = serde_json::from_str(&actions(url, &yes_or_no).unwrap()).unwrap();
         let shown: Vec<_> = buttons
             .as_array()
@@ -225,8 +236,23 @@ mod tests {
         let code = question.code.expose().to_owned();
         assert_eq!(actions(url, &question), None);
         assert_eq!(
-            reply_line(&question),
+            reply_line(&question, false),
             format!("\n\nReply here with `3 answer <text> {code}`.")
+        );
+    }
+
+    // Every reader sees a button's URL, and may hold only a token that reads.
+    #[test]
+    fn a_topic_url_carrying_a_token_gets_no_buttons() {
+        let yes_or_no = reply(Takes::YesOrNo { yes: "Merge" });
+        assert_eq!(
+            actions("https://ntfy.example/topic?auth=abc", &yes_or_no),
+            None
+        );
+        let code = yes_or_no.code.expose().to_owned();
+        assert_eq!(
+            reply_line(&yes_or_no, false),
+            format!("\n\nReply here with `3 yes {code}` or `3 no <note> {code}`.")
         );
     }
 }
