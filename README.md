@@ -22,9 +22,10 @@ A project on `merge_authority = "auto"` merges its pull requests without asking 
 Kelpie needs shep 0.11 and runs in your own shepherd, beside your other sheep. Adopt it once, then leave it disabled: it runs the dog as a sheep of its own, since an adopted dog gets no channel for the lease commands.
 
 ```sh
-shep adopt /path/to/kelpie --name kelpie
-shep disable kelpie
+shep adopt /path/to/kelpie --name kelpie && shep disable kelpie
 ```
+
+Not while a sheep named `kelpie` runs, such as a dog from an older Flockfile: shep refuses the adopt, and `disable` deletes any sheep of that name. The move below covers that case.
 
 Then, in the checkout of any GitHub repo whose default branch is `main`:
 
@@ -47,12 +48,12 @@ Kelpie refuses a shepherd on another shep minor or major than the pinned one, na
 
 An install from before `shep kelpie` runs its runners and dog from a Flockfile under `SHEP_HOME=~/.kelpie/shep`. It keeps working as it is. To move it into your own shepherd:
 
-1. Take the runners and the dog out of the old shepherd, so no project runs twice, and stop it: `SHEP_HOME=~/.kelpie/shep shep delete all`, then `SHEP_HOME=~/.kelpie/shep shep kill`. A `kill` alone leaves them in its saved roll, and a later `shep muster` there would start them beside the new ones. Their state files stay under `~/.kelpie/projects`
+1. Take the runners and the dog out of the old shepherd by name, so no project runs twice, and stop it: `SHEP_HOME=~/.kelpie/shep shep delete <project>... kelpie`, then `SHEP_HOME=~/.kelpie/shep shep kill`. Name only kelpie's sheep, since that shepherd may run others. A `kill` alone leaves them in its saved roll, and a later `shep muster` there would start them beside the new ones. Their state files stay under `~/.kelpie/projects`
 2. Adopt kelpie in your own shepherd, as above
 3. For each project: `cd ~/.kelpie/repos/<project> && shep kelpie add <project> && shep kelpie start`. `add` makes the project's table from `~/.kelpie/projects/<project>/settings.toml`, and the runner keeps its state file
 4. Once: `shep kelpie settings move <project>`, which moves `~/.kelpie/settings.toml` into the `[kelpie]` section
 
-To adopt kelpie in `~/.kelpie/shep` itself instead, run `SHEP_HOME=~/.kelpie/shep ~/.kelpie/bin/kelpie add <project>` in a project's checkout first. `shep adopt` refuses the name `kelpie` while the Flockfile's dog holds it, so `add` replaces that sheep with `kelpie-dog`, running on the same book. Then drop the `kelpie` entry from the Flockfile.
+To adopt kelpie in `~/.kelpie/shep` itself instead, run `SHEP_HOME=~/.kelpie/shep ~/.kelpie/bin/kelpie add <project>` in a project's checkout first. `shep adopt` refuses the name `kelpie` while the Flockfile's dog holds it, so `add` replaces that sheep with `kelpie-dog`, running on the same book. Then adopt as above, and drop the `kelpie` entry from the Flockfile. `add` refuses to carry `TMPDIR` or `PATH` from that entry, since this shell's may differ and the GPU lock lives under `TMPDIR`: take them out of the entry first.
 
 A runner's Flockfile entry, for a project set up by hand, is in `crates/kelpie/settings.example.toml`. It needs `SHEP_HOME` as an absolute path in `env`, since a sheep starts without it, and `kill_timeout = "10s"` or more, since a runner needs about 7s to stop cleanly.
 
