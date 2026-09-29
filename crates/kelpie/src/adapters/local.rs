@@ -150,6 +150,28 @@ fn check_command(command: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Removes round `round`'s findings file and marker from `out`, so a rework
+/// or a retried round never reads the last run's
+fn clear_round(out: &Path, round: u32) -> Result<(), ReviewerError> {
+    for name in [
+        format!("round-{round}.txt"),
+        format!("round-{round}.txt.done"),
+    ] {
+        let path = out.join(name);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(ReviewerError::Failed(format!(
+                    "cannot remove {}: {e}",
+                    path.display()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The worktree's head commit
 fn head(worktree: &Path) -> Result<String, ReviewerError> {
     let output = Command::new("git")

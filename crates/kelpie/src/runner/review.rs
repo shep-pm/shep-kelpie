@@ -22,7 +22,7 @@ use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, Spent, StepReport
 use super::shots::RoundShots;
 use crate::ports::{
     Claude, ClaudeCall, ClaudeError, ClaudeReply, Finding, Reviewer, ReviewerError, Severity,
-    Timestamp, Verdict, parse_findings,
+    Timestamp, Verdict, read_review,
 };
 use crate::state::{Fix, RulingKind, StateError};
 use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, ReviewerKind, Turn, WorkItem};
@@ -414,11 +414,15 @@ pub(super) fn run_review_call(
             match reply {
                 Err(ClaudeError::Stopped) => stopped(),
                 reply => Reviewed {
-                    result: ReviewResult::Findings(
-                        reply
-                            .map(|reply| parse_findings(&reply.text))
-                            .map_err(|e| e.to_string()),
-                    ),
+                    result: ReviewResult::Findings(reply.map_err(|e| e.to_string()).and_then(
+                        |reply| {
+                            read_review(&reply.text).map_err(|text| {
+                                format!(
+                                    "the Claude round's reply is neither findings nor CLEAN: {text}"
+                                )
+                            })
+                        },
+                    )),
                     spent,
                 },
             }

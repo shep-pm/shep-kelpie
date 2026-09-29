@@ -143,25 +143,67 @@ fn a_named_command_runs_in_place_of_the_script() {
     let rig = Rig::new("koji");
     let command = rig.home.path().join("bin/review");
     std::fs::create_dir_all(command.parent().unwrap()).unwrap();
-    crate::test::write_script(&command, "#!/bin/sh\nexit 1\n");
+    crate::test::write_script(
+        &command,
+        "#!/bin/sh\nmkdir -p \"$QWEN_REVIEW_OUT\"\n\
+         echo 'MEDIUM|work.txt:1|named command ran|it did' > \"$QWEN_REVIEW_OUT/round-1.txt\"\n\
+         : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n",
+    );
     let table = format!(
         "[review.local]\nkind = \"command\"\ncommand = \"{}\"\n",
         command.display()
     );
     rig.edit_settings(|s| s.replace(TABLE, &table));
+    rig.reviewer.pass_through();
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);
     step(&runner).unwrap(); // the worker's first turn
-    step(&runner).unwrap(); // round 1, local
+    assert!(matches!(
+        step(&runner).unwrap(), // round 1, the named command
+        Some(StepReport::ReviewRound {
+            round: 1,
+            findings: 1,
+            ..
+        })
+    ));
     let seen = rig.reviewer.seen();
     assert_eq!(seen.len(), 1);
     let LocalRound::Command(local) = &seen[0].local else {
         panic!("{:?}", seen[0].local);
     };
     assert_eq!(local.command, command);
+}
+
+#[test]
+fn a_claude_round_that_says_neither_findings_nor_clean_fails() {
+    let rig = rig_with("[review.local]\nkind = \"off\"\n");
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Text(""),
+        Scripted::Text("Looks good to me."),
+    ]);
+    step(&runner).unwrap(); // the worker's first turn
+    for said in ["", "Looks good to me."] {
+        assert_eq!(
+            step(&runner).unwrap(),
+            Some(StepReport::GateFailed {
+                issue: 7,
+                reason: format!("the Claude round's reply is neither findings nor CLEAN: {said}"),
+            })
+        );
+    }
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+        "review",
+        "nothing reviewed, so the round is still due"
+    );
 }
 
 #[test]

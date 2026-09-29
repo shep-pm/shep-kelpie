@@ -263,6 +263,35 @@ fn a_reply_cut_off_while_thinking_fails_the_round() {
 }
 
 #[test]
+fn a_reply_with_no_findings_that_is_not_clean_fails_the_round() {
+    let dir = tempfile::tempdir().unwrap();
+    let worktree = repo(dir.path(), "fn a() {}\nfn b() {}\n");
+    let server = StandInEndpoint::start([
+        Answer::Says(""),
+        Answer::Says("<think>long thoughts</think>"),
+        Answer::Says("The code looks fine."),
+        Answer::Says("  CLEAN\n"),
+    ]);
+    let reviewer = LocalReviewer::default();
+    let local = local(server.url(), 8192);
+    let out = dir.path().join("out");
+    let url = server.url();
+    for said in ["", "", "The code looks fine."] {
+        assert_eq!(
+            reviewer.round(&local, &worktree, "origin/main", &out, 1),
+            Err(ReviewerError::Failed(format!(
+                "{url}'s reply is neither findings nor CLEAN: {said}"
+            )))
+        );
+        assert!(!out.join("round-1.txt.done").exists());
+    }
+    assert_eq!(
+        reviewer.round(&local, &worktree, "origin/main", &out, 1),
+        Ok(vec![])
+    );
+}
+
+#[test]
 fn a_retried_round_never_reads_the_last_tries_reply() {
     let dir = tempfile::tempdir().unwrap();
     let worktree = repo(dir.path(), "fn a() {}\nfn b() {}\n");

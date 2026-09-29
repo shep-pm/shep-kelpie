@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 
 use super::LocalReviewer;
 use crate::adapters::process::RunError;
-use crate::ports::{Finding, ReviewerError, parse_findings};
+use crate::ports::{Finding, ReviewerError, read_review};
 use crate::settings::Endpoint;
 
 /// The review prompt every chunk is sent with
@@ -90,7 +90,9 @@ impl LocalReviewer {
         let budget = context.saturating_sub(reply + prompt) * BYTES_PER_TOKEN;
         let folder = out.join(format!("round-{round}"));
         std::fs::create_dir_all(&folder).map_err(|e| failed(&folder, "create", &e))?;
+        super::clear_round(out, round)?;
         let mut text = String::new();
+        let mut findings = Vec::new();
         for (index, chunk) in chunks(&parse(&diff), budget).iter().enumerate() {
             let body = json!({
                 "model": endpoint.model.as_str(),
@@ -112,12 +114,19 @@ impl LocalReviewer {
             )?;
             text.push_str(answer.trim());
             text.push('\n');
+            let url = endpoint.url.as_str();
+            findings.extend(read_review(&answer).map_err(|reply| {
+                ReviewerError::Failed(format!(
+                    "{url}'s reply is neither findings nor CLEAN: {}",
+                    quote(&reply)
+                ))
+            })?);
         }
         let report = out.join(format!("round-{round}.txt"));
         std::fs::write(&report, &text).map_err(|e| failed(&report, "write", &e))?;
         let done = out.join(format!("round-{round}.txt.done"));
         std::fs::write(&done, "").map_err(|e| failed(&done, "write", &e))?;
-        Ok(parse_findings(&text))
+        Ok(findings)
     }
 
     // One chunk's request, answered with the model's words and no thinking.

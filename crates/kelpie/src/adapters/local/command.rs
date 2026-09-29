@@ -73,6 +73,7 @@ impl LocalReviewer {
         files: Option<&str>,
     ) -> Result<Vec<Finding>, ReviewerError> {
         let round = at.round;
+        super::clear_round(out, round)?;
         let mut command = Command::new(at.script);
         command
             .arg("--dir")
@@ -306,6 +307,27 @@ mod tests {
 
         assert_eq!(
             reviewer.round(&local(&script), &worktree, "origin/main", &out, 1),
+            Err(ReviewerError::Incomplete)
+        );
+    }
+
+    // The last run's findings and marker are still on disk: a rework, or a
+    // retried round, under the same issue's folder.
+    #[test]
+    fn a_round_never_reads_the_last_runs_findings() {
+        let home = tempfile::tempdir().unwrap();
+        let script = home.path().join("review");
+        write_script(
+            &script,
+            "#!/bin/sh\nmkdir -p \"$QWEN_REVIEW_OUT\"\nexit 0\n",
+        );
+        let worktree = repo(home.path());
+        let out = home.path().join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(out.join("round-1.txt"), "HIGH|old.rs:1|old|old\n").unwrap();
+        std::fs::write(out.join("round-1.txt.done"), "").unwrap();
+        assert_eq!(
+            LocalReviewer::default().round(&local(&script), &worktree, "origin/main", &out, 1),
             Err(ReviewerError::Incomplete)
         );
     }
