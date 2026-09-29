@@ -214,6 +214,12 @@ fn the_file_format_is_pinned() {
         day: 1,
         week_used_pct: 10,
     });
+    state.replies = Replies {
+        last: Some(LastRead {
+            id: "W3EqiUm5rsNq".into(),
+            time: Timestamp(5),
+        }),
+    };
     store.save(&state).unwrap();
     let text = fs::read_to_string(dir.path().join("state.json")).unwrap();
     let value: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -270,6 +276,7 @@ fn the_file_format_is_pinned() {
             "leases": [{ "resource": "coderabbit", "issue": 22, "since": 8 }],
             "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
             "notices": [{ "issue": 22, "pull_request": 30, "head": "c0ffee", "shots_failed": true }],
+            "replies": { "last": { "id": "W3EqiUm5rsNq", "time": 5 } },
         })
     );
 }
