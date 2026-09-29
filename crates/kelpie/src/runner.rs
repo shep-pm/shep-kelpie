@@ -1,7 +1,7 @@
 //! The project runner
 //!
 //! One runner per project, run as a sheep under kelpie's own shepherd. It
-//! reads the project's settings when it starts, keeps the project's state
+//! checks the project's settings when it starts, keeps the project's state
 //! file, answers the maintainer's triggers, and runs the worker's turns.
 //! Every change is saved before it takes effect in memory.
 
@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::board::{LabelError, Skip, WorkerModel, worker_override};
+use crate::channels::{Channel, Channels};
 use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Ports, SessionId, Timestamp, Visibility};
 use crate::settings::{Settings, SettingsError};
@@ -32,9 +33,12 @@ mod pace;
 mod paths;
 mod question;
 mod report;
+mod reread;
 mod review;
 mod rework;
 mod ruling;
+#[cfg(test)]
+mod several;
 mod shots;
 mod trigger;
 mod turn;
@@ -46,8 +50,9 @@ pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
 pub use report::StepReport;
 pub use rework::ReworkError;
 pub use ruling::{Answer, RuleError};
-pub use trigger::GateError;
+use trigger::issue_list;
 pub use trigger::{ACTIONS, RELAY_RULE, Status, WorkItemStatus, answer, is_no_or_answer};
+pub use trigger::{GateError, WhichItem};
 pub use turn::step;
 
 #[cfg(test)]
@@ -97,8 +102,9 @@ impl From<StateError> for OpenError {
 /// Why `add` was refused
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AddError {
-    /// A work item is already in flight, for this issue
-    InFlight(u64),
+    /// The project has `max_items` open, or one for this issue already: the
+    /// issues of those in flight
+    InFlight(Vec<u64>),
     /// The forge could not show the issue
     Forge(ForgeError),
     /// The issue's `worker:` label cannot be used
@@ -112,7 +118,12 @@ pub enum AddError {
 impl fmt::Display for AddError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InFlight(issue) => write!(f, "the work item for #{issue} is in flight"),
+            Self::InFlight(issues) if issues.len() == 1 => {
+                write!(f, "the work item for {} is in flight", issue_list(issues))
+            }
+            Self::InFlight(issues) => {
+                write!(f, "the work items for {} are in flight", issue_list(issues))
+            }
             Self::Forge(e) => write!(f, "cannot read the issue: {e}"),
             Self::Label(e) => e.fmt(f),
             Self::Session(e) => write!(f, "cannot draw a session id: {e}"),
@@ -139,7 +150,9 @@ pub struct Runner {
     pacing: Option<(Timestamp, Assessment)>,
     // What the board passed over on its last poll, kept in memory only
     skipped: Vec<Skip>,
-    webhook: Webhook,
+    // None when rulings do not go to the webhook
+    webhook: Option<Webhook>,
+    channels: Channels,
     // The last failed webhook post, kept in memory so a restart tries at once
     retry: Option<alert::Retry>,
     // When the relay was last cleared, kept in memory only: a restart may
@@ -153,31 +166,43 @@ pub struct Runner {
     relaying: Option<u64>,
     // The account kelpie acts as, read once a run when a rework first needs it
     viewer: Option<String>,
+    // The issue of the work item a step or trigger is working on, set before
+    // anything reads it: every change to a work item goes to this one
+    focus: Option<u64>,
+    // What last did something in a step, kept in memory only, so the next
+    // step starts with the one after it
+    last_acted: Option<turn::Slot>,
 }
 
 impl Runner {
-    /// Reads kelpie's settings, the project's settings and its state, and
-    /// checks the settings hold
+    /// Checks the project's settings hold, and reads its state
     ///
-    /// `home` is the maintainer's home folder, for `~/` in settings.
-    /// `kelpie` is the kelpie binary, which each worker's file-tool hook runs.
+    /// `settings` and `kelpie_settings` are as [`crate::settings::source::load`]
+    /// read them. `kelpie` is the kelpie binary, which each worker's file-tool
+    /// hook runs.
     ///
     /// # Errors
     ///
     /// [`OpenError`] naming the setting, forge call or file that failed.
     pub fn open(
         project: ProjectName,
+        settings: Settings,
+        kelpie_settings: KelpieSettings,
         paths: &ProjectPaths,
-        home: &Path,
         kelpie: &Path,
         ports: Ports,
     ) -> Result<Self, OpenError> {
-        let webhook = KelpieSettings::load(&paths.kelpie_settings)?.webhook;
-        let settings = Settings::load(&paths.settings, home)?;
+        let (channels, webhook) = ruling_channels(&settings, kelpie_settings)?;
         check_repo(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;
-        guard_hooks::check(&settings, home, std::env::var_os("PATH").as_deref())?;
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        guard_hooks::check(
+            &settings,
+            home.as_deref(),
+            std::env::var_os("PATH").as_deref(),
+        )?;
         check_coderabbit(&settings, &ports)?;
+        check_local(&settings, &ports)?;
         let store = StateStore::new(paths.state.clone());
         let mut state = store
             .load()?
@@ -186,14 +211,16 @@ impl Runner {
         // its own, unlike a turn: nothing reruns review_step to naturally
         // clear it, so a restart clears it here instead of leaving it stuck
         // running forever and refusing every later drop.
-        if let Some(item) = &mut state.work_item
-            && matches!(item.review_call, ReviewCallState::Running { .. })
-        {
-            item.review_call = ReviewCallState::Idle;
+        let cut_short =
+            |item: &WorkItem| matches!(item.review_call, ReviewCallState::Running { .. });
+        if state.work_items.iter().any(cut_short) {
+            for item in state.work_items.iter_mut().filter(|item| cut_short(item)) {
+                item.review_call = ReviewCallState::Idle;
+            }
             store.save(&state)?;
         }
         // A dev server the last run's worker left behind holds its port.
-        if let Some(item) = &state.work_item {
+        for item in &state.work_items {
             ports
                 .shots
                 .stop_left(&paths.shots(item.issue).join(crate::shots::SERVER_PID));
@@ -215,11 +242,14 @@ impl Runner {
             pacing: None,
             skipped: Vec::new(),
             webhook,
+            channels,
             retry: None,
             relay_cleared: None,
             relay_notices: Vec::new(),
             relaying: None,
             viewer: None,
+            focus: None,
+            last_acted: None,
         })
     }
 
@@ -235,7 +265,14 @@ impl Runner {
             merge_authority: self.settings.merge_authority,
             run: self.state.run,
             since: self.state.since,
-            work_item: self.state.work_item.as_ref().map(WorkItemStatus::from),
+            work_item: self.state.work_items.first().map(WorkItemStatus::from),
+            work_items: self
+                .state
+                .work_items
+                .iter()
+                .map(WorkItemStatus::from)
+                .collect(),
+            max_items: self.settings.max_items.get(),
             adopted: &self.state.adopted,
             skipped: &self.skipped,
             rulings: &self.state.rulings,
@@ -262,17 +299,20 @@ impl Runner {
         self.set_run(RunState::Paused)
     }
 
-    /// Makes `issue` the work item in flight, and returns the model and
-    /// effort its worker runs on. Its first turn runs once the project is running.
+    /// Opens a work item for `issue`, and returns the model and effort its
+    /// worker runs on. Its first turn runs once the project is running.
     ///
     /// # Errors
     ///
-    /// [`AddError`] when a work item is in flight, the issue cannot be read
-    /// or its `worker:` label understood, or the change cannot be saved.
-    /// Nothing changes then.
+    /// [`AddError`] when the project has `max_items` open or one for this
+    /// issue already, the issue cannot be read or its `worker:` label
+    /// understood, or the change cannot be saved. Nothing changes then.
     pub fn add(&mut self, issue: u64) -> Result<WorkerModel, AddError> {
-        if let Some(item) = &self.state.work_item {
-            return Err(AddError::InFlight(item.issue));
+        if self.state.item(issue).is_some() {
+            return Err(AddError::InFlight(vec![issue]));
+        }
+        if !self.slot_free() {
+            return Err(AddError::InFlight(self.state.open_issues()));
         }
         let found = self
             .ports
@@ -284,7 +324,8 @@ impl Runner {
             .unwrap_or_else(|| WorkerModel::from(&self.settings.models.worker));
         let session = new_session_id().map_err(|e| AddError::Session(e.to_string()))?;
         let mut next = self.state.clone();
-        next.work_item = Some(self.fresh(issue, found.title, worker.clone(), session));
+        next.work_items
+            .push(self.fresh(issue, found.title, worker.clone(), session));
         self.save(next).map_err(AddError::State)?;
         Ok(worker)
     }
@@ -328,6 +369,28 @@ impl Runner {
             shots_comment: None,
             calls: Vec::new(),
         }
+    }
+
+    // Whether another work item may open, under `max_items`
+    pub(super) fn slot_free(&self) -> bool {
+        let max = usize::try_from(self.settings.max_items.get()).unwrap_or(usize::MAX);
+        self.state.work_items.len() < max
+    }
+
+    // The work item the runner is working on, while it is open
+    pub(super) fn current(&self) -> Option<&WorkItem> {
+        self.state.item(self.focus?)
+    }
+
+    // The work item the runner is working on, in a state about to be saved
+    pub(super) fn current_in<'a>(&self, next: &'a mut ProjectState) -> Option<&'a mut WorkItem> {
+        next.item_mut(self.focus?)
+    }
+
+    // Works on the work item for `issue` from here on
+    pub(super) fn on(&mut self, issue: Option<u64>) -> &mut Self {
+        self.focus = issue;
+        self
     }
 
     fn set_run(&mut self, run: RunState) -> Result<(), StateError> {
@@ -381,6 +444,41 @@ fn check_repo(settings: &Settings) -> Result<(), SettingsError> {
         )));
     }
     Ok(())
+}
+
+// The project's channels, else kelpie's, else every one; and the webhook
+// they need, which only a project that posts to the webhook cannot do without.
+fn ruling_channels(
+    settings: &Settings,
+    kelpie: KelpieSettings,
+) -> Result<(Channels, Option<Webhook>), SettingsError> {
+    let channels = (settings.ruling_channels.clone())
+        .or(kelpie.ruling_channels)
+        .unwrap_or_default();
+    if !channels.has(Channel::Webhook) {
+        return Ok((channels, None));
+    }
+    match kelpie.webhook {
+        Some(webhook) => Ok((channels, Some(webhook))),
+        None => Err(SettingsError::Invalid {
+            setting: "ruling_channels",
+            reason: "rulings go to the webhook, and kelpie's settings name none: add a \
+                     `webhook` table to its [kelpie] section of dogs.toml, or drop `webhook` \
+                     from `ruling_channels`"
+                .to_owned(),
+        }),
+    }
+}
+
+// The local round's command is there, or its endpoint answers.
+fn check_local(settings: &Settings, ports: &Ports) -> Result<(), SettingsError> {
+    ports
+        .reviewer
+        .check(&settings.review.local)
+        .map_err(|reason| SettingsError::Invalid {
+            setting: "review.local",
+            reason,
+        })
 }
 
 fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError> {
@@ -536,14 +634,5 @@ mod tests {
         rig.forge.set_visibility(Visibility::Private);
         rig.open().unwrap();
         assert_eq!(rig.forge.calls(), 0);
-    }
-
-    #[test]
-    fn a_missing_settings_file_stops_the_runner_naming_it() {
-        let rig = Rig::new("koji");
-        std::fs::remove_file(&rig.paths().settings).unwrap();
-        let err = rig.open().unwrap_err().to_string();
-        assert!(err.starts_with("cannot read settings file "), "{err}");
-        assert!(err.contains("projects/koji/settings.toml"), "{err}");
     }
 }

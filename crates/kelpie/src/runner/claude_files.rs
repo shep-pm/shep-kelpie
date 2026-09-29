@@ -34,11 +34,7 @@ impl Runner {
         &mut self,
         unchecked: Unchecked,
     ) -> Result<Option<Begin>, StateError> {
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("the gate runs on a work item");
+        let item = self.current().expect("the gate runs on a work item");
         let Some(number) = item.pull_request else {
             return Ok(None);
         };
@@ -59,7 +55,7 @@ impl Runner {
 
     /// Why no Claude call may run in the work item's worktree, if one may not
     pub(super) fn claude_files_refusal(&self) -> Option<String> {
-        let item = self.state.work_item.as_ref()?;
+        let item = self.current()?;
         let accepted = item.claude_files_accepted.as_deref();
         match fence::differ(&self.settings.repo, &item.worktree, accepted) {
             Ok(files) if files.is_empty() => None,
@@ -80,7 +76,8 @@ impl Runner {
         };
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
-        let mut report = failed(self.project.as_str(), &mut next, now, reason);
+        let issue = self.current().expect("the gate runs on a work item").issue;
+        let mut report = failed(self.project.as_str(), &mut next, issue, now, reason);
         self.save(next)?;
         self.fill_comment_failed(&mut report);
         Ok(Some(Begin::Report(report)))

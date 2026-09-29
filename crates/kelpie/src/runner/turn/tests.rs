@@ -107,6 +107,18 @@ fn the_settings_file_fences_writes_to_this_worktree_and_its_git_paths() {
 }
 
 #[test]
+fn a_worker_cannot_read_the_shepherd_s_home_wherever_it_is() {
+    let (rig, runner) = with_issue_7("koji");
+    rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
+    step(&runner).unwrap();
+    let [seen] = rig.claude.seen().try_into().unwrap();
+    let rule = format!("Read(/{}/**)", rig.home.path().join("shep").display());
+    let deny = seen.settings["permissions"]["deny"].as_array().unwrap();
+    assert!(deny.contains(&json!(rule)), "{rule} not in {deny:?}");
+    assert!(rule.starts_with("Read(//"), "{rule} is not rooted at /");
+}
+
+#[test]
 fn status_shows_the_session_and_what_the_work_item_has_cost() {
     let (rig, runner) = with_issue_7("golbat");
     rig.claude

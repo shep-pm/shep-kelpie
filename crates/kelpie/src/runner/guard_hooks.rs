@@ -4,14 +4,16 @@
 //! every worker, so the runner refuses to start on one and names it. A
 //! command resolves when its program is on `PATH` or at its path, and every
 //! later word that is an absolute or `~/` path exists. `~/` and `$HOME/` are
-//! the home folder, as the worker's shell reads them.
+//! the home folder, as the worker's shell reads them: the runner's own `HOME`
+//! and `PATH` are what a worker inherits.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use crate::settings::{Settings, SettingsError};
 
-/// Checks that every one of the project's guard hooks resolves, on `path`
+/// Checks that every one of the project's guard hooks resolves, with `home`
+/// and `path` the worker's `HOME` and `PATH`
 ///
 /// # Errors
 ///
@@ -19,7 +21,7 @@ use crate::settings::{Settings, SettingsError};
 /// the word in it that does not resolve.
 pub(super) fn check(
     settings: &Settings,
-    home: &Path,
+    home: Option<&Path>,
     path: Option<&OsStr>,
 ) -> Result<(), SettingsError> {
     for hook in &settings.worker.guard_hooks {
@@ -35,7 +37,7 @@ pub(super) fn check(
 }
 
 // The first word of `command` that does not resolve.
-fn unresolved(command: &str, home: &Path, path: Option<&OsStr>) -> Option<String> {
+fn unresolved(command: &str, home: Option<&Path>, path: Option<&OsStr>) -> Option<String> {
     let mut words = command
         .split_whitespace()
         .map(|w| w.trim_matches(['\'', '"']))
@@ -45,7 +47,7 @@ fn unresolved(command: &str, home: &Path, path: Option<&OsStr>) -> Option<String
     };
     let found = match expand(program, home) {
         Some(file) => file.is_file(),
-        None if program.contains('/') => false,
+        None if program.contains('/') || program.starts_with('~') => false,
         None => path
             .is_some_and(|dirs| std::env::split_paths(dirs).any(|dir| dir.join(program).is_file())),
     };
@@ -58,12 +60,13 @@ fn unresolved(command: &str, home: &Path, path: Option<&OsStr>) -> Option<String
 }
 
 // `word` as a path, when it is one: absolute, or under the home folder.
-fn expand(word: &str, home: &Path) -> Option<PathBuf> {
+// With no home, a `~/` word names nothing, and a folder that is not there.
+fn expand(word: &str, home: Option<&Path>) -> Option<PathBuf> {
     if let Some(rest) = word
         .strip_prefix("~/")
         .or_else(|| word.strip_prefix("$HOME/"))
     {
-        return Some(home.join(rest));
+        return Some(home.map_or_else(|| PathBuf::from("/nonexistent"), |h| h.join(rest)));
     }
     word.starts_with('/').then(|| PathBuf::from(word))
 }
@@ -72,14 +75,20 @@ fn expand(word: &str, home: &Path) -> Option<PathBuf> {
 mod tests {
     use std::fs;
 
+    use super::*;
     use crate::test::Rig;
 
-    fn open_with_hook(rig: &Rig, command: &str) -> Result<(), String> {
+    fn with_hook(rig: &Rig, command: &str) {
         let hook = format!(
-            "[[worker.guard_hooks]]\nevent = \"PreToolUse\"\nmatcher = \"Bash\"\ncommand = \"{command}\"\n"
+            "[[app.dogs.kelpie.worker.guard_hooks]]\nevent = \"PreToolUse\"\nmatcher = \"Bash\"\ncommand = \"{command}\"\n"
         );
         rig.edit_settings(|s| format!("{s}\n{hook}"));
-        rig.open().map(drop).map_err(|e| e.to_string())
+    }
+
+    // As the runner checks it, with the rig's home as the worker's `HOME`.
+    fn checked(rig: &Rig) -> Result<(), String> {
+        let path = std::env::var_os("PATH");
+        check(&rig.settings(), Some(rig.home.path()), path.as_deref()).map_err(|e| e.to_string())
     }
 
     #[test]
@@ -89,7 +98,19 @@ mod tests {
     }
 
     #[test]
-    fn a_hook_whose_program_is_not_there_stops_the_runner_naming_it() {
+    fn a_hook_that_does_not_resolve_stops_the_runner_at_start() {
+        let rig = Rig::new("koji");
+        with_hook(&rig, "kelpie-no-such-guard --strict");
+        let err = rig.open().map(drop).unwrap_err().to_string();
+        assert_eq!(
+            err,
+            "setting `worker.guard_hooks`: `kelpie-no-such-guard --strict` does not resolve: \
+             kelpie-no-such-guard is not there"
+        );
+    }
+
+    #[test]
+    fn a_hook_whose_program_is_not_there_is_named() {
         for (command, word) in [
             ("kelpie-no-such-guard --strict", "kelpie-no-such-guard"),
             ("/nowhere/guard", "/nowhere/guard"),
@@ -97,20 +118,21 @@ mod tests {
             ("GUARD_MODE=strict", "its program"),
         ] {
             let rig = Rig::new("koji");
-            let err = open_with_hook(&rig, command).unwrap_err();
+            with_hook(&rig, command);
             assert_eq!(
-                err,
-                format!(
+                checked(&rig),
+                Err(format!(
                     "setting `worker.guard_hooks`: `{command}` does not resolve: {word} is not there"
-                )
+                ))
             );
         }
     }
 
     #[test]
-    fn a_hook_whose_script_is_not_there_stops_the_runner_naming_it() {
+    fn a_hook_whose_script_is_not_there_is_named() {
         let rig = Rig::new("koji");
-        let err = open_with_hook(&rig, "sh ~/.claude/hooks/git-gh-guard.js").unwrap_err();
+        with_hook(&rig, "sh ~/.claude/hooks/git-gh-guard.js");
+        let err = checked(&rig).unwrap_err();
         assert!(
             err.contains("~/.claude/hooks/git-gh-guard.js is not there"),
             "{err}"
@@ -118,7 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn a_hook_on_path_or_in_the_home_folder_opens() {
+    fn a_hook_on_path_or_in_the_home_folder_resolves() {
         for command in [
             "sh ~/hooks/guard.sh",
             "sh $HOME/hooks/guard.sh --flag",
@@ -130,7 +152,8 @@ mod tests {
             let hooks = rig.home.path().join("hooks");
             fs::create_dir(&hooks).unwrap();
             fs::write(hooks.join("guard.sh"), "exit 0\n").unwrap();
-            assert_eq!(open_with_hook(&rig, command), Ok(()), "{command}");
+            with_hook(&rig, command);
+            assert_eq!(checked(&rig), Ok(()), "{command}");
         }
     }
 }
