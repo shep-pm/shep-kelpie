@@ -182,11 +182,15 @@ impl LocalReviewer {
         let content = value["choices"][0]["message"]["content"]
             .as_str()
             .ok_or_else(|| ReviewerError::Unreadable(quote(&body)))?;
-        // A thinking model's reasoning comes first, and may quote finding-shaped lines.
-        Ok(match content.rsplit_once("</think>") {
-            Some((_, answer)) => answer.to_owned(),
-            None => content.to_owned(),
-        })
+        // A thinking model's reasoning comes first, and may quote finding-shaped
+        // lines. One cut off inside it reviewed nothing, which is not clean.
+        match content.rsplit_once("</think>") {
+            Some((_, answer)) => Ok(answer.to_owned()),
+            None if content.contains("<think>") => Err(ReviewerError::Failed(format!(
+                "{url}'s reply ended inside its thinking, so nothing was reviewed"
+            ))),
+            None => Ok(content.to_owned()),
+        }
     }
 }
 

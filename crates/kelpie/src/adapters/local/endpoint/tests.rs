@@ -237,6 +237,32 @@ fn a_refused_or_unreadable_reply_fails_the_round() {
 }
 
 #[test]
+fn a_reply_cut_off_while_thinking_fails_the_round() {
+    let dir = tempfile::tempdir().unwrap();
+    let worktree = repo(dir.path(), "fn a() {}\nfn b() {}\n");
+    let server = StandInEndpoint::start([Answer::Says(
+        "<think>HIGH|src/lib.rs:2|maybe this|or not, let me check the",
+    )]);
+    let out = dir.path().join("out");
+    let err = LocalReviewer::default()
+        .round(
+            &local(server.url(), 8192),
+            &worktree,
+            "origin/main",
+            &out,
+            1,
+        )
+        .unwrap_err();
+    let url = format!("{}/chat/completions", server.url());
+    assert_eq!(
+        err,
+        ReviewerError::Failed(format!(
+            "{url}'s reply ended inside its thinking, so nothing was reviewed"
+        ))
+    );
+}
+
+#[test]
 fn a_retried_round_never_reads_the_last_tries_reply() {
     let dir = tempfile::tempdir().unwrap();
     let worktree = repo(dir.path(), "fn a() {}\nfn b() {}\n");
