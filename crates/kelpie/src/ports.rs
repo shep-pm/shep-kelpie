@@ -737,9 +737,9 @@ pub trait Reviewer: Send + Sync {
     /// Runs `local` for round `round` against `worktree`'s diff from `base`,
     /// usually `origin/main`, writing its findings under `out`
     ///
-    /// # Errors
-    ///
-    /// [`ReviewerError`] when the round cannot be run or did not finish.
+    /// The [`LocalRun`] carries the round's findings, or a [`ReviewerError`]
+    /// when the round cannot be run or did not finish, and the seconds it
+    /// queued for the GPU either way.
     fn round(
         &self,
         local: &LocalRound,
@@ -747,7 +747,17 @@ pub trait Reviewer: Send + Sync {
         base: &str,
         out: &std::path::Path,
         round: u32,
-    ) -> Result<Vec<Finding>, ReviewerError>;
+    ) -> LocalRun;
+}
+
+/// What one local round came back with
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalRun {
+    /// The round's findings, or why it produced none
+    pub result: Result<Vec<Finding>, ReviewerError>,
+    /// Whole seconds the round queued for the GPU lock, kept when it fails.
+    /// Zero for a round that did not wait, or one that cannot say.
+    pub gpu_wait_seconds: u64,
 }
 
 /// Why a local round did not produce findings

@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::adapters::LocalReviewer;
-use crate::ports::{Finding, Reviewer, ReviewerError};
+use crate::ports::{Finding, LocalRun, Reviewer, ReviewerError};
 use crate::settings::LocalRound;
+use crate::test::FakeClock;
 
 /// What the stand-in reviewer answers for its next round
 #[derive(Debug, Clone)]
@@ -15,6 +16,19 @@ pub(crate) enum ScriptedRound {
     Findings(Vec<Finding>),
     /// Fails with this error
     Fail(ReviewerError),
+    /// These findings, after queueing `gpu_wait_seconds` for the GPU in a
+    /// round that took `took_seconds` on the rig's clock
+    Waited {
+        findings: Vec<Finding>,
+        gpu_wait_seconds: u64,
+        took_seconds: u64,
+    },
+    /// Fails with this error, after the same wait and time
+    FailedWaiting {
+        error: ReviewerError,
+        gpu_wait_seconds: u64,
+        took_seconds: u64,
+    },
 }
 
 /// One round as the stand-in reviewer saw it
@@ -36,9 +50,18 @@ pub(crate) struct FakeReviewer {
     seen: Arc<Mutex<Vec<SeenRound>>>,
     script: Arc<Mutex<VecDeque<ScriptedRound>>>,
     real: Arc<Mutex<Option<LocalReviewer>>>,
+    clock: Option<FakeClock>,
 }
 
 impl FakeReviewer {
+    /// A stand-in whose scripted rounds that take time move `clock`
+    pub(crate) fn on(clock: FakeClock) -> Self {
+        Self {
+            clock: Some(clock),
+            ..Self::default()
+        }
+    }
+
     /// Every round asked of it, in order
     pub(crate) fn seen(&self) -> Vec<SeenRound> {
         self.seen.lock().unwrap().clone()
@@ -67,7 +90,7 @@ impl Reviewer for FakeReviewer {
         base: &str,
         out: &Path,
         round: u32,
-    ) -> Result<Vec<Finding>, ReviewerError> {
+    ) -> LocalRun {
         self.seen.lock().unwrap().push(SeenRound {
             local: local.clone(),
             worktree: worktree.to_owned(),
@@ -78,10 +101,28 @@ impl Reviewer for FakeReviewer {
         if let Some(real) = &*self.real.lock().unwrap() {
             return real.round(local, worktree, base, out, round);
         }
-        match self.script.lock().unwrap().pop_front() {
-            Some(ScriptedRound::Findings(findings)) => Ok(findings),
-            Some(ScriptedRound::Fail(e)) => Err(e),
-            None => Ok(Vec::new()),
+        let (result, gpu_wait_seconds, took_seconds) = match self.script.lock().unwrap().pop_front()
+        {
+            Some(ScriptedRound::Findings(findings)) => (Ok(findings), 0, 0),
+            Some(ScriptedRound::Fail(e)) => (Err(e), 0, 0),
+            Some(ScriptedRound::Waited {
+                findings,
+                gpu_wait_seconds,
+                took_seconds,
+            }) => (Ok(findings), gpu_wait_seconds, took_seconds),
+            Some(ScriptedRound::FailedWaiting {
+                error,
+                gpu_wait_seconds,
+                took_seconds,
+            }) => (Err(error), gpu_wait_seconds, took_seconds),
+            None => (Ok(Vec::new()), 0, 0),
+        };
+        if let Some(clock) = &self.clock {
+            clock.advance(took_seconds);
+        }
+        LocalRun {
+            result,
+            gpu_wait_seconds,
         }
     }
 }

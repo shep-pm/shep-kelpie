@@ -23,12 +23,13 @@ use super::Runner;
 use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, Spent, StepReport};
 use super::shots::RoundShots;
 use crate::ports::{
-    Claude, ClaudeCall, ClaudeError, ClaudeReply, Finding, Reviewer, ReviewerError, Severity,
-    Timestamp, Verdict, read_review,
+    Claude, ClaudeCall, ClaudeError, ClaudeReply, Finding, LocalRun, Reviewer, ReviewerError,
+    Severity, Timestamp, Verdict, read_review,
 };
 use crate::state::{Fix, RulingKind, StateError};
 use crate::work_item::{
-    Phase, Review, ReviewCallKind, ReviewCallState, ReviewStage, ReviewerKind, Turn, WorkItem,
+    Phase, Review, ReviewCallKind, ReviewCallState, ReviewStage, ReviewerKind, TimingPhase, Turn,
+    WorkItem,
 };
 use crate::worktree;
 
@@ -402,13 +403,19 @@ pub(super) fn run_review_call(
             base,
             out,
             round,
-        } => match reviewer.round(&local, &worktree, &base, &out, round) {
-            Err(ReviewerError::Stopped) => stopped(),
-            result => Reviewed {
-                result: ReviewResult::Findings(result.map_err(|e| e.to_string())),
-                spent: Some(Spent::Local),
-            },
-        },
+        } => {
+            let LocalRun {
+                result,
+                gpu_wait_seconds,
+            } = reviewer.round(&local, &worktree, &base, &out, round);
+            match result {
+                Err(ReviewerError::Stopped) => stopped(),
+                result => Reviewed {
+                    result: ReviewResult::Findings(result.map_err(|e| e.to_string())),
+                    spent: Some(Spent::Local { gpu_wait_seconds }),
+                },
+            }
+        }
         ReviewCall::ClaudeRound(call) => {
             let (reply, spent) = run_claude(claude, &call);
             match reply {
@@ -449,7 +456,9 @@ pub(super) fn run_review_call(
 /// Adds what a review call spent to the work item's record, and marks no
 /// call in flight
 ///
-/// A local round's time runs from when the call was marked running.
+/// A local round's time runs from when the call was marked running. The
+/// wait for the GPU it reported moves out of it, never more than the round
+/// took.
 pub(super) fn record_spent(item: &mut WorkItem, spent: Option<Spent>, now: Timestamp) {
     match spent {
         Some(Spent::Claude {
@@ -460,10 +469,20 @@ pub(super) fn record_spent(item: &mut WorkItem, spent: Option<Spent>, now: Times
         }) => {
             item.record_call(role, now, session, usage, session_cost);
         }
-        Some(Spent::Local) => {
+        Some(Spent::Local { gpu_wait_seconds }) => {
             item.qwen.rounds += 1;
             if let ReviewCallState::Running { since, .. } = item.review_call {
-                item.qwen.seconds += now.0.saturating_sub(since.0);
+                let took = now.0.saturating_sub(since.0);
+                item.qwen.seconds += took;
+                // Charged while the call is still marked running, so the
+                // round's stretch lands in `local_round` before the wait
+                // leaves it.
+                item.charge_time(now);
+                item.timings.reassign(
+                    TimingPhase::LocalRound,
+                    TimingPhase::GpuWait,
+                    gpu_wait_seconds.min(took),
+                );
             }
         }
         None => {}

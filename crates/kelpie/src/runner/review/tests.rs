@@ -366,8 +366,20 @@ fn a_qwen_rounds_time_runs_from_when_it_was_marked_running() {
         since: Timestamp(100),
         kind: Some(ReviewCallKind::Local),
     };
-    record_spent(&mut item, Some(Spent::Local), Timestamp(190));
-    record_spent(&mut item, Some(Spent::Local), Timestamp(200));
+    record_spent(
+        &mut item,
+        Some(Spent::Local {
+            gpu_wait_seconds: 0,
+        }),
+        Timestamp(190),
+    );
+    record_spent(
+        &mut item,
+        Some(Spent::Local {
+            gpu_wait_seconds: 0,
+        }),
+        Timestamp(200),
+    );
     assert_eq!(item.qwen.rounds, 2);
     assert_eq!(
         item.qwen.seconds, 90,

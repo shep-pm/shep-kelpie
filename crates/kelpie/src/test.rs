@@ -525,6 +525,7 @@ impl Rig {
     pub(crate) fn new(project: &str) -> Self {
         let home = tempfile::tempdir().unwrap();
         let meter = FakeMeter::idle();
+        let clock = FakeClock::at(Self::EPOCH);
         let rig = Self {
             project: ProjectName::try_from(project).unwrap(),
             claude: FakeClaude {
@@ -533,12 +534,12 @@ impl Rig {
             },
             forge: FakeForge::new(home.path().join("origin.git")),
             meter,
-            reviewer: FakeReviewer::default(),
+            reviewer: FakeReviewer::on(clock.clone()),
             relay: Arc::new(FakeRelay::default()),
             alerts: FakeAlerts::default(),
             leases: FakeLeases::default(),
             shots: FakeShots::default(),
-            clock: FakeClock::at(Self::EPOCH),
+            clock,
             home,
         };
         rig.make_repo();

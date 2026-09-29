@@ -12,7 +12,7 @@ use std::process::{Command, Stdio};
 
 use super::LocalReviewer;
 use crate::adapters::process::RunError;
-use crate::ports::{Finding, ReviewerError, Severity, parse_findings};
+use crate::ports::{Finding, LocalRun, ReviewerError, Severity, parse_findings};
 use crate::settings::LocalCommand;
 
 /// What every call of one round shares
@@ -29,6 +29,9 @@ impl LocalReviewer {
     /// Runs `local`'s command for round `round`, then again on a hunk of
     /// each file it skipped as too large, folding those findings back in
     /// against the original file
+    ///
+    /// The run reports the wait the command's own stderr counted, summed over
+    /// every run of it, and keeps it when the round fails.
     pub(super) fn command_round(
         &self,
         local: &LocalCommand,
@@ -36,6 +39,23 @@ impl LocalReviewer {
         base: &str,
         out: &Path,
         round: u32,
+    ) -> LocalRun {
+        let mut gpu_wait_seconds = 0;
+        let result = self.rounds(local, worktree, base, out, round, &mut gpu_wait_seconds);
+        LocalRun {
+            result,
+            gpu_wait_seconds,
+        }
+    }
+
+    fn rounds(
+        &self,
+        local: &LocalCommand,
+        worktree: &Path,
+        base: &str,
+        out: &Path,
+        round: u32,
+        waited: &mut u64,
     ) -> Result<Vec<Finding>, ReviewerError> {
         let head = super::head(worktree)?;
         let at = Round {
@@ -45,7 +65,7 @@ impl LocalReviewer {
             head: &head,
             round,
         };
-        let findings = self.run(&at, out, None)?;
+        let findings = self.run(&at, out, None, waited)?;
         let mut combined = Vec::with_capacity(findings.len());
         let mut skipped_index = 0u32;
         for finding in findings {
@@ -54,7 +74,7 @@ impl LocalReviewer {
                 // same as a hunk whose own `git diff` failed: one file's
                 // trouble never costs the round every other finding it
                 // already has.
-                match self.hunk_round(&at, out, skipped_index, &finding) {
+                match self.hunk_round(&at, out, skipped_index, &finding, waited) {
                     Ok(found) => combined.extend(found),
                     Err(_) => combined.push(finding),
                 }
@@ -71,6 +91,7 @@ impl LocalReviewer {
         at: &Round<'_>,
         out: &Path,
         files: Option<&str>,
+        waited: &mut u64,
     ) -> Result<Vec<Finding>, ReviewerError> {
         let round = at.round;
         super::clear_round(out, round)?;
@@ -97,6 +118,7 @@ impl LocalReviewer {
             // `output` never sets a deadline, so this never fires.
             RunError::TimedOut => ReviewerError::Failed("timed out".into()),
         })?;
+        *waited += gpu_wait(&String::from_utf8_lossy(&output.stderr));
         if !output.status.success() {
             return Err(ReviewerError::Failed(format!(
                 "{}\n{}",
@@ -124,6 +146,7 @@ impl LocalReviewer {
         out: &Path,
         skipped_index: u32,
         skipped: &Finding,
+        waited: &mut u64,
     ) -> Result<Vec<Finding>, ReviewerError> {
         let round = at.round;
         let diff = Command::new("git")
@@ -158,7 +181,7 @@ impl LocalReviewer {
             .join("hunks")
             .join(format!("{round}-out-{skipped_index}"));
         let files = hunk_path.to_string_lossy().into_owned();
-        let findings = self.run(at, &hunk_out, Some(&files))?;
+        let findings = self.run(at, &hunk_out, Some(&files), waited)?;
         Ok(findings
             .into_iter()
             .map(|f| Finding {
@@ -167,6 +190,37 @@ impl LocalReviewer {
             })
             .collect())
     }
+}
+
+/// The seconds the command's stderr says it waited for the GPU lock
+///
+/// The qwen-review script says `qwen-review: GPU free after <n>s, starting`
+/// once it has the lock after waiting, and `gave up after <n>s waiting for
+/// the GPU` when it stops waiting. A command that prints neither waited none,
+/// and a number that cannot be read counts as none.
+fn gpu_wait(stderr: &str) -> u64 {
+    stderr
+        .lines()
+        .filter_map(|line| {
+            seconds_after(line, "GPU free after ").or_else(|| {
+                line.contains("waiting for the GPU")
+                    .then(|| seconds_after(line, "gave up after "))
+                    .flatten()
+            })
+        })
+        .sum()
+}
+
+// The `<n>` of the first `<marker><n>s` in `line`.
+fn seconds_after(line: &str, marker: &str) -> Option<u64> {
+    let rest = &line[line.find(marker)? + marker.len()..];
+    let digits = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    rest[digits..]
+        .starts_with('s')
+        .then(|| rest[..digits].parse().ok())
+        .flatten()
 }
 
 fn is_skipped_for_size(finding: &Finding) -> bool {
@@ -220,6 +274,7 @@ mod tests {
         let out = home.path().join("out");
         let findings = LocalReviewer::default()
             .round(&local(&script), &worktree, "origin/main", &out, 1)
+            .result
             .unwrap();
         assert_eq!(findings[0].file, head);
     }
@@ -251,6 +306,7 @@ mod tests {
         assert_eq!(
             reviewer
                 .round(&local(&script), &worktree, "origin/main", &out, 1)
+                .result
                 .unwrap(),
             vec![]
         );
@@ -283,6 +339,7 @@ mod tests {
 
         let findings = reviewer
             .round(&local(&script), &worktree, "origin/main", &out, 1)
+            .result
             .unwrap();
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].file, "/var/folders/xx/yy/T/");
@@ -306,7 +363,9 @@ mod tests {
         let reviewer = LocalReviewer::default();
 
         assert_eq!(
-            reviewer.round(&local(&script), &worktree, "origin/main", &out, 1),
+            reviewer
+                .round(&local(&script), &worktree, "origin/main", &out, 1)
+                .result,
             Err(ReviewerError::Incomplete)
         );
     }
@@ -327,7 +386,9 @@ mod tests {
         std::fs::write(out.join("round-1.txt"), "HIGH|old.rs:1|old|old\n").unwrap();
         std::fs::write(out.join("round-1.txt.done"), "").unwrap();
         assert_eq!(
-            LocalReviewer::default().round(&local(&script), &worktree, "origin/main", &out, 1),
+            LocalReviewer::default()
+                .round(&local(&script), &worktree, "origin/main", &out, 1)
+                .result,
             Err(ReviewerError::Incomplete)
         );
     }
@@ -383,6 +444,7 @@ esac
         assert_eq!(
             reviewer
                 .round(&local(&script), &worktree, "origin/main", &out, 1)
+                .result
                 .unwrap(),
             vec![Finding {
                 severity: Severity::Medium,
@@ -421,6 +483,7 @@ esac
         assert_eq!(
             reviewer
                 .round(&local(&script), &worktree, "origin/main", &out, 1)
+                .result
                 .unwrap(),
             vec![skip]
         );
@@ -469,6 +532,7 @@ esac
         let reviewer = LocalReviewer::default();
         let findings = reviewer
             .round(&local(&script), &worktree, "origin/main", &out, 1)
+            .result
             .unwrap();
         assert_eq!(
             findings,
@@ -537,6 +601,7 @@ esac
         let reviewer = LocalReviewer::default();
         let findings = reviewer
             .round(&local(&script), &worktree, "origin/main", &out, 1)
+            .result
             .unwrap();
         assert_eq!(findings.len(), 2, "{findings:?}");
         assert_eq!(findings[0].file, "sub/a/util.rs");
@@ -576,5 +641,106 @@ esac
 
         let has_a_line = Finding { line: 4, ..skip };
         assert!(!is_skipped_for_size(&has_a_line));
+    }
+
+    // A stand-in whose stderr says `stderr` and whose exit code is `exit`.
+    fn saying(home: &Path, stderr: &str, exit: u8) -> PathBuf {
+        let script = home.join("review");
+        let contents = format!(
+            "#!/bin/sh\nmkdir -p \"$QWEN_REVIEW_OUT\"\n\
+             {stderr}\
+             : > \"$QWEN_REVIEW_OUT/round-1.txt\"\n\
+             : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\nexit {exit}\n",
+        );
+        write_script(&script, &contents);
+        script
+    }
+
+    fn run_saying(stderr: &str, exit: u8) -> LocalRun {
+        let home = tempfile::tempdir().unwrap();
+        let worktree = repo(home.path());
+        let out = home.path().join("out");
+        let script = saying(home.path(), stderr, exit);
+        LocalReviewer::default().round(&local(&script), &worktree, "origin/main", &out, 1)
+    }
+
+    #[test]
+    fn a_command_that_waited_for_the_gpu_says_so_on_stderr() {
+        let run = run_saying("echo 'qwen-review: GPU free after 42s, starting' >&2\n", 0);
+        assert_eq!(run.result, Ok(vec![]));
+        assert_eq!(run.gpu_wait_seconds, 42);
+    }
+
+    #[test]
+    fn a_command_that_says_nothing_waited_none() {
+        let run = run_saying("echo 'reviewing 3 files' >&2\n", 0);
+        assert_eq!(run.result, Ok(vec![]));
+        assert_eq!(run.gpu_wait_seconds, 0);
+    }
+
+    #[test]
+    fn a_command_that_gives_up_waiting_reports_the_wait_beside_its_error() {
+        let run = run_saying(
+            "echo 'qwen-review: gave up after 3600s waiting for the GPU' >&2\n",
+            1,
+        );
+        assert!(
+            matches!(run.result, Err(ReviewerError::Failed(_))),
+            "{:?}",
+            run.result
+        );
+        assert_eq!(run.gpu_wait_seconds, 3600);
+    }
+
+    // The main run waits 42 s and the hunk's re-run 8 s.
+    #[test]
+    fn a_skipped_files_re_run_adds_its_own_wait() {
+        let home = tempfile::tempdir().unwrap();
+        let script = home.path().join("review");
+        let contents = "#!/bin/sh
+mkdir -p \"$QWEN_REVIEW_OUT\"
+case \"$*\" in
+  *--files*)
+    echo 'qwen-review: GPU free after 8s, starting' >&2
+    : > \"$QWEN_REVIEW_OUT/round-1.txt\"
+    ;;
+  *)
+    echo 'qwen-review: GPU free after 42s, starting' >&2
+    printf 'LOW|big.rs:0|not reviewed: 900 lines exceeds the chunk limit|split it\\n' \\
+      > \"$QWEN_REVIEW_OUT/round-1.txt\"
+    ;;
+esac
+: > \"$QWEN_REVIEW_OUT/round-1.txt.done\"
+";
+        write_script(&script, contents);
+        let worktree = repo(home.path());
+        std::fs::write(worktree.join("big.rs"), "fn a() {}\n").unwrap();
+        crate::test::git(&worktree, &["add", "."]);
+        crate::test::git(&worktree, &["commit", "--quiet", "-m", "big"]);
+        crate::test::git(
+            &worktree,
+            &["update-ref", "refs/remotes/origin/main", "HEAD~1"],
+        );
+        let out = home.path().join("out");
+        let run =
+            LocalReviewer::default().round(&local(&script), &worktree, "origin/main", &out, 1);
+        assert_eq!(run.result, Ok(vec![]));
+        assert_eq!(run.gpu_wait_seconds, 50);
+    }
+
+    #[test]
+    fn a_wait_that_cannot_be_read_counts_as_none() {
+        assert_eq!(
+            gpu_wait("GPU free after soon, starting\ngave up after 9\n"),
+            0
+        );
+        assert_eq!(gpu_wait("gave up after 5s somewhere else\n"), 0);
+        assert_eq!(
+            gpu_wait(
+                "qwen-review: GPU free after 7s, starting\n\
+                 qwen-review: gave up after 3s waiting for the GPU\n"
+            ),
+            10
+        );
     }
 }
