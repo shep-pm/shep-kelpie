@@ -11,7 +11,7 @@ use std::process::ExitCode;
 
 use shep_client::shep_core::protocol::Request;
 use shep_client::shep_core::protocol::request::{ActionOutcome, Response, SelectorSpec};
-use shep_client::{Client, ConnectError};
+use shep_client::{Client, ConnectError, TRIGGER_DEADLINE};
 
 use crate::runner::is_no_or_answer;
 
@@ -81,12 +81,14 @@ async fn deliver(shep_home: &Path, project: &str, ruling: Ruling<'_>) -> Result<
     if running != SHEP_VERSION {
         return Err(skew(shep_home, Some(running)));
     }
+    // `shep trigger`'s own budget: a ruling can wait on the runner's lock.
+    let trigger = Request::Trigger {
+        selector: SelectorSpec::Name(project.into()),
+        action: "rule".into(),
+        params: Some(params),
+    };
     let reply = client
-        .request(Request::Trigger {
-            selector: SelectorSpec::Name(project.into()),
-            action: "rule".into(),
-            params: Some(params),
-        })
+        .request_with_deadline(trigger, Some(TRIGGER_DEADLINE))
         .await
         .map_err(|e| format!("kelpie's shepherd did not take the ruling: {e}"))?;
     let Response::Triggered(rows) = reply else {
@@ -183,6 +185,16 @@ mod tests {
         let reply = deliver_in_time(home.path(), Ruling::Yes("3")).await;
         assert_eq!(reply, Ok("merging #71".into()));
         assert_eq!(sent.try_recv().unwrap().body, rule_trigger("3 yes"));
+    }
+
+    #[tokio::test]
+    async fn a_ruling_gets_shep_trigger_s_full_minute() {
+        let home = scratch_home();
+        let mut sent = shepherd(home.path(), SHEP_VERSION, replied("")).await;
+        deliver_in_time(home.path(), Ruling::Yes("3"))
+            .await
+            .unwrap();
+        assert_eq!(sent.try_recv().unwrap().deadline_ms, Some(60_000));
     }
 
     #[tokio::test]
