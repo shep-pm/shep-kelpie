@@ -13,6 +13,7 @@ use crate::pacer::HoldKind;
 use crate::ports::{
     ClaudeCall, Cost, Finding, Role, SessionId, Severity, Timestamp, Usage, Verdict,
 };
+use crate::settings::LocalRound;
 use crate::shots::ShotsJob;
 use crate::work_item::{QwenTally, ReviewerKind, Spend};
 
@@ -446,10 +447,11 @@ pub(super) enum Begin {
     Shots(Box<ShotsJob>, String),
 }
 
-/// Something the qwen-review loop needs run outside the runner's lock
+/// Something the review loop needs run outside the runner's lock
 pub(super) enum ReviewCall {
-    /// One round of the maintainer's script
-    Qwen {
+    /// One local round, of the project's kind
+    Local {
+        local: LocalRound,
         worktree: PathBuf,
         base: String,
         out: PathBuf,
@@ -470,8 +472,8 @@ pub(super) enum Spent {
         usage: Usage,
         session_cost: Cost,
     },
-    /// A qwen round that ran, however it ended
-    Qwen,
+    /// A local round that ran, however it ended
+    Local,
 }
 
 /// What a [`ReviewCall`] came back with, and what it spent
@@ -484,7 +486,7 @@ pub(super) struct Reviewed {
 
 /// What a [`ReviewCall`] came back with
 pub(super) enum ReviewResult {
-    /// A round's raw findings, from qwen or a Claude round
+    /// A round's raw findings, from the local round or a Claude round
     Findings(Result<Vec<Finding>, String>),
     /// The judge's verdict on one finding
     Verdict(Result<Verdict, String>),

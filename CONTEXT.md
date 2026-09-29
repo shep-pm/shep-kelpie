@@ -88,6 +88,13 @@ dark. A worker takes them with kelpie's shots tool; kelpie takes them before
 each Claude review round and the merge ruling.
 _Avoid_: preview (Claude Desktop's pane), snapshots (Playwright's page trees)
 
+**Local round**:
+A review round on a local model, alternating with the Claude round. A
+project runs it through kelpie's own reviewer against an OpenAI-compatible
+server, through a command such as the maintainer's qwen-review script, or
+not at all.
+_Avoid_: qwen round (qwen is one model it can run)
+
 **Ruling**:
 A decision only the maintainer makes. A worker waiting on one is **parked**.
 
