@@ -361,28 +361,28 @@ impl Runner {
     }
 
     // A ruling just raised is posted as a comment on its pull request, if it
-    // has one; only these two reports carry a ruling and need the outcome.
+    // has one; only these three reports carry a ruling and need the outcome.
     fn fill_comment_failed(&self, report: &mut StepReport) {
         match report {
             StepReport::Asked {
                 pull_request,
-                question,
+                id,
                 comment_failed,
                 ..
             }
             | StepReport::TimedOut {
                 pull_request,
-                question,
+                id,
                 comment_failed,
                 ..
             }
             | StepReport::Failed {
                 pull_request,
-                question,
+                id,
                 comment_failed,
                 ..
             } => {
-                *comment_failed = self.post_ruling(*pull_request, question);
+                *comment_failed = self.post_ruling(*pull_request, *id);
             }
             _ => {}
         }
