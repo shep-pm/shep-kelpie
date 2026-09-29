@@ -28,6 +28,7 @@ mod claude_files;
 mod coderabbit;
 mod dispatch;
 mod gate;
+mod guard_hooks;
 mod instructions;
 mod merge;
 mod pace;
@@ -210,6 +211,12 @@ impl Runner {
         let totp = replies::authenticator(webhook.as_ref(), &paths.totp)?;
         check_repo(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        guard_hooks::check(
+            &settings,
+            home.as_deref(),
+            std::env::var_os("PATH").as_deref(),
+        )?;
         crate::skills::check(&settings.skills, &paths.skills)?;
         let skills = Skills::load(&settings.skills, &paths.skills);
         check_coderabbit(&settings, &ports)?;
