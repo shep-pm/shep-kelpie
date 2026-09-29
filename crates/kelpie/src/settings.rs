@@ -20,6 +20,7 @@ use shep_client::dogs::dog_config;
 
 use crate::preview::Preview;
 
+pub mod moving;
 pub mod source;
 mod table;
 

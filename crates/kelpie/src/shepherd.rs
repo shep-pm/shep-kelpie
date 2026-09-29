@@ -124,6 +124,15 @@ pub async fn read_tables(shep_home: &Path, sheep: &str) -> Result<Tables, String
     let client = connect(shep_home)
         .await
         .map_err(|e| e.describe(shep_home))?;
+    read_tables_with(&client, sheep).await
+}
+
+/// [`read_tables`], on a connection already made
+///
+/// # Errors
+///
+/// A message naming what the shepherd did not answer with.
+pub async fn read_tables_with(client: &Client, sheep: &str) -> Result<Tables, String> {
     let asked = |what: &str, e: &dyn core::fmt::Display| {
         format!("kelpie's shepherd did not answer with {what}: {e}")
     };
