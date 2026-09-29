@@ -192,7 +192,9 @@ impl Runner {
         }
         // A dev server the last run's worker left behind holds its port.
         if let Some(item) = &state.work_item {
-            ports.shots.stop_left(&paths.shots(item.issue));
+            ports
+                .shots
+                .stop_left(&paths.shots(item.issue).join(crate::shots::SERVER_PID));
         }
         // A new run is a new epoch, and the dog reclaims what the old one held.
         if !state.leases.is_empty() {

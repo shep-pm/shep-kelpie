@@ -285,7 +285,7 @@ impl Runner {
         );
         let shots = self.shots_job(item, self.paths.shots(item.issue));
         let domains = &self.settings.preview.domains;
-        let out = self.paths.shots(item.issue).join("playwright");
+        let out = self.paths.playwright(item.issue);
         own_folder(&out)?;
         let json = |v: &serde_json::Value| serde_json::to_string_pretty(v).expect("config is JSON");
         let job_text = serde_json::to_string_pretty(&shots).expect("the job is JSON");
@@ -311,7 +311,9 @@ impl Runner {
     ) -> Result<Option<StepReport>, StateError> {
         // However the turn ended, a dev server its shots tool started is done.
         if let Some(item) = &self.state.work_item {
-            self.ports.shots.stop_left(&self.paths.shots(item.issue));
+            self.ports
+                .shots
+                .stop_left(&self.paths.shots(item.issue).join(crate::shots::SERVER_PID));
         }
         // A turn stopped with the runner stays running, to resume on restart.
         if matches!(result, Err(ClaudeError::Stopped)) {

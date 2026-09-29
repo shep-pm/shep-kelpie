@@ -13,7 +13,7 @@ use super::report::{Begin, StepReport};
 use crate::ports::{ForgeError, Timestamp};
 use crate::preview;
 use crate::settings::NonBlank;
-use crate::shots::{ShotsJob, ShotsRecord, ShotsRun, named_routes, publish, routes};
+use crate::shots::{SERVER_PID, ShotsJob, ShotsRecord, ShotsRun, named_routes, publish, routes};
 use crate::state::StateError;
 use crate::work_item::{ReviewCallState, WorkItem};
 
@@ -65,6 +65,7 @@ impl Runner {
                 .map(str::to_owned)
                 .collect(),
             env,
+            server_pid: self.paths.shots(item.issue).join(SERVER_PID),
         }
     }
 

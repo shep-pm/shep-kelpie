@@ -147,7 +147,7 @@ mod tests {
     struct Recorder(Mutex<Vec<ShotsJob>>);
 
     impl Shots for Recorder {
-        fn stop_left(&self, _shots: &Path) {}
+        fn stop_left(&self, _server_pid: &Path) {}
 
         fn take(&self, job: &ShotsJob) -> ShotsRun {
             self.0.lock().unwrap().push(job.clone());
@@ -168,6 +168,7 @@ mod tests {
             routes: vec![Route::try_from("/".to_owned()).unwrap()],
             domains: vec![],
             env: BTreeMap::new(),
+            server_pid: dir.path().join("shots/dev-server.pid"),
         };
         let file = dir.path().join("job.json");
         std::fs::write(&file, serde_json::to_string(&job).unwrap()).unwrap();

@@ -327,15 +327,19 @@ impl Runner {
         if let Err(e) = removed {
             return Ok(self.gate_failed(format!("cannot clean up: {e}")));
         }
-        let shots = self.paths.shots(item.issue);
-        if let Err(e) = std::fs::remove_dir_all(&shots)
-            && e.kind() != std::io::ErrorKind::NotFound
-        {
-            return Ok(self.gate_failed(format!(
-                "cannot remove {}: {}",
-                shots.display(),
-                e.kind()
-            )));
+        for folder in [
+            self.paths.shots(item.issue),
+            self.paths.playwright(item.issue),
+        ] {
+            if let Err(e) = std::fs::remove_dir_all(&folder)
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                return Ok(self.gate_failed(format!(
+                    "cannot remove {}: {}",
+                    folder.display(),
+                    e.kind()
+                )));
+            }
         }
         let report = StepReport::Finished {
             issue: item.issue,

@@ -321,6 +321,7 @@ fn a_finished_work_item_takes_its_shots_with_it() {
     }
     assert_eq!(rig.forge.merges().len(), 1);
     assert!(!rig.home.path().join("kelpie/shots/lab/7").exists());
+    assert!(!rig.home.path().join("kelpie/playwright/lab/7").exists());
     assert_eq!(rig.forge.head_of("kelpie-shots/71"), None, "its branch too");
 }
 

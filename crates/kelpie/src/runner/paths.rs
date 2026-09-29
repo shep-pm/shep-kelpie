@@ -72,6 +72,7 @@ pub struct ProjectPaths {
     worktrees: PathBuf,
     builds: PathBuf,
     shots: PathBuf,
+    playwright: PathBuf,
 }
 
 impl ProjectPaths {
@@ -79,7 +80,8 @@ impl ProjectPaths {
     /// `<kelpie home>/settings.toml`, with worktrees under
     /// `<kelpie home>/wt/<project>/`, build folders under
     /// `<kelpie home>/targets/<project>/`, shots under
-    /// `<kelpie home>/shots/<project>/`, and the shared `<kelpie home>/tools/`
+    /// `<kelpie home>/shots/<project>/`, the Playwright server's files under
+    /// `<kelpie home>/playwright/<project>/`, and the shared `<kelpie home>/tools/`
     pub fn under(kelpie_home: &Path, project: &ProjectName) -> Self {
         let folder = kelpie_home.join("projects").join(project.as_str());
         Self {
@@ -91,6 +93,7 @@ impl ProjectPaths {
             worktrees: kelpie_home.join("wt").join(project.as_str()),
             builds: kelpie_home.join("targets").join(project.as_str()),
             shots: kelpie_home.join("shots").join(project.as_str()),
+            playwright: kelpie_home.join("playwright").join(project.as_str()),
         }
     }
 
@@ -104,9 +107,16 @@ impl ProjectPaths {
         self.builds.join(issue.to_string())
     }
 
-    /// Issue `issue`'s shots: out of its worker's reach for writes, not for reads
+    /// Issue `issue`'s shots: out of its worker's reach for writes, not for
+    /// reads. Only kelpie's own processes write there.
     pub fn shots(&self, issue: u64) -> PathBuf {
         self.shots.join(issue.to_string())
+    }
+
+    /// Issue `issue`'s Playwright MCP output folder, kept apart from its shots:
+    /// a page the worker drives can download a file into it
+    pub fn playwright(&self, issue: u64) -> PathBuf {
+        self.playwright.join(issue.to_string())
     }
 }
 

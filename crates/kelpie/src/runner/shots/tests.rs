@@ -124,11 +124,12 @@ fn a_dev_server_the_worker_left_is_stopped_when_its_turn_ends_and_on_restart() {
     rig.claude
         .script([Scripted::Fail(crate::ports::ClaudeError::TimedOut)]);
     step(&runner).unwrap(); // a turn killed at its ceiling
-    let shots = rig.home.path().join("kelpie/shots/lab/7");
-    assert_eq!(rig.shots.stopped(), std::slice::from_ref(&shots));
+    // The one file kelpie records its server in, never a folder to list
+    let recorded = rig.home.path().join("kelpie/shots/lab/7/dev-server.pid");
+    assert_eq!(rig.shots.stopped(), std::slice::from_ref(&recorded));
     drop(runner);
     rig.open().unwrap();
-    assert_eq!(rig.shots.stopped(), [shots.clone(), shots]);
+    assert_eq!(rig.shots.stopped(), [recorded.clone(), recorded]);
 }
 
 #[test]
@@ -188,7 +189,7 @@ fn a_worker_with_a_launch_file_gets_playwright_and_the_shots_tool() {
         worker.join("mcp.json"),
         worker.join("playwright.json"),
         worker.join("shots-job.json"),
-        rig.home.path().join("kelpie/shots/lab/7/playwright"),
+        rig.home.path().join("kelpie/playwright/lab/7"),
     ] {
         assert!(written.exists(), "{written:?}");
         assert!(!written.starts_with(&worktree), "{written:?}");
@@ -205,7 +206,7 @@ fn a_worker_with_a_launch_file_gets_playwright_and_the_shots_tool() {
 fn playwrights_output_folder_is_kelpies_and_a_symlink_there_stops_the_turn() {
     let rig = with_preview("lab");
     let runner = started(&rig);
-    let out = rig.home.path().join("kelpie/shots/lab/7/playwright");
+    let out = rig.home.path().join("kelpie/playwright/lab/7");
     std::fs::create_dir_all(out.parent().unwrap()).unwrap();
     std::os::unix::fs::symlink(rig.home.path(), &out).unwrap();
     let Some(StepReport::Failed { id, question, .. }) = step(&runner).unwrap() else {

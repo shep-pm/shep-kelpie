@@ -32,7 +32,7 @@ impl FakeShots {
         self.jobs.lock().unwrap().clone()
     }
 
-    /// Every shots folder it was asked to stop leftover servers under, in order
+    /// Every recorded server it was asked to stop, by its file, in order
     pub(crate) fn stopped(&self) -> Vec<std::path::PathBuf> {
         self.stopped.lock().unwrap().clone()
     }
@@ -44,8 +44,8 @@ impl FakeShots {
 }
 
 impl Shots for FakeShots {
-    fn stop_left(&self, shots: &std::path::Path) {
-        self.stopped.lock().unwrap().push(shots.to_owned());
+    fn stop_left(&self, server_pid: &std::path::Path) {
+        self.stopped.lock().unwrap().push(server_pid.to_owned());
     }
 
     fn take(&self, job: &ShotsJob) -> ShotsRun {

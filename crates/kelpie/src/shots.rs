@@ -39,7 +39,13 @@ pub struct ShotsJob {
     pub domains: Vec<String>,
     /// Variables the dev server starts with, such as a tool cache in the build folder
     pub env: BTreeMap<String, PathBuf>,
+    /// The file the running dev server's process group is recorded in, which
+    /// only kelpie writes, and [`crate::ports::Shots::stop_left`] reads
+    pub server_pid: PathBuf,
 }
+
+/// The file a work item's dev server group is recorded in, under its shots folder
+pub const SERVER_PID: &str = "dev-server.pid";
 
 /// A browser window's size
 // wire format: changing this is a breaking change to the state file

@@ -35,9 +35,6 @@ const CAPTURE: Duration = Duration::from_secs(600);
 /// How often a starting dev server is checked
 const POLL: Duration = Duration::from_millis(250);
 
-/// A running dev server's process group, recorded in its run's folder
-const SERVER_PID: &str = "dev-server.pid";
-
 /// What `srt -d` prints for a connection its proxy refused
 const REFUSED: &str = "Connection blocked to ";
 
@@ -91,15 +88,15 @@ impl ShotsCli {
         let log = job.out.join("dev-server.log");
         let server = self.start_server(job, &launch, &log)?;
         // Kept while the server runs, so a kelpie that did not see it end can.
-        let recorded = job.out.join(SERVER_PID);
+        let recorded = &job.server_pid;
         if let Some(pid) = self.processes.pid(server) {
-            let _ = fs::write(&recorded, pid.to_string());
+            let _ = fs::write(recorded, pid.to_string());
         }
         let taken = self
             .wait_for(server, launch.port, &log)
             .and_then(|()| self.capture(job, launch.port));
         self.processes.end(server);
-        let _ = fs::remove_file(&recorded);
+        let _ = fs::remove_file(recorded);
         let mut run = taken?;
         run.problems.extend(refused_hosts(&log));
         Ok(run)
@@ -210,19 +207,31 @@ impl Shots for ShotsCli {
         self.run(job).unwrap_or_else(ShotsRun::failed)
     }
 
-    fn stop_left(&self, shots: &Path) {
-        let Ok(runs) = fs::read_dir(shots) else {
+    fn stop_left(&self, server_pid: &Path) {
+        let pid = fs::read_to_string(server_pid).ok();
+        let _ = fs::remove_file(server_pid);
+        let Some(pgid) = pid.and_then(|p| p.trim().parse::<u32>().ok()) else {
             return;
         };
-        for run in runs.filter_map(Result::ok) {
-            let recorded = run.path().join(SERVER_PID);
-            let pid = fs::read_to_string(&recorded).ok();
-            if let Some(pid) = pid.and_then(|p| p.trim().parse::<u32>().ok()) {
-                stop_group(pid);
-            }
-            let _ = fs::remove_file(&recorded);
+        // 0 is the caller's own group and 1 is launchd's; and a recorded group
+        // is signalled only while its leader is still kelpie's sandbox runtime.
+        if pgid > 1 && leads_sandbox(pgid, &self.tools.sandbox()) {
+            stop_group(pgid);
         }
     }
+}
+
+// Whether process `pid` runs the sandbox runtime at `srt`, as every dev
+// server kelpie starts does, so a reused or planted pid is left alone.
+fn leads_sandbox(pid: u32, srt: &Path) -> bool {
+    Command::new("ps")
+        .args(["-o", "command=", "-p", &pid.to_string()])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .is_ok_and(|o| {
+            o.status.success()
+                && String::from_utf8_lossy(&o.stdout).contains(&*srt.to_string_lossy())
+        })
 }
 
 // What the capture script reads: kelpie's tools, the dev server, the hosts a
@@ -381,6 +390,7 @@ mod tests {
             routes: vec![],
             domains: vec![],
             env: BTreeMap::new(),
+            server_pid: dir.path().join("dev-server.pid"),
         });
         assert_eq!(
             run.failed.as_deref(),
@@ -397,6 +407,7 @@ mod tests {
             routes: vec![Route::try_from("/".to_owned()).unwrap()],
             domains: domains.iter().map(|&d| d.to_owned()).collect(),
             env: BTreeMap::new(),
+            server_pid: out.join("dev-server.pid"),
         }
     }
 
@@ -504,35 +515,86 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_server_a_run_left_behind_is_stopped_with_its_group() {
-        let dir = tempfile::tempdir().unwrap();
-        let run = dir.path().join("worker");
-        fs::create_dir_all(&run).unwrap();
-        let mut left = std::process::Command::new("sh")
+    // A process group whose leader's command line names `srt`, as a dev
+    // server's does, holding a child as a server's tools would
+    fn group_naming(srt: &Path) -> std::process::Child {
+        std::process::Command::new("sh")
             .args(["-c", "sleep 60 & sleep 60"])
+            .arg(srt)
             .process_group(0)
             .spawn()
-            .unwrap();
-        fs::write(run.join(SERVER_PID), left.id().to_string()).unwrap();
-        ShotsCli::new(Tools::under(dir.path())).stop_left(dir.path());
+            .unwrap()
+    }
+
+    fn ended(child: &mut std::process::Child) -> bool {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        let ended = loop {
-            if let Some(status) = left.try_wait().unwrap() {
-                break Some(status);
-            }
-            if std::time::Instant::now() > deadline {
-                break None;
+        while std::time::Instant::now() < deadline {
+            if child.try_wait().unwrap().is_some() {
+                return true;
             }
             thread::sleep(Duration::from_millis(50));
-        };
-        assert!(ended.is_some(), "the server was left running");
+        }
+        false
+    }
+
+    fn stop(child: &mut std::process::Child) {
+        stop_group(child.id());
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn a_server_kelpie_recorded_is_stopped_with_its_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let tools = Tools::under(dir.path());
+        let mut left = group_naming(&tools.sandbox());
+        let recorded = dir.path().join("dev-server.pid");
+        fs::write(&recorded, left.id().to_string()).unwrap();
+        ShotsCli::new(tools).stop_left(&recorded);
+        assert!(ended(&mut left), "the server was left running");
         let group = std::process::Command::new("pgrep")
             .args(["-g", &left.id().to_string()])
             .status()
             .unwrap();
         assert!(!group.success(), "its child was left running");
-        assert!(!run.join(SERVER_PID).exists());
+        assert!(!recorded.exists());
+    }
+
+    // The review's page downloaded a `dev-server.pid` holding `0` into the
+    // Playwright output folder, and kelpie signalled that group.
+    #[test]
+    fn a_pid_file_a_download_plants_stops_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let tools = Tools::under(dir.path());
+        let mut bystander = group_naming(Path::new("/elsewhere/not-srt"));
+        let mut planted_server = group_naming(&tools.sandbox());
+        for folder in ["playwright", "abc1234", "worker"] {
+            let beside = dir.path().join(folder);
+            fs::create_dir_all(&beside).unwrap();
+            fs::write(
+                beside.join("dev-server.pid"),
+                planted_server.id().to_string(),
+            )
+            .unwrap();
+        }
+        let recorded = dir.path().join("dev-server.pid");
+        let cli = ShotsCli::new(tools);
+        for planted in ["0".to_owned(), "1".to_owned(), bystander.id().to_string()] {
+            fs::write(&recorded, &planted).unwrap();
+            cli.stop_left(&recorded);
+        }
+        cli.stop_left(&recorded);
+        thread::sleep(Duration::from_millis(300));
+        let (bystander_ran, server_ran) = (
+            bystander.try_wait().unwrap().is_none(),
+            planted_server.try_wait().unwrap().is_none(),
+        );
+        stop(&mut bystander);
+        stop(&mut planted_server);
+        assert!(
+            bystander_ran,
+            "a group that is not kelpie's sandbox was signalled"
+        );
+        assert!(server_ran, "a pid file beside the recorded one was read");
     }
 
     #[test]
@@ -567,6 +629,7 @@ mod tests {
             routes: vec![Route::try_from("/".to_owned()).unwrap()],
             domains: vec!["leekduck.com".into()],
             env: BTreeMap::new(),
+            server_pid: "/k/shots/lab/7/dev-server.pid".into(),
         };
         let s = sandbox(&job);
         assert_eq!(
@@ -600,6 +663,7 @@ mod tests {
             routes: vec![Route::try_from("/".to_owned()).unwrap()],
             domains: vec![],
             env: BTreeMap::new(),
+            server_pid: dir.path().join("dev-server.pid"),
         });
         assert_eq!(
             run.failed,
@@ -623,6 +687,7 @@ mod tests {
             routes: vec![],
             domains: vec![],
             env: BTreeMap::new(),
+            server_pid: dir.path().join("dev-server.pid"),
         });
         let reason = run.failed.unwrap();
         assert!(
