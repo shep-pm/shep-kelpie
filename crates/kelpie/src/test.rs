@@ -138,8 +138,8 @@ pub(crate) fn a_work_item() -> WorkItem {
 /// The `[app.dogs.kelpie]` table of a runner's Flockfile entry, such as
 /// `settings.example.toml`, as shep hands it to the runner
 pub(crate) fn project_table(entry: &str) -> serde_json::Map<String, serde_json::Value> {
-    let entry: toml::Table = toml::from_str(entry).unwrap();
-    match serde_json::to_value(&entry["app"][0]["dogs"]["kelpie"]).unwrap() {
+    let parsed: toml::Table = toml::from_str(entry).unwrap();
+    match serde_json::to_value(&parsed["app"][0]["dogs"]["kelpie"]).unwrap() {
         serde_json::Value::Object(table) => table,
         other => panic!("the entry's kelpie table is {other}"),
     }
@@ -625,7 +625,7 @@ impl Rig {
             .expect("the rig's kelpie settings name a webhook")
     }
 
-    /// Kelpie's own settings as the rig's file holds them, none when it is gone
+    /// Kelpie's own settings as the rig's file holds them, empty when it is gone
     pub(crate) fn kelpie_settings(&self) -> KelpieSettings {
         self.try_kelpie_settings().unwrap()
     }

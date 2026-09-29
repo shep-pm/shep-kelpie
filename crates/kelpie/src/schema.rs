@@ -140,6 +140,7 @@ mod tests {
         assert_eq!(defs["KickoffHours"]["minimum"], 1);
         assert_eq!(defs["KickoffHours"]["maximum"], 24);
         assert_eq!(defs["Channels"]["minItems"], 1);
+        assert_eq!(defs["Route"]["pattern"], "^/");
     }
 
     #[test]

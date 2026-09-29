@@ -68,6 +68,7 @@ fn default_routes() -> Vec<Route> {
     schemars::JsonSchema,
 )]
 #[serde(try_from = "String", into = "String")]
+#[schemars(extend("pattern" = "^/"))]
 pub struct Route(String);
 
 impl Route {
