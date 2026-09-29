@@ -13,7 +13,9 @@ use crate::ports::{SessionId, Timestamp};
 use crate::relay::Settled;
 use crate::settings::MergeAuthority;
 use crate::state::{LeaseHeld, Ruling, RunState, StateError, Waiting};
-use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Turn, WorkItem};
+use crate::work_item::{
+    CodeRabbitTally, Phase, QwenTally, Spend, TimingPhase, Timings, Turn, WorkItem,
+};
 
 /// The triggers a runner answers
 pub const ACTIONS: [&str; 10] = [
@@ -90,10 +92,16 @@ pub struct WorkItemStatus<'a> {
     pub by_role: Spend,
     /// Its qwen rounds, which cost no money
     pub qwen: QwenTally,
+    /// The phase of its time it is in now
+    pub timing_phase: TimingPhase,
+    /// Where its time has gone, counted up to the read
+    pub timings: Timings,
 }
 
-impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
-    fn from(item: &'a WorkItem) -> Self {
+impl<'a> WorkItemStatus<'a> {
+    /// `item` as it stands at `now`, its time charged to `now` in the
+    /// figures shown and nowhere else
+    pub fn at(item: &'a WorkItem, now: Timestamp) -> Self {
         Self {
             issue: item.issue,
             title: &item.title,
@@ -110,6 +118,8 @@ impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
             cost_usd: item.cost().usd(),
             by_role: item.spend(),
             qwen: item.qwen,
+            timing_phase: item.timing_phase(),
+            timings: item.timings_at(now),
         }
     }
 }
@@ -390,6 +400,58 @@ mod tests {
         rig.ask(&runner, "start", None);
         assert_eq!(rig.ask(&runner, "add", Some("7"))["work_item"]["issue"], 7);
         (rig, runner)
+    }
+
+    #[test]
+    fn status_counts_a_work_items_time_to_the_read_and_saves_nothing() {
+        let (rig, runner) = with_issue_7("golbat");
+        let state = rig.paths().state;
+        let saved = std::fs::read(&state).unwrap();
+
+        rig.clock.advance(90);
+        let status = rig.ask(&runner, "status", None);
+        let item = &status["work_item"];
+        assert_eq!(item["timing_phase"], "other");
+        assert_eq!(item["timings"]["started"], Rig::EPOCH);
+        assert_eq!(item["timings"]["charged"], Rig::EPOCH + 90);
+        assert_eq!(item["timings"]["seconds"]["other"], 90);
+        let total: u64 = item["timings"]["seconds"]
+            .as_object()
+            .unwrap()
+            .values()
+            .map(|seconds| seconds.as_u64().unwrap())
+            .sum();
+        assert_eq!(total, 90);
+        assert_eq!(status["work_items"][0]["timings"], item["timings"]);
+        assert_eq!(status["work_items"][0]["timing_phase"], "other");
+
+        rig.clock.advance(30);
+        let later = rig.ask(&runner, "status", None);
+        assert_eq!(later["work_item"]["timings"]["seconds"]["other"], 120);
+        assert_eq!(std::fs::read(&state).unwrap(), saved);
+    }
+
+    #[test]
+    fn status_shows_ci_time_growing_while_a_work_item_waits_on_ci() {
+        let (rig, runner, _) = Rig::with_pull_request("hazels-lab");
+        let first = rig.ask(&runner, "status", None);
+        assert_eq!(first["work_item"]["timing_phase"], "ci");
+        let before = first["work_item"]["timings"]["seconds"]["ci"]
+            .as_u64()
+            .unwrap();
+
+        rig.clock.advance(45);
+        let second = rig.ask(&runner, "status", None);
+        assert_eq!(second["work_item"]["timings"]["seconds"]["ci"], before + 45);
+    }
+
+    #[test]
+    fn a_project_with_no_work_item_shows_no_timings() {
+        let rig = Rig::new("reactmap");
+        let runner = rig.open().unwrap();
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["work_item"], json!(null));
+        assert_eq!(status["work_items"], json!([]));
     }
 
     #[test]

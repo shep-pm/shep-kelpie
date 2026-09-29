@@ -262,24 +262,29 @@ impl Runner {
 
     /// The project's state as `status` reports it
     pub fn status(&self) -> Status<'_> {
+        let now = self.ports.clock.now();
         Status {
             project: self.project.as_str(),
             merge_authority: self.settings.merge_authority,
             run: self.state.run,
             since: self.state.since,
-            work_item: self.state.work_items.first().map(WorkItemStatus::from),
+            work_item: self
+                .state
+                .work_items
+                .first()
+                .map(|item| WorkItemStatus::at(item, now)),
             work_items: self
                 .state
                 .work_items
                 .iter()
-                .map(WorkItemStatus::from)
+                .map(|item| WorkItemStatus::at(item, now))
                 .collect(),
             max_items: self.settings.max_items.get(),
             adopted: &self.state.adopted,
             skipped: &self.skipped,
             rulings: &self.state.rulings,
             leases: &self.state.leases,
-            pacer: self.pacer_status(self.ports.clock.now()),
+            pacer: self.pacer_status(now),
         }
     }
 
