@@ -106,6 +106,30 @@ mod tests {
     }
 
     #[test]
+    fn the_instructions_ask_with_multiple_choice() {
+        assert!(INSTRUCTIONS.contains("AskUserQuestion"));
+        for merge in ["Merge", "Send back with a note", "Leave for later"] {
+            assert!(INSTRUCTIONS.contains(merge), "{merge}");
+        }
+        assert!(INSTRUCTIONS.contains("begin with `- `"));
+    }
+
+    #[test]
+    fn a_yes_has_one_command_and_a_choice_is_passed_on_as_typed() {
+        assert!(INSTRUCTIONS.contains("`kelpie relay-yes` is the only command that sends a yes"));
+        assert!(INSTRUCTIONS.contains("Never send a yes\nthrough `kelpie relay-answer`"));
+        assert!(INSTRUCTIONS.contains("exactly as they came, never reworded"));
+    }
+
+    #[test]
+    fn the_instructions_never_talk_of_cost() {
+        let lower = INSTRUCTIONS.to_lowercase();
+        for word in ["cost", "budget", "token"] {
+            assert!(!lower.contains(word), "{word}");
+        }
+    }
+
+    #[test]
     fn a_message_names_the_project_and_ruling_before_the_question() {
         assert_eq!(
             message("shep", 3, "Merge pull request #71 into main? …"),

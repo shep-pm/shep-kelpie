@@ -101,6 +101,39 @@ mod tests {
         );
     }
 
+    // Recorded the same way, with the instructions that let a worker end its
+    // block on likely answers, one per `- ` line.
+    const RECORDED_CHOICES: &str = include_str!("../../fixtures/claude-p-question-choices.json");
+
+    #[test]
+    fn a_real_workers_likely_answers_stay_in_its_question() {
+        let reply: serde_json::Value = serde_json::from_str(RECORDED_CHOICES).unwrap();
+        let text = reply["result"].as_str().unwrap();
+        assert_eq!(
+            asked(text).as_deref(),
+            Some(
+                "Should `/v1/export` be removed outright in this change, or kept for one more \
+                 release behind a deprecation warning and removed later?\n\
+                 - Remove it now\n\
+                 - Keep it one more release with a deprecation warning"
+            )
+        );
+    }
+
+    #[test]
+    fn choices_at_the_end_of_a_block_do_not_end_it_early() {
+        let text = "<kelpie-question>\nWhich?\n- `--dry-run`\n- `--check`\n</kelpie-question>";
+        assert_eq!(
+            asked(text).as_deref(),
+            Some("Which?\n- `--dry-run`\n- `--check`")
+        );
+    }
+
+    #[test]
+    fn the_worker_instructions_offer_choices() {
+        assert!(INSTRUCTIONS.contains("begin with `- `"), "{INSTRUCTIONS}");
+    }
+
     #[test]
     fn the_worker_instructions_describe_the_block() {
         assert!(INSTRUCTIONS.contains(OPEN), "{INSTRUCTIONS}");
