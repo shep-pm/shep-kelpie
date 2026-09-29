@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use crate::ports::{Finding, Role, Severity};
+use crate::ports::{Checks, Finding, Role, Severity};
 use crate::profile::INSTRUCTIONS;
 use crate::runner::{Runner, StepReport, step};
 use crate::shots::publish::MARKER;
@@ -8,12 +8,15 @@ use crate::test::{Rig, Scripted, ScriptedShots};
 
 mod merge;
 
-/// A playground-like project: a launch file on `main`, and a preview table
+/// A playground-like project: a launch file on `main`, and the preview on
 fn with_preview(project: &str) -> Rig {
     let rig = Rig::new(project);
     rig.land_launch_file();
     rig.edit_settings(|s| {
-        format!("{s}\n[app.dogs.kelpie.preview]\nroutes = [\"/\", \"/events\"]\ndomains = [\"api.example.com\"]\n")
+        format!(
+            "{s}\n[app.dogs.kelpie.preview]\nenabled = true\nroutes = [\"/\", \"/events\"]\n\
+             domains = [\"api.example.com\"]\n"
+        )
     });
     rig
 }
@@ -50,6 +53,70 @@ fn a_project_without_a_launch_file_behaves_as_before() {
     assert_eq!(instructions.unwrap(), INSTRUCTIONS);
     assert_eq!(shots_comments(&rig), Vec::<String>::new());
     assert!(!rig.paths().worker.join("mcp.json").exists());
+}
+
+// shep carries a launch file for the maintainer's own Claude preview, not for kelpie.
+#[test]
+fn a_launch_file_on_main_without_the_setting_takes_no_shots() {
+    let rig = Rig::new("shep");
+    rig.land_launch_file();
+    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.preview]\nroutes = [\"/\"]\n"));
+    let runner = started(&rig);
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    for _ in 0..3 {
+        step(&runner).unwrap(); // the turn, qwen, claude
+    }
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+    let ruling = rig.verdict(&runner);
+    assert!(
+        matches!(ruling, Some(StepReport::Ruling { id: 1, .. })),
+        "{ruling:?}"
+    );
+    assert_eq!(rig.shots.jobs(), [], "no shots run");
+    let [worker] = rig.claude.calls().try_into().unwrap();
+    assert_eq!(worker.mcp_config, None);
+    assert_eq!(shots_comments(&rig), Vec::<String>::new());
+}
+
+// shep's dev server lives in `web/`, so only a change there is worth shots.
+fn with_web_preview(project: &str, change: &'static str) -> (Rig, std::sync::Mutex<Runner>) {
+    let rig = Rig::new(project);
+    let launch = r#"{"configurations": [{"name": "web", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 5173, "cwd": "web"}]}"#;
+    rig.land(crate::preview::LAUNCH_FILE, launch);
+    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.preview]\nenabled = true\n"));
+    let runner = started(&rig);
+    rig.claude
+        .script([Scripted::Push(change, "change\n"), Scripted::Text("CLEAN")]);
+    for _ in 0..3 {
+        step(&runner).unwrap(); // the turn, qwen, then the shots or claude
+    }
+    (rig, runner)
+}
+
+#[test]
+fn a_pull_request_that_changes_nothing_under_the_cwd_takes_no_shots() {
+    let (rig, runner) = with_web_preview("shep", "src/lib.rs");
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+    let ruling = rig.verdict(&runner);
+    assert!(
+        matches!(ruling, Some(StepReport::Ruling { id: 1, .. })),
+        "{ruling:?}"
+    );
+    assert_eq!(rig.shots.jobs(), [], "no shots run");
+    assert_eq!(shots_comments(&rig), Vec::<String>::new());
+}
+
+#[test]
+fn a_pull_request_that_changes_the_cwd_takes_shots() {
+    let (rig, _runner) = with_web_preview("shep", "web/app.tsx");
+    let [job] = rig.shots.jobs().try_into().unwrap();
+    let cwd = job.launch.unwrap().cwd;
+    assert_eq!(cwd.as_deref(), Some("web"));
 }
 
 // Steps until the fence's ruling on a branch that changes `.claude`, and
@@ -261,6 +328,7 @@ fn the_dev_server_command_comes_from_main_never_the_workers_branch() {
             runtime_executable: "bun".into(),
             runtime_args: vec!["run".into(), "dev".into()],
             port: 3000,
+            cwd: None,
         })
     );
 }

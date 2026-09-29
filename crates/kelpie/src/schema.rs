@@ -134,6 +134,7 @@ mod tests {
                 "instructions_file = \"worker.md\"",
             )
             .replace("# [app.dogs.kelpie.preview]", "[app.dogs.kelpie.preview]")
+            .replace("# enabled = true", "enabled = true")
             .replace("# configuration =", "configuration =")
             .replace("# routes =", "routes =")
             .replace("# domains =", "domains =");
@@ -165,6 +166,7 @@ mod tests {
         for key in [
             "models.judge.effort",
             "worker.build_env",
+            "preview.enabled",
             "preview.routes",
             "review.local.context",
             "review.local.command",

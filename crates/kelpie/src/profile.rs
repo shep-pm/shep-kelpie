@@ -131,8 +131,7 @@ pub struct WorkerProfile<'a> {
     pub allowed_domains: &'a [NonBlank],
     /// Variables the project's settings point into the build folder
     pub build_env: &'a BTreeMap<EnvName, BuildDir>,
-    /// The preview's domains, for a work item whose worktree has a launch
-    /// file; `None` without one
+    /// The preview's domains, for a project with the preview on; `None` with it off
     pub preview: Option<&'a [NonBlank]>,
     /// The shepherd's home, whose `dogs.toml` holds the webhook's URL
     pub shep_home: &'a Path,

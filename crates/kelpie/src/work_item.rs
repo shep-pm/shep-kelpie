@@ -100,7 +100,7 @@ pub struct WorkItem {
     /// pull request later found merged at it is kelpie's merge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_tried: Option<String>,
-    /// Kelpie's last shots run, for a worktree with a launch file
+    /// Kelpie's last shots run, for a project with the preview on
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shots: Option<ShotsRecord>,
     /// The pull request's shots comment, once posted

@@ -227,6 +227,7 @@ impl Runner {
         head: String,
         notice: bool,
     ) -> Result<Begin, StateError> {
+        let shots_failed = self.shots_failed(&head);
         let mut next = self.state.clone();
         let item = self
             .current_in(&mut next)
@@ -237,6 +238,7 @@ impl Runner {
                 issue,
                 pull_request: number,
                 head,
+                shots_failed,
             });
         }
         self.save(next)?;

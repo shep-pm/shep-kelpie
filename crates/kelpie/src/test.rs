@@ -712,7 +712,8 @@ impl Rig {
         self.land(file, "landed elsewhere\n")
     }
 
-    fn land(&self, file: &str, text: &str) -> String {
+    /// Lands `file` holding `text` on origin's `main`, and returns the commit
+    pub(crate) fn land(&self, file: &str, text: &str) -> String {
         let other = self.home.path().join("other");
         if !other.exists() {
             git(
@@ -843,6 +844,7 @@ impl Rig {
             self.try_settings()?,
             self.try_kelpie_settings()?,
             &paths,
+            self.home.path(),
             Path::new(Self::KELPIE),
             ports,
         )

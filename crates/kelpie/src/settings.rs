@@ -65,7 +65,7 @@ pub struct Settings {
     pub pacing: Pacing,
     /// What every worker is started with
     pub worker: Worker,
-    /// Showing a work item's UI, for a repo with a launch file
+    /// Showing a work item's UI, off unless `enabled` and a launch file on `main`
     #[serde(default)]
     pub preview: Preview,
     /// How rulings reach the maintainer, over what kelpie's own settings say.
