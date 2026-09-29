@@ -36,8 +36,8 @@ fn main() -> ExitCode {
             let folders: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
             hook(judge(std::io::stdin().lock(), &folders))
         }
-        [role, kelpie] if role == "relay-gate" => {
-            hook(gate::judge(std::io::stdin().lock(), kelpie))
+        [role, program] if role == "relay-gate" => {
+            hook(gate::judge(std::io::stdin().lock(), program))
         }
         [role, project, id] if role == "relay-yes" => {
             with_shep_home(role, |home| rule::send(home, project, Ruling::Yes(id)))
@@ -47,7 +47,7 @@ fn main() -> ExitCode {
         }),
         _ => {
             eprintln!(
-                "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>",
+                "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>\n       kelpie relay-gate <kelpie>",
                 kelpie::lease::cli::USAGE
             );
             ExitCode::from(2)

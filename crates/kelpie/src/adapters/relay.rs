@@ -144,7 +144,7 @@ impl RelayCli {
     // starting a process itself: an upgrade's new settings reach the file
     // kelpie owns even when nothing of kelpie's runs to write it.
     fn write_relay_files(&self) -> Result<(PathBuf, PathBuf), RelayError> {
-        let kelpie = relay::bare(&self.kelpie).ok_or_else(|| {
+        let kelpie = relay::BarePath::of(&self.kelpie).ok_or_else(|| {
             RelayError::CannotStart(format!(
                 "kelpie's path {} cannot be typed bare in a shell",
                 self.kelpie.display()
@@ -562,7 +562,10 @@ mod tests {
         let written: Value = serde_json::from_str(&fs::read_to_string(settings).unwrap()).unwrap();
         assert_eq!(
             written,
-            relay::settings(Path::new("/k/shep"), "/k/bin/kelpie")
+            relay::settings(
+                Path::new("/k/shep"),
+                relay::BarePath::of(Path::new("/k/bin/kelpie")).unwrap()
+            )
         );
     }
 

