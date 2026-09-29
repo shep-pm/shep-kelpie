@@ -55,17 +55,18 @@ fn is_relay_command(command: &str, kelpie: &str) -> bool {
     let Some(rest) = command.trim().strip_prefix(kelpie) else {
         return false;
     };
-    let words = |args: &str| {
-        args.split_once(' ')
-            .filter(|(project, _)| ProjectName::try_from(*project).is_ok())
-            .map(|(_, last)| last.to_owned())
-    };
-    if let Some(id) = rest.strip_prefix(" relay-yes ").and_then(words) {
+    if let Some(id) = rest.strip_prefix(" relay-yes ").and_then(after_project) {
         return !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit());
     }
     rest.strip_prefix(" relay-answer ")
-        .and_then(words)
-        .is_some_and(|params| is_single_quoted(&params))
+        .and_then(after_project)
+        .is_some_and(is_single_quoted)
+}
+
+// What follows a valid project name and one space.
+fn after_project(args: &str) -> Option<&str> {
+    let (project, last) = args.split_once(' ')?;
+    ProjectName::try_from(project).is_ok().then_some(last)
 }
 
 // Quoted runs, and the `\'` a quote inside them is written as, with nothing
@@ -128,6 +129,8 @@ mod tests {
             "/k/bin/kelpie runner shep",
             "/k/bin/kelpie relay-yes shep 3 && shep daemon reload",
             "/k/bin/kelpie relay-yes shep 3; echo",
+            "/k/bin/kelpie relay-yes shep abc",
+            "/k/bin/kelpie relay-yes shep",
             "/k/bin/kelpie relay-yes shep $(echo 3)",
             "/k/bin/kelpie relay-answer shep '3 no x' && shep daemon reload",
             "/k/bin/kelpie relay-answer shep '3 no x'; echo",

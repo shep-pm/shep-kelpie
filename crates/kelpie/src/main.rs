@@ -36,8 +36,8 @@ fn main() -> ExitCode {
             let folders: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
             hook(judge(std::io::stdin().lock(), &folders))
         }
-        [role, program] if role == "relay-gate" => {
-            hook(gate::judge(std::io::stdin().lock(), program))
+        [role, kelpie_path] if role == "relay-gate" => {
+            hook(gate::judge(std::io::stdin().lock(), kelpie_path))
         }
         [role, project, id] if role == "relay-yes" => {
             with_shep_home(role, |home| rule::send(home, project, Ruling::Yes(id)))

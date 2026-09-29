@@ -542,6 +542,17 @@ mod tests {
     // entirely, so a settings.json an upgrade left stale never gets
     // rewritten unless writing it does not wait on `start` running at all.
     #[test]
+    fn a_kelpie_path_the_shell_would_split_starts_no_relay() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut relay = fake_claude(dir.path());
+        relay.kelpie = "/opt/my kelpie/kelpie".into();
+        let sent = relay.send("[kelpie]", "claude-haiku-4-5-20251001", Effort::Low);
+        assert!(matches!(sent, Err(RelayError::CannotStart(_))), "{sent:?}");
+        assert!(!dir.path().join("relay/settings.json").exists());
+        assert!(!dir.path().join("calls").exists(), "claude never ran");
+    }
+
+    #[test]
     fn a_stale_settings_file_is_rewritten_whether_or_not_a_start_happens() {
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().join("relay");
