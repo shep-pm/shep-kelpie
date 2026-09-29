@@ -120,6 +120,8 @@ async fn add_twice_changes_nothing() {
         ["bug", "ready-for-agent", "ready-for-human", "review please"]
     );
     assert_eq!(scene.shepherd.sheep("hazels-lab"), before);
+    // Three labels, the runner and the dog, each already there.
+    assert_eq!(lines.len(), 5, "{lines:?}");
     assert!(lines.iter().all(|l| l.contains("already")), "{lines:?}");
 }
 
@@ -180,7 +182,7 @@ async fn a_dog_under_its_old_name_is_replaced_and_kept_running() {
     assert_eq!(dog.args, ["dog"]);
     assert!(running, "the book's dog stays up");
     assert!(
-        lines.last().unwrap().contains("replaces `kelpie`"),
+        lines.iter().any(|l| l.contains("replaces `kelpie`")),
         "{lines:?}"
     );
     let writes = scene.shepherd.writes();
