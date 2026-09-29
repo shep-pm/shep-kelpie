@@ -67,6 +67,10 @@ const PM_ONLY: [&str; 5] = [
 
 // `gh api` could merge or relabel around the rules above, and `gh auth token`
 // prints the maintainer's token. No worker needs either.
+// `Monitor` runs a command or opens a WebSocket that no hook judges, and no
+// worker needs a background watch.
+const TOOLS_DENY: [&str; 1] = ["Monitor"];
+
 const GH_DENY: [&str; 4] = [
     "Bash(gh api)",
     "Bash(gh api *)",
@@ -164,6 +168,7 @@ impl WorkerProfile<'_> {
             .map(|p| format!("Read({p})"))
             .chain(PM_ONLY.iter().map(|&r| r.to_owned()))
             .chain(GH_DENY.iter().map(|&r| r.to_owned()))
+            .chain(TOOLS_DENY.iter().map(|&r| r.to_owned()))
             .chain(push_to_base())
             .chain(PUSH_FLAGS.iter().map(|&r| r.to_owned()))
             .collect();
@@ -192,6 +197,9 @@ impl WorkerProfile<'_> {
                 "network": network,
             },
             "permissions": { "deny": deny },
+            // A project's own settings could otherwise switch every hook off,
+            // `confine` and the guard with them. This file outranks them.
+            "disableAllHooks": false,
             "hooks": self.hooks(),
             "env": self.env(),
         })
@@ -553,6 +561,18 @@ mod tests {
         ] {
             assert!(deny.contains(&rule), "{rule}");
         }
+    }
+
+    #[test]
+    fn a_projects_settings_cannot_switch_the_hooks_off() {
+        assert_eq!(settings(&[])["disableAllHooks"], false);
+        assert_eq!(with_preview(&[])["disableAllHooks"], false);
+    }
+
+    #[test]
+    fn the_monitor_tool_is_denied() {
+        let deny = settings(&[])["permissions"]["deny"].clone();
+        assert!(strings(&deny).contains(&"Monitor"), "{deny}");
     }
 
     #[test]
