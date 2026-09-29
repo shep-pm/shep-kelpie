@@ -8,15 +8,16 @@
 use std::path::Path;
 use std::time::Duration;
 
-use shep_client::shep_core::protocol::request::{ActionOutcome, Response};
+use shep_client::shep_core::protocol::request::{ActionOutcome, ProcessInfo, Response};
 use shep_client::shep_core::protocol::{Request, SelectorSpec};
 use shep_client::shep_core::status::ProcStatus;
 use shep_client::{Client, TRIGGER_DEADLINE};
 
-use super::{flock, resume, tables};
+use super::{Found, flock, kelpie_sheep, resume, tables};
 use crate::dog;
 use crate::runner::ProjectName;
 use crate::settings::Settings;
+use crate::shepherd;
 
 /// How long `start` waits for a runner it started to answer
 const STARTING: Duration = Duration::from_secs(30);
@@ -60,30 +61,21 @@ pub async fn project_here(
 ///
 /// # Errors
 ///
-/// A message when the project has no runner, or it does not answer in time.
+/// A message when the project has no kelpie runner, or it does not answer
+/// in time. Only kelpie's own sheep are ever started.
 pub async fn start(client: &Client, project: &ProjectName) -> Result<Vec<String>, String> {
     let rows = flock(client).await?;
-    let runner = project.as_str();
-    if !rows.iter().any(|r| r.name == runner) {
-        return Err(format!(
-            "no runner named {runner} in this flock: `shep kelpie add` sets one up"
-        ));
-    }
-    let dog = rows
-        .iter()
-        .find(|r| r.name == dog::NAME)
-        .or_else(|| rows.iter().find(|r| r.name == dog::OLD_NAME));
-    for name in [dog.map(|r| r.name.as_str()), Some(runner)]
-        .into_iter()
-        .flatten()
-    {
-        if rows
-            .iter()
-            .any(|r| r.name == name && r.status != ProcStatus::Online)
-        {
-            resume(client, name).await?;
+    let runner = kelpie_runner(client, &rows, project).await?;
+    let dog = match kelpie_sheep(client, &rows, dog::NAME, &["dog"]).await? {
+        Some(dog) => Some(dog),
+        None => kelpie_sheep(client, &rows, dog::OLD_NAME, &["dog"]).await?,
+    };
+    for found in dog.iter().chain([&runner]) {
+        if found.row.status != ProcStatus::Online {
+            resume(client, &found.row.name).await?;
         }
     }
+    let runner = project.as_str();
     let waited = tokio::time::Instant::now();
     loop {
         match trigger(client, runner, "start").await? {
@@ -103,8 +95,9 @@ pub async fn start(client: &Client, project: &ProjectName) -> Result<Vec<String>
 ///
 /// # Errors
 ///
-/// A message when its runner is not running.
+/// A message when the project has no kelpie runner, or it is not running.
 pub async fn pause(client: &Client, project: &ProjectName) -> Result<Vec<String>, String> {
+    kelpie_runner(client, &flock(client).await?, project).await?;
     let runner = project.as_str();
     match trigger(client, runner, "pause").await? {
         Answered::Runner(body) => Ok(vec![body]),
@@ -136,6 +129,25 @@ pub async fn status(client: &Client) -> Result<Vec<String>, String> {
     Ok(lines)
 }
 
+// `project`'s runner, refusing a name that is not one: a sheep with no
+// kelpie table, or one kelpie did not start as `runner <project>`.
+async fn kelpie_runner(
+    client: &Client,
+    rows: &[ProcessInfo],
+    project: &ProjectName,
+) -> Result<Found, String> {
+    let name = project.as_str();
+    let not_one =
+        || format!("no kelpie runner named {name} in this flock: `shep kelpie add` sets one up");
+    if !tables(client).await?.contains_key(name) {
+        return Err(not_one());
+    }
+    match kelpie_sheep(client, rows, name, &["runner", name]).await {
+        Ok(Some(found)) => Ok(found),
+        Ok(None) | Err(_) => Err(not_one()),
+    }
+}
+
 /// What a runner's sheep made of a trigger
 enum Answered {
     /// The runner's own answer, which is always a JSON object
@@ -159,6 +171,7 @@ async fn trigger(client: &Client, sheep: &str, action: &str) -> Result<Answered,
         .await
     {
         Ok(Response::Triggered(rows)) => rows,
+        Err(e) if shepherd::names_no_sheep(&e) => return Ok(Answered::Down),
         Ok(other) => return Err(format!("the shepherd answered {other:?}")),
         Err(e) => return Err(format!("cannot send {sheep} `{action}`: {e}")),
     };

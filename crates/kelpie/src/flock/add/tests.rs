@@ -178,15 +178,61 @@ async fn a_dog_under_its_old_name_is_replaced_and_kept_running() {
     let (dog, running) = scene.shepherd.sheep("kelpie-dog").unwrap();
     assert_eq!(dog.args, ["dog"]);
     assert!(running, "the book's dog stays up");
-    assert!(
-        lines.iter().any(|l| l.contains("replaces `kelpie`")),
-        "{lines:?}"
-    );
+    let [.., deleted, added] = lines.as_slice() else {
+        panic!("{lines:?}");
+    };
+    assert!(deleted.starts_with("dog `kelpie`: deleted"), "{deleted}");
+    assert_eq!(added, "dog `kelpie-dog`: added and started");
+    // The old dog goes first, so a failure never leaves two.
     let writes = scene.shepherd.writes();
+    let at = |dog: fn(&Request) -> bool| writes.iter().position(dog).unwrap();
     assert!(
-        writes.iter().any(|w| matches!(w, Request::Delete { .. })),
+        at(|w| matches!(w, Request::Delete { .. }))
+            < at(|w| matches!(w, Request::Add { apps } if apps[0].name == "kelpie-dog")),
         "{writes:?}"
     );
+}
+
+#[tokio::test]
+async fn an_old_dog_s_variables_come_along_or_nothing_changes() {
+    let mut scene = Scene::new().await;
+    let mut old = scene.launch.dog();
+    old.name = "kelpie".into();
+    old.env.insert("KELPIE_TEST_NEVER_SET".into(), "x".into());
+    scene.shepherd.holds(old, true);
+    let err = scene.add().await.unwrap_err();
+    assert!(err.contains("sets KELPIE_TEST_NEVER_SET"), "{err}");
+    assert_eq!(scene.shepherd.writes(), []);
+    assert_eq!(scene.forge.repo_labels_now(), ["bug"]);
+
+    let scene = Scene::new().await;
+    let mut old = scene.launch.dog();
+    old.name = "kelpie".into();
+    old.env.insert("PATH".into(), "withheld".into());
+    scene.shepherd.holds(old, true);
+    scene.add().await.unwrap();
+    let (dog, _) = scene.shepherd.sheep("kelpie-dog").unwrap();
+    assert_eq!(dog.env.get("PATH"), std::env::var("PATH").ok().as_ref());
+}
+
+#[tokio::test]
+async fn kelpie_adopted_and_enabled_is_told_to_disable() {
+    let scene = Scene::new().await;
+    scene.shepherd.holds_dog("kelpie");
+    let lines = scene.add().await.unwrap();
+    assert!(lines[0].ends_with("run `shep disable kelpie`"), "{lines:?}");
+    assert!(scene.shepherd.sheep("kelpie-dog").is_some());
+}
+
+#[tokio::test]
+async fn a_checkout_or_repo_another_project_runs_is_refused() {
+    let mut scene = Scene::new().await;
+    scene.add().await.unwrap();
+    scene.shepherd.writes();
+    scene.name = ProjectName::try_from("koji-again").unwrap();
+    let err = scene.add().await.unwrap_err();
+    assert!(err.starts_with("project `koji` already runs"), "{err}");
+    assert_eq!(scene.shepherd.writes(), []);
 }
 
 #[tokio::test]

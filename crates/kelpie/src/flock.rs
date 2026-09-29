@@ -193,6 +193,44 @@ impl Launch {
     }
 }
 
+/// One of kelpie's sheep, as the flock holds it
+#[derive(Debug, Clone)]
+pub(crate) struct Found {
+    /// Its row in the flock
+    pub row: ProcessInfo,
+    /// The names of the variables its entry sets, whose values shep withholds
+    pub env_keys: Vec<String>,
+}
+
+/// The sheep named `name`, if the flock has one, refusing one that is not
+/// kelpie's: a dog, or a sheep started with arguments other than `args`
+async fn kelpie_sheep(
+    client: &Client,
+    rows: &[ProcessInfo],
+    name: &str,
+    args: &[&str],
+) -> Result<Option<Found>, String> {
+    let Some(row) = rows.iter().find(|r| r.name == name) else {
+        return Ok(None);
+    };
+    let taken = || format!("a sheep named `{name}` is already in this flock, and is not kelpie's");
+    if row.dog.is_some() {
+        return Err(taken());
+    }
+    let request = Request::SheepConfig {
+        name: name.to_owned(),
+    };
+    match client.request(request).await {
+        Ok(Response::SheepConfig(view)) if view.config.args == args => Ok(Some(Found {
+            row: row.clone(),
+            env_keys: view.env_keys,
+        })),
+        Ok(Response::SheepConfig(_)) => Err(taken()),
+        Ok(other) => Err(format!("the shepherd answered {other:?} for `{name}`")),
+        Err(e) => Err(format!("cannot read `{name}`'s config: {e}")),
+    }
+}
+
 /// Every sheep in the flock
 async fn flock(client: &Client) -> Result<Vec<ProcessInfo>, String> {
     match client.request(Request::ListFlock).await {

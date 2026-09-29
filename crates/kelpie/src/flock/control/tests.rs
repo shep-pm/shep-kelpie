@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use serde_json::Value;
+use shep_client::shep_core::config::AppConfig;
 
 use super::*;
 use crate::flock::Launch;
@@ -86,6 +87,30 @@ async fn start_without_a_runner_says_to_add_one() {
     let client = client(&shepherd).await;
     let err = in_time(start(&client, &project("koji"))).await.unwrap_err();
     assert!(err.contains("`shep kelpie add`"), "{err}");
+}
+
+#[tokio::test]
+async fn start_and_pause_leave_a_sheep_that_is_not_kelpie_s_alone() {
+    let mut shepherd = FakeShepherd::new().await;
+    shepherd.holds(AppConfig::minimal("web", "/srv/web"), false);
+    // A table alone does not make a runner: kelpie did not start it.
+    let mut other = AppConfig::minimal("koji", "/srv/koji");
+    other.dogs = launch(&shepherd)
+        .runner(&project("koji"), crate::test::project_table(EXAMPLE))
+        .dogs;
+    shepherd.holds(other, false);
+    let client = client(&shepherd).await;
+    for name in ["web", "koji"] {
+        let err = in_time(start(&client, &project(name))).await.unwrap_err();
+        assert!(err.starts_with("no kelpie runner named"), "{err}");
+        let err = in_time(pause(&client, &project(name))).await.unwrap_err();
+        assert!(err.starts_with("no kelpie runner named"), "{err}");
+    }
+    assert_eq!(shepherd.writes(), []);
+    assert!(
+        !shepherd.sheep("web").unwrap().1,
+        "a stopped sheep stays stopped"
+    );
 }
 
 #[tokio::test]

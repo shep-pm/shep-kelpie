@@ -10,12 +10,14 @@ use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use kelpie::flock::Launch;
 use kelpie::lease::wire::Asker;
 use kelpie::lease::{Epoch, LeaseKind};
 use serde_json::{Value, json};
 use shep_client::Client;
 use shep_client::shep_core::protocol::Request;
 use shep_client::shep_core::protocol::request::{ActionOutcome, Response, SelectorSpec};
+use shep_client::shep_core::status::ProcStatus;
 
 const KELPIE: &str = env!("CARGO_BIN_EXE_kelpie");
 const STAND_IN: &str = "KELPIE_TEST_STAND_IN";
@@ -122,15 +124,21 @@ impl Drop for Shepherd {
 }
 
 impl Shepherd {
-    // Under /tmp: a socket path longer than 104 bytes is refused on macOS.
     fn start() -> Self {
+        Self::with_dog("kelpie-dog")
+    }
+
+    // The dog's sheep under `dog`: `kelpie-dog`, or `kelpie` as a Flockfile
+    // written before `shep kelpie add` names it.
+    // Under /tmp: a socket path longer than 104 bytes is refused on macOS.
+    fn with_dog(dog: &str) -> Self {
         let home = tempfile::Builder::new()
             .prefix("kd")
             .tempdir_in("/tmp")
             .unwrap();
         let shepherd = Self { home };
         let flockfile = shepherd.home.path().join("flock.toml");
-        std::fs::write(&flockfile, shepherd.flockfile()).unwrap();
+        std::fs::write(&flockfile, shepherd.flockfile(dog)).unwrap();
         let out = shepherd.shep(&["start", flockfile.to_str().unwrap()]);
         assert!(
             out.status.success(),
@@ -140,7 +148,7 @@ impl Shepherd {
         shepherd
     }
 
-    fn flockfile(&self) -> String {
+    fn flockfile(&self, dog: &str) -> String {
         let home = self.home.path().display();
         let me = std::env::current_exe().unwrap();
         let runner = |name: &str| {
@@ -151,7 +159,7 @@ impl Shepherd {
             )
         };
         format!(
-            "[[app]]\nname = \"kelpie-dog\"\nscript = {KELPIE:?}\nargs = [\"dog\"]\n\
+            "[[app]]\nname = {dog:?}\nscript = {KELPIE:?}\nargs = [\"dog\"]\n\
              channel = true\nshutdown_with_message = true\nautorestart = false\n\
              env = {{ SHEP_HOME = \"{home}\", TMPDIR = \"{home}\", KELPIE_HOME = \"{home}\" }}\n\n{}{}",
             runner("koji"),
@@ -396,4 +404,103 @@ async fn a_restarted_dog_keeps_its_book() {
         json!({ "runner": "reactmap" })
     );
     assert_eq!(book(&client).await["queue"], json!([]));
+}
+
+// The names in the flock, and whether each runs.
+async fn flock(client: &Client) -> Vec<(String, bool)> {
+    let Response::Flock(rows) = client.request(Request::ListFlock).await.unwrap() else {
+        panic!("the flock listing");
+    };
+    rows.into_iter()
+        .map(|r| (r.name, r.status == ProcStatus::Online))
+        .collect()
+}
+
+fn ran(what: &str, out: &Output) {
+    assert!(
+        out.status.success(),
+        "{what}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+// An install whose Flockfile still names its dog `kelpie`: shep refuses a
+// trigger on `kelpie-dog` with NotFound, and the lease commands ask the old
+// name instead.
+#[tokio::test]
+#[ignore = "needs the pinned shepherd at ~/.kelpie/bin/shep"]
+async fn a_dog_still_named_kelpie_answers_the_lease_commands() {
+    let shepherd = Shepherd::with_dog("kelpie");
+    let client = shepherd.client().await;
+    until("the dog", async || {
+        trigger(&client, "kelpie", "status", None).await["leases"].is_array()
+    })
+    .await;
+
+    let status = shepherd.kelpie(&["lease", "status"]).output().unwrap();
+    ran("lease status", &status);
+    let status: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert!(status["leases"].is_array(), "{status}");
+    let take = shepherd
+        .kelpie(&["lease", "take", "stand-in"])
+        .output()
+        .unwrap();
+    ran("lease take", &take);
+    let book = trigger(&client, "kelpie", "status", None).await;
+    assert_eq!(stand_in(&book)["holder"], json!("maintainer"));
+    let back = shepherd
+        .kelpie(&["lease", "return", "stand-in"])
+        .output()
+        .unwrap();
+    ran("lease return", &back);
+}
+
+// The move `shep kelpie add` makes on such an install: `kelpie-dog` takes
+// over the book with the runner's lease in it, and `shep adopt --name
+// kelpie`, refused while the old dog held the name, then goes through.
+#[tokio::test]
+#[ignore = "needs the pinned shepherd at ~/.kelpie/bin/shep"]
+async fn the_dog_moves_to_kelpie_dog_with_its_book_and_frees_the_name() {
+    let shepherd = Shepherd::with_dog("kelpie");
+    let client = shepherd.client().await;
+    until("the dog and koji", async || {
+        trigger(&client, "kelpie", "status", None).await["leases"].is_array()
+            && trigger(&client, "koji", "status", None).await.is_object()
+    })
+    .await;
+    trigger(&client, "koji", "want", Some("stand-in")).await;
+    until("koji's grant", async || holds(&client, "koji").await).await;
+    let refused = shepherd.shep(&["adopt", KELPIE, "--name", "kelpie"]);
+    assert!(!refused.status.success(), "adopt took a name a sheep holds");
+
+    let home = shepherd.home.path().to_owned();
+    let launch = Launch {
+        kelpie: KELPIE.into(),
+        shep_home: home.clone(),
+        kelpie_home: Some(home),
+    };
+    let lines = kelpie::flock::add::move_dog(&client, &launch)
+        .await
+        .unwrap();
+    assert!(lines[0].starts_with("dog `kelpie`: deleted"), "{lines:?}");
+    until("kelpie-dog with koji's lease", async || {
+        let status = trigger(&client, "kelpie-dog", "status", None).await;
+        status["leases"].is_array() && stand_in(&status)["holder"] == json!({ "runner": "koji" })
+    })
+    .await;
+    let names = flock(&client).await;
+    assert!(!names.iter().any(|(name, _)| name == "kelpie"), "{names:?}");
+    assert!(
+        names.contains(&("kelpie-dog".to_owned(), true)),
+        "{names:?}"
+    );
+
+    shepherd.shep_ok(&["adopt", KELPIE, "--name", "kelpie"]);
+    shepherd.shep_ok(&["disable", "kelpie"]);
+    let names = flock(&client).await;
+    assert!(
+        names.contains(&("kelpie-dog".to_owned(), true)),
+        "{names:?}"
+    );
+    assert!(holds(&client, "koji").await, "koji lost its lease");
 }
