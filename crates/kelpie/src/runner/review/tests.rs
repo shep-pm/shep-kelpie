@@ -288,6 +288,87 @@ fn the_round_guard_parks_for_a_ruling_and_a_yes_clears_it_for_the_rest_of_the_it
     );
 }
 
+#[test]
+fn a_spilled_model_parks_the_round_on_a_ruling_that_alerts_and_a_yes_runs_it_again() {
+    let (rig, runner) = at_round_1("shep");
+    let reason = "the local model coder is 25% on the GPU, so its rounds would run at CPU speed";
+    rig.reviewer
+        .script([ScriptedRound::Fail(crate::ports::ReviewerError::Spilled(
+            reason.into(),
+        ))]);
+
+    let Some(StepReport::Ruling { id, question, .. }) = step(&runner).unwrap() else {
+        panic!("a spilled model did not raise a ruling");
+    };
+    assert!(
+        question.contains("Round 1 of the qwen-review loop"),
+        "{question}"
+    );
+    assert!(question.contains(reason), "{question}");
+    assert!(question.contains("runs the round again"), "{question}");
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(
+        status["work_item"]["phase"],
+        json!({ "state": "ruling", "id": id })
+    );
+    assert_eq!(status["work_item"]["qwen"]["rounds"], 0, "no round was run");
+    assert_eq!(rig.reviewer.seen().len(), 1);
+
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id }));
+    assert_eq!(rig.alerts.posts()[0].1.text, question);
+
+    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["phase"],
+        json!({
+            "state": "review",
+            "round": 1,
+            "consecutive_clean": 0,
+            "guard_cleared": false,
+            "stage": { "stage": "round" },
+        }),
+        "the same round is due again"
+    );
+    assert_eq!(
+        step(&runner).unwrap(), // the model is back: clean by default
+        Some(StepReport::ReviewFindingsSent {
+            issue: 7,
+            pull_request: 71,
+            round: 1,
+            held: 0,
+            clean: true,
+        })
+    );
+    assert_eq!(rig.reviewer.seen().len(), 2);
+}
+
+#[test]
+fn status_shows_where_the_local_model_sits() {
+    let (rig, runner) = at_round_1("shep");
+    assert!(
+        rig.ask(&runner, "status", None)
+            .get("local_model")
+            .is_none(),
+        "nothing to show until a round has looked"
+    );
+    rig.reviewer.set_seat(Some(crate::ports::ModelSeat {
+        name: "coder:latest".into(),
+        size: 1000,
+        size_vram: 900,
+        context_length: Some(32768),
+        expires_at: Some("2026-09-29T21:14:03+01:00".into()),
+    }));
+    assert_eq!(
+        rig.ask(&runner, "status", None)["local_model"],
+        json!({
+            "name": "coder:latest",
+            "gpu_percent": 90,
+            "context_length": 32768,
+            "expires_at": "2026-09-29T21:14:03+01:00",
+        })
+    );
+}
+
 // Where round 1 stands before its qwen call runs: the worker's first
 // turn opened the pull request.
 fn at_round_1(project: &str) -> (Rig, std::sync::Mutex<crate::runner::Runner>) {

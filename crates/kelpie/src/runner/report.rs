@@ -500,6 +500,9 @@ pub(super) enum ReviewResult {
     Findings(Result<Vec<Finding>, String>),
     /// The judge's verdict on one finding
     Verdict(Result<Verdict, String>),
+    /// The local model sat partly or wholly on the CPU, so the round did not
+    /// run, and why
+    Spilled(String),
     /// The call was ended because the runner is stopping, before it came
     /// back with anything
     Stopped,

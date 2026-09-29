@@ -274,6 +274,7 @@ impl Runner {
             rulings: &self.state.rulings,
             leases: &self.state.leases,
             pacer: self.pacer_status(self.ports.clock.now()),
+            local_model: self.ports.reviewer.seat().map(Into::into),
         }
     }
 

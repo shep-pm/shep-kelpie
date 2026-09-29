@@ -23,8 +23,10 @@ use crate::shots::{ShotsJob, ShotsRun};
 use crate::webhook::Webhook;
 
 mod local_paths;
+mod model_seat;
 
 pub use local_paths::Guarded;
+pub use model_seat::ModelSeat;
 
 /// Seconds since the Unix epoch
 // wire format: changing this is a breaking change to the state file
@@ -755,6 +757,14 @@ pub trait Reviewer: Send + Sync {
         out: &std::path::Path,
         round: u32,
     ) -> Result<Vec<Finding>, ReviewerError>;
+
+    /// Where the local model sat when a round last looked, for `status`
+    ///
+    /// None until a round has read it, and where there is nothing to read:
+    /// no Ollama host in the settings, or a server with no `/api/ps`.
+    fn seat(&self) -> Option<ModelSeat> {
+        None
+    }
 }
 
 /// Why a local round did not produce findings
@@ -770,6 +780,8 @@ pub enum ReviewerError {
     Stopped,
     /// The endpoint answered with something other than a chat completion
     Unreadable(String),
+    /// The model sits partly or wholly on the CPU, so the round was not run
+    Spilled(String),
 }
 
 impl fmt::Display for ReviewerError {
@@ -780,6 +792,7 @@ impl fmt::Display for ReviewerError {
             Self::Incomplete => f.write_str("the local round left no completion marker"),
             Self::Stopped => f.write_str("the local round was stopped with the runner"),
             Self::Unreadable(reply) => write!(f, "the local round's reply is unreadable: {reply}"),
+            Self::Spilled(reason) => write!(f, "the local round did not run: {reason}"),
         }
     }
 }

@@ -218,6 +218,16 @@ Measured 2026-09-28 on Claude Code 2.1.284, Node 26.8, bun 1.4, Playwright 1.64 
 - `qwen-review.sh` builds its GPU lock from `${TMPDIR:-/tmp}/qwen-review/gpu.lock`, so the lock's path depends on `TMPDIR`. An interactive Claude session gets the per-user temp folder as `TMPDIR` (`getconf DARWIN_USER_TEMP_DIR`). A runner under shep gets none, so it locked `/tmp` and its rounds ran on the GPU beside the sessions' rounds. Another session's model calls hit the 1800s timeout, seen on the playground on 2026-09-28.
 - Every qwen round now runs with `TMPDIR` set to the folder the dog's own lock is under (`lease::gpu::temp_dir`: `TMPDIR` if set, else `getconf DARWIN_USER_TEMP_DIR`, else `/tmp`), so kelpie and the sessions queue on one lock.
 
+### The local model's placement
+
+Built in shep-pm/shep-kelpie#145, after a model loaded on the CPU instead of the GPU ran review-sized prompts at a twentieth of normal speed on 2026-09-29 and nothing noticed for 14 minutes.
+
+- Ollama's `GET /api/ps` lists each loaded model with its `size` and `size_vram` in bytes, its `context_length` and its `expires_at`. A model is on the GPU when `size_vram` equals `size`, and `size_vram / size` is the share on it. Recorded shape: `crates/kelpie/fixtures/ollama-ps.json`, written by hand from Ollama's documented response, since the maintainer's host did not answer from the worker's sandbox.
+- It cannot say how busy the GPU is: there is no utilization, so a model on the GPU that another round is using looks the same as an idle one. That is the GPU metrics ticket's job, not this check's.
+- It lists only loaded models. A model not loaded yet is not checked, and the check cannot say where it will go when the round's first request loads it. A model that loads spilled in the middle of a round is not caught until the next round.
+- Kelpie reads `/api/ps` after taking the GPU lock, before a round, for an endpoint (its `url` without `/v1`) and for a command that names `ollama` in its settings. A command's model is not named, so every model the host has loaded is looked at, and one spilled fails the round. A model partly or wholly on the CPU fails the round without running it, and raises a ruling that says which model and how much is on the GPU, so it reaches the maintainer's webhook. A yes runs the same round again. A 404, or a reply that is not `/api/ps`'s, means the server is not Ollama and skips the check. A host that cannot be reached fails the round, and the runner retries it as any failed round.
+- `status` shows `local_model` from the last read: the name, the percent on the GPU, the context length and when it unloads. It is absent until a round has read one, and it is the last round's view, not live.
+
 ### The relay
 
 Measured 2026-09-26 in the experiments repo.

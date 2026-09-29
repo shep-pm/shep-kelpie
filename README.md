@@ -79,6 +79,8 @@ It writes `round-<n>.txt` in that folder, one finding per line as `SEVERITY|path
 
 `gpu_lease = true`, on either kind, has kelpie hold the GPU lock around each round. Leave it off for a command that takes the lock itself, as `qwen-review.sh` does.
 
+Before a round against Ollama, kelpie reads the host's `/api/ps`. An endpoint's host is its `url` without the `/v1`, and a command names its host with `ollama = "http://localhost:11434"`. A model partly or wholly on the CPU fails the round and raises a ruling, and a yes runs the round again once the model is back on the GPU. A host with no `/api/ps` is not checked, and `status` shows the model's name, its share on the GPU, its context length and when it unloads.
+
 Kelpie never creates labels in a project's repo. Create `ready-for-agent` and `ready-for-human` there before its first run. Issues labelled `ready-for-agent` are the board. On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep trigger <project> rework <pr>`. On any other open pull request of kelpie's account, `ready-for-agent` adopts it, the same as `shep trigger <project> adopt <pr>`. Kelpie puts `ready-for-human` on each pull request it hands back.
 
 - `CONTEXT.md`: the vocabulary

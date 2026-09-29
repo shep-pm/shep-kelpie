@@ -10,16 +10,15 @@ use std::time::Duration;
 
 use tempfile::TempDir;
 
-use crate::adapters::LocalReviewer;
 use crate::board::WorkerModel;
 use crate::ports::{
-    Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Finding, Meter, MeterError,
-    Ports, Relay, Reviewer, ReviewerError, Role, SessionId, Timestamp, Usage, Utilization, Window,
+    Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Meter, MeterError, Ports,
+    Relay, Role, SessionId, Timestamp, Usage, Utilization, Window,
 };
 use crate::runner::{
     CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
 };
-use crate::settings::{Effort, LocalRound, Settings, SettingsError};
+use crate::settings::{Effort, Settings, SettingsError};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{CallRecord, Known, Phase, Turn, WorkItem};
 
@@ -29,6 +28,7 @@ mod endpoint;
 mod forge;
 mod leases;
 mod relay;
+mod reviewer;
 mod shots;
 
 pub(crate) use alerts::FakeAlerts;
@@ -36,6 +36,7 @@ pub(crate) use endpoint::{Answer, StandInEndpoint, unreachable_url};
 pub(crate) use forge::FakeForge;
 pub(crate) use leases::{FakeLeases, Told};
 pub(crate) use relay::FakeRelay;
+pub(crate) use reviewer::{FakeReviewer, ScriptedRound};
 pub(crate) use shots::{FakeShots, ScriptedShots};
 
 /// Writes an executable stand-in script that is safe to run at once.
@@ -469,84 +470,6 @@ impl FakeClock {
 impl Clock for FakeClock {
     fn now(&self) -> Timestamp {
         Timestamp(self.0.load(Ordering::SeqCst))
-    }
-}
-
-/// What the stand-in reviewer answers for its next round
-#[derive(Debug, Clone)]
-pub(crate) enum ScriptedRound {
-    /// These findings
-    Findings(Vec<Finding>),
-    /// Fails with this error
-    Fail(ReviewerError),
-}
-
-/// One round as the stand-in reviewer saw it
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SeenRound {
-    pub(crate) local: LocalRound,
-    pub(crate) worktree: PathBuf,
-    pub(crate) base: String,
-    pub(crate) out: PathBuf,
-    pub(crate) round: u32,
-}
-
-/// A local round's stand-in. Clean (no findings) once its script runs out, so
-/// tests that do not care about the review loop see it pass straight through.
-/// Its start check is the real one, and [`Self::pass_through`] makes its
-/// rounds real too.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct FakeReviewer {
-    seen: Arc<Mutex<Vec<SeenRound>>>,
-    script: Arc<Mutex<VecDeque<ScriptedRound>>>,
-    real: Arc<Mutex<Option<LocalReviewer>>>,
-}
-
-impl FakeReviewer {
-    /// Every round asked of it, in order
-    pub(crate) fn seen(&self) -> Vec<SeenRound> {
-        self.seen.lock().unwrap().clone()
-    }
-
-    /// Runs every later round with the real reviewer, after noting it
-    pub(crate) fn pass_through(&self) {
-        *self.real.lock().unwrap() = Some(LocalReviewer::default());
-    }
-
-    /// Queues answers for its next rounds, oldest first
-    pub(crate) fn script(&self, rounds: impl IntoIterator<Item = ScriptedRound>) {
-        self.script.lock().unwrap().extend(rounds);
-    }
-}
-
-impl Reviewer for FakeReviewer {
-    fn check(&self, local: &LocalRound) -> Result<(), String> {
-        LocalReviewer::default().check(local)
-    }
-
-    fn round(
-        &self,
-        local: &LocalRound,
-        worktree: &Path,
-        base: &str,
-        out: &Path,
-        round: u32,
-    ) -> Result<Vec<Finding>, ReviewerError> {
-        self.seen.lock().unwrap().push(SeenRound {
-            local: local.clone(),
-            worktree: worktree.to_owned(),
-            base: base.to_owned(),
-            out: out.to_owned(),
-            round,
-        });
-        if let Some(real) = &*self.real.lock().unwrap() {
-            return real.round(local, worktree, base, out, round);
-        }
-        match self.script.lock().unwrap().pop_front() {
-            Some(ScriptedRound::Findings(findings)) => Ok(findings),
-            Some(ScriptedRound::Fail(e)) => Err(e),
-            None => Ok(Vec::new()),
-        }
     }
 }
 

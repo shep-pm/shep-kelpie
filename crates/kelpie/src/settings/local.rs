@@ -36,6 +36,7 @@ impl Default for LocalRound {
         Self::Command(LocalCommand {
             command: PathBuf::from(QWEN_REVIEW),
             gpu_lease: false,
+            ollama: None,
         })
     }
 }
@@ -52,6 +53,27 @@ impl LocalRound {
             Self::Off {} => false,
             Self::Endpoint(endpoint) => endpoint.gpu_lease,
             Self::Command(command) => command.gpu_lease,
+        }
+    }
+
+    /// The Ollama host to read `/api/ps` from before a round, and the model
+    /// to look for there
+    ///
+    /// An endpoint's host is its URL without the `/v1`, and its model is the
+    /// one it asks. A command names its host in `ollama` and not its model,
+    /// so every model the host has loaded is looked at.
+    pub fn ollama(&self) -> Option<(String, Option<&str>)> {
+        match self {
+            Self::Off {} => None,
+            Self::Endpoint(endpoint) => {
+                let url = endpoint.url.as_str();
+                let host = url.strip_suffix("/v1").unwrap_or(url);
+                Some((host.to_owned(), Some(endpoint.model.as_str())))
+            }
+            Self::Command(command) => command
+                .ollama
+                .as_ref()
+                .map(|host| (host.as_str().to_owned(), None)),
         }
     }
 }
@@ -82,6 +104,11 @@ pub struct LocalCommand {
     /// and off for a command that takes the lock itself.
     #[serde(default)]
     pub gpu_lease: bool,
+    /// The Ollama host the command's model runs on, such as
+    /// `http://localhost:11434`. Kelpie reads its `/api/ps` before each round.
+    /// Off when absent, since a command does not say where its model is.
+    #[serde(default)]
+    pub ollama: Option<EndpointUrl>,
 }
 
 /// An `http://` or `https://` URL, kept without a trailing `/`
@@ -168,7 +195,27 @@ mod tests {
         LocalRound::Command(LocalCommand {
             command: PathBuf::from(path),
             gpu_lease: false,
+            ollama: None,
         })
+    }
+
+    #[test]
+    fn the_ollama_host_is_an_endpoints_url_or_a_commands_own_setting() {
+        let table = "[app.dogs.kelpie.review.local]\nkind = \"endpoint\"\n\
+                     url = \"http://gpu-box:11434/v1/\"\nmodel = \"coder\"\ncontext = 8192\n";
+        assert_eq!(
+            with_table(table).unwrap().review.local.ollama(),
+            Some(("http://gpu-box:11434".to_owned(), Some("coder")))
+        );
+        let table =
+            "[app.dogs.kelpie.review.local]\nkind = \"command\"\ncommand = \"/opt/review\"\n";
+        assert_eq!(with_table(table).unwrap().review.local.ollama(), None);
+        let table = format!("{table}ollama = \"http://gpu-box:11434/\"\n");
+        assert_eq!(
+            with_table(&table).unwrap().review.local.ollama(),
+            Some(("http://gpu-box:11434".to_owned(), None))
+        );
+        assert_eq!(LocalRound::Off {}.ollama(), None);
     }
 
     #[test]
