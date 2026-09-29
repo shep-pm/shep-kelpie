@@ -395,7 +395,8 @@ impl Forge for FakeForge {
         let pr = self.opened(number)?;
         let closes = {
             let open = self.open.lock().unwrap();
-            let listed = open.iter().rfind(|pr| pr.number == number);
+            // Opened again, a pull request's latest listing is the one that counts.
+            let listed = open.iter().rfind(|l| l.number == number);
             listed.map(|l| l.closes.clone()).unwrap_or_default()
         };
         Ok(Reviewed {
