@@ -6,7 +6,7 @@ use tempfile::TempDir;
 
 use super::*;
 
-const HOME: &str = "/home/tester";
+const HOME: &str = "/home/me";
 
 fn call(cwd: &Path, command: &str, checkout: Checkout<'_>) -> Verdict {
     let call = json!({
@@ -170,16 +170,16 @@ fn a_command_that_only_mentions_gh_pr_create_is_not_judged() {
 #[test]
 fn a_message_naming_the_home_folder_is_refused_without_echoing_it() {
     for command in [
-        "git commit -m 'fix: read /home/tester/.kelpie/wt/koji/7/src/a.rs'",
-        "git commit -am 'fix: see /home/tester'",
-        "git -C sub commit --message=\"fix: /HOME/TESTER/x\"",
-        "git tag -a v1 -m 'from /home/tester/x'",
-        "git commit -F - <<'EOF'\nfix: x\n\nBuilt in /home/tester/.kelpie/wt/koji/7.\nEOF",
-        "gh pr create --title 'fix: x' --body 'ran in /home/tester/w'",
-        "gh pr create --title 'fix: x' --body \"$(cat <<'EOF'\nran in /home/tester/w\nEOF\n)\"",
-        "gh pr comment 3 -b '/home/tester/x'",
-        "gh issue create --title 'fix: x' --body '/home/tester/x'",
-        "gh release create v1 --notes 'from /home/tester'",
+        "git commit -m 'fix: read /home/me/.kelpie/wt/koji/7/src/a.rs'",
+        "git commit -am 'fix: see /home/me'",
+        "git -C sub commit --message=\"fix: /HOME/ME/x\"",
+        "git tag -a v1 -m 'from /home/me/x'",
+        "git commit -F - <<'EOF'\nfix: x\n\nBuilt in /home/me/.kelpie/wt/koji/7.\nEOF",
+        "gh pr create --title 'fix: x' --body 'ran in /home/me/w'",
+        "gh pr create --title 'fix: x' --body \"$(cat <<'EOF'\nran in /home/me/w\nEOF\n)\"",
+        "gh pr comment 3 -b '/home/me/x'",
+        "gh issue create --title 'fix: x' --body '/home/me/x'",
+        "gh release create v1 --notes 'from /home/me'",
     ] {
         let why = refusal(bash(command));
         assert!(
@@ -193,19 +193,23 @@ fn a_message_naming_the_home_folder_is_refused_without_echoing_it() {
 #[test]
 fn the_home_folder_in_a_command_but_not_its_message_goes_through() {
     for command in [
-        "cd /home/tester/.kelpie/wt/koji/7 && git status",
-        "git -C /home/tester/.kelpie/wt/koji/7 status",
-        "gh pr create --title 'fix: x' --body '~/notes and /home/testers/x and /home/tester-2'",
-        "cat /home/tester/.kelpie/wt/koji/7/src/a.rs",
+        "cd /home/me/.kelpie/wt/koji/7 && git status",
+        "git -C /home/me/.kelpie/wt/koji/7 status",
+        "cat /home/me/.kelpie/wt/koji/7/src/a.rs",
     ] {
         assert_eq!(bash(command), Verdict::Allow, "{command}");
     }
+    // Longer names that start with the home folder's, built here so the
+    // repo's check on home paths does not read them as ones.
+    let body = format!("~/notes and {HOME}s/x and {HOME}-2");
+    let command = format!("gh pr create --title 'fix: x' --body '{body}'");
+    assert_eq!(bash(&command), Verdict::Allow, "{command}");
 }
 
 #[test]
 fn a_body_file_naming_the_home_folder_is_refused() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("body.md"), "ran in /home/tester/x\n").unwrap();
+    fs::write(dir.path().join("body.md"), "ran in /home/me/x\n").unwrap();
     fs::write(dir.path().join("clean.md"), "Resolves #7\n").unwrap();
     let why = refusal(bash_in(
         dir.path(),
@@ -221,7 +225,7 @@ fn a_body_file_naming_the_home_folder_is_refused() {
 #[test]
 fn a_commit_adding_the_home_folder_is_refused_naming_the_file() {
     let tree = WorkerTree::new();
-    tree.write("notes.md", "see /home/tester/x\n");
+    tree.write("notes.md", "see /home/me/x\n");
     tree.write("clean.md", "see ~/x\n");
     tree.git(&["add", "notes.md", "clean.md"]);
     let why = refusal(tree.bash("git commit -m 'docs: notes'"));
@@ -232,7 +236,7 @@ fn a_commit_adding_the_home_folder_is_refused_naming_the_file() {
 #[test]
 fn a_commit_removing_the_home_folder_goes_through() {
     let tree = WorkerTree::new();
-    tree.write("README.md", "a project\nsee /home/tester/x\n");
+    tree.write("README.md", "a project\nsee /home/me/x\n");
     tree.git(&["commit", "--quiet", "-am", "first leak"]);
     tree.write("README.md", "a project\n");
     tree.git(&["add", "README.md"]);
@@ -245,7 +249,7 @@ fn a_commit_removing_the_home_folder_goes_through() {
 #[test]
 fn a_commit_of_every_tracked_change_reads_the_unstaged_lines_too() {
     let tree = WorkerTree::new();
-    tree.write("README.md", "see /home/tester/x\n");
+    tree.write("README.md", "see /home/me/x\n");
     assert_eq!(
         tree.bash("git commit -m 'docs: x'"),
         Verdict::Allow,
@@ -260,7 +264,7 @@ fn a_commit_of_every_tracked_change_reads_the_unstaged_lines_too() {
 #[test]
 fn a_commit_from_a_folder_in_the_worktree_reads_its_repo() {
     let tree = WorkerTree::new();
-    tree.write("sub/a.md", "/home/tester/x\n");
+    tree.write("sub/a.md", "/home/me/x\n");
     tree.git(&["add", "sub/a.md"]);
     for command in [
         "cd sub && git commit -m 'docs: a'",
@@ -292,7 +296,7 @@ fn a_repo_the_worker_made_is_refused_and_never_read() {
         &evil,
         &["config", "core.fsmonitor", program.to_str().unwrap()],
     );
-    fs::write(evil.join("a.md"), "/home/tester/x\n").unwrap();
+    fs::write(evil.join("a.md"), "/home/me/x\n").unwrap();
 
     for command in [
         "git -C evil commit -am 'docs: a'",
@@ -316,13 +320,13 @@ fn a_repo_the_worker_made_is_refused_and_never_read() {
 #[test]
 fn a_push_sending_the_home_folder_is_refused_naming_where() {
     let tree = WorkerTree::new();
-    tree.write("old.md", "/home/tester/pushed\n");
+    tree.write("old.md", "/home/me/pushed\n");
     tree.git(&["add", "old.md"]);
     tree.git(&["commit", "--quiet", "-m", "docs: already out"]);
     tree.git(&["push", "--quiet", "origin", "HEAD:main"]);
     assert_eq!(tree.bash("git push origin HEAD"), Verdict::Allow);
 
-    tree.write("notes.md", "built in /home/tester/wt\n");
+    tree.write("notes.md", "built in /home/me/wt\n");
     tree.git(&["add", "notes.md"]);
     tree.git(&["commit", "--quiet", "-m", "docs: notes"]);
     fs::remove_file(tree.path().join("notes.md")).unwrap();
@@ -382,7 +386,7 @@ fn git_pointed_at_another_repo_or_run_by_alias_is_refused() {
         "git -c alias.p=push p",
         "git -c ALIAS.p=push p",
         "git -c alias.a=b -c alias.b=push a",
-        "git -c alias.CI=commit ci -m 'fix: /home/tester/x'",
+        "git -c alias.CI=commit ci -m 'fix: /home/me/x'",
         "git --config-env=ALIAS.p=P p",
         "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p",
     ] {
@@ -425,7 +429,7 @@ fn an_exported_git_variable_redirects_the_rest_of_the_call() {
 fn a_push_of_another_source_reads_that_source() {
     let tree = WorkerTree::new();
     tree.git(&["checkout", "--quiet", "-b", "leaky"]);
-    tree.write("notes.md", "/home/tester/x\n");
+    tree.write("notes.md", "/home/me/x\n");
     tree.git(&["add", "notes.md"]);
     tree.git(&["commit", "--quiet", "-m", "docs: notes"]);
     tree.git(&["checkout", "--quiet", "kelpie/7"]);
@@ -512,7 +516,7 @@ fn what_runs_a_command_the_guard_cannot_read_is_refused() {
         assert!(matches!(bash(command), Verdict::Refuse(_)), "{command}");
     }
     let tree = WorkerTree::new();
-    tree.write("notes.md", "/home/tester/x\n");
+    tree.write("notes.md", "/home/me/x\n");
     tree.git(&["add", "notes.md"]);
     tree.git(&["commit", "--quiet", "-m", "docs: notes"]);
     for command in [
@@ -569,7 +573,7 @@ fn a_push_sending_a_message_naming_the_home_folder_is_refused() {
     let tree = WorkerTree::new();
     tree.write("notes.md", "built in ~/wt\n");
     tree.git(&["add", "notes.md"]);
-    tree.git(&["commit", "--quiet", "-m", "docs: built in /home/tester/wt"]);
+    tree.git(&["commit", "--quiet", "-m", "docs: built in /home/me/wt"]);
     let why = refusal(tree.bash("git push origin HEAD"));
     assert!(why.contains("a message in the commits"), "{why}");
     assert!(!why.contains("notes.md"), "the file is clean: {why}");
@@ -645,7 +649,7 @@ fn a_commit_or_push_from_a_folder_the_guard_cannot_follow_is_refused() {
 #[test]
 fn git_options_are_read_from_a_known_list() {
     let tree = WorkerTree::new();
-    tree.write("notes.md", "/home/tester/x\n");
+    tree.write("notes.md", "/home/me/x\n");
     tree.git(&["add", "notes.md"]);
     tree.git(&["commit", "--quiet", "-m", "docs: notes"]);
     let why = refusal(tree.bash("git --attr-source status push origin HEAD"));
@@ -711,8 +715,8 @@ fn gh_aliases_and_flags_before_the_verb_are_judged() {
         "gh pr new --title Parser",
         "gh pr -R o/r create --title Parser",
         "gh --repo o/r pr create --title Parser",
-        "gh issue new --title x --body /home/tester/x",
-        "gh release new v1 --notes /home/tester/x",
+        "gh issue new --title x --body /home/me/x",
+        "gh release new v1 --notes /home/me/x",
     ] {
         assert!(matches!(bash(command), Verdict::Refuse(_)), "{command}");
     }
@@ -723,8 +727,8 @@ fn gh_aliases_and_flags_before_the_verb_are_judged() {
 fn a_shell_script_and_a_program_by_path_are_judged() {
     for command in [
         "sh -c \"gh pr create --title Parser\"",
-        "bash -lc 'git commit -m \"fix: /home/tester/x\"'",
-        "/usr/bin/git commit -m 'fix: /home/tester/x'",
+        "bash -lc 'git commit -m \"fix: /home/me/x\"'",
+        "/usr/bin/git commit -m 'fix: /home/me/x'",
         "/opt/homebrew/bin/gh pr create --title Parser",
         "bash -c \"bash -c 'gh pr new --title Parser'\"",
     ] {
@@ -744,9 +748,9 @@ fn a_command_too_deep_to_read_is_refused() {
 #[test]
 fn a_command_behind_a_wrapper_is_still_judged() {
     for command in [
-        "env git commit -m 'fix: /home/tester/x'",
+        "env git commit -m 'fix: /home/me/x'",
         "env GH_PAGER= gh pr create --title Parser",
-        "nohup git tag -m '/home/tester' v1",
+        "nohup git tag -m '/home/me' v1",
     ] {
         assert!(matches!(bash(command), Verdict::Refuse(_)), "{command}");
     }
@@ -768,7 +772,7 @@ fn a_one_level_home_folder_is_still_kept_out() {
 #[test]
 fn every_problem_in_one_call_is_named_once() {
     let why = refusal(bash(
-        "gh pr create --title 'Parser' --body /home/tester && gh pr create --title 'In /home/tester'",
+        "gh pr create --title 'Parser' --body /home/me && gh pr create --title 'In /home/me'",
     ));
     assert!(!why.contains(HOME), "a title is not echoed: {why}");
     assert_eq!(why.matches("not a conventional commit").count(), 1, "{why}");
@@ -788,7 +792,7 @@ fn other_tools_and_a_missing_home_are_let_through() {
     };
     assert_eq!(judged(&call, Some(HOME)), Verdict::Allow);
     let call = json!({ "tool_name": "Bash", "cwd": "/x", "tool_input": {
-        "command": "git commit -m '/home/tester'",
+        "command": "git commit -m '/home/me'",
     } });
     assert_eq!(judged(&call, None), Verdict::Allow);
     assert_eq!(judged(&call, Some("/")), Verdict::Allow);
