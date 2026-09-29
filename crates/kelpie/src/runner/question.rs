@@ -134,6 +134,24 @@ mod tests {
         assert!(INSTRUCTIONS.contains("begin with `- `"), "{INSTRUCTIONS}");
     }
 
+    // Seen live on #80: a relay told nothing of the kind sent a
+    // question's one-character answer as `relay-yes`.
+    #[test]
+    fn the_relay_is_told_a_question_wants_an_answer() {
+        let (rig, runner) = asking("rotom");
+        rig.relay.set_up(true);
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Asked { id: 1, .. })
+        ));
+        assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+        let [(sent, ..)] = rig.relay.sent().try_into().unwrap();
+        assert!(
+            sent.starts_with("[kelpie]\nproject=rotom ruling=1 wants=answer\n\n"),
+            "{sent}"
+        );
+    }
+
     #[test]
     fn the_worker_instructions_describe_the_block() {
         assert!(INSTRUCTIONS.contains(OPEN), "{INSTRUCTIONS}");
@@ -322,7 +340,7 @@ mod tests {
         for params in ["1 yes", "1 no not now"] {
             assert_eq!(
                 rig.ask(&runner, "rule", Some(params)),
-                json!({ "error": "ruling 1 is the worker's question: answer it with `1 answer <text>`" })
+                json!({ "error": "ruling 1 is the worker's question, so it takes an answer, not a yes or no" })
             );
         }
         assert_eq!(
@@ -334,7 +352,7 @@ mod tests {
         let (rig, runner, _) = Rig::parked("golbat");
         assert_eq!(
             rig.ask(&runner, "rule", Some("1 answer merge it")),
-            json!({ "error": "ruling 1 takes `1 yes` or `1 no <note>`, not an answer" })
+            json!({ "error": "ruling 1 is not a question, so it takes a yes, or a no with a note" })
         );
         assert_eq!(rig.forge.merges(), []);
     }

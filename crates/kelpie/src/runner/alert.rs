@@ -58,7 +58,12 @@ impl Runner {
         }
         Some(Due {
             id: ruling.id,
-            relay_message: relay::message(self.project.as_str(), ruling.id, &ruling.question),
+            relay_message: relay::message(
+                self.project.as_str(),
+                ruling.id,
+                relay::Wants::of(&ruling.kind),
+                &ruling.question,
+            ),
             relay_model: self.settings.models.relay.model.as_str().to_owned(),
             relay_effort: self.settings.models.relay.effort,
             webhook: self.webhook.clone(),
@@ -288,7 +293,7 @@ mod tests {
         assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
         let [(sent, model, effort)] = rig.relay.sent().try_into().unwrap();
         assert!(
-            sent.starts_with("[kelpie]\nproject=shep ruling=1\n\n"),
+            sent.starts_with("[kelpie]\nproject=shep ruling=1 wants=yes-or-no\n\n"),
             "{sent}"
         );
         assert!(sent.contains(&head[..7]), "{sent}");
