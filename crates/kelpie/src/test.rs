@@ -18,7 +18,7 @@ use crate::ports::{
 use crate::runner::{
     CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
 };
-use crate::settings::{Effort, Settings};
+use crate::settings::{Effort, Settings, SettingsError};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{CallRecord, Known, Phase, Turn, WorkItem};
 
@@ -150,7 +150,7 @@ const EXAMPLE_REPO: &str = "~/.kelpie/repos/shep";
 
 /// The CodeRabbit gate as `settings.example.toml` sets it, and turned off
 pub(crate) const CODERABBIT_ON: &str = "[app.dogs.kelpie.coderabbit]\nenabled = true\n";
-const CODERABBIT_OFF: &str = "[app.dogs.kelpie.coderabbit]\nenabled = false\n";
+pub(crate) const CODERABBIT_OFF: &str = "[app.dogs.kelpie.coderabbit]\nenabled = false\n";
 
 /// A launch file like the playground's
 const LAUNCH: &str = r#"{"version": "0.0.1", "configurations": [{"name": "dev", "runtimeExecutable": "bun", "runtimeArgs": ["run", "dev"], "port": 3000}]}"#;
@@ -752,6 +752,20 @@ impl Rig {
         std::fs::write(&file, edit(text)).unwrap();
     }
 
+    /// The project's settings as its table now stands
+    pub(crate) fn settings(&self) -> Settings {
+        self.try_settings().unwrap()
+    }
+
+    // The rig keeps the runner's Flockfile entry where the old settings file was.
+    fn try_settings(&self) -> Result<Settings, SettingsError> {
+        let paths = self.paths();
+        let entry = std::fs::read_to_string(&paths.settings).unwrap();
+        let folder = paths.settings.parent().unwrap();
+        let (project, home) = (self.project.as_str(), self.home.path());
+        Settings::from_table(&project_table(&entry), project, home, folder)
+    }
+
     /// Starts a runner, as a restarted sheep would, on the rig's stand-ins
     pub(crate) fn open(&self) -> Result<Mutex<Runner>, OpenError> {
         let ports = Ports {
@@ -766,14 +780,9 @@ impl Rig {
             clock: Box::new(self.clock.clone()),
         };
         let paths = self.paths();
-        let entry = std::fs::read_to_string(&paths.settings).unwrap();
-        let folder = paths.settings.parent().unwrap();
-        let project = self.project.as_str();
-        let settings =
-            Settings::from_table(&project_table(&entry), project, self.home.path(), folder)?;
         Runner::open(
             self.project.clone(),
-            settings,
+            self.try_settings()?,
             self.webhook(),
             &paths,
             Path::new(Self::KELPIE),

@@ -21,8 +21,7 @@ use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
 use crate::ports::{Leases, Ports};
 use crate::runner::{ACTIONS, ProjectName, ProjectPaths, Runner, answer, step};
-use crate::settings::source::{self, Files};
-use crate::{shep_home, shepherd};
+use crate::shep_home;
 
 /// How long queued replies get to reach the shepherd before the runner exits
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
@@ -38,6 +37,10 @@ const BOARD_POLL: Duration = Duration::from_secs(60);
 // flush follow this wait. The whole stop needs about 7s, so the entry needs
 // `kill_timeout = "10s"` or more.
 const JOIN_BOUND: Duration = Duration::from_secs(2);
+
+mod look;
+
+use look::Look;
 
 /// Runs `project`'s runner until the shepherd stops it
 ///
@@ -89,14 +92,15 @@ fn serve(project: &str) -> Result<(), String> {
         .ok()
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| project.as_str().to_owned());
-    let tables = shepherd::block_on(shepherd::read_tables(&shep_home, &sheep))?;
-    let files = Files {
-        project: project.as_str(),
-        sheep: &sheep,
-        settings: &paths.settings,
-        kelpie_settings: &paths.kelpie_settings,
-    };
-    let loaded = source::load(&tables, files, &home).map_err(|e| e.to_string())?;
+    let mut look = Look::new(
+        shep_home,
+        sheep,
+        project.as_str().to_owned(),
+        paths.settings.clone(),
+        paths.kelpie_settings.clone(),
+        home.clone(),
+    );
+    let loaded = look.read()?;
     for notice in &loaded.notices {
         eprintln!("{notice}");
     }
@@ -132,7 +136,14 @@ fn serve(project: &str) -> Result<(), String> {
         reply.to_string()
     });
     let (stop, stopped) = mpsc::channel();
-    let worker = Worker::spawn(Arc::clone(&runner), wake.clone(), woken, stop.clone());
+    let on_wake = Box::new(move |runner: &Mutex<Runner>| look.again(runner));
+    let worker = Worker::spawn(
+        Arc::clone(&runner),
+        on_wake,
+        wake.clone(),
+        woken,
+        stop.clone(),
+    );
     shepherd.on_shutdown(move || {
         let _ = stop.send(Stop::Shutdown);
     });
@@ -170,6 +181,9 @@ enum Stop {
     WorkerDied,
 }
 
+/// What the worker's thread does each time it wakes from a wait
+type OnWake = Box<dyn FnMut(&Mutex<Runner>) + Send>;
+
 /// The thread that runs the worker's turns, and the means to stop it
 struct Worker {
     stopping: Arc<AtomicBool>,
@@ -181,8 +195,11 @@ struct Worker {
 
 impl Worker {
     /// Starts the thread, which tells `died` if it panics
+    ///
+    /// `on_wake` runs each time the thread wakes from a wait, before its next step.
     fn spawn(
         runner: Arc<Mutex<Runner>>,
+        mut on_wake: OnWake,
         wake: Sender<()>,
         woken: Receiver<()>,
         died: Sender<Stop>,
@@ -193,7 +210,8 @@ impl Worker {
         let thread = std::thread::spawn(move || {
             let _ending = ending;
             // A runner with no worker thread would answer triggers and never work.
-            if catch_unwind(AssertUnwindSafe(|| work(&runner, &woken, &flag))).is_err() {
+            let run = || work(&runner, &mut on_wake, &woken, &flag);
+            if catch_unwind(AssertUnwindSafe(run)).is_err() {
                 let _ = died.send(Stop::WorkerDied);
             }
         });
@@ -227,7 +245,7 @@ impl Worker {
 
 // Runs steps while there are any, then sleeps until a trigger or the next
 // look at the board. A turn cut short by a restart is resumed on the first pass.
-fn work(runner: &Mutex<Runner>, woken: &Receiver<()>, stopping: &AtomicBool) {
+fn work(runner: &Mutex<Runner>, on_wake: &mut OnWake, woken: &Receiver<()>, stopping: &AtomicBool) {
     while !stopping.load(Ordering::SeqCst) {
         match step(runner) {
             Ok(Some(report)) => {
@@ -243,6 +261,7 @@ fn work(runner: &Mutex<Runner>, woken: &Receiver<()>, stopping: &AtomicBool) {
         if let Err(RecvTimeoutError::Disconnected) = woken.recv_timeout(BOARD_POLL) {
             return;
         }
+        on_wake(runner);
     }
 }
 
@@ -272,7 +291,7 @@ mod tests {
     fn spawn(runner: Mutex<Runner>) -> Worker {
         let (wake, woken) = mpsc::channel();
         let (died, _) = mpsc::channel();
-        Worker::spawn(Arc::new(runner), wake, woken, died)
+        Worker::spawn(Arc::new(runner), Box::new(|_| {}), wake, woken, died)
     }
 
     fn eventually(what: &str, done: impl Fn() -> bool) {

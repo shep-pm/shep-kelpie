@@ -31,6 +31,7 @@ mod pace;
 mod paths;
 mod question;
 mod report;
+mod reread;
 mod review;
 mod rework;
 mod ruling;
