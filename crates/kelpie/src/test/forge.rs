@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 use super::coderabbit::FakeCodeRabbit;
 use crate::board::{Blocker, OpenPullRequest, READY, ReadyIssue};
 use crate::ports::{
-    Checks, Forge, ForgeError, Issue, MaintainerReview, NewLabel, PullRequest, PullRequestState,
-    Reviewed, Visibility,
+    Checks, Forge, ForgeError, Issue, MaintainerReview, NewLabel, OpenIssue, PullRequest,
+    PullRequestState, Reviewed, Visibility,
 };
 use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
@@ -47,6 +47,12 @@ pub(crate) struct FakeForge {
     readied: Arc<Mutex<Vec<u64>>>,
     skipped: Arc<Mutex<Vec<u64>>>,
     merges: Arc<Mutex<Vec<(u64, String)>>>,
+    issues: Arc<Mutex<Vec<OpenIssue>>>,
+    created: Arc<Mutex<Vec<CreatedIssue>>>,
+    // Why listing and opening issues fail, while they do
+    issues_down: Arc<Mutex<Option<String>>>,
+    // How many more issues may open before every later one fails
+    creates_left: Arc<Mutex<Option<usize>>>,
     reviews: Arc<Mutex<HashMap<u64, MaintainerReview>>>,
     // A state file read as each comment is posted, and what it held then
     watched: Arc<Mutex<Option<PathBuf>>>,
@@ -67,6 +73,15 @@ struct FakePullRequest {
     draft: bool,
     from_fork: bool,
     author: String,
+}
+
+/// An issue kelpie opened on the fake forge
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CreatedIssue {
+    pub(crate) number: u64,
+    pub(crate) title: String,
+    pub(crate) body: String,
+    pub(crate) labels: Vec<String>,
 }
 
 /// The account the fake forge says kelpie acts as, and opens pull requests as
@@ -102,6 +117,10 @@ impl FakeForge {
             readied: Arc::default(),
             skipped: Arc::default(),
             merges: Arc::default(),
+            issues: Arc::default(),
+            created: Arc::default(),
+            issues_down: Arc::default(),
+            creates_left: Arc::default(),
             reviews: Arc::default(),
             watched: Arc::default(),
             saved_at_comment: Arc::default(),
@@ -326,6 +345,36 @@ impl FakeForge {
         self.skipped.lock().unwrap().clone()
     }
 
+    /// Leaves issue `number` open, as someone other than kelpie would have
+    pub(crate) fn open_issue(&self, number: u64, title: &str, body: &str) {
+        self.issues.lock().unwrap().push(OpenIssue {
+            number,
+            title: title.to_owned(),
+            body: body.to_owned(),
+        });
+    }
+
+    /// Every issue kelpie opened, oldest first
+    pub(crate) fn created(&self) -> Vec<CreatedIssue> {
+        self.created.lock().unwrap().clone()
+    }
+
+    /// Makes listing and opening issues fail, or work again
+    pub(crate) fn set_issues_down(&self, down: bool) {
+        let why = down.then(|| "issues are down".to_owned());
+        *self.issues_down.lock().unwrap() = why;
+    }
+
+    /// Makes listing and opening issues fail with `error`, verbatim
+    pub(crate) fn set_issues_error(&self, error: &str) {
+        *self.issues_down.lock().unwrap() = Some(error.to_owned());
+    }
+
+    /// Lets `n` more issues open, then makes every later one fail
+    pub(crate) fn set_creates_left(&self, n: usize) {
+        *self.creates_left.lock().unwrap() = Some(n);
+    }
+
     /// Every merge made, with the head it was held to
     pub(crate) fn merges(&self) -> Vec<(u64, String)> {
         self.merges.lock().unwrap().clone()
@@ -505,7 +554,15 @@ impl Forge for FakeForge {
         if self.comments_down.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("comments are down".into()));
         }
-        self.opened(number)?;
+        let is_issue = self
+            .issues
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|i| i.number == number);
+        if !is_issue {
+            self.opened(number)?;
+        }
         if let Some(path) = self.watched.lock().unwrap().as_ref() {
             let saved = std::fs::read_to_string(path).unwrap();
             let saved = serde_json::from_str(&saved).unwrap();
@@ -538,6 +595,46 @@ impl Forge for FakeForge {
         self.comments.lock().unwrap()[at].1 = body.to_owned();
         self.edits.lock().unwrap().push(id);
         Ok(())
+    }
+
+    fn open_issues(&self, _repo: &ForgeSlug) -> Result<Vec<OpenIssue>, ForgeError> {
+        if let Some(why) = &*self.issues_down.lock().unwrap() {
+            return Err(ForgeError::Failed(why.clone()));
+        }
+        Ok(self.issues.lock().unwrap().clone())
+    }
+
+    // Numbers start at 900, clear of every issue a test opens by hand.
+    fn create_issue(
+        &self,
+        _repo: &ForgeSlug,
+        title: &str,
+        body: &str,
+        labels: &[&str],
+    ) -> Result<u64, ForgeError> {
+        if let Some(why) = &*self.issues_down.lock().unwrap() {
+            return Err(ForgeError::Failed(why.clone()));
+        }
+        if let Some(left) = self.creates_left.lock().unwrap().as_mut() {
+            if *left == 0 {
+                return Err(ForgeError::Failed("issues are down".into()));
+            }
+            *left -= 1;
+        }
+        let mut created = self.created.lock().unwrap();
+        let number = 900 + created.len() as u64;
+        created.push(CreatedIssue {
+            number,
+            title: title.to_owned(),
+            body: body.to_owned(),
+            labels: labels.iter().map(|&l| l.to_owned()).collect(),
+        });
+        self.issues.lock().unwrap().push(OpenIssue {
+            number,
+            title: title.to_owned(),
+            body: body.to_owned(),
+        });
+        Ok(number)
     }
 
     fn mark_ready(&self, _repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {

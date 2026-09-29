@@ -26,6 +26,7 @@ mod claude_files;
 #[cfg(test)]
 mod coderabbit;
 mod dispatch;
+mod follow_up;
 mod gate;
 mod guard_hooks;
 mod instructions;
@@ -390,6 +391,8 @@ impl Runner {
             rebased: false,
             shots: None,
             shots_comment: None,
+            held: Vec::new(),
+            follow_ups: None,
             calls: Vec::new(),
         }
     }

@@ -234,6 +234,7 @@ impl Runner {
         let held_count = held.len();
         let prompt = findings::fix_prompt(number, round, held_count, &path);
         self.update(|item| {
+            item.record_held(&held);
             item.turn = Turn::Next { prompt };
             item.phase = Phase::Review(Review {
                 stage: ReviewStage::Fixing {
