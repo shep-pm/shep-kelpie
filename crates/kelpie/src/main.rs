@@ -55,6 +55,7 @@ fn main() -> ExitCode {
     }
 }
 
+// A PreToolUse hook's answer: a refusal's reason goes to Claude on stderr.
 fn hook(verdict: Verdict) -> ExitCode {
     match verdict {
         Verdict::Allow => ExitCode::SUCCESS,
