@@ -310,6 +310,7 @@ mod tests {
                 "pull_request": 71,
                 "kind": { "kind": "merge", "head": head },
                 "alerted": false,
+                "relayed": false,
             }])
         );
         assert_eq!(

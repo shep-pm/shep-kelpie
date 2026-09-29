@@ -13,12 +13,12 @@ use shep_client::shep_core::protocol::Request;
 use shep_client::shep_core::protocol::request::{ActionOutcome, Response, SelectorSpec};
 use shep_client::{Client, ConnectError, TRIGGER_DEADLINE};
 
-use crate::runner::is_no_or_answer;
+use crate::runner::{RELAY_RULE, is_no_or_answer};
 
 /// The shep version kelpie is built with, pinned in the workspace manifest
 pub const SHEP_VERSION: &str = "0.10.1";
 
-/// A ruling the relay passes on to a runner's `rule` action
+/// A ruling the relay passes on to a runner's `relay-rule` action
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ruling<'a> {
     /// `kelpie relay-yes`: the ruling's id, sent as `<id> yes`
@@ -81,20 +81,14 @@ async fn deliver(shep_home: &Path, project: &str, ruling: Ruling<'_>) -> Result<
     if release_line(running) != release_line(SHEP_VERSION) {
         return Err(skew(shep_home, Some(running)));
     }
-    // `shep trigger`'s own budget: a ruling can wait on the runner's lock.
-    let trigger = Request::Trigger {
-        selector: SelectorSpec::Name(project.into()),
-        action: "rule".into(),
-        params: Some(params),
-    };
-    let reply = client
-        .request_with_deadline(trigger, Some(TRIGGER_DEADLINE))
-        .await
-        .map_err(|e| format!("kelpie's shepherd did not take the ruling: {e}"))?;
-    let Response::Triggered(rows) = reply else {
-        return Err(format!("kelpie's shepherd answered {reply:?}"));
-    };
-    match rows.into_iter().next().map(|row| row.outcome) {
+    let mut outcome = trigger(&client, project, RELAY_RULE, &params).await?;
+    // A runner started before `relay-rule` existed takes the same ruling as `rule`.
+    if let Some(ActionOutcome::Replied { body }) = &outcome
+        && refusal(body).is_some_and(|why| why == format!("unknown action `{RELAY_RULE}`"))
+    {
+        outcome = trigger(&client, project, "rule", &params).await?;
+    }
+    match outcome {
         Some(ActionOutcome::Replied { body }) => match refusal(&body) {
             None => Ok(body),
             Some(why) => Err(format!(
@@ -105,6 +99,29 @@ async fn deliver(shep_home: &Path, project: &str, ruling: Ruling<'_>) -> Result<
         Some(other) => Err(format!("{project}'s runner did not answer: {other:?}")),
         None => Err(format!("kelpie's shepherd runs no sheep named {project}")),
     }
+}
+
+// The first sheep's outcome of `action`, under `shep trigger`'s own budget:
+// a ruling can wait on the runner's lock.
+async fn trigger(
+    client: &Client,
+    project: &str,
+    action: &str,
+    params: &str,
+) -> Result<Option<ActionOutcome>, String> {
+    let trigger = Request::Trigger {
+        selector: SelectorSpec::Name(project.into()),
+        action: action.into(),
+        params: Some(params.into()),
+    };
+    let reply = client
+        .request_with_deadline(trigger, Some(TRIGGER_DEADLINE))
+        .await
+        .map_err(|e| format!("kelpie's shepherd did not take the ruling: {e}"))?;
+    let Response::Triggered(rows) = reply else {
+        return Err(format!("kelpie's shepherd answered {reply:?}"));
+    };
+    Ok(rows.into_iter().next().map(|row| row.outcome))
 }
 
 // The `error` a runner's reply carries, if any. A reply that is not JSON
@@ -199,11 +216,38 @@ mod tests {
     }
 
     fn rule_trigger(params: &str) -> Request {
+        trigger_of("relay-rule", params)
+    }
+
+    fn trigger_of(action: &str, params: &str) -> Request {
         Request::Trigger {
             selector: SelectorSpec::Name("shep".into()),
-            action: "rule".into(),
+            action: action.into(),
             params: Some(params.into()),
         }
+    }
+
+    // A runner started on an older kelpie answers only `rule`.
+    #[tokio::test]
+    async fn a_runner_without_relay_rule_gets_the_ruling_as_rule() {
+        let home = scratch_home();
+        let socket = home.path().join("run/shep.sock");
+        let mut sent = fake_daemon_answering_with_ack(&socket, ack(SHEP_VERSION), |request| {
+            let body = match request {
+                Request::Trigger { action, .. } if action == "rule" => "merging #71",
+                _ => r#"{"error":"unknown action `relay-rule`"}"#,
+            };
+            Response::Triggered(vec![ActionReply {
+                id: 1,
+                name: "shep".into(),
+                outcome: replied(body),
+            }])
+        })
+        .await;
+        let reply = deliver_in_time(home.path(), Ruling::Yes("3")).await;
+        assert_eq!(reply, Ok("merging #71".into()));
+        assert_eq!(sent.try_recv().unwrap().body, rule_trigger("3 yes"));
+        assert_eq!(sent.try_recv().unwrap().body, trigger_of("rule", "3 yes"));
     }
 
     // Real sockets under a real clock: a paused one would time out the

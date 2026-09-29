@@ -14,6 +14,7 @@ use crate::settings::Effort;
 #[derive(Debug, Default)]
 pub(crate) struct FakeRelay {
     sent: Mutex<Vec<(String, String, Effort)>>,
+    told: Mutex<Vec<String>>,
     clears: AtomicUsize,
     up: AtomicBool,
 }
@@ -23,6 +24,11 @@ impl FakeRelay {
     /// asked to start with
     pub(crate) fn sent(&self) -> Vec<(String, String, Effort)> {
         self.sent.lock().unwrap().clone()
+    }
+
+    /// Every message told to a running relay, oldest first
+    pub(crate) fn told(&self) -> Vec<String> {
+        self.told.lock().unwrap().clone()
     }
 
     /// How many times the relay was cleared
@@ -46,6 +52,14 @@ impl Relay for FakeRelay {
             .lock()
             .unwrap()
             .push((message.to_owned(), model.to_owned(), effort));
+        Ok(())
+    }
+
+    fn tell(&self, message: &str) -> Result<(), RelayError> {
+        if !self.up.load(Ordering::SeqCst) {
+            return Err(RelayError::Unreachable("the rig's relay is down".into()));
+        }
+        self.told.lock().unwrap().push(message.to_owned());
         Ok(())
     }
 

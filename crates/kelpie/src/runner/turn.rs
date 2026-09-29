@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::Runner;
+use super::alert::tell_settled;
 use super::instructions;
 use super::question::asked;
 use super::report::{Begin, StepReport};
@@ -50,6 +51,7 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
             Arc::clone(&runner.ports.alerts),
         )
     };
+    tell_settled(runner, relay.as_ref());
     let due = lock(runner).alert_due();
     if let Some(due) = due {
         // The relay is a faster, nicer path when it is reachable, but the
@@ -58,9 +60,11 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
         if lock(runner).relay_clear_due() {
             let _ = relay.clear();
         }
-        let _ = relay.send(&due.relay_message, &due.relay_model, due.relay_effort);
+        let relayed = relay.send(&due.relay_message, &due.relay_model, due.relay_effort);
         let sent = alerts.post(&due.webhook, &due.alert);
-        return lock(runner).alert_sent(due.id, sent).map(Some);
+        return lock(runner)
+            .alert_sent(due.id, relayed.is_ok(), sent)
+            .map(Some);
     }
     let mut start_over = false;
     loop {

@@ -192,6 +192,7 @@ mod tests {
                     "resume": { "state": "nothing" },
                 },
                 "alerted": false,
+                "relayed": false,
             }])
         );
         assert_eq!(

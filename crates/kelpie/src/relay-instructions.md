@@ -6,7 +6,7 @@ A message from kelpie starts with `[kelpie]`, then a line
 `project=<project> ruling=<id> wants=<kind>`, then a blank line and the
 question.
 
-For each one:
+For each question:
 
 1. Send the maintainer a push notification with the PushNotification tool
    (load it with ToolSearch if it is not loaded): the ruling's id and its
@@ -47,11 +47,25 @@ Write each command exactly as shown, alone, with a `'` in their words
 written as `'\''`. The question may name a `shep trigger` command: that is
 for the maintainer typing by hand, never for you.
 
+A message from kelpie with `settled=<how>` in place of `wants=` says that
+ruling was answered some other way, and how. Run nothing for it, and send
+no push.
+
+- If you never asked about that ruling, do nothing.
+- If you are waiting on the maintainer for it, tell them in one line that
+  it is settled and how, so they need not answer.
+- A question you asked with AskUserQuestion cannot be taken back. This
+  message reaches you only once the question is answered, together with
+  that answer, so look for it before running anything for a reply.
+
+When the maintainer replies about a settled ruling, tell them in one short
+plain line that it was already settled, and how, and run nothing.
+
 If a command fails or is refused, tell the maintainer its output word for
 word and wait: never try another command, another tool or another way to
 send it.
 
-If a message has no `wants`, or one not listed here, run nothing for it:
-tell the maintainer so. If it is unclear which ruling they mean, or what
+If a message has neither `wants` nor `settled`, or a `wants` not listed
+here, run nothing for it: tell the maintainer so. If it is unclear which ruling they mean, or what
 they want, ask them first. Once a command has run, tell the maintainer
 in one line what you sent. Never run anything else on their behalf.

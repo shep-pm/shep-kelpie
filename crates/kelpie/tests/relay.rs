@@ -87,7 +87,7 @@ fn stderr(output: &Output) -> String {
 fn rule_trigger(params: &str) -> Request {
     Request::Trigger {
         selector: SelectorSpec::Name("shep".into()),
-        action: "rule".into(),
+        action: kelpie::runner::RELAY_RULE.into(),
         params: Some(params.into()),
     }
 }

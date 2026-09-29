@@ -229,6 +229,24 @@ impl RelayCli {
     // `current_dir` and the relay's own `~/.claude/sessions` all key off
     // `self.home`, and a process whose real `$HOME` ever differed from it
     // would otherwise start the relay somewhere it can never be found again.
+    fn deliver(&self, found: &Found, message: &str) -> Result<(), RelayError> {
+        let registry = session::registry(&self.sessions(), found.pid)?;
+        let token = session::peer_token(&self.sessions(), found.pid)?;
+        let mut stream = UnixStream::connect(&registry.messaging_socket_path)
+            .map_err(|e| RelayError::Unreachable(e.to_string()))?;
+        write_line(
+            &mut stream,
+            &json!({ "type": "auth", "token": token.expose() }),
+        )?;
+        write_line(
+            &mut stream,
+            &json!({
+                "type": "user",
+                "message": { "role": "user", "content": message },
+            }),
+        )
+    }
+
     fn relay_env(&self, command: &mut Command) {
         command.env_clear();
         command.env("HOME", &self.home);
@@ -252,21 +270,14 @@ impl Relay for RelayCli {
         if fresh {
             thread::sleep(SOCKET_GRACE);
         }
-        let registry = session::registry(&self.sessions(), found.pid)?;
-        let token = session::peer_token(&self.sessions(), found.pid)?;
-        let mut stream = UnixStream::connect(&registry.messaging_socket_path)
-            .map_err(|e| RelayError::Unreachable(e.to_string()))?;
-        write_line(
-            &mut stream,
-            &json!({ "type": "auth", "token": token.expose() }),
-        )?;
-        write_line(
-            &mut stream,
-            &json!({
-                "type": "user",
-                "message": { "role": "user", "content": message },
-            }),
-        )
+        self.deliver(&found, message)
+    }
+
+    fn tell(&self, message: &str) -> Result<(), RelayError> {
+        match self.find()? {
+            Some(found) => self.deliver(&found, message),
+            None => Ok(()),
+        }
     }
 
     fn clear(&self) -> Result<(), RelayError> {
@@ -455,6 +466,18 @@ mod tests {
             ]
         );
         assert!(calls.iter().all(|c| !c.contains("1b2cf60f")));
+    }
+
+    #[test]
+    fn a_tell_with_no_relay_running_starts_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let relay = fake_claude(dir.path());
+        fs::write(dir.path().join("agents.json"), "[]").unwrap();
+        relay
+            .tell("[kelpie]\nproject=shep ruling=1 settled=yes")
+            .unwrap();
+        assert_eq!(calls(dir.path()), Vec::<String>::new());
+        assert!(!dir.path().join("relay").exists(), "no files were written");
     }
 
     #[test]
