@@ -115,6 +115,10 @@ pub struct Ruling {
     /// webhooks existed is posted once.
     #[serde(default)]
     pub alerted: bool,
+    /// Whether it reached a running relay, which is told if it is settled
+    /// any other way
+    #[serde(default)]
+    pub relayed: bool,
 }
 
 /// A merge kelpie made under `auto`, told to the maintainer after it lands
@@ -230,6 +234,16 @@ pub enum RulingKind {
         phase: Phase,
         /// The turn as it stood before it failed, which a yes puts back
         retry: Turn,
+    },
+    /// The pull request changes Claude Code's own files, which run outside
+    /// the sandbox. A yes accepts them at this head; a no stops the work item.
+    ClaudeFiles {
+        /// The head that changes them
+        head: String,
+        /// The files it changes
+        files: Vec<String>,
+        /// The phase the gate was in, which a yes goes back to
+        phase: Phase,
     },
     /// The pull request's labels or ready state changed outside kelpie. A
     /// yes accepts the change and kelpie carries on watching it.
@@ -471,6 +485,7 @@ mod tests {
                 pull_request: Some(n),
                 kind: RulingKind::Closed,
                 alerted: false,
+                relayed: false,
             })
             .collect();
         state
@@ -502,6 +517,7 @@ mod tests {
                 head: "c0ffee".into(),
             },
             alerted: true,
+            relayed: true,
         });
         state.last_ruling = 1;
         state.leases.push(LeaseHeld {
@@ -543,6 +559,7 @@ mod tests {
             pull_request: Some(30),
             kind,
             alerted: id.is_multiple_of(2),
+            relayed: id.is_multiple_of(3),
         };
         state.rulings = vec![
             ruling(
@@ -625,6 +642,7 @@ mod tests {
                 "pull_request": 30,
                 "kind": kind,
                 "alerted": id.is_multiple_of(2),
+                "relayed": id.is_multiple_of(3),
             })
         };
         assert_eq!(
@@ -756,6 +774,26 @@ mod tests {
                 "reason": "no worktree",
                 "phase": { "state": "implement" },
                 "retry": { "state": "due" },
+            })
+        );
+        assert_eq!(serde_json::from_value::<RulingKind>(saved).unwrap(), kind);
+    }
+
+    #[test]
+    fn a_change_to_claudes_files_keeps_its_head_files_and_phase() {
+        let kind = RulingKind::ClaudeFiles {
+            head: "c0ffee".into(),
+            files: vec![".mcp.json".into()],
+            phase: Phase::Implement,
+        };
+        let saved = serde_json::to_value(&kind).unwrap();
+        assert_eq!(
+            saved,
+            serde_json::json!({
+                "kind": "claude-files",
+                "head": "c0ffee",
+                "files": [".mcp.json"],
+                "phase": { "state": "implement" },
             })
         );
         assert_eq!(serde_json::from_value::<RulingKind>(saved).unwrap(), kind);

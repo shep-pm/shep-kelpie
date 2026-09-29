@@ -3,14 +3,16 @@
 //! The worker runs in `bypassPermissions`, so the file is its whole fence.
 //! Claude Code's sandbox confines Bash and its children, and fails closed.
 //! The sandbox does not cover Claude's own file tools, so a hook that runs
-//! `kelpie confine` holds those to the same folders. Deny rules keep what
-//! only the project manager does, and credential paths, out of reach.
+//! `kelpie confine` holds those to the same folders. Both refuse Claude
+//! Code's own files in the worktree. Deny rules keep what only the project
+//! manager does, and credential paths, out of reach.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
+use crate::fence;
 use crate::settings::{BuildDir, EnvName, GuardHook, HookEvent, NonBlank};
 use crate::worktree::BASE;
 
@@ -154,6 +156,7 @@ impl WorkerProfile<'_> {
             .iter()
             .map(|p| git(p))
             .chain([git("refs/heads").join(BASE)])
+            .chain(fence::deny_write(self.worktree))
             .collect();
         let mut deny: Vec<String> = CREDENTIALS
             .iter()
@@ -354,6 +357,9 @@ mod tests {
                 "/k/repos/shep/.git/packed-refs",
                 "/k/repos/shep/.git/refs/tags",
                 "/k/repos/shep/.git/refs/heads/main",
+                "/k/wt/shep/7/.claude",
+                "/k/wt/shep/7/**/.claude",
+                "/k/wt/shep/7/.mcp.json",
             ]
         );
         assert_eq!(s["env"]["CARGO_TARGET_DIR"], "/k/targets/shep/7");
@@ -459,6 +465,27 @@ mod tests {
             let rule = format!("mcp__playwright__{tool}");
             assert!(deny.contains(&rule.as_str()), "{rule}");
         }
+    }
+
+    // The preview widens nothing the fence on Claude Code's own files holds.
+    #[test]
+    fn a_preview_keeps_the_fence_on_claude_files_beside_its_own() {
+        let s = with_preview(&[]);
+        let deny_write = strings(&s["sandbox"]["filesystem"]["denyWrite"]);
+        for path in [
+            "/k/wt/lab/7/.claude",
+            "/k/wt/lab/7/**/.claude",
+            "/k/wt/lab/7/.mcp.json",
+        ] {
+            assert!(deny_write.contains(&path), "{path}: {deny_write:?}");
+        }
+        assert!(deny_write.contains(&"/k/repos/lab/.git/config"));
+        let deny = s["permissions"]["deny"].to_string();
+        assert!(deny.contains("Read(~/.ssh/**)"), "{deny}");
+        assert!(deny.contains("mcp__playwright__browser_drop"), "{deny}");
+        let pre = s["hooks"]["PreToolUse"].to_string();
+        assert!(pre.contains("'confine'"), "{pre}");
+        assert!(pre.contains("'browse-guard'"), "{pre}");
     }
 
     #[test]

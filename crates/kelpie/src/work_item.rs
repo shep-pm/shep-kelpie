@@ -79,6 +79,11 @@ pub struct WorkItem {
     /// worker leave them. A mismatch at the gate is a change kelpie did not make.
     #[serde(default)]
     pub known: Known,
+    /// The head at which the maintainer accepted a change to `.claude` or
+    /// `.mcp.json`. Later heads that leave those files as this one has them
+    /// pass the gate, and so does a worktree holding this head's copies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_files_accepted: Option<String>,
     /// Its qwen rounds so far
     #[serde(default)]
     pub qwen: QwenTally,

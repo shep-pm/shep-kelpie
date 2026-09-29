@@ -111,6 +111,7 @@ pub(crate) fn a_work_item() -> WorkItem {
             ready: false,
             head: None,
         },
+        claude_files_accepted: None,
         qwen: crate::work_item::QwenTally::default(),
         merge_refused: false,
         merge_tried: None,
@@ -161,6 +162,9 @@ pub(crate) enum Scripted {
     /// Commits this file with this text on the worktree's branch, pushes
     /// it the way a worker does, and answers
     Push(&'static str, &'static str),
+    /// Writes this file with this text in the worktree, commits nothing,
+    /// and answers: a write that got past the fence
+    Plant(&'static str, &'static str),
     /// Merges `origin/main` into the worktree's branch, keeping main's
     /// side of any conflict, and pushes it without force, as a worker
     /// resolving a conflict does
@@ -345,10 +349,17 @@ impl Claude for FakeClaude {
                     session_cost: Cost(0),
                 })
             }
+            Some(Scripted::Plant(file, text)) => {
+                write_in(&call.cwd, file, text);
+                Ok(ClaudeReply {
+                    session_id: call.session.id().clone(),
+                    text: "done".into(),
+                    usage: Usage::default(),
+                    session_cost: Cost(0),
+                })
+            }
             Some(Scripted::Push(file, text)) => {
-                let path = call.cwd.join(file);
-                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-                std::fs::write(path, text).unwrap();
+                write_in(&call.cwd, file, text);
                 git(&call.cwd, &["add", file]);
                 git(&call.cwd, &["commit", "--quiet", "-m", file]);
                 git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);
@@ -836,6 +847,12 @@ fn denies(rule: &str, path: &str) -> bool {
         None if !glob.contains('*') => path == glob,
         _ => panic!("teach this test to read {rule}"),
     }
+}
+
+fn write_in(folder: &Path, file: &str, text: &str) {
+    let path = folder.join(file);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, text).unwrap();
 }
 
 fn path(p: &Path) -> &str {

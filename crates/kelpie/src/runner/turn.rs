@@ -14,6 +14,8 @@ use std::time::Duration;
 
 use super::Runner;
 use super::adopt;
+use super::alert::{post_due, tell_settled};
+use super::claude_files::Unchecked;
 use super::instructions;
 use super::question::asked;
 use super::report::{Begin, StepReport};
@@ -28,7 +30,8 @@ use crate::profile::WorkerProfile;
 use crate::state::{Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree::{self, Start};
-use unfinished::{failed, timed_out};
+pub(super) use unfinished::failed;
+use unfinished::timed_out;
 
 mod unfinished;
 
@@ -56,19 +59,9 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
             Arc::clone(&runner.ports.shots),
         )
     };
-    let due = lock(runner).alert_due();
-    if let Some(due) = due {
-        // The relay is a faster, nicer path when it is reachable, but the
-        // webhook is what actually keeps a ruling from being lost, so it
-        // posts every ruling regardless of how the relay's send went.
-        if let Some(message) = &due.relay {
-            if lock(runner).relay_clear_due() {
-                let _ = relay.clear();
-            }
-            let _ = relay.send(&message.text, &message.model, message.effort);
-        }
-        let sent = alerts.post(&due.webhook, &due.alert);
-        return lock(runner).alert_sent(due.of, sent).map(Some);
+    tell_settled(runner, relay.as_ref());
+    if let Some(posted) = post_due(runner, relay.as_ref(), alerts.as_ref()) {
+        return posted.map(Some);
     }
     let mut start_over = false;
     loop {
@@ -118,11 +111,21 @@ impl Runner {
             Phase::Review(review)
                 if matches!(review.stage, ReviewStage::Fixing { .. })
                     && !matches!(item.turn, Turn::Ended { .. }) => {}
-            Phase::Review(_) => return self.review_step(),
+            Phase::Review(_) => {
+                if let Some(parked) = self.fence_gate()? {
+                    return Ok(parked);
+                }
+                return self.review_step();
+            }
             Phase::CodeRabbit(CodeRabbitStage::Fixing { .. })
                 if !matches!(item.turn, Turn::Ended { .. }) => {}
             Phase::Ci { .. } => return self.check_ci(),
-            Phase::CodeRabbit(_) => return self.coderabbit_step(),
+            Phase::CodeRabbit(_) => {
+                if let Some(parked) = self.fence_gate()? {
+                    return Ok(parked);
+                }
+                return self.coderabbit_step();
+            }
             Phase::Ruling { .. } => return self.retry_shots(),
             Phase::Merge { .. } => return self.merge(),
             Phase::Done { merged } => return self.finish(*merged),
@@ -133,6 +136,10 @@ impl Runner {
         let due = matches!(item.turn, Turn::Due | Turn::Next { .. });
         if let Some(begin) = self.pushed_by_someone_else()? {
             return Ok(begin);
+        }
+        // A rework can start on a branch that already changes them.
+        if due && let Some(parked) = self.claude_files_changed(Unchecked::CarryOn)? {
+            return Ok(parked);
         }
         if due && let Some(held) = self.pace(Scope::Turn)?.holds() {
             return Ok(held);
@@ -211,6 +218,9 @@ impl Runner {
             &item.build,
         )
         .map_err(|e| e.to_string())?;
+        if let Some(reason) = self.claude_files_refusal() {
+            return Err(reason);
+        }
         let previewed = preview::enabled(&self.settings.repo);
         let profile = WorkerProfile {
             worktree: &item.worktree,
@@ -411,7 +421,7 @@ impl Runner {
 
     // A ruling just raised is posted as a comment on its pull request, if it
     // has one; only these three reports carry a ruling and need the outcome.
-    fn fill_comment_failed(&self, report: &mut StepReport) {
+    pub(super) fn fill_comment_failed(&self, report: &mut StepReport) {
         match report {
             StepReport::Asked {
                 pull_request,

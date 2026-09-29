@@ -52,22 +52,69 @@ fn a_project_without_a_launch_file_behaves_as_before() {
     assert!(!rig.paths().worker.join("mcp.json").exists());
 }
 
+// Steps until the fence's ruling on a branch that changes `.claude`, and
+// accepts it with a yes, as the maintainer would
+fn accept_fenced_change(rig: &Rig, runner: &std::sync::Mutex<Runner>) {
+    let ruling = (0..4).find_map(|_| match step(runner).unwrap() {
+        Some(StepReport::Ruling { id, question, .. }) => Some((id, question)),
+        _ => None,
+    });
+    let Some((id, question)) = ruling else {
+        panic!("the fence let a change to .claude/launch.json through");
+    };
+    assert!(question.contains(".claude/launch.json"), "{question}");
+    rig.ask(runner, "rule", Some(&format!("{id} yes")));
+}
+
+// The fence parks the change first; accepted, the preview still reads main.
 #[test]
 fn a_launch_file_the_worker_adds_on_its_branch_opens_nothing() {
     let rig = Rig::new("koji");
     let runner = started(&rig);
-    rig.claude.script([
-        Scripted::Push(".claude/launch.json", r#"{"configurations": []}"#),
-        Scripted::Text("CLEAN"),
-    ]);
+    rig.claude.script([Scripted::Push(
+        ".claude/launch.json",
+        r#"{"configurations": []}"#,
+    )]);
     step(&runner).unwrap(); // the worker's turn adds the file
-    step(&runner).unwrap(); // round 1, qwen
-    step(&runner).unwrap(); // round 2, claude: no shots first
-    assert!(rig.worktree_7().join(".claude/launch.json").is_file());
+    accept_fenced_change(&rig, &runner);
+    rig.claude.script([Scripted::Text("CLEAN")]);
+    for _ in 0..4 {
+        step(&runner).unwrap(); // the alert, qwen, then claude with no shots
+    }
     assert_eq!(rig.shots.jobs(), []);
     let all = rig.claude.all_seen();
     let round = all.iter().find(|s| s.call.role == Role::Reviewer).unwrap();
     assert!(!round.call.prompt.contains("--- shots ---"));
+}
+
+// The per-turn check on Claude Code's own files passes with a launch file on
+// main: the worker's second turn runs, as it does without a preview.
+#[test]
+fn the_fences_per_turn_check_passes_with_a_preview() {
+    let rig = with_preview("lab");
+    let runner = started(&rig);
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Say("HIGH|src/app.tsx:3|wrong colour|unreadable"),
+        Scripted::Text(r#"{"holds": true, "severity": "high", "reason": "it is"}"#),
+        Scripted::Push("fix.txt", "fixed\n"),
+    ]);
+    for _ in 0..10 {
+        let report = step(&runner).unwrap();
+        assert!(
+            !matches!(
+                report,
+                Some(StepReport::Failed { .. } | StepReport::Ruling { .. })
+            ),
+            "{report:?}"
+        );
+        if rig.claude.calls().len() == 2 {
+            break;
+        }
+    }
+    let worker_turns = rig.claude.calls();
+    assert_eq!(worker_turns.len(), 2, "the fix turn ran");
+    assert!(worker_turns[1].mcp_config.is_some());
 }
 
 #[test]
@@ -134,6 +181,18 @@ fn a_worker_with_a_launch_file_gets_playwright_and_the_shots_tool() {
             .unwrap()
             .contains(&json!("api.example.com"))
     );
+    // Nothing kelpie writes for the preview is in the worktree, so none of it
+    // falls under the fence on Claude Code's own files there.
+    let worktree = rig.worktree_7();
+    for written in [
+        worker.join("mcp.json"),
+        worker.join("playwright.json"),
+        worker.join("shots-job.json"),
+        rig.home.path().join("kelpie/shots/lab/7/playwright"),
+    ] {
+        assert!(written.exists(), "{written:?}");
+        assert!(!written.starts_with(&worktree), "{written:?}");
+    }
     let instructions = std::fs::read_to_string(worker.join("instructions.md")).unwrap();
     assert!(instructions.starts_with(INSTRUCTIONS));
     assert!(
@@ -186,8 +245,13 @@ fn the_dev_server_command_comes_from_main_never_the_workers_branch() {
     rig.claude
         .script([Scripted::Push(".claude/launch.json", theirs)]);
     step(&runner).unwrap(); // the worker's turn changes the launch file
-    step(&runner).unwrap(); // round 1, qwen: clean
-    step(&runner).unwrap(); // the shots
+    accept_fenced_change(&rig, &runner);
+    for _ in 0..4 {
+        step(&runner).unwrap(); // the alert, qwen, then the shots
+        if !rig.shots.jobs().is_empty() {
+            break;
+        }
+    }
     let [job] = rig.shots.jobs().try_into().unwrap();
     assert_eq!(
         job.launch,

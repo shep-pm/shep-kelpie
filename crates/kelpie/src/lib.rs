@@ -14,6 +14,7 @@ pub mod browse;
 pub mod coderabbit;
 pub mod confine;
 pub mod dog;
+pub mod fence;
 pub mod lease;
 pub mod pacer;
 pub mod ports;

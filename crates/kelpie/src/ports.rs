@@ -565,6 +565,15 @@ pub trait Relay: Send + Sync {
     /// [`RelayError`] when the relay cannot be started or reached.
     fn send(&self, message: &str, model: &str, effort: Effort) -> Result<(), RelayError>;
 
+    /// Sends `message` to the relay if one is running, and never starts one
+    ///
+    /// A relay started afresh never asked what `message` is about.
+    ///
+    /// # Errors
+    ///
+    /// [`RelayError`] when a running relay cannot be reached.
+    fn tell(&self, message: &str) -> Result<(), RelayError>;
+
     /// Deletes the relay, if one exists, conversation included, so kelpie
     /// starts a fresh one next time and nothing a worker's question tried
     /// to carry into it survives the clear

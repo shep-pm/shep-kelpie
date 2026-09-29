@@ -61,7 +61,7 @@ pub(super) fn timed_out(project: &str, next: &mut ProjectState) -> StepReport {
 // Marks the turn failed and parks the work item on a ruling carrying why,
 // keeping the turn as it stood so a yes can put it back. `comment_failed` is
 // filled in afterwards, once the ruling has actually been posted.
-pub(super) fn failed(
+pub(in crate::runner) fn failed(
     project: &str,
     next: &mut ProjectState,
     at: Timestamp,

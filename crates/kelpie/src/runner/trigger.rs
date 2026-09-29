@@ -10,17 +10,22 @@ use super::pace::PacerStatus;
 use super::{Answer, Runner};
 use crate::board::{Skip, WorkerModel};
 use crate::ports::{SessionId, Timestamp};
+use crate::relay::Settled;
 use crate::settings::MergeAuthority;
 use crate::state::{LeaseHeld, Ruling, RunState, StateError, Waiting};
 use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Turn, WorkItem};
 
 /// The triggers a runner answers
-pub const ACTIONS: [&str; 9] = [
-    "status", "start", "pause", "add", "rework", "adopt", "rule", "gate", "drop",
+pub const ACTIONS: [&str; 10] = [
+    "status", "start", "pause", "add", "rework", "adopt", "rule", RELAY_RULE, "gate", "drop",
 ];
 
-/// What `rule` takes, as its refusals say
-const RULE_USAGE: &str = "`rule` takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`";
+/// `rule`, sent by the relay: the same answer, but the relay is not told
+/// of it, since it already knows
+pub const RELAY_RULE: &str = "relay-rule";
+
+/// What `rule` and `relay-rule` take, as their refusals say
+const RULE_USAGE: &str = "takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`";
 
 /// What `status` answers
 #[derive(Debug, Serialize)]
@@ -113,6 +118,7 @@ enum Request {
     Rework(u64),
     Adopt(u64),
     Rule(u64, Answer),
+    RelayRule(u64, Answer),
     Gate,
     Drop,
 }
@@ -120,8 +126,10 @@ enum Request {
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
 ///
 /// Blank params count as none. `add` takes an issue number, `rework` and
-/// `adopt` a pull request number, `rule` takes `<id> yes`, `<id> no <note>` or
-/// `<id> answer <text>`, and every other action takes nothing.
+/// `adopt` a pull request number, `rule` and `relay-rule` take `<id> yes`,
+/// `<id> no <note>` or `<id> answer <text>`, and every other action takes
+/// nothing. A ruling the relay was sent, settled by anything but
+/// `relay-rule`, is told to it.
 pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> String {
     let error = |message: String| serde_json::json!({ "error": message }).to_string();
     let request = match read(action, params.map(str::trim).filter(|p| !p.is_empty())) {
@@ -131,6 +139,14 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
     // Memory changes only after a save succeeds, so a panicked holder
     // cannot have left the runner half changed.
     let mut runner = lock(runner);
+    let settled = match &request {
+        Request::Rule(_, Answer::Yes) => Some(Settled::Yes),
+        Request::Rule(_, Answer::No(note)) => Some(Settled::No(note.clone())),
+        Request::Rule(_, Answer::Text(text)) => Some(Settled::Answer(text.clone())),
+        Request::Drop => Some(Settled::Dropped),
+        _ => None,
+    }
+    .map(|how| (how, runner.relayed()));
     let changed = match request {
         Request::Status => Ok(()),
         Request::Start => runner.start().map_err(|e| e.to_string()),
@@ -138,10 +154,15 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
         Request::Add(issue) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
         Request::Rework(number) => runner.rework(number).map(drop).map_err(|e| e.to_string()),
         Request::Adopt(number) => runner.adopt(number).map_err(|e| e.to_string()),
-        Request::Rule(id, answer) => runner.rule(id, answer).map_err(|e| e.to_string()),
+        Request::Rule(id, answer) | Request::RelayRule(id, answer) => {
+            runner.rule(id, answer).map_err(|e| e.to_string())
+        }
         Request::Gate => runner.gate().map_err(|e| e.to_string()),
         Request::Drop => runner.drop_work_item().map_err(|e| e.to_string()),
     };
+    if let (Ok(()), Some((how, relayed))) = (&changed, settled) {
+        runner.settled_without_relay(&relayed, &how);
+    }
     match changed {
         Ok(()) => serde_json::to_string(&runner.status()).expect("status serializes to JSON"),
         Err(e) => error(e),
@@ -162,8 +183,13 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
             .map(Request::Adopt)
             .ok_or_else(|| format!("{p:?} is not a pull request number")),
         ("adopt", None) => Err("`adopt` takes a pull request number".into()),
-        ("rule", Some(p)) => read_rule(p).ok_or_else(|| format!("{RULE_USAGE}, not {p:?}")),
-        ("rule", None) => Err(RULE_USAGE.into()),
+        ("rule", Some(p)) => read_rule(p)
+            .map(|(id, answer)| Request::Rule(id, answer))
+            .ok_or_else(|| format!("`{action}` {RULE_USAGE}, not {p:?}")),
+        (RELAY_RULE, Some(p)) => read_rule(p)
+            .map(|(id, answer)| Request::RelayRule(id, answer))
+            .ok_or_else(|| format!("`{action}` {RULE_USAGE}, not {p:?}")),
+        ("rule" | RELAY_RULE, None) => Err(format!("`{action}` {RULE_USAGE}")),
         (_, _) if !ACTIONS.contains(&action) => Err(format!("unknown action `{action}`")),
         (_, Some(_)) => Err(format!("`{action}` takes no params")),
         ("start", None) => Ok(Request::Start),
@@ -174,7 +200,7 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
     }
 }
 
-fn read_rule(params: &str) -> Option<Request> {
+fn read_rule(params: &str) -> Option<(u64, Answer)> {
     let (id, rest) = params.split_once(char::is_whitespace)?;
     let id = number(id)?;
     let rest = rest.trim_start();
@@ -184,7 +210,7 @@ fn read_rule(params: &str) -> Option<Request> {
         Some(("answer", text)) if !text.trim().is_empty() => Answer::Text(text.trim().to_owned()),
         _ => return None,
     };
-    Some(Request::Rule(id, answer))
+    Some((id, answer))
 }
 
 /// Whether `params` reads as `rule`'s own `<id> no <note>` or
@@ -197,7 +223,7 @@ fn read_rule(params: &str) -> Option<Request> {
 pub fn is_no_or_answer(params: &str) -> bool {
     matches!(
         read_rule(params),
-        Some(Request::Rule(_, Answer::No(_) | Answer::Text(_)))
+        Some((_, Answer::No(_) | Answer::Text(_)))
     )
 }
 
@@ -343,7 +369,7 @@ mod tests {
         let runner = rig.open().unwrap();
         for action in ACTIONS
             .into_iter()
-            .filter(|a| !["rework", "adopt", "rule", "gate", "drop"].contains(a))
+            .filter(|a| !["rework", "adopt", "rule", RELAY_RULE, "gate", "drop"].contains(a))
         {
             let params = (action == "add").then_some("7");
             assert_eq!(
@@ -363,6 +389,14 @@ mod tests {
         assert_eq!(
             rig.ask(&runner, "rule", Some("1 yes")),
             json!({ "error": "no ruling 1 is pending" })
+        );
+        assert_eq!(
+            rig.ask(&runner, RELAY_RULE, Some("1 yes")),
+            json!({ "error": "no ruling 1 is pending" })
+        );
+        assert_eq!(
+            rig.ask(&runner, RELAY_RULE, None),
+            json!({ "error": "`relay-rule` takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`" })
         );
         assert_eq!(
             rig.ask(&runner, "merge", None),
