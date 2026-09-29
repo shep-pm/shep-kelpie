@@ -1,7 +1,9 @@
 //! The board: which ready issue becomes the next work item
 //!
 //! The board's input is the project's open issues labelled `ready-for-agent`.
-//! The oldest one, by issue number, is dispatched next. An issue that already
+//! The one with the highest priority is dispatched next: `priority: P0`, then
+//! `P1`, `P2`, `P3`, then an issue with no priority label. Within a priority
+//! the oldest goes first, by issue number. An issue that already
 //! has an open pull request or an assignee is someone's work in progress, and
 //! is skipped. So is one whose `worker:` label cannot be read, since kelpie
 //! would not know which model to run it on. An issue waits while any issue it
@@ -21,6 +23,14 @@ pub const READY: &str = "ready-for-agent";
 
 /// The prefix of the label that overrides the worker's model and effort
 const WORKER_LABEL: &str = "worker:";
+
+// The priority labels, highest first. An issue with none ranks after them all.
+const PRIORITIES: [&str; 4] = [
+    "priority: P0",
+    "priority: P1",
+    "priority: P2",
+    "priority: P3",
+];
 
 // The names a `worker:` label may use, and the model each one runs.
 const MODELS: [(&str, &str); 4] = [
@@ -160,14 +170,15 @@ pub struct Pick {
     pub skipped: Vec<Skip>,
 }
 
-/// Picks the oldest ready issue that nobody is working on
+/// Picks the ready issue that nobody is working on, highest priority first and
+/// oldest first within a priority
 ///
 /// `finished` lists the issues whose work items kelpie already finished. The
 /// forge can still list one as open and ready for a while after its pull
 /// request merges, so the board never takes one again.
 pub fn pick(ready: &[ReadyIssue], open: &[OpenPullRequest], finished: &[u64]) -> Pick {
     let mut ready: Vec<&ReadyIssue> = ready.iter().collect();
-    ready.sort_by_key(|i| i.number);
+    ready.sort_by_key(|i| (priority_rank(&i.labels), i.number));
     let mut skipped = Vec::new();
     for issue in ready {
         let number = issue.number;
@@ -209,6 +220,15 @@ pub fn pick(ready: &[ReadyIssue], open: &[OpenPullRequest], finished: &[u64]) ->
         issue: None,
         skipped,
     }
+}
+
+// Where an issue's priority label puts it: 0 for P0 to 3 for P3, and 4 with
+// none. With several, the highest counts.
+fn priority_rank(labels: &[String]) -> usize {
+    PRIORITIES
+        .iter()
+        .position(|p| labels.iter().any(|l| l == p))
+        .unwrap_or(PRIORITIES.len())
 }
 
 /// The worker's model and effort from a `worker:<model>-<effort>` label, if the issue has one
@@ -318,6 +338,56 @@ mod tests {
         let pick = pick(&[ready(16), ready(12), ready(14)], &[], &[]);
         assert_eq!(pick.issue, Some(12));
         assert_eq!(pick.skipped, []);
+    }
+
+    fn prioritised(number: u64, priority: &str) -> ReadyIssue {
+        let mut issue = ready(number);
+        issue.labels.push(priority.into());
+        issue
+    }
+
+    #[test]
+    fn a_p0_issue_is_picked_before_an_older_unlabelled_one() {
+        let pick = pick(&[ready(3), prioritised(9, "priority: P0")], &[], &[]);
+        assert_eq!(pick.issue, Some(9));
+        assert_eq!(pick.skipped, []);
+    }
+
+    #[test]
+    fn priorities_order_the_board_p0_to_p3_then_unlabelled_oldest_first_within_each() {
+        let mut order = Vec::new();
+        let mut issues = vec![
+            ready(1),
+            prioritised(2, "priority: P3"),
+            prioritised(3, "priority: P1"),
+            ready(4),
+            prioritised(5, "priority: P0"),
+            prioritised(6, "priority: P2"),
+            prioritised(7, "priority: P1"),
+            prioritised(8, "priority: P0"),
+        ];
+        while let Some(next) = pick(&issues, &[], &[]).issue {
+            order.push(next);
+            issues.retain(|i| i.number != next);
+        }
+        assert_eq!(order, [5, 8, 3, 7, 6, 2, 1, 4]);
+    }
+
+    #[test]
+    fn an_issue_with_several_priority_labels_ranks_by_the_highest() {
+        let mut both = prioritised(9, "priority: P3");
+        both.labels.push("priority: P1".into());
+        let pick = pick(&[prioritised(2, "priority: P2"), both], &[], &[]);
+        assert_eq!(pick.issue, Some(9));
+    }
+
+    #[test]
+    fn a_blocked_p0_issue_waits_and_the_next_priority_is_picked() {
+        let mut p0 = blocked(9, &[(4, true)]);
+        p0.labels.push("priority: P0".into());
+        let pick = pick(&[p0, ready(1)], &[], &[]);
+        assert_eq!(pick.issue, Some(1));
+        assert_eq!(pick.skipped.len(), 1);
     }
 
     #[test]
