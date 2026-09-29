@@ -17,6 +17,7 @@ pub(crate) struct FakeRelay {
     told: Mutex<Vec<String>>,
     clears: AtomicUsize,
     up: AtomicBool,
+    stale: AtomicBool,
 }
 
 impl FakeRelay {
@@ -41,9 +42,22 @@ impl FakeRelay {
     pub(crate) fn set_up(&self, up: bool) {
         self.up.store(up, Ordering::SeqCst);
     }
+
+    /// Makes the next renew find the relay on older files and clear it
+    pub(crate) fn set_stale(&self) {
+        self.stale.store(true, Ordering::SeqCst);
+    }
 }
 
 impl Relay for FakeRelay {
+    fn renew(&self) -> Result<bool, RelayError> {
+        let stale = self.stale.swap(false, Ordering::SeqCst);
+        if stale {
+            self.clears.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(stale)
+    }
+
     fn send(&self, message: &str, model: &str, effort: Effort) -> Result<(), RelayError> {
         if !self.up.load(Ordering::SeqCst) {
             return Err(RelayError::Unreachable("the rig's relay is down".into()));

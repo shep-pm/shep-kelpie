@@ -124,23 +124,33 @@ pub(super) fn post_due(
     relay: &dyn Relay,
     alerts: &dyn Alerts,
 ) -> Option<Result<StepReport, StateError>> {
-    let due = lock(runner).alert_due()?;
-    let mut relayed = due.relay_held;
+    let mut due = lock(runner).alert_due()?;
     let mut relay_failed = None;
-    if let Some(message) = &due.relay {
-        // A notice never clears: a clear would end a question still up.
-        let clear_due = matches!(due.of, Posting::Ruling(_)) && lock(runner).relay_clear_due();
-        if clear_due
-            && relay.clear().is_ok()
-            && let Err(e) = lock(runner).relay_emptied()
-        {
-            return Some(Err(e));
+    if due.relay.is_some() {
+        // A notice never clears on the day: a clear would end a question still up.
+        let daily = matches!(due.of, Posting::Ruling(_)) && lock(runner).relay_clear_due();
+        let renewed = relay.renew();
+        let cleared =
+            renewed.as_ref().is_ok_and(|&cleared| cleared) || (daily && relay.clear().is_ok());
+        if cleared {
+            let mut runner = lock(runner);
+            if let Err(e) = runner.relay_emptied() {
+                return Some(Err(e));
+            }
+            // Every ruling the clear took goes back, oldest first.
+            due = runner.alert_due()?;
         }
-        match relay.send(&message.text, &message.model, message.effort) {
-            Ok(()) => relayed = true,
-            Err(e) => relay_failed = Some(e),
+        match (renewed, &due.relay) {
+            (Err(e), _) => relay_failed = Some(e),
+            (Ok(_), Some(message)) => {
+                if let Err(e) = relay.send(&message.text, &message.model, message.effort) {
+                    relay_failed = Some(e);
+                }
+            }
+            (Ok(_), None) => {}
         }
     }
+    let relayed = due.relay_held || (due.relay.is_some() && relay_failed.is_none());
     let sent = match &due.webhook {
         Some(webhook) => alerts.post(webhook, &due.alert),
         None => relay_failed.map_or(Ok(()), |e| Err(AlertError::Relay(e.to_string()))),
@@ -193,7 +203,10 @@ impl Runner {
     pub(super) fn alert_due(&mut self) -> Option<Due> {
         let now = self.ports.clock.now();
         let waiting = |retry: Option<Retry>, of| retry.is_some_and(|r| r.of == of && now < r.at);
-        if let Some(ruling) = self.state.rulings.iter().find(|r| !r.alerted) {
+        let resend = self.channels.has(Channel::Relay);
+        if let Some(ruling) =
+            (self.state.rulings.iter()).find(|r| !r.alerted || (r.resend && resend))
+        {
             let (id, kind) = (ruling.id, ruling.kind.clone());
             if waiting(self.retry, Posting::Ruling(id)) {
                 return None;
@@ -234,7 +247,7 @@ impl Runner {
                 ))
             }),
             relay_held: ruling.relayed,
-            webhook: self.webhook.clone(),
+            webhook: self.webhook.clone().filter(|_| !ruling.alerted),
             alert: Alert {
                 title: format!("kelpie: {project} ruling {id}"),
                 text: ruling.question.clone(),
@@ -269,14 +282,17 @@ impl Runner {
         due
     }
 
-    /// Forgets which rulings the relay holds, once a clear left it holding none
+    /// Records a clear, which left the relay holding no ruling: each one it
+    /// held is sent to it again
     fn relay_emptied(&mut self) -> Result<(), StateError> {
+        self.relaying = None;
         if !self.state.rulings.iter().any(|r| r.relayed) {
             return Ok(());
         }
         let mut next = self.state.clone();
-        for ruling in &mut next.rulings {
+        for ruling in next.rulings.iter_mut().filter(|r| r.relayed) {
             ruling.relayed = false;
+            ruling.resend = true;
         }
         self.save(next)
     }
@@ -339,6 +355,7 @@ impl Runner {
             Posting::Ruling(id) => {
                 if let Some(ruling) = next.rulings.iter_mut().find(|r| r.id == id) {
                     ruling.alerted = true;
+                    ruling.resend = false;
                 }
                 // A reply may come even if the ruling is settled first.
                 self.read_replies_from(self.ports.clock.now());
@@ -389,6 +406,9 @@ fn notice_alert(project: &str, notice: &Notice) -> Alert {
 
 #[cfg(test)]
 mod channels;
+
+#[cfg(test)]
+mod clears;
 
 #[cfg(test)]
 mod tests {
@@ -705,38 +725,6 @@ mod tests {
             .unwrap();
         step(&runner).unwrap();
         assert_eq!(rig.relay.told().len(), 1);
-    }
-
-    #[test]
-    fn a_cleared_relay_is_told_nothing_of_a_question_it_never_asked() {
-        let (rig, runner, _) = Rig::parked("rotom");
-        rig.relay.set_up(true);
-        step(&runner).unwrap(); // clears, then relays ruling 1
-        drop(runner);
-        // A second ruling raised a day later, while ruling 1 still waits.
-        let path = rig.paths().state;
-        let mut state: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        let mut second = state["rulings"][0].clone();
-        second["id"] = json!(2);
-        second["kind"] = json!({ "kind": "closed" });
-        second["alerted"] = json!(false);
-        second["relayed"] = json!(false);
-        state["rulings"].as_array_mut().unwrap().push(second);
-        std::fs::write(&path, state.to_string()).unwrap();
-        let runner = rig.open().unwrap();
-        rig.clock.advance(Rig::DAY);
-        assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 2 }));
-        assert_eq!(rig.relay.clears(), 2);
-        let rulings = &rig.ask(&runner, "status", None)["rulings"];
-        assert_eq!(
-            (&rulings[0]["relayed"], &rulings[1]["relayed"]),
-            (&json!(false), &json!(true))
-        );
-        rig.ask(&runner, "rule", Some("1 no not yet"));
-        rig.claude.script([Scripted::Text("CLEAN")]);
-        step(&runner).unwrap();
-        assert_eq!(rig.relay.told(), Vec::<String>::new());
     }
 
     #[test]

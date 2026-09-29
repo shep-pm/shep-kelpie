@@ -24,6 +24,7 @@ fn big_state(n: u64) -> ProjectState {
             kind: RulingKind::Closed,
             alerted: false,
             relayed: false,
+            resend: false,
         })
         .collect();
     state
@@ -58,6 +59,7 @@ fn a_saved_state_loads_back_whole() {
         },
         alerted: true,
         relayed: true,
+        resend: false,
     });
     state.last_ruling = 1;
     state.leases.push(LeaseHeld {
@@ -140,6 +142,7 @@ fn the_file_format_is_pinned() {
         kind,
         alerted: id.is_multiple_of(2),
         relayed: id.is_multiple_of(3),
+        resend: false,
     };
     state.rulings = vec![
         ruling(

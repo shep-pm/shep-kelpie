@@ -639,6 +639,17 @@ impl core::error::Error for AlertError {}
 /// message: the relay's own reply, if any, is not read here. The
 /// maintainer's answer comes back later through `shep trigger`, on its own.
 pub trait Relay: Send + Sync {
+    /// Writes the relay's settings and instructions files, and clears a
+    /// relay started on older ones, which reads both only when it starts
+    ///
+    /// Returns whether it cleared. Called before each [`Self::send`].
+    ///
+    /// # Errors
+    ///
+    /// [`RelayError`] when the files cannot be written, or a running relay
+    /// on older ones could not be deleted.
+    fn renew(&self) -> Result<bool, RelayError>;
+
     /// Sends `message`, starting the relay first if none is running
     ///
     /// `model` and `effort` are passed to `--model`/`--effort` only when a
