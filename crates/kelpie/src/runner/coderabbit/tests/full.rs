@@ -150,8 +150,8 @@ fn a_full_review_answered_with_nothing_again_is_the_maintainers_after_two_hours(
         rig.ask(&runner, "status", None)["rulings"][0]["kind"]["kind"],
         "coderabbit-silent"
     );
-    let asked = rig.forge.comments().into_iter();
-    assert_eq!(asked.filter(|(_, c)| c == FULL_REVIEW).count(), 1);
+    let comments = rig.forge.comments().into_iter();
+    assert_eq!(comments.filter(|(_, c)| c == FULL_REVIEW).count(), 1);
 }
 
 #[test]

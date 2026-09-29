@@ -279,6 +279,18 @@ mod tests {
     }
 
     #[test]
+    fn a_status_takes_its_commit_from_its_url() {
+        let line = br#"{"created_at":"2026-09-29T05:53:45Z","description":"Review completed","url":"https://api.github.com/repos/shep-pm/shep/statuses/7d30d0f6f8d03314fe9f060b4627643bb32db8cc"}"#;
+        let parsed = parse_statuses(line).unwrap();
+        assert_eq!(parsed[0].commit, "7d30d0f6f8d03314fe9f060b4627643bb32db8cc");
+        assert_eq!(parsed[0].description, "Review completed");
+        assert!(matches!(
+            parse_statuses(br#"{"url":"x","created_at":"soon"}"#),
+            Err(ForgeError::Unreadable(_))
+        ));
+    }
+
+    #[test]
     fn a_thread_whose_first_comment_has_no_author_is_not_coderabbits() {
         let reply = br#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
             {"id":"a","isResolved":false,"path":"x","line":1,
