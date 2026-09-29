@@ -330,15 +330,20 @@ impl Runner {
                 )));
             }
         }
+        let record = item.finished(self.ports.clock.now(), merged);
         let report = StepReport::Finished {
             issue: item.issue,
             pull_request: item.pull_request,
             merged,
             spend: item.spend(),
             qwen: item.qwen,
+            split: record.as_ref().map(|r| r.split),
         };
         let mut next = self.state.clone();
         next.work_items.retain(|open| open.issue != item.issue);
+        if let Some(record) = record {
+            next.record_finished(record);
+        }
         // Rulings about this work item go with it, a question asked before
         // its pull request included.
         next.rulings.retain(|r| r.issue != Some(item.issue));

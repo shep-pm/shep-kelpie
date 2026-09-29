@@ -42,6 +42,8 @@ kill_timeout = "10s"
 
 Then `SHEP_HOME=~/.kelpie/shep shep trigger shep status`. `shep describe shep` labels each Claude session the runner starts with its issue and role, such as `#114 worker`.
 
+`status` shows each open work item's time split by where it went, and `shep trigger <project> timings [N]` totals the split over the last N finished work items (10 by default), as a table.
+
 ## The local round
 
 Each pull request goes through a review loop before CI. Rounds alternate between a local model and a Claude session, local first, and the loop ends once one of each in a row finds nothing above a nit. `review.local` in a project's table picks the local round:

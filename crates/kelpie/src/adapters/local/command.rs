@@ -7,22 +7,28 @@
 //! disk, never from stdout: only the marker tells a finished `round-N.txt`
 //! from one a killed round left.
 
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use super::LocalReviewer;
+use super::watch::Watch;
 use crate::adapters::process::RunError;
-use crate::ports::{Finding, ReviewerError, Severity, parse_findings};
+use crate::lease::gpu::GpuLock;
+use crate::ports::{Finding, ReviewerError, Round, Severity, parse_findings};
 use crate::settings::LocalCommand;
 
 /// What every call of one round shares
 #[derive(Clone, Copy)]
-struct Round<'a> {
+struct Run<'a> {
     script: &'a Path,
     worktree: &'a Path,
     base: &'a str,
     head: &'a str,
     round: u32,
+    // What every script run of the round has queued for the GPU so far
+    waited: &'a Cell<Duration>,
 }
 
 impl LocalReviewer {
@@ -36,14 +42,16 @@ impl LocalReviewer {
         base: &str,
         out: &Path,
         round: u32,
-    ) -> Result<Vec<Finding>, ReviewerError> {
+    ) -> Result<Round, ReviewerError> {
         let head = super::head(worktree)?;
-        let at = Round {
+        let waited = Cell::new(Duration::ZERO);
+        let at = Run {
             script: &local.command,
             worktree,
             base,
             head: &head,
             round,
+            waited: &waited,
         };
         let findings = self.run(&at, out, None)?;
         let mut combined = Vec::with_capacity(findings.len());
@@ -63,12 +71,15 @@ impl LocalReviewer {
                 combined.push(finding);
             }
         }
-        Ok(combined)
+        Ok(Round {
+            findings: combined,
+            gpu_wait: waited.get(),
+        })
     }
 
     fn run(
         &self,
-        at: &Round<'_>,
+        at: &Run<'_>,
         out: &Path,
         files: Option<&str>,
     ) -> Result<Vec<Finding>, ReviewerError> {
@@ -91,10 +102,20 @@ impl LocalReviewer {
                 command.arg("--diff").arg(at.base);
             }
         }
-        let output = self.processes.output(&mut command).map_err(|e| match e {
+        // The script queues for the GPU lock itself, so its wait is seen
+        // from outside: the lock's holder becoming the script's own pid.
+        let watch = RefCell::new(None);
+        let spawned = |pid| {
+            let lock = GpuLock::under(&self.temp_dir);
+            *watch.borrow_mut() = Some(Watch::start(lock, pid));
+        };
+        let output = self.processes.output_telling(&mut command, None, &spawned);
+        let queued = watch.into_inner().map_or(Duration::ZERO, Watch::finish);
+        at.waited.set(at.waited.get() + queued);
+        let output = output.map_err(|e| match e {
             RunError::Io(e) => ReviewerError::Spawn(e.to_string()),
             RunError::Stopped => ReviewerError::Stopped,
-            // `output` never sets a deadline, so this never fires.
+            // `output_telling` sets no deadline here, so this never fires.
             RunError::TimedOut => ReviewerError::Failed("timed out".into()),
         })?;
         if !output.status.success() {
@@ -120,7 +141,7 @@ impl LocalReviewer {
     // are folded back in against the original path.
     fn hunk_round(
         &self,
-        at: &Round<'_>,
+        at: &Run<'_>,
         out: &Path,
         skipped_index: u32,
         skipped: &Finding,
@@ -220,6 +241,7 @@ mod tests {
         let out = home.path().join("out");
         let findings = LocalReviewer::default()
             .round(&local(&script), &worktree, "origin/main", &out, 1)
+            .map(|round| round.findings)
             .unwrap();
         assert_eq!(findings[0].file, head);
     }
@@ -251,6 +273,7 @@ mod tests {
         assert_eq!(
             reviewer
                 .round(&local(&script), &worktree, "origin/main", &out, 1)
+                .map(|round| round.findings)
                 .unwrap(),
             vec![]
         );
@@ -283,6 +306,7 @@ mod tests {
 
         let findings = reviewer
             .round(&local(&script), &worktree, "origin/main", &out, 1)
+            .map(|round| round.findings)
             .unwrap();
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].file, "/var/folders/xx/yy/T/");
@@ -306,7 +330,9 @@ mod tests {
         let reviewer = LocalReviewer::default();
 
         assert_eq!(
-            reviewer.round(&local(&script), &worktree, "origin/main", &out, 1),
+            reviewer
+                .round(&local(&script), &worktree, "origin/main", &out, 1)
+                .map(|round| round.findings),
             Err(ReviewerError::Incomplete)
         );
     }
@@ -327,7 +353,9 @@ mod tests {
         std::fs::write(out.join("round-1.txt"), "HIGH|old.rs:1|old|old\n").unwrap();
         std::fs::write(out.join("round-1.txt.done"), "").unwrap();
         assert_eq!(
-            LocalReviewer::default().round(&local(&script), &worktree, "origin/main", &out, 1),
+            LocalReviewer::default()
+                .round(&local(&script), &worktree, "origin/main", &out, 1)
+                .map(|round| round.findings),
             Err(ReviewerError::Incomplete)
         );
     }
@@ -383,6 +411,7 @@ esac
         assert_eq!(
             reviewer
                 .round(&local(&script), &worktree, "origin/main", &out, 1)
+                .map(|round| round.findings)
                 .unwrap(),
             vec![Finding {
                 severity: Severity::Medium,
@@ -421,6 +450,7 @@ esac
         assert_eq!(
             reviewer
                 .round(&local(&script), &worktree, "origin/main", &out, 1)
+                .map(|round| round.findings)
                 .unwrap(),
             vec![skip]
         );
@@ -469,6 +499,7 @@ esac
         let reviewer = LocalReviewer::default();
         let findings = reviewer
             .round(&local(&script), &worktree, "origin/main", &out, 1)
+            .map(|round| round.findings)
             .unwrap();
         assert_eq!(
             findings,
@@ -537,6 +568,7 @@ esac
         let reviewer = LocalReviewer::default();
         let findings = reviewer
             .round(&local(&script), &worktree, "origin/main", &out, 1)
+            .map(|round| round.findings)
             .unwrap();
         assert_eq!(findings.len(), 2, "{findings:?}");
         assert_eq!(findings[0].file, "sub/a/util.rs");

@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
 use crate::ports::Timestamp;
+use crate::timings::{Finished, HISTORY_KEPT};
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
 
 /// The state file's format version
@@ -47,6 +48,9 @@ pub struct ProjectState {
     /// Issues whose work items kelpie finished, which the board never takes again
     #[serde(default)]
     pub finished: Vec<u64>,
+    /// Where the time went for the last work items kelpie finished, oldest first
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<Finished>,
     /// The forge's ids of the reviews that started a rework or were refused
     /// one. None of them starts another.
     #[serde(default)]
@@ -76,6 +80,7 @@ impl ProjectState {
             rulings: Vec::new(),
             last_ruling: 0,
             finished: Vec::new(),
+            history: Vec::new(),
             reworked: Vec::new(),
             adopted: Vec::new(),
             leases: Vec::new(),
@@ -97,6 +102,14 @@ impl ProjectState {
     /// The open work item for `issue`, to change
     pub fn item_mut(&mut self, issue: u64) -> Option<&mut WorkItem> {
         self.work_items.iter_mut().find(|item| item.issue == issue)
+    }
+
+    /// Adds a finished work item's split to the history, dropping the oldest
+    /// past [`HISTORY_KEPT`]
+    pub fn record_finished(&mut self, record: Finished) {
+        self.history.push(record);
+        let extra = self.history.len().saturating_sub(HISTORY_KEPT);
+        self.history.drain(..extra);
     }
 
     // A version 1 file held one work item, and every ruling in it was that

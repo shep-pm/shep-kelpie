@@ -8,16 +8,17 @@
 
 mod command;
 mod endpoint;
+mod watch;
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::process::Processes;
 use crate::lease::gpu::{self, Attempt, Claim, GpuLock};
-use crate::ports::{Finding, Reviewer, ReviewerError};
+use crate::ports::{Reviewer, ReviewerError, Round};
 use crate::settings::LocalRound;
 
 /// How often a round waiting on the GPU lock looks for a stop
@@ -69,6 +70,7 @@ impl LocalReviewer {
         let cannot = |e: std::io::Error| {
             ReviewerError::Failed(format!("cannot take {}: {e}", lock.path().display()))
         };
+        let began = Instant::now();
         let mut waited = 0;
         loop {
             match lock.try_take(&claim).map_err(cannot)? {
@@ -76,6 +78,7 @@ impl LocalReviewer {
                     return Ok(GpuHold {
                         lock,
                         pid: claim.pid,
+                        waited: began.elapsed(),
                     });
                 }
                 Attempt::Cleared(_) => continue,
@@ -99,6 +102,7 @@ impl LocalReviewer {
 struct GpuHold {
     lock: GpuLock,
     pid: u32,
+    waited: Duration,
 }
 
 impl Drop for GpuHold {
@@ -123,18 +127,21 @@ impl Reviewer for LocalReviewer {
         base: &str,
         out: &Path,
         round: u32,
-    ) -> Result<Vec<Finding>, ReviewerError> {
-        let _hold = match local.gpu_lease() {
+    ) -> Result<Round, ReviewerError> {
+        let hold = match local.gpu_lease() {
             true => Some(self.hold_gpu(round, worktree)?),
             false => None,
         };
-        match local {
-            LocalRound::Off {} => Ok(Vec::new()),
-            LocalRound::Command(local) => self.command_round(local, worktree, base, out, round),
-            LocalRound::Endpoint(endpoint) => {
-                self.endpoint_round(endpoint, worktree, base, out, round)
-            }
-        }
+        let mut found = match local {
+            LocalRound::Off {} => Round::default(),
+            LocalRound::Command(local) => self.command_round(local, worktree, base, out, round)?,
+            LocalRound::Endpoint(endpoint) => Round {
+                findings: self.endpoint_round(endpoint, worktree, base, out, round)?,
+                gpu_wait: Duration::ZERO,
+            },
+        };
+        found.gpu_wait += hold.map_or(Duration::ZERO, |hold| hold.waited);
+        Ok(found)
     }
 }
 
@@ -253,7 +260,10 @@ mod tests {
         for (gpu_lease, seen) in [(false, "free"), (true, "held")] {
             let out = dir.path().join(format!("out-{gpu_lease}"));
             let local = command(&script, gpu_lease);
-            let findings = reviewer.round(&local, &worktree, "main", &out, 1).unwrap();
+            let findings = reviewer
+                .round(&local, &worktree, "main", &out, 1)
+                .map(|round| round.findings)
+                .unwrap();
             assert_eq!(findings[0].file, seen, "gpu_lease = {gpu_lease}");
             assert!(
                 lock.holder().is_none(),
@@ -280,7 +290,9 @@ mod tests {
         let local = command(Path::new("/bin/true"), true);
         let out = dir.path().join("out");
         let started = std::time::Instant::now();
-        let result = reviewer.round(&local, dir.path(), "main", &out, 1);
+        let result = reviewer
+            .round(&local, dir.path(), "main", &out, 1)
+            .map(|round| round.findings);
         stopping.join().unwrap();
         assert_eq!(result, Err(ReviewerError::Stopped));
         assert!(

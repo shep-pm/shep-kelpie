@@ -141,6 +141,7 @@ fn a_round_sends_the_diff_with_the_prompt_and_reads_the_findings() {
             &out,
             3,
         )
+        .map(|round| round.findings)
         .unwrap();
     assert_eq!(
         findings,
@@ -181,6 +182,7 @@ fn a_diff_bigger_than_the_context_goes_in_several_requests() {
             &out,
             1,
         )
+        .map(|round| round.findings)
         .unwrap();
     assert!(findings.is_empty(), "CLEAN from every chunk");
     let requests = server.requests();
@@ -203,6 +205,7 @@ fn an_empty_diff_asks_nothing() {
     let out = dir.path().join("out");
     let findings = LocalReviewer::default()
         .round(&local(server.url(), 8192), &worktree, "HEAD", &out, 1)
+        .map(|round| round.findings)
         .unwrap();
     assert!(findings.is_empty());
     assert!(server.requests().is_empty());
@@ -222,6 +225,7 @@ fn a_refused_or_unreadable_reply_fails_the_round() {
     let out = dir.path().join("out");
     let err = reviewer
         .round(&local, &worktree, "origin/main", &out, 1)
+        .map(|round| round.findings)
         .unwrap_err();
     let url = format!("{}/chat/completions", server.url());
     assert_eq!(
@@ -232,6 +236,7 @@ fn a_refused_or_unreadable_reply_fails_the_round() {
     );
     let err = reviewer
         .round(&local, &worktree, "origin/main", &out, 2)
+        .map(|round| round.findings)
         .unwrap_err();
     assert_eq!(err, ReviewerError::Unreadable("not json".into()));
 }
@@ -252,6 +257,7 @@ fn a_reply_cut_off_while_thinking_fails_the_round() {
             &out,
             1,
         )
+        .map(|round| round.findings)
         .unwrap_err();
     let url = format!("{}/chat/completions", server.url());
     assert_eq!(
@@ -278,7 +284,9 @@ fn a_reply_with_no_findings_that_is_not_clean_fails_the_round() {
     let url = server.url();
     for said in ["", "", "The code looks fine."] {
         assert_eq!(
-            reviewer.round(&local, &worktree, "origin/main", &out, 1),
+            reviewer
+                .round(&local, &worktree, "origin/main", &out, 1)
+                .map(|round| round.findings),
             Err(ReviewerError::Failed(format!(
                 "{url}'s reply is neither findings nor CLEAN: {said}"
             )))
@@ -286,7 +294,9 @@ fn a_reply_with_no_findings_that_is_not_clean_fails_the_round() {
         assert!(!out.join("round-1.txt.done").exists());
     }
     assert_eq!(
-        reviewer.round(&local, &worktree, "origin/main", &out, 1),
+        reviewer
+            .round(&local, &worktree, "origin/main", &out, 1)
+            .map(|round| round.findings),
         Ok(vec![])
     );
 }
@@ -302,9 +312,13 @@ fn a_retried_round_never_reads_the_last_tries_reply() {
     let reviewer = LocalReviewer::default();
     let local = local(server.url(), 8192);
     let out = dir.path().join("out");
-    let first = reviewer.round(&local, &worktree, "origin/main", &out, 1);
+    let first = reviewer
+        .round(&local, &worktree, "origin/main", &out, 1)
+        .map(|round| round.findings);
     assert_eq!(first.unwrap().len(), 1);
-    let again = reviewer.round(&local, &worktree, "origin/main", &out, 1);
+    let again = reviewer
+        .round(&local, &worktree, "origin/main", &out, 1)
+        .map(|round| round.findings);
     assert_eq!(again, Err(ReviewerError::Unreadable(String::new())));
 }
 

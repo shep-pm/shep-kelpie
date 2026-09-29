@@ -13,12 +13,17 @@ use crate::ports::{SessionId, Timestamp};
 use crate::relay::Settled;
 use crate::settings::MergeAuthority;
 use crate::state::{LeaseHeld, Ruling, RunState, StateError, Waiting};
+use crate::timings::{Report, Split};
 use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Turn, WorkItem};
 
 /// The triggers a runner answers
-pub const ACTIONS: [&str; 10] = [
+pub const ACTIONS: [&str; 11] = [
     "status", "start", "pause", "add", "rework", "adopt", "rule", RELAY_RULE, "gate", "drop",
+    "timings",
 ];
+
+/// How many finished work items `timings` covers when it is not told
+const TIMINGS_LAST: usize = 10;
 
 /// `rule`, sent by the relay: the same answer, but the relay is not told
 /// of it, since it already knows
@@ -90,10 +95,16 @@ pub struct WorkItemStatus<'a> {
     pub by_role: Spend,
     /// Its qwen rounds, which cost no money
     pub qwen: QwenTally,
+    /// Seconds since its clock began, which its split adds up to
+    pub wall: u64,
+    /// Where those seconds went, once its clock has begun
+    pub split: Option<Split>,
 }
 
-impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
-    fn from(item: &'a WorkItem) -> Self {
+impl<'a> WorkItemStatus<'a> {
+    /// `item` as `status` shows it at `now`
+    pub fn at(item: &'a WorkItem, now: Timestamp) -> Self {
+        let split = item.split(now);
         Self {
             issue: item.issue,
             title: &item.title,
@@ -110,6 +121,8 @@ impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
             cost_usd: item.cost().usd(),
             by_role: item.spend(),
             qwen: item.qwen,
+            wall: split.map_or(0, |s| s.total()),
+            split,
         }
     }
 }
@@ -126,6 +139,7 @@ enum Request {
     RelayRule(u64, Answer),
     Gate(Option<u64>),
     Drop(Option<u64>),
+    Timings(usize),
 }
 
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
@@ -133,8 +147,9 @@ enum Request {
 /// Blank params count as none. `add` takes an issue number, `rework` and
 /// `adopt` a pull request number, `rule` and `relay-rule` take `<id> yes`,
 /// `<id> no <note>` or `<id> answer <text>`, `gate` and `drop` take the
-/// issue of the work item they are about when more than one is open, and
-/// every other action takes nothing.
+/// issue of the work item they are about when more than one is open,
+/// `timings` takes how many finished work items to total, and every other
+/// action takes nothing.
 ///
 /// A ruling the relay was sent, settled by anything but `relay-rule`, is
 /// told to it.
@@ -157,6 +172,10 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
     .map(|how| (how, runner.relayed()));
     let changed = match request {
         Request::Status => Ok(()),
+        Request::Timings(last) => {
+            return serde_json::to_string(&Report::of(&runner.state.history, last))
+                .expect("timings serialize to JSON");
+        }
         Request::Start => runner.start().map_err(|e| e.to_string()),
         Request::Pause => runner.pause().map_err(|e| e.to_string()),
         Request::Add(issue) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
@@ -197,6 +216,10 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
         ("drop", Some(p)) => number(p)
             .map(|issue| Request::Drop(Some(issue)))
             .ok_or_else(|| format!("{p:?} is not an issue number")),
+        ("timings", Some(p)) => number(p)
+            .and_then(|n| usize::try_from(n).ok())
+            .map(Request::Timings)
+            .ok_or_else(|| format!("`timings` takes a count of work items, not {p:?}")),
         ("rule", Some(p)) => read_rule(p)
             .map(|(id, answer)| Request::Rule(id, answer))
             .ok_or_else(|| format!("`{action}` {RULE_USAGE}, not {p:?}")),
@@ -208,6 +231,7 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
         (_, Some(_)) => Err(format!("`{action}` takes no params")),
         ("start", None) => Ok(Request::Start),
         ("pause", None) => Ok(Request::Pause),
+        ("timings", None) => Ok(Request::Timings(TIMINGS_LAST)),
         ("gate", None) => Ok(Request::Gate(None)),
         ("drop", None) => Ok(Request::Drop(None)),
         (_, None) => Ok(Request::Status),
@@ -445,10 +469,12 @@ mod tests {
     fn every_registered_action_is_answered_and_no_other() {
         let rig = Rig::new("koji");
         let runner = rig.open().unwrap();
-        for action in ACTIONS
-            .into_iter()
-            .filter(|a| !["rework", "adopt", "rule", RELAY_RULE, "gate", "drop"].contains(a))
-        {
+        for action in ACTIONS.into_iter().filter(|a| {
+            ![
+                "rework", "adopt", "rule", RELAY_RULE, "gate", "drop", "timings",
+            ]
+            .contains(a)
+        }) {
             let params = (action == "add").then_some("7");
             assert_eq!(
                 rig.ask(&runner, action, params)["project"],
@@ -456,6 +482,7 @@ mod tests {
                 "{action}"
             );
         }
+        assert_eq!(rig.ask(&runner, "timings", None)["items"], 0);
         assert_eq!(
             rig.ask(&runner, "rework", Some("71")),
             json!({ "error": "the work item for #7 is in flight" })

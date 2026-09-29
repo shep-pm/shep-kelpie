@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::board::WorkerModel;
 use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage, Verdict};
 use crate::shots::ShotsRecord;
+use crate::timings::Timings;
 
 mod spend;
 
@@ -106,6 +107,10 @@ pub struct WorkItem {
     /// The pull request's shots comment, once posted
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shots_comment: Option<u64>,
+    /// Where its time has gone. None until the first save after a kelpie
+    /// that keeps it, which starts the clock.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timings: Option<Timings>,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
 }

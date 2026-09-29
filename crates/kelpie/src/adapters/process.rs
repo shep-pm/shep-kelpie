@@ -44,6 +44,7 @@ struct Running {
 
 impl Processes {
     /// Runs `command` to its end with stdin closed, collecting its output
+    #[cfg(test)]
     pub(super) fn output(&self, command: &mut Command) -> Result<Output, RunError> {
         self.run(command, None, &|_| {})
     }

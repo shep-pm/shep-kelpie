@@ -15,6 +15,7 @@ use crate::ports::{
 };
 use crate::settings::LocalRound;
 use crate::shots::ShotsJob;
+use crate::timings::Split;
 use crate::work_item::{QwenTally, ReviewerKind, Spend};
 
 /// What asked for a rework on the pull request itself
@@ -253,6 +254,8 @@ pub enum StepReport {
         spend: Spend,
         /// Its qwen rounds
         qwen: QwenTally,
+        /// Where its time went, if its clock ran
+        split: Option<Split>,
     },
     /// A ruling was posted to the maintainer's webhook
     Alerted {
@@ -473,7 +476,10 @@ pub(super) enum Spent {
         session_cost: Cost,
     },
     /// A local round that ran, however it ended
-    Local,
+    Local {
+        /// Seconds of it spent queued for the GPU
+        gpu_wait: u64,
+    },
 }
 
 /// What a [`ReviewCall`] came back with, and what it spent

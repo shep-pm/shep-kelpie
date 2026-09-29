@@ -157,7 +157,7 @@ impl Runner {
 
     // Whether the project runs a local round, which sets who reviews a round
     // and how many clean rounds end the loop.
-    fn local_round(&self) -> bool {
+    pub(super) fn local_round(&self) -> bool {
         self.settings.review.local.is_on()
     }
 
@@ -393,8 +393,14 @@ pub(super) fn run_review_call(
         } => match reviewer.round(&local, &worktree, &base, &out, round) {
             Err(ReviewerError::Stopped) => stopped(),
             result => Reviewed {
-                result: ReviewResult::Findings(result.map_err(|e| e.to_string())),
-                spent: Some(Spent::Local),
+                spent: Some(Spent::Local {
+                    gpu_wait: result.as_ref().map_or(0, |round| round.gpu_wait.as_secs()),
+                }),
+                result: ReviewResult::Findings(
+                    result
+                        .map(|round| round.findings)
+                        .map_err(|e| e.to_string()),
+                ),
             },
         },
         ReviewCall::ClaudeRound(call) => {
@@ -448,10 +454,13 @@ pub(super) fn record_spent(item: &mut WorkItem, spent: Option<Spent>, now: Times
         }) => {
             item.record_call(role, now, session, usage, session_cost);
         }
-        Some(Spent::Local) => {
+        Some(Spent::Local { gpu_wait }) => {
             item.qwen.rounds += 1;
             if let ReviewCallState::Running { since } = item.review_call {
                 item.qwen.seconds += now.0.saturating_sub(since.0);
+            }
+            if let Some(timings) = &mut item.timings {
+                timings.gpu_waited(now, gpu_wait);
             }
         }
         None => {}
@@ -849,8 +858,16 @@ mod tests {
         item.review_call = ReviewCallState::Running {
             since: Timestamp(100),
         };
-        record_spent(&mut item, Some(Spent::Local), Timestamp(190));
-        record_spent(&mut item, Some(Spent::Local), Timestamp(200));
+        record_spent(
+            &mut item,
+            Some(Spent::Local { gpu_wait: 0 }),
+            Timestamp(190),
+        );
+        record_spent(
+            &mut item,
+            Some(Spent::Local { gpu_wait: 0 }),
+            Timestamp(200),
+        );
         assert_eq!(item.qwen.rounds, 2);
         assert_eq!(
             item.qwen.seconds, 90,

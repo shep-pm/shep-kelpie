@@ -747,7 +747,18 @@ pub trait Reviewer: Send + Sync {
         base: &str,
         out: &std::path::Path,
         round: u32,
-    ) -> Result<Vec<Finding>, ReviewerError>;
+    ) -> Result<Round, ReviewerError>;
+}
+
+/// What a finished local round found, and how much of its time went to
+/// waiting for the GPU
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Round {
+    /// What the round found
+    pub findings: Vec<Finding>,
+    /// How long it queued for the GPU lock before it could run. Zero for a
+    /// round that takes no lock.
+    pub gpu_wait: Duration,
 }
 
 /// Why a local round did not produce findings

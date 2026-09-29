@@ -30,6 +30,7 @@ pub mod shep_home;
 pub mod shepherd;
 pub mod shots;
 pub mod state;
+pub mod timings;
 pub mod webhook;
 pub mod work_item;
 pub mod worktree;
