@@ -59,7 +59,7 @@ pub struct ProjectState {
     /// What the week had spent when today began, once usage has been read
     #[serde(default)]
     pub pacing: Option<DayStart>,
-    /// Automatic merges not yet posted to the webhook, oldest first
+    /// Automatic merges not yet sent, oldest first
     #[serde(default)]
     pub notices: Vec<Notice>,
     /// Where reading the webhook's replies has got to

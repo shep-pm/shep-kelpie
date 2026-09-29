@@ -40,9 +40,8 @@ mod unfinished;
 const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
                         Carry on with the work item from where you left off.";
 
-/// Posts a ruling or a notice to the webhook, handles a reply on its
-/// topic, or runs the worker's next turn if one is due and the project is
-/// running
+/// Posts a ruling or a notice, handles a reply on the webhook's topic, or
+/// runs the worker's next turn if one is due and the project is running
 ///
 /// Each open work item is stepped in turn, starting after the one that did
 /// something last, and one with nothing to do yields to the next. Returns
