@@ -130,8 +130,12 @@ impl Runner {
     /// also goes to it as a comment, or why the change cannot be saved.
     /// Nothing is adopted then.
     pub fn adopt(&mut self, number: u64) -> Result<(), AdoptError> {
-        let in_flight = self.current().and_then(|i| i.pull_request);
-        if in_flight == Some(number) || self.waiting(number) {
+        let in_flight = self
+            .state
+            .work_items
+            .iter()
+            .any(|i| i.pull_request == Some(number));
+        if in_flight || self.waiting(number) {
             return Ok(());
         }
         let pr = self
@@ -167,7 +171,7 @@ impl Runner {
         open: &[OpenPullRequest],
     ) -> Result<(Option<Begin>, Vec<Skip>), StateError> {
         let mut skipped = Vec::new();
-        if self.current().is_some() {
+        if !self.state.work_items.is_empty() {
             return Ok((None, skipped));
         }
         let mut labelled: Vec<u64> = open

@@ -38,8 +38,12 @@ pub struct Status<'a> {
     pub run: RunState,
     /// When it last started or paused
     pub since: Timestamp,
-    /// The work item in flight
+    /// The oldest open work item, as a status before `work_items` showed it
     pub work_item: Option<WorkItemStatus<'a>>,
+    /// Every open work item, oldest first
+    pub work_items: Vec<WorkItemStatus<'a>>,
+    /// How many work items may be open at once
+    pub max_items: u32,
     /// Pull requests adopted and waiting for the work item in flight, oldest first
     pub adopted: &'a [Waiting],
     /// Ready issues the board passed over on its last poll, and why
@@ -119,16 +123,17 @@ enum Request {
     Adopt(u64),
     Rule(u64, Answer),
     RelayRule(u64, Answer),
-    Gate,
-    Drop,
+    Gate(Option<u64>),
+    Drop(Option<u64>),
 }
 
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
 ///
 /// Blank params count as none. `add` takes an issue number, `rework` and
 /// `adopt` a pull request number, `rule` and `relay-rule` take `<id> yes`,
-/// `<id> no <note>` or `<id> answer <text>`, and every other action takes
-/// nothing. A ruling the relay was sent, settled by anything but
+/// `<id> no <note>` or `<id> answer <text>`, `gate` and `drop` take the
+/// issue of the work item they are about when more than one is open, and
+/// every other action takes nothing. A ruling the relay was sent, settled by anything but
 /// `relay-rule`, is told to it.
 pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> String {
     let error = |message: String| serde_json::json!({ "error": message }).to_string();
@@ -143,7 +148,7 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
         Request::Rule(_, Answer::Yes) => Some(Settled::Yes),
         Request::Rule(_, Answer::No(note)) => Some(Settled::No(note.clone())),
         Request::Rule(_, Answer::Text(text)) => Some(Settled::Answer(text.clone())),
-        Request::Drop => Some(Settled::Dropped),
+        Request::Drop(_) => Some(Settled::Dropped),
         _ => None,
     }
     .map(|how| (how, runner.relayed()));
@@ -157,8 +162,8 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
         Request::Rule(id, answer) | Request::RelayRule(id, answer) => {
             runner.rule(id, answer).map_err(|e| e.to_string())
         }
-        Request::Gate => runner.gate().map_err(|e| e.to_string()),
-        Request::Drop => runner.drop_work_item().map_err(|e| e.to_string()),
+        Request::Gate(issue) => runner.gate(issue).map_err(|e| e.to_string()),
+        Request::Drop(issue) => runner.drop_work_item(issue).map_err(|e| e.to_string()),
     };
     if let (Ok(()), Some((how, relayed))) = (&changed, settled) {
         runner.settled_without_relay(&relayed, &how);
@@ -183,6 +188,12 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
             .map(Request::Adopt)
             .ok_or_else(|| format!("{p:?} is not a pull request number")),
         ("adopt", None) => Err("`adopt` takes a pull request number".into()),
+        ("gate", Some(p)) => number(p)
+            .map(|issue| Request::Gate(Some(issue)))
+            .ok_or_else(|| format!("{p:?} is not an issue number")),
+        ("drop", Some(p)) => number(p)
+            .map(|issue| Request::Drop(Some(issue)))
+            .ok_or_else(|| format!("{p:?} is not an issue number")),
         ("rule", Some(p)) => read_rule(p)
             .map(|(id, answer)| Request::Rule(id, answer))
             .ok_or_else(|| format!("`{action}` {RULE_USAGE}, not {p:?}")),
@@ -194,8 +205,8 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
         (_, Some(_)) => Err(format!("`{action}` takes no params")),
         ("start", None) => Ok(Request::Start),
         ("pause", None) => Ok(Request::Pause),
-        ("gate", None) => Ok(Request::Gate),
-        ("drop", None) => Ok(Request::Drop),
+        ("gate", None) => Ok(Request::Gate(None)),
+        ("drop", None) => Ok(Request::Drop(None)),
         (_, None) => Ok(Request::Status),
     }
 }
@@ -233,11 +244,47 @@ pub(super) fn number(text: &str) -> Option<u64> {
     (n > 0 && text.bytes().all(|b| b.is_ascii_digit())).then_some(n)
 }
 
+/// Why a trigger could not tell which work item it is about
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WhichItem {
+    /// No work item is in flight
+    NoWorkItem,
+    /// These issues' work items are open, and the trigger named none
+    Several(Vec<u64>),
+    /// No work item is open for this issue
+    NotOpen(u64),
+}
+
+impl fmt::Display for WhichItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoWorkItem => f.write_str("no work item is in flight"),
+            Self::Several(issues) => write!(
+                f,
+                "the work items for {} are open, so name the issue of one",
+                issue_list(issues)
+            ),
+            Self::NotOpen(issue) => write!(f, "no work item for #{issue} is open"),
+        }
+    }
+}
+
+impl core::error::Error for WhichItem {}
+
+/// `#7`, `#7 and #9`, or `#7, #9 and #12`
+pub(super) fn issue_list(issues: &[u64]) -> String {
+    let named: Vec<String> = issues.iter().map(|i| format!("#{i}")).collect();
+    match named.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        _ => named.concat(),
+    }
+}
+
 /// Why `gate` was refused
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GateError {
-    /// No work item is in flight
-    NoWorkItem,
+    /// The trigger named no work item, or one not open
+    Which(WhichItem),
     /// The work item is past its worker's turns: in CI, parked, or merging
     AlreadyGated(u64),
     /// The worker's turn has not ended, with the turn's state
@@ -251,7 +298,7 @@ pub enum GateError {
 impl fmt::Display for GateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NoWorkItem => f.write_str("no work item is in flight"),
+            Self::Which(e) => e.fmt(f),
             Self::AlreadyGated(issue) => {
                 write!(f, "the work item for #{issue} is already in the gate")
             }
@@ -270,14 +317,16 @@ impl Runner {
     /// Sends the work item into the gate, when its worker's turn has ended
     /// with a pull request kelpie knows but the gate was not entered
     ///
-    /// A work item saved before the gate existed is one such.
+    /// A work item saved before the gate existed is one such. `issue` names
+    /// the work item, and may be left out while only one is open.
     ///
     /// # Errors
     ///
     /// [`GateError`] naming why the work item cannot enter the gate. Nothing
     /// changes then.
-    pub fn gate(&mut self) -> Result<(), GateError> {
-        let item = self.current().ok_or(GateError::NoWorkItem)?;
+    pub fn gate(&mut self, issue: Option<u64>) -> Result<(), GateError> {
+        self.choose(issue).map_err(GateError::Which)?;
+        let item = self.current().expect("the work item chosen");
         let issue = item.issue;
         if item.phase != Phase::Implement {
             return Err(GateError::AlreadyGated(issue));
@@ -298,6 +347,23 @@ impl Runner {
         let since = self.ports.clock.now();
         self.update(|item| item.phase = Phase::Ci { head: None, since })
             .map_err(GateError::State)
+    }
+}
+
+impl Runner {
+    // Works on the work item for `issue`, or on the only one open when no
+    // issue is named.
+    pub(super) fn choose(&mut self, issue: Option<u64>) -> Result<(), WhichItem> {
+        let open: Vec<u64> = self.state.work_items.iter().map(|i| i.issue).collect();
+        let chosen = match (issue, open.as_slice()) {
+            (Some(issue), _) if open.contains(&issue) => issue,
+            (Some(issue), _) => return Err(WhichItem::NotOpen(issue)),
+            (None, []) => return Err(WhichItem::NoWorkItem),
+            (None, [only]) => *only,
+            (None, _) => return Err(WhichItem::Several(open)),
+        };
+        self.focus = Some(chosen);
+        Ok(())
     }
 }
 
@@ -354,6 +420,8 @@ mod tests {
                 "run": "paused",
                 "since": Rig::EPOCH,
                 "work_item": null,
+                "work_items": [],
+                "max_items": 1,
                 "adopted": [],
                 "skipped": [],
                 "rulings": [],
@@ -492,7 +560,15 @@ mod tests {
         refused(&runner, "the worker's turn on #7 is due, not ended");
         assert_eq!(
             rig.ask(&runner, "gate", Some("7")),
-            json!({ "error": "`gate` takes no params" })
+            json!({ "error": "the worker's turn on #7 is due, not ended" })
+        );
+        assert_eq!(
+            rig.ask(&runner, "gate", Some("8")),
+            json!({ "error": "no work item for #8 is open" })
+        );
+        assert_eq!(
+            rig.ask(&runner, "gate", Some("#7")),
+            json!({ "error": "\"#7\" is not an issue number" })
         );
 
         rig.ask(&runner, "start", None);

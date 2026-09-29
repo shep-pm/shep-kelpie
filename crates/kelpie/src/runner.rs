@@ -34,6 +34,8 @@ mod report;
 mod review;
 mod rework;
 mod ruling;
+#[cfg(test)]
+mod several;
 mod shots;
 mod trigger;
 mod turn;
@@ -45,8 +47,9 @@ pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
 pub use report::StepReport;
 pub use rework::ReworkError;
 pub use ruling::{Answer, RuleError};
-pub use trigger::GateError;
+use trigger::issue_list;
 pub use trigger::{ACTIONS, RELAY_RULE, Status, WorkItemStatus, answer, is_no_or_answer};
+pub use trigger::{GateError, WhichItem};
 pub use turn::step;
 
 #[cfg(test)]
@@ -96,8 +99,9 @@ impl From<StateError> for OpenError {
 /// Why `add` was refused
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AddError {
-    /// A work item is already in flight, for this issue
-    InFlight(u64),
+    /// The project has `max_items` open, or one for this issue already: the
+    /// issues of those in flight
+    InFlight(Vec<u64>),
     /// The forge could not show the issue
     Forge(ForgeError),
     /// The issue's `worker:` label cannot be used
@@ -111,7 +115,12 @@ pub enum AddError {
 impl fmt::Display for AddError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InFlight(issue) => write!(f, "the work item for #{issue} is in flight"),
+            Self::InFlight(issues) if issues.len() == 1 => {
+                write!(f, "the work item for {} is in flight", issue_list(issues))
+            }
+            Self::InFlight(issues) => {
+                write!(f, "the work items for {} are in flight", issue_list(issues))
+            }
             Self::Forge(e) => write!(f, "cannot read the issue: {e}"),
             Self::Label(e) => e.fmt(f),
             Self::Session(e) => write!(f, "cannot draw a session id: {e}"),
@@ -152,6 +161,12 @@ pub struct Runner {
     relaying: Option<u64>,
     // The account kelpie acts as, read once a run when a rework first needs it
     viewer: Option<String>,
+    // The issue of the work item a step or trigger is working on, set before
+    // anything reads it: every change to a work item goes to this one
+    focus: Option<u64>,
+    // The issue of the work item that last did something in a step, kept in
+    // memory only, so the next step starts with the one after it
+    last_acted: Option<u64>,
 }
 
 impl Runner {
@@ -220,6 +235,8 @@ impl Runner {
             relay_notices: Vec::new(),
             relaying: None,
             viewer: None,
+            focus: None,
+            last_acted: None,
         })
     }
 
@@ -235,7 +252,14 @@ impl Runner {
             merge_authority: self.settings.merge_authority,
             run: self.state.run,
             since: self.state.since,
-            work_item: self.current().map(WorkItemStatus::from),
+            work_item: self.state.work_items.first().map(WorkItemStatus::from),
+            work_items: self
+                .state
+                .work_items
+                .iter()
+                .map(WorkItemStatus::from)
+                .collect(),
+            max_items: self.settings.max_items.get(),
             adopted: &self.state.adopted,
             skipped: &self.skipped,
             rulings: &self.state.rulings,
@@ -262,17 +286,21 @@ impl Runner {
         self.set_run(RunState::Paused)
     }
 
-    /// Makes `issue` the work item in flight, and returns the model and
-    /// effort its worker runs on. Its first turn runs once the project is running.
+    /// Opens a work item for `issue`, and returns the model and effort its
+    /// worker runs on. Its first turn runs once the project is running.
     ///
     /// # Errors
     ///
-    /// [`AddError`] when a work item is in flight, the issue cannot be read
-    /// or its `worker:` label understood, or the change cannot be saved.
-    /// Nothing changes then.
+    /// [`AddError`] when the project has `max_items` open or one for this
+    /// issue already, the issue cannot be read or its `worker:` label
+    /// understood, or the change cannot be saved. Nothing changes then.
     pub fn add(&mut self, issue: u64) -> Result<WorkerModel, AddError> {
-        if let Some(item) = self.current() {
-            return Err(AddError::InFlight(item.issue));
+        if self.state.item(issue).is_some() {
+            return Err(AddError::InFlight(vec![issue]));
+        }
+        if !self.slot_free() {
+            let open = self.state.work_items.iter().map(|i| i.issue).collect();
+            return Err(AddError::InFlight(open));
         }
         let found = self
             .ports
@@ -331,14 +359,26 @@ impl Runner {
         }
     }
 
-    // The work item the runner is working on
+    // Whether another work item may open, under `max_items`
+    pub(super) fn slot_free(&self) -> bool {
+        let max = usize::try_from(self.settings.max_items.get()).unwrap_or(usize::MAX);
+        self.state.work_items.len() < max
+    }
+
+    // The work item the runner is working on, while it is open
     pub(super) fn current(&self) -> Option<&WorkItem> {
-        self.state.work_items.first()
+        self.state.item(self.focus?)
     }
 
     // The work item the runner is working on, in a state about to be saved
     pub(super) fn current_in<'a>(&self, next: &'a mut ProjectState) -> Option<&'a mut WorkItem> {
-        next.work_items.first_mut()
+        next.item_mut(self.focus?)
+    }
+
+    // Works on the work item for `issue` from here on
+    pub(super) fn on(&mut self, issue: Option<u64>) -> &mut Self {
+        self.focus = issue;
+        self
     }
 
     fn set_run(&mut self, run: RunState) -> Result<(), StateError> {

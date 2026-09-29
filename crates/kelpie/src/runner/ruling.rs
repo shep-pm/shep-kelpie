@@ -143,6 +143,8 @@ impl Runner {
         // which nothing leaves behind today, is answered by clearing it.
         let parked_on = |item: &WorkItem| item.phase == Phase::Ruling { id };
         let parked = next.work_items.iter().find(|item| parked_on(item));
+        // The answer moves only the work item it parks, whichever is open.
+        self.focus = parked.map(|item| item.issue);
         let head_moved = match (parked, &ruling.kind) {
             (Some(item), RulingKind::ForeignChange { known: seen, .. }) => {
                 match (&item.known.head, &seen.head) {
@@ -165,7 +167,7 @@ impl Runner {
             }
         }
         let moved = decide(id, answer, ruling, now, head_moved)?;
-        if let Some(item) = self.current_in(&mut next).filter(|item| parked_on(item)) {
+        if let Some(item) = self.current_in(&mut next) {
             item.coderabbit.cap_cleared |= lifts_cap;
             if accepts.is_some() {
                 item.claude_files_accepted = accepts;

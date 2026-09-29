@@ -124,7 +124,9 @@ impl Runner {
         }
         let kind = LeaseKind::coderabbit();
         self.ports.leases.want(&kind);
-        if !self.ports.leases.holds(&kind) {
+        // One grant is one summon: a lease another work item holds is not
+        // this one's to use.
+        if !self.ports.leases.holds(&kind) || self.lease_held_elsewhere() {
             return Ok(Begin::Idle);
         }
         let now = self.ports.clock.now();
@@ -595,8 +597,12 @@ impl Runner {
         self.save(next)
     }
 
-    /// Gives the CodeRabbit lease back, if this run holds or asks for it
+    /// Gives the CodeRabbit lease back, if this run holds or asks for it,
+    /// unless another work item holds it
     pub(super) fn release(&mut self) -> Result<(), StateError> {
+        if self.lease_held_elsewhere() {
+            return Ok(());
+        }
         self.ports.leases.give_back(&LeaseKind::coderabbit());
         if !self
             .state
@@ -609,6 +615,15 @@ impl Runner {
         let mut next = self.state.clone();
         next.leases.retain(|l| l.resource != Resource::Coderabbit);
         self.save(next)
+    }
+
+    // Whether a work item other than this one holds the CodeRabbit lease
+    fn lease_held_elsewhere(&self) -> bool {
+        let this = self.current().map(|item| item.issue);
+        self.state
+            .leases
+            .iter()
+            .any(|l| l.resource == Resource::Coderabbit && l.issue != this)
     }
 
     // Reads CodeRabbit's activity and passes the latest footer's quota on.

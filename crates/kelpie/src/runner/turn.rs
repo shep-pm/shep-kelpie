@@ -42,8 +42,12 @@ const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
 /// Posts a ruling or a notice to the webhook, or runs the worker's next
 /// turn if one is due and the project is running
 ///
-/// Returns what happened, or `None` when there was nothing to do. A ruling
-/// is posted whether the project runs or not.
+/// Each open work item is stepped in turn, starting after the one that did
+/// something last, and one with nothing to do yields to the next. Returns
+/// what happened, or `None` when there was nothing to do. A report that
+/// waits, such as a forge that cannot be read, is returned only when no
+/// other work item did anything. A ruling is posted whether the project
+/// runs or not.
 ///
 /// # Errors
 ///
@@ -63,27 +67,34 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
     if let Some(posted) = post_due(runner, relay.as_ref(), alerts.as_ref()) {
         return posted.map(Some);
     }
-    let mut start_over = false;
+    // The work item whose session died unborn, which starts over
+    let mut start_over = None;
     loop {
-        let begin = lock(runner).begin_turn(start_over)?;
+        // The call runs outside the lock, and a trigger may work on another
+        // item meanwhile, so its end names the item it began on.
+        let (begin, issue) = {
+            let mut runner = lock(runner);
+            let begin = runner.begin_turn(start_over)?;
+            (begin, runner.focus)
+        };
         match begin {
             Begin::Idle => return Ok(None),
             Begin::Report(report) => return Ok(Some(report)),
             Begin::Call(call) => {
                 let result = claude.run(&call);
-                if !start_over && matches!(result, Err(ClaudeError::NoSession(_))) {
-                    start_over = true;
+                if start_over.is_none() && matches!(result, Err(ClaudeError::NoSession(_))) {
+                    start_over = issue;
                     continue;
                 }
-                return lock(runner).end_turn(result);
+                return lock(runner).on(issue).end_turn(result);
             }
             Begin::Review(action) => {
                 let reviewed = run_review_call(claude.as_ref(), reviewer.as_ref(), action);
-                return lock(runner).end_review(reviewed);
+                return lock(runner).on(issue).end_review(reviewed);
             }
             Begin::Shots(job, head) => {
                 let run = shots.take(&job);
-                return lock(runner).end_shots(head, run);
+                return lock(runner).on(issue).end_shots(head, run);
             }
         }
     }
@@ -98,12 +109,51 @@ fn first_prompt(number: u64, issue: &Issue) -> String {
 }
 
 impl Runner {
-    fn begin_turn(&mut self, start_over: bool) -> Result<Begin, StateError> {
+    // Steps each open work item from the one after the last to act, until
+    // one acts. `start_over` is the item whose session died unborn, which
+    // begins the same turn again.
+    fn begin_turn(&mut self, start_over: Option<u64>) -> Result<Begin, StateError> {
         if self.state.run != RunState::Running {
             return Ok(Begin::Idle);
         }
-        let Some(item) = self.current() else {
+        if let Some(issue) = start_over {
+            self.focus = Some(issue);
+            return self.begin_item(true);
+        }
+        if self.state.work_items.is_empty() {
+            self.focus = None;
             return self.dispatch();
+        }
+        let mut waiting = None;
+        for issue in self.rotation() {
+            self.focus = Some(issue);
+            match self.begin_item(false)? {
+                Begin::Idle => {}
+                Begin::Report(report) if report.waits() => {
+                    waiting.get_or_insert(report);
+                }
+                begin => {
+                    self.last_acted = Some(issue);
+                    return Ok(begin);
+                }
+            }
+        }
+        Ok(waiting.map_or(Begin::Idle, Begin::Report))
+    }
+
+    // The open work items' issues, oldest first, from the one after the
+    // last to act, so one that keeps acting cannot starve the rest
+    fn rotation(&self) -> Vec<u64> {
+        let mut issues: Vec<u64> = self.state.work_items.iter().map(|i| i.issue).collect();
+        if let Some(at) = issues.iter().position(|&i| Some(i) == self.last_acted) {
+            issues.rotate_left(at + 1);
+        }
+        issues
+    }
+
+    fn begin_item(&mut self, start_over: bool) -> Result<Begin, StateError> {
+        let Some(item) = self.current() else {
+            return Ok(Begin::Idle);
         };
         match &item.phase {
             Phase::Implement => {}

@@ -12,6 +12,7 @@ use std::fmt;
 use super::Runner;
 use super::gate::{settled, short};
 use super::report::{Begin, StepReport};
+use super::trigger::WhichItem;
 use crate::ports::{Checks, PullRequestState};
 use crate::settings::MergeAuthority;
 use crate::shots::publish;
@@ -22,8 +23,8 @@ use crate::worktree::{self, Base};
 /// Why `drop` was refused
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DropError {
-    /// No work item is in flight
-    NoWorkItem,
+    /// The trigger named no work item, or one not open
+    Which(WhichItem),
     /// The worker's turn is running, and the work item stays until it ends
     TurnRunning(u64),
     /// A review round or judge call is running, and the work item stays
@@ -40,7 +41,7 @@ pub enum DropError {
 impl fmt::Display for DropError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NoWorkItem => f.write_str("no work item is in flight"),
+            Self::Which(e) => e.fmt(f),
             Self::TurnRunning(issue) => write!(f, "the worker's turn on #{issue} is running"),
             Self::ReviewRunning(issue) => {
                 write!(f, "the qwen-review loop's round on #{issue} is running")
@@ -55,7 +56,8 @@ impl fmt::Display for DropError {
 impl core::error::Error for DropError {}
 
 impl Runner {
-    /// Ends the work item in flight without merging it
+    /// Ends a work item without merging it, the one `issue` names or the
+    /// only one open
     ///
     /// Its worktree, local branch and build folder go, and its issue is
     /// recorded as finished. Its pull request and branch on the forge stay,
@@ -66,8 +68,9 @@ impl Runner {
     ///
     /// [`DropError`] when nothing is in flight, a turn, a review round or a
     /// merge is under way, or the cleanup fails. The work item stays then.
-    pub fn drop_work_item(&mut self) -> Result<(), DropError> {
-        let item = self.current().ok_or(DropError::NoWorkItem)?;
+    pub fn drop_work_item(&mut self, issue: Option<u64>) -> Result<(), DropError> {
+        self.choose(issue).map_err(DropError::Which)?;
+        let item = self.current().expect("the work item chosen");
         if matches!(item.turn, Turn::Running { .. }) {
             return Err(DropError::TurnRunning(item.issue));
         }
