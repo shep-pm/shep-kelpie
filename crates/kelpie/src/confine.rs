@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn climbing_out_with_dots_is_refused() {
         let w = world();
-        for p in ["wt/../home/x", "wt/missing/../../home/x"] {
+        for p in ["wt/../home/me", "wt/missing/../../home/me"] {
             let verdict = w.judge(json!({ "file_path": w.path(p) }));
             assert!(matches!(verdict, Verdict::Refuse(_)), "{p}");
         }

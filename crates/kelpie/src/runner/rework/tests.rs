@@ -49,7 +49,7 @@ fn running(rig: &Rig) -> Mutex<Runner> {
 
 #[test]
 fn a_rework_starts_on_the_pull_requests_branch_with_the_review_as_its_first_turn() {
-    let rig = Rig::new("hazels-lab");
+    let rig = Rig::new("webapp");
     let by_hand = reviewed_71(&rig);
     let runner = running(&rig);
     let item = &rig.ask(&runner, "rework", Some("71"))["work_item"];
@@ -160,7 +160,7 @@ fn a_branch_the_maintainer_pushed_to_since_is_where_the_worker_starts() {
 
 #[test]
 fn a_local_branch_left_behind_that_matches_origin_is_reused() {
-    let rig = Rig::new("hazels-lab");
+    let rig = Rig::new("webapp");
     let by_hand = reviewed_71(&rig);
     git(&rig.repo(), &["fetch", "--quiet", "origin", "kelpie/7"]);
     git(&rig.repo(), &["branch", "kelpie/7", &by_hand]);
@@ -180,7 +180,7 @@ fn a_local_branch_left_behind_that_matches_origin_is_reused() {
 
 #[test]
 fn a_local_branch_with_commits_origin_lacks_stays_a_refusal() {
-    let rig = Rig::new("hazels-lab");
+    let rig = Rig::new("webapp");
     let by_hand = reviewed_71(&rig);
     git(&rig.repo(), &["fetch", "--quiet", "origin", "kelpie/7"]);
     let tree = format!("{by_hand}^{{tree}}");

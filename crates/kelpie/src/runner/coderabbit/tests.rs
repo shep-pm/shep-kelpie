@@ -89,7 +89,7 @@ fn phase(rig: &Rig, runner: &Mutex<Runner>) -> serde_json::Value {
 
 #[test]
 fn with_the_gate_off_green_ci_goes_straight_to_the_merge_ruling_and_no_lease_is_asked() {
-    let (rig, runner, head) = Rig::with_pull_request("hazels-lab");
+    let (rig, runner, head) = Rig::with_pull_request("webapp");
     rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
         rig.verdict(&runner),
