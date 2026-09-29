@@ -309,7 +309,7 @@ mod tests {
                 &head[..7]
             )
         );
-        assert_eq!(rig.forge.comments(), [(71, question.clone())]);
+        assert_eq!(rig.forge.comments(), [], "a merge ruling is not posted");
         let status = rig.ask(&runner, "status", None);
         assert_eq!(
             status["rulings"],
@@ -750,8 +750,8 @@ mod tests {
 
     #[test]
     fn a_ruling_whose_comment_fails_still_stands_in_status_and_the_log() {
-        let (rig, runner, head) = Rig::with_pull_request("golbat");
-        rig.forge.set_checks(&head, Checks::Passed);
+        let (rig, runner, _) = Rig::with_pull_request("golbat");
+        rig.forge.set_state(71, PullRequestState::Closed);
         rig.forge.set_comments_down(true);
         let Some(StepReport::Ruling { comment_failed, .. }) = rig.verdict(&runner) else {
             panic!("no ruling was raised");
@@ -789,6 +789,14 @@ mod tests {
         assert!(
             question.starts_with("Pull request #71 was closed without merging."),
             "{question}"
+        );
+        assert_eq!(
+            rig.forge.comments(),
+            [(
+                71,
+                "This pull request was closed without merging.\n\nWaiting on the maintainer."
+                    .to_owned()
+            )]
         );
         rig.ask(&runner, "rule", Some(&format!("{id} yes")));
         assert!(matches!(

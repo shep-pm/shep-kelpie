@@ -243,7 +243,15 @@ mod tests {
             panic!("the question was not about pull request 71");
         };
         assert!(question.starts_with("The worker on pull request #71 asks:\n\n"));
-        assert_eq!(rig.forge.comments(), [(71, question)]);
+        assert_eq!(
+            rig.forge.comments(),
+            [(
+                71,
+                "Should it be `--dry-run` or `--check`?\n\nBoth appear in the docs.\n\n\
+                 Waiting on the maintainer."
+                    .to_owned()
+            )]
+        );
         assert_eq!(
             rig.ask(&runner, "status", None)["work_item"]["phase"],
             json!({ "state": "ruling", "id": 1 })

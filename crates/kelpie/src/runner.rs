@@ -24,6 +24,7 @@ mod alert;
 mod coderabbit;
 mod dispatch;
 mod gate;
+mod instructions;
 mod merge;
 mod pace;
 mod paths;
@@ -124,6 +125,8 @@ impl std::error::Error for AddError {}
 pub struct Runner {
     project: ProjectName,
     settings: Settings,
+    // The project's extra worker instructions, read once when the runner starts
+    extra_instructions: Option<String>,
     paths: ProjectPaths,
     kelpie: PathBuf,
     store: StateStore,
@@ -163,6 +166,7 @@ impl Runner {
         let webhook = KelpieSettings::load(&paths.kelpie_settings)?.webhook;
         let settings = Settings::load(&paths.settings, home)?;
         check_repo(&settings)?;
+        let extra_instructions = instructions::read_extra(&settings)?;
         check_coderabbit(&settings, &ports)?;
         let store = StateStore::new(paths.state.clone());
         let mut state = store
@@ -186,6 +190,7 @@ impl Runner {
         Ok(Self {
             project,
             settings,
+            extra_instructions,
             paths: paths.clone(),
             kelpie: kelpie.to_owned(),
             store,

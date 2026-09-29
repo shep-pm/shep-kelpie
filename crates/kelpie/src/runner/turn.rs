@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use super::Runner;
 use super::adopt;
+use super::instructions;
 use super::question::asked;
 use super::report::{Begin, StepReport};
 use super::review::run_review_call;
@@ -22,7 +23,7 @@ use super::ruling::park;
 use super::trigger::lock;
 use crate::pacer::Scope;
 use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Issue, Role, Session, Timestamp};
-use crate::profile::{INSTRUCTIONS, WorkerProfile};
+use crate::profile::WorkerProfile;
 use crate::state::{ProjectState, Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree::{self, Start};
@@ -227,7 +228,8 @@ impl Runner {
         let instructions = folder.join("instructions.md");
         let text = serde_json::to_string_pretty(&profile.settings()).expect("settings are JSON");
         write(folder, &settings, &text)?;
-        write(folder, &instructions, INSTRUCTIONS)?;
+        let text = instructions::compose(self.extra_instructions.as_deref(), &item.worktree);
+        write(folder, &instructions, &text)?;
         let prompt = match prompt {
             Some(prompt) => prompt,
             None if item.rework => rework::first_prompt(item),
@@ -369,28 +371,28 @@ impl Runner {
     }
 
     // A ruling just raised is posted as a comment on its pull request, if it
-    // has one; only these two reports carry a ruling and need the outcome.
+    // has one; only these three reports carry a ruling and need the outcome.
     fn fill_comment_failed(&self, report: &mut StepReport) {
         match report {
             StepReport::Asked {
                 pull_request,
-                question,
+                id,
                 comment_failed,
                 ..
             }
             | StepReport::TimedOut {
                 pull_request,
-                question,
+                id,
                 comment_failed,
                 ..
             }
             | StepReport::Failed {
                 pull_request,
-                question,
+                id,
                 comment_failed,
                 ..
             } => {
-                *comment_failed = self.post_ruling(*pull_request, question);
+                *comment_failed = self.post_ruling(*pull_request, *id);
             }
             _ => {}
         }
@@ -481,6 +483,7 @@ mod tests {
 
     use super::*;
     use crate::ports::{Cost, Usage};
+    use crate::profile::INSTRUCTIONS;
     use crate::settings::Effort;
     use crate::test::{LEFT_BEHIND, Rig, Scripted, git};
 
