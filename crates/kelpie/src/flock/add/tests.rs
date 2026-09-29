@@ -226,6 +226,17 @@ async fn a_file_for_another_checkout_is_refused() {
 }
 
 #[tokio::test]
+async fn a_project_cannot_take_kelpie_s_own_names() {
+    for taken in ["kelpie", "kelpie-dog"] {
+        let mut scene = Scene::new().await;
+        scene.name = ProjectName::try_from(taken).unwrap();
+        let err = scene.add().await.unwrap_err();
+        assert!(err.contains("kelpie's own name"), "{taken}: {err}");
+        assert_eq!(scene.shepherd.writes(), []);
+    }
+}
+
+#[tokio::test]
 async fn a_dog_under_both_names_is_refused_before_anything_changes() {
     let mut scene = Scene::new().await;
     let mut old = scene.launch.dog();

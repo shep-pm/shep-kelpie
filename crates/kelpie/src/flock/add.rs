@@ -112,6 +112,12 @@ pub async fn add(
     place: Place<'_>,
 ) -> Result<Vec<String>, String> {
     let Place { checkout, .. } = place;
+    // `shep disable kelpie` deletes a sheep named `kelpie`, the adopted dog's name.
+    if [dog::NAME, dog::OLD_NAME].contains(&name.as_str()) {
+        return Err(format!(
+            "`{name}` is kelpie's own name, so name the project: `shep kelpie add <project>`"
+        ));
+    }
     let repo = &checkout.forge;
     let slug = repo.as_str();
     let asked =
