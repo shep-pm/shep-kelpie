@@ -182,8 +182,8 @@ pub fn prepare(
 
 /// Removes a work item's worktree, its branch and its build folder
 ///
-/// `remote` also deletes the branch on `origin`. Whatever is already gone
-/// is skipped, so a removal cut short can run again.
+/// `remote` also deletes the branch on `origin`. Whatever is already gone,
+/// a branch the forge deleted first included, is skipped, so a removal cut short can run again.
 ///
 /// # Errors
 ///
@@ -212,8 +212,17 @@ pub fn remove(
     if git(repo, ["rev-parse", "--verify", "--quiet", &full_ref]).is_ok() {
         git(repo, ["branch", "--quiet", "-D", branch])?;
     }
-    if remote && !git(repo, ["ls-remote", "--heads", "origin", &full_ref])?.is_empty() {
-        git(repo, ["push", "--quiet", "origin", "--delete", &full_ref])?;
+    if remote && on_origin(repo, &full_ref)? {
+        // The forge deletes a merged head branch itself on some repos, and
+        // may do it between the check above and this push. Git's error for
+        // that varies by version and host, so a failed delete is judged by
+        // whether the ref is still there.
+        let deleted = git(repo, ["push", "--quiet", "origin", "--delete", &full_ref]);
+        if let Err(e) = deleted
+            && on_origin(repo, &full_ref)?
+        {
+            return Err(e);
+        }
     }
     match std::fs::remove_dir_all(build) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => Err(WorktreeError::Remove {
@@ -222,6 +231,11 @@ pub fn remove(
         }),
         _ => Ok(()),
     }
+}
+
+/// Whether `full_ref` is a branch on `origin` right now, asked of the remote
+fn on_origin(repo: &Path, full_ref: &str) -> Result<bool, WorktreeError> {
+    Ok(!git(repo, ["ls-remote", "--heads", "origin", full_ref])?.is_empty())
 }
 
 /// Where a pull request's head stands against `origin`, just fetched
