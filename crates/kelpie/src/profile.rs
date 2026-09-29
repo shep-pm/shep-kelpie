@@ -5,7 +5,8 @@
 //! The sandbox does not cover Claude's own file tools, so a hook that runs
 //! `kelpie confine` holds those to the same folders. Both refuse Claude
 //! Code's own files in the worktree. Deny rules keep what only the project
-//! manager does, and credential paths, out of reach.
+//! manager does, and credential paths, out of reach. `kelpie guard` judges
+//! every Bash call before any hook the project adds.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -122,7 +123,7 @@ pub struct WorkerProfile<'a> {
     pub branch: &'a str,
     /// The kelpie binary, which the file-tool hook runs
     pub kelpie: &'a Path,
-    /// The guard hooks the project's settings name
+    /// The project's own guard hooks, which run after kelpie's
     pub guard_hooks: &'a [GuardHook],
     /// The domains the project's settings add to GitHub's
     pub allowed_domains: &'a [NonBlank],
@@ -222,6 +223,8 @@ impl WorkerProfile<'_> {
                 .join(" ");
             pre.push(entry(Some(PLAYWRIGHT_TOOLS), &guard));
         }
+        let guard = [self.kelpie, Path::new("guard")].map(|p| shell_quote(&p.to_string_lossy()));
+        pre.push(entry(Some("Bash"), &guard.join(" ")));
         let mut post = Vec::new();
         for hook in self.guard_hooks {
             let e = entry(
@@ -630,20 +633,35 @@ mod tests {
     }
 
     #[test]
-    fn the_projects_guard_hooks_are_carried_after_kelpies_own() {
-        let s = settings(&[
-            guard(
-                HookEvent::PreToolUse,
-                Some("Bash"),
-                "node ~/.claude/hooks/git-gh-guard.js",
-            ),
-            guard(HookEvent::PostToolUse, None, "~/bin/after"),
-        ]);
+    fn every_worker_has_kelpies_guard_on_bash_with_no_project_hooks() {
+        let s = settings(&[]);
         assert_eq!(
             s["hooks"]["PreToolUse"][1],
             json!({
                 "matcher": "Bash",
-                "hooks": [{ "type": "command", "command": "node ~/.claude/hooks/git-gh-guard.js" }],
+                "hooks": [{
+                    "type": "command",
+                    "command": r"'/opt/kelpie'\''s bin/kelpie' 'guard'",
+                }],
+            })
+        );
+        assert_eq!(s["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
+        assert_eq!(s["hooks"]["PostToolUse"], Value::Null);
+        let preview = with_preview(&[])["hooks"]["PreToolUse"][2].to_string();
+        assert!(preview.contains("'guard'"), "{preview}");
+    }
+
+    #[test]
+    fn the_projects_guard_hooks_are_carried_after_kelpies_own() {
+        let s = settings(&[
+            guard(HookEvent::PreToolUse, Some("Bash"), "~/bin/before"),
+            guard(HookEvent::PostToolUse, None, "~/bin/after"),
+        ]);
+        assert_eq!(
+            s["hooks"]["PreToolUse"][2],
+            json!({
+                "matcher": "Bash",
+                "hooks": [{ "type": "command", "command": "~/bin/before" }],
             })
         );
         assert_eq!(
