@@ -533,7 +533,7 @@ fn a_start_retried_after_a_failure_begins_at_the_head_origin_holds_now() {
 
 #[test]
 fn a_ready_pull_request_reaches_the_merge_ruling_without_parking() {
-    let rig = Rig::new("hazels-lab");
+    let rig = Rig::new("webapp");
     let head = opened_80(&rig);
     rig.forge.ready_pull_request(80);
     let runner = running(&rig);

@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+#
+# CodeRabbit reviews a pull request only when it carries the `review please`
+# label. Kelpie's runner puts that label on its own pull requests when it wants
+# a review (see CONTEXT.md).
+#
+# Once this repo is public, CodeRabbit's free plan reviews every pull request
+# by default, and it only gets one review an hour. A drive-by pull request
+# would spend the slot the runner is waiting on for its own branch.
+#
+# The cost is that nothing is reviewed until someone adds the label, which is
+# one click. `@coderabbitai review` still works on any pull request. The label
+# is the only gate: two positive gates might combine as OR or as AND, and the
+# schema does not say which.
+
+language: en-US
+
+reviews:
+  auto_review:
+    labels:
+      - "review please"

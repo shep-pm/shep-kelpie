@@ -18,6 +18,7 @@ use super::alert::{post_due, tell_settled};
 use super::claude_files::Unchecked;
 use super::instructions;
 use super::question::asked;
+use super::replies::answer_replies;
 use super::report::{Begin, StepReport};
 use super::review::run_review_call;
 use super::rework;
@@ -39,15 +40,15 @@ mod unfinished;
 const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
                         Carry on with the work item from where you left off.";
 
-/// Posts a ruling or a notice, or runs the worker's next
-/// turn if one is due and the project is running
+/// Posts a ruling or a notice, handles a reply on the webhook's topic, or
+/// runs the worker's next turn if one is due and the project is running
 ///
 /// Each open work item is stepped in turn, starting after the one that did
 /// something last, and one with nothing to do yields to the next. Returns
 /// what happened, or `None` when there was nothing to do. A report that
 /// waits, such as a forge that cannot be read, is returned only when no
-/// other work item did anything. A ruling is posted whether the project
-/// runs or not.
+/// other work item did anything. A ruling is posted, and a reply handled,
+/// whether the project runs or not.
 ///
 /// # Errors
 ///
@@ -66,6 +67,9 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
     tell_settled(runner, relay.as_ref());
     if let Some(posted) = post_due(runner, relay.as_ref(), alerts.as_ref()) {
         return posted.map(Some);
+    }
+    if let Some(answered) = answer_replies(runner, alerts.as_ref()) {
+        return answered.map(Some);
     }
     // The work item whose session died unborn, which starts over
     let mut start_over = None;

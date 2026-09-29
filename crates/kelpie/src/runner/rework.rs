@@ -19,7 +19,7 @@ use crate::board::{LabelError, OpenPullRequest, READY, Skip, WorkerModel, worker
 use crate::pacer::Scope;
 use crate::ports::{ForgeError, MaintainerReview, PullRequestState, Reviewed};
 use crate::state::StateError;
-use crate::work_item::{Known, Phase, Review, WorkItem, new_session_id};
+use crate::work_item::{CodeRabbitTally, Known, Phase, Review, WorkItem, new_session_id};
 
 /// The label on a pull request kelpie handed back to the maintainer
 ///
@@ -56,6 +56,8 @@ pub enum ReworkError {
     ReviewFile(String),
     /// A label could not be taken off the pull request
     Unlabel(u64, &'static str, ForgeError),
+    /// The forge could not show CodeRabbit's reviews of the pull request
+    CodeRabbit(u64, ForgeError),
     /// The work item could not be saved
     State(StateError),
 }
@@ -86,6 +88,9 @@ impl fmt::Display for ReworkError {
             Self::ReviewFile(e) => f.write_str(e),
             Self::Unlabel(number, label, e) => {
                 write!(f, "cannot take the `{label}` label off #{number}: {e}")
+            }
+            Self::CodeRabbit(number, e) => {
+                write!(f, "cannot read CodeRabbit's reviews of #{number}: {e}")
             }
             Self::State(e) => e.fmt(f),
         }
@@ -315,6 +320,20 @@ impl Runner {
             .unwrap_or_else(|| WorkerModel::from(&self.settings.models.worker));
         let session = new_session_id().map_err(|e| ReworkError::Session(e.to_string()))?;
         let fresh = self.fresh(issue, found.title, worker.clone(), session);
+        // A rework stays on its pull request, so a fixed number of rounds
+        // counts the reviews the review bot gave it before.
+        let bot = &self.ports.review_bot;
+        let rounds = match self.settings.coderabbit.rounds {
+            Some(_) if self.settings.coderabbit.enabled => {
+                let activity = self
+                    .ports
+                    .forge
+                    .review_bot(repo, number, bot.login())
+                    .map_err(|e| ReworkError::CodeRabbit(number, e))?;
+                bot.reviewed_besides(&activity, "")
+            }
+            _ => 0,
+        };
         let text = review_text(number, &review);
         turn::write(&fresh.build, &review_path(&fresh.build), &text)
             .map_err(ReworkError::ReviewFile)?;
@@ -335,6 +354,10 @@ impl Runner {
         next.work_items.push(WorkItem {
             branch: pr.branch,
             rework: true,
+            coderabbit: CodeRabbitTally {
+                rounds,
+                ..CodeRabbitTally::default()
+            },
             pull_request: Some(number),
             // The fix is new code, so the qwen-review loop runs before CI.
             resume: Some(Phase::Review(Review::first())),

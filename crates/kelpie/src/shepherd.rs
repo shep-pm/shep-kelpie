@@ -225,7 +225,7 @@ mod tests {
     #[tokio::test]
     async fn a_sheep_with_no_table_reads_none() {
         let (home, _sent) = shepherd(SHEP_VERSION).await;
-        let tables = read_in_time(home.path(), "hazels-lab").await.unwrap();
+        let tables = read_in_time(home.path(), "webapp").await.unwrap();
         assert_eq!(tables.project, None);
     }
 

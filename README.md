@@ -2,13 +2,26 @@
 
 A [shep](https://github.com/shep-pm/shep) dog that runs Claude Code workers on your projects, from a planned work item to a merged pull request. It holds the merge gate, the review budgets and the pacing in code, and calls Claude only for the work and for judgement.
 
-First build under way. A project runner reads its settings, keeps its state, and answers `status`, `start` and `pause`.
+This is early. It runs the maintainer's own projects and changes without notice, and there is no release yet.
+
+## What it needs
+
+- shep 0.11
+- Rust 1.88 or later, to build it
+- Claude Code, signed in
+- `git`, and `gh` signed in to the account that opens the pull requests
+- a GitHub repo per project, with `ready-for-agent` and `ready-for-human` labels
+- a local review command or an OpenAI-compatible endpoint, or `review.local` set to `off`
+
+## Merging
+
+A project on `merge_authority = "auto"` merges its pull requests without asking once every gate passes, and posts a notice after. The example settings use `ask`, which raises a ruling before every merge.
 
 ## Running a project
 
 Kelpie needs shep 0.11. A project's settings are its runner sheep's `[app.dogs.kelpie]` table, in the runner's Flockfile entry. Start from `crates/kelpie/settings.example.toml`, which is that entry with the defaults for shep.
 
-Kelpie's own settings are its `[kelpie]` section of `dogs.toml` in the shepherd's home. Start from `crates/kelpie/kelpie-settings.example.toml`, and keep `dogs.toml` private: the webhook's URL is a credential. `ruling_channels` there, or in a project's table, picks the webhook, the relay or both. Both is the default, and only a project that posts to the webhook needs a `webhook` table.
+Kelpie's own settings are its `[kelpie]` section of `dogs.toml` in the shepherd's home. Start from `crates/kelpie/kelpie-settings.example.toml`, and keep `dogs.toml` private: the webhook's URL is a credential. `ruling_channels` there, or in a project's table, picks the webhook, the relay or both. Both is the default, and only a project that posts to the webhook needs a `webhook` table. On an ntfy webhook, a ruling can be answered from the topic: run `kelpie totp` once and scan the QR code into an authenticator app, then reply with the line the alert ends on, such as `shep 14 yes <code>`, with the app's code last. Anyone who can read the topic can read rulings, but only a reply with the code of the moment answers one, and each code answers once. Five wrong codes turn answers off until `kelpie totp --unlock`, and `kelpie totp --rotate` replaces a secret that may have leaked.
 
 Lookout edits both once kelpie is adopted as a dog, which is how shep finds its settings schema: `shep adopt /path/to/kelpie --name kelpie`, then `shep disable kelpie`, both with `SHEP_HOME=~/.kelpie/shep`. Adopting starts it, and the dog still runs from the Flockfile below, so the disable stops that start. A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start.
 
@@ -49,6 +62,8 @@ Each pull request goes through a review loop before CI. Rounds alternate between
 - `kind = "off"`: every round is the Claude round, and one that finds nothing above a nit ends the loop
 - `kind = "endpoint"`: kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server
 - `kind = "command"`: a command of your own that keeps the contract below
+
+`review.local_rounds` caps the local rounds per work item. Once they are spent, every round is Claude's and one clean Claude round ends the loop.
 
 A file without the table runs `~/.claude/scripts/qwen-review.sh`, the maintainer's own command. A missing command or an endpoint that doesn't answer stops the runner at start.
 

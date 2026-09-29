@@ -196,7 +196,7 @@ mod tests {
                 settings: &settings,
                 kelpie_settings: &kelpie_settings,
             };
-            let home = Path::new("/home/maintainer");
+            let home = Path::new("/home/me");
             tokio::time::timeout(PATIENCE, move_files(self.home.path(), files, home))
                 .await
                 .expect("the move neither ended nor failed in time")

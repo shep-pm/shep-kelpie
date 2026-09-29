@@ -49,7 +49,7 @@ fn running(rig: &Rig) -> Mutex<Runner> {
 
 #[test]
 fn a_rework_starts_on_the_pull_requests_branch_with_the_review_as_its_first_turn() {
-    let rig = Rig::new("hazels-lab");
+    let rig = Rig::new("webapp");
     let by_hand = reviewed_71(&rig);
     let runner = running(&rig);
     let item = &rig.ask(&runner, "rework", Some("71"))["work_item"];
@@ -160,7 +160,7 @@ fn a_branch_the_maintainer_pushed_to_since_is_where_the_worker_starts() {
 
 #[test]
 fn a_local_branch_left_behind_that_matches_origin_is_reused() {
-    let rig = Rig::new("hazels-lab");
+    let rig = Rig::new("webapp");
     let by_hand = reviewed_71(&rig);
     git(&rig.repo(), &["fetch", "--quiet", "origin", "kelpie/7"]);
     git(&rig.repo(), &["branch", "kelpie/7", &by_hand]);
@@ -180,7 +180,7 @@ fn a_local_branch_left_behind_that_matches_origin_is_reused() {
 
 #[test]
 fn a_local_branch_with_commits_origin_lacks_stays_a_refusal() {
-    let rig = Rig::new("hazels-lab");
+    let rig = Rig::new("webapp");
     let by_hand = reviewed_71(&rig);
     git(&rig.repo(), &["fetch", "--quiet", "origin", "kelpie/7"]);
     let tree = format!("{by_hand}^{{tree}}");
@@ -369,6 +369,43 @@ fn rework_takes_one_plain_pull_request_number() {
             json!({ "error": format!("{bad:?} is not a pull request number") })
         );
     }
+}
+
+#[test]
+fn a_rework_of_a_pull_request_coderabbit_reviewed_spends_no_second_round() {
+    let rig = Rig::new("shep");
+    rig.coderabbit_on();
+    rig.edit_settings(|s| s.replace("divisor = 1000\n", "divisor = 1000\nrounds = 1\n"));
+    reviewed_71(&rig);
+    let reviewed = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.coderabbit.review(
+        71,
+        &reviewed,
+        crate::runner::coderabbit::tests::now(&rig),
+        &[],
+    );
+    let runner = running(&rig);
+    rig.ask(&runner, "rework", Some("71"));
+    rig.claude.script([
+        Scripted::Push("fix.txt", "fixed\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    step(&runner).unwrap(); // the rework's turn
+    step(&runner).unwrap(); // review round 1, qwen: clean by default
+    step(&runner).unwrap(); // review round 2, claude: scripted clean above
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::Ruling { id: 1, .. })
+    ));
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["rulings"][0]["kind"]["kind"], json!("merge"));
+    assert_eq!(status["work_item"]["coderabbit"]["rounds"], json!(1));
+    let summons = rig.forge.coderabbit.label_log().into_iter();
+    let summon = crate::runner::coderabbit::LABEL;
+    assert_eq!(summons.filter(|(_, l, _)| l == summon).count(), 0);
 }
 
 mod asked;

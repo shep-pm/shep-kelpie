@@ -537,9 +537,58 @@ pub struct Alert {
     pub title: String,
     /// The ruling's question, with the triggers that answer it
     pub text: String,
+    /// How the maintainer answers it where they read it, on a webhook that
+    /// takes replies
+    pub reply: Option<ReplyWith>,
 }
 
-/// Posts alerts to the maintainer's webhook
+/// The ruling a reply on the webhook's topic answers, and what it takes
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplyWith {
+    /// The project, which a reply names, since every project shares the topic
+    pub project: String,
+    /// The ruling
+    pub id: u64,
+    /// What answers it
+    pub takes: Takes,
+}
+
+/// What answers a ruling
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Takes {
+    /// The worker's question: an answer
+    Answer,
+    /// A yes, or a no with a note
+    YesOrNo,
+}
+
+/// Where a read of the webhook's replies starts
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Since {
+    /// Every message from this time on
+    Time(Timestamp),
+    /// Every message after the one with this id
+    After(String),
+}
+
+/// One message on the webhook's topic
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reply {
+    /// The webhook's id for it, which the next read starts after
+    pub id: String,
+    /// When the webhook took it, which the sender cannot set
+    pub time: Timestamp,
+    /// Its text, or `None` for kelpie's own posts and anything but plain text
+    pub text: Option<String>,
+    /// Every text it carries, its title included, whose codes are spent
+    /// though only `text` can answer
+    pub said: Vec<String>,
+    /// Whether it carries text kelpie cannot read in full, as ntfy turns a
+    /// long message into an attachment
+    pub cut: bool,
+}
+
+/// Posts alerts to the maintainer's webhook, and reads replies to them
 pub trait Alerts: Send + Sync {
     /// Posts `alert` to `webhook`
     ///
@@ -548,6 +597,15 @@ pub trait Alerts: Send + Sync {
     /// [`AlertError`] when the post cannot be made or is refused. Its text
     /// never carries the webhook's URL.
     fn post(&self, webhook: &Webhook, alert: &Alert) -> Result<(), AlertError>;
+
+    /// The messages on `webhook`'s topic since `since`, oldest first, on a
+    /// webhook that takes replies
+    ///
+    /// # Errors
+    ///
+    /// [`AlertError`] when the read cannot be made, is refused, or cannot
+    /// be understood. Its text never carries the webhook's URL.
+    fn replies(&self, webhook: &Webhook, since: &Since) -> Result<Vec<Reply>, AlertError>;
 }
 
 /// Why an alert was not posted. None of these carry the webhook's URL.
@@ -561,15 +619,18 @@ pub enum AlertError {
     Refused(u16),
     /// The webhook is off and the relay could not take the ruling, with why
     Relay(String),
+    /// The webhook's replies came back in a shape kelpie cannot read
+    Unreadable,
 }
 
 impl fmt::Display for AlertError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Spawn(error) => write!(f, "cannot run curl: {error}"),
-            Self::Unreachable(code) => write!(f, "curl could not post it (exit {code})"),
+            Self::Unreachable(code) => write!(f, "curl could not reach the webhook (exit {code})"),
             Self::Refused(status) => write!(f, "the webhook answered HTTP {status}"),
             Self::Relay(reason) => f.write_str(reason),
+            Self::Unreadable => f.write_str("the webhook's replies could not be read"),
         }
     }
 }
@@ -681,16 +742,24 @@ pub fn parse_findings(text: &str) -> Vec<Finding> {
     text.lines().filter_map(parse_finding_line).collect()
 }
 
-/// Reads a model's review reply: its findings, or none when it says
-/// exactly `CLEAN`
+/// Reads a model's review reply: its findings, or none when its last
+/// non-empty line is exactly `CLEAN`
+///
+/// A summary ahead of that line is fine. `CLEAN` anywhere else, or inside a
+/// longer line such as "not CLEAN", is not a verdict.
 ///
 /// # Errors
 ///
-/// The reply, trimmed, when it holds no finding and is not `CLEAN`: an
-/// empty reply or prose reviewed nothing, which is not clean.
+/// The reply, trimmed, when it holds no finding and does not end on `CLEAN`:
+/// an empty reply or prose reviewed nothing, which is not clean.
 pub fn read_review(text: &str) -> Result<Vec<Finding>, String> {
     let findings = parse_findings(text);
-    if findings.is_empty() && text.trim() != "CLEAN" {
+    let ends_clean = text
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .is_some_and(|line| line.trim() == "CLEAN");
+    if findings.is_empty() && !ends_clean {
         return Err(text.trim().to_owned());
     }
     Ok(findings)
