@@ -45,8 +45,8 @@ mod shots;
 mod trigger;
 mod turn;
 
-pub use adopt::AdoptError;
 pub use crate::coderabbit::LABEL as SUMMON_LABEL;
+pub use adopt::AdoptError;
 pub use merge::DropError;
 pub use pace::PacerStatus;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
