@@ -334,6 +334,10 @@ fn comment(kind: &RulingKind) -> Option<String> {
             short(head),
             checks.join(", ")
         ),
+        // The forge's own words stay off a public pull request.
+        RulingKind::MergeRefused { head, .. } => {
+            format!("Merging at {} was refused twice.", short(head))
+        }
         RulingKind::Closed => "This pull request was closed without merging.".to_owned(),
         RulingKind::ReviewGuard { review } => format!(
             "The review of this pull request has run {} rounds without settling.",

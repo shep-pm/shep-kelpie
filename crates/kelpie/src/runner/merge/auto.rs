@@ -247,6 +247,17 @@ fn a_merge_the_forge_refuses_is_caught_up_once_then_parks_and_a_yes_looks_again(
             &head[..7]
         )
     );
+    assert_eq!(
+        rig.forge.comments(),
+        [(
+            71,
+            format!(
+                "Merging at {} was refused twice.\n\nWaiting on the maintainer.",
+                &head[..7]
+            )
+        )],
+        "the forge's words stay off the pull request"
+    );
     still_asks(&rig, &runner, id, "merge-refused");
 
     // The answer gives the next refusal its catch-up again.
