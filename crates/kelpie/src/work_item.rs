@@ -341,11 +341,13 @@ pub enum ReviewCallState {
     },
 }
 
-/// Where the qwen-review loop stands
+/// Where the review loop stands
 ///
-/// Rounds alternate, qwen first: an odd round is qwen's, an even one is
-/// Claude's. The loop ends once two rounds in a row hold nothing above a nit
-/// (LOW), with the worker's fix turn for each folded in before the next round.
+/// With a local round, rounds alternate, local first: an odd round is the
+/// local one, an even one Claude's, and the loop ends once two rounds in a
+/// row hold nothing above a nit (LOW). Without one, every round is Claude's,
+/// and one such round ends it. The worker's fix turn for each round is folded
+/// in before the next.
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -361,7 +363,7 @@ pub struct Review {
 }
 
 impl Review {
-    /// The first round: qwen, about to run
+    /// The first round, about to run
     pub fn first() -> Self {
         Self {
             round: 1,
@@ -371,10 +373,10 @@ impl Review {
         }
     }
 
-    /// Which reviewer runs this round
-    pub fn reviewer(&self) -> ReviewerKind {
-        if self.round % 2 == 1 {
-            ReviewerKind::Qwen
+    /// Which reviewer runs this round, given whether the project has a local round
+    pub fn reviewer(&self, local: bool) -> ReviewerKind {
+        if local && self.round % 2 == 1 {
+            ReviewerKind::Local
         } else {
             ReviewerKind::Claude
         }
@@ -385,8 +387,9 @@ impl Review {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ReviewerKind {
-    /// The maintainer's qwen-review script
-    Qwen,
+    /// The project's local round, named for the first model it ran
+    #[serde(rename = "qwen")]
+    Local,
     /// A fresh Claude session, never the worker's
     Claude,
 }
@@ -712,12 +715,31 @@ mod tests {
     }
 
     #[test]
-    fn rounds_alternate_qwen_first() {
+    fn rounds_alternate_local_first_and_are_all_claudes_without_one() {
         let review = Review::first();
-        assert_eq!(review.reviewer(), ReviewerKind::Qwen);
+        assert_eq!(review.reviewer(true), ReviewerKind::Local);
         assert_eq!(
-            Review { round: 2, ..review }.reviewer(),
+            Review { round: 2, ..review }.reviewer(true),
             ReviewerKind::Claude
+        );
+        for round in 1..=3 {
+            let review = Review {
+                round,
+                ..Review::first()
+            };
+            assert_eq!(
+                review.reviewer(false),
+                ReviewerKind::Claude,
+                "round {round}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_local_reviewer_keeps_its_wire_name() {
+        assert_eq!(
+            serde_json::to_value(ReviewerKind::Local).unwrap(),
+            json!("qwen")
         );
     }
 

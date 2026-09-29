@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use serde::Deserialize;
 
 /// One way to reach the maintainer
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Channel {
     /// A post to the webhook in kelpie's settings
@@ -19,8 +19,10 @@ pub enum Channel {
 }
 
 /// The channels rulings go to: at least one
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(try_from = "Vec<Channel>")]
+// schemars describes a `try_from` type by its source, so the bound goes here.
+#[schemars(extend("minItems" = 1))]
 pub struct Channels(BTreeSet<Channel>);
 
 impl Channels {

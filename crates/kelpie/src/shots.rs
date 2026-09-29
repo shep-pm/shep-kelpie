@@ -42,6 +42,10 @@ pub struct ShotsJob {
     /// The file the running dev server's process group is recorded in, which
     /// only kelpie writes, and [`crate::ports::Shots::stop_left`] reads
     pub server_pid: PathBuf,
+    /// The shepherd's home, which the dev server may not read. Empty in a
+    /// job an older runner wrote, which then denies only the credentials.
+    #[serde(default)]
+    pub shep_home: PathBuf,
 }
 
 /// The file a work item's dev server group is recorded in, under its shots folder

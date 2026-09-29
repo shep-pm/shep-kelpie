@@ -1,7 +1,9 @@
 //! Headless Claude Code, one `claude -p` process per call
 
 use std::ffi::OsString;
+use std::fmt;
 use std::process::{Command, Output};
+use std::sync::Arc;
 
 use serde::Deserialize;
 
@@ -13,15 +15,51 @@ use crate::ports::{
 /// What `claude -p --resume` prints when the session has no transcript
 const NO_SESSION: &str = "No conversation found with session ID";
 
+/// Names a runner's child process in `shep describe`
+pub trait LambLabels: Send + Sync + fmt::Debug {
+    /// Labels the child `pid` with `label`
+    fn label(&self, pid: u32, label: &str);
+}
+
+impl LambLabels for shep_channel::Shepherd {
+    // A label kelpie builds is short and plain, so a refused one is dropped
+    // rather than failing the call it names.
+    fn label(&self, pid: u32, label: &str) {
+        if let Ok(label) = shep_channel::LambLabel::new(label) {
+            let _ = self.label_lamb(pid, label);
+        }
+    }
+}
+
 /// Headless Claude Code, one `claude -p` process per call
 ///
 /// Clones share their calls in flight, so one clone can stop them all.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ClaudeCli {
     pub(super) processes: Processes,
+    program: OsString,
+    lambs: Option<Arc<dyn LambLabels>>,
+}
+
+impl Default for ClaudeCli {
+    fn default() -> Self {
+        Self {
+            processes: Processes::default(),
+            program: "claude".into(),
+            lambs: None,
+        }
+    }
 }
 
 impl ClaudeCli {
+    /// Labels each call's process with its issue and role, such as `#7 worker`
+    pub fn labelling(lambs: Arc<dyn LambLabels>) -> Self {
+        Self {
+            lambs: Some(lambs),
+            ..Self::default()
+        }
+    }
+
     /// Ends every call in flight, and refuses new ones, as the runner stops
     ///
     /// A call ended this way returns [`ClaudeError::Stopped`].
@@ -33,12 +71,17 @@ impl ClaudeCli {
 impl Claude for ClaudeCli {
     fn run(&self, call: &ClaudeCall) -> Result<ClaudeReply, ClaudeError> {
         // Stdin is closed: a `claude -p` with an open stdin waits on it.
-        let mut command = Command::new("claude");
+        let mut command = Command::new(&self.program);
         command.args(argv(call)).current_dir(&call.cwd);
-        let run = match call.timeout {
-            Some(limit) => self.processes.output_within(&mut command, limit),
-            None => self.processes.output(&mut command),
+        let label = format!("#{} {}", call.issue, call.role.as_str());
+        let spawned = |pid| {
+            if let Some(lambs) = &self.lambs {
+                lambs.label(pid, &label);
+            }
         };
+        let run = self
+            .processes
+            .output_telling(&mut command, call.timeout, &spawned);
         let output = run.map_err(|e| match e {
             RunError::Io(e) => ClaudeError::Spawn(e.to_string()),
             RunError::Stopped => ClaudeError::Stopped,
@@ -175,6 +218,7 @@ mod tests {
     fn call(role: Role, session: Session) -> ClaudeCall {
         ClaudeCall {
             role,
+            issue: 6,
             model: "claude-sonnet-5".into(),
             effort: Effort::Medium,
             session,
@@ -341,5 +385,46 @@ mod tests {
         assert_eq!(Cost::from_usd(-0.01), None);
         assert_eq!(Cost::from_usd(f64::NAN), None);
         assert_eq!(Cost(22_917_000).usd(), 0.022917);
+    }
+
+    #[derive(Debug, Default)]
+    struct Recorded(std::sync::Mutex<Vec<(u32, String)>>);
+
+    impl LambLabels for Recorded {
+        fn label(&self, pid: u32, label: &str) {
+            self.0.lock().unwrap().push((pid, label.to_owned()));
+        }
+    }
+
+    #[test]
+    fn a_call_s_lamb_carries_its_issue_and_role() {
+        let dir = tempfile::tempdir().unwrap();
+        let (claude, pid_file) = (dir.path().join("claude"), dir.path().join("pid"));
+        std::fs::write(dir.path().join("result.json"), RESULT).unwrap();
+        let script = format!(
+            "#!/bin/sh\necho $$ > {}\ncat {}/result.json\n",
+            pid_file.display(),
+            dir.path().display()
+        );
+        crate::test::write_script(&claude, &script);
+        let lambs = Arc::new(Recorded::default());
+        let cli = ClaudeCli {
+            program: claude.into(),
+            ..ClaudeCli::labelling(Arc::clone(&lambs) as Arc<dyn LambLabels>)
+        };
+        for role in [Role::Worker, Role::Reviewer, Role::Judge] {
+            let mut call = call(role, fresh());
+            call.cwd = dir.path().to_owned();
+            cli.run(&call).unwrap();
+        }
+        let labels = lambs.0.lock().unwrap().clone();
+        let names: Vec<&str> = labels.iter().map(|(_, l)| l.as_str()).collect();
+        assert_eq!(names, ["#6 worker", "#6 reviewer", "#6 judge"]);
+        let pid: u32 = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert_eq!(labels[2].0, pid, "the label is not on the process that ran");
     }
 }

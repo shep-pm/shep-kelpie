@@ -14,7 +14,7 @@ fn with_preview(project: &str) -> Rig {
     rig.land_launch_file();
     rig.edit_settings(|s| {
         format!(
-            "{s}\n[preview]\nenabled = true\nroutes = [\"/\", \"/events\"]\n\
+            "{s}\n[app.dogs.kelpie.preview]\nenabled = true\nroutes = [\"/\", \"/events\"]\n\
              domains = [\"api.example.com\"]\n"
         )
     });
@@ -60,7 +60,7 @@ fn a_project_without_a_launch_file_behaves_as_before() {
 fn a_launch_file_on_main_without_the_setting_takes_no_shots() {
     let rig = Rig::new("shep");
     rig.land_launch_file();
-    rig.edit_settings(|s| format!("{s}\n[preview]\nroutes = [\"/\"]\n"));
+    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.preview]\nroutes = [\"/\"]\n"));
     let runner = started(&rig);
     rig.claude.script([
         Scripted::Push("work.txt", "work\n"),
@@ -87,7 +87,7 @@ fn with_web_preview(project: &str, change: &'static str) -> (Rig, std::sync::Mut
     let rig = Rig::new(project);
     let launch = r#"{"configurations": [{"name": "web", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 5173, "cwd": "web"}]}"#;
     rig.land(crate::preview::LAUNCH_FILE, launch);
-    rig.edit_settings(|s| format!("{s}\n[preview]\nenabled = true\n"));
+    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.preview]\nenabled = true\n"));
     let runner = started(&rig);
     rig.claude
         .script([Scripted::Push(change, "change\n"), Scripted::Text("CLEAN")]);

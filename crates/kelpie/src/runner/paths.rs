@@ -71,6 +71,9 @@ pub struct ProjectPaths {
     pub tools: Tools,
     /// Kelpie's home, which holds every folder here
     pub kelpie_home: PathBuf,
+    /// The shepherd's home, which a worker may not read. Kelpie's own shepherd,
+    /// `<kelpie home>/shep`, unless the runner's `SHEP_HOME` names another.
+    pub shep_home: PathBuf,
     worktrees: PathBuf,
     builds: PathBuf,
     shots: PathBuf,
@@ -93,6 +96,7 @@ impl ProjectPaths {
             worker: folder.join("worker"),
             tools: Tools::under(kelpie_home),
             kelpie_home: kelpie_home.to_owned(),
+            shep_home: kelpie_home.join("shep"),
             worktrees: kelpie_home.join("wt").join(project.as_str()),
             builds: kelpie_home.join("targets").join(project.as_str()),
             shots: kelpie_home.join("shots").join(project.as_str()),

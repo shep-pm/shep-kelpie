@@ -1,8 +1,14 @@
 //! The project's state file
 //!
 //! What a runner must remember across a restart: whether the project is
-//! running, its work item, pending rulings and leases held. [`StateStore`]
-//! saves and reads it.
+//! running, its open work items, pending rulings and leases held. Each save goes
+//! to a temporary file that is synced and then renamed over the old one, so
+//! a runner killed mid-write leaves the previous state whole.
+
+use std::fmt;
+use std::fs::{self, File};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -10,13 +16,12 @@ use crate::pacer::DayStart;
 use crate::ports::Timestamp;
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
 
-mod store;
-
-pub(crate) use store::write_atomically;
-pub use store::{StateError, StateStore};
-
 /// The state file's format version
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
+
+/// The format before a project could have more than one work item open,
+/// which this kelpie still reads
+const ONE_ITEM: u32 = 1;
 
 /// Everything a project's runner keeps across a restart
 // wire format: changing this is a breaking change to the state file
@@ -28,8 +33,12 @@ pub struct ProjectState {
     pub run: RunState,
     /// When `run` last changed
     pub since: Timestamp,
-    /// The work item in flight
-    pub work_item: Option<WorkItem>,
+    /// The open work items, oldest first
+    #[serde(default)]
+    pub work_items: Vec<WorkItem>,
+    /// The work item a version 1 file kept, which loads into `work_items`
+    #[serde(default, skip_serializing)]
+    work_item: Option<WorkItem>,
     /// Rulings waiting on the maintainer, oldest first
     pub rulings: Vec<Ruling>,
     /// The id of the last ruling raised, so no id is ever given twice
@@ -42,7 +51,7 @@ pub struct ProjectState {
     /// one. None of them starts another.
     #[serde(default)]
     pub reworked: Vec<String>,
-    /// Pull requests adopted and waiting for the work item in flight, oldest first
+    /// Pull requests adopted and waiting for a free slot, oldest first
     #[serde(default)]
     pub adopted: Vec<Waiting>,
     /// Leases this project holds
@@ -62,6 +71,7 @@ impl ProjectState {
             version: VERSION,
             run: RunState::Paused,
             since,
+            work_items: Vec::new(),
             work_item: None,
             rulings: Vec::new(),
             last_ruling: 0,
@@ -72,6 +82,34 @@ impl ProjectState {
             pacing: None,
             notices: Vec::new(),
         }
+    }
+
+    /// The open work items' issues, oldest first
+    pub fn open_issues(&self) -> Vec<u64> {
+        self.work_items.iter().map(|item| item.issue).collect()
+    }
+
+    /// The open work item for `issue`
+    pub fn item(&self, issue: u64) -> Option<&WorkItem> {
+        self.work_items.iter().find(|item| item.issue == issue)
+    }
+
+    /// The open work item for `issue`, to change
+    pub fn item_mut(&mut self, issue: u64) -> Option<&mut WorkItem> {
+        self.work_items.iter_mut().find(|item| item.issue == issue)
+    }
+
+    // A version 1 file held one work item, and every ruling in it was that
+    // item's.
+    fn one_item_moved(mut self) -> Self {
+        let Some(item) = self.work_item.take() else {
+            return self;
+        };
+        for ruling in &mut self.rulings {
+            ruling.issue.get_or_insert(item.issue);
+        }
+        self.work_items = vec![item];
+        self
     }
 }
 
@@ -104,6 +142,10 @@ pub enum RunState {
 pub struct Ruling {
     /// What the answering trigger names
     pub id: u64,
+    /// The issue of the work item it parks. None only in an older file
+    /// with no work item open.
+    #[serde(default)]
+    pub issue: Option<u64>,
     /// The question, as the maintainer reads it
     pub question: String,
     /// The pull request it is about, once there is one
@@ -307,6 +349,9 @@ pub enum Resume {
 pub struct LeaseHeld {
     /// What the lease is for
     pub resource: Resource,
+    /// The issue of the work item it was taken for
+    #[serde(default)]
+    pub issue: Option<u64>,
     /// When it was granted
     pub since: Timestamp,
 }
@@ -322,390 +367,151 @@ pub enum Resource {
     Coderabbit,
 }
 
-#[cfg(test)]
-mod tests {
-    use std::fs;
-    use std::path::Path;
+/// Why the state file cannot be read or written
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StateError {
+    /// Reading the file failed
+    Read {
+        /// The file
+        path: PathBuf,
+        /// What reading it failed with
+        kind: io::ErrorKind,
+    },
+    /// The file is not a state file this version of kelpie wrote
+    Malformed {
+        /// The file
+        path: PathBuf,
+        /// The parser's message
+        message: String,
+    },
+    /// The file carries a format version this kelpie does not read
+    Version {
+        /// The file
+        path: PathBuf,
+        /// The version it carries
+        found: u32,
+    },
+    /// Writing the file failed, and the previous state still stands
+    Write {
+        /// The file
+        path: PathBuf,
+        /// What writing it failed with
+        kind: io::ErrorKind,
+    },
+}
 
-    use super::*;
-    use crate::test::a_work_item;
-
-    fn store_in(dir: &Path) -> StateStore {
-        StateStore::new(dir.join("state.json"))
-    }
-
-    #[test]
-    fn a_saved_state_loads_back_whole() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = store_in(dir.path());
-        let mut state = ProjectState::new(Timestamp(1_790_000_000));
-        state.run = RunState::Running;
-        state.work_item = Some(a_work_item());
-        state.rulings.push(Ruling {
-            id: 1,
-            question: "merge #43?".into(),
-            pull_request: Some(43),
-            kind: RulingKind::Merge {
-                head: "c0ffee".into(),
-                shots_failed: false,
-            },
-            alerted: true,
-            relayed: true,
-        });
-        state.last_ruling = 1;
-        state.leases.push(LeaseHeld {
-            resource: Resource::Gpu,
-            since: Timestamp(1_790_000_100),
-        });
-        state.pacing = Some(DayStart {
-            week_resets_at: Timestamp(1_790_500_000),
-            day: 2,
-            week_used_pct: 31,
-        });
-        store.save(&state).unwrap();
-        assert_eq!(store.load().unwrap(), Some(state));
-    }
-
-    #[test]
-    fn a_file_saved_before_pacing_loads_with_none() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = store_in(dir.path());
-        let old =
-            r#"{"version":1,"run":"running","since":7,"work_item":null,"rulings":[],"leases":[]}"#;
-        fs::write(dir.path().join("state.json"), old).unwrap();
-        let state = store.load().unwrap().unwrap();
-        assert_eq!((state.run, state.pacing), (RunState::Running, None));
-    }
-
-    #[test]
-    fn the_file_format_is_pinned() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = store_in(dir.path());
-        let mut state = ProjectState::new(Timestamp(7));
-        state.leases.push(LeaseHeld {
-            resource: Resource::Coderabbit,
-            since: Timestamp(8),
-        });
-        let ruling = |id, kind| Ruling {
-            id,
-            question: "q".into(),
-            pull_request: Some(30),
-            kind,
-            alerted: id.is_multiple_of(2),
-            relayed: id.is_multiple_of(3),
-        };
-        state.rulings = vec![
-            ruling(
-                1,
-                RulingKind::Merge {
-                    head: "c0ffee".into(),
-                    shots_failed: true,
-                },
-            ),
-            ruling(
-                2,
-                RulingKind::Rebase {
-                    reason: "conflicts".into(),
-                },
-            ),
-            ruling(
-                3,
-                RulingKind::StillRed {
-                    head: "bad".into(),
-                    checks: vec!["lint".into()],
-                },
-            ),
-            ruling(4, RulingKind::Closed),
-            ruling(
-                5,
-                RulingKind::Question {
-                    asked: "Which name?".into(),
-                    resume: Resume::Nothing,
-                },
-            ),
-            ruling(6, RulingKind::TurnTimeout { phase: None }),
-            ruling(
-                7,
-                RulingKind::ForeignChange {
-                    description: "the `bug` label was added".into(),
-                    known: Known {
-                        labels: vec!["bug".into()],
-                        ready: false,
-                        head: Some("c0ffee".into()),
-                    },
-                },
-            ),
-            ruling(
-                8,
-                RulingKind::MergeRefused {
-                    head: "c0ffee".into(),
-                    reason: "a ruleset".into(),
-                },
-            ),
-        ];
-        state.last_ruling = 8;
-        state.notices = vec![Notice {
-            issue: 22,
-            pull_request: 30,
-            head: "c0ffee".into(),
-            shots_failed: true,
-        }];
-        state.finished = vec![22, 30];
-        state.reworked = vec!["PRR_1".into()];
-        state.adopted = vec![
-            Waiting {
-                pull_request: 614,
-                by_label: false,
-            },
-            Waiting {
-                pull_request: 638,
-                by_label: true,
-            },
-        ];
-        state.pacing = Some(DayStart {
-            week_resets_at: Timestamp(9),
-            day: 1,
-            week_used_pct: 10,
-        });
-        store.save(&state).unwrap();
-        let text = fs::read_to_string(dir.path().join("state.json")).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
-        let pinned = |id: u64, kind| {
-            serde_json::json!({
-                "id": id,
-                "question": "q",
-                "pull_request": 30,
-                "kind": kind,
-                "alerted": id.is_multiple_of(2),
-                "relayed": id.is_multiple_of(3),
-            })
-        };
-        assert_eq!(
-            value,
-            serde_json::json!({
-                "version": 1,
-                "run": "paused",
-                "since": 7,
-                "work_item": null,
-                "rulings": [
-                    pinned(1, serde_json::json!({ "kind": "merge", "head": "c0ffee", "shots_failed": true })),
-                    pinned(2, serde_json::json!({ "kind": "rebase", "reason": "conflicts" })),
-                    pinned(3, serde_json::json!({ "kind": "still-red", "head": "bad", "checks": ["lint"] })),
-                    pinned(4, serde_json::json!({ "kind": "closed" })),
-                    pinned(
-                        5,
-                        serde_json::json!({
-                            "kind": "question",
-                            "asked": "Which name?",
-                            "resume": { "state": "nothing" },
-                        }),
-                    ),
-                    pinned(6, serde_json::json!({ "kind": "turn-timeout" })),
-                    pinned(7, serde_json::json!({
-                        "kind": "foreign-change",
-                        "description": "the `bug` label was added",
-                        "known": { "labels": ["bug"], "ready": false, "head": "c0ffee" },
-                    })),
-                    pinned(8, serde_json::json!({
-                        "kind": "merge-refused",
-                        "head": "c0ffee",
-                        "reason": "a ruleset",
-                    })),
-                ],
-                "last_ruling": 8,
-                "finished": [22, 30],
-                "reworked": ["PRR_1"],
-                "adopted": [
-                    { "pull_request": 614, "by_label": false },
-                    { "pull_request": 638, "by_label": true },
-                ],
-                "leases": [{ "resource": "coderabbit", "since": 8 }],
-                "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
-                "notices": [{ "issue": 22, "pull_request": 30, "head": "c0ffee", "shots_failed": true }],
-            })
-        );
-    }
-
-    #[test]
-    fn the_coderabbit_rulings_are_pinned() {
-        let cap = RulingKind::CodeRabbitCap {
-            rounds: 2,
-            held: 1,
-            prompt: "fix".into(),
-            head: Some("c0ffee".into()),
-        };
-        let silent = RulingKind::CodeRabbitSilent {
-            head: "c0ffee".into(),
-        };
-        let unpushed = RulingKind::FixNotPushed {
-            fix: Fix::CodeRabbit {
-                round: 3,
-                head: "c0ffee".into(),
-            },
-            prompt: "again".into(),
-        };
-        for kind in [&cap, &silent, &unpushed] {
-            let saved = serde_json::to_value(kind).unwrap();
-            assert_eq!(&serde_json::from_value::<RulingKind>(saved).unwrap(), kind);
-        }
-        assert_eq!(
-            serde_json::to_value([&cap, &silent, &unpushed]).unwrap(),
-            serde_json::json!([
-                {
-                    "kind": "coderabbit-cap",
-                    "rounds": 2,
-                    "held": 1,
-                    "prompt": "fix",
-                    "head": "c0ffee",
-                },
-                { "kind": "coderabbit-silent", "head": "c0ffee" },
-                {
-                    "kind": "fix-not-pushed",
-                    "coderabbit": { "round": 3, "head": "c0ffee" },
-                    "prompt": "again",
-                },
-            ])
-        );
-        let saved_before_the_head: RulingKind = serde_json::from_value(serde_json::json!(
-            { "kind": "coderabbit-cap", "rounds": 2, "held": 1, "prompt": "fix" }
-        ))
-        .unwrap();
-        assert_eq!(
-            saved_before_the_head,
-            RulingKind::CodeRabbitCap {
-                rounds: 2,
-                held: 1,
-                prompt: "fix".into(),
-                head: None,
+impl fmt::Display for StateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read { path, kind } => {
+                write!(f, "cannot read state file {}: {kind}", path.display())
             }
-        );
-    }
-
-    #[test]
-    fn a_timeout_keeps_the_phase_its_turn_ran_in() {
-        let kind = RulingKind::TurnTimeout {
-            phase: Some(Phase::Implement),
-        };
-        let saved = serde_json::to_value(&kind).unwrap();
-        assert_eq!(
-            saved,
-            serde_json::json!({ "kind": "turn-timeout", "phase": { "state": "implement" } })
-        );
-        assert_eq!(serde_json::from_value::<RulingKind>(saved).unwrap(), kind);
-    }
-
-    #[test]
-    fn a_failed_turn_keeps_its_phase_and_the_turn_to_retry() {
-        let kind = RulingKind::TurnFailed {
-            reason: "no worktree".into(),
-            phase: Phase::Implement,
-            retry: Turn::Due,
-        };
-        let saved = serde_json::to_value(&kind).unwrap();
-        assert_eq!(
-            saved,
-            serde_json::json!({
-                "kind": "turn-failed",
-                "reason": "no worktree",
-                "phase": { "state": "implement" },
-                "retry": { "state": "due" },
-            })
-        );
-        assert_eq!(serde_json::from_value::<RulingKind>(saved).unwrap(), kind);
-    }
-
-    #[test]
-    fn a_change_to_claudes_files_keeps_its_head_files_and_phase() {
-        let kind = RulingKind::ClaudeFiles {
-            head: "c0ffee".into(),
-            files: vec![".mcp.json".into()],
-            phase: Phase::Implement,
-        };
-        let saved = serde_json::to_value(&kind).unwrap();
-        assert_eq!(
-            saved,
-            serde_json::json!({
-                "kind": "claude-files",
-                "head": "c0ffee",
-                "files": [".mcp.json"],
-                "phase": { "state": "implement" },
-            })
-        );
-        assert_eq!(serde_json::from_value::<RulingKind>(saved).unwrap(), kind);
-    }
-
-    #[test]
-    fn a_question_during_a_coderabbit_fix_is_pinned() {
-        let resume = Resume::CodeRabbitFix {
-            head: "c0ffee".into(),
-        };
-        let saved = serde_json::to_value(&resume).unwrap();
-        assert_eq!(
-            saved,
-            serde_json::json!({ "state": "coderabbit-fix", "head": "c0ffee" })
-        );
-        assert_eq!(serde_json::from_value::<Resume>(saved).unwrap(), resume);
-    }
-
-    #[test]
-    fn a_qwen_fix_not_pushed_keeps_its_wire_shape() {
-        let saved = serde_json::json!({
-            "kind": "fix-not-pushed",
-            "review": {
-                "round": 1,
-                "consecutive_clean": 0,
-                "guard_cleared": false,
-                "stage": { "stage": "fixing", "clean": false, "head": "c0ffee" },
-            },
-            "prompt": "again",
-        });
-        let kind: RulingKind = serde_json::from_value(saved.clone()).unwrap();
-        let RulingKind::FixNotPushed {
-            fix: Fix::Review(review),
-            ..
-        } = &kind
-        else {
-            panic!("read as {kind:?}");
-        };
-        assert_eq!(review.round, 1);
-        assert_eq!(serde_json::to_value(&kind).unwrap(), saved);
-        let stray = serde_json::json!({
-            "kind": "fix-not-pushed",
-            "coderabbit": { "round": 3, "head": "c0ffee" },
-            "prompt": "again",
-            "extra": true,
-        });
-        assert!(serde_json::from_value::<RulingKind>(stray).is_err());
-        let misspelt = serde_json::json!({
-            "kind": "fix-not-pushed",
-            "coderabbit": { "round": 3, "head": "c0ffee", "heade": "c0ffee" },
-            "prompt": "again",
-        });
-        assert!(serde_json::from_value::<RulingKind>(misspelt).is_err());
-    }
-
-    #[test]
-    fn a_state_saved_before_ruling_ids_were_counted_starts_counting_at_zero() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = store_in(dir.path());
-        fs::write(
-            dir.path().join("state.json"),
-            r#"{"version":1,"run":"running","since":3,"work_item":null,"rulings":[],"leases":[]}"#,
-        )
-        .unwrap();
-        let state = store.load().unwrap().unwrap();
-        assert_eq!((state.last_ruling, state.finished), (0, vec![]));
-        assert!(state.reworked.is_empty());
-    }
-
-    #[test]
-    fn a_ruling_saved_before_webhooks_is_posted_once() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = store_in(dir.path());
-        let old = r#"{"version":1,"run":"running","since":7,"work_item":null,
-            "rulings":[{"id":1,"question":"q","pull_request":3,"kind":{"kind":"closed"}}],
-            "leases":[]}"#;
-        fs::write(dir.path().join("state.json"), old).unwrap();
-        assert!(!store.load().unwrap().unwrap().rulings[0].alerted);
+            Self::Malformed { path, message } => {
+                write!(f, "state file {} is malformed: {message}", path.display())
+            }
+            Self::Version { path, found } => write!(
+                f,
+                "state file {} is version {found}, and this kelpie reads versions {ONE_ITEM} and {VERSION}",
+                path.display()
+            ),
+            Self::Write { path, kind } => {
+                write!(f, "cannot write state file {}: {kind}", path.display())
+            }
+        }
     }
 }
+
+impl core::error::Error for StateError {}
+
+/// Where a project's state lives on disk
+#[derive(Debug, Clone)]
+pub struct StateStore {
+    path: PathBuf,
+}
+
+impl StateStore {
+    /// A store for the state file at `path`
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    /// Reads the state, or `None` when no state has been saved yet
+    ///
+    /// # Errors
+    ///
+    /// [`StateError`] when the file exists and cannot be read or understood.
+    pub fn load(&self) -> Result<Option<ProjectState>, StateError> {
+        let text = match fs::read_to_string(&self.path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(self.error_read(e)),
+        };
+
+        // Only the version first, so a newer format reports as one.
+        #[derive(Deserialize)]
+        struct Versioned {
+            version: u32,
+        }
+        let malformed = |e: serde_json::Error| StateError::Malformed {
+            path: self.path.clone(),
+            message: e.to_string(),
+        };
+        let found = serde_json::from_str::<Versioned>(&text)
+            .map_err(malformed)?
+            .version;
+        if found != VERSION && found != ONE_ITEM {
+            return Err(StateError::Version {
+                path: self.path.clone(),
+                found,
+            });
+        }
+        let state: ProjectState = serde_json::from_str(&text).map_err(malformed)?;
+        Ok(Some(ProjectState {
+            version: VERSION,
+            ..state.one_item_moved()
+        }))
+    }
+
+    /// Replaces the saved state with `state`, atomically
+    ///
+    /// # Errors
+    ///
+    /// [`StateError::Write`] when any step fails. The previous state stands.
+    pub fn save(&self, state: &ProjectState) -> Result<(), StateError> {
+        let mut bytes = serde_json::to_vec_pretty(state).expect("state serializes to JSON");
+        bytes.push(b'\n');
+        write_atomically(&self.path, &bytes).map_err(|e| StateError::Write {
+            path: self.path.clone(),
+            kind: e.kind(),
+        })
+    }
+
+    fn error_read(&self, e: io::Error) -> StateError {
+        StateError::Read {
+            path: self.path.clone(),
+            kind: e.kind(),
+        }
+    }
+}
+
+pub(crate) fn temporary_path(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_owned();
+    name.push(".tmp");
+    path.with_file_name(name)
+}
+
+// The rename is the commit point. Syncing the file first means the name
+// never points at unwritten bytes; syncing the folder keeps the rename.
+pub(crate) fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let temporary = temporary_path(path);
+    let mut file = File::create(&temporary)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    drop(file);
+    fs::rename(&temporary, path)?;
+    let folder = path.parent().filter(|p| !p.as_os_str().is_empty());
+    File::open(folder.unwrap_or(Path::new(".")))?.sync_all()
+}
+
+#[cfg(test)]
+mod tests;

@@ -99,7 +99,7 @@ fn rule_trigger(params: &str) -> Request {
 #[tokio::test]
 async fn relay_yes_reaches_the_shepherd_at_shep_home_not_the_shep_on_path() {
     let scene = Scene::new();
-    let mut sent = scene.shepherd(kelpie::relay::rule::SHEP_VERSION).await;
+    let mut sent = scene.shepherd(kelpie::shepherd::SHEP_VERSION).await;
     let output = scene.kelpie(&["relay-yes", "shep", "3"]).await;
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
@@ -113,7 +113,7 @@ async fn relay_yes_reaches_the_shepherd_at_shep_home_not_the_shep_on_path() {
 #[tokio::test]
 async fn relay_answer_reaches_the_shepherd_at_shep_home_not_the_shep_on_path() {
     let scene = Scene::new();
-    let mut sent = scene.shepherd(kelpie::relay::rule::SHEP_VERSION).await;
+    let mut sent = scene.shepherd(kelpie::shepherd::SHEP_VERSION).await;
     let output = scene
         .kelpie(&["relay-answer", "shep", "3 no rename the flag"])
         .await;

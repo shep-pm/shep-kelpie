@@ -45,7 +45,7 @@ impl Runner {
 
     /// Whether the preview is on, with a work item in flight
     pub(super) fn preview_on(&self) -> bool {
-        self.state.work_item.is_some() && self.previewed()
+        self.current().is_some() && self.previewed()
     }
 
     // Whether `head` changes anything under the launch configuration's `cwd`.
@@ -85,16 +85,13 @@ impl Runner {
                 .collect(),
             env,
             server_pid: self.paths.shots(item.issue).join(SERVER_PID),
+            shep_home: self.paths.shep_home.clone(),
         }
     }
 
     /// A run of `head`, unless kelpie already has one
     pub(super) fn shots_due(&mut self, head: &str) -> Result<Option<Begin>, StateError> {
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("shots are a work item's");
+        let item = self.current().expect("shots are a work item's");
         if item.shots.as_ref().is_some_and(|r| r.head == head) {
             return Ok(None);
         }
@@ -123,7 +120,7 @@ impl Runner {
         if let Some(begin) = self.shots_due(&head)? {
             return Ok(RoundShots::Take(begin));
         }
-        let item = self.state.work_item.as_ref().expect("checked above");
+        let item = self.current().expect("checked above");
         Ok(RoundShots::Ready(
             item.shots.as_ref().map(|r| r.run.clone()),
         ))
@@ -131,8 +128,7 @@ impl Runner {
 
     /// Whether kelpie's run of `head` failed, so its shots are not on the pull request
     pub(super) fn shots_failed(&self, head: &str) -> bool {
-        let item = self.state.work_item.as_ref();
-        let record = item.and_then(|item| item.shots.as_ref());
+        let record = self.current().and_then(|item| item.shots.as_ref());
         record.is_some_and(|r| r.head == head && r.run.failed.is_some())
     }
 
@@ -143,7 +139,7 @@ impl Runner {
         run: ShotsRun,
     ) -> Result<Option<StepReport>, StateError> {
         let mut next = self.state.clone();
-        let Some(item) = next.work_item.as_mut() else {
+        let Some(item) = self.current_in(&mut next) else {
             return Ok(None);
         };
         item.review_call = ReviewCallState::Idle;
@@ -175,7 +171,7 @@ impl Runner {
         if let Some(begin) = self.shots_due(head)? {
             return Ok(Some(begin));
         }
-        let item = self.state.work_item.as_ref().expect("checked above");
+        let item = self.current().expect("checked above");
         let record = item.shots.as_ref().expect("a run of this head");
         // A post that failed does not hold the ruling; `retry_shots` tries again.
         // A failed run is the ruling's to mention, never the pull request's.
@@ -188,11 +184,7 @@ impl Runner {
 
     /// While parked on a ruling: posts shots whose post failed, once it is due
     pub(super) fn retry_shots(&mut self) -> Result<Begin, StateError> {
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("a ruling is a work item's");
+        let item = self.current().expect("a ruling is a work item's");
         let now = self.ports.clock.now();
         let due = item
             .shots
@@ -207,11 +199,7 @@ impl Runner {
     // Pushes the work item's shots and puts them on the pull request's one
     // shots comment, recording whether that worked.
     fn post_shots(&mut self, number: u64) -> Result<StepReport, StateError> {
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("shots are a work item's");
+        let item = self.current().expect("shots are a work item's");
         let record = item.shots.clone().expect("a run to post");
         let head = record.head.as_str();
         let (issue, comment) = (item.issue, item.shots_comment);

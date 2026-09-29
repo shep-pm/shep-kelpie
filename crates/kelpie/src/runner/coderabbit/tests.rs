@@ -143,7 +143,7 @@ fn nothing_summons_without_the_lease() {
     assert_eq!(labels(&rig), [on()]);
     assert_eq!(
         rig.ask(&runner, "status", None)["leases"],
-        json!([{ "resource": "coderabbit", "since": now(&rig) }])
+        json!([{ "resource": "coderabbit", "issue": 7, "since": now(&rig) }])
     );
 }
 
@@ -797,7 +797,8 @@ fn a_restart_between_the_label_and_its_save_does_not_summon_twice() {
     let state = rig.paths().state;
     let mut saved: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
-    saved["work_item"]["phase"] = json!({ "state": "coderabbit", "stage": "lease", "head": head });
+    saved["work_items"][0]["phase"] =
+        json!({ "state": "coderabbit", "stage": "lease", "head": head });
     std::fs::write(&state, saved.to_string()).unwrap();
 
     let runner = rig.open().unwrap();

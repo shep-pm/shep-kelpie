@@ -121,7 +121,7 @@ fn the_webhook_is_required_only_when_rulings_go_to_it() {
         .expect_err("both channels, no webhook")
         .to_string();
     assert!(err.contains("`ruling_channels`"), "{err}");
-    assert!(err.contains("`[webhook]`"), "{err}");
+    assert!(err.contains("`webhook` table"), "{err}");
 
     rig.set_ruling_channels(r#"["relay"]"#);
     rig.open().expect("relay only needs no webhook");
@@ -133,5 +133,5 @@ fn the_webhook_is_required_only_when_rulings_go_to_it() {
         .open()
         .expect_err("no file to hold the webhook")
         .to_string();
-    assert!(err.contains("`[webhook]`"), "{err}");
+    assert!(err.contains("`webhook` table"), "{err}");
 }

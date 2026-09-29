@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use tempfile::TempDir;
 
+use crate::adapters::LocalReviewer;
 use crate::board::WorkerModel;
 use crate::ports::{
     Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Finding, Meter, MeterError,
@@ -18,18 +19,20 @@ use crate::ports::{
 use crate::runner::{
     CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
 };
-use crate::settings::Effort;
+use crate::settings::{Effort, LocalRound, Settings, SettingsError};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{CallRecord, Known, Phase, Turn, WorkItem};
 
 mod alerts;
 mod coderabbit;
+mod endpoint;
 mod forge;
 mod leases;
 mod relay;
 mod shots;
 
 pub(crate) use alerts::FakeAlerts;
+pub(crate) use endpoint::{Answer, StandInEndpoint, unreachable_url};
 pub(crate) use forge::FakeForge;
 pub(crate) use leases::{FakeLeases, Told};
 pub(crate) use relay::FakeRelay;
@@ -135,12 +138,22 @@ pub(crate) fn a_work_item() -> WorkItem {
     }
 }
 
+/// The `[app.dogs.kelpie]` table of a runner's Flockfile entry, such as
+/// `settings.example.toml`, as shep hands it to the runner
+pub(crate) fn project_table(entry: &str) -> serde_json::Map<String, serde_json::Value> {
+    let parsed: toml::Table = toml::from_str(entry).unwrap();
+    match serde_json::to_value(&parsed["app"][0]["dogs"]["kelpie"]).unwrap() {
+        serde_json::Value::Object(table) => table,
+        other => panic!("the entry's kelpie table is {other}"),
+    }
+}
+
 /// The `repo` in `settings.example.toml`, which the rig points at its own
 const EXAMPLE_REPO: &str = "~/.kelpie/repos/shep";
 
 /// The CodeRabbit gate as `settings.example.toml` sets it, and turned off
-pub(crate) const CODERABBIT_ON: &str = "[coderabbit]\nenabled = true\n";
-const CODERABBIT_OFF: &str = "[coderabbit]\nenabled = false\n";
+pub(crate) const CODERABBIT_ON: &str = "[app.dogs.kelpie.coderabbit]\nenabled = true\n";
+pub(crate) const CODERABBIT_OFF: &str = "[app.dogs.kelpie.coderabbit]\nenabled = false\n";
 
 /// A launch file like the playground's
 const LAUNCH: &str = r#"{"version": "0.0.1", "configurations": [{"name": "dev", "runtimeExecutable": "bun", "runtimeArgs": ["run", "dev"], "port": 3000}]}"#;
@@ -470,24 +483,33 @@ pub(crate) enum ScriptedRound {
 /// One round as the stand-in reviewer saw it
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SeenRound {
+    pub(crate) local: LocalRound,
     pub(crate) worktree: PathBuf,
     pub(crate) base: String,
     pub(crate) out: PathBuf,
     pub(crate) round: u32,
 }
 
-/// A qwen-review stand-in. Clean (no findings) once its script runs out, so
+/// A local round's stand-in. Clean (no findings) once its script runs out, so
 /// tests that do not care about the review loop see it pass straight through.
+/// Its start check is the real one, and [`Self::pass_through`] makes its
+/// rounds real too.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FakeReviewer {
     seen: Arc<Mutex<Vec<SeenRound>>>,
     script: Arc<Mutex<VecDeque<ScriptedRound>>>,
+    real: Arc<Mutex<Option<LocalReviewer>>>,
 }
 
 impl FakeReviewer {
     /// Every round asked of it, in order
     pub(crate) fn seen(&self) -> Vec<SeenRound> {
         self.seen.lock().unwrap().clone()
+    }
+
+    /// Runs every later round with the real reviewer, after noting it
+    pub(crate) fn pass_through(&self) {
+        *self.real.lock().unwrap() = Some(LocalReviewer::default());
     }
 
     /// Queues answers for its next rounds, oldest first
@@ -497,19 +519,28 @@ impl FakeReviewer {
 }
 
 impl Reviewer for FakeReviewer {
+    fn check(&self, local: &LocalRound) -> Result<(), String> {
+        LocalReviewer::default().check(local)
+    }
+
     fn round(
         &self,
+        local: &LocalRound,
         worktree: &Path,
         base: &str,
         out: &Path,
         round: u32,
     ) -> Result<Vec<Finding>, ReviewerError> {
         self.seen.lock().unwrap().push(SeenRound {
+            local: local.clone(),
             worktree: worktree.to_owned(),
             base: base.to_owned(),
             out: out.to_owned(),
             round,
         });
+        if let Some(real) = &*self.real.lock().unwrap() {
+            return real.round(local, worktree, base, out, round);
+        }
         match self.script.lock().unwrap().pop_front() {
             Some(ScriptedRound::Findings(findings)) => Ok(findings),
             Some(ScriptedRound::Fail(e)) => Err(e),
@@ -599,6 +630,10 @@ impl Rig {
         let paths = rig.paths();
         std::fs::create_dir_all(paths.settings.parent().unwrap()).unwrap();
         std::fs::write(&paths.settings, settings).unwrap();
+        // The example's local round, which the runner checks is there as it starts.
+        let script = rig.home.path().join(".claude/scripts/qwen-review.sh");
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        write_script(&script, "#!/bin/sh\nexit 1\n");
         let kelpie = format!(
             "[webhook]\nkind = \"ntfy\"\nurl = \"{}\"\n",
             Self::WEBHOOK_URL
@@ -615,6 +650,19 @@ impl Rig {
             .expect("the rig's kelpie settings name a webhook")
     }
 
+    /// Kelpie's own settings as the rig's file holds them, empty when it is gone
+    pub(crate) fn kelpie_settings(&self) -> KelpieSettings {
+        self.try_kelpie_settings().unwrap()
+    }
+
+    fn try_kelpie_settings(&self) -> Result<KelpieSettings, SettingsError> {
+        match std::fs::read_to_string(self.paths().kelpie_settings) {
+            Ok(text) => KelpieSettings::from_section(&text),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(KelpieSettings::default()),
+            Err(e) => panic!("cannot read the rig's kelpie settings: {e}"),
+        }
+    }
+
     /// Replaces the rig's kelpie settings file with `text`
     pub(crate) fn set_kelpie_settings(&self, text: &str) {
         std::fs::write(self.paths().kelpie_settings, text).unwrap();
@@ -622,7 +670,11 @@ impl Rig {
 
     /// Sets the project's `ruling_channels`, as its settings file would
     pub(crate) fn set_ruling_channels(&self, list: &str) {
-        self.edit_settings(|s| format!("ruling_channels = {list}\n{s}"));
+        let table = "[app.dogs.kelpie]\n";
+        self.edit_settings(|s| {
+            assert!(s.contains(table), "the rig's entry has no kelpie table");
+            s.replacen(table, &format!("{table}ruling_channels = {list}\n"), 1)
+        });
     }
 
     fn make_repo(&self) {
@@ -731,7 +783,10 @@ impl Rig {
     }
 
     pub(crate) fn paths(&self) -> ProjectPaths {
-        ProjectPaths::under(&self.home.path().join("kelpie"), &self.project)
+        let mut paths = ProjectPaths::under(&self.home.path().join("kelpie"), &self.project);
+        // A shepherd outside kelpie's home, as the user's own would be.
+        paths.shep_home = self.home.path().join("shep");
+        paths
     }
 
     /// Turns the CodeRabbit gate on, as the example settings have it for shep
@@ -754,6 +809,20 @@ impl Rig {
         std::fs::write(&file, edit(text)).unwrap();
     }
 
+    /// The project's settings as its table now stands
+    pub(crate) fn settings(&self) -> Settings {
+        self.try_settings().unwrap()
+    }
+
+    // The rig keeps the runner's Flockfile entry where the old settings file was.
+    fn try_settings(&self) -> Result<Settings, SettingsError> {
+        let paths = self.paths();
+        let entry = std::fs::read_to_string(&paths.settings).unwrap();
+        let folder = paths.settings.parent().unwrap();
+        let (project, home) = (self.project.as_str(), self.home.path());
+        Settings::from_table(&project_table(&entry), project, home, folder)
+    }
+
     /// Starts a runner, as a restarted sheep would, on the rig's stand-ins
     pub(crate) fn open(&self) -> Result<Mutex<Runner>, OpenError> {
         let ports = Ports {
@@ -767,9 +836,12 @@ impl Rig {
             shots: Arc::new(self.shots.clone()),
             clock: Box::new(self.clock.clone()),
         };
+        let paths = self.paths();
         Runner::open(
             self.project.clone(),
-            &self.paths(),
+            self.try_settings()?,
+            self.try_kelpie_settings()?,
+            &paths,
             self.home.path(),
             Path::new(Self::KELPIE),
             ports,

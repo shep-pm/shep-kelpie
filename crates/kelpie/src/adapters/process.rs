@@ -45,7 +45,18 @@ struct Running {
 impl Processes {
     /// Runs `command` to its end with stdin closed, collecting its output
     pub(super) fn output(&self, command: &mut Command) -> Result<Output, RunError> {
-        self.run(command, None)
+        self.run(command, None, &|_| {})
+    }
+
+    /// Like [`Self::output`], killing the child after `limit` if one is
+    /// given, and telling `spawned` its pid as soon as it runs
+    pub(super) fn output_telling(
+        &self,
+        command: &mut Command,
+        limit: Option<Duration>,
+        spawned: &dyn Fn(u32),
+    ) -> Result<Output, RunError> {
+        self.run(command, limit.map(|l| Instant::now() + l), spawned)
     }
 
     /// Like [`Self::output`], and kills the child once `limit` has passed
@@ -54,10 +65,15 @@ impl Processes {
         command: &mut Command,
         limit: Duration,
     ) -> Result<Output, RunError> {
-        self.run(command, Some(Instant::now() + limit))
+        self.run(command, Some(Instant::now() + limit), &|_| {})
     }
 
-    fn run(&self, command: &mut Command, deadline: Option<Instant>) -> Result<Output, RunError> {
+    fn run(
+        &self,
+        command: &mut Command,
+        deadline: Option<Instant>,
+        spawned: &dyn Fn(u32),
+    ) -> Result<Output, RunError> {
         // Its own process group, led by its own pid, so a program it spawns
         // and leaves behind (a build, a test run) is reachable by signalling
         // the group, not just the one pid this struct tracks.
@@ -68,6 +84,7 @@ impl Processes {
             .process_group(0)
             .spawn()
             .map_err(RunError::Io)?;
+        let pid = child.id();
         let stdout = drain(child.stdout.take());
         let stderr = drain(child.stderr.take());
         let id = {
@@ -82,6 +99,7 @@ impl Processes {
             running.children.push((id, child));
             id
         };
+        spawned(pid);
         let status = self.wait(id, deadline)?;
         // A stopped child's own children may hold its pipes open, so its
         // output is left unread.
@@ -145,6 +163,11 @@ impl Processes {
         if let Some(mut child) = child {
             stop_child(&mut child, STOP_GRACE);
         }
+    }
+
+    /// Whether [`Self::stop`] has been called
+    pub(super) fn stopping(&self) -> bool {
+        self.lock().stopping
     }
 
     /// Ends every running child and refuses new ones

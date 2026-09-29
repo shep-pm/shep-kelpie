@@ -31,11 +31,7 @@ mod catch_up;
 
 impl Runner {
     pub(super) fn check_ci(&mut self) -> Result<Begin, StateError> {
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("CI runs on a work item");
+        let item = self.current().expect("CI runs on a work item");
         let Some(number) = item.pull_request else {
             return Ok(Begin::Idle);
         };
@@ -148,11 +144,7 @@ impl Runner {
         head: String,
         checks: Vec<String>,
     ) -> Result<Begin, StateError> {
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("CI runs on a work item");
+        let item = self.current().expect("CI runs on a work item");
         if item.red_head.as_deref() == Some(head.as_str()) {
             return self.raise(number, RulingKind::StillRed { head, checks });
         }
@@ -174,11 +166,7 @@ impl Runner {
 
     /// Where `head` stands against `origin`, or why git could not say
     pub(super) fn base_of(&self, head: &str) -> Result<Base, String> {
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("a base is of a work item");
+        let item = self.current().expect("a base is of a work item");
         worktree::base_of(&self.settings.repo, &item.branch, head)
             .map_err(|e| format!("cannot fetch main: {e}"))
     }
@@ -186,11 +174,7 @@ impl Runner {
     // A head no gate vouched for, such as one a yes under `ask` left before
     // a restart onto `auto`, goes through every gate before any merge.
     fn regate_unknown(&mut self, number: u64, head: &str) -> Result<Begin, StateError> {
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("CI runs on a work item");
+        let item = self.current().expect("CI runs on a work item");
         let issue = item.issue;
         let at = worktree::head(&self.settings.repo, &item.worktree);
         let regated = at
@@ -207,7 +191,7 @@ impl Runner {
     }
 
     pub(super) fn gate_failed(&self, reason: String) -> Begin {
-        let issue = self.state.work_item.as_ref().map_or(0, |item| item.issue);
+        let issue = self.current().map_or(0, |item| item.issue);
         Begin::Report(StepReport::GateFailed { issue, reason })
     }
 }
@@ -270,6 +254,7 @@ pub(super) mod tests {
             status["rulings"],
             json!([{
                 "id": 1,
+                "issue": 7,
                 "question": question,
                 "pull_request": 71,
                 "kind": { "kind": "merge", "head": head },
@@ -630,7 +615,7 @@ pub(super) mod tests {
         let state = rig.paths().state;
         let text = std::fs::read_to_string(&state).unwrap();
         let mut saved: serde_json::Value = serde_json::from_str(&text).unwrap();
-        let known = saved["work_item"]["known"].as_object_mut().unwrap();
+        let known = saved["work_items"][0]["known"].as_object_mut().unwrap();
         assert!(known.remove("head").is_some());
         std::fs::write(&state, saved.to_string()).unwrap();
 
@@ -640,7 +625,7 @@ pub(super) mod tests {
         assert!(question.starts_with("Merge pull request #71"), "{question}");
         let text = std::fs::read_to_string(&state).unwrap();
         let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(saved["work_item"]["known"]["head"], json!(head));
+        assert_eq!(saved["work_items"][0]["known"]["head"], json!(head));
     }
 
     #[test]
@@ -650,7 +635,7 @@ pub(super) mod tests {
         let state = rig.paths().state;
         let text = std::fs::read_to_string(&state).unwrap();
         let mut saved: serde_json::Value = serde_json::from_str(&text).unwrap();
-        let item = saved["work_item"].as_object_mut().unwrap();
+        let item = saved["work_items"][0].as_object_mut().unwrap();
         item.remove("phase");
         item.remove("red_head");
         std::fs::write(&state, saved.to_string()).unwrap();
