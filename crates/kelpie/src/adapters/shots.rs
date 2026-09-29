@@ -448,20 +448,35 @@ mod tests {
     #[ignore = "needs kelpie's tools: KELPIE_TOOLS=<dir> from `kelpie tools install`"]
     fn a_page_reaches_neither_a_host_off_the_list_nor_the_lan() {
         use std::io::{BufRead, BufReader, Write as _};
+        use std::net::{IpAddr, SocketAddr, UdpSocket};
         let tools = std::env::var_os("KELPIE_TOOLS").expect("KELPIE_TOOLS");
-        let lan = std::net::UdpSocket::bind("0.0.0.0:0")
-            .and_then(|s| s.connect("192.0.2.1:9").map(|()| s))
-            .and_then(|s| s.local_addr())
-            .unwrap()
-            .ip();
-        let listener = TcpListener::bind((lan, 0)).unwrap();
-        let listener_port = listener.local_addr().unwrap().port();
-        listener.set_nonblocking(true).unwrap();
+        // This machine's own address toward a documentation address, which
+        // sends nothing; IPv6 falls back to loopback on a machine without it.
+        let own = |bind: &str, toward: &str| {
+            UdpSocket::bind(bind)
+                .and_then(|s| s.connect(toward).map(|()| s))
+                .and_then(|s| s.local_addr())
+                .map(|a| a.ip())
+        };
+        let v4 = own("0.0.0.0:0", "192.0.2.1:9").unwrap();
+        let v6 = own("[::]:0", "[2001:db8::1]:9").unwrap_or(IpAddr::V6(Ipv6Addr::LOCALHOST));
+        let listeners: Vec<(TcpListener, String)> = [v4, v6]
+            .into_iter()
+            .map(|ip| {
+                let listener = TcpListener::bind(SocketAddr::new(ip, 0)).unwrap();
+                listener.set_nonblocking(true).unwrap();
+                let at = listener.local_addr().unwrap().to_string();
+                (listener, at)
+            })
+            .collect();
+        let reach: String = listeners
+            .iter()
+            .map(|(_, at)| {
+                format!("new WebSocket('ws://{at}/'); fetch('http://{at}/').catch(() => {{}}); ")
+            })
+            .collect();
         let page = format!(
-            "<html><body><img src=\"http://blocked.example/x.png\"><script>\
-             new WebSocket('ws://{lan}:{listener_port}/'); \
-             fetch('http://{lan}:{listener_port}/').catch(() => {{}});\
-             </script></body></html>"
+            "<html><body><img src=\"http://blocked.example/x.png\"><script>{reach}</script></body></html>"
         );
         let server = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = server.local_addr().unwrap().port();
@@ -492,10 +507,12 @@ mod tests {
             "{problems:?}"
         );
         thread::sleep(Duration::from_secs(1));
-        assert!(
-            matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
-            "the page reached {lan}:{listener_port}"
-        );
+        for (listener, at) in &listeners {
+            assert!(
+                matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+                "the page reached {at}"
+            );
+        }
     }
 
     #[test]

@@ -166,6 +166,8 @@ mod tests {
     // The review wrote outside the worktree by racing a folder against a link.
     #[test]
     fn no_playwright_tool_names_a_file() {
+        // `browser_pdf_save` and `browser_storage_state` are not in 0.0.82's
+        // default set; they come with its `--caps`, so the rule covers them too.
         for tool in [
             "browser_take_screenshot",
             "browser_snapshot",
