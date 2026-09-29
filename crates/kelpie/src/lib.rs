@@ -11,6 +11,7 @@
 pub mod adapters;
 pub mod board;
 pub mod browse;
+pub mod channels;
 pub mod coderabbit;
 pub mod confine;
 pub mod dog;
