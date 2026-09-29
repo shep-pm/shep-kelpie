@@ -43,11 +43,12 @@ mod trigger;
 mod turn;
 
 pub use adopt::AdoptError;
+pub use coderabbit::LABEL as SUMMON_LABEL;
 pub use merge::DropError;
 pub use pace::PacerStatus;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
 pub use report::StepReport;
-pub use rework::ReworkError;
+pub use rework::{HUMAN, ReworkError};
 pub use ruling::{Answer, RuleError};
 use trigger::issue_list;
 pub use trigger::{ACTIONS, RELAY_RULE, Status, WorkItemStatus, answer, is_no_or_answer};

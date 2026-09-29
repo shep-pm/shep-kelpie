@@ -29,6 +29,7 @@ mod endpoint;
 mod forge;
 mod leases;
 mod relay;
+mod shepherd;
 mod shots;
 
 pub(crate) use alerts::FakeAlerts;
@@ -36,6 +37,7 @@ pub(crate) use endpoint::{Answer, StandInEndpoint, unreachable_url};
 pub(crate) use forge::FakeForge;
 pub(crate) use leases::{FakeLeases, Told};
 pub(crate) use relay::FakeRelay;
+pub(crate) use shepherd::FakeShepherd;
 pub(crate) use shots::{FakeShots, ScriptedShots};
 
 /// Writes an executable stand-in script that is safe to run at once.

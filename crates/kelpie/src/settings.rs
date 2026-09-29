@@ -340,6 +340,11 @@ impl ForgeSlug {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// The repo's name, without its owner
+    pub fn name(&self) -> &str {
+        self.0.split_once('/').map_or(&self.0, |(_, name)| name)
+    }
 }
 
 impl TryFrom<String> for ForgeSlug {
