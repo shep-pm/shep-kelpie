@@ -98,6 +98,7 @@ mod tests {
     // The example with every optional key set, so each one is counted.
     fn every_project_key() -> String {
         let text = include_str!("../settings.example.toml")
+            .replace("# ruling_channels =", "ruling_channels =")
             .replace("build_env = {}", "build_env = { BUN = \"bun\" }")
             .replace(
                 "# instructions_file = \"~/.kelpie/projects/shep/worker-instructions.md\"",
@@ -126,8 +127,9 @@ mod tests {
     fn the_kelpie_schema_round_trips_every_key() {
         let mut root = schema();
         root.as_object_mut().unwrap().remove(SHEEP_SCHEMA_KEY);
-        let example: toml::Table =
-            toml::from_str(include_str!("../kelpie-settings.example.toml")).unwrap();
+        let example = include_str!("../kelpie-settings.example.toml")
+            .replace("# ruling_channels =", "ruling_channels =");
+        let example: toml::Table = toml::from_str(&example).unwrap();
         let section = toml::to_string(&example["kelpie"]).unwrap();
         assert_eq!(keys_of_schema(&root), keys_of_table(&root, &root, &section));
     }

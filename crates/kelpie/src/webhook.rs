@@ -1,10 +1,11 @@
-//! Kelpie's own settings: the webhook every ruling also goes to
+//! Kelpie's own settings: the webhook, and the channels rulings go to
 //!
 //! Kelpie's `[kelpie]` section of `dogs.toml`, or the file under kelpie's
-//! home it had before one, shared by every project. It holds one `webhook`
-//! table, and both its keys are required. The URL is a credential, so no
-//! error, log line or status carries it. `kelpie-settings.example.toml`
-//! beside this crate shows the section.
+//! home it had before one, shared by every project. Both parts are
+//! optional: the `webhook` table, whose keys are both required, is needed
+//! only by a project whose rulings go to the webhook. The URL is a
+//! credential, so no error, log line or status carries it.
+//! `kelpie-settings.example.toml` beside this crate shows the section.
 
 use std::fmt;
 use std::path::Path;
@@ -13,16 +14,22 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use shep_client::dogs::dog_config;
 
+use crate::channels::Channels;
 use crate::settings::SettingsError;
 
 /// What every project shares
 #[dog_config]
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KelpieSettings {
-    /// Where every ruling is posted, so the maintainer hears of it away
-    /// from the terminal
-    pub webhook: Webhook,
+    /// Where rulings are posted, so the maintainer hears of them away from
+    /// the terminal
+    #[serde(default)]
+    pub webhook: Option<Webhook>,
+    /// How rulings reach the maintainer, unless a project says otherwise.
+    /// Every channel when absent.
+    #[serde(default)]
+    pub ruling_channels: Option<Channels>,
 }
 
 /// The maintainer's webhook
@@ -103,8 +110,9 @@ fn authority(rest: &str) -> &str {
 }
 
 /// What a malformed file is told, since the parser's own message could quote the URL
-const SHAPE: &str = "it needs a `[webhook]` table with `kind` (`discord` or `ntfy`) \
-                     and an `https://` `url`, and nothing else";
+const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntfy`) \
+                     and an `https://` `url`, and `ruling_channels`, a list of \
+                     `webhook` and `relay`, and nothing else";
 
 impl KelpieSettings {
     /// Reads and checks kelpie's settings file
@@ -149,10 +157,13 @@ impl KelpieSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::channels::Channel;
 
     // The example's section as shep hands it over: re-rooted, so `[webhook]`.
     fn example() -> String {
-        include_str!("../kelpie-settings.example.toml").replace("[kelpie.webhook]", "[webhook]")
+        include_str!("../kelpie-settings.example.toml")
+            .replace("[kelpie]\n", "")
+            .replace("[kelpie.webhook]", "[webhook]")
     }
 
     // A URL no test would print by chance, so finding it anywhere is a leak
@@ -165,8 +176,27 @@ mod tests {
     #[test]
     fn the_example_reads() {
         let s = KelpieSettings::parse(&example()).unwrap();
-        assert_eq!(s.webhook.kind, WebhookKind::Ntfy);
-        assert!(s.webhook.url.expose().starts_with("https://ntfy.sh/"));
+        let webhook = s.webhook.expect("the example names a webhook");
+        assert_eq!(webhook.kind, WebhookKind::Ntfy);
+        assert!(webhook.url.expose().starts_with("https://ntfy.sh/"));
+        assert_eq!(s.ruling_channels, None);
+    }
+
+    #[test]
+    fn the_webhook_is_only_needed_by_a_project_that_posts_to_it() {
+        assert_eq!(KelpieSettings::parse(""), Ok(KelpieSettings::default()));
+        let s = KelpieSettings::parse("ruling_channels = [\"relay\"]\n").unwrap();
+        assert_eq!(s.webhook, None);
+        assert!(!s.ruling_channels.unwrap().has(Channel::Webhook));
+    }
+
+    #[test]
+    fn no_channel_is_refused_without_quoting_the_file() {
+        let text =
+            format!("ruling_channels = []\n[webhook]\nkind = \"ntfy\"\nurl = \"{SECRET}\"\n");
+        let err = parse_err(&text);
+        assert!(err.starts_with("line 1 is not right"), "{err}");
+        assert!(!err.contains("s3cr3t"), "{err}");
     }
 
     // A derived Debug would print the URL wherever settings are debugged.
@@ -175,7 +205,8 @@ mod tests {
         assert!(example().contains("https://ntfy.sh/your-private-topic"));
         let text = example().replace("https://ntfy.sh/your-private-topic", SECRET);
         let s = KelpieSettings::parse(&text).unwrap();
-        assert_eq!(format!("{:?}", s.webhook.url), "WebhookUrl(..)");
+        let url = s.webhook.as_ref().unwrap().url.clone();
+        assert_eq!(format!("{url:?}"), "WebhookUrl(..)");
         assert!(!format!("{s:?}").contains("s3cr3t"), "{s:?}");
     }
 

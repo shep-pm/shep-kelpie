@@ -622,6 +622,30 @@ impl Rig {
         KelpieSettings::load(&self.paths().kelpie_settings)
             .unwrap()
             .webhook
+            .expect("the rig's kelpie settings name a webhook")
+    }
+
+    /// Kelpie's own settings as the rig's file holds them, none when it is gone
+    pub(crate) fn kelpie_settings(&self) -> KelpieSettings {
+        self.try_kelpie_settings().unwrap()
+    }
+
+    fn try_kelpie_settings(&self) -> Result<KelpieSettings, SettingsError> {
+        match std::fs::read_to_string(self.paths().kelpie_settings) {
+            Ok(text) => KelpieSettings::from_section(&text),
+            Err(_) => Ok(KelpieSettings::default()),
+        }
+    }
+
+    /// Replaces the rig's kelpie settings file with `text`
+    pub(crate) fn set_kelpie_settings(&self, text: &str) {
+        std::fs::write(self.paths().kelpie_settings, text).unwrap();
+    }
+
+    /// Sets the project's `ruling_channels`, as its settings file would
+    pub(crate) fn set_ruling_channels(&self, list: &str) {
+        let table = "[app.dogs.kelpie]\n";
+        self.edit_settings(|s| s.replacen(table, &format!("{table}ruling_channels = {list}\n"), 1));
     }
 
     fn make_repo(&self) {
@@ -783,7 +807,7 @@ impl Rig {
         Runner::open(
             self.project.clone(),
             self.try_settings()?,
-            self.webhook(),
+            self.try_kelpie_settings()?,
             &paths,
             Path::new(Self::KELPIE),
             ports,
@@ -810,7 +834,16 @@ impl Rig {
     ///
     /// Returns the pull request's head.
     pub(crate) fn with_pull_request(project: &str) -> (Self, Mutex<Runner>, String) {
+        Self::with_pull_request_set(project, |_| {})
+    }
+
+    /// [`Rig::with_pull_request`], after `setup` changed the rig's settings
+    pub(crate) fn with_pull_request_set(
+        project: &str,
+        setup: impl FnOnce(&Self),
+    ) -> (Self, Mutex<Runner>, String) {
         let rig = Self::new(project);
+        setup(&rig);
         let runner = rig.open().unwrap();
         rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
@@ -829,7 +862,15 @@ impl Rig {
     /// [`Rig::with_pull_request`], with CI green and the worker parked on
     /// merge ruling 1 about the returned head
     pub(crate) fn parked(project: &str) -> (Self, Mutex<Runner>, String) {
-        let (rig, runner, head) = Self::with_pull_request(project);
+        Self::parked_set(project, |_| {})
+    }
+
+    /// [`Rig::parked`], after `setup` changed the rig's settings
+    pub(crate) fn parked_set(
+        project: &str,
+        setup: impl FnOnce(&Self),
+    ) -> (Self, Mutex<Runner>, String) {
+        let (rig, runner, head) = Self::with_pull_request_set(project, setup);
         rig.forge.set_checks(&head, Checks::Passed);
         assert!(matches!(
             rig.verdict(&runner),

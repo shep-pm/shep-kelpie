@@ -4,13 +4,14 @@
 //! and kelpie's own are its `[kelpie]` section of `dogs.toml`. A project set
 //! up before those existed has files under kelpie's home instead. A file
 //! still loads while its table is unset, with a notice naming the command
-//! that moves it. Nothing here deletes a file.
+//! that moves it. Kelpie's own settings are all optional, so with neither
+//! a section nor a file they are empty. Nothing here deletes a file.
 
 use std::path::Path;
 
 use super::{Settings, SettingsError};
 use crate::shepherd::Tables;
-use crate::webhook::{KelpieSettings, Webhook};
+use crate::webhook::KelpieSettings;
 
 /// The files a project had before its tables, and whose they are
 #[derive(Debug, Clone, Copy)]
@@ -41,8 +42,8 @@ impl Files<'_> {
 pub struct Loaded {
     /// The project's settings
     pub settings: Settings,
-    /// Where every ruling is posted
-    pub webhook: Webhook,
+    /// Kelpie's own settings
+    pub kelpie: KelpieSettings,
     /// One line per file read in place of a table
     pub notices: Vec<String>,
 }
@@ -73,27 +74,28 @@ pub fn load(tables: &Tables, files: Files<'_>, home: &Path) -> Result<Loaded, Se
             settings
         }
     };
-    let webhook = if tables.kelpie.trim().is_empty() {
-        let table = "[kelpie] section in dogs.toml".to_owned();
-        let kelpie = from_file_or_unset(files.kelpie_settings, table, KelpieSettings::load)?;
+    let kelpie = if !tables.kelpie.trim().is_empty() {
+        KelpieSettings::from_section(&tables.kelpie)?
+    } else if files.kelpie_settings.exists() {
+        let kelpie = KelpieSettings::load(files.kelpie_settings)?;
         from_file("kelpie's own settings", files.kelpie_settings);
-        kelpie.webhook
+        kelpie
     } else {
-        KelpieSettings::from_section(&tables.kelpie)?.webhook
+        KelpieSettings::default()
     };
     Ok(Loaded {
         settings,
-        webhook,
+        kelpie,
         notices,
     })
 }
 
 // A file that is not there is named beside the table it stands in for.
-fn from_file_or_unset<T>(
+fn from_file_or_unset(
     path: &Path,
     table: String,
-    load: impl FnOnce(&Path) -> Result<T, SettingsError>,
-) -> Result<T, SettingsError> {
+    load: impl FnOnce(&Path) -> Result<Settings, SettingsError>,
+) -> Result<Settings, SettingsError> {
     load(path).map_err(|e| match e {
         SettingsError::Read {
             path,
@@ -168,7 +170,7 @@ mod tests {
     fn the_tables_win_over_the_files_and_say_nothing() {
         let loaded = Home::with_files().load(&tables(), "shep").unwrap();
         assert_eq!(loaded.settings.forge.as_str(), "shep-pm/from-table");
-        assert_eq!(loaded.webhook.kind, WebhookKind::Discord);
+        assert_eq!(loaded.kelpie.webhook.unwrap().kind, WebhookKind::Discord);
         assert!(loaded.notices.is_empty(), "{:?}", loaded.notices);
     }
 
@@ -177,7 +179,7 @@ mod tests {
         let home = Home::with_files();
         let loaded = home.load(&Tables::default(), "shep").unwrap();
         assert_eq!(loaded.settings.forge.as_str(), "shep-pm/shep");
-        assert_eq!(loaded.webhook.kind, WebhookKind::Ntfy);
+        assert_eq!(loaded.kelpie.webhook.unwrap().kind, WebhookKind::Ntfy);
         let [project, kelpie] = loaded.notices.try_into().unwrap();
         assert_eq!(
             project,
@@ -208,7 +210,7 @@ mod tests {
     }
 
     #[test]
-    fn with_neither_a_table_nor_a_file_the_runner_is_told_both() {
+    fn with_neither_a_table_nor_a_file_a_project_is_refused_and_kelpie_is_empty() {
         let home = Home::empty();
         let err = home
             .load(&Tables::default(), "shep")
@@ -225,10 +227,8 @@ mod tests {
             kelpie: String::new(),
             ..tables()
         };
-        let err = home.load(&only_project, "shep").unwrap_err().to_string();
-        assert!(
-            err.starts_with("there is no [kelpie] section in dogs.toml"),
-            "{err}"
-        );
+        let loaded = home.load(&only_project, "shep").unwrap();
+        assert_eq!(loaded.kelpie, KelpieSettings::default());
+        assert!(loaded.notices.is_empty(), "{:?}", loaded.notices);
     }
 }

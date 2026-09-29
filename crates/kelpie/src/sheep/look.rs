@@ -11,7 +11,7 @@ use crate::runner::Runner;
 use crate::settings::Settings;
 use crate::settings::source::{self, Files, Loaded};
 use crate::shepherd;
-use crate::webhook::Webhook;
+use crate::webhook::KelpieSettings;
 
 /// Where a runner's settings are read from, and what it read last
 pub(super) struct Look {
@@ -21,7 +21,7 @@ pub(super) struct Look {
     settings: PathBuf,
     kelpie_settings: PathBuf,
     home: PathBuf,
-    last: Option<(Settings, Webhook)>,
+    last: Option<(Settings, KelpieSettings)>,
     failed: Option<String>,
 }
 
@@ -56,7 +56,7 @@ impl Look {
             kelpie_settings: &self.kelpie_settings,
         };
         let loaded = source::load(&tables, files, &self.home).map_err(|e| e.to_string())?;
-        self.last = Some((loaded.settings.clone(), loaded.webhook.clone()));
+        self.last = Some((loaded.settings.clone(), loaded.kelpie.clone()));
         Ok(loaded)
     }
 
@@ -78,7 +78,7 @@ impl Look {
             return;
         }
         let mut runner = runner.lock().unwrap_or_else(PoisonError::into_inner);
-        match runner.reread(loaded.settings, loaded.webhook) {
+        match runner.reread(loaded.settings, loaded.kelpie) {
             Ok(Some(line)) => eprintln!("{line}"),
             Ok(None) => {}
             Err(e) => eprintln!("a settings change was refused, so they stay as they are: {e}"),

@@ -6,12 +6,13 @@
 //! checked as a start checks it, and one that fails keeps the settings the
 //! runner has.
 
-use super::{OpenError, Runner, check_coderabbit, instructions};
+use super::{OpenError, Runner, check_coderabbit, instructions, ruling_channels};
+use crate::channels::Channels;
 use crate::settings::Settings;
-use crate::webhook::Webhook;
+use crate::webhook::{KelpieSettings, Webhook};
 
 impl Runner {
-    /// Takes `settings` and `webhook` as the runner's own, from its next step
+    /// Takes `settings` and kelpie's own as the runner's, from its next step
     ///
     /// Returns a line for the log naming what changed and what waits for
     /// the next start, or nothing when nothing changed.
@@ -22,7 +23,7 @@ impl Runner {
     pub fn reread(
         &mut self,
         mut settings: Settings,
-        webhook: Webhook,
+        kelpie: KelpieSettings,
     ) -> Result<Option<String>, OpenError> {
         let mut waiting = Vec::new();
         if settings.repo != self.settings.repo {
@@ -33,7 +34,11 @@ impl Runner {
             waiting.push("forge");
             settings.forge = self.settings.forge.clone();
         }
-        let changed = changed(&self.settings, &settings, &self.webhook, &webhook);
+        let (channels, webhook) = ruling_channels(&settings, kelpie)?;
+        let changed = changed(
+            (&self.settings, &self.channels, &self.webhook),
+            (&settings, &channels, &webhook),
+        );
         if changed.is_empty() && waiting.is_empty() {
             return Ok(None);
         }
@@ -43,6 +48,7 @@ impl Runner {
         }
         self.settings = settings;
         self.extra_instructions = extra_instructions;
+        self.channels = channels;
         self.webhook = webhook;
         // Read again under the new pacing settings at the next look.
         self.pacing = None;
@@ -60,14 +66,19 @@ impl Runner {
     }
 }
 
-// The top-level settings that differ, `webhook` for kelpie's own.
-fn changed(old: &Settings, new: &Settings, was: &Webhook, now: &Webhook) -> Vec<&'static str> {
+// A project's settings, the channels its rulings go to, and the webhook.
+type Reach<'a> = (&'a Settings, &'a Channels, &'a Option<Webhook>);
+
+// The top-level settings that differ. `ruling_channels` and `webhook` also
+// change when kelpie's own settings do.
+fn changed((old, went, was): Reach<'_>, (new, goes, now): Reach<'_>) -> Vec<&'static str> {
     [
         (
             "merge_authority",
             old.merge_authority != new.merge_authority,
         ),
         ("ci", old.ci != new.ci),
+        ("ruling_channels", went != goes),
         ("generated", old.generated != new.generated),
         ("models", old.models != new.models),
         ("review", old.review != new.review),
@@ -89,7 +100,7 @@ mod tests {
     use crate::ports::Visibility;
     use crate::settings::MergeAuthority;
     use crate::test::Rig;
-    use crate::webhook::{Webhook, WebhookKind};
+    use crate::webhook::{KelpieSettings, WebhookKind};
 
     fn settings_with(rig: &Rig, edit: impl FnOnce(String) -> String) -> crate::settings::Settings {
         rig.edit_settings(edit);
@@ -105,7 +116,7 @@ mod tests {
                 .replace("loop_guard = 8", "loop_guard = 3")
         });
         let mut runner = runner.lock().unwrap();
-        let line = runner.reread(next, rig.webhook()).unwrap();
+        let line = runner.reread(next, rig.kelpie_settings()).unwrap();
         assert_eq!(
             line.as_deref(),
             Some("settings changed: merge_authority, review now in effect")
@@ -120,7 +131,10 @@ mod tests {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
         let mut runner = runner.lock().unwrap();
-        assert_eq!(runner.reread(rig.settings(), rig.webhook()), Ok(None));
+        assert_eq!(
+            runner.reread(rig.settings(), rig.kelpie_settings()),
+            Ok(None)
+        );
     }
 
     #[test]
@@ -131,7 +145,7 @@ mod tests {
             s.replace("forge = \"shep-pm/shep\"", "forge = \"shep-pm/elsewhere\"")
         });
         let mut runner = runner.lock().unwrap();
-        let line = runner.reread(next, rig.webhook()).unwrap();
+        let line = runner.reread(next, rig.kelpie_settings()).unwrap();
         assert_eq!(
             line.as_deref(),
             Some("settings changed; forge from the runner's next start")
@@ -144,16 +158,29 @@ mod tests {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
         let text = "[webhook]\nkind = \"discord\"\nurl = \"https://discord.example/h\"\n";
-        let webhook: Webhook = crate::webhook::KelpieSettings::from_section(text)
-            .unwrap()
-            .webhook;
+        let kelpie = KelpieSettings::from_section(text).unwrap();
         let mut runner = runner.lock().unwrap();
-        let line = runner.reread(rig.settings(), webhook).unwrap();
+        let line = runner.reread(rig.settings(), kelpie).unwrap();
         assert_eq!(
             line.as_deref(),
             Some("settings changed: webhook now in effect")
         );
-        assert_eq!(runner.webhook.kind, WebhookKind::Discord);
+        assert_eq!(runner.webhook.as_ref().unwrap().kind, WebhookKind::Discord);
+    }
+
+    #[test]
+    fn a_webhook_taken_from_a_project_that_posts_to_it_is_refused() {
+        let rig = Rig::new("shep");
+        let runner = rig.open().unwrap();
+        let mut runner = runner.lock().unwrap();
+        let err = runner
+            .reread(rig.settings(), KelpieSettings::default())
+            .unwrap_err();
+        assert!(
+            err.to_string().starts_with("setting `ruling_channels`"),
+            "{err}"
+        );
+        assert!(runner.webhook.is_some());
     }
 
     #[test]
@@ -164,7 +191,10 @@ mod tests {
         rig.coderabbit_on();
         let next = rig.settings();
         let mut runner = runner.lock().unwrap();
-        let err = runner.reread(next, rig.webhook()).unwrap_err().to_string();
+        let err = runner
+            .reread(next, rig.kelpie_settings())
+            .unwrap_err()
+            .to_string();
         assert!(err.starts_with("setting `coderabbit.enabled`"), "{err}");
         assert!(!runner.settings().coderabbit.enabled);
         let missing = settings_with(&rig, |s| {
@@ -175,7 +205,7 @@ mod tests {
                 )
         });
         let err = runner
-            .reread(missing, rig.webhook())
+            .reread(missing, rig.kelpie_settings())
             .unwrap_err()
             .to_string();
         assert!(err.contains("worker.instructions_file"), "{err}");

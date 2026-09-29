@@ -104,8 +104,8 @@ fn serve(project: &str) -> Result<(), String> {
     for notice in &loaded.notices {
         eprintln!("{notice}");
     }
-    let (settings, webhook) = (loaded.settings, loaded.webhook);
-    let runner = Runner::open(project, settings, webhook, &paths, &kelpie, ports)
+    let (settings, kelpie_settings) = (loaded.settings, loaded.kelpie);
+    let runner = Runner::open(project, settings, kelpie_settings, &paths, &kelpie, ports)
         .map_err(|e| e.to_string())?;
 
     if !shepherd.is_active() {

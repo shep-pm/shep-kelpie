@@ -5,7 +5,8 @@
 //! malformed setting stops the runner with a message naming it. Every
 //! setting is required except the ones added after the first build
 //! (`pacing.enabled`, `worker.allowed_domains`, `worker.build_env`,
-//! `worker.instructions_file`, `worker.turn_timeout` and `[preview]`).
+//! `worker.instructions_file`, `worker.turn_timeout`, `ruling_channels`
+//! and `[preview]`).
 //! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
@@ -18,6 +19,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use shep_client::dogs::dog_config;
 
+use crate::channels::Channels;
 use crate::preview::Preview;
 
 pub mod moving;
@@ -58,6 +60,10 @@ pub struct Settings {
     /// Showing a work item's UI, for a repo with a launch file
     #[serde(default)]
     pub preview: Preview,
+    /// How rulings reach the maintainer, over what kelpie's own settings say.
+    /// Kelpie's settings decide when absent.
+    #[serde(default)]
+    pub ruling_channels: Option<Channels>,
 }
 
 /// Who decides a merge
