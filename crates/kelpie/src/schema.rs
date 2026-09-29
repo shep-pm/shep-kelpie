@@ -143,7 +143,9 @@ mod tests {
             .replace("# routes =", "routes =")
             .replace("# domains =", "domains =")
             .replace("# local_rounds =", "local_rounds =")
-            .replace("# rounds =", "rounds =");
+            .replace("# rounds =", "rounds =")
+            .replace("# ollama =", "ollama =")
+            .replace("# ollama_model =", "ollama_model =");
         let command = "kind = \"command\"\ncommand = \"~/.claude/scripts/qwen-review.sh\"\n";
         assert!(text.contains(command), "the example's local round moved");
         let endpoint = "kind = \"endpoint\"\nurl = \"http://localhost:11434/v1\"\n\

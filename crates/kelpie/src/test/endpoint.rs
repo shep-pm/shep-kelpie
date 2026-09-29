@@ -1,6 +1,7 @@
 //! A stand-in OpenAI-compatible server, for kelpie's own local reviewer
 //!
-//! It answers `GET …/models` with an empty list, and each
+//! It answers `GET …/models` with an empty list, `GET /api/ps` with what the
+//! test gave it (a 404, as a server that is not Ollama answers, until then), and each
 //! `POST …/chat/completions` with the next scripted reply, or `CLEAN` once
 //! the script runs out. It keeps every chat request's body.
 
@@ -25,6 +26,7 @@ pub(crate) enum Answer {
 struct Shared {
     answers: VecDeque<Answer>,
     requests: Vec<Value>,
+    ps: Option<String>,
 }
 
 /// A server on a free local port, until the test ends
@@ -42,6 +44,7 @@ impl StandInEndpoint {
         let shared = Arc::new(Mutex::new(Shared {
             answers: answers.into_iter().collect(),
             requests: Vec::new(),
+            ps: None,
         }));
         let serving = Arc::clone(&shared);
         // The thread outlives the test only while the test binary runs.
@@ -51,6 +54,17 @@ impl StandInEndpoint {
             }
         });
         Self { url, shared }
+    }
+
+    /// Has `/api/ps` answer with this body, as Ollama does
+    pub(crate) fn with_ps(self, body: &str) -> Self {
+        self.shared.lock().unwrap().ps = Some(body.to_owned());
+        self
+    }
+
+    /// Its Ollama host: the base URL without `/v1`
+    pub(crate) fn host(&self) -> &str {
+        self.url.strip_suffix("/v1").unwrap_or(&self.url)
     }
 
     /// Its base URL, up to and including `/v1`
@@ -91,7 +105,12 @@ fn serve(stream: TcpStream, shared: &Mutex<Shared>) {
     if reader.read_exact(&mut body).is_err() {
         return;
     }
-    let (status, reply) = if request_line.contains("/models ") {
+    let (status, reply) = if request_line.contains("/api/ps ") {
+        match &shared.lock().unwrap().ps {
+            Some(body) => (200, body.clone()),
+            None => (404, "404 page not found".to_owned()),
+        }
+    } else if request_line.contains("/models ") {
         (200, json!({ "object": "list", "data": [] }).to_string())
     } else {
         let mut shared = shared.lock().unwrap();

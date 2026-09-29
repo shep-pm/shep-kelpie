@@ -9,11 +9,20 @@ use crate::runner::turn;
 /// Where a round's held findings are written for the worker's next turn
 const FINDINGS_FILE: &str = "review-findings.md";
 
+/// Where the worker copies the held findings it leaves unfixed
+const DEFERRED_FILE: &str = "deferred-findings.md";
+
 // The worker can read its build folder, and a commit never carries it. The
 // project's folder holds its settings, so the worker is denied it.
 /// The findings file's path, in the work item's build folder
 pub(in crate::runner) fn findings_path(build: &Path) -> PathBuf {
     build.join(FINDINGS_FILE)
+}
+
+/// Where the worker copies a held finding it leaves unfixed, in the same
+/// folder as the findings file
+pub(in crate::runner) fn deferred_path(build: &Path) -> PathBuf {
+    build.join(DEFERRED_FILE)
 }
 
 pub(in crate::runner) fn write_findings_file(
@@ -22,9 +31,13 @@ pub(in crate::runner) fn write_findings_file(
     round: u32,
     findings: &[Finding],
 ) -> Result<(), String> {
+    let deferred = deferred_path(folder);
     let mut text = format!(
         "Round {round}'s held findings, at the judge's severity. Fix each one, then \
-         commit and push.\n\n"
+         commit and push. A finding that is out of scope for this pull request may be \
+         left: copy its line, as it stands here, onto a line of its own in {}. Kelpie \
+         files what is there as an issue once the pull request merges.\n\n",
+        deferred.display()
     );
     for f in findings {
         text.push_str(&format!(
@@ -94,6 +107,13 @@ mod tests {
         assert!(
             text.starts_with("Round 3's held findings, at the judge's severity."),
             "{text}"
+        );
+        assert!(
+            text.contains(&format!(
+                "in {}. Kelpie files what is there as an issue",
+                dir.path().join("deferred-findings.md").display()
+            )),
+            "the header names where a finding left unfixed goes: {text}"
         );
         assert!(
             text.contains("HIGH|src/lib.rs:9|looks racy|two threads write the same field\n"),

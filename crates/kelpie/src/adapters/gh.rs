@@ -1,6 +1,7 @@
 //! GitHub, through the `gh` command line
 
 mod board;
+mod issues;
 mod review;
 pub(crate) mod review_bot;
 
@@ -10,7 +11,8 @@ use serde::Deserialize;
 
 use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::ports::{
-    Checks, Forge, ForgeError, Issue, NewLabel, PullRequest, PullRequestState, Reviewed, Visibility,
+    Checks, Forge, ForgeError, Issue, NewLabel, OpenIssue, PullRequest, PullRequestState, Reviewed,
+    Visibility,
 };
 use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
@@ -143,6 +145,20 @@ impl Forge for Gh {
         let field = format!("body={body}");
         let args = ["api", "--method", "PATCH", &path, "-f", &field, "--silent"];
         gh(&args).map(drop)
+    }
+
+    fn open_issues(&self, repo: &ForgeSlug) -> Result<Vec<OpenIssue>, ForgeError> {
+        issues::open_issues(repo)
+    }
+
+    fn create_issue(
+        &self,
+        repo: &ForgeSlug,
+        title: &str,
+        body: &str,
+        labels: &[&str],
+    ) -> Result<u64, ForgeError> {
+        issues::create_issue(repo, title, body, labels)
     }
 
     fn mark_ready(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {

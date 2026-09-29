@@ -504,6 +504,7 @@ impl Settings {
     pub(crate) fn parse(text: &str, home: &Path) -> Result<Self, String> {
         let mut settings: Self = toml::from_str(text).map_err(|e| e.to_string())?;
         settings.expand(home);
+        settings.review.local.check()?;
         Ok(settings)
     }
 

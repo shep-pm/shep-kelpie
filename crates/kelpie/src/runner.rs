@@ -27,6 +27,7 @@ mod claude_files;
 #[cfg(test)]
 mod coderabbit;
 mod dispatch;
+mod follow_up;
 mod gate;
 mod guard_hooks;
 mod instructions;
@@ -312,6 +313,7 @@ impl Runner {
             leases: &self.state.leases,
             pacer: self.pacer_status(self.ports.clock.now()),
             skills: self.skills.status(),
+            local_model: self.ports.reviewer.seat().map(Into::into),
         }
     }
 
@@ -402,6 +404,8 @@ impl Runner {
             rebased: false,
             shots: None,
             shots_comment: None,
+            held: Vec::new(),
+            follow_ups: None,
             calls: Vec::new(),
         }
     }
