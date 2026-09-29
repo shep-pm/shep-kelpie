@@ -86,7 +86,9 @@ pub async fn move_files(
                     }
                 }
                 done.push(format!("moved into {section_name}"));
-            } else if KelpieSettings::from_section(&tables.kelpie).as_ref() == Ok(&file) {
+            } else if KelpieSettings::from_section(&tables.kelpie).map_err(|e| e.to_string())?
+                == file
+            {
                 done.push(format!("{section_name} already holds it"));
             } else {
                 return Err(differs(files.kelpie_settings, section_name));

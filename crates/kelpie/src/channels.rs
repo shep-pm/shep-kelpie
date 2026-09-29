@@ -21,7 +21,9 @@ pub enum Channel {
 /// The channels rulings go to: at least one
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(try_from = "Vec<Channel>")]
-pub struct Channels(#[schemars(length(min = 1))] BTreeSet<Channel>);
+// schemars describes a `try_from` type by its source, so the bound goes here.
+#[schemars(extend("minItems" = 1))]
+pub struct Channels(BTreeSet<Channel>);
 
 impl Channels {
     /// Whether rulings go through `channel`

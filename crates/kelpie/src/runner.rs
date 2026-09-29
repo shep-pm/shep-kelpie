@@ -161,7 +161,9 @@ pub struct Runner {
 impl Runner {
     /// Checks the project's settings hold, and reads its state
     ///
-    /// `kelpie` is the kelpie binary, which each worker's file-tool hook runs.
+    /// `settings` and `kelpie_settings` are as [`crate::settings::source::load`]
+    /// read them. `kelpie` is the kelpie binary, which each worker's file-tool
+    /// hook runs.
     ///
     /// # Errors
     ///

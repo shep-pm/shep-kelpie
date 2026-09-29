@@ -48,7 +48,7 @@ impl Look {
         }
     }
 
-    /// Reads the tables, or the files standing in for them
+    /// Reads the tables, or the files standing in for them, and remembers them
     pub(super) fn read(&mut self) -> Result<Loaded, String> {
         let tables = shepherd::block_on(shepherd::read_tables(&self.shep_home, &self.sheep))?;
         let files = Files {

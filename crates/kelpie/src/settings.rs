@@ -344,7 +344,9 @@ impl TryFrom<String> for ForgeSlug {
 /// Hours in a working day, from 1 to 24
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(try_from = "i64")]
-pub struct KickoffHours(#[schemars(range(min = 1, max = 24))] u8);
+// schemars describes a `try_from` type by its source, so the range goes here.
+#[schemars(extend("minimum" = 1, "maximum" = 24))]
+pub struct KickoffHours(u8);
 
 impl KickoffHours {
     /// The number of hours

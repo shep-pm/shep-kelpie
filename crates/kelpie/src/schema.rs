@@ -135,6 +135,14 @@ mod tests {
     }
 
     #[test]
+    fn a_checked_value_carries_its_bounds() {
+        let defs = &schema()["$defs"];
+        assert_eq!(defs["KickoffHours"]["minimum"], 1);
+        assert_eq!(defs["KickoffHours"]["maximum"], 24);
+        assert_eq!(defs["Channels"]["minItems"], 1);
+    }
+
+    #[test]
     fn only_the_webhook_url_is_a_secret() {
         let root = schema();
         let text = root.to_string();
