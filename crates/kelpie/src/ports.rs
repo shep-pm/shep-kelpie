@@ -176,6 +176,8 @@ pub struct Reviewed {
     pub body: String,
     /// The issues on the same repo that it closes when it merges
     pub closes: Vec<u64>,
+    /// The branch it merges into
+    pub base: String,
     /// The branch it merges from
     pub branch: String,
     /// Whether that branch is on a fork rather than the repo itself

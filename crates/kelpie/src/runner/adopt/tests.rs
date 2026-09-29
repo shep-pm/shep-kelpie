@@ -1,4 +1,5 @@
 use std::sync::Mutex;
+use std::time::Duration;
 
 use serde_json::json;
 
@@ -6,7 +7,7 @@ use super::*;
 use crate::ports::{Checks, PullRequestState, Session};
 use crate::runner::{StepReport, step};
 use crate::settings::Effort;
-use crate::test::{Rig, Scripted, git};
+use crate::test::{Hold, Rig, Scripted, git};
 
 // Pull request 80 on `fix/timeline`, opened by kelpie's account from another
 // session: two commits pushed by hand, closing issue 5. Returns its head.
@@ -34,6 +35,14 @@ fn adopted_80() -> StepReport {
     }
 }
 
+fn waiting(numbers: &[u64], by_label: bool) -> serde_json::Value {
+    let waiting: Vec<_> = numbers
+        .iter()
+        .map(|n| json!({ "pull_request": n, "by_label": by_label }))
+        .collect();
+    json!(waiting)
+}
+
 fn file_5(rig: &Rig) -> PathBuf {
     rig.paths().build(5).join("adopted-pull-request.md")
 }
@@ -46,7 +55,7 @@ fn adopt_starts_at_ci_and_the_first_turn_names_the_file_ahead_of_the_red_run() {
     let status = rig.ask(&runner, "adopt", Some("80"));
     assert_eq!(
         (&status["adopted"], &status["work_item"]),
-        (&json!([80]), &json!(null))
+        (&waiting(&[80], false), &json!(null))
     );
 
     assert_eq!(step(&runner).unwrap(), Some(adopted_80()));
@@ -137,7 +146,7 @@ type Refusal = (&'static str, fn(&Rig), &'static str);
 
 #[test]
 fn each_refusal_comments_and_adopts_nothing() {
-    let cases: [Refusal; 5] = [
+    let cases: [Refusal; 6] = [
         (
             "closed",
             |rig| rig.forge.set_state(80, PullRequestState::Closed),
@@ -152,6 +161,11 @@ fn each_refusal_comments_and_adopts_nothing() {
             "fork",
             |rig| rig.forge.set_from_fork(80),
             "pull request #80 comes from a fork",
+        ),
+        (
+            "base",
+            |rig| rig.forge.set_base(80, "feat/stacked"),
+            "pull request #80 merges into `feat/stacked`, not `main`",
         ),
         (
             "author",
@@ -375,7 +389,7 @@ fn adopted_pull_requests_wait_for_the_work_item_in_flight_across_a_restart() {
 
     let runner = rig.open().unwrap();
     let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["adopted"], json!([81, 80]));
+    assert_eq!(status["adopted"], waiting(&[81, 80], false));
     assert_eq!(status["work_item"]["issue"], 7);
     rig.ask(&runner, "drop", None);
     rig.ask(&runner, "start", None);
@@ -390,5 +404,189 @@ fn adopted_pull_requests_wait_for_the_work_item_in_flight_across_a_restart() {
             },
         })
     );
-    assert_eq!(rig.ask(&runner, "status", None)["adopted"], json!([80]));
+    assert_eq!(
+        rig.ask(&runner, "status", None)["adopted"],
+        waiting(&[80], false)
+    );
+}
+
+// Pull request 80 adopted and at CI, whose red run went to the worker as its
+// next turn. Returns the red head.
+fn red_80(rig: &Rig, runner: &Mutex<Runner>) -> String {
+    let head = opened_80(rig);
+    rig.ask(runner, "adopt", Some("80"));
+    step(runner).unwrap();
+    rig.forge
+        .set_checks(&head, Checks::Failed(vec!["test".into()]));
+    assert!(matches!(
+        rig.verdict(runner),
+        Some(StepReport::CiFailed { .. })
+    ));
+    head
+}
+
+fn foreign_ruling(rig: &Rig, runner: &Mutex<Runner>, pushed: &str) {
+    rig.forge.set_checks(pushed, Checks::Passed);
+    let Some(StepReport::Ruling { question, .. }) = rig.verdict(runner) else {
+        panic!("the push was not ruled on");
+    };
+    let moved = format!("its head moved to {}", &pushed[..7]);
+    assert!(question.contains(&moved), "{question}");
+}
+
+#[test]
+fn a_push_by_the_branchs_owner_during_the_workers_turn_is_not_the_workers() {
+    let rig = Rig::new("koji");
+    let runner = running(&rig);
+    red_80(&rig, &runner);
+    let hold = Hold::default();
+    rig.claude.script([Scripted::Hold(hold.clone())]);
+    let pushed = std::thread::scope(|s| {
+        let turn = s.spawn(|| step(&runner).unwrap());
+        assert!(
+            hold.entered(Duration::from_secs(10)),
+            "the turn never began"
+        );
+        let pushed = rig.push_by_hand("fix/timeline", "owner.txt");
+        hold.release();
+        turn.join().unwrap();
+        pushed
+    });
+    foreign_ruling(&rig, &runner, &pushed);
+}
+
+#[test]
+fn a_push_by_the_branchs_owner_before_the_workers_turn_parks_it_with_no_turn() {
+    let rig = Rig::new("rotom");
+    let runner = running(&rig);
+    red_80(&rig, &runner);
+    let pushed = rig.push_by_hand("fix/timeline", "owner.txt");
+    foreign_ruling(&rig, &runner, &pushed);
+    assert_eq!(rig.claude.all_calls(), []);
+}
+
+#[test]
+fn one_coderabbit_review_of_the_head_it_arrived_with_is_round_one_not_the_cap() {
+    let rig = Rig::new("shep");
+    rig.coderabbit_on();
+    let head = opened_80(&rig);
+    rig.forge.ready_pull_request(80);
+    rig.forge
+        .coderabbit
+        .review(80, &head, Rig::EPOCH - 60, &["Check the bounds"]);
+    let runner = running(&rig);
+    rig.ask(&runner, "adopt", Some("80"));
+    step(&runner).unwrap();
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["coderabbit"]["rounds"],
+        0
+    );
+
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::CodeRabbitReviewed { round: 1, .. })
+    ));
+    rig.claude.script([Scripted::Text(
+        r#"{"holds": true, "severity": "medium", "reason": "real"}"#,
+    )]);
+    step(&runner).unwrap(); // the judge
+    step(&runner).unwrap(); // the finding goes to the worker
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["rulings"], json!([]), "no cap ruling");
+    assert_eq!(status["work_item"]["coderabbit"]["rounds"], 1);
+}
+
+#[test]
+fn a_start_retried_after_a_failure_begins_at_the_head_origin_holds_now() {
+    let rig = Rig::new("golbat");
+    rig.coderabbit_on();
+    opened_80(&rig);
+    let runner = running(&rig);
+    rig.ask(&runner, "adopt", Some("80"));
+    rig.forge.coderabbit.set_down(true);
+    step(&runner).unwrap();
+    assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
+
+    let moved = rig.push_by_hand("fix/timeline", "later.txt");
+    rig.forge.coderabbit.set_down(false);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Adopted {
+            issue: 5,
+            pull_request: 80,
+            worker: WorkerModel {
+                model: "claude-sonnet-5".into(),
+                effort: Effort::Medium,
+            },
+        })
+    );
+    let worktree = rig.paths().worktree(5);
+    assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), moved);
+    rig.forge.set_checks(&moved, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::MarkedReady { .. })
+    ));
+}
+
+#[test]
+fn a_ready_pull_request_reaches_the_merge_ruling_without_parking() {
+    let rig = Rig::new("hazels-lab");
+    let head = opened_80(&rig);
+    rig.forge.ready_pull_request(80);
+    let runner = running(&rig);
+    rig.ask(&runner, "adopt", Some("80"));
+    step(&runner).unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+    let Some(StepReport::Ruling { question, .. }) = rig.verdict(&runner) else {
+        panic!("no ruling was raised");
+    };
+    assert!(question.starts_with("Merge pull request #80"), "{question}");
+}
+
+// Issue 7 in flight, with pull requests 80 and 81 waiting behind it
+fn two_waiting(rig: &Rig) -> Mutex<Runner> {
+    opened_80(rig);
+    rig.push_by_hand("fix/other", "other.txt");
+    rig.forge.open_pull_request(81, "fix/other", &[6]);
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    runner
+}
+
+#[test]
+fn a_waiting_pull_request_merged_or_closed_by_hand_leaves_without_a_comment() {
+    let rig = Rig::new("chelone");
+    let runner = two_waiting(&rig);
+    rig.ask(&runner, "adopt", Some("80"));
+    rig.ask(&runner, "adopt", Some("81"));
+    rig.forge.set_state(80, PullRequestState::Merged);
+    rig.forge.set_state(81, PullRequestState::Closed);
+    rig.ask(&runner, "drop", None);
+    rig.ask(&runner, "start", None);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(rig.forge.comments(), []);
+    assert_eq!(rig.ask(&runner, "status", None)["adopted"], json!([]));
+}
+
+#[test]
+fn taking_the_label_off_a_waiting_pull_request_takes_it_back() {
+    let rig = Rig::new("xilriws");
+    opened_80(&rig);
+    rig.push_by_hand("fix/other", "other.txt");
+    rig.forge.open_pull_request(81, "fix/other", &[6]);
+    rig.forge.label_pull_request(80, READY);
+    rig.forge.label_pull_request(81, READY);
+    let runner = running(&rig);
+    step(&runner).unwrap();
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["pull_request"], 80);
+    assert_eq!(status["adopted"], waiting(&[81], true));
+
+    rig.forge.unlabel_pull_request(81, READY);
+    rig.ask(&runner, "drop", None);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(rig.ask(&runner, "status", None)["adopted"], json!([]));
+    assert_eq!(rig.forge.comments(), []);
 }

@@ -120,6 +120,9 @@ impl Runner {
         // running carries on, since a turn is never interrupted, and start_over
         // resumes the same not-yet-begun turn after a session died unborn.
         let due = matches!(item.turn, Turn::Due | Turn::Next { .. });
+        if let Some(begin) = self.pushed_by_someone_else()? {
+            return Ok(begin);
+        }
         if due && let Some(held) = self.pace(Scope::Turn)?.holds() {
             return Ok(held);
         }
@@ -267,11 +270,7 @@ impl Runner {
         let now = self.ports.clock.now();
         // Whatever the turn left on `origin` is the worker's own. A head
         // that cannot be read keeps the last one, which errs toward parking.
-        let pushed = self
-            .state
-            .work_item
-            .as_ref()
-            .and_then(|_| self.origin_head().ok());
+        let pushed = self.state.work_item.as_ref().and_then(|_| self.own_push());
         let mut next = self.state.clone();
         let Some(item) = next.work_item.as_mut() else {
             return Ok(None);

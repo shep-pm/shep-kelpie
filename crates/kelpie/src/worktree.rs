@@ -280,6 +280,15 @@ pub fn origin_head(repo: &Path, branch: &str) -> Result<String, WorktreeError> {
     git(repo, ["rev-parse", "--verify", "--quiet", &tracking])
 }
 
+/// The commit `worktree` has checked out
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn head(repo: &Path, worktree: &Path) -> Result<String, WorktreeError> {
+    trusted(repo, worktree)?(&["rev-parse", "HEAD"])
+}
+
 /// Moves the worktree's branch from `from`, the head kelpie knew, to `to`
 ///
 /// `to` is a head on `origin` the maintainer accepted. A worktree at neither,

@@ -10,7 +10,7 @@ use super::pace::PacerStatus;
 use super::{Answer, Runner};
 use crate::board::{Skip, WorkerModel};
 use crate::ports::{SessionId, Timestamp};
-use crate::state::{LeaseHeld, Ruling, RunState, StateError};
+use crate::state::{LeaseHeld, Ruling, RunState, StateError, Waiting};
 use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Turn, WorkItem};
 
 /// The triggers a runner answers
@@ -33,7 +33,7 @@ pub struct Status<'a> {
     /// The work item in flight
     pub work_item: Option<WorkItemStatus<'a>>,
     /// Pull requests adopted and waiting for the work item in flight, oldest first
-    pub adopted: &'a [u64],
+    pub adopted: &'a [Waiting],
     /// Ready issues the board passed over on its last poll, and why
     pub skipped: &'a [Skip],
     /// Rulings waiting on the maintainer, oldest first

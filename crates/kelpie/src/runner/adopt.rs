@@ -5,7 +5,9 @@
 //! requests wait in the state file for the work item in flight, one at a
 //! time, and go before the board's issues. Each starts at CI on its branch as
 //! `origin` holds it, with its labels, ready state and head taken as kelpie's
-//! own. A review asking for changes is the worker's first turn instead.
+//! own. A review asking for changes is the worker's first turn instead. The
+//! branch's owner may still be pushing, so only a push the worker's worktree
+//! holds is the worker's.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -19,7 +21,7 @@ use super::turn;
 use crate::board::{LabelError, OpenPullRequest, READY, Skip, WorkerModel, worker_override};
 use crate::pacer::Scope;
 use crate::ports::{ForgeError, Issue, MaintainerReview, PullRequestState, Reviewed, Role};
-use crate::state::StateError;
+use crate::state::{StateError, Waiting};
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem, new_session_id};
 use crate::worktree::{self, Start};
 
@@ -35,6 +37,8 @@ pub enum AdoptError {
     NotOpen(u64, &'static str),
     /// The pull request's branch is on a fork, not the repo itself
     Fork(u64),
+    /// The pull request merges into this branch, not `main`
+    Base(u64, String),
     /// The pull request was opened by this login, not the account kelpie acts as
     Author(u64, String),
     /// The pull request names no issue on the repo that it closes
@@ -65,6 +69,11 @@ impl fmt::Display for AdoptError {
             Self::PullRequest(number, e) => write!(f, "cannot read pull request #{number}: {e}"),
             Self::NotOpen(number, state) => write!(f, "pull request #{number} is {state}"),
             Self::Fork(number) => write!(f, "pull request #{number} comes from a fork"),
+            Self::Base(number, base) => write!(
+                f,
+                "pull request #{number} merges into `{base}`, not `{}`",
+                worktree::BASE
+            ),
             Self::Author(number, login) => {
                 write!(
                     f,
@@ -101,6 +110,7 @@ impl AdoptError {
             self,
             Self::NotOpen(..)
                 | Self::Fork(_)
+                | Self::Base(..)
                 | Self::Author(..)
                 | Self::NoIssue(_)
                 | Self::Label(_)
@@ -121,7 +131,7 @@ impl Runner {
     /// Nothing is adopted then.
     pub fn adopt(&mut self, number: u64) -> Result<(), AdoptError> {
         let in_flight = self.state.work_item.as_ref().and_then(|i| i.pull_request);
-        if in_flight == Some(number) || self.state.adopted.contains(&number) {
+        if in_flight == Some(number) || self.waiting(number) {
             return Ok(());
         }
         let pr = self
@@ -136,14 +146,22 @@ impl Runner {
             return Err(e);
         }
         let mut next = self.state.clone();
-        next.adopted.push(number);
+        next.adopted.push(Waiting {
+            pull_request: number,
+            by_label: false,
+        });
         self.save(next).map_err(AdoptError::State)
     }
 
+    fn waiting(&self, number: u64) -> bool {
+        self.state.adopted.iter().any(|w| w.pull_request == number)
+    }
+
     // Queues each open pull request labelled `ready-for-agent` whose branch
-    // isn't `kelpie/N`, then starts the oldest adopted one that can start. A
-    // refusal takes the label off and goes to the pull request as a comment.
-    // Returns each adopted one that could not start this poll.
+    // isn't `kelpie/N`, and lets go of any the label adopted that lost it.
+    // Then starts the oldest adopted one that can start. A refusal takes the
+    // label off and goes to the pull request as a comment, and one merged or
+    // closed while it waited just leaves. Returns each that could not start.
     pub(super) fn adopt_waiting(
         &mut self,
         open: &[OpenPullRequest],
@@ -157,17 +175,27 @@ impl Runner {
             .filter(|pr| pr.labels.iter().any(|l| l == READY))
             .filter(|pr| {
                 let kelpies = pr.head.strip_prefix("kelpie/").and_then(trigger::number);
-                kelpies.is_none() && !self.state.adopted.contains(&pr.number)
+                kelpies.is_none()
             })
             .map(|pr| pr.number)
             .collect();
-        if !labelled.is_empty() {
-            labelled.sort_unstable();
-            let mut next = self.state.clone();
-            next.adopted.extend(labelled);
+        labelled.sort_unstable();
+        let mut next = self.state.clone();
+        next.adopted
+            .retain(|w| !w.by_label || labelled.contains(&w.pull_request));
+        for number in labelled {
+            if !next.adopted.iter().any(|w| w.pull_request == number) {
+                next.adopted.push(Waiting {
+                    pull_request: number,
+                    by_label: true,
+                });
+            }
+        }
+        if next.adopted != self.state.adopted {
             self.save(next)?;
         }
-        for number in self.state.adopted.clone() {
+        let waiting: Vec<u64> = self.state.adopted.iter().map(|w| w.pull_request).collect();
+        for number in waiting {
             if let Some(held) = self.pace(Scope::Dispatch)?.holds() {
                 return Ok((Some(held), skipped));
             }
@@ -178,6 +206,10 @@ impl Runner {
                     worker,
                 }),
                 Err(AdoptError::State(e)) => return Err(e),
+                Err(AdoptError::NotOpen(..)) => {
+                    self.let_go(number)?;
+                    continue;
+                }
                 Err(e) if e.settled() => match self.refuse_adoption(number, &e)? {
                     Ok(begin) => begin,
                     Err(e) => {
@@ -219,15 +251,19 @@ impl Runner {
         if let Err(e) = unlabelled {
             return Ok(Err(AdoptError::Unlabel(number, READY, e)));
         }
-        let mut next = self.state.clone();
-        next.adopted.retain(|n| *n != number);
-        self.save(next)?;
+        self.let_go(number)?;
         let comment_failed = self.refusal_comment(number, refused);
         Ok(Ok(Begin::Report(StepReport::AdoptRefused {
             pull_request: number,
             reason: refused.to_string(),
             comment_failed,
         })))
+    }
+
+    fn let_go(&mut self, number: u64) -> Result<(), StateError> {
+        let mut next = self.state.clone();
+        next.adopted.retain(|w| w.pull_request != number);
+        self.save(next)
     }
 
     fn refusal_comment(&self, number: u64, refused: &AdoptError) -> Option<String> {
@@ -249,6 +285,9 @@ impl Runner {
         }
         if pr.from_fork {
             return Err(AdoptError::Fork(number));
+        }
+        if pr.base != worktree::BASE {
+            return Err(AdoptError::Base(number, pr.base.clone()));
         }
         let me = self.viewer().map_err(AdoptError::Viewer)?;
         if pr.author != me {
@@ -287,6 +326,16 @@ impl Runner {
             .unwrap_or_else(|| WorkerModel::from(&self.settings.models.worker));
         let session = new_session_id().map_err(|e| AdoptError::Session(e.to_string()))?;
         let fresh = self.fresh(issue, found.title.clone(), worker.clone(), session);
+        // A start that failed part way leaves a worktree on a head `origin`
+        // may have moved past, so each start begins from a fresh one.
+        let removed = worktree::remove(
+            &self.settings.repo,
+            &fresh.worktree,
+            &pr.branch,
+            &fresh.build,
+            false,
+        );
+        removed.map_err(|e| AdoptError::Worktree(e.to_string()))?;
         let prepared = worktree::prepare(
             &self.settings.repo,
             &fresh.worktree,
@@ -297,14 +346,15 @@ impl Runner {
         prepared.map_err(|e| AdoptError::Worktree(e.to_string()))?;
         let head = worktree::origin_head(&self.settings.repo, &pr.branch)
             .map_err(|e| AdoptError::Worktree(e.to_string()))?;
-        // The cap on CodeRabbit's rounds counts the reviews it already made.
+        // The cap counts CodeRabbit's reviews so far. One of this head counts
+        // when the gate finds it, as any round does.
         let rounds = if self.settings.coderabbit.enabled {
             let activity = self
                 .ports
                 .forge
                 .coderabbit(&repo, number)
                 .map_err(|e| AdoptError::CodeRabbit(number, e))?;
-            activity.reviews_made()
+            activity.reviewed_besides(&head)
         } else {
             0
         };
@@ -328,7 +378,7 @@ impl Runner {
         }
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
-        next.adopted.retain(|n| *n != number);
+        next.adopted.retain(|w| w.pull_request != number);
         let (turn, phase, resume) = match &review {
             Some(review) => {
                 next.reworked.push(review.id.clone());
@@ -362,6 +412,48 @@ impl Runner {
         next.work_item = Some(item);
         self.save(next).map_err(AdoptError::State)?;
         Ok((issue, worker))
+    }
+}
+
+impl Runner {
+    /// The branch's head on `origin`, as the worker's own push
+    ///
+    /// On an adopted branch its owner may push too, so the head counts only
+    /// when the worktree holds it. `None` keeps the head kelpie knew, which
+    /// errs toward parking.
+    pub(super) fn own_push(&self) -> Option<String> {
+        let item = self.state.work_item.as_ref()?;
+        let head = self.origin_head().ok()?;
+        if !item.adopted {
+            return Some(head);
+        }
+        let checked_out = worktree::head(&self.settings.repo, &item.worktree).ok()?;
+        (checked_out == head).then_some(head)
+    }
+
+    // A push by anyone else to an adopted branch since kelpie last looked
+    // goes to the gate, which parks it, before a worker's turn builds on it.
+    pub(super) fn pushed_by_someone_else(&mut self) -> Result<Option<Begin>, StateError> {
+        let Some(item) = self.state.work_item.as_ref() else {
+            return Ok(None);
+        };
+        let due = matches!(item.turn, Turn::Due | Turn::Next { .. });
+        let Some(known) = item.known.head.clone().filter(|_| item.adopted && due) else {
+            return Ok(None);
+        };
+        if self.origin_head().is_ok_and(|head| head == known) {
+            return Ok(None);
+        }
+        let now = self.ports.clock.now();
+        self.update(|item| {
+            item.turn = Turn::Ended { at: now };
+            item.resume = None;
+            item.phase = Phase::Ci {
+                head: None,
+                since: now,
+            };
+        })?;
+        self.check_ci().map(Some)
     }
 }
 

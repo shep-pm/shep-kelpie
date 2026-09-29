@@ -52,6 +52,7 @@ pub(crate) struct FakeForge {
 /// origin, so a push the runner makes moves it.
 #[derive(Debug, Clone)]
 struct FakePullRequest {
+    base: String,
     branch: String,
     state: PullRequestState,
     draft: bool,
@@ -155,6 +156,7 @@ impl FakeForge {
             labels: Vec::new(),
         });
         let pr = FakePullRequest {
+            base: "main".to_owned(),
             branch: head.to_owned(),
             state: PullRequestState::Open,
             draft: true,
@@ -190,6 +192,12 @@ impl FakeForge {
     pub(crate) fn ready_pull_request(&self, number: u64) {
         let mut prs = self.pull_requests.lock().unwrap();
         prs.get_mut(&number).expect("an opened pull request").draft = false;
+    }
+
+    /// Makes pull request `number` merge into `base` rather than `main`
+    pub(crate) fn set_base(&self, number: u64, base: &str) {
+        let mut prs = self.pull_requests.lock().unwrap();
+        prs.get_mut(&number).expect("an opened pull request").base = base.to_owned();
     }
 
     /// Makes pull request `number` come from a fork's branch
@@ -404,6 +412,7 @@ impl Forge for FakeForge {
             title: format!("Title of pull request #{number}"),
             body: format!("Body of pull request #{number}.\n"),
             closes,
+            base: pr.base,
             branch: pr.branch,
             from_fork: pr.from_fork,
             author: pr.author,
