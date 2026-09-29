@@ -212,9 +212,11 @@ impl Runner {
             return None;
         }
         // A read after an id ntfy no longer holds returns its whole cache.
-        // It reaches two steps past the window, so the code of a reply just
-        // too old to act on is still spent before a replay of it is read.
-        let floor = Timestamp(now.0.saturating_sub(WINDOW + 2 * STEP));
+        // It reaches three steps past the window, so the code of a reply just
+        // too old to act on is still spent before a replay of it is read: a
+        // reply spends the next step's code too, which a replay can still
+        // send up to three steps after the reply.
+        let floor = Timestamp(now.0.saturating_sub(WINDOW + 3 * STEP));
         let since = match &self.state.replies.last {
             Some(last) if last.time >= floor => Since::After(last.id.clone()),
             _ => Since::Time(floor),

@@ -263,7 +263,7 @@ fn reading_resumes_after_the_last_reply_across_a_restart() {
     let (rig, runner, _) = alerted("koji");
     rig.alerts.reply("hello from the phone", rig.clock.now());
     assert_eq!(step(&runner).unwrap(), Some(StepReport::ReplyIgnored));
-    let floor = Timestamp(rig.clock.now().0 - WINDOW - 2 * STEP);
+    let floor = Timestamp(rig.clock.now().0 - WINDOW - 3 * STEP);
     assert_eq!(rig.alerts.reads(), [Since::Time(floor)]);
     drop(runner);
 
@@ -286,14 +286,14 @@ fn an_old_position_reads_from_the_window_instead() {
     let state = rig.paths().state;
     let mut saved: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
-    let old = rig.clock.now().0 - WINDOW - 2 * STEP - 1;
+    let old = rig.clock.now().0 - WINDOW - 3 * STEP - 1;
     saved["replies"] = json!({ "last": { "id": "lapsed", "time": old } });
     std::fs::write(&state, saved.to_string()).unwrap();
 
     let runner = rig.open().unwrap();
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     step(&runner).unwrap();
-    let floor = Timestamp(rig.clock.now().0 - WINDOW - 2 * STEP);
+    let floor = Timestamp(rig.clock.now().0 - WINDOW - 3 * STEP);
     assert_eq!(rig.alerts.reads(), [Since::Time(floor)]);
 }
 
@@ -719,4 +719,32 @@ fn a_code_that_cannot_be_spent_holds_the_reply_until_it_can() {
         let phase = phase(&rig, &runner);
         assert_ne!(phase["state"], "merge", "{fault}: {phase}");
     }
+}
+
+// Probed in review: a reply spends the next step's code, which a replay
+// can still send three steps later. With kelpie down, a read that starts
+// only two steps before the window missed the reply but read the replay.
+#[test]
+fn a_replay_of_a_next_step_code_after_a_gap_finds_it_spent() {
+    let (rig, runner, _) = alerted("koji");
+    // The start of a step to come, so the replay lands two steps later.
+    let sent = (rig.clock.now().0 / STEP + 1) * STEP;
+    let ahead = rig.code_at(Timestamp(sent + STEP));
+    rig.alerts
+        .reply(&format!("koji 1 no rename it {ahead}"), Timestamp(sent));
+    rig.alerts
+        .reply(&format!("koji 1 yes {ahead}"), Timestamp(sent + 85));
+    // Kelpie comes back with the replay just inside the window.
+    let back = sent + WINDOW + 80;
+    rig.clock.advance(back - rig.clock.now().0);
+    let mut seen = Vec::new();
+    for _ in 0..3 {
+        seen.extend(step(&runner).unwrap());
+    }
+    assert!(
+        seen.iter()
+            .any(|r| matches!(r, StepReport::ReplyCodeUsed { id: 1, .. })),
+        "{seen:?}"
+    );
+    assert_eq!(phase(&rig, &runner), json!({ "state": "ruling", "id": 1 }));
 }
