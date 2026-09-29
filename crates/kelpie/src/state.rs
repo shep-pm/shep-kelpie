@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
-use crate::ports::Timestamp;
+use crate::ports::{OneTimeCode, Timestamp};
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
 
 /// The state file's format version
@@ -54,6 +54,10 @@ pub struct ProjectState {
     /// Automatic merges not yet posted to the webhook, oldest first
     #[serde(default)]
     pub notices: Vec<Notice>,
+    /// Where reading the webhook's replies has got to, and each ruling's
+    /// one-time code
+    #[serde(default)]
+    pub replies: Replies,
 }
 
 impl ProjectState {
@@ -72,6 +76,7 @@ impl ProjectState {
             leases: Vec::new(),
             pacing: None,
             notices: Vec::new(),
+            replies: Replies::default(),
         }
     }
 }
@@ -119,6 +124,38 @@ pub struct Ruling {
     /// any other way
     #[serde(default)]
     pub relayed: bool,
+}
+
+/// Replies on the webhook's topic: the last one read, and the codes that
+/// make one answer a ruling
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Replies {
+    /// The webhook's id for the last message read, which the next read
+    /// starts after
+    #[serde(default)]
+    pub after: Option<String>,
+    /// The code of each ruling alerted with one, pending or settled a day
+    /// ago at most, oldest first
+    #[serde(default)]
+    pub codes: Vec<Code>,
+}
+
+/// One ruling's one-time code
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Code {
+    /// The ruling
+    pub ruling: u64,
+    /// Its code
+    pub code: OneTimeCode,
+    /// When it was drawn, which a first read starts from
+    pub drawn: Timestamp,
+    /// When kelpie first saw the ruling settled
+    #[serde(default)]
+    pub settled: Option<Timestamp>,
 }
 
 /// A merge kelpie made under `auto`, told to the maintainer after it lands

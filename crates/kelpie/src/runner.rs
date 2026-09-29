@@ -32,6 +32,7 @@ mod merge;
 mod pace;
 mod paths;
 mod question;
+mod replies;
 mod report;
 mod review;
 mod rework;
@@ -44,6 +45,7 @@ pub use adopt::AdoptError;
 pub use merge::DropError;
 pub use pace::PacerStatus;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
+pub use replies::READ_EVERY;
 pub use report::StepReport;
 pub use rework::ReworkError;
 pub use ruling::{Answer, RuleError};
@@ -154,6 +156,8 @@ pub struct Runner {
     relay_notices: Vec<alert::SettledNotice>,
     // The ruling whose relay send is out, which an answer can settle first
     relaying: Option<u64>,
+    // Reading the webhook's topic for replies, kept in memory only
+    reading: replies::Reading,
     // The account kelpie acts as, read once a run when a rework first needs it
     viewer: Option<String>,
 }
@@ -222,6 +226,7 @@ impl Runner {
             relay_cleared: None,
             relay_notices: Vec::new(),
             relaying: None,
+            reading: replies::Reading::default(),
             viewer: None,
         })
     }

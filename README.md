@@ -8,7 +8,7 @@ First build under way. A project runner reads its settings, keeps its state, and
 
 Settings live at `~/.kelpie/projects/<project>/settings.toml`. Start from `crates/kelpie/settings.example.toml`, which holds the defaults for shep.
 
-Every runner also reads `~/.kelpie/settings.toml`, which names the webhook rulings are posted to. Start from `crates/kelpie/kelpie-settings.example.toml`, and keep the file private: the URL is a credential. `ruling_channels` there, or in a project's own settings, picks the webhook, the relay or both. Both is the default, and only a project that posts to the webhook needs a `[webhook]` table.
+Every runner also reads `~/.kelpie/settings.toml`, which names the webhook rulings are posted to. Start from `crates/kelpie/kelpie-settings.example.toml`, and keep the file private: the URL is a credential. `ruling_channels` there, or in a project's own settings, picks the webhook, the relay or both. Both is the default, and only a project that posts to the webhook needs a `[webhook]` table. On an ntfy webhook, a ruling can be answered from the topic: tap Merge, Send back or Leave on its alert, or reply with the line the alert ends on, one-time code included.
 
 Kelpie runs under its own shepherd, with `SHEP_HOME=~/.kelpie/shep`. Each runner is a sheep in its flock, and so is the dog, which holds the leases every runner asks before a summon:
 

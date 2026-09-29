@@ -7,7 +7,8 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-use crate::ports::{Alert, AlertError, Alerts};
+use super::ntfy;
+use crate::ports::{Alert, AlertError, Alerts, Reply, Since};
 use crate::webhook::{Webhook, WebhookKind};
 
 // Discord refuses a message over 2,000 characters, and ntfy turns a body
@@ -29,44 +30,74 @@ const _: () = assert!(DISCORD_MAX > KEEP_TAIL + CUT.len() && NTFY_MAX > DISCORD_
 const CONNECT_TIMEOUT: u32 = 5;
 const MAX_TIME: u32 = 15;
 
-/// Posts alerts with the system's `curl`
+/// The most a read of replies may print: ntfy.sh keeps a topic's messages
+/// for twelve hours, and a topic kelpie posts to never holds this much
+const REPLIES_MAX: usize = 4 << 20;
+
+/// Posts alerts, and reads replies to them, with the system's `curl`
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Curl;
 
 impl Alerts for Curl {
     fn post(&self, webhook: &Webhook, alert: &Alert) -> Result<(), AlertError> {
-        let mut child = Command::new("curl")
-            .args(["--config", "-"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| AlertError::Spawn(e.to_string()))?;
-        let config = config(webhook, alert);
-        let mut stdin = child.stdin.take().expect("stdin was piped");
-        let written = stdin.write_all(config.as_bytes());
-        drop(stdin);
-        let output = child
-            .wait_with_output()
-            .map_err(|e| AlertError::Spawn(e.to_string()))?;
-        if written.is_err() || !output.status.success() {
-            return Err(AlertError::Unreachable(output.status.code().unwrap_or(-1)));
-        }
-        let status = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .parse::<u16>();
+        let (_, status) = run(&config(webhook, alert))?;
         match status {
-            Ok(200..=299) => Ok(()),
-            Ok(status) => Err(AlertError::Refused(status)),
-            Err(_) => Err(AlertError::Unreachable(0)),
+            200..=299 => Ok(()),
+            status => Err(AlertError::Refused(status)),
         }
     }
+
+    fn replies(&self, webhook: &Webhook, since: &Since) -> Result<Vec<Reply>, AlertError> {
+        let lines = [
+            ("url", ntfy::poll_url(webhook.url.expose(), since)),
+            ("proto", "=https,http".to_owned()),
+            ("connect-timeout", CONNECT_TIMEOUT.to_string()),
+            ("max-time", MAX_TIME.to_string()),
+            // The status goes on a line of its own after the body.
+            ("write-out", "\n%{http_code}".to_owned()),
+        ];
+        match run(&render(&lines))? {
+            (body, 200..=299) if body.len() <= REPLIES_MAX => {
+                ntfy::parse(&body).ok_or(AlertError::Unreadable)
+            }
+            (_, 200..=299) => Err(AlertError::Unreadable),
+            (_, status) => Err(AlertError::Refused(status)),
+        }
+    }
+}
+
+// Runs curl on `config`, whose `write-out` prints the HTTP status last, and
+// returns what it printed before the status, and the status.
+fn run(config: &str) -> Result<(String, u16), AlertError> {
+    let mut child = Command::new("curl")
+        .args(["--config", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| AlertError::Spawn(e.to_string()))?;
+    let mut stdin = child.stdin.take().expect("stdin was piped");
+    let written = stdin.write_all(config.as_bytes());
+    drop(stdin);
+    let output = child
+        .wait_with_output()
+        .map_err(|e| AlertError::Spawn(e.to_string()))?;
+    if written.is_err() || !output.status.success() {
+        return Err(AlertError::Unreachable(output.status.code().unwrap_or(-1)));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let (body, status) = stdout.rsplit_once('\n').unwrap_or(("", &stdout));
+    let status = status
+        .trim()
+        .parse()
+        .map_err(|_| AlertError::Unreachable(0))?;
+    Ok((body.to_owned(), status))
 }
 
 // A curl config: one `option = "value"` per line. No redirects are followed,
 // so a post never goes anywhere but the URL.
 fn config(webhook: &Webhook, alert: &Alert) -> String {
-    let (header, body) = match webhook.kind {
+    let (headers, body) = match webhook.kind {
         WebhookKind::Discord => {
             let content = fit(&format!("{}\n{}", alert.title, alert.text), DISCORD_MAX);
             let body = serde_json::json!({
@@ -75,33 +106,46 @@ fn config(webhook: &Webhook, alert: &Alert) -> String {
                 "allowed_mentions": { "parse": [] },
             });
             (
-                "Content-Type: application/json".to_owned(),
+                vec!["Content-Type: application/json".to_owned()],
                 body.to_string(),
             )
         }
-        WebhookKind::Ntfy => (
-            format!("Title: {}", alert.title),
-            fit(&alert.text, NTFY_MAX),
-        ),
+        WebhookKind::Ntfy => {
+            let mut headers = vec![
+                format!("Title: {}", alert.title),
+                format!("Tags: {}", ntfy::TAG),
+            ];
+            let mut text = alert.text.clone();
+            if let Some(reply) = &alert.reply {
+                // The reply line goes last, where a cut keeps it.
+                text.push_str(&ntfy::reply_line(reply));
+                let actions = ntfy::actions(webhook.url.expose(), reply);
+                headers.extend(actions.map(|a| format!("Actions: {a}")));
+            }
+            (headers, fit(&text, NTFY_MAX))
+        }
     };
-    let lines = [
+    let mut lines = vec![
         ("url", webhook.url.expose().to_owned()),
         ("proto", "=https,http".to_owned()),
-        ("silent", String::new()),
         ("connect-timeout", CONNECT_TIMEOUT.to_string()),
         ("max-time", MAX_TIME.to_string()),
         ("output", "/dev/null".to_owned()),
         ("write-out", "%{http_code}".to_owned()),
-        // curl reads a literal `\n` in a value as a newline, so no worker text goes in a header.
-        ("header", header),
-        ("data-raw", body),
     ];
-    lines
-        .into_iter()
-        .map(|(option, value)| match option {
-            "silent" => "silent\n".to_owned(),
-            _ => format!("{option} = \"{}\"\n", quote(&value)),
-        })
+    // curl reads a literal `\n` in a value as a newline, so no worker text goes in a header.
+    lines.extend(headers.into_iter().map(|h| ("header", h)));
+    lines.push(("data-raw", body));
+    render(&lines)
+}
+
+// Quiet, then each option and its quoted value.
+fn render(lines: &[(&str, String)]) -> String {
+    let options = lines
+        .iter()
+        .map(|(option, value)| format!("{option} = \"{}\"\n", quote(value)));
+    std::iter::once("silent\n".to_owned())
+        .chain(options)
         .collect()
 }
 
@@ -147,6 +191,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::ports::{Clock, OneTimeCode, ReplyWith, Takes, Timestamp};
     use crate::webhook::WebhookUrl;
 
     fn webhook(kind: WebhookKind, url: &str) -> Webhook {
@@ -160,6 +205,7 @@ mod tests {
         Alert {
             title: "kelpie: hazels-lab ruling 3".into(),
             text: text.into(),
+            reply: None,
         }
     }
 
@@ -173,6 +219,11 @@ mod tests {
 
     // A stand-in webhook on this machine that answers one post with `status`.
     fn stand_in(status: u16) -> (String, thread::JoinHandle<Received>) {
+        serving(status, "")
+    }
+
+    // A stand-in that answers one request with `status` and `answer`.
+    fn serving(status: u16, answer: &'static str) -> (String, thread::JoinHandle<Received>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!(
             "http://127.0.0.1:{}/hook/s3cr3t",
@@ -209,7 +260,8 @@ mod tests {
             let mut stream = stream;
             write!(
                 stream,
-                "HTTP/1.1 {status} X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                answer.len()
             )
             .unwrap();
             Received {
@@ -263,6 +315,130 @@ mod tests {
             "{got:?}"
         );
         assert_eq!(got.body, text);
+        assert!(got.headers.contains(&"Tags: kelpie".to_owned()), "{got:?}");
+        assert!(
+            !got.headers.iter().any(|h| h.starts_with("Actions:")),
+            "{got:?}"
+        );
+    }
+
+    #[test]
+    fn an_ntfy_ruling_ends_with_its_reply_and_carries_its_buttons() {
+        let (url, served) = stand_in(200);
+        let reply = ReplyWith {
+            id: 3,
+            code: OneTimeCode::draw().unwrap(),
+            takes: Takes::YesOrNo { yes: "Merge" },
+        };
+        let code = reply.code.expose().to_owned();
+        let alert = Alert {
+            reply: Some(reply),
+            ..alert("Merge pull request #71?")
+        };
+        Curl.post(&webhook(WebhookKind::Ntfy, &url), &alert)
+            .unwrap();
+        let got = served.join().unwrap();
+        assert!(
+            got.body
+                .starts_with("Merge pull request #71?\n\nTap a button"),
+            "{got:?}"
+        );
+        assert!(
+            got.body.ends_with(&format!("`3 no <note> {code}`.")),
+            "{got:?}"
+        );
+        let actions = got
+            .headers
+            .iter()
+            .find_map(|h| h.strip_prefix("Actions: "))
+            .expect("the buttons");
+        let actions: serde_json::Value = serde_json::from_str(actions).unwrap();
+        assert_eq!(actions[0]["label"], "Merge");
+        assert_eq!(actions[0]["body"], format!("3 yes {code}"));
+        assert_eq!(actions[0]["url"], url.as_str());
+    }
+
+    #[test]
+    fn replies_are_read_from_the_topics_json_since_the_last_one() {
+        let (url, served) = serving(200, include_str!("../../fixtures/ntfy-poll.jsonl"));
+        let url = format!("{url}?auth=tok");
+        let since = Since::After("W3EqiUm5rsNq".into());
+        let replies = Curl
+            .replies(&webhook(WebhookKind::Ntfy, &url), &since)
+            .unwrap();
+        let got = served.join().unwrap();
+        assert_eq!(
+            got.request_line,
+            "GET /hook/s3cr3t/json?auth=tok&poll=1&since=W3EqiUm5rsNq HTTP/1.1"
+        );
+        assert_eq!(replies.len(), 6);
+        assert_eq!(replies[1].text.as_deref(), Some("3 yes 7hq2mx9d"));
+    }
+
+    // What a tap on an alert's button does, measured end to end on a real
+    // topic: the alert goes up with its buttons, the button's post lands on
+    // the topic, and a read gives back that post and skips the alert.
+    #[test]
+    #[ignore = "posts to a scratch ntfy topic: KELPIE_NTFY_SCRATCH=https://ntfy.sh/<topic>"]
+    fn a_buttons_reply_on_a_real_topic_reads_back() {
+        let url = std::env::var("KELPIE_NTFY_SCRATCH").expect("KELPIE_NTFY_SCRATCH");
+        let webhook = webhook(WebhookKind::Ntfy, &url);
+        let reply = ReplyWith {
+            id: 3,
+            code: OneTimeCode::draw().unwrap(),
+            takes: Takes::YesOrNo { yes: "Merge" },
+        };
+        let since = Since::Time(crate::adapters::SystemClock.now());
+        let alert = Alert {
+            reply: Some(reply.clone()),
+            ..alert("Merge pull request #71 at 4d2c9e1 into main?")
+        };
+        Curl.post(&webhook, &alert).unwrap();
+        let actions = ntfy::actions(&url, &reply).unwrap();
+        let actions: serde_json::Value = serde_json::from_str(&actions).unwrap();
+        // The Merge button's own request, as the app sends it
+        let merge = &actions[0];
+        let status = Command::new("curl")
+            .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "-X", "POST"])
+            .args(["-H", "X-Priority: 1", "--data-raw"])
+            .arg(merge["body"].as_str().unwrap())
+            .arg(merge["url"].as_str().unwrap())
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&status.stdout), "200");
+        // ntfy.sh writes its cache in batches, so a read at once can miss a post.
+        thread::sleep(Duration::from_secs(3));
+        let replies = Curl.replies(&webhook, &since).unwrap();
+        let texts: Vec<_> = replies.iter().map(|r| r.text.clone()).collect();
+        let code = reply.code.expose();
+        assert_eq!(texts, [None, Some(format!("3 yes {code}"))]);
+        let after = Since::After(replies[0].id.clone());
+        let [tap] = Curl.replies(&webhook, &after).unwrap().try_into().unwrap();
+        assert_eq!(tap.id, replies[1].id);
+    }
+
+    #[test]
+    fn a_read_that_fails_names_the_status_and_not_the_url() {
+        let (url, served) = serving(429, "{\"error\":\"limited\"}");
+        let err = Curl
+            .replies(
+                &webhook(WebhookKind::Ntfy, &url),
+                &Since::Time(Timestamp(1)),
+            )
+            .unwrap_err();
+        served.join().unwrap();
+        assert_eq!(err, AlertError::Refused(429));
+
+        let (url, served) = serving(200, "<html>not ntfy</html>");
+        let err = Curl
+            .replies(
+                &webhook(WebhookKind::Ntfy, &url),
+                &Since::Time(Timestamp(1)),
+            )
+            .unwrap_err();
+        served.join().unwrap();
+        assert_eq!(err, AlertError::Unreadable);
+        assert!(!err.to_string().contains("s3cr3t"), "{err}");
     }
 
     #[test]

@@ -1,8 +1,8 @@
 //! What each step of the runner did, one JSON line each in its log
 //!
 //! A step dispatches from the board, runs a worker's turn, moves the work
-//! item through the gate (CI, a rebase, a ruling, the merge), or posts a
-//! ruling to the maintainer's webhook.
+//! item through the gate (CI, a rebase, a ruling, the merge), posts a
+//! ruling to the maintainer's webhook, or handles a reply on its topic.
 
 use std::path::PathBuf;
 
@@ -285,6 +285,40 @@ pub enum StepReport {
         /// When the post is tried again at the earliest
         retry_at: Timestamp,
     },
+    /// A reply on the webhook's topic, carrying a ruling's code, answered it
+    ReplyAnswered {
+        /// The ruling's id
+        id: u64,
+    },
+    /// A reply carrying a ruling's code was refused by `rule`, and the
+    /// topic was told why
+    ReplyRefused {
+        /// The ruling's id
+        id: u64,
+        /// Why, as `rule` refused it
+        reason: String,
+        /// Why the topic could not be told, if it could not
+        told: Option<String>,
+    },
+    /// A reply carried the code of a ruling already settled: it ran nothing,
+    /// and the topic was told so
+    ReplyToSettled {
+        /// The ruling's id
+        id: u64,
+        /// Why the topic could not be told, if it could not
+        told: Option<String>,
+    },
+    /// A message on the webhook's topic carried no ruling's code, and was
+    /// ignored. Its text is not logged, since anyone holding the topic can
+    /// write it.
+    ReplyIgnored,
+    /// The webhook's topic could not be read, and is read again later
+    RepliesFailed {
+        /// Why, never naming the webhook's URL
+        reason: String,
+        /// When it is read again at the earliest
+        retry_at: Timestamp,
+    },
     /// The forge or git could not be asked, and the step is tried again later
     GateFailed {
         /// The work item's issue
@@ -431,7 +465,10 @@ impl StepReport {
     pub fn waits(&self) -> bool {
         matches!(
             self,
-            Self::BoardFailed { .. } | Self::GateFailed { .. } | Self::Held { .. }
+            Self::BoardFailed { .. }
+                | Self::GateFailed { .. }
+                | Self::Held { .. }
+                | Self::RepliesFailed { .. }
         )
     }
 }

@@ -10,6 +10,7 @@ mod claude;
 mod curl;
 pub(crate) mod gh;
 mod leases;
+mod ntfy;
 mod process;
 mod qwen;
 mod relay;

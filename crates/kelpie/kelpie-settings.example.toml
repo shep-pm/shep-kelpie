@@ -11,6 +11,11 @@
 # `kind` is `discord` (a channel's webhook URL) or `ntfy` (a topic's URL); both
 # keys are required. The URL is a credential: anyone holding it can post, or
 # read an ntfy topic. Keep this file private.
+#
+# On ntfy a ruling is answered in the topic too: tap a button on its alert,
+# or reply with the line the alert ends on, which carries the ruling's
+# one-time code. Anyone who can read the topic can read the code, so keep
+# the topic's name unguessable, or protect it with an `?auth=` token in `url`.
 [webhook]
 kind = "ntfy"
 url = "https://ntfy.sh/your-private-topic"
