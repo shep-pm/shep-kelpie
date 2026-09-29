@@ -737,16 +737,24 @@ pub fn parse_findings(text: &str) -> Vec<Finding> {
     text.lines().filter_map(parse_finding_line).collect()
 }
 
-/// Reads a model's review reply: its findings, or none when it says
-/// exactly `CLEAN`
+/// Reads a model's review reply: its findings, or none when its last
+/// non-empty line is exactly `CLEAN`
+///
+/// A summary ahead of that line is fine. `CLEAN` anywhere else, or inside a
+/// longer line such as "not CLEAN", is not a verdict.
 ///
 /// # Errors
 ///
-/// The reply, trimmed, when it holds no finding and is not `CLEAN`: an
-/// empty reply or prose reviewed nothing, which is not clean.
+/// The reply, trimmed, when it holds no finding and does not end on `CLEAN`:
+/// an empty reply or prose reviewed nothing, which is not clean.
 pub fn read_review(text: &str) -> Result<Vec<Finding>, String> {
     let findings = parse_findings(text);
-    if findings.is_empty() && text.trim() != "CLEAN" {
+    let ends_clean = text
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .is_some_and(|line| line.trim() == "CLEAN");
+    if findings.is_empty() && !ends_clean {
         return Err(text.trim().to_owned());
     }
     Ok(findings)
