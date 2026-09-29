@@ -10,7 +10,7 @@
 use crate::lease::LeaseKind;
 use crate::ports::{Finding, Severity, Timestamp};
 pub use crate::review_bot::{Activity, Comment, Reading, Review, Status, Thread};
-use crate::review_bot::{CLOCK_SLACK, Login, Profile};
+use crate::review_bot::{Bot, CLOCK_SLACK, Login, Profile, one_line};
 
 /// The label shep's `.coderabbit.yaml` gates auto review on: the summon
 pub const LABEL: &str = "review please";
@@ -29,8 +29,8 @@ pub const LOGIN: Login<'static> = Login {
 pub struct CodeRabbit;
 
 impl Profile for CodeRabbit {
-    fn name(&self) -> &str {
-        "CodeRabbit"
+    fn bot(&self) -> Bot {
+        Bot::Coderabbit
     }
 
     fn login(&self) -> Login<'_> {
@@ -41,8 +41,8 @@ impl Profile for CodeRabbit {
         LeaseKind::coderabbit()
     }
 
-    fn label(&self) -> &str {
-        LABEL
+    fn label(&self) -> Option<&str> {
+        Some(LABEL)
     }
 
     fn full_review(&self) -> Option<&str> {
@@ -124,7 +124,7 @@ impl Reads for Activity {
             .max_by_key(|(at, _)| *at);
         if let Some((at, wait)) = refusal {
             return Reading::Refused {
-                opens: Timestamp(at.0.saturating_add(wait)),
+                opens: Some(Timestamp(at.0.saturating_add(wait))),
             };
         }
         let ours = self
@@ -302,17 +302,6 @@ fn outside_details(body: &str) -> String {
     kept
 }
 
-// A findings file holds one finding a line, fields split by `|`.
-fn one_line(text: &str) -> String {
-    const MOST: usize = 600;
-    let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let flat = flat.replace('|', "/");
-    match flat.char_indices().nth(MOST) {
-        Some((cut, _)) => format!("{}...", &flat[..cut]),
-        None => flat,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -488,7 +477,7 @@ mod tests {
         assert_eq!(
             seen.read(HEAD_598, iso("2026-09-22T22:29:00Z")),
             Reading::Refused {
-                opens: iso("2026-09-22T22:32:37Z")
+                opens: Some(iso("2026-09-22T22:32:37Z"))
             }
         );
     }
@@ -518,7 +507,7 @@ mod tests {
         assert_eq!(
             seen.read("0000000", summoned),
             Reading::Refused {
-                opens: iso("2026-09-24T13:00:41Z")
+                opens: Some(iso("2026-09-24T13:00:41Z"))
             },
             "12:22:41 plus 38 minutes"
         );
@@ -667,14 +656,5 @@ mod tests {
         assert_eq!(read("1 hour and 5 minutes."), Some(3900));
         assert_eq!(read("a moment."), None);
         assert_eq!(read("18446744073709551615 hours."), Some(u64::MAX));
-    }
-
-    #[test]
-    fn a_long_finding_is_cut_to_one_line() {
-        let long = "word ".repeat(200);
-        let cut = one_line(&long);
-        assert_eq!(cut.chars().count(), 603);
-        assert!(cut.ends_with("..."));
-        assert_eq!(one_line("a |b\n c"), "a /b c");
     }
 }

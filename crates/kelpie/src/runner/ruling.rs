@@ -299,7 +299,7 @@ impl Runner {
     pub(super) fn post_ruling(&self, number: Option<u64>, id: u64) -> Option<String> {
         let number = number?;
         let ruling = self.state.rulings.iter().find(|r| r.id == id)?;
-        let comment = comment(&ruling.kind, self.names().bot)?;
+        let comment = comment(&ruling.kind, &self.names().bot)?;
         let posted = self
             .ports
             .forge
@@ -399,8 +399,8 @@ fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
             "{bot} has run {rounds} rounds here, its cap, \
              and {held} of its findings still hold."
         ),
-        RulingKind::CodeRabbitSilent { head } => {
-            format!("{bot} never reviewed {}.", short(head))
+        RulingKind::CodeRabbitSilent { bot, head } => {
+            format!("{} never reviewed {}.", bot.name(), short(head))
         }
         RulingKind::Question { asked, .. } => asked.clone(),
         RulingKind::TurnTimeout { .. } => {
@@ -603,9 +603,10 @@ fn question(
              still holds {held} of its findings. {yes} sends the worker those \
              findings and lets the rounds go past the cap"
         ),
-        RulingKind::CodeRabbitSilent { head } => format!(
-            "{bot} never reviewed {about} at {} after kelpie summoned it. \
+        RulingKind::CodeRabbitSilent { bot: silent, head } => format!(
+            "{} never reviewed {about} at {} after kelpie summoned it. \
              {yes} has kelpie look at CI and summon it again",
+            silent.name(),
             short(head)
         ),
         RulingKind::Question { asked, .. } => {
@@ -738,6 +739,7 @@ mod tests {
                 head: None,
             },
             RulingKind::CodeRabbitSilent {
+                bot: crate::review_bot::Bot::Coderabbit,
                 head: "abcdef123".into(),
             },
             RulingKind::Question {

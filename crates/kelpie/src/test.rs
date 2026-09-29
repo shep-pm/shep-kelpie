@@ -4,7 +4,6 @@
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -13,9 +12,10 @@ use tempfile::TempDir;
 use crate::adapters::LocalReviewer;
 use crate::board::WorkerModel;
 use crate::coderabbit::CodeRabbit;
+use crate::cubic::Cubic;
 use crate::ports::{
-    Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Finding, Meter, MeterError,
-    Ports, Relay, Reviewer, ReviewerError, Role, SessionId, Timestamp, Usage, Utilization, Window,
+    Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Cost, Finding, Ports, Relay, Reviewer,
+    ReviewerError, Role, SessionId, Timestamp, Usage, Utilization, Window,
 };
 use crate::review_bot::Profile;
 use crate::runner::{
@@ -27,9 +27,11 @@ use crate::work_item::{CallRecord, Known, Phase, Turn, WorkItem};
 
 mod alerts;
 mod coderabbit;
+mod cubic;
 mod endpoint;
 mod forge;
 mod leases;
+mod meter;
 mod relay;
 mod shepherd;
 mod shots;
@@ -38,6 +40,7 @@ pub(crate) use alerts::FakeAlerts;
 pub(crate) use endpoint::{Answer, StandInEndpoint, unreachable_url};
 pub(crate) use forge::FakeForge;
 pub(crate) use leases::{FakeLeases, Told};
+pub(crate) use meter::{FakeClock, FakeMeter};
 pub(crate) use relay::FakeRelay;
 pub(crate) use shepherd::FakeShepherd;
 pub(crate) use shots::{FakeShots, ScriptedShots};
@@ -415,67 +418,6 @@ impl Claude for FakeClaude {
     }
 }
 
-/// A meter that reports what a test sets, and counts its reads
-///
-/// It starts with the account idle: nothing used in either window, the
-/// week `Rig::EPOCH` begins and the session window five hours long.
-#[derive(Debug, Clone)]
-pub(crate) struct FakeMeter {
-    reading: Arc<Mutex<Result<Utilization, MeterError>>>,
-    reads: Arc<AtomicUsize>,
-}
-
-impl FakeMeter {
-    fn idle() -> Self {
-        Self {
-            reading: Arc::new(Mutex::new(Ok(Rig::utilization(0, 0)))),
-            reads: Arc::default(),
-        }
-    }
-
-    /// Reports `usage` from now on
-    pub(crate) fn set(&self, usage: Utilization) {
-        *self.reading.lock().unwrap() = Ok(usage);
-    }
-
-    /// Fails every read with `error`, until a test sets a reading
-    pub(crate) fn fail(&self, error: MeterError) {
-        *self.reading.lock().unwrap() = Err(error);
-    }
-
-    /// How many times usage was read
-    pub(crate) fn reads(&self) -> usize {
-        self.reads.load(Ordering::SeqCst)
-    }
-}
-
-impl Meter for FakeMeter {
-    fn read(&self, _now: Timestamp) -> Result<Utilization, MeterError> {
-        self.reads.fetch_add(1, Ordering::SeqCst);
-        self.reading.lock().unwrap().clone()
-    }
-}
-
-/// A clock that moves only when a test moves it
-#[derive(Debug, Clone)]
-pub(crate) struct FakeClock(Arc<AtomicU64>);
-
-impl FakeClock {
-    pub(crate) fn at(seconds: u64) -> Self {
-        Self(Arc::new(AtomicU64::new(seconds)))
-    }
-
-    pub(crate) fn advance(&self, seconds: u64) {
-        self.0.fetch_add(seconds, Ordering::SeqCst);
-    }
-}
-
-impl Clock for FakeClock {
-    fn now(&self) -> Timestamp {
-        Timestamp(self.0.load(Ordering::SeqCst))
-    }
-}
-
 /// What the stand-in reviewer answers for its next round
 #[derive(Debug, Clone)]
 pub(crate) enum ScriptedRound {
@@ -832,20 +774,20 @@ impl Rig {
 
     /// Starts a runner, as a restarted sheep would, on the rig's stand-ins
     pub(crate) fn open(&self) -> Result<Mutex<Runner>, OpenError> {
-        self.open_with(Arc::new(CodeRabbit))
+        self.open_with(vec![Arc::new(CodeRabbit), Arc::new(Cubic)])
     }
 
-    /// Starts a runner whose review bot rounds summon `review_bot`
+    /// Starts a runner whose review bot rounds summon the bots of `review_bots`
     pub(crate) fn open_with(
         &self,
-        review_bot: Arc<dyn Profile>,
+        review_bots: Vec<Arc<dyn Profile>>,
     ) -> Result<Mutex<Runner>, OpenError> {
         let ports = Ports {
             claude: Arc::new(self.claude.clone()),
             forge: Box::new(self.forge.clone()),
             meter: Box::new(self.meter.clone()),
             reviewer: Arc::new(self.reviewer.clone()),
-            review_bot,
+            review_bots,
             relay: Arc::clone(&self.relay) as Arc<dyn Relay>,
             alerts: Arc::new(self.alerts.clone()),
             leases: Arc::new(self.leases.clone()),

@@ -16,21 +16,26 @@
 //! profile has one. A head the bot marks done with nothing posted was read
 //! and found clean, unless a summon is owed: that one asks once more, for a
 //! full review.
+//!
+//! A project may list several bots. Each round goes to the first listed
+//! whose window is free, and the round cap counts rounds from all of them.
 
 mod cap;
+mod lease;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod two_bots;
 
 use super::Runner;
 use super::gate::settled;
 use super::report::{Begin, ReviewCall, ReviewResult, Spent, StepReport};
 use super::review::{calls, findings, record_spent};
-use std::sync::Arc;
 
 use crate::lease::wire::WindowFact;
 use crate::ports::{Finding, PullRequestState, Timestamp, Verdict};
-use crate::review_bot::{Activity, Profile, Reading};
-use crate::state::{Fix, LeaseHeld, Resource, RulingKind, StateError};
+use crate::review_bot::{Activity, Bot, Reading};
+use crate::state::{Fix, RulingKind, StateError};
 use crate::work_item::{CodeRabbitStage, OpenThread, Phase, Turn, WorkItem};
 
 // A summon the bot gave no sign of in fifteen minutes may never have
@@ -99,14 +104,18 @@ impl Runner {
                 full,
             } => self.summon(head, readied, full),
             CodeRabbitStage::Summoned {
+                bot,
                 head,
                 at,
                 full,
                 resent,
-            } => self.await_review(head, at, full, resent),
+            } => self.await_review(bot, head, at, full, resent),
             CodeRabbitStage::Judging {
-                threads, verdicts, ..
-            } => self.judge_threads(&threads, &verdicts),
+                bot,
+                threads,
+                verdicts,
+                ..
+            } => self.judge_threads(bot, &threads, &verdicts),
             CodeRabbitStage::Fixing { head } => self.fix_turn_ended(head),
         }
     }
@@ -115,7 +124,8 @@ impl Runner {
     // that one costs the hour and buys nothing. CodeRabbit skips a draft, so
     // a draft is marked ready first and the summon waits for the next pass:
     // the forge can show the old state for a few seconds after. `full` asks
-    // for a full review whatever the bot read before.
+    // for a full review whatever the bot read before. The first listed bot
+    // is read while the round waits, as its footer states its quota.
     fn summon(
         &mut self,
         head: String,
@@ -123,40 +133,56 @@ impl Runner {
         full: bool,
     ) -> Result<Begin, StateError> {
         let number = self.number();
-        let activity = match self.activity(number) {
+        let first = self.settings.reviewers()[0];
+        let activity = match self.activity(first, number) {
             Ok(activity) => activity,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
-        // A review from before an adoption lands only to hand on its findings.
-        let owed = self.item().summon_owed;
-        let covered = self.bot().covers(&activity, &head);
-        if covered && (!owed || activity.open_threads().next().is_some()) {
-            return self.review_landed(number, &activity);
+        if self.lands_unsummoned(first, &head, &activity) {
+            return self.review_landed(number, first, &activity);
         }
         if let Some(begin) = self.ready_for_review(number, &head, readied, full)? {
             return Ok(begin);
         }
-        let kind = self.bot().lease();
-        self.ports.leases.want(&kind);
-        // One grant is one summon: a lease another work item holds is not
-        // this one's to use.
-        if !self.ports.leases.holds(&kind) || self.lease_held_elsewhere() {
+        let Some(bot) = self.choose_bot()? else {
             return Ok(Begin::Idle);
+        };
+        let activity = if bot == first {
+            activity
+        } else {
+            match self.activity(bot, number) {
+                Ok(activity) => activity,
+                Err(reason) => return Ok(self.gate_failed(reason)),
+            }
+        };
+        if self.lands_unsummoned(bot, &head, &activity) {
+            self.release(bot)?;
+            return self.review_landed(number, bot, &activity);
         }
         let now = self.ports.clock.now();
-        self.hold(now)?;
-        let full = self.asks_full(full, &activity);
-        self.send(number, head, now, full, false)
+        self.hold(bot, now)?;
+        let full = self.asks_full(bot, full, &activity);
+        self.send(bot, number, head, now, full, false)
+    }
+
+    // Whether `bot` already reviewed `head`, so the round needs no summon.
+    // A review from before an adoption lands only to hand on its findings.
+    fn lands_unsummoned(&self, bot: Bot, head: &str, activity: &Activity) -> bool {
+        let owed = self.item().summon_owed;
+        self.profile(bot).covers(activity, head)
+            && (!owed || activity.open_threads().next().is_some())
     }
 
     // Whether a summon asks for a full review by comment: when it was told
-    // to, or when the bot read the pull request before and the label would
-    // find nothing new, because a summon is owed or kelpie caught the branch
-    // up. A bot with no such comment always gets the label.
-    fn asks_full(&self, full: bool, activity: &Activity) -> bool {
-        let (item, bot) = (self.item(), self.bot());
+    // to, when the bot has no label, or when the bot read the pull request
+    // before and the label would find nothing new, because a summon is owed
+    // or kelpie caught the branch up. A bot with no such comment always gets
+    // the label.
+    fn asks_full(&self, bot: Bot, full: bool, activity: &Activity) -> bool {
+        let (item, bot) = (self.item(), self.profile(bot));
         let read_before = bot.reviewed_besides(activity, "") > 0;
-        let wanted = full || (read_before && (item.summon_owed || item.rebased));
+        let wanted =
+            full || bot.label().is_none() || (read_before && (item.summon_owed || item.rebased));
         wanted && bot.full_review().is_some()
     }
 
@@ -166,6 +192,7 @@ impl Runner {
     // round is the same and its hour is not counted twice.
     fn send(
         &mut self,
+        bot: Bot,
         number: u64,
         head: String,
         at: Timestamp,
@@ -173,25 +200,31 @@ impl Runner {
         again: bool,
     ) -> Result<Begin, StateError> {
         if full {
-            return self.ask_full(number, head, at, again);
+            return self.ask_full(bot, number, head, at, again);
         }
         // A label kelpie put on is a summon made before a restart could save
         // it. Any other label on sends no event, so it comes off first, and
         // so does one the bot never acted on.
-        let bot = self.bot();
-        let ours = self.item().known.labels.iter().any(|l| l == bot.label());
-        let summoned = match self.labelled(number) {
+        let label = self.profile(bot).label().map(str::to_owned);
+        let ours = self
+            .item()
+            .known
+            .labels
+            .iter()
+            .any(|l| Some(l) == label.as_ref());
+        let summoned = match self.labelled(bot, number) {
             Ok(on) => ours && on && !again,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
         if !summoned
             && let Err(reason) = self
-                .label(number, false)
-                .and_then(|()| self.label(number, true))
+                .label(bot, number, false)
+                .and_then(|()| self.label(bot, number, true))
         {
             return Ok(self.gate_failed(reason));
         }
         let stage = CodeRabbitStage::Summoned {
+            bot,
             head: head.clone(),
             at,
             full: false,
@@ -224,27 +257,30 @@ impl Runner {
     // first, since a push while it is on would summon outside the lease.
     fn ask_full(
         &mut self,
+        bot: Bot,
         number: u64,
         head: String,
         at: Timestamp,
         again: bool,
     ) -> Result<Begin, StateError> {
-        if let Err(reason) = self.label(number, false) {
+        if let Err(reason) = self.label(bot, number, false) {
             return Ok(self.gate_failed(reason));
         }
         let stage = CodeRabbitStage::Summoned {
+            bot,
             head: head.clone(),
             at,
             full: true,
             resent: again,
         };
         self.update(|item| item.phase = Phase::CodeRabbit(stage))?;
-        let bot = self.bot();
-        let body = bot.full_review().unwrap_or_default();
+        let profile = self.profile(bot);
+        let body = profile.full_review().unwrap_or_default();
         let posted = self.ports.forge.comment(&self.settings.forge, number, body);
         if let Err(e) = posted {
             let stage = if again {
                 CodeRabbitStage::Summoned {
+                    bot,
                     head,
                     at,
                     full: true,
@@ -258,7 +294,7 @@ impl Runner {
                 }
             };
             self.update(|item| item.phase = Phase::CodeRabbit(stage))?;
-            let name = bot.name();
+            let name = profile.name();
             let reason = format!("cannot ask {name} for a full review on #{number}: {e}");
             return Ok(self.gate_failed(reason));
         }
@@ -317,13 +353,14 @@ impl Runner {
 
     fn await_review(
         &mut self,
+        bot: Bot,
         head: String,
         at: Timestamp,
         full: bool,
         resent: bool,
     ) -> Result<Begin, StateError> {
         let number = self.number();
-        let activity = match self.activity(number) {
+        let activity = match self.activity(bot, number) {
             Ok(activity) => activity,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
@@ -331,25 +368,25 @@ impl Runner {
         let waited = now.saturating_sub(at.0);
         // A re-send asks the way the first summon did, which is read from
         // everything the bot has done, not only since the summon.
-        let full_again = self.asks_full(full, &activity);
-        let bot = self.bot();
-        let heard = bot.heard(&activity, &head, at);
+        let full_again = self.asks_full(bot, full, &activity);
+        let profile = self.profile(bot);
+        let heard = profile.heard(&activity, &head, at);
         // A head reviewed before an adoption needs a review of kelpie's own.
         let owed = self.item().summon_owed;
         let activity = if owed { activity.since(at) } else { activity };
-        match bot.read(&activity, &head, at) {
-            Reading::Reviewed => self.answered(number, &activity, at),
+        match profile.read(&activity, &head, at) {
+            Reading::Reviewed => self.answered(bot, number, &activity, at),
             Reading::Completed { at: done } if now.saturating_sub(done.0) < DONE_SETTLE => {
-                self.accepted(at).map(|()| Begin::Idle)
+                self.accepted(bot, at).map(|()| Begin::Idle)
             }
             // A bot with no full review has nothing more to ask for.
-            Reading::Completed { .. } if !owed || bot.full_review().is_none() => {
-                self.answered(number, &activity, at)
+            Reading::Completed { .. } if !owed || profile.full_review().is_none() => {
+                self.answered(bot, number, &activity, at)
             }
             // An owed summon found nothing new: ask once more, for a full review.
             Reading::Completed { .. } if !full => {
-                self.accepted(at)?;
-                if let Err(reason) = self.label(number, false) {
+                self.accepted(bot, at)?;
+                if let Err(reason) = self.label(bot, number, false) {
                     return Ok(self.gate_failed(reason));
                 }
                 let stage = CodeRabbitStage::Lease {
@@ -360,17 +397,22 @@ impl Runner {
                 self.update(|item| item.phase = Phase::CodeRabbit(stage))?;
                 self.summon(head, None, true)
             }
+            // The bot is parked until its window opens, and the round falls
+            // to whichever listed bot is free first.
             Reading::Refused { opens } => {
-                let kind = bot.lease();
+                let opens = opens.unwrap_or_else(|| self.parked_until(bot, Timestamp(now)));
+                let kind = profile.lease();
                 self.ports.leases.window(&kind, WindowFact::Opens, opens.0);
-                self.release()?;
-                if let Err(reason) = self.label(number, false) {
+                self.release(bot)?;
+                if let Err(reason) = self.label(bot, number, false) {
                     return Ok(self.gate_failed(reason));
                 }
+                // A bot with no label is always asked by comment, which asks
+                // nothing of the bot that takes the round next.
                 let stage = CodeRabbitStage::Lease {
                     head,
                     readied: None,
-                    full,
+                    full: full && profile.label().is_some(),
                 };
                 self.update(|item| item.phase = Phase::CodeRabbit(stage))?;
                 Ok(Begin::Report(StepReport::SummonRefused {
@@ -382,14 +424,14 @@ impl Runner {
             Reading::Silent | Reading::Processing | Reading::Completed { .. }
                 if waited >= REVIEW_WAIT =>
             {
-                self.accepted(at)?;
-                if let Err(reason) = self.label(number, false) {
+                self.accepted(bot, at)?;
+                if let Err(reason) = self.label(bot, number, false) {
                     return Ok(self.gate_failed(reason));
                 }
-                self.raise(number, RulingKind::CodeRabbitSilent { head })
+                self.raise(number, RulingKind::CodeRabbitSilent { bot, head })
             }
             Reading::Processing | Reading::Completed { .. } => {
-                self.accepted(at).map(|()| Begin::Idle)
+                self.accepted(bot, at).map(|()| Begin::Idle)
             }
             // No sign of the summon yet: it may never have been seen, so it
             // goes out once more before the lease is counted spent.
@@ -397,10 +439,12 @@ impl Runner {
                 if waited < HEARD_WAIT {
                     Ok(Begin::Idle)
                 } else {
-                    self.resend(head, at, full_again)
+                    self.resend(bot, head, at, full_again)
                 }
             }
-            Reading::Silent if waited >= ANSWER_WAIT => self.accepted(at).map(|()| Begin::Idle),
+            Reading::Silent if waited >= ANSWER_WAIT => {
+                self.accepted(bot, at).map(|()| Begin::Idle)
+            }
             Reading::Silent => Ok(Begin::Idle),
         }
     }
@@ -408,53 +452,58 @@ impl Runner {
     // The same summon, once more, under the lease this work item took. A
     // restart clears the book of them, and the grant then held may be
     // another item's, so without its own row nothing is sent.
-    fn resend(&mut self, head: String, at: Timestamp, full: bool) -> Result<Begin, StateError> {
+    fn resend(
+        &mut self,
+        bot: Bot,
+        head: String,
+        at: Timestamp,
+        full: bool,
+    ) -> Result<Begin, StateError> {
         let number = self.number();
-        let issue = self.item().issue;
-        let mine = |l: &LeaseHeld| l.resource == Resource::Coderabbit && l.issue == Some(issue);
-        if !self.state.leases.iter().any(mine) {
-            return self.accepted(at).map(|()| Begin::Idle);
+        if !self.holds_own(bot) {
+            return self.accepted(bot, at).map(|()| Begin::Idle);
         }
-        self.send(number, head, at, full, true)
+        self.send(bot, number, head, at, full, true)
     }
 
     // A summon answered, by a review of the head or by the bot finding
-    // nothing new in it, which is a clean read.
+    // nothing new in it, which is a clean read. An answer from any listed
+    // bot settles a summon owed since an adoption.
     fn answered(
         &mut self,
+        bot: Bot,
         number: u64,
         activity: &Activity,
         at: Timestamp,
     ) -> Result<Begin, StateError> {
-        self.accepted(at)?;
+        self.accepted(bot, at)?;
         if self.item().summon_owed {
             self.update(|item| item.summon_owed = false)?;
         }
-        if let Err(reason) = self.label(number, false) {
+        if let Err(reason) = self.label(bot, number, false) {
             return Ok(self.gate_failed(reason));
         }
-        self.review_landed(number, activity)
+        self.review_landed(number, bot, activity)
     }
 
     // A round counts only here, once the bot has read the head, which
     // also reads whatever a catch-up with `main` brought.
-    fn review_landed(&mut self, number: u64, activity: &Activity) -> Result<Begin, StateError> {
+    fn review_landed(
+        &mut self,
+        number: u64,
+        bot: Bot,
+        activity: &Activity,
+    ) -> Result<Begin, StateError> {
         if self.item().rebased {
             self.update(|item| item.rebased = false)?;
         }
-        let Phase::CodeRabbit(stage) = self.item().phase.clone() else {
-            unreachable!("a review lands in a review bot round")
-        };
-        let head = match stage {
-            CodeRabbitStage::Lease { head, .. } | CodeRabbitStage::Summoned { head, .. } => head,
-            CodeRabbitStage::Judging { head, .. } | CodeRabbitStage::Fixing { head } => head,
-        };
-        let bot = self.bot();
+        let head = self.round_head();
+        let profile = self.profile(bot);
         let threads: Vec<OpenThread> = activity
             .open_threads()
             .map(|t| OpenThread {
                 id: t.id.clone(),
-                finding: bot.finding(t),
+                finding: profile.finding(t),
             })
             .collect();
         let round = self.item().coderabbit.rounds + 1;
@@ -465,6 +514,7 @@ impl Runner {
         self.update(|item| {
             item.coderabbit.rounds = round;
             item.phase = Phase::CodeRabbit(CodeRabbitStage::Judging {
+                bot,
                 head,
                 threads,
                 verdicts: Vec::new(),
@@ -480,11 +530,12 @@ impl Runner {
 
     fn judge_threads(
         &mut self,
+        bot: Bot,
         threads: &[OpenThread],
         verdicts: &[Verdict],
     ) -> Result<Begin, StateError> {
         let Some(next) = threads.get(verdicts.len()) else {
-            return self.judged(threads, verdicts);
+            return self.judged(bot, threads, verdicts);
         };
         let item = self.item();
         let (issue, worktree, folder) =
@@ -512,6 +563,7 @@ impl Runner {
     // Resolving is safe to repeat, so a failure part way retries it all.
     fn judged(
         &mut self,
+        bot: Bot,
         threads: &[OpenThread],
         verdicts: &[Verdict],
     ) -> Result<Begin, StateError> {
@@ -545,7 +597,7 @@ impl Runner {
         if let Err(reason) = findings::write_findings_file(build, &path, round, &held) {
             return Ok(self.gate_failed(reason));
         }
-        let prompt = fix_prompt(self.bot().name(), number, round, held.len(), &path);
+        let prompt = fix_prompt(self.profile(bot).name(), number, round, held.len(), &path);
         let head = match self.origin_head() {
             Ok(head) => head,
             Err(reason) => return Ok(self.gate_failed(reason)),
@@ -563,7 +615,7 @@ impl Runner {
         };
         // After the last round a push with the label on would summon another.
         if cap::spent(round, fixed)
-            && let Err(reason) = self.label(number, false)
+            && let Err(reason) = self.label(bot, number, false)
         {
             return Ok(self.gate_failed(reason));
         }
@@ -635,13 +687,7 @@ impl Runner {
     // Reviews from before an adoption count toward the cap but never satisfy
     // a round, so the round summons instead.
     fn summon_owed(&mut self, rounds: u32) -> Result<Begin, StateError> {
-        let Phase::CodeRabbit(stage) = self.item().phase.clone() else {
-            unreachable!("a round is satisfied in a review bot round")
-        };
-        let head = match stage {
-            CodeRabbitStage::Lease { head, .. } | CodeRabbitStage::Summoned { head, .. } => head,
-            CodeRabbitStage::Judging { head, .. } | CodeRabbitStage::Fixing { head } => head,
-        };
+        let head = self.round_head();
         let lease = CodeRabbitStage::Lease {
             head: head.clone(),
             readied: None,
@@ -691,77 +737,33 @@ impl Runner {
         Ok(report)
     }
 
-    /// Gives the review bot's lease back and takes its label off, when the
-    /// work item leaves a round for good
+    /// Gives every listed bot's lease back and takes each one's label off,
+    /// when the work item leaves a round for good
     pub(super) fn leave_round(&mut self) {
         let Some(number) = self.current().and_then(|i| i.pull_request) else {
             return;
         };
-        let _ = self.release();
-        let _ = self.label(number, false);
-    }
-
-    // What a summon's answer tells the dog: the hour runs from `at`.
-    fn accepted(&mut self, at: Timestamp) -> Result<(), StateError> {
-        let kind = self.bot().lease();
-        self.ports.leases.window(&kind, WindowFact::Summoned, at.0);
-        self.release()
-    }
-
-    fn hold(&mut self, since: Timestamp) -> Result<(), StateError> {
-        let mut next = self.state.clone();
-        next.leases.retain(|l| l.resource != Resource::Coderabbit);
-        next.leases.push(LeaseHeld {
-            resource: Resource::Coderabbit,
-            issue: Some(self.item().issue),
-            since,
-        });
-        self.save(next)
-    }
-
-    /// Gives the review bot's lease back when this work item holds it, or
-    /// when no other item holds it or waits for it
-    ///
-    /// The ask and the grant are the project's, not an item's: giving them
-    /// back for an item that never took the lease would cancel a sibling's
-    /// place in the dog's queue, or a grant it has yet to take up.
-    pub(super) fn release(&mut self) -> Result<(), StateError> {
-        let this = self.current().map(|item| item.issue);
-        let mine = |l: &LeaseHeld| l.resource == Resource::Coderabbit && l.issue == this;
-        let held = self.state.leases.iter().any(mine);
-        if !held && (self.lease_held_elsewhere() || self.lease_wanted_elsewhere()) {
-            return Ok(());
+        for bot in self.settings.reviewers() {
+            let _ = self.release(bot);
+            let _ = self.label(bot, number, false);
         }
-        self.ports.leases.give_back(&self.bot().lease());
-        if !held {
-            return Ok(());
+    }
+
+    // The head the round is on, whatever its stage.
+    fn round_head(&self) -> String {
+        let Phase::CodeRabbit(stage) = &self.item().phase else {
+            unreachable!("a review bot round is in its phase")
+        };
+        match stage {
+            CodeRabbitStage::Lease { head, .. } | CodeRabbitStage::Summoned { head, .. } => head,
+            CodeRabbitStage::Judging { head, .. } | CodeRabbitStage::Fixing { head } => head,
         }
-        let mut next = self.state.clone();
-        next.leases.retain(|l| !mine(l));
-        self.save(next)
+        .clone()
     }
 
-    // Whether a work item other than this one waits in a round for the lease
-    fn lease_wanted_elsewhere(&self) -> bool {
-        let this = self.current().map(|item| item.issue);
-        self.state.work_items.iter().any(|item| {
-            Some(item.issue) != this
-                && matches!(item.phase, Phase::CodeRabbit(CodeRabbitStage::Lease { .. }))
-        })
-    }
-
-    // Whether a work item other than this one holds the review bot's lease
-    fn lease_held_elsewhere(&self) -> bool {
-        let this = self.current().map(|item| item.issue);
-        self.state
-            .leases
-            .iter()
-            .any(|l| l.resource == Resource::Coderabbit && l.issue != this)
-    }
-
-    // Reads the bot's activity and passes the quota it last stated on.
-    fn activity(&self, number: u64) -> Result<Activity, String> {
-        let bot = self.bot();
+    // Reads `bot`'s activity and passes the quota it last stated on.
+    fn activity(&self, bot: Bot, number: u64) -> Result<Activity, String> {
+        let bot = self.profile(bot);
         let activity = self
             .ports
             .forge
@@ -775,13 +777,15 @@ impl Runner {
         Ok(activity)
     }
 
-    // Changes the label only when it is not already as asked.
-    // Records the label as kelpie's own, so the gate never reads it as a
-    // change someone else made.
-    fn label(&mut self, number: u64, on: bool) -> Result<(), String> {
-        let bot = self.bot();
-        let label = bot.label();
-        if self.labelled(number)? != on {
+    // Changes `bot`'s label only when it is not already as asked, and does
+    // nothing for a bot with no label. Records the label as kelpie's own, so
+    // the gate never reads it as a change someone else made.
+    fn label(&mut self, bot: Bot, number: u64, on: bool) -> Result<(), String> {
+        let profile = self.profile(bot);
+        let Some(label) = profile.label() else {
+            return Ok(());
+        };
+        if self.labelled(bot, number)? != on {
             self.ports
                 .forge
                 .set_label(&self.settings.forge, number, label, on)
@@ -796,17 +800,16 @@ impl Runner {
         .map_err(|e| e.to_string())
     }
 
-    fn labelled(&self, number: u64) -> Result<bool, String> {
+    fn labelled(&self, bot: Bot, number: u64) -> Result<bool, String> {
+        let Some(label) = self.profile(bot).label().map(str::to_owned) else {
+            return Ok(false);
+        };
         let pr = self
             .ports
             .forge
             .pull_request(&self.settings.forge, number)
             .map_err(|e| format!("cannot read #{number}: {e}"))?;
-        Ok(pr.labels.iter().any(|l| l == self.bot().label()))
-    }
-
-    fn bot(&self) -> Arc<dyn Profile> {
-        Arc::clone(&self.ports.review_bot)
+        Ok(pr.labels.contains(&label))
     }
 
     fn item(&self) -> &WorkItem {

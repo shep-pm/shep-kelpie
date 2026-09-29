@@ -11,7 +11,6 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use super::Runner;
 
@@ -356,19 +355,23 @@ impl Runner {
         prepared.map_err(|e| AdoptError::Worktree(e.to_string()))?;
         let head = worktree::origin_head(&self.settings.repo, &pr.branch)
             .map_err(|e| AdoptError::Worktree(e.to_string()))?;
-        // The cap counts the review bot's reviews so far. One of this head counts
-        // when the gate finds it, as any round does.
-        let bot = Arc::clone(&self.ports.review_bot);
-        let rounds = if self.settings.coderabbit.enabled {
+        // The cap counts every listed bot's reviews so far. One of this head
+        // counts when the gate finds it, as any round does.
+        let bots: Vec<_> = self
+            .settings
+            .reviewers()
+            .into_iter()
+            .map(|b| self.profile(b))
+            .collect();
+        let mut rounds = 0u32;
+        for bot in bots.iter().filter(|_| self.settings.coderabbit.enabled) {
             let activity = self
                 .ports
                 .forge
                 .review_bot(&repo, number, bot.login())
                 .map_err(|e| AdoptError::ReviewBot(bot.name().to_owned(), number, e))?;
-            bot.reviewed_besides(&activity, &head)
-        } else {
-            0
-        };
+            rounds = rounds.saturating_add(bot.reviewed_besides(&activity, &head));
+        }
         let review = pr
             .review
             .as_ref()
@@ -376,9 +379,10 @@ impl Runner {
             .cloned();
         let text = adopted_text(number, &pr, issue, &found, review.as_ref());
         turn::write(&fresh.build, &adopted_path(&fresh.build), &text).map_err(AdoptError::File)?;
-        // With the summon label off, no push summons the review bot outside the lease.
+        // With the summon labels off, no push summons a review bot outside the lease.
         let mut labels = pr.labels;
-        for label in [READY, HUMAN, bot.label()] {
+        let summons = bots.iter().filter_map(|bot| bot.label());
+        for label in [READY, HUMAN].into_iter().chain(summons) {
             if labels.iter().any(|l| l == label) {
                 self.ports
                     .forge

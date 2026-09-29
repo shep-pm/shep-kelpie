@@ -13,6 +13,7 @@ use crate::board::{LabelError, Skip, WorkerModel, worker_override};
 use crate::channels::{Channel, Channels};
 use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Guarded, Ports, SessionId, Timestamp, Visibility};
+use crate::review_bot::{Bot, Profile, Reviewers};
 use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
@@ -155,6 +156,8 @@ pub struct Runner {
     pacing: Option<(Timestamp, Assessment)>,
     // What the board passed over on its last poll, kept in memory only
     skipped: Vec<Skip>,
+    // The pull request reviewers kelpie's own settings define
+    reviewers: Reviewers,
     // None when rulings do not go to the webhook
     webhook: Option<Webhook>,
     channels: Channels,
@@ -204,6 +207,7 @@ impl Runner {
     ) -> Result<Self, OpenError> {
         let local = [home, paths.kelpie_home.as_path(), settings.repo.as_path()];
         ports.forge = Box::new(Guarded::new(ports.forge, local));
+        let reviewers = kelpie_settings.reviewers;
         let (channels, webhook) = ruling_channels(&settings, kelpie_settings)?;
         let totp = replies::authenticator(webhook.as_ref(), &paths.totp)?;
         check_repo(&settings)?;
@@ -214,6 +218,7 @@ impl Runner {
             home.as_deref(),
             std::env::var_os("PATH").as_deref(),
         )?;
+        check_reviewers(&settings, &reviewers, &ports)?;
         check_coderabbit(&settings, &ports)?;
         check_local(&settings, &ports)?;
         let store = StateStore::new(paths.state.clone());
@@ -254,6 +259,7 @@ impl Runner {
             ports,
             pacing: None,
             skipped: Vec::new(),
+            reviewers,
             webhook,
             channels,
             retry: None,
@@ -273,10 +279,20 @@ impl Runner {
         &self.settings
     }
 
+    // The profile of `bot`, which a start checks every listed bot has.
+    fn profile(&self, bot: Bot) -> std::sync::Arc<dyn Profile> {
+        let found = self.ports.review_bots.iter().find(|p| p.bot() == bot);
+        std::sync::Arc::clone(found.expect("a listed review bot has a profile"))
+    }
+
     fn names(&self) -> Names<'_> {
+        let listed = self.settings.reviewers().into_iter();
+        let names: Vec<String> = listed
+            .map(|bot| self.profile(bot).name().to_owned())
+            .collect();
         Names {
             project: self.project.as_str(),
-            bot: self.ports.review_bot.name(),
+            bot: names.join("/"),
         }
     }
 
@@ -504,15 +520,40 @@ fn check_local(settings: &Settings, ports: &Ports) -> Result<(), SettingsError> 
         })
 }
 
-// What a ruling's question names: its project, and the review bot it may be about.
-#[derive(Debug, Clone, Copy)]
+// What a ruling's question names: its project, and the review bots it may
+// be about, as one name.
+#[derive(Debug, Clone)]
 struct Names<'a> {
     project: &'a str,
-    bot: &'a str,
+    bot: String,
+}
+
+// Every listed reviewer needs a definition in kelpie's settings and a profile.
+fn check_reviewers(
+    settings: &Settings,
+    reviewers: &Reviewers,
+    ports: &Ports,
+) -> Result<(), SettingsError> {
+    let invalid = |reason: String| SettingsError::Invalid {
+        setting: "pull_request_reviewers",
+        reason,
+    };
+    for bot in settings.reviewers() {
+        if reviewers.window(bot).is_none() {
+            return Err(invalid(format!(
+                "{bot} is not defined: kelpie's own settings need a [reviewers.{bot}] table"
+            )));
+        }
+        if !ports.review_bots.iter().any(|p| p.bot() == bot) {
+            return Err(invalid(format!("kelpie has no profile for {bot}")));
+        }
+    }
+    Ok(())
 }
 
 fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError> {
-    if !settings.coderabbit.enabled {
+    let listed = settings.reviewers().contains(&Bot::Coderabbit);
+    if !settings.coderabbit.enabled || !listed {
         return Ok(());
     }
     let visibility = match ports.forge.visibility(&settings.forge)? {
@@ -525,7 +566,7 @@ fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError>
         reason: format!(
             "{} is {visibility}, and {}'s free plan reviews public repos only",
             settings.forge.as_str(),
-            ports.review_bot.name()
+            Bot::Coderabbit.name()
         ),
     }
     .into())

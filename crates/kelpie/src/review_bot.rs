@@ -8,9 +8,125 @@
 //! its summons, how its answers read, and the window it spends.
 
 use std::fmt;
+use std::num::NonZeroU32;
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::lease::LeaseKind;
 use crate::ports::{Finding, Timestamp};
+use crate::state::Resource;
+
+/// A review bot kelpie has a profile for, as settings and the state file name it
+// wire format: changing this is a breaking change to settings and the state file
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Bot {
+    /// CodeRabbit
+    #[default]
+    Coderabbit,
+    /// cubic
+    Cubic,
+}
+
+impl Bot {
+    /// Its name as settings write it, which is also its lease's
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Coderabbit => "coderabbit",
+            Self::Cubic => "cubic",
+        }
+    }
+
+    /// Its name in what kelpie tells the maintainer and the worker
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Coderabbit => "CodeRabbit",
+            Self::Cubic => "cubic",
+        }
+    }
+
+    /// Whether it is CodeRabbit, which the state file names by leaving it out
+    pub fn is_coderabbit(&self) -> bool {
+        *self == Self::Coderabbit
+    }
+
+    /// The lease on its window
+    pub fn lease(self) -> LeaseKind {
+        LeaseKind::try_from(self.as_str()).expect("a bot's name is a lease kind")
+    }
+
+    /// The row the state file keeps for its lease
+    pub fn resource(self) -> Resource {
+        match self {
+            Self::Coderabbit => Resource::Coderabbit,
+            Self::Cubic => Resource::Cubic,
+        }
+    }
+}
+
+impl fmt::Display for Bot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// The pull request reviewers kelpie's own settings define, each by its window
+///
+/// A project lists only reviewers defined here. CodeRabbit is defined with
+/// one review an hour when absent, which its review footers raise.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Reviewers {
+    /// CodeRabbit's window
+    #[serde(default)]
+    pub coderabbit: Option<ReviewWindow>,
+    /// cubic's window. Its free plan gives a private repo 20 reviews a month.
+    #[serde(default)]
+    pub cubic: Option<ReviewWindow>,
+}
+
+impl Reviewers {
+    /// The window of `bot`, or `None` when it is not defined
+    pub fn window(&self, bot: Bot) -> Option<ReviewWindow> {
+        match bot {
+            Bot::Coderabbit => Some(self.coderabbit.unwrap_or(ReviewWindow::HOURLY)),
+            Bot::Cubic => self.cubic,
+        }
+    }
+
+    /// Every defined bot and its window
+    pub fn defined(&self) -> impl Iterator<Item = (Bot, ReviewWindow)> + '_ {
+        [Bot::Coderabbit, Bot::Cubic]
+            .into_iter()
+            .filter_map(|bot| Some((bot, self.window(bot)?)))
+    }
+}
+
+/// A review window: so many reviews in so many hours
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewWindow {
+    /// Reviews it allows at once. A quota the bot states overrides it.
+    pub reviews: NonZeroU32,
+    /// Hours each accepted summon holds its place
+    pub hours: NonZeroU32,
+}
+
+impl ReviewWindow {
+    /// One review an hour, CodeRabbit's until a footer says more
+    pub const HOURLY: Self = Self {
+        reviews: NonZeroU32::MIN,
+        hours: NonZeroU32::MIN,
+    };
+
+    /// How long each accepted summon holds its place, in seconds
+    pub fn seconds(self) -> u64 {
+        u64::from(self.hours.get()) * crate::lease::window::HOUR
+    }
+}
 
 /// Everything one review bot has posted on one pull request
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -78,10 +194,11 @@ pub enum Reading {
     Reviewed,
     /// A review is running
     Processing,
-    /// The bot refused, quoting when its window opens
+    /// The bot refused
     Refused {
-        /// When the window opens
-        opens: Timestamp,
+        /// When its window opens, if it said. The window's definition
+        /// decides when it did not.
+        opens: Option<Timestamp>,
     },
     /// The bot marked the head done and posted nothing that covers it:
     /// it found nothing new to read
@@ -106,8 +223,13 @@ pub struct Login<'a> {
 ///
 /// Parsing lives here, in code, tested against the bot's recorded output.
 pub trait Profile: Send + Sync + fmt::Debug {
+    /// Which bot it is
+    fn bot(&self) -> Bot;
+
     /// Its name in what kelpie tells the maintainer and the worker
-    fn name(&self) -> &str;
+    fn name(&self) -> &str {
+        self.bot().name()
+    }
 
     /// The login its comments, reviews, threads and statuses are posted by
     fn login(&self) -> Login<'_>;
@@ -115,11 +237,12 @@ pub trait Profile: Send + Sync + fmt::Debug {
     /// The lease on the rate window each summon spends
     fn lease(&self) -> LeaseKind;
 
-    /// The label whose adding summons it
-    fn label(&self) -> &str;
+    /// The label whose adding summons it, if one does
+    fn label(&self) -> Option<&str>;
 
     /// The comment that asks it to read the whole pull request again, where
-    /// the label asks only for what is new
+    /// the label asks only for what is new. A bot with no label is summoned
+    /// by this comment alone.
     fn full_review(&self) -> Option<&str>;
 
     /// What became of a summon made at `since`, for commit `head`
@@ -175,5 +298,36 @@ impl Activity {
     /// Its threads not yet resolved
     pub fn open_threads(&self) -> impl Iterator<Item = &Thread> {
         self.threads.iter().filter(|t| !t.resolved)
+    }
+}
+
+// A findings file holds one finding a line, fields split by `|`.
+pub(crate) fn one_line(text: &str) -> String {
+    const MOST: usize = 600;
+    let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let flat = flat.replace('|', "/");
+    match flat.char_indices().nth(MOST) {
+        Some((cut, _)) => format!("{}...", &flat[..cut]),
+        None => flat,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_long_finding_is_cut_to_one_line() {
+        let long = "word ".repeat(200);
+        let cut = one_line(&long);
+        assert_eq!(cut.chars().count(), 603);
+        assert!(cut.ends_with("..."));
+        assert_eq!(one_line("a |b\n c"), "a /b c");
+    }
+
+    #[test]
+    fn a_bots_name_is_its_lease() {
+        assert_eq!(Bot::Coderabbit.lease(), LeaseKind::coderabbit());
+        assert_eq!(Bot::Cubic.lease().as_str(), "cubic");
     }
 }

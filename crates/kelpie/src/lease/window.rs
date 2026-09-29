@@ -1,9 +1,11 @@
-//! A review window: so many summons an hour, account-wide
+//! A review window: so many summons in a span, account-wide
 //!
-//! The quota is whatever the latest review footer said, one an hour until
-//! a footer is read. The hour runs from each accepted summon, not from the
-//! review it bought. A refusal quotes when the window opens, and that quote
-//! overrides the book's own count until a later summon is accepted.
+//! The quota and span come from the reviewer's definition, one an hour
+//! unless it says otherwise, and the latest review footer's quota
+//! overrides the definition's. The span runs from each accepted summon,
+//! not from the review it bought. A refusal quotes when the window opens,
+//! and that quote overrides the book's own count until a later summon is
+//! accepted.
 
 use std::num::NonZeroU32;
 
@@ -11,8 +13,9 @@ use serde::Serialize;
 
 use super::saved::{SavedRefusal, SavedWindow};
 use crate::ports::Timestamp;
+use crate::review_bot::ReviewWindow;
 
-/// How long one accepted summon holds its place in the window, in seconds
+/// How long one accepted summon holds its place in an undefined window, in seconds
 pub const HOUR: u64 = 3600;
 
 /// The quota before any footer has been read: the last one read on shep
@@ -26,6 +29,8 @@ pub struct Window {
     quota_at: Option<Timestamp>,
     summons: Vec<Timestamp>,
     refusal: Option<Refusal>,
+    // Seconds each accepted summon holds its place.
+    span: u64,
 }
 
 // A refusal, and when the book heard it, so a later summon supersedes it.
@@ -38,9 +43,9 @@ struct Refusal {
 /// A window as `status` shows it
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WindowStatus {
-    /// Summons an hour, from the latest footer
+    /// Summons a span, from the latest footer or the definition
     pub quota: u32,
-    /// Accepted summons in the last hour, oldest first
+    /// Accepted summons in the last span, oldest first
     pub summons: Vec<Timestamp>,
     /// When it opens, or `None` while it is open
     pub opens: Option<Timestamp>,
@@ -53,6 +58,7 @@ impl Default for Window {
             quota_at: None,
             summons: Vec::new(),
             refusal: None,
+            span: HOUR,
         }
     }
 }
@@ -70,11 +76,21 @@ impl From<SavedWindow> for Window {
                 heard: r.heard,
                 opens: r.opens,
             }),
+            span: HOUR,
         }
     }
 }
 
 impl Window {
+    /// Takes the reviewer's definition: its span, and its quota until a
+    /// footer states one
+    pub fn define(&mut self, definition: ReviewWindow) {
+        self.span = definition.seconds();
+        if self.quota_at.is_none() {
+            self.quota = definition.reviews.get();
+        }
+    }
+
     /// Takes the quota a review footer posted at `at` states
     ///
     /// The newest footer wins, whichever runner reports it last: each one
@@ -116,7 +132,7 @@ impl Window {
         }
         let recent = self.recent(now);
         let full = recent.len().checked_sub(self.quota as usize)?;
-        Some(Timestamp(recent[full].0 + HOUR))
+        Some(Timestamp(recent[full].0 + self.span))
     }
 
     /// The window as `status` shows it at `now`
@@ -130,7 +146,7 @@ impl Window {
 
     /// Forgets summons older than an hour before `now`
     pub fn prune(&mut self, now: Timestamp) {
-        self.summons.retain(|at| at.0 + HOUR > now.0);
+        self.summons.retain(|at| at.0 + self.span > now.0);
     }
 
     /// The window as the book file keeps it
@@ -147,7 +163,7 @@ impl Window {
     }
 
     fn recent(&self, now: Timestamp) -> &[Timestamp] {
-        let start = self.summons.partition_point(|at| at.0 + HOUR <= now.0);
+        let start = self.summons.partition_point(|at| at.0 + self.span <= now.0);
         &self.summons[start..]
     }
 }
@@ -170,6 +186,29 @@ mod tests {
         assert_eq!(window.opens(at(1)), Some(at(HOUR)));
         assert_eq!(window.opens(at(HOUR - 1)), Some(at(HOUR)));
         assert_eq!(window.opens(at(HOUR)), None);
+    }
+
+    #[test]
+    fn a_defined_window_holds_its_own_quota_for_its_own_span() {
+        let mut window = Window::default();
+        let month = ReviewWindow {
+            reviews: NonZeroU32::new(2).unwrap(),
+            hours: NonZeroU32::new(720).unwrap(),
+        };
+        window.define(month);
+        window.summoned(at(0));
+        assert_eq!(window.opens(at(1)), None, "the second of two");
+        window.summoned(at(1));
+        assert_eq!(window.opens(at(HOUR)), Some(at(720 * HOUR)));
+        window.prune(at(HOUR));
+        assert_eq!(window.status(at(HOUR)).summons.len(), 2, "still held");
+        window.quota(5, at(2));
+        window.define(month);
+        assert_eq!(
+            window.opens(at(HOUR)),
+            None,
+            "a stated quota outlasts the definition"
+        );
     }
 
     // Measured on shep: accepted 11:36:36, finished 12:00:01, and a

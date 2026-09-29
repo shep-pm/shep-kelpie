@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::board::WorkerModel;
 use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage, Verdict};
+use crate::review_bot::Bot;
 use crate::shots::ShotsRecord;
 
 mod spend;
@@ -146,7 +147,7 @@ pub struct CodeRabbitTally {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "stage", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum CodeRabbitStage {
-    /// Waiting for the CodeRabbit lease, to summon a review of `head`
+    /// Waiting for a listed bot's lease, to summon a review of `head`
     Lease {
         /// The head CI passed on
         head: String,
@@ -159,8 +160,11 @@ pub enum CodeRabbitStage {
         full: bool,
     },
     /// The label went on, or the comment asking for a full review was
-    /// posted, at `at`. The lease goes back once CodeRabbit answers.
+    /// posted, at `at`. The lease goes back once the bot answers.
     Summoned {
+        /// The bot summoned, which holds the round. CodeRabbit when absent.
+        #[serde(default, skip_serializing_if = "Bot::is_coderabbit")]
+        bot: Bot,
         /// The head the summon is for
         head: String,
         /// When the summon was made
@@ -174,6 +178,9 @@ pub enum CodeRabbitStage {
     },
     /// The open threads of a review of `head`, judged in order
     Judging {
+        /// The bot whose review it is. CodeRabbit when absent.
+        #[serde(default, skip_serializing_if = "Bot::is_coderabbit")]
+        bot: Bot,
         /// The head the review covered
         head: String,
         /// Every thread still open, as a finding
@@ -605,6 +612,7 @@ mod tests {
         );
         assert_eq!(
             value(Phase::CodeRabbit(CodeRabbitStage::Summoned {
+                bot: Bot::Coderabbit,
                 head: "c0ffee".into(),
                 at: Timestamp(12),
                 full: false,
@@ -626,7 +634,11 @@ mod tests {
             })),
             json!({ "state": "coderabbit", "stage": "lease", "head": "c0ffee", "full": true })
         );
+        let cubic = json!({ "state": "coderabbit", "stage": "summoned", "bot": "cubic", "head": "c0ffee", "at": 12, "full": true });
+        let by_cubic: Phase = serde_json::from_value(cubic.clone()).unwrap();
+        assert_eq!(value(by_cubic), cubic);
         let judging = Phase::CodeRabbit(CodeRabbitStage::Judging {
+            bot: Bot::Cubic,
             head: "c0ffee".into(),
             threads: vec![OpenThread {
                 id: "PRRT_1".into(),
@@ -642,6 +654,7 @@ mod tests {
         });
         let pinned = value(judging.clone());
         assert_eq!(pinned["threads"][0]["id"], "PRRT_1");
+        assert_eq!(pinned["bot"], "cubic");
         assert_eq!(serde_json::from_value::<Phase>(pinned).unwrap(), judging);
         assert_eq!(
             value(Phase::Ruling { id: 3 }),

@@ -321,19 +321,19 @@ impl Runner {
         let session = new_session_id().map_err(|e| ReworkError::Session(e.to_string()))?;
         let fresh = self.fresh(issue, found.title, worker.clone(), session);
         // A rework stays on its pull request, so a fixed number of rounds
-        // counts the reviews the review bot gave it before.
-        let bot = &self.ports.review_bot;
-        let rounds = match self.settings.coderabbit.rounds {
-            Some(_) if self.settings.coderabbit.enabled => {
+        // counts the reviews every listed bot gave it before.
+        let mut rounds = 0u32;
+        if self.settings.coderabbit.rounds.is_some() && self.settings.coderabbit.enabled {
+            for bot in self.settings.reviewers() {
+                let bot = self.profile(bot);
                 let activity = self
                     .ports
                     .forge
                     .review_bot(repo, number, bot.login())
                     .map_err(|e| ReworkError::CodeRabbit(number, e))?;
-                bot.reviewed_besides(&activity, "")
+                rounds = rounds.saturating_add(bot.reviewed_besides(&activity, ""));
             }
-            _ => 0,
-        };
+        }
         let text = review_text(number, &review);
         turn::write(&fresh.build, &review_path(&fresh.build), &text)
             .map_err(ReworkError::ReviewFile)?;

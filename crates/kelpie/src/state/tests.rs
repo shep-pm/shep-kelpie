@@ -290,6 +290,7 @@ fn the_coderabbit_rulings_are_pinned() {
         head: Some("c0ffee".into()),
     };
     let silent = RulingKind::CodeRabbitSilent {
+        bot: crate::review_bot::Bot::Coderabbit,
         head: "c0ffee".into(),
     };
     let unpushed = RulingKind::FixNotPushed {

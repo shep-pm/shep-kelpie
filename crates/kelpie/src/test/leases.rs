@@ -26,6 +26,7 @@ pub(crate) struct FakeLeases {
     told: Arc<Mutex<Vec<Told>>>,
     held: Arc<Mutex<BTreeSet<LeaseKind>>>,
     withheld: Arc<AtomicBool>,
+    closed: Arc<Mutex<BTreeSet<LeaseKind>>>,
 }
 
 impl FakeLeases {
@@ -38,6 +39,17 @@ impl FakeLeases {
     /// the next ask through
     pub(crate) fn withhold(&self, withheld: bool) {
         self.withheld.store(withheld, Ordering::SeqCst);
+    }
+
+    /// Holds back grants of `kind` alone, as a dog whose window for it is
+    /// closed does, or lets its next ask through
+    pub(crate) fn close(&self, kind: &LeaseKind, closed: bool) {
+        let mut all = self.closed.lock().unwrap();
+        if closed {
+            all.insert(kind.clone());
+        } else {
+            all.remove(kind);
+        }
     }
 
     /// Grants `kind` between steps, as the dog's `grant` trigger does
@@ -54,7 +66,8 @@ impl FakeLeases {
 impl Leases for FakeLeases {
     fn want(&self, kind: &LeaseKind) {
         self.told.lock().unwrap().push(Told::Want(kind.clone()));
-        if !self.withheld.load(Ordering::SeqCst) {
+        let closed = self.closed.lock().unwrap().contains(kind);
+        if !self.withheld.load(Ordering::SeqCst) && !closed {
             self.held.lock().unwrap().insert(kind.clone());
         }
     }

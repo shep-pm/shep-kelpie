@@ -8,16 +8,21 @@ use std::sync::{Arc, Mutex};
 use crate::ports::{ForgeError, Timestamp};
 use crate::review_bot::{Activity, Comment, Review, Status, Thread};
 
-/// Labels on pull requests, CodeRabbit's activity on them, and every
-/// label change and resolved thread, in order
+/// Labels on pull requests, each bot's activity on them by its login, and
+/// every label change and resolved thread, in order
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FakeCodeRabbit {
-    activity: Arc<Mutex<HashMap<u64, Activity>>>,
+    activity: Arc<Mutex<HashMap<(u64, String), Activity>>>,
     labels: Arc<Mutex<HashMap<u64, Vec<String>>>>,
     label_log: Arc<Mutex<Vec<(u64, String, bool)>>>,
     resolved: Arc<Mutex<Vec<String>>>,
     logins: Arc<Mutex<Vec<String>>>,
     down: Arc<AtomicBool>,
+}
+
+// CodeRabbit's own store on pull request `number`.
+fn ours(number: u64) -> (u64, String) {
+    (number, crate::coderabbit::LOGIN.rest.to_owned())
 }
 
 /// A CodeRabbit thread's first comment, as it words a Minor finding
@@ -34,7 +39,7 @@ impl FakeCodeRabbit {
     /// for each title, or posting a clean walkthrough when there are none
     pub(crate) fn review(&self, number: u64, head: &str, at: u64, titles: &[&str]) {
         let mut activity = self.activity.lock().unwrap();
-        let seen = activity.entry(number).or_default();
+        let seen = activity.entry(ours(number)).or_default();
         seen.comments.retain(|c| !c.body.contains("## Walkthrough"));
         seen.comments.push(Comment {
             body: format!(
@@ -64,11 +69,11 @@ impl FakeCodeRabbit {
             }));
     }
 
-    /// Changes the bot's activity on pull request `number` as `post` says,
-    /// in whatever shape the bot a test stands in for posts it
-    pub(crate) fn post(&self, number: u64, post: impl FnOnce(&mut Activity)) {
+    /// Changes the activity of the bot posting as `login` on pull request
+    /// `number` as `post` says, in whatever shape that bot posts it
+    pub(crate) fn post_as(&self, number: u64, login: &str, post: impl FnOnce(&mut Activity)) {
         let mut activity = self.activity.lock().unwrap();
-        post(activity.entry(number).or_default());
+        post(activity.entry((number, login.to_owned())).or_default());
     }
 
     /// Every login the runner read a bot's activity by, in order
@@ -79,28 +84,36 @@ impl FakeCodeRabbit {
     /// Refuses a summon on pull request `number` at `at`, quoting `minutes`
     pub(crate) fn refuse(&self, number: u64, at: u64, minutes: u64) {
         let mut activity = self.activity.lock().unwrap();
-        activity.entry(number).or_default().comments.push(Comment {
-            body: format!(
-                "> [!WARNING]\n> ## Review limit reached\n> \n> \
+        activity
+            .entry(ours(number))
+            .or_default()
+            .comments
+            .push(Comment {
+                body: format!(
+                    "> [!WARNING]\n> ## Review limit reached\n> \n> \
                  **Next included review available in {minutes} minutes.**"
-            ),
-            at: Timestamp(at),
-        });
+                ),
+                at: Timestamp(at),
+            });
     }
 
     /// Starts reading pull request `number` at `at`, with nothing posted yet
     pub(crate) fn start(&self, number: u64, at: u64) {
         let mut activity = self.activity.lock().unwrap();
-        activity.entry(number).or_default().comments.push(Comment {
-            body: "<summary>📒 Files selected for processing (1)</summary>".into(),
-            at: Timestamp(at),
-        });
+        activity
+            .entry(ours(number))
+            .or_default()
+            .comments
+            .push(Comment {
+                body: "<summary>📒 Files selected for processing (1)</summary>".into(),
+                at: Timestamp(at),
+            });
     }
 
     /// Sets "Review in progress" on `head` of pull request `number` at `at`
     pub(crate) fn progress(&self, number: u64, head: &str, at: u64) {
         let mut activity = self.activity.lock().unwrap();
-        activity.entry(number).or_default().statuses.insert(
+        activity.entry(ours(number)).or_default().statuses.insert(
             0,
             Status {
                 commit: head.to_owned(),
@@ -114,7 +127,7 @@ impl FakeCodeRabbit {
     /// with no review or comment: CodeRabbit found nothing new to read
     pub(crate) fn complete(&self, number: u64, head: &str, at: u64) {
         let mut activity = self.activity.lock().unwrap();
-        activity.entry(number).or_default().statuses.insert(
+        activity.entry(ours(number)).or_default().statuses.insert(
             0,
             Status {
                 commit: head.to_owned(),
@@ -177,7 +190,8 @@ impl FakeCodeRabbit {
             return Err(ForgeError::Failed("CodeRabbit's comments are down".into()));
         }
         let activity = self.activity.lock().unwrap();
-        Ok(activity.get(&number).cloned().unwrap_or_default())
+        let key = (number, login.to_owned());
+        Ok(activity.get(&key).cloned().unwrap_or_default())
     }
 
     // Refuses a thread that does not exist, as GitHub does.

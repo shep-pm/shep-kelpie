@@ -80,7 +80,8 @@ _Avoid_: lock (the file the lease is built on)
 **Summon**:
 Anything that makes a pull request reviewer spend its review window. For
 CodeRabbit on shep that is adding the `review please` label, pushing to a pull
-request that carries it, or asking for a full review in a comment.
+request that carries it, or asking for a full review in a comment. For
+cubic it is the `@cubic-dev-ai review` comment.
 Only the project manager summons.
 
 **Shots**:
@@ -99,9 +100,11 @@ _Avoid_: qwen round (qwen is one model it can run)
 
 **Pull request reviewer**:
 A reviewer summoned on the pull request that answers there, within a rate
-window of its own. CodeRabbit is one. A **review bot** is one that works
-the GitHub way, by label, status and review threads, and a **profile**
-says how each bot does it. The other kind of reviewer is the local round's.
+window of its own. CodeRabbit and cubic are two. A **review bot** is one
+that works the GitHub way, by label or comment, status and review threads,
+and a **profile** says how each bot does it. A project lists its pull
+request reviewers in preference order, and each round goes to the first
+whose window is free. The other kind of reviewer is the local round's.
 _Avoid_: outside reviewer, remote reviewer
 
 **Ruling**:

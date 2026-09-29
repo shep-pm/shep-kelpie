@@ -14,6 +14,7 @@ use super::saved::{SavedHeld, SavedLease};
 use super::window::{Window, WindowStatus};
 use super::{Epoch, Holder, LeaseKind};
 use crate::ports::{Clock, Timestamp};
+use crate::review_bot::ReviewWindow;
 use crate::runner::ProjectName;
 
 /// What asking for a lease came to
@@ -123,11 +124,15 @@ impl LeaseBook {
             .collect()
     }
 
-    /// Gives `kind` a review window, so it is granted only while that is
-    /// open. A window it already has is kept.
-    pub fn add_window(&mut self, kind: LeaseKind) {
+    /// Gives `kind` a review window as `definition` sets it, so it is
+    /// granted only while that is open. A window it already has keeps its
+    /// summons and takes the definition.
+    pub fn add_window(&mut self, kind: LeaseKind, definition: ReviewWindow) {
         let lease = self.leases.entry(kind).or_default();
-        lease.window.get_or_insert_with(Window::default);
+        lease
+            .window
+            .get_or_insert_with(Window::default)
+            .define(definition);
     }
 
     /// Takes the quota a review footer posted at `at` states for `kind`'s window
@@ -489,7 +494,7 @@ mod tests {
     fn windowed() -> (LeaseBook, FakeClock, LeaseKind) {
         let (mut book, clock) = book();
         let kind = LeaseKind::try_from("reviews").unwrap();
-        book.add_window(kind.clone());
+        book.add_window(kind.clone(), ReviewWindow::HOURLY);
         (book, clock, kind)
     }
 
@@ -663,7 +668,7 @@ mod tests {
         clock.advance(120);
 
         let mut book = restarted(&book, &clock);
-        book.add_window(kind.clone());
+        book.add_window(kind.clone(), ReviewWindow::HOURLY);
         assert_eq!(
             book.ask(&kind, runner("golbat", 1)),
             Asked::Queued { ahead: 0 }

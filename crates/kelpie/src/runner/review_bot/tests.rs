@@ -6,7 +6,7 @@ use super::{DONE_SETTLE, HEARD_WAIT};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
 use crate::ports::{Checks, Finding, Role, Severity, Timestamp};
-use crate::review_bot::{Activity, Comment, Login, Profile, Reading, Review, Status, Thread};
+use crate::review_bot::{Activity, Bot, Comment, Login, Profile, Reading, Review, Status, Thread};
 use crate::runner::coderabbit::tests::now;
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{Rig, Scripted, Told};
@@ -22,6 +22,10 @@ const LOGIN: &str = "stand-in[bot]";
 struct StandIn;
 
 impl Profile for StandIn {
+    fn bot(&self) -> Bot {
+        Bot::Coderabbit
+    }
+
     fn name(&self) -> &str {
         "Stand-in"
     }
@@ -37,8 +41,8 @@ impl Profile for StandIn {
         LeaseKind::try_from("stand-in").unwrap()
     }
 
-    fn label(&self) -> &str {
-        LABEL
+    fn label(&self) -> Option<&str> {
+        Some(LABEL)
     }
 
     fn full_review(&self) -> Option<&str> {
@@ -56,7 +60,7 @@ impl Profile for StandIn {
             .find_map(|c| c.body.strip_prefix("retry at ")?.parse().ok());
         if let Some(opens) = opens {
             return Reading::Refused {
-                opens: Timestamp(opens),
+                opens: Some(Timestamp(opens)),
             };
         }
         let done = activity
@@ -137,7 +141,7 @@ fn read_as_stand_in(rig: &Rig) {
 fn summoned(project: &str) -> (Rig, Mutex<Runner>, String) {
     let rig = Rig::new(project);
     rig.coderabbit_on();
-    let runner = rig.open_with(Arc::new(StandIn)).unwrap();
+    let runner = rig.open_with(vec![Arc::new(StandIn)]).unwrap();
     rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
@@ -174,7 +178,7 @@ fn a_stand_in_bot_runs_a_whole_round_through_the_judge_to_the_worker() {
         line: Some(1),
         body: "[high] Close the file.\n\nIt leaks a handle.".into(),
     };
-    rig.forge.coderabbit.post(71, |seen| {
+    rig.forge.coderabbit.post_as(71, LOGIN, |seen| {
         seen.reviews.push(review(&head, summon + 60));
         seen.threads.push(thread);
     });
@@ -239,7 +243,7 @@ fn a_stand_in_refusal_reschedules_its_own_window_and_takes_its_label_off() {
     let (rig, runner, _) = summoned("shep");
     let summon = now(&rig);
     let opens = summon + 1800;
-    rig.forge.coderabbit.post(71, |seen| {
+    rig.forge.coderabbit.post_as(71, LOGIN, |seen| {
         seen.comments.push(Comment {
             body: format!("retry at {opens}"),
             at: Timestamp(summon + 30),
@@ -292,13 +296,13 @@ fn an_owed_stand_in_summon_marked_done_is_answered_not_summoned_again() {
     let rig = Rig::new("shep");
     rig.coderabbit_on();
     let reviewed = rig.push_by_hand("fix/timeline", "work.txt");
-    rig.forge.coderabbit.post(80, |seen| {
+    rig.forge.coderabbit.post_as(80, LOGIN, |seen| {
         seen.reviews.push(review(&reviewed, Rig::EPOCH - 60))
     });
     let head = rig.push_by_hand("fix/timeline", "more.txt");
     rig.forge.open_pull_request(80, "fix/timeline", &[5]);
     rig.forge.ready_pull_request(80);
-    let runner = rig.open_with(Arc::new(StandIn)).unwrap();
+    let runner = rig.open_with(vec![Arc::new(StandIn)]).unwrap();
     rig.ask(&runner, "start", None);
     rig.ask(&runner, "adopt", Some("80"));
     step(&runner).unwrap();
@@ -309,7 +313,7 @@ fn an_owed_stand_in_summon_marked_done_is_answered_not_summoned_again() {
     ));
     let summon = now(&rig);
 
-    rig.forge.coderabbit.post(80, |seen| {
+    rig.forge.coderabbit.post_as(80, LOGIN, |seen| {
         seen.statuses.insert(
             0,
             Status {

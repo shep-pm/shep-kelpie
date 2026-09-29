@@ -6,8 +6,12 @@
 //! checked as a start checks it, and one that fails keeps the settings the
 //! runner has.
 
-use super::{OpenError, Runner, check_coderabbit, check_local, instructions, ruling_channels};
+use super::{
+    OpenError, Runner, check_coderabbit, check_local, check_reviewers, instructions,
+    ruling_channels,
+};
 use crate::channels::Channels;
+use crate::review_bot::Bot;
 use crate::settings::Settings;
 use crate::webhook::{KelpieSettings, Webhook};
 
@@ -34,22 +38,30 @@ impl Runner {
             waiting.push("forge");
             settings.forge = self.settings.forge.clone();
         }
+        let reviewers = kelpie.reviewers;
         let (channels, webhook) = ruling_channels(&settings, kelpie)?;
-        let changed = changed(
+        let mut changed = changed(
             (&self.settings, &self.channels, &self.webhook),
             (&settings, &channels, &webhook),
         );
+        if reviewers != self.reviewers {
+            changed.push("reviewers");
+        }
         if changed.is_empty() && waiting.is_empty() {
             return Ok(None);
         }
         let extra_instructions = instructions::read_extra(&settings)?;
-        if settings.coderabbit.enabled && !self.settings.coderabbit.enabled {
+        check_reviewers(&settings, &reviewers, &self.ports)?;
+        let listed =
+            |s: &Settings| s.coderabbit.enabled && s.reviewers().contains(&Bot::Coderabbit);
+        if listed(&settings) && !listed(&self.settings) {
             check_coderabbit(&settings, &self.ports)?;
         }
         if settings.review.local != self.settings.review.local {
             check_local(&settings, &self.ports)?;
         }
         self.settings = settings;
+        self.reviewers = reviewers;
         self.extra_instructions = extra_instructions;
         self.channels = channels;
         self.webhook = webhook;
@@ -87,6 +99,10 @@ fn changed((old, went, was): Reach<'_>, (new, goes, now): Reach<'_>) -> Vec<&'st
         ("models", old.models != new.models),
         ("review", old.review != new.review),
         ("coderabbit", old.coderabbit != new.coderabbit),
+        (
+            "pull_request_reviewers",
+            old.pull_request_reviewers != new.pull_request_reviewers,
+        ),
         ("pacing", old.pacing != new.pacing),
         ("worker", old.worker != new.worker),
         ("preview", old.preview != new.preview),
