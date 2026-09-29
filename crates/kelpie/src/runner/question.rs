@@ -137,6 +137,22 @@ mod tests {
     // Seen live on #80: a relay told nothing of the kind sent a
     // question's one-character answer as `relay-yes`.
     #[test]
+    fn a_relayed_question_answered_by_trigger_tells_the_relay_the_answer() {
+        let (rig, runner) = asking("golbat");
+        rig.relay.set_up(true);
+        step(&runner).unwrap(); // asked
+        step(&runner).unwrap(); // alerted, and relayed
+        rig.ask(&runner, "rule", Some("1 answer use --dry-run"));
+        rig.claude.script([Scripted::Text("done")]);
+        step(&runner).unwrap();
+        assert_eq!(
+            rig.relay.told(),
+            ["[kelpie]\nproject=golbat ruling=1 settled=answer\n\n\
+              Ruling 1 was answered: use --dry-run"]
+        );
+    }
+
+    #[test]
     fn the_relay_is_told_a_question_wants_an_answer() {
         let (rig, runner) = asking("rotom");
         rig.relay.set_up(true);
