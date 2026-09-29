@@ -141,16 +141,19 @@ mod tests {
     fn repo_and_forge_wait_for_the_next_start() {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
+        let repo = rig.repo().display().to_string();
         let next = settings_with(&rig, |s| {
             s.replace("forge = \"shep-pm/shep\"", "forge = \"shep-pm/elsewhere\"")
+                .replace(&repo, "/srv/elsewhere")
         });
         let mut runner = runner.lock().unwrap();
         let line = runner.reread(next, rig.kelpie_settings()).unwrap();
         assert_eq!(
             line.as_deref(),
-            Some("settings changed; forge from the runner's next start")
+            Some("settings changed; repo and forge from the runner's next start")
         );
         assert_eq!(runner.settings().forge.as_str(), "shep-pm/shep");
+        assert_eq!(runner.settings().repo, rig.repo());
     }
 
     #[test]

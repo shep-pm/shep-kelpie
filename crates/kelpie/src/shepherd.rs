@@ -230,6 +230,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn no_shepherd_is_named_by_its_home() {
+        let home = tempfile::tempdir().unwrap();
+        let err = read_in_time(home.path(), "shep").await.unwrap_err();
+        let expected = format!(
+            "cannot reach kelpie's shepherd at {}: ",
+            home.path().display()
+        );
+        assert!(err.starts_with(&expected), "{err}");
+    }
+
+    #[test]
+    fn a_shepherd_that_names_no_version_is_still_refused() {
+        let err = ConnectRefused::Skew(None).describe(Path::new("/k/shep"));
+        assert!(err.contains("runs a shep version it did not name"), "{err}");
+    }
+
+    #[tokio::test]
     async fn a_shepherd_on_another_minor_is_refused_by_name() {
         let (home, _sent) = shepherd("0.10.1").await;
         let err = read_in_time(home.path(), "shep").await.unwrap_err();

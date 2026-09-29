@@ -633,7 +633,8 @@ impl Rig {
     fn try_kelpie_settings(&self) -> Result<KelpieSettings, SettingsError> {
         match std::fs::read_to_string(self.paths().kelpie_settings) {
             Ok(text) => KelpieSettings::from_section(&text),
-            Err(_) => Ok(KelpieSettings::default()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(KelpieSettings::default()),
+            Err(e) => panic!("cannot read the rig's kelpie settings: {e}"),
         }
     }
 
@@ -645,7 +646,10 @@ impl Rig {
     /// Sets the project's `ruling_channels`, as its settings file would
     pub(crate) fn set_ruling_channels(&self, list: &str) {
         let table = "[app.dogs.kelpie]\n";
-        self.edit_settings(|s| s.replacen(table, &format!("{table}ruling_channels = {list}\n"), 1));
+        self.edit_settings(|s| {
+            assert!(s.contains(table), "the rig's entry has no kelpie table");
+            s.replacen(table, &format!("{table}ruling_channels = {list}\n"), 1)
+        });
     }
 
     fn make_repo(&self) {

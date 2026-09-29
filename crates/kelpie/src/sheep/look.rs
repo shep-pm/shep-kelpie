@@ -144,6 +144,27 @@ mod tests {
     }
 
     #[test]
+    fn a_read_that_fails_keeps_the_settings_in_effect() {
+        let rig = Rig::new("shep");
+        let runner = rig.open().unwrap();
+        let before = runner.lock().unwrap().settings().clone();
+        let no_shepherd = tempfile::tempdir().unwrap();
+        let paths = rig.paths();
+        let mut look = Look::new(
+            no_shepherd.path().to_owned(),
+            "shep".into(),
+            "shep".into(),
+            paths.settings.clone(),
+            paths.kelpie_settings.clone(),
+            PathBuf::from("/home/maintainer"),
+        );
+        look.again(&runner);
+        look.again(&runner);
+        assert_eq!(runner.lock().unwrap().settings(), &before);
+        assert!(look.failed.as_deref().unwrap().starts_with("cannot reach"));
+    }
+
+    #[test]
     fn a_table_changed_in_lookout_reaches_the_running_runner() {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();

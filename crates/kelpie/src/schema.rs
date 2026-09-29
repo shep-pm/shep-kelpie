@@ -96,7 +96,7 @@ mod tests {
     }
 
     // The example with every optional key set, so each one is counted.
-    fn every_project_key() -> String {
+    fn example_with_every_key() -> String {
         let text = include_str!("../settings.example.toml")
             .replace("# ruling_channels =", "ruling_channels =")
             .replace("build_env = {}", "build_env = { BUN = \"bun\" }")
@@ -116,8 +116,8 @@ mod tests {
         let root = schema();
         let mut sheep = BTreeSet::new();
         schema_keys(&root, &root[SHEEP_SCHEMA_KEY], "", &mut sheep);
-        let table = keys_of_table(&root, &root[SHEEP_SCHEMA_KEY], &every_project_key());
-        assert_eq!(sheep, table);
+        let set = keys_of_table(&root, &root[SHEEP_SCHEMA_KEY], &example_with_every_key());
+        assert_eq!(sheep, set);
         for key in ["models.judge.effort", "worker.build_env", "preview.routes"] {
             assert!(sheep.contains(key), "{key}: {sheep:?}");
         }
