@@ -23,6 +23,9 @@ use crate::work_item::FollowUps;
 // in a list anyway.
 const TITLE_LIMIT: usize = 80;
 
+// The fewest characters of a finding's `what` a body may match on
+const MIN_BODY_MATCH: usize = 12;
+
 impl Runner {
     // What `finish` does first for a merged pull request. Returns None when
     // nothing is left to file, and the work item goes on to be removed.
@@ -150,7 +153,8 @@ fn title_of(finding: &Finding) -> String {
 }
 
 // Another issue's title says the same, or its body names the file and says
-// what this one does.
+// what this one does. A short `what` would match half the tracker, so only
+// a title can match on one.
 fn already_filed<'a>(
     open: &'a [OpenIssue],
     title: &str,
@@ -158,7 +162,9 @@ fn already_filed<'a>(
 ) -> Option<&'a OpenIssue> {
     open.iter().find(|issue| {
         issue.title.trim().eq_ignore_ascii_case(title)
-            || (issue.body.contains(&finding.file) && issue.body.contains(finding.what.trim()))
+            || (finding.what.trim().len() >= MIN_BODY_MATCH
+                && issue.body.contains(&finding.file)
+                && issue.body.contains(finding.what.trim()))
     })
 }
 

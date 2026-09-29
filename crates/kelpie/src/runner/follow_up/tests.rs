@@ -39,7 +39,7 @@ fn auto_ready_to_merge(text: &str) -> (Rig, Mutex<Runner>) {
 }
 
 // The next step's report, past the notice a merge under `auto` queues
-fn on(runner: &Mutex<Runner>) -> Option<StepReport> {
+fn after_merge(runner: &Mutex<Runner>) -> Option<StepReport> {
     match step(runner).unwrap() {
         Some(StepReport::Noticed { .. }) => step(runner).unwrap(),
         other => other,
@@ -72,7 +72,7 @@ fn finished(report: Option<StepReport>) -> bool {
 fn under_auto_an_unfixed_confirmed_finding_files_one_issue_on_the_board() {
     let (rig, runner) = auto_ready_to_merge(LINE);
 
-    assert_eq!(on(&runner), filed(&[900], &[], 0));
+    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
     let [issue] = rig.forge.created().try_into().unwrap();
     assert_eq!(issue.title, "looks racy");
     assert_eq!(issue.labels, [READY]);
@@ -83,7 +83,7 @@ fn under_auto_an_unfixed_confirmed_finding_files_one_issue_on_the_board() {
         "{}",
         issue.body
     );
-    assert!(finished(on(&runner)));
+    assert!(finished(after_merge(&runner)));
     assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
     assert_eq!(rig.forge.created().len(), 1, "filed once, not again");
 }
@@ -93,31 +93,33 @@ fn a_finding_an_open_issue_already_holds_gets_a_comment_and_no_new_issue() {
     let (rig, runner) = auto_ready_to_merge(LINE);
     rig.forge.open_issue(50, "Looks racy", "Filed by hand.");
 
-    assert_eq!(on(&runner), filed(&[], &[50], 0));
+    assert_eq!(after_merge(&runner), filed(&[], &[50], 0));
     assert_eq!(rig.forge.created(), []);
     let [(number, body)] = rig.forge.comments().try_into().unwrap();
     assert_eq!(number, 50);
     assert!(body.contains("#71"), "{body}");
     assert!(body.contains("`src/lib.rs:9`"), "{body}");
-    assert!(finished(on(&runner)));
+    assert!(finished(after_merge(&runner)));
 }
 
 #[test]
 fn an_issue_that_names_the_file_and_says_the_same_thing_is_a_duplicate_too() {
-    let (rig, runner) = auto_ready_to_merge(LINE);
-    let body = "In src/lib.rs, this looks racy, and two threads write the field.";
+    let (rig, runner) =
+        auto_ready_to_merge("HIGH|src/lib.rs:9|writes the field without a lock|races\n");
+    let body = "In src/lib.rs, the writer writes the field without a lock.";
     rig.forge.open_issue(51, "Race in the writer", body);
     rig.forge.open_issue(52, "Unrelated", "src/lib.rs is long.");
 
-    assert_eq!(on(&runner), filed(&[], &[51], 0));
+    assert_eq!(after_merge(&runner), filed(&[], &[51], 0));
     assert_eq!(rig.forge.created(), []);
+    assert!(finished(after_merge(&runner)));
 }
 
 #[test]
 fn the_same_finding_twice_files_once_and_comments_once() {
     let (rig, runner) = auto_ready_to_merge(&LINE.repeat(2));
 
-    assert_eq!(on(&runner), filed(&[900], &[900], 0));
+    assert_eq!(after_merge(&runner), filed(&[900], &[900], 0));
     assert_eq!(rig.forge.created().len(), 1);
 }
 
@@ -154,7 +156,7 @@ fn a_finding_the_judge_refuted_files_nothing() {
     ));
     rig.clock.advance(CHECKS_SETTLE);
 
-    assert!(finished(on(&runner)));
+    assert!(finished(after_merge(&runner)));
     assert_eq!(rig.forge.created(), []);
     assert_eq!(rig.forge.comments(), []);
 }
@@ -170,7 +172,7 @@ fn a_worker_that_deferred_nothing_merges_with_nothing_filed() {
     ));
     rig.clock.advance(CHECKS_SETTLE);
 
-    assert!(finished(on(&runner)));
+    assert!(finished(after_merge(&runner)));
     assert_eq!(rig.forge.created(), []);
 }
 
@@ -184,10 +186,10 @@ fn a_finding_that_names_a_folder_on_this_machine_is_left_out_and_the_rest_are_fi
     );
     defer(&rig, &text);
 
-    assert_eq!(on(&runner), filed(&[900], &[], 1));
+    assert_eq!(after_merge(&runner), filed(&[900], &[], 1));
     let [issue] = rig.forge.created().try_into().unwrap();
     assert_eq!(issue.title, "looks racy");
-    assert!(finished(on(&runner)));
+    assert!(finished(after_merge(&runner)));
 }
 
 #[test]
@@ -199,9 +201,10 @@ fn a_finding_named_by_its_worktree_path_is_filed_by_the_path_in_the_repo() {
         &format!("HIGH|{}:9|looks racy|why\n", inside.display()),
     );
 
-    assert_eq!(on(&runner), filed(&[900], &[], 0));
+    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
     let [issue] = rig.forge.created().try_into().unwrap();
     assert!(issue.body.contains("`src/lib.rs:9`"), "{}", issue.body);
+    assert!(finished(after_merge(&runner)));
 }
 
 #[test]
@@ -209,7 +212,7 @@ fn a_forge_that_cannot_open_issues_holds_the_work_item_and_the_retry_files_once(
     let (rig, runner) = auto_ready_to_merge(LINE);
     rig.forge.set_issues_down(true);
 
-    let Some(StepReport::GateFailed { issue: 7, reason }) = on(&runner) else {
+    let Some(StepReport::GateFailed { issue: 7, reason }) = after_merge(&runner) else {
         panic!("the failure was not reported");
     };
     assert!(reason.contains("issues are down"), "{reason}");
@@ -219,8 +222,8 @@ fn a_forge_that_cannot_open_issues_holds_the_work_item_and_the_retry_files_once(
     );
 
     rig.forge.set_issues_down(false);
-    assert_eq!(on(&runner), filed(&[900], &[], 0));
-    assert!(finished(on(&runner)));
+    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    assert!(finished(after_merge(&runner)));
     assert_eq!(rig.forge.created().len(), 1);
 }
 
@@ -228,13 +231,16 @@ fn a_forge_that_cannot_open_issues_holds_the_work_item_and_the_retry_files_once(
 fn a_restart_after_the_merge_still_files_what_the_worker_deferred() {
     let (rig, runner) = auto_ready_to_merge(LINE);
     rig.forge.set_issues_down(true);
-    step(&runner).unwrap();
+    assert!(matches!(
+        after_merge(&runner),
+        Some(StepReport::GateFailed { .. })
+    ));
     drop(runner);
     rig.forge.set_issues_down(false);
     let runner = rig.open().unwrap();
 
-    assert_eq!(on(&runner), filed(&[900], &[], 0));
-    assert!(finished(on(&runner)));
+    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    assert!(finished(after_merge(&runner)));
 }
 
 // Under `ask`: the worker parked on merge ruling 1, then a yes, then the merge
@@ -268,9 +274,9 @@ fn under_ask_the_findings_are_a_ruling_first_and_a_yes_files_them() {
     );
 
     rig.ask(&runner, "rule", Some(&format!("{id} yes")));
-    assert_eq!(on(&runner), filed(&[900], &[], 0));
+    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
     assert_eq!(rig.forge.created().len(), 1);
-    assert!(finished(on(&runner)));
+    assert!(finished(after_merge(&runner)));
     let status = rig.ask(&runner, "status", None);
     assert_eq!(
         (&status["work_item"], &status["rulings"]),
@@ -287,6 +293,6 @@ fn under_ask_a_no_drops_the_findings() {
         "rule",
         Some(&format!("{id} no not worth an issue")),
     );
-    assert!(finished(on(&runner)));
+    assert!(finished(after_merge(&runner)));
     assert_eq!(rig.forge.created(), []);
 }
