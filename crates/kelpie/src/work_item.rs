@@ -126,7 +126,7 @@ pub enum OutsideStage {
         at: Timestamp,
         /// Whether the summon comment is known posted. Gemini's round saves
         /// the stage before posting, so a restart posts it at most once.
-        #[serde(default = "posted", skip_serializing_if = "Clone::clone")]
+        #[serde(default = "posted", skip_serializing_if = "is_posted")]
         posted: bool,
     },
     /// The open threads of a review of `head`, judged in order
@@ -147,6 +147,12 @@ pub enum OutsideStage {
 
 fn posted() -> bool {
     true
+}
+
+// Only an unposted summon is written, so CodeRabbit's stage keeps its shape.
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "serde passes a reference")]
+fn is_posted(posted: &bool) -> bool {
+    *posted
 }
 
 /// An outside reviewer's thread still open, as the judge reads it
