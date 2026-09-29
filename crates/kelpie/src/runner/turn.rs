@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::Runner;
+use super::instructions;
 use super::question::asked;
 use super::report::{Begin, StepReport};
 use super::review::run_review_call;
@@ -21,7 +22,7 @@ use super::ruling::park;
 use super::trigger::lock;
 use crate::pacer::Scope;
 use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Issue, Role, Session, Timestamp};
-use crate::profile::{INSTRUCTIONS, WorkerProfile};
+use crate::profile::WorkerProfile;
 use crate::state::{ProjectState, Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree::{self, Start};
@@ -220,7 +221,8 @@ impl Runner {
         let instructions = folder.join("instructions.md");
         let text = serde_json::to_string_pretty(&profile.settings()).expect("settings are JSON");
         write(folder, &settings, &text)?;
-        write(folder, &instructions, INSTRUCTIONS)?;
+        let text = instructions::compose(self.extra_instructions.as_deref(), &item.worktree);
+        write(folder, &instructions, &text)?;
         let prompt = match prompt {
             Some(prompt) => prompt,
             None if item.rework => rework::first_prompt(item),
@@ -473,6 +475,7 @@ mod tests {
 
     use super::*;
     use crate::ports::{Cost, Usage};
+    use crate::profile::INSTRUCTIONS;
     use crate::settings::Effort;
     use crate::test::{LEFT_BEHIND, Rig, Scripted, git};
 
