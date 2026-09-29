@@ -297,6 +297,7 @@ impl Runner {
             known: Known::default(),
             qwen: QwenTally::default(),
             merge_refused: false,
+            merge_tried: None,
             calls: Vec::new(),
         }
     }

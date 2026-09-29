@@ -196,7 +196,7 @@ fn notice_alert(project: &str, notice: &Notice) -> Alert {
     Alert {
         title: format!("kelpie: {project} merged #{pull_request}"),
         text: format!(
-            "Kelpie merged pull request #{pull_request} for issue #{issue} into main at {} \
+            "Pull request #{pull_request} for issue #{issue} merged into main at {} \
              on {project}, every gate passed. Nothing to answer.",
             short(head)
         ),

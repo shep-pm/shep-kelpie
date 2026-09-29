@@ -13,6 +13,7 @@ use super::gate::short;
 use super::report::{Begin, StepReport};
 use super::rework::HUMAN;
 use crate::ports::Timestamp;
+use crate::settings::MergeAuthority;
 use crate::state::{Fix, ProjectState, Resume, Ruling, RulingKind, StateError};
 use crate::work_item::{CodeRabbitStage, Known, Phase, Review, Turn, WorkItem, foreign_change};
 use crate::worktree;
@@ -161,9 +162,14 @@ impl Runner {
         let moved = decide(id, answer, ruling, now, head_moved)?;
         if let Some(item) = next.work_item.as_mut().filter(|item| parked_on(item)) {
             item.coderabbit.cap_cleared |= lifts_cap;
-            if vouches {
-                item.known.head = None;
-            }
+            let regate = match (vouches, self.settings.merge_authority) {
+                (true, MergeAuthority::Auto) => regate(&self.settings.repo, item)?,
+                (true, MergeAuthority::Ask) => {
+                    item.known.head = None;
+                    false
+                }
+                (false, _) => false,
+            };
             if refusal_answered {
                 item.merge_refused = false;
             }
@@ -205,6 +211,9 @@ impl Runner {
                     Some((Turn::Next { prompt }, Phase::Implement, review))
                 }
             };
+            if regate {
+                item.phase = Phase::Review(Review::first());
+            }
             if let Some((turn, phase, force)) = worker {
                 item.turn = turn;
                 item.phase = phase;
@@ -290,6 +299,24 @@ impl Runner {
         );
         self.save(next)
     }
+}
+
+// Under `auto` no merge ruling follows a yes that vouches for the branch,
+// so a head the gates never saw is adopted and goes back through them.
+// Returns whether it does; an unchanged head keeps its place.
+fn regate(repo: &std::path::Path, item: &mut WorkItem) -> Result<bool, RuleError> {
+    let known = item.known.head.clone();
+    let tip = worktree::origin_head(repo, &item.branch)
+        .map_err(|e| RuleError::Adopt(known.clone().unwrap_or_default(), e.to_string()))?;
+    let from = known.unwrap_or_else(|| tip.clone());
+    if from == tip && item.known.head.is_some() {
+        return Ok(false);
+    }
+    worktree::adopt(repo, &item.worktree, &item.branch, &from, &tip)
+        .map_err(|e| RuleError::Adopt(tip.clone(), e.to_string()))?;
+    item.known.head = Some(tip);
+    item.coderabbit.satisfied = false;
+    Ok(true)
 }
 
 /// Adds a ruling to `next` and parks its work item on it

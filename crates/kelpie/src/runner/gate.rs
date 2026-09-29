@@ -47,10 +47,11 @@ impl Runner {
         };
         match pr.state {
             PullRequestState::Open => {}
-            // The maintainer merged it by hand, which is their own ruling.
+            // The maintainer merged it by hand, which is their own ruling,
+            // unless it is kelpie's `auto` merge whose answer was an error.
             PullRequestState::Merged => {
-                self.update(|item| item.phase = Phase::Done { merged: true })?;
-                return self.finish(true);
+                let notice = item.merge_tried.as_deref() == Some(pr.head.as_str());
+                return self.merged(item.issue, number, pr.head, notice);
             }
             PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
         }

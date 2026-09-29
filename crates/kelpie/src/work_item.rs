@@ -72,6 +72,10 @@ pub struct WorkItem {
     /// ruling on one. A second refusal raises a `merge-refused` ruling.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub merge_refused: bool,
+    /// The head of the last merge under `auto` that answered an error. A
+    /// pull request later found merged at it is kelpie's merge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_tried: Option<String>,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
 }

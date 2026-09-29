@@ -13,6 +13,7 @@ use super::Runner;
 use super::gate::{settled, short};
 use super::report::{Begin, StepReport};
 use crate::ports::{Checks, PullRequestState};
+use crate::settings::MergeAuthority;
 use crate::state::{Notice, RulingKind, StateError};
 use crate::work_item::{Phase, ReviewCallState, Turn};
 use crate::worktree::{self, Base};
@@ -107,6 +108,12 @@ impl Runner {
         else {
             return Ok(Begin::Idle);
         };
+        // The gate asks again once the project is no longer `auto`.
+        if auto && self.settings.merge_authority != MergeAuthority::Auto {
+            let reason = "the merge authority is no longer auto".to_owned();
+            return self.withdraw(issue, number, auto, reason);
+        }
+        let tried = item.merge_tried.clone();
         let repo = self.settings.forge.clone();
         let pr = match self.ports.forge.pull_request(&repo, number) {
             Ok(pr) => pr,
@@ -117,8 +124,8 @@ impl Runner {
             // Kelpie's own merge at this head, when a restart or a lost
             // answer hid it, still gets its notice under `auto`.
             PullRequestState::Merged => {
-                let notice = auto && pr.head == head;
-                return self.merged(issue, number, head, notice);
+                let notice = (auto && pr.head == head) || tried == Some(pr.head.clone());
+                return self.merged(issue, number, pr.head, notice);
             }
             PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
         }
@@ -197,7 +204,7 @@ impl Runner {
     }
 
     // The notice is saved with the merge, so it goes out exactly once.
-    fn merged(
+    pub(super) fn merged(
         &mut self,
         issue: u64,
         number: u64,
@@ -256,10 +263,15 @@ impl Runner {
             .work_item
             .as_ref()
             .expect("a merge is of a work item");
-        if item.merge_refused {
+        let refused_before = item.merge_refused;
+        let tried = Some(head.clone());
+        self.update(|item| {
+            item.merge_refused = true;
+            item.merge_tried = tried;
+        })?;
+        if refused_before {
             return self.raise(number, RulingKind::MergeRefused { head, reason });
         }
-        self.update(|item| item.merge_refused = true)?;
         self.withdraw(issue, number, true, reason)
     }
 

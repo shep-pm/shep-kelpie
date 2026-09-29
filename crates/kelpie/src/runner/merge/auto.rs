@@ -124,7 +124,7 @@ fn green_gates_merge_with_no_ruling_and_one_notice_after() {
     assert_eq!(
         alert.text,
         format!(
-            "Kelpie merged pull request #71 for issue #7 into main at {} on shep, \
+            "Pull request #71 for issue #7 merged into main at {} on shep, \
              every gate passed. Nothing to answer.",
             &head[..7]
         )
@@ -454,4 +454,173 @@ fn a_summon_coderabbit_never_answers_still_parks_on_a_ruling() {
     rig.clock.advance(REVIEW_WAIT - ANSWER_WAIT);
     let id = raised(step(&runner).unwrap());
     still_asks(&rig, &runner, id, "coderabbit-silent");
+}
+
+// After the gate passed under `auto` with CodeRabbit off: the draft marked
+// ready, and the merge waiting out its fresh run
+fn marked_ready_under_auto(project: &str) -> (Rig, Mutex<Runner>, String) {
+    let (rig, runner, head) = Rig::with_pull_request(project);
+    let runner = under_auto(&rig, runner);
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::MarkedReady { .. })
+    ));
+    (rig, runner, head)
+}
+
+#[test]
+fn a_merge_started_under_auto_asks_once_the_project_is_back_on_ask() {
+    let (rig, runner, head) = marked_ready_under_auto("shep");
+    drop(runner);
+    rig.edit_settings(|s| s.replace("merge_authority = \"auto\"", "merge_authority = \"ask\""));
+    let runner = rig.open().unwrap();
+    rig.clock.advance(CHECKS_SETTLE);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::MergeWithdrawn { reason, .. })
+            if reason == "the merge authority is no longer auto"
+    ));
+    let id = raised(rig.verdict(&runner));
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["merge_authority"], "ask");
+    assert_eq!(
+        status["rulings"][0]["kind"],
+        json!({ "kind": "merge", "head": head })
+    );
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id }));
+    rig.clock.advance(CHECKS_SETTLE);
+    assert_eq!(step(&runner).unwrap(), None, "a parked worker waits");
+    assert_eq!(rig.forge.merges(), []);
+}
+
+#[test]
+fn a_head_that_moves_while_the_merge_settles_is_not_merged() {
+    let (rig, runner, _) = marked_ready_under_auto("koji");
+    let by_hand = rig.push_by_hand("kelpie/7", "late.txt");
+    rig.clock.advance(CHECKS_SETTLE);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::MergeWithdrawn {
+            issue: 7,
+            pull_request: 71,
+            reason: format!("#71 moved to {}", &by_hand[..7]),
+        })
+    );
+    assert_eq!(rig.forge.merges(), []);
+}
+
+#[test]
+fn a_run_that_goes_red_while_the_merge_settles_is_not_merged() {
+    let (rig, runner, head) = marked_ready_under_auto("rotom");
+    rig.forge
+        .set_checks(&head, Checks::Failed(vec!["test".into()]));
+    rig.clock.advance(CHECKS_SETTLE);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::MergeWithdrawn {
+            issue: 7,
+            pull_request: 71,
+            reason: "CI on #71 is no longer green".into(),
+        })
+    );
+    assert_eq!(rig.forge.merges(), []);
+}
+
+#[test]
+fn a_merge_that_lands_after_kelpie_saw_its_error_still_gets_its_notice() {
+    let (rig, runner, head) = marked_ready_under_auto("golbat");
+    rig.forge.set_merges_down(true);
+    rig.clock.advance(CHECKS_SETTLE);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::MergeWithdrawn { .. })
+    ));
+    // GitHub finished the merge after kelpie's call gave up on it.
+    rig.forge.set_state(71, PullRequestState::Merged);
+    assert!(merged(rig.verdict(&runner)));
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Noticed {
+            issue: 7,
+            pull_request: 71,
+        })
+    );
+    let [(_, alert)] = rig.alerts.posts().try_into().unwrap();
+    assert!(alert.text.contains(&head[..7]), "{}", alert.text);
+}
+
+#[test]
+fn a_pull_request_merged_by_hand_under_auto_gets_no_notice() {
+    let (rig, runner, _) = Rig::with_pull_request("chelone");
+    let runner = under_auto(&rig, runner);
+    rig.forge.set_state(71, PullRequestState::Merged);
+    assert!(merged(step(&runner).unwrap()));
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(rig.alerts.posts(), []);
+}
+
+#[test]
+fn a_yes_that_vouches_for_a_new_head_sends_it_back_through_every_gate() {
+    let (rig, runner, head) = summoned_under_auto("reactmap");
+    rig.forge.coderabbit.review(71, &head, now(&rig) + 60, &[]);
+    rig.clock.advance(60);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::CodeRabbitSatisfied { .. })
+    ));
+    rig.forge
+        .set_checks(&head, Checks::Failed(vec!["lint".into()]));
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::CiFailed { .. })
+    ));
+    rig.claude
+        .script([Scripted::Say("Looked, changed nothing.")]);
+    step(&runner).unwrap();
+    let id = raised(rig.verdict(&runner));
+    step(&runner).unwrap(); // the alert
+
+    // The maintainer fixes the branch by hand and says yes.
+    let fixed = rig.push_by_hand("kelpie/7", "lint.txt");
+    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["phase"]["state"], "review");
+    assert_eq!(status["work_item"]["coderabbit"]["satisfied"], false);
+
+    rig.claude.script([Scripted::Text("CLEAN")]);
+    step(&runner).unwrap(); // review round 1, qwen: clean by default
+    step(&runner).unwrap(); // review round 2, claude: scripted clean above
+    rig.forge.set_checks(&fixed, Checks::Passed);
+    assert_eq!(
+        rig.verdict(&runner),
+        Some(StepReport::Summoned {
+            issue: 7,
+            pull_request: 71,
+            head: fixed,
+        })
+    );
+    assert_eq!(rig.forge.merges(), []);
+}
+
+#[test]
+fn a_yes_on_a_head_nobody_moved_goes_back_to_ci_under_auto() {
+    let (rig, runner, head) = Rig::with_pull_request("zeus");
+    let runner = under_auto(&rig, runner);
+    rig.forge
+        .set_checks(&head, Checks::Failed(vec!["lint".into()]));
+    rig.verdict(&runner);
+    rig.claude
+        .script([Scripted::Say("Looked, changed nothing.")]);
+    step(&runner).unwrap();
+    let id = raised(rig.verdict(&runner));
+    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+        "ci"
+    );
+    rig.forge.set_checks(&head, Checks::Passed);
+    rig.verdict(&runner); // marks the draft ready
+    rig.clock.advance(CHECKS_SETTLE);
+    assert!(merged(step(&runner).unwrap()));
 }
