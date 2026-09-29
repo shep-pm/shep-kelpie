@@ -31,6 +31,10 @@ const TITLE_LIMIT: usize = 80;
 // ever, and a passing outage of the forge's own must not cost the findings.
 const REFUSAL_WINDOW: u64 = 6 * 60 * 60;
 
+// The most of the forge's own words a ruling carries: an unreadable answer
+// can be a whole issue list, and the ruling goes to the webhook.
+const REASON_LIMIT: usize = 300;
+
 // The fewest characters of a finding's `what` a body may match on
 const MIN_BODY_MATCH: usize = 12;
 
@@ -157,7 +161,7 @@ impl Runner {
         }
         let kind = RulingKind::FollowUp {
             findings: pending.findings,
-            refused: Some(reason),
+            refused: Some(reason.chars().take(REASON_LIMIT).collect()),
         };
         self.raise(number, kind)
     }

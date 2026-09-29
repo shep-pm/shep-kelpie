@@ -77,10 +77,17 @@ impl Runner {
         if matches!(item.review_call, ReviewCallState::Running { .. }) {
             return Err(DropError::ReviewRunning(item.issue));
         }
+        // A merged pull request parked on its follow-up ruling is past its
+        // merge: dropping it would hand the merged pull request back as unmerged.
+        let follow_up_parked = |id| {
+            let ruling = self.state.rulings.iter().find(|r| r.id == id);
+            ruling.is_some_and(|r| matches!(r.kind, RulingKind::FollowUp { .. }))
+        };
         if matches!(
             item.phase,
             Phase::Merge { .. } | Phase::Done { merged: true }
-        ) {
+        ) || matches!(item.phase, Phase::Ruling { id } if follow_up_parked(id))
+        {
             return Err(DropError::Merging(item.issue));
         }
         if matches!(item.phase, Phase::CodeRabbit(_)) {

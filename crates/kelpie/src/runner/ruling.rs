@@ -669,7 +669,10 @@ fn question(
         RulingKind::FollowUp { findings, refused } => {
             let list: Vec<String> = findings
                 .iter()
-                .map(|f| format!("- {}:{} {}", f.file, f.line, f.what.trim()))
+                .map(|f| match f.line {
+                    0 => format!("- {} {}", f.file, f.what.trim()),
+                    line => format!("- {}:{line} {}", f.file, f.what.trim()),
+                })
                 .collect();
             let (said, files) = match refused {
                 Some(why) => (

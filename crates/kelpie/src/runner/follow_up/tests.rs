@@ -354,6 +354,103 @@ fn a_forge_that_keeps_refusing_is_retried_for_hours_and_then_the_maintainer_is_a
 }
 
 #[test]
+fn a_yes_while_the_forge_still_refuses_starts_a_fresh_window_not_an_instant_ruling() {
+    let found = [racy()];
+    let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
+    rig.forge.set_issues_down(true);
+    after_merge(&runner);
+    rig.clock.advance(6 * 60 * 60);
+    let Some(StepReport::Ruling { id, .. }) = after_merge(&runner) else {
+        panic!("the maintainer was not asked after the window");
+    };
+
+    // Still down when the maintainer says yes.
+    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+    assert!(matches!(
+        after_merge(&runner),
+        Some(StepReport::GateFailed { .. })
+    ));
+    rig.clock.advance(5 * 60 * 60);
+    assert!(
+        matches!(after_merge(&runner), Some(StepReport::GateFailed { .. })),
+        "the yes bought a whole window"
+    );
+    rig.clock.advance(60 * 60);
+    assert!(matches!(
+        after_merge(&runner),
+        Some(StepReport::Ruling { .. })
+    ));
+}
+
+#[test]
+fn a_finding_the_forge_takes_starts_the_refusal_window_again() {
+    let found = [racy(), finding("src/main.rs", "leaks a handle")];
+    let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
+    rig.forge.set_issues_down(true);
+    after_merge(&runner);
+    rig.clock.advance(5 * 60 * 60);
+
+    // It takes one finding, then refuses the other.
+    rig.forge.set_issues_down(false);
+    rig.forge.set_creates_left(1);
+    assert!(matches!(
+        after_merge(&runner),
+        Some(StepReport::GateFailed { .. })
+    ));
+    assert_eq!(rig.forge.created().len(), 1);
+    rig.clock.advance(60 * 60);
+    assert!(
+        matches!(after_merge(&runner), Some(StepReport::GateFailed { .. })),
+        "six hours since the first refusal, but the forge took one since"
+    );
+    rig.clock.advance(5 * 60 * 60);
+    assert!(matches!(
+        after_merge(&runner),
+        Some(StepReport::Ruling { .. })
+    ));
+}
+
+#[test]
+fn what_a_ruling_says_of_the_forges_refusal_is_cut_short() {
+    let found = [racy()];
+    let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
+    rig.forge.set_issues_error(&"x".repeat(5000));
+    after_merge(&runner);
+    rig.clock.advance(6 * 60 * 60);
+
+    let Some(StepReport::Ruling { question, .. }) = after_merge(&runner) else {
+        panic!("the maintainer was not asked after the window");
+    };
+    assert!(question.len() < 1000, "{}", question.len());
+    assert!(question.contains("xxx"), "{question}");
+}
+
+#[test]
+fn a_finding_with_no_line_is_asked_about_without_one() {
+    let found = Finding { line: 0, ..racy() };
+    let (_, _, _, question) = ask_after_the_merge(Rig::new("shep"), &[found]);
+
+    assert!(question.contains("- src/lib.rs looks racy"), "{question}");
+    assert!(!question.contains("lib.rs:0"), "{question}");
+}
+
+#[test]
+fn drop_leaves_a_merged_pull_request_waiting_on_its_follow_up_ruling_alone() {
+    let (rig, runner, _, _) = ask_after_the_merge(Rig::new("shep"), &[racy()]);
+
+    let reply = rig.ask(&runner, "drop", None);
+    assert!(
+        reply["error"].as_str().unwrap().contains("is merging"),
+        "{reply}"
+    );
+    assert!(rig.ask(&runner, "status", None)["work_item"].is_object());
+    assert!(
+        rig.worktree_7().exists(),
+        "the merged item is not cleaned up as an unmerged one"
+    );
+}
+
+#[test]
 fn a_no_to_a_forge_that_kept_refusing_drops_the_findings() {
     let found = [racy()];
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));

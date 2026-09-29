@@ -49,7 +49,10 @@ pub(crate) struct FakeForge {
     merges: Arc<Mutex<Vec<(u64, String)>>>,
     issues: Arc<Mutex<Vec<OpenIssue>>>,
     created: Arc<Mutex<Vec<CreatedIssue>>>,
-    issues_down: Arc<AtomicBool>,
+    // Why listing and opening issues fail, while they do
+    issues_down: Arc<Mutex<Option<String>>>,
+    // How many more issues may open before every later one fails
+    creates_left: Arc<Mutex<Option<usize>>>,
     reviews: Arc<Mutex<HashMap<u64, MaintainerReview>>>,
     // A state file read as each comment is posted, and what it held then
     watched: Arc<Mutex<Option<PathBuf>>>,
@@ -117,6 +120,7 @@ impl FakeForge {
             issues: Arc::default(),
             created: Arc::default(),
             issues_down: Arc::default(),
+            creates_left: Arc::default(),
             reviews: Arc::default(),
             watched: Arc::default(),
             saved_at_comment: Arc::default(),
@@ -357,7 +361,18 @@ impl FakeForge {
 
     /// Makes listing and opening issues fail, or work again
     pub(crate) fn set_issues_down(&self, down: bool) {
-        self.issues_down.store(down, Ordering::SeqCst);
+        let why = down.then(|| "issues are down".to_owned());
+        *self.issues_down.lock().unwrap() = why;
+    }
+
+    /// Makes listing and opening issues fail with `error`, verbatim
+    pub(crate) fn set_issues_error(&self, error: &str) {
+        *self.issues_down.lock().unwrap() = Some(error.to_owned());
+    }
+
+    /// Lets `n` more issues open, then makes every later one fail
+    pub(crate) fn set_creates_left(&self, n: usize) {
+        *self.creates_left.lock().unwrap() = Some(n);
     }
 
     /// Every merge made, with the head it was held to
@@ -583,8 +598,8 @@ impl Forge for FakeForge {
     }
 
     fn open_issues(&self, _repo: &ForgeSlug) -> Result<Vec<OpenIssue>, ForgeError> {
-        if self.issues_down.load(Ordering::SeqCst) {
-            return Err(ForgeError::Failed("issues are down".into()));
+        if let Some(why) = &*self.issues_down.lock().unwrap() {
+            return Err(ForgeError::Failed(why.clone()));
         }
         Ok(self.issues.lock().unwrap().clone())
     }
@@ -597,8 +612,14 @@ impl Forge for FakeForge {
         body: &str,
         labels: &[&str],
     ) -> Result<u64, ForgeError> {
-        if self.issues_down.load(Ordering::SeqCst) {
-            return Err(ForgeError::Failed("issues are down".into()));
+        if let Some(why) = &*self.issues_down.lock().unwrap() {
+            return Err(ForgeError::Failed(why.clone()));
+        }
+        if let Some(left) = self.creates_left.lock().unwrap().as_mut() {
+            if *left == 0 {
+                return Err(ForgeError::Failed("issues are down".into()));
+            }
+            *left -= 1;
         }
         let mut created = self.created.lock().unwrap();
         let number = 900 + created.len() as u64;
