@@ -91,6 +91,16 @@ fn lift_heredocs(line: &str) -> (String, Vec<String>) {
             continue;
         } else if top != Some('"') {
             match ch {
+                // A comment's apostrophes are not quotes, as in `split`.
+                '#' if i == 0 || chars[i - 1].is_whitespace() => {
+                    let end = chars[i..]
+                        .iter()
+                        .position(|c| *c == '\n')
+                        .map_or(chars.len(), |n| i + n);
+                    out.extend(&chars[i..end]);
+                    i = end;
+                    continue;
+                }
                 '\'' | '"' => stack.push(ch),
                 '(' => stack.push('('),
                 ')' if top == Some('(') => {
@@ -279,6 +289,8 @@ fn words(segment: &[char]) -> Vec<String> {
     while i < segment.len() {
         let ch = segment[i];
         match ch {
+            // A comment runs to the segment's end, a newline.
+            '#' if !started => break,
             c if c.is_whitespace() || c == '(' || c == ')' => {
                 if started {
                     out.push(std::mem::take(&mut word));
@@ -424,6 +436,13 @@ mod tests {
         let gh = all.iter().find(|c| c.words[0] == "gh").unwrap();
         assert_eq!(gh.words[..4], w(&["gh", "pr", "create", "--title"]));
         assert_eq!(gh.heredocs, ["the body"]);
+    }
+
+    #[test]
+    fn a_heredoc_after_a_comment_with_an_apostrophe_is_still_lifted() {
+        let all = commands("# don't push yet\ngit commit -F - <<EOF\nfix: x\nEOF\ngit push");
+        assert_eq!(all[0].heredocs, ["fix: x"], "{all:?}");
+        assert_eq!(all[1].words, w(&["git", "push"]));
     }
 
     #[test]
