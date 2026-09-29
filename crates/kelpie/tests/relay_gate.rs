@@ -12,7 +12,11 @@ const KELPIE: &str = env!("CARGO_BIN_EXE_kelpie");
 
 // Claude Code runs a hook's command through the shell, with the call on stdin.
 fn hook(tool: &str, command: &str) -> Output {
-    let program = BarePath::of(Path::new(KELPIE)).unwrap();
+    hook_run_as(KELPIE, tool, command)
+}
+
+fn hook_run_as(kelpie_path: &str, tool: &str, command: &str) -> Output {
+    let program = BarePath::of(Path::new(kelpie_path)).unwrap();
     let settings = kelpie::relay::settings(Path::new("/k/shep"), program);
     let line = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
         .as_str()
@@ -55,4 +59,13 @@ fn shep_is_refused_with_the_reason() {
         stderr.contains("Tell the maintainer what failed"),
         "{stderr}"
     );
+}
+
+// Claude Code lets a call through on any hook exit but 2.
+#[test]
+fn a_kelpie_that_cannot_run_still_refuses() {
+    let gone = tempfile::tempdir().unwrap().path().join("kelpie");
+    let gone = gone.to_str().unwrap();
+    let output = hook_run_as(gone, "Bash", &format!("{gone} relay-yes shep 3"));
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
 }

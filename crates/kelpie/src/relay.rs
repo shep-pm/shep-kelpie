@@ -66,6 +66,9 @@ impl fmt::Display for BarePath<'_> {
 /// The `env` block hands the relay's shell kelpie's `shep_home`: a session
 /// started by a runner does not inherit the runner's environment, and
 /// `kelpie relay-*` would otherwise trigger the default shepherd.
+///
+/// Claude Code blocks a call only on a hook's exit 2, so any other failure
+/// of the gate, such as kelpie gone from its path, is turned into one.
 pub fn settings(shep_home: &Path, kelpie: BarePath<'_>) -> Value {
     json!({
         "env": { "SHEP_HOME": shep_home.to_string_lossy() },
@@ -79,7 +82,7 @@ pub fn settings(shep_home: &Path, kelpie: BarePath<'_>) -> Value {
         "hooks": {
             "PreToolUse": [{
                 "matcher": "*",
-                "hooks": [{ "type": "command", "command": format!("{kelpie} relay-gate {kelpie}") }],
+                "hooks": [{ "type": "command", "command": format!("{kelpie} relay-gate {kelpie} || exit 2") }],
             }],
         },
     })
@@ -178,14 +181,13 @@ mod tests {
         let s = settings();
         let hook = &s["hooks"]["PreToolUse"][0];
         assert_eq!(hook["matcher"], "*");
-        let command = hook["hooks"][0]["command"].as_str().unwrap();
-        let [program, role, gate_path] = command.split(' ').collect::<Vec<_>>()[..] else {
-            panic!("{command}");
-        };
-        assert_eq!((program, role, gate_path), (KELPIE, "relay-gate", KELPIE));
+        assert_eq!(
+            hook["hooks"][0]["command"],
+            "/k/bin/kelpie relay-gate /k/bin/kelpie || exit 2"
+        );
         let judge = |command: &str| {
             let call = json!({ "tool_name": "Bash", "tool_input": { "command": command } });
-            gate::judge(call.to_string().as_bytes(), gate_path)
+            gate::judge(call.to_string().as_bytes(), KELPIE)
         };
         for denied in [
             "shep trigger shep rule '1 yes'",
