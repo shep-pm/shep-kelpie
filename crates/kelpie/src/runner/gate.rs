@@ -2,7 +2,8 @@
 //!
 //! Each step looks once at the pull request's head. A label, ready or head
 //! change kelpie did not make parks the worker before anything else. A
-//! branch without the latest `main` is rebased and pushed, and a conflict is
+//! branch without the latest `main` is rebased and pushed, or merged when
+//! it is adopted or holds a merge already, and a conflict is
 //! the worker's next turn, naming the files. A conflict the worker left
 //! standing parks it on a ruling. A pending run, or none yet, waits for the
 //! next step. A red run is the worker's next turn, naming the checks that
@@ -167,7 +168,15 @@ impl Runner {
             .as_ref()
             .expect("a rebase is of a work item");
         let issue = item.issue;
-        let outcome = worktree::rebase(&self.settings.repo, &item.worktree, &item.branch, head);
+        // An adopted branch's commits are someone else's, so it is merged, never rewritten.
+        let rewrite = !item.adopted;
+        let outcome = worktree::rebase(
+            &self.settings.repo,
+            &item.worktree,
+            &item.branch,
+            head,
+            rewrite,
+        );
         match outcome {
             Ok(Rebase::Pushed(rebased)) => {
                 let (seen, since) = (Some(rebased.clone()), self.ports.clock.now());

@@ -83,8 +83,8 @@ pub trait Forge: Send {
     /// request, or its answer cannot be read.
     fn pull_request(&self, repo: &ForgeSlug, number: u64) -> Result<PullRequest, ForgeError>;
 
-    /// Pull request `number` on `repo` as a rework reads it: its branch and
-    /// the maintainer's latest review
+    /// Pull request `number` on `repo` as a rework or an adoption reads it:
+    /// its branch, what it closes and the maintainer's latest review
     ///
     /// # Errors
     ///
@@ -165,11 +165,19 @@ pub struct PullRequest {
     pub labels: Vec<String>,
 }
 
-/// A pull request as a rework reads it
+/// A pull request as a rework or an adoption reads it
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reviewed {
     /// Open, merged or closed
     pub state: PullRequestState,
+    /// Its title
+    pub title: String,
+    /// Its body, as written
+    pub body: String,
+    /// The issues on the same repo that it closes when it merges
+    pub closes: Vec<u64>,
+    /// The branch it merges into
+    pub base: String,
     /// The branch it merges from
     pub branch: String,
     /// Whether that branch is on a fork rather than the repo itself
@@ -665,8 +673,8 @@ pub struct Verdict {
 
 /// Runs one round of the maintainer's qwen-review script
 pub trait Reviewer: Send + Sync {
-    /// Runs round `round` against `worktree`'s diff from `origin/main`,
-    /// writing the script's own findings under `out`
+    /// Runs round `round` against `worktree`'s diff from `base`, usually
+    /// `origin/main`, writing the script's own findings under `out`
     ///
     /// Feeds hunk files for anything the script skips as too large, folding
     /// their findings back in against the original file.
@@ -678,6 +686,7 @@ pub trait Reviewer: Send + Sync {
     fn round(
         &self,
         worktree: &std::path::Path,
+        base: &str,
         out: &std::path::Path,
         round: u32,
     ) -> Result<Vec<Finding>, ReviewerError>;

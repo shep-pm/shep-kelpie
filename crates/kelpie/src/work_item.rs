@@ -28,6 +28,15 @@ pub struct WorkItem {
     /// latest review. Its worktree starts at the branch's head on `origin`.
     #[serde(default)]
     pub rework: bool,
+    /// Whether it adopts an open pull request kelpie didn't open. Its
+    /// worktree starts at the branch's head on `origin`, and kelpie never
+    /// rewrites the branch's commits.
+    #[serde(default)]
+    pub adopted: bool,
+    /// An adopted pull request's head as it arrived, which its qwen-review
+    /// loop diffs against instead of `origin/main`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arrived: Option<String>,
     /// Its worktree
     pub worktree: PathBuf,
     /// Its worker's build folder
@@ -369,6 +378,14 @@ pub enum ReviewStage {
 }
 
 impl WorkItem {
+    /// The commit its qwen-review loop diffs against: `origin/main`, or the
+    /// head an adopted pull request arrived with, so none of that is reviewed
+    pub fn review_base(&self) -> String {
+        self.arrived
+            .clone()
+            .unwrap_or_else(|| format!("origin/{}", crate::worktree::BASE))
+    }
+
     /// What its calls have cost so far
     pub fn cost(&self) -> Cost {
         Cost(self.calls.iter().map(|c| c.cost.0).sum())
@@ -461,6 +478,7 @@ mod tests {
                 "title": "Add a thing",
                 "branch": "kelpie/42",
                 "rework": false,
+                "adopted": false,
                 "worktree": "/k/wt/shep/42",
                 "build": "/k/targets/shep/42",
                 "worker": { "model": "claude-opus-5-5", "effort": "medium" },
@@ -661,11 +679,21 @@ mod tests {
     }
 
     #[test]
-    fn a_work_item_saved_before_reworks_is_not_one() {
+    fn the_review_loop_diffs_from_main_unless_a_pull_request_arrived_at_a_head() {
+        let mut item = a_work_item();
+        assert_eq!(item.review_base(), "origin/main");
+        item.arrived = Some("c0ffee".into());
+        assert_eq!(item.review_base(), "c0ffee");
+    }
+
+    #[test]
+    fn a_work_item_saved_before_reworks_and_adoptions_is_neither() {
         let mut value = serde_json::to_value(a_work_item()).unwrap();
-        value.as_object_mut().unwrap().remove("rework");
+        let fields = value.as_object_mut().unwrap();
+        fields.remove("rework");
+        fields.remove("adopted");
         let item: WorkItem = serde_json::from_value(value).unwrap();
-        assert!(!item.rework);
+        assert!(!item.rework && !item.adopted);
     }
 
     #[test]

@@ -11,12 +11,12 @@ use super::{Answer, Runner};
 use crate::board::{Skip, WorkerModel};
 use crate::ports::{SessionId, Timestamp};
 use crate::relay::Settled;
-use crate::state::{LeaseHeld, Ruling, RunState, StateError};
+use crate::state::{LeaseHeld, Ruling, RunState, StateError, Waiting};
 use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Turn, WorkItem};
 
 /// The triggers a runner answers
-pub const ACTIONS: [&str; 9] = [
-    "status", "start", "pause", "add", "rework", "rule", RELAY_RULE, "gate", "drop",
+pub const ACTIONS: [&str; 10] = [
+    "status", "start", "pause", "add", "rework", "adopt", "rule", RELAY_RULE, "gate", "drop",
 ];
 
 /// `rule`, sent by the relay: the same answer, but the relay is not told
@@ -37,6 +37,8 @@ pub struct Status<'a> {
     pub since: Timestamp,
     /// The work item in flight
     pub work_item: Option<WorkItemStatus<'a>>,
+    /// Pull requests adopted and waiting for the work item in flight, oldest first
+    pub adopted: &'a [Waiting],
     /// Ready issues the board passed over on its last poll, and why
     pub skipped: &'a [Skip],
     /// Rulings waiting on the maintainer, oldest first
@@ -56,6 +58,8 @@ pub struct WorkItemStatus<'a> {
     pub title: &'a str,
     /// Its branch
     pub branch: &'a str,
+    /// Whether it adopts a pull request kelpie didn't open
+    pub adopted: bool,
     /// Its worktree
     pub worktree: &'a Path,
     /// The model and effort its worker runs on
@@ -86,6 +90,7 @@ impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
             issue: item.issue,
             title: &item.title,
             branch: &item.branch,
+            adopted: item.adopted,
             worktree: &item.worktree,
             worker: &item.worker,
             session: &item.session,
@@ -108,6 +113,7 @@ enum Request {
     Pause,
     Add(u64),
     Rework(u64),
+    Adopt(u64),
     Rule(u64, Answer),
     RelayRule(u64, Answer),
     Gate,
@@ -116,10 +122,11 @@ enum Request {
 
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
 ///
-/// Blank params count as none. `add` takes an issue number, `rework` a pull
-/// request number, `rule` and `relay-rule` take `<id> yes`, `<id> no <note>`
-/// or `<id> answer <text>`, and every other action takes nothing. A ruling
-/// the relay was sent, settled by anything but `relay-rule`, is told to it.
+/// Blank params count as none. `add` takes an issue number, `rework` and
+/// `adopt` a pull request number, `rule` and `relay-rule` take `<id> yes`,
+/// `<id> no <note>` or `<id> answer <text>`, and every other action takes
+/// nothing. A ruling the relay was sent, settled by anything but
+/// `relay-rule`, is told to it.
 pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> String {
     let error = |message: String| serde_json::json!({ "error": message }).to_string();
     let request = match read(action, params.map(str::trim).filter(|p| !p.is_empty())) {
@@ -143,6 +150,7 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
         Request::Pause => runner.pause().map_err(|e| e.to_string()),
         Request::Add(issue) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
         Request::Rework(number) => runner.rework(number).map(drop).map_err(|e| e.to_string()),
+        Request::Adopt(number) => runner.adopt(number).map_err(|e| e.to_string()),
         Request::Rule(id, answer) | Request::RelayRule(id, answer) => {
             runner.rule(id, answer).map_err(|e| e.to_string())
         }
@@ -168,6 +176,10 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
             .map(Request::Rework)
             .ok_or_else(|| format!("{p:?} is not a pull request number")),
         ("rework", None) => Err("`rework` takes a pull request number".into()),
+        ("adopt", Some(p)) => number(p)
+            .map(Request::Adopt)
+            .ok_or_else(|| format!("{p:?} is not a pull request number")),
+        ("adopt", None) => Err("`adopt` takes a pull request number".into()),
         ("rule", Some(p)) => read_rule(p)
             .map(|(id, answer)| Request::Rule(id, answer))
             .ok_or_else(|| format!("`{action}` {RULE_USAGE}, not {p:?}")),
@@ -338,6 +350,7 @@ mod tests {
                 "run": "paused",
                 "since": Rig::EPOCH,
                 "work_item": null,
+                "adopted": [],
                 "skipped": [],
                 "rulings": [],
                 "leases": [],
@@ -352,7 +365,7 @@ mod tests {
         let runner = rig.open().unwrap();
         for action in ACTIONS
             .into_iter()
-            .filter(|a| !["rework", "rule", RELAY_RULE, "gate", "drop"].contains(a))
+            .filter(|a| !["rework", "adopt", "rule", RELAY_RULE, "gate", "drop"].contains(a))
         {
             let params = (action == "add").then_some("7");
             assert_eq!(
@@ -364,6 +377,10 @@ mod tests {
         assert_eq!(
             rig.ask(&runner, "rework", Some("71")),
             json!({ "error": "the work item for #7 is in flight" })
+        );
+        assert_eq!(
+            rig.ask(&runner, "adopt", Some("71")),
+            json!({ "error": "cannot read pull request #71: gh failed: no pull request #71" })
         );
         assert_eq!(
             rig.ask(&runner, "rule", Some("1 yes")),

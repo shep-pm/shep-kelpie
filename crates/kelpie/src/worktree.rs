@@ -182,8 +182,8 @@ pub fn prepare(
 
 /// Removes a work item's worktree, its branch and its build folder
 ///
-/// `remote` also deletes the branch on `origin`. Whatever is already gone
-/// is skipped, so a removal cut short can run again.
+/// `remote` also deletes the branch on `origin`. Whatever is already gone,
+/// a branch the forge deleted first included, is skipped, so a removal cut short can run again.
 ///
 /// # Errors
 ///
@@ -212,8 +212,17 @@ pub fn remove(
     if git(repo, ["rev-parse", "--verify", "--quiet", &full_ref]).is_ok() {
         git(repo, ["branch", "--quiet", "-D", branch])?;
     }
-    if remote && !git(repo, ["ls-remote", "--heads", "origin", &full_ref])?.is_empty() {
-        git(repo, ["push", "--quiet", "origin", "--delete", &full_ref])?;
+    if remote && on_origin(repo, &full_ref)? {
+        // The forge deletes a merged head branch itself on some repos, and
+        // may do it between the check above and this push. Git's error for
+        // that varies by version and host, so a failed delete is judged by
+        // whether the ref is still there.
+        let deleted = git(repo, ["push", "--quiet", "origin", "--delete", &full_ref]);
+        if let Err(e) = deleted
+            && on_origin(repo, &full_ref)?
+        {
+            return Err(e);
+        }
     }
     match std::fs::remove_dir_all(build) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => Err(WorktreeError::Remove {
@@ -222,6 +231,11 @@ pub fn remove(
         }),
         _ => Ok(()),
     }
+}
+
+/// Whether `full_ref` is a branch on `origin` right now, asked of the remote
+fn on_origin(repo: &Path, full_ref: &str) -> Result<bool, WorktreeError> {
+    Ok(!git(repo, ["ls-remote", "--heads", "origin", full_ref])?.is_empty())
 }
 
 /// Where a pull request's head stands against `origin`, just fetched
@@ -278,6 +292,15 @@ pub fn origin_head(repo: &Path, branch: &str) -> Result<String, WorktreeError> {
     git(repo, ["fetch", "--quiet", "origin", branch])?;
     let tracking = format!("refs/remotes/origin/{branch}");
     git(repo, ["rev-parse", "--verify", "--quiet", &tracking])
+}
+
+/// The commit `worktree` has checked out
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn head(repo: &Path, worktree: &Path) -> Result<String, WorktreeError> {
+    trusted(repo, worktree)?(&["rev-parse", "HEAD"])
 }
 
 /// Moves the worktree's branch from `from`, the head kelpie knew, to `to`
@@ -338,10 +361,11 @@ pub enum Rebase {
 /// Catches the worktree's branch, at `head`, up with `origin/main` and pushes it
 ///
 /// A branch with a merge commit in it (the worker's resolution of an earlier
-/// conflict) is merged with `origin/main`, and pushed without force. Any
-/// other is rebased, and the push is forced with a lease on `head`, so it
-/// fails rather than drop a commit pushed since. A conflict aborts the rebase and names its files, and a failed push
-/// puts the branch back at `head`. Run [`base_of`] first, which fetches.
+/// conflict), or one whose commits are not kelpie's to `rewrite`, is merged
+/// with `origin/main` and pushed without force. Any other is rebased, and the
+/// push is forced with a lease on `head`, so it fails rather than drop a
+/// commit pushed since. A conflict aborts and names its files, and a failed
+/// push puts the branch back at `head`. Run [`base_of`] first, which fetches.
 ///
 /// # Errors
 ///
@@ -351,6 +375,7 @@ pub fn rebase(
     worktree: &Path,
     branch: &str,
     head: &str,
+    rewrite: bool,
 ) -> Result<Rebase, WorktreeError> {
     let in_worktree = trusted(repo, worktree)?;
     let full_ref = format!("refs/heads/{branch}");
@@ -384,7 +409,8 @@ pub fn rebase(
     // and with them the worker's hand resolution of an earlier conflict. A
     // branch holding one is caught up by merging instead, and pushed plain.
     let ahead = format!("{base}..HEAD");
-    let merging = !in_worktree(&["rev-list", "--merges", "--max-count=1", &ahead])?.is_empty();
+    let merging =
+        !rewrite || !in_worktree(&["rev-list", "--merges", "--max-count=1", &ahead])?.is_empty();
     let (verb, abort): (&[&str], &[&str]) = if merging {
         (
             &["merge", "--quiet", "--no-edit", &base],
