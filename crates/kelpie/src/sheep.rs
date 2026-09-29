@@ -18,6 +18,7 @@ use std::time::Duration;
 use crate::adapters::{
     ClaudeCli, Curl, Gh, LocalReviewer, RelayCli, ShepLeases, ShotsCli, SystemClock,
 };
+use crate::coderabbit::CodeRabbit;
 use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
 use crate::ports::{Leases, Ports};
@@ -79,6 +80,7 @@ fn serve(project: &str) -> Result<(), String> {
         forge: Box::new(Gh),
         meter: Box::new(claude.meter()),
         reviewer: Arc::new(reviewer.clone()),
+        review_bot: Arc::new(CodeRabbit),
         shots: Arc::new(shots.clone()),
         relay: Arc::new(RelayCli::new(
             home.clone(),

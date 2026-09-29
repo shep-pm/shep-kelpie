@@ -23,6 +23,7 @@ pub mod ports;
 pub mod preview;
 pub mod profile;
 pub mod relay;
+pub mod review_bot;
 pub mod runner;
 pub mod schema;
 pub mod settings;

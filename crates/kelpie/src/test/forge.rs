@@ -9,11 +9,11 @@ use std::sync::{Arc, Mutex};
 
 use super::coderabbit::FakeCodeRabbit;
 use crate::board::{Blocker, OpenPullRequest, READY, ReadyIssue};
-use crate::coderabbit::Activity;
 use crate::ports::{
     Checks, Forge, ForgeError, Issue, MaintainerReview, NewLabel, PullRequest, PullRequestState,
     Reviewed, Visibility,
 };
+use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
 
 /// A forge whose repo is public and whose every issue exists, unless a
@@ -567,9 +567,15 @@ impl Forge for FakeForge {
         Ok(())
     }
 
-    fn coderabbit(&self, _repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError> {
+    // One store for every bot, since a test runs one; the login is recorded.
+    fn review_bot(
+        &self,
+        _repo: &ForgeSlug,
+        number: u64,
+        login: Login<'_>,
+    ) -> Result<Activity, ForgeError> {
         self.opened(number)?;
-        self.coderabbit.activity(number)
+        self.coderabbit.activity(number, login.rest)
     }
 
     fn resolve_thread(&self, _repo: &ForgeSlug, thread: &str) -> Result<(), ForgeError> {

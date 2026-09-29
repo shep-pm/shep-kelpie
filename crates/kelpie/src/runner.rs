@@ -23,6 +23,7 @@ use crate::work_item::{
 mod adopt;
 mod alert;
 mod claude_files;
+#[cfg(test)]
 mod coderabbit;
 mod dispatch;
 mod gate;
@@ -35,6 +36,7 @@ mod replies;
 mod report;
 mod reread;
 mod review;
+mod review_bot;
 mod rework;
 mod ruling;
 #[cfg(test)]
@@ -264,6 +266,13 @@ impl Runner {
         &self.settings
     }
 
+    fn names(&self) -> Names<'_> {
+        Names {
+            project: self.project.as_str(),
+            bot: self.ports.review_bot.name(),
+        }
+    }
+
     /// The project's state as `status` reports it
     pub fn status(&self) -> Status<'_> {
         Status {
@@ -488,6 +497,13 @@ fn check_local(settings: &Settings, ports: &Ports) -> Result<(), SettingsError> 
         })
 }
 
+// What a ruling's question names: its project, and the review bot it may be about.
+#[derive(Debug, Clone, Copy)]
+struct Names<'a> {
+    project: &'a str,
+    bot: &'a str,
+}
+
 fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError> {
     if !settings.coderabbit.enabled {
         return Ok(());
@@ -500,8 +516,9 @@ fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError>
     Err(SettingsError::Invalid {
         setting: "coderabbit.enabled",
         reason: format!(
-            "{} is {visibility}, and CodeRabbit's free plan reviews public repos only",
-            settings.forge.as_str()
+            "{} is {visibility}, and {}'s free plan reviews public repos only",
+            settings.forge.as_str(),
+            ports.review_bot.name()
         ),
     }
     .into())

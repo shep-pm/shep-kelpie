@@ -1,18 +1,18 @@
 //! GitHub, through the `gh` command line
 
 mod board;
-pub(crate) mod coderabbit;
 mod review;
+pub(crate) mod review_bot;
 
 use std::process::{Command, Stdio};
 
 use serde::Deserialize;
 
 use crate::board::{OpenPullRequest, ReadyIssue};
-use crate::coderabbit::Activity;
 use crate::ports::{
     Checks, Forge, ForgeError, Issue, NewLabel, PullRequest, PullRequestState, Reviewed, Visibility,
 };
+use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
 
 /// GitHub, through the `gh` command line
@@ -157,15 +157,20 @@ impl Forge for Gh {
         label: &str,
         on: bool,
     ) -> Result<(), ForgeError> {
-        coderabbit::label(repo, number, label, on)
+        review_bot::label(repo, number, label, on)
     }
 
-    fn coderabbit(&self, repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError> {
-        coderabbit::activity(repo, number)
+    fn review_bot(
+        &self,
+        repo: &ForgeSlug,
+        number: u64,
+        login: Login<'_>,
+    ) -> Result<Activity, ForgeError> {
+        review_bot::activity(repo, number, login)
     }
 
     fn resolve_thread(&self, _repo: &ForgeSlug, thread: &str) -> Result<(), ForgeError> {
-        coderabbit::resolve(thread)
+        review_bot::resolve(thread)
     }
 
     fn merge(&self, repo: &ForgeSlug, number: u64, head: &str) -> Result<(), ForgeError> {
