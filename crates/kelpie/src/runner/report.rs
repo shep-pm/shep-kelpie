@@ -473,7 +473,7 @@ pub(super) enum Spent {
         session_cost: Cost,
     },
     /// A local round that ran, however it ended
-    Qwen,
+    Local,
 }
 
 /// What a [`ReviewCall`] came back with, and what it spent
@@ -486,7 +486,7 @@ pub(super) struct Reviewed {
 
 /// What a [`ReviewCall`] came back with
 pub(super) enum ReviewResult {
-    /// A round's raw findings, from qwen or a Claude round
+    /// A round's raw findings, from the local round or a Claude round
     Findings(Result<Vec<Finding>, String>),
     /// The judge's verdict on one finding
     Verdict(Result<Verdict, String>),

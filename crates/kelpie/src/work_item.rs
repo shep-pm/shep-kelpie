@@ -718,11 +718,21 @@ mod tests {
     fn rounds_alternate_local_first_and_are_all_claudes_without_one() {
         let review = Review::first();
         assert_eq!(review.reviewer(true), ReviewerKind::Local);
-        assert_eq!(review.reviewer(false), ReviewerKind::Claude);
         assert_eq!(
             Review { round: 2, ..review }.reviewer(true),
             ReviewerKind::Claude
         );
+        for round in 1..=3 {
+            let review = Review {
+                round,
+                ..Review::first()
+            };
+            assert_eq!(
+                review.reviewer(false),
+                ReviewerKind::Claude,
+                "round {round}"
+            );
+        }
     }
 
     #[test]

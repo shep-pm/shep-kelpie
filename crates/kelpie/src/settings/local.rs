@@ -132,6 +132,7 @@ impl TryFrom<i64> for ContextSize {
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         match u32::try_from(value) {
             Ok(tokens) if tokens >= MIN_CONTEXT => Ok(Self(tokens)),
+            Err(_) if value > 0 => Err("is too large: give the model's context in tokens"),
             _ => Err("must be at least 4096 tokens"),
         }
     }
@@ -233,6 +234,8 @@ mod tests {
                 "{context}: {err}"
             );
         }
+        let err = with_table(&endpoint("http://x", "5000000000")).unwrap_err();
+        assert!(err.contains("is too large"), "{err}");
         let err = with_table("[review.local]\nkind = \"endpoint\"\nurl = \"http://x\"\n");
         assert!(err.unwrap_err().contains("missing field `model`"));
     }
