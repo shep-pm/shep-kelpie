@@ -40,7 +40,6 @@ mod ruling;
 #[cfg(test)]
 mod several;
 mod shots;
-#[cfg(test)]
 mod timings;
 mod trigger;
 mod turn;

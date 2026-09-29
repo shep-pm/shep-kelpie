@@ -40,7 +40,7 @@ kill_timeout = "10s"
 
 `kill_timeout` matters too. `shep stop` and `restart` give a runner only that long after the shutdown message, 1.6s by default, then SIGKILL. A runner needs about 7s to stop cleanly, so set it to `10s` or more.
 
-Then `SHEP_HOME=~/.kelpie/shep shep trigger shep status`. `shep describe shep` labels each Claude session the runner starts with its issue and role, such as `#114 worker`.
+Then `SHEP_HOME=~/.kelpie/shep shep trigger shep status`. `shep trigger shep timings 20` totals where the time of the last 20 finished work items went, phase by phase, from the run history (10 items when left out); `jq -r .table` prints the totals as a table. `shep describe shep` labels each Claude session the runner starts with its issue and role, such as `#114 worker`.
 
 ## The local round
 

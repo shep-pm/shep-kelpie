@@ -18,8 +18,9 @@ use crate::work_item::{
 };
 
 /// The triggers a runner answers
-pub const ACTIONS: [&str; 10] = [
+pub const ACTIONS: [&str; 11] = [
     "status", "start", "pause", "add", "rework", "adopt", "rule", RELAY_RULE, "gate", "drop",
+    "timings",
 ];
 
 /// `rule`, sent by the relay: the same answer, but the relay is not told
@@ -136,6 +137,7 @@ enum Request {
     RelayRule(u64, Answer),
     Gate(Option<u64>),
     Drop(Option<u64>),
+    Timings(usize),
 }
 
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
@@ -143,8 +145,9 @@ enum Request {
 /// Blank params count as none. `add` takes an issue number, `rework` and
 /// `adopt` a pull request number, `rule` and `relay-rule` take `<id> yes`,
 /// `<id> no <note>` or `<id> answer <text>`, `gate` and `drop` take the
-/// issue of the work item they are about when more than one is open, and
-/// every other action takes nothing.
+/// issue of the work item they are about when more than one is open,
+/// `timings` takes how many finished work items to total, and every other
+/// action takes nothing.
 ///
 /// A ruling the relay was sent, settled by anything but `relay-rule`, is
 /// told to it.
@@ -157,6 +160,10 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
     // Memory changes only after a save succeeds, so a panicked holder
     // cannot have left the runner half changed.
     let mut runner = lock(runner);
+    if let Request::Timings(n) = request {
+        return serde_json::to_string(&runner.timings_report(n))
+            .expect("timings serialize to JSON");
+    }
     let settled = match &request {
         Request::Rule(_, Answer::Yes) => Some(Settled::Yes),
         Request::Rule(_, Answer::No(note)) => Some(Settled::No(note.clone())),
@@ -166,7 +173,7 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
     }
     .map(|how| (how, runner.relayed()));
     let changed = match request {
-        Request::Status => Ok(()),
+        Request::Status | Request::Timings(_) => Ok(()),
         Request::Start => runner.start().map_err(|e| e.to_string()),
         Request::Pause => runner.pause().map_err(|e| e.to_string()),
         Request::Add(issue) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
@@ -207,6 +214,10 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
         ("drop", Some(p)) => number(p)
             .map(|issue| Request::Drop(Some(issue)))
             .ok_or_else(|| format!("{p:?} is not an issue number")),
+        ("timings", Some(p)) => number(p)
+            .and_then(|n| usize::try_from(n).ok())
+            .map(Request::Timings)
+            .ok_or_else(|| format!("{p:?} is not a count of finished work items")),
         ("rule", Some(p)) => read_rule(p)
             .map(|(id, answer)| Request::Rule(id, answer))
             .ok_or_else(|| format!("`{action}` {RULE_USAGE}, not {p:?}")),
@@ -220,6 +231,7 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
         ("pause", None) => Ok(Request::Pause),
         ("gate", None) => Ok(Request::Gate(None)),
         ("drop", None) => Ok(Request::Drop(None)),
+        ("timings", None) => Ok(Request::Timings(super::timings::DEFAULT_ITEMS)),
         (_, None) => Ok(Request::Status),
     }
 }
