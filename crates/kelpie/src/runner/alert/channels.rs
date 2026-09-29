@@ -140,12 +140,12 @@ fn the_webhook_is_required_only_when_rulings_go_to_it() {
 
 // A project under `auto` with `channels` chosen and its pull request's
 // merge just landed, so the next step is the merge's notice
-fn just_merged(channels: &str, relay_only: bool) -> (Rig, Mutex<Runner>, String) {
+fn just_merged(channels: &str, no_webhook: bool) -> (Rig, Mutex<Runner>, String) {
     let (rig, runner, head) = Rig::with_pull_request_set("shep", |rig| {
         rig.relay.set_up(true);
         rig.merge_auto();
         rig.set_ruling_channels(channels);
-        if relay_only {
+        if no_webhook {
             rig.set_kelpie_settings(NO_WEBHOOK);
         }
     });
