@@ -4,7 +4,8 @@
 //! on `origin`: before each Claude review round, and before the merge ruling.
 //! The merge ruling's run goes on the pull request's shots comment first.
 //! A head that changes nothing under the launch configuration's `cwd` gets none.
-//! A run that fails is reported and kept, so it never holds a gate.
+//! A run that fails is reported and kept, so it never holds a gate. It never
+//! goes on the pull request: the merge ruling or notice says it failed.
 
 use std::path::PathBuf;
 
@@ -128,6 +129,13 @@ impl Runner {
         ))
     }
 
+    /// Whether kelpie's run of `head` failed, so its shots are not on the pull request
+    pub(super) fn shots_failed(&self, head: &str) -> bool {
+        let item = self.state.work_item.as_ref();
+        let record = item.and_then(|item| item.shots.as_ref());
+        record.is_some_and(|r| r.head == head && r.run.failed.is_some())
+    }
+
     /// Keeps a run of `head` on the work item
     pub(super) fn end_shots(
         &mut self,
@@ -170,7 +178,8 @@ impl Runner {
         let item = self.state.work_item.as_ref().expect("checked above");
         let record = item.shots.as_ref().expect("a run of this head");
         // A post that failed does not hold the ruling; `retry_shots` tries again.
-        if record.posted || record.retry_at.is_some() {
+        // A failed run is the ruling's to mention, never the pull request's.
+        if record.posted || record.retry_at.is_some() || record.run.failed.is_some() {
             return Ok(None);
         }
         self.post_shots(number)
@@ -232,13 +241,19 @@ impl Runner {
             },
             None => self.ports.forge.post_comment(forge, number, &body),
         };
+        // A body naming a local folder would be refused again, so the run
+        // counts as failed: the ruling says so, and nothing retries.
+        let refused = matches!(posted, Err(ForgeError::LocalPath));
         let posted = posted.map_err(|e| failures.push(e.to_string())).ok();
         let done = posted.is_some() && failures.is_empty();
         let retry_at = Timestamp(self.ports.clock.now().0 + SHOTS_RETRY);
         self.update(|item| {
             if let Some(shots) = item.shots.as_mut() {
                 shots.posted = done;
-                shots.retry_at = (!done).then_some(retry_at);
+                shots.retry_at = (!done && !refused).then_some(retry_at);
+                if refused {
+                    shots.run.failed = Some(ForgeError::LocalPath.to_string());
+                }
             }
             item.shots_comment = posted.or(item.shots_comment);
         })?;

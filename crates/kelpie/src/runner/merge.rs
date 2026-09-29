@@ -232,6 +232,7 @@ impl Runner {
         head: String,
         notice: bool,
     ) -> Result<Begin, StateError> {
+        let shots_failed = self.shots_failed(&head);
         let mut next = self.state.clone();
         let item = next.work_item.as_mut().expect("a merge is of a work item");
         item.phase = Phase::Done { merged: true };
@@ -240,6 +241,7 @@ impl Runner {
                 issue,
                 pull_request: number,
                 head,
+                shots_failed,
             });
         }
         self.save(next)?;

@@ -28,6 +28,11 @@ const TIMEOUT_CONTINUE: &str = "Kelpie stopped your last turn: it ran past its c
 const FAILED_CONTINUE: &str = "Your last turn failed before it finished. \
                                Carry on with the work item from where you left off.";
 
+/// What the merge ruling and the notice say of a failed shots run: no path,
+/// and none of the run's own words
+pub(super) const SHOTS_FAILED: &str = " Kelpie's shots of it failed, so none are on the \
+                                        pull request; the runner's log says why.";
+
 /// The maintainer's answer to a ruling
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Answer {
@@ -486,7 +491,7 @@ fn decide(
                 force: Some(Phase::Review(Review::first())),
             });
         }
-        (Answer::Yes, RulingKind::Merge { head }) => Phase::Merge {
+        (Answer::Yes, RulingKind::Merge { head, .. }) => Phase::Merge {
             head,
             readied: None,
             auto: false,
@@ -540,9 +545,10 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
         |n| format!("pull request #{n}"),
     );
     let ask = match kind {
-        RulingKind::Merge { head } => {
+        RulingKind::Merge { head, shots_failed } => {
+            let shots = if *shots_failed { SHOTS_FAILED } else { "" };
             format!(
-                "Merge {about} at {} into main? {yes} merges it",
+                "Merge {about} at {} into main?{shots} {yes} merges it",
                 short(head)
             )
         }
@@ -745,7 +751,11 @@ mod tests {
                 assert!(!said.contains(internal), "{internal} in {said}");
             }
         }
-        assert_eq!(comment(&RulingKind::Merge { head: "abc".into() }), None);
+        let merge = RulingKind::Merge {
+            head: "abc".into(),
+            shots_failed: true,
+        };
+        assert_eq!(comment(&merge), None);
     }
 
     #[test]

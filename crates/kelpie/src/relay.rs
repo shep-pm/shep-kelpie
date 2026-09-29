@@ -311,7 +311,10 @@ mod tests {
             resume: crate::state::Resume::Nothing,
         };
         assert_eq!(Wants::of(&question), Wants::Answer);
-        let merge = RulingKind::Merge { head: "abc".into() };
+        let merge = RulingKind::Merge {
+            head: "abc".into(),
+            shots_failed: false,
+        };
         assert_eq!(Wants::of(&merge), Wants::YesOrNo);
         let text = instructions_text();
         assert!(text.contains("`wants=answer`"), "{text}");

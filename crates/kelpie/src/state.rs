@@ -123,8 +123,7 @@ pub struct Ruling {
 
 /// A merge kelpie made under `auto`, told to the maintainer after it lands
 ///
-/// Not a ruling: it has no id and takes no answer. It goes once the
-/// webhook post lands.
+/// Not a ruling: it has no id, takes no answer, and goes once its webhook post lands.
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -135,6 +134,9 @@ pub struct Notice {
     pub pull_request: u64,
     /// The head it merged at
     pub head: String,
+    /// Whether kelpie's shots of that head failed, so none were on the pull request
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shots_failed: bool,
 }
 
 /// What raised a ruling. A no's note, or an answer, always goes to the worker.
@@ -146,6 +148,9 @@ pub enum RulingKind {
     Merge {
         /// The head the question is about
         head: String,
+        /// Whether kelpie's shots of that head failed, so none are on the pull request
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        shots_failed: bool,
     },
     /// Kelpie could not rebase the branch onto `main`. A yes looks again.
     Rebase {
@@ -515,6 +520,7 @@ mod tests {
             pull_request: Some(43),
             kind: RulingKind::Merge {
                 head: "c0ffee".into(),
+                shots_failed: false,
             },
             alerted: true,
             relayed: true,
@@ -566,6 +572,7 @@ mod tests {
                 1,
                 RulingKind::Merge {
                     head: "c0ffee".into(),
+                    shots_failed: true,
                 },
             ),
             ruling(
@@ -614,6 +621,7 @@ mod tests {
             issue: 22,
             pull_request: 30,
             head: "c0ffee".into(),
+            shots_failed: true,
         }];
         state.finished = vec![22, 30];
         state.reworked = vec!["PRR_1".into()];
@@ -653,7 +661,7 @@ mod tests {
                 "since": 7,
                 "work_item": null,
                 "rulings": [
-                    pinned(1, serde_json::json!({ "kind": "merge", "head": "c0ffee" })),
+                    pinned(1, serde_json::json!({ "kind": "merge", "head": "c0ffee", "shots_failed": true })),
                     pinned(2, serde_json::json!({ "kind": "rebase", "reason": "conflicts" })),
                     pinned(3, serde_json::json!({ "kind": "still-red", "head": "bad", "checks": ["lint"] })),
                     pinned(4, serde_json::json!({ "kind": "closed" })),
@@ -686,7 +694,7 @@ mod tests {
                 ],
                 "leases": [{ "resource": "coderabbit", "since": 8 }],
                 "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
-                "notices": [{ "issue": 22, "pull_request": 30, "head": "c0ffee" }],
+                "notices": [{ "issue": 22, "pull_request": 30, "head": "c0ffee", "shots_failed": true }],
             })
         );
     }
