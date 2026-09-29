@@ -260,6 +260,10 @@ pub enum RulingKind {
     FollowUp {
         /// The findings, at the judge's severity
         findings: Vec<Finding>,
+        /// Why the forge would not take them, when it has refused for hours
+        /// and a yes tries again. None when the ruling comes before filing.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        refused: Option<String>,
     },
     /// The worker ended its turn on a question. The answer is its next turn.
     Question {

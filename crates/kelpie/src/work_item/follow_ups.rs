@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ports::Finding;
+use crate::ports::{Finding, Timestamp};
 
 /// Confirmed findings a merged pull request left unfixed, waiting to be filed
 // wire format: changing this is a breaking change to the state file
@@ -15,7 +15,7 @@ pub struct FollowUps {
     /// `auto` and nobody is asked
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ruled: bool,
-    /// How many times the forge refused to take them
-    #[serde(default, skip_serializing_if = "super::is_zero")]
-    pub failures: u32,
+    /// When the forge first refused to take them, since it last took one
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_refused: Option<Timestamp>,
 }

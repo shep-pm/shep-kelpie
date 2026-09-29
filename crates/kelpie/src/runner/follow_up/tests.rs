@@ -6,6 +6,7 @@ use serde_json::json;
 
 use crate::board::READY;
 use crate::ports::{Checks, Finding, Severity};
+use crate::runner::coderabbit::tests::{fixed, hold_a_finding, summoned};
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::test::{Rig, Scripted, ScriptedRound};
 
@@ -179,7 +180,8 @@ fn what_is_filed_is_kelpies_own_text_not_the_workers_edit_of_it() {
 fn a_finding_an_open_issue_already_holds_gets_a_comment_and_no_new_issue() {
     let found = [racy()];
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
-    rig.forge.open_issue(50, "Looks racy", "Filed by hand.");
+    rig.forge
+        .open_issue(50, "Looks racy", "Filed by hand, in src/lib.rs.");
 
     assert_eq!(after_merge(&runner), filed(&[], &[50], 0));
     assert_eq!(rig.forge.created(), []);
@@ -213,7 +215,7 @@ fn two_findings_sharing_the_first_eighty_characters_are_not_one_issue() {
     ];
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
     rig.forge
-        .open_issue(60, &stem, &format!("Noticed: {first}"));
+        .open_issue(60, &stem, &format!("In src/lib.rs: {first}"));
 
     assert_eq!(after_merge(&runner), filed(&[900], &[60], 0));
     let [issue] = rig.forge.created().try_into().unwrap();
@@ -311,29 +313,84 @@ fn a_forge_that_cannot_open_issues_holds_the_work_item_and_the_retry_files_once(
 }
 
 #[test]
-fn a_forge_that_keeps_refusing_loses_the_findings_with_a_report_and_the_item_finishes() {
+fn an_issue_with_the_same_title_that_never_names_the_file_is_not_a_duplicate() {
+    let found = [racy()];
+    let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
+    rig.forge.open_issue(53, "Looks racy", "Somewhere else.");
+
+    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+}
+
+#[test]
+fn a_forge_that_keeps_refusing_is_retried_for_hours_and_then_the_maintainer_is_asked() {
     let found = [racy()];
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
     rig.forge.set_issues_down(true);
 
-    for _ in 0..4 {
+    for _ in 0..20 {
         assert!(matches!(
             after_merge(&runner),
             Some(StepReport::GateFailed { .. })
         ));
     }
-    let Some(StepReport::FollowUpsDropped {
-        issue: 7,
-        pull_request: 71,
-        dropped: 1,
-        reason,
-    }) = after_merge(&runner)
-    else {
-        panic!("the findings were not dropped with a report");
+    rig.clock.advance(5 * 60 * 60);
+    assert!(
+        matches!(after_merge(&runner), Some(StepReport::GateFailed { .. })),
+        "still inside the window: passes made no difference, only time does"
+    );
+    rig.clock.advance(60 * 60);
+    let Some(StepReport::Ruling { id, question, .. }) = after_merge(&runner) else {
+        panic!("the maintainer was not asked after the window");
     };
-    assert!(reason.contains("issues are down"), "{reason}");
+    assert!(question.contains("- src/lib.rs:9 looks racy"), "{question}");
+    assert!(question.contains("issues are down"), "{question}");
+    assert!(question.contains("tries again"), "{question}");
+    assert_eq!(rig.forge.created(), [], "nothing is lost while it waits");
+
+    rig.forge.set_issues_down(false);
+    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    assert!(finished(after_merge(&runner)));
+}
+
+#[test]
+fn a_no_to_a_forge_that_kept_refusing_drops_the_findings() {
+    let found = [racy()];
+    let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
+    rig.forge.set_issues_down(true);
+    after_merge(&runner);
+    rig.clock.advance(6 * 60 * 60);
+    let Some(StepReport::Ruling { id, .. }) = after_merge(&runner) else {
+        panic!("the maintainer was not asked after the window");
+    };
+
+    rig.ask(&runner, "rule", Some(&format!("{id} no leave it")));
     assert!(finished(after_merge(&runner)));
     assert_eq!(rig.forge.created(), []);
+}
+
+#[test]
+fn a_finding_a_coderabbit_round_held_is_filed_when_the_worker_defers_it() {
+    let (rig, runner, head) = summoned("shep");
+    hold_a_finding(&rig, &runner, &head, "Name the flag.");
+    // The worker defers what the findings file gave it, line for line.
+    let held = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
+    defer(&rig, &held);
+    fixed(&rig, &runner, "fix.txt");
+    rig.forge
+        .set_state(71, crate::ports::PullRequestState::Merged);
+
+    let Some(StepReport::Ruling { id, question, .. }) = step(&runner).unwrap() else {
+        panic!("the maintainer was not asked about the findings");
+    };
+    assert!(question.contains("Name the flag."), "{question}");
+    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::FollowUpsFiled { .. })
+    ));
+    let [issue] = rig.forge.created().try_into().unwrap();
+    assert!(issue.title.contains("Name the flag."), "{}", issue.title);
 }
 
 #[test]

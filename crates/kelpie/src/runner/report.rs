@@ -267,17 +267,6 @@ pub enum StepReport {
         /// How many findings were left out because the text names a folder on this machine
         skipped: usize,
     },
-    /// The forge kept refusing follow-up issues, so the findings were dropped
-    FollowUpsDropped {
-        /// The work item's issue
-        issue: u64,
-        /// Its pull request
-        pull_request: u64,
-        /// How many findings were not filed
-        dropped: usize,
-        /// The last refusal
-        reason: String,
-    },
     /// A ruling was posted to the maintainer's webhook
     Alerted {
         /// The ruling's id

@@ -25,10 +25,11 @@ use crate::work_item::FollowUps;
 // in a list anyway.
 const TITLE_LIMIT: usize = 80;
 
-// How many times the forge may refuse before the findings are dropped, so
-// issues switched off or a label that is missing cannot hold a merged work
-// item for ever.
-const MAX_FAILURES: u32 = 5;
+// How long the forge may keep refusing, counted from its first refusal,
+// before the maintainer is asked whether to try again. Issues switched off
+// or a label that is missing would otherwise hold a merged work item for
+// ever, and a passing outage of the forge's own must not cost the findings.
+const REFUSAL_WINDOW: u64 = 6 * 60 * 60;
 
 // The fewest characters of a finding's `what` a body may match on
 const MIN_BODY_MATCH: usize = 12;
@@ -64,6 +65,7 @@ impl Runner {
         if !pending.ruled && self.settings.merge_authority == MergeAuthority::Ask {
             let kind = RulingKind::FollowUp {
                 findings: pending.findings,
+                refused: None,
             };
             return self.raise(number, kind).map(Some);
         }
@@ -109,7 +111,11 @@ impl Runner {
                 }
             };
             match filed {
-                Ok(()) => {}
+                Ok(()) => self.update(|item| {
+                    if let Some(pending) = item.follow_ups.as_mut() {
+                        pending.first_refused = None;
+                    }
+                })?,
                 // Never sent, and never will be: retrying would only stall the work item.
                 Err(ForgeError::LocalPath) => skipped += 1,
                 Err(e) => {
@@ -133,29 +139,27 @@ impl Runner {
         }))
     }
 
-    // The forge would not take them. Retried on the next pass until it has
-    // refused `MAX_FAILURES` times, then dropped with a report so the work
-    // item can finish.
+    // The forge would not take them. Retried on every pass for `REFUSAL_WINDOW`
+    // from the first refusal, then a ruling lists them: a yes tries again for
+    // another window, and a no drops them so the work item can finish.
     fn forge_refused(&mut self, number: u64, reason: String) -> Result<Begin, StateError> {
+        let now = self.ports.clock.now();
         let item = self.current().expect("a follow-up is of a work item");
-        let issue = item.issue;
-        let failures = item.follow_ups.as_ref().map_or(0, |f| f.failures) + 1;
-        if failures < MAX_FAILURES {
+        let pending = item.follow_ups.clone().unwrap_or_default();
+        let first = pending.first_refused.unwrap_or(now);
+        if now.0.saturating_sub(first.0) < REFUSAL_WINDOW {
             self.update(|item| {
                 if let Some(pending) = item.follow_ups.as_mut() {
-                    pending.failures = failures;
+                    pending.first_refused = Some(first);
                 }
             })?;
             return Ok(self.gate_failed(reason));
         }
-        let dropped = item.follow_ups.as_ref().map_or(0, |f| f.findings.len());
-        self.update(|item| item.follow_ups = Some(FollowUps::default()))?;
-        Ok(Begin::Report(StepReport::FollowUpsDropped {
-            issue,
-            pull_request: number,
-            dropped,
-            reason,
-        }))
+        let kind = RulingKind::FollowUp {
+            findings: pending.findings,
+            refused: Some(reason),
+        };
+        self.raise(number, kind)
     }
 
     fn next_follow_up(&self) -> Option<Finding> {
@@ -199,9 +203,9 @@ fn title_of(finding: &Finding) -> String {
     finding.what.trim().chars().take(TITLE_LIMIT).collect()
 }
 
-// Another issue's title says the same, or its body names the file and says
-// what this one does. A short `what` would match half the tracker, so only
-// a title can match on one.
+// Another issue whose body names the file, and whose title says the same or
+// whose body says what this one does. A short `what` would match half the
+// tracker, so only a title can match on one.
 fn already_filed<'a>(
     open: &'a [OpenIssue],
     title: &str,
@@ -210,11 +214,11 @@ fn already_filed<'a>(
     // A title cut short at the limit could be any of several findings.
     let cut = finding.what.trim().chars().count() > TITLE_LIMIT;
     open.iter().find(|issue| {
-        (issue.title.trim().eq_ignore_ascii_case(title)
-            && (!cut || issue.body.contains(finding.what.trim())))
-            || (finding.what.trim().len() >= MIN_BODY_MATCH
-                && issue.body.contains(&finding.file)
-                && issue.body.contains(finding.what.trim()))
+        issue.body.contains(&finding.file)
+            && ((issue.title.trim().eq_ignore_ascii_case(title)
+                && (!cut || issue.body.contains(finding.what.trim())))
+                || (finding.what.trim().len() >= MIN_BODY_MATCH
+                    && issue.body.contains(finding.what.trim())))
     })
 }
 

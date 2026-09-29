@@ -183,6 +183,7 @@ impl Runner {
             if let (Some(filed), Some(pending)) = (follow_up, item.follow_ups.as_mut()) {
                 if filed {
                     pending.ruled = true;
+                    pending.first_refused = None;
                 } else {
                     pending.findings.clear();
                 }
@@ -658,16 +659,32 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
                 capitalized(&about)
             );
         }
-        RulingKind::FollowUp { findings } => {
+        RulingKind::FollowUp { findings, refused } => {
             let list: Vec<String> = findings
                 .iter()
                 .map(|f| format!("- {}:{} {}", f.file, f.line, f.what.trim()))
                 .collect();
+            let (said, files) = match refused {
+                Some(why) => (
+                    format!(
+                        "The forge has refused for hours to take the {} confirmed \
+                         finding(s) {about} left unfixed: {}.",
+                        findings.len(),
+                        why.trim()
+                    ),
+                    "tries again",
+                ),
+                None => (
+                    format!(
+                        "{} merged with {} confirmed finding(s) left unfixed.",
+                        capitalized(&about),
+                        findings.len()
+                    ),
+                    "files each as an issue on the board",
+                ),
+            };
             return format!(
-                "{} merged with {} confirmed finding(s) left unfixed:\n\n{}\n\n\
-                 {yes} files each as an issue on the board, and {} drops them.",
-                capitalized(&about),
-                findings.len(),
+                "{said}\n\n{}\n\n{yes} {files}, and {} drops them.",
                 list.join("\n"),
                 trigger("no")
             );
