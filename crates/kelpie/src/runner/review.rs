@@ -73,6 +73,7 @@ impl Runner {
                             &worker_folder,
                             &model,
                             shots,
+                            &self.skills,
                         ) {
                             Ok(call) => {
                                 self.mark_review_call_running()?;

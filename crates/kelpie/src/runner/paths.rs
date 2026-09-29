@@ -75,6 +75,8 @@ pub struct ProjectPaths {
     pub state: PathBuf,
     /// The folder for the worker's settings file and instructions
     pub worker: PathBuf,
+    /// The folder for the plugins that hold each step's skill
+    pub skills: PathBuf,
     /// Kelpie's own tools for showing a work item's UI, which every project shares
     pub tools: Tools,
     /// Kelpie's home, which holds every folder here
@@ -103,6 +105,7 @@ impl ProjectPaths {
             settings: folder.join("settings.toml"),
             state: folder.join("state.json"),
             worker: folder.join("worker"),
+            skills: folder.join("skills"),
             tools: Tools::under(kelpie_home),
             kelpie_home: kelpie_home.to_owned(),
             shep_home: kelpie_home.join("shep"),

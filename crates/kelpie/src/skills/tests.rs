@@ -1,0 +1,244 @@
+use std::fs;
+use std::path::Path;
+
+use serde_json::json;
+
+use super::*;
+use crate::ports::{Checks, ClaudeCall, Role};
+use crate::runner::step;
+use crate::test::{Rig, Scripted};
+
+// Appends a `[skills]` table to the rig's settings, read when a runner next opens
+fn choose(rig: &Rig, table: &str) {
+    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.skills]\n{table}"));
+}
+
+fn skill_folder(at: &Path, text: &str) {
+    fs::create_dir_all(at.join("references")).unwrap();
+    fs::write(at.join("SKILL.md"), text).unwrap();
+    fs::write(at.join("references/more.md"), "more\n").unwrap();
+}
+
+fn call_of(rig: &Rig, role: Role) -> ClaudeCall {
+    rig.claude
+        .all_calls()
+        .into_iter()
+        .find(|c| c.role == role)
+        .expect("the call ran")
+}
+
+#[test]
+fn each_step_runs_its_default_skill_from_kelpies_own_copy() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    let plugin = rig.paths().skills.join("mattpocock");
+    let worker = call_of(&rig, Role::Worker);
+    assert!(
+        worker
+            .prompt
+            .starts_with("/mattpocock:implement Your work item is issue #7: "),
+        "{}",
+        worker.prompt
+    );
+    assert_eq!(worker.plugin_dirs, std::slice::from_ref(&plugin));
+    let reviewer = call_of(&rig, Role::Reviewer);
+    assert!(
+        reviewer
+            .prompt
+            .starts_with("/mattpocock:code-review You are a founding engineer"),
+        "{}",
+        reviewer.prompt
+    );
+    assert_eq!(reviewer.plugin_dirs, std::slice::from_ref(&plugin));
+    for step in Step::ALL {
+        let skill = plugin.join("skills").join(step.default_skill());
+        assert!(skill.join("SKILL.md").is_file(), "{step}");
+    }
+
+    rig.forge
+        .set_checks(&head, Checks::Failed(vec!["test".into()]));
+    rig.verdict(&runner);
+    rig.claude.script([Scripted::Push("fix.txt", "fixed\n")]);
+    step(&runner).unwrap();
+    let fix = rig.claude.calls().pop().unwrap();
+    assert!(
+        fix.prompt
+            .starts_with("/mattpocock:diagnosing-bugs CI failed on your pull request #71"),
+        "{}",
+        fix.prompt
+    );
+
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(
+        status["skills"][5],
+        json!({ "step": "review", "skill": "/mattpocock:code-review", "fallback": null })
+    );
+    assert_eq!(status["skills"].as_array().unwrap().len(), Step::ALL.len());
+}
+
+#[test]
+fn a_projects_skill_folder_replaces_the_default() {
+    let (rig, runner, _) = Rig::with_pull_request_set("shep", |rig| {
+        let folder = rig.home.path().join("house/build-it");
+        skill_folder(&folder, "---\nname: build-it\n---\nBuild it.\n");
+        choose(
+            rig,
+            &format!(
+                "implement = {{ kind = \"path\", path = \"{}\" }}\n",
+                folder.display()
+            ),
+        );
+    });
+    let worker = call_of(&rig, Role::Worker);
+    assert!(
+        worker
+            .prompt
+            .starts_with("/kelpie-implement:build-it Your work item is issue #7: "),
+        "{}",
+        worker.prompt
+    );
+    let own = rig.paths().skills.join("implement");
+    assert!(
+        worker.plugin_dirs.contains(&own),
+        "{:?}",
+        worker.plugin_dirs
+    );
+    assert_eq!(
+        fs::read_to_string(own.join("skills/build-it/references/more.md")).unwrap(),
+        "more\n"
+    );
+    let manifest = fs::read_to_string(own.join(".claude-plugin/plugin.json")).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&manifest).unwrap()["name"],
+        "kelpie-implement"
+    );
+    let reviewer = call_of(&rig, Role::Reviewer);
+    assert!(reviewer.prompt.starts_with("/mattpocock:code-review "));
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["skills"][3]["skill"], "/kelpie-implement:build-it");
+}
+
+#[test]
+fn a_skill_in_a_projects_plugin_replaces_the_default() {
+    let (rig, _runner, _) = Rig::with_pull_request_set("shep", |rig| {
+        let plugin = rig.home.path().join("house-plugin");
+        fs::create_dir_all(plugin.join(".claude-plugin")).unwrap();
+        fs::write(
+            plugin.join(".claude-plugin/plugin.json"),
+            r#"{"name": "house"}"#,
+        )
+        .unwrap();
+        skill_folder(&plugin.join("skills/review-hard"), "Review hard.\n");
+        choose(
+            rig,
+            &format!(
+                "review = {{ kind = \"plugin\", plugin = \"{}\", skill = \"review-hard\" }}\n",
+                plugin.display()
+            ),
+        );
+    });
+    let reviewer = call_of(&rig, Role::Reviewer);
+    assert!(
+        reviewer
+            .prompt
+            .starts_with("/house:review-hard You are a founding engineer"),
+        "{}",
+        reviewer.prompt
+    );
+    let plugin = rig.home.path().join("house-plugin");
+    assert!(
+        reviewer.plugin_dirs.contains(&plugin),
+        "{:?}",
+        reviewer.plugin_dirs
+    );
+}
+
+#[test]
+fn a_skill_that_cannot_load_falls_back_to_kelpies_prompt_and_says_why() {
+    let rig = Rig::new("shep");
+    let gone = rig.home.path().join("gone");
+    let plugin = rig.home.path().join("empty-plugin");
+    fs::create_dir_all(plugin.join(".claude-plugin")).unwrap();
+    fs::write(
+        plugin.join(".claude-plugin/plugin.json"),
+        r#"{"name": "e"}"#,
+    )
+    .unwrap();
+    choose(
+        &rig,
+        &format!(
+            "implement = {{ kind = \"path\", path = \"{}\" }}\n\
+             ci = {{ kind = \"plugin\", plugin = \"{}\", skill = \"debug\" }}\n",
+            gone.display(),
+            plugin.display()
+        ),
+    );
+    let runner = rig.open().unwrap();
+    let notices: Vec<String> = runner.lock().unwrap().skill_notices().collect();
+    assert_eq!(
+        notices,
+        [
+            format!(
+                "the implement step's skill cannot load, so it runs kelpie's own prompt: \
+                 {} holds no SKILL.md",
+                gone.display()
+            ),
+            format!(
+                "the ci step's skill cannot load, so it runs kelpie's own prompt: \
+                 the plugin in {} has no skill debug",
+                plugin.display()
+            ),
+        ]
+    );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["skills"][3]["skill"], json!(null));
+    assert_eq!(
+        status["skills"][3]["fallback"],
+        format!("{} holds no SKILL.md", gone.display())
+    );
+
+    rig.ask(&runner, "start", None);
+    rig.ask(&runner, "add", Some("7"));
+    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+    step(&runner).unwrap();
+    let worker = call_of(&rig, Role::Worker);
+    assert!(
+        worker.prompt.starts_with("Your work item is issue #7: "),
+        "{}",
+        worker.prompt
+    );
+}
+
+#[test]
+fn a_step_set_to_none_runs_kelpies_prompt_with_no_notice() {
+    let (rig, runner, _) = Rig::with_pull_request_set("shep", |rig| {
+        choose(rig, "review = { kind = \"none\" }\n");
+    });
+    let reviewer = call_of(&rig, Role::Reviewer);
+    assert!(
+        reviewer.prompt.starts_with("You are a founding engineer"),
+        "{}",
+        reviewer.prompt
+    );
+    assert_eq!(runner.lock().unwrap().skill_notices().count(), 0);
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(
+        status["skills"][5],
+        json!({ "step": "review", "skill": null, "fallback": null })
+    );
+}
+
+#[test]
+fn a_misspelt_step_or_skill_name_stops_the_runner() {
+    let rig = Rig::new("shep");
+    choose(&rig, "reveiw = { kind = \"none\" }\n");
+    let err = rig.open().unwrap_err().to_string();
+    assert!(err.contains("reveiw"), "{err}");
+
+    let rig = Rig::new("shep");
+    choose(
+        &rig,
+        "review = { kind = \"plugin\", plugin = \"/p\", skill = \"../up\" }\n",
+    );
+    let err = rig.open().unwrap_err().to_string();
+    assert!(err.contains("must be a skill's name"), "{err}");
+}

@@ -409,6 +409,8 @@ pub struct ClaudeCall {
     pub prompt: String,
     /// The MCP servers the session starts with, beside any the repo names
     pub mcp_config: Option<PathBuf>,
+    /// The plugin folders its steps' skills are in, each passed to `--plugin-dir`
+    pub plugin_dirs: Vec<PathBuf>,
     /// Kills the call, and returns [`ClaudeError::TimedOut`], once it has
     /// run this long
     pub timeout: Option<Duration>,

@@ -158,7 +158,10 @@ mod tests {
             .script([Scripted::Reply(Usage::default(), Cost(1))]);
         step(&runner).unwrap();
         let [call] = rig.claude.calls().try_into().unwrap();
-        assert!(call.prompt.starts_with("Your work item is issue #9: "));
+        assert!(
+            call.prompt
+                .starts_with("/mattpocock:implement Your work item is issue #9: ")
+        );
 
         // The turn ended, and #9 is still in flight, so #12 waits.
         assert_eq!(step(&runner).unwrap(), None);

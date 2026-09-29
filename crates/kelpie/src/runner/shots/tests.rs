@@ -50,7 +50,9 @@ fn a_project_without_a_launch_file_behaves_as_before() {
     let [worker] = rig.claude.calls().try_into().unwrap();
     assert_eq!(worker.mcp_config, None);
     let instructions = std::fs::read_to_string(rig.paths().worker.join("instructions.md"));
-    assert_eq!(instructions.unwrap(), INSTRUCTIONS);
+    let instructions = instructions.unwrap();
+    assert!(instructions.starts_with(INSTRUCTIONS), "{instructions}");
+    assert!(!instructions.contains(crate::preview::WORKER_INSTRUCTIONS));
     assert_eq!(shots_comments(&rig), Vec::<String>::new());
     assert!(!rig.paths().worker.join("mcp.json").exists());
 }

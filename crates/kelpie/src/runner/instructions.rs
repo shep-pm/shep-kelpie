@@ -9,6 +9,7 @@ use std::path::Path;
 
 use crate::profile::INSTRUCTIONS;
 use crate::settings::{Settings, SettingsError};
+use crate::skills::{Skills, Step};
 
 /// Reads the project's extra worker instructions, if its settings name a file
 ///
@@ -30,13 +31,28 @@ pub(super) fn read_extra(settings: &Settings) -> Result<Option<String>, Settings
 
 /// The instructions file for one worker turn
 ///
-/// Kelpie's own, then a line about the pull request template if the worktree
-/// has one, then the project's extra instructions.
-pub(super) fn compose(extra: Option<&str>, worktree: &Path) -> String {
+/// Kelpie's own, then the skills the worker writes tests and its pull
+/// request's body with, then the project's extra instructions. A pull
+/// request template in the worktree stands in for the body's skill.
+pub(super) fn compose(extra: Option<&str>, worktree: &Path, skills: &Skills) -> String {
     let mut text = INSTRUCTIONS.to_owned();
-    if let Some(template) = template(worktree) {
+    let mut lines = Vec::new();
+    if let Some(tdd) = skills.command(Step::Tests) {
+        lines.push(format!(
+            "Write your tests the way the `{tdd}` skill says.\n"
+        ));
+    }
+    match (template(worktree), skills.command(Step::Pr)) {
+        (Some(template), _) => lines.push(template_line(&template)),
+        (None, Some(pr)) => lines.push(format!(
+            "Write your pull request's body with the `{pr}` skill, and still end it with \
+             `Resolves #<issue>`.\n"
+        )),
+        (None, None) => {}
+    }
+    if !lines.is_empty() {
         text.push('\n');
-        text.push_str(&template_line(&template));
+        text.push_str(&lines.concat());
     }
     if let Some(extra) = extra.filter(|e| !e.trim().is_empty()) {
         text.push_str("\n# This project's instructions\n\n");
@@ -113,6 +129,7 @@ mod tests {
     use crate::ports::{Cost, Usage};
     use crate::runner::Runner;
     use crate::runner::turn::step;
+    use crate::settings::StepSkills;
     use crate::test::{Rig, Scripted};
 
     const EXTRA: &str = "Never use an em dash in public writing.\n";
@@ -135,10 +152,17 @@ mod tests {
     }
 
     #[test]
-    fn a_repo_without_a_template_gets_no_template_line() {
+    fn a_repo_without_a_template_has_the_body_written_with_the_pr_skill() {
         let rig = Rig::new("koji");
         let runner = rig.open().unwrap();
-        assert_eq!(first_instructions(&rig, &runner), INSTRUCTIONS);
+        let text = first_instructions(&rig, &runner);
+        let lines = text.strip_prefix(INSTRUCTIONS).expect(&text);
+        assert_eq!(
+            lines,
+            "\nWrite your tests the way the `/mattpocock:tdd` skill says.\n\
+             Write your pull request's body with the `/mattpocock:pr` skill, and still end \
+             it with `Resolves #<issue>`.\n"
+        );
     }
 
     #[test]
@@ -153,6 +177,7 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("`Resolves #<issue>`"), "{text}");
+        assert!(!text.contains("/mattpocock:pr"), "{text}");
     }
 
     #[test]
@@ -175,11 +200,17 @@ mod tests {
     fn the_template_line_comes_before_the_projects_instructions() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("pull_request_template.md"), "## Summary\n").unwrap();
-        let text = compose(Some(EXTRA), dir.path());
+        let skills = Skills::load(&StepSkills::default(), &dir.path().join("skills"));
+        let text = compose(Some(EXTRA), dir.path(), &skills);
         let at = |needle: &str| text.find(needle).expect(needle);
+        assert!(at("/mattpocock:tdd") < at("pull request template"));
         assert!(at("pull request template") < at("# This project's instructions"));
         assert!(text.ends_with(EXTRA), "{text}");
-        assert_eq!(compose(Some(" \n"), dir.path()), compose(None, dir.path()));
+        let (blank, none) = (
+            compose(Some(" \n"), dir.path(), &skills),
+            compose(None, dir.path(), &skills),
+        );
+        assert_eq!(blank, none);
     }
 
     #[test]

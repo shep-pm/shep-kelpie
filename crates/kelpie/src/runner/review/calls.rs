@@ -14,6 +14,7 @@ use crate::ports::{ClaudeCall, Finding, Role, Session, Severity, Verdict};
 use crate::runner::turn;
 use crate::settings::RoleModel;
 use crate::shots::ShotsRun;
+use crate::skills::{Skills, Step};
 use crate::work_item::new_session_id;
 
 /// The Claude round's throwaway settings: no sandbox fencing, no bypassed
@@ -54,6 +55,7 @@ pub(super) fn reviewer_call(
     worker_folder: &Path,
     model: &RoleModel,
     shots: Option<Screens<'_>>,
+    skills: &Skills,
 ) -> Result<ClaudeCall, String> {
     let diff = diff_against(worktree, base)?;
     let settings = review_settings(worker_folder, shots.map(|s| s.dir))?;
@@ -61,7 +63,10 @@ pub(super) fn reviewer_call(
     if let Some(shots) = shots {
         prompt.push_str(&shots_prompt(shots.run));
     }
-    build_call(Role::Reviewer, issue, worktree, model, settings, prompt)
+    let prompt = skills.invoke(Step::Review, &prompt);
+    let mut call = build_call(Role::Reviewer, issue, worktree, model, settings, prompt)?;
+    call.plugin_dirs = skills.plugin_dirs().to_vec();
+    Ok(call)
 }
 
 // A finding that names a PNG under `shots` is about a screenshot, and its
@@ -104,8 +109,8 @@ fn is_shot(file: &str, dir: &Path) -> bool {
 }
 
 // The shape every call the review loop makes itself shares: a fresh
-// session, the worktree as its folder, no instructions file, and whatever
-// role, settings and prompt its caller worked out.
+// session, the worktree as its folder, no instructions file or plugins, and
+// whatever role, settings and prompt its caller worked out.
 fn build_call(
     role: Role,
     issue: u64,
@@ -127,6 +132,7 @@ fn build_call(
         prompt,
         timeout: None,
         mcp_config: None,
+        plugin_dirs: Vec::new(),
     })
 }
 

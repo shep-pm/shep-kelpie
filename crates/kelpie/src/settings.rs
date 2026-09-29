@@ -6,8 +6,8 @@
 //! setting is required except the ones added after the first build
 //! (`max_items`, `review.local`, `review.local_rounds`, `coderabbit.rounds`,
 //! `pacing.enabled`, `worker.allowed_domains`, `worker.build_env`,
-//! `worker.instructions_file`, `worker.turn_timeout`, `ruling_channels` and
-//! `[preview]`).
+//! `worker.instructions_file`, `worker.turn_timeout`, `ruling_channels`,
+//! `[preview]` and `[skills]`).
 //! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
@@ -29,8 +29,10 @@ mod table;
 
 pub use table::table_of;
 mod local;
+mod skills;
 
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
+pub use skills::{SkillChoice, SkillName, StepSkills};
 
 /// Everything kelpie reads about one project
 #[dog_config]
@@ -73,6 +75,9 @@ pub struct Settings {
     /// Kelpie's settings decide when absent.
     #[serde(default)]
     pub ruling_channels: Option<Channels>,
+    /// The skill each step runs, over kelpie's vendored defaults
+    #[serde(default)]
+    pub skills: StepSkills,
 }
 
 /// Who decides a merge
@@ -527,6 +532,7 @@ impl Settings {
         [self.worker.instructions_file.as_mut(), local]
             .into_iter()
             .flatten()
+            .chain(self.skills.paths_mut())
     }
 }
 

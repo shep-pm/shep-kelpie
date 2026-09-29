@@ -28,6 +28,7 @@ use crate::pacer::Scope;
 use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Issue, Role, Session};
 use crate::preview::{self, McpFiles, WORKER_INSTRUCTIONS};
 use crate::profile::WorkerProfile;
+use crate::skills::{Step, split_command};
 use crate::state::{Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree::{self, Start};
@@ -227,7 +228,12 @@ impl Runner {
             Turn::Running { since } => (Session::Resume(id), Some(CONTINUE.to_owned()), *since),
             // An adopted work item's session begins with whatever the gate sends it.
             Turn::Next { prompt } if adopt::unborn(item) => {
-                let first = adopt::first_prompt(item, Some(prompt));
+                let (command, then) = split_command(prompt);
+                let first = adopt::first_prompt(item, Some(then));
+                let first = match command {
+                    Some(command) => format!("{command} {first}"),
+                    None => first,
+                };
                 (Session::New(id), Some(first), now)
             }
             // No session to resume: the retry of a turn whose call failed
@@ -314,7 +320,11 @@ impl Runner {
         let instructions = folder.join("instructions.md");
         let text = serde_json::to_string_pretty(&profile.settings()).expect("settings are JSON");
         write(folder, &settings, &text)?;
-        let mut text = instructions::compose(self.extra_instructions.as_deref(), &item.worktree);
+        let mut text = instructions::compose(
+            self.extra_instructions.as_deref(),
+            &item.worktree,
+            &self.skills,
+        );
         let mcp_config = if previewed {
             text.push_str(WORKER_INSTRUCTIONS);
             Some(self.write_mcp_config(item)?)
@@ -332,7 +342,8 @@ impl Runner {
                     .forge
                     .issue(&self.settings.forge, item.issue)
                     .map_err(|e| format!("cannot read issue #{}: {e}", item.issue))?;
-                first_prompt(item.issue, &issue)
+                self.skills
+                    .invoke(Step::Implement, &first_prompt(item.issue, &issue))
             }
         };
         Ok(ClaudeCall {
@@ -347,6 +358,7 @@ impl Runner {
             prompt,
             timeout: Some(timeout),
             mcp_config,
+            plugin_dirs: self.skills.plugin_dirs().to_vec(),
         })
     }
 

@@ -12,6 +12,7 @@ use crate::board::{Skip, WorkerModel};
 use crate::ports::{SessionId, Timestamp};
 use crate::relay::Settled;
 use crate::settings::MergeAuthority;
+use crate::skills::StepSkill;
 use crate::state::{LeaseHeld, Ruling, RunState, StateError, Waiting};
 use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Turn, WorkItem};
 
@@ -55,6 +56,8 @@ pub struct Status<'a> {
     pub leases: &'a [LeaseHeld],
     /// What usage was when last read, and why nothing new is starting
     pub pacer: PacerStatus<'a>,
+    /// The skill each step runs, and why any chosen one could not load
+    pub skills: &'a [StepSkill],
 }
 
 /// An open work item, as `status` shows it
@@ -381,6 +384,7 @@ mod tests {
     use super::*;
     use crate::ports::{Checks, Cost, Usage};
     use crate::runner::{StepReport, step};
+    use crate::skills::Step;
     use crate::test::{Rig, Scripted};
 
     // A running project with issue 7 in flight
@@ -437,6 +441,11 @@ mod tests {
                 "rulings": [],
                 "leases": [],
                 "pacer": { "enabled": true, "reading": null, "holding": null },
+                "skills": Step::ALL.map(|step| json!({
+                    "step": step.as_str(),
+                    "skill": format!("/mattpocock:{}", step.default_skill()),
+                    "fallback": null,
+                })),
             })
         );
     }

@@ -145,10 +145,21 @@ mod tests {
         let endpoint = "kind = \"endpoint\"\nurl = \"http://localhost:11434/v1\"\n\
                         model = \"m\"\ncontext = 32768\ngpu_lease = true\n";
         let command_with_lease = format!("{command}gpu_lease = true\n");
+        // Each kind of skill once, every step naming it.
+        let kinds = [
+            "{ kind = \"path\", path = \"skills/mine\" }",
+            "{ kind = \"plugin\", plugin = \"plugins/house\", skill = \"mine\" }",
+            "{ kind = \"none\" }",
+        ];
         [command_with_lease.as_str(), endpoint, "kind = \"off\"\n"]
             .into_iter()
-            .map(|local| {
-                let text = text.replace(command, local);
+            .zip(kinds)
+            .map(|(local, kind)| {
+                let mut text = text.replace(command, local);
+                text.push_str("\n[app.dogs.kelpie.skills]\n");
+                for step in crate::skills::Step::ALL {
+                    text.push_str(&format!("{step} = {kind}\n"));
+                }
                 toml::to_string(&crate::test::project_table(&text)).unwrap()
             })
             .collect()
