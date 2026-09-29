@@ -321,7 +321,7 @@ mod tests {
         let (url, served) = stand_in(200);
         let alert = Alert {
             reply: Some(ReplyWith {
-                project: "hazels-lab".into(),
+                project: "koji".into(),
                 id: 3,
                 takes: Takes::YesOrNo,
             }),
@@ -332,8 +332,8 @@ mod tests {
         let got = served.join().unwrap();
         assert_eq!(
             got.body,
-            "Merge pull request #71?\n\nReply here with `hazels-lab 3 yes <code>` or \
-             `hazels-lab 3 no <note> <code>`, where <code> is kelpie's authenticator code."
+            "Merge pull request #71?\n\nReply here with `koji 3 yes <code>` or \
+             `koji 3 no <note> <code>`, where <code> is kelpie's authenticator code."
         );
     }
 
@@ -342,7 +342,7 @@ mod tests {
         let (url, served) = stand_in(200);
         let alert = Alert {
             reply: Some(ReplyWith {
-                project: "hazels-lab".into(),
+                project: "koji".into(),
                 id: 3,
                 takes: Takes::YesOrNo,
             }),
@@ -389,7 +389,7 @@ mod tests {
         let now = crate::adapters::SystemClock.now();
         let alert = Alert {
             reply: Some(ReplyWith {
-                project: "hazels-lab".into(),
+                project: "koji".into(),
                 id: 3,
                 takes: Takes::YesOrNo,
             }),

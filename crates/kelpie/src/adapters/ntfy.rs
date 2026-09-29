@@ -128,12 +128,7 @@ mod tests {
         assert_eq!(replies[0].time, Timestamp(1_790_683_787));
         // Kelpie's own alert and the attachment are not answers, but every
         // text they carry is still read for codes to spend.
-        assert!(
-            replies[0]
-                .said
-                .iter()
-                .any(|s| s == "kelpie: hazels-lab ruling 3")
-        );
+        assert!(replies[0].said.iter().any(|s| s == "kelpie: koji ruling 3"));
         assert!(
             replies[0].said.iter().any(|s| s == "3 yes 7hq2mx9d"),
             "a button's body"
