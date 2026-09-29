@@ -126,7 +126,10 @@ fn a_replayed_code_runs_nothing_and_the_topic_is_told() {
         rig.clock.advance(READ_EVERY);
         assert_eq!(
             step(&runner).unwrap(),
-            Some(StepReport::ReplyToSettled { id: 1, told: None }),
+            Some(StepReport::ReplyToSettled {
+                id: 1,
+                line_failed: None
+            }),
             "{replay}"
         );
     }
@@ -148,7 +151,10 @@ fn a_ruling_settled_by_trigger_tells_a_late_tap_so() {
     rig.alerts.reply(&format!("1 yes {code}"));
     assert_eq!(
         step(&runner).unwrap(),
-        Some(StepReport::ReplyToSettled { id: 1, told: None })
+        Some(StepReport::ReplyToSettled {
+            id: 1,
+            line_failed: None
+        })
     );
 }
 
@@ -162,7 +168,7 @@ fn a_reply_rule_refuses_is_told_on_the_topic() {
         Some(StepReport::ReplyRefused {
             id: 1,
             reason: reason.into(),
-            told: None
+            line_failed: None
         })
     );
     assert_eq!(

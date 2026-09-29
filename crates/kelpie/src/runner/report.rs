@@ -297,16 +297,16 @@ pub enum StepReport {
         id: u64,
         /// Why, as `rule` refused it
         reason: String,
-        /// Why the topic could not be told, if it could not
-        told: Option<String>,
+        /// Why the line for the topic could not be posted, if it could not
+        line_failed: Option<String>,
     },
     /// A reply carried the code of a ruling already settled: it ran nothing,
     /// and the topic was told so
     ReplyToSettled {
         /// The ruling's id
         id: u64,
-        /// Why the topic could not be told, if it could not
-        told: Option<String>,
+        /// Why the line for the topic could not be posted, if it could not
+        line_failed: Option<String>,
     },
     /// A message on the webhook's topic carried no ruling's code, and was
     /// ignored. Its text is not logged, since anyone holding the topic can

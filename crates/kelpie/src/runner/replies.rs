@@ -66,7 +66,7 @@ pub(super) fn answer_replies(
             Some(Ok(None)) => continue,
             Some(Ok(Some((report, line)))) => {
                 let failed = line.and_then(|(webhook, alert)| alerts.post(&webhook, &alert).err());
-                return Some(Ok(report.told(failed)));
+                return Some(Ok(report.with_line_failed(failed)));
             }
             Some(Err(e)) => return Some(Err(e)),
             None => {}
@@ -90,9 +90,11 @@ fn read_reply(text: &str) -> Option<(u64, Answer, &str)> {
 
 impl StepReport {
     // Records why the line for the topic could not be posted, if it could not.
-    fn told(mut self, failed: Option<AlertError>) -> Self {
-        if let Self::ReplyRefused { told, .. } | Self::ReplyToSettled { told, .. } = &mut self {
-            *told = failed.map(|e| e.to_string());
+    fn with_line_failed(mut self, failed: Option<AlertError>) -> Self {
+        if let Self::ReplyRefused { line_failed, .. } | Self::ReplyToSettled { line_failed, .. } =
+            &mut self
+        {
+            *line_failed = failed.map(|e| e.to_string());
         }
         self
     }
@@ -261,7 +263,13 @@ impl Runner {
         };
         if !self.state.rulings.iter().any(|r| r.id == id) {
             let text = format!("Ruling {id} is already settled, so that reply ran nothing.");
-            return (StepReport::ReplyToSettled { id, told: None }, line(text));
+            return (
+                StepReport::ReplyToSettled {
+                    id,
+                    line_failed: None,
+                },
+                line(text),
+            );
         }
         match self.rule_and_tell(id, answer) {
             Ok(()) => (StepReport::ReplyAnswered { id }, None),
@@ -271,7 +279,7 @@ impl Runner {
                 let report = StepReport::ReplyRefused {
                     id,
                     reason,
-                    told: None,
+                    line_failed: None,
                 };
                 (report, line(text))
             }
