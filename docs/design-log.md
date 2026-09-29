@@ -30,6 +30,7 @@ So kelpie moves the control room's rules (gates, locks, rate windows) into code,
 ## Work
 
 - GitHub Issues stay the tracker for the work kelpie does, with the `ready-for-agent` family of triage labels. The board of work items lives inside kelpie.
+- Priority orders the board (shep-pm/shep-kelpie#144). Ready issues labelled `priority: P0` go first, then `P1`, `P2`, `P3`, then those with no priority label, the labels shep uses. Within a priority the oldest issue goes first, as before, and an issue with several priority labels ranks by the highest. Adoptions and reworks still go before any issue. A blocked, assigned or otherwise passed-over issue does not hold up the next one, whatever its priority.
 - A planning session forms work items: the maintainer with an Opus agent, interactive, fed mechanical footprints. Kelpie adds the results to the board and dispatches.
 - Overlapping items are bundled when the combined PR stays small, and chained otherwise. The next worker in a chain starts from `--fork-session` of the previous worker's last session.
 - One work item, one PR, and every PR boundary is a reset point. A worker that finds more than one PR's worth of work splits the rest into chained work items and divides its remaining budget among them. The motivating case: a shep refactor issue became four PRs in one session with a huge context, though the pieces barely overlapped.
