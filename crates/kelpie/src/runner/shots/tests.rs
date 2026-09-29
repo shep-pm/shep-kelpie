@@ -82,6 +82,43 @@ fn a_launch_file_on_main_without_the_setting_takes_no_shots() {
     assert_eq!(shots_comments(&rig), Vec::<String>::new());
 }
 
+// shep's dev server lives in `web/`, so only a change there is worth shots.
+fn with_web_preview(project: &str, change: &'static str) -> (Rig, std::sync::Mutex<Runner>) {
+    let rig = Rig::new(project);
+    let launch = r#"{"configurations": [{"name": "web", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 5173, "cwd": "web"}]}"#;
+    rig.land(crate::preview::LAUNCH_FILE, launch);
+    rig.edit_settings(|s| format!("{s}\n[preview]\nenabled = true\n"));
+    let runner = started(&rig);
+    rig.claude
+        .script([Scripted::Push(change, "change\n"), Scripted::Text("CLEAN")]);
+    for _ in 0..3 {
+        step(&runner).unwrap(); // the turn, qwen, then the shots or claude
+    }
+    (rig, runner)
+}
+
+#[test]
+fn a_pull_request_that_changes_nothing_under_the_cwd_takes_no_shots() {
+    let (rig, runner) = with_web_preview("shep", "src/lib.rs");
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+    let ruling = rig.verdict(&runner);
+    assert!(
+        matches!(ruling, Some(StepReport::Ruling { id: 1, .. })),
+        "{ruling:?}"
+    );
+    assert_eq!(rig.shots.jobs(), [], "no shots run");
+    assert_eq!(shots_comments(&rig), Vec::<String>::new());
+}
+
+#[test]
+fn a_pull_request_that_changes_the_cwd_takes_shots() {
+    let (rig, _runner) = with_web_preview("shep", "web/app.tsx");
+    let [job] = rig.shots.jobs().try_into().unwrap();
+    let cwd = job.launch.unwrap().cwd;
+    assert_eq!(cwd.as_deref(), Some("web"));
+}
+
 // Steps until the fence's ruling on a branch that changes `.claude`, and
 // accepts it with a yes, as the maintainer would
 fn accept_fenced_change(rig: &Rig, runner: &std::sync::Mutex<Runner>) {

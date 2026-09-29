@@ -3,6 +3,7 @@
 //! A run is taken outside the runner's lock, like a review call, of the head
 //! on `origin`: before each Claude review round, and before the merge ruling.
 //! The merge ruling's run goes on the pull request's shots comment first.
+//! A head that changes nothing under the launch configuration's `cwd` gets none.
 //! A run that fails is reported and kept, so it never holds a gate.
 
 use std::path::PathBuf;
@@ -16,6 +17,7 @@ use crate::settings::NonBlank;
 use crate::shots::{SERVER_PID, ShotsJob, ShotsRecord, ShotsRun, named_routes, publish, routes};
 use crate::state::StateError;
 use crate::work_item::{ReviewCallState, WorkItem};
+use crate::worktree;
 
 #[cfg(test)]
 mod tests;
@@ -43,6 +45,17 @@ impl Runner {
     /// Whether the preview is on, with a work item in flight
     pub(super) fn preview_on(&self) -> bool {
         self.state.work_item.is_some() && self.previewed()
+    }
+
+    // Whether `head` changes anything under the launch configuration's `cwd`.
+    // A file or diff kelpie cannot read says yes, so the run says why.
+    fn touches_preview(&self, head: &str) -> bool {
+        let preview = &self.settings.preview;
+        let config = preview.configuration.as_ref().map(NonBlank::as_str);
+        let Ok(launch) = preview::launch(&self.settings.repo, config) else {
+            return true;
+        };
+        worktree::changes_under(&self.settings.repo, head, launch.cwd.as_deref()).unwrap_or(true)
     }
 
     /// The job for a run into `out`, on the settings' routes and the worker's
@@ -103,6 +116,9 @@ impl Runner {
                 return Ok(RoundShots::Ready(Some(ShotsRun::failed(why))));
             }
         };
+        if !self.touches_preview(&head) {
+            return Ok(RoundShots::Ready(None));
+        }
         if let Some(begin) = self.shots_due(&head)? {
             return Ok(RoundShots::Take(begin));
         }
@@ -145,7 +161,7 @@ impl Runner {
         number: u64,
         head: &str,
     ) -> Result<Option<Begin>, StateError> {
-        if !self.preview_on() {
+        if !self.preview_on() || !self.touches_preview(head) {
             return Ok(None);
         }
         if let Some(begin) = self.shots_due(head)? {
