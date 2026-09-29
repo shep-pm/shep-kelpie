@@ -3,8 +3,8 @@
 //! Both reach the shepherd over its socket through the shep client kelpie
 //! is built with, never through a `shep` binary. A `shep` found on `PATH`
 //! can be another version, and an older one can take over a newer
-//! shepherd. A shepherd on another shep version is refused with the reason
-//! and nothing to run, since shep's own advice for a skew is a reload.
+//! shepherd. A shepherd on another shep major or minor is refused with the
+//! reason and nothing to run, since shep's own advice for a skew is a reload.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -78,7 +78,7 @@ async fn deliver(shep_home: &Path, project: &str, ruling: Ruling<'_>) -> Result<
             ),
         })?;
     let running = client.daemon().daemon_version.as_str();
-    if running != SHEP_VERSION {
+    if release_line(running) != release_line(SHEP_VERSION) {
         return Err(skew(shep_home, Some(running)));
     }
     // `shep trigger`'s own budget: a ruling can wait on the runner's lock.
@@ -101,6 +101,13 @@ async fn deliver(shep_home: &Path, project: &str, ruling: Ruling<'_>) -> Result<
     }
 }
 
+// A version's major and minor. A patch release of the pinned line is
+// accepted, so shep's patch releases never need a kelpie rebuild.
+fn release_line(version: &str) -> (Option<&str>, Option<&str>) {
+    let mut parts = version.split('.');
+    (parts.next(), parts.next())
+}
+
 // Names nothing to run: shep's own advice for a skew is a reload, and a
 // relay that ran it with the wrong `shep` could replace kelpie's shepherd.
 fn skew(shep_home: &Path, running: Option<&str>) -> String {
@@ -108,10 +115,14 @@ fn skew(shep_home: &Path, running: Option<&str>) -> String {
         || "a shep version it did not name".to_owned(),
         |v| format!("shep {v}"),
     );
+    let (major, minor) = release_line(SHEP_VERSION);
     format!(
-        "kelpie's shepherd at {} runs {running}, and kelpie is built for shep {SHEP_VERSION}, \
-         so the ruling was not sent. Tell the maintainer, and leave the shepherd as it is.",
-        shep_home.display()
+        "kelpie's shepherd at {} runs {running}, and kelpie is built for shep {SHEP_VERSION} \
+         and takes only a {}.{}.x shepherd, so the ruling was not sent. \
+         Tell the maintainer, and leave the shepherd as it is.",
+        shep_home.display(),
+        major.unwrap_or_default(),
+        minor.unwrap_or_default(),
     )
 }
 
@@ -222,16 +233,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_shepherd_on_another_shep_version_gets_no_ruling() {
-        let home = scratch_home();
-        let mut sent = shepherd(home.path(), "0.8.2", replied("merging #71")).await;
-        let refused = deliver_in_time(home.path(), Ruling::Yes("3"))
-            .await
-            .unwrap_err();
-        assert!(refused.contains("runs shep 0.8.2"), "{refused}");
-        assert!(refused.contains("built for shep 0.10.1"), "{refused}");
-        assert!(!refused.contains("reload"), "{refused}");
-        assert!(sent.try_recv().is_err(), "the ruling was sent");
+    async fn a_shepherd_on_another_minor_or_major_gets_no_ruling() {
+        for version in ["0.8.2", "0.9.4", "0.11.0", "1.10.1", "0.100.1"] {
+            let home = scratch_home();
+            let mut sent = shepherd(home.path(), version, replied("merging #71")).await;
+            let refused = deliver_in_time(home.path(), Ruling::Yes("3"))
+                .await
+                .unwrap_err();
+            assert!(
+                refused.contains(&format!("runs shep {version}")),
+                "{refused}"
+            );
+            assert!(
+                refused.contains("takes only a 0.10.x shepherd"),
+                "{refused}"
+            );
+            assert!(!refused.contains("reload"), "{refused}");
+            assert!(sent.try_recv().is_err(), "the ruling was sent to {version}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_patch_release_of_the_pinned_line_gets_the_ruling() {
+        for version in ["0.10.0", "0.10.2"] {
+            let home = scratch_home();
+            let mut sent = shepherd(home.path(), version, replied("merging #71")).await;
+            let reply = deliver_in_time(home.path(), Ruling::Yes("3")).await;
+            assert_eq!(reply, Ok("merging #71".into()), "{version}");
+            assert_eq!(sent.try_recv().unwrap().body, rule_trigger("3 yes"));
+        }
     }
 
     #[tokio::test]

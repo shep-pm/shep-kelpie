@@ -32,7 +32,7 @@ shutdown_with_message = true
 kill_timeout = "10s"
 ```
 
-`env` matters. A sheep starts with only `HOME`, `LANG`, `PATH`, `USER` and its `SHEP_*` variables, so `SHEP_HOME` has to be set in its entry. The value must be an absolute path, since shep does not expand `~` in `env`. A runner and the dog refuse to start without it, or with a relative one. The runner passes it on to the relay, whose `kelpie relay-*` commands send its answers to the shepherd at that home. They talk to its socket with the shep client kelpie is built with, never a `shep` on `PATH`, and refuse a shepherd on any other shep version.
+`env` matters. A sheep starts with only `HOME`, `LANG`, `PATH`, `USER` and its `SHEP_*` variables, so `SHEP_HOME` has to be set in its entry. The value must be an absolute path, since shep does not expand `~` in `env`. A runner and the dog refuse to start without it, or with a relative one. The runner passes it on to the relay, whose `kelpie relay-*` commands send its answers to the shepherd at that home. They talk to its socket with the shep client kelpie is built with, never a `shep` on `PATH`, and refuse a shepherd on another shep minor or major than the pinned one.
 
 `kill_timeout` matters too. `shep stop` and `restart` give a runner only that long after the shutdown message, 1.6s by default, then SIGKILL. A runner needs about 7s to stop cleanly, so set it to `10s` or more.
 
