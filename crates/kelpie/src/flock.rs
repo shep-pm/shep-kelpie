@@ -110,6 +110,7 @@ impl Checkout {
     /// A message when `folder` is in no git checkout, or its `origin` is
     /// missing or not a GitHub repo.
     pub fn of(folder: &Path) -> Result<Self, String> {
+        // Git's answer, or none when it ran and refused; a git that cannot run is an error.
         let git = |args: &[&str]| {
             let output = Command::new("git")
                 .arg("-C")
@@ -118,16 +119,13 @@ impl Checkout {
                 .stdin(Stdio::null())
                 .output()
                 .map_err(|e| format!("cannot run git: {e}"))?;
-            output
-                .status
-                .success()
-                .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
-                .ok_or_else(|| String::from_utf8_lossy(&output.stderr).trim().to_owned())
+            let answer = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            Ok::<_, String>(output.status.success().then_some(answer))
         };
-        let root = git(&["rev-parse", "--show-toplevel"])
-            .map_err(|_| format!("{} is not in a git checkout", folder.display()))?;
-        let url = git(&["remote", "get-url", "origin"])
-            .map_err(|_| format!("the checkout at {root} has no `origin` remote"))?;
+        let root = git(&["rev-parse", "--show-toplevel"])?
+            .ok_or_else(|| format!("{} is not in a git checkout", folder.display()))?;
+        let url = git(&["remote", "get-url", "origin"])?
+            .ok_or_else(|| format!("the checkout at {root} has no `origin` remote"))?;
         let forge = forge_of(&url)
             .ok_or_else(|| format!("`origin` is {url}, and kelpie works only with GitHub repos"))?;
         Ok(Self {
@@ -233,7 +231,9 @@ async fn send(
     }
 }
 
-/// Starts `name` again when it is registered and not running
+/// Starts `name`, which the caller has seen registered and not running
+///
+/// A restart, so a sheep that is running is restarted: callers check first.
 async fn resume(client: &Client, name: &str) -> Result<(), String> {
     let request = Request::Restart {
         selector: SelectorSpec::Name(name.to_owned()),
