@@ -139,10 +139,13 @@ build_env = {}
 # busy: kelpie stops it, parks it and asks. A yes resumes the same session.
 turn_timeout = 60
 
-[[app.dogs.kelpie.worker.guard_hooks]]
-event = "PreToolUse"
-matcher = "Bash"
-command = "node ~/.claude/hooks/git-gh-guard.js"
+# A project's own hooks, run after kelpie's guard, which every worker gets.
+# Each command must resolve when the runner starts: its program on `PATH`
+# or at its path, and every argument that is a path must exist.
+# [[app.dogs.kelpie.worker.guard_hooks]]
+# event = "PreToolUse"
+# matcher = "Bash"
+# command = "~/.kelpie/hooks/lint-guard"
 
 # Off unless `enabled = true`, and then only for a repo with
 # `.claude/launch.json` on `main`. Kelpie starts that file's dev server to

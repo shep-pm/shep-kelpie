@@ -1,19 +1,12 @@
-//! CodeRabbit's comments, reviews, threads and head statuses on a pull
-//! request, and the
-//! label and thread changes the project manager makes
+//! A review bot's comments, reviews, threads and head statuses on a pull
+//! request, and the label and thread changes the project manager makes
 
 use serde::Deserialize;
 
 use super::{gh, unreadable};
-use crate::coderabbit::{Activity, Comment, Review, Status, Thread};
 use crate::ports::{ForgeError, Timestamp};
+use crate::review_bot::{Activity, Comment, Login, Review, Status, Thread};
 use crate::settings::ForgeSlug;
-
-/// CodeRabbit's login on the REST API
-const BOT: &str = "coderabbitai[bot]";
-
-/// CodeRabbit's login on the GraphQL API, which drops the suffix
-const BOT_GRAPHQL: &str = "coderabbitai";
 
 // A pull request with more than 100 threads is not expected; one past it
 // would read as unresolved-but-unseen, never as satisfied.
@@ -25,7 +18,12 @@ const THREADS: &str = "query($owner: String!, $name: String!, $number: Int!) { \
 const RESOLVE: &str = "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) \
     { thread { isResolved } } }";
 
-pub(super) fn activity(repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError> {
+pub(super) fn activity(
+    repo: &ForgeSlug,
+    number: u64,
+    login: Login<'_>,
+) -> Result<Activity, ForgeError> {
+    let bot = login.rest;
     let comments = gh(&[
         "api",
         "--paginate",
@@ -34,7 +32,7 @@ pub(super) fn activity(repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeE
             repo.as_str()
         ),
         "--jq",
-        &format!(".[] | select(.user.login == \"{BOT}\") | {{body, updated_at}}"),
+        &format!(".[] | select(.user.login == \"{bot}\") | {{body, updated_at}}"),
     ])?;
     let reviews = gh(&[
         "api",
@@ -44,7 +42,7 @@ pub(super) fn activity(repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeE
             repo.as_str()
         ),
         "--jq",
-        &format!(".[] | select(.user.login == \"{BOT}\") | {{commit_id, body, submitted_at}}"),
+        &format!(".[] | select(.user.login == \"{bot}\") | {{commit_id, body, submitted_at}}"),
     ])?;
     let (owner, name) = repo.as_str().split_once('/').unwrap_or_default();
     let threads = gh(&[
@@ -68,12 +66,12 @@ pub(super) fn activity(repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeE
             repo.as_str()
         ),
         "--jq",
-        &format!(".[] | select(.creator.login == \"{BOT}\") | {{url, description, created_at}}"),
+        &format!(".[] | select(.creator.login == \"{bot}\") | {{url, description, created_at}}"),
     ])?;
     Ok(Activity {
         comments: parse_comments(&comments)?,
         reviews: parse_reviews(&reviews)?,
-        threads: parse_threads(&threads)?,
+        threads: parse_threads(&threads, login.graphql)?,
         statuses: parse_statuses(&statuses)?,
     })
 }
@@ -199,7 +197,8 @@ pub(crate) fn parse_statuses(stdout: &[u8]) -> Result<Vec<Status>, ForgeError> {
         .collect()
 }
 
-pub(crate) fn parse_threads(stdout: &[u8]) -> Result<Vec<Thread>, ForgeError> {
+// Only the threads whose first comment is by `bot`, its GraphQL login.
+pub(crate) fn parse_threads(stdout: &[u8], bot: &str) -> Result<Vec<Thread>, ForgeError> {
     #[derive(Deserialize)]
     struct Reply {
         data: Data,
@@ -246,7 +245,7 @@ pub(crate) fn parse_threads(stdout: &[u8]) -> Result<Vec<Thread>, ForgeError> {
         .into_iter()
         .filter_map(|node| {
             let first = node.comments.nodes.into_iter().next()?;
-            let by_bot = first.author.is_some_and(|a| a.login == BOT_GRAPHQL);
+            let by_bot = first.author.is_some_and(|a| a.login == bot);
             by_bot.then_some(Thread {
                 id: node.id,
                 resolved: node.is_resolved,
@@ -305,6 +304,7 @@ mod tests {
         let reply = br#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
             {"id":"a","isResolved":false,"path":"x","line":1,
              "comments":{"nodes":[{"author":null,"body":"ghost"}]}}]}}}}}"#;
-        assert_eq!(parse_threads(reply).unwrap(), []);
+        let coderabbit = crate::coderabbit::LOGIN.graphql;
+        assert_eq!(parse_threads(reply, coderabbit).unwrap(), []);
     }
 }

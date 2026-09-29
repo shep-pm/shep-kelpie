@@ -3,24 +3,26 @@
 //! The runner's flock entry needs `channel = true`, and
 //! `shutdown_with_message = true` so a stop reaches it as a message.
 //! Triggers are answered at once; the worker's turns run on a thread of
-//! their own, woken by each trigger and by a look at the board every minute.
+//! their own, woken by each trigger and by a look at the board every minute,
+//! or more often while a ruling waits on a reply on the webhook's topic.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::adapters::{
     ClaudeCli, Curl, Gh, LocalReviewer, RelayCli, ShepLeases, ShotsCli, SystemClock,
 };
+use crate::coderabbit::CodeRabbit;
 use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
 use crate::ports::{Leases, Ports};
-use crate::runner::{ACTIONS, ProjectName, ProjectPaths, Runner, answer, step};
+use crate::runner::{ACTIONS, ProjectName, ProjectPaths, READ_EVERY, Runner, answer, step};
 use crate::shep_home;
 
 /// How long queued replies get to reach the shepherd before the runner exits
@@ -78,6 +80,7 @@ fn serve(project: &str) -> Result<(), String> {
         forge: Box::new(Gh),
         meter: Box::new(claude.meter()),
         reviewer: Arc::new(reviewer.clone()),
+        review_bot: Arc::new(CodeRabbit),
         shots: Arc::new(shots.clone()),
         relay: Arc::new(RelayCli::new(
             home.clone(),
@@ -253,7 +256,8 @@ impl Worker {
 }
 
 // Runs steps while there are any, then sleeps until a trigger or the next
-// look at the board. A turn cut short by a restart is resumed on the first pass.
+// look at the board, or at the webhook's topic while a ruling waits on a reply
+// there. A turn cut short by a restart is resumed on the first pass.
 fn work(runner: &Mutex<Runner>, on_wake: &mut OnWake, woken: &Receiver<()>, stopping: &AtomicBool) {
     while !stopping.load(Ordering::SeqCst) {
         match step(runner) {
@@ -267,7 +271,15 @@ fn work(runner: &Mutex<Runner>, on_wake: &mut OnWake, woken: &Receiver<()>, stop
             Ok(None) => {}
             Err(e) => eprintln!("cannot save the worker's turn: {e}"),
         }
-        if let Err(RecvTimeoutError::Disconnected) = woken.recv_timeout(BOARD_POLL) {
+        let awaits_reply = (runner.lock())
+            .unwrap_or_else(PoisonError::into_inner)
+            .awaits_reply();
+        let wait = if awaits_reply {
+            Duration::from_secs(READ_EVERY)
+        } else {
+            BOARD_POLL
+        };
+        if let Err(RecvTimeoutError::Disconnected) = woken.recv_timeout(wait) {
             return;
         }
         // A stop has only JOIN_BOUND to be let go, so it skips the wake's work.

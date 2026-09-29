@@ -235,6 +235,7 @@ impl Runner {
         let held_count = held.len();
         let prompt = findings::fix_prompt(number, round, held_count, &path);
         self.update(|item| {
+            item.record_held(&held);
             item.turn = Turn::Next { prompt };
             item.phase = Phase::Review(Review {
                 stage: ReviewStage::Fixing {
@@ -264,11 +265,11 @@ impl Runner {
         if matches!(result, ReviewResult::Stopped) {
             return Ok(None);
         }
-        let in_coderabbit_round = self
+        let in_review_bot_round = self
             .current()
             .is_some_and(|item| matches!(item.phase, Phase::CodeRabbit(_)));
-        if in_coderabbit_round {
-            return self.coderabbit_verdict(result, spent);
+        if in_review_bot_round {
+            return self.review_bot_verdict(result, spent);
         }
         let now = self.ports.clock.now();
         let local = self.local_rounds();
@@ -296,7 +297,7 @@ impl Runner {
         if let ReviewResult::Spilled(reason) = &result {
             let reason = reason.clone();
             let kind = RulingKind::LocalModelSpilled { review, reason };
-            let (id, question) = park(self.project.as_str(), &mut next, issue, Some(number), kind);
+            let (id, question) = park(self.names(), &mut next, issue, Some(number), kind);
             self.save(next)?;
             let comment_failed = self.post_ruling(Some(number), id);
             return Ok(Some(StepReport::Ruling {

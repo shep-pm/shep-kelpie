@@ -287,7 +287,10 @@ mod tests {
     fn a_dispatch_that_cannot_be_saved_is_an_error_and_takes_nothing() {
         let (rig, runner) = running("rotom");
         rig.forge.list_ready(4, false);
-        std::fs::remove_dir_all(rig.paths().state.parent().unwrap()).unwrap();
+        let folder = rig.paths().state.parent().unwrap().to_owned();
+        std::fs::remove_dir_all(&folder).unwrap();
+        // A file where the folder was, which a save cannot make a folder of.
+        std::fs::write(&folder, "").unwrap();
         let err = step(&runner).unwrap_err();
         assert!(
             err.to_string().starts_with("cannot write state file"),

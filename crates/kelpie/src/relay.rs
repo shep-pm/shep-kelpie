@@ -116,7 +116,8 @@ impl Wants {
             | RulingKind::TurnTimeout { .. }
             | RulingKind::TurnFailed { .. }
             | RulingKind::ClaudeFiles { .. }
-            | RulingKind::ForeignChange { .. } => Self::YesOrNo,
+            | RulingKind::ForeignChange { .. }
+            | RulingKind::FollowUp { .. } => Self::YesOrNo,
         }
     }
 

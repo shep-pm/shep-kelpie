@@ -8,9 +8,9 @@
 use std::path::Path;
 
 use serde_json::{Map, Value};
-use shep_client::shep_core::protocol::Request;
 use shep_client::shep_core::protocol::request::Response;
-use shep_client::{Client, ConnectError};
+use shep_client::shep_core::protocol::{Request, RpcErrorCode};
+use shep_client::{Client, ConnectError, RequestError};
 
 /// The shep version kelpie is built with, pinned in the workspace manifest
 pub const SHEP_VERSION: &str = "0.11.0";
@@ -86,6 +86,14 @@ pub async fn connect(shep_home: &Path) -> Result<Client, ConnectRefused> {
         return Err(ConnectRefused::Skew(Some(running.to_owned())));
     }
     Ok(client)
+}
+
+/// Whether `error` is shep's answer to a request naming no sheep it has
+///
+/// A trigger on an unknown name is refused with `NotFound`, never answered
+/// with an empty list of replies.
+pub fn names_no_sheep(error: &RequestError) -> bool {
+    matches!(error, RequestError::Rpc(e) if e.code == RpcErrorCode::NotFound)
 }
 
 // A version's major and minor.

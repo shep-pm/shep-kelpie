@@ -15,13 +15,13 @@
 
 use std::sync::Mutex;
 
-use super::Runner;
 use super::gate::short;
 use super::report::StepReport;
 use super::ruling::SHOTS_FAILED;
 use super::trigger::lock;
+use super::{Answer, RuleError, Runner};
 use crate::channels::Channel;
-use crate::ports::{Alert, AlertError, Alerts, Relay, Timestamp};
+use crate::ports::{Alert, AlertError, Alerts, Relay, ReplyWith, Timestamp};
 use crate::relay::{self, Settled};
 use crate::settings::Effort;
 use crate::state::{Notice, StateError};
@@ -160,6 +160,20 @@ impl Runner {
         relayed.collect()
     }
 
+    /// Answers ruling `id` as `rule` does, and queues a message to the relay
+    /// for each ruling it held that the answer settled
+    pub(super) fn rule_and_tell(&mut self, id: u64, answer: Answer) -> Result<(), RuleError> {
+        let how = match &answer {
+            Answer::Yes => Settled::Yes,
+            Answer::No(note) => Settled::No(note.clone()),
+            Answer::Text(text) => Settled::Answer(text.clone()),
+        };
+        let relayed = self.relayed();
+        self.rule(id, answer)?;
+        self.settled_without_relay(&relayed, &how);
+        Ok(())
+    }
+
     /// Queues a message to the relay for each of `relayed` no longer pending
     pub(super) fn settled_without_relay(&mut self, relayed: &[Relayed], how: &Settled) {
         for held in relayed {
@@ -178,42 +192,23 @@ impl Runner {
     /// one being relayed until [`Self::alert_sent`].
     pub(super) fn alert_due(&mut self) -> Option<Due> {
         let now = self.ports.clock.now();
-        let waiting = |of| self.retry.is_some_and(|r| r.of == of && now < r.at);
-        let project = self.project.as_str();
+        let waiting = |retry: Option<Retry>, of| retry.is_some_and(|r| r.of == of && now < r.at);
         if let Some(ruling) = self.state.rulings.iter().find(|r| !r.alerted) {
-            let of = Posting::Ruling(ruling.id);
-            if waiting(of) {
+            let (id, kind) = (ruling.id, ruling.kind.clone());
+            if waiting(self.retry, Posting::Ruling(id)) {
                 return None;
             }
-            let due = Due {
-                of,
-                relay: (self.channels.has(Channel::Relay) && !ruling.relayed).then(|| {
-                    self.relay_message(relay::message(
-                        project,
-                        ruling.id,
-                        relay::Wants::of(&ruling.kind),
-                        &ruling.question,
-                    ))
-                }),
-                relay_held: ruling.relayed,
-                webhook: self.webhook.clone(),
-                alert: Alert {
-                    title: format!("kelpie: {project} ruling {}", ruling.id),
-                    text: ruling.question.clone(),
-                },
-            };
-            if due.relay.is_some() {
-                self.relaying = Some(ruling.id);
-            }
-            return Some(due);
+            let reply = self.reply_with(id, &kind);
+            return Some(self.ruling_due(id, reply));
         }
+        let project = self.project.as_str();
         let notice = self.state.notices.first()?;
         let of = Posting::Notice {
             issue: notice.issue,
             pull_request: notice.pull_request,
         };
         let alert = notice_alert(project, notice);
-        (!waiting(of)).then(|| Due {
+        (!waiting(self.retry, of)).then(|| Due {
             of,
             relay: (self.channels.has(Channel::Relay) && !self.channels.has(Channel::Webhook))
                 .then(|| self.relay_message(relay::notice(project, &alert.text))),
@@ -221,6 +216,35 @@ impl Runner {
             webhook: self.webhook.clone(),
             alert,
         })
+    }
+
+    // Ruling `id`'s post, which must be pending
+    fn ruling_due(&mut self, id: u64, reply: Option<ReplyWith>) -> Due {
+        let project = self.project.as_str();
+        let ruling = self.state.rulings.iter().find(|r| r.id == id);
+        let ruling = ruling.expect("the ruling due is pending");
+        let due = Due {
+            of: Posting::Ruling(id),
+            relay: (self.channels.has(Channel::Relay) && !ruling.relayed).then(|| {
+                self.relay_message(relay::message(
+                    project,
+                    id,
+                    relay::Wants::of(&ruling.kind),
+                    &ruling.question,
+                ))
+            }),
+            relay_held: ruling.relayed,
+            webhook: self.webhook.clone(),
+            alert: Alert {
+                title: format!("kelpie: {project} ruling {id}"),
+                text: ruling.question.clone(),
+                reply,
+            },
+        };
+        if due.relay.is_some() {
+            self.relaying = Some(id);
+        }
+        due
     }
 
     fn relay_message(&self, text: String) -> RelayMessage {
@@ -289,9 +313,7 @@ impl Runner {
                 Some(r) if r.of == of => r.failures.saturating_add(1),
                 _ => 1,
             };
-            let wait = RETRY_FIRST
-                .saturating_mul(1 << (failures - 1).min(16))
-                .min(RETRY_MAX);
+            let wait = backoff(RETRY_FIRST, failures, RETRY_MAX);
             let at = Timestamp(self.ports.clock.now().0.saturating_add(wait));
             self.retry = Some(Retry { of, failures, at });
             let reason = e.to_string();
@@ -318,6 +340,8 @@ impl Runner {
                 if let Some(ruling) = next.rulings.iter_mut().find(|r| r.id == id) {
                     ruling.alerted = true;
                 }
+                // A reply may come even if the ruling is settled first.
+                self.read_replies_from(self.ports.clock.now());
                 StepReport::Alerted { id }
             }
             Posting::Notice {
@@ -336,6 +360,14 @@ impl Runner {
     }
 }
 
+/// Seconds to wait after the `failures`th failure in a row: `first`, then
+/// twice as long each time, up to `max`
+pub(super) fn backoff(first: u64, failures: u32, max: u64) -> u64 {
+    first
+        .saturating_mul(1 << failures.saturating_sub(1).min(16))
+        .min(max)
+}
+
 fn notice_alert(project: &str, notice: &Notice) -> Alert {
     let Notice {
         issue,
@@ -351,6 +383,7 @@ fn notice_alert(project: &str, notice: &Notice) -> Alert {
              on {project}, every gate passed.{shots} Nothing to answer.",
             short(head)
         ),
+        reply: None,
     }
 }
 

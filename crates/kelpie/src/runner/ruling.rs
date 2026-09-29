@@ -8,10 +8,10 @@
 
 use std::fmt;
 
-use super::Runner;
 use super::gate::short;
 use super::report::{Begin, StepReport};
 use super::rework::HUMAN;
+use super::{Names, Runner};
 use crate::ports::Timestamp;
 use crate::settings::MergeAuthority;
 use crate::state::{Fix, ProjectState, Resume, Ruling, RulingKind, StateError};
@@ -130,6 +130,12 @@ impl Runner {
             (&answer, &ruling.kind),
             (Answer::Yes, RulingKind::CodeRabbitCap { .. })
         );
+        // Whether the findings a merged pull request left are filed or dropped.
+        let follow_up = match (&answer, &ruling.kind) {
+            (Answer::Yes, RulingKind::FollowUp { .. }) => Some(true),
+            (Answer::No(_), RulingKind::FollowUp { .. }) => Some(false),
+            _ => None,
+        };
         let accepts = match (&answer, &ruling.kind) {
             (Answer::Yes, RulingKind::ClaudeFiles { head, .. }) => Some(head.clone()),
             _ => None,
@@ -174,6 +180,14 @@ impl Runner {
         let moved = decide(id, answer, ruling, now, head_moved)?;
         if let Some(item) = next.work_items.iter_mut().find(|item| parked_on(item)) {
             item.coderabbit.cap_cleared |= lifts_cap;
+            if let (Some(filed), Some(pending)) = (follow_up, item.follow_ups.as_mut()) {
+                if filed {
+                    pending.ruled = true;
+                    pending.first_refused = None;
+                } else {
+                    pending.findings.clear();
+                }
+            }
             if accepts.is_some() {
                 item.claude_files_accepted = accepts;
             }
@@ -269,7 +283,7 @@ impl Runner {
             return self.save(next).map_err(RuleError::State);
         };
         let kind = RulingKind::ForeignChange { description, known };
-        let (id, _) = park(self.project.as_str(), &mut next, issue, number, kind);
+        let (id, _) = park(self.names(), &mut next, issue, number, kind);
         self.save(next).map_err(RuleError::State)?;
         // A comment that fails loses nothing: the ruling is saved and alerted.
         let _ = self.post_ruling(number, id);
@@ -281,7 +295,7 @@ impl Runner {
     pub(super) fn raise(&mut self, number: u64, kind: RulingKind) -> Result<Begin, StateError> {
         let mut next = self.state.clone();
         let issue = self.current().expect("a ruling is about a work item").issue;
-        let (id, question) = park(self.project.as_str(), &mut next, issue, Some(number), kind);
+        let (id, question) = park(self.names(), &mut next, issue, Some(number), kind);
         self.save(next)?;
         let comment_failed = self.post_ruling(Some(number), id);
         Ok(Begin::Report(StepReport::Ruling {
@@ -299,7 +313,7 @@ impl Runner {
     pub(super) fn post_ruling(&self, number: Option<u64>, id: u64) -> Option<String> {
         let number = number?;
         let ruling = self.state.rulings.iter().find(|r| r.id == id)?;
-        let comment = comment(&ruling.kind)?;
+        let comment = comment(&ruling.kind, self.names().bot)?;
         let posted = self
             .ports
             .forge
@@ -343,7 +357,7 @@ fn regate(repo: &std::path::Path, item: &mut WorkItem) -> Result<bool, RuleError
 ///
 /// Returns the ruling's id and question.
 pub(super) fn park(
-    project: &str,
+    names: Names<'_>,
     next: &mut ProjectState,
     issue: u64,
     pull_request: Option<u64>,
@@ -354,7 +368,7 @@ pub(super) fn park(
         .item_mut(issue)
         .expect("a ruling is about an open work item");
     item.phase = Phase::Ruling { id };
-    let text = question(project, id, issue, pull_request, &kind);
+    let text = question(names, id, issue, pull_request, &kind);
     next.last_ruling = id;
     next.rulings.push(Ruling {
         id,
@@ -371,7 +385,7 @@ pub(super) fn park(
 // What a reader of the pull request is told of a ruling: what happened and
 // that it waits on the maintainer, with no command and nothing of kelpie's.
 // A merge ruling says nothing, since `ready-for-human` already does.
-fn comment(kind: &RulingKind) -> Option<String> {
+fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
     let said = match kind {
         RulingKind::Merge { .. } => return None,
         RulingKind::Rebase { reason } => {
@@ -401,11 +415,11 @@ fn comment(kind: &RulingKind) -> Option<String> {
                 .to_owned()
         }
         RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
-            "CodeRabbit has run {rounds} rounds here, its cap, \
+            "{bot} has run {rounds} rounds here, its cap, \
              and {held} of its findings still hold."
         ),
         RulingKind::CodeRabbitSilent { head } => {
-            format!("CodeRabbit never reviewed {}.", short(head))
+            format!("{bot} never reviewed {}.", short(head))
         }
         RulingKind::Question { asked, .. } => asked.clone(),
         RulingKind::TurnTimeout { .. } => {
@@ -421,6 +435,8 @@ fn comment(kind: &RulingKind) -> Option<String> {
         RulingKind::ForeignChange { description, .. } => {
             format!("This pull request was changed: {description}.")
         }
+        // Merged and done: nothing on the pull request waits on the maintainer.
+        RulingKind::FollowUp { .. } => return None,
     };
     Some(format!("{said}\n\nWaiting on the maintainer."))
 }
@@ -491,6 +507,8 @@ fn decide(
         ) => Phase::Done { merged: false },
         (Answer::Yes, RulingKind::ClaudeFiles { phase, .. }) => phase,
         (Answer::Yes, RulingKind::ForeignChange { known, .. }) => return Ok(Move::Accept(known)),
+        // The pull request is merged, so a no has no worker to send a note to.
+        (Answer::Yes | Answer::No(_), RulingKind::FollowUp { .. }) => Phase::Done { merged: true },
         // A no's fix is new code, unreviewed: it goes through the
         // qwen-review loop again before CI, whatever ruling this answers.
         (Answer::No(note), _) => {
@@ -547,7 +565,14 @@ fn decide(
     Ok(Move::Phase(phase))
 }
 
-fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &RulingKind) -> String {
+fn question(
+    names: Names<'_>,
+    id: u64,
+    issue: u64,
+    number: Option<u64>,
+    kind: &RulingKind,
+) -> String {
+    let Names { project, bot } = names;
     let trigger = |answer: &str| format!("`shep trigger {project} rule '{id} {answer}'`");
     let (yes, no) = (trigger("yes"), trigger("no <note>"));
     let about = number.map_or_else(
@@ -595,7 +620,7 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
         RulingKind::FixNotPushed { fix, .. } => {
             let round = match fix {
                 Fix::Review(review) => format!("round {} of the qwen-review loop", review.round),
-                Fix::CodeRabbit { round, .. } => format!("CodeRabbit round {round}"),
+                Fix::CodeRabbit { round, .. } => format!("{bot} round {round}"),
             };
             format!(
                 "The worker on {about} ended its fix for {round} without pushing, \
@@ -603,12 +628,12 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
             )
         }
         RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
-            "CodeRabbit has run {rounds} rounds on {about}, its cap, and the judge \
+            "{bot} has run {rounds} rounds on {about}, its cap, and the judge \
              still holds {held} of its findings. {yes} sends the worker those \
              findings and lets the rounds go past the cap"
         ),
         RulingKind::CodeRabbitSilent { head } => format!(
-            "CodeRabbit never reviewed {about} at {} after kelpie summoned it. \
+            "{bot} never reviewed {about} at {} after kelpie summoned it. \
              {yes} has kelpie look at CI and summon it again",
             short(head)
         ),
@@ -652,11 +677,44 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
                 capitalized(&about)
             );
         }
+        RulingKind::FollowUp { findings, refused } => {
+            let list: Vec<String> = findings
+                .iter()
+                .map(|f| match f.line {
+                    0 => format!("- {} {}", f.file, f.what.trim()),
+                    line => format!("- {}:{line} {}", f.file, f.what.trim()),
+                })
+                .collect();
+            let (said, files) = match refused {
+                Some(why) => (
+                    format!(
+                        "The forge has refused for hours to take the {} confirmed \
+                         finding(s) {about} left unfixed: {}.",
+                        findings.len(),
+                        why.trim()
+                    ),
+                    "tries again",
+                ),
+                None => (
+                    format!(
+                        "{} merged with {} confirmed finding(s) left unfixed.",
+                        capitalized(&about),
+                        findings.len()
+                    ),
+                    "files each as an issue on the board",
+                ),
+            };
+            return format!(
+                "{said}\n\n{}\n\n{yes} {files}, and {} drops them.",
+                list.join("\n"),
+                trigger("no")
+            );
+        }
     };
     format!("{ask}, and {no} sends the worker your note.")
 }
 
-// A CodeRabbit fix ends back in its round, which checks it moved `head`.
+// A review bot fix ends back in its round, which checks it moved `head`.
 // With no head, from an older state file, it ends under Implement and
 // goes straight to CI.
 fn fixing(head: Option<String>) -> Phase {

@@ -214,6 +214,12 @@ fn the_file_format_is_pinned() {
         day: 1,
         week_used_pct: 10,
     });
+    state.replies = Replies {
+        last: Some(LastRead {
+            id: "W3EqiUm5rsNq".into(),
+            time: Timestamp(5),
+        }),
+    };
     store.save(&state).unwrap();
     let text = fs::read_to_string(dir.path().join("state.json")).unwrap();
     let value: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -270,6 +276,7 @@ fn the_file_format_is_pinned() {
             "leases": [{ "resource": "coderabbit", "issue": 22, "since": 8 }],
             "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
             "notices": [{ "issue": 22, "pull_request": 30, "head": "c0ffee", "shots_failed": true }],
+            "replies": { "last": { "id": "W3EqiUm5rsNq", "time": 5 } },
         })
     );
 }
@@ -499,17 +506,21 @@ fn a_newer_format_is_reported_as_one() {
 }
 
 #[test]
+fn a_project_with_no_folder_yet_gets_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = StateStore::new(dir.path().join("projects/koji/state.json"));
+    let state = ProjectState::new(Timestamp(1));
+    store.save(&state).unwrap();
+    assert_eq!(store.load().unwrap(), Some(state));
+}
+
+#[test]
 fn a_write_that_cannot_happen_is_an_error() {
     let dir = tempfile::tempdir().unwrap();
-    let store = StateStore::new(dir.path().join("missing/state.json"));
+    std::fs::write(dir.path().join("projects"), "a file, not a folder").unwrap();
+    let store = StateStore::new(dir.path().join("projects/koji/state.json"));
     let err = store.save(&ProjectState::new(Timestamp(1))).unwrap_err();
-    assert!(matches!(
-        err,
-        StateError::Write {
-            kind: io::ErrorKind::NotFound,
-            ..
-        }
-    ));
+    assert!(matches!(err, StateError::Write { .. }), "{err:?}");
 }
 
 #[test]

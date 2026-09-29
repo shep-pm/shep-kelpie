@@ -1,94 +1,77 @@
-//! Reading what CodeRabbit has done on a pull request
+//! CodeRabbit's profile as a review bot
 //!
-//! Two traps shape this. `gh pr view --json reviews` is empty for a review
-//! CodeRabbit liked, so a clean review is read from its walkthrough comment.
-//! And the rate-limit notice quotes the commit range it would have read, so
-//! the reviewed commit comes from the walkthrough's own markers, never from
-//! that range. A third: a summon CodeRabbit finds nothing new in is marked
-//! done on the head's commit status, and posts nothing at all. Pure: the
-//! forge fetches, this reads.
+//! Two traps shape its reading. `gh pr view --json reviews` is empty for a
+//! review CodeRabbit liked, so a clean review is read from its walkthrough
+//! comment. And the rate-limit notice quotes the commit range it would have
+//! read, so the reviewed commit comes from the walkthrough's own markers,
+//! never from that range. A third: a summon CodeRabbit finds nothing new in
+//! is marked done on the head's commit status, and posts nothing at all.
 
+use crate::lease::LeaseKind;
 use crate::ports::{Finding, Severity, Timestamp};
+pub use crate::review_bot::{Activity, Comment, Reading, Review, Status, Thread};
+use crate::review_bot::{CLOCK_SLACK, Login, Profile};
 
-/// Everything CodeRabbit has posted on one pull request
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Activity {
-    /// Its comments on the conversation, oldest first
-    pub comments: Vec<Comment>,
-    /// Its reviews, oldest first. A clean review posts none.
-    pub reviews: Vec<Review>,
-    /// The review threads it opened
-    pub threads: Vec<Thread>,
-    /// The commit statuses it set on the pull request's head, newest first
-    pub statuses: Vec<Status>,
-}
+/// The label shep's `.coderabbit.yaml` gates auto review on: the summon
+pub const LABEL: &str = "review please";
 
-/// One of CodeRabbit's conversation comments, as last edited
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Comment {
-    /// Its text
-    pub body: String,
-    /// When it was last edited: the walkthrough is edited in place
-    pub at: Timestamp,
-}
+/// The comment that asks CodeRabbit to read the whole pull request again
+pub const FULL_REVIEW: &str = "@coderabbitai full review";
 
-/// One review CodeRabbit posted
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Review {
-    /// The commit it reviewed
-    pub commit: String,
-    /// Its text, whose footer states the quota
-    pub body: String,
-    /// When it was posted
-    pub at: Timestamp,
-}
+/// CodeRabbit's login on both of the forge's APIs
+pub const LOGIN: Login<'static> = Login {
+    rest: "coderabbitai[bot]",
+    graphql: "coderabbitai",
+};
 
-/// A review thread CodeRabbit opened
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Thread {
-    /// The forge's id for it, which resolving it takes
-    pub id: String,
-    /// Whether it is resolved
-    pub resolved: bool,
-    /// The file it is on
-    pub path: String,
-    /// The line it is on, if it still maps to one
-    pub line: Option<u32>,
-    /// Its first comment: the finding
-    pub body: String,
-}
+/// CodeRabbit, the first review bot
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CodeRabbit;
 
-/// A commit status CodeRabbit set
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Status {
-    /// The commit it is on
-    pub commit: String,
-    /// What it says, such as "Review completed"
-    pub description: String,
-    /// When it was set
-    pub at: Timestamp,
-}
+impl Profile for CodeRabbit {
+    fn name(&self) -> &str {
+        "CodeRabbit"
+    }
 
-/// What became of a summon, read at one moment
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Reading {
-    /// A review covers the head
-    Reviewed,
-    /// A review is running
-    Processing,
-    /// CodeRabbit refused, quoting when its window opens
-    Refused {
-        /// When the window opens
-        opens: Timestamp,
-    },
-    /// CodeRabbit marked the head done and posted nothing that covers it:
-    /// it found nothing new to read
-    Completed {
-        /// When it marked the head done
-        at: Timestamp,
-    },
-    /// Nothing yet
-    Silent,
+    fn login(&self) -> Login<'_> {
+        LOGIN
+    }
+
+    fn lease(&self) -> LeaseKind {
+        LeaseKind::coderabbit()
+    }
+
+    fn label(&self) -> &str {
+        LABEL
+    }
+
+    fn full_review(&self) -> Option<&str> {
+        Some(FULL_REVIEW)
+    }
+
+    fn read(&self, activity: &Activity, head: &str, since: Timestamp) -> Reading {
+        activity.read(head, since)
+    }
+
+    fn heard(&self, activity: &Activity, head: &str, since: Timestamp) -> bool {
+        activity.heard(head, since)
+    }
+
+    fn covers(&self, activity: &Activity, head: &str) -> bool {
+        activity.covers(head)
+    }
+
+    fn reviewed_besides(&self, activity: &Activity, head: &str) -> u32 {
+        activity.reviewed_besides(head)
+    }
+
+    fn quota(&self, activity: &Activity) -> Option<(u32, Timestamp)> {
+        activity.quota()
+    }
+
+    fn finding(&self, thread: &Thread) -> Finding {
+        finding(thread)
+    }
 }
 
 // The comment CodeRabbit edits in place, found by what it says.
@@ -102,23 +85,28 @@ const LIMIT: &str = "Review limit reached";
 const COMPLETED: &str = "Review completed";
 const RUNNING: &str = "Review in progress";
 
-// A refusal stamped this long before the summon is still its answer. One a
-// minute older quotes the same window, so misreading it costs nothing.
-const CLOCK_SLACK: u64 = 60;
 const WAITS: [&str; 2] = [
     "Next included review available in ",
     "next included review will be available in ",
 ];
 
-impl Activity {
-    /// Whether a review covers commit `head`
-    pub fn covers(&self, head: &str) -> bool {
+// CodeRabbit's reading of its activity, which only its profile calls.
+trait Reads {
+    fn covers(&self, head: &str) -> bool;
+    fn read(&self, head: &str, since: Timestamp) -> Reading;
+    fn heard(&self, head: &str, since: Timestamp) -> bool;
+    fn quota(&self) -> Option<(u32, Timestamp)>;
+    fn reviewed_besides(&self, head: &str) -> u32;
+    fn sticky(&self) -> Option<&Comment>;
+}
+
+impl Reads for Activity {
+    fn covers(&self, head: &str) -> bool {
         self.reviews.iter().any(|r| r.commit == head)
             || self.sticky().and_then(|c| covered(&c.body)) == Some(head)
     }
 
-    /// What became of a summon made at `since`, for commit `head`
-    pub fn read(&self, head: &str, since: Timestamp) -> Reading {
+    fn read(&self, head: &str, since: Timestamp) -> Reading {
         if self.covers(head) {
             return Reading::Reviewed;
         }
@@ -126,8 +114,7 @@ impl Activity {
             return Reading::Processing;
         }
         // Listed by creation, and the walkthrough is edited in place, so
-        // the newest refusal is found by when it was last edited. GitHub's
-        // clock is not this machine's, hence the slack.
+        // the newest refusal is found by when it was last edited.
         let from = since.0.saturating_sub(CLOCK_SLACK);
         let refusal = self
             .comments
@@ -157,10 +144,9 @@ impl Activity {
         Reading::Silent
     }
 
-    /// Whether CodeRabbit gave any sign of a summon made at `since`, for
-    /// commit `head`: it edited or posted a comment, posted a review, or set
-    /// a status on the head. A refusal is a comment, so it counts.
-    pub fn heard(&self, head: &str, since: Timestamp) -> bool {
+    // Any comment edited or posted, review posted, or status set on the
+    // head counts. A refusal is a comment, so it counts.
+    fn heard(&self, head: &str, since: Timestamp) -> bool {
         let from = since.0.saturating_sub(CLOCK_SLACK);
         self.comments.iter().any(|c| c.at.0 >= from)
             || self.reviews.iter().any(|r| r.at.0 >= from)
@@ -170,9 +156,8 @@ impl Activity {
                 .any(|s| s.commit == head && s.at.0 >= from)
     }
 
-    /// The quota the latest footer states, included reviews an hour, and
-    /// when that footer was posted
-    pub fn quota(&self) -> Option<(u32, Timestamp)> {
+    // The quota the latest footer states, and when that footer was posted.
+    fn quota(&self) -> Option<(u32, Timestamp)> {
         let reviews = self.reviews.iter().map(|r| (r.at, r.body.as_str()));
         let comments = self.comments.iter().map(|c| (c.at, c.body.as_str()));
         reviews
@@ -181,11 +166,9 @@ impl Activity {
             .max_by_key(|(_, at)| *at)
     }
 
-    /// How many commits other than `head` it reviewed: each a posted review
-    /// is of, and the one a clean review's walkthrough covers
-    ///
-    /// A reply in a thread posts a review with no body, which is not one.
-    pub fn reviewed_besides(&self, head: &str) -> u32 {
+    // Each commit a posted review is of, and the one a clean review's
+    // walkthrough covers. A reply in a thread posts a review with no body.
+    fn reviewed_besides(&self, head: &str) -> u32 {
         let posted = self.reviews.iter().filter(|r| !r.body.trim().is_empty());
         let mut commits: Vec<&str> = posted.map(|r| r.commit.as_str()).collect();
         commits.extend(self.sticky().and_then(|c| covered(&c.body)));
@@ -193,37 +176,6 @@ impl Activity {
         commits.dedup();
         commits.retain(|c| *c != head);
         u32::try_from(commits.len()).unwrap_or(u32::MAX)
-    }
-
-    /// Only what CodeRabbit posted or edited from `at` on, threads aside
-    pub fn since(&self, at: Timestamp) -> Self {
-        let from = at.0.saturating_sub(CLOCK_SLACK);
-        Self {
-            comments: self
-                .comments
-                .iter()
-                .filter(|c| c.at.0 >= from)
-                .cloned()
-                .collect(),
-            reviews: self
-                .reviews
-                .iter()
-                .filter(|r| r.at.0 >= from)
-                .cloned()
-                .collect(),
-            threads: self.threads.clone(),
-            statuses: self
-                .statuses
-                .iter()
-                .filter(|s| s.at.0 >= from)
-                .cloned()
-                .collect(),
-        }
-    }
-
-    /// Its threads not yet resolved
-    pub fn open_threads(&self) -> impl Iterator<Item = &Thread> {
-        self.threads.iter().filter(|t| !t.resolved)
     }
 
     fn sticky(&self) -> Option<&Comment> {
@@ -296,7 +248,7 @@ fn after<'a>(text: &'a str, marker: &str) -> Option<&'a str> {
 ///
 /// The severity comes from CodeRabbit's own label: Critical and Major are
 /// high, Minor is medium, Trivial is a nit. The judge regrades it anyway.
-pub fn finding(thread: &Thread) -> Finding {
+fn finding(thread: &Thread) -> Finding {
     let label = thread.body.lines().next().unwrap_or_default();
     let severity = if label.contains("Critical") || label.contains("Major") {
         Severity::High
@@ -364,7 +316,7 @@ fn one_line(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::gh::coderabbit::{
+    use crate::adapters::gh::review_bot::{
         parse_comments, parse_reviews, parse_statuses, parse_threads,
     };
 
@@ -394,7 +346,7 @@ mod tests {
         Activity {
             comments: parse_comments(comments.as_bytes()).unwrap(),
             reviews: parse_reviews(reviews.as_bytes()).unwrap(),
-            threads: parse_threads(threads.as_bytes()).unwrap(),
+            threads: parse_threads(threads.as_bytes(), LOGIN.graphql).unwrap(),
             statuses: Vec::new(),
         }
     }
