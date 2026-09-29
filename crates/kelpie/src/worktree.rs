@@ -233,6 +233,7 @@ pub fn remove(
     }
 }
 
+/// Whether `full_ref` is a branch on `origin` right now, asked of the remote
 fn on_origin(repo: &Path, full_ref: &str) -> Result<bool, WorktreeError> {
     Ok(!git(repo, ["ls-remote", "--heads", "origin", full_ref])?.is_empty())
 }
