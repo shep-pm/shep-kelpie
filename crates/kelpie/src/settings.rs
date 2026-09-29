@@ -19,6 +19,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::preview::Preview;
 
+mod local;
+
+pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
+
 /// Everything kelpie reads about one project
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,7 +43,7 @@ pub struct Settings {
     pub generated: Vec<String>,
     /// The model and effort for each role
     pub models: Models,
-    /// The qwen-review loop
+    /// The review loop
     pub review: Review,
     /// The CodeRabbit gate
     pub coderabbit: CodeRabbit,
@@ -126,12 +130,16 @@ impl Effort {
     }
 }
 
-/// The qwen-review loop's settings
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+/// The review loop's settings
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Review {
     /// Rounds after which the worker is parked for a ruling
     pub loop_guard: NonZeroU32,
+    /// The local round, `[review.local]`. The maintainer's qwen-review
+    /// script when absent, as every file before this table ran it.
+    #[serde(default)]
+    pub local: LocalRound,
 }
 
 /// The CodeRabbit gate's settings
@@ -409,10 +417,10 @@ impl Settings {
             path: path.to_owned(),
             message,
         })?;
-        if let (Some(file), Some(folder)) = (&mut settings.worker.instructions_file, path.parent())
-            && file.is_relative()
-        {
-            *file = folder.join(&*file);
+        if let Some(folder) = path.parent() {
+            for file in settings.files_mut().filter(|file| file.is_relative()) {
+                *file = folder.join(&*file);
+            }
         }
         Ok(settings)
     }
@@ -422,12 +430,23 @@ impl Settings {
         if let Ok(rest) = settings.repo.strip_prefix("~") {
             settings.repo = home.join(rest);
         }
-        if let Some(file) = &mut settings.worker.instructions_file
-            && let Ok(rest) = file.strip_prefix("~")
-        {
-            *file = home.join(rest);
+        for file in settings.files_mut() {
+            if let Ok(rest) = file.strip_prefix("~") {
+                *file = home.join(rest);
+            }
         }
         Ok(settings)
+    }
+
+    // The paths that expand `~/` and are taken from the settings file's folder.
+    fn files_mut(&mut self) -> impl Iterator<Item = &mut PathBuf> {
+        let local = match &mut self.review.local {
+            LocalRound::Command(local) => Some(&mut local.command),
+            LocalRound::Off {} | LocalRound::Endpoint(_) => None,
+        };
+        [self.worker.instructions_file.as_mut(), local]
+            .into_iter()
+            .flatten()
     }
 }
 
