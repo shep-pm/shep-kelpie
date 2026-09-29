@@ -2,7 +2,8 @@
 //!
 //! Each step looks once at the pull request's head. A label, ready or head
 //! change kelpie did not make parks the worker before anything else. A
-//! branch without the latest `main` is rebased and pushed, and a conflict is
+//! branch without the latest `main` is rebased and pushed, or merged when
+//! it is adopted or holds a merge already, and a conflict is
 //! the worker's next turn, naming the files. A conflict the worker left
 //! standing parks it on a ruling. A pending run, or none yet, waits for the
 //! next step. A red run is the worker's next turn, naming the checks that

@@ -679,6 +679,14 @@ mod tests {
     }
 
     #[test]
+    fn the_review_loop_diffs_from_main_unless_a_pull_request_arrived_at_a_head() {
+        let mut item = a_work_item();
+        assert_eq!(item.review_base(), "origin/main");
+        item.arrived = Some("c0ffee".into());
+        assert_eq!(item.review_base(), "c0ffee");
+    }
+
+    #[test]
     fn a_work_item_saved_before_reworks_and_adoptions_is_neither() {
         let mut value = serde_json::to_value(a_work_item()).unwrap();
         let fields = value.as_object_mut().unwrap();

@@ -53,7 +53,7 @@ fn parse_viewer(stdout: &[u8]) -> Result<String, ForgeError> {
 struct Pr {
     state: String,
     title: String,
-    body: String,
+    body: Option<String>,
     closing_issues_references: Nodes<Closes>,
     is_draft: bool,
     head_ref_name: String,
@@ -158,7 +158,7 @@ pub(crate) fn parse_reviewed(stdout: &[u8], repo: &ForgeSlug) -> Result<Reviewed
     Ok(Reviewed {
         state: pull_request_state(&pr.state, stdout)?,
         title: pr.title,
-        body: pr.body,
+        body: pr.body.unwrap_or_default(),
         closes: closed_here(pr.closing_issues_references.nodes, repo),
         branch: pr.head_ref_name,
         from_fork: pr.is_cross_repository,

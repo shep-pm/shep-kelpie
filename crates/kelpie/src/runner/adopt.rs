@@ -304,14 +304,15 @@ impl Runner {
                 .forge
                 .coderabbit(&repo, number)
                 .map_err(|e| AdoptError::CodeRabbit(number, e))?;
-            activity.reviewed()
+            activity.reviews_made()
         } else {
             0
         };
         let review = pr
             .review
-            .clone()
-            .filter(|r| r.changes_requested && !self.state.reworked.contains(&r.id));
+            .as_ref()
+            .filter(|r| r.changes_requested && !self.state.reworked.contains(&r.id))
+            .cloned();
         let text = adopted_text(number, &pr, issue, &found, review.as_ref());
         turn::write(&fresh.build, &adopted_path(&fresh.build), &text).map_err(AdoptError::File)?;
         // With the summon label off, no push summons CodeRabbit outside the lease.
@@ -330,9 +331,7 @@ impl Runner {
         next.adopted.retain(|n| *n != number);
         let (turn, phase, resume) = match &review {
             Some(review) => {
-                if !next.reworked.contains(&review.id) {
-                    next.reworked.push(review.id.clone());
-                }
+                next.reworked.push(review.id.clone());
                 let first = Some(Phase::Review(Review::first()));
                 (Turn::Due, Phase::Implement, first)
             }

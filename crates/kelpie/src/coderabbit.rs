@@ -129,7 +129,7 @@ impl Activity {
 
     /// How many reviews it has made: each one posted, and a clean one the
     /// walkthrough covers with none posted
-    pub fn reviewed(&self) -> u32 {
+    pub fn reviews_made(&self) -> u32 {
         let posted = u32::try_from(self.reviews.len()).unwrap_or(u32::MAX);
         let clean = self
             .sticky()
@@ -328,10 +328,12 @@ mod tests {
 
     #[test]
     fn a_clean_review_counts_once_and_a_posted_one_is_not_counted_again_from_the_walkthrough() {
-        assert_eq!(activity(COMMENTS_615, "", NO_THREADS).reviewed(), 1);
+        assert_eq!(activity(COMMENTS_615, "", NO_THREADS).reviews_made(), 1);
         let seen = activity(COMMENTS_598, REVIEWS_598, NO_THREADS);
-        assert_eq!(seen.reviewed(), 2, "both posted reviews are of ce143d9");
-        assert_eq!(activity("", "", NO_THREADS).reviewed(), 0);
+        assert_eq!(seen.reviews_made(), 2, "both posted reviews are of ce143d9");
+        let later_clean = activity(COMMENTS_615, REVIEWS_617, NO_THREADS);
+        assert_eq!(later_clean.reviews_made(), 2, "one posted, one clean");
+        assert_eq!(activity("", "", NO_THREADS).reviews_made(), 0);
     }
 
     #[test]

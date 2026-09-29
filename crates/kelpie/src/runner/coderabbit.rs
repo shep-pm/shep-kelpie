@@ -271,7 +271,7 @@ impl Runner {
         let item = self.item();
         let (worktree, folder) = (item.worktree.clone(), self.paths.worker.clone());
         let model = self.settings.models.judge.clone();
-        // CodeRabbit reviews the whole pull request, adopted or not.
+        // CodeRabbit reviews the whole pull request, so its judge diffs from `main`.
         let main = format!("origin/{}", crate::worktree::BASE);
         match calls::judge_call(&worktree, &main, &folder, &model, &next.finding) {
             Ok(call) => {

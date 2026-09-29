@@ -189,7 +189,8 @@ impl Runner {
 
     // Everything the worker needs on disk before it starts: its worktree, its
     // build folder, its settings file and kelpie's instructions. A turn with
-    // no prompt of its own is the first, and takes the issue or the review.
+    // no prompt of its own is the first, and takes the issue, the review or
+    // what it adopted.
     fn prepare(
         &self,
         item: &WorkItem,
