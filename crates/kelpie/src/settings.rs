@@ -3,10 +3,11 @@
 //! One TOML file per project, read once when the runner starts. Unknown keys
 //! are refused, so a misspelt or malformed setting stops the runner with a
 //! message naming it. Every setting is required except the ones added after
-//! the first build (`review.local`, `pacing.enabled`, `worker.allowed_domains`,
-//! `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout`,
-//! `ruling_channels` and `[preview]`): a file written before them loads with the documented
-//! default, so an upgrade never breaks an existing project.
+//! the first build (`max_items`, `review.local`, `pacing.enabled`,
+//! `worker.allowed_domains`, `worker.build_env`, `worker.instructions_file`,
+//! `worker.turn_timeout`, `ruling_channels` and `[preview]`): a file written
+//! before them loads with the documented default, so an upgrade never breaks
+//! an existing project.
 //! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
@@ -40,6 +41,11 @@ pub struct Settings {
     /// off, kelpie reads no checks and asks for the merge once the branch
     /// has the latest `main`.
     pub ci: bool,
+    /// How many work items may be open at once, each with its own branch,
+    /// worktree and gates. The worker's turns still run one at a time. 1
+    /// when absent.
+    #[serde(default = "default_max_items")]
+    pub max_items: NonZeroU32,
     /// Globs for files left out of a pull request's changed-line count
     pub generated: Vec<String>,
     /// The model and effort for each role
@@ -203,6 +209,11 @@ pub struct Worker {
     /// on a ruling, keeping its session. 60 when absent.
     #[serde(default = "default_turn_timeout")]
     pub turn_timeout: NonZeroU32,
+}
+
+/// One work item at a time, as every project ran before `max_items`
+fn default_max_items() -> NonZeroU32 {
+    NonZeroU32::MIN
 }
 
 /// The design log's default for `worker.turn_timeout`, in minutes
@@ -476,6 +487,7 @@ mod tests {
         assert_eq!(s.forge.as_str(), "shep-pm/shep");
         assert_eq!(s.merge_authority, MergeAuthority::Ask);
         assert!(s.ci);
+        assert_eq!(s.max_items.get(), 1);
         let role = |r: &RoleModel| (r.model.as_str().to_owned(), r.effort);
         assert_eq!(
             role(&s.models.worker),
@@ -573,6 +585,17 @@ mod tests {
         assert_eq!(s.worker.turn_timeout.get(), 60);
         assert!(s.worker.allowed_domains.is_empty());
         assert!(s.worker.build_env.is_empty());
+    }
+
+    #[test]
+    fn one_work_item_is_open_at_a_time_when_the_file_does_not_say() {
+        let before = EXAMPLE.replace("max_items = 1\n", "");
+        assert!(!before.contains("max_items ="));
+        assert_eq!(parse(&before).unwrap().max_items.get(), 1);
+        let text = EXAMPLE.replace("max_items = 1", "max_items = 3");
+        assert_eq!(parse(&text).unwrap().max_items.get(), 3);
+        let err = parse_err(&EXAMPLE.replace("max_items = 1", "max_items = 0"));
+        assert!(err.contains("max_items"), "{err}");
     }
 
     #[test]

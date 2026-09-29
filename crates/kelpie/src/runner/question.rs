@@ -200,6 +200,7 @@ mod tests {
             status["rulings"],
             json!([{
                 "id": 1,
+                "issue": 7,
                 "question": question,
                 "pull_request": null,
                 "kind": {

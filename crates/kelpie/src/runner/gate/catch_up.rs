@@ -18,11 +18,7 @@ impl Runner {
     // `main` moved since the branch was cut or last rebased: rebase and push,
     // and CI runs again on the new head before anyone is asked.
     pub(super) fn rebase(&mut self, number: u64, head: &str) -> Result<Begin, StateError> {
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("a rebase is of a work item");
+        let item = self.current().expect("a rebase is of a work item");
         let issue = item.issue;
         // An adopted branch's commits are someone else's, so it is merged, never rewritten.
         let rewrite = !item.adopted;
@@ -65,11 +61,7 @@ impl Runner {
         main: String,
         files: Vec<String>,
     ) -> Result<Begin, StateError> {
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("a conflict is of a work item");
+        let item = self.current().expect("a conflict is of a work item");
         if item.conflict.as_ref().is_some_and(|sent| {
             sent.head == head || sent.main == main || sent.turns >= CONFLICT_TURNS
         }) {

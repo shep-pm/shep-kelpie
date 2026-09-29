@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use super::Runner;
 use super::report::{Begin, ReworkBy, StepReport};
-use super::trigger;
+use super::trigger::{self, issue_list};
 use super::turn;
 use crate::board::{LabelError, OpenPullRequest, READY, Skip, WorkerModel, worker_override};
 use crate::pacer::Scope;
@@ -32,8 +32,9 @@ const REVIEW_FILE: &str = "maintainer-review.md";
 /// Why `rework` was refused
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReworkError {
-    /// A work item is already in flight, for this issue
-    InFlight(u64),
+    /// The project has `max_items` open, or one for this issue already: the
+    /// issues of those in flight
+    InFlight(Vec<u64>),
     /// The forge could not show the pull request
     PullRequest(u64, ForgeError),
     /// The pull request is merged or closed, as named
@@ -62,7 +63,12 @@ pub enum ReworkError {
 impl fmt::Display for ReworkError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InFlight(issue) => write!(f, "the work item for #{issue} is in flight"),
+            Self::InFlight(issues) if issues.len() == 1 => {
+                write!(f, "the work item for {} is in flight", issue_list(issues))
+            }
+            Self::InFlight(issues) => {
+                write!(f, "the work items for {} are in flight", issue_list(issues))
+            }
             Self::PullRequest(number, e) => write!(f, "cannot read pull request #{number}: {e}"),
             Self::NotOpen(number, state) => write!(f, "pull request #{number} is {state}"),
             Self::NotKelpies(number) => {
@@ -100,8 +106,8 @@ impl ReworkError {
 }
 
 impl Runner {
-    /// Makes open pull request `number`, which kelpie opened, the work item
-    /// in flight, and returns the model and effort its worker runs on
+    /// Opens a work item reworking open pull request `number`, which kelpie
+    /// opened, and returns the model and effort its worker runs on
     ///
     /// Its first turn runs once the project is running.
     ///
@@ -111,8 +117,8 @@ impl Runner {
     /// the change cannot be saved. A refusal changes nothing. A label or
     /// save that fails after the triage labels began coming off leaves them off.
     pub fn rework(&mut self, number: u64) -> Result<WorkerModel, ReworkError> {
-        if let Some(item) = &self.state.work_item {
-            return Err(ReworkError::InFlight(item.issue));
+        if !self.slot_free() {
+            return Err(ReworkError::InFlight(self.state.open_issues()));
         }
         let pr = self
             .ports
@@ -131,16 +137,14 @@ impl Runner {
         open: &[OpenPullRequest],
     ) -> Result<(Option<Begin>, Vec<Skip>), StateError> {
         let mut skipped = Vec::new();
-        // A second ask waits for the work item in flight to end.
-        if self.state.work_item.is_some() {
-            return Ok((None, skipped));
-        }
+        // A second ask waits for the work item in flight on its issue to end.
         let mut ours: Vec<(u64, u64)> = open
             .iter()
             .filter_map(|pr| {
                 let issue = pr.head.strip_prefix("kelpie/").and_then(trigger::number)?;
                 Some((pr.number, issue))
             })
+            .filter(|&(_, issue)| self.state.item(issue).is_none())
             .collect();
         ours.sort_unstable();
         // One pull request that fails holds up none of the others, nor the board.
@@ -294,6 +298,9 @@ impl Runner {
             .and_then(trigger::number)
             .filter(|_| !pr.from_fork && pr.author == me)
             .ok_or(ReworkError::NotKelpies(number))?;
+        if self.state.item(issue).is_some() {
+            return Err(ReworkError::InFlight(vec![issue]));
+        }
         let review = pr
             .review
             .filter(|r| !r.body.trim().is_empty() || !r.comments.is_empty())
@@ -325,7 +332,7 @@ impl Runner {
         if !next.reworked.contains(&review.id) {
             next.reworked.push(review.id);
         }
-        next.work_item = Some(WorkItem {
+        next.work_items.push(WorkItem {
             branch: pr.branch,
             rework: true,
             pull_request: Some(number),
