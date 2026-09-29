@@ -307,6 +307,49 @@ mod tests {
         );
     }
 
+    // A hook on the bare origin that refuses the worker branch's delete,
+    // after the forge's own delete has taken the branch first when `forge_won`
+    fn refuse_delete(rig: &Rig, forge_won: bool) {
+        use std::os::unix::fs::PermissionsExt;
+        let hook = rig.home.path().join("origin.git/hooks/pre-receive");
+        let script = if forge_won {
+            "#!/bin/sh\ngit update-ref -d refs/heads/kelpie/7\nexit 1\n"
+        } else {
+            "#!/bin/sh\nexit 1\n"
+        };
+        std::fs::write(&hook, script).unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn a_branch_the_forge_deleted_first_still_counts_as_cleaned_up() {
+        let (rig, runner, head) = Rig::parked("koji");
+        rig.ask(&runner, "rule", Some("1 yes"));
+        refuse_delete(&rig, true);
+
+        assert!(finished(ready_then_merge(&rig, &runner)));
+        assert_eq!(rig.forge.merges(), [(71, head)]);
+        assert_eq!(rig.forge.head_of("kelpie/7"), None);
+        assert!(!rig.worktree_7().exists());
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["work_item"], json!(null));
+    }
+
+    #[test]
+    fn a_branch_that_cannot_be_deleted_for_another_reason_fails_the_cleanup() {
+        let (rig, runner, _) = Rig::parked("koji");
+        rig.ask(&runner, "rule", Some("1 yes"));
+        refuse_delete(&rig, false);
+
+        let Some(StepReport::GateFailed { reason, .. }) = ready_then_merge(&rig, &runner) else {
+            panic!("the cleanup did not fail");
+        };
+        assert!(reason.starts_with("cannot clean up"), "{reason}");
+        assert!(rig.forge.head_of("kelpie/7").is_some());
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["work_item"]["issue"], json!(7));
+    }
+
     #[test]
     fn a_yes_on_a_head_that_moved_since_the_question_is_withdrawn() {
         let (rig, runner, _) = Rig::parked("golbat");

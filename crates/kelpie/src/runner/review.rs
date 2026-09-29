@@ -39,6 +39,7 @@ impl Runner {
             .pull_request
             .expect("review starts once a pull request is known");
         let (issue, worktree) = (item.issue, item.worktree.clone());
+        let base = item.review_base();
         let build = item.build.clone();
         let worker_folder = self.paths.worker.clone();
 
@@ -52,6 +53,7 @@ impl Runner {
                         self.mark_review_call_running()?;
                         Ok(Begin::Review(ReviewCall::Qwen {
                             worktree,
+                            base,
                             out: build.join("qwen-review"),
                             round: review.round,
                         }))
@@ -64,7 +66,8 @@ impl Runner {
                         let model = self.settings.models.reviewer.clone();
                         let dir = self.paths.shots(issue);
                         let shots = shots.as_ref().map(|run| calls::Screens { dir: &dir, run });
-                        match calls::reviewer_call(&worktree, &worker_folder, &model, shots) {
+                        match calls::reviewer_call(&worktree, &base, &worker_folder, &model, shots)
+                        {
                             Ok(call) => {
                                 self.mark_review_call_running()?;
                                 Ok(Begin::Review(ReviewCall::ClaudeRound(call)))
@@ -83,6 +86,7 @@ impl Runner {
                 let shots = self.preview_on().then(|| self.paths.shots(issue));
                 match calls::judge_call(
                     &worktree,
+                    &base,
                     &worker_folder,
                     &model,
                     &finding,
@@ -374,9 +378,10 @@ pub(super) fn run_review_call(
     match action {
         ReviewCall::Qwen {
             worktree,
+            base,
             out,
             round,
-        } => match reviewer.round(&worktree, &out, round) {
+        } => match reviewer.round(&worktree, &base, &out, round) {
             Err(ReviewerError::Stopped) => stopped(),
             result => Reviewed {
                 result: ReviewResult::Findings(result.map_err(|e| e.to_string())),

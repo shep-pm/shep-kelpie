@@ -55,6 +55,7 @@ pub(crate) struct FakeForge {
 /// origin, so a push the runner makes moves it.
 #[derive(Debug, Clone)]
 struct FakePullRequest {
+    base: String,
     branch: String,
     state: PullRequestState,
     draft: bool,
@@ -157,8 +158,10 @@ impl FakeForge {
             number,
             head: head.to_owned(),
             closes: closes.to_vec(),
+            labels: Vec::new(),
         });
         let pr = FakePullRequest {
+            base: "main".to_owned(),
             branch: head.to_owned(),
             state: PullRequestState::Open,
             draft: true,
@@ -194,6 +197,12 @@ impl FakeForge {
     pub(crate) fn ready_pull_request(&self, number: u64) {
         let mut prs = self.pull_requests.lock().unwrap();
         prs.get_mut(&number).expect("an opened pull request").draft = false;
+    }
+
+    /// Makes pull request `number` merge into `base` rather than `main`
+    pub(crate) fn set_base(&self, number: u64, base: &str) {
+        let mut prs = self.pull_requests.lock().unwrap();
+        prs.get_mut(&number).expect("an opened pull request").base = base.to_owned();
     }
 
     /// Makes pull request `number` come from a fork's branch
@@ -376,6 +385,10 @@ impl Forge for FakeForge {
         Ok(open
             .into_iter()
             .filter(|pr| prs[&pr.number].state == PullRequestState::Open)
+            .map(|pr| OpenPullRequest {
+                labels: self.coderabbit.labels(pr.number),
+                ..pr
+            })
             .collect())
     }
 
@@ -403,8 +416,18 @@ impl Forge for FakeForge {
             return Err(ForgeError::Failed(format!("#{number} is unreadable")));
         }
         let pr = self.opened(number)?;
+        let closes = {
+            let open = self.open.lock().unwrap();
+            // Opened again, a pull request's latest listing is the one that counts.
+            let listed = open.iter().rfind(|l| l.number == number);
+            listed.map(|l| l.closes.clone()).unwrap_or_default()
+        };
         Ok(Reviewed {
             state: pr.state,
+            title: format!("Title of pull request #{number}"),
+            body: format!("Body of pull request #{number}.\n"),
+            closes,
+            base: pr.base,
             branch: pr.branch,
             from_fork: pr.from_fork,
             author: pr.author,

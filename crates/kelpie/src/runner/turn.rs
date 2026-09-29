@@ -13,6 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::Runner;
+use super::adopt;
+use super::instructions;
 use super::question::asked;
 use super::report::{Begin, StepReport};
 use super::review::run_review_call;
@@ -22,7 +24,7 @@ use super::trigger::lock;
 use crate::pacer::Scope;
 use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Issue, Role, Session};
 use crate::preview::{self, McpFiles, WORKER_INSTRUCTIONS};
-use crate::profile::{INSTRUCTIONS, WorkerProfile};
+use crate::profile::WorkerProfile;
 use crate::state::{Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree::{self, Start};
@@ -127,6 +129,9 @@ impl Runner {
         // running carries on, since a turn is never interrupted, and start_over
         // resumes the same not-yet-begun turn after a session died unborn.
         let due = matches!(item.turn, Turn::Due | Turn::Next { .. });
+        if let Some(begin) = self.pushed_by_someone_else()? {
+            return Ok(begin);
+        }
         if due && let Some(held) = self.pace(Scope::Turn)?.holds() {
             return Ok(held);
         }
@@ -140,6 +145,11 @@ impl Runner {
             Turn::Due => (Session::New(id), None, now),
             Turn::Running { since } if start_over => (Session::New(id), None, *since),
             Turn::Running { since } => (Session::Resume(id), Some(CONTINUE.to_owned()), *since),
+            // An adopted work item's session begins with whatever the gate sends it.
+            Turn::Next { prompt } if adopt::unborn(item) => {
+                let first = adopt::first_prompt(item, Some(prompt));
+                (Session::New(id), Some(first), now)
+            }
             // No session to resume: the retry of a turn whose call failed
             // before its session existed starts it over, as a killed one does.
             Turn::Next { .. } if start_over => (Session::New(id), None, now),
@@ -177,7 +187,8 @@ impl Runner {
 
     // Everything the worker needs on disk before it starts: its worktree, its
     // build folder, its settings file and kelpie's instructions. A turn with
-    // no prompt of its own is the first, and takes the issue or the review.
+    // no prompt of its own is the first, and takes the issue, the review or
+    // what it adopted.
     fn prepare(
         &self,
         item: &WorkItem,
@@ -185,7 +196,7 @@ impl Runner {
         prompt: Option<String>,
         timeout: Duration,
     ) -> Result<ClaudeCall, String> {
-        let start = if item.rework {
+        let start = if item.rework || item.adopted {
             Start::Pushed
         } else {
             Start::Main
@@ -216,20 +227,18 @@ impl Runner {
         let instructions = folder.join("instructions.md");
         let text = serde_json::to_string_pretty(&profile.settings()).expect("settings are JSON");
         write(folder, &settings, &text)?;
+        let mut text = instructions::compose(self.extra_instructions.as_deref(), &item.worktree);
         let mcp_config = if previewed {
-            write(
-                folder,
-                &instructions,
-                &format!("{INSTRUCTIONS}{WORKER_INSTRUCTIONS}"),
-            )?;
+            text.push_str(WORKER_INSTRUCTIONS);
             Some(self.write_mcp_config(item)?)
         } else {
-            write(folder, &instructions, INSTRUCTIONS)?;
             None
         };
+        write(folder, &instructions, &text)?;
         let prompt = match prompt {
             Some(prompt) => prompt,
             None if item.rework => rework::first_prompt(item),
+            None if item.adopted => adopt::first_prompt(item, None),
             None => {
                 let issue = self
                     .ports
@@ -299,11 +308,7 @@ impl Runner {
         let now = self.ports.clock.now();
         // Whatever the turn left on `origin` is the worker's own. A head
         // that cannot be read keeps the last one, which errs toward parking.
-        let pushed = self
-            .state
-            .work_item
-            .as_ref()
-            .and_then(|_| self.origin_head().ok());
+        let pushed = self.state.work_item.as_ref().and_then(|_| self.own_push());
         let mut next = self.state.clone();
         let Some(item) = next.work_item.as_mut() else {
             return Ok(None);
@@ -403,28 +408,28 @@ impl Runner {
     }
 
     // A ruling just raised is posted as a comment on its pull request, if it
-    // has one; only these two reports carry a ruling and need the outcome.
+    // has one; only these three reports carry a ruling and need the outcome.
     fn fill_comment_failed(&self, report: &mut StepReport) {
         match report {
             StepReport::Asked {
                 pull_request,
-                question,
+                id,
                 comment_failed,
                 ..
             }
             | StepReport::TimedOut {
                 pull_request,
-                question,
+                id,
                 comment_failed,
                 ..
             }
             | StepReport::Failed {
                 pull_request,
-                question,
+                id,
                 comment_failed,
                 ..
             } => {
-                *comment_failed = self.post_ruling(*pull_request, question);
+                *comment_failed = self.post_ruling(*pull_request, *id);
             }
             _ => {}
         }
@@ -466,294 +471,4 @@ pub(super) fn write(folder: &Path, file: &Path, text: &str) -> Result<(), String
 }
 
 #[cfg(test)]
-pub(super) mod tests {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
-
-    use serde_json::json;
-
-    use super::*;
-    use crate::ports::{Cost, Usage};
-    use crate::settings::Effort;
-    use crate::test::{LEFT_BEHIND, Rig, Scripted, git};
-
-    pub(super) fn usage(n: u64) -> Usage {
-        Usage {
-            input: n,
-            cache_write: 10 * n,
-            cache_read: 100 * n,
-            output: 1000 * n,
-        }
-    }
-
-    // A running project with issue 7 in flight
-    pub(super) fn with_issue_7(project: &str) -> (Rig, Mutex<Runner>) {
-        let rig = Rig::new(project);
-        let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
-        assert_eq!(rig.ask(&runner, "add", Some("7"))["work_item"]["issue"], 7);
-        (rig, runner)
-    }
-
-    #[test]
-    fn the_first_turn_starts_the_workers_session_in_its_own_worktree() {
-        let (rig, runner) = with_issue_7("shep");
-        rig.claude
-            .script([Scripted::Reply(usage(1), Cost(20_085_300))]);
-        step(&runner).unwrap();
-
-        let [seen] = rig.claude.seen().try_into().unwrap();
-        let call = seen.call;
-        let worktree = rig.home.path().join("kelpie/wt/shep/7");
-        assert_eq!(call.role, Role::Worker);
-        assert_eq!(
-            (call.model.as_str(), call.effort),
-            ("claude-sonnet-5", Effort::Medium)
-        );
-        assert!(
-            matches!(call.session, Session::New(_)),
-            "{:?}",
-            call.session
-        );
-        assert_eq!(call.cwd, worktree);
-        assert_eq!(
-            call.prompt,
-            "Your work item is issue #7: Title of #7\n\nBody of #7.\n"
-        );
-        let worker = rig.paths().worker;
-        assert_eq!(call.settings, worker.join("settings.json"));
-        assert_eq!(call.instructions, Some(worker.join("instructions.md")));
-        assert_eq!(
-            fs::read_to_string(worker.join("instructions.md")).unwrap(),
-            INSTRUCTIONS
-        );
-        assert!(seen.build_existed, "the build folder came after the worker");
-
-        assert_eq!(git(&worktree, &["branch", "--show-current"]), "kelpie/7");
-        let origin_main = git(&rig.repo(), &["rev-parse", "origin/main"]);
-        assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), origin_main);
-    }
-
-    #[test]
-    fn the_branch_is_cut_from_the_latest_origin_main() {
-        let rig = Rig::new("reactmap");
-        let landed = rig.land_on_origin("landed.txt");
-        let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
-        rig.ask(&runner, "add", Some("3"));
-        rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
-        step(&runner).unwrap();
-        let worktree = rig.home.path().join("kelpie/wt/reactmap/3");
-        assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), landed);
-    }
-
-    #[test]
-    fn the_settings_file_fences_writes_to_this_worktree_and_its_git_paths() {
-        let (rig, runner) = with_issue_7("koji");
-        rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
-        step(&runner).unwrap();
-        let [seen] = rig.claude.seen().try_into().unwrap();
-        let kelpie = rig.home.path().join("kelpie");
-        let git_dir = fs::canonicalize(rig.repo().join(".git")).unwrap();
-        let allow = &seen.settings["sandbox"]["filesystem"]["allowWrite"];
-        assert_eq!(allow[0], json!(kelpie.join("wt/koji/7")));
-        assert_eq!(allow[1], json!(kelpie.join("targets/koji/7")));
-        assert_eq!(allow[2], json!(git_dir.join("objects")));
-        assert_eq!(allow[3], json!(git_dir.join("worktrees/7")));
-        assert_eq!(
-            seen.settings["sandbox"]["filesystem"]["denyWrite"][0],
-            json!(git_dir.join("config"))
-        );
-        assert_eq!(
-            seen.settings["hooks"]["PreToolUse"][1]["hooks"][0]["command"],
-            "node ~/.claude/hooks/git-gh-guard.js"
-        );
-    }
-
-    #[test]
-    fn status_shows_the_session_and_what_the_work_item_has_cost() {
-        let (rig, runner) = with_issue_7("golbat");
-        rig.claude
-            .script([Scripted::Reply(usage(2), Cost(20_085_300))]);
-        let report = step(&runner).unwrap().unwrap();
-        let session = rig.claude.calls()[0].session.id().clone();
-        assert_eq!(
-            report,
-            StepReport::Ended {
-                issue: 7,
-                session: session.clone(),
-                usage: usage(2),
-                cost_usd: 0.0200853,
-                work_item_cost_usd: 0.0200853,
-                pull_request: None,
-            }
-        );
-        let item = &rig.ask(&runner, "status", None)["work_item"];
-        assert_eq!(item["session"], json!(session));
-        assert_eq!(item["cost_usd"], 0.0200853);
-        assert_eq!(item["calls"], 1);
-        assert_eq!(item["turn"], json!({ "state": "ended", "at": Rig::EPOCH }));
-    }
-
-    #[test]
-    fn a_runner_killed_mid_turn_resumes_the_same_session_in_the_same_worktree() {
-        let (rig, runner) = with_issue_7("rotom");
-        rig.claude.script([Scripted::Kill]);
-        let killed = catch_unwind(AssertUnwindSafe(|| step(&runner)));
-        assert!(killed.is_err(), "the scripted kill did not happen");
-        drop(runner);
-
-        let runner = rig.open().unwrap();
-        assert_eq!(
-            rig.ask(&runner, "status", None)["work_item"]["turn"]["state"],
-            "running"
-        );
-        // The resumed call reports the whole session so far, the killed call
-        // included, and all of it lands on the work item.
-        rig.claude
-            .script([Scripted::Reply(usage(1), Cost(30_000_000))]);
-        step(&runner).unwrap();
-
-        let [first, second] = rig.claude.calls().try_into().unwrap();
-        assert_eq!(second.session, Session::Resume(first.session.id().clone()));
-        assert_eq!(second.cwd, first.cwd);
-        assert!(
-            second.cwd.join(LEFT_BEHIND).exists(),
-            "the worktree was replaced"
-        );
-        assert_eq!(second.prompt, CONTINUE);
-        assert_eq!(
-            rig.ask(&runner, "status", None)["work_item"]["cost_usd"],
-            0.03
-        );
-    }
-
-    #[test]
-    fn a_worker_that_repoints_its_git_file_cannot_move_its_fence() {
-        let (rig, runner) = with_issue_7("golbat");
-        rig.claude.script([Scripted::Kill]);
-        let _ = catch_unwind(AssertUnwindSafe(|| step(&runner)));
-        drop(runner);
-
-        // What a worker could do from inside its worktree: a fake git dir
-        // whose common dir is a folder it wants to write.
-        let worktree = rig.home.path().join("kelpie/wt/golbat/7");
-        let wanted = rig.home.path().join("wanted");
-        let fake = worktree.join("fake");
-        for dir in ["refs", "objects"] {
-            fs::create_dir_all(fake.join(dir)).unwrap();
-            fs::create_dir_all(wanted.join(dir)).unwrap();
-        }
-        fs::write(fake.join("HEAD"), "ref: refs/heads/kelpie/7\n").unwrap();
-        fs::write(fake.join("commondir"), format!("{}\n", wanted.display())).unwrap();
-        fs::write(
-            worktree.join(".git"),
-            format!("gitdir: {}\n", fake.display()),
-        )
-        .unwrap();
-
-        let runner = rig.open().unwrap();
-        rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
-        step(&runner).unwrap();
-        let [_, seen] = rig.claude.seen().try_into().unwrap();
-        let git_dir = fs::canonicalize(rig.repo().join(".git")).unwrap();
-        let allow = &seen.settings["sandbox"]["filesystem"]["allowWrite"];
-        assert_eq!(allow[2], json!(git_dir.join("objects")));
-        assert_eq!(allow[3], json!(git_dir.join("worktrees/7")));
-        assert!(!allow.to_string().contains("wanted"), "{allow}");
-    }
-
-    #[test]
-    fn a_turn_stopped_with_the_runner_resumes_when_it_starts_again() {
-        let (rig, runner) = with_issue_7("reactmap");
-        rig.claude.script([Scripted::Fail(ClaudeError::Stopped)]);
-        assert_eq!(step(&runner).unwrap(), None);
-        drop(runner);
-
-        let runner = rig.open().unwrap();
-        rig.claude.script([Scripted::Reply(usage(1), Cost(9))]);
-        step(&runner).unwrap();
-        let [first, second] = rig.claude.calls().try_into().unwrap();
-        assert_eq!(second.session, Session::Resume(first.session.id().clone()));
-        assert_eq!(second.prompt, CONTINUE);
-    }
-
-    #[test]
-    fn a_session_killed_before_it_began_starts_over_with_the_same_id() {
-        let (rig, runner) = with_issue_7("xilriws");
-        rig.claude.script([Scripted::Kill]);
-        let _ = catch_unwind(AssertUnwindSafe(|| step(&runner)));
-        drop(runner);
-
-        let runner = rig.open().unwrap();
-        let first = rig.claude.calls()[0].session.id().clone();
-        rig.claude.script([
-            Scripted::Fail(ClaudeError::NoSession(first.clone())),
-            Scripted::Reply(usage(1), Cost(5)),
-        ]);
-        step(&runner).unwrap();
-        let [original, resumed, again] = rig.claude.calls().try_into().unwrap();
-        assert_eq!(resumed.session, Session::Resume(first.clone()));
-        assert_eq!(again.session, Session::New(first));
-        assert_eq!(again.prompt, original.prompt);
-    }
-
-    #[test]
-    fn a_paused_project_runs_no_turn_until_it_starts() {
-        let rig = Rig::new("chelone");
-        let runner = rig.open().unwrap();
-        rig.ask(&runner, "add", Some("5"));
-        assert_eq!(step(&runner).unwrap(), None);
-        assert_eq!(rig.claude.calls(), []);
-        assert!(!rig.home.path().join("kelpie/wt/chelone/5").exists());
-
-        rig.ask(&runner, "start", None);
-        rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
-        assert!(step(&runner).unwrap().is_some());
-        assert_eq!(rig.claude.calls().len(), 1);
-    }
-
-    #[test]
-    fn a_foreign_folder_where_the_worktree_goes_fails_the_turn_before_any_call() {
-        let (rig, runner) = with_issue_7("koji");
-        let folder = rig.home.path().join("kelpie/wt/koji/7");
-        fs::create_dir_all(&folder).unwrap();
-        let Some(StepReport::Failed { question, .. }) = step(&runner).unwrap() else {
-            panic!("the turn ran in a folder kelpie did not make");
-        };
-        assert!(
-            question.contains("is not this work item's worktree"),
-            "{question}"
-        );
-        assert_eq!(rig.claude.calls(), []);
-
-        // A yes retries the step that failed: the first turn, from the issue.
-        fs::remove_dir_all(&folder).unwrap();
-        rig.ask(&runner, "rule", Some("1 yes"));
-        rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
-        step(&runner).unwrap();
-        let [call] = rig.claude.calls().try_into().unwrap();
-        assert!(
-            matches!(call.session, Session::New(_)),
-            "{:?}",
-            call.session
-        );
-        assert_eq!(
-            call.prompt,
-            "Your work item is issue #7: Title of #7\n\nBody of #7.\n"
-        );
-    }
-
-    #[test]
-    fn a_branch_left_behind_stays_a_refusal_for_a_new_work_item_even_when_it_matches_main() {
-        let (rig, runner) = with_issue_7("golbat");
-        git(&rig.repo(), &["branch", "kelpie/7", "origin/main"]);
-        let Some(StepReport::Failed { question, .. }) = step(&runner).unwrap() else {
-            panic!("a fresh work item took a branch that was not its own");
-        };
-        assert!(
-            question.contains("branch kelpie/7 already exists without its worktree"),
-            "{question}"
-        );
-        assert_eq!(rig.claude.calls(), []);
-    }
-}
+mod tests;

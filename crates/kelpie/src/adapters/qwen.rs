@@ -15,15 +15,9 @@ use std::process::{Command, Stdio};
 use super::process::{Processes, RunError};
 use crate::lease::gpu;
 use crate::ports::{Finding, Reviewer, ReviewerError, Severity, parse_findings};
-use crate::worktree;
 
 /// `qwen-review.sh`, under the maintainer's `~/.claude/scripts/`
 const SCRIPT: &str = ".claude/scripts/qwen-review.sh";
-
-/// `origin/main`: the ref every round diffs against
-fn base_ref() -> String {
-    format!("origin/{}", worktree::BASE)
-}
 
 /// The maintainer's qwen-review script
 ///
@@ -65,6 +59,7 @@ impl QwenReviewer {
     fn run(
         &self,
         worktree: &Path,
+        base: &str,
         out: &Path,
         round: u32,
         files: Option<&str>,
@@ -82,7 +77,7 @@ impl QwenReviewer {
                 command.arg("--files").arg(files);
             }
             None => {
-                command.arg("--diff").arg(base_ref());
+                command.arg("--diff").arg(base);
             }
         }
         let output = self.processes.output(&mut command).map_err(|e| match e {
@@ -109,12 +104,13 @@ impl QwenReviewer {
     }
 
     // A file the script skipped for size is reviewed again on its own, as a
-    // `-U25` hunk against `origin/main`: the skill's own way of feeding it a
+    // `-U25` hunk against the round's base: the skill's own way of feeding it a
     // file small enough for the chunk limit. Findings against the hunk file
     // are folded back in against the original path.
     fn hunk_round(
         &self,
         worktree: &Path,
+        base: &str,
         out: &Path,
         round: u32,
         skipped_index: u32,
@@ -123,7 +119,7 @@ impl QwenReviewer {
         let diff = Command::new("git")
             .arg("-C")
             .arg(worktree)
-            .args(["diff", &base_ref(), "-U25", "--"])
+            .args(["diff", base, "-U25", "--"])
             .arg(&skipped.file)
             .stdin(Stdio::null())
             .output()
@@ -152,7 +148,7 @@ impl QwenReviewer {
             .join("hunks")
             .join(format!("{round}-out-{skipped_index}"));
         let files = hunk_path.to_string_lossy().into_owned();
-        let findings = self.run(worktree, &hunk_out, round, Some(&files))?;
+        let findings = self.run(worktree, base, &hunk_out, round, Some(&files))?;
         Ok(findings
             .into_iter()
             .map(|f| Finding {
@@ -167,10 +163,11 @@ impl Reviewer for QwenReviewer {
     fn round(
         &self,
         worktree: &Path,
+        base: &str,
         out: &Path,
         round: u32,
     ) -> Result<Vec<Finding>, ReviewerError> {
-        let findings = self.run(worktree, out, round, None)?;
+        let findings = self.run(worktree, base, out, round, None)?;
         let mut combined = Vec::with_capacity(findings.len());
         let mut skipped_index = 0u32;
         for finding in findings {
@@ -179,7 +176,7 @@ impl Reviewer for QwenReviewer {
                 // same as a hunk whose own `git diff` failed: one file's
                 // trouble never costs the round every other finding it
                 // already has.
-                match self.hunk_round(worktree, out, round, skipped_index, &finding) {
+                match self.hunk_round(worktree, base, out, round, skipped_index, &finding) {
                     Ok(found) => combined.extend(found),
                     Err(_) => combined.push(finding),
                 }
@@ -229,7 +226,10 @@ mod tests {
         let out = home.path().join("out");
         let reviewer = QwenReviewer::new(home.path());
 
-        assert_eq!(reviewer.round(&worktree, &out, 1).unwrap(), vec![]);
+        assert_eq!(
+            reviewer.round(&worktree, "origin/main", &out, 1).unwrap(),
+            vec![]
+        );
         assert!(
             !lock.exists(),
             "the script's own lock is released once it finishes, \
@@ -258,7 +258,7 @@ mod tests {
         let reviewer =
             QwenReviewer::new(home.path()).with_temp_dir(PathBuf::from("/var/folders/xx/yy/T/"));
 
-        let findings = reviewer.round(&worktree, &out, 1).unwrap();
+        let findings = reviewer.round(&worktree, "origin/main", &out, 1).unwrap();
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].file, "/var/folders/xx/yy/T/");
     }
@@ -282,7 +282,7 @@ mod tests {
         let reviewer = QwenReviewer::new(home.path());
 
         assert_eq!(
-            reviewer.round(&worktree, &out, 1),
+            reviewer.round(&worktree, "origin/main", &out, 1),
             Err(ReviewerError::Incomplete)
         );
     }
@@ -336,7 +336,7 @@ esac
         let reviewer = QwenReviewer::new(home.path());
 
         assert_eq!(
-            reviewer.round(&worktree, &out, 1).unwrap(),
+            reviewer.round(&worktree, "origin/main", &out, 1).unwrap(),
             vec![Finding {
                 severity: Severity::Medium,
                 file: "sub/dir/big.rs".into(),
@@ -372,7 +372,10 @@ esac
             what: "not reviewed: 900 lines exceeds the chunk limit".into(),
             why: "split the file or review it by hand".into(),
         };
-        assert_eq!(reviewer.round(&worktree, &out, 1).unwrap(), vec![skip]);
+        assert_eq!(
+            reviewer.round(&worktree, "origin/main", &out, 1).unwrap(),
+            vec![skip]
+        );
     }
 
     // The hunk's own script invocation fails outright (not the `git diff`
@@ -416,7 +419,7 @@ esac
 
         let out = home.path().join("out");
         let reviewer = QwenReviewer::new(home.path());
-        let findings = reviewer.round(&worktree, &out, 1).unwrap();
+        let findings = reviewer.round(&worktree, "origin/main", &out, 1).unwrap();
         assert_eq!(
             findings,
             vec![
@@ -482,7 +485,7 @@ esac
 
         let out = home.path().join("out");
         let reviewer = QwenReviewer::new(home.path());
-        let findings = reviewer.round(&worktree, &out, 1).unwrap();
+        let findings = reviewer.round(&worktree, "origin/main", &out, 1).unwrap();
         assert_eq!(findings.len(), 2, "{findings:?}");
         assert_eq!(findings[0].file, "sub/a/util.rs");
         assert_eq!(findings[1].file, "sub/b/util.rs");

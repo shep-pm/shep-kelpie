@@ -47,6 +47,11 @@ What a worker is handed: one or more issues bundled into one branch and pull
 request.
 _Avoid_: task, job, ticket
 
+**Adoption**:
+Kelpie taking over an open pull request it didn't open, as a work item for
+the issue that pull request closes.
+_Avoid_: takeover, import
+
 **Phase**:
 A stage of a work item: plan, implement, review, fix, merge.
 

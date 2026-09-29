@@ -49,13 +49,14 @@ pub(super) struct Screens<'a> {
 
 pub(super) fn reviewer_call(
     worktree: &Path,
+    base: &str,
     worker_folder: &Path,
     model: &RoleModel,
     shots: Option<Screens<'_>>,
 ) -> Result<ClaudeCall, String> {
-    let diff = diff_against_base(worktree)?;
+    let diff = diff_against(worktree, base)?;
     let settings = review_settings(worker_folder, shots.map(|s| s.dir))?;
-    let mut prompt = reviewer_prompt(&base_ref(), &diff);
+    let mut prompt = reviewer_prompt(base, &diff);
     if let Some(shots) = shots {
         prompt.push_str(&shots_prompt(shots.run));
     }
@@ -66,15 +67,16 @@ pub(super) fn reviewer_call(
 // judge may open that folder with Read and nothing else.
 pub(in crate::runner) fn judge_call(
     worktree: &Path,
+    base: &str,
     worker_folder: &Path,
     model: &RoleModel,
     finding: &Finding,
     shots: Option<&Path>,
 ) -> Result<ClaudeCall, String> {
-    let diff = diff_against_base(worktree)?;
+    let diff = diff_against(worktree, base)?;
     let shot = shots.filter(|dir| is_shot(&finding.file, dir));
     let settings = judge_settings(worker_folder, shot)?;
-    let mut prompt = judge_prompt(&base_ref(), &diff, finding);
+    let mut prompt = judge_prompt(base, &diff, finding);
     if shot.is_some() {
         prompt.push_str(&format!(
             "\n\nThe finding is about the screenshot {}. Open it with Read before you decide.",
@@ -161,16 +163,11 @@ fn shots_prompt(run: &ShotsRun) -> String {
     )
 }
 
-/// `origin/main`: the ref every call in this loop diffs against
-fn base_ref() -> String {
-    format!("origin/{}", crate::worktree::BASE)
-}
-
-fn diff_against_base(worktree: &Path) -> Result<String, String> {
+fn diff_against(worktree: &Path, base: &str) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(worktree)
-        .args(["diff", &base_ref()])
+        .args(["diff", base])
         .stdin(Stdio::null())
         .output()
         .map_err(|e| format!("cannot run git diff: {e}"))?;
