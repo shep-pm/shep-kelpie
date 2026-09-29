@@ -38,6 +38,28 @@ kill_timeout = "10s"
 
 Then `SHEP_HOME=~/.kelpie/shep shep trigger shep status`.
 
+## The local round
+
+Each pull request goes through a review loop before CI. Rounds alternate between a local model and a Claude session, local first, and the loop ends once one of each in a row finds nothing above a nit. `[review.local]` in a project's settings picks the local round:
+
+- `kind = "off"`: every round is the Claude round, and one that finds nothing above a nit ends the loop
+- `kind = "endpoint"`: kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server
+- `kind = "command"`: a command of your own that keeps the contract below
+
+A file without the table runs `~/.claude/scripts/qwen-review.sh`, the maintainer's own command. A missing command or an endpoint that doesn't answer stops the runner at start.
+
+An endpoint takes `url` (the base, up to and including `/v1`), `model`, and `context`, the context size in tokens the server gives that model. Kelpie diffs the pull request, cuts the diff to fit that context, and sends each piece with its own review prompt, `crates/kelpie/src/adapters/local/review-prompt.md`. Set `context` to what the server really uses: Ollama gives its OpenAI-compatible endpoint a small default context unless `OLLAMA_CONTEXT_LENGTH` says more, and drops whatever doesn't fit without saying so.
+
+A command is run as `<command> --dir <worktree> --round <n> --diff <base>`, with:
+
+- `QWEN_REVIEW_OUT`: the folder to write in
+- `KELPIE_REVIEW_HEAD`: the commit under review
+- `TMPDIR`: the folder the GPU lock lives under
+
+It writes `round-<n>.txt` in that folder, one finding per line as `SEVERITY|path:line|what|why` with `HIGH`, `MEDIUM` or `LOW`, and then an empty `round-<n>.txt.done`. Kelpie reads nothing without the marker, and nothing from stdout. A nonzero exit fails the round. A command that writes `LOW|<path>:0|not reviewed: <n> lines exceeds the chunk limit|...` is run again with `--files <hunk file>` in place of `--diff`, on that file alone.
+
+`gpu_lease = true`, on either kind, has kelpie hold the GPU lock around each round. Leave it off for a command that takes the lock itself, as `qwen-review.sh` does.
+
 Kelpie never creates labels in a project's repo. Create `ready-for-agent` and `ready-for-human` there before its first run. Issues labelled `ready-for-agent` are the board. On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep trigger <project> rework <pr>`. On any other open pull request of kelpie's account, `ready-for-agent` adopts it, the same as `shep trigger <project> adopt <pr>`. Kelpie puts `ready-for-human` on each pull request it hands back.
 
 - `CONTEXT.md`: the vocabulary
