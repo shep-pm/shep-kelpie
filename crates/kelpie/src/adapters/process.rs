@@ -147,6 +147,11 @@ impl Processes {
         }
     }
 
+    /// Whether [`Self::stop`] has been called
+    pub(super) fn stopping(&self) -> bool {
+        self.lock().stopping
+    }
+
     /// Ends every running child and refuses new ones
     ///
     /// Each gets SIGTERM, so it can end its own children, and SIGKILL if it

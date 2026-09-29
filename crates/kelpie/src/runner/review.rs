@@ -1,16 +1,19 @@
-//! The qwen-review loop: rounds alternating qwen and Claude, each judged
-//! finding by finding before the worker sees anything
+//! The review loop: rounds alternating the local round and Claude, or
+//! Claude's alone, each judged finding by finding before the worker sees any
 //!
 //! A round with no raw findings is clean at once. One with findings waits
 //! for the judge, in order; once every finding is judged, the held ones (if
 //! any) go to the worker's next turn, and the round's cleanliness is decided
 //! by the judge's severities. Two clean rounds in a row, one from each
-//! reviewer since they strictly alternate, end the loop for [`super::gate`].
-//! Past the round guard the worker parks for a ruling; a yes clears the
-//! guard for the rest of this work item.
+//! reviewer since they strictly alternate, end the loop for [`super::gate`];
+//! with the local round off, one clean Claude round does. Past the round
+//! guard the worker parks for a ruling; a yes clears the guard for the rest
+//! of this work item.
 
 pub(super) mod calls;
 pub(super) mod findings;
+#[cfg(test)]
+mod local;
 
 use std::path::Path;
 
@@ -19,7 +22,7 @@ use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, Spent, StepReport
 use super::shots::RoundShots;
 use crate::ports::{
     Claude, ClaudeCall, ClaudeError, ClaudeReply, Finding, Reviewer, ReviewerError, Severity,
-    Timestamp, Verdict, parse_findings,
+    Timestamp, Verdict, read_review,
 };
 use crate::state::{Fix, RulingKind, StateError};
 use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, ReviewerKind, Turn, WorkItem};
@@ -48,10 +51,11 @@ impl Runner {
                 if !review.guard_cleared && review.round > self.settings.review.loop_guard.get() {
                     return self.raise(number, RulingKind::ReviewGuard { review });
                 }
-                match review.reviewer() {
-                    ReviewerKind::Qwen => {
+                match review.reviewer(self.local_round()) {
+                    ReviewerKind::Local => {
                         self.mark_review_call_running()?;
-                        Ok(Begin::Review(ReviewCall::Qwen {
+                        Ok(Begin::Review(ReviewCall::Local {
+                            local: self.settings.review.local.clone(),
                             worktree,
                             base,
                             out: build.join("qwen-review"),
@@ -137,7 +141,8 @@ impl Runner {
             None => None,
         };
         let now = self.ports.clock.now();
-        self.update(|item| item.phase = advance(review, clean, now))?;
+        let local = self.local_round();
+        self.update(|item| item.phase = advance(review, clean, now, local))?;
         Ok(Begin::Report(StepReport::FixPushed {
             issue,
             pull_request: number,
@@ -154,6 +159,12 @@ impl Runner {
             .as_ref()
             .expect("a head is a work item's");
         worktree::origin_head(&self.settings.repo, &item.branch).map_err(|e| e.to_string())
+    }
+
+    // Whether the project runs a local round, which sets who reviews a round
+    // and how many clean rounds end the loop.
+    fn local_round(&self) -> bool {
+        self.settings.review.local.is_on()
     }
 
     // Recorded in state before the runner's lock is released for the call
@@ -194,8 +205,9 @@ impl Runner {
                 ..f
             })
             .collect();
+        let local = self.local_round();
         if held.is_empty() {
-            self.update(|item| item.phase = advance(review, true, now))?;
+            self.update(|item| item.phase = advance(review, true, now, local))?;
             return Ok(Begin::Report(StepReport::ReviewFindingsSent {
                 issue,
                 pull_request: number,
@@ -255,6 +267,7 @@ impl Runner {
             return self.coderabbit_verdict(result, spent);
         }
         let now = self.ports.clock.now();
+        let local = self.local_round();
         let mut next = self.state.clone();
         // Tolerated the same way `end_turn` tolerates a turn's result
         // arriving with nothing (or something else) to apply it to: the
@@ -281,7 +294,7 @@ impl Runner {
                 if !matches!(review.stage, ReviewStage::Round) {
                     unreachable!("a round's findings only arrive while awaiting that round");
                 }
-                item.phase = advance(review, true, now);
+                item.phase = advance(review, true, now, local);
                 StepReport::ReviewFindingsSent {
                     issue,
                     pull_request: number,
@@ -294,7 +307,7 @@ impl Runner {
                 if !matches!(review.stage, ReviewStage::Round) {
                     unreachable!("a round's findings only arrive while awaiting that round");
                 }
-                let reviewer = review.reviewer();
+                let reviewer = review.reviewer(local);
                 let count = findings.len();
                 item.phase = Phase::Review(Review {
                     stage: ReviewStage::Judging {
@@ -342,15 +355,22 @@ impl Runner {
 
 /// Where the review phase goes after one round finishes, clean or not
 ///
-/// Two clean rounds in a row end the loop, and a strict qwen/Claude
-/// alternation means the pair is always one of each.
-pub(super) fn advance(review: Review, clean: bool, now: crate::ports::Timestamp) -> Phase {
+/// With a local round, two clean rounds in a row end the loop, and the
+/// strict alternation means the pair is always one of each. Without one,
+/// every round is Claude's, so one clean round ends it.
+pub(super) fn advance(
+    review: Review,
+    clean: bool,
+    now: crate::ports::Timestamp,
+    local: bool,
+) -> Phase {
     let consecutive_clean = if clean {
         review.consecutive_clean + 1
     } else {
         0
     };
-    if consecutive_clean >= 2 {
+    let needed = if local { 2 } else { 1 };
+    if consecutive_clean >= needed {
         Phase::Ci {
             head: None,
             since: now,
@@ -365,7 +385,7 @@ pub(super) fn advance(review: Review, clean: bool, now: crate::ports::Timestamp)
     }
 }
 
-/// Runs `action` outside the runner's lock: the qwen script, or a fresh
+/// Runs `action` outside the runner's lock: the local round, or a fresh
 /// Claude call for a review round or the judge
 ///
 /// A call stopped with the runner comes back as [`ReviewResult::Stopped`]
@@ -376,16 +396,17 @@ pub(super) fn run_review_call(
     action: ReviewCall,
 ) -> Reviewed {
     match action {
-        ReviewCall::Qwen {
+        ReviewCall::Local {
+            local,
             worktree,
             base,
             out,
             round,
-        } => match reviewer.round(&worktree, &base, &out, round) {
+        } => match reviewer.round(&local, &worktree, &base, &out, round) {
             Err(ReviewerError::Stopped) => stopped(),
             result => Reviewed {
                 result: ReviewResult::Findings(result.map_err(|e| e.to_string())),
-                spent: Some(Spent::Qwen),
+                spent: Some(Spent::Local),
             },
         },
         ReviewCall::ClaudeRound(call) => {
@@ -393,11 +414,15 @@ pub(super) fn run_review_call(
             match reply {
                 Err(ClaudeError::Stopped) => stopped(),
                 reply => Reviewed {
-                    result: ReviewResult::Findings(
-                        reply
-                            .map(|reply| parse_findings(&reply.text))
-                            .map_err(|e| e.to_string()),
-                    ),
+                    result: ReviewResult::Findings(reply.map_err(|e| e.to_string()).and_then(
+                        |reply| {
+                            read_review(&reply.text).map_err(|text| {
+                                format!(
+                                    "the Claude round's reply is neither findings nor CLEAN: {text}"
+                                )
+                            })
+                        },
+                    )),
                     spent,
                 },
             }
@@ -424,7 +449,7 @@ pub(super) fn run_review_call(
 /// Adds what a review call spent to the work item's record, and marks no
 /// call in flight
 ///
-/// A qwen round's time runs from when the call was marked running.
+/// A local round's time runs from when the call was marked running.
 pub(super) fn record_spent(item: &mut WorkItem, spent: Option<Spent>, now: Timestamp) {
     match spent {
         Some(Spent::Claude {
@@ -435,7 +460,7 @@ pub(super) fn record_spent(item: &mut WorkItem, spent: Option<Spent>, now: Times
         }) => {
             item.record_call(role, now, session, usage, session_cost);
         }
-        Some(Spent::Qwen) => {
+        Some(Spent::Local) => {
             item.qwen.rounds += 1;
             if let ReviewCallState::Running { since } = item.review_call {
                 item.qwen.seconds += now.0.saturating_sub(since.0);
@@ -499,14 +524,14 @@ mod tests {
     #[test]
     fn advancing_a_clean_round_extends_the_streak_and_settles_at_two() {
         let now = crate::ports::Timestamp(100);
-        let after_first = advance(Review::first(), true, now);
+        let after_first = advance(Review::first(), true, now, true);
         let Phase::Review(review) = after_first else {
             panic!("stays reviewing after one clean round");
         };
         assert_eq!((review.round, review.consecutive_clean), (2, 1));
         assert_eq!(review.stage, ReviewStage::Round);
 
-        let phase = advance(review, true, now);
+        let phase = advance(review, true, now, true);
         assert_eq!(
             phase,
             Phase::Ci {
@@ -525,7 +550,7 @@ mod tests {
             guard_cleared: true,
             stage: ReviewStage::Round,
         };
-        let Phase::Review(next) = advance(review, false, now) else {
+        let Phase::Review(next) = advance(review, false, now, true) else {
             panic!("stays reviewing");
         };
         assert_eq!(
@@ -615,7 +640,7 @@ mod tests {
             step(&runner).unwrap(),
             Some(StepReport::GateFailed {
                 issue: 7,
-                reason: "qwen-review.sh left no completion marker".into(),
+                reason: "the local round left no completion marker".into(),
             })
         );
         assert_eq!(rig.reviewer.seen().len(), 1);
@@ -836,8 +861,8 @@ mod tests {
         item.review_call = ReviewCallState::Running {
             since: Timestamp(100),
         };
-        record_spent(&mut item, Some(Spent::Qwen), Timestamp(190));
-        record_spent(&mut item, Some(Spent::Qwen), Timestamp(200));
+        record_spent(&mut item, Some(Spent::Local), Timestamp(190));
+        record_spent(&mut item, Some(Spent::Local), Timestamp(200));
         assert_eq!(item.qwen.rounds, 2);
         assert_eq!(
             item.qwen.seconds, 90,
