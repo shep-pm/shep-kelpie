@@ -374,6 +374,16 @@ pub enum StepReport {
         /// The head the summon is for
         head: String,
     },
+    /// CodeRabbit gave no sign of the summon in fifteen minutes, so kelpie
+    /// sent it once more, in the same round
+    SummonedAgain {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The head the summon is for
+        head: String,
+    },
     /// CodeRabbit refused the summon, and the label came off
     SummonRefused {
         /// The work item's issue

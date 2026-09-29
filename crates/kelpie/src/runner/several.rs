@@ -7,6 +7,7 @@ use serde_json::json;
 use crate::board::Skip;
 use crate::lease::LeaseKind;
 use crate::ports::{Checks, Cost, Usage};
+use crate::runner::coderabbit::HEARD_WAIT;
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{Rig, Scripted, Told};
 
@@ -138,6 +139,43 @@ fn an_item_ending_leaves_a_grant_its_sibling_waits_for() {
         step(&runner).unwrap(),
         Some(StepReport::Summoned { issue: 7, .. })
     ));
+}
+
+#[test]
+fn a_restart_leaves_no_resend_under_a_grant_another_item_took() {
+    let (rig, runner, _) = seven_waits_on_the_lease("lugia");
+    rig.leases.withhold(false);
+    assert_eq!(issue_of(step(&runner).unwrap()), 7, "#7 summons");
+
+    // The restart clears the book of leases, and #8 takes the grant.
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.ask(&runner, "add", Some("8"));
+    rig.claude.script([
+        Scripted::Push("eight.txt", "eight\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    for _ in 0..3 {
+        assert_eq!(issue_of(step(&runner).unwrap()), 8);
+    }
+    let eight = rig.forge.head_of("kelpie/8").unwrap();
+    rig.forge.set_checks(&eight, Checks::Passed);
+    assert_eq!(issue_of(rig.verdict(&runner)), 8, "marks #81 ready");
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Summoned { issue: 8, .. })
+    ));
+
+    // #7's fifteen minutes pass with no sign; the grant is #8's.
+    rig.clock.advance(HEARD_WAIT);
+    for _ in 0..4 {
+        if let Some(report) = step(&runner).unwrap() {
+            assert!(
+                !matches!(report, StepReport::SummonedAgain { issue: 7, .. }),
+                "re-sent under another item's grant: {report:?}"
+            );
+        }
+    }
 }
 
 #[test]

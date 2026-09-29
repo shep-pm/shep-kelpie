@@ -4,13 +4,14 @@ use std::sync::Mutex;
 
 use serde_json::json;
 
-use super::{ANSWER_WAIT, LABEL, REVIEW_WAIT};
+use super::{ANSWER_WAIT, HEARD_WAIT, LABEL, REVIEW_WAIT};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
 use crate::ports::{Checks, ClaudeError, Cost, Role};
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::test::{Rig, Scripted, Told, git};
 
+mod again;
 mod full;
 
 const HOLDS: &str = r#"{"holds": true, "severity": "medium", "reason": "real"}"#;
@@ -88,7 +89,7 @@ fn phase(rig: &Rig, runner: &Mutex<Runner>) -> serde_json::Value {
 
 #[test]
 fn with_the_gate_off_green_ci_goes_straight_to_the_merge_ruling_and_no_lease_is_asked() {
-    let (rig, runner, head) = Rig::with_pull_request("hazels-lab");
+    let (rig, runner, head) = Rig::with_pull_request("webapp");
     rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
         rig.verdict(&runner),
@@ -377,10 +378,14 @@ fn a_refusal_gives_the_lease_back_with_its_quoted_wait_and_the_label_comes_off()
 fn a_summon_nobody_answers_is_counted_spent_and_then_asked_about() {
     let (rig, runner, head) = summoned("zeus");
     let summon = now(&rig);
-    rig.clock.advance(ANSWER_WAIT - 1);
+    rig.clock.advance(ANSWER_WAIT);
     step(&runner).unwrap();
-    assert!(rig.leases.held(&cr()));
-    rig.clock.advance(1);
+    assert!(rig.leases.held(&cr()), "held for the re-send");
+    rig.clock.advance(HEARD_WAIT - ANSWER_WAIT);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::SummonedAgain { .. })
+    ));
     step(&runner).unwrap();
     assert!(!rig.leases.held(&cr()));
     assert!(
@@ -389,7 +394,7 @@ fn a_summon_nobody_answers_is_counted_spent_and_then_asked_about() {
             .contains(&Told::Window(WindowFact::Summoned, summon))
     );
 
-    rig.clock.advance(REVIEW_WAIT - ANSWER_WAIT);
+    rig.clock.advance(REVIEW_WAIT - HEARD_WAIT);
     let Some(StepReport::Ruling { id, question, .. }) = step(&runner).unwrap() else {
         panic!("no ruling on a review that never ran");
     };
@@ -400,7 +405,7 @@ fn a_summon_nobody_answers_is_counted_spent_and_then_asked_about() {
         )),
         "{question}"
     );
-    assert_eq!(labels(&rig), [on(), off()]);
+    assert_eq!(labels(&rig), [on(), off(), on(), off()]);
 
     rig.ask(&runner, "rule", Some(&format!("{id} yes")));
     assert!(matches!(

@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn gate_sends_a_work_item_saved_before_the_gate_to_its_merge_ruling() {
-        let (rig, runner, head) = Rig::with_pull_request("hazels-lab");
+        let (rig, runner, head) = Rig::with_pull_request("webapp");
         drop(runner);
         let state = rig.paths().state;
         let text = std::fs::read_to_string(&state).unwrap();

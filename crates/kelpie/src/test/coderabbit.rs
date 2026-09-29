@@ -84,6 +84,19 @@ impl FakeCodeRabbit {
         });
     }
 
+    /// Sets "Review in progress" on `head` of pull request `number` at `at`
+    pub(crate) fn progress(&self, number: u64, head: &str, at: u64) {
+        let mut activity = self.activity.lock().unwrap();
+        activity.entry(number).or_default().statuses.insert(
+            0,
+            Status {
+                commit: head.to_owned(),
+                description: "Review in progress".into(),
+                at: Timestamp(at),
+            },
+        );
+    }
+
     /// Sets "Review completed" on `head` of pull request `number` at `at`,
     /// with no review or comment: CodeRabbit found nothing new to read
     pub(crate) fn complete(&self, number: u64, head: &str, at: u64) {
