@@ -22,6 +22,10 @@ use crate::settings::{Effort, ForgeSlug};
 use crate::shots::{ShotsJob, ShotsRun};
 use crate::webhook::Webhook;
 
+mod local_paths;
+
+pub use local_paths::Guarded;
+
 /// Seconds since the Unix epoch
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -277,6 +281,8 @@ pub enum ForgeError {
     Failed(String),
     /// The tool succeeded but its output was not what was asked for
     Unreadable(String),
+    /// The text to post names a folder on this machine, so kelpie never sent it
+    LocalPath,
 }
 
 impl fmt::Display for ForgeError {
@@ -285,6 +291,7 @@ impl fmt::Display for ForgeError {
             Self::Spawn(error) => write!(f, "cannot run gh: {error}"),
             Self::Failed(stderr) => write!(f, "gh failed: {}", stderr.trim()),
             Self::Unreadable(output) => write!(f, "unreadable gh output: {}", output.trim()),
+            Self::LocalPath => f.write_str("not posted: the text names a folder on this machine"),
         }
     }
 }

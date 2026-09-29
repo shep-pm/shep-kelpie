@@ -13,7 +13,7 @@ use std::process::{Command, Stdio};
 use crate::board::{LabelError, Skip, WorkerModel, worker_override};
 use crate::channels::{Channel, Channels};
 use crate::pacer::Assessment;
-use crate::ports::{ForgeError, Ports, SessionId, Timestamp, Visibility};
+use crate::ports::{ForgeError, Guarded, Ports, SessionId, Timestamp, Visibility};
 use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
@@ -173,9 +173,11 @@ impl Runner {
         paths: &ProjectPaths,
         home: &Path,
         kelpie: &Path,
-        ports: Ports,
+        mut ports: Ports,
     ) -> Result<Self, OpenError> {
         let settings = Settings::load(&paths.settings, home)?;
+        let local = [home, paths.kelpie_home.as_path(), settings.repo.as_path()];
+        ports.forge = Box::new(Guarded::new(ports.forge, local));
         let (channels, webhook) = ruling_channels(&settings, &paths.kelpie_settings)?;
         check_repo(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;

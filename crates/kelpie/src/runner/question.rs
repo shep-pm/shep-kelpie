@@ -295,6 +295,34 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn a_question_naming_a_local_folder_reaches_the_maintainer_but_not_the_pull_request() {
+        let rig = Rig::new("shep");
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "start", None);
+        rig.ask(&runner, "add", Some("7"));
+        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+        let log = rig.home.path().join(".npm/_logs/debug-0.log");
+        let says = format!("{OPEN}npm failed, see {}{CLOSE}", log.display());
+        rig.claude
+            .script([Scripted::Say(Box::leak(says.into_boxed_str()))]);
+        let Some(StepReport::Asked {
+            pull_request: Some(71),
+            question,
+            comment_failed,
+            ..
+        }) = step(&runner).unwrap()
+        else {
+            panic!("the question was not about pull request 71");
+        };
+        assert_eq!(
+            comment_failed.as_deref(),
+            Some("not posted: the text names a folder on this machine")
+        );
+        assert_eq!(rig.forge.comments(), []);
+        assert!(question.contains(&log.display().to_string()), "{question}");
+    }
+
     // A question asked mid-fix, during a review round's own turn,
     // interrupts that exact round; once answered, it resumes there rather
     // than restarting the loop.
