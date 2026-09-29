@@ -66,8 +66,19 @@ pub async fn project_here(
 pub async fn start(client: &Client, project: &ProjectName) -> Result<Vec<String>, String> {
     let rows = flock(client).await?;
     let runner = kelpie_runner(client, &rows, project).await?;
+    let adopted = rows
+        .iter()
+        .any(|r| r.name == dog::OLD_NAME && r.dog.is_some());
     let dog = match kelpie_sheep(client, &rows, dog::NAME, &["dog"]).await? {
         Some(dog) => Some(dog),
+        None if adopted => {
+            return Err(format!(
+                "kelpie is adopted and enabled, and this flock has no `{}`: run `shep disable \
+                 {}`, then `shep kelpie add`",
+                dog::NAME,
+                dog::OLD_NAME
+            ));
+        }
         None => kelpie_sheep(client, &rows, dog::OLD_NAME, &["dog"]).await?,
     };
     for found in dog.iter().chain([&runner]) {

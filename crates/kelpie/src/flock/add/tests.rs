@@ -208,11 +208,72 @@ async fn an_old_dog_s_variables_come_along_or_nothing_changes() {
     let scene = Scene::new().await;
     let mut old = scene.launch.dog();
     old.name = "kelpie".into();
-    old.env.insert("PATH".into(), "withheld".into());
+    old.env.insert("HOME".into(), "withheld".into());
     scene.shepherd.holds(old, true);
-    scene.add().await.unwrap();
+    let lines = scene.add().await.unwrap();
     let (dog, _) = scene.shepherd.sheep("kelpie-dog").unwrap();
-    assert_eq!(dog.env.get("PATH"), std::env::var("PATH").ok().as_ref());
+    assert_eq!(dog.env.get("HOME"), std::env::var("HOME").ok().as_ref());
+    assert!(
+        lines.contains(
+            &"dog `kelpie-dog`: HOME taken from this shell, as `kelpie`'s entry set them"
+                .to_owned()
+        ),
+        "{lines:?}"
+    );
+}
+
+// A shell always has both, and a TMPDIR other than the runners' would put
+// the GPU lock somewhere else.
+#[tokio::test]
+async fn an_old_dog_s_tmpdir_or_path_is_never_taken_from_the_shell() {
+    for key in ["TMPDIR", "PATH"] {
+        let mut scene = Scene::new().await;
+        let mut old = scene.launch.dog();
+        old.name = "kelpie".into();
+        old.env.insert(key.into(), "withheld".into());
+        scene.shepherd.holds(old, true);
+        let err = scene.add().await.unwrap_err();
+        assert!(
+            err.contains(&format!("take {key} out of that entry")),
+            "{err}"
+        );
+        assert_eq!(scene.shepherd.writes(), []);
+    }
+}
+
+#[tokio::test]
+async fn a_flockfile_runner_or_a_broken_table_for_this_checkout_is_refused() {
+    let mut scene = Scene::new().await;
+    let root = scene.checkout.root.display().to_string();
+    // A Flockfile runner with no table, whose old file names this checkout.
+    let mut flockfile = scene
+        .launch
+        .runner(&ProjectName::try_from("old").unwrap(), Map::new());
+    flockfile.dogs.clear();
+    scene.shepherd.holds(flockfile, true);
+    let file = scene.home.join(".kelpie/projects/old/settings.toml");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, format!("repo = {root:?}\n")).unwrap();
+    let err = scene.add().await.unwrap_err();
+    assert!(err.starts_with("project `old` already runs"), "{err}");
+    assert_eq!(scene.shepherd.writes(), []);
+
+    // A table that no longer parses still names its checkout.
+    let mut scene = Scene::new().await;
+    let mut broken = Map::new();
+    broken.insert(
+        "repo".into(),
+        Value::String(scene.checkout.root.display().to_string()),
+    );
+    scene.shepherd.holds(
+        scene
+            .launch
+            .runner(&ProjectName::try_from("broken").unwrap(), broken),
+        true,
+    );
+    let err = scene.add().await.unwrap_err();
+    assert!(err.starts_with("project `broken` already runs"), "{err}");
+    assert_eq!(scene.shepherd.writes(), []);
 }
 
 #[tokio::test]

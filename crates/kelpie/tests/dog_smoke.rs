@@ -148,8 +148,14 @@ impl Shepherd {
         shepherd
     }
 
+    // A dog under the old name leaves `TMPDIR` out, as the maintainer's own
+    // entry does: `shep kelpie add` refuses to carry it into `kelpie-dog`.
     fn flockfile(&self, dog: &str) -> String {
         let home = self.home.path().display();
+        let tmpdir = match dog {
+            "kelpie-dog" => format!("TMPDIR = \"{home}\", "),
+            _ => String::new(),
+        };
         let me = std::env::current_exe().unwrap();
         let runner = |name: &str| {
             format!(
@@ -161,7 +167,7 @@ impl Shepherd {
         format!(
             "[[app]]\nname = {dog:?}\nscript = {KELPIE:?}\nargs = [\"dog\"]\n\
              channel = true\nshutdown_with_message = true\nautorestart = false\n\
-             env = {{ SHEP_HOME = \"{home}\", TMPDIR = \"{home}\", KELPIE_HOME = \"{home}\" }}\n\n{}{}",
+             env = {{ SHEP_HOME = \"{home}\", {tmpdir}KELPIE_HOME = \"{home}\" }}\n\n{}{}",
             runner("koji"),
             runner("reactmap")
         )

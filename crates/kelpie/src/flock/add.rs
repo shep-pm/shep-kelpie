@@ -164,15 +164,30 @@ pub async fn add(
     }
     let mut tables = tables(client).await?;
     // One runner per checkout and per repo: two would take the same issues.
-    for (sheep, table) in &tables {
-        let Ok(other) = Settings::from_table(table, sheep, place.home, place.home) else {
-            continue;
+    // Read from each table, or a Flockfile runner's file, by its raw keys,
+    // so one that no longer parses still counts.
+    let projects = place.old_settings.parent().and_then(Path::parent);
+    for row in rows.iter().filter(|r| r.name != name.as_str()) {
+        let sheep = row.name.as_str();
+        let other = match (tables.get(sheep), projects) {
+            (Some(table), _) => table.clone(),
+            (None, Some(projects)) => {
+                match std::fs::read_to_string(projects.join(sheep).join("settings.toml")) {
+                    Ok(text) => table_of(&text).unwrap_or_default(),
+                    Err(_) => continue,
+                }
+            }
+            (None, None) => continue,
         };
-        if sheep != name.as_str() && (other.repo == checkout.root || other.forge == *repo) {
+        let text = |key: &str| other.get(key).and_then(Value::as_str).map(str::to_owned);
+        let runs_from = text("repo").map(|repo| match repo.strip_prefix("~/") {
+            Some(rest) => place.home.join(rest),
+            None => repo.into(),
+        });
+        let same_repo = text("forge").as_deref() == Some(slug);
+        if runs_from.as_deref() == Some(checkout.root.as_path()) || same_repo {
             return Err(format!(
-                "project `{sheep}` already runs {} from {}: `shep kelpie start {sheep}`",
-                other.forge.as_str(),
-                other.repo.display()
+                "project `{sheep}` already runs this checkout or {slug}: `shep kelpie start {sheep}`"
             ));
         }
     }
@@ -191,7 +206,7 @@ pub async fn add(
             ));
         }
     }
-    let new_dog = dog_app(launch, old_dog.as_ref())?;
+    let (new_dog, carried) = dog_app(launch, old_dog.as_ref())?;
 
     // A failure part way says what had changed by then.
     let wrote = async {
@@ -236,7 +251,9 @@ pub async fn add(
 
         match (dog, new_dog) {
             (Some(_), _) => done.push(format!("dog `{}`: already there", dog::NAME)),
-            (None, new_dog) => replace_dog(client, new_dog, old_dog, &mut done).await?,
+            (None, new_dog) => {
+                replace_dog(client, new_dog, &carried, old_dog, &mut done).await?;
+            }
         }
         Ok::<(), String>(())
     }
@@ -267,23 +284,33 @@ pub async fn move_dog(client: &Client, launch: &Launch) -> Result<Vec<String>, S
             None => Ok(vec![format!("dog `{}`: already there", dog::NAME)]),
         };
     }
-    let new_dog = dog_app(launch, old.as_ref())?;
+    let (new_dog, carried) = dog_app(launch, old.as_ref())?;
     let mut done = Vec::new();
-    match replace_dog(client, new_dog, old, &mut done).await {
+    match replace_dog(client, new_dog, &carried, old, &mut done).await {
         Ok(()) => Ok(done),
         Err(e) => Err(format!("{e}, after this much: {}", done.join("; "))),
     }
 }
 
-// The dog's sheep as `add` makes it. One replacing a Flockfile dog keeps
-// every variable that entry set: shep withholds their values, so each is
-// taken from this command's own environment, and one missing there stops
-// `add` before anything changes.
-fn dog_app(launch: &Launch, old: Option<&Found>) -> Result<AppConfig, String> {
+// The dog's sheep as `add` makes it, and the variables it took from this
+// shell. One replacing a Flockfile dog keeps every variable that entry set:
+// shep withholds their values, so each is taken from this command's own
+// environment, and one missing there stops `add` before anything changes.
+// `TMPDIR` and `PATH` are refused instead: a shell always has both, and a
+// `TMPDIR` other than the runners' puts the GPU lock somewhere else.
+fn dog_app(launch: &Launch, old: Option<&Found>) -> Result<(AppConfig, Vec<String>), String> {
     let mut app = launch.dog();
+    let mut carried = Vec::new();
     for key in old.map_or(&[][..], |old| old.env_keys.as_slice()) {
         if app.env.contains_key(key) {
             continue;
+        }
+        if ["TMPDIR", "PATH"].contains(&key.as_str()) {
+            return Err(format!(
+                "`{}`'s entry sets {key}, which shep does not hand back and this shell's may \
+                 not match: take {key} out of that entry, restart it, and run this again",
+                dog::OLD_NAME
+            ));
         }
         let value = std::env::var(key).map_err(|_| {
             format!(
@@ -293,8 +320,9 @@ fn dog_app(launch: &Launch, old: Option<&Found>) -> Result<AppConfig, String> {
             )
         })?;
         app.env.insert(key.clone(), value);
+        carried.push(key.clone());
     }
-    Ok(app)
+    Ok((app, carried))
 }
 
 // Adds the dog's sheep. A dog set up from a Flockfile under its old name
@@ -304,6 +332,7 @@ fn dog_app(launch: &Launch, old: Option<&Found>) -> Result<AppConfig, String> {
 async fn replace_dog(
     client: &Client,
     new_dog: AppConfig,
+    carried: &[String],
     old: Option<Found>,
     done: &mut Vec<String>,
 ) -> Result<(), String> {
@@ -323,6 +352,14 @@ async fn replace_dog(
         apps: vec![new_dog],
     };
     send(client, request, |r| matches!(r, Response::Added(_))).await?;
+    if !carried.is_empty() {
+        done.push(format!(
+            "dog `{}`: {} taken from this shell, as `{}`'s entry set them",
+            dog::NAME,
+            carried.join(", "),
+            dog::OLD_NAME
+        ));
+    }
     match old {
         Some(old) if old.row.status == ProcStatus::Online => {
             super::resume(client, dog::NAME).await?;

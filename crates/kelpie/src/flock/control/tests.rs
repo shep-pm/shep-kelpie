@@ -114,6 +114,17 @@ async fn start_and_pause_leave_a_sheep_that_is_not_kelpie_s_alone() {
 }
 
 #[tokio::test]
+async fn start_with_kelpie_adopted_and_enabled_and_no_dog_says_to_disable_it() {
+    let mut shepherd = FakeShepherd::new().await;
+    runner(&shepherd, "koji", Path::new("/src/koji"), false);
+    shepherd.holds_dog("kelpie");
+    let client = client(&shepherd).await;
+    let err = in_time(start(&client, &project("koji"))).await.unwrap_err();
+    assert!(err.contains("run `shep disable kelpie`"), "{err}");
+    assert_eq!(shepherd.writes(), []);
+}
+
+#[tokio::test]
 async fn the_project_here_is_the_one_whose_settings_name_this_checkout() {
     let shepherd = FakeShepherd::new().await;
     let home = PathBuf::from("/home/me");
