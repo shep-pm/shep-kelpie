@@ -106,6 +106,7 @@ impl Wants {
             RulingKind::Merge { .. }
             | RulingKind::Rebase { .. }
             | RulingKind::StillRed { .. }
+            | RulingKind::MergeRefused { .. }
             | RulingKind::Closed
             | RulingKind::ReviewGuard { .. }
             | RulingKind::FixNotPushed { .. }

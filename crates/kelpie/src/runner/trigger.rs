@@ -11,6 +11,7 @@ use super::{Answer, Runner};
 use crate::board::{Skip, WorkerModel};
 use crate::ports::{SessionId, Timestamp};
 use crate::relay::Settled;
+use crate::settings::MergeAuthority;
 use crate::state::{LeaseHeld, Ruling, RunState, StateError, Waiting};
 use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Turn, WorkItem};
 
@@ -31,6 +32,8 @@ const RULE_USAGE: &str = "takes `<id> yes`, `<id> no <note>` or `<id> answer <te
 pub struct Status<'a> {
     /// The project
     pub project: &'a str,
+    /// Who decides its merges
+    pub merge_authority: MergeAuthority,
     /// Running or paused
     pub run: RunState,
     /// When it last started or paused
@@ -347,6 +350,7 @@ mod tests {
             rig.ask(&runner, "status", None),
             json!({
                 "project": "koji",
+                "merge_authority": "ask",
                 "run": "paused",
                 "since": Rig::EPOCH,
                 "work_item": null,

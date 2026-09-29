@@ -145,7 +145,7 @@ pub struct Runner {
     // Notices for the relay of rulings settled without it, kept in memory
     // only: one lost to a restart leaves the question up, and `rule`
     // refuses a tap on it.
-    relay_notices: Vec<alert::Notice>,
+    relay_notices: Vec<alert::SettledNotice>,
     // The ruling whose relay send is out, which an answer can settle first
     relaying: Option<u64>,
     // The account kelpie acts as, read once a run when a rework first needs it
@@ -222,6 +222,7 @@ impl Runner {
     pub fn status(&self) -> Status<'_> {
         Status {
             project: self.project.as_str(),
+            merge_authority: self.settings.merge_authority,
             run: self.state.run,
             since: self.state.since,
             work_item: self.state.work_item.as_ref().map(WorkItemStatus::from),
@@ -308,6 +309,9 @@ impl Runner {
             coderabbit: CodeRabbitTally::default(),
             known: Known::default(),
             qwen: QwenTally::default(),
+            merge_refused: false,
+            merge_tried: None,
+            summon_owed: false,
             calls: Vec::new(),
         }
     }

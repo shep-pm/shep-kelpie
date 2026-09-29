@@ -8,13 +8,15 @@
 //! standing parks it on a ruling. A pending run, or none yet, waits for the
 //! next step. A red run is the worker's next turn, naming the checks that
 //! failed. A green run starts a CodeRabbit round while one is owed, and
-//! otherwise raises the merge ruling. A project without CI skips the checks.
+//! otherwise raises the merge ruling, or under `auto` merges. A project
+//! without CI skips the checks.
 
 use super::Runner;
 use super::report::{Begin, StepReport};
 use super::rework::HUMAN;
 use crate::board::READY;
 use crate::ports::{Checks, PullRequestState, Timestamp};
+use crate::settings::MergeAuthority;
 use crate::state::{RulingKind, StateError};
 use crate::work_item::{Conflict, Phase, Turn, foreign_change};
 use crate::worktree::{self, Base, Rebase};
@@ -46,10 +48,11 @@ impl Runner {
         };
         match pr.state {
             PullRequestState::Open => {}
-            // The maintainer merged it by hand, which is their own ruling.
+            // The maintainer merged it by hand, which is their own ruling,
+            // unless it is kelpie's `auto` merge whose answer was an error.
             PullRequestState::Merged => {
-                self.update(|item| item.phase = Phase::Done { merged: true })?;
-                return self.finish(true);
+                let notice = item.merge_tried.as_deref() == Some(pr.head.as_str());
+                return self.merged(item.issue, number, pr.head, notice);
             }
             PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
         }
@@ -79,6 +82,9 @@ impl Runner {
             return self.raise(number, kind);
         }
         if known.head.is_none() {
+            if self.settings.merge_authority == MergeAuthority::Auto {
+                return self.regate_unknown(number, &pr.head);
+            }
             let head = Some(pr.head.clone());
             self.update(|item| item.known.head = head)?;
         }
@@ -100,11 +106,22 @@ impl Runner {
         }
     }
 
-    // Green CI goes to a CodeRabbit round while one is owed, then to the merge
-    // ruling, with the pull request handed back `ready-for-human`.
+    // Green CI goes to a CodeRabbit round while one is owed. Then `auto`
+    // merges by the path a yes takes, and `ask` raises the merge ruling
+    // with the pull request handed back `ready-for-human`.
     fn passed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
         if self.coderabbit_due() {
             return self.start_round(head);
+        }
+        if self.settings.merge_authority == MergeAuthority::Auto {
+            self.update(|item| {
+                item.phase = Phase::Merge {
+                    head,
+                    readied: None,
+                    auto: true,
+                };
+            })?;
+            return self.merge();
         }
         if let Err(reason) = self.hand_back(number) {
             return Ok(self.gate_failed(reason));
@@ -238,6 +255,29 @@ impl Runner {
             pull_request: number,
             head,
             files,
+        }))
+    }
+
+    // A head no gate vouched for, such as one a yes under `ask` left before
+    // a restart onto `auto`, goes through every gate before any merge.
+    fn regate_unknown(&mut self, number: u64, head: &str) -> Result<Begin, StateError> {
+        let item = self
+            .state
+            .work_item
+            .as_ref()
+            .expect("CI runs on a work item");
+        let issue = item.issue;
+        let at = worktree::head(&self.settings.repo, &item.worktree);
+        let regated = at
+            .map_err(|e| format!("cannot read the worktree's head: {e}"))
+            .and_then(|at| self.regate(&at, head));
+        if let Err(reason) = regated {
+            return Ok(self.gate_failed(reason));
+        }
+        Ok(Begin::Report(StepReport::Regated {
+            issue,
+            pull_request: number,
+            head: head.to_owned(),
         }))
     }
 

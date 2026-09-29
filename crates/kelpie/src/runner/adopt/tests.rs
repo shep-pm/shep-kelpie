@@ -590,3 +590,78 @@ fn taking_the_label_off_a_waiting_pull_request_takes_it_back() {
     assert_eq!(rig.ask(&runner, "status", None)["adopted"], json!([]));
     assert_eq!(rig.forge.comments(), []);
 }
+
+// Pull request 80 adopted under `auto` with CodeRabbit on, ready, its head
+// already reviewed by CodeRabbit before the adoption. Returns its head.
+fn adopted_reviewed_under_auto(rig: &Rig, titles: &[&str]) -> (Mutex<Runner>, String) {
+    rig.coderabbit_on();
+    rig.merge_auto();
+    let head = opened_80(rig);
+    rig.forge.ready_pull_request(80);
+    rig.forge
+        .coderabbit
+        .review(80, &head, Rig::EPOCH - 60, titles);
+    let runner = running(rig);
+    rig.ask(&runner, "adopt", Some("80"));
+    step(&runner).unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+    (runner, head)
+}
+
+#[test]
+fn a_clean_review_from_before_the_adoption_never_satisfies_the_round() {
+    let rig = Rig::new("shep");
+    let (runner, head) = adopted_reviewed_under_auto(&rig, &[]);
+    assert_eq!(
+        rig.verdict(&runner),
+        Some(StepReport::Summoned {
+            issue: 5,
+            pull_request: 80,
+            head: head.clone(),
+        })
+    );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["coderabbit"]["satisfied"], false);
+    rig.clock.advance(60);
+    assert_eq!(step(&runner).unwrap(), None, "the old review is no answer");
+    assert_eq!(rig.forge.merges(), []);
+
+    let at = crate::ports::Clock::now(&rig.clock).0;
+    rig.forge.coderabbit.review(80, &head, at + 60, &[]);
+    rig.clock.advance(60);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::CodeRabbitSatisfied { .. })
+    ));
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::Finished { merged: true, .. })
+    ));
+    assert_eq!(rig.forge.merges(), [(80, head)]);
+}
+
+#[test]
+fn findings_from_before_the_adoption_the_judge_rejects_still_leave_a_summon_owed() {
+    let rig = Rig::new("rotom");
+    let (runner, head) = adopted_reviewed_under_auto(&rig, &["Not real."]);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::CodeRabbitReviewed { round: 1, .. })
+    ));
+    rig.claude.script([Scripted::Text(
+        r#"{"holds": false, "severity": "low", "reason": "not so"}"#,
+    )]);
+    step(&runner).unwrap(); // the judge
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Summoned {
+            issue: 5,
+            pull_request: 80,
+            head,
+        })
+    );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["coderabbit"]["satisfied"], false);
+    assert_eq!(status["work_item"]["coderabbit"]["rounds"], 1);
+    assert_eq!(rig.forge.merges(), []);
+}

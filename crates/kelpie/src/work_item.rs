@@ -37,6 +37,10 @@ pub struct WorkItem {
     /// loop diffs against instead of `origin/main`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arrived: Option<String>,
+    /// Whether an adopted pull request still waits for a CodeRabbit review
+    /// kelpie summoned. Until one lands, no round is satisfied.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub summon_owed: bool,
     /// Its worktree
     pub worktree: PathBuf,
     /// Its worker's build folder
@@ -77,6 +81,14 @@ pub struct WorkItem {
     /// Its qwen rounds so far
     #[serde(default)]
     pub qwen: QwenTally,
+    /// Whether the forge refused a merge under `auto` since the last
+    /// ruling on one. A second refusal raises a `merge-refused` ruling.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub merge_refused: bool,
+    /// The head of the last merge under `auto` that answered an error. A
+    /// pull request later found merged at it is kelpie's merge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_tried: Option<String>,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
 }
@@ -267,13 +279,16 @@ pub enum Phase {
         /// The ruling's id
         id: u64,
     },
-    /// The maintainer said yes: merging this head
+    /// The maintainer said yes, or every gate passed under `auto`: merging this head
     Merge {
-        /// The head the ruling was about
+        /// The head the ruling, or the gate, was about
         head: String,
         /// When kelpie marked the draft ready, which can start a fresh CI run
         #[serde(default)]
         readied: Option<Timestamp>,
+        /// Whether the gate started it under `auto`, with no ruling asked
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        auto: bool,
     },
     /// Removing the worktree, branch and build folder
     Done {
@@ -573,8 +588,17 @@ mod tests {
             value(Phase::Merge {
                 head: "c0ffee".into(),
                 readied: Some(Timestamp(12)),
+                auto: false,
             }),
             json!({ "state": "merge", "head": "c0ffee", "readied": 12 })
+        );
+        assert_eq!(
+            value(Phase::Merge {
+                head: "c0ffee".into(),
+                readied: None,
+                auto: true,
+            }),
+            json!({ "state": "merge", "head": "c0ffee", "readied": null, "auto": true })
         );
         assert_eq!(
             value(Phase::Done { merged: true }),
@@ -694,6 +718,26 @@ mod tests {
         fields.remove("adopted");
         let item: WorkItem = serde_json::from_value(value).unwrap();
         assert!(!item.rework && !item.adopted);
+    }
+
+    #[test]
+    fn a_refused_merge_is_saved_only_while_it_stands() {
+        let mut item = a_work_item();
+        let value = serde_json::to_value(&item).unwrap();
+        assert!(value.get("merge_refused").is_none(), "{value}");
+        assert!(
+            !serde_json::from_value::<WorkItem>(value)
+                .unwrap()
+                .merge_refused
+        );
+        item.merge_refused = true;
+        let value = serde_json::to_value(&item).unwrap();
+        assert_eq!(value["merge_refused"], true);
+        assert!(
+            serde_json::from_value::<WorkItem>(value)
+                .unwrap()
+                .merge_refused
+        );
     }
 
     #[test]
