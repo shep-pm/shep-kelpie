@@ -27,7 +27,9 @@ use crate::ports::{
     Timestamp, Verdict, read_review,
 };
 use crate::state::{Fix, RulingKind, StateError};
-use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, ReviewerKind, Turn, WorkItem};
+use crate::work_item::{
+    Phase, Review, ReviewCallKind, ReviewCallState, ReviewStage, ReviewerKind, Turn, WorkItem,
+};
 use crate::worktree;
 
 impl Runner {
@@ -51,7 +53,7 @@ impl Runner {
                 }
                 match review.reviewer(self.local_round()) {
                     ReviewerKind::Local => {
-                        self.mark_review_call_running()?;
+                        self.mark_review_call_running(ReviewCallKind::Local)?;
                         Ok(Begin::Review(ReviewCall::Local {
                             local: self.settings.review.local.clone(),
                             worktree,
@@ -77,7 +79,7 @@ impl Runner {
                             shots,
                         ) {
                             Ok(call) => {
-                                self.mark_review_call_running()?;
+                                self.mark_review_call_running(ReviewCallKind::Claude)?;
                                 Ok(Begin::Review(ReviewCall::ClaudeRound(call)))
                             }
                             Err(reason) => Ok(self.gate_failed(reason)),
@@ -102,7 +104,7 @@ impl Runner {
                     shots.as_deref(),
                 ) {
                     Ok(call) => {
-                        self.mark_review_call_running()?;
+                        self.mark_review_call_running(ReviewCallKind::Judge)?;
                         Ok(Begin::Review(ReviewCall::Judge(call)))
                     }
                     Err(reason) => Ok(self.gate_failed(reason)),
@@ -167,9 +169,17 @@ impl Runner {
     // itself, the same as a worker's turn marks `Turn::Running`: `drop`
     // refuses while this is set, so a call in flight always has a work
     // item to land its result on.
-    pub(super) fn mark_review_call_running(&mut self) -> Result<(), StateError> {
+    pub(super) fn mark_review_call_running(
+        &mut self,
+        kind: ReviewCallKind,
+    ) -> Result<(), StateError> {
         let since = self.ports.clock.now();
-        self.update(|item| item.review_call = ReviewCallState::Running { since })
+        self.update(|item| {
+            item.review_call = ReviewCallState::Running {
+                since,
+                kind: Some(kind),
+            }
+        })
     }
 
     // Every held finding holds the judge's own severity, since the nit rule
@@ -452,7 +462,7 @@ pub(super) fn record_spent(item: &mut WorkItem, spent: Option<Spent>, now: Times
         }
         Some(Spent::Local) => {
             item.qwen.rounds += 1;
-            if let ReviewCallState::Running { since } = item.review_call {
+            if let ReviewCallState::Running { since, .. } = item.review_call {
                 item.qwen.seconds += now.0.saturating_sub(since.0);
             }
         }

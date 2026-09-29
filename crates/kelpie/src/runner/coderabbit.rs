@@ -27,7 +27,7 @@ use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
 use crate::ports::{Finding, PullRequestState, Timestamp, Verdict};
 use crate::state::{Fix, LeaseHeld, Resource, RulingKind, StateError};
-use crate::work_item::{CodeRabbitStage, OpenThread, Phase, Turn, WorkItem};
+use crate::work_item::{CodeRabbitStage, OpenThread, Phase, ReviewCallKind, Turn, WorkItem};
 
 /// The label shep's `.coderabbit.yaml` gates auto review on: the summon
 pub const LABEL: &str = "review please";
@@ -401,7 +401,7 @@ impl Runner {
             None,
         ) {
             Ok(call) => {
-                self.mark_review_call_running()?;
+                self.mark_review_call_running(ReviewCallKind::Judge)?;
                 Ok(Begin::Review(ReviewCall::Judge(call)))
             }
             Err(reason) => Ok(self.gate_failed(reason)),

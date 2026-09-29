@@ -235,9 +235,27 @@ fn review_call_state_is_pinned() {
     );
     assert_eq!(
         serde_json::to_value(ReviewCallState::Running {
-            since: Timestamp(9)
+            since: Timestamp(9),
+            kind: Some(ReviewCallKind::Judge),
         })
         .unwrap(),
+        json!({ "state": "running", "since": 9, "kind": "judge" })
+    );
+}
+
+#[test]
+fn a_running_review_call_saved_without_a_kind_loads() {
+    let call: ReviewCallState =
+        serde_json::from_value(json!({ "state": "running", "since": 9 })).unwrap();
+    assert_eq!(
+        call,
+        ReviewCallState::Running {
+            since: Timestamp(9),
+            kind: None,
+        }
+    );
+    assert_eq!(
+        serde_json::to_value(call).unwrap(),
         json!({ "state": "running", "since": 9 })
     );
 }

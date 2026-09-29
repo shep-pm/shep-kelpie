@@ -338,7 +338,25 @@ pub enum ReviewCallState {
     Running {
         /// When it started
         since: Timestamp,
+        /// What is running. None in a state file saved before it was kept.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<ReviewCallKind>,
     },
+}
+
+/// Which call a running [`ReviewCallState`] is
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReviewCallKind {
+    /// A local round
+    Local,
+    /// A Claude review round
+    Claude,
+    /// A judge call
+    Judge,
+    /// A shots run
+    Shots,
 }
 
 /// Where the review loop stands

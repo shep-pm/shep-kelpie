@@ -4,6 +4,7 @@ use super::*;
 use crate::ports::{Cost, Role, Session};
 use crate::runner::step;
 use crate::test::{Rig, Scripted, ScriptedRound};
+use crate::work_item::ReviewCallKind;
 
 // `drop` refuses while a call is running (see merge.rs's own test for
 // that), but `end_review` tolerates a work item that is gone anyway,
@@ -363,6 +364,7 @@ fn a_qwen_rounds_time_runs_from_when_it_was_marked_running() {
     let mut item = crate::test::a_work_item();
     item.review_call = ReviewCallState::Running {
         since: Timestamp(100),
+        kind: Some(ReviewCallKind::Local),
     };
     record_spent(&mut item, Some(Spent::Local), Timestamp(190));
     record_spent(&mut item, Some(Spent::Local), Timestamp(200));

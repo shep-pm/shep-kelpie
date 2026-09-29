@@ -15,7 +15,7 @@ use crate::preview;
 use crate::settings::NonBlank;
 use crate::shots::{SERVER_PID, ShotsJob, ShotsRecord, ShotsRun, named_routes, publish, routes};
 use crate::state::StateError;
-use crate::work_item::{ReviewCallState, WorkItem};
+use crate::work_item::{ReviewCallKind, ReviewCallState, WorkItem};
 
 #[cfg(test)]
 mod tests;
@@ -78,7 +78,7 @@ impl Runner {
         }
         let out = self.paths.shots(item.issue).join(short(head));
         let job = self.shots_job(item, out);
-        self.mark_review_call_running()?;
+        self.mark_review_call_running(ReviewCallKind::Shots)?;
         Ok(Some(Begin::Shots(Box::new(job), head.to_owned())))
     }
 
