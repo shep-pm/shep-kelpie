@@ -782,7 +782,10 @@ impl Rig {
     }
 
     pub(crate) fn paths(&self) -> ProjectPaths {
-        ProjectPaths::under(&self.home.path().join("kelpie"), &self.project)
+        let mut paths = ProjectPaths::under(&self.home.path().join("kelpie"), &self.project);
+        // A shepherd outside kelpie's home, as the user's own would be.
+        paths.shep_home = self.home.path().join("shep");
+        paths
     }
 
     /// Turns the CodeRabbit gate on, as the example settings have it for shep

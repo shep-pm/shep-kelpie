@@ -65,7 +65,8 @@ fn serve(project: &str) -> Result<(), String> {
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".kelpie"));
     let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
-    let paths = ProjectPaths::under(&kelpie_home, &project);
+    let mut paths = ProjectPaths::under(&kelpie_home, &project);
+    paths.shep_home.clone_from(&shep_home);
     let shepherd = shep_channel::serve();
     let claude = ClaudeCli::labelling(Arc::new(shepherd.clone()));
     let reviewer = LocalReviewer::default();

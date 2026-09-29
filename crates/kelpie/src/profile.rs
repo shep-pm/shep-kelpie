@@ -40,7 +40,7 @@ const GIT_DENY: [&str; 8] = [
 // Read and written by no worker. Also denied to sandboxed Bash, which takes
 // `Read` deny rules as its own. `~/.config/gh` stays readable: `gh` will not
 // start without its config, and the worker opens its own pull request.
-pub(crate) const CREDENTIALS: [&str; 12] = [
+pub(crate) const CREDENTIALS: [&str; 11] = [
     "~/.ssh/**",
     "~/.aws/**",
     "~/.gnupg/**",
@@ -51,9 +51,8 @@ pub(crate) const CREDENTIALS: [&str; 12] = [
     "~/.cargo/credentials",
     "~/.cargo/credentials.toml",
     "~/.kelpie/projects/**",
-    // The webhook URL, in the old file and in the shepherd's `dogs.toml`. Not all of
-    // `~/.kelpie`: worktrees and build folders live there.
-    "~/.kelpie/shep/**",
+    // The webhook URL's old file. Not all of `~/.kelpie`: worktrees and build
+    // folders live there. The shepherd's home, with `dogs.toml`, is the profile's own.
     "~/.kelpie/settings.toml",
 ];
 
@@ -133,6 +132,8 @@ pub struct WorkerProfile<'a> {
     /// The preview's domains, for a work item whose worktree has a launch
     /// file; `None` without one
     pub preview: Option<&'a [NonBlank]>,
+    /// The shepherd's home, whose `dogs.toml` holds the webhook's URL
+    pub shep_home: &'a Path,
 }
 
 impl WorkerProfile<'_> {
@@ -160,9 +161,12 @@ impl WorkerProfile<'_> {
             .chain([git("refs/heads").join(BASE)])
             .chain(fence::deny_write(self.worktree))
             .collect();
+        // `//` roots a rule at `/`: a single `/` is taken from the settings file.
+        let shep_home = format!("Read(/{}/**)", self.shep_home.display());
         let mut deny: Vec<String> = CREDENTIALS
             .iter()
             .map(|p| format!("Read({p})"))
+            .chain([shep_home])
             .chain(PM_ONLY.iter().map(|&r| r.to_owned()))
             .chain(GH_DENY.iter().map(|&r| r.to_owned()))
             .chain(push_to_base())
@@ -300,6 +304,7 @@ mod tests {
             allowed_domains: domains,
             build_env: &BTreeMap::new(),
             preview: None,
+            shep_home: Path::new("/srv/shep"),
         }
         .settings()
     }
@@ -384,6 +389,7 @@ mod tests {
             allowed_domains: &[],
             build_env: &build_env,
             preview: None,
+            shep_home: Path::new("/srv/shep"),
         }
         .settings();
         assert_eq!(
@@ -425,6 +431,7 @@ mod tests {
             allowed_domains: &[],
             build_env: &BTreeMap::new(),
             preview: Some(domains),
+            shep_home: Path::new("/srv/shep"),
         }
         .settings()
     }
@@ -618,7 +625,7 @@ mod tests {
             "Read(~/.ssh/**)",
             "Read(~/.kelpie/projects/**)",
             "Read(~/.kelpie/settings.toml)",
-            "Read(~/.kelpie/shep/**)",
+            "Read(//srv/shep/**)",
         ] {
             assert!(deny.contains(&rule), "{rule}");
         }

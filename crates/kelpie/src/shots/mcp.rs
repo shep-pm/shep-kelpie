@@ -169,6 +169,7 @@ mod tests {
             domains: vec![],
             env: BTreeMap::new(),
             server_pid: dir.path().join("shots/dev-server.pid"),
+            shep_home: dir.path().join("shep"),
         };
         let file = dir.path().join("job.json");
         std::fs::write(&file, serde_json::to_string(&job).unwrap()).unwrap();
