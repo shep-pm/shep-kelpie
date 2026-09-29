@@ -123,6 +123,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         rebased: false,
         shots: None,
         shots_comment: None,
+        held: Vec::new(),
         follow_ups: None,
         calls: vec![CallRecord {
             role: Role::Worker,

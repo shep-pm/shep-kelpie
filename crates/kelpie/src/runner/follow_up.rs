@@ -3,7 +3,9 @@
 //! The judge holds a finding, and the worker fixes it. One it leaves, because
 //! the fix is out of scope for the pull request, it copies into the deferred
 //! findings file in its build folder. When the pull request merges, kelpie
-//! reads that file once. Under `auto` each finding is filed at once, and under
+//! reads that file once and files only findings it sent the worker itself,
+//! in its own words: a line the worker invents or rewrites files nothing.
+//! Under `auto` each finding is filed at once, and under
 //! `ask` the maintainer is asked first. A finding an open issue already holds
 //! gets a comment on that issue instead of a second one.
 
@@ -23,6 +25,11 @@ use crate::work_item::FollowUps;
 // in a list anyway.
 const TITLE_LIMIT: usize = 80;
 
+// How many times the forge may refuse before the findings are dropped, so
+// issues switched off or a label that is missing cannot hold a merged work
+// item for ever.
+const MAX_FAILURES: u32 = 5;
+
 // The fewest characters of a finding's `what` a body may match on
 const MIN_BODY_MATCH: usize = 12;
 
@@ -38,13 +45,13 @@ impl Runner {
             Some(pending) => pending,
             None => {
                 let path = findings::deferred_path(&item.build);
-                let found = match read_deferred(&path) {
+                let found = match read_deferred(&path, &item.held, &item.worktree) {
                     Ok(found) => found,
                     Err(reason) => return Ok(Some(self.gate_failed(reason))),
                 };
                 let pending = FollowUps {
                     findings: found,
-                    ruled: false,
+                    ..FollowUps::default()
                 };
                 let saved = pending.clone();
                 self.update(|item| item.follow_ups = Some(saved))?;
@@ -67,15 +74,16 @@ impl Runner {
     // so a failure part way retries only what is left.
     fn file_follow_ups(&mut self, number: u64) -> Result<Begin, StateError> {
         let item = self.current().expect("a follow-up is of a work item");
-        let (issue, worktree) = (item.issue, item.worktree.clone());
+        let issue = item.issue;
         let repo = self.settings.forge.clone();
         let mut open = match self.ports.forge.open_issues(&repo) {
             Ok(open) => open,
-            Err(e) => return Ok(self.gate_failed(format!("cannot list the open issues: {e}"))),
+            Err(e) => {
+                return self.forge_refused(number, format!("cannot list the open issues: {e}"));
+            }
         };
         let (mut opened, mut commented, mut skipped) = (Vec::new(), Vec::new(), 0);
         while let Some(finding) = self.next_follow_up() {
-            let finding = relative(finding, &worktree);
             let title = title_of(&finding);
             let filed = match already_filed(&open, &title, &finding) {
                 Some(known) => {
@@ -106,7 +114,7 @@ impl Runner {
                 Err(ForgeError::LocalPath) => skipped += 1,
                 Err(e) => {
                     let reason = format!("cannot file a follow-up for #{number}: {e}");
-                    return Ok(self.gate_failed(reason));
+                    return self.forge_refused(number, reason);
                 }
             }
             self.update(|item| {
@@ -125,22 +133,61 @@ impl Runner {
         }))
     }
 
+    // The forge would not take them. Retried on the next pass until it has
+    // refused `MAX_FAILURES` times, then dropped with a report so the work
+    // item can finish.
+    fn forge_refused(&mut self, number: u64, reason: String) -> Result<Begin, StateError> {
+        let item = self.current().expect("a follow-up is of a work item");
+        let issue = item.issue;
+        let failures = item.follow_ups.as_ref().map_or(0, |f| f.failures) + 1;
+        if failures < MAX_FAILURES {
+            self.update(|item| {
+                if let Some(pending) = item.follow_ups.as_mut() {
+                    pending.failures = failures;
+                }
+            })?;
+            return Ok(self.gate_failed(reason));
+        }
+        let dropped = item.follow_ups.as_ref().map_or(0, |f| f.findings.len());
+        self.update(|item| item.follow_ups = Some(FollowUps::default()))?;
+        Ok(Begin::Report(StepReport::FollowUpsDropped {
+            issue,
+            pull_request: number,
+            dropped,
+            reason,
+        }))
+    }
+
     fn next_follow_up(&self) -> Option<Finding> {
         let item = self.current()?;
         item.follow_ups.as_ref()?.findings.first().cloned()
     }
 }
 
-// A file that was never written is a worker with nothing to defer.
-fn read_deferred(path: &Path) -> Result<Vec<Finding>, String> {
-    match std::fs::read_to_string(path) {
-        Ok(text) => Ok(parse_findings(&text)),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
-        Err(e) => Err(format!("cannot read {}: {}", path.display(), e.kind())),
-    }
+// The findings kelpie sent the worker that the file names again, in kelpie's
+// own words and each once. A file that was never written is a worker with
+// nothing to defer.
+fn read_deferred(path: &Path, held: &[Finding], worktree: &Path) -> Result<Vec<Finding>, String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("cannot read {}: {}", path.display(), e.kind())),
+    };
+    let deferred = parse_findings(&text);
+    let named = |held: &Finding| {
+        deferred
+            .iter()
+            .any(|d| (&d.file, d.line, &d.what) == (&held.file, held.line, &held.what))
+    };
+    Ok(held
+        .iter()
+        .filter(|held| named(held))
+        .cloned()
+        .map(|finding| relative(finding, worktree))
+        .collect())
 }
 
-// A worker names files by the path it sees, which starts at its worktree.
+// A reviewer names files by the path it sees, which can start at the worktree.
 fn relative(finding: Finding, worktree: &Path) -> Finding {
     let file = Path::new(&finding.file)
         .strip_prefix(worktree)
@@ -160,8 +207,11 @@ fn already_filed<'a>(
     title: &str,
     finding: &Finding,
 ) -> Option<&'a OpenIssue> {
+    // A title cut short at the limit could be any of several findings.
+    let cut = finding.what.trim().chars().count() > TITLE_LIMIT;
     open.iter().find(|issue| {
-        issue.title.trim().eq_ignore_ascii_case(title)
+        (issue.title.trim().eq_ignore_ascii_case(title)
+            && (!cut || issue.body.contains(finding.what.trim())))
             || (finding.what.trim().len() >= MIN_BODY_MATCH
                 && issue.body.contains(&finding.file)
                 && issue.body.contains(finding.what.trim()))

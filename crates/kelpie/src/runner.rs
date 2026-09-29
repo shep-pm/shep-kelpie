@@ -365,6 +365,7 @@ impl Runner {
             rebased: false,
             shots: None,
             shots_comment: None,
+            held: Vec::new(),
             follow_ups: None,
             calls: Vec::new(),
         }
