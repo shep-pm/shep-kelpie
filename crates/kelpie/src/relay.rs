@@ -179,13 +179,13 @@ mod tests {
         let hook = &s["hooks"]["PreToolUse"][0];
         assert_eq!(hook["matcher"], "*");
         let command = hook["hooks"][0]["command"].as_str().unwrap();
-        let [program, role, kelpie] = command.split(' ').collect::<Vec<_>>()[..] else {
+        let [program, role, gate_path] = command.split(' ').collect::<Vec<_>>()[..] else {
             panic!("{command}");
         };
-        assert_eq!((program, role), (KELPIE, "relay-gate"));
+        assert_eq!((program, role, gate_path), (KELPIE, "relay-gate", KELPIE));
         let judge = |command: &str| {
             let call = json!({ "tool_name": "Bash", "tool_input": { "command": command } });
-            gate::judge(call.to_string().as_bytes(), kelpie)
+            gate::judge(call.to_string().as_bytes(), gate_path)
         };
         for denied in [
             "shep trigger shep rule '1 yes'",

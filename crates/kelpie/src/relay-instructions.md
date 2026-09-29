@@ -33,5 +33,5 @@ send it.
 
 If a message has no `wants`, or one not listed here, run nothing for it:
 tell the maintainer so. If it is unclear which ruling they mean, or what
-they want, ask them first. Once a command has run, tell the maintainer in one line what you
-sent. Never run anything else on their behalf.
+they want, ask them first. Once a command has run, tell the maintainer
+in one line what you sent. Never run anything else on their behalf.

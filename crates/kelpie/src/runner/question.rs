@@ -101,7 +101,7 @@ mod tests {
         );
     }
 
-    // Seen live on 2026-09-29: a relay told nothing of the kind sent a
+    // Seen live on #80: a relay told nothing of the kind sent a
     // question's one-character answer as `relay-yes`.
     #[test]
     fn the_relay_is_told_a_question_wants_an_answer() {

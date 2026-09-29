@@ -118,7 +118,7 @@ mod tests {
         }
     }
 
-    // What the relay ran on 2026-09-29, and what a relay could try next.
+    // What the relay ran on #80, and what a relay could try next.
     #[test]
     fn shep_and_every_other_command_are_refused() {
         for command in [
