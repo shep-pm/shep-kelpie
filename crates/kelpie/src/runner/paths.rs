@@ -20,6 +20,12 @@ impl ProjectName {
     }
 }
 
+impl fmt::Display for ProjectName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 impl TryFrom<&str> for ProjectName {
     type Error = ProjectNameError;
 
@@ -61,6 +67,8 @@ impl core::error::Error for ProjectNameError {}
 pub struct ProjectPaths {
     /// Kelpie's own settings file, which every project shares
     pub kelpie_settings: PathBuf,
+    /// The authenticator secret and the codes used, which every project shares
+    pub totp: PathBuf,
     /// The settings file
     pub settings: PathBuf,
     /// The state file
@@ -91,6 +99,7 @@ impl ProjectPaths {
         let folder = kelpie_home.join("projects").join(project.as_str());
         Self {
             kelpie_settings: kelpie_home.join("settings.toml"),
+            totp: kelpie_home.join("totp"),
             settings: folder.join("settings.toml"),
             state: folder.join("state.json"),
             worker: folder.join("worker"),

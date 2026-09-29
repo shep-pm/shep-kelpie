@@ -413,6 +413,31 @@ fn a_qwen_round_stopped_with_the_runner_runs_again_on_restart() {
 }
 
 #[test]
+fn a_claude_round_that_summarises_and_ends_on_clean_is_clean() {
+    let (rig, runner) = at_round_1("shep");
+    step(&runner).unwrap(); // round 1, qwen: clean by default
+    rig.claude
+        .script([Scripted::Text("The refactor is correct.\n\nCLEAN\n")]);
+    step(&runner).unwrap(); // round 2, claude
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+        "ci"
+    );
+}
+
+#[test]
+fn a_claude_round_that_only_mentions_clean_fails_the_gate() {
+    let (rig, runner) = at_round_1("shep");
+    step(&runner).unwrap(); // round 1, qwen: clean by default
+    rig.claude
+        .script([Scripted::Text("CLEAN would be premature.\nnot CLEAN")]);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::GateFailed { .. })
+    ));
+}
+
+#[test]
 fn a_claude_round_stopped_with_the_runner_runs_again_on_restart() {
     let (rig, runner) = at_round_1("shep");
     step(&runner).unwrap(); // round 1, qwen: clean by default

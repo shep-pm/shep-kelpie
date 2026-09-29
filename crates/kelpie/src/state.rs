@@ -62,6 +62,9 @@ pub struct ProjectState {
     /// Automatic merges not yet sent, oldest first
     #[serde(default)]
     pub notices: Vec<Notice>,
+    /// Where reading the webhook's replies has got to
+    #[serde(default)]
+    pub replies: Replies,
 }
 
 impl ProjectState {
@@ -81,6 +84,7 @@ impl ProjectState {
             leases: Vec::new(),
             pacing: None,
             notices: Vec::new(),
+            replies: Replies::default(),
         }
     }
 
@@ -160,6 +164,27 @@ pub struct Ruling {
     /// any other way
     #[serde(default)]
     pub relayed: bool,
+}
+
+/// Where reading replies on the webhook's topic has got to
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Replies {
+    /// The last message read, which the next read starts after
+    #[serde(default)]
+    pub last: Option<LastRead>,
+}
+
+/// A message on the webhook's topic, as far as reading it goes
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LastRead {
+    /// The webhook's id for it
+    pub id: String,
+    /// When the webhook took it
+    pub time: Timestamp,
 }
 
 /// A merge kelpie made under `auto`, told to the maintainer after it lands
@@ -373,7 +398,7 @@ pub struct LeaseHeld {
 pub enum Resource {
     /// The GPU the qwen-review loop runs on
     Gpu,
-    /// The CodeRabbit review window
+    /// The review bot's window, which is CodeRabbit's
     Coderabbit,
 }
 
@@ -490,10 +515,13 @@ impl StateStore {
     pub fn save(&self, state: &ProjectState) -> Result<(), StateError> {
         let mut bytes = serde_json::to_vec_pretty(state).expect("state serializes to JSON");
         bytes.push(b'\n');
-        write_atomically(&self.path, &bytes).map_err(|e| StateError::Write {
-            path: self.path.clone(),
-            kind: e.kind(),
-        })
+        // A project `shep kelpie add` set up has no folder of its own yet.
+        let made = self.path.parent().map_or(Ok(()), std::fs::create_dir_all);
+        made.and_then(|()| write_atomically(&self.path, &bytes))
+            .map_err(|e| StateError::Write {
+                path: self.path.clone(),
+                kind: e.kind(),
+            })
     }
 
     fn error_read(&self, e: io::Error) -> StateError {

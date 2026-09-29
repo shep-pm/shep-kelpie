@@ -11,6 +11,7 @@ mod curl;
 pub(crate) mod gh;
 mod leases;
 mod local;
+mod ntfy;
 mod process;
 mod relay;
 mod shots;

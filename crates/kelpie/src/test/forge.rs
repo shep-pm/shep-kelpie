@@ -9,11 +9,11 @@ use std::sync::{Arc, Mutex};
 
 use super::coderabbit::FakeCodeRabbit;
 use crate::board::{Blocker, OpenPullRequest, READY, ReadyIssue};
-use crate::coderabbit::Activity;
 use crate::ports::{
-    Checks, Forge, ForgeError, Issue, MaintainerReview, OpenIssue, PullRequest, PullRequestState,
-    Reviewed, Visibility,
+    Checks, Forge, ForgeError, Issue, MaintainerReview, NewLabel, OpenIssue, PullRequest,
+    PullRequestState, Reviewed, Visibility,
 };
+use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
 
 /// A forge whose repo is public and whose every issue exists, unless a
@@ -54,6 +54,8 @@ pub(crate) struct FakeForge {
     // A state file read as each comment is posted, and what it held then
     watched: Arc<Mutex<Option<PathBuf>>>,
     saved_at_comment: Arc<Mutex<Vec<serde_json::Value>>>,
+    default_branch: Arc<Mutex<String>>,
+    repo_labels: Arc<Mutex<Vec<String>>>,
     /// Pull requests' labels, and what CodeRabbit posts
     pub(crate) coderabbit: FakeCodeRabbit,
 }
@@ -118,6 +120,8 @@ impl FakeForge {
             reviews: Arc::default(),
             watched: Arc::default(),
             saved_at_comment: Arc::default(),
+            default_branch: Arc::new(Mutex::new("main".to_owned())),
+            repo_labels: Arc::default(),
             coderabbit: FakeCodeRabbit::default(),
         }
     }
@@ -139,6 +143,19 @@ impl FakeForge {
 
     pub(crate) fn set_visibility(&self, visibility: Visibility) {
         *self.visibility.lock().unwrap() = visibility;
+    }
+
+    pub(crate) fn set_default_branch(&self, branch: &str) {
+        *self.default_branch.lock().unwrap() = branch.to_owned();
+    }
+
+    /// The repo's labels, those it started with and those made since
+    pub(crate) fn repo_labels_now(&self) -> Vec<String> {
+        self.repo_labels.lock().unwrap().clone()
+    }
+
+    pub(crate) fn set_repo_labels(&self, labels: &[&str]) {
+        *self.repo_labels.lock().unwrap() = labels.iter().map(|&l| l.to_owned()).collect();
     }
 
     pub(crate) fn remove_issue(&self, number: u64) {
@@ -410,6 +427,26 @@ impl Forge for FakeForge {
         Ok(*self.visibility.lock().unwrap())
     }
 
+    fn default_branch(&self, _repo: &ForgeSlug) -> Result<String, ForgeError> {
+        Ok(self.default_branch.lock().unwrap().clone())
+    }
+
+    fn repo_labels(&self, _repo: &ForgeSlug) -> Result<Vec<String>, ForgeError> {
+        Ok(self.repo_labels.lock().unwrap().clone())
+    }
+
+    fn create_label(&self, _repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError> {
+        let mut labels = self.repo_labels.lock().unwrap();
+        if labels.iter().any(|l| l == label.name) {
+            return Err(ForgeError::Failed(format!(
+                "label with name \"{}\" already exists",
+                label.name
+            )));
+        }
+        labels.push(label.name.to_owned());
+        Ok(())
+    }
+
     fn issue(&self, _repo: &ForgeSlug, number: u64) -> Result<Issue, ForgeError> {
         if self.missing.lock().unwrap().contains(&number) {
             return Err(ForgeError::Failed(format!("no issue #{number}")));
@@ -606,9 +643,15 @@ impl Forge for FakeForge {
         Ok(())
     }
 
-    fn coderabbit(&self, _repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError> {
+    // One store for every bot, since a test runs one; the login is recorded.
+    fn review_bot(
+        &self,
+        _repo: &ForgeSlug,
+        number: u64,
+        login: Login<'_>,
+    ) -> Result<Activity, ForgeError> {
         self.opened(number)?;
-        self.coderabbit.activity(number)
+        self.coderabbit.activity(number, login.rest)
     }
 
     fn resolve_thread(&self, _repo: &ForgeSlug, thread: &str) -> Result<(), ForgeError> {

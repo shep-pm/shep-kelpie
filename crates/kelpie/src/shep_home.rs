@@ -20,6 +20,9 @@ pub const RELAY_FIX: &str =
 pub const MOVE_FIX: &str = "run it as `SHEP_HOME=~/.kelpie/shep kelpie settings move <project>`, \
      naming kelpie's shepherd";
 
+/// What to do about a missing `SHEP_HOME` in `kelpie add`, `start`, `pause` or `status`
+pub const FLOCK_FIX: &str = "run it as `shep kelpie <command>`, which sets it to your shepherd";
+
 /// The shepherd's home, from the `SHEP_HOME` variable
 ///
 /// # Errors

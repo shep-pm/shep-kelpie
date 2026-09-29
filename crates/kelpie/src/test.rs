@@ -12,10 +12,12 @@ use tempfile::TempDir;
 
 use crate::adapters::LocalReviewer;
 use crate::board::WorkerModel;
+use crate::coderabbit::CodeRabbit;
 use crate::ports::{
     Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Finding, Meter, MeterError,
     Ports, Relay, Reviewer, ReviewerError, Role, SessionId, Timestamp, Usage, Utilization, Window,
 };
+use crate::review_bot::Profile;
 use crate::runner::{
     CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
 };
@@ -29,6 +31,7 @@ mod endpoint;
 mod forge;
 mod leases;
 mod relay;
+mod shepherd;
 mod shots;
 
 pub(crate) use alerts::FakeAlerts;
@@ -36,6 +39,7 @@ pub(crate) use endpoint::{Answer, StandInEndpoint, unreachable_url};
 pub(crate) use forge::FakeForge;
 pub(crate) use leases::{FakeLeases, Told};
 pub(crate) use relay::FakeRelay;
+pub(crate) use shepherd::FakeShepherd;
 pub(crate) use shots::{FakeShots, ScriptedShots};
 
 /// Writes an executable stand-in script that is safe to run at once.
@@ -604,6 +608,7 @@ impl Rig {
     pub(crate) fn new(project: &str) -> Self {
         let home = tempfile::tempdir().unwrap();
         let meter = FakeMeter::idle();
+        let clock = FakeClock::at(Self::EPOCH);
         let rig = Self {
             project: ProjectName::try_from(project).unwrap(),
             claude: FakeClaude {
@@ -614,10 +619,10 @@ impl Rig {
             meter,
             reviewer: FakeReviewer::default(),
             relay: Arc::new(FakeRelay::default()),
-            alerts: FakeAlerts::default(),
+            alerts: FakeAlerts::on(clock.clone()),
             leases: FakeLeases::default(),
             shots: FakeShots::default(),
-            clock: FakeClock::at(Self::EPOCH),
+            clock,
             home,
         };
         rig.make_repo();
@@ -642,6 +647,7 @@ impl Rig {
             Self::WEBHOOK_URL
         );
         std::fs::write(&paths.kelpie_settings, kelpie).unwrap();
+        rig.write_totp_secret();
         rig
     }
 
@@ -828,11 +834,20 @@ impl Rig {
 
     /// Starts a runner, as a restarted sheep would, on the rig's stand-ins
     pub(crate) fn open(&self) -> Result<Mutex<Runner>, OpenError> {
+        self.open_with(Arc::new(CodeRabbit))
+    }
+
+    /// Starts a runner whose review bot rounds summon `review_bot`
+    pub(crate) fn open_with(
+        &self,
+        review_bot: Arc<dyn Profile>,
+    ) -> Result<Mutex<Runner>, OpenError> {
         let ports = Ports {
             claude: Arc::new(self.claude.clone()),
             forge: Box::new(self.forge.clone()),
             meter: Box::new(self.meter.clone()),
             reviewer: Arc::new(self.reviewer.clone()),
+            review_bot,
             relay: Arc::clone(&self.relay) as Arc<dyn Relay>,
             alerts: Arc::new(self.alerts.clone()),
             leases: Arc::new(self.leases.clone()),

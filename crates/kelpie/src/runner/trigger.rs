@@ -151,14 +151,6 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
     // Memory changes only after a save succeeds, so a panicked holder
     // cannot have left the runner half changed.
     let mut runner = lock(runner);
-    let settled = match &request {
-        Request::Rule(_, Answer::Yes) => Some(Settled::Yes),
-        Request::Rule(_, Answer::No(note)) => Some(Settled::No(note.clone())),
-        Request::Rule(_, Answer::Text(text)) => Some(Settled::Answer(text.clone())),
-        Request::Drop(_) => Some(Settled::Dropped),
-        _ => None,
-    }
-    .map(|how| (how, runner.relayed()));
     let changed = match request {
         Request::Status => Ok(()),
         Request::Start => runner.start().map_err(|e| e.to_string()),
@@ -166,15 +158,18 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
         Request::Add(issue) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
         Request::Rework(number) => runner.rework(number).map(drop).map_err(|e| e.to_string()),
         Request::Adopt(number) => runner.adopt(number).map_err(|e| e.to_string()),
-        Request::Rule(id, answer) | Request::RelayRule(id, answer) => {
-            runner.rule(id, answer).map_err(|e| e.to_string())
-        }
+        Request::Rule(id, answer) => runner.rule_and_tell(id, answer).map_err(|e| e.to_string()),
+        Request::RelayRule(id, answer) => runner.rule(id, answer).map_err(|e| e.to_string()),
         Request::Gate(issue) => runner.gate(issue).map_err(|e| e.to_string()),
-        Request::Drop(issue) => runner.drop_work_item(issue).map_err(|e| e.to_string()),
+        Request::Drop(issue) => {
+            let relayed = runner.relayed();
+            let dropped = runner.drop_work_item(issue).map_err(|e| e.to_string());
+            if dropped.is_ok() {
+                runner.settled_without_relay(&relayed, &Settled::Dropped);
+            }
+            dropped
+        }
     };
-    if let (Ok(()), Some((how, relayed))) = (&changed, settled) {
-        runner.settled_without_relay(&relayed, &how);
-    }
     match changed {
         Ok(()) => serde_json::to_string(&runner.status()).expect("status serializes to JSON"),
         Err(e) => error(e),
@@ -218,7 +213,8 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
     }
 }
 
-fn read_rule(params: &str) -> Option<(u64, Answer)> {
+/// `rule`'s params read: `<id> yes`, `<id> no <note>` or `<id> answer <text>`
+pub(super) fn read_rule(params: &str) -> Option<(u64, Answer)> {
     let (id, rest) = params.split_once(char::is_whitespace)?;
     let id = number(id)?;
     let rest = rest.trim_start();

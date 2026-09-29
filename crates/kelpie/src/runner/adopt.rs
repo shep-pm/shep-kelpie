@@ -11,9 +11,10 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use super::Runner;
-use super::coderabbit::LABEL;
+
 use super::report::{Begin, StepReport};
 use super::rework::{HUMAN, review_text};
 use super::trigger;
@@ -55,12 +56,12 @@ pub enum AdoptError {
     Session(String),
     /// The worktree could not be prepared on the branch, with the reason
     Worktree(String),
-    /// The forge could not show CodeRabbit's reviews of the pull request
-    CodeRabbit(u64, ForgeError),
+    /// The forge could not show the review bot's reviews of the pull request
+    ReviewBot(String, u64, ForgeError),
     /// The file for the worker could not be written, with the reason
     File(String),
     /// A label could not be taken off the pull request
-    Unlabel(u64, &'static str, ForgeError),
+    Unlabel(u64, String, ForgeError),
     /// The change could not be saved
     State(StateError),
 }
@@ -91,8 +92,8 @@ impl fmt::Display for AdoptError {
             Self::Label(e) => e.fmt(f),
             Self::Session(e) => write!(f, "cannot draw a session id: {e}"),
             Self::Worktree(e) => write!(f, "cannot prepare its worktree: {e}"),
-            Self::CodeRabbit(number, e) => {
-                write!(f, "cannot read CodeRabbit's reviews of #{number}: {e}")
+            Self::ReviewBot(bot, number, e) => {
+                write!(f, "cannot read {bot}'s reviews of #{number}: {e}")
             }
             Self::File(e) => f.write_str(e),
             Self::Unlabel(number, label, e) => {
@@ -255,7 +256,7 @@ impl Runner {
             }
         });
         if let Err(e) = unlabelled {
-            return Ok(Err(AdoptError::Unlabel(number, READY, e)));
+            return Ok(Err(AdoptError::Unlabel(number, READY.to_owned(), e)));
         }
         self.let_go(number)?;
         let comment_failed = self.refusal_comment(number, refused);
@@ -355,15 +356,16 @@ impl Runner {
         prepared.map_err(|e| AdoptError::Worktree(e.to_string()))?;
         let head = worktree::origin_head(&self.settings.repo, &pr.branch)
             .map_err(|e| AdoptError::Worktree(e.to_string()))?;
-        // The cap counts CodeRabbit's reviews so far. One of this head counts
+        // The cap counts the review bot's reviews so far. One of this head counts
         // when the gate finds it, as any round does.
+        let bot = Arc::clone(&self.ports.review_bot);
         let rounds = if self.settings.coderabbit.enabled {
             let activity = self
                 .ports
                 .forge
-                .coderabbit(&repo, number)
-                .map_err(|e| AdoptError::CodeRabbit(number, e))?;
-            activity.reviewed_besides(&head)
+                .review_bot(&repo, number, bot.login())
+                .map_err(|e| AdoptError::ReviewBot(bot.name().to_owned(), number, e))?;
+            bot.reviewed_besides(&activity, &head)
         } else {
             0
         };
@@ -374,14 +376,14 @@ impl Runner {
             .cloned();
         let text = adopted_text(number, &pr, issue, &found, review.as_ref());
         turn::write(&fresh.build, &adopted_path(&fresh.build), &text).map_err(AdoptError::File)?;
-        // With the summon label off, no push summons CodeRabbit outside the lease.
+        // With the summon label off, no push summons the review bot outside the lease.
         let mut labels = pr.labels;
-        for label in [READY, HUMAN, LABEL] {
+        for label in [READY, HUMAN, bot.label()] {
             if labels.iter().any(|l| l == label) {
                 self.ports
                     .forge
                     .set_label(&repo, number, label, false)
-                    .map_err(|e| AdoptError::Unlabel(number, label, e))?;
+                    .map_err(|e| AdoptError::Unlabel(number, label.to_owned(), e))?;
                 labels.retain(|l| l != label);
             }
         }

@@ -59,7 +59,7 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
         },
     ];
     for kind in kinds {
-        let said = comment(&kind).unwrap_or_default();
+        let said = comment(&kind, "CodeRabbit").unwrap_or_default();
         assert!(said.ends_with("\n\nWaiting on the maintainer."), "{said}");
         for internal in ["shep trigger", "rule '", "ruling", "yes", "<note>"] {
             assert!(!said.contains(internal), "{internal} in {said}");
@@ -69,7 +69,7 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
         head: "abc".into(),
         shots_failed: true,
     };
-    assert_eq!(comment(&merge), None);
+    assert_eq!(comment(&merge, "CodeRabbit"), None);
 }
 
 #[test]

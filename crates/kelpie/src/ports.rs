@@ -15,9 +15,9 @@ use serde::{Deserialize, Serialize};
 #[cfg(doc)]
 use crate::board::READY;
 use crate::board::{OpenPullRequest, ReadyIssue};
-use crate::coderabbit::Activity;
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
+use crate::review_bot::{Activity, Login, Profile};
 use crate::settings::{Effort, ForgeSlug, LocalRound};
 use crate::shots::{ShotsJob, ShotsRun};
 use crate::webhook::Webhook;
@@ -57,6 +57,27 @@ pub trait Forge: Send {
     ///
     /// [`ForgeError`] when the forge cannot be asked or its answer read.
     fn visibility(&self, repo: &ForgeSlug) -> Result<Visibility, ForgeError>;
+
+    /// The branch `repo`'s pull requests merge into by default
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn default_branch(&self, repo: &ForgeSlug) -> Result<String, ForgeError>;
+
+    /// The names of the labels `repo` has
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn repo_labels(&self, repo: &ForgeSlug) -> Result<Vec<String>, ForgeError>;
+
+    /// Makes `label` on `repo`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses, such as when `repo` already has it.
+    fn create_label(&self, repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError>;
 
     /// Issue `number` on `repo`
     ///
@@ -165,12 +186,17 @@ pub trait Forge: Send {
         on: bool,
     ) -> Result<(), ForgeError>;
 
-    /// What CodeRabbit has posted on pull request `number`
+    /// What the review bot `login` has posted on pull request `number`
     ///
     /// # Errors
     ///
     /// [`ForgeError`] when the forge cannot be asked or its answer read.
-    fn coderabbit(&self, repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError>;
+    fn review_bot(
+        &self,
+        repo: &ForgeSlug,
+        number: u64,
+        login: Login<'_>,
+    ) -> Result<Activity, ForgeError>;
 
     /// Resolves review thread `thread`
     ///
@@ -279,6 +305,17 @@ pub enum Checks {
     Passed,
     /// Every check finished, and these failed
     Failed(Vec<String>),
+}
+
+/// A label kelpie makes on a project's repo
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NewLabel {
+    /// Its name
+    pub name: &'static str,
+    /// Its colour, as six lowercase hex digits with no `#`, as GitHub takes it
+    pub color: &'static str,
+    /// What it means, shown beside it on the forge
+    pub description: &'static str,
 }
 
 /// An issue as the forge holds it
@@ -563,9 +600,58 @@ pub struct Alert {
     pub title: String,
     /// The ruling's question, with the triggers that answer it
     pub text: String,
+    /// How the maintainer answers it where they read it, on a webhook that
+    /// takes replies
+    pub reply: Option<ReplyWith>,
 }
 
-/// Posts alerts to the maintainer's webhook
+/// The ruling a reply on the webhook's topic answers, and what it takes
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplyWith {
+    /// The project, which a reply names, since every project shares the topic
+    pub project: String,
+    /// The ruling
+    pub id: u64,
+    /// What answers it
+    pub takes: Takes,
+}
+
+/// What answers a ruling
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Takes {
+    /// The worker's question: an answer
+    Answer,
+    /// A yes, or a no with a note
+    YesOrNo,
+}
+
+/// Where a read of the webhook's replies starts
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Since {
+    /// Every message from this time on
+    Time(Timestamp),
+    /// Every message after the one with this id
+    After(String),
+}
+
+/// One message on the webhook's topic
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reply {
+    /// The webhook's id for it, which the next read starts after
+    pub id: String,
+    /// When the webhook took it, which the sender cannot set
+    pub time: Timestamp,
+    /// Its text, or `None` for kelpie's own posts and anything but plain text
+    pub text: Option<String>,
+    /// Every text it carries, its title included, whose codes are spent
+    /// though only `text` can answer
+    pub said: Vec<String>,
+    /// Whether it carries text kelpie cannot read in full, as ntfy turns a
+    /// long message into an attachment
+    pub cut: bool,
+}
+
+/// Posts alerts to the maintainer's webhook, and reads replies to them
 pub trait Alerts: Send + Sync {
     /// Posts `alert` to `webhook`
     ///
@@ -574,6 +660,15 @@ pub trait Alerts: Send + Sync {
     /// [`AlertError`] when the post cannot be made or is refused. Its text
     /// never carries the webhook's URL.
     fn post(&self, webhook: &Webhook, alert: &Alert) -> Result<(), AlertError>;
+
+    /// The messages on `webhook`'s topic since `since`, oldest first, on a
+    /// webhook that takes replies
+    ///
+    /// # Errors
+    ///
+    /// [`AlertError`] when the read cannot be made, is refused, or cannot
+    /// be understood. Its text never carries the webhook's URL.
+    fn replies(&self, webhook: &Webhook, since: &Since) -> Result<Vec<Reply>, AlertError>;
 }
 
 /// Why an alert was not posted. None of these carry the webhook's URL.
@@ -587,15 +682,18 @@ pub enum AlertError {
     Refused(u16),
     /// The webhook is off and the relay could not take the ruling, with why
     Relay(String),
+    /// The webhook's replies came back in a shape kelpie cannot read
+    Unreadable,
 }
 
 impl fmt::Display for AlertError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Spawn(error) => write!(f, "cannot run curl: {error}"),
-            Self::Unreachable(code) => write!(f, "curl could not post it (exit {code})"),
+            Self::Unreachable(code) => write!(f, "curl could not reach the webhook (exit {code})"),
             Self::Refused(status) => write!(f, "the webhook answered HTTP {status}"),
             Self::Relay(reason) => f.write_str(reason),
+            Self::Unreadable => f.write_str("the webhook's replies could not be read"),
         }
     }
 }
@@ -707,16 +805,24 @@ pub fn parse_findings(text: &str) -> Vec<Finding> {
     text.lines().filter_map(parse_finding_line).collect()
 }
 
-/// Reads a model's review reply: its findings, or none when it says
-/// exactly `CLEAN`
+/// Reads a model's review reply: its findings, or none when its last
+/// non-empty line is exactly `CLEAN`
+///
+/// A summary ahead of that line is fine. `CLEAN` anywhere else, or inside a
+/// longer line such as "not CLEAN", is not a verdict.
 ///
 /// # Errors
 ///
-/// The reply, trimmed, when it holds no finding and is not `CLEAN`: an
-/// empty reply or prose reviewed nothing, which is not clean.
+/// The reply, trimmed, when it holds no finding and does not end on `CLEAN`:
+/// an empty reply or prose reviewed nothing, which is not clean.
 pub fn read_review(text: &str) -> Result<Vec<Finding>, String> {
     let findings = parse_findings(text);
-    if findings.is_empty() && text.trim() != "CLEAN" {
+    let ends_clean = text
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .is_some_and(|line| line.trim() == "CLEAN");
+    if findings.is_empty() && !ends_clean {
         return Err(text.trim().to_owned());
     }
     Ok(findings)
@@ -860,6 +966,8 @@ pub struct Ports {
     pub meter: Box<dyn Meter>,
     /// The local round's runner, shared so a round runs without holding the runner
     pub reviewer: Arc<dyn Reviewer>,
+    /// The pull request reviewer a review bot round summons
+    pub review_bot: Arc<dyn Profile>,
     /// The maintainer's relay session, sent every ruling alongside the webhook
     pub relay: Arc<dyn Relay>,
     /// The maintainer's webhook, shared so a post runs without holding the runner
@@ -879,68 +987,4 @@ impl fmt::Debug for Ports {
 }
 
 #[cfg(test)]
-mod findings_tests {
-    use super::*;
-
-    #[test]
-    fn well_formed_lines_parse_in_order() {
-        let text = "HIGH|src/lib.rs:42|does the bad thing|breaks prod\n\
-                    LOW|src/main.rs:0|not reviewed: 900 lines exceeds the chunk limit|split the file or review it by hand";
-        assert_eq!(
-            parse_findings(text),
-            vec![
-                Finding {
-                    severity: Severity::High,
-                    file: "src/lib.rs".into(),
-                    line: 42,
-                    what: "does the bad thing".into(),
-                    why: "breaks prod".into(),
-                },
-                Finding {
-                    severity: Severity::Low,
-                    file: "src/main.rs".into(),
-                    line: 0,
-                    what: "not reviewed: 900 lines exceeds the chunk limit".into(),
-                    why: "split the file or review it by hand".into(),
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn blank_and_malformed_lines_are_skipped() {
-        let text = "\nCLEAN\nnot a finding at all\nMEDIUM|only|two|fields|extra\nMEDIUM|a.rs:no-number|what|why";
-        assert_eq!(parse_findings(text), vec![]);
-    }
-
-    // What a live Claude round wrote, with the screenshot's path shortened
-    #[test]
-    fn a_screenshot_named_without_a_line_is_line_zero() {
-        let text = "HIGH|/k/shots/lab/7/events-mobile-dark.png|dark matches light|no dark theme\n\
-                    LOW|src/app.tsx|no line|dropped";
-        let [finding] = parse_findings(text).try_into().unwrap();
-        assert_eq!(finding.file, "/k/shots/lab/7/events-mobile-dark.png");
-        assert_eq!(finding.line, 0);
-    }
-
-    #[test]
-    fn severities_order_low_to_high() {
-        assert!(Severity::Low < Severity::Medium);
-        assert!(Severity::Medium < Severity::High);
-    }
-
-    // Recorded shape of a real round-N.txt, one line per severity plus a
-    // skipped-file placeholder.
-    #[test]
-    fn a_recorded_findings_file_parses() {
-        let text = include_str!("../fixtures/qwen-round.txt");
-        let findings = parse_findings(text);
-        assert_eq!(findings.len(), 4);
-        assert_eq!(findings[0].severity, Severity::High);
-        assert_eq!(findings[0].file, "src/pricing.rs");
-        assert_eq!(
-            findings[3].what,
-            "not reviewed: 900 lines exceeds the chunk limit"
-        );
-    }
-}
+mod findings_tests;
