@@ -13,6 +13,7 @@
 //! from the topic are off for every project until `kelpie totp --unlock`.
 
 use std::collections::VecDeque;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -25,7 +26,7 @@ use crate::relay::Wants;
 use crate::settings::SettingsError;
 use crate::state::{LastRead, RulingKind, StateError};
 use crate::totp::answers::{Answers, Claim, FAILURES, Failure};
-use crate::totp::{STEP, Secret, codes_in};
+use crate::totp::{STEP, Secret, digits_of};
 use crate::webhook::{Webhook, WebhookKind};
 
 /// Seconds between reads of the topic while a ruling waits on it
@@ -238,7 +239,8 @@ impl Runner {
     // found claimed by it and it is handled again.
     fn handle_next(&mut self) -> Option<Result<Handled, StateError>> {
         let reply = self.reading.queue.pop_front()?;
-        let handled = (reply.text.as_deref()).map(|text| self.handle(text, &reply));
+        let spent = self.spend(&reply);
+        let handled = (reply.text.as_deref()).map(|text| self.handle(text, &reply, spent));
         let mut next = self.state.clone();
         next.replies.last = Some(LastRead {
             id: reply.id,
@@ -250,7 +252,36 @@ impl Runner {
         Some(Ok(handled))
     }
 
-    fn handle(&mut self, text: &str, reply: &Reply) -> (StepReport, Option<Line>) {
+    // Claims the step of every right code anywhere in `reply`, before
+    // anything else about it is read: whether answers are on, whether it is
+    // kelpie's own or has text to answer with, which project it names, how
+    // old it is, or how the code was typed. Every text the post carries
+    // counts, its title included.
+    fn spend(&self, reply: &Reply) -> Vec<(u64, io::Result<Claim>)> {
+        let Some(auth) = &self.totp else {
+            return Vec::new();
+        };
+        let Ok(Some(secret)) = Secret::load(&auth.secret) else {
+            return Vec::new();
+        };
+        let now = self.ports.clock.now();
+        let mut claims: Vec<(u64, io::Result<Claim>)> = Vec::new();
+        for said in &reply.said {
+            for step in secret.steps_in(&digits_of(said), reply.time) {
+                if !claims.iter().any(|(claimed, _)| *claimed == step) {
+                    claims.push((step, auth.answers.claim(step, &reply.id, now)));
+                }
+            }
+        }
+        claims
+    }
+
+    fn handle(
+        &mut self,
+        text: &str,
+        reply: &Reply,
+        spent: Vec<(u64, io::Result<Claim>)>,
+    ) -> (StepReport, Option<Line>) {
         let ignored = (StepReport::ReplyIgnored, None);
         let Some(webhook) = self.replies_on().cloned() else {
             return ignored;
@@ -270,18 +301,7 @@ impl Runner {
         let Ok(Some(secret)) = Secret::load(&auth.secret) else {
             return ignored;
         };
-        // Every right code anywhere in the reply is claimed before anything
-        // else is read, so no later reply can reuse it, whatever shape this
-        // one had and whatever it said.
         let now = self.ports.clock.now();
-        let mut claims = Vec::new();
-        for code in codes_in(text) {
-            if let Some(step) = secret.verify(&code, reply.time)
-                && !claims.iter().any(|(claimed, _)| *claimed == step)
-            {
-                claims.push((step, auth.answers.claim(step, &reply.id, now)));
-            }
-        }
         // Older than the window, a reply is read only so its code is spent.
         if reply.time.0 < now.0.saturating_sub(WINDOW) {
             return ignored;
@@ -294,10 +314,11 @@ impl Runner {
             return ignored;
         }
         let claim = match secret.verify(typed, reply.time) {
-            Some(step) => claims
+            Some(step) => spent
                 .into_iter()
                 .find_map(|(claimed, claim)| (claimed == step).then_some(claim))
-                .expect("a right code was claimed above"),
+                // Spent above, unless the secret was rotated in between.
+                .unwrap_or_else(|| auth.answers.claim(step, &reply.id, now)),
             None => {
                 return match auth.answers.fail(&reply.id) {
                     Ok(Failure::LockedNow) => {

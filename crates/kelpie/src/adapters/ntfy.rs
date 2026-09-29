@@ -64,20 +64,43 @@ struct Line {
 pub(super) fn parse(output: &str) -> Option<Vec<Reply>> {
     let mut replies = Vec::new();
     for line in output.lines().filter(|l| !l.trim().is_empty()) {
-        let line: Line = serde_json::from_str(line).ok()?;
+        let whole: Value = serde_json::from_str(line).ok()?;
+        let line: Line = serde_json::from_value(whole.clone()).ok()?;
         let plain = !line.id.is_empty() && line.id.bytes().all(|b| b.is_ascii_alphanumeric());
         if line.event != "message" || !plain {
             continue;
         }
+        let mut said = Vec::new();
+        strings(&whole, &mut said);
         let ours = line.tags.iter().any(|t| t == TAG);
         let text = line.message.filter(|_| !ours && line.attachment.is_none());
         replies.push(Reply {
             id: line.id,
             time: Timestamp(line.time),
             text,
+            said,
         });
     }
     Some(replies)
+}
+
+// Every string a post carries (its message, title, tags, attachment,
+// actions and anything ntfy adds later), but not the fields ntfy itself
+// sets, whose digits no sender chose.
+fn strings(value: &Value, into: &mut Vec<String>) {
+    match value {
+        Value::String(text) => into.push(text.clone()),
+        Value::Array(items) => items.iter().for_each(|item| strings(item, into)),
+        Value::Object(fields) => {
+            let set_by_ntfy = ["id", "time", "expires", "event", "topic"];
+            for (name, field) in fields {
+                if !set_by_ntfy.contains(&name.as_str()) {
+                    strings(field, into);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -103,6 +126,23 @@ mod tests {
         );
         assert_eq!(replies[0].id, "W3EqiUm5rsNq");
         assert_eq!(replies[0].time, Timestamp(1_790_683_787));
+        // Kelpie's own alert and the attachment are not answers, but every
+        // text they carry is still read for codes to spend.
+        assert!(
+            replies[0]
+                .said
+                .iter()
+                .any(|s| s == "kelpie: hazels-lab ruling 3")
+        );
+        assert!(
+            replies[0].said.iter().any(|s| s == "3 yes 7hq2mx9d"),
+            "a button's body"
+        );
+        assert!(replies[4].said.iter().any(|s| s == "attachment.txt"));
+        assert!(
+            !replies[0].said.iter().any(|s| s == "kelpie-probe-topic"),
+            "not the topic"
+        );
         assert_eq!(replies[5].id, "dvMOjwjVgxy8");
     }
 
@@ -118,7 +158,8 @@ mod tests {
             Some(vec![Reply {
                 id: "ok1".into(),
                 time: Timestamp(2),
-                text: Some("1 yes x".into())
+                text: Some("1 yes x".into()),
+                said: vec!["1 yes x".into()],
             }])
         );
     }

@@ -48,6 +48,9 @@ pub enum SecretError {
     Malformed(PathBuf),
     /// Someone other than its owner may read or write the file
     Exposed(PathBuf),
+    /// Someone other than its owner may read or write the file's folder,
+    /// and so put a secret of their own there
+    FolderExposed(PathBuf),
 }
 
 impl fmt::Display for SecretError {
@@ -64,6 +67,12 @@ impl fmt::Display for SecretError {
                 "{} may be read by others: `chmod 600` it, or run `kelpie totp --rotate` \
                  if someone else may have read it",
                 path.display()
+            ),
+            Self::FolderExposed(folder) => write!(
+                f,
+                "{} may be used by others: `chmod 700` it, and run `kelpie totp --rotate` \
+                 if someone else may have read or replaced the secret in it",
+                folder.display()
             ),
         }
     }
@@ -94,7 +103,7 @@ impl Secret {
             .map_err(|e| SecretError::Io(folder.to_owned(), e.kind()))?
             .mode();
         if folder_mode & 0o077 != 0 {
-            return Err(SecretError::Exposed(folder.to_owned()));
+            return Err(SecretError::FolderExposed(folder.to_owned()));
         }
         let mut text = String::new();
         file.read_to_string(&mut text).map_err(io)?;
@@ -186,6 +195,24 @@ impl Secret {
         (bits & 0x7fff_ffff) % 1_000_000
     }
 
+    /// The steps, `at`'s and the one before, whose code is six digits in a
+    /// row of `digits`
+    pub fn steps_in(&self, digits: &[u8], at: Timestamp) -> Vec<u64> {
+        let now = step_of(at);
+        let mut steps = Vec::new();
+        for step in [now, now.saturating_sub(1)] {
+            let code = self.code(step);
+            let code: Vec<u8> = (0..6)
+                .rev()
+                .map(|i| (code / 10u32.pow(i) % 10) as u8)
+                .collect();
+            if digits.windows(6).any(|window| window == code.as_slice()) && !steps.contains(&step) {
+                steps.push(step);
+            }
+        }
+        steps
+    }
+
     /// The step `typed` is the code for, at `at` or the step before, so a
     /// code sent as its step turns is still taken
     pub fn verify(&self, typed: &str, at: Timestamp) -> Option<u64> {
@@ -230,43 +257,35 @@ pub fn show(path: &Path, rotate: bool) -> Result<String, SecretError> {
     ))
 }
 
-/// Every six digits in a row in `text` that could be a code, however it
-/// was typed: full-width digits read as digits, spaces inside a group of
-/// digits are dropped, and a longer run gives each six in a row
+/// The zero of every run of ten Unicode decimal digits (general category
+/// Nd, Unicode 16.0), each run in order from 0 to 9
+const ZEROS: [u32; 76] = [
+    0x30, 0x660, 0x6f0, 0x7c0, 0x966, 0x9e6, 0xa66, 0xae6, 0xb66, 0xbe6, 0xc66, 0xce6, 0xd66,
+    0xde6, 0xe50, 0xed0, 0xf20, 0x1040, 0x1090, 0x17e0, 0x1810, 0x1946, 0x19d0, 0x1a80, 0x1a90,
+    0x1b50, 0x1bb0, 0x1c40, 0x1c50, 0xa620, 0xa8d0, 0xa900, 0xa9d0, 0xa9f0, 0xaa50, 0xabf0, 0xff10,
+    0x104a0, 0x10d30, 0x10d40, 0x11066, 0x110f0, 0x11136, 0x111d0, 0x112f0, 0x11450, 0x114d0,
+    0x11650, 0x116c0, 0x116d0, 0x116da, 0x11730, 0x118e0, 0x11950, 0x11bf0, 0x11c50, 0x11d50,
+    0x11da0, 0x11f50, 0x16130, 0x16a60, 0x16ac0, 0x16b50, 0x16d70, 0x1ccf0, 0x1d7ce, 0x1d7d8,
+    0x1d7e2, 0x1d7ec, 0x1d7f6, 0x1e140, 0x1e2f0, 0x1e4f0, 0x1e5f1, 0x1e950, 0x1fbf0,
+];
+
+/// The value of `c` as a decimal digit, in any script
+fn digit(c: char) -> Option<u8> {
+    let c = u32::from(c);
+    let at = ZEROS.partition_point(|&zero| zero <= c).checked_sub(1)?;
+    let value = c - ZEROS[at];
+    u8::try_from(value).ok().filter(|&v| v < 10)
+}
+
+/// Every decimal digit in `text`, in any script, in order, with whatever
+/// stands between them dropped
 ///
-/// For claiming, never for acting: a right code anywhere in a reply is
-/// spent, so a phone's stray period or a code typed first leaves nothing
-/// for a reader of the topic to reuse.
-pub fn codes_in(text: &str) -> Vec<String> {
-    let mut codes = Vec::new();
-    let mut run = String::new();
-    let mut flush = |run: &mut String| {
-        let digits: Vec<char> = run.chars().collect();
-        for window in digits.windows(6) {
-            codes.push(window.iter().collect());
-        }
-        run.clear();
-    };
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        let digit = match c {
-            '0'..='9' => Some(c),
-            // Full-width digits, which some keyboards type
-            '\u{ff10}'..='\u{ff19}' => char::from_u32(u32::from(c) - 0xff10 + u32::from('0')),
-            _ => None,
-        };
-        match digit {
-            Some(d) => run.push(d),
-            None if c.is_whitespace()
-                && !run.is_empty()
-                && chars.peek().is_some_and(|n| {
-                    n.is_ascii_digit() || ('\u{ff10}'..='\u{ff19}').contains(n)
-                }) => {}
-            None => flush(&mut run),
-        }
-    }
-    flush(&mut run);
-    codes
+/// For spending codes, never for acting: a right code anywhere in a reply
+/// is spent however it was typed (`123-456`, `123 456`, `١٢٣٤٥٦`, with a
+/// stray period), so a reader of the topic has nothing to reuse. A chance
+/// match only spends a step early.
+pub fn digits_of(text: &str) -> Vec<u8> {
+    text.chars().filter_map(digit).collect()
 }
 
 /// The time step `at` falls in
@@ -408,7 +427,7 @@ mod tests {
             fs::set_permissions(folder, fs::Permissions::from_mode(mode)).unwrap();
             assert_eq!(
                 Secret::load(&path),
-                Err(SecretError::Exposed(folder.to_owned())),
+                Err(SecretError::FolderExposed(folder.to_owned())),
                 "{mode:o}"
             );
         }
@@ -460,18 +479,47 @@ mod tests {
     }
 
     #[test]
-    fn every_way_of_typing_a_code_is_found() {
-        let found = |text: &str| codes_in(text);
-        assert_eq!(found("koji 1 no rename it 123456."), ["123456"]);
-        assert_eq!(found("123456 koji 1 yes"), ["123456"]);
-        assert_eq!(found("koji 1 yes 123 456"), ["123456"]);
-        assert_eq!(found("123456"), ["123456"]);
-        assert_eq!(found("koji 1 yes １２３４５６"), ["123456"]);
-        assert_eq!(found("koji 1 yes 1234567"), ["123456", "234567"]);
-        // The ruling id runs into the code when only a space parts them.
-        assert!(found("koji 14 123456").contains(&"123456".to_owned()));
-        assert_eq!(found("koji 1 yes 12345"), Vec::<String>::new());
-        assert_eq!(found("koji 1 yes"), Vec::<String>::new());
+    fn every_digit_in_any_script_is_read_and_nothing_else() {
+        let digits = |text: &str| -> String {
+            digits_of(text)
+                .iter()
+                .map(|d| char::from(b'0' + d))
+                .collect()
+        };
+        for typed in [
+            "123456",
+            "123-456",
+            "123.456",
+            "123,456",
+            "123. 456",
+            "123  456",
+            "123\r\n456",
+            "123\u{200b}456",
+            "123\u{2060}456",
+            "\u{feff}123456",
+            "１２３４５６",
+            "١٢٣٤٥٦",
+            "۱۲۳۴۵۶",
+            "१२३४५६",
+            "𝟏𝟐𝟑𝟒𝟓𝟔",
+        ] {
+            assert_eq!(digits(typed), "123456", "{typed:?}");
+        }
+        assert_eq!(digits("koji 14 no rename it 123456."), "14123456");
+        assert_eq!(digits("½ ² Ⅻ x"), "", "not decimal digits");
+        for (at, zero) in ZEROS.iter().enumerate() {
+            assert_eq!(digit(char::from_u32(zero + 9).unwrap()), Some(9), "{at}");
+        }
+    }
+
+    #[test]
+    fn a_step_is_found_wherever_its_code_sits_in_the_digits() {
+        let at = Timestamp(1_111_111_109);
+        let digits = digits_of("koji 14 no rename it 081 804.");
+        assert_eq!(RFC.steps_in(&digits, at), [step_of(at)]);
+        let next = Timestamp(at.0 + STEP);
+        assert_eq!(RFC.steps_in(&digits, next), [step_of(at)]);
+        assert_eq!(RFC.steps_in(&digits_of("081805"), at), Vec::<u64>::new());
     }
 
     #[test]

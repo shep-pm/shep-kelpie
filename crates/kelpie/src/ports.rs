@@ -575,6 +575,9 @@ pub struct Reply {
     pub time: Timestamp,
     /// Its text, or `None` for kelpie's own posts and anything but plain text
     pub text: Option<String>,
+    /// Every text it carries, its title included, whose codes are spent
+    /// though only `text` can answer
+    pub said: Vec<String>,
 }
 
 /// Posts alerts to the maintainer's webhook, and reads replies to them

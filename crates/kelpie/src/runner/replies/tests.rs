@@ -482,6 +482,8 @@ fn a_right_code_in_any_shape_is_spent_before_a_replay() {
         "koji 1 no rename it {spaced}",
         "{code}",
         "koji 1 no rename it {wide}",
+        "koji 1 no rename it {dashed}",
+        "koji 1 no rename it {arabic}",
     ] {
         let (rig, runner, _) = alerted("koji");
         let now = rig.clock.now();
@@ -491,7 +493,14 @@ fn a_right_code_in_any_shape_is_spent_before_a_replay() {
             .chars()
             .map(|c| char::from_u32(u32::from(c) - u32::from('0') + 0xff10).unwrap())
             .collect();
+        let dashed = format!("{}-{}", &code[..3], &code[3..]);
+        let arabic: String = code
+            .chars()
+            .map(|c| char::from_u32(u32::from(c) - u32::from('0') + 0x660).unwrap())
+            .collect();
         let sent = shape
+            .replace("{dashed}", &dashed)
+            .replace("{arabic}", &arabic)
             .replace("{code}", &code)
             .replace("{spaced}", &spaced)
             .replace("{wide}", &wide);
@@ -536,4 +545,68 @@ fn a_reply_older_than_the_window_is_read_only_to_spend_its_code() {
         Some(StepReport::ReplyCodeUsed { id: 1, .. })
     ));
     assert_eq!(phase(&rig, &runner), json!({ "state": "ruling", "id": 1 }));
+}
+
+// Probed in review: an attacker's fifth wrong code, read with the
+// maintainer's reply, turned answers off before that reply's code was
+// spent, and a replay after `--unlock` merged.
+#[test]
+fn a_code_is_spent_even_when_answers_are_off() {
+    let (rig, runner, _) = alerted("koji");
+    let now = rig.clock.now();
+    let right = rig.code_at(now);
+    let wrong = |n: u32| format!("{:06}", (right.parse::<u32>().unwrap() + n) % 1_000_000);
+    for n in 1..=5 {
+        rig.alerts.reply(&format!("koji 1 yes {}", wrong(n)), now);
+    }
+    rig.alerts
+        .reply(&format!("koji 1 no rename it {right}"), now);
+    for _ in 1..5 {
+        assert_eq!(step(&runner).unwrap(), Some(StepReport::ReplyIgnored));
+    }
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::RepliesLocked { .. })
+    ));
+    step(&runner).unwrap();
+
+    rig.clock.advance(25);
+    rig.alerts
+        .reply(&format!("koji 1 yes {right}"), rig.clock.now());
+    crate::totp::answers::Answers::in_folder(rig.paths().totp)
+        .unlock()
+        .unwrap();
+    rig.clock.advance(READ_EVERY);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReplyCodeUsed { id: 1, .. })
+    ));
+    assert_eq!(phase(&rig, &runner), json!({ "state": "ruling", "id": 1 }));
+}
+
+// Only a message's text answers, but a code anywhere in a post is spent:
+// in its title, or in a post kelpie reads as its own.
+#[test]
+fn a_code_in_a_title_or_a_tagged_post_is_spent() {
+    for (text, others) in [
+        (Some("koji 1 no rename it"), vec!["{code}"]),
+        (None, vec!["koji 1 no {code}", "kelpie"]),
+    ] {
+        let (rig, runner, _) = alerted("koji");
+        let now = rig.clock.now();
+        let code = rig.code_at(now);
+        let others: Vec<String> = others.iter().map(|o| o.replace("{code}", &code)).collect();
+        let others: Vec<&str> = others.iter().map(String::as_str).collect();
+        rig.alerts.post_raw(text, &others, now);
+        rig.alerts.reply(&format!("koji 1 yes {code}"), now);
+        let mut used = false;
+        for _ in 0..3 {
+            used |= matches!(
+                step(&runner).unwrap(),
+                Some(StepReport::ReplyCodeUsed { id: 1, .. })
+            );
+        }
+        assert!(used, "{text:?} {others:?}");
+        assert_eq!(phase(&rig, &runner), json!({ "state": "ruling", "id": 1 }));
+    }
 }

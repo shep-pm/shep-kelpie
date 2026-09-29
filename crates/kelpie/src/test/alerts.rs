@@ -47,6 +47,21 @@ impl FakeAlerts {
             id,
             time,
             text: Some(text.to_owned()),
+            said: vec![text.to_owned()],
+        });
+    }
+
+    /// Writes a post to the topic with `text` to answer with, if any, and
+    /// every other text it carries, such as a title or a tag
+    pub(crate) fn post_raw(&self, text: Option<&str>, others: &[&str], time: Timestamp) {
+        let mut topic = self.topic.lock().unwrap();
+        let id = format!("m{}", topic.len() + 1);
+        let said = text.into_iter().chain(others.iter().copied());
+        topic.push(Reply {
+            id,
+            time,
+            text: text.map(str::to_owned),
+            said: said.map(str::to_owned).collect(),
         });
     }
 
@@ -72,6 +87,7 @@ impl Alerts for FakeAlerts {
             id,
             time: self.clock.as_ref().map_or(Timestamp(0), Clock::now),
             text: None,
+            said: vec![alert.title.clone(), alert.text.clone()],
         });
         Ok(())
     }
@@ -83,17 +99,16 @@ impl Alerts for FakeAlerts {
             return Err(AlertError::Refused(503));
         }
         let topic = self.topic.lock().unwrap();
-        let from = match since {
-            Since::Time(at) => topic
-                .iter()
-                .position(|r| r.time >= *at)
-                .unwrap_or(topic.len()),
-            Since::After(id) => topic
-                .iter()
-                .position(|r| r.id == *id)
-                .map_or(0, |at| at + 1),
-        };
-        Ok(topic[from..].to_vec())
+        Ok(match since {
+            Since::Time(at) => topic.iter().filter(|r| r.time >= *at).cloned().collect(),
+            Since::After(id) => {
+                let from = topic
+                    .iter()
+                    .position(|r| r.id == *id)
+                    .map_or(0, |at| at + 1);
+                topic[from..].to_vec()
+            }
+        })
     }
 }
 
