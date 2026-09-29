@@ -16,7 +16,7 @@ use shep_client::{Client, ConnectError, TRIGGER_DEADLINE};
 use crate::runner::{RELAY_RULE, is_no_or_answer};
 
 /// The shep version kelpie is built with, pinned in the workspace manifest
-pub const SHEP_VERSION: &str = "0.10.1";
+pub const SHEP_VERSION: &str = "0.11.0";
 
 /// A ruling the relay passes on to a runner's `relay-rule` action
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -320,9 +320,18 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_checked_version_is_the_one_the_manifest_pins() {
+        let manifest = include_str!("../../../../Cargo.toml");
+        for krate in ["shep-client", "shep-channel"] {
+            let pin = format!("{krate} = {{ version = \"={SHEP_VERSION}\"");
+            assert!(manifest.contains(&pin), "{krate} is not pinned to {SHEP_VERSION}");
+        }
+    }
+
     #[tokio::test]
     async fn a_shepherd_on_another_minor_or_major_gets_no_ruling() {
-        for version in ["0.8.2", "0.9.4", "0.11.0", "1.10.1", "0.100.1"] {
+        for version in ["0.9.4", "0.10.1", "0.12.0", "1.11.0", "0.110.1"] {
             let home = scratch_home();
             let mut sent = shepherd(home.path(), version, replied(STATUS)).await;
             let refused = deliver_in_time(home.path(), Ruling::Yes("3"))
@@ -333,7 +342,7 @@ mod tests {
                 "{refused}"
             );
             assert!(
-                refused.contains("takes only a 0.10.x shepherd"),
+                refused.contains("takes only a 0.11.x shepherd"),
                 "{refused}"
             );
             assert!(!refused.contains("reload"), "{refused}");
@@ -343,7 +352,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_patch_release_of_the_pinned_line_gets_the_ruling() {
-        for version in ["0.10.0", "0.10.2"] {
+        for version in ["0.11.0", "0.11.3"] {
             let home = scratch_home();
             let mut sent = shepherd(home.path(), version, replied(STATUS)).await;
             let reply = deliver_in_time(home.path(), Ruling::Yes("3")).await;

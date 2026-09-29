@@ -15,8 +15,8 @@ publish = false
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-zoneinfo"] }
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
-shep-client = { version = "=0.10.1", default-features = false }
-shep-channel = { version = "=0.10.1", default-features = false, features = ["client"] }
+shep-client = { version = "=0.11.0", default-features = false }
+shep-channel = { version = "=0.11.0", default-features = false, features = ["client"] }
 tokio = { version = "1", default-features = false, features = ["macros", "process", "rt", "signal", "sync", "time"] }
 toml = { version = "0.9", default-features = false, features = ["std", "parse", "serde"] }
 # Only for throwaway homes and repos in tests

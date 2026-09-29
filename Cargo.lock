@@ -803,9 +803,9 @@ dependencies = [
 
 [[package]]
 name = "shep-channel"
-version = "0.10.1"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80cc248b132140e0ea59a4fcdc9f460e7f99d698e43107ddc53512d0ba13c4ff"
+checksum = "b5e73596f55f5e17012910c34af82145a15436e26a8da657cba40858f0da4265"
 dependencies = [
  "serde",
  "serde_json",
@@ -814,23 +814,26 @@ dependencies = [
 
 [[package]]
 name = "shep-client"
-version = "0.10.1"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f311fabeadd577ac999262950bff3b2077c01933a697ba0e5cb7df662f8c7613"
+checksum = "7d7c0bf096cfedab0ff488c5c71e28c07c9fccc9efcdf3fe76fabde190ed4f7f"
 dependencies = [
  "futures-util",
+ "serde",
+ "serde_json",
  "shep-core",
  "shep-macros",
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "toml 0.8.23",
 ]
 
 [[package]]
 name = "shep-core"
-version = "0.10.1"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80ab7014230e0504b58007c82dd6acc8bfeb3f0e19be12dbad0e77fbe0cc4230"
+checksum = "5d64e940b65751f28046a3ef6a156aa5afa9928fa999ff91fd5e8ae5bb13332b"
 dependencies = [
  "annotate-snippets",
  "anstyle",
@@ -859,9 +862,9 @@ dependencies = [
 
 [[package]]
 name = "shep-macros"
-version = "0.10.1"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16d0e12a4bd7ad8d4917d8bd5a42489dd58d4c289398cb7efd33c921966b2593"
+checksum = "465ec2513c79fea7d4efe100c53606cbb2863cf34cc58d246d72d58c9ba02577"
 dependencies = [
  "proc-macro2",
  "quote 1.0.47",
