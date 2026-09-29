@@ -38,7 +38,7 @@ pub(super) fn compose(extra: Option<&str>, worktree: &Path) -> String {
         text.push('\n');
         text.push_str(&template_line(&template));
     }
-    if let Some(extra) = extra {
+    if let Some(extra) = extra.filter(|e| !e.trim().is_empty()) {
         text.push_str("\n# This project's instructions\n\n");
         text.push_str(extra);
         if !extra.ends_with('\n') {
@@ -71,7 +71,7 @@ enum Template {
 
 /// The template GitHub would offer for a pull request from this worktree
 ///
-/// GitHub reads `pull_request_template.md` from the root, `.github/` or
+/// GitHub reads `pull_request_template.md` (or `.txt`) from the root, `.github/` or
 /// `docs/`, in any case, and a `PULL_REQUEST_TEMPLATE` folder of several from
 /// the same places.
 fn template(worktree: &Path) -> Option<Template> {
@@ -83,7 +83,7 @@ fn template(worktree: &Path) -> Option<Template> {
             .filter_map(Result::ok)
             .filter_map(|entry| {
                 let name = entry.file_name().into_string().ok()?;
-                let is_dir = entry.path().is_dir();
+                let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
                 let path = if place.is_empty() {
                     name.clone()
                 } else {
@@ -169,6 +169,17 @@ mod tests {
         let text = first_instructions(&rig, &runner);
         assert!(text.starts_with(INSTRUCTIONS), "{text}");
         assert!(text.ends_with(EXTRA), "{text}");
+    }
+
+    #[test]
+    fn the_template_line_comes_before_the_projects_instructions() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("pull_request_template.md"), "## Summary\n").unwrap();
+        let text = compose(Some(EXTRA), dir.path());
+        let at = |needle: &str| text.find(needle).expect(needle);
+        assert!(at("pull request template") < at("# This project's instructions"));
+        assert!(text.ends_with(EXTRA), "{text}");
+        assert_eq!(compose(Some(" \n"), dir.path()), compose(None, dir.path()));
     }
 
     #[test]
