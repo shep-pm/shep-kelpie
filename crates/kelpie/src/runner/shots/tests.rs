@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use crate::ports::{Finding, Role, Severity};
+use crate::ports::{Checks, Finding, Role, Severity};
 use crate::profile::INSTRUCTIONS;
 use crate::runner::{Runner, StepReport, step};
 use crate::shots::publish::MARKER;
@@ -8,12 +8,15 @@ use crate::test::{Rig, Scripted, ScriptedShots};
 
 mod merge;
 
-/// A playground-like project: a launch file on `main`, and a preview table
+/// A playground-like project: a launch file on `main`, and the preview on
 fn with_preview(project: &str) -> Rig {
     let rig = Rig::new(project);
     rig.land_launch_file();
     rig.edit_settings(|s| {
-        format!("{s}\n[preview]\nroutes = [\"/\", \"/events\"]\ndomains = [\"api.example.com\"]\n")
+        format!(
+            "{s}\n[preview]\nenabled = true\nroutes = [\"/\", \"/events\"]\n\
+             domains = [\"api.example.com\"]\n"
+        )
     });
     rig
 }
@@ -50,6 +53,33 @@ fn a_project_without_a_launch_file_behaves_as_before() {
     assert_eq!(instructions.unwrap(), INSTRUCTIONS);
     assert_eq!(shots_comments(&rig), Vec::<String>::new());
     assert!(!rig.paths().worker.join("mcp.json").exists());
+}
+
+// shep carries a launch file for the maintainer's own Claude preview, not for kelpie.
+#[test]
+fn a_launch_file_on_main_without_the_setting_takes_no_shots() {
+    let rig = Rig::new("shep");
+    rig.land_launch_file();
+    rig.edit_settings(|s| format!("{s}\n[preview]\nroutes = [\"/\"]\n"));
+    let runner = started(&rig);
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    for _ in 0..3 {
+        step(&runner).unwrap(); // the turn, qwen, claude
+    }
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+    let ruling = rig.verdict(&runner);
+    assert!(
+        matches!(ruling, Some(StepReport::Ruling { id: 1, .. })),
+        "{ruling:?}"
+    );
+    assert_eq!(rig.shots.jobs(), [], "no shots run");
+    let [worker] = rig.claude.calls().try_into().unwrap();
+    assert_eq!(worker.mcp_config, None);
+    assert_eq!(shots_comments(&rig), Vec::<String>::new());
 }
 
 // Steps until the fence's ruling on a branch that changes `.claude`, and

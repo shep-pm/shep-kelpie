@@ -1,11 +1,11 @@
 //! Letting workers and reviewers see the UI a work item builds
 //!
-//! A project opts in by carrying `.claude/launch.json` on `main`, the file Claude
-//! Desktop's preview reads. Kelpie starts the named configuration's dev
-//! server itself for its shots, and gives each worker the Playwright MCP
-//! server. `[preview]` in the project's settings names the configuration,
-//! the default routes, and the domains the app really calls. Without the
-//! file, nothing here runs.
+//! A project opts in with `enabled = true` under `[preview]` in its settings,
+//! and carries `.claude/launch.json` on `main`, the file Claude Desktop's
+//! preview reads. Kelpie starts the named configuration's dev server itself
+//! for its shots, and gives each worker the Playwright MCP server. The table
+//! also names the configuration, the default routes, and the domains the app
+//! really calls. Without both, nothing here runs.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -25,6 +25,10 @@ pub const LOCAL_HOSTS: [&str; 2] = ["localhost", "127.0.0.1"];
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preview {
+    /// Whether the project takes shots and gives its workers the preview's
+    /// tools. A launch file on `main` alone turns nothing on.
+    #[serde(default)]
+    pub enabled: bool,
     /// The launch configuration kelpie starts, by name. The file's first
     /// when absent.
     #[serde(default)]
@@ -43,6 +47,7 @@ pub struct Preview {
 impl Default for Preview {
     fn default() -> Self {
         Self {
+            enabled: false,
             configuration: None,
             routes: default_routes(),
             domains: Vec::new(),
@@ -144,11 +149,11 @@ impl fmt::Display for LaunchError {
 
 impl core::error::Error for LaunchError {}
 
-/// Whether `repo`'s `origin/main` carries a launch file, which turns the preview on
+/// Whether `repo`'s `origin/main` carries a launch file, which the preview needs
 ///
 /// Read from `main`, not the work item's branch, so a worker cannot widen
 /// its own sandbox by adding the file.
-pub fn enabled(repo: &Path) -> bool {
+pub fn launch_file_on_main(repo: &Path) -> bool {
     let spec = format!("origin/{}:{LAUNCH_FILE}", crate::worktree::BASE);
     Command::new("git")
         .arg("-C")
@@ -364,6 +369,7 @@ mod tests {
         assert_eq!(preview.routes, [Route("/".into())]);
         assert_eq!(preview.domains, []);
         assert_eq!(preview.configuration, None);
+        assert!(!preview.enabled);
     }
 
     // The playground's own file, as Claude Desktop's preview reads it
@@ -417,7 +423,7 @@ mod tests {
     #[test]
     fn a_folder_that_is_not_a_repo_has_no_preview() {
         let dir = worktree_with(PLAYGROUND);
-        assert!(!enabled(dir.path()));
+        assert!(!launch_file_on_main(dir.path()));
     }
 
     #[test]
