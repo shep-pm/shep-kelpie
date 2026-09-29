@@ -35,8 +35,13 @@ pub const LABEL: &str = "review please";
 /// The comment that asks CodeRabbit to read the whole pull request again
 pub const FULL_REVIEW: &str = "@coderabbitai full review";
 
+// A summon CodeRabbit gave no sign of in fifteen minutes may never have
+// reached it, and is sent once more. A sign is its "Review in progress"
+// status on the head, a change to its comment, or a rate-limit notice.
+pub(super) const HEARD_WAIT: u64 = 900;
+
 // A summon neither taken up nor refused in ten minutes is counted as spent,
-// so the lease goes back.
+// so the lease goes back. A summon with no sign waits for its re-send first.
 pub(super) const ANSWER_WAIT: u64 = 600;
 
 // A full review of a long branch took 24 minutes on shep. Two hours with
@@ -90,7 +95,12 @@ impl Runner {
                 readied,
                 full,
             } => self.summon(head, readied, full),
-            CodeRabbitStage::Summoned { head, at, full } => self.await_review(head, at, full),
+            CodeRabbitStage::Summoned {
+                head,
+                at,
+                full,
+                resent,
+            } => self.await_review(head, at, full, resent),
             CodeRabbitStage::Judging {
                 threads, verdicts, ..
             } => self.judge_threads(&threads, &verdicts),
@@ -131,16 +141,41 @@ impl Runner {
         }
         let now = self.ports.clock.now();
         self.hold(now)?;
+        let full = self.asks_full(full, &activity);
+        self.send(number, head, now, full, false)
+    }
+
+    // Whether a summon asks for a full review by comment: when it was told
+    // to, or when CodeRabbit read the pull request before and the label
+    // would find nothing new, because a summon is owed or kelpie caught the
+    // branch up. A re-send goes through this too.
+    fn asks_full(&self, full: bool, activity: &Activity) -> bool {
         let item = self.item();
         let read_before = activity.reviewed_besides("") > 0;
-        if full || (read_before && (item.summon_owed || item.rebased)) {
-            return self.ask_full(number, head, now);
+        full || (read_before && (item.summon_owed || item.rebased))
+    }
+
+    // Sends the summon, under the lease, in whichever form `full` says.
+    // `again` is a re-send of a summon CodeRabbit gave no sign of: it goes
+    // out as a fresh event, and `at` stays the first one's time, so the
+    // round is the same and its hour is not counted twice.
+    fn send(
+        &mut self,
+        number: u64,
+        head: String,
+        at: Timestamp,
+        full: bool,
+        again: bool,
+    ) -> Result<Begin, StateError> {
+        if full {
+            return self.ask_full(number, head, at, again);
         }
         // A label kelpie put on is a summon made before a restart could save
-        // it. Any other label on sends no event, so it comes off first.
+        // it. Any other label on sends no event, so it comes off first, and
+        // so does one CodeRabbit never acted on.
         let ours = self.item().known.labels.iter().any(|l| l == LABEL);
         let summoned = match self.labelled(number) {
-            Ok(on) => ours && on,
+            Ok(on) => ours && on && !again,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
         if !summoned
@@ -152,29 +187,50 @@ impl Runner {
         }
         let stage = CodeRabbitStage::Summoned {
             head: head.clone(),
-            at: now,
+            at,
             full: false,
+            resent: again,
         };
         self.update(|item| item.phase = Phase::CodeRabbit(stage))?;
-        Ok(Begin::Report(StepReport::Summoned {
-            issue: self.item().issue,
-            pull_request: number,
-            head,
-        }))
+        Ok(self.summoned(number, head, again))
+    }
+
+    fn summoned(&self, number: u64, head: String, again: bool) -> Begin {
+        let (issue, pull_request) = (self.item().issue, number);
+        Begin::Report(if again {
+            StepReport::SummonedAgain {
+                issue,
+                pull_request,
+                head,
+            }
+        } else {
+            StepReport::Summoned {
+                issue,
+                pull_request,
+                head,
+            }
+        })
     }
 
     // The summon is saved before the comment goes out, so a restart never
     // posts it twice. A comment the forge refused leaves the round waiting
-    // for the lease again. The label comes off first, since a push while it
-    // is on would summon outside the lease.
-    fn ask_full(&mut self, number: u64, head: String, now: Timestamp) -> Result<Begin, StateError> {
+    // for the lease again, or for the re-send again. The label comes off
+    // first, since a push while it is on would summon outside the lease.
+    fn ask_full(
+        &mut self,
+        number: u64,
+        head: String,
+        at: Timestamp,
+        again: bool,
+    ) -> Result<Begin, StateError> {
         if let Err(reason) = self.label(number, false) {
             return Ok(self.gate_failed(reason));
         }
         let stage = CodeRabbitStage::Summoned {
             head: head.clone(),
-            at: now,
+            at,
             full: true,
+            resent: again,
         };
         self.update(|item| item.phase = Phase::CodeRabbit(stage))?;
         let posted = self
@@ -182,20 +238,25 @@ impl Runner {
             .forge
             .comment(&self.settings.forge, number, FULL_REVIEW);
         if let Err(e) = posted {
-            let stage = CodeRabbitStage::Lease {
-                head,
-                readied: None,
-                full: true,
+            let stage = if again {
+                CodeRabbitStage::Summoned {
+                    head,
+                    at,
+                    full: true,
+                    resent: false,
+                }
+            } else {
+                CodeRabbitStage::Lease {
+                    head,
+                    readied: None,
+                    full: true,
+                }
             };
             self.update(|item| item.phase = Phase::CodeRabbit(stage))?;
             let reason = format!("cannot ask CodeRabbit for a full review on #{number}: {e}");
             return Ok(self.gate_failed(reason));
         }
-        Ok(Begin::Report(StepReport::Summoned {
-            issue: self.item().issue,
-            pull_request: number,
-            head,
-        }))
+        Ok(self.summoned(number, head, again))
     }
 
     // A draft is marked ready once, and the round then waits out the settle
@@ -253,6 +314,7 @@ impl Runner {
         head: String,
         at: Timestamp,
         full: bool,
+        resent: bool,
     ) -> Result<Begin, StateError> {
         let number = self.number();
         let activity = match self.activity(number) {
@@ -261,6 +323,10 @@ impl Runner {
         };
         let now = self.ports.clock.now().0;
         let waited = now.saturating_sub(at.0);
+        // A re-send asks the way the first summon did, which is read from
+        // everything CodeRabbit has done, not only since the summon.
+        let full_again = self.asks_full(full, &activity);
+        let heard = activity.heard(&head, at);
         // A head reviewed before an adoption needs a review of kelpie's own.
         let owed = self.item().summon_owed;
         let activity = if owed { activity.since(at) } else { activity };
@@ -303,7 +369,9 @@ impl Runner {
                     opens,
                 }))
             }
-            Reading::Silent | Reading::Completed { .. } if waited >= REVIEW_WAIT => {
+            Reading::Silent | Reading::Processing | Reading::Completed { .. }
+                if waited >= REVIEW_WAIT =>
+            {
                 self.accepted(at)?;
                 if let Err(reason) = self.label(number, false) {
                     return Ok(self.gate_failed(reason));
@@ -313,9 +381,31 @@ impl Runner {
             Reading::Processing | Reading::Completed { .. } => {
                 self.accepted(at).map(|()| Begin::Idle)
             }
+            // No sign of the summon yet: it may never have been seen, so it
+            // goes out once more before the lease is counted spent.
+            Reading::Silent if !resent && !heard => {
+                if waited < HEARD_WAIT {
+                    Ok(Begin::Idle)
+                } else {
+                    self.resend(head, at, full_again)
+                }
+            }
             Reading::Silent if waited >= ANSWER_WAIT => self.accepted(at).map(|()| Begin::Idle),
             Reading::Silent => Ok(Begin::Idle),
         }
+    }
+
+    // The same summon, once more, under the lease this work item took. A
+    // restart clears the book of them, and the grant then held may be
+    // another item's, so without its own row nothing is sent.
+    fn resend(&mut self, head: String, at: Timestamp, full: bool) -> Result<Begin, StateError> {
+        let number = self.number();
+        let issue = self.item().issue;
+        let mine = |l: &LeaseHeld| l.resource == Resource::Coderabbit && l.issue == Some(issue);
+        if !self.state.leases.iter().any(mine) {
+            return self.accepted(at).map(|()| Begin::Idle);
+        }
+        self.send(number, head, at, full, true)
     }
 
     // A summon answered, by a review of the head or by CodeRabbit finding
