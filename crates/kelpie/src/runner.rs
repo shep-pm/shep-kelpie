@@ -540,7 +540,10 @@ mod tests {
     fn a_failed_save_is_reported_and_changes_nothing() {
         let rig = Rig::new("xilriws");
         let runner = rig.open().unwrap();
-        std::fs::remove_dir_all(rig.paths().state.parent().unwrap()).unwrap();
+        let folder = rig.paths().state.parent().unwrap().to_owned();
+        std::fs::remove_dir_all(&folder).unwrap();
+        // A file where the folder was, which a save cannot make a folder of.
+        std::fs::write(&folder, "").unwrap();
         let reply = rig.ask(&runner, "start", None);
         assert!(
             reply["error"]
