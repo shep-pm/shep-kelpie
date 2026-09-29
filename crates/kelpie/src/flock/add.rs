@@ -133,13 +133,20 @@ pub async fn add(
     let runner = kelpie_sheep(client, &rows, name.as_str(), &["runner", name.as_str()]).await?;
     let old_dog = kelpie_sheep(client, &rows, dog::OLD_NAME, &["dog"]).await?;
     let dog = kelpie_sheep(client, &rows, dog::NAME, &["dog"]).await?;
-    let table = match tables(client).await?.remove(name.as_str()) {
-        Some(table) => Some(table),
-        None if runner.is_some() => None,
-        None => Some(settings(name, place, public)?),
+    if old_dog.is_some() && dog.is_some() {
+        return Err(format!(
+            "both `{}` and `{}` run kelpie's dog, and one book needs one dog",
+            dog::OLD_NAME,
+            dog::NAME
+        ));
+    }
+    // The runner's table as set, or the one to write.
+    let (set, table) = match tables(client).await?.remove(name.as_str()) {
+        Some(set) => (true, set),
+        None => (false, settings(name, place, public)?),
     };
-    if let (Some(set), true) = (&table, runner.is_some()) {
-        let loaded = Settings::from_table(set, name.as_str(), place.home, place.home)
+    if set {
+        let loaded = Settings::from_table(&table, name.as_str(), place.home, place.home)
             .map_err(|e| e.to_string())?;
         if loaded.repo != checkout.root {
             return Err(format!(
@@ -162,8 +169,8 @@ pub async fn add(
         }
     }
 
-    match (runner, table) {
-        (None, Some(table)) => {
+    match (runner, set) {
+        (None, _) => {
             let request = Request::Add {
                 apps: vec![launch.runner(name, table)],
             };
@@ -172,11 +179,11 @@ pub async fn add(
                 "runner `{name}`: added with its settings, stopped until `shep kelpie start`"
             ));
         }
-        (Some(_), None) => {
+        (Some(_), false) => {
             let request = Request::SetSheepDogSettings {
                 name: name.as_str().to_owned(),
                 dog: DOG.to_owned(),
-                table: Some(DogTable::from(settings(name, place, public)?)),
+                table: Some(DogTable::from(table)),
             };
             send(client, request, |r| {
                 matches!(r, Response::SheepDogSettingsSet { .. })
@@ -202,14 +209,8 @@ async fn replace_dog(
     old: Option<ProcessInfo>,
     dog: Option<ProcessInfo>,
 ) -> Result<String, String> {
+    // `add` refused both before it wrote anything.
     if dog.is_some() {
-        if old.is_some() {
-            return Err(format!(
-                "both `{}` and `{}` run kelpie's dog, and one book needs one dog",
-                dog::OLD_NAME,
-                dog::NAME
-            ));
-        }
         return Ok(format!("dog `{}`: already there", dog::NAME));
     }
     let request = Request::Add {

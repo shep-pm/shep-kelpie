@@ -225,3 +225,36 @@ async fn a_file_for_another_checkout_is_refused() {
     assert!(err.contains("not this checkout"), "{err}");
     assert_eq!(scene.shepherd.writes(), []);
 }
+
+#[tokio::test]
+async fn a_dog_under_both_names_is_refused_before_anything_changes() {
+    let mut scene = Scene::new().await;
+    let mut old = scene.launch.dog();
+    old.name = "kelpie".into();
+    scene.shepherd.holds(old, true);
+    scene.shepherd.holds(scene.launch.dog(), true);
+    let err = scene.add().await.unwrap_err();
+    assert!(err.contains("one book needs one dog"), "{err}");
+    assert_eq!(scene.shepherd.writes(), []);
+    assert_eq!(scene.forge.repo_labels_now(), ["bug"]);
+}
+
+#[tokio::test]
+async fn a_runner_from_a_flockfile_with_no_table_is_given_one() {
+    let mut scene = Scene::new().await;
+    let mut runner = scene.launch.runner(&scene.name, Map::new());
+    runner.dogs.clear();
+    scene.shepherd.holds(runner, true);
+    let lines = scene.add().await.unwrap();
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.ends_with("already there, and given its settings")),
+        "{lines:?}"
+    );
+    assert_eq!(scene.settings().repo, scene.checkout.root);
+    let writes = scene.shepherd.writes();
+    let added_runner =
+        |w: &Request| matches!(w, Request::Add { apps } if apps[0].name == "hazels-lab");
+    assert!(!writes.iter().any(added_runner), "{writes:?}");
+}
