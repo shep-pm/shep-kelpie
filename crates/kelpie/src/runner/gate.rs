@@ -132,7 +132,8 @@ impl Runner {
             item.known.labels.retain(|l| l != READY && l != HUMAN);
             item.known.labels.push(HUMAN.to_owned());
         })?;
-        self.raise(number, RulingKind::Merge { head })
+        let shots_failed = self.shots_failed(&head);
+        self.raise(number, RulingKind::Merge { head, shots_failed })
     }
 
     // A worker that pushed nothing after its last red run would get the
@@ -365,7 +366,7 @@ pub(super) mod tests {
     // from before the push, and parked the worker on a false ruling.
     #[test]
     fn a_forge_still_showing_the_head_from_before_a_push_is_waited_out() {
-        let (rig, runner, head) = Rig::with_pull_request("hazels-lab");
+        let (rig, runner, head) = Rig::with_pull_request("webapp");
         rig.land_on_origin("landed.txt");
         let Some(StepReport::Rebased { head: rebased, .. }) = step(&runner).unwrap() else {
             panic!("the branch was not rebased");
@@ -410,7 +411,7 @@ pub(super) mod tests {
 
     #[test]
     fn with_ci_off_the_checks_are_never_read() {
-        let rig = Rig::new("hazels-lab");
+        let rig = Rig::new("webapp");
         rig.edit_settings(|s| s.replace("ci = true", "ci = false"));
         let runner = rig.open().unwrap();
         rig.ask(&runner, "start", None);

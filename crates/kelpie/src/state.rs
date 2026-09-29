@@ -59,9 +59,12 @@ pub struct ProjectState {
     /// What the week had spent when today began, once usage has been read
     #[serde(default)]
     pub pacing: Option<DayStart>,
-    /// Automatic merges not yet posted to the webhook, oldest first
+    /// Automatic merges not yet sent, oldest first
     #[serde(default)]
     pub notices: Vec<Notice>,
+    /// Where reading the webhook's replies has got to
+    #[serde(default)]
+    pub replies: Replies,
 }
 
 impl ProjectState {
@@ -81,6 +84,7 @@ impl ProjectState {
             leases: Vec::new(),
             pacing: None,
             notices: Vec::new(),
+            replies: Replies::default(),
         }
     }
 
@@ -162,6 +166,27 @@ pub struct Ruling {
     pub relayed: bool,
 }
 
+/// Where reading replies on the webhook's topic has got to
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Replies {
+    /// The last message read, which the next read starts after
+    #[serde(default)]
+    pub last: Option<LastRead>,
+}
+
+/// A message on the webhook's topic, as far as reading it goes
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LastRead {
+    /// The webhook's id for it
+    pub id: String,
+    /// When the webhook took it
+    pub time: Timestamp,
+}
+
 /// A merge kelpie made under `auto`, told to the maintainer after it lands
 ///
 /// Not a ruling: it has no id and takes no answer. It goes once the
@@ -176,6 +201,9 @@ pub struct Notice {
     pub pull_request: u64,
     /// The head it merged at
     pub head: String,
+    /// Whether kelpie's shots of that head failed, so none were on the pull request
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shots_failed: bool,
 }
 
 /// What raised a ruling. A no's note, or an answer, always goes to the worker.
@@ -187,6 +215,9 @@ pub enum RulingKind {
     Merge {
         /// The head the question is about
         head: String,
+        /// Whether kelpie's shots of that head failed, so none are on the pull request
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        shots_failed: bool,
     },
     /// Kelpie could not rebase the branch onto `main`. A yes looks again.
     Rebase {

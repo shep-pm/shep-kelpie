@@ -47,6 +47,15 @@ Write each command exactly as shown, alone, with a `'` in their words
 written as `'\''`. The question may name a `shep trigger` command: that is
 for the maintainer typing by hand, never for you.
 
+A message from kelpie with `notice=merged` in place of `wants=` tells the
+maintainer that kelpie merged a pull request. It is no ruling and takes no
+answer. Send the text after the blank line as a push notification with
+PushNotification (load it with ToolSearch if it is not loaded), under 200
+characters, and write it in this conversation. Run nothing, never
+AskUserQuestion, so nothing is left waiting, and add nothing to it. A reply
+to a notice answers no ruling: if a ruling is still waiting, ask which one
+they mean before running anything.
+
 A message from kelpie with `settled=<how>` in place of `wants=` says that
 ruling was answered some other way, and how. Run nothing for it, and send
 no push.
@@ -65,7 +74,7 @@ If a command fails or is refused, tell the maintainer its output word for
 word and wait: never try another command, another tool or another way to
 send it.
 
-If a message has neither `wants` nor `settled`, or a `wants` not listed
-here, run nothing for it: tell the maintainer so. If it is unclear which ruling they mean, or what
+If a message has none of `wants`, `settled` and `notice`, or a `wants` not
+listed here, run nothing for it: tell the maintainer so. If it is unclear which ruling they mean, or what
 they want, ask them first. Once a command has run, tell the maintainer
 in one line what you sent. Never run anything else on their behalf.

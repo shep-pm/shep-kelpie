@@ -12,7 +12,7 @@ use std::process::{Command, Stdio};
 use crate::board::{LabelError, Skip, WorkerModel, worker_override};
 use crate::channels::{Channel, Channels};
 use crate::pacer::Assessment;
-use crate::ports::{ForgeError, Ports, SessionId, Timestamp, Visibility};
+use crate::ports::{ForgeError, Guarded, Ports, SessionId, Timestamp, Visibility};
 use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
@@ -32,6 +32,7 @@ mod merge;
 mod pace;
 mod paths;
 mod question;
+mod replies;
 mod report;
 mod reread;
 mod review;
@@ -47,6 +48,7 @@ pub use adopt::AdoptError;
 pub use merge::DropError;
 pub use pace::PacerStatus;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
+pub use replies::READ_EVERY;
 pub use report::StepReport;
 pub use rework::ReworkError;
 pub use ruling::{Answer, RuleError};
@@ -164,6 +166,10 @@ pub struct Runner {
     relay_notices: Vec<alert::SettledNotice>,
     // The ruling whose relay send is out, which an answer can settle first
     relaying: Option<u64>,
+    // Reading the webhook's topic for replies, kept in memory only
+    reading: replies::Reading,
+    // What a reply's code is checked against, on an ntfy webhook
+    totp: Option<replies::Authenticator>,
     // The account kelpie acts as, read once a run when a rework first needs it
     viewer: Option<String>,
     // The issue of the work item a step or trigger is working on, set before
@@ -179,7 +185,7 @@ impl Runner {
     ///
     /// `settings` and `kelpie_settings` are as [`crate::settings::source::load`]
     /// read them. `kelpie` is the kelpie binary, which each worker's file-tool
-    /// hook runs.
+    /// hook runs. No forge post may name `home`, kelpie's home or the checkout.
     ///
     /// # Errors
     ///
@@ -189,10 +195,14 @@ impl Runner {
         settings: Settings,
         kelpie_settings: KelpieSettings,
         paths: &ProjectPaths,
+        home: &Path,
         kelpie: &Path,
-        ports: Ports,
+        mut ports: Ports,
     ) -> Result<Self, OpenError> {
+        let local = [home, paths.kelpie_home.as_path(), settings.repo.as_path()];
+        ports.forge = Box::new(Guarded::new(ports.forge, local));
         let (channels, webhook) = ruling_channels(&settings, kelpie_settings)?;
+        let totp = replies::authenticator(webhook.as_ref(), &paths.totp)?;
         check_repo(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;
         let home = std::env::var_os("HOME").map(PathBuf::from);
@@ -247,6 +257,8 @@ impl Runner {
             relay_cleared: None,
             relay_notices: Vec::new(),
             relaying: None,
+            reading: replies::Reading::default(),
+            totp,
             viewer: None,
             focus: None,
             last_acted: None,
@@ -364,6 +376,7 @@ impl Runner {
             merge_refused: false,
             merge_tried: None,
             summon_owed: false,
+            local_rounds: 0,
             rebased: false,
             shots: None,
             shots_comment: None,

@@ -95,10 +95,6 @@ pub fn comment(
 ) -> String {
     let short = head.get(..7).unwrap_or(head);
     let mut body = format!("{MARKER}\n");
-    if let Some(reason) = &run.failed {
-        let _ = writeln!(body, "Kelpie could not take shots of {short}: {reason}");
-        return body;
-    }
     let _ = writeln!(
         body,
         "Kelpie's shots of {short}. They live on the `{}` branch, not this pull request's, until it closes.\n",

@@ -1,8 +1,8 @@
 //! What each step of the runner did, one JSON line each in its log
 //!
 //! A step dispatches from the board, runs a worker's turn, moves the work
-//! item through the gate (CI, a rebase, a ruling, the merge), or posts a
-//! ruling to the maintainer's webhook.
+//! item through the gate (CI, a rebase, a ruling, the merge), posts a
+//! ruling to the maintainer's webhook, or handles a reply on its topic.
 
 use std::path::PathBuf;
 
@@ -259,7 +259,7 @@ pub enum StepReport {
         /// The ruling's id
         id: u64,
     },
-    /// A ruling could not be posted to the webhook, and is tried again later
+    /// A ruling could not be sent, and is tried again later
     AlertFailed {
         /// The ruling's id
         id: u64,
@@ -268,7 +268,7 @@ pub enum StepReport {
         /// When the post is tried again at the earliest
         retry_at: Timestamp,
     },
-    /// The notice of an automatic merge was posted to the webhook
+    /// The notice of an automatic merge was sent to the webhook, or the relay where the webhook is off
     Noticed {
         /// The work item's issue
         issue: u64,
@@ -284,6 +284,61 @@ pub enum StepReport {
         /// Why, never naming the webhook's URL
         reason: String,
         /// When the post is tried again at the earliest
+        retry_at: Timestamp,
+    },
+    /// A reply on the webhook's topic, carrying the authenticator code, answered it
+    ReplyAnswered {
+        /// The ruling's id
+        id: u64,
+    },
+    /// A reply carrying the authenticator code was refused, by `rule` or
+    /// because its code could not be recorded, and the topic was told why
+    ReplyRefused {
+        /// The ruling's id
+        id: u64,
+        /// Why, as `rule` refused it
+        reason: String,
+        /// Why the line for the topic could not be posted, if it could not
+        line_failed: Option<String>,
+    },
+    /// A reply with the authenticator code named a ruling already settled:
+    /// it ran nothing, and the topic was told so
+    ReplyToSettled {
+        /// The ruling's id
+        id: u64,
+        /// Why the line for the topic could not be posted, if it could not
+        line_failed: Option<String>,
+    },
+    /// A reply carried a right code that already answered a reply: it ran
+    /// nothing, and the topic was told so
+    ReplyCodeUsed {
+        /// The ruling's id
+        id: u64,
+        /// Why the line for the topic could not be posted, if it could not
+        line_failed: Option<String>,
+    },
+    /// A message on the webhook's topic carried no right code, and was
+    /// ignored. Its text is not logged, since anyone holding the topic can
+    /// write it.
+    ReplyIgnored,
+    /// A post on the topic held text kelpie could not read in full: every
+    /// step a code in it could name was spent, it answered nothing, and the
+    /// topic was told to send a shorter reply
+    ReplyTooLong {
+        /// Why the line for the topic could not be posted, if it could not
+        line_failed: Option<String>,
+    },
+    /// A wrong code turned answers from the topic off, for every project,
+    /// until the maintainer turns them back on, and the topic was told so
+    RepliesLocked {
+        /// Why the line for the topic could not be posted, if it could not
+        line_failed: Option<String>,
+    },
+    /// The webhook's topic could not be read, and is read again later
+    RepliesFailed {
+        /// Why, never naming the webhook's URL
+        reason: String,
+        /// When it is read again at the earliest
         retry_at: Timestamp,
     },
     /// The forge or git could not be asked, and the step is tried again later
@@ -319,6 +374,16 @@ pub enum StepReport {
     },
     /// Kelpie put the `review please` label on, holding the CodeRabbit lease
     Summoned {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The head the summon is for
+        head: String,
+    },
+    /// CodeRabbit gave no sign of the summon in fifteen minutes, so kelpie
+    /// sent it once more, in the same round
+    SummonedAgain {
         /// The work item's issue
         issue: u64,
         /// Its pull request
@@ -432,7 +497,10 @@ impl StepReport {
     pub fn waits(&self) -> bool {
         matches!(
             self,
-            Self::BoardFailed { .. } | Self::GateFailed { .. } | Self::Held { .. }
+            Self::BoardFailed { .. }
+                | Self::GateFailed { .. }
+                | Self::Held { .. }
+                | Self::RepliesFailed { .. }
         )
     }
 }

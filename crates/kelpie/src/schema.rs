@@ -138,9 +138,12 @@ mod tests {
                 "[[app.dogs.kelpie.worker.guard_hooks]]\nevent = \"PreToolUse\"\nmatcher = \"Bash\"\ncommand =",
             )
             .replace("# [app.dogs.kelpie.preview]", "[app.dogs.kelpie.preview]")
+            .replace("# enabled = true", "enabled = true")
             .replace("# configuration =", "configuration =")
             .replace("# routes =", "routes =")
-            .replace("# domains =", "domains =");
+            .replace("# domains =", "domains =")
+            .replace("# local_rounds =", "local_rounds =")
+            .replace("# rounds =", "rounds =");
         let command = "kind = \"command\"\ncommand = \"~/.claude/scripts/qwen-review.sh\"\n";
         assert!(text.contains(command), "the example's local round moved");
         let endpoint = "kind = \"endpoint\"\nurl = \"http://localhost:11434/v1\"\n\
@@ -169,6 +172,7 @@ mod tests {
         for key in [
             "models.judge.effort",
             "worker.build_env",
+            "preview.enabled",
             "preview.routes",
             "review.local.context",
             "review.local.command",

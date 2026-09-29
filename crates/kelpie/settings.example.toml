@@ -21,8 +21,8 @@ repo = "~/.kelpie/repos/shep"
 forge = "shep-pm/shep"
 
 # `ask` raises a ruling before every merge. `auto` merges once every gate
-# passes and posts a notice to the webhook after; every other ruling still
-# asks.
+# passes and sends a notice after, to the webhook or the relay; every other
+# ruling still asks.
 merge_authority = "ask"
 
 # Whether the repo runs CI on pull requests. GitHub cannot tell a repo
@@ -64,6 +64,10 @@ effort = "low"
 
 [app.dogs.kelpie.review]
 loop_guard = 8
+# At most this many local rounds per work item. Once they are spent, every
+# round is Claude's and one clean Claude round ends the loop. No limit when
+# absent.
+# local_rounds = 1
 
 # The local round, which alternates with the Claude round, local first. The
 # README says what each kind does. `off` runs the Claude round alone.
@@ -95,6 +99,10 @@ command = "~/.claude/scripts/qwen-review.sh"
 [app.dogs.kelpie.coderabbit]
 enabled = true
 divisor = 1000
+# A fixed number of rounds per work item, in place of the divisor's cap of
+# ceil(changed lines / divisor) + 1. The last round's held findings go to the
+# worker, and its fix goes to CI and the merge with no further summon.
+# rounds = 1
 
 # Turn `enabled` off for a stretch when usage limits do not matter: neither
 # the daily allowance nor the 5-hour window then holds anything, and `status`
@@ -130,11 +138,13 @@ turn_timeout = 60
 # matcher = "Bash"
 # command = "~/.kelpie/hooks/lint-guard"
 
-# Only for a repo with `.claude/launch.json`, which shep has none of. Kelpie
-# starts that file's dev server to take its shots, and gives workers the
-# Playwright MCP server. `configuration` is the file's first when absent,
-# `routes` is ["/"], and `domains`, the hosts the app itself calls, is empty.
+# Off unless `enabled = true`, and then only for a repo with
+# `.claude/launch.json` on `main`. Kelpie starts that file's dev server to
+# take its shots, and gives workers the Playwright MCP server.
+# `configuration` is the file's first when absent, `routes` is ["/"], and
+# `domains`, the hosts the app itself calls, is empty.
 # [app.dogs.kelpie.preview]
+# enabled = true
 # configuration = "dev"
 # routes = ["/", "/events"]
 # domains = ["pokemon-go-api.github.io", "leekduck.com", "*.leekduck.com"]

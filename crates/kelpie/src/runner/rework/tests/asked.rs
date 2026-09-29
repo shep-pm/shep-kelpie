@@ -17,7 +17,7 @@ fn requesting_changes() -> MaintainerReview {
 
 #[test]
 fn ready_for_agent_on_a_pull_request_kelpie_opened_starts_its_rework_and_comes_off() {
-    let rig = Rig::new("hazels-lab");
+    let rig = Rig::new("webapp");
     reviewed_71(&rig);
     rig.forge.label_pull_request(71, READY);
     rig.forge.label_pull_request(71, HUMAN);

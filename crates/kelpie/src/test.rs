@@ -119,6 +119,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         merge_refused: false,
         merge_tried: None,
         summon_owed: false,
+        local_rounds: 0,
         rebased: false,
         shots: None,
         shots_comment: None,
@@ -601,6 +602,7 @@ impl Rig {
     pub(crate) fn new(project: &str) -> Self {
         let home = tempfile::tempdir().unwrap();
         let meter = FakeMeter::idle();
+        let clock = FakeClock::at(Self::EPOCH);
         let rig = Self {
             project: ProjectName::try_from(project).unwrap(),
             claude: FakeClaude {
@@ -611,10 +613,10 @@ impl Rig {
             meter,
             reviewer: FakeReviewer::default(),
             relay: Arc::new(FakeRelay::default()),
-            alerts: FakeAlerts::default(),
+            alerts: FakeAlerts::on(clock.clone()),
             leases: FakeLeases::default(),
             shots: FakeShots::default(),
-            clock: FakeClock::at(Self::EPOCH),
+            clock,
             home,
         };
         rig.make_repo();
@@ -639,6 +641,7 @@ impl Rig {
             Self::WEBHOOK_URL
         );
         std::fs::write(&paths.kelpie_settings, kelpie).unwrap();
+        rig.write_totp_secret();
         rig
     }
 
@@ -710,7 +713,8 @@ impl Rig {
         self.land(file, "landed elsewhere\n")
     }
 
-    fn land(&self, file: &str, text: &str) -> String {
+    /// Lands `file` holding `text` on origin's `main`, and returns the commit
+    pub(crate) fn land(&self, file: &str, text: &str) -> String {
         let other = self.home.path().join("other");
         if !other.exists() {
             git(
@@ -841,6 +845,7 @@ impl Rig {
             self.try_settings()?,
             self.try_kelpie_settings()?,
             &paths,
+            self.home.path(),
             Path::new(Self::KELPIE),
             ports,
         )

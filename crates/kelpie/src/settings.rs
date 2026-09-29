@@ -4,9 +4,10 @@
 //! project had before one. Unknown keys are refused, so a misspelt or
 //! malformed setting stops the runner with a message naming it. Every
 //! setting is required except the ones added after the first build
-//! (`max_items`, `review.local`, `pacing.enabled`, `worker.allowed_domains`,
-//! `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout`,
-//! `worker.guard_hooks`, `ruling_channels` and `[preview]`).
+//! (`max_items`, `review.local`, `review.local_rounds`, `coderabbit.rounds`,
+//! `pacing.enabled`, `worker.allowed_domains`, `worker.build_env`,
+//! `worker.instructions_file`, `worker.turn_timeout`, `worker.guard_hooks`,
+//! `ruling_channels` and `[preview]`).
 //! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
@@ -65,7 +66,7 @@ pub struct Settings {
     pub pacing: Pacing,
     /// What every worker is started with
     pub worker: Worker,
-    /// Showing a work item's UI, for a repo with a launch file
+    /// Showing a work item's UI, off unless `enabled` and a launch file on `main`
     #[serde(default)]
     pub preview: Preview,
     /// How rulings reach the maintainer, over what kelpie's own settings say.
@@ -158,6 +159,11 @@ pub struct Review {
     /// script when absent, as every file before this table ran it.
     #[serde(default)]
     pub local: LocalRound,
+    /// At most this many local rounds per work item. Once they are spent,
+    /// every round is Claude's and one clean Claude round ends the loop.
+    /// No limit when absent.
+    #[serde(default)]
+    pub local_rounds: Option<NonZeroU32>,
 }
 
 /// The CodeRabbit gate's settings
@@ -171,6 +177,12 @@ pub struct CodeRabbit {
     pub enabled: bool,
     /// Changed lines per extra round: the cap is `ceil(changed / divisor) + 1`
     pub divisor: NonZeroU32,
+    /// A fixed number of rounds per work item, in place of the divisor's cap
+    ///
+    /// The last round's held findings go to the worker, and its fix push
+    /// summons no further round. The divisor's cap when absent.
+    #[serde(default)]
+    pub rounds: Option<NonZeroU32>,
 }
 
 /// Usage pacing settings

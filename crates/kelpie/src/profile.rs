@@ -41,7 +41,7 @@ const GIT_DENY: [&str; 8] = [
 // Read and written by no worker. Also denied to sandboxed Bash, which takes
 // `Read` deny rules as its own. `~/.config/gh` stays readable: `gh` will not
 // start without its config, and the worker opens its own pull request.
-pub(crate) const CREDENTIALS: [&str; 11] = [
+pub(crate) const CREDENTIALS: [&str; 12] = [
     "~/.ssh/**",
     "~/.aws/**",
     "~/.gnupg/**",
@@ -55,6 +55,8 @@ pub(crate) const CREDENTIALS: [&str; 11] = [
     // The webhook URL's old file. Not all of `~/.kelpie`: worktrees and build
     // folders live there. The shepherd's home, with `dogs.toml`, is the profile's own.
     "~/.kelpie/settings.toml",
+    // The authenticator secret, which answers a ruling from ntfy
+    "~/.kelpie/totp/**",
 ];
 
 // What only the project manager does: merge, mark ready, and summon.
@@ -145,8 +147,7 @@ pub struct WorkerProfile<'a> {
     pub allowed_domains: &'a [NonBlank],
     /// Variables the project's settings point into the build folder
     pub build_env: &'a BTreeMap<EnvName, BuildDir>,
-    /// The preview's domains, for a work item whose worktree has a launch
-    /// file; `None` without one
+    /// The preview's domains, for a project with the preview on; `None` with it off
     pub preview: Option<&'a [NonBlank]>,
     /// The shepherd's home, whose `dogs.toml` holds the webhook's URL
     pub shep_home: &'a Path,
@@ -673,6 +674,7 @@ mod tests {
             "Read(~/.ssh/**)",
             "Read(~/.kelpie/projects/**)",
             "Read(~/.kelpie/settings.toml)",
+            "Read(~/.kelpie/totp/**)",
             "Read(//srv/shep/**)",
         ] {
             assert!(deny.contains(&rule), "{rule}");

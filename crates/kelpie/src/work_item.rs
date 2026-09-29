@@ -47,6 +47,10 @@ pub struct WorkItem {
     /// so the next summon asks it for a full review.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub rebased: bool,
+    /// Local rounds finished in every pass of its review loop so far, which
+    /// `review.local_rounds` caps
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub local_rounds: u32,
     /// Its worktree
     pub worktree: PathBuf,
     /// Its worker's build folder
@@ -100,7 +104,7 @@ pub struct WorkItem {
     /// pull request later found merged at it is kelpie's merge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_tried: Option<String>,
-    /// Kelpie's last shots run, for a worktree with a launch file
+    /// Kelpie's last shots run, for a project with the preview on
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shots: Option<ShotsRecord>,
     /// The pull request's shots comment, once posted
@@ -164,6 +168,9 @@ pub enum CodeRabbitStage {
         /// Whether it asked for a full review
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         full: bool,
+        /// Whether CodeRabbit gave no sign of it and it went out once more
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        resent: bool,
     },
     /// The open threads of a review of `head`, judged in order
     Judging {
@@ -261,6 +268,10 @@ pub fn foreign_change(
         head: Some(head.to_owned()),
     };
     Some((seen, parts.join("; ")))
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 fn label_or_labels(n: usize) -> &'static str {
@@ -373,9 +384,10 @@ impl Review {
         }
     }
 
-    /// Which reviewer runs this round, given whether the project has a local round
-    pub fn reviewer(&self, local: bool) -> ReviewerKind {
-        if local && self.round % 2 == 1 {
+    /// Which reviewer runs this round, given how many local rounds the work
+    /// item has left: 0 with the local round off
+    pub fn reviewer(&self, local_left: u32) -> ReviewerKind {
+        if local_left > 0 && self.round % 2 == 1 {
             ReviewerKind::Local
         } else {
             ReviewerKind::Claude
@@ -596,9 +608,13 @@ mod tests {
                 head: "c0ffee".into(),
                 at: Timestamp(12),
                 full: false,
+                resent: false,
             })),
             json!({ "state": "coderabbit", "stage": "summoned", "head": "c0ffee", "at": 12 })
         );
+        let again = json!({ "state": "coderabbit", "stage": "summoned", "head": "c0ffee", "at": 12, "resent": true });
+        let sent: Phase = serde_json::from_value(again.clone()).unwrap();
+        assert_eq!(value(sent), again);
         let full = json!({ "state": "coderabbit", "stage": "summoned", "head": "c0ffee", "at": 12, "full": true });
         let asked: Phase = serde_json::from_value(full.clone()).unwrap();
         assert_eq!(value(asked), full);
@@ -717,9 +733,9 @@ mod tests {
     #[test]
     fn rounds_alternate_local_first_and_are_all_claudes_without_one() {
         let review = Review::first();
-        assert_eq!(review.reviewer(true), ReviewerKind::Local);
+        assert_eq!(review.reviewer(u32::MAX), ReviewerKind::Local);
         assert_eq!(
-            Review { round: 2, ..review }.reviewer(true),
+            Review { round: 2, ..review }.reviewer(u32::MAX),
             ReviewerKind::Claude
         );
         for round in 1..=3 {
@@ -727,12 +743,19 @@ mod tests {
                 round,
                 ..Review::first()
             };
-            assert_eq!(
-                review.reviewer(false),
-                ReviewerKind::Claude,
-                "round {round}"
-            );
+            assert_eq!(review.reviewer(0), ReviewerKind::Claude, "round {round}");
         }
+    }
+
+    #[test]
+    fn with_no_local_round_left_every_round_is_claudes() {
+        let round = |round| Review {
+            round,
+            ..Review::first()
+        };
+        assert_eq!(round(3).reviewer(1), ReviewerKind::Local);
+        assert_eq!(round(3).reviewer(0), ReviewerKind::Claude);
+        assert_eq!(round(4).reviewer(1), ReviewerKind::Claude);
     }
 
     #[test]

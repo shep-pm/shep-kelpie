@@ -2,8 +2,8 @@ use super::*;
 
 const EXAMPLE: &str = include_str!("../../settings.example.toml");
 
-const HOME: &str = "/home/maintainer";
-const FOLDER: &str = "/home/maintainer/.kelpie/projects/shep";
+const HOME: &str = "/home/me";
+const FOLDER: &str = "/home/me/.kelpie/projects/shep";
 
 // A runner's Flockfile entry, read the way its runner reads the table.
 fn parse(entry: &str) -> Result<Settings, String> {
@@ -29,7 +29,7 @@ fn with_hook(event: &str) -> String {
 #[test]
 fn the_example_holds_the_first_build_defaults() {
     let s = parse(EXAMPLE).unwrap();
-    assert_eq!(s.repo, Path::new("/home/maintainer/.kelpie/repos/shep"));
+    assert_eq!(s.repo, Path::new("/home/me/.kelpie/repos/shep"));
     assert_eq!(s.forge.as_str(), "shep-pm/shep");
     assert_eq!(s.merge_authority, MergeAuthority::Ask);
     assert!(s.ci);
@@ -90,7 +90,7 @@ fn the_instructions_file_expands_the_home_folder_and_defaults_to_none() {
     assert_eq!(parse(EXAMPLE).unwrap().worker.instructions_file, None);
     let text = EXAMPLE.replace("build_env = {}\n", "instructions_file = \"~/w.md\"\n");
     let file = parse(&text).unwrap().worker.instructions_file;
-    assert_eq!(file.as_deref(), Some(Path::new("/home/maintainer/w.md")));
+    assert_eq!(file.as_deref(), Some(Path::new("/home/me/w.md")));
 }
 
 #[test]
@@ -205,6 +205,22 @@ fn a_zero_loop_guard_is_refused() {
         "the [app.dogs.kelpie] table on shep: `review.loop_guard = 0`: \
          invalid value: integer `0`, expected a nonzero u32"
     );
+}
+
+#[test]
+fn the_review_budget_is_unset_until_a_table_sets_it() {
+    let s = parse(EXAMPLE).unwrap();
+    assert_eq!((s.review.local_rounds, s.coderabbit.rounds), (None, None));
+    let text = EXAMPLE
+        .replace("loop_guard = 8\n", "loop_guard = 8\nlocal_rounds = 2\n")
+        .replace("divisor = 1000\n", "divisor = 1000\nrounds = 1\n");
+    let s = parse(&text).unwrap();
+    assert_eq!(s.review.local_rounds.map(NonZeroU32::get), Some(2));
+    assert_eq!(s.coderabbit.rounds.map(NonZeroU32::get), Some(1));
+    let err = parse_err(&EXAMPLE.replace("divisor = 1000\n", "divisor = 1000\nrounds = 0\n"));
+    assert!(err.contains("`coderabbit.rounds = 0`"), "{err}");
+    let err = parse_err(&EXAMPLE.replace("loop_guard = 8\n", "loop_guard = 8\nlocal_rounds = 0\n"));
+    assert!(err.contains("`review.local_rounds = 0`"), "{err}");
 }
 
 #[test]
@@ -379,7 +395,7 @@ fn a_table_s_local_command_expands_the_home_folder_and_takes_the_project_folder(
     };
     assert_eq!(
         command("~/.claude/scripts/qwen-review.sh"),
-        Path::new("/home/maintainer/.claude/scripts/qwen-review.sh")
+        Path::new("/home/me/.claude/scripts/qwen-review.sh")
     );
     assert_eq!(command("review.sh"), Path::new(FOLDER).join("review.sh"));
     assert_eq!(command("/opt/review.sh"), Path::new("/opt/review.sh"));

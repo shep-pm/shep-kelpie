@@ -104,7 +104,7 @@ mod tests {
     #[test]
     fn every_other_scheme_and_every_other_host_is_refused() {
         for url in [
-            "view-source:file:///Users/maintainer/.kelpie/settings.toml",
+            "view-source:file:///Users/me/.kelpie/settings.toml",
             "file:///etc/hosts",
             "view-source:http://localhost:3000/",
             "javascript:alert(1)",

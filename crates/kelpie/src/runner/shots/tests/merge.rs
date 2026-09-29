@@ -229,41 +229,123 @@ fn a_page_that_calls_a_domain_off_the_list_says_so_on_the_comment() {
     );
 }
 
+// What shep's pull requests got: npm's error, naming its log in the home folder
+fn failing(rig: &Rig) -> &'static str {
+    let reason = format!(
+        "the dev server exited: npm error Missing script: \"dev\"\n\
+         npm error A complete log of this run can be found in: {}/.npm/_logs/debug-0.log",
+        rig.home.path().display()
+    );
+    Box::leak(reason.into_boxed_str())
+}
+
 #[test]
-fn a_failed_run_at_the_merge_is_on_the_comment_and_the_ruling_still_comes() {
+fn a_failed_run_posts_nothing_and_the_merge_ruling_says_so() {
     let rig = with_preview("lab");
     let runner = started(&rig);
     rig.claude.script([
         Scripted::Push("work.txt", "work\n"),
         Scripted::Text("CLEAN"),
     ]);
-    rig.shots.script([ScriptedShots::Fail(
-        "the dev server exited: bun: command not found",
-    )]);
+    let reason = failing(&rig);
+    rig.shots.script([ScriptedShots::Fail(reason)]);
     for _ in 0..4 {
-        step(&runner).unwrap();
+        step(&runner).unwrap(); // the turn, qwen, the shots, claude
     }
     let head = rig.forge.head_of("kelpie/7").unwrap();
     rig.forge.set_checks(&head, Checks::Passed);
-    let posted = rig.verdict(&runner);
-    assert!(
-        matches!(posted, Some(StepReport::ShotsPosted { .. })),
-        "{posted:?}"
-    );
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::Ruling { id: 1, .. })
-    ));
-    let [body] = shots_comments(&rig).try_into().unwrap();
-    assert!(body.ends_with(&format!(
-        "Kelpie could not take shots of {}: the dev server exited: bun: command not found\n",
-        &head[..7]
-    )));
+    let Some(StepReport::Ruling {
+        id: 1, question, ..
+    }) = rig.verdict(&runner)
+    else {
+        panic!("the merge ruling did not come");
+    };
     assert_eq!(
-        rig.forge.head_of("kelpie-shots/71"),
-        None,
-        "nothing to push"
+        question,
+        format!(
+            "Merge pull request #71 at {} into main? Kelpie's shots of it failed, so \
+             none are on the pull request; the runner's log says why. \
+             `shep trigger lab rule '1 yes'` merges it, and `shep trigger lab rule '1 no <note>'` \
+             sends the worker your note.",
+            &head[..7]
+        )
     );
+    assert_eq!(rig.forge.comments(), [], "nothing on the pull request");
+    assert_eq!(rig.forge.head_of("kelpie-shots/71"), None);
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["shots_failed"], reason);
+}
+
+#[test]
+fn under_auto_a_failed_run_posts_nothing_and_the_notice_says_so() {
+    let rig = with_preview("lab");
+    rig.merge_auto();
+    let runner = started(&rig);
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    rig.shots.script([ScriptedShots::Fail(failing(&rig))]);
+    for _ in 0..4 {
+        step(&runner).unwrap(); // the turn, qwen, the shots, claude
+    }
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+    for _ in 0..8 {
+        rig.clock.advance(crate::runner::CHECKS_SETTLE);
+        step(&runner).unwrap();
+    }
+    assert_eq!(rig.forge.merges(), [(71, head.clone())]);
+    assert_eq!(rig.forge.comments(), [], "nothing on the pull request");
+    let [(_, notice)] = rig.alerts.posts().try_into().unwrap();
+    assert_eq!(
+        notice.text,
+        format!(
+            "Pull request #71 for issue #7 merged into main at {} on lab, every gate passed. \
+             Kelpie's shots of it failed, so none are on the pull request; the runner's log \
+             says why. Nothing to answer.",
+            &head[..7]
+        )
+    );
+}
+
+// A page's own error can name a local folder too, and the forge port refuses it.
+#[test]
+fn a_shots_comment_naming_a_local_folder_is_refused_once_and_the_ruling_says_so() {
+    let rig = with_preview("lab");
+    let runner = started(&rig);
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    let page = format!(
+        "console: cannot read {}/app/.env",
+        rig.home.path().display()
+    );
+    rig.shots.script([ScriptedShots::Problems(vec![page])]);
+    for _ in 0..4 {
+        step(&runner).unwrap(); // the turn, qwen, the shots, claude
+    }
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+    let Some(StepReport::ShotsNotPosted { reason, .. }) = rig.verdict(&runner) else {
+        panic!("the shots comment was not refused");
+    };
+    assert_eq!(
+        reason,
+        "not posted: the text names a folder on this machine"
+    );
+    let Some(StepReport::Ruling { question, .. }) = step(&runner).unwrap() else {
+        panic!("the merge ruling did not follow");
+    };
+    assert!(
+        question.contains("Kelpie's shots of it failed"),
+        "{question}"
+    );
+    assert_eq!(rig.forge.comments(), [], "nothing on the pull request");
+    step(&runner).unwrap(); // the ruling's alert
+    rig.clock.advance(600);
+    assert_eq!(step(&runner).unwrap(), None, "never tried again");
 }
 
 #[test]

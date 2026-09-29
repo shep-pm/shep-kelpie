@@ -61,6 +61,8 @@ impl core::error::Error for ProjectNameError {}
 pub struct ProjectPaths {
     /// Kelpie's own settings file, which every project shares
     pub kelpie_settings: PathBuf,
+    /// The authenticator secret and the codes used, which every project shares
+    pub totp: PathBuf,
     /// The settings file
     pub settings: PathBuf,
     /// The state file
@@ -69,6 +71,8 @@ pub struct ProjectPaths {
     pub worker: PathBuf,
     /// Kelpie's own tools for showing a work item's UI, which every project shares
     pub tools: Tools,
+    /// Kelpie's home, which holds every folder here
+    pub kelpie_home: PathBuf,
     /// The shepherd's home, which a worker may not read. Kelpie's own shepherd,
     /// `<kelpie home>/shep`, unless the runner's `SHEP_HOME` names another.
     pub shep_home: PathBuf,
@@ -89,10 +93,12 @@ impl ProjectPaths {
         let folder = kelpie_home.join("projects").join(project.as_str());
         Self {
             kelpie_settings: kelpie_home.join("settings.toml"),
+            totp: kelpie_home.join("totp"),
             settings: folder.join("settings.toml"),
             state: folder.join("state.json"),
             worker: folder.join("worker"),
             tools: Tools::under(kelpie_home),
+            kelpie_home: kelpie_home.to_owned(),
             shep_home: kelpie_home.join("shep"),
             worktrees: kelpie_home.join("wt").join(project.as_str()),
             builds: kelpie_home.join("targets").join(project.as_str()),
