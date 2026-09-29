@@ -103,6 +103,16 @@ Worth lifting, with attribution:
 - Paperclip: decisions and decision queues, for parking a worker on a ruling. The execution-workspace lease, for worktree exclusivity.
 - Vibe Kanban (Apache-2.0): `crates/executors/src/executors/claude.rs`, `crates/worktree-manager`, `crates/mcp`.
 
+## V1 directions
+
+Not built and not decided: where the maintainer wants kelpie to go after the MVP, noted 2026-09-28.
+
+- Names and shape, per the maintainer: `shep-kelpie` stays the shep adapter (the runner, the dog and a library), published as crates. `kelpie` becomes the Tauri app on top of shep and those crates, shipped as an app, never as a crate.
+- A kelpie GitHub App. Pull requests would come from its own identity instead of the maintainer's account, so the maintainer can request changes and approve like any reviewer. GitHub refuses both from a pull request's author, which is why #53 reworks on a `ready-for-agent` label. Installation tokens, scoped per repo, replace the maintainer's `gh` token, and the gates show as check runs. Webhooks would replace polling, but kelpie runs on the maintainer's machine, so they need a tunnel. Identity and check runs come first, on polling.
+- Any CLI agent, through adapters. The worker, reviewer and judge are already ports. Three things are Claude-shaped today. The worker adapter leans on Claude Code's session resume, usage output and settings file. The guardrails are Claude Code's own sandbox, deny rules and hooks, so another CLI needs kelpie to supply its own sandbox, the largest piece. Pacing reads Anthropic's weekly and 5-hour windows, which becomes a budget per provider.
+- A spike on Restate (restatedev/restate), a durable-execution engine: journaled steps that resume after a crash, exactly-once calls, durable timers and promises, and single-writer keyed state. The runner hand-rolls that today in its state file and resume logic, and the bugs fixed on 2026-09-28 were that class: a crash between the label call and the save that could summon twice, a review round cut short by a restart recorded as a failure (#46), a lease book lost on restart (#19). A ruling is a durable promise, and the turn ceiling and pacing are durable timers. The spike models one work item's loop as a Restate workflow and measures whether the resume code shrinks and those bugs go away. The costs: `restate-server` is one more process (it could run as a sheep), the tests change shape, and the server is under the Business Source License 1.1, which allows this use (it bars offering Restate as a hosted service). Its Rust SDK is MIT.
+- Prior art, checked against each vendor's docs on 2026-09-28. GitHub's Copilot coding agent, Codex, Jules, Cursor's cloud agents and claude-code-action all ship issue to pull request, rework from review comments, and UI screenshots on the pull request. Copilot's Playwright defaults (on by default, localhost only) are the shape #54 follows. None of them has an ordered gate chain, pacing against a subscription's usage windows, or leases on a shared resource across repos. That is where kelpie's design effort goes.
+
 ## Facts
 
 ### Headless Claude Code
