@@ -13,11 +13,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::process::Processes;
 use crate::lease::gpu::{self, Attempt, Claim, GpuLock};
-use crate::ports::{Finding, Reviewer, ReviewerError};
+use crate::ports::{LocalRun, Reviewer, ReviewerError};
 use crate::settings::LocalRound;
 
 /// How often a round waiting on the GPU lock looks for a stop
@@ -30,6 +30,7 @@ const STOP_POLL: Duration = Duration::from_millis(100);
 pub struct LocalReviewer {
     temp_dir: PathBuf,
     processes: Processes,
+    naps: fn(u64) -> Duration,
 }
 
 impl Default for LocalReviewer {
@@ -37,6 +38,7 @@ impl Default for LocalReviewer {
         Self {
             temp_dir: gpu::temp_dir(),
             processes: Processes::default(),
+            naps: gpu::scripts_naps,
         }
     }
 }
@@ -59,33 +61,52 @@ impl LocalReviewer {
         self.processes.stop();
     }
 
+    /// Naps between tries for the GPU lock on `naps`, not the scripts' schedule
+    #[cfg(test)]
+    fn with_naps(mut self, naps: fn(u64) -> Duration) -> Self {
+        self.naps = naps;
+        self
+    }
+
     // Waits on the scripts' own schedule, so kelpie keeps its place in line.
-    fn hold_gpu(&self, round: u32, worktree: &Path) -> Result<GpuHold, ReviewerError> {
+    // On the wall clock, the wait is whole seconds from the first try to the
+    // lock; a hold that fails carries the wait it had, and one stopped with
+    // the runner none.
+    fn hold_gpu(&self, round: u32, worktree: &Path) -> Result<(GpuHold, u64), LocalRun> {
         let lock = GpuLock::under(&self.temp_dir);
         let claim = Claim {
             pid: std::process::id(),
             what: format!("kelpie local round {round} in {}", worktree.display()),
         };
-        let cannot = |e: std::io::Error| {
-            ReviewerError::Failed(format!("cannot take {}: {e}", lock.path().display()))
+        let started = Instant::now();
+        let cannot = |e: std::io::Error| LocalRun {
+            result: Err(ReviewerError::Failed(format!(
+                "cannot take {}: {e}",
+                lock.path().display()
+            ))),
+            gpu_wait_seconds: started.elapsed().as_secs(),
         };
         let mut waited = 0;
         loop {
             match lock.try_take(&claim).map_err(cannot)? {
                 Attempt::Taken => {
-                    return Ok(GpuHold {
+                    let hold = GpuHold {
                         lock,
                         pid: claim.pid,
-                    });
+                    };
+                    return Ok((hold, started.elapsed().as_secs()));
                 }
                 Attempt::Cleared(_) => continue,
                 Attempt::Held(_) => {}
             }
-            let nap = gpu::scripts_naps(waited);
+            let nap = (self.naps)(waited);
             let mut slept = Duration::ZERO;
             while slept < nap {
                 if self.processes.stopping() {
-                    return Err(ReviewerError::Stopped);
+                    return Err(LocalRun {
+                        result: Err(ReviewerError::Stopped),
+                        gpu_wait_seconds: 0,
+                    });
                 }
                 thread::sleep(STOP_POLL);
                 slept += STOP_POLL;
@@ -123,17 +144,28 @@ impl Reviewer for LocalReviewer {
         base: &str,
         out: &Path,
         round: u32,
-    ) -> Result<Vec<Finding>, ReviewerError> {
-        let _hold = match local.gpu_lease() {
-            true => Some(self.hold_gpu(round, worktree)?),
-            false => None,
+    ) -> LocalRun {
+        let (_hold, held_wait) = match local.gpu_lease() {
+            true => match self.hold_gpu(round, worktree) {
+                Ok((hold, wait)) => (Some(hold), wait),
+                Err(run) => return run,
+            },
+            false => (None, 0),
         };
         match local {
-            LocalRound::Off {} => Ok(Vec::new()),
-            LocalRound::Command(local) => self.command_round(local, worktree, base, out, round),
-            LocalRound::Endpoint(endpoint) => {
-                self.endpoint_round(endpoint, worktree, base, out, round)
+            LocalRound::Off {} => LocalRun {
+                result: Ok(Vec::new()),
+                gpu_wait_seconds: held_wait,
+            },
+            LocalRound::Command(local) => {
+                let mut run = self.command_round(local, worktree, base, out, round);
+                run.gpu_wait_seconds += held_wait;
+                run
             }
+            LocalRound::Endpoint(endpoint) => LocalRun {
+                result: self.endpoint_round(endpoint, worktree, base, out, round),
+                gpu_wait_seconds: held_wait,
+            },
         }
     }
 }
@@ -253,7 +285,10 @@ mod tests {
         for (gpu_lease, seen) in [(false, "free"), (true, "held")] {
             let out = dir.path().join(format!("out-{gpu_lease}"));
             let local = command(&script, gpu_lease);
-            let findings = reviewer.round(&local, &worktree, "main", &out, 1).unwrap();
+            let findings = reviewer
+                .round(&local, &worktree, "main", &out, 1)
+                .result
+                .unwrap();
             assert_eq!(findings[0].file, seen, "gpu_lease = {gpu_lease}");
             assert!(
                 lock.holder().is_none(),
@@ -280,14 +315,57 @@ mod tests {
         let local = command(Path::new("/bin/true"), true);
         let out = dir.path().join("out");
         let started = std::time::Instant::now();
-        let result = reviewer.round(&local, dir.path(), "main", &out, 1);
+        let run = reviewer.round(&local, dir.path(), "main", &out, 1);
         stopping.join().unwrap();
-        assert_eq!(result, Err(ReviewerError::Stopped));
+        assert_eq!(run.result, Err(ReviewerError::Stopped));
+        assert_eq!(run.gpu_wait_seconds, 0, "a stopped round reports none");
         assert!(
             started.elapsed() < Duration::from_secs(5),
             "{:?}",
             started.elapsed()
         );
         assert_eq!(lock.holder().and_then(|h| h.pid), Some(parent.pid));
+    }
+
+    fn quick_naps(_waited: u64) -> Duration {
+        Duration::from_millis(200)
+    }
+
+    #[test]
+    fn a_round_that_finds_the_gpu_lock_free_waits_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let reviewer = LocalReviewer::default().with_temp_dir(dir.path().to_owned());
+        let local = command(Path::new("/bin/true"), true);
+        let out = dir.path().join("out");
+        let run = reviewer.round(&local, dir.path(), "main", &out, 1);
+        assert_eq!(run.gpu_wait_seconds, 0);
+    }
+
+    // The lock is held by this test's parent process, which is alive, until
+    // a thread lets go of it.
+    #[test]
+    fn a_round_that_queues_for_the_gpu_lock_reports_how_long() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock = GpuLock::under(dir.path());
+        let parent = Claim {
+            pid: std::os::unix::process::parent_id(),
+            what: "someone else's round".into(),
+        };
+        assert_eq!(lock.try_take(&parent).unwrap(), Attempt::Taken);
+        let reviewer = LocalReviewer::default()
+            .with_temp_dir(dir.path().to_owned())
+            .with_naps(quick_naps);
+        let letting_go = {
+            let lock = GpuLock::under(dir.path());
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(1200));
+                lock.release(parent.pid).unwrap();
+            })
+        };
+        let local = command(Path::new("/bin/true"), true);
+        let out = dir.path().join("out");
+        let run = reviewer.round(&local, dir.path(), "main", &out, 1);
+        letting_go.join().unwrap();
+        assert!(run.gpu_wait_seconds >= 1, "{}", run.gpu_wait_seconds);
     }
 }

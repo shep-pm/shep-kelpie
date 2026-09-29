@@ -474,8 +474,9 @@ pub(super) enum Spent {
         usage: Usage,
         session_cost: Cost,
     },
-    /// A local round that ran, however it ended
-    Local,
+    /// A local round that ran, however it ended, and the seconds of it spent
+    /// queued for the GPU
+    Local { gpu_wait_seconds: u64 },
 }
 
 /// What a [`ReviewCall`] came back with, and what it spent

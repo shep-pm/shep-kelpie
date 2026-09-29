@@ -60,7 +60,7 @@ A command is run as `<command> --dir <worktree> --round <n> --diff <base>`, with
 - `KELPIE_REVIEW_HEAD`: the commit under review
 - `TMPDIR`: the folder the GPU lock lives under
 
-It writes `round-<n>.txt` in that folder, one finding per line as `SEVERITY|path:line|what|why` with `HIGH`, `MEDIUM` or `LOW`, and then an empty `round-<n>.txt.done`. Kelpie reads nothing without the marker, and nothing from stdout. A nonzero exit fails the round. A command that writes `LOW|<path>:0|not reviewed: <n> lines exceeds the chunk limit|...` is run again with `--files <hunk file>` in place of `--diff`, on that file alone. If that run fails, the placeholder stays as the finding.
+It writes `round-<n>.txt` in that folder, one finding per line as `SEVERITY|path:line|what|why` with `HIGH`, `MEDIUM` or `LOW`, and then an empty `round-<n>.txt.done`. Kelpie reads nothing without the marker, and nothing from stdout. A nonzero exit fails the round. A command that writes `LOW|<path>:0|not reviewed: <n> lines exceeds the chunk limit|...` is run again with `--files <hunk file>` in place of `--diff`, on that file alone. If that run fails, the placeholder stays as the finding. A command that queues for the GPU lock itself may say how long on stderr, as `qwen-review: GPU free after <n>s, starting` once it has the lock or `gave up after <n>s waiting for the GPU` when it stops waiting and exits 1. Kelpie counts that, summed over every run of the command in the round, as the round's wait for the GPU, apart from the round's own time. A command that prints neither waited none.
 
 `gpu_lease = true`, on either kind, has kelpie hold the GPU lock around each round. Leave it off for a command that takes the lock itself, as `qwen-review.sh` does.
 

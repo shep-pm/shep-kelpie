@@ -2,11 +2,12 @@
 
 use serde_json::json;
 
-use crate::ports::Role;
+use crate::ports::{ReviewerError, Role};
 use crate::runner::report::StepReport;
 use crate::runner::step;
 use crate::settings::LocalRound;
-use crate::test::{Answer, Rig, Scripted, StandInEndpoint, unreachable_url};
+use crate::state::StateStore;
+use crate::test::{Answer, Rig, Scripted, ScriptedRound, StandInEndpoint, unreachable_url};
 
 const TABLE: &str = "[app.dogs.kelpie.review.local]\n\
                      kind = \"command\"\n\
@@ -240,4 +241,76 @@ fn with_the_local_round_off_no_command_is_needed() {
     assert!(rig.open().is_err(), "the default command is checked");
     rig.edit_settings(|s| s.replace(TABLE, "[app.dogs.kelpie.review.local]\nkind = \"off\"\n"));
     assert!(rig.open().is_ok());
+}
+
+// A running project at its first local round, past the worker's turn.
+fn at_the_local_round() -> (Rig, std::sync::Mutex<crate::runner::Runner>) {
+    let rig = Rig::new("koji");
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+    step(&runner).unwrap(); // the worker's first turn
+    (rig, runner)
+}
+
+// The open work item's timings once the round is saved.
+fn timings_after(rig: &Rig) -> crate::work_item::Timings {
+    let state = StateStore::new(rig.paths().state).load().unwrap().unwrap();
+    state.work_items[0].timings
+}
+
+fn assert_sums_to_wall_time(timings: &crate::work_item::Timings) {
+    let started = timings.started.expect("counted from the start");
+    let charged = timings.charged.expect("charged by the round");
+    assert_eq!(timings.seconds.total(), charged.0 - started.0);
+}
+
+#[test]
+fn a_local_rounds_wait_for_the_gpu_is_counted_apart_from_the_round() {
+    let (rig, runner) = at_the_local_round();
+    rig.reviewer.script([ScriptedRound::Waited {
+        findings: Vec::new(),
+        gpu_wait_seconds: 600,
+        took_seconds: 900,
+    }]);
+    step(&runner).unwrap();
+    let timings = timings_after(&rig);
+    assert_eq!(timings.seconds.gpu_wait, 600);
+    assert_eq!(timings.seconds.local_round, 300);
+    assert_sums_to_wall_time(&timings);
+}
+
+#[test]
+fn a_wait_longer_than_the_round_moves_only_the_rounds_own_length() {
+    let (rig, runner) = at_the_local_round();
+    rig.reviewer.script([ScriptedRound::Waited {
+        findings: Vec::new(),
+        gpu_wait_seconds: 5000,
+        took_seconds: 100,
+    }]);
+    step(&runner).unwrap();
+    let timings = timings_after(&rig);
+    assert_eq!(timings.seconds.gpu_wait, 100);
+    assert_eq!(timings.seconds.local_round, 0);
+    assert_sums_to_wall_time(&timings);
+}
+
+#[test]
+fn a_failed_local_round_keeps_the_wait_it_had() {
+    let (rig, runner) = at_the_local_round();
+    rig.reviewer.script([ScriptedRound::FailedWaiting {
+        error: ReviewerError::Failed("gave up".into()),
+        gpu_wait_seconds: 40,
+        took_seconds: 50,
+    }]);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::GateFailed { .. })
+    ));
+    let timings = timings_after(&rig);
+    assert_eq!(timings.seconds.gpu_wait, 40);
+    assert_eq!(timings.seconds.local_round, 10);
+    assert_sums_to_wall_time(&timings);
 }
