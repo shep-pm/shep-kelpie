@@ -8,8 +8,8 @@
 //! or a push in the worker's worktree, the lines it adds or sends. It never
 //! echoes what it matched.
 //!
-//! The hook runs outside the sandbox, so git runs only through
-//! [`worktree::trusted`], with the worktree's git dirs named and checked. A
+//! The hook runs outside the sandbox, so it runs git the way kelpie's own
+//! worktree steps do, with the worktree's git dirs named and checked. A
 //! repo the worker made could name any program in its own config.
 
 mod shell;
