@@ -6,8 +6,8 @@
 //! setting is required except the ones added after the first build
 //! (`max_items`, `review.local`, `review.local_rounds`, `coderabbit.rounds`,
 //! `pacing.enabled`, `worker.allowed_domains`, `worker.build_env`,
-//! `worker.instructions_file`, `worker.turn_timeout`, `ruling_channels` and
-//! `[preview]`).
+//! `worker.instructions_file`, `worker.turn_timeout`, `worker.guard_hooks`,
+//! `ruling_channels` and `[preview]`).
 //! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
@@ -222,7 +222,10 @@ pub struct Worker {
     /// None when absent.
     #[serde(default)]
     pub instructions_file: Option<PathBuf>,
-    /// Hooks copied into each worker's own settings file
+    /// The project's own hooks, copied into each worker's settings file
+    /// after kelpie's guard. Each must resolve when the runner starts.
+    /// Empty when absent.
+    #[serde(default)]
     pub guard_hooks: Vec<GuardHook>,
     /// Minutes a worker's turn may run before kelpie stops it and parks it
     /// on a ruling, keeping its session. 60 when absent.
@@ -240,7 +243,7 @@ fn default_turn_timeout() -> NonZeroU32 {
     NonZeroU32::MIN.saturating_add(59)
 }
 
-/// One of the maintainer's guard hooks, run by path
+/// One of a project's own guard hooks, run by path
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GuardHook {

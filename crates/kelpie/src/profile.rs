@@ -5,7 +5,8 @@
 //! The sandbox does not cover Claude's own file tools, so a hook that runs
 //! `kelpie confine` holds those to the same folders. Both refuse Claude
 //! Code's own files in the worktree. Deny rules keep what only the project
-//! manager does, and credential paths, out of reach.
+//! manager does, and credential paths, out of reach. `kelpie guard` judges
+//! every Bash call before any hook the project adds.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -69,6 +70,21 @@ const PM_ONLY: [&str; 5] = [
 
 // `gh api` could merge or relabel around the rules above, and `gh auth token`
 // prints the maintainer's token. No worker needs either.
+// Tools no worker needs that reach past its fence: `Monitor` runs a command
+// or WebSocket no hook judges; `RemoteTrigger` starts cloud agents on the
+// maintainer's account with none of this file; `Workflow` agents escape the
+// worker's pacing; and kelpie, not the worker, owns its worktree.
+const TOOLS_DENY: [&str; 5] = [
+    "Monitor",
+    "RemoteTrigger",
+    "Workflow",
+    "EnterWorktree",
+    "ExitWorktree",
+];
+
+// What `kelpie guard` judges: every command, and a subagent's isolation.
+const GUARDED_TOOLS: &str = "Bash|Agent|Task";
+
 const GH_DENY: [&str; 4] = [
     "Bash(gh api)",
     "Bash(gh api *)",
@@ -125,7 +141,7 @@ pub struct WorkerProfile<'a> {
     pub branch: &'a str,
     /// The kelpie binary, which the file-tool hook runs
     pub kelpie: &'a Path,
-    /// The guard hooks the project's settings name
+    /// The project's own guard hooks, which run after kelpie's
     pub guard_hooks: &'a [GuardHook],
     /// The domains the project's settings add to GitHub's
     pub allowed_domains: &'a [NonBlank],
@@ -170,6 +186,7 @@ impl WorkerProfile<'_> {
             .chain([shep_home])
             .chain(PM_ONLY.iter().map(|&r| r.to_owned()))
             .chain(GH_DENY.iter().map(|&r| r.to_owned()))
+            .chain(TOOLS_DENY.iter().map(|&r| r.to_owned()))
             .chain(push_to_base())
             .chain(PUSH_FLAGS.iter().map(|&r| r.to_owned()))
             .collect();
@@ -198,6 +215,9 @@ impl WorkerProfile<'_> {
                 "network": network,
             },
             "permissions": { "deny": deny },
+            // A project's own settings could otherwise switch every hook off,
+            // `confine` and the guard with them. This file outranks them.
+            "disableAllHooks": false,
             "hooks": self.hooks(),
             "env": self.env(),
         })
@@ -229,6 +249,14 @@ impl WorkerProfile<'_> {
                 .join(" ");
             pre.push(entry(Some(PLAYWRIGHT_TOOLS), &guard));
         }
+        let guard = [
+            self.kelpie,
+            Path::new("guard"),
+            self.git_common_dir,
+            self.worktree,
+        ]
+        .map(|p| shell_quote(&p.to_string_lossy()));
+        pre.push(entry(Some(GUARDED_TOOLS), &guard.join(" ")));
         let mut post = Vec::new();
         for hook in self.guard_hooks {
             let e = entry(
@@ -557,6 +585,26 @@ mod tests {
     }
 
     #[test]
+    fn a_projects_settings_cannot_switch_the_hooks_off() {
+        assert_eq!(settings(&[])["disableAllHooks"], false);
+        assert_eq!(with_preview(&[])["disableAllHooks"], false);
+    }
+
+    #[test]
+    fn tools_that_reach_past_the_fence_are_denied() {
+        let deny = settings(&[])["permissions"]["deny"].clone();
+        for tool in [
+            "Monitor",
+            "RemoteTrigger",
+            "Workflow",
+            "EnterWorktree",
+            "ExitWorktree",
+        ] {
+            assert!(strings(&deny).contains(&tool), "{tool}: {deny}");
+        }
+    }
+
+    #[test]
     fn gh_api_and_gh_auth_are_denied() {
         let deny = settings(&[])["permissions"]["deny"].clone();
         let deny = strings(&deny);
@@ -642,20 +690,35 @@ mod tests {
     }
 
     #[test]
-    fn the_projects_guard_hooks_are_carried_after_kelpies_own() {
-        let s = settings(&[
-            guard(
-                HookEvent::PreToolUse,
-                Some("Bash"),
-                "node ~/.claude/hooks/git-gh-guard.js",
-            ),
-            guard(HookEvent::PostToolUse, None, "~/bin/after"),
-        ]);
+    fn every_worker_has_kelpies_guard_on_bash_and_agents_with_no_project_hooks() {
+        let s = settings(&[]);
         assert_eq!(
             s["hooks"]["PreToolUse"][1],
             json!({
+                "matcher": "Bash|Agent|Task",
+                "hooks": [{
+                    "type": "command",
+                    "command": r"'/opt/kelpie'\''s bin/kelpie' 'guard' '/k/repos/shep/.git' '/k/wt/shep/7'",
+                }],
+            })
+        );
+        assert_eq!(s["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
+        assert_eq!(s["hooks"]["PostToolUse"], Value::Null);
+        let preview = with_preview(&[])["hooks"]["PreToolUse"][2].to_string();
+        assert!(preview.contains("'guard'"), "{preview}");
+    }
+
+    #[test]
+    fn the_projects_guard_hooks_are_carried_after_kelpies_own() {
+        let s = settings(&[
+            guard(HookEvent::PreToolUse, Some("Bash"), "~/bin/before"),
+            guard(HookEvent::PostToolUse, None, "~/bin/after"),
+        ]);
+        assert_eq!(
+            s["hooks"]["PreToolUse"][2],
+            json!({
                 "matcher": "Bash",
-                "hooks": [{ "type": "command", "command": "node ~/.claude/hooks/git-gh-guard.js" }],
+                "hooks": [{ "type": "command", "command": "~/bin/before" }],
             })
         );
         assert_eq!(

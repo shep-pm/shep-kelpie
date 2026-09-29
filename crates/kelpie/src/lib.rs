@@ -17,6 +17,7 @@ pub mod confine;
 pub mod dog;
 pub mod fence;
 pub mod flock;
+pub mod guard;
 pub mod lease;
 pub mod pacer;
 pub mod ports;
