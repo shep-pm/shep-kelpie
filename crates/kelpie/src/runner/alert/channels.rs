@@ -4,6 +4,14 @@ use crate::test::Rig;
 
 const NO_WEBHOOK: &str = "";
 
+// Kelpie's settings with the rig's webhook and `channels` chosen
+fn kelpie_settings(channels: &str) -> String {
+    format!(
+        "ruling_channels = {channels}\n[webhook]\nkind = \"ntfy\"\nurl = \"{}\"\n",
+        Rig::WEBHOOK_URL
+    )
+}
+
 #[test]
 fn webhook_only_never_starts_a_relay() {
     let (rig, runner, _) = Rig::parked_set("shep", |rig| {
@@ -42,13 +50,13 @@ fn relay_only_keeps_a_ruling_owed_until_the_relay_takes_it() {
         rig.set_kelpie_settings(NO_WEBHOOK);
         rig.set_ruling_channels(r#"["relay"]"#);
     });
-    let start = rig.clock.now().0 - Rig::EPOCH;
+    let offset = rig.clock.now().0 - Rig::EPOCH;
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::AlertFailed {
             id: 1,
             reason: "cannot reach the relay: the rig's relay is down".into(),
-            retry_at: Timestamp(Rig::EPOCH + start + 60),
+            retry_at: Timestamp(Rig::EPOCH + offset + 60),
         })
     );
     assert!(rig.alerts.posts().is_empty());
@@ -60,14 +68,10 @@ fn relay_only_keeps_a_ruling_owed_until_the_relay_takes_it() {
 }
 
 #[test]
-fn kelpies_settings_choose_for_a_project_that_does_not() {
+fn kelpies_settings_choose_when_the_project_names_no_channels() {
     let (rig, runner, _) = Rig::parked_set("shep", |rig| {
         rig.relay.set_up(true);
-        let text = format!(
-            "ruling_channels = [\"relay\"]\n[webhook]\nkind = \"ntfy\"\nurl = \"{}\"\n",
-            Rig::WEBHOOK_URL
-        );
-        rig.set_kelpie_settings(&text);
+        rig.set_kelpie_settings(&kelpie_settings(r#"["relay"]"#));
     });
     step(&runner).unwrap();
     assert!(rig.alerts.posts().is_empty());
@@ -78,11 +82,7 @@ fn kelpies_settings_choose_for_a_project_that_does_not() {
 fn a_projects_choice_wins_over_kelpies() {
     let (rig, runner, _) = Rig::parked_set("shep", |rig| {
         rig.relay.set_up(true);
-        let text = format!(
-            "ruling_channels = [\"relay\"]\n[webhook]\nkind = \"ntfy\"\nurl = \"{}\"\n",
-            Rig::WEBHOOK_URL
-        );
-        rig.set_kelpie_settings(&text);
+        rig.set_kelpie_settings(&kelpie_settings(r#"["relay"]"#));
         rig.set_ruling_channels(r#"["webhook"]"#);
     });
     step(&runner).unwrap();
