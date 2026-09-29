@@ -19,10 +19,10 @@ pub(super) struct Command {
 // A heredoc's place in the lifted text: `<<`, then its index between these.
 const MARK: char = '\u{0}';
 
-// Words a command can hide behind: `if gh pr create`, `do git commit`.
-const LEADS: [&str; 14] = [
+// Words a command can hide behind: `if gh pr create`, `env git commit`.
+const LEADS: [&str; 18] = [
     "if", "while", "until", "do", "then", "else", "elif", "time", "command", "builtin", "exec",
-    "!", "{", "}",
+    "env", "nohup", "nice", "setsid", "!", "{", "}",
 ];
 
 /// Every command in `line`, a nested body's before the command around it

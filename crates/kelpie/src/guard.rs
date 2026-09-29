@@ -227,9 +227,10 @@ fn gh(command: &Command, cwd: &Path, home: Option<&Home>) -> Vec<String> {
         );
     }
     if verb.0 == "pr" {
-        for title in titles.iter().filter(|t| !conventional(t)) {
+        // Not echoed: a title can carry the home folder's path too.
+        if !titles.iter().all(|t| conventional(t)) {
             out.push(format!(
-                "the title {title:?} is not a conventional commit. Write it as \
+                "this pull request's title is not a conventional commit. Write it as \
                  `type(scope): summary`, the scope optional, with the type one of {}, and \
                  `!` after the type or scope for a breaking change.",
                 TYPES.join(", ")
@@ -283,6 +284,8 @@ fn files(args: &[String], long: &[&str], short: &[char], cwd: &Path) -> Vec<Stri
     values(args, long, short)
         .into_iter()
         .filter(|f| f != "-")
+        // An empty `cwd` is a folder the guard could not follow.
+        .filter(|f| !cwd.as_os_str().is_empty() || Path::new(f).is_absolute())
         .filter_map(|f| {
             let path = cwd.join(f);
             // A pipe would hold the hook open.
@@ -321,10 +324,10 @@ struct Home {
 }
 
 impl Home {
-    // A path this short would match every absolute path.
+    // `/` alone would match every absolute path.
     fn new(path: &Path) -> Option<Self> {
         let text = path.to_str()?.trim_end_matches('/').to_lowercase();
-        (text.matches('/').count() >= 2).then(|| Self {
+        (text.len() > 1 && text.starts_with('/')).then(|| Self {
             path: path.to_owned(),
             text,
         })

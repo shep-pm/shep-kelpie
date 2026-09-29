@@ -385,10 +385,35 @@ fn a_worktree_whose_git_was_repointed_is_refused_not_read() {
 }
 
 #[test]
+fn a_command_behind_a_wrapper_is_still_judged() {
+    for command in [
+        "env git commit -m 'fix: /home/tester/x'",
+        "env GH_PAGER= gh pr create --title Parser",
+        "nohup git tag -m '/home/tester' v1",
+    ] {
+        assert!(matches!(bash(command), Verdict::Refuse(_)), "{command}");
+    }
+}
+
+#[test]
+fn a_one_level_home_folder_is_still_kept_out() {
+    let call = json!({ "tool_name": "Bash", "cwd": "/x", "tool_input": {
+        "command": "git commit -m 'fix: see /root/.kelpie/wt'",
+    } });
+    let verdict = judge(
+        call.to_string().as_bytes(),
+        Some(Path::new("/root")),
+        nowhere(),
+    );
+    assert!(matches!(verdict, Verdict::Refuse(_)), "{verdict:?}");
+}
+
+#[test]
 fn every_problem_in_one_call_is_named_once() {
     let why = refusal(bash(
-        "gh pr create --title 'Parser' --body /home/tester && gh pr create --title 'Parser'",
+        "gh pr create --title 'Parser' --body /home/tester && gh pr create --title 'In /home/tester'",
     ));
+    assert!(!why.contains(HOME), "a title is not echoed: {why}");
     assert_eq!(why.matches("not a conventional commit").count(), 1, "{why}");
     assert_eq!(
         why.matches("home folder's absolute path").count(),
