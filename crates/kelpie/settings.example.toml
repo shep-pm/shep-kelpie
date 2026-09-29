@@ -1,7 +1,7 @@
 # A project's settings, read once when its runner starts. Every key is
 # required except `pacing.enabled`, `worker.allowed_domains`,
-# `worker.build_env` and `worker.turn_timeout`, which a file written before
-# them may leave out.
+# `worker.build_env`, `worker.instructions_file` and `worker.turn_timeout`,
+# which a file written before them may leave out.
 # This file holds the first build's defaults, for shep.
 
 repo = "~/.kelpie/repos/shep"
@@ -63,6 +63,12 @@ kickoff_hours = 8
 [worker]
 allowed_domains = ["crates.io", "index.crates.io", "static.crates.io"]
 build_env = {}
+
+# A file of extra worker instructions, appended to kelpie's own: rules the
+# repo's docs don't carry. `~/` is the home folder, and a relative path is
+# taken from this file's folder. A missing file stops the runner. Left out
+# here, so shep's first-build defaults carry none.
+# instructions_file = "~/.kelpie/projects/shep/worker-instructions.md"
 
 # A worker turn still running at this ceiling is more likely stuck than
 # busy: kelpie stops it, parks it and asks. A yes resumes the same session.

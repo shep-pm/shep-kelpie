@@ -13,8 +13,9 @@ use serde::Deserialize;
 use crate::confine::Verdict;
 use crate::runner::ProjectName;
 
-/// The tools the relay needs besides Bash: finding and sending a push
-const PASSED: [&str; 2] = ["ToolSearch", "PushNotification"];
+/// The tools the relay needs besides Bash: finding a tool, sending a push,
+/// and asking a ruling as multiple choice
+const PASSED: [&str; 3] = ["ToolSearch", "PushNotification", "AskUserQuestion"];
 
 /// Judges the tool call in `input` against the relay's two commands, each
 /// run as `kelpie`
@@ -157,6 +158,37 @@ mod tests {
         for tool in PASSED {
             let call = json!({ "tool_name": tool, "tool_input": {} });
             assert_eq!(judge(call.to_string().as_bytes(), KELPIE), Verdict::Allow);
+        }
+    }
+
+    #[test]
+    fn asking_a_ruling_as_multiple_choice_goes_through() {
+        let call = json!({ "tool_name": "AskUserQuestion", "tool_input": {
+            "questions": [{ "question": "Ruling 3: merge?" }],
+        } });
+        assert_eq!(judge(call.to_string().as_bytes(), KELPIE), Verdict::Allow);
+    }
+
+    // A tool the instructions name but the gate refuses fails only at
+    // runtime: a relay told to ask a ruling as multiple choice was refused.
+    #[test]
+    fn every_tool_the_instructions_name_is_one_the_gate_passes() {
+        let named: Vec<&str> = crate::relay::INSTRUCTIONS
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|w| {
+                w.starts_with(|c: char| c.is_ascii_uppercase())
+                    && w.chars().any(|c| c.is_ascii_lowercase())
+                    && w.chars().skip(1).any(|c| c.is_ascii_uppercase())
+            })
+            .collect();
+        for tool in ["ToolSearch", "PushNotification", "AskUserQuestion"] {
+            assert!(
+                named.contains(&tool),
+                "the instructions no longer name {tool}"
+            );
+        }
+        for tool in named {
+            assert!(PASSED.contains(&tool), "{tool} is named but refused");
         }
     }
 

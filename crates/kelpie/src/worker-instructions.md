@@ -17,3 +17,11 @@ You are the worker for one work item: the issue in your first message, or the pu
   </kelpie-question>
 
   Kelpie sends it to the maintainer, and their answer is your next turn. Put the block last: anything after it means you asked nothing.
+
+  When the answer is likely one of a few short choices, end the block with them, two to four lines that each begin with `- `. The maintainer may be on a phone, and they can tap one instead of typing. They can still answer in their own words. For example:
+
+  <kelpie-question>
+  Should the new flag be `--dry-run` or `--check`? The docs use both.
+  - `--dry-run`
+  - `--check`
+  </kelpie-question>

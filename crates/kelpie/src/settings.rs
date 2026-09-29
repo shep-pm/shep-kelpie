@@ -4,7 +4,7 @@
 //! are refused, so a misspelt or malformed setting stops the runner with a
 //! message naming it. Every setting is required except the ones added after
 //! the first build (`pacing.enabled`, `worker.allowed_domains`,
-//! `worker.build_env` and `worker.turn_timeout`): a file written before them
+//! `worker.build_env`, `worker.instructions_file` and `worker.turn_timeout`): a file written before them
 //! loads with the documented default, so an upgrade never breaks an existing
 //! project.
 //! `settings.example.toml` beside this crate holds the defaults.
@@ -173,6 +173,12 @@ pub struct Worker {
     /// absent.
     #[serde(default)]
     pub build_env: BTreeMap<EnvName, BuildDir>,
+    /// A file of extra instructions for every worker, appended to kelpie's
+    /// own: rules the repo's docs don't carry. A leading `~/` is the home
+    /// folder, and a relative path is taken from the settings file's folder.
+    /// None when absent.
+    #[serde(default)]
+    pub instructions_file: Option<PathBuf>,
     /// Hooks copied into each worker's own settings file
     pub guard_hooks: Vec<GuardHook>,
     /// Minutes a worker's turn may run before kelpie stops it and parks it
@@ -394,16 +400,27 @@ impl Settings {
             path: path.to_owned(),
             kind: e.kind(),
         })?;
-        Self::parse(&text, home).map_err(|message| SettingsError::Parse {
+        let mut settings = Self::parse(&text, home).map_err(|message| SettingsError::Parse {
             path: path.to_owned(),
             message,
-        })
+        })?;
+        if let (Some(file), Some(folder)) = (&mut settings.worker.instructions_file, path.parent())
+            && file.is_relative()
+        {
+            *file = folder.join(&*file);
+        }
+        Ok(settings)
     }
 
     fn parse(text: &str, home: &Path) -> Result<Self, String> {
         let mut settings: Self = toml::from_str(text).map_err(|e| e.to_string())?;
         if let Ok(rest) = settings.repo.strip_prefix("~") {
             settings.repo = home.join(rest);
+        }
+        if let Some(file) = &mut settings.worker.instructions_file
+            && let Ok(rest) = file.strip_prefix("~")
+        {
+            *file = home.join(rest);
         }
         Ok(settings)
     }
@@ -465,6 +482,14 @@ mod tests {
             domains,
             ["crates.io", "index.crates.io", "static.crates.io"]
         );
+    }
+
+    #[test]
+    fn the_instructions_file_expands_the_home_folder_and_defaults_to_none() {
+        assert_eq!(parse(EXAMPLE).unwrap().worker.instructions_file, None);
+        let text = EXAMPLE.replace("build_env = {}\n", "instructions_file = \"~/w.md\"\n");
+        let file = parse(&text).unwrap().worker.instructions_file;
+        assert_eq!(file.as_deref(), Some(Path::new("/home/maintainer/w.md")));
     }
 
     #[test]
