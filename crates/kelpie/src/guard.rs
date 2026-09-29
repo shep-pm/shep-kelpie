@@ -333,11 +333,11 @@ impl Home {
         })
     }
 
-    // Whether `text` names the folder, or a path under it.
-    fn is_in(&self, text: &str) -> bool {
-        let text = text.to_lowercase();
-        text.match_indices(&self.text).any(|(at, _)| {
-            text[at + self.text.len()..]
+    // Whether `written` names the folder, or a path under it.
+    fn is_in(&self, written: &str) -> bool {
+        let written = written.to_lowercase();
+        written.match_indices(&self.text).any(|(at, _)| {
+            written[at + self.text.len()..]
                 .chars()
                 .next()
                 .is_none_or(|c| !(c.is_alphanumeric() || c == '_' || c == '-'))
