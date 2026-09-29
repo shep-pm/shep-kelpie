@@ -621,19 +621,87 @@ fn a_worktree_whose_git_was_repointed_is_refused_not_read() {
 
 // A folder the guard cannot follow is judged as the worktree, not skipped.
 #[test]
-fn a_push_from_a_folder_the_guard_cannot_follow_reads_the_worktree() {
-    let tree = WorkerTree::new();
-    tree.write("notes.md", "built in /home/tester/wt\n");
-    tree.git(&["add", "notes.md"]);
-    tree.git(&["commit", "--quiet", "-m", "docs: notes"]);
+fn a_commit_or_push_from_a_folder_the_guard_cannot_follow_is_refused() {
     for command in [
         "cd \"$(git rev-parse --show-toplevel)\" && git push",
         "cd \"$PWD\" && git push origin HEAD",
+        "cd $D && git push",
+        "cd \"$(mktemp -d)\" && git commit -m 'fix: x'",
         "cd - && git push",
+        "popd; git push",
         "git -C \"$PWD\" push",
+        "git -C \"$D\" commit -m 'fix: x'",
     ] {
-        let why = refusal(tree.bash(command));
-        assert!(why.contains("`notes.md`"), "{command}: {why}");
+        let why = refusal(bash(command));
+        assert!(
+            why.contains("outside this worktree's own repo"),
+            "{command}: {why}"
+        );
+    }
+    assert_eq!(bash("cd . && git push origin HEAD"), Verdict::Allow);
+}
+
+// An option git takes a value for, read as the command, hid a push.
+#[test]
+fn git_options_are_read_from_a_known_list() {
+    let tree = WorkerTree::new();
+    tree.write("notes.md", "/home/tester/x\n");
+    tree.git(&["add", "notes.md"]);
+    tree.git(&["commit", "--quiet", "-m", "docs: notes"]);
+    let why = refusal(tree.bash("git --attr-source status push origin HEAD"));
+    assert!(why.contains("`notes.md`"), "{why}");
+    for command in [
+        "git --frobnicate status",
+        "git --exec-pat=x push",
+        "git -Z push",
+    ] {
+        let why = refusal(bash(command));
+        assert!(
+            why.contains("cannot read the git option"),
+            "{command}: {why}"
+        );
+    }
+    for command in ["git --no-pager log -1", "git -P status", "git --version"] {
+        assert_eq!(bash(command), Verdict::Allow, "{command}");
+    }
+}
+
+// Git takes an abbreviated long option, and `:` pushes every matching branch.
+#[test]
+fn push_forms_the_guard_does_not_know_are_refused() {
+    for command in [
+        "git push origin :",
+        "git push origin +:",
+        "git push --branches origin",
+        "git push --al origin",
+        "git push --mirr origin",
+        "git push --tag origin",
+        "git push --follow-t origin",
+        "git push --prune origin",
+        "git push --recurse-submodules=on-demand origin HEAD",
+        "git push --receive-pack=x origin HEAD",
+    ] {
+        let why = refusal(bash(command));
+        assert!(why.contains("forms it knows"), "{command}: {why}");
+    }
+    for command in [
+        "git push -u origin HEAD",
+        "git push --set-upstream origin HEAD:kelpie/7",
+        "git push -o ci.skip origin HEAD",
+        "git push --force-with-lease=kelpie/7 origin HEAD",
+    ] {
+        assert_eq!(bash(command), Verdict::Allow, "{command}");
+    }
+}
+
+#[test]
+fn an_export_of_a_name_the_shell_works_out_redirects_git() {
+    for command in [
+        "export $(printf GIT_DIR=/x); git push",
+        "export \"$V\"; git commit -m 'fix: x'",
+    ] {
+        let why = refusal(bash(command));
+        assert!(why.contains("GIT_"), "{command}: {why}");
     }
 }
 

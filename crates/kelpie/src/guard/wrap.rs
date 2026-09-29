@@ -1,9 +1,9 @@
 //! What a command runs once the programs wrapped around it are taken off
 //!
 //! `env`, `timeout`, `nice` and the like run the command after their own
-//! options, so the guard judges that command. Anything that runs a command
-//! the guard cannot read is refused: `eval`, `xargs` running git or gh, a
-//! shell other than the four it reads, and `env -S`. No worker needs them.
+//! options, so the guard judges that command. Some ways of running a command
+//! it cannot read are refused: `eval`, `xargs` running git or gh, a shell
+//! other than the four it reads, and `env -S`. Others it does not know of.
 
 /// The shells whose `-c` script, or heredoc, the guard reads as commands
 pub(super) const SHELLS: [&str; 4] = ["sh", "bash", "zsh", "dash"];
@@ -40,11 +40,12 @@ pub(super) fn redirects_git(name: &str) -> bool {
 /// redirects git: an `export`, a `declare -x`, or an assignment alone,
 /// which `set -a` would export
 pub(super) fn sets_git_redirect(words: &[String]) -> bool {
+    // A name the shell works out when it runs could be any of them.
     let names = |words: &[String]| {
-        words
-            .iter()
-            .filter(|w| !w.starts_with('-'))
-            .any(|w| redirects_git(w.split_once('=').map_or(w.as_str(), |(n, _)| n)))
+        words.iter().filter(|w| !w.starts_with('-')).any(|w| {
+            let name = w.split_once('=').map_or(w.as_str(), |(n, _)| n);
+            !is_name(name) || redirects_git(name)
+        })
     };
     match words.first().map(|w| program(w)) {
         Some("export" | "declare" | "typeset" | "local" | "readonly") => names(&words[1..]),
@@ -175,12 +176,15 @@ fn runs_script(rest: &[String]) -> bool {
 
 fn assignment(word: &str) -> Option<(&str, &str)> {
     let (name, value) = word.split_once('=')?;
-    let named = name
-        .chars()
+    is_name(name).then_some((name, value))
+}
+
+// A shell variable's name, as written.
+fn is_name(name: &str) -> bool {
+    name.chars()
         .next()
         .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-    named.then_some((name, value))
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 // How many words a wrapper's own options take; `valued` take a separate value.
@@ -306,6 +310,8 @@ mod tests {
             "declare -x GIT_WORK_TREE=.",
             "export GIT_DIR",
             "GIT_DIR=/x",
+            "export $(printf GIT_DIR=/x)",
+            "export $V",
         ] {
             assert!(sets_git_redirect(&w(line)), "{line}");
         }
