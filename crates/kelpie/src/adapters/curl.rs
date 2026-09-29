@@ -439,6 +439,19 @@ mod tests {
         served.join().unwrap();
         assert_eq!(err, AlertError::Unreadable);
         assert!(!err.to_string().contains("s3cr3t"), "{err}");
+
+        // A topic kelpie posts to never holds this much, however well formed.
+        let line = "{\"id\":\"a\",\"event\":\"message\",\"message\":\"x\"}\n";
+        let big: &'static str = line.repeat(REPLIES_MAX / line.len() + 1).leak();
+        let (url, served) = serving(200, big);
+        let err = Curl
+            .replies(
+                &webhook(WebhookKind::Ntfy, &url),
+                &Since::Time(Timestamp(1)),
+            )
+            .unwrap_err();
+        served.join().unwrap();
+        assert_eq!(err, AlertError::Unreadable);
     }
 
     #[test]
