@@ -64,10 +64,9 @@ impl StandInEndpoint {
     }
 }
 
-/// A base URL nothing answers on: a port bound and let go at once
+/// A base URL nothing answers on: port 1, which is never served
 pub(crate) fn unreachable_url() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    format!("http://{}/v1", listener.local_addr().unwrap())
+    "http://127.0.0.1:1/v1".to_owned()
 }
 
 fn serve(stream: TcpStream, shared: &Mutex<Shared>) {
