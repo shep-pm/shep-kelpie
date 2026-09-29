@@ -16,7 +16,7 @@ mod relay;
 mod shots;
 mod usage;
 
-pub use claude::ClaudeCli;
+pub use claude::{ClaudeCli, LambLabels};
 pub use curl::Curl;
 pub use gh::Gh;
 pub use leases::ShepLeases;

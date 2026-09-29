@@ -67,7 +67,7 @@ fn serve(project: &str) -> Result<(), String> {
     let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
     let paths = ProjectPaths::under(&kelpie_home, &project);
     let shepherd = shep_channel::serve();
-    let claude = ClaudeCli::default();
+    let claude = ClaudeCli::labelling(Arc::new(shepherd.clone()));
     let reviewer = QwenReviewer::new(&home);
     let shots = ShotsCli::new(paths.tools.clone());
     let epoch = Epoch(u64::from(std::process::id()));

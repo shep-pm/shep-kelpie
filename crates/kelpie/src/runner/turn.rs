@@ -262,6 +262,7 @@ impl Runner {
         };
         Ok(ClaudeCall {
             role: Role::Worker,
+            issue: item.issue,
             model: item.worker.model.clone(),
             effort: item.worker.effort,
             session,
