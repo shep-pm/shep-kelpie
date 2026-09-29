@@ -8,7 +8,7 @@
 //! really calls. Without both, nothing here runs.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use serde::Deserialize;
@@ -123,6 +123,36 @@ pub struct Launch {
     pub runtime_args: Vec<String>,
     /// The local port the dev server answers on
     pub port: u16,
+    /// The folder the dev server starts in, relative to the worktree
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+}
+
+impl Launch {
+    /// The folder in `worktree` the dev server starts in: `cwd`, or the worktree
+    ///
+    /// Symlinks are resolved first, so a folder the worker swapped for a link
+    /// out of the worktree is refused too.
+    ///
+    /// # Errors
+    ///
+    /// Why the folder cannot be found, or that it lies outside `worktree`.
+    pub fn dir(&self, worktree: &Path) -> Result<PathBuf, String> {
+        let root = worktree
+            .canonicalize()
+            .map_err(|e| format!("cannot find the worktree: {e}"))?;
+        let Some(cwd) = &self.cwd else {
+            return Ok(root);
+        };
+        let dir = root
+            .join(cwd)
+            .canonicalize()
+            .map_err(|e| format!("cannot find {LAUNCH_FILE}'s cwd {cwd:?}: {e}"))?;
+        if !dir.starts_with(&root) {
+            return Err(LaunchError::Cwd(cwd.clone()).to_string());
+        }
+        Ok(dir)
+    }
 }
 
 /// Why a launch configuration could not be read
@@ -134,6 +164,8 @@ pub enum LaunchError {
     Parse(String),
     /// No configuration has the settings' name, or the file lists none
     Missing(Option<String>),
+    /// The configuration's `cwd` leaves the worktree
+    Cwd(String),
 }
 
 impl fmt::Display for LaunchError {
@@ -143,6 +175,7 @@ impl fmt::Display for LaunchError {
             Self::Parse(e) => write!(f, "cannot parse {LAUNCH_FILE}: {e}"),
             Self::Missing(Some(name)) => write!(f, "{LAUNCH_FILE} has no configuration {name:?}"),
             Self::Missing(None) => write!(f, "{LAUNCH_FILE} lists no configuration"),
+            Self::Cwd(cwd) => write!(f, "{LAUNCH_FILE}'s cwd {cwd:?} leaves the worktree"),
         }
     }
 }
@@ -200,7 +233,16 @@ fn parse_launch(text: &str, name: Option<&str>) -> Result<Launch, LaunchError> {
         Some(name) => file.configurations.into_iter().find(|c| c.name == name),
         None => file.configurations.into_iter().next(),
     };
-    found.ok_or_else(|| LaunchError::Missing(name.map(str::to_owned)))
+    let found = found.ok_or_else(|| LaunchError::Missing(name.map(str::to_owned)))?;
+    if let Some(cwd) = &found.cwd {
+        let inside = Path::new(cwd)
+            .components()
+            .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+        if !inside {
+            return Err(LaunchError::Cwd(cwd.clone()));
+        }
+    }
+    Ok(found)
 }
 
 /// Chromium's `--host-resolver-rules`: every host fails to resolve but the
@@ -398,6 +440,7 @@ mod tests {
                 runtime_executable: "bun".into(),
                 runtime_args: vec!["run".into(), "dev".into()],
                 port: 3000,
+                cwd: None,
             }
         );
         assert_eq!(
@@ -409,6 +452,45 @@ mod tests {
                 .unwrap_err()
                 .to_string(),
             ".claude/launch.json has no configuration \"storybook\""
+        );
+    }
+
+    // shep's own file, whose dev server lives in `web/`
+    const SHEP: &str = r#"{
+        "configurations": [
+            { "name": "web", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 5173, "cwd": "web" }
+        ]
+    }"#;
+
+    #[test]
+    fn the_dev_server_starts_in_the_configurations_cwd() {
+        let worktree = worktree_with(SHEP);
+        std::fs::create_dir(worktree.path().join("web")).unwrap();
+        let launch = parse_launch(SHEP, None).unwrap();
+        let root = worktree.path().canonicalize().unwrap();
+        assert_eq!(launch.dir(worktree.path()), Ok(root.join("web")));
+        let no_cwd = parse_launch(PLAYGROUND, None).unwrap();
+        assert_eq!(no_cwd.dir(worktree.path()), Ok(root));
+    }
+
+    #[test]
+    fn a_cwd_that_leaves_the_worktree_is_refused() {
+        for cwd in ["..", "../other", "web/../..", "/tmp"] {
+            let text = SHEP.replace("\"cwd\": \"web\"", &format!("\"cwd\": {cwd:?}"));
+            assert_eq!(
+                parse_launch(&text, None),
+                Err(LaunchError::Cwd(cwd.to_owned())),
+                "{cwd}"
+            );
+        }
+        // A folder the worker swapped for a link out of the worktree
+        let worktree = worktree_with(SHEP);
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), worktree.path().join("web")).unwrap();
+        let launch = parse_launch(SHEP, None).unwrap();
+        assert_eq!(
+            launch.dir(worktree.path()),
+            Err(".claude/launch.json's cwd \"web\" leaves the worktree".to_owned())
         );
     }
 

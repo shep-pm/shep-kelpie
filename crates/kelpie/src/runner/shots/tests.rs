@@ -291,6 +291,7 @@ fn the_dev_server_command_comes_from_main_never_the_workers_branch() {
             runtime_executable: "bun".into(),
             runtime_args: vec!["run".into(), "dev".into()],
             port: 3000,
+            cwd: None,
         })
     );
 }
