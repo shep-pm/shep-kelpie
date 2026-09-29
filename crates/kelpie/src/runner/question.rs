@@ -101,6 +101,57 @@ mod tests {
         );
     }
 
+    // Recorded the same way, with the instructions that let a worker end its
+    // block on likely answers, one per `- ` line.
+    const RECORDED_CHOICES: &str = include_str!("../../fixtures/claude-p-question-choices.json");
+
+    #[test]
+    fn a_real_workers_likely_answers_stay_in_its_question() {
+        let reply: serde_json::Value = serde_json::from_str(RECORDED_CHOICES).unwrap();
+        let text = reply["result"].as_str().unwrap();
+        assert_eq!(
+            asked(text).as_deref(),
+            Some(
+                "Should `/v1/export` be removed outright in this change, or kept for one more \
+                 release behind a deprecation warning and removed later?\n\
+                 - Remove it now\n\
+                 - Keep it one more release with a deprecation warning"
+            )
+        );
+    }
+
+    #[test]
+    fn choices_at_the_end_of_a_block_do_not_end_it_early() {
+        let text = "<kelpie-question>\nWhich?\n- `--dry-run`\n- `--check`\n</kelpie-question>";
+        assert_eq!(
+            asked(text).as_deref(),
+            Some("Which?\n- `--dry-run`\n- `--check`")
+        );
+    }
+
+    #[test]
+    fn the_worker_instructions_offer_choices() {
+        assert!(INSTRUCTIONS.contains("begin with `- `"), "{INSTRUCTIONS}");
+    }
+
+    // Seen live on #80: a relay told nothing of the kind sent a
+    // question's one-character answer as `relay-yes`.
+    #[test]
+    fn the_relay_is_told_a_question_wants_an_answer() {
+        let (rig, runner) = asking("rotom");
+        rig.relay.set_up(true);
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Asked { id: 1, .. })
+        ));
+        assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+        let [(sent, ..)] = rig.relay.sent().try_into().unwrap();
+        assert!(
+            sent.starts_with("[kelpie]\nproject=rotom ruling=1 wants=answer\n\n"),
+            "{sent}"
+        );
+    }
+
     #[test]
     fn the_worker_instructions_describe_the_block() {
         assert!(INSTRUCTIONS.contains(OPEN), "{INSTRUCTIONS}");
@@ -289,7 +340,7 @@ mod tests {
         for params in ["1 yes", "1 no not now"] {
             assert_eq!(
                 rig.ask(&runner, "rule", Some(params)),
-                json!({ "error": "ruling 1 is the worker's question: answer it with `1 answer <text>`" })
+                json!({ "error": "ruling 1 is the worker's question, so it takes an answer, not a yes or no" })
             );
         }
         assert_eq!(
@@ -301,7 +352,7 @@ mod tests {
         let (rig, runner, _) = Rig::parked("golbat");
         assert_eq!(
             rig.ask(&runner, "rule", Some("1 answer merge it")),
-            json!({ "error": "ruling 1 takes `1 yes` or `1 no <note>`, not an answer" })
+            json!({ "error": "ruling 1 is not a question, so it takes a yes, or a no with a note" })
         );
         assert_eq!(rig.forge.merges(), []);
     }

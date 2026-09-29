@@ -74,6 +74,7 @@ fn serve(project: &str) -> Result<(), String> {
             home.clone(),
             kelpie_home.join("relay"),
             shep_home,
+            kelpie.clone(),
         )),
         alerts: Arc::new(Curl),
         leases: Arc::clone(&leases) as Arc<dyn Leases>,

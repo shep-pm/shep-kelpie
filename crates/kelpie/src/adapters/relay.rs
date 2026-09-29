@@ -59,18 +59,21 @@ pub struct RelayCli {
     folder: PathBuf,
     /// Kelpie's shepherd, which the relay's commands must reach
     shep_home: PathBuf,
+    /// The kelpie binary the relay's commands run, by its absolute path
+    kelpie: PathBuf,
     /// The `claude` program every call runs
     claude: PathBuf,
 }
 
 impl RelayCli {
     /// A relay whose settings and instructions live under `folder`, and
-    /// whose commands trigger the shepherd at `shep_home`
-    pub fn new(home: PathBuf, folder: PathBuf, shep_home: PathBuf) -> Self {
+    /// whose commands run `kelpie` against the shepherd at `shep_home`
+    pub fn new(home: PathBuf, folder: PathBuf, shep_home: PathBuf, kelpie: PathBuf) -> Self {
         Self {
             home,
             folder,
             shep_home,
+            kelpie,
             claude: PathBuf::from("claude"),
         }
     }
@@ -139,17 +142,23 @@ impl RelayCli {
     // entirely. So the settings and instructions files are rewritten here,
     // unconditionally, on every `send`, whether or not this call ends up
     // starting a process itself: an upgrade's new settings reach the file
-    // kelpie owns even when nothing of kelpie's runs to write it.
-    fn write_relay_files(&self) -> Result<(PathBuf, PathBuf), RelayError> {
+    // kelpie owns even when nothing of kelpie's runs to write it. Also
+    // returns whether either file changed.
+    fn write_relay_files(&self) -> Result<(PathBuf, PathBuf, bool), RelayError> {
+        let kelpie = relay::BarePath::of(&self.kelpie).ok_or_else(|| {
+            RelayError::CannotStart(format!(
+                "kelpie's path {} cannot be typed bare in a shell",
+                self.kelpie.display()
+            ))
+        })?;
         fs::create_dir_all(&self.folder).map_err(|e| RelayError::CannotStart(e.to_string()))?;
         let settings = self.folder.join("settings.json");
         let instructions = self.folder.join("instructions.md");
-        let text = serde_json::to_string_pretty(&relay::settings(&self.shep_home))
+        let text = serde_json::to_string_pretty(&relay::settings(&self.shep_home, kelpie))
             .expect("settings are JSON");
-        fs::write(&settings, text).map_err(|e| RelayError::CannotStart(e.to_string()))?;
-        fs::write(&instructions, relay::INSTRUCTIONS)
-            .map_err(|e| RelayError::CannotStart(e.to_string()))?;
-        Ok((settings, instructions))
+        let changed = replace(&settings, &text)?;
+        let changed = replace(&instructions, &relay::instructions(kelpie))? || changed;
+        Ok((settings, instructions, changed))
     }
 
     fn start(
@@ -233,7 +242,12 @@ impl RelayCli {
 
 impl Relay for RelayCli {
     fn send(&self, message: &str, model: &str, effort: Effort) -> Result<(), RelayError> {
-        let (settings, instructions) = self.write_relay_files()?;
+        let (settings, instructions, changed) = self.write_relay_files()?;
+        // A relay reads both files only when it starts, so one started on
+        // older ones is cleared, and the send starts a fresh one.
+        if changed {
+            self.clear()?;
+        }
         let (found, fresh) = self.ensure_running(&settings, &instructions, model, effort)?;
         if fresh {
             thread::sleep(SOCKET_GRACE);
@@ -322,6 +336,15 @@ fn start_argv(settings: &Path, instructions: &Path, model: &str, effort: Effort)
 // environment: `HOME` itself comes from `self.home` (see `relay_env`).
 const RELAY_ENV: [&str; 4] = ["PATH", "TMPDIR", "USER", "LANG"];
 
+// Writes `text` to `path` unless it already holds it, saying whether it wrote.
+fn replace(path: &Path, text: &str) -> Result<bool, RelayError> {
+    if fs::read_to_string(path).is_ok_and(|old| old == text) {
+        return Ok(false);
+    }
+    fs::write(path, text).map_err(|e| RelayError::CannotStart(e.to_string()))?;
+    Ok(true)
+}
+
 fn write_line(stream: &mut UnixStream, value: &Value) -> Result<(), RelayError> {
     let mut line = value.to_string();
     line.push('\n');
@@ -368,7 +391,12 @@ mod tests {
             listing = listing.display(),
         );
         crate::test::write_script(&program, &script);
-        let mut relay = RelayCli::new(dir.to_owned(), dir.join("relay"), dir.join("shep"));
+        let mut relay = RelayCli::new(
+            dir.to_owned(),
+            dir.join("relay"),
+            dir.join("shep"),
+            "/k/bin/kelpie".into(),
+        );
         relay.claude = program;
         relay
     }
@@ -523,6 +551,17 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_kelpie_path_the_shell_would_split_starts_no_relay() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut relay = fake_claude(dir.path());
+        relay.kelpie = "/opt/my kelpie/kelpie".into();
+        let sent = relay.send("[kelpie]", "claude-haiku-4-5-20251001", Effort::Low);
+        assert!(matches!(sent, Err(RelayError::CannotStart(_))), "{sent:?}");
+        assert!(!dir.path().join("relay/settings.json").exists());
+        assert!(!dir.path().join("calls").exists(), "claude never ran");
+    }
+
     // Measured live on #14: Claude Code's own background-session handling
     // can revive a killed relay under its old pid, bypassing `start`
     // entirely, so a settings.json an upgrade left stale never gets
@@ -538,10 +577,45 @@ mod tests {
         )
         .unwrap();
 
-        let relay = RelayCli::new(dir.path().to_owned(), folder.clone(), "/k/shep".into());
-        let (settings, _) = relay.write_relay_files().unwrap();
+        let relay = RelayCli::new(
+            dir.path().to_owned(),
+            folder.clone(),
+            "/k/shep".into(),
+            "/k/bin/kelpie".into(),
+        );
+        let (settings, instructions, changed) = relay.write_relay_files().unwrap();
+        assert!(changed);
         let written: Value = serde_json::from_str(&fs::read_to_string(settings).unwrap()).unwrap();
-        assert_eq!(written, relay::settings(Path::new("/k/shep")));
+        let kelpie = relay::BarePath::of(Path::new("/k/bin/kelpie")).unwrap();
+        assert_eq!(written, relay::settings(Path::new("/k/shep"), kelpie));
+        assert_eq!(
+            fs::read_to_string(instructions).unwrap(),
+            relay::instructions(kelpie)
+        );
+    }
+
+    // The fake's roster still lists the live relay after it is removed, so
+    // each send goes on to fail reading its session; the calls are the test.
+    #[test]
+    fn a_relay_started_on_older_files_is_cleared_before_a_send() {
+        let dir = tempfile::tempdir().unwrap();
+        let relay = fake_claude(dir.path());
+        fs::create_dir_all(dir.path().join("relay")).unwrap();
+        fs::write(dir.path().join("relay/settings.json"), "{}").unwrap();
+        let _ = relay.send("[kelpie]", "claude-haiku-4-5-20251001", Effort::Low);
+        let calls = calls(dir.path());
+        assert!(calls.contains(&"stop e9a38e1e".to_owned()), "{calls:?}");
+        assert!(calls.contains(&"rm e9a38e1e".to_owned()), "{calls:?}");
+    }
+
+    #[test]
+    fn a_relay_on_the_current_files_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let relay = fake_claude(dir.path());
+        relay.write_relay_files().unwrap();
+        let _ = relay.send("[kelpie]", "claude-haiku-4-5-20251001", Effort::Low);
+        let calls = calls(dir.path());
+        assert!(!calls.contains(&"rm e9a38e1e".to_owned()), "{calls:?}");
     }
 
     #[test]
@@ -550,6 +624,7 @@ mod tests {
             PathBuf::from("/k/maintainer-home"),
             PathBuf::from("/k/relay"),
             PathBuf::from("/k/shep"),
+            PathBuf::from("/k/bin/kelpie"),
         );
         let mut command = Command::new("true");
         relay.relay_env(&mut command);
