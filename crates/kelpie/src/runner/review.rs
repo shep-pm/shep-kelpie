@@ -30,11 +30,7 @@ use crate::worktree;
 
 impl Runner {
     pub(super) fn review_step(&mut self) -> Result<Begin, StateError> {
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("review runs on a work item");
+        let item = self.current().expect("review runs on a work item");
         let Phase::Review(review) = item.phase.clone() else {
             unreachable!("review_step only runs in the review phase")
         };
@@ -127,12 +123,7 @@ impl Runner {
         clean: bool,
         head: Option<String>,
     ) -> Result<Begin, StateError> {
-        let issue = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("a fix is a work item's")
-            .issue;
+        let issue = self.current().expect("a fix is a work item's").issue;
         let round = review.round;
         let pushed = match head {
             Some(before) => match self.origin_head() {
@@ -160,11 +151,7 @@ impl Runner {
 
     // Asks git rather than the forge: the forge's head lags a push by a moment.
     pub(super) fn origin_head(&self) -> Result<String, String> {
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("a head is a work item's");
+        let item = self.current().expect("a head is a work item's");
         worktree::origin_head(&self.settings.repo, &item.branch).map_err(|e| e.to_string())
     }
 
@@ -192,11 +179,7 @@ impl Runner {
         findings: Vec<Finding>,
         verdicts: Vec<Verdict>,
     ) -> Result<Begin, StateError> {
-        let item = self
-            .state
-            .work_item
-            .as_ref()
-            .expect("finalize runs on a work item");
+        let item = self.current().expect("finalize runs on a work item");
         let issue = item.issue;
         let number = item
             .pull_request
@@ -266,9 +249,7 @@ impl Runner {
             return Ok(None);
         }
         let in_coderabbit_round = self
-            .state
-            .work_item
-            .as_ref()
+            .current()
             .is_some_and(|item| matches!(item.phase, Phase::CodeRabbit(_)));
         if in_coderabbit_round {
             return self.coderabbit_verdict(result, spent);
@@ -281,7 +262,7 @@ impl Runner {
         // guard on `drop` keeps this from happening today, but a result
         // for a work item that is no longer this one, or gone outright,
         // is silently discarded rather than panicking the runner.
-        let Some(item) = next.work_item.as_mut() else {
+        let Some(item) = self.current_in(&mut next) else {
             return Ok(None);
         };
         record_spent(item, spent, now);
@@ -516,7 +497,7 @@ mod tests {
     #[test]
     fn end_review_tolerates_a_work_item_that_is_gone() {
         let (_rig, runner, _) = Rig::with_pull_request("shep");
-        runner.lock().unwrap().state.work_item = None;
+        runner.lock().unwrap().state.work_items.clear();
         let report = runner
             .lock()
             .unwrap()
@@ -754,7 +735,7 @@ mod tests {
         let state = rig.paths().state;
         let text = std::fs::read_to_string(&state).unwrap();
         let mut saved: serde_json::Value = serde_json::from_str(&text).unwrap();
-        saved["work_item"]["phase"] = json!({
+        saved["work_items"][0]["phase"] = json!({
             "state": "review",
             "round": 9,
             "consecutive_clean": 0,

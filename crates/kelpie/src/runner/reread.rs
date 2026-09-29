@@ -81,6 +81,7 @@ fn changed((old, went, was): Reach<'_>, (new, goes, now): Reach<'_>) -> Vec<&'st
             old.merge_authority != new.merge_authority,
         ),
         ("ci", old.ci != new.ci),
+        ("max_items", old.max_items != new.max_items),
         ("ruling_channels", went != goes),
         ("generated", old.generated != new.generated),
         ("models", old.models != new.models),
@@ -117,13 +118,15 @@ mod tests {
         let next = settings_with(&rig, |s| {
             s.replace("merge_authority = \"ask\"", "merge_authority = \"auto\"")
                 .replace("loop_guard = 8", "loop_guard = 3")
+                .replace("max_items = 1", "max_items = 2")
         });
         let mut runner = runner.lock().unwrap();
         let line = runner.reread(next, rig.kelpie_settings()).unwrap();
         assert_eq!(
             line.as_deref(),
-            Some("settings changed: merge_authority, review now in effect")
+            Some("settings changed: merge_authority, max_items, review now in effect")
         );
+        assert_eq!(runner.settings().max_items.get(), 2);
         assert_eq!(runner.settings().merge_authority, MergeAuthority::Auto);
         assert_eq!(runner.settings().review.loop_guard.get(), 3);
         assert_eq!(runner.status().merge_authority, MergeAuthority::Auto);

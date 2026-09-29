@@ -406,7 +406,7 @@ fn the_review_loops_round_guard_still_parks_on_a_ruling() {
     let state = rig.paths().state;
     let text = std::fs::read_to_string(&state).unwrap();
     let mut saved: serde_json::Value = serde_json::from_str(&text).unwrap();
-    saved["work_item"]["phase"] = json!({
+    saved["work_items"][0]["phase"] = json!({
         "state": "review",
         "round": 9,
         "consecutive_clean": 0,

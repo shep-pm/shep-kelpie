@@ -192,6 +192,11 @@ mod tests {
         assert_eq!(defs["Channels"]["minItems"], 1);
         assert_eq!(defs["Route"]["pattern"], "^/");
         assert_eq!(defs["ContextSize"]["minimum"], 4096);
+        let max_items = &defs["Settings"]["properties"]["max_items"];
+        assert_eq!(
+            (&max_items["minimum"], &max_items["default"]),
+            (&1.into(), &1.into())
+        );
         assert!(defs["EndpointUrl"]["pattern"].is_string());
     }
 

@@ -42,8 +42,12 @@ const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
 /// Posts a ruling or a notice to the webhook, or runs the worker's next
 /// turn if one is due and the project is running
 ///
-/// Returns what happened, or `None` when there was nothing to do. A ruling
-/// is posted whether the project runs or not.
+/// Each open work item is stepped in turn, starting after the one that did
+/// something last, and one with nothing to do yields to the next. Returns
+/// what happened, or `None` when there was nothing to do. A report that
+/// waits, such as a forge that cannot be read, is returned only when no
+/// other work item did anything. A ruling is posted whether the project
+/// runs or not.
 ///
 /// # Errors
 ///
@@ -63,27 +67,34 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
     if let Some(posted) = post_due(runner, relay.as_ref(), alerts.as_ref()) {
         return posted.map(Some);
     }
-    let mut start_over = false;
+    // The work item whose session died unborn, which starts over
+    let mut start_over = None;
     loop {
-        let begin = lock(runner).begin_turn(start_over)?;
+        // The call runs outside the lock, and a trigger may work on another
+        // item meanwhile, so its end names the item it began on.
+        let (begin, issue) = {
+            let mut runner = lock(runner);
+            let begin = runner.begin_turn(start_over)?;
+            (begin, runner.focus)
+        };
         match begin {
             Begin::Idle => return Ok(None),
             Begin::Report(report) => return Ok(Some(report)),
             Begin::Call(call) => {
                 let result = claude.run(&call);
-                if !start_over && matches!(result, Err(ClaudeError::NoSession(_))) {
-                    start_over = true;
+                if start_over.is_none() && matches!(result, Err(ClaudeError::NoSession(_))) {
+                    start_over = issue;
                     continue;
                 }
-                return lock(runner).end_turn(result);
+                return lock(runner).on(issue).end_turn(result);
             }
             Begin::Review(action) => {
                 let reviewed = run_review_call(claude.as_ref(), reviewer.as_ref(), action);
-                return lock(runner).end_review(reviewed);
+                return lock(runner).on(issue).end_review(reviewed);
             }
             Begin::Shots(job, head) => {
                 let run = shots.take(&job);
-                return lock(runner).end_shots(head, run);
+                return lock(runner).on(issue).end_shots(head, run);
             }
         }
     }
@@ -97,13 +108,69 @@ fn first_prompt(number: u64, issue: &Issue) -> String {
     )
 }
 
+/// What a step can work on
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Slot {
+    /// The open work item for this issue
+    Item(u64),
+    /// The board, while a slot is free under `max_items`
+    Board,
+}
+
 impl Runner {
-    fn begin_turn(&mut self, start_over: bool) -> Result<Begin, StateError> {
+    // Steps each open work item, and the board while a slot is free, from
+    // the one after the last to act, until one acts. `start_over` is the
+    // item whose session died unborn, which begins the same turn again.
+    fn begin_turn(&mut self, start_over: Option<u64>) -> Result<Begin, StateError> {
         if self.state.run != RunState::Running {
             return Ok(Begin::Idle);
         }
-        let Some(item) = &self.state.work_item else {
-            return self.dispatch();
+        if let Some(issue) = start_over {
+            self.focus = Some(issue);
+            return self.begin_item(true);
+        }
+        let mut waiting = None;
+        for slot in self.rotation() {
+            let begin = match slot {
+                Slot::Item(issue) => {
+                    self.focus = Some(issue);
+                    self.begin_item(false)?
+                }
+                Slot::Board => {
+                    self.focus = None;
+                    self.dispatch()?
+                }
+            };
+            match begin {
+                Begin::Idle => {}
+                Begin::Report(report) if report.waits() => {
+                    waiting.get_or_insert(report);
+                }
+                begin => {
+                    self.last_acted = Some(slot);
+                    return Ok(begin);
+                }
+            }
+        }
+        Ok(waiting.map_or(Begin::Idle, Begin::Report))
+    }
+
+    // The open work items oldest first, then the board while a slot is
+    // free, from the one after the last to act, so one that keeps acting
+    // cannot starve the rest
+    fn rotation(&self) -> Vec<Slot> {
+        let items = self.state.work_items.iter().map(|i| Slot::Item(i.issue));
+        let board = self.slot_free().then_some(Slot::Board);
+        let mut slots: Vec<Slot> = items.chain(board).collect();
+        if let Some(at) = slots.iter().position(|&s| Some(s) == self.last_acted) {
+            slots.rotate_left(at + 1);
+        }
+        slots
+    }
+
+    fn begin_item(&mut self, start_over: bool) -> Result<Begin, StateError> {
+        let Some(item) = self.current() else {
+            return Ok(Begin::Idle);
         };
         match &item.phase {
             Phase::Implement => {}
@@ -144,7 +211,7 @@ impl Runner {
         if due && let Some(held) = self.pace(Scope::Turn)?.holds() {
             return Ok(held);
         }
-        let item = self.state.work_item.as_ref().expect("checked above");
+        let item = self.current().expect("checked above");
         let id = item.session.clone();
         let now = self.ports.clock.now();
         // A turn already running when the runner starts keeps the start it
@@ -174,18 +241,21 @@ impl Runner {
             // `ClaudeError::TimedOut` would, with no call spent.
             return self.park_ceiling_passed(now);
         }
+        let issue = item.issue;
         let prepared = self.prepare(item, session, prompt, remaining);
         let mut next = self.state.clone();
         let mut begin = match prepared {
             Ok(call) => {
-                let item = next
-                    .work_item
-                    .as_mut()
+                let item = self
+                    .current_in(&mut next)
                     .expect("the work item checked above");
                 item.turn = Turn::Running { since };
                 Begin::Call(call)
             }
-            Err(reason) => Begin::Report(failed(self.project.as_str(), &mut next, now, reason)),
+            Err(reason) => {
+                let project = self.project.as_str();
+                Begin::Report(failed(project, &mut next, issue, now, reason))
+            }
         };
         self.save(next)?;
         if let Begin::Report(report) = &mut begin {
@@ -312,7 +382,7 @@ impl Runner {
         result: Result<ClaudeReply, ClaudeError>,
     ) -> Result<Option<StepReport>, StateError> {
         // However the turn ended, a dev server its shots tool started is done.
-        if let Some(item) = &self.state.work_item {
+        if let Some(item) = self.current() {
             self.ports
                 .shots
                 .stop_left(&self.paths.shots(item.issue).join(crate::shots::SERVER_PID));
@@ -324,11 +394,12 @@ impl Runner {
         let now = self.ports.clock.now();
         // Whatever the turn left on `origin` is the worker's own. A head
         // that cannot be read keeps the last one, which errs toward parking.
-        let pushed = self.state.work_item.as_ref().and_then(|_| self.own_push());
+        let pushed = self.current().and_then(|_| self.own_push());
         let mut next = self.state.clone();
-        let Some(item) = next.work_item.as_mut() else {
+        let Some(item) = self.current_in(&mut next) else {
             return Ok(None);
         };
+        let issue = item.issue;
         if pushed.is_some() {
             item.known.head = pushed;
         }
@@ -371,7 +442,7 @@ impl Runner {
                         }
                     }
                 }
-                let (issue, session) = (item.issue, item.session.clone());
+                let session = item.session.clone();
                 let (work_item_cost_usd, pull_request) = (item.cost().usd(), item.pull_request);
                 match question {
                     None => StepReport::Ended {
@@ -396,7 +467,7 @@ impl Runner {
                             resume,
                         };
                         let project = self.project.as_str();
-                        let (_, id, question) = park(project, &mut next, pull_request, kind);
+                        let (id, question) = park(project, &mut next, issue, pull_request, kind);
                         StepReport::Asked {
                             issue,
                             session,
@@ -413,9 +484,9 @@ impl Runner {
             }
             Err(ClaudeError::TimedOut) => {
                 item.turn = Turn::Ended { at: now };
-                timed_out(self.project.as_str(), &mut next)
+                timed_out(self.project.as_str(), &mut next, issue)
             }
-            Err(e) => failed(self.project.as_str(), &mut next, now, e.to_string()),
+            Err(e) => failed(self.project.as_str(), &mut next, issue, now, e.to_string()),
         };
         self.save(next)?;
         let mut report = report;

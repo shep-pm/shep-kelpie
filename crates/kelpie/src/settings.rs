@@ -4,7 +4,7 @@
 //! project had before one. Unknown keys are refused, so a misspelt or
 //! malformed setting stops the runner with a message naming it. Every
 //! setting is required except the ones added after the first build
-//! (`review.local`, `pacing.enabled`, `worker.allowed_domains`,
+//! (`max_items`, `review.local`, `pacing.enabled`, `worker.allowed_domains`,
 //! `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout`,
 //! `ruling_channels` and `[preview]`).
 //! `settings.example.toml` beside this crate holds the defaults.
@@ -48,6 +48,11 @@ pub struct Settings {
     /// off, kelpie reads no checks and asks for the merge once the branch
     /// has the latest `main`.
     pub ci: bool,
+    /// How many work items may be open at once, each with its own branch,
+    /// worktree and gates. The worker's turns still run one at a time. 1
+    /// when absent.
+    #[serde(default = "default_max_items")]
+    pub max_items: NonZeroU32,
     /// Globs for files left out of a pull request's changed-line count
     pub generated: Vec<String>,
     /// The model and effort for each role
@@ -211,6 +216,11 @@ pub struct Worker {
     /// on a ruling, keeping its session. 60 when absent.
     #[serde(default = "default_turn_timeout")]
     pub turn_timeout: NonZeroU32,
+}
+
+/// One work item at a time, as every project ran before `max_items`
+fn default_max_items() -> NonZeroU32 {
+    NonZeroU32::MIN
 }
 
 /// The design log's default for `worker.turn_timeout`, in minutes

@@ -23,6 +23,7 @@ fn the_example_holds_the_first_build_defaults() {
     assert_eq!(s.forge.as_str(), "shep-pm/shep");
     assert_eq!(s.merge_authority, MergeAuthority::Ask);
     assert!(s.ci);
+    assert_eq!(s.max_items.get(), 1);
     let role = |r: &RoleModel| (r.model.as_str().to_owned(), r.effort);
     assert_eq!(
         role(&s.models.worker),
@@ -120,6 +121,17 @@ fn a_table_written_before_the_worker_keys_loads_with_their_defaults() {
     assert_eq!(s.worker.turn_timeout.get(), 60);
     assert!(s.worker.allowed_domains.is_empty());
     assert!(s.worker.build_env.is_empty());
+}
+
+#[test]
+fn one_work_item_is_open_at_a_time_when_the_table_does_not_say() {
+    let before = EXAMPLE.replace("max_items = 1\n", "");
+    assert!(!before.contains("max_items ="));
+    assert_eq!(parse(&before).unwrap().max_items.get(), 1);
+    let text = EXAMPLE.replace("max_items = 1", "max_items = 3");
+    assert_eq!(parse(&text).unwrap().max_items.get(), 3);
+    let err = parse_err(&EXAMPLE.replace("max_items = 1", "max_items = 0"));
+    assert!(err.contains("`max_items = 0`"), "{err}");
 }
 
 #[test]

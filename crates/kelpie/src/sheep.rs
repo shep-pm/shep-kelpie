@@ -311,7 +311,9 @@ mod tests {
     fn saved_calls(state: &Path) -> usize {
         let text = std::fs::read_to_string(state).unwrap();
         let state: serde_json::Value = serde_json::from_str(&text).unwrap();
-        state["work_item"]["calls"].as_array().map_or(0, Vec::len)
+        state["work_items"][0]["calls"]
+            .as_array()
+            .map_or(0, Vec::len)
     }
 
     #[test]
