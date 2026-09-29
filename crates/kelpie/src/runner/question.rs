@@ -101,6 +101,21 @@ mod tests {
         );
     }
 
+    // Seen live on 2026-09-29: a relay told nothing of the kind sent a
+    // question's one-character answer as `relay-yes`.
+    #[test]
+    fn the_relay_is_told_a_question_wants_an_answer() {
+        let (rig, runner) = asking("rotom");
+        rig.relay.set_up(true);
+        step(&runner).unwrap();
+        assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+        let [(sent, ..)] = rig.relay.sent().try_into().unwrap();
+        assert!(
+            sent.starts_with("[kelpie]\nproject=rotom ruling=1 wants=answer\n\n"),
+            "{sent}"
+        );
+    }
+
     #[test]
     fn the_worker_instructions_describe_the_block() {
         assert!(INSTRUCTIONS.contains(OPEN), "{INSTRUCTIONS}");

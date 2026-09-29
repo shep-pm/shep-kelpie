@@ -59,18 +59,21 @@ pub struct RelayCli {
     folder: PathBuf,
     /// Kelpie's shepherd, which the relay's commands must reach
     shep_home: PathBuf,
+    /// The kelpie binary the relay's commands run, by its absolute path
+    kelpie: PathBuf,
     /// The `claude` program every call runs
     claude: PathBuf,
 }
 
 impl RelayCli {
     /// A relay whose settings and instructions live under `folder`, and
-    /// whose commands trigger the shepherd at `shep_home`
-    pub fn new(home: PathBuf, folder: PathBuf, shep_home: PathBuf) -> Self {
+    /// whose commands run `kelpie` against the shepherd at `shep_home`
+    pub fn new(home: PathBuf, folder: PathBuf, shep_home: PathBuf, kelpie: PathBuf) -> Self {
         Self {
             home,
             folder,
             shep_home,
+            kelpie,
             claude: PathBuf::from("claude"),
         }
     }
@@ -141,13 +144,19 @@ impl RelayCli {
     // starting a process itself: an upgrade's new settings reach the file
     // kelpie owns even when nothing of kelpie's runs to write it.
     fn write_relay_files(&self) -> Result<(PathBuf, PathBuf), RelayError> {
+        let kelpie = relay::bare(&self.kelpie).ok_or_else(|| {
+            RelayError::CannotStart(format!(
+                "kelpie's path {} cannot be typed bare in a shell",
+                self.kelpie.display()
+            ))
+        })?;
         fs::create_dir_all(&self.folder).map_err(|e| RelayError::CannotStart(e.to_string()))?;
         let settings = self.folder.join("settings.json");
         let instructions = self.folder.join("instructions.md");
-        let text = serde_json::to_string_pretty(&relay::settings(&self.shep_home))
+        let text = serde_json::to_string_pretty(&relay::settings(&self.shep_home, kelpie))
             .expect("settings are JSON");
         fs::write(&settings, text).map_err(|e| RelayError::CannotStart(e.to_string()))?;
-        fs::write(&instructions, relay::INSTRUCTIONS)
+        fs::write(&instructions, relay::instructions(kelpie))
             .map_err(|e| RelayError::CannotStart(e.to_string()))?;
         Ok((settings, instructions))
     }
@@ -368,7 +377,12 @@ mod tests {
             listing = listing.display(),
         );
         crate::test::write_script(&program, &script);
-        let mut relay = RelayCli::new(dir.to_owned(), dir.join("relay"), dir.join("shep"));
+        let mut relay = RelayCli::new(
+            dir.to_owned(),
+            dir.join("relay"),
+            dir.join("shep"),
+            "/k/bin/kelpie".into(),
+        );
         relay.claude = program;
         relay
     }
@@ -538,10 +552,18 @@ mod tests {
         )
         .unwrap();
 
-        let relay = RelayCli::new(dir.path().to_owned(), folder.clone(), "/k/shep".into());
+        let relay = RelayCli::new(
+            dir.path().to_owned(),
+            folder.clone(),
+            "/k/shep".into(),
+            "/k/bin/kelpie".into(),
+        );
         let (settings, _) = relay.write_relay_files().unwrap();
         let written: Value = serde_json::from_str(&fs::read_to_string(settings).unwrap()).unwrap();
-        assert_eq!(written, relay::settings(Path::new("/k/shep")));
+        assert_eq!(
+            written,
+            relay::settings(Path::new("/k/shep"), "/k/bin/kelpie")
+        );
     }
 
     #[test]
@@ -550,6 +572,7 @@ mod tests {
             PathBuf::from("/k/maintainer-home"),
             PathBuf::from("/k/relay"),
             PathBuf::from("/k/shep"),
+            PathBuf::from("/k/bin/kelpie"),
         );
         let mut command = Command::new("true");
         relay.relay_env(&mut command);
