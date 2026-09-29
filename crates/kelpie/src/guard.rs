@@ -165,6 +165,8 @@ impl Judging<'_> {
                     continue;
                 }
             };
+            // `builtin export`, `command export` and `A=1 export` export too.
+            state.git_redirected |= wrap::sets_git_redirect(run.words);
             if run.moved {
                 cwd = None;
             }

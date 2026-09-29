@@ -699,6 +699,35 @@ fn push_forms_the_guard_does_not_know_are_refused() {
 }
 
 #[test]
+fn an_export_behind_a_wrapper_redirects_git() {
+    for command in [
+        "builtin export GIT_DIR=/x; git push origin HEAD",
+        "command export GIT_DIR=/x; git push origin HEAD",
+        "A=1 export GIT_DIR=/x; git push origin HEAD",
+        "builtin declare -x GIT_DIR=/x; git commit -m 'fix: x'",
+    ] {
+        let why = refusal(bash(command));
+        assert!(why.contains("GIT_"), "{command}: {why}");
+    }
+}
+
+// Replace refs made a read follow one commit while the push packed another.
+#[test]
+fn a_replace_ref_does_not_hide_what_a_push_sends() {
+    let tree = WorkerTree::new();
+    tree.write("leak.txt", "/home/me/x\n");
+    tree.git(&["add", "leak.txt"]);
+    tree.git(&["commit", "--quiet", "-m", "docs: leak"]);
+    let why = refusal(tree.bash("git push origin HEAD"));
+    assert!(why.contains("`leak.txt`"), "{why}");
+    let why = refusal(tree.bash("git replace HEAD HEAD~1"));
+    assert!(why.contains("git's own commands"), "{why}");
+    tree.git(&["replace", "HEAD", "HEAD~1"]);
+    let why = refusal(tree.bash("git push origin HEAD"));
+    assert!(why.contains("`leak.txt`"), "a replace ref hid it: {why}");
+}
+
+#[test]
 fn an_export_of_a_name_the_shell_works_out_redirects_git() {
     for command in [
         "export $(printf GIT_DIR=/x); git push",

@@ -174,7 +174,7 @@ fn unknown_option(option: &str) -> String {
 }
 
 // Git's own commands a worker may run. `--version` and `--help` come as options.
-const BUILTINS: [&str; 76] = [
+const BUILTINS: [&str; 75] = [
     "add",
     "am",
     "annotate",
@@ -234,7 +234,6 @@ const BUILTINS: [&str; 76] = [
     "reflog",
     "remote",
     "repack",
-    "replace",
     "reset",
     "restore",
     "rev-list",
