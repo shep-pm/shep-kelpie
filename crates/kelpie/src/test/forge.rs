@@ -48,6 +48,9 @@ pub(crate) struct FakeForge {
     skipped: Arc<Mutex<Vec<u64>>>,
     merges: Arc<Mutex<Vec<(u64, String)>>>,
     reviews: Arc<Mutex<HashMap<u64, MaintainerReview>>>,
+    // A state file read as each comment is posted, and what it held then
+    watched: Arc<Mutex<Option<PathBuf>>>,
+    saved_at_comment: Arc<Mutex<Vec<serde_json::Value>>>,
     /// Pull requests' labels, and what CodeRabbit posts
     pub(crate) coderabbit: FakeCodeRabbit,
 }
@@ -98,6 +101,8 @@ impl FakeForge {
             skipped: Arc::default(),
             merges: Arc::default(),
             reviews: Arc::default(),
+            watched: Arc::default(),
+            saved_at_comment: Arc::default(),
             coderabbit: FakeCodeRabbit::default(),
         }
     }
@@ -271,6 +276,16 @@ impl FakeForge {
     /// Every comment posted, oldest first, with its pull request
     pub(crate) fn comments(&self) -> Vec<(u64, String)> {
         self.comments.lock().unwrap().clone()
+    }
+
+    /// Reads the state file at `path` as each comment is posted
+    pub(crate) fn watch_state(&self, path: PathBuf) {
+        *self.watched.lock().unwrap() = Some(path);
+    }
+
+    /// The state file as each comment found it, oldest first
+    pub(crate) fn saved_at_comment(&self) -> Vec<serde_json::Value> {
+        self.saved_at_comment.lock().unwrap().clone()
     }
 
     /// Deletes comment `id`, as someone other than kelpie would
@@ -454,6 +469,11 @@ impl Forge for FakeForge {
             return Err(ForgeError::Failed("comments are down".into()));
         }
         self.opened(number)?;
+        if let Some(path) = self.watched.lock().unwrap().as_ref() {
+            let saved = std::fs::read_to_string(path).unwrap();
+            let saved = serde_json::from_str(&saved).unwrap();
+            self.saved_at_comment.lock().unwrap().push(saved);
+        }
         self.comments
             .lock()
             .unwrap()

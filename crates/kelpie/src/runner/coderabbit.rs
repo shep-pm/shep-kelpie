@@ -271,6 +271,9 @@ impl Runner {
             // An owed summon found nothing new: ask once more, for a full review.
             Reading::Completed { .. } if !full => {
                 self.accepted(at)?;
+                if let Err(reason) = self.label(number, false) {
+                    return Ok(self.gate_failed(reason));
+                }
                 let stage = CodeRabbitStage::Lease {
                     head: head.clone(),
                     readied: None,
