@@ -569,14 +569,13 @@ mod tests {
             "/k/shep".into(),
             "/k/bin/kelpie".into(),
         );
-        let (settings, _) = relay.write_relay_files().unwrap();
+        let (settings, instructions) = relay.write_relay_files().unwrap();
         let written: Value = serde_json::from_str(&fs::read_to_string(settings).unwrap()).unwrap();
+        let kelpie = relay::BarePath::of(Path::new("/k/bin/kelpie")).unwrap();
+        assert_eq!(written, relay::settings(Path::new("/k/shep"), kelpie));
         assert_eq!(
-            written,
-            relay::settings(
-                Path::new("/k/shep"),
-                relay::BarePath::of(Path::new("/k/bin/kelpie")).unwrap()
-            )
+            fs::read_to_string(instructions).unwrap(),
+            relay::instructions(kelpie)
         );
     }
 
