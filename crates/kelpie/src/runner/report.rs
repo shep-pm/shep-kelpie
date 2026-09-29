@@ -15,7 +15,7 @@ use crate::ports::{
 };
 use crate::settings::LocalRound;
 use crate::shots::ShotsJob;
-use crate::work_item::{QwenTally, ReviewerKind, Spend};
+use crate::work_item::{QwenTally, ReviewerKind, Spend, Timings};
 
 /// What asked for a rework on the pull request itself
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -253,6 +253,8 @@ pub enum StepReport {
         spend: Spend,
         /// Its qwen rounds
         qwen: QwenTally,
+        /// Where its wall time went
+        timings: Timings,
     },
     /// A ruling was posted to the maintainer's webhook
     Alerted {

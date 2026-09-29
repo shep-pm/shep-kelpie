@@ -27,6 +27,7 @@ fn the_format_is_pinned() {
             "coderabbit": { "rounds": 0, "cap_cleared": false, "satisfied": false },
             "known": { "labels": ["review please"], "ready": false },
             "qwen": { "rounds": 0, "seconds": 0 },
+            "timings": { "seconds": { "worker": 0, "gpu_wait": 0, "local_round": 0, "claude_round": 0, "judging": 0, "ci": 0, "coderabbit_window": 0, "coderabbit_review": 0, "ruling": 0, "merge": 0, "shots": 0, "other": 0 } },
             "calls": [{
                 "role": "worker",
                 "at": 10,
@@ -444,4 +445,12 @@ fn a_calls_cost_is_measured_from_its_own_sessions_last_call() {
     assert_eq!(item.session_cost(&other), Cost(40));
     assert_eq!(item.session_cost(&SessionId("new".into())), Cost(0));
     assert_eq!(item.cost(), Cost(45));
+}
+
+#[test]
+fn a_work_item_saved_before_timings_has_none_yet() {
+    let mut value = serde_json::to_value(a_work_item()).unwrap();
+    value.as_object_mut().unwrap().remove("timings");
+    let item: WorkItem = serde_json::from_value(value).unwrap();
+    assert_eq!(item.timings, Timings::default());
 }

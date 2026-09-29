@@ -119,6 +119,30 @@ fn a_file_saved_before_pacing_loads_with_none() {
     fs::write(dir.path().join("state.json"), old).unwrap();
     let state = store.load().unwrap().unwrap();
     assert_eq!((state.run, state.pacing), (RunState::Running, None));
+    assert_eq!(state.history, []);
+}
+
+fn finished(issue: u64) -> FinishedItem {
+    FinishedItem {
+        issue,
+        pull_request: Some(issue + 1),
+        merged: true,
+        at: Timestamp(issue),
+        timings: Timings::default(),
+    }
+}
+
+#[test]
+fn past_the_history_kept_the_oldest_entry_goes() {
+    let mut state = ProjectState::new(Timestamp(1));
+    for issue in 1..=HISTORY_KEPT as u64 {
+        state.record_finished(finished(issue));
+    }
+    assert_eq!(state.history.len(), HISTORY_KEPT);
+    assert_eq!(state.history[0].issue, 1);
+    state.record_finished(finished(101));
+    let issues: Vec<u64> = state.history.iter().map(|e| e.issue).collect();
+    assert_eq!(issues, (2..=101).collect::<Vec<u64>>());
 }
 
 #[test]
@@ -211,6 +235,24 @@ fn the_file_format_is_pinned() {
         day: 1,
         week_used_pct: 10,
     });
+    let mut timings = Timings::starting(Timestamp(20));
+    timings.charge(crate::work_item::TimingPhase::Ci, Timestamp(50));
+    state.history = vec![
+        FinishedItem {
+            issue: 22,
+            pull_request: Some(30),
+            merged: true,
+            at: Timestamp(50),
+            timings,
+        },
+        FinishedItem {
+            issue: 23,
+            pull_request: None,
+            merged: false,
+            at: Timestamp(60),
+            timings: Timings::default(),
+        },
+    ];
     store.save(&state).unwrap();
     let text = fs::read_to_string(dir.path().join("state.json")).unwrap();
     let value: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -267,6 +309,22 @@ fn the_file_format_is_pinned() {
             "leases": [{ "resource": "coderabbit", "issue": 22, "since": 8 }],
             "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
             "notices": [{ "issue": 22, "pull_request": 30, "head": "c0ffee" }],
+            "history": [
+                {
+                    "issue": 22,
+                    "pull_request": 30,
+                    "merged": true,
+                    "at": 50,
+                    "timings": { "started": 20, "charged": 50, "seconds": { "worker": 0, "gpu_wait": 0, "local_round": 0, "claude_round": 0, "judging": 0, "ci": 30, "coderabbit_window": 0, "coderabbit_review": 0, "ruling": 0, "merge": 0, "shots": 0, "other": 0 } },
+                },
+                {
+                    "issue": 23,
+                    "pull_request": null,
+                    "merged": false,
+                    "at": 60,
+                    "timings": { "seconds": { "worker": 0, "gpu_wait": 0, "local_round": 0, "claude_round": 0, "judging": 0, "ci": 0, "coderabbit_window": 0, "coderabbit_review": 0, "ruling": 0, "merge": 0, "shots": 0, "other": 0 } },
+                },
+            ],
         })
     );
 }

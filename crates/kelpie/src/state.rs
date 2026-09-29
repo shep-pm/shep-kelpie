@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
 use crate::ports::Timestamp;
-use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
+use crate::work_item::{Known, Phase, Review, Timings, Turn, WorkItem};
 
 /// The state file's format version
 const VERSION: u32 = 2;
@@ -62,6 +62,29 @@ pub struct ProjectState {
     /// Automatic merges not yet posted to the webhook, oldest first
     #[serde(default)]
     pub notices: Vec<Notice>,
+    /// The last [`HISTORY_KEPT`] work items finished, oldest first
+    #[serde(default)]
+    pub history: Vec<FinishedItem>,
+}
+
+/// How many finished work items the state file keeps
+pub const HISTORY_KEPT: usize = 100;
+
+/// A work item that finished, merged or dropped
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FinishedItem {
+    /// The issue it resolved
+    pub issue: u64,
+    /// Its pull request, if it had one
+    pub pull_request: Option<u64>,
+    /// Whether the pull request merged
+    pub merged: bool,
+    /// When it finished
+    pub at: Timestamp,
+    /// Where its wall time went, charged to `at`
+    pub timings: Timings,
 }
 
 impl ProjectState {
@@ -81,6 +104,7 @@ impl ProjectState {
             leases: Vec::new(),
             pacing: None,
             notices: Vec::new(),
+            history: Vec::new(),
         }
     }
 
@@ -97,6 +121,15 @@ impl ProjectState {
     /// The open work item for `issue`, to change
     pub fn item_mut(&mut self, issue: u64) -> Option<&mut WorkItem> {
         self.work_items.iter_mut().find(|item| item.issue == issue)
+    }
+
+    /// Adds a finished work item to the history, dropping the oldest past
+    /// [`HISTORY_KEPT`]
+    pub fn record_finished(&mut self, entry: FinishedItem) {
+        self.history.push(entry);
+        if let Some(excess) = self.history.len().checked_sub(HISTORY_KEPT) {
+            self.history.drain(..excess);
+        }
     }
 
     // A version 1 file held one work item, and every ruling in it was that

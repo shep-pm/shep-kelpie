@@ -11,8 +11,10 @@ use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage, Verdict};
 use crate::shots::ShotsRecord;
 
 mod spend;
+mod timings;
 
 pub use spend::{QwenTally, RoleSpend, Spend};
+pub use timings::{PhaseSeconds, TimingPhase, Timings};
 
 /// The work item in flight
 // wire format: changing this is a breaking change to the state file
@@ -106,6 +108,9 @@ pub struct WorkItem {
     /// The pull request's shots comment, once posted
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shots_comment: Option<u64>,
+    /// Where its wall time has gone, by phase
+    #[serde(default)]
+    pub timings: Timings,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
 }

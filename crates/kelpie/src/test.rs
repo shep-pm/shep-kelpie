@@ -123,6 +123,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         rebased: false,
         shots: None,
         shots_comment: None,
+        timings: crate::work_item::Timings::default(),
         calls: vec![CallRecord {
             role: Role::Worker,
             at: Timestamp(10),

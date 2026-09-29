@@ -17,7 +17,8 @@ use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{
-    CodeRabbitTally, Known, Phase, QwenTally, ReviewCallState, Turn, WorkItem, new_session_id,
+    CodeRabbitTally, Known, Phase, QwenTally, ReviewCallState, Timings, Turn, WorkItem,
+    new_session_id,
 };
 
 mod adopt;
@@ -39,6 +40,8 @@ mod ruling;
 #[cfg(test)]
 mod several;
 mod shots;
+#[cfg(test)]
+mod timings;
 mod trigger;
 mod turn;
 
@@ -200,6 +203,12 @@ impl Runner {
         let mut state = store
             .load()?
             .unwrap_or_else(|| ProjectState::new(ports.clock.now()));
+        // The time across a restart counts where each item stood when it was
+        // last saved; the next save persists it.
+        let now = ports.clock.now();
+        for item in &mut state.work_items {
+            item.charge_time(now);
+        }
         // A review call in flight when the runner stopped never resumes on
         // its own, unlike a turn: nothing reruns review_step to naturally
         // clear it, so a restart clears it here instead of leaving it stuck
@@ -360,6 +369,7 @@ impl Runner {
             rebased: false,
             shots: None,
             shots_comment: None,
+            timings: Timings::starting(self.ports.clock.now()),
             calls: Vec::new(),
         }
     }
@@ -396,7 +406,16 @@ impl Runner {
         self.save(next)
     }
 
-    fn save(&mut self, next: ProjectState) -> Result<(), StateError> {
+    // Time is charged here, once for every change, so no step starts or stops
+    // a clock: what an item was doing since its last charge is what the state
+    // it was in says.
+    fn save(&mut self, mut next: ProjectState) -> Result<(), StateError> {
+        let now = self.ports.clock.now();
+        for item in &mut next.work_items {
+            if let Some(before) = self.state.item(item.issue) {
+                item.timings.charge(before.timing_phase(), now);
+            }
+        }
         self.store.save(&next)?;
         self.state = next;
         Ok(())
