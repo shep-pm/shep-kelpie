@@ -237,6 +237,32 @@ mod tests {
     }
 
     #[test]
+    fn the_instructions_ask_with_multiple_choice() {
+        let text = instructions_text();
+        assert!(text.contains("AskUserQuestion"));
+        for merge in ["Merge", "Send back with a note", "Leave for later"] {
+            assert!(text.contains(merge), "{merge}");
+        }
+        assert!(text.contains("begin with `- `"));
+    }
+
+    #[test]
+    fn a_tapped_choice_is_passed_on_as_shown_and_a_yes_has_one_command() {
+        let text = instructions_text();
+        assert!(text.contains("pass its text exactly as shown, never reworded"));
+        assert!(text.contains("`/k/bin/kelpie relay-yes <project> <id>`"));
+        assert!(text.contains("Leave for later: run nothing"));
+    }
+
+    #[test]
+    fn the_instructions_never_talk_of_cost() {
+        let lower = instructions_text().to_lowercase();
+        for word in ["cost", "budget", "token"] {
+            assert!(!lower.contains(word), "{word}");
+        }
+    }
+
+    #[test]
     fn the_instructions_say_a_failure_is_reported_never_worked_around() {
         let text = instructions_text();
         assert!(text.contains("tell the maintainer its output word for word"));
