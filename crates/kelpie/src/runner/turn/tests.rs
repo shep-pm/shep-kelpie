@@ -97,7 +97,11 @@ fn the_settings_file_fences_writes_to_this_worktree_and_its_git_paths() {
     );
     assert_eq!(
         seen.settings["hooks"]["PreToolUse"][1]["hooks"][0]["command"],
-        "'/opt/kelpie/bin/kelpie' 'guard'",
+        format!(
+            "'/opt/kelpie/bin/kelpie' 'guard' '{}' '{}'",
+            git_dir.display(),
+            kelpie.join("wt/koji/7").display()
+        ),
         "kelpie's own guard, with no project hooks in the settings"
     );
 }

@@ -4,20 +4,34 @@
 //! refuses two things a worker's commit or pull request would carry out:
 //! the home folder's path, which names the machine's user and every
 //! worktree sits under, and a pull request title that is not a
-//! conventional commit. It reads the command's own text and, for a commit,
-//! the lines it adds. It never echoes what it matched.
+//! conventional commit. It reads the command's own text and, for a commit
+//! or a push in the worker's worktree, the lines it adds or sends. It never
+//! echoes what it matched.
+//!
+//! The hook runs outside the sandbox, so git runs only through
+//! [`worktree::trusted`], with the worktree's git dirs named and checked. A
+//! repo the worker made could name any program in its own config.
 
 mod shell;
 
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command as Process, Stdio};
 
 use serde::Deserialize;
 
 use crate::confine::Verdict;
+use crate::worktree;
 use shell::Command;
+
+/// Where the worker's own git lives
+#[derive(Debug, Clone, Copy)]
+pub struct Checkout<'a> {
+    /// The project repo's common git dir
+    pub git_common_dir: &'a Path,
+    /// The work item's worktree
+    pub worktree: &'a Path,
+}
 
 /// The conventional commit types a pull request title may start with
 const TYPES: [&str; 11] = [
@@ -28,7 +42,7 @@ const TYPES: [&str; 11] = [
 const MESSAGE_FILE_MAX: u64 = 1 << 20;
 
 /// Judges the Bash call in `input`, with `home` the home folder whose path stays in
-pub fn judge(input: impl Read, home: Option<&Path>) -> Verdict {
+pub fn judge(input: impl Read, home: Option<&Path>, checkout: Checkout<'_>) -> Verdict {
     #[derive(Deserialize)]
     struct Call {
         tool_name: String,
@@ -58,7 +72,7 @@ pub fn judge(input: impl Read, home: Option<&Path>) -> Verdict {
                 }
                 Vec::new()
             }
-            Some("git") => git(&command, &cwd, home.as_ref()),
+            Some("git") => git(&command, &cwd, home.as_ref(), checkout),
             Some("gh") => gh(&command, &cwd, home.as_ref()),
             _ => Vec::new(),
         };
@@ -74,8 +88,8 @@ pub fn judge(input: impl Read, home: Option<&Path>) -> Verdict {
     Verdict::Refuse(refusals.join("\n\n"))
 }
 
-// `git commit` and `git tag`: their messages, and the lines a commit adds.
-fn git(command: &Command, cwd: &Path, home: Option<&Home>) -> Vec<String> {
+// `git commit`, `git tag` and `git push`: their messages, and the lines they add or send.
+fn git(command: &Command, cwd: &Path, home: Option<&Home>, checkout: Checkout<'_>) -> Vec<String> {
     let mut words = command.words[1..].iter();
     let mut dir = cwd.to_owned();
     let sub = loop {
@@ -94,41 +108,70 @@ fn git(command: &Command, cwd: &Path, home: Option<&Home>) -> Vec<String> {
     };
     let args: Vec<String> = words.cloned().collect();
     let mut out = Vec::new();
-    match sub {
-        "commit" | "tag" => {
-            let messages = values(&args, &["--message"], &['m'])
-                .into_iter()
-                .chain(files(&args, &["--file"], &['F'], &dir))
-                .chain(command.heredocs.iter().cloned());
-            if messages.into_iter().any(|m| home.is_in(&m)) {
-                out.push(home.refusal(&format!("this {sub}'s message"), WRITE));
-            }
+    if sub == "commit" || sub == "tag" {
+        let messages = values(&args, &["--message"], &['m'])
+            .into_iter()
+            .chain(files(&args, &["--file"], &['F'], &dir))
+            .chain(command.heredocs.iter().cloned());
+        if messages.into_iter().any(|m| home.is_in(&m)) {
+            out.push(home.refusal(&format!("this {sub}'s message"), WRITE));
         }
+    }
+    if !matches!(sub, "commit" | "push") || !in_own_repo(checkout.worktree, &dir) {
+        return out;
+    }
+    let run = match worktree::trusted(checkout.git_common_dir, checkout.worktree) {
+        Ok(run) => run,
+        Err(e) => {
+            out.push(format!(
+                "kelpie cannot read this worktree's git to check this {sub}: {e}"
+            ));
+            return out;
+        }
+    };
+    let read = |args: &[&str]| run(&[args, &PLAIN].concat()).unwrap_or_default();
+    if sub == "push" {
         // A file written and committed in one call is not staged when the
         // commit is judged, so the push reads what it sends.
-        "push" => {
-            let log = run_git(&dir, &["log", "--format=%B", "HEAD", "--not", "--remotes"]);
-            if home.is_in(&log) {
-                out.push(home.refusal("a message in the commits this push sends", REWRITE));
-            }
-            let patches = ["log", "-p", "--format=", "HEAD", "--not", "--remotes"];
-            for file in home.added(&dir, &patches) {
-                out.push(home.refusal(&format!("{file} in the commits this push sends"), REWRITE));
-            }
+        let log = read(&["log", "--format=%B", "HEAD", "--not", "--remotes"]);
+        if home.is_in(&log) {
+            out.push(home.refusal("a message in the commits this push sends", REWRITE));
         }
-        _ => {}
+        let patches = read(&["log", "-p", "--format=", "HEAD", "--not", "--remotes"]);
+        for file in home.added(&patches) {
+            out.push(home.refusal(&format!("{file} in the commits this push sends"), REWRITE));
+        }
+        return out;
     }
-    if sub == "commit" {
-        let all = args
-            .iter()
-            .take_while(|a| *a != "--")
-            .any(|a| a == "--all" || a.starts_with('-') && !a.starts_with("--") && a.contains('a'));
-        let range = if all { "HEAD" } else { "--cached" };
-        for file in home.added(&dir, &["diff", range]) {
-            out.push(home.refusal(&format!("this commit's {file}"), WRITE));
-        }
+    let all = args
+        .iter()
+        .take_while(|a| *a != "--")
+        .any(|a| a == "--all" || a.starts_with('-') && !a.starts_with("--") && a.contains('a'));
+    let range = if all { "HEAD" } else { "--cached" };
+    for file in home.added(&read(&["diff", range])) {
+        out.push(home.refusal(&format!("this commit's {file}"), WRITE));
     }
     out
+}
+
+// Plain patches: no colour, and no program the repo's config names.
+const PLAIN: [&str; 4] = [
+    "--unified=0",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+];
+
+// Whether `dir` is in the worktree, and in no repo the worker made inside it.
+fn in_own_repo(worktree: &Path, dir: &Path) -> bool {
+    let (Ok(worktree), Ok(dir)) = (worktree.canonicalize(), dir.canonicalize()) else {
+        return false;
+    };
+    dir.starts_with(&worktree)
+        && dir
+            .ancestors()
+            .take_while(|a| *a != worktree)
+            .all(|a| a.join(".git").symlink_metadata().is_err())
 }
 
 // `gh` publishing verbs: their titles, bodies and notes, and a pull request's title.
@@ -217,7 +260,9 @@ fn files(args: &[String], long: &[&str], short: &[char], cwd: &Path) -> Vec<Stri
         .filter(|f| f != "-")
         .filter_map(|f| {
             let path = cwd.join(f);
-            let small = fs::metadata(&path).is_ok_and(|m| m.len() <= MESSAGE_FILE_MAX);
+            // A pipe would hold the hook open.
+            let small =
+                fs::metadata(&path).is_ok_and(|m| m.is_file() && m.len() <= MESSAGE_FILE_MAX);
             small.then(|| fs::read_to_string(path).ok()).flatten()
         })
         .collect()
@@ -265,18 +310,11 @@ impl Home {
         })
     }
 
-    // The files whose added lines, in what `git <args>` prints, name the folder.
-    fn added(&self, dir: &Path, args: &[&str]) -> Vec<String> {
-        let plain = [
-            "--unified=0",
-            "--no-color",
-            "--no-ext-diff",
-            "--no-textconv",
-        ];
-        let diff = run_git(dir, &[args, &plain].concat());
+    // The files whose added lines in `patches` name the folder.
+    fn added(&self, patches: &str) -> Vec<String> {
         let mut file = "";
         let mut out: Vec<String> = Vec::new();
-        for line in diff.lines() {
+        for line in patches.lines() {
             if let Some(name) = line.strip_prefix("+++ ") {
                 file = name.strip_prefix("b/").unwrap_or(name);
             } else if line.starts_with('+') && self.is_in(line) && !out.iter().any(|f| f == file) {
@@ -299,18 +337,6 @@ const WRITE: &str = "Take it out, then try again.";
 
 const REWRITE: &str = "Those commits have not left this machine: take it out and rewrite \
                        them, since a new commit on top would still send the old one.";
-
-// What `git <args>` prints in `dir`, or nothing when it cannot run.
-fn run_git(dir: &Path, args: &[&str]) -> String {
-    Process::new("git")
-        .args(args)
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .unwrap_or_default()
-}
 
 #[cfg(test)]
 mod tests;

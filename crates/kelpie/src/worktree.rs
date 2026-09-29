@@ -463,7 +463,7 @@ pub fn rebase(
 // Git for the worktree, with its git dirs named rather than found. The
 // worker can write the worktree's own git dir, so its `commondir` is checked
 // against the repo's, and hooks are off: none of them is kelpie's to run.
-fn trusted<'a>(
+pub(crate) fn trusted<'a>(
     repo: &Path,
     worktree: &'a Path,
 ) -> Result<impl Fn(&[&str]) -> Result<String, WorktreeError> + 'a, WorktreeError> {

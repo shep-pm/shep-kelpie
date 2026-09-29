@@ -223,7 +223,13 @@ impl WorkerProfile<'_> {
                 .join(" ");
             pre.push(entry(Some(PLAYWRIGHT_TOOLS), &guard));
         }
-        let guard = [self.kelpie, Path::new("guard")].map(|p| shell_quote(&p.to_string_lossy()));
+        let guard = [
+            self.kelpie,
+            Path::new("guard"),
+            self.git_common_dir,
+            self.worktree,
+        ]
+        .map(|p| shell_quote(&p.to_string_lossy()));
         pre.push(entry(Some("Bash"), &guard.join(" ")));
         let mut post = Vec::new();
         for hook in self.guard_hooks {
@@ -641,7 +647,7 @@ mod tests {
                 "matcher": "Bash",
                 "hooks": [{
                     "type": "command",
-                    "command": r"'/opt/kelpie'\''s bin/kelpie' 'guard'",
+                    "command": r"'/opt/kelpie'\''s bin/kelpie' 'guard' '/k/repos/shep/.git' '/k/wt/shep/7'",
                 }],
             })
         );

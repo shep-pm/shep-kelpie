@@ -5,7 +5,7 @@
 //! `kelpie confine <folder>...`: the hook that holds a worker's file tools
 //! to its folders. Claude Code runs it; it is not for the maintainer.
 //!
-//! `kelpie guard`: the hook on every worker's Bash calls that keeps the home
+//! `kelpie guard <git common dir> <worktree>`: the hook on every worker's Bash calls that keeps the home
 //! folder's path and freeform pull request titles out of what it publishes.
 //! Claude Code runs it, like `confine`.
 //!
@@ -30,6 +30,7 @@ use std::process::ExitCode;
 
 use kelpie::adapters::ShotsCli;
 use kelpie::confine::{Verdict, judge};
+use kelpie::guard::{self, Checkout};
 use kelpie::preview::Tools;
 use kelpie::relay::gate;
 use kelpie::relay::rule::{self, Ruling};
@@ -44,11 +45,16 @@ fn main() -> ExitCode {
         [role, project] if role == "runner" => kelpie::sheep::run(project),
         [role] if role == "dog" => kelpie::dog::run(),
         [command, rest @ ..] if command == "lease" => kelpie::lease::cli::main(rest),
-        [role] if role == "guard" => {
+        [role, git_common_dir, worktree] if role == "guard" => {
             let home = std::env::var_os("HOME").map(PathBuf::from);
-            hook(kelpie::guard::judge(
+            let checkout = Checkout {
+                git_common_dir: Path::new(git_common_dir),
+                worktree: Path::new(worktree),
+            };
+            hook(guard::judge(
                 std::io::stdin().lock(),
                 home.as_deref(),
+                checkout,
             ))
         }
         [role, domains @ ..] if role == "browse-guard" => {
@@ -82,7 +88,7 @@ fn main() -> ExitCode {
         }),
         _ => {
             eprintln!(
-                "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie guard\n       kelpie browse-guard <domain>...\n       kelpie tools install\n       kelpie shots-mcp <tools> <job>\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>\n       kelpie relay-gate <kelpie>",
+                "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie guard <git common dir> <worktree>\n       kelpie browse-guard <domain>...\n       kelpie tools install\n       kelpie shots-mcp <tools> <job>\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>\n       kelpie relay-gate <kelpie>",
                 kelpie::lease::cli::USAGE
             );
             ExitCode::from(2)
