@@ -637,6 +637,17 @@ impl Rig {
         KelpieSettings::load(&self.paths().kelpie_settings)
             .unwrap()
             .webhook
+            .expect("the rig's kelpie settings name a webhook")
+    }
+
+    /// Replaces the rig's kelpie settings file with `text`
+    pub(crate) fn set_kelpie_settings(&self, text: &str) {
+        std::fs::write(self.paths().kelpie_settings, text).unwrap();
+    }
+
+    /// Sets the project's `ruling_channels`, as its settings file would
+    pub(crate) fn set_ruling_channels(&self, list: &str) {
+        self.edit_settings(|s| format!("ruling_channels = {list}\n{s}"));
     }
 
     fn make_repo(&self) {
@@ -809,7 +820,16 @@ impl Rig {
     ///
     /// Returns the pull request's head.
     pub(crate) fn with_pull_request(project: &str) -> (Self, Mutex<Runner>, String) {
+        Self::with_pull_request_set(project, |_| {})
+    }
+
+    /// [`Rig::with_pull_request`], after `setup` changed the rig's settings
+    pub(crate) fn with_pull_request_set(
+        project: &str,
+        setup: impl FnOnce(&Self),
+    ) -> (Self, Mutex<Runner>, String) {
         let rig = Self::new(project);
+        setup(&rig);
         let runner = rig.open().unwrap();
         rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
@@ -828,7 +848,15 @@ impl Rig {
     /// [`Rig::with_pull_request`], with CI green and the worker parked on
     /// merge ruling 1 about the returned head
     pub(crate) fn parked(project: &str) -> (Self, Mutex<Runner>, String) {
-        let (rig, runner, head) = Self::with_pull_request(project);
+        Self::parked_set(project, |_| {})
+    }
+
+    /// [`Rig::parked`], after `setup` changed the rig's settings
+    pub(crate) fn parked_set(
+        project: &str,
+        setup: impl FnOnce(&Self),
+    ) -> (Self, Mutex<Runner>, String) {
+        let (rig, runner, head) = Self::with_pull_request_set(project, setup);
         rig.forge.set_checks(&head, Checks::Passed);
         assert!(matches!(
             rig.verdict(&runner),

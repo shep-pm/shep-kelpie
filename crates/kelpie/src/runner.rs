@@ -6,10 +6,12 @@
 //! Every change is saved before it takes effect in memory.
 
 use std::fmt;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::board::{LabelError, Skip, WorkerModel, worker_override};
+use crate::channels::{Channel, Channels};
 use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Ports, SessionId, Timestamp, Visibility};
 use crate::settings::{Settings, SettingsError};
@@ -138,7 +140,9 @@ pub struct Runner {
     pacing: Option<(Timestamp, Assessment)>,
     // What the board passed over on its last poll, kept in memory only
     skipped: Vec<Skip>,
-    webhook: Webhook,
+    // None when rulings do not go to the webhook
+    webhook: Option<Webhook>,
+    channels: Channels,
     // The last failed webhook post, kept in memory so a restart tries at once
     retry: Option<alert::Retry>,
     // When the relay was last cleared, kept in memory only: a restart may
@@ -171,8 +175,8 @@ impl Runner {
         kelpie: &Path,
         ports: Ports,
     ) -> Result<Self, OpenError> {
-        let webhook = KelpieSettings::load(&paths.kelpie_settings)?.webhook;
         let settings = Settings::load(&paths.settings, home)?;
+        let (channels, webhook) = ruling_channels(&settings, &paths.kelpie_settings)?;
         check_repo(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;
         check_coderabbit(&settings, &ports)?;
@@ -220,6 +224,7 @@ impl Runner {
             pacing: None,
             skipped: Vec::new(),
             webhook,
+            channels,
             retry: None,
             relay_cleared: None,
             relay_notices: Vec::new(),
@@ -386,6 +391,39 @@ fn check_repo(settings: &Settings) -> Result<(), SettingsError> {
         )));
     }
     Ok(())
+}
+
+// The project's channels, else kelpie's, else every one; and the webhook
+// they need. A kelpie settings file that is absent is one with nothing in it,
+// which only a project that posts to the webhook cannot do without.
+fn ruling_channels(
+    settings: &Settings,
+    file: &Path,
+) -> Result<(Channels, Option<Webhook>), SettingsError> {
+    let kelpie = match KelpieSettings::load(file) {
+        Err(SettingsError::Read {
+            kind: io::ErrorKind::NotFound,
+            ..
+        }) => KelpieSettings::default(),
+        loaded => loaded?,
+    };
+    let channels = (settings.ruling_channels.clone())
+        .or(kelpie.ruling_channels)
+        .unwrap_or_default();
+    if !channels.has(Channel::Webhook) {
+        return Ok((channels, None));
+    }
+    match kelpie.webhook {
+        Some(webhook) => Ok((channels, Some(webhook))),
+        None => Err(SettingsError::Invalid {
+            setting: "ruling_channels",
+            reason: format!(
+                "rulings go to the webhook, and {} names none: add a `[webhook]` \
+                 table, or drop `webhook` from `ruling_channels`",
+                file.display()
+            ),
+        }),
+    }
 }
 
 fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError> {

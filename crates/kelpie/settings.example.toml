@@ -1,7 +1,7 @@
 # A project's settings, read once when its runner starts. Every key is
 # required except `review.local`, `pacing.enabled`, `worker.allowed_domains`,
-# `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout` and
-# `[preview]`, which a file written before them may leave out.
+# `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout`,
+# `ruling_channels` and `[preview]`, which a file written before them may leave out.
 # This file holds the first build's defaults, for shep.
 
 repo = "~/.kelpie/repos/shep"
@@ -15,6 +15,12 @@ merge_authority = "ask"
 # Whether the repo runs CI on pull requests. GitHub cannot tell a repo
 # with no CI from checks not registered yet, so a repo without CI says so.
 ci = true
+
+# How rulings reach the maintainer: `webhook`, `relay` (the Claude app on the
+# phone) or both. Over `ruling_channels` in `~/.kelpie/settings.toml`, and both
+# when neither says. A project with no `webhook` in it needs no webhook in
+# that file, and one with no `relay` never starts a relay.
+# ruling_channels = ["webhook", "relay"]
 
 # Left out of a pull request's changed-line count.
 generated = [

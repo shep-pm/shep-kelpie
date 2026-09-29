@@ -3,9 +3,9 @@
 //! One TOML file per project, read once when the runner starts. Unknown keys
 //! are refused, so a misspelt or malformed setting stops the runner with a
 //! message naming it. Every setting is required except the ones added after
-//! the first build (`pacing.enabled`, `worker.allowed_domains`,
-//! `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout` and
-//! `[preview]`): a file written before them loads with the documented
+//! the first build (`review.local`, `pacing.enabled`, `worker.allowed_domains`,
+//! `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout`,
+//! `ruling_channels` and `[preview]`): a file written before them loads with the documented
 //! default, so an upgrade never breaks an existing project.
 //! `settings.example.toml` beside this crate holds the defaults.
 
@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::channels::Channels;
 use crate::preview::Preview;
 
 mod local;
@@ -54,6 +55,10 @@ pub struct Settings {
     /// Showing a work item's UI, for a repo with a launch file
     #[serde(default)]
     pub preview: Preview,
+    /// How rulings reach the maintainer, over what kelpie's own settings say.
+    /// Kelpie's settings decide when absent.
+    #[serde(default)]
+    pub ruling_channels: Option<Channels>,
 }
 
 /// Who decides a merge
