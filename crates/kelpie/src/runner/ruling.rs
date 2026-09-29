@@ -14,7 +14,7 @@ use super::report::{Begin, StepReport};
 use super::rework::HUMAN;
 use crate::ports::Timestamp;
 use crate::state::{Fix, ProjectState, Resume, Ruling, RulingKind, StateError};
-use crate::work_item::{CodeRabbitStage, Known, Phase, Review, Turn, WorkItem};
+use crate::work_item::{CodeRabbitStage, Known, Phase, Review, Turn, WorkItem, foreign_change};
 use crate::worktree;
 
 /// The prompt for a turn resumed after the maintainer accepts a timed-out
@@ -145,6 +145,17 @@ impl Runner {
             }
             _ => None,
         };
+        if let (Some((_, to)), Answer::Yes | Answer::No(_), Some(item)) =
+            (&head_moved, &answer, parked)
+            && let RulingKind::ForeignChange { known: seen, .. } = &ruling.kind
+        {
+            let tip = worktree::origin_head(&self.settings.repo, &item.branch)
+                .map_err(|e| RuleError::Adopt(to.clone(), e.to_string()))?;
+            if tip != *to {
+                let change = foreign_change(&item.known, &seen.labels, seen.ready, &tip);
+                return self.ask_again(next, ruling.pull_request, change, now);
+            }
+        }
         let moved = decide(id, answer, ruling, now, head_moved)?;
         if let Some(item) = next.work_item.as_mut().filter(|item| parked_on(item)) {
             item.coderabbit.cap_cleared |= lifts_cap;
@@ -206,6 +217,33 @@ impl Runner {
             }
         }
         self.save(next).map_err(RuleError::State)
+    }
+
+    // The branch moved again while the ruling waited, so the answer was about
+    // a head that is gone. What stands now is asked about afresh, or, when
+    // nothing outside kelpie is left, the gate looks again.
+    fn ask_again(
+        &mut self,
+        mut next: ProjectState,
+        number: Option<u64>,
+        change: Option<(Known, String)>,
+        now: Timestamp,
+    ) -> Result<(), RuleError> {
+        let Some((known, description)) = change else {
+            if let Some(item) = next.work_item.as_mut() {
+                item.phase = Phase::Ci {
+                    head: None,
+                    since: now,
+                };
+            }
+            return self.save(next).map_err(RuleError::State);
+        };
+        let kind = RulingKind::ForeignChange { description, known };
+        let (_, _, question) = park(self.project.as_str(), &mut next, number, kind);
+        self.save(next).map_err(RuleError::State)?;
+        // A comment that fails loses nothing: the ruling is saved and alerted.
+        let _ = self.post_ruling(number, &question);
+        Ok(())
     }
 
     // Saves the ruling and parks the worker on it, then posts it on pull
@@ -683,6 +721,35 @@ mod tests {
             panic!("no second ruling");
         };
         assert!(question.starts_with("Merge pull request #71"), "{question}");
+    }
+
+    #[test]
+    fn a_yes_on_a_head_the_branch_moved_past_asks_about_the_new_head_instead() {
+        let (rig, runner, head) = Rig::with_pull_request("koji");
+        rig.push_by_hand("kelpie/7", "first.txt");
+        assert!(matches!(
+            rig.verdict(&runner),
+            Some(StepReport::Ruling { id: 1, .. })
+        ));
+        let second = rig.push_by_hand("kelpie/7", "second.txt");
+        let status = rig.ask(&runner, "rule", Some("1 yes"));
+        assert_eq!(
+            status["work_item"]["phase"],
+            json!({ "state": "ruling", "id": 2 })
+        );
+        assert_eq!(status["rulings"][0]["kind"]["known"]["head"], json!(second));
+        let question = status["rulings"][0]["question"].as_str().unwrap();
+        assert!(
+            question.starts_with(&format!(
+                "Pull request #71 changed outside kelpie: its head moved to {}",
+                &second[..7]
+            )),
+            "{question}"
+        );
+        assert_eq!(
+            crate::test::git(&rig.worktree_7(), &["rev-parse", "HEAD"]),
+            head
+        );
     }
 
     #[test]
