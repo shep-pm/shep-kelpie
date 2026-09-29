@@ -183,14 +183,22 @@ mod tests {
             panic!("{command}");
         };
         assert_eq!((program, role), (KELPIE, "relay-gate"));
+        let judge = |command: &str| {
+            let call = json!({ "tool_name": "Bash", "tool_input": { "command": command } });
+            gate::judge(call.to_string().as_bytes(), kelpie)
+        };
         for denied in [
             "shep trigger shep rule '1 yes'",
             "shep daemon reload",
             "echo hi",
         ] {
-            let call = json!({ "tool_name": "Bash", "tool_input": { "command": denied } });
-            let verdict = gate::judge(call.to_string().as_bytes(), kelpie);
-            assert!(matches!(verdict, Verdict::Refuse(_)), "{denied}");
+            assert!(matches!(judge(denied), Verdict::Refuse(_)), "{denied}");
+        }
+        for passed in [
+            "/k/bin/kelpie relay-yes shep 1",
+            "/k/bin/kelpie relay-answer shep '1 no rename it'",
+        ] {
+            assert_eq!(judge(passed), Verdict::Allow, "{passed}");
         }
         assert!(s["permissions"].get("defaultMode").is_none(), "{s}");
     }
