@@ -167,6 +167,36 @@ mod tests {
     }
 
     #[test]
+    fn under_auto_a_change_to_claudes_settings_merges_only_after_a_yes() {
+        let rig = Rig::new("shep");
+        rig.merge_auto();
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "start", None);
+        rig.ask(&runner, "add", Some("7"));
+        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+        rig.claude.script([
+            Scripted::Push(".claude/agents/helper.md", "an agent\n"),
+            Scripted::Text("CLEAN"),
+        ]);
+        step(&runner).unwrap();
+        let (id, _) = ruling(step(&runner).unwrap());
+        step(&runner).unwrap(); // the alert
+        let head = rig.forge.head_of("kelpie/7").unwrap();
+        rig.forge.set_checks(&head, Checks::Passed);
+        assert_eq!(step(&runner).unwrap(), None);
+        assert!(rig.forge.merges().is_empty());
+
+        rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+        step(&runner).unwrap(); // review round 1, qwen
+        step(&runner).unwrap(); // review round 2, claude
+        // CI, then marking the draft ready and waiting out its checks.
+        for _ in 0..4 {
+            rig.verdict(&runner);
+        }
+        assert_eq!(rig.forge.merges(), [(71, head)]);
+    }
+
+    #[test]
     fn a_no_on_a_change_to_claudes_settings_stops_the_work_item() {
         let (rig, runner) = pushed(".mcp.json");
         let (_, question) = ruling(step(&runner).unwrap());
