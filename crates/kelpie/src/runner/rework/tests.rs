@@ -371,4 +371,41 @@ fn rework_takes_one_plain_pull_request_number() {
     }
 }
 
+#[test]
+fn a_rework_of_a_pull_request_coderabbit_reviewed_spends_no_second_round() {
+    let rig = Rig::new("shep");
+    rig.coderabbit_on();
+    rig.edit_settings(|s| s.replace("divisor = 1000\n", "divisor = 1000\nrounds = 1\n"));
+    reviewed_71(&rig);
+    let reviewed = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.coderabbit.review(
+        71,
+        &reviewed,
+        crate::runner::coderabbit::tests::now(&rig),
+        &[],
+    );
+    let runner = running(&rig);
+    rig.ask(&runner, "rework", Some("71"));
+    rig.claude.script([
+        Scripted::Push("fix.txt", "fixed\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    step(&runner).unwrap(); // the rework's turn
+    step(&runner).unwrap(); // review round 1, qwen: clean by default
+    step(&runner).unwrap(); // review round 2, claude: scripted clean above
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::Ruling { id: 1, .. })
+    ));
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["rulings"][0]["kind"]["kind"], json!("merge"));
+    assert_eq!(status["work_item"]["coderabbit"]["rounds"], json!(1));
+    let summons = rig.forge.coderabbit.label_log().into_iter();
+    let summon = crate::runner::coderabbit::LABEL;
+    assert_eq!(summons.filter(|(_, l, _)| l == summon).count(), 0);
+}
+
 mod asked;
