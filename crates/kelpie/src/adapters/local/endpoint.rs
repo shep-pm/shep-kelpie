@@ -128,6 +128,14 @@ impl LocalReviewer {
         reply: &Path,
     ) -> Result<String, ReviewerError> {
         let url = format!("{}/chat/completions", endpoint.url.as_str());
+        // curl leaves the file alone on a reply with no body, and a retried
+        // round reuses the name.
+        std::fs::remove_file(reply)
+            .or_else(|e| match e.kind() {
+                std::io::ErrorKind::NotFound => Ok(()),
+                _ => Err(e),
+            })
+            .map_err(|e| failed(reply, "remove", &e))?;
         let mut command = Command::new("curl");
         command
             .args(["-sS", "-X", "POST", "-w", "%{http_code}"])

@@ -237,6 +237,23 @@ fn a_refused_or_unreadable_reply_fails_the_round() {
 }
 
 #[test]
+fn a_retried_round_never_reads_the_last_tries_reply() {
+    let dir = tempfile::tempdir().unwrap();
+    let worktree = repo(dir.path(), "fn a() {}\nfn b() {}\n");
+    let server = StandInEndpoint::start([
+        Answer::Says("MEDIUM|src/lib.rs:2|b is new|it matters"),
+        Answer::Status(200, ""),
+    ]);
+    let reviewer = LocalReviewer::default();
+    let local = local(server.url(), 8192);
+    let out = dir.path().join("out");
+    let first = reviewer.round(&local, &worktree, "origin/main", &out, 1);
+    assert_eq!(first.unwrap().len(), 1);
+    let again = reviewer.round(&local, &worktree, "origin/main", &out, 1);
+    assert_eq!(again, Err(ReviewerError::Unreadable(String::new())));
+}
+
+#[test]
 fn the_start_check_asks_the_server_for_its_models() {
     let server = StandInEndpoint::start([]);
     let reviewer = LocalReviewer::default();
