@@ -58,15 +58,16 @@ pub(super) struct Due {
 /// to `rule`'s own refusal.
 pub(super) fn tell_settled(runner: &Mutex<Runner>, relay: &dyn Relay) {
     let notices = std::mem::take(&mut lock(runner).relay_notices);
-    for notice in notices {
+    for (_, notice) in notices {
         let _ = relay.tell(&notice);
     }
 }
 
 impl Runner {
-    /// The ids of the pending rulings the relay was sent
+    /// The ids of the pending rulings the relay was sent, or is being sent
     pub(super) fn relayed(&self) -> Vec<u64> {
-        let relayed = self.state.rulings.iter().filter(|r| r.relayed);
+        let relayed = self.state.rulings.iter();
+        let relayed = relayed.filter(|r| r.relayed || self.relaying == Some(r.id));
         relayed.map(|r| r.id).collect()
     }
 
@@ -75,18 +76,20 @@ impl Runner {
         for &id in relayed {
             if !self.state.rulings.iter().any(|r| r.id == id) {
                 let notice = relay::settled(self.project.as_str(), id, how);
-                self.relay_notices.push(notice);
+                self.relay_notices.push((id, notice));
             }
         }
     }
 
-    /// The oldest ruling not yet posted, unless its last failure says wait
-    pub(super) fn alert_due(&self) -> Option<Due> {
+    /// The oldest ruling not yet posted, unless its last failure says wait,
+    /// held as the one being relayed until [`Self::alert_sent`]
+    pub(super) fn alert_due(&mut self) -> Option<Due> {
         let ruling = self.state.rulings.iter().find(|r| !r.alerted)?;
         let now = self.ports.clock.now();
         if self.retry.is_some_and(|r| r.id == ruling.id && now < r.at) {
             return None;
         }
+        self.relaying = Some(ruling.id);
         Some(Due {
             id: ruling.id,
             relay_message: relay::message(
@@ -126,6 +129,12 @@ impl Runner {
         relayed: bool,
         sent: Result<(), AlertError>,
     ) -> Result<StepReport, StateError> {
+        self.relaying = None;
+        // A notice queued for a ruling answered while its send was out is
+        // kept only if the relay did take the ruling.
+        if !relayed {
+            self.relay_notices.retain(|(notice, _)| *notice != id);
+        }
         let mut next = self.state.clone();
         // An answer can land while the post is out, and takes the ruling with it.
         let ruling = next.rulings.iter_mut().find(|r| r.id == id);
@@ -392,6 +401,40 @@ mod tests {
         step(&runner).unwrap();
         let reply = rig.ask(&runner, "relay-rule", Some("1 no rename the flag"));
         assert_eq!(reply["rulings"], json!([]), "{reply}");
+        step(&runner).unwrap();
+        assert_eq!(rig.relay.told(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_ruling_answered_while_its_relay_send_is_out_is_told_once_the_relay_took_it() {
+        let (rig, runner, _) = Rig::parked("shep");
+        rig.relay.set_up(true);
+        let due = runner.lock().unwrap().alert_due().unwrap();
+        rig.ask(&runner, "rule", Some("1 yes"));
+        runner
+            .lock()
+            .unwrap()
+            .alert_sent(due.id, true, Ok(()))
+            .unwrap();
+        step(&runner).unwrap();
+        assert_eq!(
+            rig.relay.told(),
+            ["[kelpie]\nproject=shep ruling=1 settled=yes\n\nRuling 1 was answered with a yes"]
+        );
+    }
+
+    #[test]
+    fn a_ruling_answered_while_a_failed_relay_send_is_out_tells_it_nothing() {
+        let (rig, runner, _) = Rig::parked("koji");
+        rig.relay.set_up(true);
+        let due = runner.lock().unwrap().alert_due().unwrap();
+        rig.ask(&runner, "rule", Some("1 no not yet"));
+        runner
+            .lock()
+            .unwrap()
+            .alert_sent(due.id, false, Ok(()))
+            .unwrap();
+        rig.claude.script([Scripted::Text("CLEAN")]);
         step(&runner).unwrap();
         assert_eq!(rig.relay.told(), Vec::<String>::new());
     }

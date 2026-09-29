@@ -143,7 +143,9 @@ pub struct Runner {
     // Notices for the relay of rulings settled without it, kept in memory
     // only: one lost to a restart leaves the question up, and `rule`
     // refuses a tap on it.
-    relay_notices: Vec<String>,
+    relay_notices: Vec<(u64, String)>,
+    // The ruling whose relay send is out, which an answer can settle first
+    relaying: Option<u64>,
     // The account kelpie acts as, read once a run when a rework first needs it
     viewer: Option<String>,
 }
@@ -204,6 +206,7 @@ impl Runner {
             retry: None,
             relay_cleared: None,
             relay_notices: Vec::new(),
+            relaying: None,
             viewer: None,
         })
     }
