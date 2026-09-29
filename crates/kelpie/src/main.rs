@@ -87,6 +87,15 @@ fn main() -> ExitCode {
                 rule::send(home, project, Ruling::NoOrAnswer(params))
             })
         }
+        // Adopted for lookout's settings panes, shep starts kelpie with no
+        // arguments. The dog still runs from the Flockfile.
+        [] if std::env::var_os("SHEP_DOG_NAME").is_some() => {
+            eprintln!(
+                "kelpie is adopted so lookout can edit its settings, and its dog runs from \
+                 the Flockfile: run `shep disable kelpie` to stop this start"
+            );
+            ExitCode::from(2)
+        }
         _ => {
             eprintln!(
                 "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie browse-guard <domain>...\n       kelpie settings move <project> [<sheep>]\n       kelpie tools install\n       kelpie shots-mcp <tools> <job>\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>\n       kelpie relay-gate <kelpie>",

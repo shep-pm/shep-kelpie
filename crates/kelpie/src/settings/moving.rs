@@ -76,7 +76,14 @@ pub async fn move_files(
                 match client.request(request).await {
                     Ok(Response::DogConfigSet { .. }) => {}
                     Ok(other) => return Err(format!("the shepherd answered {other:?}")),
-                    Err(e) => return Err(format!("the shepherd refused {section_name}: {e}")),
+                    // shep writes a dog's section only once the dog is adopted.
+                    Err(e) => {
+                        return Err(format!(
+                            "the shepherd refused {section_name}: {e}. Adopt kelpie first, \
+                             `shep adopt /path/to/kelpie --name kelpie` then \
+                             `shep disable kelpie`, and run this again"
+                        ));
+                    }
                 }
                 done.push(format!("moved into {section_name}"));
             } else if KelpieSettings::from_section(&tables.kelpie).as_ref() == Ok(&file) {
