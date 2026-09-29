@@ -393,13 +393,16 @@ impl Forge for FakeForge {
             return Err(ForgeError::Failed(format!("#{number} is unreadable")));
         }
         let pr = self.opened(number)?;
-        let open = self.open.lock().unwrap();
-        let listed = open.iter().rfind(|pr| pr.number == number);
+        let closes = {
+            let open = self.open.lock().unwrap();
+            let listed = open.iter().rfind(|pr| pr.number == number);
+            listed.map(|l| l.closes.clone()).unwrap_or_default()
+        };
         Ok(Reviewed {
             state: pr.state,
             title: format!("Title of pull request #{number}"),
             body: format!("Body of pull request #{number}.\n"),
-            closes: listed.map(|l| l.closes.clone()).unwrap_or_default(),
+            closes,
             branch: pr.branch,
             from_fork: pr.from_fork,
             author: pr.author,
