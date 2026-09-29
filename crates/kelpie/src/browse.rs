@@ -4,7 +4,9 @@
 //! The Playwright MCP server runs outside the sandbox, and its own fence
 //! blocks only the `file:` scheme: `view-source:file://` read any file. The
 //! hook reads each Playwright tool call on stdin and lets a URL through only
-//! when it is `http` or `https` to the dev server or a preview domain.
+//! when it is `http` or `https` to the dev server or a preview domain. It
+//! refuses every file name, since the server checks one before it writes.
+//! Screenshots go to kelpie's own output folder instead.
 
 use std::io::Read;
 
@@ -22,6 +24,15 @@ pub fn judge(input: impl Read, domains: &[String]) -> Verdict {
     let Some(arguments) = call["tool_input"].as_object() else {
         return Verdict::Refuse("kelpie cannot read this tool call's input".into());
     };
+    // The server resolves a file name's symlinks, then writes later: a worktree
+    // folder swapped for a link in between took a write outside it.
+    if arguments.get("filename").is_some_and(|f| !f.is_null()) {
+        return Verdict::Refuse(
+            "Playwright's tools save no file under kelpie: leave out `filename`, and a \
+             screenshot goes to kelpie's own folder, whose path the tool returns"
+                .into(),
+        );
+    }
     match arguments.get("url") {
         None | Some(Value::Null) => Verdict::Allow,
         Some(Value::String(url)) if allowed_url(url, domains) => Verdict::Allow,
@@ -147,6 +158,48 @@ mod tests {
             call(
                 "mcp__playwright__browser_tabs",
                 serde_json::json!({ "action": "list" })
+            ),
+            Verdict::Allow
+        );
+    }
+
+    // The review wrote outside the worktree by racing a folder against a link.
+    #[test]
+    fn no_playwright_tool_names_a_file() {
+        for tool in [
+            "browser_take_screenshot",
+            "browser_snapshot",
+            "browser_evaluate",
+            "browser_console_messages",
+            "browser_network_requests",
+            "browser_network_request",
+            "browser_pdf_save",
+            "browser_storage_state",
+        ] {
+            for filename in [
+                "shot.png",
+                "d/x.json",
+                ".claude/settings.local.json",
+                "/tmp/x",
+            ] {
+                let verdict = call(
+                    &format!("mcp__playwright__{tool}"),
+                    serde_json::json!({ "filename": filename }),
+                );
+                assert!(matches!(verdict, Verdict::Refuse(_)), "{tool} {filename}");
+            }
+        }
+        assert_eq!(
+            call(
+                "mcp__playwright__browser_take_screenshot",
+                serde_json::json!({ "type": "png" })
+            ),
+            Verdict::Allow
+        );
+        assert_eq!(
+            call(
+                "mcp__playwright__browser_snapshot",
+                serde_json::json!({ "filename": null })
             ),
             Verdict::Allow
         );
