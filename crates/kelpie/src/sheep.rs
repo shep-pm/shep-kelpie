@@ -15,7 +15,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::adapters::{
-    ClaudeCli, Curl, Gh, QwenReviewer, RelayCli, ShepLeases, ShotsCli, SystemClock,
+    ClaudeCli, Curl, Gh, LocalReviewer, RelayCli, ShepLeases, ShotsCli, SystemClock,
 };
 use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
@@ -64,7 +64,7 @@ fn serve(project: &str) -> Result<(), String> {
     let paths = ProjectPaths::under(&kelpie_home, &project);
     let shepherd = shep_channel::serve();
     let claude = ClaudeCli::default();
-    let reviewer = QwenReviewer::new(&home);
+    let reviewer = LocalReviewer::default();
     let shots = ShotsCli::new(paths.tools.clone());
     let epoch = Epoch(u64::from(std::process::id()));
     let leases = Arc::new(ShepLeases::new(shepherd.clone(), Asker::new(epoch)));

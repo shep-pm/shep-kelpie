@@ -1,83 +1,93 @@
-//! The maintainer's qwen-review script, run as a subprocess
+//! A local round's command, run as a subprocess
 //!
-//! The script takes the GPU lock itself and waits in line for it, up to an
-//! hour; a long wait here is normal, not a hang. This module only spawns
-//! the script and waits on its exit status: it never reads or writes a lock
-//! folder itself, so a round holding one for the whole hour is simply a
-//! long-running child process from kelpie's side, never a wait on the lock.
-//! A round's findings and its completion marker both come from disk, never
-//! from stdout: a round killed mid-flight can leave a `round-N.txt` behind
-//! with no `.done` beside it, and only the marker tells the two apart.
+//! The command is the maintainer's qwen-review script or anything that
+//! keeps its contract, which the README sets out. The script takes the GPU
+//! lock itself and waits in line for it, up to an hour; a long wait is not
+//! a hang. A round's findings and its completion marker both come from
+//! disk, never from stdout: only the marker tells a finished `round-N.txt`
+//! from one a killed round left.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
-use super::process::{Processes, RunError};
-use crate::lease::gpu;
-use crate::ports::{Finding, Reviewer, ReviewerError, Severity, parse_findings};
+use super::LocalReviewer;
+use crate::adapters::process::RunError;
+use crate::ports::{Finding, ReviewerError, Severity, parse_findings};
+use crate::settings::LocalCommand;
 
-/// `qwen-review.sh`, under the maintainer's `~/.claude/scripts/`
-const SCRIPT: &str = ".claude/scripts/qwen-review.sh";
-
-/// The maintainer's qwen-review script
-///
-/// Clones share their rounds in flight, so one clone can stop them all.
-#[derive(Debug, Clone)]
-pub struct QwenReviewer {
-    script: PathBuf,
-    temp_dir: PathBuf,
-    processes: Processes,
+/// What every call of one round shares
+#[derive(Clone, Copy)]
+struct Round<'a> {
+    script: &'a Path,
+    worktree: &'a Path,
+    base: &'a str,
+    head: &'a str,
+    round: u32,
 }
 
-impl QwenReviewer {
-    /// A reviewer running the script under the maintainer's `home`
-    pub fn new(home: &Path) -> Self {
-        Self {
-            script: home.join(SCRIPT),
-            temp_dir: gpu::temp_dir(),
-            processes: Processes::default(),
-        }
-    }
-
-    /// Runs every round with `TMPDIR` set to `temp_dir`
-    ///
-    /// A reviewer starts with [`gpu::temp_dir`], the folder the dog's own GPU
-    /// lock is under. The script builds its GPU lock under `${TMPDIR:-/tmp}`, and the runner
-    /// under shep has no `TMPDIR`. Without this, its rounds lock `/tmp` while
-    /// every interactive session locks the per-user temp folder, and the two
-    /// queues run the GPU at once.
-    pub fn with_temp_dir(mut self, temp_dir: PathBuf) -> Self {
-        self.temp_dir = temp_dir;
-        self
-    }
-
-    /// Ends every round in flight, and refuses new ones, as the runner stops
-    pub fn stop(&self) {
-        self.processes.stop();
-    }
-
-    fn run(
+impl LocalReviewer {
+    /// Runs `local`'s command for round `round`, then again on a hunk of
+    /// each file it skipped as too large, folding those findings back in
+    /// against the original file
+    pub(super) fn command_round(
         &self,
+        local: &LocalCommand,
         worktree: &Path,
         base: &str,
         out: &Path,
         round: u32,
+    ) -> Result<Vec<Finding>, ReviewerError> {
+        let head = super::head(worktree)?;
+        let at = Round {
+            script: &local.command,
+            worktree,
+            base,
+            head: &head,
+            round,
+        };
+        let findings = self.run(&at, out, None)?;
+        let mut combined = Vec::with_capacity(findings.len());
+        let mut skipped_index = 0u32;
+        for finding in findings {
+            if is_skipped_for_size(&finding) {
+                // A hunk kelpie could not run keeps its placeholder, the
+                // same as a hunk whose own `git diff` failed: one file's
+                // trouble never costs the round every other finding it
+                // already has.
+                match self.hunk_round(&at, out, skipped_index, &finding) {
+                    Ok(found) => combined.extend(found),
+                    Err(_) => combined.push(finding),
+                }
+                skipped_index += 1;
+            } else {
+                combined.push(finding);
+            }
+        }
+        Ok(combined)
+    }
+
+    fn run(
+        &self,
+        at: &Round<'_>,
+        out: &Path,
         files: Option<&str>,
     ) -> Result<Vec<Finding>, ReviewerError> {
-        let mut command = Command::new(&self.script);
+        let round = at.round;
+        let mut command = Command::new(at.script);
         command
             .arg("--dir")
-            .arg(worktree)
+            .arg(at.worktree)
             .arg("--round")
             .arg(round.to_string())
-            .env("QWEN_REVIEW_OUT", out);
-        command.env("TMPDIR", &self.temp_dir);
+            .env("QWEN_REVIEW_OUT", out)
+            .env("KELPIE_REVIEW_HEAD", at.head)
+            .env("TMPDIR", &self.temp_dir);
         match files {
             Some(files) => {
                 command.arg("--files").arg(files);
             }
             None => {
-                command.arg("--diff").arg(base);
+                command.arg("--diff").arg(at.base);
             }
         }
         let output = self.processes.output(&mut command).map_err(|e| match e {
@@ -109,17 +119,16 @@ impl QwenReviewer {
     // are folded back in against the original path.
     fn hunk_round(
         &self,
-        worktree: &Path,
-        base: &str,
+        at: &Round<'_>,
         out: &Path,
-        round: u32,
         skipped_index: u32,
         skipped: &Finding,
     ) -> Result<Vec<Finding>, ReviewerError> {
+        let round = at.round;
         let diff = Command::new("git")
             .arg("-C")
-            .arg(worktree)
-            .args(["diff", base, "-U25", "--"])
+            .arg(at.worktree)
+            .args(["diff", at.base, "-U25", "--"])
             .arg(&skipped.file)
             .stdin(Stdio::null())
             .output()
@@ -148,7 +157,7 @@ impl QwenReviewer {
             .join("hunks")
             .join(format!("{round}-out-{skipped_index}"));
         let files = hunk_path.to_string_lossy().into_owned();
-        let findings = self.run(worktree, base, &hunk_out, round, Some(&files))?;
+        let findings = self.run(at, &hunk_out, Some(&files))?;
         Ok(findings
             .into_iter()
             .map(|f| Finding {
@@ -156,36 +165,6 @@ impl QwenReviewer {
                 ..f
             })
             .collect())
-    }
-}
-
-impl Reviewer for QwenReviewer {
-    fn round(
-        &self,
-        worktree: &Path,
-        base: &str,
-        out: &Path,
-        round: u32,
-    ) -> Result<Vec<Finding>, ReviewerError> {
-        let findings = self.run(worktree, base, out, round, None)?;
-        let mut combined = Vec::with_capacity(findings.len());
-        let mut skipped_index = 0u32;
-        for finding in findings {
-            if is_skipped_for_size(&finding) {
-                // A hunk kelpie could not run keeps its placeholder, the
-                // same as a hunk whose own `git diff` failed: one file's
-                // trouble never costs the round every other finding it
-                // already has.
-                match self.hunk_round(worktree, base, out, round, skipped_index, &finding) {
-                    Ok(found) => combined.extend(found),
-                    Err(_) => combined.push(finding),
-                }
-                skipped_index += 1;
-            } else {
-                combined.push(finding);
-            }
-        }
-        Ok(combined)
     }
 }
 
@@ -198,8 +177,51 @@ fn is_skipped_for_size(finding: &Finding) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
+    use crate::ports::Reviewer;
+    use crate::settings::LocalRound;
     use crate::test::write_script;
+
+    fn local(script: &Path) -> LocalRound {
+        LocalRound::Command(LocalCommand {
+            command: script.to_owned(),
+            gpu_lease: false,
+        })
+    }
+
+    // A worktree with one commit and no `origin/main`.
+    fn repo(home: &Path) -> PathBuf {
+        let worktree = home.join("wt");
+        std::fs::create_dir_all(&worktree).unwrap();
+        crate::test::git(&worktree, &["init", "--quiet", "-b", "main"]);
+        crate::test::git(
+            &worktree,
+            &["commit", "--quiet", "--allow-empty", "-m", "init"],
+        );
+        worktree
+    }
+
+    // A stand-in that writes the head it was given as a finding's file.
+    #[test]
+    fn a_round_is_told_the_worktrees_head() {
+        let home = tempfile::tempdir().unwrap();
+        let script = home.path().join("review");
+        write_script(
+            &script,
+            "#!/bin/sh\nmkdir -p \"$QWEN_REVIEW_OUT\"\n\
+             printf 'LOW|%s:1|seen|seen\\n' \"$KELPIE_REVIEW_HEAD\" > \"$QWEN_REVIEW_OUT/round-1.txt\"\n\
+             : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n",
+        );
+        let worktree = repo(home.path());
+        let head = crate::test::git(&worktree, &["rev-parse", "HEAD"]);
+        let out = home.path().join("out");
+        let findings = LocalReviewer::default()
+            .round(&local(&script), &worktree, "origin/main", &out, 1)
+            .unwrap();
+        assert_eq!(findings[0].file, head);
+    }
 
     // A stand-in for the real script: it takes and releases a lock of its
     // own around the round, the way the maintainer's script takes the GPU
@@ -221,13 +243,14 @@ mod tests {
         );
         write_script(&script, &contents);
 
-        let worktree = home.path().join("wt");
-        std::fs::create_dir_all(&worktree).unwrap();
+        let worktree = repo(home.path());
         let out = home.path().join("out");
-        let reviewer = QwenReviewer::new(home.path());
+        let reviewer = LocalReviewer::default();
 
         assert_eq!(
-            reviewer.round(&worktree, "origin/main", &out, 1).unwrap(),
+            reviewer
+                .round(&local(&script), &worktree, "origin/main", &out, 1)
+                .unwrap(),
             vec![]
         );
         assert!(
@@ -252,13 +275,14 @@ mod tests {
              : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n",
         );
 
-        let worktree = home.path().join("wt");
-        std::fs::create_dir_all(&worktree).unwrap();
+        let worktree = repo(home.path());
         let out = home.path().join("out");
         let reviewer =
-            QwenReviewer::new(home.path()).with_temp_dir(PathBuf::from("/var/folders/xx/yy/T/"));
+            LocalReviewer::default().with_temp_dir(PathBuf::from("/var/folders/xx/yy/T/"));
 
-        let findings = reviewer.round(&worktree, "origin/main", &out, 1).unwrap();
+        let findings = reviewer
+            .round(&local(&script), &worktree, "origin/main", &out, 1)
+            .unwrap();
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].file, "/var/folders/xx/yy/T/");
     }
@@ -276,13 +300,12 @@ mod tests {
             "#!/bin/sh\nmkdir -p \"$QWEN_REVIEW_OUT\"\nexit 0\n",
         );
 
-        let worktree = home.path().join("wt");
-        std::fs::create_dir_all(&worktree).unwrap();
+        let worktree = repo(home.path());
         let out = home.path().join("out");
-        let reviewer = QwenReviewer::new(home.path());
+        let reviewer = LocalReviewer::default();
 
         assert_eq!(
-            reviewer.round(&worktree, "origin/main", &out, 1),
+            reviewer.round(&local(&script), &worktree, "origin/main", &out, 1),
             Err(ReviewerError::Incomplete)
         );
     }
@@ -333,10 +356,12 @@ esac
         crate::test::git(&worktree, &["commit", "--quiet", "-am", "change"]);
 
         let out = home.path().join("out");
-        let reviewer = QwenReviewer::new(home.path());
+        let reviewer = LocalReviewer::default();
 
         assert_eq!(
-            reviewer.round(&worktree, "origin/main", &out, 1).unwrap(),
+            reviewer
+                .round(&local(&script), &worktree, "origin/main", &out, 1)
+                .unwrap(),
             vec![Finding {
                 severity: Severity::Medium,
                 file: "sub/dir/big.rs".into(),
@@ -347,7 +372,7 @@ esac
         );
     }
 
-    // Not a git repository, so the `-U25` diff itself fails.
+    // A repo with no `origin/main`, so the `-U25` diff itself fails.
     #[test]
     fn a_git_diff_failure_keeps_the_skip_placeholder() {
         let home = tempfile::tempdir().unwrap();
@@ -360,10 +385,9 @@ esac
              : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n";
         write_script(&script, contents);
 
-        let worktree = home.path().join("not-a-repo");
-        std::fs::create_dir_all(&worktree).unwrap();
+        let worktree = repo(home.path());
         let out = home.path().join("out");
-        let reviewer = QwenReviewer::new(home.path());
+        let reviewer = LocalReviewer::default();
 
         let skip = Finding {
             severity: Severity::Low,
@@ -373,7 +397,9 @@ esac
             why: "split the file or review it by hand".into(),
         };
         assert_eq!(
-            reviewer.round(&worktree, "origin/main", &out, 1).unwrap(),
+            reviewer
+                .round(&local(&script), &worktree, "origin/main", &out, 1)
+                .unwrap(),
             vec![skip]
         );
     }
@@ -418,8 +444,10 @@ esac
         crate::test::git(&worktree, &["commit", "--quiet", "-am", "change"]);
 
         let out = home.path().join("out");
-        let reviewer = QwenReviewer::new(home.path());
-        let findings = reviewer.round(&worktree, "origin/main", &out, 1).unwrap();
+        let reviewer = LocalReviewer::default();
+        let findings = reviewer
+            .round(&local(&script), &worktree, "origin/main", &out, 1)
+            .unwrap();
         assert_eq!(
             findings,
             vec![
@@ -484,8 +512,10 @@ esac
         crate::test::git(&worktree, &["commit", "--quiet", "-am", "change"]);
 
         let out = home.path().join("out");
-        let reviewer = QwenReviewer::new(home.path());
-        let findings = reviewer.round(&worktree, "origin/main", &out, 1).unwrap();
+        let reviewer = LocalReviewer::default();
+        let findings = reviewer
+            .round(&local(&script), &worktree, "origin/main", &out, 1)
+            .unwrap();
         assert_eq!(findings.len(), 2, "{findings:?}");
         assert_eq!(findings[0].file, "sub/a/util.rs");
         assert_eq!(findings[1].file, "sub/b/util.rs");

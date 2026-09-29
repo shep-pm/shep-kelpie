@@ -176,6 +176,13 @@ impl Runner {
         check_repo(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;
         check_coderabbit(&settings, &ports)?;
+        ports
+            .reviewer
+            .check(&settings.review.local)
+            .map_err(|reason| SettingsError::Invalid {
+                setting: "review.local",
+                reason,
+            })?;
         let store = StateStore::new(paths.state.clone());
         let mut state = store
             .load()?

@@ -1,6 +1,6 @@
 //! The real ports: the system clock, `gh`, `curl`, the `claude` command
-//! line, its `/usage`, the relay session, the maintainer's qwen-review
-//! script, kelpie's shots, and the dog's leases over the shepherd channel
+//! line, its `/usage`, the relay session, the local review
+//! round, kelpie's shots, and the dog's leases over the shepherd channel
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -10,8 +10,8 @@ mod claude;
 mod curl;
 pub(crate) mod gh;
 mod leases;
+mod local;
 mod process;
-mod qwen;
 mod relay;
 mod shots;
 mod usage;
@@ -20,7 +20,7 @@ pub use claude::ClaudeCli;
 pub use curl::Curl;
 pub use gh::Gh;
 pub use leases::ShepLeases;
-pub use qwen::QwenReviewer;
+pub use local::LocalReviewer;
 pub use relay::RelayCli;
 pub use shots::ShotsCli;
 pub use usage::UsageMeter;
