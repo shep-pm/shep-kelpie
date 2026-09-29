@@ -18,7 +18,7 @@ use serde_json::json;
 
 use super::process::{Processes, RunError, stop_group};
 use crate::ports::Shots;
-use crate::preview::{LOCAL_HOSTS, Launch, Tools};
+use crate::preview::{self, LOCAL_HOSTS, Launch, Tools};
 use crate::profile::CREDENTIALS;
 use crate::shots::{Scheme, ShotsJob, ShotsRun, Viewport, plan};
 
@@ -160,34 +160,7 @@ impl ShotsCli {
         let script = job.out.join("shots.mjs");
         let plan_file = job.out.join("plan.json");
         let report_file = job.out.join("report.json");
-        let hosts: Vec<&str> = LOCAL_HOSTS
-            .into_iter()
-            .chain(job.domains.iter().map(String::as_str))
-            .collect();
-        let planned: Vec<_> = shots
-            .iter()
-            .map(|s| {
-                let (width, height) = match s.viewport {
-                    Viewport::Mobile => (390, 844),
-                    Viewport::Desktop => (1280, 800),
-                };
-                json!({
-                    "route": s.route.as_str(),
-                    "width": width,
-                    "height": height,
-                    "mobile": s.viewport == Viewport::Mobile,
-                    "scheme": match s.scheme { Scheme::Light => "light", Scheme::Dark => "dark" },
-                    "file": s.file,
-                })
-            })
-            .collect();
-        let plan = json!({
-            "tools": self.tools.dir(),
-            "base": format!("http://localhost:{port}"),
-            "hosts": hosts,
-            "shots": planned,
-            "report": report_file,
-        });
+        let plan = capture_plan(self.tools.dir(), job, port, &shots, &report_file);
         fs::write(&script, SCRIPT)
             .and_then(|()| fs::write(&plan_file, plan.to_string()))
             .map_err(|e| format!("cannot write the capture script: {e}"))?;
@@ -250,6 +223,47 @@ impl Shots for ShotsCli {
             let _ = fs::remove_file(&recorded);
         }
     }
+}
+
+// What the capture script reads: kelpie's tools, the dev server, the hosts a
+// page may reach and the resolver rules that hold the browser to them, and
+// each shot.
+fn capture_plan(
+    tools: &Path,
+    job: &ShotsJob,
+    port: u16,
+    shots: &[crate::shots::Shot],
+    report: &Path,
+) -> serde_json::Value {
+    let hosts: Vec<&str> = LOCAL_HOSTS
+        .into_iter()
+        .chain(job.domains.iter().map(String::as_str))
+        .collect();
+    let planned: Vec<_> = shots
+        .iter()
+        .map(|s| {
+            let (width, height) = match s.viewport {
+                Viewport::Mobile => (390, 844),
+                Viewport::Desktop => (1280, 800),
+            };
+            json!({
+                "route": s.route.as_str(),
+                "width": width,
+                "height": height,
+                "mobile": s.viewport == Viewport::Mobile,
+                "scheme": match s.scheme { Scheme::Light => "light", Scheme::Dark => "dark" },
+                "file": s.file,
+            })
+        })
+        .collect();
+    json!({
+        "tools": tools,
+        "base": format!("http://localhost:{port}"),
+        "hosts": hosts,
+        "resolverRules": preview::resolver_rules(job.domains.iter().map(String::as_str)),
+        "shots": planned,
+        "report": report,
+    })
 }
 
 /// One page as the capture script reports it
@@ -371,6 +385,105 @@ mod tests {
         assert_eq!(
             run.failed.as_deref(),
             Some("cannot read .claude/launch.json: bad revision")
+        );
+    }
+
+    fn job_in(out: &Path, domains: &[&str]) -> ShotsJob {
+        ShotsJob {
+            worktree: out.join("wt"),
+            build: out.join("build"),
+            out: out.to_owned(),
+            launch: Ok(launch(1)),
+            routes: vec![Route::try_from("/".to_owned()).unwrap()],
+            domains: domains.iter().map(|&d| d.to_owned()).collect(),
+            env: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn the_capture_browser_resolves_only_the_dev_server_and_the_domains() {
+        let job = job_in(Path::new("/k/out"), &["*.leekduck.com"]);
+        let shots = plan(&job.routes, &job.out);
+        let plan = capture_plan(Path::new("/k/tools"), &job, 3000, &shots, Path::new("/k/r"));
+        assert_eq!(
+            plan["resolverRules"],
+            "MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1, EXCLUDE *.leekduck.com"
+        );
+        assert_eq!(
+            plan["hosts"],
+            json!(["localhost", "127.0.0.1", "*.leekduck.com"])
+        );
+    }
+
+    // CI has no browser, so this pins the two fences the script must keep: the
+    // resolver rules on the browser, and the route that refuses and reports.
+    #[test]
+    fn the_capture_script_launches_behind_both_fences() {
+        assert!(
+            SCRIPT.contains("args: [`--host-resolver-rules=${plan.resolverRules}`]"),
+            "the browser launches without the resolver rules"
+        );
+        assert!(
+            SCRIPT.contains("return route.abort('blockedbyclient');"),
+            "a request off the list is not refused"
+        );
+        assert!(SCRIPT.contains("is not a preview domain`);"));
+    }
+
+    // A page that loads an image from a host off the list and opens a
+    // WebSocket and a fetch to this machine's LAN address, which the
+    // review's listener caught before the browser had resolver rules.
+    #[test]
+    #[ignore = "needs kelpie's tools: KELPIE_TOOLS=<dir> from `kelpie tools install`"]
+    fn a_page_reaches_neither_a_host_off_the_list_nor_the_lan() {
+        use std::io::{BufRead, BufReader, Write as _};
+        let tools = std::env::var_os("KELPIE_TOOLS").expect("KELPIE_TOOLS");
+        let lan = std::net::UdpSocket::bind("0.0.0.0:0")
+            .and_then(|s| s.connect("192.0.2.1:9").map(|()| s))
+            .and_then(|s| s.local_addr())
+            .unwrap()
+            .ip();
+        let listener = TcpListener::bind((lan, 0)).unwrap();
+        let listener_port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
+        let page = format!(
+            "<html><body><img src=\"http://blocked.example/x.png\"><script>\
+             new WebSocket('ws://{lan}:{listener_port}/'); \
+             fetch('http://{lan}:{listener_port}/').catch(() => {{}});\
+             </script></body></html>"
+        );
+        let server = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = server.local_addr().unwrap().port();
+        thread::spawn(move || {
+            for stream in server.incoming().flatten() {
+                let mut reader = BufReader::new(&stream);
+                let mut line = String::new();
+                while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
+                    line.clear();
+                }
+                let _ = write!(
+                    &stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{page}",
+                    page.len()
+                );
+            }
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let job = job_in(dir.path(), &[]);
+        let run = ShotsCli::new(Tools::at(std::path::PathBuf::from(tools)))
+            .capture(&job, port)
+            .unwrap();
+        let problems = run.all_problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("blocked http://blocked.example/x.png")),
+            "{problems:?}"
+        );
+        thread::sleep(Duration::from_secs(1));
+        assert!(
+            matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "the page reached {lan}:{listener_port}"
         );
     }
 

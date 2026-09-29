@@ -56,7 +56,12 @@ async function capture(context, shot, note) {
   }
 }
 
-const browser = await chromium.launch({ headless: true });
+// Every host but the dev server's and the preview's fails to resolve, an IP
+// literal included, so a WebSocket the route below never sees fails too.
+const browser = await chromium.launch({
+  headless: true,
+  args: [`--host-resolver-rules=${plan.resolverRules}`],
+});
 const report = [];
 for (const shot of plan.shots) {
   const problems = [];
