@@ -369,7 +369,9 @@ impl Runner {
                     opens,
                 }))
             }
-            Reading::Silent | Reading::Completed { .. } if waited >= REVIEW_WAIT => {
+            Reading::Silent | Reading::Processing | Reading::Completed { .. }
+                if waited >= REVIEW_WAIT =>
+            {
                 self.accepted(at)?;
                 if let Err(reason) = self.label(number, false) {
                     return Ok(self.gate_failed(reason));
@@ -393,11 +395,14 @@ impl Runner {
         }
     }
 
-    // The same summon, once more, under the lease it still holds. Without
-    // the lease it is not sent.
+    // The same summon, once more, under the lease this work item took. A
+    // restart clears the book of them, and the grant then held may be
+    // another item's, so without its own row nothing is sent.
     fn resend(&mut self, head: String, at: Timestamp, full: bool) -> Result<Begin, StateError> {
         let number = self.number();
-        if !self.ports.leases.holds(&LeaseKind::coderabbit()) {
+        let issue = self.item().issue;
+        let mine = |l: &LeaseHeld| l.resource == Resource::Coderabbit && l.issue == Some(issue);
+        if !self.state.leases.iter().any(mine) {
             return self.accepted(at).map(|()| Begin::Idle);
         }
         self.send(number, head, at, full, true)

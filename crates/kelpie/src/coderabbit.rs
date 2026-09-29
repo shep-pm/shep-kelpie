@@ -140,7 +140,7 @@ impl Activity {
                 opens: Timestamp(at.0.saturating_add(wait)),
             };
         }
-        let mut ours = self
+        let ours = self
             .statuses
             .iter()
             .filter(|s| s.commit == head && s.at.0 >= from);
@@ -148,7 +148,10 @@ impl Activity {
         if let Some(at) = done.map(|s| s.at).max() {
             return Reading::Completed { at };
         }
-        if ours.any(|s| s.description == RUNNING) {
+        // Only the newest status says where it stands: a running review
+        // that ended in a status this does not parse is not still running.
+        let newest = ours.max_by_key(|s| s.at);
+        if newest.is_some_and(|s| s.description == RUNNING) {
             return Reading::Processing;
         }
         Reading::Silent
@@ -442,6 +445,24 @@ mod tests {
             "done before a later summon is no answer to it"
         );
         assert_eq!(seen.read("0ther", summoned), Reading::Silent);
+    }
+
+    #[test]
+    fn a_running_review_that_ended_in_another_status_is_not_still_running() {
+        let status = |description: &str, at: u64| Status {
+            commit: HEAD_614.into(),
+            description: description.into(),
+            at: Timestamp(at),
+        };
+        let seen = Activity {
+            statuses: vec![
+                status("Review rate limited", 130),
+                status("Review in progress", 110),
+            ],
+            ..Activity::default()
+        };
+        assert_eq!(seen.read(HEAD_614, Timestamp(100)), Reading::Silent);
+        assert!(seen.heard(HEAD_614, Timestamp(100)));
     }
 
     #[test]

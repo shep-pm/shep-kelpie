@@ -76,6 +76,23 @@ fn a_rate_limit_notice_is_a_sign_and_reschedules_as_before() {
 }
 
 #[test]
+fn a_review_stuck_in_progress_is_the_maintainers_after_two_hours() {
+    let (rig, runner, head) = summoned("zeus");
+    rig.forge.coderabbit.progress(71, &head, now(&rig) + 20);
+    rig.clock.advance(REVIEW_WAIT - 1);
+    assert_eq!(step(&runner).unwrap(), None);
+    rig.clock.advance(1);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Ruling { .. })
+    ));
+    assert_eq!(
+        rig.ask(&runner, "status", None)["rulings"][0]["kind"]["kind"],
+        "coderabbit-silent"
+    );
+}
+
+#[test]
 fn a_second_silence_raises_the_ruling_at_two_hours() {
     let (rig, runner, head) = summoned("zeus");
     rig.clock.advance(HEARD_WAIT);
