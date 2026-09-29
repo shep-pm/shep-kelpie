@@ -47,7 +47,7 @@ impl Runner {
                 if !review.guard_cleared && review.round > self.settings.review.loop_guard.get() {
                     return self.raise(number, RulingKind::ReviewGuard { review });
                 }
-                match review.reviewer(self.local_round()) {
+                match review.reviewer(self.local_rounds()) {
                     ReviewerKind::Local => {
                         self.mark_review_call_running()?;
                         Ok(Begin::Review(ReviewCall::Local {
@@ -139,7 +139,7 @@ impl Runner {
             None => None,
         };
         let now = self.ports.clock.now();
-        let local = self.local_round();
+        let local = self.local_rounds();
         self.update(|item| item.phase = advance(review, clean, now, local))?;
         Ok(Begin::Report(StepReport::FixPushed {
             issue,
@@ -155,10 +155,15 @@ impl Runner {
         worktree::origin_head(&self.settings.repo, &item.branch).map_err(|e| e.to_string())
     }
 
-    // Whether the project runs a local round, which sets who reviews a round
-    // and how many clean rounds end the loop.
-    fn local_round(&self) -> bool {
-        self.settings.review.local.is_on()
+    // How many local rounds a work item may run, which sets who reviews a
+    // round and how many clean rounds end the loop.
+    fn local_rounds(&self) -> u32 {
+        let review = &self.settings.review;
+        match review.local_rounds {
+            _ if !review.local.is_on() => 0,
+            Some(rounds) => rounds.get(),
+            None => u32::MAX,
+        }
     }
 
     // Recorded in state before the runner's lock is released for the call
@@ -195,7 +200,7 @@ impl Runner {
                 ..f
             })
             .collect();
-        let local = self.local_round();
+        let local = self.local_rounds();
         if held.is_empty() {
             self.update(|item| item.phase = advance(review, true, now, local))?;
             return Ok(Begin::Report(StepReport::ReviewFindingsSent {
@@ -255,7 +260,7 @@ impl Runner {
             return self.coderabbit_verdict(result, spent);
         }
         let now = self.ports.clock.now();
-        let local = self.local_round();
+        let local = self.local_rounds();
         let mut next = self.state.clone();
         // Tolerated the same way `end_turn` tolerates a turn's result
         // arriving with nothing (or something else) to apply it to: the
@@ -343,21 +348,23 @@ impl Runner {
 
 /// Where the review phase goes after one round finishes, clean or not
 ///
-/// With a local round, two clean rounds in a row end the loop, and the
-/// strict alternation means the pair is always one of each. Without one,
-/// every round is Claude's, so one clean round ends it.
+/// While local rounds are left, two clean rounds in a row end the loop, and
+/// the strict alternation means the pair is always one of each. Without
+/// one, or once they are spent, every round is Claude's, so one clean
+/// Claude round ends it.
 pub(super) fn advance(
     review: Review,
     clean: bool,
     now: crate::ports::Timestamp,
-    local: bool,
+    local: u32,
 ) -> Phase {
     let consecutive_clean = if clean {
         review.consecutive_clean + 1
     } else {
         0
     };
-    let needed = if local { 2 } else { 1 };
+    let alone = review.reviewer(local) == ReviewerKind::Claude && review.local_spent(local);
+    let needed = if alone { 1 } else { 2 };
     if consecutive_clean >= needed {
         Phase::Ci {
             head: None,
@@ -512,14 +519,14 @@ mod tests {
     #[test]
     fn advancing_a_clean_round_extends_the_streak_and_settles_at_two() {
         let now = crate::ports::Timestamp(100);
-        let after_first = advance(Review::first(), true, now, true);
+        let after_first = advance(Review::first(), true, now, u32::MAX);
         let Phase::Review(review) = after_first else {
             panic!("stays reviewing after one clean round");
         };
         assert_eq!((review.round, review.consecutive_clean), (2, 1));
         assert_eq!(review.stage, ReviewStage::Round);
 
-        let phase = advance(review, true, now, true);
+        let phase = advance(review, true, now, u32::MAX);
         assert_eq!(
             phase,
             Phase::Ci {
@@ -538,7 +545,7 @@ mod tests {
             guard_cleared: true,
             stage: ReviewStage::Round,
         };
-        let Phase::Review(next) = advance(review, false, now, true) else {
+        let Phase::Review(next) = advance(review, false, now, u32::MAX) else {
             panic!("stays reviewing");
         };
         assert_eq!(

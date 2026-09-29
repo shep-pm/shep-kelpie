@@ -7,6 +7,8 @@
 //! head the label comes off, the judge reads every open thread, rejected
 //! ones are resolved and held ones go to the worker. Satisfied means no
 //! thread open and nothing held. Past the cap, held findings park the worker.
+//! A fixed number of rounds replaces the cap: the last round's held findings
+//! go to the worker with the label off, and the fix push summons nothing.
 //!
 //! On a pull request CodeRabbit read before, the label asks only for what is
 //! new, and after an adoption or a catch-up with `main` it finds nothing.
@@ -49,8 +51,14 @@ pub(super) const DONE_SETTLE: u64 = 60;
 
 impl Runner {
     /// Whether the work item owes CodeRabbit a round before its merge ruling
+    ///
+    /// A summon owed since an adoption is due whatever rounds came before it.
     pub(super) fn coderabbit_due(&self) -> bool {
-        self.settings.coderabbit.enabled && !self.item().coderabbit.satisfied
+        let item = self.item();
+        let spent = cap::spent(item.coderabbit.rounds, self.settings.coderabbit.rounds);
+        self.settings.coderabbit.enabled
+            && !item.coderabbit.satisfied
+            && (item.summon_owed || !spent)
     }
 
     /// Starts a round on `head`, which CI has just passed
@@ -449,12 +457,24 @@ impl Runner {
             Ok(head) => head,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
-        let changed = cap::changed_lines(&self.item().worktree, &self.settings.generated);
-        let cap = match changed {
-            Ok(changed) => cap::cap(changed, self.settings.coderabbit.divisor),
-            Err(reason) => return Ok(self.gate_failed(reason)),
+        let fixed = self.settings.coderabbit.rounds;
+        let capped = match fixed {
+            Some(_) => false,
+            None => match cap::changed_lines(&self.item().worktree, &self.settings.generated) {
+                Ok(changed) => {
+                    round >= cap::cap(changed, self.settings.coderabbit.divisor)
+                        && !tally.cap_cleared
+                }
+                Err(reason) => return Ok(self.gate_failed(reason)),
+            },
         };
-        if round >= cap && !tally.cap_cleared {
+        // After the last round a push with the label on would summon another.
+        if cap::spent(round, fixed)
+            && let Err(reason) = self.label(number, false)
+        {
+            return Ok(self.gate_failed(reason));
+        }
+        if capped {
             let kind = RulingKind::CodeRabbitCap {
                 rounds: round,
                 held: u32::try_from(held.len()).unwrap_or(u32::MAX),

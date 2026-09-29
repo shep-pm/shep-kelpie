@@ -2,11 +2,12 @@
 
 use serde_json::json;
 
-use crate::ports::Role;
+use crate::ports::{Finding, Role, Severity};
 use crate::runner::report::StepReport;
 use crate::runner::step;
 use crate::settings::LocalRound;
-use crate::test::{Answer, Rig, Scripted, StandInEndpoint, unreachable_url};
+use crate::test::{Answer, Rig, Scripted, ScriptedRound, StandInEndpoint, unreachable_url};
+use crate::work_item::ReviewerKind;
 
 const TABLE: &str = "[app.dogs.kelpie.review.local]\n\
                      kind = \"command\"\n\
@@ -240,4 +241,58 @@ fn with_the_local_round_off_no_command_is_needed() {
     assert!(rig.open().is_err(), "the default command is checked");
     rig.edit_settings(|s| s.replace(TABLE, "[app.dogs.kelpie.review.local]\nkind = \"off\"\n"));
     assert!(rig.open().is_ok());
+}
+
+#[test]
+fn past_its_local_rounds_every_round_is_claudes_and_one_clean_one_ends_the_loop() {
+    let rig = Rig::new("koji");
+    rig.edit_settings(|s| {
+        assert!(s.contains("loop_guard = 8\n"), "the example's guard moved");
+        s.replace("loop_guard = 8\n", "loop_guard = 8\nlocal_rounds = 1\n")
+    });
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.reviewer.script([ScriptedRound::Findings(vec![Finding {
+        severity: Severity::Medium,
+        file: "src/lib.rs".into(),
+        line: 3,
+        what: "the flag is misnamed".into(),
+        why: "it reads as its opposite".into(),
+    }])]);
+    let holds = r#"{"holds": true, "severity": "high", "reason": "it is"}"#;
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Text(holds),
+        Scripted::Push("named.txt", "named\n"),
+        Scripted::Text("HIGH|src/lib.rs:9|racy|two writers"),
+        Scripted::Text(holds),
+        Scripted::Push("fixed.txt", "fixed\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    step(&runner).unwrap(); // the worker's first turn
+    let mut reviewers = Vec::new();
+    for _ in 0..12 {
+        match step(&runner).unwrap() {
+            Some(StepReport::ReviewRound { reviewer, .. }) => reviewers.push(reviewer),
+            // Only a Claude round is left to come back with nothing.
+            Some(StepReport::ReviewFindingsSent { held: 0, .. }) => {
+                reviewers.push(ReviewerKind::Claude);
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        reviewers,
+        [
+            ReviewerKind::Local,
+            ReviewerKind::Claude,
+            ReviewerKind::Claude
+        ]
+    );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["phase"]["state"], "ci");
+    assert_eq!(rig.reviewer.seen().len(), 1, "one local round");
 }

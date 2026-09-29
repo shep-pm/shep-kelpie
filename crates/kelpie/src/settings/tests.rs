@@ -195,6 +195,20 @@ fn a_zero_loop_guard_is_refused() {
 }
 
 #[test]
+fn the_review_budget_is_unset_until_a_table_sets_it() {
+    let s = parse(EXAMPLE).unwrap();
+    assert_eq!((s.review.local_rounds, s.coderabbit.rounds), (None, None));
+    let text = EXAMPLE
+        .replace("loop_guard = 8\n", "loop_guard = 8\nlocal_rounds = 2\n")
+        .replace("divisor = 1000\n", "divisor = 1000\nrounds = 1\n");
+    let s = parse(&text).unwrap();
+    assert_eq!(s.review.local_rounds.map(NonZeroU32::get), Some(2));
+    assert_eq!(s.coderabbit.rounds.map(NonZeroU32::get), Some(1));
+    let err = parse_err(&EXAMPLE.replace("divisor = 1000\n", "divisor = 1000\nrounds = 0\n"));
+    assert!(err.contains("`coderabbit.rounds = 0`"), "{err}");
+}
+
+#[test]
 fn kickoff_hours_outside_a_day_are_refused() {
     for hours in ["0", "25", "300", "-1"] {
         let line = format!("kickoff_hours = {hours}");

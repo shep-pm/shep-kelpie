@@ -373,13 +373,19 @@ impl Review {
         }
     }
 
-    /// Which reviewer runs this round, given whether the project has a local round
-    pub fn reviewer(&self, local: bool) -> ReviewerKind {
-        if local && self.round % 2 == 1 {
+    /// Which reviewer runs this round, given how many local rounds a work
+    /// item may run: none without a local round
+    pub fn reviewer(&self, local: u32) -> ReviewerKind {
+        if self.round % 2 == 1 && self.round.div_ceil(2) <= local {
             ReviewerKind::Local
         } else {
             ReviewerKind::Claude
         }
+    }
+
+    /// Whether no local round is left once this one ends
+    pub fn local_spent(&self, local: u32) -> bool {
+        self.round.div_ceil(2) >= local
     }
 }
 
@@ -717,9 +723,9 @@ mod tests {
     #[test]
     fn rounds_alternate_local_first_and_are_all_claudes_without_one() {
         let review = Review::first();
-        assert_eq!(review.reviewer(true), ReviewerKind::Local);
+        assert_eq!(review.reviewer(u32::MAX), ReviewerKind::Local);
         assert_eq!(
-            Review { round: 2, ..review }.reviewer(true),
+            Review { round: 2, ..review }.reviewer(u32::MAX),
             ReviewerKind::Claude
         );
         for round in 1..=3 {
@@ -727,12 +733,21 @@ mod tests {
                 round,
                 ..Review::first()
             };
-            assert_eq!(
-                review.reviewer(false),
-                ReviewerKind::Claude,
-                "round {round}"
-            );
+            assert_eq!(review.reviewer(0), ReviewerKind::Claude, "round {round}");
         }
+    }
+
+    #[test]
+    fn past_its_local_rounds_every_round_is_claudes() {
+        let reviewers: Vec<_> = (1..=5)
+            .map(|round| Review {
+                round,
+                ..Review::first()
+            })
+            .map(|review| review.reviewer(2))
+            .collect();
+        use ReviewerKind::{Claude, Local};
+        assert_eq!(reviewers, [Local, Claude, Local, Claude, Claude]);
     }
 
     #[test]

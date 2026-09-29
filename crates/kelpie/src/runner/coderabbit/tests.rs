@@ -11,6 +11,7 @@ use crate::ports::{Checks, ClaudeError, Cost, Role};
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::test::{Rig, Scripted, Told, git};
 
+mod budget;
 mod full;
 
 const HOLDS: &str = r#"{"holds": true, "severity": "medium", "reason": "real"}"#;
