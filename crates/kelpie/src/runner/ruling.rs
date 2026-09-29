@@ -132,6 +132,8 @@ impl Runner {
                 RulingKind::Rebase { .. } | RulingKind::StillRed { .. }
             )
         );
+        // Any answer to a refused merge gives the next one its catch-up again.
+        let refusal_answered = matches!(ruling.kind, RulingKind::MergeRefused { .. });
         // Only the ruling the work item is parked on moves it. Any other,
         // which nothing leaves behind today, is answered by clearing it.
         let parked_on = |item: &WorkItem| item.phase == Phase::Ruling { id };
@@ -161,6 +163,9 @@ impl Runner {
             item.coderabbit.cap_cleared |= lifts_cap;
             if vouches {
                 item.known.head = None;
+            }
+            if refusal_answered {
+                item.merge_refused = false;
             }
             let worker = match moved {
                 Move::Phase(phase) => {
@@ -385,8 +390,14 @@ fn decide(
         (Answer::Yes, RulingKind::Merge { head }) => Phase::Merge {
             head,
             readied: None,
+            auto: false,
         },
-        (Answer::Yes, RulingKind::Rebase { .. } | RulingKind::StillRed { .. }) => Phase::Ci {
+        (
+            Answer::Yes,
+            RulingKind::Rebase { .. }
+            | RulingKind::StillRed { .. }
+            | RulingKind::MergeRefused { .. },
+        ) => Phase::Ci {
             head: None,
             since: now,
         },
@@ -445,6 +456,11 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
              no fix: {}. {yes} has kelpie look again",
             short(head),
             checks.join(", ")
+        ),
+        RulingKind::MergeRefused { head, reason } => format!(
+            "Kelpie could not merge {about} at {} after catching it up: {reason}. \
+             {yes} has kelpie look again and merge once every gate passes",
+            short(head)
         ),
         RulingKind::Closed => format!(
             "{} was closed without merging. {yes} drops the work \

@@ -68,6 +68,10 @@ pub struct WorkItem {
     /// Its qwen rounds so far
     #[serde(default)]
     pub qwen: QwenTally,
+    /// Whether the forge refused a merge under `auto` since the last
+    /// ruling on one, so a second refusal asks
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub merge_refused: bool,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
 }
@@ -258,13 +262,16 @@ pub enum Phase {
         /// The ruling's id
         id: u64,
     },
-    /// The maintainer said yes: merging this head
+    /// The maintainer said yes, or every gate passed under `auto`: merging this head
     Merge {
-        /// The head the ruling was about
+        /// The head the ruling, or the gate, was about
         head: String,
         /// When kelpie marked the draft ready, which can start a fresh CI run
         #[serde(default)]
         readied: Option<Timestamp>,
+        /// Whether the gate started it under `auto`, with no ruling asked
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        auto: bool,
     },
     /// Removing the worktree, branch and build folder
     Done {
@@ -555,8 +562,17 @@ mod tests {
             value(Phase::Merge {
                 head: "c0ffee".into(),
                 readied: Some(Timestamp(12)),
+                auto: false,
             }),
             json!({ "state": "merge", "head": "c0ffee", "readied": 12 })
+        );
+        assert_eq!(
+            value(Phase::Merge {
+                head: "c0ffee".into(),
+                readied: None,
+                auto: true,
+            }),
+            json!({ "state": "merge", "head": "c0ffee", "readied": null, "auto": true })
         );
         assert_eq!(
             value(Phase::Done { merged: true }),

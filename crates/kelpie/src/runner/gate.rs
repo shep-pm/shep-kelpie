@@ -7,13 +7,15 @@
 //! standing parks it on a ruling. A pending run, or none yet, waits for the
 //! next step. A red run is the worker's next turn, naming the checks that
 //! failed. A green run starts a CodeRabbit round while one is owed, and
-//! otherwise raises the merge ruling. A project without CI skips the checks.
+//! otherwise raises the merge ruling, or under `auto` merges. A project
+//! without CI skips the checks.
 
 use super::Runner;
 use super::report::{Begin, StepReport};
 use super::rework::HUMAN;
 use crate::board::READY;
 use crate::ports::{Checks, PullRequestState, Timestamp};
+use crate::settings::MergeAuthority;
 use crate::state::{RulingKind, StateError};
 use crate::work_item::{Conflict, Phase, Turn, foreign_change};
 use crate::worktree::{self, Base, Rebase};
@@ -99,11 +101,22 @@ impl Runner {
         }
     }
 
-    // Green CI goes to a CodeRabbit round while one is owed, then to the merge
-    // ruling, with the pull request handed back `ready-for-human`.
+    // Green CI goes to a CodeRabbit round while one is owed. Then `auto`
+    // merges by the path a yes takes, and `ask` raises the merge ruling
+    // with the pull request handed back `ready-for-human`.
     fn passed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
         if self.coderabbit_due() {
             return self.start_round(head);
+        }
+        if self.settings.merge_authority == MergeAuthority::Auto {
+            self.update(|item| {
+                item.phase = Phase::Merge {
+                    head,
+                    readied: None,
+                    auto: true,
+                };
+            })?;
+            return self.merge();
         }
         if let Err(reason) = self.hand_back(number) {
             return Ok(self.gate_failed(reason));

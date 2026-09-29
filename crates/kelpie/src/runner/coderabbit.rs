@@ -10,7 +10,7 @@
 
 mod cap;
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 
 use super::Runner;
 use super::gate::settled;
@@ -28,11 +28,11 @@ pub const LABEL: &str = "review please";
 
 // A summon neither taken up nor refused in ten minutes is counted as spent,
 // so the lease goes back.
-const ANSWER_WAIT: u64 = 600;
+pub(super) const ANSWER_WAIT: u64 = 600;
 
 // A full review of a long branch took 24 minutes on shep. Two hours with
 // none is the maintainer's to look at.
-const REVIEW_WAIT: u64 = 2 * 3600;
+pub(super) const REVIEW_WAIT: u64 = 2 * 3600;
 
 impl Runner {
     /// Whether the work item owes CodeRabbit a round before its merge ruling

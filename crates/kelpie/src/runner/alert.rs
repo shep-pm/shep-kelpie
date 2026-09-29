@@ -1,4 +1,5 @@
-//! Posting each ruling to the maintainer's relay and webhook
+//! Posting each ruling to the maintainer's relay and webhook, and each notice
+//! to the webhook
 //!
 //! The relay is a faster, nicer path when it is reachable, but it is a
 //! stopgap over an undocumented protocol, so it is never what keeps a
@@ -7,13 +8,16 @@
 //! tried again, waiting longer after each failure, and the ruling counts
 //! as alerted only once the webhook post lands, whatever the relay's send
 //! did. A save that fails after a post lands leaves it to be posted again.
+//! A notice of an automatic merge takes the same path, webhook only, once
+//! no ruling is waiting to be posted.
 
 use super::Runner;
+use super::gate::short;
 use super::report::StepReport;
 use crate::ports::{Alert, AlertError, Timestamp};
 use crate::relay;
 use crate::settings::Effort;
-use crate::state::StateError;
+use crate::state::{Notice, StateError};
 use crate::webhook::Webhook;
 
 // A failed post waits a minute, then twice as long after each failure, up
@@ -26,46 +30,73 @@ const RETRY_MAX: u64 = 30 * 60;
 // bound: see docs/design-log.md.
 const CLEAR_EVERY: u64 = 24 * 60 * 60;
 
+/// What a post carries
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Posting {
+    /// The ruling with this id
+    Ruling(u64),
+    /// The notice of this pull request's automatic merge
+    Notice(u64),
+}
+
 /// The last failed post, and when it may be tried again
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Retry {
-    id: u64,
+    of: Posting,
     failures: u32,
     at: Timestamp,
 }
 
-/// A ruling to post, and where to post it
+/// What the relay is sent, best-effort, alongside a ruling's webhook post
+#[derive(Debug)]
+pub(super) struct RelayMessage {
+    pub(super) text: String,
+    /// Passed to the relay's `--model`, only spent if it needs starting
+    pub(super) model: String,
+    /// Passed to the relay's `--effort`, only spent if it needs starting
+    pub(super) effort: Effort,
+}
+
+/// A ruling or notice to post, and where to post it
 #[derive(Debug)]
 pub(super) struct Due {
-    pub(super) id: u64,
-    /// What the relay is sent, best-effort, alongside the webhook
-    pub(super) relay_message: String,
-    /// Passed to the relay's `--model`, only spent if it needs starting
-    pub(super) relay_model: String,
-    /// Passed to the relay's `--effort`, only spent if it needs starting
-    pub(super) relay_effort: Effort,
+    pub(super) of: Posting,
+    /// None for a notice, which needs no answer
+    pub(super) relay: Option<RelayMessage>,
     pub(super) webhook: Webhook,
     pub(super) alert: Alert,
 }
 
 impl Runner {
-    /// The oldest ruling not yet posted, unless its last failure says wait
+    /// The oldest ruling not yet posted, or else the oldest notice, unless
+    /// its last failure says wait
     pub(super) fn alert_due(&self) -> Option<Due> {
-        let ruling = self.state.rulings.iter().find(|r| !r.alerted)?;
         let now = self.ports.clock.now();
-        if self.retry.is_some_and(|r| r.id == ruling.id && now < r.at) {
-            return None;
+        let waiting = |of| self.retry.is_some_and(|r| r.of == of && now < r.at);
+        let project = self.project.as_str();
+        if let Some(ruling) = self.state.rulings.iter().find(|r| !r.alerted) {
+            let of = Posting::Ruling(ruling.id);
+            return (!waiting(of)).then(|| Due {
+                of,
+                relay: Some(RelayMessage {
+                    text: relay::message(project, ruling.id, &ruling.question),
+                    model: self.settings.models.relay.model.as_str().to_owned(),
+                    effort: self.settings.models.relay.effort,
+                }),
+                webhook: self.webhook.clone(),
+                alert: Alert {
+                    title: format!("kelpie: {project} ruling {}", ruling.id),
+                    text: ruling.question.clone(),
+                },
+            });
         }
-        Some(Due {
-            id: ruling.id,
-            relay_message: relay::message(self.project.as_str(), ruling.id, &ruling.question),
-            relay_model: self.settings.models.relay.model.as_str().to_owned(),
-            relay_effort: self.settings.models.relay.effort,
+        let notice = self.state.notices.first()?;
+        let of = Posting::Notice(notice.pull_request);
+        (!waiting(of)).then(|| Due {
+            of,
+            relay: None,
             webhook: self.webhook.clone(),
-            alert: Alert {
-                title: format!("kelpie: {} ruling {}", self.project.as_str(), ruling.id),
-                text: ruling.question.clone(),
-            },
+            alert: notice_alert(project, notice),
         })
     }
 
@@ -83,36 +114,69 @@ impl Runner {
         due
     }
 
-    /// Records how the post of ruling `id` went
+    /// Records how the post of `of` went
     pub(super) fn alert_sent(
         &mut self,
-        id: u64,
+        of: Posting,
         sent: Result<(), AlertError>,
     ) -> Result<StepReport, StateError> {
         if let Err(e) = sent {
             let failures = match self.retry {
-                Some(r) if r.id == id => r.failures.saturating_add(1),
+                Some(r) if r.of == of => r.failures.saturating_add(1),
                 _ => 1,
             };
             let wait = RETRY_FIRST
                 .saturating_mul(1 << (failures - 1).min(16))
                 .min(RETRY_MAX);
             let at = Timestamp(self.ports.clock.now().0.saturating_add(wait));
-            self.retry = Some(Retry { id, failures, at });
-            return Ok(StepReport::AlertFailed {
-                id,
-                reason: e.to_string(),
-                retry_at: at,
+            self.retry = Some(Retry { of, failures, at });
+            let reason = e.to_string();
+            return Ok(match of {
+                Posting::Ruling(id) => StepReport::AlertFailed {
+                    id,
+                    reason,
+                    retry_at: at,
+                },
+                Posting::Notice(pull_request) => StepReport::NoticeFailed {
+                    pull_request,
+                    reason,
+                    retry_at: at,
+                },
             });
         }
         self.retry = None;
         let mut next = self.state.clone();
-        // An answer can land while the post is out, and takes the ruling with it.
-        if let Some(ruling) = next.rulings.iter_mut().find(|r| r.id == id) {
-            ruling.alerted = true;
-        }
+        let report = match of {
+            // An answer can land while the post is out, and takes the ruling with it.
+            Posting::Ruling(id) => {
+                if let Some(ruling) = next.rulings.iter_mut().find(|r| r.id == id) {
+                    ruling.alerted = true;
+                }
+                StepReport::Alerted { id }
+            }
+            Posting::Notice(pull_request) => {
+                next.notices.retain(|n| n.pull_request != pull_request);
+                StepReport::Noticed { pull_request }
+            }
+        };
         self.save(next)?;
-        Ok(StepReport::Alerted { id })
+        Ok(report)
+    }
+}
+
+fn notice_alert(project: &str, notice: &Notice) -> Alert {
+    let Notice {
+        issue,
+        pull_request,
+        head,
+    } = notice;
+    Alert {
+        title: format!("kelpie: {project} merged #{pull_request}"),
+        text: format!(
+            "Kelpie merged pull request #{pull_request} for issue #{issue} into main at {} \
+             on {project}, every gate passed. Nothing to answer.",
+            short(head)
+        ),
     }
 }
 
@@ -261,7 +325,7 @@ mod tests {
         let (rig, runner, _) = Rig::parked("reactmap");
         let due = runner.lock().unwrap().alert_due().unwrap();
         rig.ask(&runner, "rule", Some("1 no not yet"));
-        let report = runner.lock().unwrap().alert_sent(due.id, Ok(())).unwrap();
+        let report = runner.lock().unwrap().alert_sent(due.of, Ok(())).unwrap();
         assert_eq!(report, StepReport::Alerted { id: 1 });
         assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
         assert!(runner.lock().unwrap().alert_due().is_none());

@@ -200,6 +200,16 @@ pub enum StepReport {
         /// What changed since the question
         reason: String,
     },
+    /// A merge under `auto` no longer held, or the forge refused it, so CI
+    /// runs again
+    MergeWithdrawn {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// What changed since the gate passed, or why the forge refused
+        reason: String,
+    },
     /// The work item is gone: its worktree, branch and build folder removed
     Finished {
         /// The work item's issue
@@ -222,6 +232,20 @@ pub enum StepReport {
     AlertFailed {
         /// The ruling's id
         id: u64,
+        /// Why, never naming the webhook's URL
+        reason: String,
+        /// When the post is tried again at the earliest
+        retry_at: Timestamp,
+    },
+    /// The notice of an automatic merge was posted to the webhook
+    Noticed {
+        /// The pull request merged
+        pull_request: u64,
+    },
+    /// A notice could not be posted to the webhook, and is tried again later
+    NoticeFailed {
+        /// The pull request merged
+        pull_request: u64,
         /// Why, never naming the webhook's URL
         reason: String,
         /// When the post is tried again at the earliest
