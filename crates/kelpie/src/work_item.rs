@@ -374,9 +374,9 @@ impl Review {
     }
 
     /// Which reviewer runs this round, given how many local rounds a work
-    /// item may run: none without a local round
-    pub fn reviewer(&self, local: u32) -> ReviewerKind {
-        if self.round % 2 == 1 && self.round.div_ceil(2) <= local {
+    /// item may run: 0 with the local round off
+    pub fn reviewer(&self, local_rounds: u32) -> ReviewerKind {
+        if self.round % 2 == 1 && self.round.div_ceil(2) <= local_rounds {
             ReviewerKind::Local
         } else {
             ReviewerKind::Claude
@@ -384,8 +384,8 @@ impl Review {
     }
 
     /// Whether no local round is left once this one ends
-    pub fn local_spent(&self, local: u32) -> bool {
-        self.round.div_ceil(2) >= local
+    pub fn local_spent(&self, local_rounds: u32) -> bool {
+        self.round.div_ceil(2) >= local_rounds
     }
 }
 

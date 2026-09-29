@@ -356,14 +356,15 @@ pub(super) fn advance(
     review: Review,
     clean: bool,
     now: crate::ports::Timestamp,
-    local: u32,
+    local_rounds: u32,
 ) -> Phase {
     let consecutive_clean = if clean {
         review.consecutive_clean + 1
     } else {
         0
     };
-    let alone = review.reviewer(local) == ReviewerKind::Claude && review.local_spent(local);
+    let alone =
+        review.reviewer(local_rounds) == ReviewerKind::Claude && review.local_spent(local_rounds);
     let needed = if alone { 1 } else { 2 };
     if consecutive_clean >= needed {
         Phase::Ci {
