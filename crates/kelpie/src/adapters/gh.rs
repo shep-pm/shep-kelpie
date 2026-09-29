@@ -1,18 +1,18 @@
 //! GitHub, through the `gh` command line
 
 mod board;
-pub(crate) mod coderabbit;
 mod review;
+pub(crate) mod review_bot;
 
 use std::process::{Command, Stdio};
 
 use serde::Deserialize;
 
 use crate::board::{OpenPullRequest, ReadyIssue};
-use crate::coderabbit::Activity;
 use crate::ports::{
-    Checks, Forge, ForgeError, Issue, PullRequest, PullRequestState, Reviewed, Visibility,
+    Checks, Forge, ForgeError, Issue, NewLabel, PullRequest, PullRequestState, Reviewed, Visibility,
 };
+use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
 
 /// GitHub, through the `gh` command line
@@ -28,6 +28,45 @@ impl Forge for Gh {
             "--json",
             "visibility",
         ])?)
+    }
+
+    fn default_branch(&self, repo: &ForgeSlug) -> Result<String, ForgeError> {
+        parse_default_branch(&gh(&[
+            "repo",
+            "view",
+            repo.as_str(),
+            "--json",
+            "defaultBranchRef",
+        ])?)
+    }
+
+    fn repo_labels(&self, repo: &ForgeSlug) -> Result<Vec<String>, ForgeError> {
+        let stdout = gh(&[
+            "label",
+            "list",
+            "--repo",
+            repo.as_str(),
+            "--json",
+            "name",
+            "--limit",
+            "1000",
+        ])?;
+        parse_label_names(&stdout)
+    }
+
+    fn create_label(&self, repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError> {
+        gh(&[
+            "label",
+            "create",
+            label.name,
+            "--repo",
+            repo.as_str(),
+            "--color",
+            label.color,
+            "--description",
+            label.description,
+        ])
+        .map(drop)
     }
 
     fn issue(&self, repo: &ForgeSlug, number: u64) -> Result<Issue, ForgeError> {
@@ -118,15 +157,20 @@ impl Forge for Gh {
         label: &str,
         on: bool,
     ) -> Result<(), ForgeError> {
-        coderabbit::label(repo, number, label, on)
+        review_bot::label(repo, number, label, on)
     }
 
-    fn coderabbit(&self, repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError> {
-        coderabbit::activity(repo, number)
+    fn review_bot(
+        &self,
+        repo: &ForgeSlug,
+        number: u64,
+        login: Login<'_>,
+    ) -> Result<Activity, ForgeError> {
+        review_bot::activity(repo, number, login)
     }
 
     fn resolve_thread(&self, _repo: &ForgeSlug, thread: &str) -> Result<(), ForgeError> {
-        coderabbit::resolve(thread)
+        review_bot::resolve(thread)
     }
 
     fn merge(&self, repo: &ForgeSlug, number: u64, head: &str) -> Result<(), ForgeError> {
@@ -180,6 +224,25 @@ fn parse_visibility(stdout: &[u8]) -> Result<Visibility, ForgeError> {
         "INTERNAL" => Ok(Visibility::Internal),
         _ => Err(unreadable(stdout)),
     }
+}
+
+fn parse_default_branch(stdout: &[u8]) -> Result<String, ForgeError> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct View {
+        default_branch_ref: BranchRef,
+    }
+    #[derive(Deserialize)]
+    struct BranchRef {
+        name: String,
+    }
+    let view: View = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
+    Ok(view.default_branch_ref.name)
+}
+
+fn parse_label_names(stdout: &[u8]) -> Result<Vec<String>, ForgeError> {
+    let labels: Vec<Label> = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
+    Ok(labels.into_iter().map(|l| l.name).collect())
 }
 
 fn parse_issue(stdout: &[u8]) -> Result<Issue, ForgeError> {
@@ -321,6 +384,26 @@ mod tests {
             read(r#"{"visibility":"SECRET"}"#),
             Err(ForgeError::Unreadable(_))
         ));
+    }
+
+    #[test]
+    fn a_repo_s_label_names_are_read() {
+        let read = |s: &str| parse_label_names(s.as_bytes());
+        assert_eq!(
+            read(r#"[{"name":"bug"},{"name":"review please"}]"#),
+            Ok(vec!["bug".to_owned(), "review please".to_owned()])
+        );
+        assert!(matches!(read("{}"), Err(ForgeError::Unreadable(_))));
+    }
+
+    #[test]
+    fn the_default_branch_is_read() {
+        let read = |s: &str| parse_default_branch(s.as_bytes());
+        assert_eq!(
+            read(r#"{"defaultBranchRef":{"name":"trunk"}}"#),
+            Ok("trunk".to_owned())
+        );
+        assert!(matches!(read("{}"), Err(ForgeError::Unreadable(_))));
     }
 
     #[test]

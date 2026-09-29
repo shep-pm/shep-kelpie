@@ -77,7 +77,7 @@ impl Runner {
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
         let issue = self.current().expect("the gate runs on a work item").issue;
-        let mut report = failed(self.project.as_str(), &mut next, issue, now, reason);
+        let mut report = failed(self.names(), &mut next, issue, now, reason);
         self.save(next)?;
         self.fill_comment_failed(&mut report);
         Ok(Some(Begin::Report(report)))

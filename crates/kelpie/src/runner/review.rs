@@ -263,11 +263,11 @@ impl Runner {
         if matches!(result, ReviewResult::Stopped) {
             return Ok(None);
         }
-        let in_coderabbit_round = self
+        let in_review_bot_round = self
             .current()
             .is_some_and(|item| matches!(item.phase, Phase::CodeRabbit(_)));
-        if in_coderabbit_round {
-            return self.coderabbit_verdict(result, spent);
+        if in_review_bot_round {
+            return self.review_bot_verdict(result, spent);
         }
         let now = self.ports.clock.now();
         let local = self.local_rounds();

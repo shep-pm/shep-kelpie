@@ -4,6 +4,10 @@
 //! `kelpie dog`: the kelpie dog, run as a sheep
 //! `kelpie lease ...`: the maintainer's lease commands
 //!
+//! `kelpie add [<project>]`, `start [<project>]`, `pause [<project>]`,
+//! `status`: a checkout's project in the maintainer's own flock, run as
+//! `shep kelpie <command>` in the checkout.
+//!
 //! `kelpie confine <folder>...`: the hook that holds a worker's file tools
 //! to its folders. Claude Code runs it; it is not for the maintainer.
 //!
@@ -71,6 +75,9 @@ fn main() -> ExitCode {
                 checkout,
             ))
         }
+        [command, rest @ ..] if ["add", "start", "pause", "status"].contains(&command.as_str()) => {
+            kelpie::flock::main(command, rest)
+        }
         [role, domains @ ..] if role == "browse-guard" => {
             hook(kelpie::browse::judge(std::io::stdin().lock(), domains))
         }
@@ -112,18 +119,19 @@ fn main() -> ExitCode {
                 rule::send(home, project, Ruling::NoOrAnswer(params))
             })
         }
-        // Adopted for lookout's settings panes, shep starts kelpie with no
-        // arguments. The dog still runs from the Flockfile.
+        // Adopted for `shep kelpie` and lookout's settings panes, shep starts
+        // kelpie with no arguments. The dog runs as a sheep of its own, since
+        // an adopted dog gets no shepherd channel.
         [] if std::env::var_os("SHEP_DOG_NAME").is_some() => {
             eprintln!(
-                "kelpie is adopted so lookout can edit its settings, and its dog runs from \
-                 the Flockfile: run `shep disable kelpie` to stop this start"
+                "kelpie is adopted for `shep kelpie` and lookout's settings panes, and its dog \
+                 runs as the `kelpie-dog` sheep: run `shep disable kelpie` to stop this start"
             );
             ExitCode::from(2)
         }
         _ => {
             eprintln!(
-                "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie guard <git common dir> <worktree>\n       kelpie browse-guard <domain>...\n       kelpie settings move <project> [<sheep>]\n       kelpie tools install\n       kelpie totp [--rotate | --unlock]\n       kelpie shots-mcp <tools> <job>\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>\n       kelpie relay-gate <kelpie>",
+                "usage: kelpie add [<project>]\n       kelpie start [<project>]\n       kelpie pause [<project>]\n       kelpie status\n       kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie guard <git common dir> <worktree>\n       kelpie browse-guard <domain>...\n       kelpie settings move <project> [<sheep>]\n       kelpie tools install\n       kelpie totp [--rotate | --unlock]\n       kelpie shots-mcp <tools> <job>\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>\n       kelpie relay-gate <kelpie>",
                 kelpie::lease::cli::USAGE
             );
             ExitCode::from(2)

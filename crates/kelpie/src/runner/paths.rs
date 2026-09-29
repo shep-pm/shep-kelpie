@@ -20,6 +20,12 @@ impl ProjectName {
     }
 }
 
+impl fmt::Display for ProjectName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 impl TryFrom<&str> for ProjectName {
     type Error = ProjectNameError;
 

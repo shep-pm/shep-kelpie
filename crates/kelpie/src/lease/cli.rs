@@ -11,14 +11,14 @@ use std::process::{ExitCode, ExitStatus, Stdio};
 use std::time::Duration;
 
 use serde_json::Value;
-use shep_client::Client;
 use shep_client::shep_core::protocol::Request;
 use shep_client::shep_core::protocol::request::{ActionOutcome, Response, SelectorSpec};
+use shep_client::{Client, RequestError};
 use tokio::signal::unix::{Signal, SignalKind, signal};
 
 use super::gpu::{self, Claim, GpuLock, Waiting};
 use super::{GPU, LeaseKind};
-use crate::dog;
+use crate::{dog, shepherd};
 
 /// The usage lines for `kelpie lease`
 pub const USAGE: &str = "\
@@ -326,21 +326,34 @@ async fn ask_dog(action: &str, params: &str) -> Result<Value, String> {
     let client = Client::connect(&socket)
         .await
         .map_err(|e| format!("cannot reach the shepherd at {}: {e}", socket.display()))?;
-    let reply = client
-        .request(Request::Trigger {
-            selector: SelectorSpec::Name(dog::NAME.into()),
+    let ask = |name: &str| {
+        client.request(Request::Trigger {
+            selector: SelectorSpec::Name(name.into()),
             action: action.into(),
             params: Some(params.to_owned()).filter(|p| !p.is_empty()),
         })
-        .await
-        .map_err(|e| format!("cannot ask the dog: {e}"))?;
-    let Response::Triggered(rows) = reply else {
-        return Err(format!("the shepherd answered {reply:?}"));
     };
-    let body = match rows.into_iter().next().map(|row| row.outcome) {
+    let triggered = |reply: Result<Response, RequestError>| match reply {
+        Ok(Response::Triggered(rows)) => Ok(rows),
+        Err(e) if shepherd::names_no_sheep(&e) => Ok(Vec::new()),
+        Ok(other) => Err(format!("the shepherd answered {other:?}")),
+        Err(e) => Err(format!("cannot ask the dog: {e}")),
+    };
+    // A dog set up from a Flockfile before `shep kelpie add` has its old name.
+    let mut found = triggered(ask(dog::NAME).await)?;
+    if found.is_empty() {
+        found = triggered(ask(dog::OLD_NAME).await)?;
+    }
+    let body = match found.into_iter().next().map(|row| row.outcome) {
         Some(ActionOutcome::Replied { body }) => body,
         Some(other) => return Err(format!("the dog did not answer: {other:?}")),
-        None => return Err(format!("no sheep named {} is running", dog::NAME)),
+        None => {
+            return Err(format!(
+                "no sheep named {} or {} is running",
+                dog::NAME,
+                dog::OLD_NAME
+            ));
+        }
     };
     let value: Value =
         serde_json::from_str(&body).map_err(|e| format!("the dog answered {body:?} ({e})"))?;

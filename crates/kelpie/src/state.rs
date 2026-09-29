@@ -388,7 +388,7 @@ pub struct LeaseHeld {
 pub enum Resource {
     /// The GPU the qwen-review loop runs on
     Gpu,
-    /// The CodeRabbit review window
+    /// The review bot's window, which is CodeRabbit's
     Coderabbit,
 }
 
@@ -505,10 +505,13 @@ impl StateStore {
     pub fn save(&self, state: &ProjectState) -> Result<(), StateError> {
         let mut bytes = serde_json::to_vec_pretty(state).expect("state serializes to JSON");
         bytes.push(b'\n');
-        write_atomically(&self.path, &bytes).map_err(|e| StateError::Write {
-            path: self.path.clone(),
-            kind: e.kind(),
-        })
+        // A project `shep kelpie add` set up has no folder of its own yet.
+        let made = self.path.parent().map_or(Ok(()), std::fs::create_dir_all);
+        made.and_then(|()| write_atomically(&self.path, &bytes))
+            .map_err(|e| StateError::Write {
+                path: self.path.clone(),
+                kind: e.kind(),
+            })
     }
 
     fn error_read(&self, e: io::Error) -> StateError {
