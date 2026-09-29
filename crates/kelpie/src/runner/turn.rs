@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::Runner;
+use super::adopt;
 use super::question::asked;
 use super::report::{Begin, StepReport};
 use super::review::run_review_call;
@@ -131,6 +132,11 @@ impl Runner {
             Turn::Due => (Session::New(id), None, now),
             Turn::Running { since } if start_over => (Session::New(id), None, *since),
             Turn::Running { since } => (Session::Resume(id), Some(CONTINUE.to_owned()), *since),
+            // An adopted work item's session begins with whatever the gate sends it.
+            Turn::Next { prompt } if adopt::unborn(item) => {
+                let first = adopt::first_prompt(item, Some(prompt));
+                (Session::New(id), Some(first), now)
+            }
             // No session to resume: the retry of a turn whose call failed
             // before its session existed starts it over, as a killed one does.
             Turn::Next { .. } if start_over => (Session::New(id), None, now),
@@ -191,7 +197,7 @@ impl Runner {
         prompt: Option<String>,
         timeout: Duration,
     ) -> Result<ClaudeCall, String> {
-        let start = if item.rework {
+        let start = if item.rework || item.adopted {
             Start::Pushed
         } else {
             Start::Main
@@ -224,6 +230,7 @@ impl Runner {
         let prompt = match prompt {
             Some(prompt) => prompt,
             None if item.rework => rework::first_prompt(item),
+            None if item.adopted => adopt::first_prompt(item, None),
             None => {
                 let issue = self
                     .ports

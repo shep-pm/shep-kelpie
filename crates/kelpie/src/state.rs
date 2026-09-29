@@ -43,6 +43,9 @@ pub struct ProjectState {
     /// one. None of them starts another.
     #[serde(default)]
     pub reworked: Vec<String>,
+    /// Pull requests adopted and waiting for the work item in flight, oldest first
+    #[serde(default)]
+    pub adopted: Vec<u64>,
     /// Leases this project holds
     pub leases: Vec<LeaseHeld>,
     /// What the week had spent when today began, once usage has been read
@@ -62,6 +65,7 @@ impl ProjectState {
             last_ruling: 0,
             finished: Vec::new(),
             reworked: Vec::new(),
+            adopted: Vec::new(),
             leases: Vec::new(),
             pacing: None,
         }
@@ -545,6 +549,7 @@ mod tests {
         state.last_ruling = 7;
         state.finished = vec![22, 30];
         state.reworked = vec!["PRR_1".into()];
+        state.adopted = vec![614, 638];
         state.pacing = Some(DayStart {
             week_resets_at: Timestamp(9),
             day: 1,
@@ -592,6 +597,7 @@ mod tests {
                 "last_ruling": 7,
                 "finished": [22, 30],
                 "reworked": ["PRR_1"],
+                "adopted": [614, 638],
                 "leases": [{ "resource": "coderabbit", "since": 8 }],
                 "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
             })

@@ -167,7 +167,15 @@ impl Runner {
             .as_ref()
             .expect("a rebase is of a work item");
         let issue = item.issue;
-        let outcome = worktree::rebase(&self.settings.repo, &item.worktree, &item.branch, head);
+        // An adopted branch's commits are someone else's, so it is merged, never rewritten.
+        let rewrite = !item.adopted;
+        let outcome = worktree::rebase(
+            &self.settings.repo,
+            &item.worktree,
+            &item.branch,
+            head,
+            rewrite,
+        );
         match outcome {
             Ok(Rebase::Pushed(rebased)) => {
                 let (seen, since) = (Some(rebased.clone()), self.ports.clock.now());

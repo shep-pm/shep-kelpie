@@ -394,7 +394,7 @@ impl Forge for FakeForge {
         }
         let pr = self.opened(number)?;
         let open = self.open.lock().unwrap();
-        let listed = open.iter().find(|listed| listed.number == number);
+        let listed = open.iter().rfind(|listed| listed.number == number);
         Ok(Reviewed {
             state: pr.state,
             title: format!("Title of pull request #{number}"),

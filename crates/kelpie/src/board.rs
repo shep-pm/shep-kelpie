@@ -121,10 +121,18 @@ pub enum Skip {
         /// Why, as the refusal reads
         error: String,
     },
+    /// An adopted pull request that could not start this poll, and still waits
+    Adopt {
+        /// The pull request
+        pull_request: u64,
+        /// Why, as the refusal reads
+        error: String,
+    },
 }
 
 impl Skip {
-    /// The issue passed over
+    /// The issue passed over, or 0 for an adopted pull request, which goes
+    /// before every issue
     pub fn issue(&self) -> u64 {
         match self {
             Self::PullRequest { issue, .. }
@@ -134,6 +142,7 @@ impl Skip {
             | Self::Label { issue, .. }
             | Self::Failed { issue, .. }
             | Self::Rework { issue, .. } => *issue,
+            Self::Adopt { .. } => 0,
         }
     }
 }

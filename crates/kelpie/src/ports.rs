@@ -662,8 +662,8 @@ pub struct Verdict {
 
 /// Runs one round of the maintainer's qwen-review script
 pub trait Reviewer: Send + Sync {
-    /// Runs round `round` against `worktree`'s diff from `origin/main`,
-    /// writing the script's own findings under `out`
+    /// Runs round `round` against `worktree`'s diff from `base`, usually
+    /// `origin/main`, writing the script's own findings under `out`
     ///
     /// Feeds hunk files for anything the script skips as too large, folding
     /// their findings back in against the original file.
@@ -675,6 +675,7 @@ pub trait Reviewer: Send + Sync {
     fn round(
         &self,
         worktree: &std::path::Path,
+        base: &str,
         out: &std::path::Path,
         round: u32,
     ) -> Result<Vec<Finding>, ReviewerError>;

@@ -22,16 +22,16 @@ pub(super) fn reviewed(repo: &ForgeSlug, number: u64) -> Result<Reviewed, ForgeE
     let (owner, name) = repo.as_str().split_once('/').unwrap_or_default();
     parse_reviewed(
         &gh(&[
-        "api",
-        "graphql",
-        "-f",
-        &format!("query={QUERY}"),
-        "-f",
-        &format!("owner={owner}"),
-        "-f",
-        &format!("name={name}"),
-        "-F",
-        &format!("number={number}"),
+            "api",
+            "graphql",
+            "-f",
+            &format!("query={QUERY}"),
+            "-f",
+            &format!("owner={owner}"),
+            "-f",
+            &format!("name={name}"),
+            "-F",
+            &format!("number={number}"),
         ])?,
         repo,
     )

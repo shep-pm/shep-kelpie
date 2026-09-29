@@ -1,7 +1,8 @@
 //! Dispatch: the board's next issue becomes the work item in flight
 //!
 //! A running project with nothing in flight asks the board on every step,
-//! after checking its open pull requests for one asking for a rework.
+//! after starting any pull request it adopted and checking its open pull
+//! requests for one asking for a rework.
 //! One work item is in flight at a time, so a queued issue waits until the
 //! one in flight is gone.
 
@@ -26,9 +27,15 @@ impl Runner {
                 }));
             }
         };
-        // A pull request asking for a rework goes before any ready issue, and
-        // one whose rework cannot start is passed over like one.
-        let (begin, mut failed) = self.rework_asked(&open)?;
+        // An adopted pull request, then one asking for a rework, goes before
+        // any ready issue, and one that cannot start is passed over like one.
+        let (begin, mut failed) = self.adopt_waiting(&open)?;
+        if let Some(begin) = begin {
+            self.skipped = failed;
+            return Ok(begin);
+        }
+        let (begin, reworks) = self.rework_asked(&open)?;
+        failed.extend(reworks);
         if let Some(begin) = begin {
             self.skipped = failed;
             return Ok(begin);
@@ -51,6 +58,10 @@ impl Runner {
                             error,
                             ..
                         } => Some(format!("cannot rework #{pull_request}: {error}")),
+                        Skip::Adopt {
+                            pull_request,
+                            error,
+                        } => Some(format!("cannot adopt #{pull_request}: {error}")),
                         _ => None,
                     })
                     .collect::<Vec<_>>()

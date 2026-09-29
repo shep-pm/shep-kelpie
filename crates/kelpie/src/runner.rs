@@ -19,6 +19,7 @@ use crate::work_item::{
     CodeRabbitTally, Known, Phase, QwenTally, ReviewCallState, Turn, WorkItem, new_session_id,
 };
 
+mod adopt;
 mod alert;
 mod coderabbit;
 mod dispatch;
@@ -34,6 +35,7 @@ mod ruling;
 mod trigger;
 mod turn;
 
+pub use adopt::AdoptError;
 pub use merge::DropError;
 pub use pace::PacerStatus;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
@@ -210,6 +212,7 @@ impl Runner {
             run: self.state.run,
             since: self.state.since,
             work_item: self.state.work_item.as_ref().map(WorkItemStatus::from),
+            adopted: &self.state.adopted,
             skipped: &self.skipped,
             rulings: &self.state.rulings,
             leases: &self.state.leases,
@@ -276,6 +279,8 @@ impl Runner {
             title,
             branch: format!("kelpie/{issue}"),
             rework: false,
+            adopted: false,
+            arrived: None,
             worktree: self.paths.worktree(issue),
             build: self.paths.build(issue),
             worker,
