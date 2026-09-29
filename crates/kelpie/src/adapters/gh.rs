@@ -2,6 +2,7 @@
 
 mod board;
 pub(crate) mod coderabbit;
+mod issues;
 mod review;
 
 use std::process::{Command, Stdio};
@@ -11,7 +12,8 @@ use serde::Deserialize;
 use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::coderabbit::Activity;
 use crate::ports::{
-    Checks, Forge, ForgeError, Issue, PullRequest, PullRequestState, Reviewed, Visibility,
+    Checks, Forge, ForgeError, Issue, OpenIssue, PullRequest, PullRequestState, Reviewed,
+    Visibility,
 };
 use crate::settings::ForgeSlug;
 
@@ -104,6 +106,20 @@ impl Forge for Gh {
         let field = format!("body={body}");
         let args = ["api", "--method", "PATCH", &path, "-f", &field, "--silent"];
         gh(&args).map(drop)
+    }
+
+    fn open_issues(&self, repo: &ForgeSlug) -> Result<Vec<OpenIssue>, ForgeError> {
+        issues::open_issues(repo)
+    }
+
+    fn create_issue(
+        &self,
+        repo: &ForgeSlug,
+        title: &str,
+        body: &str,
+        labels: &[&str],
+    ) -> Result<u64, ForgeError> {
+        issues::create_issue(repo, title, body, labels)
     }
 
     fn mark_ready(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {

@@ -1,6 +1,6 @@
 //! Keeping this machine's paths off the forge
 //!
-//! Everything kelpie posts to a pull request goes through [`Guarded`], which
+//! Everything kelpie posts to the forge goes through [`Guarded`], which
 //! refuses a body naming a local folder: the home folder, kelpie's home,
 //! which holds every worktree, build and shots folder, and the project's
 //! checkout. A post that names one is never sent.
@@ -8,7 +8,7 @@
 use std::fmt;
 use std::path::Path;
 
-use super::{Forge, ForgeError, Issue, PullRequest, Reviewed, Visibility};
+use super::{Forge, ForgeError, Issue, OpenIssue, PullRequest, Reviewed, Visibility};
 use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::coderabbit::Activity;
 use crate::settings::ForgeSlug;
@@ -94,6 +94,22 @@ impl Forge for Guarded {
     fn edit_comment(&self, repo: &ForgeSlug, id: u64, body: &str) -> Result<(), ForgeError> {
         self.check(body)?;
         self.forge.edit_comment(repo, id, body)
+    }
+
+    fn open_issues(&self, repo: &ForgeSlug) -> Result<Vec<OpenIssue>, ForgeError> {
+        self.forge.open_issues(repo)
+    }
+
+    fn create_issue(
+        &self,
+        repo: &ForgeSlug,
+        title: &str,
+        body: &str,
+        labels: &[&str],
+    ) -> Result<u64, ForgeError> {
+        self.check(title)?;
+        self.check(body)?;
+        self.forge.create_issue(repo, title, body, labels)
     }
 
     fn mark_ready(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {

@@ -25,6 +25,7 @@ mod alert;
 mod claude_files;
 mod coderabbit;
 mod dispatch;
+mod follow_up;
 mod gate;
 mod instructions;
 mod merge;
@@ -363,6 +364,7 @@ impl Runner {
             rebased: false,
             shots: None,
             shots_comment: None,
+            follow_ups: None,
             calls: Vec::new(),
         }
     }

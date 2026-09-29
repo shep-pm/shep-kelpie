@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
-use crate::ports::Timestamp;
+use crate::ports::{Finding, Timestamp};
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
 
 /// The state file's format version
@@ -254,6 +254,12 @@ pub enum RulingKind {
     CodeRabbitSilent {
         /// The head the summon was for
         head: String,
+    },
+    /// A merged pull request left confirmed findings unfixed. A yes files
+    /// each as an issue on the project, and a no drops them.
+    FollowUp {
+        /// The findings, at the judge's severity
+        findings: Vec<Finding>,
     },
     /// The worker ended its turn on a question. The answer is its next turn.
     Question {

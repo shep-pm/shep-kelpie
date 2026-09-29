@@ -295,6 +295,10 @@ impl Runner {
     // item, and records its issue so the board never takes it again. A pull
     // request left unmerged is handed back to the maintainer first.
     pub(super) fn finish(&mut self, merged: bool) -> Result<Begin, StateError> {
+        // First, since the findings sit in the build folder this removes.
+        if merged && let Some(begin) = self.follow_ups()? {
+            return Ok(begin);
+        }
         self.release()?;
         let item = self.current().expect("a finish is of a work item");
         // First, so a failure here leaves everything else for the retry.

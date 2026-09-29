@@ -106,8 +106,25 @@ pub struct WorkItem {
     /// The pull request's shots comment, once posted
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shots_comment: Option<u64>,
+    /// The findings the worker left unfixed, read once the pull request
+    /// merges. None until then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_ups: Option<FollowUps>,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
+}
+
+/// Confirmed findings a merged pull request left unfixed, waiting to be filed
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FollowUps {
+    /// The findings still to file
+    pub findings: Vec<Finding>,
+    /// Whether the maintainer said yes to filing them, or the project is on
+    /// `auto` and nobody is asked
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ruled: bool,
 }
 
 /// A conflict with `main` that went to the worker as its next turn

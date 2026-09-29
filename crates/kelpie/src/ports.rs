@@ -125,6 +125,26 @@ pub trait Forge: Send {
     /// [`ForgeError`] when the comment is gone or cannot be edited.
     fn edit_comment(&self, repo: &ForgeSlug, id: u64, body: &str) -> Result<(), ForgeError>;
 
+    /// The open issues on `repo`, for telling a finding already filed
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn open_issues(&self, repo: &ForgeSlug) -> Result<Vec<OpenIssue>, ForgeError>;
+
+    /// Opens an issue on `repo` with these labels, and returns its number
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses, or its answer names no number.
+    fn create_issue(
+        &self,
+        repo: &ForgeSlug,
+        title: &str,
+        body: &str,
+        labels: &[&str],
+    ) -> Result<u64, ForgeError>;
+
     /// Marks draft pull request `number` ready for review
     ///
     /// # Errors
@@ -270,6 +290,17 @@ pub struct Issue {
     pub body: String,
     /// Its labels' names
     pub labels: Vec<String>,
+}
+
+/// An open issue, as the follow-up check reads it
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenIssue {
+    /// Its number
+    pub number: u64,
+    /// Its title
+    pub title: String,
+    /// Its body, as written
+    pub body: String,
 }
 
 /// Why a forge call failed

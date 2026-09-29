@@ -122,6 +122,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         rebased: false,
         shots: None,
         shots_comment: None,
+        follow_ups: None,
         calls: vec![CallRecord {
             role: Role::Worker,
             at: Timestamp(10),
