@@ -104,6 +104,16 @@ Worth lifting, with attribution:
 - Paperclip: decisions and decision queues, for parking a worker on a ruling. The execution-workspace lease, for worktree exclusivity.
 - Vibe Kanban (Apache-2.0): `crates/executors/src/executors/claude.rs`, `crates/worktree-manager`, `crates/mcp`.
 
+## V1 directions
+
+Not built and not decided: where the maintainer wants kelpie to go after the MVP, noted 2026-09-28.
+
+- Names and shape, per the maintainer: `shep-kelpie` stays the shep adapter (the runner, the dog and a library), published as crates. `kelpie` becomes the Tauri app on top of shep and those crates, shipped as an app, never as a crate.
+- A kelpie GitHub App. Pull requests would come from its own identity instead of the maintainer's account, so the maintainer can request changes and approve like any reviewer. GitHub refuses both from a pull request's author, which is why #53 reworks on a `ready-for-agent` label. Installation tokens, scoped per repo, replace the maintainer's `gh` token, and the gates show as check runs. Webhooks would replace polling, but kelpie runs on the maintainer's machine, so they need a tunnel. Identity and check runs come first, on polling.
+- Any CLI agent, through adapters. The worker, reviewer and judge are already ports. Three things are Claude-shaped today. The worker adapter leans on Claude Code's session resume, usage output and settings file. The guardrails are Claude Code's own sandbox, deny rules and hooks, so another CLI needs kelpie to supply its own sandbox, the largest piece. Pacing reads Anthropic's weekly and 5-hour windows, which becomes a budget per provider.
+- A spike on Restate (restatedev/restate), a durable-execution engine: journaled steps that resume after a crash, exactly-once calls, durable timers and promises, and single-writer keyed state. The runner hand-rolls that today in its state file and resume logic, and the bugs fixed on 2026-09-28 were that class: a crash between the label call and the save that could summon twice, a review round cut short by a restart recorded as a failure (#46), a lease book lost on restart (#19). A ruling is a durable promise, and the turn ceiling and pacing are durable timers. The spike models one work item's loop as a Restate workflow and measures whether the resume code shrinks and those bugs go away. The costs: `restate-server` is one more process (it could run as a sheep), the tests change shape, and the server is under the Business Source License 1.1, which allows this use (it bars offering Restate as a hosted service). Its Rust SDK is MIT.
+- Prior art, checked against each vendor's docs on 2026-09-28. GitHub's Copilot coding agent, Codex, Jules, Cursor's cloud agents and claude-code-action all ship issue to pull request, rework from review comments, and UI screenshots on the pull request. Copilot's Playwright defaults (on by default, localhost only) are the shape #54 follows. None of them has an ordered gate chain, pacing against a subscription's usage windows, or leases on a shared resource across repos. That is where kelpie's design effort goes.
+
 ## Facts
 
 ### Headless Claude Code
@@ -294,6 +304,21 @@ Read 2026-09-28 through GitHub's GraphQL API on shep#598, #607, #614, #617, #622
 - The maintainer's replies in CodeRabbit's threads are reviews of their own, often with an empty body. Their comments sit in the bot's thread, tied to the maintainer's review by `pullRequestReview`.
 - A comment on a line the diff has since moved past has `line` null and keeps only `originalLine`. Kelpie gives such a comment its file and no line.
 
+### The first hands-on run
+
+Measured 2026-09-28 and 2026-09-29 on kelpie-scratch (shep-pm/kelpie-scratch, public), with the runner under `~/.kelpie/shep` and builds from f738abd to e1dbe90. Five runs for #17.
+
+- A labelled issue reached a merged pull request through every gate: issue #1, pull request #3, merged as 4b6d2d3 at 21:21Z. The worker's turn ran 20:52 to 20:54Z, qwen's round 1 and Claude's round 2 came back clean, CI passed all 7 checks on ubuntu and macos, one CodeRabbit round was satisfied, and the merge ruling got a yes. Run 2 (issue #4, pull request #5, merged as f0723de at 22:12Z) and run 4 (issue #8, pull request #9, merged as eb15925) did the same.
+- CodeRabbit skips a draft that carries the label: "Draft PR not reviewed" at the 20:59:52Z summon. A hand `@coderabbitai review` comment inside kelpie's lease got past it. #65 marks the pull request ready before the CodeRabbit round. Run 3 (issue #6, pull request #7) showed it live: ready at 22:42:08Z, before any summon, then the lease waited for the window (the last summon was 22:04:19Z), the dog granted at 23:04:18Z, the label went on at 23:04:23Z, and no draft was skipped. Run 4 was marked ready at 23:38:50Z and summoned the moment the window opened, at 00:05:52Z, with no refusal.
+- A cold cargo cache works inside the worker's sandbox. With `build_env` `CARGO_HOME = "cargo"` (inside the build folder), build, clippy and tests passed in the worker and in CI, and the worker needed no paths or domains beyond crates.io's three.
+- Removing `review please` stops a later push from summoning. The label came off as each round was satisfied (21:04Z and 22:07:27Z). A commit pushed by hand at 22:08:03Z, with the label off, made CodeRabbit update its comment at 22:10:39Z to "Review skipped: Auto reviews are limited based on label configuration", and it posted no review. That commit reached the merge ruling with CI only, with no review loop and no CodeRabbit round, because #16 watches labels and ready state and nothing else. Filed as #69.
+- The runner waited at stage `lease` until the `kelpie dog` app was added under kelpie's shepherd, which was granted within seconds. Filed in #64.
+- The relay took rulings 1 (merge) and 2 (question) to the maintainer's phone, but the answers could not come back: the relay's `shep trigger` had no `SHEP_HOME` and reported "the shep daemon isn't running". A `claude --bg` session takes its environment from Claude's background supervisor, not from the runner, so the Flockfile's `SHEP_HOME` never reached it. Filed in #64, and the answers went in by hand. After #77, run 5 (issue #10) closed the loop: the worker asked at 00:59:28Z (ruling 6), the relay carried it to the phone, and the maintainer's answer reached the runner over the shepherd's socket at about 01:02Z, and the worker built on it.
+- The webhook (ntfy) delivered the alerts for ruling 1 (21:06Z) and ruling 2 (21:31Z) to the maintainer's phone, confirmed by the maintainer.
+- Cost by role: before run 2's merge, `status` showed 2 calls, all the worker's, since Claude review rounds and judge calls were not recorded. Filed as #70. Run 4's `status` before its merge did show it: worker 1 call, review 1 call, judge 0 calls, and one qwen round of 1131 s, mostly the GPU queue.
+- CodeRabbit's refusal path (#12) ran live in run 3. The hour counted from the hand comment's summon at 22:04:28Z. Kelpie took the label off at 23:05:28Z and summoned again at 23:05:36Z. It read the same refusal, whose quoted time (23:04:44Z) was already past (`summon-refused` at 23:05:39Z), and summoned a third time at 23:05:46Z, which landed. That cost one wasted label toggle from re-reading a stale refusal. CodeRabbit reviewed at 23:10:57Z with one thread, the judge did not hold it (low), and one round satisfied it.
+- Kelpie's 0.10.1 shepherd was replaced by a 0.8.2 one (`~/.cargo/bin/shep`, first on `PATH`) on the same home twice on 2026-09-28, at 19:16 and again at 21:01 local, and the old shepherd's children survived as orphans: a second hazels-lab runner and a second dispatcher. The second is proven from the relay's own transcript. Kelpie was not on the relay's `PATH`, so `kelpie relay-yes` failed with command not found. The relay improvised `shep trigger` with the 0.8.2 shep, got a version-skew error that said "Run: shep daemon reload", and ran it, which re-executed the older binary and orphaned the runners. The first takeover most likely went the same way. Each time the orphans were killed and the shepherd was restarted on 0.10.1 by hand. Filed as #77 (the relay answers over the shepherd's socket) and #80 (the relay is held to its two kelpie commands by absolute path, and everything else is refused).
+
 ### The shep surface kelpie leans on
 
 - `Request::Trigger` becomes an `action` message on a sheep's shepherd channel (fd 3), answered with an `action-reply`. `ready`, `metric` and `action-reply` are all republished on the bus as `channel.*`.
@@ -343,8 +368,8 @@ The model to fit: one session's cache reads grow with the square of its length. 
 
 ### Other checks
 
-- Claude Code's sandbox with cargo, which writes to `~/.cargo`. A warm cache passes (see Worker profile and sandbox). A cold cache waits for the hands-on run.
-- Whether removing `review please` after a review stops a later push from spending the next window.
+- Claude Code's sandbox with cargo, which writes to `~/.cargo`. A warm cache passes (see Worker profile and sandbox). A cold cache passes too: settled by #17's hands-on run, see The first hands-on run.
+- Whether removing `review please` after a review stops a later push from spending the next window: it does, settled by the same run.
 
 ## Waiting on the tests
 

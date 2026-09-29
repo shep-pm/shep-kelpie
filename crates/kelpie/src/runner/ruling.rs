@@ -79,7 +79,7 @@ impl fmt::Display for RuleError {
     }
 }
 
-impl std::error::Error for RuleError {}
+impl core::error::Error for RuleError {}
 
 /// What an answer does to the work item parked on its ruling
 enum Move {

@@ -73,7 +73,7 @@ impl fmt::Display for OpenError {
     }
 }
 
-impl std::error::Error for OpenError {}
+impl core::error::Error for OpenError {}
 
 impl From<SettingsError> for OpenError {
     fn from(e: SettingsError) -> Self {
@@ -120,7 +120,7 @@ impl fmt::Display for AddError {
     }
 }
 
-impl std::error::Error for AddError {}
+impl core::error::Error for AddError {}
 
 /// One project's runner
 #[derive(Debug)]

@@ -94,7 +94,7 @@ impl fmt::Display for LeaseKindError {
     }
 }
 
-impl std::error::Error for LeaseKindError {}
+impl core::error::Error for LeaseKindError {}
 
 /// Which run of a runner is asking: its process id
 ///

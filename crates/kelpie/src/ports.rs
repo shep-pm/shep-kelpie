@@ -289,7 +289,7 @@ impl fmt::Display for ForgeError {
     }
 }
 
-impl std::error::Error for ForgeError {}
+impl core::error::Error for ForgeError {}
 
 /// Which role a Claude call is made for
 // wire format: changing this is a breaking change to the state file
@@ -446,7 +446,7 @@ impl fmt::Display for ClaudeError {
     }
 }
 
-impl std::error::Error for ClaudeError {}
+impl core::error::Error for ClaudeError {}
 
 /// How much of one usage window the account has spent
 // wire format: changing this is a breaking change to the pacer's status
@@ -503,7 +503,7 @@ impl fmt::Display for MeterError {
     }
 }
 
-impl std::error::Error for MeterError {}
+impl core::error::Error for MeterError {}
 
 /// One alert for the maintainer, away from the terminal
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -546,7 +546,7 @@ impl fmt::Display for AlertError {
     }
 }
 
-impl std::error::Error for AlertError {}
+impl core::error::Error for AlertError {}
 
 /// Sends a ruling to the maintainer's relay session
 ///
@@ -609,7 +609,7 @@ impl fmt::Display for RelayError {
     }
 }
 
-impl std::error::Error for RelayError {}
+impl core::error::Error for RelayError {}
 
 /// How serious a review finding is
 ///
@@ -738,7 +738,7 @@ impl fmt::Display for ReviewerError {
     }
 }
 
-impl std::error::Error for ReviewerError {}
+impl core::error::Error for ReviewerError {}
 
 /// Takes a work item's shots
 pub trait Shots: Send + Sync {

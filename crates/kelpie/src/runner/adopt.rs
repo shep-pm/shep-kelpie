@@ -100,7 +100,7 @@ impl fmt::Display for AdoptError {
     }
 }
 
-impl std::error::Error for AdoptError {}
+impl core::error::Error for AdoptError {}
 
 impl AdoptError {
     // Whether asking again, with nothing changed on the pull request, is

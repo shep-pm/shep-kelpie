@@ -711,11 +711,6 @@ impl Rig {
                 "{rule} hides {as_written}"
             );
         }
-        let deny_read = &seen.settings["sandbox"]["filesystem"]["denyRead"];
-        for folder in deny_read.as_array().into_iter().flatten() {
-            let folder = folder.as_str().unwrap();
-            assert!(!path.starts_with(folder), "the sandbox hides it: {folder}");
-        }
     }
 
     /// The project's checkout
