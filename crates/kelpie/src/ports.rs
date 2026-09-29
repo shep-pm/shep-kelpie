@@ -534,6 +534,8 @@ pub enum AlertError {
     Unreachable(i32),
     /// The webhook answered with this HTTP status, not a success
     Refused(u16),
+    /// The webhook is off and the relay could not take the ruling, with why
+    Relay(String),
 }
 
 impl fmt::Display for AlertError {
@@ -542,6 +544,7 @@ impl fmt::Display for AlertError {
             Self::Spawn(error) => write!(f, "cannot run curl: {error}"),
             Self::Unreachable(code) => write!(f, "curl could not post it (exit {code})"),
             Self::Refused(status) => write!(f, "the webhook answered HTTP {status}"),
+            Self::Relay(reason) => f.write_str(reason),
         }
     }
 }
