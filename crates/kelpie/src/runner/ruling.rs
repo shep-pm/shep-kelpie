@@ -405,6 +405,11 @@ fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
             "The review of this pull request has run {} rounds without settling.",
             review.round.saturating_sub(1)
         ),
+        RulingKind::LocalModelSpilled { .. } => {
+            "The local model for this pull request's review is not fully on the GPU, \
+             so a review round did not run."
+                .to_owned()
+        }
         RulingKind::FixNotPushed { .. } => {
             "A fix for review findings ended without a push, so those findings still hold."
                 .to_owned()
@@ -532,6 +537,7 @@ fn decide(
             guard_cleared: true,
             ..review
         }),
+        (Answer::Yes, RulingKind::LocalModelSpilled { review, .. }) => Phase::Review(review),
         // The fix ends under the same round, which checks the head again.
         (Answer::Yes, RulingKind::FixNotPushed { fix, prompt }) => {
             let phase = match fix {
@@ -605,6 +611,11 @@ fn question(
             "The qwen-review loop on {about} has run {} rounds without \
              settling. {yes} lets it keep going",
             review.round.saturating_sub(1)
+        ),
+        RulingKind::LocalModelSpilled { review, reason } => format!(
+            "Round {} of the qwen-review loop on {about} did not run: {reason}. \
+             Once the model is back on the GPU, {yes} runs the round again",
+            review.round
         ),
         RulingKind::FixNotPushed { fix, .. } => {
             let round = match fix {

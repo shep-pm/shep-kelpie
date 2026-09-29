@@ -79,9 +79,18 @@ loop_guard = 8
 # leave it off for a command that takes the lock itself, as that script does.
 # A missing command or an unreachable endpoint stops the runner. A table
 # without this one runs `~/.claude/scripts/qwen-review.sh`.
+# Under `gpu_lease = true`, before a round against Ollama, kelpie reads the
+# host's `/api/ps`. A model partly or wholly on the CPU fails the round and
+# raises a ruling, since it would run at a twentieth of its speed. An
+# endpoint's host is its url. A command names its host with `ollama`, which
+# needs `gpu_lease = true`, and may name its model with `ollama_model`,
+# else every model the host has loaded is checked. A server with no
+# `/api/ps` is not checked.
 [app.dogs.kelpie.review.local]
 kind = "command"
 command = "~/.claude/scripts/qwen-review.sh"
+# ollama = "http://localhost:11434"
+# ollama_model = "qwen2.5-coder:14b"
 
 # [app.dogs.kelpie.review.local]
 # kind = "endpoint"
