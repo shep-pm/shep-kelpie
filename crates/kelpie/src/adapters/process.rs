@@ -95,6 +95,58 @@ impl Processes {
         })
     }
 
+    /// Starts `command` in its own process group, stdin closed, and leaves
+    /// it running, its output going where the caller pointed it
+    ///
+    /// [`Self::end`] stops it, and so does [`Self::stop`].
+    pub(super) fn start(&self, command: &mut Command) -> Result<u64, RunError> {
+        let mut child = command
+            .stdin(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .map_err(RunError::Io)?;
+        let mut running = self.lock();
+        if running.stopping {
+            stop_child(&mut child, Duration::ZERO);
+            return Err(RunError::Stopped);
+        }
+        running.next += 1;
+        let id = running.next;
+        running.children.push((id, child));
+        Ok(id)
+    }
+
+    /// The process id of child `id` from [`Self::start`], also its group's id
+    pub(super) fn pid(&self, id: u64) -> Option<u32> {
+        let running = self.lock();
+        running
+            .children
+            .iter()
+            .find(|(i, _)| *i == id)
+            .map(|(_, c)| c.id())
+    }
+
+    /// Whether child `id` from [`Self::start`] is still running
+    pub(super) fn alive(&self, id: u64) -> bool {
+        let mut running = self.lock();
+        let Some((_, child)) = running.children.iter_mut().find(|(i, _)| *i == id) else {
+            return false;
+        };
+        matches!(child.try_wait(), Ok(None))
+    }
+
+    /// Stops child `id` from [`Self::start`], and whatever it spawned
+    pub(super) fn end(&self, id: u64) {
+        let child = {
+            let mut running = self.lock();
+            let at = running.children.iter().position(|(i, _)| *i == id);
+            at.map(|at| running.children.remove(at).1)
+        };
+        if let Some(mut child) = child {
+            stop_child(&mut child, STOP_GRACE);
+        }
+    }
+
     /// Ends every running child and refuses new ones
     ///
     /// Each gets SIGTERM, so it can end its own children, and SIGKILL if it
@@ -168,6 +220,25 @@ fn signal_group(pgid: u32, signal: &str) {
         .args([format!("-{signal}"), "-g".to_owned(), pgid.to_string()])
         .stdin(Stdio::null())
         .status();
+}
+
+/// Stops process group `pgid`, which no `Processes` holds: SIGTERM, then
+/// SIGKILL once [`STOP_GRACE`] has passed with any of it still running
+pub(super) fn stop_group(pgid: u32) {
+    let alive = || {
+        Command::new("pgrep")
+            .args(["-g", &pgid.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    signal_group(pgid, "TERM");
+    let deadline = Instant::now() + STOP_GRACE;
+    while Instant::now() < deadline && alive() {
+        thread::sleep(POLL);
+    }
+    signal_group(pgid, "KILL");
 }
 
 // SIGTERM to `child`'s whole process group, then SIGKILL once `grace` has

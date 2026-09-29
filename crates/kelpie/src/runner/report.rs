@@ -13,6 +13,7 @@ use crate::pacer::HoldKind;
 use crate::ports::{
     ClaudeCall, Cost, Finding, Role, SessionId, Severity, Timestamp, Usage, Verdict,
 };
+use crate::shots::ShotsJob;
 use crate::work_item::{QwenTally, ReviewerKind, Spend};
 
 /// What asked for a rework on the pull request itself
@@ -380,6 +381,37 @@ pub enum StepReport {
         /// Whether every one was a nit (LOW)
         clean: bool,
     },
+    /// Kelpie took shots of a head, before a Claude review round or the merge ruling
+    Shots {
+        /// The work item's issue
+        issue: u64,
+        /// The head the worktree held
+        head: String,
+        /// How many screenshots it took
+        shots: usize,
+        /// What went wrong, each naming its page, the whole run's failure included
+        problems: Vec<String>,
+    },
+    /// The shots of the head about to be ruled on are on its pull request's comment
+    ShotsPosted {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The head they show
+        head: String,
+        /// The comment's id, edited in place by every later run
+        comment: u64,
+    },
+    /// The shots could not all reach the pull request; the merge ruling goes on
+    ShotsNotPosted {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// Why
+        reason: String,
+    },
     /// The worker's fix turn for a round's held findings ended, and the
     /// round counts
     FixPushed {
@@ -410,6 +442,8 @@ pub(super) enum Begin {
     Report(StepReport),
     Call(ClaudeCall),
     Review(ReviewCall),
+    /// A shots run of this head
+    Shots(Box<ShotsJob>, String),
 }
 
 /// Something the qwen-review loop needs run outside the runner's lock

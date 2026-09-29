@@ -4,9 +4,9 @@
 //! are refused, so a misspelt or malformed setting stops the runner with a
 //! message naming it. Every setting is required except the ones added after
 //! the first build (`pacing.enabled`, `worker.allowed_domains`,
-//! `worker.build_env`, `worker.instructions_file` and `worker.turn_timeout`): a file written before them
-//! loads with the documented default, so an upgrade never breaks an existing
-//! project.
+//! `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout` and
+//! `[preview]`): a file written before them loads with the documented
+//! default, so an upgrade never breaks an existing project.
 //! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
@@ -16,6 +16,8 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+use crate::preview::Preview;
 
 /// Everything kelpie reads about one project
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -45,6 +47,9 @@ pub struct Settings {
     pub pacing: Pacing,
     /// What every worker is started with
     pub worker: Worker,
+    /// Showing a work item's UI, for a repo with a launch file
+    #[serde(default)]
+    pub preview: Preview,
 }
 
 /// Who decides a merge
@@ -482,6 +487,17 @@ mod tests {
             domains,
             ["crates.io", "index.crates.io", "static.crates.io"]
         );
+    }
+
+    #[test]
+    fn a_file_with_no_preview_table_captures_the_root() {
+        assert!(
+            !EXAMPLE.contains("\n[preview]"),
+            "the example sets no preview"
+        );
+        let s = parse(EXAMPLE).unwrap();
+        assert_eq!(s.preview.routes.len(), 1);
+        assert_eq!(s.preview.routes[0].as_str(), "/");
     }
 
     #[test]

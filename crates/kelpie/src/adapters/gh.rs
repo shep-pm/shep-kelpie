@@ -86,6 +86,26 @@ impl Forge for Gh {
         gh(&args).map(drop)
     }
 
+    fn post_comment(&self, repo: &ForgeSlug, number: u64, body: &str) -> Result<u64, ForgeError> {
+        let path = format!("repos/{}/issues/{number}/comments", repo.as_str());
+        let field = format!("body={body}");
+        let args = [
+            "api", "--method", "POST", &path, "-f", &field, "--jq", ".id",
+        ];
+        let out = gh(&args)?;
+        let text = String::from_utf8_lossy(&out);
+        text.trim()
+            .parse()
+            .map_err(|_| ForgeError::Unreadable(text.into_owned()))
+    }
+
+    fn edit_comment(&self, repo: &ForgeSlug, id: u64, body: &str) -> Result<(), ForgeError> {
+        let path = format!("repos/{}/issues/comments/{id}", repo.as_str());
+        let field = format!("body={body}");
+        let args = ["api", "--method", "PATCH", &path, "-f", &field, "--silent"];
+        gh(&args).map(drop)
+    }
+
     fn mark_ready(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
         let number = number.to_string();
         gh(&["pr", "ready", &number, "--repo", repo.as_str()]).map(drop)

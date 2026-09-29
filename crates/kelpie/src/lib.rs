@@ -10,6 +10,7 @@
 
 pub mod adapters;
 pub mod board;
+pub mod browse;
 pub mod coderabbit;
 pub mod confine;
 pub mod dog;
@@ -17,12 +18,14 @@ pub mod fence;
 pub mod lease;
 pub mod pacer;
 pub mod ports;
+pub mod preview;
 pub mod profile;
 pub mod relay;
 pub mod runner;
 pub mod settings;
 pub mod sheep;
 pub mod shep_home;
+pub mod shots;
 pub mod state;
 pub mod webhook;
 pub mod work_item;
