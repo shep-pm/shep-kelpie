@@ -306,7 +306,7 @@ mod tests {
     fn a_runner_is_a_channel_sheep_holding_its_table_and_the_shepherd_s_home() {
         let launch = Launch {
             kelpie: "/opt/kelpie".into(),
-            shep_home: "/home/m/.shep".into(),
+            shep_home: "/home/me/.shep".into(),
             kelpie_home: None,
         };
         let mut table = Map::new();
@@ -320,7 +320,7 @@ mod tests {
         assert_eq!(app.args, ["runner", "koji"]);
         assert_eq!(
             app.env.get("SHEP_HOME").map(String::as_str),
-            Some("/home/m/.shep")
+            Some("/home/me/.shep")
         );
         assert!(!app.env.contains_key("KELPIE_HOME"));
         assert!(app.channel && app.shutdown_with_message && app.autorestart);

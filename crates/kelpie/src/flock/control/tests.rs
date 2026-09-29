@@ -91,7 +91,7 @@ async fn start_without_a_runner_says_to_add_one() {
 #[tokio::test]
 async fn the_project_here_is_the_one_whose_settings_name_this_checkout() {
     let shepherd = FakeShepherd::new().await;
-    let home = PathBuf::from("/home/maintainer");
+    let home = PathBuf::from("/home/me");
     runner(&shepherd, "koji", Path::new("/src/koji"), false);
     runner(&shepherd, "reactmap", Path::new("/src/reactmap"), false);
     let client = client(&shepherd).await;
