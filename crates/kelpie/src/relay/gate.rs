@@ -163,7 +163,10 @@ mod tests {
     #[test]
     fn every_other_tool_is_refused() {
         for tool in ["Write", "Edit", "Read", "WebFetch", "Agent", "SendMessage"] {
-            let call = json!({ "tool_name": tool, "tool_input": { "file_path": "/tmp/x" } });
+            let call = json!({ "tool_name": tool, "tool_input": {
+                "file_path": "/tmp/x",
+                "command": "/k/bin/kelpie relay-yes shep 3",
+            } });
             assert!(
                 refused(&judge(call.to_string().as_bytes(), KELPIE)),
                 "{tool}"
