@@ -63,6 +63,8 @@ Each pull request goes through a review loop before CI. Rounds alternate between
 - `kind = "endpoint"`: kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server
 - `kind = "command"`: a command of your own that keeps the contract below
 
+`review.local_rounds` caps the local rounds per work item. Once they are spent, every round is Claude's and one clean Claude round ends the loop.
+
 A file without the table runs `~/.claude/scripts/qwen-review.sh`, the maintainer's own command. A missing command or an endpoint that doesn't answer stops the runner at start.
 
 An endpoint takes `url` (the base, up to and including `/v1`), `model`, and `context`, the context size in tokens the server gives that model. Kelpie diffs the pull request, cuts the diff to fit that context, and sends each piece with its own review prompt, `crates/kelpie/src/adapters/local/review-prompt.md`. Set `context` to what the server really uses: Ollama gives its OpenAI-compatible endpoint a small default context unless `OLLAMA_CONTEXT_LENGTH` says more, and drops whatever doesn't fit without saying so.
