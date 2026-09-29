@@ -115,7 +115,10 @@ async fn add_twice_changes_nothing() {
 
     let lines = scene.add().await.unwrap();
     assert_eq!(scene.shepherd.writes(), []);
-    assert_eq!(scene.forge.repo_labels_now().len(), 4);
+    assert_eq!(
+        scene.forge.repo_labels_now(),
+        ["bug", "ready-for-agent", "ready-for-human", "review please"]
+    );
     assert_eq!(scene.shepherd.sheep("hazels-lab"), before);
     assert!(lines.iter().all(|l| l.contains("already")), "{lines:?}");
 }
