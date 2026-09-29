@@ -314,6 +314,7 @@ impl Runner {
             merge_refused: false,
             merge_tried: None,
             summon_owed: false,
+            rebased: false,
             calls: Vec::new(),
         }
     }

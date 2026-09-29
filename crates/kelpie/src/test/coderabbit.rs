@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::coderabbit::{Activity, Comment, Review, Thread};
+use crate::coderabbit::{Activity, Comment, Review, Status, Thread};
 use crate::ports::{ForgeError, Timestamp};
 
 /// Labels on pull requests, CodeRabbit's activity on them, and every
@@ -82,6 +82,20 @@ impl FakeCodeRabbit {
             body: "<summary>📒 Files selected for processing (1)</summary>".into(),
             at: Timestamp(at),
         });
+    }
+
+    /// Marks `head` of pull request `number` done at `at`, and posts
+    /// nothing: CodeRabbit found nothing new to read
+    pub(crate) fn complete(&self, number: u64, head: &str, at: u64) {
+        let mut activity = self.activity.lock().unwrap();
+        activity.entry(number).or_default().statuses.insert(
+            0,
+            Status {
+                commit: head.to_owned(),
+                description: "Review completed".into(),
+                at: Timestamp(at),
+            },
+        );
     }
 
     /// Resolves thread `id` as CodeRabbit does once it sees a fix

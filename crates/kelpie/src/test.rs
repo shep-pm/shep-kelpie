@@ -114,6 +114,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         merge_refused: false,
         merge_tried: None,
         summon_owed: false,
+        rebased: false,
         calls: vec![CallRecord {
             role: Role::Worker,
             at: Timestamp(10),

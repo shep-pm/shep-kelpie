@@ -203,7 +203,7 @@ impl Runner {
             Ok(Rebase::Pushed(rebased)) => {
                 let (seen, since) = (Some(rebased.clone()), self.ports.clock.now());
                 self.update(|item| {
-                    item.known.head.clone_from(&seen);
+                    item.caught_up(seen.clone());
                     item.phase = Phase::Ci { head: seen, since };
                 })?;
                 Ok(Begin::Report(StepReport::Rebased {
