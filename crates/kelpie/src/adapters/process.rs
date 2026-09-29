@@ -84,7 +84,7 @@ impl Processes {
             .process_group(0)
             .spawn()
             .map_err(RunError::Io)?;
-        spawned(child.id());
+        let pid = child.id();
         let stdout = drain(child.stdout.take());
         let stderr = drain(child.stderr.take());
         let id = {
@@ -99,6 +99,7 @@ impl Processes {
             running.children.push((id, child));
             id
         };
+        spawned(pid);
         let status = self.wait(id, deadline)?;
         // A stopped child's own children may hold its pipes open, so its
         // output is left unread.

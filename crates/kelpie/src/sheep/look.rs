@@ -2,7 +2,9 @@
 //!
 //! Reading them each wake is how a change made in lookout reaches a running
 //! runner: within a minute when idle, and at the next wake after a step.
-//! A read that fails keeps the settings in effect, and says so once.
+//! A read that fails, or a change the runner refuses, keeps the settings in
+//! effect and says so once. A refused change is offered again each wake,
+//! so it lands once what refused it is fixed.
 
 use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError};
@@ -73,15 +75,26 @@ impl Look {
                 return;
             }
         };
-        self.failed = None;
         if before == self.last {
+            self.failed = None;
             return;
         }
         let mut runner = runner.lock().unwrap_or_else(PoisonError::into_inner);
         match runner.reread(loaded.settings, loaded.kelpie) {
-            Ok(Some(line)) => eprintln!("{line}"),
-            Ok(None) => {}
-            Err(e) => eprintln!("a settings change was refused, so they stay as they are: {e}"),
+            Ok(line) => {
+                self.failed = None;
+                if let Some(line) = line {
+                    eprintln!("{line}");
+                }
+            }
+            Err(e) => {
+                let e = e.to_string();
+                if self.failed.as_ref() != Some(&e) {
+                    eprintln!("a settings change was refused, so they stay as they are: {e}");
+                    self.failed = Some(e);
+                }
+                self.last = before;
+            }
         }
     }
 }
@@ -162,6 +175,43 @@ mod tests {
         look.again(&runner);
         assert_eq!(runner.lock().unwrap().settings(), &before);
         assert!(look.failed.as_deref().unwrap().starts_with("cannot reach"));
+    }
+
+    #[test]
+    fn a_refused_change_lands_once_what_refused_it_is_fixed() {
+        let rig = Rig::new("shep");
+        let runner = rig.open().unwrap();
+        let entry = std::fs::read_to_string(rig.paths().settings).unwrap();
+        let mut on = project_table(&entry);
+        on["coderabbit"]["enabled"] = Value::Bool(true);
+        let table = Arc::new(Mutex::new(on));
+        let shep_home = tempfile::tempdir().unwrap();
+        let _shepherd = shepherd(shep_home.path(), Arc::clone(&table));
+        let paths = rig.paths();
+        let mut look = Look::new(
+            shep_home.path().to_owned(),
+            "shep".into(),
+            "shep".into(),
+            paths.settings.clone(),
+            paths.kelpie_settings.clone(),
+            PathBuf::from("/home/maintainer"),
+        );
+        look.last = Some((rig.settings(), rig.kelpie_settings()));
+
+        rig.forge.set_visibility(crate::ports::Visibility::Private);
+        look.again(&runner);
+        assert!(!runner.lock().unwrap().settings().coderabbit.enabled);
+        assert!(
+            look.failed
+                .as_deref()
+                .unwrap()
+                .contains("coderabbit.enabled")
+        );
+
+        rig.forge.set_visibility(crate::ports::Visibility::Public);
+        look.again(&runner);
+        assert!(runner.lock().unwrap().settings().coderabbit.enabled);
+        assert_eq!(look.failed, None);
     }
 
     #[test]
