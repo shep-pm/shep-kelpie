@@ -187,9 +187,10 @@ impl Runner {
             if !auto {
                 return Ok(self.gate_failed(reason));
             }
-            let landed = self.ports.forge.pull_request(&repo, number);
-            if !landed.is_ok_and(|pr| pr.state == PullRequestState::Merged && pr.head == head) {
-                return self.refused(issue, number, head, reason);
+            match self.ports.forge.pull_request(&repo, number) {
+                Ok(pr) if pr.state == PullRequestState::Merged && pr.head == head => {}
+                Ok(_) => return self.refused(issue, number, head, reason),
+                Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}: {e}"))),
             }
         }
         self.merged(issue, number, head, auto)
@@ -204,9 +205,8 @@ impl Runner {
         notice: bool,
     ) -> Result<Begin, StateError> {
         let mut next = self.state.clone();
-        if let Some(item) = next.work_item.as_mut() {
-            item.phase = Phase::Done { merged: true };
-        }
+        let item = next.work_item.as_mut().expect("a merge is of a work item");
+        item.phase = Phase::Done { merged: true };
         if notice {
             next.notices.push(Notice {
                 issue,
@@ -227,17 +227,16 @@ impl Runner {
     ) -> Result<Begin, StateError> {
         let since = self.ports.clock.now();
         self.update(|item| item.phase = Phase::Ci { head: None, since })?;
-        let pull_request = number;
         Ok(Begin::Report(if auto {
             StepReport::MergeWithdrawn {
                 issue,
-                pull_request,
+                pull_request: number,
                 reason,
             }
         } else {
             StepReport::YesWithdrawn {
                 issue,
-                pull_request,
+                pull_request: number,
                 reason,
             }
         }))
