@@ -105,7 +105,7 @@ impl fmt::Display for WorktreeError {
     }
 }
 
-impl std::error::Error for WorktreeError {}
+impl core::error::Error for WorktreeError {}
 
 /// Makes sure `worktree` is a worktree of `repo` on `branch`, and `build` exists
 ///

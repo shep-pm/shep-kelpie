@@ -222,7 +222,7 @@ impl fmt::Display for BookFileError {
     }
 }
 
-impl std::error::Error for BookFileError {}
+impl core::error::Error for BookFileError {}
 
 /// Where the dog's book lives on disk
 #[derive(Debug, Clone)]

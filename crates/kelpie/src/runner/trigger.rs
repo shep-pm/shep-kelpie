@@ -264,7 +264,7 @@ impl fmt::Display for GateError {
     }
 }
 
-impl std::error::Error for GateError {}
+impl core::error::Error for GateError {}
 
 impl Runner {
     /// Sends the work item into the gate, when its worker's turn has ended

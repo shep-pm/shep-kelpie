@@ -86,7 +86,7 @@ impl fmt::Display for ReworkError {
     }
 }
 
-impl std::error::Error for ReworkError {}
+impl core::error::Error for ReworkError {}
 
 impl ReworkError {
     // Whether asking again, with nothing changed on the pull request, is

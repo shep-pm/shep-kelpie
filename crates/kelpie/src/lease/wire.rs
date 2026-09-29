@@ -314,7 +314,7 @@ impl fmt::Display for GrantError {
     }
 }
 
-impl std::error::Error for GrantError {}
+impl core::error::Error for GrantError {}
 
 #[cfg(test)]
 mod tests {

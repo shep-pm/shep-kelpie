@@ -102,7 +102,7 @@ impl fmt::Display for RouteError {
     }
 }
 
-impl std::error::Error for RouteError {}
+impl core::error::Error for RouteError {}
 
 /// One configuration from `.claude/launch.json`
 // wire format: changing this is a breaking change to the job file
@@ -142,7 +142,7 @@ impl fmt::Display for LaunchError {
     }
 }
 
-impl std::error::Error for LaunchError {}
+impl core::error::Error for LaunchError {}
 
 /// Whether `repo`'s `origin/main` carries a launch file, which turns the preview on
 ///

@@ -54,7 +54,7 @@ impl fmt::Display for ProjectNameError {
     }
 }
 
-impl std::error::Error for ProjectNameError {}
+impl core::error::Error for ProjectNameError {}
 
 /// Where a project's files live under kelpie's home
 #[derive(Debug, Clone, PartialEq, Eq)]

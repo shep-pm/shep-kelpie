@@ -391,7 +391,7 @@ impl fmt::Display for SettingsError {
     }
 }
 
-impl std::error::Error for SettingsError {}
+impl core::error::Error for SettingsError {}
 
 impl Settings {
     /// Reads and checks a settings file, expanding `~/` in `repo` against `home`

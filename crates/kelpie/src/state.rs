@@ -371,7 +371,7 @@ impl fmt::Display for StateError {
     }
 }
 
-impl std::error::Error for StateError {}
+impl core::error::Error for StateError {}
 
 /// Where a project's state lives on disk
 #[derive(Debug, Clone)]

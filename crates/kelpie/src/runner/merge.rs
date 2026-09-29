@@ -52,7 +52,7 @@ impl fmt::Display for DropError {
     }
 }
 
-impl std::error::Error for DropError {}
+impl core::error::Error for DropError {}
 
 impl Runner {
     /// Ends the work item in flight without merging it

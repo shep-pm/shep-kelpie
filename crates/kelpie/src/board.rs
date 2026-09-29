@@ -265,7 +265,7 @@ impl fmt::Display for LabelError {
     }
 }
 
-impl std::error::Error for LabelError {}
+impl core::error::Error for LabelError {}
 
 /// The model and effort one work item's worker runs on
 // wire format: changing this is a breaking change to the state file
