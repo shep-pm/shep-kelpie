@@ -16,6 +16,7 @@ pub(crate) struct FakeCodeRabbit {
     labels: Arc<Mutex<HashMap<u64, Vec<String>>>>,
     label_log: Arc<Mutex<Vec<(u64, String, bool)>>>,
     resolved: Arc<Mutex<Vec<String>>>,
+    logins: Arc<Mutex<Vec<String>>>,
     down: Arc<AtomicBool>,
 }
 
@@ -63,13 +64,16 @@ impl FakeCodeRabbit {
             }));
     }
 
-    /// Posts `review` on pull request `number` with `threads`, in whatever
-    /// shape the bot a test stands in for posts them
-    pub(crate) fn post(&self, number: u64, review: Review, threads: &[Thread]) {
+    /// Changes the bot's activity on pull request `number` as `post` says,
+    /// in whatever shape the bot a test stands in for posts it
+    pub(crate) fn post(&self, number: u64, post: impl FnOnce(&mut Activity)) {
         let mut activity = self.activity.lock().unwrap();
-        let seen = activity.entry(number).or_default();
-        seen.reviews.push(review);
-        seen.threads.extend_from_slice(threads);
+        post(activity.entry(number).or_default());
+    }
+
+    /// Every login the runner read a bot's activity by, in order
+    pub(crate) fn logins(&self) -> Vec<String> {
+        self.logins.lock().unwrap().clone()
     }
 
     /// Refuses a summon on pull request `number` at `at`, quoting `minutes`
@@ -167,7 +171,8 @@ impl FakeCodeRabbit {
         }
     }
 
-    pub(super) fn activity(&self, number: u64) -> Result<Activity, ForgeError> {
+    pub(super) fn activity(&self, number: u64, login: &str) -> Result<Activity, ForgeError> {
+        self.logins.lock().unwrap().push(login.to_owned());
         if self.down.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("CodeRabbit's comments are down".into()));
         }

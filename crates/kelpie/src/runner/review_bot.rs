@@ -334,7 +334,10 @@ impl Runner {
             Reading::Completed { at: done } if now.saturating_sub(done.0) < DONE_SETTLE => {
                 self.accepted(at).map(|()| Begin::Idle)
             }
-            Reading::Completed { .. } if !owed => self.answered(number, &activity, at),
+            // A bot with no full review has nothing more to ask for.
+            Reading::Completed { .. } if !owed || bot.full_review().is_none() => {
+                self.answered(number, &activity, at)
+            }
             // An owed summon found nothing new: ask once more, for a full review.
             Reading::Completed { .. } if !full => {
                 self.accepted(at)?;

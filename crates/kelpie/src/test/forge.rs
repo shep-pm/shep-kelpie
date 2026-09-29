@@ -530,15 +530,15 @@ impl Forge for FakeForge {
         Ok(())
     }
 
-    // One store for every bot: a test runs one bot at a time.
+    // One store for every bot, since a test runs one; the login is recorded.
     fn review_bot(
         &self,
         _repo: &ForgeSlug,
         number: u64,
-        _login: Login<'_>,
+        login: Login<'_>,
     ) -> Result<Activity, ForgeError> {
         self.opened(number)?;
-        self.coderabbit.activity(number)
+        self.coderabbit.activity(number, login.rest)
     }
 
     fn resolve_thread(&self, _repo: &ForgeSlug, thread: &str) -> Result<(), ForgeError> {
