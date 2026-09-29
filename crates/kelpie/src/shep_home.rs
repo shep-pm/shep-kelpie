@@ -16,6 +16,10 @@ pub const FLOCKFILE_FIX: &str = "add `env = { SHEP_HOME = \"/path/to/kelpie/shep
 pub const RELAY_FIX: &str =
     "the relay's settings set it in their `env` block, so this command did not run from the relay";
 
+/// What to do about a missing `SHEP_HOME` in `kelpie settings move`
+pub const MOVE_FIX: &str = "run it as `SHEP_HOME=~/.kelpie/shep kelpie settings move <project>`, \
+     naming kelpie's shepherd";
+
 /// The shepherd's home, from the `SHEP_HOME` variable
 ///
 /// # Errors

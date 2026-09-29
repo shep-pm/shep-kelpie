@@ -386,11 +386,20 @@ impl Runner {
             return self.judged(threads, verdicts);
         };
         let item = self.item();
-        let (worktree, folder) = (item.worktree.clone(), self.paths.worker.clone());
+        let (issue, worktree, folder) =
+            (item.issue, item.worktree.clone(), self.paths.worker.clone());
         let model = self.settings.models.judge.clone();
         // CodeRabbit reviews the whole pull request, so its judge diffs from `main`.
         let main = format!("origin/{}", crate::worktree::BASE);
-        match calls::judge_call(&worktree, &main, &folder, &model, &next.finding, None) {
+        match calls::judge_call(
+            issue,
+            &worktree,
+            &main,
+            &folder,
+            &model,
+            &next.finding,
+            None,
+        ) {
             Ok(call) => {
                 self.mark_review_call_running()?;
                 Ok(Begin::Review(ReviewCall::Judge(call)))

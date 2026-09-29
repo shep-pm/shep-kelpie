@@ -291,9 +291,11 @@ fn parse_report(text: &str) -> Result<Vec<Page>, String> {
 // fence and credential denies, and the preview's domains only. The shots
 // folder stays out of its reach, so the server cannot touch what kelpie posts.
 fn sandbox(job: &ShotsJob) -> serde_json::Value {
+    let shep_home = job.shep_home.display().to_string();
     let deny_read: Vec<&str> = CREDENTIALS
         .iter()
         .map(|p| p.strip_suffix("/**").unwrap_or(p))
+        .chain([shep_home.as_str()].into_iter().filter(|p| !p.is_empty()))
         .collect();
     json!({
         "network": {
@@ -391,6 +393,7 @@ mod tests {
             domains: vec![],
             env: BTreeMap::new(),
             server_pid: dir.path().join("dev-server.pid"),
+            shep_home: "/srv/shep".into(),
         });
         assert_eq!(
             run.failed.as_deref(),
@@ -408,6 +411,7 @@ mod tests {
             domains: domains.iter().map(|&d| d.to_owned()).collect(),
             env: BTreeMap::new(),
             server_pid: out.join("dev-server.pid"),
+            shep_home: "/srv/shep".into(),
         }
     }
 
@@ -647,6 +651,7 @@ mod tests {
             domains: vec!["leekduck.com".into()],
             env: BTreeMap::new(),
             server_pid: "/k/shots/lab/7/dev-server.pid".into(),
+            shep_home: "/srv/shep".into(),
         };
         let s = sandbox(&job);
         assert_eq!(
@@ -658,6 +663,10 @@ mod tests {
         let deny = s["filesystem"]["denyRead"].as_array().unwrap();
         assert!(deny.contains(&json!("~/.ssh")));
         assert!(deny.contains(&json!("~/.kelpie/settings.toml")));
+        assert!(
+            deny.contains(&json!("/srv/shep")),
+            "the shepherd's home, outside ~/.kelpie"
+        );
     }
 
     #[test]
@@ -681,6 +690,7 @@ mod tests {
             domains: vec![],
             env: BTreeMap::new(),
             server_pid: dir.path().join("dev-server.pid"),
+            shep_home: "/srv/shep".into(),
         });
         assert_eq!(
             run.failed,
@@ -705,6 +715,7 @@ mod tests {
             domains: vec![],
             env: BTreeMap::new(),
             server_pid: dir.path().join("dev-server.pid"),
+            shep_home: "/srv/shep".into(),
         });
         let reason = run.failed.unwrap();
         assert!(

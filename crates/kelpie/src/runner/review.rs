@@ -66,8 +66,14 @@ impl Runner {
                         let model = self.settings.models.reviewer.clone();
                         let dir = self.paths.shots(issue);
                         let shots = shots.as_ref().map(|run| calls::Screens { dir: &dir, run });
-                        match calls::reviewer_call(&worktree, &base, &worker_folder, &model, shots)
-                        {
+                        match calls::reviewer_call(
+                            issue,
+                            &worktree,
+                            &base,
+                            &worker_folder,
+                            &model,
+                            shots,
+                        ) {
                             Ok(call) => {
                                 self.mark_review_call_running()?;
                                 Ok(Begin::Review(ReviewCall::ClaudeRound(call)))
@@ -85,6 +91,7 @@ impl Runner {
                 let model = self.settings.models.judge.clone();
                 let shots = self.preview_on().then(|| self.paths.shots(issue));
                 match calls::judge_call(
+                    issue,
                     &worktree,
                     &base,
                     &worker_folder,
