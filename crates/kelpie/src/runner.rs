@@ -25,6 +25,7 @@ mod claude_files;
 mod coderabbit;
 mod dispatch;
 mod gate;
+mod guard_hooks;
 mod instructions;
 mod merge;
 mod pace;
@@ -175,6 +176,7 @@ impl Runner {
         let settings = Settings::load(&paths.settings, home)?;
         check_repo(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;
+        guard_hooks::check(&settings, home, std::env::var_os("PATH").as_deref())?;
         check_coderabbit(&settings, &ports)?;
         let store = StateStore::new(paths.state.clone());
         let mut state = store

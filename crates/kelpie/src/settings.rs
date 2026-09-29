@@ -4,8 +4,8 @@
 //! are refused, so a misspelt or malformed setting stops the runner with a
 //! message naming it. Every setting is required except the ones added after
 //! the first build (`pacing.enabled`, `worker.allowed_domains`,
-//! `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout` and
-//! `[preview]`): a file written before them loads with the documented
+//! `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout`,
+//! `worker.guard_hooks` and `[preview]`): a file written before them loads with the documented
 //! default, so an upgrade never breaks an existing project.
 //! `settings.example.toml` beside this crate holds the defaults.
 
@@ -184,7 +184,10 @@ pub struct Worker {
     /// None when absent.
     #[serde(default)]
     pub instructions_file: Option<PathBuf>,
-    /// Hooks copied into each worker's own settings file
+    /// The project's own hooks, copied into each worker's settings file
+    /// after kelpie's guard. Each must resolve when the runner starts.
+    /// Empty when absent.
+    #[serde(default)]
     pub guard_hooks: Vec<GuardHook>,
     /// Minutes a worker's turn may run before kelpie stops it and parks it
     /// on a ruling, keeping its session. 60 when absent.
@@ -197,7 +200,7 @@ fn default_turn_timeout() -> NonZeroU32 {
     NonZeroU32::MIN.saturating_add(59)
 }
 
-/// One of the maintainer's guard hooks, run by path
+/// One of a project's own guard hooks, run by path
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GuardHook {
@@ -476,7 +479,10 @@ mod tests {
         assert_eq!(s.pacing.kickoff_hours.get(), 8);
         assert_eq!(s.worker.turn_timeout.get(), 60);
         assert!(s.generated.iter().any(|g| g == "Cargo.lock"));
-        assert_eq!(s.worker.guard_hooks[0].event, HookEvent::PreToolUse);
+        assert!(
+            s.worker.guard_hooks.is_empty(),
+            "kelpie's own guard needs none"
+        );
         let domains: Vec<&str> = s
             .worker
             .allowed_domains
@@ -506,6 +512,19 @@ mod tests {
         let text = EXAMPLE.replace("build_env = {}\n", "instructions_file = \"~/w.md\"\n");
         let file = parse(&text).unwrap().worker.instructions_file;
         assert_eq!(file.as_deref(), Some(Path::new("/home/maintainer/w.md")));
+    }
+
+    #[test]
+    fn a_projects_own_guard_hooks_are_read() {
+        let hooks = "# [[worker.guard_hooks]]\n# event = \"PreToolUse\"\n# matcher = \"Bash\"\n";
+        assert!(EXAMPLE.contains(hooks), "the example's hooks moved");
+        let text = EXAMPLE
+            .replace(hooks, "[[worker.guard_hooks]]\nevent = \"PostToolUse\"\n")
+            .replace("# command = \"~/", "command = \"~/");
+        let [hook] = parse(&text).unwrap().worker.guard_hooks.try_into().unwrap();
+        assert_eq!(hook.event, HookEvent::PostToolUse);
+        assert_eq!(hook.matcher, None);
+        assert_eq!(hook.command.as_str(), "~/.kelpie/hooks/lint-guard");
     }
 
     #[test]
