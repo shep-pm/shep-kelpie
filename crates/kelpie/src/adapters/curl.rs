@@ -11,9 +11,10 @@ use crate::ports::{Alert, AlertError, Alerts};
 use crate::webhook::{Webhook, WebhookKind};
 
 // Discord refuses a message over 2,000 characters, and ntfy turns a body
-// over 4,096 bytes into an attachment. Counting bytes keeps under both.
+// of 4,096 bytes or more into an attachment (measured on ntfy.sh: 4,095
+// stays text). Counting bytes keeps under both.
 const DISCORD_MAX: usize = 2000;
-const NTFY_MAX: usize = 4096;
+const NTFY_MAX: usize = 4095;
 
 /// How much of a cut text's end is kept, where a ruling's triggers are
 const KEEP_TAIL: usize = 400;
