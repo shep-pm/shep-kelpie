@@ -1,0 +1,11 @@
+# cubic reviews a pull request only when asked with `@cubic-dev-ai review`.
+# The free plan gives this private repo 20 reviews a month, so they go to the
+# merge-path and security pull requests the control session picks.
+# A head-branch pattern stops automatic reviews and still allows a manual one.
+version: 1
+reviews:
+  incremental_commits: false
+  ignore:
+    head_branches:
+      - "*"
+      - "**"
