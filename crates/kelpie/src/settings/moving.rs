@@ -244,6 +244,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_file_that_is_not_there_moves_nothing() {
+        let mut scene = Scene::new(None, "").await;
+        std::fs::remove_file(scene.file("settings.toml")).unwrap();
+        let lines = scene.move_in_time().await.unwrap();
+        assert!(
+            lines[1].ends_with("settings.toml: not there, so nothing moved"),
+            "{lines:?}"
+        );
+        let writes = scene.writes();
+        assert!(
+            matches!(writes.as_slice(), [Request::SetSheepDogSettings { .. }]),
+            "{writes:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn a_second_move_changes_nothing() {
         let table = crate::test::project_table(EXAMPLE);
         let mut scene = Scene::new(Some(table), KELPIE_FILE).await;

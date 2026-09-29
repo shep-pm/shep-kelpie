@@ -145,12 +145,15 @@ mod tests {
         let next = settings_with(&rig, |s| {
             s.replace("forge = \"shep-pm/shep\"", "forge = \"shep-pm/elsewhere\"")
                 .replace(&repo, "/srv/elsewhere")
+                .replace("loop_guard = 8", "loop_guard = 3")
         });
         let mut runner = runner.lock().unwrap();
         let line = runner.reread(next, rig.kelpie_settings()).unwrap();
         assert_eq!(
             line.as_deref(),
-            Some("settings changed; repo and forge from the runner's next start")
+            Some(
+                "settings changed: review now in effect; repo and forge from the runner's next start"
+            )
         );
         assert_eq!(runner.settings().forge.as_str(), "shep-pm/shep");
         assert_eq!(runner.settings().repo, rig.repo());
