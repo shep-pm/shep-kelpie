@@ -311,9 +311,7 @@ impl Runner {
                 Some(r) if r.of == of => r.failures.saturating_add(1),
                 _ => 1,
             };
-            let wait = RETRY_FIRST
-                .saturating_mul(1 << (failures - 1).min(16))
-                .min(RETRY_MAX);
+            let wait = backoff(RETRY_FIRST, failures, RETRY_MAX);
             let at = Timestamp(self.ports.clock.now().0.saturating_add(wait));
             self.retry = Some(Retry { of, failures, at });
             let reason = e.to_string();
@@ -356,6 +354,14 @@ impl Runner {
         self.save(next)?;
         Ok(report)
     }
+}
+
+/// Seconds to wait after the `failures`th failure in a row: `first`, then
+/// twice as long each time, up to `max`
+pub(super) fn backoff(first: u64, failures: u32, max: u64) -> u64 {
+    first
+        .saturating_mul(1 << failures.saturating_sub(1).min(16))
+        .min(max)
 }
 
 fn notice_alert(project: &str, notice: &Notice) -> Alert {

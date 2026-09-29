@@ -14,6 +14,7 @@
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
+use super::alert::backoff;
 use super::report::StepReport;
 use super::trigger::{lock, read_rule};
 use super::{Answer, Runner};
@@ -193,9 +194,7 @@ impl Runner {
             Ok(replies) => replies,
             Err(e) => {
                 self.reading.failures = self.reading.failures.saturating_add(1);
-                let wait = READ_EVERY
-                    .saturating_mul(1 << (self.reading.failures - 1).min(16))
-                    .min(BACKOFF_MAX);
+                let wait = backoff(READ_EVERY, self.reading.failures, BACKOFF_MAX);
                 let retry_at = Timestamp(now.0.saturating_add(wait));
                 self.reading.next = Some(retry_at);
                 return Ok(Some(StepReport::RepliesFailed {
