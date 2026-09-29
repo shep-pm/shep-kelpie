@@ -3,7 +3,7 @@
 
 use serde::Deserialize;
 
-use super::{Closes, Label, closed_here, gh, unreadable};
+use super::{Label, gh, unreadable};
 use crate::board::{Blocker, OpenPullRequest, READY, ReadyIssue};
 use crate::ports::ForgeError;
 use crate::settings::ForgeSlug;
@@ -126,6 +126,37 @@ fn parse_pull_requests(
             labels: pr.labels.into_iter().map(|l| l.name).collect(),
         })
         .collect())
+}
+
+/// An issue a pull request closes, on whichever repo it is
+#[derive(Deserialize)]
+pub(super) struct Closes {
+    number: u64,
+    repository: Repository,
+}
+
+#[derive(Deserialize)]
+struct Repository {
+    name: String,
+    owner: Owner,
+}
+
+#[derive(Deserialize)]
+struct Owner {
+    login: String,
+}
+
+// A pull request can close issues on other repos, which are not this board's.
+pub(super) fn closed_here(closes: Vec<Closes>, repo: &ForgeSlug) -> Vec<u64> {
+    let (owner, name) = repo.as_str().split_once('/').unwrap_or_default();
+    closes
+        .into_iter()
+        .filter(|c| {
+            let r = &c.repository;
+            r.owner.login.eq_ignore_ascii_case(owner) && r.name.eq_ignore_ascii_case(name)
+        })
+        .map(|c| c.number)
+        .collect()
 }
 
 #[cfg(test)]

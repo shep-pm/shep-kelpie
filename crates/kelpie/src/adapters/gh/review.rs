@@ -3,7 +3,8 @@
 
 use serde::Deserialize;
 
-use super::{Closes, Label, closed_here, gh, pull_request_state, unreadable};
+use super::board::{Closes, closed_here};
+use super::{Label, gh, pull_request_state, unreadable};
 use crate::ports::{ForgeError, MaintainerReview, ReviewComment, Reviewed};
 use crate::settings::ForgeSlug;
 
