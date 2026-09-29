@@ -359,6 +359,6 @@ fn a_table_s_local_command_expands_the_home_folder_and_takes_the_project_folder(
 
 #[test]
 fn a_forge_slug_s_name_is_the_repo_without_its_owner() {
-    let slug = ForgeSlug::try_from("Hazels-Lab/hazels-lab-website".to_owned()).unwrap();
-    assert_eq!(slug.name(), "hazels-lab-website");
+    let slug = ForgeSlug::try_from("shep-pm/koji-website".to_owned()).unwrap();
+    assert_eq!(slug.name(), "koji-website");
 }

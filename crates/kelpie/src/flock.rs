@@ -248,13 +248,13 @@ mod tests {
     #[test]
     fn a_github_remote_names_its_repo_over_https_or_ssh() {
         for url in [
-            "https://github.com/Hazels-Lab/hazels-lab-website.git",
-            "https://github.com/Hazels-Lab/hazels-lab-website",
-            "git@github.com:Hazels-Lab/hazels-lab-website.git",
-            "ssh://git@github.com/Hazels-Lab/hazels-lab-website/",
+            "https://github.com/shep-pm/koji-website.git",
+            "https://github.com/shep-pm/koji-website",
+            "git@github.com:shep-pm/koji-website.git",
+            "ssh://git@github.com/shep-pm/koji-website/",
         ] {
             let slug = forge_of(url).unwrap_or_else(|| panic!("{url}"));
-            assert_eq!(slug.as_str(), "Hazels-Lab/hazels-lab-website", "{url}");
+            assert_eq!(slug.as_str(), "shep-pm/koji-website", "{url}");
         }
     }
 

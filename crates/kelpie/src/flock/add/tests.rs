@@ -26,7 +26,7 @@ struct Scene {
 impl Scene {
     async fn new() -> Self {
         let shepherd = FakeShepherd::new().await;
-        let root = shepherd.scratch("hazels-lab");
+        let root = shepherd.scratch("koji");
         std::fs::create_dir_all(root.join(".github/workflows")).unwrap();
         let forge = FakeForge::new(PathBuf::from("/nowhere"));
         forge.set_visibility(Visibility::Private);
@@ -40,12 +40,12 @@ impl Scene {
             home: shepherd.scratch("home"),
             checkout: Checkout {
                 root,
-                forge: ForgeSlug::try_from("Hazels-Lab/hazels-lab-website".to_owned()).unwrap(),
+                forge: ForgeSlug::try_from("shep-pm/koji-website".to_owned()).unwrap(),
             },
             shepherd,
             forge,
             launch,
-            name: ProjectName::try_from("hazels-lab").unwrap(),
+            name: ProjectName::try_from("koji").unwrap(),
         }
     }
 
@@ -72,9 +72,9 @@ impl Scene {
 
     /// The runner's table, read back as the runner reads it
     fn settings(&self) -> Settings {
-        let (runner, _) = self.shepherd.sheep("hazels-lab").expect("a runner");
+        let (runner, _) = self.shepherd.sheep("koji").expect("a runner");
         let table = runner.dogs.get(DOG).expect("a kelpie table").as_map();
-        Settings::from_table(table, "hazels-lab", &self.home, &self.home).unwrap()
+        Settings::from_table(table, "koji", &self.home, &self.home).unwrap()
     }
 }
 
@@ -89,11 +89,11 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
     let [Request::Add { apps: runner }, Request::Add { apps: dog }] = writes.as_slice() else {
         panic!("{writes:?}");
     };
-    assert_eq!(runner[0].args, ["runner", "hazels-lab"]);
+    assert_eq!(runner[0].args, ["runner", "koji"]);
     assert_eq!(dog[0].name, "kelpie-dog");
     let settings = scene.settings();
     assert_eq!(settings.repo, scene.checkout.root);
-    assert_eq!(settings.forge.as_str(), "Hazels-Lab/hazels-lab-website");
+    assert_eq!(settings.forge.as_str(), "shep-pm/koji-website");
     assert!(settings.ci, "the checkout has workflows");
     assert!(!settings.coderabbit.enabled, "the repo is private");
     assert_eq!(settings.review.local, LocalRound::Off {});
@@ -101,7 +101,7 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
         scene.forge.repo_labels_now(),
         ["bug", "ready-for-agent", "ready-for-human", "review please"]
     );
-    let (_, running) = scene.shepherd.sheep("hazels-lab").unwrap();
+    let (_, running) = scene.shepherd.sheep("koji").unwrap();
     assert!(!running, "add starts nothing");
 }
 
@@ -111,7 +111,7 @@ async fn add_twice_changes_nothing() {
     scene.add().await.unwrap();
     // Reading the writes takes them, so only the second add's are left.
     scene.shepherd.writes();
-    let before = scene.shepherd.sheep("hazels-lab");
+    let before = scene.shepherd.sheep("koji");
 
     let lines = scene.add().await.unwrap();
     assert_eq!(scene.shepherd.writes(), []);
@@ -119,7 +119,7 @@ async fn add_twice_changes_nothing() {
         scene.forge.repo_labels_now(),
         ["bug", "ready-for-agent", "ready-for-human", "review please"]
     );
-    assert_eq!(scene.shepherd.sheep("hazels-lab"), before);
+    assert_eq!(scene.shepherd.sheep("koji"), before);
     // Three labels, the runner and the dog, each already there.
     assert_eq!(lines.len(), 5, "{lines:?}");
     assert!(lines.iter().all(|l| l.contains("already")), "{lines:?}");
@@ -151,12 +151,9 @@ async fn a_sheep_that_is_not_kelpie_s_keeps_its_name() {
     let mut scene = Scene::new().await;
     scene
         .shepherd
-        .holds(AppConfig::minimal("hazels-lab", "/srv/web"), true);
+        .holds(AppConfig::minimal("koji", "/srv/web"), true);
     let err = scene.add().await.unwrap_err();
-    assert!(
-        err.contains("`hazels-lab` is already in this flock"),
-        "{err}"
-    );
+    assert!(err.contains("`koji` is already in this flock"), "{err}");
     assert_eq!(scene.shepherd.writes(), []);
     assert_eq!(scene.forge.repo_labels_now(), ["bug"]);
 }
@@ -164,7 +161,7 @@ async fn a_sheep_that_is_not_kelpie_s_keeps_its_name() {
 #[tokio::test]
 async fn an_enabled_dog_that_holds_the_project_s_name_is_not_kelpie_s() {
     let scene = Scene::new().await;
-    scene.shepherd.holds_dog("hazels-lab");
+    scene.shepherd.holds_dog("koji");
     let err = scene.add().await.unwrap_err();
     assert!(err.contains("is not kelpie's"), "{err}");
 }
@@ -208,7 +205,7 @@ async fn a_project_s_file_from_before_the_tables_becomes_its_table() {
     std::fs::write(&file, toml::to_string(&table).unwrap()).unwrap();
 
     scene.add().await.unwrap();
-    let (runner, _) = scene.shepherd.sheep("hazels-lab").unwrap();
+    let (runner, _) = scene.shepherd.sheep("koji").unwrap();
     assert_eq!(runner.dogs.get(DOG).unwrap().as_map(), &table);
 }
 
@@ -266,7 +263,6 @@ async fn a_runner_from_a_flockfile_with_no_table_is_given_one() {
     );
     assert_eq!(scene.settings().repo, scene.checkout.root);
     let writes = scene.shepherd.writes();
-    let added_runner =
-        |w: &Request| matches!(w, Request::Add { apps } if apps[0].name == "hazels-lab");
+    let added_runner = |w: &Request| matches!(w, Request::Add { apps } if apps[0].name == "koji");
     assert!(!writes.iter().any(added_runner), "{writes:?}");
 }
