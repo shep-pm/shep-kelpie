@@ -95,9 +95,11 @@ fn phases(rig: &Rig, runner: &Mutex<Runner>) -> Vec<(u64, String)> {
         .collect()
 }
 
-#[test]
-fn an_item_waiting_on_coderabbit_yields_to_one_implementing_and_reviewing() {
-    let rig = two_slot_rig("shep");
+// Two slots with CodeRabbit on and the dog granting nothing, and #7 through
+// its turn, its review rounds and green CI, waiting on the lease. Returns
+// #7's head.
+fn seven_waits_on_the_lease(project: &str) -> (Rig, Mutex<Runner>, String) {
+    let rig = two_slot_rig(project);
     rig.coderabbit_on();
     let (rig, runner) = running(rig);
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
@@ -115,6 +117,32 @@ fn an_item_waiting_on_coderabbit_yields_to_one_implementing_and_reviewing() {
     rig.forge.set_checks(&seven, Checks::Passed);
     assert_eq!(issue_of(rig.verdict(&runner)), 7, "marks #71 ready");
     assert_eq!(step(&runner).unwrap(), None, "#7 waits on the lease");
+    (rig, runner, seven)
+}
+
+#[test]
+fn an_item_ending_leaves_a_grant_its_sibling_waits_for() {
+    let (rig, runner, _) = seven_waits_on_the_lease("koji");
+    rig.ask(&runner, "add", Some("8"));
+    rig.leases.grant(&LeaseKind::coderabbit());
+
+    // #8 never took the lease, so dropping it gives back nothing of #7's.
+    rig.ask(&runner, "drop", Some("8"));
+    assert!(rig.leases.held(&LeaseKind::coderabbit()));
+    assert!(
+        !rig.leases
+            .told()
+            .contains(&Told::Return(LeaseKind::coderabbit()))
+    );
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Summoned { issue: 7, .. })
+    ));
+}
+
+#[test]
+fn an_item_waiting_on_coderabbit_yields_to_one_implementing_and_reviewing() {
+    let (rig, runner, seven) = seven_waits_on_the_lease("shep");
 
     // #8 opens while #7 waits, and its turn and review rounds go ahead.
     rig.ask(&runner, "add", Some("8"));
