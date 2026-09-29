@@ -54,13 +54,13 @@ fn an_adopted_pull_requests_owed_summon_asks_for_a_full_review_under_the_lease()
     assert_eq!(rig.forge.pull_request_labels(80), Vec::<String>::new());
     let summon = now(&rig);
     assert_eq!(
-        rig.forge.saved_at_comment()[0]["work_item"]["phase"],
+        rig.forge.saved_at_comment()[0]["work_items"][0]["phase"],
         json!({ "state": "coderabbit", "stage": "summoned", "head": head, "at": summon, "full": true }),
         "the summon is saved before the comment goes out, so no restart posts it twice"
     );
     assert_eq!(
         rig.ask(&runner, "status", None)["leases"],
-        json!([{ "resource": "coderabbit", "since": summon }])
+        json!([{ "resource": "coderabbit", "issue": 5, "since": summon }])
     );
 
     rig.forge.coderabbit.review(80, &head, summon + 600, &[]);
@@ -97,7 +97,7 @@ fn paused_like_614(project: &str) -> (Rig, String) {
     let state = rig.paths().state;
     let mut saved: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
-    let item = &mut saved["work_item"];
+    let item = &mut saved["work_items"][0];
     item["phase"] =
         json!({ "state": "coderabbit", "stage": "summoned", "head": head, "at": summon });
     item["known"]["labels"] = json!([LABEL]);

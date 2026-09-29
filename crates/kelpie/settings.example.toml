@@ -1,7 +1,8 @@
 # A project's settings, read once when its runner starts. Every key is
-# required except `pacing.enabled`, `worker.allowed_domains`,
-# `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout`,
-# `ruling_channels` and `[preview]`, which a file written before them may leave out.
+# required except `max_items`, `review.local`, `pacing.enabled`,
+# `worker.allowed_domains`, `worker.build_env`, `worker.instructions_file`,
+# `worker.turn_timeout`, `ruling_channels` and `[preview]`, which a file
+# written before them may leave out.
 # This file holds the first build's defaults, for shep.
 
 repo = "~/.kelpie/repos/shep"
@@ -15,6 +16,10 @@ merge_authority = "ask"
 # Whether the repo runs CI on pull requests. GitHub cannot tell a repo
 # with no CI from checks not registered yet, so a repo without CI says so.
 ci = true
+
+# How many work items may be open at once. Each has its own branch,
+# worktree and gates, and the worker's turns still run one at a time.
+max_items = 1
 
 # How rulings reach the maintainer: `webhook`, `relay` (the Claude app on the
 # phone) or both. Over `ruling_channels` in `~/.kelpie/settings.toml`, and both
@@ -48,8 +53,32 @@ effort = "low"
 [review]
 loop_guard = 8
 
+# The local round, which alternates with the Claude round, local first. The
+# README says what each kind does. `off` runs the Claude round alone.
+# `endpoint` is kelpie's own reviewer: any OpenAI-compatible server (Ollama,
+# LM Studio, llama.cpp's server), its model, and the context size the server
+# gives that model, in tokens. `command` runs a command that keeps the
+# README's contract, here the maintainer's own qwen-review script, as one
+# example. `gpu_lease = true` has kelpie hold the GPU lock around each round;
+# leave it off for a command that takes the lock itself, as that script does.
+# A missing command or an unreachable endpoint stops the runner. A file
+# without this table runs `~/.claude/scripts/qwen-review.sh`.
+[review.local]
+kind = "command"
+command = "~/.claude/scripts/qwen-review.sh"
+
+# [review.local]
+# kind = "endpoint"
+# url = "http://localhost:11434/v1"
+# model = "qwen2.5-coder:14b"
+# context = 32768
+# gpu_lease = true
+
+# [review.local]
+# kind = "off"
+
 # CodeRabbit's free plan reviews public repos only. Turn this off for a
-# private repo, which then goes from the qwen-review loop and CI straight
+# private repo, which then goes from the review loop and CI straight
 # to the merge ruling.
 [coderabbit]
 enabled = true

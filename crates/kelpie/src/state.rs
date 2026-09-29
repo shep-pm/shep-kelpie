@@ -1,7 +1,7 @@
 //! The project's state file
 //!
 //! What a runner must remember across a restart: whether the project is
-//! running, its work item, pending rulings and leases held. Each save goes
+//! running, its open work items, pending rulings and leases held. Each save goes
 //! to a temporary file that is synced and then renamed over the old one, so
 //! a runner killed mid-write leaves the previous state whole.
 
@@ -17,7 +17,11 @@ use crate::ports::Timestamp;
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
 
 /// The state file's format version
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
+
+/// The format before a project could have more than one work item open,
+/// which this kelpie still reads
+const ONE_ITEM: u32 = 1;
 
 /// Everything a project's runner keeps across a restart
 // wire format: changing this is a breaking change to the state file
@@ -29,8 +33,12 @@ pub struct ProjectState {
     pub run: RunState,
     /// When `run` last changed
     pub since: Timestamp,
-    /// The work item in flight
-    pub work_item: Option<WorkItem>,
+    /// The open work items, oldest first
+    #[serde(default)]
+    pub work_items: Vec<WorkItem>,
+    /// The work item a version 1 file kept, which loads into `work_items`
+    #[serde(default, skip_serializing)]
+    work_item: Option<WorkItem>,
     /// Rulings waiting on the maintainer, oldest first
     pub rulings: Vec<Ruling>,
     /// The id of the last ruling raised, so no id is ever given twice
@@ -43,7 +51,7 @@ pub struct ProjectState {
     /// one. None of them starts another.
     #[serde(default)]
     pub reworked: Vec<String>,
-    /// Pull requests adopted and waiting for the work item in flight, oldest first
+    /// Pull requests adopted and waiting for a free slot, oldest first
     #[serde(default)]
     pub adopted: Vec<Waiting>,
     /// Leases this project holds
@@ -66,6 +74,7 @@ impl ProjectState {
             version: VERSION,
             run: RunState::Paused,
             since,
+            work_items: Vec::new(),
             work_item: None,
             rulings: Vec::new(),
             last_ruling: 0,
@@ -77,6 +86,34 @@ impl ProjectState {
             notices: Vec::new(),
             replies: Replies::default(),
         }
+    }
+
+    /// The open work items' issues, oldest first
+    pub fn open_issues(&self) -> Vec<u64> {
+        self.work_items.iter().map(|item| item.issue).collect()
+    }
+
+    /// The open work item for `issue`
+    pub fn item(&self, issue: u64) -> Option<&WorkItem> {
+        self.work_items.iter().find(|item| item.issue == issue)
+    }
+
+    /// The open work item for `issue`, to change
+    pub fn item_mut(&mut self, issue: u64) -> Option<&mut WorkItem> {
+        self.work_items.iter_mut().find(|item| item.issue == issue)
+    }
+
+    // A version 1 file held one work item, and every ruling in it was that
+    // item's.
+    fn one_item_moved(mut self) -> Self {
+        let Some(item) = self.work_item.take() else {
+            return self;
+        };
+        for ruling in &mut self.rulings {
+            ruling.issue.get_or_insert(item.issue);
+        }
+        self.work_items = vec![item];
+        self
     }
 }
 
@@ -109,6 +146,10 @@ pub enum RunState {
 pub struct Ruling {
     /// What the answering trigger names
     pub id: u64,
+    /// The issue of the work item it parks. None only in an older file
+    /// with no work item open.
+    #[serde(default)]
+    pub issue: Option<u64>,
     /// The question, as the maintainer reads it
     pub question: String,
     /// The pull request it is about, once there is one
@@ -327,6 +368,9 @@ pub enum Resume {
 pub struct LeaseHeld {
     /// What the lease is for
     pub resource: Resource,
+    /// The issue of the work item it was taken for
+    #[serde(default)]
+    pub issue: Option<u64>,
     /// When it was granted
     pub since: Timestamp,
 }
@@ -386,7 +430,7 @@ impl fmt::Display for StateError {
             }
             Self::Version { path, found } => write!(
                 f,
-                "state file {} is version {found}, and this kelpie reads version {VERSION}",
+                "state file {} is version {found}, and this kelpie reads versions {ONE_ITEM} and {VERSION}",
                 path.display()
             ),
             Self::Write { path, kind } => {
@@ -434,13 +478,17 @@ impl StateStore {
         let found = serde_json::from_str::<Versioned>(&text)
             .map_err(malformed)?
             .version;
-        if found != VERSION {
+        if found != VERSION && found != ONE_ITEM {
             return Err(StateError::Version {
                 path: self.path.clone(),
                 found,
             });
         }
-        serde_json::from_str(&text).map(Some).map_err(malformed)
+        let state: ProjectState = serde_json::from_str(&text).map_err(malformed)?;
+        Ok(Some(ProjectState {
+            version: VERSION,
+            ..state.one_item_moved()
+        }))
     }
 
     /// Replaces the saved state with `state`, atomically

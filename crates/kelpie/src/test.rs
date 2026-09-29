@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use tempfile::TempDir;
 
+use crate::adapters::LocalReviewer;
 use crate::board::WorkerModel;
 use crate::ports::{
     Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Finding, Meter, MeterError,
@@ -18,18 +19,20 @@ use crate::ports::{
 use crate::runner::{
     CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
 };
-use crate::settings::Effort;
+use crate::settings::{Effort, LocalRound};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{CallRecord, Known, Phase, Turn, WorkItem};
 
 mod alerts;
 mod coderabbit;
+mod endpoint;
 mod forge;
 mod leases;
 mod relay;
 mod shots;
 
 pub(crate) use alerts::FakeAlerts;
+pub(crate) use endpoint::{Answer, StandInEndpoint, unreachable_url};
 pub(crate) use forge::FakeForge;
 pub(crate) use leases::{FakeLeases, Told};
 pub(crate) use relay::FakeRelay;
@@ -470,24 +473,33 @@ pub(crate) enum ScriptedRound {
 /// One round as the stand-in reviewer saw it
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SeenRound {
+    pub(crate) local: LocalRound,
     pub(crate) worktree: PathBuf,
     pub(crate) base: String,
     pub(crate) out: PathBuf,
     pub(crate) round: u32,
 }
 
-/// A qwen-review stand-in. Clean (no findings) once its script runs out, so
+/// A local round's stand-in. Clean (no findings) once its script runs out, so
 /// tests that do not care about the review loop see it pass straight through.
+/// Its start check is the real one, and [`Self::pass_through`] makes its
+/// rounds real too.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FakeReviewer {
     seen: Arc<Mutex<Vec<SeenRound>>>,
     script: Arc<Mutex<VecDeque<ScriptedRound>>>,
+    real: Arc<Mutex<Option<LocalReviewer>>>,
 }
 
 impl FakeReviewer {
     /// Every round asked of it, in order
     pub(crate) fn seen(&self) -> Vec<SeenRound> {
         self.seen.lock().unwrap().clone()
+    }
+
+    /// Runs every later round with the real reviewer, after noting it
+    pub(crate) fn pass_through(&self) {
+        *self.real.lock().unwrap() = Some(LocalReviewer::default());
     }
 
     /// Queues answers for its next rounds, oldest first
@@ -497,19 +509,28 @@ impl FakeReviewer {
 }
 
 impl Reviewer for FakeReviewer {
+    fn check(&self, local: &LocalRound) -> Result<(), String> {
+        LocalReviewer::default().check(local)
+    }
+
     fn round(
         &self,
+        local: &LocalRound,
         worktree: &Path,
         base: &str,
         out: &Path,
         round: u32,
     ) -> Result<Vec<Finding>, ReviewerError> {
         self.seen.lock().unwrap().push(SeenRound {
+            local: local.clone(),
             worktree: worktree.to_owned(),
             base: base.to_owned(),
             out: out.to_owned(),
             round,
         });
+        if let Some(real) = &*self.real.lock().unwrap() {
+            return real.round(local, worktree, base, out, round);
+        }
         match self.script.lock().unwrap().pop_front() {
             Some(ScriptedRound::Findings(findings)) => Ok(findings),
             Some(ScriptedRound::Fail(e)) => Err(e),
@@ -600,6 +621,10 @@ impl Rig {
         let paths = rig.paths();
         std::fs::create_dir_all(paths.settings.parent().unwrap()).unwrap();
         std::fs::write(&paths.settings, settings).unwrap();
+        // The example's local round, which the runner checks is there as it starts.
+        let script = rig.home.path().join(".claude/scripts/qwen-review.sh");
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        write_script(&script, "#!/bin/sh\nexit 1\n");
         let kelpie = format!(
             "[webhook]\nkind = \"ntfy\"\nurl = \"{}\"\n",
             Self::WEBHOOK_URL

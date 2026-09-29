@@ -18,6 +18,7 @@ fn big_state(n: u64) -> ProjectState {
     state.rulings = (0..20_000)
         .map(|id| Ruling {
             id,
+            issue: Some(n),
             question: format!("question {n}"),
             pull_request: Some(n),
             kind: RulingKind::Closed,
@@ -45,9 +46,10 @@ fn a_saved_state_loads_back_whole() {
     let store = store_in(dir.path());
     let mut state = ProjectState::new(Timestamp(1_790_000_000));
     state.run = RunState::Running;
-    state.work_item = Some(a_work_item());
+    state.work_items = vec![a_work_item()];
     state.rulings.push(Ruling {
         id: 1,
+        issue: Some(7),
         question: "merge #43?".into(),
         pull_request: Some(43),
         kind: RulingKind::Merge {
@@ -59,6 +61,7 @@ fn a_saved_state_loads_back_whole() {
     state.last_ruling = 1;
     state.leases.push(LeaseHeld {
         resource: Resource::Gpu,
+        issue: Some(7),
         since: Timestamp(1_790_000_100),
     });
     state.pacing = Some(DayStart {
@@ -68,6 +71,43 @@ fn a_saved_state_loads_back_whole() {
     });
     store.save(&state).unwrap();
     assert_eq!(store.load().unwrap(), Some(state));
+}
+
+#[test]
+fn a_file_with_one_work_item_loads_as_a_list_of_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path());
+    let mut one = serde_json::json!({
+        "version": 1,
+        "run": "running",
+        "since": 7,
+        "work_item": serde_json::to_value(a_work_item()).unwrap(),
+        "rulings": [{ "id": 3, "question": "q", "pull_request": 51, "kind": { "kind": "closed" } }],
+        "last_ruling": 3,
+        "leases": [],
+    });
+    fs::write(dir.path().join("state.json"), one.to_string()).unwrap();
+    let state = store.load().unwrap().unwrap();
+    assert_eq!(state.work_items, [a_work_item()]);
+    assert_eq!(
+        state.rulings[0].issue,
+        Some(42),
+        "its rulings are its item's"
+    );
+
+    store.save(&state).unwrap();
+    let text = fs::read_to_string(dir.path().join("state.json")).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        (&saved["version"], saved.get("work_item")),
+        (&serde_json::json!(2), None)
+    );
+    assert_eq!(store.load().unwrap(), Some(state));
+
+    one["work_item"] = serde_json::Value::Null;
+    fs::write(dir.path().join("state.json"), one.to_string()).unwrap();
+    let state = store.load().unwrap().unwrap();
+    assert_eq!((state.work_items, state.rulings[0].issue), (vec![], None));
 }
 
 #[test]
@@ -88,10 +128,12 @@ fn the_file_format_is_pinned() {
     let mut state = ProjectState::new(Timestamp(7));
     state.leases.push(LeaseHeld {
         resource: Resource::Coderabbit,
+        issue: Some(22),
         since: Timestamp(8),
     });
     let ruling = |id, kind| Ruling {
         id,
+        issue: Some(22),
         question: "q".into(),
         pull_request: Some(30),
         kind,
@@ -181,6 +223,7 @@ fn the_file_format_is_pinned() {
     let pinned = |id: u64, kind| {
         serde_json::json!({
             "id": id,
+            "issue": 22,
             "question": "q",
             "pull_request": 30,
             "kind": kind,
@@ -191,10 +234,10 @@ fn the_file_format_is_pinned() {
     assert_eq!(
         value,
         serde_json::json!({
-            "version": 1,
+            "version": 2,
             "run": "paused",
             "since": 7,
-            "work_item": null,
+            "work_items": [],
             "rulings": [
                 pinned(1, serde_json::json!({ "kind": "merge", "head": "c0ffee" })),
                 pinned(2, serde_json::json!({ "kind": "rebase", "reason": "conflicts" })),
@@ -227,7 +270,7 @@ fn the_file_format_is_pinned() {
                 { "pull_request": 614, "by_label": false },
                 { "pull_request": 638, "by_label": true },
             ],
-            "leases": [{ "resource": "coderabbit", "since": 8 }],
+            "leases": [{ "resource": "coderabbit", "issue": 22, "since": 8 }],
             "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
             "notices": [{ "issue": 22, "pull_request": 30, "head": "c0ffee" }],
             "replies": { "last": { "id": "W3EqiUm5rsNq", "time": 5 } },
@@ -447,14 +490,14 @@ fn a_newer_format_is_reported_as_one() {
     let store = store_in(dir.path());
     fs::write(
         dir.path().join("state.json"),
-        r#"{"version": 2, "shape": "new"}"#,
+        r#"{"version": 3, "shape": "new"}"#,
     )
     .unwrap();
     assert_eq!(
         store.load().unwrap_err(),
         StateError::Version {
             path: store.path.clone(),
-            found: 2
+            found: 3
         }
     );
 }

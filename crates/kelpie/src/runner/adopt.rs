@@ -2,8 +2,8 @@
 //!
 //! The maintainer adopts one with `adopt <pr>`, or with `ready-for-agent` on
 //! one whose branch isn't `kelpie/N`, seen on the board's poll. Adopted pull
-//! requests wait in the state file for the work item in flight, one at a
-//! time, and go before the board's issues. Each starts at CI on its branch as
+//! requests wait in the state file for a free slot, one at a time, and go
+//! before the board's issues. Each starts at CI on its branch as
 //! `origin` holds it, with its labels, ready state and head taken as kelpie's
 //! own. A review asking for changes is the worker's first turn instead. The
 //! branch's owner may still be pushing, so only a push the worker's worktree
@@ -43,6 +43,8 @@ pub enum AdoptError {
     Author(u64, String),
     /// The pull request names no issue on the repo that it closes
     NoIssue(u64),
+    /// A work item for the issue it closes is open
+    InFlight(u64),
     /// The forge could not say which account kelpie acts as
     Viewer(ForgeError),
     /// The forge could not show the pull request's issue
@@ -83,6 +85,7 @@ impl fmt::Display for AdoptError {
             Self::NoIssue(number) => {
                 write!(f, "pull request #{number} names no issue it closes")
             }
+            Self::InFlight(issue) => write!(f, "the work item for #{issue} is in flight"),
             Self::Viewer(e) => write!(f, "cannot read the account kelpie acts as: {e}"),
             Self::Issue(issue, e) => write!(f, "cannot read issue #{issue}: {e}"),
             Self::Label(e) => e.fmt(f),
@@ -119,8 +122,8 @@ impl AdoptError {
 }
 
 impl Runner {
-    /// Adopts open pull request `number`, which waits for the work item in
-    /// flight and any adopted before it
+    /// Adopts open pull request `number`, which waits for a free slot and
+    /// any adopted before it
     ///
     /// Adopting one already waiting or in flight changes nothing.
     ///
@@ -130,8 +133,12 @@ impl Runner {
     /// also goes to it as a comment, or why the change cannot be saved.
     /// Nothing is adopted then.
     pub fn adopt(&mut self, number: u64) -> Result<(), AdoptError> {
-        let in_flight = self.state.work_item.as_ref().and_then(|i| i.pull_request);
-        if in_flight == Some(number) || self.waiting(number) {
+        let in_flight = self
+            .state
+            .work_items
+            .iter()
+            .any(|i| i.pull_request == Some(number));
+        if in_flight || self.waiting(number) {
             return Ok(());
         }
         let pr = self
@@ -167,9 +174,6 @@ impl Runner {
         open: &[OpenPullRequest],
     ) -> Result<(Option<Begin>, Vec<Skip>), StateError> {
         let mut skipped = Vec::new();
-        if self.state.work_item.is_some() {
-            return Ok((None, skipped));
-        }
         let mut labelled: Vec<u64> = open
             .iter()
             .filter(|pr| pr.labels.iter().any(|l| l == READY))
@@ -210,6 +214,8 @@ impl Runner {
                     self.let_go(number)?;
                     continue;
                 }
+                // It waits for the work item on its issue to end.
+                Err(AdoptError::InFlight(_)) => continue,
                 Err(e) if e.settled() => match self.refuse_adoption(number, &e)? {
                     Ok(begin) => begin,
                     Err(e) => {
@@ -316,6 +322,9 @@ impl Runner {
             .reviewed(&repo, number)
             .map_err(|e| AdoptError::PullRequest(number, e))?;
         let issue = self.adoptable(number, &pr)?;
+        if self.state.item(issue).is_some() {
+            return Err(AdoptError::InFlight(issue));
+        }
         let found = self
             .ports
             .forge
@@ -410,7 +419,7 @@ impl Runner {
         };
         item.coderabbit.rounds = rounds;
         item.summon_owed = self.settings.coderabbit.enabled;
-        next.work_item = Some(item);
+        next.work_items.push(item);
         self.save(next).map_err(AdoptError::State)?;
         Ok((issue, worker))
     }
@@ -423,7 +432,7 @@ impl Runner {
     /// when the worktree holds it. `None` keeps the head kelpie knew, which
     /// errs toward parking.
     pub(super) fn own_push(&self) -> Option<String> {
-        let item = self.state.work_item.as_ref()?;
+        let item = self.current()?;
         let head = self.origin_head().ok()?;
         if !item.adopted {
             return Some(head);
@@ -435,7 +444,7 @@ impl Runner {
     // A push by anyone else to an adopted branch since kelpie last looked
     // goes to the gate, which parks it, before a worker's turn builds on it.
     pub(super) fn pushed_by_someone_else(&mut self) -> Result<Option<Begin>, StateError> {
-        let Some(item) = self.state.work_item.as_ref() else {
+        let Some(item) = self.current() else {
             return Ok(None);
         };
         let due = matches!(item.turn, Turn::Due | Turn::Next { .. });
