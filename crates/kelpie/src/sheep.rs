@@ -261,13 +261,17 @@ fn work(runner: &Mutex<Runner>, on_wake: &mut OnWake, woken: &Receiver<()>, stop
         if let Err(RecvTimeoutError::Disconnected) = woken.recv_timeout(BOARD_POLL) {
             return;
         }
-        on_wake(runner);
+        // A stop has only JOIN_BOUND to be let go, so it skips the wake's work.
+        if !stopping.load(Ordering::SeqCst) {
+            on_wake(runner);
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::sync::atomic::AtomicUsize;
     use std::time::Instant;
 
     use super::*;
@@ -307,6 +311,29 @@ mod tests {
         let text = std::fs::read_to_string(state).unwrap();
         let state: serde_json::Value = serde_json::from_str(&text).unwrap();
         state["work_item"]["calls"].as_array().map_or(0, Vec::len)
+    }
+
+    #[test]
+    fn a_wake_reads_the_settings_again_but_a_stop_does_not() {
+        let rig = Rig::new("shep");
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&wakes);
+        let on_wake: OnWake = Box::new(move |_| {
+            counted.fetch_add(1, Ordering::SeqCst);
+        });
+        let (wake, woken) = mpsc::channel();
+        let (died, _) = mpsc::channel();
+        let runner = Arc::new(rig.open().unwrap());
+        let worker = Worker::spawn(runner, on_wake, wake.clone(), woken, died);
+        wake.send(()).unwrap();
+        eventually("the trigger's wake", || wakes.load(Ordering::SeqCst) == 1);
+
+        assert!(worker.stop(PATIENCE, || {}));
+        assert_eq!(
+            wakes.load(Ordering::SeqCst),
+            1,
+            "the stop read the settings"
+        );
     }
 
     #[test]
