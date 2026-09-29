@@ -384,6 +384,60 @@ fn a_worktree_whose_git_was_repointed_is_refused_not_read() {
     assert!(why.contains("cannot read this worktree's git"), "{why}");
 }
 
+// A folder the guard cannot follow is judged as the worktree, not skipped.
+#[test]
+fn a_push_from_a_folder_the_guard_cannot_follow_reads_the_worktree() {
+    let tree = WorkerTree::new();
+    tree.write("notes.md", "built in /home/tester/wt\n");
+    tree.git(&["add", "notes.md"]);
+    tree.git(&["commit", "--quiet", "-m", "docs: notes"]);
+    for command in [
+        "cd \"$(git rev-parse --show-toplevel)\" && git push",
+        "cd \"$PWD\" && git push origin HEAD",
+        "cd - && git push",
+        "git -C \"$PWD\" push",
+    ] {
+        let why = refusal(tree.bash(command));
+        assert!(why.contains("`notes.md`"), "{command}: {why}");
+    }
+}
+
+#[test]
+fn gh_aliases_and_flags_before_the_verb_are_judged() {
+    for command in [
+        "gh pr new --title Parser",
+        "gh pr -R o/r create --title Parser",
+        "gh --repo o/r pr create --title Parser",
+        "gh issue new --title x --body /home/tester/x",
+        "gh release new v1 --notes /home/tester/x",
+    ] {
+        assert!(matches!(bash(command), Verdict::Refuse(_)), "{command}");
+    }
+    assert_eq!(bash("gh pr -R o/r view 3"), Verdict::Allow);
+}
+
+#[test]
+fn a_shell_script_and_a_program_by_path_are_judged() {
+    for command in [
+        "sh -c \"gh pr create --title Parser\"",
+        "bash -lc 'git commit -m \"fix: /home/tester/x\"'",
+        "/usr/bin/git commit -m 'fix: /home/tester/x'",
+        "/opt/homebrew/bin/gh pr create --title Parser",
+        "bash -c \"bash -c 'gh pr new --title Parser'\"",
+    ] {
+        assert!(matches!(bash(command), Verdict::Refuse(_)), "{command}");
+    }
+    assert_eq!(bash("bash -c 'cargo test'"), Verdict::Allow);
+}
+
+// Nested past the parser's cap, a call is refused rather than read slowly.
+#[test]
+fn a_command_too_deep_to_read_is_refused() {
+    let deep = format!("{}git push{}", "echo $(".repeat(40), ")".repeat(40));
+    let why = refusal(bash(&deep));
+    assert!(why.contains("too deep"), "{why}");
+}
+
 #[test]
 fn a_command_behind_a_wrapper_is_still_judged() {
     for command in [

@@ -61,42 +61,99 @@ pub fn judge(input: impl Read, home: Option<&Path>, checkout: Checkout<'_>) -> V
     let Some(line) = call.tool_input.command.filter(|_| call.tool_name == "Bash") else {
         return Verdict::Allow;
     };
-    let home = home.and_then(Home::new);
-    let mut refusals: Vec<String> = Vec::new();
-    let mut cwd = call.cwd;
-    for command in shell::commands(&line) {
-        let found = match command.words.first().map(String::as_str) {
-            Some("cd") => {
-                if let Some(dir) = command.words.get(1) {
-                    cwd = moved(&cwd, dir, home.as_ref()).unwrap_or_default();
-                }
-                Vec::new()
-            }
-            Some("git") => git(&command, &cwd, home.as_ref(), checkout),
-            Some("gh") => gh(&command, &cwd, home.as_ref()),
-            _ => Vec::new(),
-        };
-        for refusal in found {
-            if !refusals.contains(&refusal) {
-                refusals.push(refusal);
-            }
-        }
-    }
+    let judging = Judging {
+        home: home.and_then(Home::new),
+        checkout,
+    };
+    let mut refusals = Vec::new();
+    judging.line(&line, Some(call.cwd), 0, &mut refusals);
     if refusals.is_empty() {
         return Verdict::Allow;
     }
     Verdict::Refuse(refusals.join("\n\n"))
 }
 
+// A shell run inside a shell this many times over is not a worker's command.
+const MAX_SHELLS: usize = 4;
+
+// The shells whose `-c` script the guard reads as a command line of its own.
+const SHELLS: [&str; 4] = ["sh", "bash", "zsh", "dash"];
+
+/// One Bash call being judged
+struct Judging<'a> {
+    home: Option<Home>,
+    checkout: Checkout<'a>,
+}
+
+impl Judging<'_> {
+    // `cwd` is `None` once a `cd` goes somewhere the guard cannot follow.
+    fn line(&self, line: &str, mut cwd: Option<PathBuf>, shells: usize, out: &mut Vec<String>) {
+        let commands = match shell::commands(line) {
+            Ok(commands) if shells <= MAX_SHELLS => commands,
+            Ok(_) => return refuse(out, "kelpie cannot check this command: it runs a shell inside a shell too many times over. Run it as plain commands.".into()),
+            Err(e) => return refuse(out, format!("kelpie cannot check this command: {e}. Split it into plain commands.")),
+        };
+        let home = self.home.as_ref();
+        for command in commands {
+            let found = match program(&command.words[0]) {
+                "cd" => {
+                    cwd = match command.words.get(1) {
+                        Some(to) => moved(cwd.as_deref(), to, home),
+                        None => home.map(|h| h.path.clone()),
+                    };
+                    Vec::new()
+                }
+                "git" => git(&command, cwd.as_deref(), home, self.checkout),
+                "gh" => gh(&command, cwd.as_deref(), home),
+                name if SHELLS.contains(&name) => {
+                    if let Some(script) = script(&command.words) {
+                        self.line(script, cwd.clone(), shells + 1, out);
+                    }
+                    Vec::new()
+                }
+                _ => Vec::new(),
+            };
+            for refusal in found {
+                refuse(out, refusal);
+            }
+        }
+    }
+}
+
+// Each refusal once, however many commands earn it.
+fn refuse(out: &mut Vec<String>, refusal: String) {
+    if !out.contains(&refusal) {
+        out.push(refusal);
+    }
+}
+
+// A command's program, by name: `/usr/bin/git` is `git`.
+fn program(word: &str) -> &str {
+    word.rsplit('/').next().unwrap_or(word)
+}
+
+// The script a shell runs with `-c`, `-lc` and the like.
+fn script(words: &[String]) -> Option<&str> {
+    let at = words[1..]
+        .iter()
+        .position(|w| w.starts_with('-') && !w.starts_with("--") && w.contains('c'))?;
+    words.get(at + 2).map(String::as_str)
+}
+
 // `git commit`, `git tag` and `git push`: their messages, and the lines they add or send.
-fn git(command: &Command, cwd: &Path, home: Option<&Home>, checkout: Checkout<'_>) -> Vec<String> {
+fn git(
+    command: &Command,
+    cwd: Option<&Path>,
+    home: Option<&Home>,
+    checkout: Checkout<'_>,
+) -> Vec<String> {
     let mut words = command.words[1..].iter();
-    let mut dir = cwd.to_owned();
+    let mut dir = cwd.map(Path::to_owned);
     let sub = loop {
         match words.next().map(String::as_str) {
             Some("-C") => {
                 let to = words.next().map_or("", String::as_str);
-                dir = moved(&dir, to, home).unwrap_or_default();
+                dir = moved(dir.as_deref(), to, home);
             }
             Some("-c") => {
                 words.next();
@@ -114,13 +171,13 @@ fn git(command: &Command, cwd: &Path, home: Option<&Home>, checkout: Checkout<'_
     if sub == "commit" || sub == "tag" {
         let messages = values(&args, &["--message"], &['m'])
             .into_iter()
-            .chain(files(&args, &["--file"], &['F'], &dir))
+            .chain(files(&args, &["--file"], &['F'], dir.as_deref()))
             .chain(command.heredocs.iter().cloned());
         if messages.into_iter().any(|m| home.is_in(&m)) {
             out.push(home.refusal(&format!("this {sub}'s message"), WRITE));
         }
     }
-    if !matches!(sub, "commit" | "push") || !in_own_repo(checkout.worktree, &dir) {
+    if !matches!(sub, "commit" | "push") || !in_own_repo(checkout.worktree, dir.as_deref()) {
         return out;
     }
     let found = worktree::trusted(checkout.git_common_dir, checkout.worktree)
@@ -170,12 +227,13 @@ fn read_git(
 }
 
 // Where `cd` or `git -C` moves from `cwd`: `None` when it cannot be told.
-fn moved(cwd: &Path, to: &str, home: Option<&Home>) -> Option<PathBuf> {
+fn moved(cwd: Option<&Path>, to: &str, home: Option<&Home>) -> Option<PathBuf> {
     match to.strip_prefix('~') {
         Some("") => Some(home?.path.clone()),
         Some(rest) => Some(home?.path.join(rest.strip_prefix('/')?)),
         None if to == "-" => None,
-        None => Some(cwd.join(to)),
+        None if Path::new(to).is_absolute() => Some(PathBuf::from(to)),
+        None => Some(cwd?.join(to)),
     }
 }
 
@@ -187,10 +245,14 @@ const PLAIN: [&str; 4] = [
     "--no-textconv",
 ];
 
-// Whether `dir` is in the worktree, and in no repo the worker made inside it.
-fn in_own_repo(worktree: &Path, dir: &Path) -> bool {
-    let (Ok(worktree), Ok(dir)) = (worktree.canonicalize(), dir.canonicalize()) else {
+// Whether `dir` is the worker's own repo: in the worktree and in no repo it
+// made there. A folder the guard cannot follow or see is judged as the worktree.
+fn in_own_repo(worktree: &Path, dir: Option<&Path>) -> bool {
+    let Ok(worktree) = worktree.canonicalize() else {
         return false;
+    };
+    let Some(Ok(dir)) = dir.map(Path::canonicalize) else {
+        return true;
     };
     dir.starts_with(&worktree)
         && dir
@@ -200,12 +262,27 @@ fn in_own_repo(worktree: &Path, dir: &Path) -> bool {
 }
 
 // `gh` publishing verbs: their titles, bodies and notes, and a pull request's title.
-fn gh(command: &Command, cwd: &Path, home: Option<&Home>) -> Vec<String> {
+fn gh(command: &Command, cwd: Option<&Path>, home: Option<&Home>) -> Vec<String> {
     let words = &command.words;
-    let verb = (
-        words.get(1).map_or("", String::as_str),
-        words.get(2).map_or("", String::as_str),
-    );
+    // The group and verb are the first two words that are not flags, which
+    // may come before them: `gh pr -R owner/repo create`.
+    let mut positions = Vec::new();
+    let mut i = 1;
+    while i < words.len() && positions.len() < 2 {
+        match words[i].as_str() {
+            "-R" | "--repo" => i += 1,
+            w if w.starts_with('-') => {}
+            _ => positions.push(i),
+        }
+        i += 1;
+    }
+    let [group, verb] = positions[..] else {
+        return Vec::new();
+    };
+    let verb = match (words[group].as_str(), words[verb].as_str()) {
+        (group, "new") => (group, "create"),
+        pair => pair,
+    };
     let publishes = matches!(
         verb,
         ("pr", "create" | "edit" | "comment" | "review")
@@ -215,7 +292,7 @@ fn gh(command: &Command, cwd: &Path, home: Option<&Home>) -> Vec<String> {
     if !publishes {
         return Vec::new();
     }
-    let args = &words[3..];
+    let args = &words[i..];
     let titles = values(args, &["--title"], &['t']);
     let mut out = Vec::new();
     if verb.0 == "pr" && verb.1 == "create" && titles.is_empty() {
@@ -280,14 +357,13 @@ fn values(args: &[String], long: &[&str], short: &[char]) -> Vec<String> {
 }
 
 // What the files a flag names hold. `-` is stdin, which a heredoc carries.
-fn files(args: &[String], long: &[&str], short: &[char], cwd: &Path) -> Vec<String> {
+fn files(args: &[String], long: &[&str], short: &[char], cwd: Option<&Path>) -> Vec<String> {
     values(args, long, short)
         .into_iter()
         .filter(|f| f != "-")
-        // An empty `cwd` is a folder the guard could not follow.
-        .filter(|f| !cwd.as_os_str().is_empty() || Path::new(f).is_absolute())
         .filter_map(|f| {
-            let path = cwd.join(f);
+            // A relative file under a folder the guard could not follow is not read.
+            let path = moved(cwd, &f, None)?;
             // A pipe would hold the hook open.
             let small =
                 fs::metadata(&path).is_ok_and(|m| m.is_file() && m.len() <= MESSAGE_FILE_MAX);

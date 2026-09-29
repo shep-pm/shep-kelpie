@@ -25,11 +25,40 @@ const LEADS: [&str; 18] = [
     "env", "nohup", "nice", "setsid", "!", "{", "}",
 ];
 
+/// A command line the guard will not read
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Unreadable {
+    /// Nested past [`MAX_DEPTH`] quotes and bodies
+    TooDeep,
+    /// Longer than [`MAX_LEN`] characters
+    TooLong,
+}
+
+impl std::fmt::Display for Unreadable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::TooDeep => "it nests quotes and substitutions too deep to read",
+            Self::TooLong => "it is too long to read",
+        })
+    }
+}
+
+// No command a worker writes nests this deep or runs this long.
+const MAX_DEPTH: usize = 32;
+const MAX_LEN: usize = 1 << 20;
+
 /// Every command in `line`, a nested body's before the command around it
-pub(super) fn commands(line: &str) -> Vec<Command> {
+///
+/// # Errors
+///
+/// [`Unreadable`] when `line` is too deep or too long to read.
+pub(super) fn commands(line: &str) -> Result<Vec<Command>, Unreadable> {
+    if line.len() > MAX_LEN {
+        return Err(Unreadable::TooLong);
+    }
     let (text, bodies) = lift_heredocs(line);
     let chars: Vec<char> = text.chars().collect();
-    split(&chars)
+    Ok(split(&chars)?
         .into_iter()
         .filter_map(|segment| {
             // A word keeps its `<<`, not the mark after it.
@@ -46,7 +75,7 @@ pub(super) fn commands(line: &str) -> Vec<Command> {
                 words,
             })
         })
-        .collect()
+        .collect())
 }
 
 // Where a scan stands: inside quotes, or in a command list.
@@ -198,12 +227,18 @@ fn body(chars: &[char], from: usize, delimiter: &str, strip: bool) -> (String, u
 }
 
 // The command segments of `chars`, each with its full text, nested bodies too.
-fn split(chars: &[char]) -> Vec<Vec<char>> {
+//
+// One pass: each open `$( )`, `( )` or backtick body keeps the start of its
+// own current segment, so no body is scanned twice.
+fn split(chars: &[char]) -> Result<Vec<Vec<char>>, Unreadable> {
     let mut out = Vec::new();
     let mut stack: Vec<Context> = Vec::new();
     let mut start = 0;
     let mut i = 0;
     while i < chars.len() {
+        if stack.len() > MAX_DEPTH {
+            return Err(Unreadable::TooDeep);
+        }
         let ch = chars[i];
         let top = stack.last().copied();
         if top == Some(Context::Single) {
@@ -225,7 +260,7 @@ fn split(chars: &[char]) -> Vec<Vec<char>> {
         if ch == '`' {
             if let Some(Context::Backtick(from)) = top {
                 stack.pop();
-                out.extend(split(&chars[from..i]));
+                out.push(chars[from..i].to_vec());
             } else {
                 stack.push(Context::Backtick(i + 1));
             }
@@ -255,19 +290,26 @@ fn split(chars: &[char]) -> Vec<Vec<char>> {
             ')' => {
                 if let Some(Context::Sub(from)) = top {
                     stack.pop();
-                    out.extend(split(&chars[from..i]));
+                    out.push(chars[from..i].to_vec());
                 }
             }
-            '\n' | ';' | '&' | '|' if stack.is_empty() => {
-                out.push(chars[start..i].to_vec());
-                start = i + 1;
-            }
+            '\n' | ';' | '&' | '|' => match stack.last_mut() {
+                None => {
+                    out.push(chars[start..i].to_vec());
+                    start = i + 1;
+                }
+                Some(Context::Sub(from) | Context::Backtick(from)) => {
+                    out.push(chars[*from..i].to_vec());
+                    *from = i + 1;
+                }
+                Some(_) => {}
+            },
             _ => {}
         }
         i += 1;
     }
     out.push(chars[start..].to_vec());
-    out
+    Ok(out)
 }
 
 // The heredoc indexes a segment's text names.
@@ -361,7 +403,11 @@ mod tests {
     use super::*;
 
     fn words_of(line: &str) -> Vec<Vec<String>> {
-        commands(line).into_iter().map(|c| c.words).collect()
+        commands(line)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.words)
+            .collect()
     }
 
     fn w(words: &[&str]) -> Vec<String> {
@@ -421,7 +467,7 @@ mod tests {
     fn a_heredoc_body_is_data_and_goes_with_the_command_that_reads_it() {
         let line =
             "git commit -F - <<'EOF'\nfix: x\n\ngh pr create; it runs nothing\nEOF\ngit push";
-        let all = commands(line);
+        let all = commands(line).unwrap();
         assert_eq!(all.len(), 2, "{all:?}");
         assert_eq!(all[0].words, w(&["git", "commit", "-F", "-", "<<"]));
         assert_eq!(all[0].heredocs, ["fix: x\n\ngh pr create; it runs nothing"]);
@@ -432,7 +478,7 @@ mod tests {
     #[test]
     fn a_heredoc_inside_a_quoted_substitution_goes_with_the_outer_command() {
         let line = "gh pr create --title 'fix: x' --body \"$(cat <<'EOF'\nthe body\nEOF\n)\"";
-        let all = commands(line);
+        let all = commands(line).unwrap();
         let gh = all.iter().find(|c| c.words[0] == "gh").unwrap();
         assert_eq!(gh.words[..4], w(&["gh", "pr", "create", "--title"]));
         assert_eq!(gh.heredocs, ["the body"]);
@@ -440,21 +486,41 @@ mod tests {
 
     #[test]
     fn a_heredoc_after_a_comment_with_an_apostrophe_is_still_lifted() {
-        let all = commands("# don't push yet\ngit commit -F - <<EOF\nfix: x\nEOF\ngit push");
+        let all =
+            commands("# don't push yet\ngit commit -F - <<EOF\nfix: x\nEOF\ngit push").unwrap();
         assert_eq!(all[0].heredocs, ["fix: x"], "{all:?}");
         assert_eq!(all[1].words, w(&["git", "push"]));
     }
 
+    // Each level used to re-read every body inside it: 22 levels took 3.9s.
+    #[test]
+    fn deep_nesting_is_read_once_and_refused_past_the_cap() {
+        let nest =
+            |depth: usize| format!("{}git push{}", "echo $(".repeat(depth), ")".repeat(depth));
+        let all = words_of(&nest(MAX_DEPTH - 1));
+        assert!(all.contains(&w(&["git", "push"])), "{all:?}");
+        assert_eq!(commands(&nest(MAX_DEPTH + 2)), Err(Unreadable::TooDeep));
+        assert_eq!(commands(&"x".repeat(MAX_LEN + 1)), Err(Unreadable::TooLong));
+    }
+
+    #[test]
+    fn a_list_inside_a_substitution_is_split() {
+        let all = words_of("echo \"$(cd sub; git push && echo `gh pr view; true`)\"");
+        for command in [&["cd", "sub"][..], &["git", "push"], &["gh", "pr", "view"]] {
+            assert!(all.contains(&w(command)), "{command:?}: {all:?}");
+        }
+    }
+
     #[test]
     fn a_heredoc_marker_in_quotes_is_text() {
-        let all = commands("echo \"a << b\"\ngit push");
+        let all = commands("echo \"a << b\"\ngit push").unwrap();
         assert_eq!(all.len(), 2, "{all:?}");
         assert!(all.iter().all(|c| c.heredocs.is_empty()));
     }
 
     #[test]
     fn a_tab_stripping_heredoc_ends_at_an_indented_delimiter() {
-        let all = commands("cat <<-END\n\tone\n\tEND\ngit push");
+        let all = commands("cat <<-END\n\tone\n\tEND\ngit push").unwrap();
         assert_eq!(all[0].heredocs, ["\tone"]);
         assert_eq!(all[1].words, w(&["git", "push"]));
     }
