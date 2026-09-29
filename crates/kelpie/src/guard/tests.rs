@@ -340,6 +340,38 @@ fn a_push_sending_a_message_naming_the_home_folder_is_refused() {
     assert!(!why.contains("notes.md"), "the file is clean: {why}");
 }
 
+// The shell expands `~` before git sees it, so the guard does too.
+#[test]
+fn a_commit_from_the_home_folder_by_tilde_reads_the_worktree() {
+    let tree = WorkerTree::new();
+    let home = tree.0.path();
+    tree.write("notes.md", &format!("built in {}/wt\n", home.display()));
+    tree.git(&["add", "notes.md"]);
+    let common = tree.repo().join(".git");
+    let worktree = tree.path();
+    let checkout = Checkout {
+        git_common_dir: &common,
+        worktree: &worktree,
+    };
+    for command in [
+        "cd ~/wt && git commit -m 'docs: notes'",
+        "git -C ~/wt commit -m 'docs: notes'",
+    ] {
+        let call = json!({ "tool_name": "Bash", "cwd": "/", "tool_input": { "command": command } });
+        let why = refusal(judge(call.to_string().as_bytes(), Some(home), checkout));
+        assert!(why.contains("`notes.md`"), "{command}: {why}");
+    }
+}
+
+#[test]
+fn git_that_cannot_be_read_is_refused_not_let_through() {
+    let tree = WorkerTree::new();
+    let own = fs::canonicalize(tree.repo().join(".git/worktrees/wt")).unwrap();
+    fs::write(own.join("index"), "not an index").unwrap();
+    let why = refusal(tree.bash("git commit -m 'docs: x'"));
+    assert!(why.contains("cannot read this worktree's git"), "{why}");
+}
+
 // The worker can rewrite its worktree's `.git` file and its own git dir.
 #[test]
 fn a_worktree_whose_git_was_repointed_is_refused_not_read() {

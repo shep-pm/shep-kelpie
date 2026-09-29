@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::confine::Verdict;
-use crate::worktree;
+use crate::worktree::{self, WorktreeError};
 use shell::Command;
 
 /// Where the worker's own git lives
@@ -67,8 +67,8 @@ pub fn judge(input: impl Read, home: Option<&Path>, checkout: Checkout<'_>) -> V
     for command in shell::commands(&line) {
         let found = match command.words.first().map(String::as_str) {
             Some("cd") => {
-                if let Some(dir) = command.words.get(1).filter(|d| !d.starts_with(['~', '-'])) {
-                    cwd = cwd.join(dir);
+                if let Some(dir) = command.words.get(1) {
+                    cwd = moved(&cwd, dir, home.as_ref()).unwrap_or_default();
                 }
                 Vec::new()
             }
@@ -94,7 +94,10 @@ fn git(command: &Command, cwd: &Path, home: Option<&Home>, checkout: Checkout<'_
     let mut dir = cwd.to_owned();
     let sub = loop {
         match words.next().map(String::as_str) {
-            Some("-C") => dir = dir.join(words.next().map_or("", String::as_str)),
+            Some("-C") => {
+                let to = words.next().map_or("", String::as_str);
+                dir = moved(&dir, to, home).unwrap_or_default();
+            }
             Some("-c") => {
                 words.next();
             }
@@ -120,40 +123,60 @@ fn git(command: &Command, cwd: &Path, home: Option<&Home>, checkout: Checkout<'_
     if !matches!(sub, "commit" | "push") || !in_own_repo(checkout.worktree, &dir) {
         return out;
     }
-    let run = match worktree::trusted(checkout.git_common_dir, checkout.worktree) {
-        Ok(run) => run,
-        Err(e) => {
-            out.push(format!(
-                "kelpie cannot read this worktree's git to check this {sub}: {e}"
-            ));
-            return out;
-        }
-    };
-    let read = |args: &[&str]| run(args).unwrap_or_default();
+    let found = worktree::trusted(checkout.git_common_dir, checkout.worktree)
+        .and_then(|run| read_git(sub, &args, home, run));
+    match found {
+        Ok(found) => out.extend(found),
+        // Git that cannot be read is refused, not let through unchecked.
+        Err(e) => out.push(format!(
+            "kelpie cannot read this worktree's git to check this {sub}: {e}"
+        )),
+    }
+    out
+}
+
+// What a commit adds, or a push sends, that names the home folder.
+fn read_git(
+    sub: &str,
+    args: &[String],
+    home: &Home,
+    run: impl Fn(&[&str]) -> Result<String, WorktreeError>,
+) -> Result<Vec<String>, WorktreeError> {
     // `--unified` alone makes `git log` print patches, so only patch reads take these.
-    let patches = |args: &[&str]| read(&[args, &PLAIN].concat());
+    let patches = |args: &[&str]| run(&[args, &PLAIN].concat());
+    let mut out = Vec::new();
     if sub == "push" {
         // A file written and committed in one call is not staged when the
         // commit is judged, so the push reads what it sends.
-        let log = read(&["log", "--format=%B", "HEAD", "--not", "--remotes"]);
+        let log = run(&["log", "--format=%B", "HEAD", "--not", "--remotes"])?;
         if home.is_in(&log) {
             out.push(home.refusal("a message in the commits this push sends", REWRITE));
         }
-        let patches = patches(&["log", "-p", "--format=", "HEAD", "--not", "--remotes"]);
-        for file in home.added(&patches) {
+        let sent = patches(&["log", "-p", "--format=", "HEAD", "--not", "--remotes"])?;
+        for file in home.added(&sent) {
             out.push(home.refusal(&format!("{file} in the commits this push sends"), REWRITE));
         }
-        return out;
+        return Ok(out);
     }
     let all = args
         .iter()
         .take_while(|a| *a != "--")
         .any(|a| a == "--all" || a.starts_with('-') && !a.starts_with("--") && a.contains('a'));
     let range = if all { "HEAD" } else { "--cached" };
-    for file in home.added(&patches(&["diff", range])) {
+    for file in home.added(&patches(&["diff", range])?) {
         out.push(home.refusal(&format!("this commit's {file}"), WRITE));
     }
-    out
+    Ok(out)
+}
+
+// Where `cd` or `git -C` moves from `cwd`: `None` when it cannot be told.
+fn moved(cwd: &Path, to: &str, home: Option<&Home>) -> Option<PathBuf> {
+    match to.strip_prefix('~') {
+        Some("") => Some(home?.path.clone()),
+        Some(rest) => Some(home?.path.join(rest.strip_prefix('/')?)),
+        None if to == "-" => None,
+        None => Some(cwd.join(to)),
+    }
 }
 
 // Plain patches: no colour, and no program the repo's config names.
@@ -292,20 +315,26 @@ fn conventional(title: &str) -> bool {
 }
 
 /// The home folder's path, as text that must not leave the machine
-struct Home(String);
+struct Home {
+    path: PathBuf,
+    text: String,
+}
 
 impl Home {
     // A path this short would match every absolute path.
     fn new(path: &Path) -> Option<Self> {
         let text = path.to_str()?.trim_end_matches('/').to_lowercase();
-        (text.matches('/').count() >= 2).then_some(Self(text))
+        (text.matches('/').count() >= 2).then(|| Self {
+            path: path.to_owned(),
+            text,
+        })
     }
 
     // Whether `text` names the folder, or a path under it.
     fn is_in(&self, text: &str) -> bool {
         let text = text.to_lowercase();
-        text.match_indices(&self.0).any(|(at, _)| {
-            text[at + self.0.len()..]
+        text.match_indices(&self.text).any(|(at, _)| {
+            text[at + self.text.len()..]
                 .chars()
                 .next()
                 .is_none_or(|c| !(c.is_alphanumeric() || c == '_' || c == '-'))
