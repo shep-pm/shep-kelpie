@@ -30,6 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: scripts/check-private.sh
+        env:
+          PRIVATE_NAMES: ${{ secrets.PRIVATE_NAMES }}
 
   docs:
     runs-on: ubuntu-latest

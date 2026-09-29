@@ -462,12 +462,12 @@ mod tests {
             socket_from(shep_home.map(Into::into), home.map(Into::into))
         };
         assert_eq!(
-            socket(Some("/s"), Some("/home/m")),
+            socket(Some("/s"), Some("/home/me")),
             Ok(PathBuf::from("/s/run/shep.sock"))
         );
         assert_eq!(
-            socket(None, Some("/home/m")),
-            Ok(PathBuf::from("/home/m/.kelpie/shep/run/shep.sock"))
+            socket(None, Some("/home/me")),
+            Ok(PathBuf::from("/home/me/.kelpie/shep/run/shep.sock"))
         );
         assert!(socket(None, None).is_err());
     }
@@ -478,12 +478,12 @@ mod tests {
             book_path_from(kelpie_home.map(Into::into), home.map(Into::into))
         };
         assert_eq!(
-            book(Some("/k"), Some("/home/m")),
+            book(Some("/k"), Some("/home/me")),
             Ok(PathBuf::from("/k/dog/book.json"))
         );
         assert_eq!(
-            book(None, Some("/home/m")),
-            Ok(PathBuf::from("/home/m/.kelpie/dog/book.json"))
+            book(None, Some("/home/me")),
+            Ok(PathBuf::from("/home/me/.kelpie/dog/book.json"))
         );
         assert!(book(None, None).is_err());
     }

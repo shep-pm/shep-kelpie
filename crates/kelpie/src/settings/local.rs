@@ -160,7 +160,7 @@ mod tests {
     fn with_table(table: &str) -> Result<Settings, String> {
         assert!(EXAMPLE.contains(TABLE), "the example's local round moved");
         let entry = crate::test::project_table(&EXAMPLE.replace(TABLE, table));
-        let (home, folder) = (Path::new("/home/maintainer"), Path::new("/p"));
+        let (home, folder) = (Path::new("/home/me"), Path::new("/p"));
         Settings::from_table(&entry, "shep", home, folder).map_err(|e| e.to_string())
     }
 
@@ -175,7 +175,7 @@ mod tests {
     fn the_example_runs_the_qwen_review_script_from_the_home_folder() {
         assert_eq!(
             with_table(TABLE).unwrap().review.local,
-            command("/home/maintainer/.claude/scripts/qwen-review.sh")
+            command("/home/me/.claude/scripts/qwen-review.sh")
         );
     }
 
@@ -263,7 +263,7 @@ mod tests {
         let table = "[app.dogs.kelpie.review.local]\nkind = \"command\"\ncommand = \"review.sh\"\n";
         let old_file = crate::test::project_table(&EXAMPLE.replace(TABLE, table));
         std::fs::write(&file, toml::to_string(&old_file).unwrap()).unwrap();
-        let s = Settings::load(&file, Path::new("/home/maintainer")).unwrap();
+        let s = Settings::load(&file, Path::new("/home/me")).unwrap();
         assert_eq!(
             s.review.local,
             command(&dir.path().join("review.sh").display().to_string())
