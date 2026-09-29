@@ -2,7 +2,20 @@
 
 A [shep](https://github.com/shep-pm/shep) dog that runs Claude Code workers on your projects, from a planned work item to a merged pull request. It holds the merge gate, the review budgets and the pacing in code, and calls Claude only for the work and for judgement.
 
-First build under way. A project runner reads its settings, keeps its state, and answers `status`, `start` and `pause`.
+This is early. It runs the maintainer's own projects and changes without notice, and there is no release yet.
+
+## What it needs
+
+- shep 0.11
+- Rust 1.88 or later, to build it
+- Claude Code, signed in
+- `git`, and `gh` signed in to the account that opens the pull requests
+- a GitHub repo per project, with `ready-for-agent` and `ready-for-human` labels
+- a local review command or an OpenAI-compatible endpoint, or `review.local` set to `off`
+
+## Merging
+
+A project on `merge_authority = "auto"` merges its pull requests without asking once every gate passes, and posts a notice after. The example settings use `ask`, which raises a ruling before every merge.
 
 ## Running a project
 
