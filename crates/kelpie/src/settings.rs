@@ -56,7 +56,7 @@ pub struct Settings {
 pub enum MergeAuthority {
     /// Kelpie asks for a ruling before every merge
     Ask,
-    /// Kelpie merges once every gate passes, and posts a notice after
+    /// Kelpie merges once every gate passes, then posts a notice of the merge
     Auto,
 }
 

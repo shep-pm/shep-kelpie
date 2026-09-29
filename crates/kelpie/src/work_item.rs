@@ -69,7 +69,7 @@ pub struct WorkItem {
     #[serde(default)]
     pub qwen: QwenTally,
     /// Whether the forge refused a merge under `auto` since the last
-    /// ruling on one, so a second refusal asks
+    /// ruling on one. A second refusal raises a `merge-refused` ruling.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub merge_refused: bool,
     /// Every Claude call made for it, oldest first

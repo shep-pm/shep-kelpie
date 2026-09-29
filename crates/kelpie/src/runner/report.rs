@@ -239,11 +239,15 @@ pub enum StepReport {
     },
     /// The notice of an automatic merge was posted to the webhook
     Noticed {
+        /// The work item's issue
+        issue: u64,
         /// The pull request merged
         pull_request: u64,
     },
     /// A notice could not be posted to the webhook, and is tried again later
     NoticeFailed {
+        /// The work item's issue
+        issue: u64,
         /// The pull request merged
         pull_request: u64,
         /// Why, never naming the webhook's URL

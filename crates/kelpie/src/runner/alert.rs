@@ -35,8 +35,13 @@ const CLEAR_EVERY: u64 = 24 * 60 * 60;
 pub(super) enum Posting {
     /// The ruling with this id
     Ruling(u64),
-    /// The notice of this pull request's automatic merge
-    Notice(u64),
+    /// The notice of an automatic merge
+    Notice {
+        /// The work item's issue
+        issue: u64,
+        /// The pull request merged
+        pull_request: u64,
+    },
 }
 
 /// The last failed post, and when it may be tried again
@@ -96,7 +101,10 @@ impl Runner {
             });
         }
         let notice = self.state.notices.first()?;
-        let of = Posting::Notice(notice.pull_request);
+        let of = Posting::Notice {
+            issue: notice.issue,
+            pull_request: notice.pull_request,
+        };
         (!waiting(of)).then(|| Due {
             of,
             relay: None,
@@ -142,7 +150,11 @@ impl Runner {
                     reason,
                     retry_at: at,
                 },
-                Posting::Notice(pull_request) => StepReport::NoticeFailed {
+                Posting::Notice {
+                    issue,
+                    pull_request,
+                } => StepReport::NoticeFailed {
+                    issue,
                     pull_request,
                     reason,
                     retry_at: at,
@@ -159,9 +171,15 @@ impl Runner {
                 }
                 StepReport::Alerted { id }
             }
-            Posting::Notice(pull_request) => {
+            Posting::Notice {
+                issue,
+                pull_request,
+            } => {
                 next.notices.retain(|n| n.pull_request != pull_request);
-                StepReport::Noticed { pull_request }
+                StepReport::Noticed {
+                    issue,
+                    pull_request,
+                }
             }
         };
         self.save(next)?;

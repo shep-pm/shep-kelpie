@@ -113,7 +113,10 @@ fn green_gates_merge_with_no_ruling_and_one_notice_after() {
 
     assert_eq!(
         step(&runner).unwrap(),
-        Some(StepReport::Noticed { pull_request: 71 })
+        Some(StepReport::Noticed {
+            issue: 7,
+            pull_request: 71,
+        })
     );
     let [(webhook, alert)] = rig.alerts.posts().try_into().unwrap();
     assert_eq!(webhook, rig.webhook());
@@ -157,6 +160,7 @@ fn a_notice_the_webhook_refuses_is_tried_again_across_a_restart_and_posted_once(
     assert!(matches!(
         step(&runner).unwrap(),
         Some(StepReport::NoticeFailed {
+            issue: 7,
             pull_request: 71,
             ..
         })
@@ -167,7 +171,10 @@ fn a_notice_the_webhook_refuses_is_tried_again_across_a_restart_and_posted_once(
     let runner = rig.open().unwrap();
     assert_eq!(
         step(&runner).unwrap(),
-        Some(StepReport::Noticed { pull_request: 71 })
+        Some(StepReport::Noticed {
+            issue: 7,
+            pull_request: 71,
+        })
     );
     rig.clock.advance(3600);
     assert_eq!(step(&runner).unwrap(), None);
@@ -242,8 +249,13 @@ fn a_merge_the_forge_refuses_is_caught_up_once_then_parks_and_a_yes_looks_again(
     );
     still_asks(&rig, &runner, id, "merge-refused");
 
-    rig.forge.set_merges_down(false);
+    // The answer gives the next refusal its catch-up again.
     rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::MergeWithdrawn { reason, .. }) if reason == refused
+    ));
+    rig.forge.set_merges_down(false);
     assert!(merged(rig.verdict(&runner)));
     assert_eq!(rig.forge.merges(), [(71, head)]);
 }
