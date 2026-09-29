@@ -135,6 +135,10 @@ impl Runner {
         if let Some(begin) = self.pushed_by_someone_else()? {
             return Ok(begin);
         }
+        // A rework can start on a branch that already changes them.
+        if due && let Some(parked) = self.claude_files_changed(false)? {
+            return Ok(parked);
+        }
         if due && let Some(held) = self.pace(Scope::Turn)?.holds() {
             return Ok(held);
         }

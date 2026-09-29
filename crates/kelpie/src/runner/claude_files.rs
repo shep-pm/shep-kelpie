@@ -86,7 +86,7 @@ mod tests {
     use std::fs;
     use std::sync::Mutex;
 
-    use crate::ports::{Checks, Cost, Usage};
+    use crate::ports::{Checks, Cost, MaintainerReview, Usage};
     use crate::runner::Runner;
     use crate::runner::gate::short;
     use crate::runner::report::StepReport;
@@ -194,6 +194,37 @@ mod tests {
             rig.verdict(&runner);
         }
         assert_eq!(rig.forge.merges(), [(71, head)]);
+    }
+
+    #[test]
+    fn a_rework_of_a_branch_that_changes_them_asks_before_its_first_turn() {
+        let rig = Rig::new("shep");
+        rig.push_by_hand("kelpie/7", ".mcp.json");
+        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+        rig.forge.review(
+            71,
+            MaintainerReview {
+                id: "PRR_71".into(),
+                changes_requested: false,
+                body: "Tidy it up.".into(),
+                comments: vec![],
+            },
+        );
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "start", None);
+        rig.ask(&runner, "rework", Some("71"));
+        let (id, question) = ruling(step(&runner).unwrap());
+        assert!(question.contains("sandbox: .mcp.json."), "{question}");
+        assert!(rig.claude.all_calls().is_empty());
+
+        step(&runner).unwrap(); // the alert
+        rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+        rig.claude
+            .script([Scripted::Reply(Usage::default(), Cost(0))]);
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Ended { .. })
+        ));
     }
 
     #[test]
