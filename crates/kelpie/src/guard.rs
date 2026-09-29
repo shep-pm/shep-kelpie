@@ -6,7 +6,8 @@
 //! worktree sits under, and a pull request title that is not a
 //! conventional commit. It reads the command's own text and, for a commit
 //! or a push in the worker's worktree, the lines it adds or sends. It never
-//! echoes what it matched. A command it cannot read is refused.
+//! echoes what it matched. It refuses the ways of running a command it
+//! knows it cannot read; it is not a shell, and does not find them all.
 //!
 //! The hook runs outside the sandbox, so it runs git the way kelpie's own
 //! worktree steps do, with the worktree's git dirs named and checked. A
@@ -62,17 +63,22 @@ pub fn judge(input: impl Read, home: Option<&Path>, checkout: Checkout<'_>) -> V
     struct ToolInput {
         command: Option<String>,
         isolation: Option<String>,
+        subagent_type: Option<String>,
     }
     let call: Call = match serde_json::from_reader(input) {
         Ok(call) => call,
         Err(e) => return Verdict::Refuse(format!("kelpie cannot read this tool call: {e}")),
     };
     // Kelpie gives each worker its worktree; a subagent gets no other.
+    let isolated = |isolation: Option<&str>| matches!(isolation, Some("worktree" | "remote"));
     if matches!(call.tool_name.as_str(), "Agent" | "Task")
-        && matches!(
-            call.tool_input.isolation.as_deref(),
-            Some("worktree" | "remote")
-        )
+        && (isolated(call.tool_input.isolation.as_deref())
+            || call
+                .tool_input
+                .subagent_type
+                .as_deref()
+                .and_then(|name| agent_isolation(checkout.worktree, name))
+                .is_some_and(|i| isolated(Some(&i))))
     {
         return Verdict::Refuse(
             "a worker's subagents run in its own worktree: leave out `isolation`.".into(),
@@ -105,6 +111,8 @@ struct CallState {
     refusals: Vec<String>,
     commands: usize,
     reads: git::Reads,
+    // Whether an earlier command exported a variable that redirects git.
+    git_redirected: bool,
 }
 
 impl CallState {
@@ -148,6 +156,7 @@ impl Judging<'_> {
                 state.refuse(wrap::FUNCTION.into());
                 continue;
             }
+            state.git_redirected |= wrap::sets_git_redirect(&command.words);
             let run = match wrap::unwrap(&command.words) {
                 Ok(Some(run)) => run,
                 Ok(None) => continue,
@@ -176,7 +185,7 @@ impl Judging<'_> {
                     let git = git::Git {
                         words: run.words,
                         heredocs: &command.heredocs,
-                        redirected: run.git_redirected,
+                        redirected: run.git_redirected || state.git_redirected,
                     };
                     git::judge(git, cwd.as_deref(), home, self.checkout, &mut state.reads)
                 }
@@ -200,8 +209,29 @@ impl Judging<'_> {
     }
 }
 
+// The `isolation` a project subagent's definition in the worktree sets.
+fn agent_isolation(worktree: &Path, name: &str) -> Option<String> {
+    let plain = name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !plain {
+        return None;
+    }
+    let text =
+        fs::read_to_string(worktree.join(".claude/agents").join(format!("{name}.md"))).ok()?;
+    let front = text.strip_prefix("---")?.split("\n---").next()?;
+    front.lines().find_map(|line| {
+        let value = line.trim().strip_prefix("isolation:")?;
+        Some(value.trim().trim_matches(['"', '\'']).to_owned())
+    })
+}
+
 // Where `cd` or `git -C` moves from `cwd`: `None` when it cannot be told.
 fn moved(cwd: Option<&Path>, to: &str, home: Option<&Home>) -> Option<PathBuf> {
+    // A folder the shell works out when it runs.
+    if to.contains(['$', '`', '*', '?', '[']) {
+        return None;
+    }
     match to.strip_prefix('~') {
         Some("") => Some(home?.path.clone()),
         Some(rest) => Some(home?.path.join(rest.strip_prefix('/')?)),

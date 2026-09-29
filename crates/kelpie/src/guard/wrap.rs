@@ -13,15 +13,44 @@ const OTHER_SHELLS: [&str; 12] = [
     "ksh", "mksh", "pdksh", "oksh", "yash", "fish", "csh", "tcsh", "ash", "busybox", "posh", "rc",
 ];
 
-// Variables that point git at another repo, index or config.
-const GIT_REDIRECTS: [&str; 6] = [
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_COMMON_DIR",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_CONFIG_PARAMETERS",
+// `GIT_` variables that change only how git shows or signs what it does.
+// Any other can point git at another repo, index or config.
+const GIT_HARMLESS: [&str; 12] = [
+    "GIT_PAGER",
+    "GIT_EDITOR",
+    "GIT_SEQUENCE_EDITOR",
+    "GIT_AUTHOR_NAME",
+    "GIT_AUTHOR_EMAIL",
+    "GIT_AUTHOR_DATE",
+    "GIT_COMMITTER_NAME",
+    "GIT_COMMITTER_EMAIL",
+    "GIT_COMMITTER_DATE",
+    "GIT_TERMINAL_PROMPT",
+    "GIT_MERGE_AUTOEDIT",
+    "GIT_OPTIONAL_LOCKS",
 ];
+
+/// Whether setting `name` can point git at another repo or config
+pub(super) fn redirects_git(name: &str) -> bool {
+    name.starts_with("GIT_") && !GIT_HARMLESS.contains(&name)
+        || matches!(name, "HOME" | "XDG_CONFIG_HOME")
+}
+
+/// Whether `words` set, for the commands after them, a variable that
+/// redirects git: an `export`, a `declare -x`, or an assignment alone,
+/// which `set -a` would export
+pub(super) fn sets_git_redirect(words: &[String]) -> bool {
+    let names = |words: &[String]| {
+        words
+            .iter()
+            .filter(|w| !w.starts_with('-'))
+            .any(|w| redirects_git(w.split_once('=').map_or(w.as_str(), |(n, _)| n)))
+    };
+    match words.first().map(|w| program(w)) {
+        Some("export" | "declare" | "typeset" | "local" | "readonly") => names(&words[1..]),
+        _ => words.iter().all(|w| assignment(w).is_some()) && names(words),
+    }
+}
 
 /// A command with its wrappers taken off
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,7 +76,7 @@ pub(super) fn unwrap(mut words: &[String]) -> Result<Option<Unwrapped<'_>>, Stri
             return Ok(None);
         };
         if let Some((name, _)) = assignment(first) {
-            git_redirected |= GIT_REDIRECTS.contains(&name);
+            git_redirected |= redirects_git(name);
             words = &words[1..];
             continue;
         }
@@ -59,7 +88,7 @@ pub(super) fn unwrap(mut words: &[String]) -> Result<Option<Unwrapped<'_>>, Stri
                 git_redirected |= rest[..skip]
                     .iter()
                     .filter_map(|w| assignment(w))
-                    .any(|(name, _)| GIT_REDIRECTS.contains(&name));
+                    .any(|(name, _)| redirects_git(name));
                 &rest[skip..]
             }
             "timeout" => {
@@ -264,6 +293,25 @@ mod tests {
         assert!(unwrap(&words).unwrap().unwrap().moved);
         let words = w("env -i GIT_WORK_TREE=. git push");
         assert!(unwrap(&words).unwrap().unwrap().git_redirected);
+        for line in [
+            "GIT_CONFIG_COUNT=1 git push",
+            "GIT_CONFIG_GLOBAL=cfg git push",
+            "HOME=. git push",
+            "XDG_CONFIG_HOME=x git push",
+        ] {
+            assert!(unwrap(&w(line)).unwrap().unwrap().git_redirected, "{line}");
+        }
+        for line in [
+            "export GIT_DIR=/x",
+            "declare -x GIT_WORK_TREE=.",
+            "export GIT_DIR",
+            "GIT_DIR=/x",
+        ] {
+            assert!(sets_git_redirect(&w(line)), "{line}");
+        }
+        for line in ["export GIT_PAGER=cat", "A=1", "GIT_DIR=/x git log"] {
+            assert!(!sets_git_redirect(&w(line)), "{line}");
+        }
         let words = w("GIT_PAGER=cat git log");
         assert!(!unwrap(&words).unwrap().unwrap().git_redirected);
     }

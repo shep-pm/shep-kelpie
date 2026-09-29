@@ -193,7 +193,7 @@ fn a_message_naming_the_home_folder_is_refused_without_echoing_it() {
 #[test]
 fn the_home_folder_in_a_command_but_not_its_message_goes_through() {
     for command in [
-        "cd /home/tester/.kelpie/wt/koji/7 && git commit -m 'fix: x'",
+        "cd /home/tester/.kelpie/wt/koji/7 && git status",
         "git -C /home/tester/.kelpie/wt/koji/7 status",
         "gh pr create --title 'fix: x' --body '~/notes and /home/testers/x and /home/tester-2'",
         "cat /home/tester/.kelpie/wt/koji/7/src/a.rs",
@@ -372,23 +372,132 @@ fn git_pointed_at_another_repo_or_run_by_alias_is_refused() {
         "git --git-dir=.git commit -m 'fix: x'",
         "GIT_DIR=.git git push",
         "env GIT_WORK_TREE=. git commit -m 'fix: x'",
-        "git -c 'alias.p=!git push' p",
-        "git --config-env alias.p=P p",
     ] {
         assert!(matches!(bash(command), Verdict::Refuse(_)), "{command}");
     }
+    // Aliases, from the command line, the environment or a config the
+    // worker wrote: git honours them all, and none is a built-in's name.
+    for command in [
+        "git p",
+        "git -c alias.p=push p",
+        "git -c ALIAS.p=push p",
+        "git -c alias.a=b -c alias.b=push a",
+        "git -c alias.CI=commit ci -m 'fix: /home/tester/x'",
+        "git --config-env=ALIAS.p=P p",
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p",
+    ] {
+        let why = refusal(bash(command));
+        assert!(why.contains("git's own commands"), "{command}: {why}");
+    }
+    // Config that could change what a commit or push does.
+    for command in [
+        "git -c user.name=t commit -m 'fix: x'",
+        "git -c remote.origin.push=HEAD@{1}:refs/heads/x push",
+        "git -c include.path=cfg push",
+        "GIT_CONFIG_GLOBAL=cfg git push",
+        "HOME=. git push",
+        "XDG_CONFIG_HOME=x git commit -m 'fix: x'",
+    ] {
+        assert!(matches!(bash(command), Verdict::Refuse(_)), "{command}");
+    }
+    assert_eq!(bash("git -c color.ui=false log --oneline"), Verdict::Allow);
+}
+
+#[test]
+fn an_exported_git_variable_redirects_the_rest_of_the_call() {
+    for command in [
+        "export GIT_DIR=/x; git push",
+        "GIT_DIR=/x; export GIT_DIR; git push",
+        "declare -x GIT_WORK_TREE=.; git commit -m 'fix: x'",
+        "set -a; GIT_INDEX_FILE=/x; git commit -m 'fix: x'",
+    ] {
+        let why = refusal(bash(command));
+        assert!(why.contains("GIT_"), "{command}: {why}");
+    }
+    assert_eq!(
+        bash("export GIT_PAGER=cat; git push origin HEAD"),
+        Verdict::Allow
+    );
+}
+
+// The push reads each refspec's source, not HEAD.
+#[test]
+fn a_push_of_another_source_reads_that_source() {
     let tree = WorkerTree::new();
+    tree.git(&["checkout", "--quiet", "-b", "leaky"]);
     tree.write("notes.md", "/home/tester/x\n");
     tree.git(&["add", "notes.md"]);
     tree.git(&["commit", "--quiet", "-m", "docs: notes"]);
+    tree.git(&["checkout", "--quiet", "kelpie/7"]);
     for command in [
-        "git -c alias.p=push p",
-        "git -c alias.sh=push sh origin HEAD",
+        "git push origin leaky:refs/heads/kelpie/7",
+        "git push origin +leaky",
+        "git push -u origin leaky:kelpie/7 HEAD",
     ] {
         let why = refusal(tree.bash(command));
         assert!(why.contains("`notes.md`"), "{command}: {why}");
     }
-    assert_eq!(bash("git -c alias.st=status st"), Verdict::Allow);
+    assert_eq!(tree.bash("git push origin HEAD"), Verdict::Allow);
+    assert_eq!(tree.bash("git push origin :refs/heads/old"), Verdict::Allow);
+
+    tree.git(&["merge", "--quiet", "--ff-only", "leaky"]);
+    tree.git(&["reset", "--quiet", "--hard", "HEAD~"]);
+    let why = refusal(tree.bash("git push origin 'HEAD@{1}:refs/heads/kelpie/7'"));
+    assert!(why.contains("`notes.md`"), "{why}");
+    for command in [
+        "git push --tags",
+        "git push origin --follow-tags",
+        "git push origin -- -x",
+    ] {
+        assert!(
+            matches!(tree.bash(command), Verdict::Refuse(_)),
+            "{command}"
+        );
+    }
+}
+
+// A folder that is not there yet is one the call makes: not the worktree.
+#[test]
+fn a_commit_or_push_in_a_folder_the_call_makes_is_refused() {
+    for command in [
+        "mkdir fresh && cd fresh && git init -q && git commit -m 'fix: x' && git push https://example.invalid/x",
+        "git clone https://example.invalid/x /tmp/kelpie-no-such-clone && cd /tmp/kelpie-no-such-clone && git push",
+    ] {
+        let why = refusal(bash(command));
+        assert!(
+            why.contains("outside this worktree's own repo"),
+            "{command}: {why}"
+        );
+    }
+}
+
+#[test]
+fn a_project_subagent_defined_with_isolation_is_refused() {
+    let tree = WorkerTree::new();
+    tree.write(
+        ".claude/agents/away.md",
+        "---\nname: away\nisolation: worktree\n---\nGo.\n",
+    );
+    tree.write(".claude/agents/here.md", "---\nname: here\n---\nStay.\n");
+    let agent = |name: &str| {
+        let call = json!({ "tool_name": "Agent", "cwd": tree.path(), "tool_input": {
+            "prompt": "go", "subagent_type": name,
+        } });
+        let common = tree.repo().join(".git");
+        let worktree = tree.path();
+        let checkout = Checkout {
+            git_common_dir: &common,
+            worktree: &worktree,
+        };
+        judge(call.to_string().as_bytes(), Some(Path::new(HOME)), checkout)
+    };
+    assert!(matches!(agent("away"), Verdict::Refuse(_)));
+    assert_eq!(agent("here"), Verdict::Allow);
+    assert_eq!(
+        agent("../away"),
+        Verdict::Allow,
+        "only a plain name is read"
+    );
 }
 
 #[test]
