@@ -29,7 +29,8 @@ impl Runner {
                 }));
             }
         };
-        // An issue in flight is not passed over: it is being worked on.
+        // An issue in flight is left out, and not listed in `skipped`: it is
+        // being worked on, not passed over.
         ready.retain(|issue| self.state.item(issue.number).is_none());
         // An adopted pull request, then one asking for a rework, goes before
         // any ready issue, and one that cannot start is passed over like one.

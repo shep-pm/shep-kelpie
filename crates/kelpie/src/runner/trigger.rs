@@ -393,6 +393,13 @@ mod tests {
     }
 
     #[test]
+    fn issue_lists_read_as_prose() {
+        assert_eq!(issue_list(&[7]), "#7");
+        assert_eq!(issue_list(&[7, 9]), "#7 and #9");
+        assert_eq!(issue_list(&[7, 9, 12]), "#7, #9 and #12");
+    }
+
+    #[test]
     fn is_no_or_answer_refuses_every_shape_of_yes() {
         for refused in [
             "3 yes",
