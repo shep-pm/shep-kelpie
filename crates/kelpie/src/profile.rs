@@ -68,9 +68,20 @@ const PM_ONLY: [&str; 5] = [
 
 // `gh api` could merge or relabel around the rules above, and `gh auth token`
 // prints the maintainer's token. No worker needs either.
-// `Monitor` runs a command or opens a WebSocket that no hook judges, and no
-// worker needs a background watch.
-const TOOLS_DENY: [&str; 1] = ["Monitor"];
+// Tools no worker needs that reach past its fence: `Monitor` runs a command
+// or WebSocket no hook judges; `RemoteTrigger` starts cloud agents on the
+// maintainer's account with none of this file; `Workflow` agents escape the
+// worker's pacing; and kelpie, not the worker, owns its worktree.
+const TOOLS_DENY: [&str; 5] = [
+    "Monitor",
+    "RemoteTrigger",
+    "Workflow",
+    "EnterWorktree",
+    "ExitWorktree",
+];
+
+// What `kelpie guard` judges: every command, and a subagent's isolation.
+const GUARDED_TOOLS: &str = "Bash|Agent|Task";
 
 const GH_DENY: [&str; 4] = [
     "Bash(gh api)",
@@ -244,7 +255,7 @@ impl WorkerProfile<'_> {
             self.worktree,
         ]
         .map(|p| shell_quote(&p.to_string_lossy()));
-        pre.push(entry(Some("Bash"), &guard.join(" ")));
+        pre.push(entry(Some(GUARDED_TOOLS), &guard.join(" ")));
         let mut post = Vec::new();
         for hook in self.guard_hooks {
             let e = entry(
@@ -579,9 +590,17 @@ mod tests {
     }
 
     #[test]
-    fn the_monitor_tool_is_denied() {
+    fn tools_that_reach_past_the_fence_are_denied() {
         let deny = settings(&[])["permissions"]["deny"].clone();
-        assert!(strings(&deny).contains(&"Monitor"), "{deny}");
+        for tool in [
+            "Monitor",
+            "RemoteTrigger",
+            "Workflow",
+            "EnterWorktree",
+            "ExitWorktree",
+        ] {
+            assert!(strings(&deny).contains(&tool), "{tool}: {deny}");
+        }
     }
 
     #[test]
@@ -669,12 +688,12 @@ mod tests {
     }
 
     #[test]
-    fn every_worker_has_kelpies_guard_on_bash_with_no_project_hooks() {
+    fn every_worker_has_kelpies_guard_on_bash_and_agents_with_no_project_hooks() {
         let s = settings(&[]);
         assert_eq!(
             s["hooks"]["PreToolUse"][1],
             json!({
-                "matcher": "Bash",
+                "matcher": "Bash|Agent|Task",
                 "hooks": [{
                     "type": "command",
                     "command": r"'/opt/kelpie'\''s bin/kelpie' 'guard' '/k/repos/shep/.git' '/k/wt/shep/7'",
