@@ -1,5 +1,5 @@
 # A project's settings, read once when its runner starts. Every key is
-# required except `pacing.enabled`, `worker.allowed_domains`,
+# required except the `[gemini]` table, `pacing.enabled`, `worker.allowed_domains`,
 # `worker.build_env`, `worker.instructions_file` and `worker.turn_timeout`,
 # which a file written before them may leave out.
 # This file holds the first build's defaults, for shep.
@@ -46,6 +46,16 @@ loop_guard = 8
 [coderabbit]
 enabled = true
 divisor = 1000
+
+# Gemini Code Assist rounds run after CI and before CodeRabbit's, summoned
+# by a `/gemini review` comment. Off when this table is absent. A pull
+# request gets at most `max_rounds` Gemini reviews (1 to 4), counting any
+# already on it, then moves on to CodeRabbit. The repo's
+# `.gemini/config.yaml` should turn off the review and summary Gemini posts
+# when a pull request opens, so only kelpie's summons spend reviews.
+[gemini]
+enabled = false
+max_rounds = 3
 
 # Turn `enabled` off for a stretch when usage limits do not matter: neither
 # the daily allowance nor the 5-hour window then holds anything, and `status`

@@ -109,6 +109,12 @@ mod tests {
                 "since": null,
                 "queue": [],
                 "window": { "quota": 1, "summons": [], "opens": null },
+            }, {
+                "kind": "gemini",
+                "holder": null,
+                "since": null,
+                "queue": [],
+                "window": { "quota": 100, "summons": [], "opens": null },
             }] })
         );
         let me = std::process::id();

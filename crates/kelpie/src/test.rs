@@ -25,6 +25,7 @@ use crate::work_item::{CallRecord, Known, Phase, Turn, WorkItem};
 mod alerts;
 mod coderabbit;
 mod forge;
+mod gemini;
 mod leases;
 mod relay;
 
@@ -101,7 +102,8 @@ pub(crate) fn a_work_item() -> WorkItem {
         }),
         resume: None,
         review_call: crate::work_item::ReviewCallState::Idle,
-        coderabbit: crate::work_item::CodeRabbitTally::default(),
+        coderabbit: crate::work_item::OutsideTally::default(),
+        gemini: crate::work_item::OutsideTally::default(),
         known: Known {
             labels: vec!["review please".into()],
             ready: false,
@@ -130,6 +132,9 @@ const EXAMPLE_REPO: &str = "~/.kelpie/repos/shep";
 /// The CodeRabbit gate as `settings.example.toml` sets it, and turned off
 pub(crate) const CODERABBIT_ON: &str = "[coderabbit]\nenabled = true\n";
 const CODERABBIT_OFF: &str = "[coderabbit]\nenabled = false\n";
+
+/// Gemini's rounds as `settings.example.toml` sets them
+const GEMINI_OFF: &str = "[gemini]\nenabled = false\n";
 
 /// The file a killed worker leaves in its worktree, to find after a restart
 pub(crate) const LEFT_BEHIND: &str = "left-behind.txt";
@@ -540,19 +545,20 @@ impl Rig {
     pub(crate) fn new(project: &str) -> Self {
         let home = tempfile::tempdir().unwrap();
         let meter = FakeMeter::idle();
+        let clock = FakeClock::at(Self::EPOCH);
         let rig = Self {
             project: ProjectName::try_from(project).unwrap(),
             claude: FakeClaude {
                 meter: Some(meter.clone()),
                 ..FakeClaude::default()
             },
-            forge: FakeForge::new(home.path().join("origin.git")),
+            forge: FakeForge::new(home.path().join("origin.git"), clock.clone()),
             meter,
             reviewer: FakeReviewer::default(),
             relay: Arc::new(FakeRelay::default()),
             alerts: FakeAlerts::default(),
             leases: FakeLeases::default(),
-            clock: FakeClock::at(Self::EPOCH),
+            clock,
             home,
         };
         rig.make_repo();
@@ -562,6 +568,7 @@ impl Rig {
         let example = include_str!("../settings.example.toml");
         assert!(example.contains(EXAMPLE_REPO), "the example's repo moved");
         assert!(example.contains(CODERABBIT_ON), "the example's gate moved");
+        assert!(example.contains(GEMINI_OFF), "the example's Gemini moved");
         let settings = example
             .replace(EXAMPLE_REPO, &rig.repo().display().to_string())
             .replace(CODERABBIT_ON, CODERABBIT_OFF);
@@ -687,6 +694,11 @@ impl Rig {
     /// Turns the CodeRabbit gate on, as the example settings have it for shep
     pub(crate) fn coderabbit_on(&self) {
         self.edit_settings(|s| s.replace(CODERABBIT_OFF, CODERABBIT_ON));
+    }
+
+    /// Turns Gemini's rounds on
+    pub(crate) fn gemini_on(&self) {
+        self.edit_settings(|s| s.replace(GEMINI_OFF, "[gemini]\nenabled = true\n"));
     }
 
     pub(crate) fn edit_settings(&self, edit: impl FnOnce(String) -> String) {

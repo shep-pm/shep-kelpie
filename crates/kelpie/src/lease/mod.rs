@@ -25,6 +25,9 @@ pub const GPU: &str = "gpu";
 /// The CodeRabbit lease's name: one review window for the whole account
 pub const CODERABBIT: &str = "coderabbit";
 
+/// The Gemini lease's name: one review window for the whole account
+pub const GEMINI: &str = "gemini";
+
 /// What a book lease is for, as a runner and the dog name it
 // wire format: changing this is a breaking change to runner metrics
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -35,6 +38,11 @@ impl LeaseKind {
     /// The CodeRabbit window's lease
     pub fn coderabbit() -> Self {
         Self(CODERABBIT.to_owned())
+    }
+
+    /// The Gemini window's lease
+    pub fn gemini() -> Self {
+        Self(GEMINI.to_owned())
     }
 
     /// The name as written

@@ -7,9 +7,12 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use super::FakeClock;
 use super::coderabbit::FakeCodeRabbit;
+use super::gemini::FakeGemini;
 use crate::board::{Blocker, OpenPullRequest, READY, ReadyIssue};
 use crate::coderabbit::Activity;
+use crate::gemini::{Activity as GeminiActivity, SUMMON};
 use crate::ports::{
     Checks, Forge, ForgeError, Issue, MaintainerReview, PullRequest, PullRequestState, Reviewed,
     Visibility,
@@ -46,6 +49,8 @@ pub(crate) struct FakeForge {
     reviews: Arc<Mutex<HashMap<u64, MaintainerReview>>>,
     /// Pull requests' labels, and what CodeRabbit posts
     pub(crate) coderabbit: FakeCodeRabbit,
+    /// What Gemini posts, and the summons posted to it
+    pub(crate) gemini: FakeGemini,
 }
 
 /// A pull request on the fake forge. Its head is its branch on the rig's
@@ -63,8 +68,9 @@ struct FakePullRequest {
 pub(crate) const VIEWER: &str = "the-maintainer";
 
 impl FakeForge {
-    /// A public repo whose pull requests' branches live on `origin`, a bare repo
-    pub(crate) fn new(origin: PathBuf) -> Self {
+    /// A public repo whose pull requests' branches live on `origin`, a bare
+    /// repo, stamping what its bots post by `clock`
+    pub(crate) fn new(origin: PathBuf, clock: FakeClock) -> Self {
         Self {
             visibility: Arc::new(Mutex::new(Visibility::Public)),
             missing: Arc::default(),
@@ -91,6 +97,7 @@ impl FakeForge {
             merges: Arc::default(),
             reviews: Arc::default(),
             coderabbit: FakeCodeRabbit::default(),
+            gemini: FakeGemini::new(clock),
         }
     }
 
@@ -409,6 +416,9 @@ impl Forge for FakeForge {
             return Err(ForgeError::Failed("comments are down".into()));
         }
         self.opened(number)?;
+        if body == SUMMON {
+            self.gemini.summoned(number);
+        }
         self.comments
             .lock()
             .unwrap()
@@ -448,7 +458,16 @@ impl Forge for FakeForge {
         self.coderabbit.activity(number)
     }
 
+    fn gemini(&self, _repo: &ForgeSlug, number: u64) -> Result<GeminiActivity, ForgeError> {
+        self.opened(number)?;
+        self.gemini.activity(number)
+    }
+
     fn resolve_thread(&self, _repo: &ForgeSlug, thread: &str) -> Result<(), ForgeError> {
+        if self.gemini.knows(thread) {
+            self.gemini.settle(thread);
+            return self.coderabbit.record_resolved(thread);
+        }
         self.coderabbit.resolve(thread)
     }
 

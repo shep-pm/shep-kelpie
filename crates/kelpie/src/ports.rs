@@ -15,11 +15,11 @@ use serde::{Deserialize, Serialize};
 #[cfg(doc)]
 use crate::board::READY;
 use crate::board::{OpenPullRequest, ReadyIssue};
-use crate::coderabbit::Activity;
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
 use crate::settings::{Effort, ForgeSlug};
 use crate::webhook::Webhook;
+use crate::{coderabbit, gemini};
 
 /// Seconds since the Unix epoch
 // wire format: changing this is a breaking change to the state file
@@ -131,7 +131,15 @@ pub trait Forge: Send {
     /// # Errors
     ///
     /// [`ForgeError`] when the forge cannot be asked or its answer read.
-    fn coderabbit(&self, repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError>;
+    fn coderabbit(&self, repo: &ForgeSlug, number: u64)
+    -> Result<coderabbit::Activity, ForgeError>;
+
+    /// What Gemini, or a summon of it, has posted on pull request `number`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn gemini(&self, repo: &ForgeSlug, number: u64) -> Result<gemini::Activity, ForgeError>;
 
     /// Resolves review thread `thread`
     ///

@@ -76,7 +76,7 @@ impl Runner {
         ) {
             return Err(DropError::Merging(item.issue));
         }
-        if matches!(item.phase, Phase::CodeRabbit(_)) {
+        if item.phase.outside().is_some() {
             self.leave_round();
         }
         match self.finish(false).map_err(DropError::State)? {

@@ -6,8 +6,8 @@
 //! the worker's next turn, naming the files. A conflict the worker left
 //! standing parks it on a ruling. A pending run, or none yet, waits for the
 //! next step. A red run is the worker's next turn, naming the checks that
-//! failed. A green run starts a CodeRabbit round while one is owed, and
-//! otherwise raises the merge ruling. A project without CI skips the checks.
+//! failed. A green run starts a Gemini or CodeRabbit round while one is
+//! owed, and otherwise raises the merge ruling. A project without CI skips the checks.
 
 use super::Runner;
 use super::report::{Begin, StepReport};
@@ -99,11 +99,11 @@ impl Runner {
         }
     }
 
-    // Green CI goes to a CodeRabbit round while one is owed, then to the merge
-    // ruling, with the pull request handed back `ready-for-human`.
+    // Green CI goes to each outside reviewer's round while one is owed, then
+    // to the merge ruling, with the pull request handed back `ready-for-human`.
     fn passed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
-        if self.coderabbit_due() {
-            return self.start_round(head);
+        if let Some(reviewer) = self.outside_due() {
+            return self.start_round(reviewer, head);
         }
         if let Err(reason) = self.hand_back(number) {
             return Ok(self.gate_failed(reason));

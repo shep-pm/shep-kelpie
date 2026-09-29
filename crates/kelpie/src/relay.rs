@@ -109,8 +109,8 @@ impl Wants {
             | RulingKind::Closed
             | RulingKind::ReviewGuard { .. }
             | RulingKind::FixNotPushed { .. }
-            | RulingKind::CodeRabbitCap { .. }
-            | RulingKind::CodeRabbitSilent { .. }
+            | RulingKind::OutsideCap { .. }
+            | RulingKind::OutsideSilent { .. }
             | RulingKind::TurnTimeout { .. }
             | RulingKind::TurnFailed { .. }
             | RulingKind::ForeignChange { .. } => Self::YesOrNo,

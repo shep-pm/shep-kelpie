@@ -6,6 +6,8 @@
 //! the reviewed commit comes from the walkthrough's own markers, never from
 //! that range. Pure: the forge fetches, this reads.
 
+use crate::outside::{CLOCK_SLACK, one_line};
+pub use crate::outside::{Comment, Reading, Thread};
 use crate::ports::{Finding, Severity, Timestamp};
 
 /// Everything CodeRabbit has posted on one pull request
@@ -19,15 +21,6 @@ pub struct Activity {
     pub threads: Vec<Thread>,
 }
 
-/// One of CodeRabbit's conversation comments, as last edited
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Comment {
-    /// Its text
-    pub body: String,
-    /// When it was last edited: the walkthrough is edited in place
-    pub at: Timestamp,
-}
-
 /// One review CodeRabbit posted
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Review {
@@ -39,37 +32,6 @@ pub struct Review {
     pub at: Timestamp,
 }
 
-/// A review thread CodeRabbit opened
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Thread {
-    /// The forge's id for it, which resolving it takes
-    pub id: String,
-    /// Whether it is resolved
-    pub resolved: bool,
-    /// The file it is on
-    pub path: String,
-    /// The line it is on, if it still maps to one
-    pub line: Option<u32>,
-    /// Its first comment: the finding
-    pub body: String,
-}
-
-/// What became of a summon, read at one moment
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Reading {
-    /// A review covers the head
-    Reviewed,
-    /// A review is running
-    Processing,
-    /// CodeRabbit refused, quoting when its window opens
-    Refused {
-        /// When the window opens
-        opens: Timestamp,
-    },
-    /// Nothing yet
-    Silent,
-}
-
 // The comment CodeRabbit edits in place, found by what it says.
 const STICKY: [&str; 3] = [
     "## Walkthrough",
@@ -78,9 +40,8 @@ const STICKY: [&str; 3] = [
 ];
 const LIMIT: &str = "Review limit reached";
 
-// A refusal stamped this long before the summon is still its answer. One a
-// minute older quotes the same window, so misreading it costs nothing.
-const CLOCK_SLACK: u64 = 60;
+// A refusal a minute older than the summon quotes the same window, so
+// misreading it costs nothing.
 const WAITS: [&str; 2] = [
     "Next included review available in ",
     "next included review will be available in ",
@@ -256,21 +217,11 @@ fn outside_details(body: &str) -> String {
     kept
 }
 
-// A findings file holds one finding a line, fields split by `|`.
-fn one_line(text: &str) -> String {
-    const MOST: usize = 600;
-    let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let flat = flat.replace('|', "/");
-    match flat.char_indices().nth(MOST) {
-        Some((cut, _)) => format!("{}...", &flat[..cut]),
-        None => flat,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::gh::coderabbit::{parse_comments, parse_reviews, parse_threads};
+    use crate::adapters::gh::coderabbit::{BOT_GRAPHQL, parse_comments, parse_reviews};
+    use crate::adapters::gh::outside::parse_threads;
 
     // Recorded from shep with the gh adapter's own calls: its sticky holds
     // a walkthrough up to ce143d9 and a limit block quoting the head.
@@ -291,7 +242,7 @@ mod tests {
         Activity {
             comments: parse_comments(comments.as_bytes()).unwrap(),
             reviews: parse_reviews(reviews.as_bytes()).unwrap(),
-            threads: parse_threads(threads.as_bytes()).unwrap(),
+            threads: parse_threads(threads.as_bytes(), BOT_GRAPHQL).unwrap(),
         }
     }
 
@@ -430,6 +381,7 @@ mod tests {
             path: "a.rs".into(),
             line: Some(3),
             body: "_🟡 Minor_\n\nThis drops the error.\n\nIt matters.".into(),
+            review: None,
         };
         assert_eq!(finding(&thread).what, "This drops the error. It matters.");
     }
@@ -473,6 +425,7 @@ mod tests {
             path: "a.rs".into(),
             line: None,
             body: format!("_⚠️ Potential issue_ | {label}\n\n**Title.**\n\nWhy."),
+            review: None,
         };
         assert_eq!(finding(&thread("_🟠 Major_")).severity, Severity::High);
         assert_eq!(finding(&thread("_🔴 Critical_")).severity, Severity::High);
@@ -513,14 +466,5 @@ mod tests {
         assert_eq!(read("1 hour and 5 minutes."), Some(3900));
         assert_eq!(read("a moment."), None);
         assert_eq!(read("18446744073709551615 hours."), Some(u64::MAX));
-    }
-
-    #[test]
-    fn a_long_finding_is_cut_to_one_line() {
-        let long = "word ".repeat(200);
-        let cut = one_line(&long);
-        assert_eq!(cut.chars().count(), 603);
-        assert!(cut.ends_with("..."));
-        assert_eq!(one_line("a |b\n c"), "a /b c");
     }
 }

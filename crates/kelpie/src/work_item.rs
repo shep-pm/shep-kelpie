@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::board::WorkerModel;
+use crate::outside::Outside;
 use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage, Verdict};
 
 mod spend;
@@ -60,7 +61,10 @@ pub struct WorkItem {
     pub review_call: ReviewCallState,
     /// Its CodeRabbit rounds so far
     #[serde(default)]
-    pub coderabbit: CodeRabbitTally,
+    pub coderabbit: OutsideTally,
+    /// Its Gemini rounds so far
+    #[serde(default)]
+    pub gemini: OutsideTally,
     /// The pull request's labels, ready state and head, as kelpie and its
     /// worker leave them. A mismatch at the gate is a change kelpie did not make.
     #[serde(default)]
@@ -85,26 +89,27 @@ pub struct Conflict {
     pub turns: u32,
 }
 
-/// A work item's CodeRabbit rounds so far
+/// A work item's rounds with one outside reviewer so far
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct CodeRabbitTally {
+pub struct OutsideTally {
     /// Rounds whose review covered the head
     pub rounds: u32,
     /// Whether the maintainer let the rounds past their cap
     pub cap_cleared: bool,
-    /// Whether CodeRabbit is satisfied with the code as it stands. A
-    /// worker's turn changes the code, so it clears this.
+    /// Whether the reviewer is satisfied with the code as it stands, or,
+    /// for Gemini, its rounds reached their cap. A worker's turn changes the
+    /// code, so it clears this.
     pub satisfied: bool,
 }
 
-/// Where one CodeRabbit round stands
+/// Where one outside reviewer's round stands
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "stage", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum CodeRabbitStage {
-    /// Waiting for the CodeRabbit lease, to summon a review of `head`
+pub enum OutsideStage {
+    /// Waiting for the reviewer's lease, to summon a review of `head`
     Lease {
         /// The head CI passed on
         head: String,
@@ -112,12 +117,17 @@ pub enum CodeRabbitStage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         readied: Option<Timestamp>,
     },
-    /// The label went on at `at`. The lease goes back once CodeRabbit answers.
+    /// The summon went out at `at`. The lease goes back once the reviewer
+    /// answers.
     Summoned {
         /// The head the summon is for
         head: String,
-        /// When the label went on
+        /// When the label went on, or the comment was about to be posted
         at: Timestamp,
+        /// Whether the summon comment is known posted. Gemini's round saves
+        /// the stage before posting, so a restart posts it at most once.
+        #[serde(default = "posted", skip_serializing_if = "Clone::clone")]
+        posted: bool,
     },
     /// The open threads of a review of `head`, judged in order
     Judging {
@@ -135,7 +145,11 @@ pub enum CodeRabbitStage {
     },
 }
 
-/// A CodeRabbit thread still open, as the judge reads it
+fn posted() -> bool {
+    true
+}
+
+/// An outside reviewer's thread still open, as the judge reads it
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -252,7 +266,9 @@ pub enum Phase {
     },
     /// A CodeRabbit round, between green CI and the merge ruling
     #[serde(rename = "coderabbit")]
-    CodeRabbit(CodeRabbitStage),
+    CodeRabbit(OutsideStage),
+    /// A Gemini round, between green CI and a CodeRabbit round
+    Gemini(OutsideStage),
     /// Parked on a ruling
     Ruling {
         /// The ruling's id
@@ -368,7 +384,48 @@ pub enum ReviewStage {
     },
 }
 
+impl Phase {
+    /// The outside reviewer whose round this is, and where it stands
+    pub fn outside(&self) -> Option<(Outside, &OutsideStage)> {
+        match self {
+            Self::CodeRabbit(stage) => Some((Outside::CodeRabbit, stage)),
+            Self::Gemini(stage) => Some((Outside::Gemini, stage)),
+            _ => None,
+        }
+    }
+
+    /// `reviewer`'s round, at `stage`
+    pub fn round(reviewer: Outside, stage: OutsideStage) -> Self {
+        match reviewer {
+            Outside::CodeRabbit => Self::CodeRabbit(stage),
+            Outside::Gemini => Self::Gemini(stage),
+        }
+    }
+}
+
 impl WorkItem {
+    /// Its rounds with `reviewer` so far
+    pub fn tally(&self, reviewer: Outside) -> OutsideTally {
+        match reviewer {
+            Outside::CodeRabbit => self.coderabbit,
+            Outside::Gemini => self.gemini,
+        }
+    }
+
+    /// Its rounds with `reviewer`, to change
+    pub fn tally_mut(&mut self, reviewer: Outside) -> &mut OutsideTally {
+        match reviewer {
+            Outside::CodeRabbit => &mut self.coderabbit,
+            Outside::Gemini => &mut self.gemini,
+        }
+    }
+
+    /// Clears every outside reviewer's satisfaction: the code changed
+    pub fn unsatisfy(&mut self) {
+        self.coderabbit.satisfied = false;
+        self.gemini.satisfied = false;
+    }
+
     /// What its calls have cost so far
     pub fn cost(&self) -> Cost {
         Cost(self.calls.iter().map(|c| c.cost.0).sum())
@@ -473,6 +530,7 @@ mod tests {
                 "resume": null,
                 "review_call": { "state": "idle" },
                 "coderabbit": { "rounds": 0, "cap_cleared": false, "satisfied": false },
+                "gemini": { "rounds": 0, "cap_cleared": false, "satisfied": false },
                 "known": { "labels": ["review please"], "ready": false },
                 "qwen": { "rounds": 0, "seconds": 0 },
                 "calls": [{
@@ -524,13 +582,24 @@ mod tests {
             })
         );
         assert_eq!(
-            value(Phase::CodeRabbit(CodeRabbitStage::Summoned {
+            value(Phase::CodeRabbit(OutsideStage::Summoned {
                 head: "c0ffee".into(),
                 at: Timestamp(12),
+                posted: true,
             })),
             json!({ "state": "coderabbit", "stage": "summoned", "head": "c0ffee", "at": 12 })
         );
-        let judging = Phase::CodeRabbit(CodeRabbitStage::Judging {
+        let unposted = Phase::Gemini(OutsideStage::Summoned {
+            head: "c0ffee".into(),
+            at: Timestamp(12),
+            posted: false,
+        });
+        let pinned = json!({
+            "state": "gemini", "stage": "summoned", "head": "c0ffee", "at": 12, "posted": false
+        });
+        assert_eq!(value(unposted.clone()), pinned);
+        assert_eq!(serde_json::from_value::<Phase>(pinned).unwrap(), unposted);
+        let judging = Phase::CodeRabbit(OutsideStage::Judging {
             head: "c0ffee".into(),
             threads: vec![OpenThread {
                 id: "PRRT_1".into(),

@@ -12,9 +12,10 @@ use super::Runner;
 use super::gate::short;
 use super::report::{Begin, StepReport};
 use super::rework::HUMAN;
+use crate::outside::Outside;
 use crate::ports::Timestamp;
 use crate::state::{Fix, ProjectState, Resume, Ruling, RulingKind, StateError};
-use crate::work_item::{CodeRabbitStage, Known, Phase, Review, Turn, WorkItem, foreign_change};
+use crate::work_item::{Known, OutsideStage, Phase, Review, Turn, WorkItem, foreign_change};
 use crate::worktree;
 
 /// The prompt for a turn resumed after the maintainer accepts a timed-out
@@ -120,10 +121,10 @@ impl Runner {
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
         let ruling = next.rulings.remove(at);
-        let lifts_cap = matches!(
-            (&answer, &ruling.kind),
-            (Answer::Yes, RulingKind::CodeRabbitCap { .. })
-        );
+        let lifts_cap = match (&answer, &ruling.kind) {
+            (Answer::Yes, RulingKind::OutsideCap { reviewer, .. }) => Some(*reviewer),
+            _ => None,
+        };
         // These ask the maintainer to fix the branch, so a yes vouches for its head.
         let vouches = matches!(
             (&answer, &ruling.kind),
@@ -158,7 +159,9 @@ impl Runner {
         }
         let moved = decide(id, answer, ruling, now, head_moved)?;
         if let Some(item) = next.work_item.as_mut().filter(|item| parked_on(item)) {
-            item.coderabbit.cap_cleared |= lifts_cap;
+            if let Some(reviewer) = lifts_cap {
+                item.tally_mut(reviewer).cap_cleared = true;
+            }
             if vouches {
                 item.known.head = None;
             }
@@ -180,7 +183,7 @@ impl Runner {
                             let (repo, branch) = (&self.settings.repo, &item.branch);
                             worktree::adopt(repo, &item.worktree, branch, &from, &to)
                                 .map_err(|e| RuleError::Adopt(to, e.to_string()))?;
-                            item.coderabbit.satisfied = false;
+                            item.unsatisfy();
                             Phase::Review(Review::first())
                         }
                         _ => Phase::Ci {
@@ -338,12 +341,17 @@ fn comment(kind: &RulingKind) -> Option<String> {
             "A fix for review findings ended without a push, so those findings still hold."
                 .to_owned()
         }
-        RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
-            "CodeRabbit has run {rounds} rounds here, its cap, \
+        RulingKind::OutsideCap {
+            reviewer,
+            rounds,
+            held,
+            ..
+        } => format!(
+            "{reviewer} has run {rounds} rounds here, its cap, \
              and {held} of its findings still hold."
         ),
-        RulingKind::CodeRabbitSilent { head } => {
-            format!("CodeRabbit never reviewed {}.", short(head))
+        RulingKind::OutsideSilent { reviewer, head } => {
+            format!("{reviewer} never reviewed {}.", short(head))
         }
         RulingKind::Question { asked, .. } => asked.clone(),
         RulingKind::TurnTimeout { .. } => {
@@ -386,7 +394,7 @@ fn decide(
                 Resume::Nothing => (Phase::Implement, None),
                 Resume::ReviewFirst => (Phase::Implement, Some(Phase::Review(Review::first()))),
                 Resume::Review(review) => (Phase::Review(review), None),
-                Resume::CodeRabbitFix { head } => (fixing(Some(head)), None),
+                Resume::OutsideFix { reviewer, head } => (fixing(reviewer, Some(head)), None),
             };
             return Ok(Move::Turn {
                 prompt: answer_prompt(&text),
@@ -446,7 +454,7 @@ fn decide(
         (Answer::Yes, RulingKind::FixNotPushed { fix, prompt }) => {
             let phase = match fix {
                 Fix::Review(review) => Phase::Review(review),
-                Fix::CodeRabbit { head, .. } => fixing(Some(head)),
+                Fix::Outside { reviewer, head, .. } => fixing(reviewer, Some(head)),
             };
             return Ok(Move::Turn {
                 prompt,
@@ -454,14 +462,22 @@ fn decide(
                 force: None,
             });
         }
-        (Answer::Yes, RulingKind::CodeRabbitCap { prompt, head, .. }) => {
+        (
+            Answer::Yes,
+            RulingKind::OutsideCap {
+                reviewer,
+                prompt,
+                head,
+                ..
+            },
+        ) => {
             return Ok(Move::Turn {
                 prompt,
-                phase: fixing(head),
+                phase: fixing(reviewer, head),
                 force: None,
             });
         }
-        (Answer::Yes, RulingKind::CodeRabbitSilent { .. }) => Phase::Ci {
+        (Answer::Yes, RulingKind::OutsideSilent { .. }) => Phase::Ci {
             head: None,
             since: now,
         },
@@ -506,20 +522,27 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
         RulingKind::FixNotPushed { fix, .. } => {
             let round = match fix {
                 Fix::Review(review) => format!("round {} of the qwen-review loop", review.round),
-                Fix::CodeRabbit { round, .. } => format!("CodeRabbit round {round}"),
+                Fix::Outside {
+                    reviewer, round, ..
+                } => format!("{reviewer} round {round}"),
             };
             format!(
                 "The worker on {about} ended its fix for {round} without pushing, \
                  so those findings still hold. {yes} sends it the findings again"
             )
         }
-        RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
-            "CodeRabbit has run {rounds} rounds on {about}, its cap, and the judge \
+        RulingKind::OutsideCap {
+            reviewer,
+            rounds,
+            held,
+            ..
+        } => format!(
+            "{reviewer} has run {rounds} rounds on {about}, its cap, and the judge \
              still holds {held} of its findings. {yes} sends the worker those \
              findings and lets the rounds go past the cap"
         ),
-        RulingKind::CodeRabbitSilent { head } => format!(
-            "CodeRabbit never reviewed {about} at {} after kelpie summoned it. \
+        RulingKind::OutsideSilent { reviewer, head } => format!(
+            "{reviewer} never reviewed {about} at {} after kelpie summoned it. \
              {yes} has kelpie look at CI and summon it again",
             short(head)
         ),
@@ -556,12 +579,12 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
     format!("{ask}, and {no} sends the worker your note.")
 }
 
-// A CodeRabbit fix ends back in its round, which checks it moved `head`.
-// With no head, from an older state file, it ends under Implement and
-// goes straight to CI.
-fn fixing(head: Option<String>) -> Phase {
+// An outside reviewer's fix ends back in its round, which checks it moved
+// `head`. With no head, from an older state file, it ends under Implement
+// and goes straight to CI.
+fn fixing(reviewer: Outside, head: Option<String>) -> Phase {
     head.map_or(Phase::Implement, |head| {
-        Phase::CodeRabbit(CodeRabbitStage::Fixing { head })
+        Phase::round(reviewer, OutsideStage::Fixing { head })
     })
 }
 
@@ -635,13 +658,15 @@ mod tests {
                 fix: Fix::Review(review),
                 prompt: "fix it".into(),
             },
-            RulingKind::CodeRabbitCap {
+            RulingKind::OutsideCap {
+                reviewer: Outside::Gemini,
                 rounds: 3,
                 held: 2,
                 prompt: "fix it".into(),
                 head: None,
             },
-            RulingKind::CodeRabbitSilent {
+            RulingKind::OutsideSilent {
+                reviewer: Outside::CodeRabbit,
                 head: "abcdef123".into(),
             },
             RulingKind::Question {

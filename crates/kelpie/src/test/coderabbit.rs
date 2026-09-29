@@ -60,6 +60,7 @@ impl FakeCodeRabbit {
                 path: "work.txt".into(),
                 line: Some(1),
                 body: finding_body(title),
+                review: None,
             }));
     }
 
@@ -151,6 +152,11 @@ impl FakeCodeRabbit {
             return Err(ForgeError::Failed(format!("no thread {id}")));
         }
         self.settle(id);
+        self.record_resolved(id)
+    }
+
+    // Every thread kelpie resolves, CodeRabbit's or Gemini's, in one log.
+    pub(super) fn record_resolved(&self, id: &str) -> Result<(), ForgeError> {
         self.resolved.lock().unwrap().push(id.to_owned());
         Ok(())
     }

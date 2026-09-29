@@ -2,6 +2,8 @@
 
 mod board;
 pub(crate) mod coderabbit;
+pub(crate) mod gemini;
+pub(crate) mod outside;
 mod review;
 
 use std::process::{Command, Stdio};
@@ -9,7 +11,8 @@ use std::process::{Command, Stdio};
 use serde::Deserialize;
 
 use crate::board::{OpenPullRequest, ReadyIssue};
-use crate::coderabbit::Activity;
+use crate::coderabbit::Activity as CodeRabbitActivity;
+use crate::gemini::Activity as GeminiActivity;
 use crate::ports::{
     Checks, Forge, ForgeError, Issue, PullRequest, PullRequestState, Reviewed, Visibility,
 };
@@ -101,12 +104,16 @@ impl Forge for Gh {
         coderabbit::label(repo, number, label, on)
     }
 
-    fn coderabbit(&self, repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError> {
+    fn coderabbit(&self, repo: &ForgeSlug, number: u64) -> Result<CodeRabbitActivity, ForgeError> {
         coderabbit::activity(repo, number)
     }
 
+    fn gemini(&self, repo: &ForgeSlug, number: u64) -> Result<GeminiActivity, ForgeError> {
+        gemini::activity(repo, number)
+    }
+
     fn resolve_thread(&self, _repo: &ForgeSlug, thread: &str) -> Result<(), ForgeError> {
-        coderabbit::resolve(thread)
+        outside::resolve(thread)
     }
 
     fn merge(&self, repo: &ForgeSlug, number: u64, head: &str) -> Result<(), ForgeError> {

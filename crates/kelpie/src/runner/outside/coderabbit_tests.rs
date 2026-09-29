@@ -7,12 +7,15 @@ use serde_json::json;
 use super::{ANSWER_WAIT, LABEL, REVIEW_WAIT};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
+use crate::outside::Outside;
 use crate::ports::{Checks, ClaudeError, Cost, Role};
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::test::{Rig, Scripted, Told, git};
 
 const HOLDS: &str = r#"{"holds": true, "severity": "medium", "reason": "real"}"#;
 const REJECTED: &str = r#"{"holds": false, "severity": "low", "reason": "not so"}"#;
+
+const RABBIT: Outside = Outside::CodeRabbit;
 
 fn cr() -> LeaseKind {
     LeaseKind::coderabbit()
@@ -53,12 +56,23 @@ fn summoned(project: &str) -> (Rig, Mutex<Runner>, String) {
     assert_eq!(
         rig.verdict(&runner),
         Some(StepReport::Summoned {
+            reviewer: RABBIT,
             issue: 7,
             pull_request: 71,
             head: head.clone(),
         })
     );
     (rig, runner, head)
+}
+
+fn summons_coderabbit(report: Option<StepReport>) -> bool {
+    matches!(
+        report,
+        Some(StepReport::Summoned {
+            reviewer: RABBIT,
+            ..
+        })
+    )
 }
 
 fn now(rig: &Rig) -> u64 {
@@ -134,10 +148,7 @@ fn nothing_summons_without_the_lease() {
     );
 
     rig.leases.withhold(false);
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::Summoned { .. })
-    ));
+    assert!(summons_coderabbit(step(&runner).unwrap()));
     assert_eq!(labels(&rig), [on()]);
     assert_eq!(
         rig.ask(&runner, "status", None)["leases"],
@@ -180,7 +191,8 @@ fn a_round_counts_only_once_a_review_covers_the_head() {
     rig.clock.advance(1400);
     assert_eq!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSatisfied {
+        Some(StepReport::OutsideSatisfied {
+            reviewer: RABBIT,
             issue: 7,
             pull_request: 71,
             rounds: 1
@@ -232,10 +244,7 @@ fn a_draft_is_marked_ready_before_the_label_goes_on_and_the_summon_waits_a_pass(
     assert_eq!(labels(&rig), [], "no label in the pass that marks ready");
     assert_eq!(rig.leases.told(), []);
 
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::Summoned { .. })
-    ));
+    assert!(summons_coderabbit(step(&runner).unwrap()));
     assert_eq!(labels(&rig), [on()]);
     assert_eq!(rig.forge.readied(), [71], "marked once");
     assert!(
@@ -272,10 +281,7 @@ fn a_forge_still_reading_draft_is_neither_marked_again_nor_summoned() {
 
     // Once the forge reads it ready, the summon needs no more waiting.
     rig.forge.set_lagging_draft(71, false);
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::Summoned { .. })
-    ));
+    assert!(summons_coderabbit(step(&runner).unwrap()));
     assert_eq!(labels(&rig), [on()]);
     assert_eq!(rig.forge.readied(), [71]);
     assert!(rig.forge.skipped_as_drafts().is_empty());
@@ -309,7 +315,11 @@ fn a_rework_on_a_ready_pull_request_leaves_it_ready_and_summons_at_once() {
     let (rig, runner, head) = summoned("shep");
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "Name the flag."),
-        Some(StepReport::CodeRabbitJudged { round: 1, .. })
+        Some(StepReport::OutsideJudged {
+            reviewer: RABBIT,
+            round: 1,
+            ..
+        })
     ));
     fixed(&rig, &runner, "flag.txt");
     assert_eq!(rig.forge.readied(), [71], "marked once, before round one");
@@ -325,7 +335,11 @@ fn a_head_already_reviewed_is_not_summoned_again() {
     rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
         rig.verdict(&runner),
-        Some(StepReport::CodeRabbitSatisfied { rounds: 1, .. })
+        Some(StepReport::OutsideSatisfied {
+            reviewer: RABBIT,
+            rounds: 1,
+            ..
+        })
     ));
     assert_eq!(labels(&rig), []);
     assert_eq!(
@@ -344,6 +358,7 @@ fn a_refusal_gives_the_lease_back_with_its_quoted_wait_and_the_label_comes_off()
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::SummonRefused {
+            reviewer: RABBIT,
             issue: 7,
             pull_request: 71,
             opens: crate::ports::Timestamp(refused_at + 12 * 60),
@@ -363,6 +378,7 @@ fn a_refusal_gives_the_lease_back_with_its_quoted_wait_and_the_label_comes_off()
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::Summoned {
+            reviewer: RABBIT,
             issue: 7,
             pull_request: 71,
             head
@@ -401,10 +417,7 @@ fn a_summon_nobody_answers_is_counted_spent_and_then_asked_about() {
     assert_eq!(labels(&rig), [on(), off()]);
 
     rig.ask(&runner, "rule", Some(&format!("{id} yes")));
-    assert!(matches!(
-        rig.verdict(&runner),
-        Some(StepReport::Summoned { .. })
-    ));
+    assert!(summons_coderabbit(rig.verdict(&runner)));
 }
 
 #[test]
@@ -419,7 +432,8 @@ fn the_judge_reads_every_open_thread_rejected_ones_are_resolved_and_held_ones_go
     rig.clock.advance(60);
     assert_eq!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitReviewed {
+        Some(StepReport::OutsideReviewed {
+            reviewer: RABBIT,
             issue: 7,
             pull_request: 71,
             round: 1,
@@ -442,7 +456,8 @@ fn the_judge_reads_every_open_thread_rejected_ones_are_resolved_and_held_ones_go
 
     assert_eq!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitJudged {
+        Some(StepReport::OutsideJudged {
+            reviewer: RABBIT,
             issue: 7,
             pull_request: 71,
             round: 1,
@@ -483,16 +498,14 @@ fn the_judge_reads_every_open_thread_rejected_ones_are_resolved_and_held_ones_go
     assert_eq!(step(&runner).unwrap(), None, "CI on the fix is pending");
     assert_eq!(labels(&rig), [on(), off()]);
     rig.forge.set_checks(&fixed, Checks::Passed);
-    assert!(matches!(
-        rig.verdict(&runner),
-        Some(StepReport::Summoned { .. })
-    ));
+    assert!(summons_coderabbit(rig.verdict(&runner)));
     rig.forge.coderabbit.settle("PRRT_71_0");
     rig.forge.coderabbit.review(71, &fixed, now(&rig) + 60, &[]);
     rig.clock.advance(60);
     assert_eq!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSatisfied {
+        Some(StepReport::OutsideSatisfied {
+            reviewer: RABBIT,
             issue: 7,
             pull_request: 71,
             rounds: 2
@@ -513,7 +526,11 @@ fn a_thread_the_judge_holds_nothing_on_leaves_coderabbit_satisfied() {
     step(&runner).unwrap();
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSatisfied { rounds: 1, .. })
+        Some(StepReport::OutsideSatisfied {
+            reviewer: RABBIT,
+            rounds: 1,
+            ..
+        })
     ));
     assert_eq!(rig.forge.coderabbit.resolved(), ["PRRT_71_0"]);
     assert_eq!(rig.claude.calls().len(), 1, "the worker took no turn");
@@ -546,10 +563,7 @@ fn fixed(rig: &Rig, runner: &Mutex<Runner>, file: &'static str) -> String {
         Some(StepReport::FixPushed { .. })
     ));
     rig.forge.set_checks(&head, Checks::Passed);
-    assert!(matches!(
-        rig.verdict(runner),
-        Some(StepReport::Summoned { .. })
-    ));
+    assert!(summons_coderabbit(rig.verdict(runner)));
     head
 }
 
@@ -558,7 +572,11 @@ fn a_fix_turn_that_pushes_nothing_parks_instead_of_opening_round_two() {
     let (rig, runner, head) = summoned("shep");
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "Name the flag."),
-        Some(StepReport::CodeRabbitJudged { round: 1, .. })
+        Some(StepReport::OutsideJudged {
+            reviewer: RABBIT,
+            round: 1,
+            ..
+        })
     ));
     rig.claude
         .script([Scripted::Say("I can't push from this sandbox.")]);
@@ -586,7 +604,7 @@ fn a_fix_turn_that_pushes_nothing_parks_instead_of_opening_round_two() {
         status["rulings"][0]["kind"],
         json!({
             "kind": "fix-not-pushed",
-            "coderabbit": { "round": 1, "head": head },
+            "outside": { "reviewer": "coderabbit", "round": 1, "head": head },
             "prompt": again,
         })
     );
@@ -675,7 +693,11 @@ fn a_fix_past_the_cap_that_pushes_nothing_still_parks() {
     let (rig, runner, head) = summoned("rotom");
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "First."),
-        Some(StepReport::CodeRabbitJudged { round: 1, .. })
+        Some(StepReport::OutsideJudged {
+            reviewer: RABBIT,
+            round: 1,
+            ..
+        })
     ));
     let head = fixed(&rig, &runner, "one.txt");
     rig.forge.coderabbit.settle("PRRT_71_0");
@@ -727,14 +749,15 @@ fn the_cap_leaves_generated_files_out_and_parks_the_worker_with_findings_open() 
         rig.verdict(&runner),
         Some(StepReport::MarkedReady { .. })
     ));
-    assert!(matches!(
-        rig.verdict(&runner),
-        Some(StepReport::Summoned { .. })
-    ));
+    assert!(summons_coderabbit(rig.verdict(&runner)));
 
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "First."),
-        Some(StepReport::CodeRabbitJudged { round: 1, .. })
+        Some(StepReport::OutsideJudged {
+            reviewer: RABBIT,
+            round: 1,
+            ..
+        })
     ));
     // Two changed lines by round two: ceil(2 / 2) + 1 = 2 rounds.
     let head = fixed(&rig, &runner, "one.txt");
@@ -767,7 +790,11 @@ fn the_cap_leaves_generated_files_out_and_parks_the_worker_with_findings_open() 
     rig.forge.coderabbit.settle("PRRT_71_1");
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "Third."),
-        Some(StepReport::CodeRabbitJudged { round: 3, .. })
+        Some(StepReport::OutsideJudged {
+            reviewer: RABBIT,
+            round: 3,
+            ..
+        })
     ));
 }
 
@@ -781,7 +808,10 @@ fn a_restart_mid_summon_reads_on_and_holds_no_stale_lease() {
     rig.clock.advance(60);
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSatisfied { .. })
+        Some(StepReport::OutsideSatisfied {
+            reviewer: RABBIT,
+            ..
+        })
     ));
     assert_eq!(labels(&rig), [on(), off()]);
 }
@@ -802,6 +832,7 @@ fn a_restart_between_the_label_and_its_save_does_not_summon_twice() {
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::Summoned {
+            reviewer: RABBIT,
             issue: 7,
             pull_request: 71,
             head: head.clone()
@@ -819,10 +850,7 @@ fn a_label_someone_else_left_on_is_toggled_to_summon() {
     rig.verdict(&runner);
     rig.forge.label_pull_request(71, LABEL);
     rig.leases.withhold(false);
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::Summoned { .. })
-    ));
+    assert!(summons_coderabbit(step(&runner).unwrap()));
     assert_eq!(labels(&rig), [off(), on()]);
 }
 
@@ -888,7 +916,10 @@ fn coderabbit_that_cannot_be_read_is_tried_again_later() {
     rig.forge.coderabbit.review(71, &head, now(&rig), &[]);
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSatisfied { .. })
+        Some(StepReport::OutsideSatisfied {
+            reviewer: RABBIT,
+            ..
+        })
     ));
 }
 
@@ -899,7 +930,10 @@ fn satisfied(project: &str) -> (Rig, Mutex<Runner>, String) {
     rig.clock.advance(60);
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSatisfied { .. })
+        Some(StepReport::OutsideSatisfied {
+            reviewer: RABBIT,
+            ..
+        })
     ));
     (rig, runner, head)
 }
@@ -950,6 +984,7 @@ fn a_yes_on_a_commit_pushed_by_hand_runs_the_review_loop_and_coderabbit_on_it() 
     assert_eq!(
         rig.verdict(&runner),
         Some(StepReport::Summoned {
+            reviewer: RABBIT,
             issue: 7,
             pull_request: 71,
             head: by_hand,

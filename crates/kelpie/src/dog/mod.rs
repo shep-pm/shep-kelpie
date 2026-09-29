@@ -27,10 +27,10 @@ use shep_client::shep_core::status::ProcStatus;
 use tokio::sync::mpsc;
 
 use crate::adapters::SystemClock;
-use crate::lease::LeaseKind;
 use crate::lease::gpu::{self, GpuLock};
 use crate::lease::saved::{BookFile, SavedBook};
 use crate::lease::wire::{GRANT, grant_params};
+use crate::outside::Outside;
 use crate::ports::Clock;
 use crate::shep_home;
 use desk::{Delivery, Desk};
@@ -130,8 +130,8 @@ impl Kept {
 
 // Another build's file, or none, starts an empty book. One that claims
 // this build's format and cannot be read may have held a summon, so its
-// empty book starts with the CodeRabbit window closed for the hour, as if
-// a summon had just been accepted. The first change overwrites the file.
+// empty book counts one summon in every review window, just accepted. That
+// closes CodeRabbit's for the hour. The first change overwrites the file.
 fn open(file: BookFile, clock: Box<dyn Clock>, gpu: GpuLock) -> Kept {
     let empty = || SavedBook::new(Vec::new(), Vec::new(), Vec::new());
     let (last, unread) = match file.load() {
@@ -147,7 +147,9 @@ fn open(file: BookFile, clock: Box<dyn Clock>, gpu: GpuLock) -> Kept {
     let now = clock.now();
     let mut desk = Desk::restore(clock, gpu, last.clone());
     if unread {
-        desk.book.summoned(&LeaseKind::coderabbit(), now);
+        for reviewer in Outside::ALL {
+            desk.book.summoned(&reviewer.lease_kind(), now);
+        }
     }
     Kept { desk, file, last }
 }
@@ -386,7 +388,7 @@ mod tests {
         kept.change(take);
         let saved = file.load().unwrap().unwrap();
         assert_eq!(saved, kept.desk.saved());
-        let stand_in = LeaseKind::try_from("stand-in").unwrap();
+        let stand_in = crate::lease::LeaseKind::try_from("stand-in").unwrap();
         assert!(saved.leases.iter().any(|l| l.kind == stand_in));
     }
 
@@ -416,7 +418,7 @@ mod tests {
             .iter()
             .map(|l| l.kind.to_string())
             .collect();
-        assert_eq!(kinds, ["coderabbit", "other", "stand-in"]);
+        assert_eq!(kinds, ["coderabbit", "gemini", "other", "stand-in"]);
     }
 
     #[test]
@@ -426,8 +428,8 @@ mod tests {
         let mut kept = opened(dir.path(), file.clone());
         assert_eq!(
             kept.desk.book.status().len(),
-            1,
-            "the CodeRabbit window alone"
+            2,
+            "the CodeRabbit and Gemini windows alone"
         );
         assert_eq!(window(&mut kept)["opens"], serde_json::Value::Null);
 

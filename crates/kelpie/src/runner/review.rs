@@ -228,13 +228,13 @@ impl Runner {
         if matches!(result, ReviewResult::Stopped) {
             return Ok(None);
         }
-        let in_coderabbit_round = self
+        let in_outside_round = self
             .state
             .work_item
             .as_ref()
-            .is_some_and(|item| matches!(item.phase, Phase::CodeRabbit(_)));
-        if in_coderabbit_round {
-            return self.coderabbit_verdict(result, spent);
+            .is_some_and(|item| item.phase.outside().is_some());
+        if in_outside_round {
+            return self.outside_verdict(result, spent);
         }
         let now = self.ports.clock.now();
         let mut next = self.state.clone();

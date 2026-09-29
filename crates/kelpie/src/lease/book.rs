@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use serde::Serialize;
 
 use super::saved::{SavedHeld, SavedLease};
-use super::window::{Window, WindowStatus};
+use super::window::{Terms, Window, WindowStatus};
 use super::{Epoch, Holder, LeaseKind};
 use crate::ports::{Clock, Timestamp};
 use crate::runner::ProjectName;
@@ -123,11 +123,12 @@ impl LeaseBook {
             .collect()
     }
 
-    /// Gives `kind` a review window, so it is granted only while that is
-    /// open. A window it already has is kept.
-    pub fn add_window(&mut self, kind: LeaseKind) {
+    /// Gives `kind` a review window on `terms`, so it is granted only while
+    /// that is open. A window it already has keeps its summons and quota.
+    pub fn add_window(&mut self, kind: LeaseKind, terms: Terms) {
         let lease = self.leases.entry(kind).or_default();
-        lease.window.get_or_insert_with(Window::default);
+        let window = lease.window.get_or_insert_with(|| Window::new(terms));
+        window.span(terms);
     }
 
     /// Takes the quota a review footer posted at `at` states for `kind`'s window
@@ -489,7 +490,7 @@ mod tests {
     fn windowed() -> (LeaseBook, FakeClock, LeaseKind) {
         let (mut book, clock) = book();
         let kind = LeaseKind::try_from("reviews").unwrap();
-        book.add_window(kind.clone());
+        book.add_window(kind.clone(), Terms::CODERABBIT);
         (book, clock, kind)
     }
 
@@ -663,7 +664,7 @@ mod tests {
         clock.advance(120);
 
         let mut book = restarted(&book, &clock);
-        book.add_window(kind.clone());
+        book.add_window(kind.clone(), Terms::CODERABBIT);
         assert_eq!(
             book.ask(&kind, runner("golbat", 1)),
             Asked::Queued { ahead: 0 }

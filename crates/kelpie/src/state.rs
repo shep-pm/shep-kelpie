@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::outside::Outside;
 use crate::pacer::DayStart;
 use crate::ports::Timestamp;
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
@@ -138,11 +139,14 @@ pub enum RulingKind {
         /// The fix turn a yes starts
         prompt: String,
     },
-    /// CodeRabbit's rounds reached their cap with findings the judge held.
-    /// A yes sends the worker those findings and lifts the cap for the rest
-    /// of this work item.
-    #[serde(rename = "coderabbit-cap")]
-    CodeRabbitCap {
+    /// An outside reviewer's rounds reached their cap with findings the
+    /// judge held. A yes sends the worker those findings and lifts the cap
+    /// for the rest of this work item.
+    #[serde(rename = "outside-cap", alias = "coderabbit-cap")]
+    OutsideCap {
+        /// The reviewer, CodeRabbit in an older state file
+        #[serde(default)]
+        reviewer: Outside,
         /// Rounds run
         rounds: u32,
         /// Findings the judge held
@@ -154,10 +158,13 @@ pub enum RulingKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         head: Option<String>,
     },
-    /// CodeRabbit never reviewed this head after a summon. A yes looks at
-    /// CI again, and summons again once it is green.
-    #[serde(rename = "coderabbit-silent")]
-    CodeRabbitSilent {
+    /// An outside reviewer never reviewed this head after a summon. A yes
+    /// looks at CI again, and summons again once it is green.
+    #[serde(rename = "outside-silent", alias = "coderabbit-silent")]
+    OutsideSilent {
+        /// The reviewer, CodeRabbit in an older state file
+        #[serde(default)]
+        reviewer: Outside,
         /// The head the summon was for
         head: String,
     },
@@ -205,9 +212,12 @@ pub enum RulingKind {
 pub enum Fix {
     /// A qwen-review round: the review, still fixing it
     Review(Review),
-    /// A CodeRabbit round
-    #[serde(rename = "coderabbit")]
-    CodeRabbit {
+    /// An outside reviewer's round
+    #[serde(rename = "outside", alias = "coderabbit")]
+    Outside {
+        /// The reviewer, CodeRabbit in an older state file
+        #[serde(default)]
+        reviewer: Outside,
         /// Its number
         round: u32,
         /// The head its findings are on, which the fix must move
@@ -229,10 +239,13 @@ pub enum Resume {
     /// The loop had already reached this round and stage; once answered,
     /// resume exactly there
     Review(Review),
-    /// A CodeRabbit round's fix turn from `head`; once answered, the fix
+    /// An outside reviewer's fix turn from `head`; once answered, the fix
     /// ends back in that round, which checks it moved the head
-    #[serde(rename = "coderabbit-fix")]
-    CodeRabbitFix {
+    #[serde(rename = "outside-fix", alias = "coderabbit-fix")]
+    OutsideFix {
+        /// The reviewer, CodeRabbit in an older state file
+        #[serde(default)]
+        reviewer: Outside,
         /// The head the findings are on
         head: String,
     },
@@ -258,6 +271,18 @@ pub enum Resource {
     Gpu,
     /// The CodeRabbit review window
     Coderabbit,
+    /// The Gemini review window
+    Gemini,
+}
+
+impl Resource {
+    /// `reviewer`'s review window
+    pub fn window(reviewer: Outside) -> Self {
+        match reviewer {
+            Outside::CodeRabbit => Self::Coderabbit,
+            Outside::Gemini => Self::Gemini,
+        }
+    }
 }
 
 /// Why the state file cannot be read or written
@@ -599,18 +624,21 @@ mod tests {
     }
 
     #[test]
-    fn the_coderabbit_rulings_are_pinned() {
-        let cap = RulingKind::CodeRabbitCap {
+    fn the_outside_reviewers_rulings_are_pinned() {
+        let cap = RulingKind::OutsideCap {
+            reviewer: Outside::Gemini,
             rounds: 2,
             held: 1,
             prompt: "fix".into(),
             head: Some("c0ffee".into()),
         };
-        let silent = RulingKind::CodeRabbitSilent {
+        let silent = RulingKind::OutsideSilent {
+            reviewer: Outside::CodeRabbit,
             head: "c0ffee".into(),
         };
         let unpushed = RulingKind::FixNotPushed {
-            fix: Fix::CodeRabbit {
+            fix: Fix::Outside {
+                reviewer: Outside::Gemini,
                 round: 3,
                 head: "c0ffee".into(),
             },
@@ -624,31 +652,70 @@ mod tests {
             serde_json::to_value([&cap, &silent, &unpushed]).unwrap(),
             serde_json::json!([
                 {
-                    "kind": "coderabbit-cap",
+                    "kind": "outside-cap",
+                    "reviewer": "gemini",
                     "rounds": 2,
                     "held": 1,
                     "prompt": "fix",
                     "head": "c0ffee",
                 },
-                { "kind": "coderabbit-silent", "head": "c0ffee" },
+                { "kind": "outside-silent", "reviewer": "coderabbit", "head": "c0ffee" },
                 {
                     "kind": "fix-not-pushed",
-                    "coderabbit": { "round": 3, "head": "c0ffee" },
+                    "outside": { "reviewer": "gemini", "round": 3, "head": "c0ffee" },
                     "prompt": "again",
                 },
             ])
         );
-        let saved_before_the_head: RulingKind = serde_json::from_value(serde_json::json!(
-            { "kind": "coderabbit-cap", "rounds": 2, "held": 1, "prompt": "fix" }
-        ))
-        .unwrap();
+    }
+
+    // A state file written before Gemini names CodeRabbit's rulings alone.
+    #[test]
+    fn an_older_files_coderabbit_rulings_still_read() {
+        let read = |saved| serde_json::from_value::<RulingKind>(saved).unwrap();
         assert_eq!(
-            saved_before_the_head,
-            RulingKind::CodeRabbitCap {
+            read(serde_json::json!(
+                { "kind": "coderabbit-cap", "rounds": 2, "held": 1, "prompt": "fix" }
+            )),
+            RulingKind::OutsideCap {
+                reviewer: Outside::CodeRabbit,
                 rounds: 2,
                 held: 1,
                 prompt: "fix".into(),
                 head: None,
+            }
+        );
+        assert_eq!(
+            read(serde_json::json!({ "kind": "coderabbit-silent", "head": "c0ffee" })),
+            RulingKind::OutsideSilent {
+                reviewer: Outside::CodeRabbit,
+                head: "c0ffee".into(),
+            }
+        );
+        assert_eq!(
+            read(serde_json::json!({
+                "kind": "fix-not-pushed",
+                "coderabbit": { "round": 3, "head": "c0ffee" },
+                "prompt": "again",
+            })),
+            RulingKind::FixNotPushed {
+                fix: Fix::Outside {
+                    reviewer: Outside::CodeRabbit,
+                    round: 3,
+                    head: "c0ffee".into(),
+                },
+                prompt: "again".into(),
+            }
+        );
+        let resume: Resume = serde_json::from_value(
+            serde_json::json!({ "state": "coderabbit-fix", "head": "c0ffee" }),
+        )
+        .unwrap();
+        assert_eq!(
+            resume,
+            Resume::OutsideFix {
+                reviewer: Outside::CodeRabbit,
+                head: "c0ffee".into(),
             }
         );
     }
@@ -687,14 +754,15 @@ mod tests {
     }
 
     #[test]
-    fn a_question_during_a_coderabbit_fix_is_pinned() {
-        let resume = Resume::CodeRabbitFix {
+    fn a_question_during_an_outside_fix_is_pinned() {
+        let resume = Resume::OutsideFix {
+            reviewer: Outside::Gemini,
             head: "c0ffee".into(),
         };
         let saved = serde_json::to_value(&resume).unwrap();
         assert_eq!(
             saved,
-            serde_json::json!({ "state": "coderabbit-fix", "head": "c0ffee" })
+            serde_json::json!({ "state": "outside-fix", "reviewer": "gemini", "head": "c0ffee" })
         );
         assert_eq!(serde_json::from_value::<Resume>(saved).unwrap(), resume);
     }

@@ -68,12 +68,14 @@ _Avoid_: summary (Claude's compaction output)
 The checks a pull request must pass before it merges.
 
 **Lease**:
-Kelpie-granted use of a shared resource: the GPU, or the CodeRabbit window.
+Kelpie-granted use of a shared resource: the GPU, or the CodeRabbit or Gemini
+window.
 _Avoid_: lock (the file the lease is built on)
 
 **Summon**:
-Anything that makes CodeRabbit spend the hourly review window. On shep that is
-adding the `review please` label, or pushing to a pull request that carries it.
+Anything that makes an outside reviewer spend its review window. For
+CodeRabbit on shep that is adding the `review please` label, or pushing to a
+pull request that carries it. For Gemini it is a `/gemini review` comment.
 Only the project manager summons.
 
 **Ruling**:

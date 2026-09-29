@@ -3,7 +3,7 @@
 //! One TOML file per project, read once when the runner starts. Unknown keys
 //! are refused, so a misspelt or malformed setting stops the runner with a
 //! message naming it. Every setting is required except the ones added after
-//! the first build (`pacing.enabled`, `worker.allowed_domains`,
+//! the first build (`gemini`, `pacing.enabled`, `worker.allowed_domains`,
 //! `worker.build_env`, `worker.instructions_file` and `worker.turn_timeout`): a file written before them
 //! loads with the documented default, so an upgrade never breaks an existing
 //! project.
@@ -16,6 +16,8 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+use crate::outside::Outside;
 
 /// Everything kelpie reads about one project
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -41,6 +43,9 @@ pub struct Settings {
     pub review: Review,
     /// The CodeRabbit gate
     pub coderabbit: CodeRabbit,
+    /// Gemini Code Assist's rounds, off when the table is absent
+    #[serde(default)]
+    pub gemini: Gemini,
     /// Usage pacing
     pub pacing: Pacing,
     /// What every worker is started with
@@ -138,6 +143,59 @@ pub struct CodeRabbit {
     pub enabled: bool,
     /// Changed lines per extra round: the cap is `ceil(changed / divisor) + 1`
     pub divisor: NonZeroU32,
+}
+
+/// Gemini Code Assist's rounds
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Gemini {
+    /// Whether pull requests go through Gemini rounds at all
+    pub enabled: bool,
+    /// Gemini reviews a pull request gets at most, counting any already on
+    /// it. At the cap, the work item moves on to CodeRabbit.
+    #[serde(default)]
+    pub max_rounds: GeminiRounds,
+}
+
+/// Gemini rounds on one pull request, from 1 to 4
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "i64")]
+pub struct GeminiRounds(u8);
+
+impl GeminiRounds {
+    /// The number of rounds
+    #[inline]
+    pub fn get(self) -> u8 {
+        self.0
+    }
+}
+
+// The maintainer's default, decided on #92.
+impl Default for GeminiRounds {
+    fn default() -> Self {
+        Self(3)
+    }
+}
+
+impl TryFrom<i64> for GeminiRounds {
+    type Error = &'static str;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        match u8::try_from(value) {
+            Ok(rounds @ 1..=4) => Ok(Self(rounds)),
+            _ => Err("must be from 1 to 4"),
+        }
+    }
+}
+
+impl Settings {
+    /// Whether pull requests go through `reviewer`'s rounds
+    pub fn rounds_on(&self, reviewer: Outside) -> bool {
+        match reviewer {
+            Outside::Gemini => self.gemini.enabled,
+            Outside::CodeRabbit => self.coderabbit.enabled,
+        }
+    }
 }
 
 /// Usage pacing settings
@@ -465,6 +523,8 @@ mod tests {
         assert_eq!(s.review.loop_guard.get(), 8);
         assert!(s.coderabbit.enabled);
         assert_eq!(s.coderabbit.divisor.get(), 1000);
+        assert!(!s.gemini.enabled);
+        assert_eq!(s.gemini.max_rounds.get(), 3);
         assert!(s.pacing.enabled);
         assert_eq!(s.pacing.kickoff_hours.get(), 8);
         assert_eq!(s.worker.turn_timeout.get(), 60);
@@ -531,6 +591,32 @@ mod tests {
         assert_eq!(s.worker.turn_timeout.get(), 60);
         assert!(s.worker.allowed_domains.is_empty());
         assert!(s.worker.build_env.is_empty());
+    }
+
+    #[test]
+    fn gemini_rounds_are_off_when_the_file_does_not_say() {
+        let before = EXAMPLE.replace("[gemini]\nenabled = false\nmax_rounds = 3\n", "");
+        assert!(!before.contains("\n[gemini]\n"));
+        let s = parse(&before).unwrap();
+        assert_eq!(s.gemini, Gemini::default());
+        assert_eq!(s.gemini.max_rounds.get(), 3);
+        assert!(!s.rounds_on(Outside::Gemini));
+        assert!(s.rounds_on(Outside::CodeRabbit));
+        let on = EXAMPLE.replace("[gemini]\nenabled = false", "[gemini]\nenabled = true");
+        assert!(parse(&on).unwrap().rounds_on(Outside::Gemini));
+        let without_cap = EXAMPLE.replace("max_rounds = 3\n", "");
+        assert_eq!(parse(&without_cap).unwrap().gemini.max_rounds.get(), 3);
+    }
+
+    #[test]
+    fn gemini_rounds_are_one_to_four() {
+        for (rounds, ok) in [(0, false), (1, true), (4, true), (5, false), (-1, false)] {
+            let text = EXAMPLE.replace("max_rounds = 3", &format!("max_rounds = {rounds}"));
+            match parse(&text) {
+                Ok(s) => assert!(ok && i64::from(s.gemini.max_rounds.get()) == rounds),
+                Err(e) => assert!(!ok && e.contains("must be from 1 to 4"), "{e}"),
+            }
+        }
     }
 
     #[test]

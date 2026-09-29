@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use crate::board::{Skip, WorkerModel};
+use crate::outside::Outside;
 use crate::pacer::HoldKind;
 use crate::ports::{
     ClaudeCall, Cost, Finding, Role, SessionId, Severity, Timestamp, Usage, Verdict,
@@ -184,7 +185,7 @@ pub enum StepReport {
         /// Why the question could not be posted on the pull request, if it could not
         comment_failed: Option<String>,
     },
-    /// The draft was marked ready, before a CodeRabbit round or after a yes
+    /// The draft was marked ready, before an outside reviewer's round or after a yes
     MarkedReady {
         /// The work item's issue
         issue: u64,
@@ -258,8 +259,10 @@ pub enum StepReport {
         /// The judge's severity
         severity: Severity,
     },
-    /// Kelpie put the `review please` label on, holding the CodeRabbit lease
+    /// Kelpie summoned an outside reviewer, holding its lease
     Summoned {
+        /// The reviewer
+        reviewer: Outside,
         /// The work item's issue
         issue: u64,
         /// Its pull request
@@ -267,17 +270,21 @@ pub enum StepReport {
         /// The head the summon is for
         head: String,
     },
-    /// CodeRabbit refused the summon, and the label came off
+    /// The reviewer refused the summon, and CodeRabbit's label came off
     SummonRefused {
+        /// The reviewer
+        reviewer: Outside,
         /// The work item's issue
         issue: u64,
         /// Its pull request
         pull_request: u64,
-        /// When CodeRabbit said its window opens
+        /// When the reviewer said its window opens
         opens: Timestamp,
     },
-    /// A CodeRabbit review covered the head, and the label came off
-    CodeRabbitReviewed {
+    /// A review covered the head, and CodeRabbit's label came off
+    OutsideReviewed {
+        /// The reviewer
+        reviewer: Outside,
         /// The work item's issue
         issue: u64,
         /// Its pull request
@@ -287,8 +294,10 @@ pub enum StepReport {
         /// Its threads still open, which the judge now reads
         open_threads: usize,
     },
-    /// The judge ruled on every open CodeRabbit thread
-    CodeRabbitJudged {
+    /// The judge ruled on every open thread of the review
+    OutsideJudged {
+        /// The reviewer
+        reviewer: Outside,
         /// The work item's issue
         issue: u64,
         /// Its pull request
@@ -300,9 +309,21 @@ pub enum StepReport {
         /// Threads the judge rejected, now resolved
         resolved: usize,
     },
-    /// No CodeRabbit thread is open and the judge holds nothing: CI, then
+    /// Gemini's reviews on the pull request reached `max_rounds`: CI, then
+    /// CodeRabbit or the merge ruling, with no summon
+    GeminiCapped {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// Gemini's reviews on it
+        reviews: usize,
+    },
+    /// The judge holds nothing of the review: CI, then the next round or
     /// the merge ruling
-    CodeRabbitSatisfied {
+    OutsideSatisfied {
+        /// The reviewer
+        reviewer: Outside,
         /// The work item's issue
         issue: u64,
         /// Its pull request

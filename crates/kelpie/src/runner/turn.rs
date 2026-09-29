@@ -24,7 +24,7 @@ use crate::pacer::Scope;
 use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Issue, Role, Session, Timestamp};
 use crate::profile::WorkerProfile;
 use crate::state::{ProjectState, Resume, RulingKind, RunState, StateError};
-use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
+use crate::work_item::{OutsideStage, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree::{self, Start};
 
 /// The prompt for a turn resumed after the runner restarted
@@ -107,10 +107,11 @@ impl Runner {
                 if matches!(review.stage, ReviewStage::Fixing { .. })
                     && !matches!(item.turn, Turn::Ended { .. }) => {}
             Phase::Review(_) => return self.review_step(),
-            Phase::CodeRabbit(CodeRabbitStage::Fixing { .. })
+            Phase::CodeRabbit(OutsideStage::Fixing { .. })
+            | Phase::Gemini(OutsideStage::Fixing { .. })
                 if !matches!(item.turn, Turn::Ended { .. }) => {}
             Phase::Ci { .. } => return self.check_ci(),
-            Phase::CodeRabbit(_) => return self.coderabbit_step(),
+            Phase::CodeRabbit(_) | Phase::Gemini(_) => return self.outside_step(),
             Phase::Ruling { .. } => return Ok(Begin::Idle),
             Phase::Merge { .. } => return self.merge(),
             Phase::Done { merged } => return self.finish(*merged),
@@ -285,8 +286,8 @@ impl Runner {
                 let cost =
                     item.record_call(Role::Worker, now, session, reply.usage, reply.session_cost);
                 item.turn = Turn::Ended { at: now };
-                // The turn may have changed the code CodeRabbit was satisfied with.
-                item.coderabbit.satisfied = false;
+                // The turn may have changed the code a reviewer was satisfied with.
+                item.unsatisfy();
                 // A question leaves the phase untouched: it interrupted
                 // whatever was running, before that turn could be said to
                 // have ended normally, and the answer resumes exactly this,
@@ -324,8 +325,13 @@ impl Runner {
                     Some(text) => {
                         let resume = match &item.phase {
                             Phase::Review(review) => Resume::Review(review.clone()),
-                            Phase::CodeRabbit(CodeRabbitStage::Fixing { head }) => {
-                                Resume::CodeRabbitFix { head: head.clone() }
+                            Phase::CodeRabbit(OutsideStage::Fixing { head })
+                            | Phase::Gemini(OutsideStage::Fixing { head }) => {
+                                let (reviewer, _) = item.phase.outside().expect("a round");
+                                Resume::OutsideFix {
+                                    reviewer,
+                                    head: head.clone(),
+                                }
                             }
                             Phase::Implement if pull_request.is_some() => Resume::ReviewFirst,
                             _ => Resume::Nothing,

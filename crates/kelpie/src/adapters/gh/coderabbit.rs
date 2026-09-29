@@ -1,28 +1,19 @@
 //! CodeRabbit's comments, reviews and threads on a pull request, and the
-//! label and thread changes the project manager makes
+//! label changes the project manager makes
 
 use serde::Deserialize;
 
-use super::{gh, unreadable};
-use crate::coderabbit::{Activity, Comment, Review, Thread};
-use crate::ports::{ForgeError, Timestamp};
+use super::gh;
+use super::outside::{lines, threads, time};
+use crate::coderabbit::{Activity, Comment, Review};
+use crate::ports::ForgeError;
 use crate::settings::ForgeSlug;
 
 /// CodeRabbit's login on the REST API
 const BOT: &str = "coderabbitai[bot]";
 
 /// CodeRabbit's login on the GraphQL API, which drops the suffix
-const BOT_GRAPHQL: &str = "coderabbitai";
-
-// A pull request with more than 100 threads is not expected; one past it
-// would read as unresolved-but-unseen, never as satisfied.
-const THREADS: &str = "query($owner: String!, $name: String!, $number: Int!) { \
-    repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
-    reviewThreads(first: 100) { nodes { id isResolved path line \
-    comments(first: 1) { nodes { author { login } body } } } } } } }";
-
-const RESOLVE: &str = "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) \
-    { thread { isResolved } } }";
+pub(crate) const BOT_GRAPHQL: &str = "coderabbitai";
 
 pub(super) fn activity(repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeError> {
     let comments = gh(&[
@@ -45,23 +36,10 @@ pub(super) fn activity(repo: &ForgeSlug, number: u64) -> Result<Activity, ForgeE
         "--jq",
         &format!(".[] | select(.user.login == \"{BOT}\") | {{commit_id, body, submitted_at}}"),
     ])?;
-    let (owner, name) = repo.as_str().split_once('/').unwrap_or_default();
-    let threads = gh(&[
-        "api",
-        "graphql",
-        "-f",
-        &format!("query={THREADS}"),
-        "-f",
-        &format!("owner={owner}"),
-        "-f",
-        &format!("name={name}"),
-        "-F",
-        &format!("number={number}"),
-    ])?;
     Ok(Activity {
         comments: parse_comments(&comments)?,
         reviews: parse_reviews(&reviews)?,
-        threads: parse_threads(&threads)?,
+        threads: threads(repo, number, BOT_GRAPHQL)?,
     })
 }
 
@@ -74,56 +52,6 @@ pub(super) fn label(
     let flag = if add { "--add-label" } else { "--remove-label" };
     let number = number.to_string();
     gh(&["pr", "edit", &number, "--repo", repo.as_str(), flag, label]).map(drop)
-}
-
-pub(super) fn resolve(thread: &str) -> Result<(), ForgeError> {
-    let resolved = gh(&[
-        "api",
-        "graphql",
-        "-f",
-        &format!("query={RESOLVE}"),
-        "-f",
-        &format!("id={thread}"),
-    ])?;
-    #[derive(Deserialize)]
-    struct Reply {
-        data: Data,
-    }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Data {
-        resolve_review_thread: Resolved,
-    }
-    #[derive(Deserialize)]
-    struct Resolved {
-        thread: State,
-    }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct State {
-        is_resolved: bool,
-    }
-    let reply: Reply = serde_json::from_slice(&resolved).map_err(|_| unreadable(&resolved))?;
-    if reply.data.resolve_review_thread.thread.is_resolved {
-        Ok(())
-    } else {
-        Err(unreadable(&resolved))
-    }
-}
-
-fn time(text: &str, stdout: &[u8]) -> Result<Timestamp, ForgeError> {
-    let at: jiff::Timestamp = text.parse().map_err(|_| unreadable(stdout))?;
-    let seconds = u64::try_from(at.as_second()).map_err(|_| unreadable(stdout))?;
-    Ok(Timestamp(seconds))
-}
-
-// `--jq` prints one JSON object a line, across every page.
-fn lines<T: for<'de> Deserialize<'de>>(stdout: &[u8]) -> Result<Vec<T>, ForgeError> {
-    stdout
-        .split(|b| *b == b'\n')
-        .filter(|line| !line.trim_ascii().is_empty())
-        .map(|line| serde_json::from_slice(line).map_err(|_| unreadable(stdout)))
-        .collect()
 }
 
 pub(crate) fn parse_comments(stdout: &[u8]) -> Result<Vec<Comment>, ForgeError> {
@@ -162,65 +90,6 @@ pub(crate) fn parse_reviews(stdout: &[u8]) -> Result<Vec<Review>, ForgeError> {
         .collect()
 }
 
-pub(crate) fn parse_threads(stdout: &[u8]) -> Result<Vec<Thread>, ForgeError> {
-    #[derive(Deserialize)]
-    struct Reply {
-        data: Data,
-    }
-    #[derive(Deserialize)]
-    struct Data {
-        repository: Repository,
-    }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Repository {
-        pull_request: PullRequest,
-    }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct PullRequest {
-        review_threads: Nodes<Node>,
-    }
-    #[derive(Deserialize)]
-    struct Nodes<T> {
-        nodes: Vec<T>,
-    }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Node {
-        id: String,
-        is_resolved: bool,
-        path: String,
-        line: Option<u32>,
-        comments: Nodes<First>,
-    }
-    #[derive(Deserialize)]
-    struct First {
-        author: Option<Author>,
-        body: String,
-    }
-    #[derive(Deserialize)]
-    struct Author {
-        login: String,
-    }
-    let reply: Reply = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
-    let nodes = reply.data.repository.pull_request.review_threads.nodes;
-    Ok(nodes
-        .into_iter()
-        .filter_map(|node| {
-            let first = node.comments.nodes.into_iter().next()?;
-            let by_bot = first.author.is_some_and(|a| a.login == BOT_GRAPHQL);
-            by_bot.then_some(Thread {
-                id: node.id,
-                resolved: node.is_resolved,
-                path: node.path,
-                line: node.line,
-                body: first.body,
-            })
-        })
-        .collect())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,13 +110,5 @@ mod tests {
             parse_reviews(b"{not json}"),
             Err(ForgeError::Unreadable(_))
         ));
-    }
-
-    #[test]
-    fn a_thread_whose_first_comment_has_no_author_is_not_coderabbits() {
-        let reply = br#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
-            {"id":"a","isResolved":false,"path":"x","line":1,
-             "comments":{"nodes":[{"author":null,"body":"ghost"}]}}]}}}}}"#;
-        assert_eq!(parse_threads(reply).unwrap(), []);
     }
 }

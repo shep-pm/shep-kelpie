@@ -12,6 +12,7 @@ use crate::lease::gpu::GpuLock;
 use crate::lease::saved::{SavedBook, SavedRun, SavedRunId, SavedTotals};
 use crate::lease::wire::{MetricName, Total, Totals, WindowFact, WindowMetric};
 use crate::lease::{Epoch, Holder, LeaseKind};
+use crate::outside::Outside;
 use crate::ports::{Clock, Timestamp};
 use crate::runner::ProjectName;
 
@@ -89,7 +90,9 @@ impl Desk {
     /// against the live flock reclaims from those since gone or restarted.
     pub fn restore(clock: Box<dyn Clock>, gpu: GpuLock, saved: SavedBook) -> Self {
         let mut book = LeaseBook::restore(clock, saved.leases);
-        book.add_window(LeaseKind::coderabbit());
+        for reviewer in Outside::ALL {
+            book.add_window(reviewer.lease_kind(), reviewer.terms());
+        }
         let runs = saved
             .runs
             .into_iter()
@@ -532,8 +535,8 @@ pub(super) mod tests {
         let leases = &w.ask("status", None).0["leases"];
         assert_eq!(
             leases.as_array().unwrap().len(),
-            2,
-            "the GPU and the CodeRabbit window alone: {leases}"
+            3,
+            "the GPU and the two review windows alone: {leases}"
         );
     }
 
@@ -564,6 +567,45 @@ pub(super) mod tests {
 
         w.clock.advance(3600 - 20);
         assert_eq!(w.desk.tick(), [coderabbit_grant("reactmap", 202)]);
+    }
+
+    // One Gemini window for the account: two projects share its lease, one
+    // summon at a time, and a summon takes one of the day's hundred.
+    #[test]
+    fn two_projects_share_one_gemini_lease() {
+        let mut w = world();
+        let gemini = LeaseKind::gemini();
+        let (mut koji, mut reactmap) = (Asker::new(Epoch(101)), Asker::new(Epoch(202)));
+        let granted = |project, pid| Delivery {
+            kind: LeaseKind::gemini(),
+            ..grant(project, pid)
+        };
+        assert_eq!(w.raise("koji", koji.want(&gemini)), [granted("koji", 101)]);
+        assert_eq!(w.raise("reactmap", reactmap.want(&gemini)), []);
+        assert_eq!(w.line("gemini")["queue"], json!([{ "runner": "reactmap" }]));
+        w.raise("koji", koji.window(&gemini, WindowFact::Summoned, EPOCH));
+        assert_eq!(
+            w.raise("koji", koji.give_back(&gemini)),
+            [granted("reactmap", 202)],
+            "the day's window stays open"
+        );
+        assert_eq!(w.line("gemini")["window"]["summons"], json!([EPOCH]));
+        assert!(
+            w.line("coderabbit")["holder"].is_null(),
+            "a window of its own"
+        );
+
+        w.raise("reactmap", reactmap.give_back(&gemini));
+        let opens = EPOCH + 24 * 3600;
+        w.raise("koji", koji.window(&gemini, WindowFact::Opens, opens));
+        assert_eq!(
+            w.raise("koji", koji.want(&gemini)),
+            [],
+            "refused for the day"
+        );
+        assert_eq!(w.raise("reactmap", reactmap.want(&gemini)), []);
+        w.clock.advance(24 * 3600);
+        assert_eq!(w.desk.tick(), [granted("koji", 101)]);
     }
 
     #[test]

@@ -1,9 +1,11 @@
-//! A review window: so many summons an hour, account-wide
+//! A review window: so many summons a span, account-wide
 //!
-//! The quota is whatever the latest review footer said, one an hour until
-//! a footer is read. The hour runs from each accepted summon, not from the
-//! review it bought. A refusal quotes when the window opens, and that quote
-//! overrides the book's own count until a later summon is accepted.
+//! CodeRabbit's span is an hour, and its quota is whatever the latest review
+//! footer said, one until a footer is read. Gemini's is a day of at least a
+//! hundred, and no review states it. The span runs from each accepted
+//! summon, not from the review it bought. A refusal quotes when the window
+//! opens, and that quote overrides the book's own count until a later summon
+//! is accepted.
 
 use std::num::NonZeroU32;
 
@@ -12,15 +14,40 @@ use serde::Serialize;
 use super::saved::{SavedRefusal, SavedWindow};
 use crate::ports::Timestamp;
 
-/// How long one accepted summon holds its place in the window, in seconds
+/// An hour, in seconds
 pub const HOUR: u64 = 3600;
 
-/// The quota before any footer has been read: the last one read on shep
-const FIRST_QUOTA: u32 = 1;
+/// A day, in seconds
+pub const DAY: u64 = 24 * HOUR;
+
+/// A window's quota before any review states one, and its span
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Terms {
+    /// Summons a span
+    pub quota: u32,
+    /// How long one accepted summon holds its place, in seconds
+    pub span: u64,
+}
+
+impl Terms {
+    /// CodeRabbit's: the last footer read on shep said one an hour
+    pub const CODERABBIT: Self = Self {
+        quota: 1,
+        span: HOUR,
+    };
+
+    /// Gemini's: "at least 100 pull request reviews per day" per
+    /// installation, from Google's quotas page. Rolling, so never more.
+    pub const GEMINI: Self = Self {
+        quota: 100,
+        span: DAY,
+    };
+}
 
 /// One kind's review window
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Window {
+    span: u64,
     quota: u32,
     // When the footer that stated the quota was posted.
     quota_at: Option<Timestamp>,
@@ -38,9 +65,9 @@ struct Refusal {
 /// A window as `status` shows it
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WindowStatus {
-    /// Summons an hour, from the latest footer
+    /// Summons a span, from the latest footer or the window's terms
     pub quota: u32,
-    /// Accepted summons in the last hour, oldest first
+    /// Accepted summons in the last span, oldest first
     pub summons: Vec<Timestamp>,
     /// When it opens, or `None` while it is open
     pub opens: Option<Timestamp>,
@@ -48,12 +75,7 @@ pub struct WindowStatus {
 
 impl Default for Window {
     fn default() -> Self {
-        Self {
-            quota: FIRST_QUOTA,
-            quota_at: None,
-            summons: Vec::new(),
-            refusal: None,
-        }
+        Self::new(Terms::CODERABBIT)
     }
 }
 
@@ -63,6 +85,7 @@ impl From<SavedWindow> for Window {
         summons.sort_unstable();
         summons.dedup();
         Self {
+            span: HOUR,
             quota: saved.quota.get(),
             quota_at: saved.quota_at,
             summons,
@@ -75,6 +98,23 @@ impl From<SavedWindow> for Window {
 }
 
 impl Window {
+    /// An open window on `terms`
+    pub fn new(terms: Terms) -> Self {
+        Self {
+            span: terms.span,
+            quota: terms.quota.max(1),
+            quota_at: None,
+            summons: Vec::new(),
+            refusal: None,
+        }
+    }
+
+    /// Takes the span from `terms`. The book file keeps no span, so a
+    /// restored window takes its kind's.
+    pub fn span(&mut self, terms: Terms) {
+        self.span = terms.span;
+    }
+
     /// Takes the quota a review footer posted at `at` states
     ///
     /// The newest footer wins, whichever runner reports it last: each one
@@ -116,7 +156,7 @@ impl Window {
         }
         let recent = self.recent(now);
         let full = recent.len().checked_sub(self.quota as usize)?;
-        Some(Timestamp(recent[full].0 + HOUR))
+        Some(Timestamp(recent[full].0 + self.span))
     }
 
     /// The window as `status` shows it at `now`
@@ -128,9 +168,9 @@ impl Window {
         }
     }
 
-    /// Forgets summons older than an hour before `now`
+    /// Forgets summons older than a span before `now`
     pub fn prune(&mut self, now: Timestamp) {
-        self.summons.retain(|at| at.0 + HOUR > now.0);
+        self.summons.retain(|at| at.0 + self.span > now.0);
     }
 
     /// The window as the book file keeps it
@@ -147,7 +187,7 @@ impl Window {
     }
 
     fn recent(&self, now: Timestamp) -> &[Timestamp] {
-        let start = self.summons.partition_point(|at| at.0 + HOUR <= now.0);
+        let start = self.summons.partition_point(|at| at.0 + self.span <= now.0);
         &self.summons[start..]
     }
 }
@@ -297,6 +337,27 @@ mod tests {
             assert_eq!(restored.opens(now), window.opens(now), "{now:?}");
         }
         assert_eq!(restored.status(at(120)), window.status(at(120)));
+    }
+
+    #[test]
+    fn geminis_window_lets_a_hundred_summons_through_a_day() {
+        let mut window = Window::new(Terms::GEMINI);
+        for n in 0..100 {
+            assert_eq!(window.opens(at(n * 60)), None, "summon {n}");
+            window.summoned(at(n * 60));
+        }
+        assert_eq!(window.opens(at(HOUR * 2)), Some(at(DAY)));
+        window.prune(at(DAY));
+        assert_eq!(window.opens(at(DAY)), None, "the first summon aged out");
+    }
+
+    #[test]
+    fn a_restored_window_takes_its_kinds_span() {
+        let mut window = Window::new(Terms::GEMINI);
+        window.summoned(at(0));
+        let mut restored = Window::from(window.saved());
+        restored.span(Terms::GEMINI);
+        assert_eq!(restored, window);
     }
 
     #[test]
