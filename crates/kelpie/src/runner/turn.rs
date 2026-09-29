@@ -253,8 +253,8 @@ impl Runner {
                 Begin::Call(call)
             }
             Err(reason) => {
-                let project = self.project.as_str();
-                Begin::Report(failed(project, &mut next, issue, now, reason))
+                let names = self.names();
+                Begin::Report(failed(names, &mut next, issue, now, reason))
             }
         };
         self.save(next)?;
@@ -466,8 +466,8 @@ impl Runner {
                             asked: text,
                             resume,
                         };
-                        let project = self.project.as_str();
-                        let (id, question) = park(project, &mut next, issue, pull_request, kind);
+                        let names = self.names();
+                        let (id, question) = park(names, &mut next, issue, pull_request, kind);
                         StepReport::Asked {
                             issue,
                             session,
@@ -484,9 +484,9 @@ impl Runner {
             }
             Err(ClaudeError::TimedOut) => {
                 item.turn = Turn::Ended { at: now };
-                timed_out(self.project.as_str(), &mut next, issue)
+                timed_out(self.names(), &mut next, issue)
             }
-            Err(e) => failed(self.project.as_str(), &mut next, issue, now, e.to_string()),
+            Err(e) => failed(self.names(), &mut next, issue, now, e.to_string()),
         };
         self.save(next)?;
         let mut report = report;
