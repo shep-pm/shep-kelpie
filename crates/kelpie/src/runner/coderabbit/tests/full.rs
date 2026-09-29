@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 use serde_json::json;
 
-use super::super::{DONE_SETTLE, FULL_REVIEW, LABEL, REVIEW_WAIT};
+use super::super::{DONE_SETTLE, FULL_REVIEW, HEARD_WAIT, LABEL, REVIEW_WAIT};
 use super::{cr, fixed, hold_a_finding, labels, now, off, on, reviewed_by_qwen, summoned};
 use crate::lease::wire::WindowFact;
 use crate::ports::Checks;
@@ -162,6 +162,27 @@ fn a_full_review_answered_with_nothing_again_is_the_maintainers_after_two_hours(
     );
     let comments = rig.forge.comments().into_iter();
     assert_eq!(comments.filter(|(_, c)| c == FULL_REVIEW).count(), 1);
+}
+
+#[test]
+fn a_full_review_with_no_sign_is_asked_for_once_more_by_comment() {
+    let (rig, runner, head) = adopted("lugia");
+    assert_eq!(rig.verdict(&runner), summoned_80(&head));
+    rig.clock.advance(HEARD_WAIT);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::SummonedAgain {
+            issue: 5,
+            pull_request: 80,
+            head: head.clone(),
+        })
+    );
+    let both = [full_review(80), full_review(80)].concat();
+    assert_eq!(rig.forge.comments(), both);
+    assert!(rig.leases.held(&cr()));
+    rig.clock.advance(60);
+    step(&runner).unwrap();
+    assert_eq!(rig.forge.comments(), both, "once more, no more");
 }
 
 #[test]

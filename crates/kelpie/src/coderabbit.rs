@@ -100,6 +100,7 @@ const STICKY: [&str; 3] = [
 const LIMIT: &str = "Review limit reached";
 // A rate limit and a skip are marked done too, under other words.
 const COMPLETED: &str = "Review completed";
+const RUNNING: &str = "Review in progress";
 
 // A refusal stamped this long before the summon is still its answer. One a
 // minute older quotes the same window, so misreading it costs nothing.
@@ -139,13 +140,31 @@ impl Activity {
                 opens: Timestamp(at.0.saturating_add(wait)),
             };
         }
-        let done = self
+        let mut ours = self
             .statuses
             .iter()
-            .filter(|s| s.commit == head && s.at.0 >= from && s.description == COMPLETED);
-        done.map(|s| s.at)
-            .max()
-            .map_or(Reading::Silent, |at| Reading::Completed { at })
+            .filter(|s| s.commit == head && s.at.0 >= from);
+        let done = ours.clone().filter(|s| s.description == COMPLETED);
+        if let Some(at) = done.map(|s| s.at).max() {
+            return Reading::Completed { at };
+        }
+        if ours.any(|s| s.description == RUNNING) {
+            return Reading::Processing;
+        }
+        Reading::Silent
+    }
+
+    /// Whether CodeRabbit gave any sign of a summon made at `since`, for
+    /// commit `head`: it edited or posted a comment, posted a review, or set
+    /// a status on the head. A refusal is a comment, so it counts.
+    pub fn heard(&self, head: &str, since: Timestamp) -> bool {
+        let from = since.0.saturating_sub(CLOCK_SLACK);
+        self.comments.iter().any(|c| c.at.0 >= from)
+            || self.reviews.iter().any(|r| r.at.0 >= from)
+            || self
+                .statuses
+                .iter()
+                .any(|s| s.commit == head && s.at.0 >= from)
     }
 
     /// The quota the latest footer states, included reviews an hour, and
@@ -423,6 +442,26 @@ mod tests {
             "done before a later summon is no answer to it"
         );
         assert_eq!(seen.read("0ther", summoned), Reading::Silent);
+    }
+
+    #[test]
+    fn an_in_progress_status_on_the_head_is_a_review_running_and_a_sign() {
+        let all = parse_statuses(STATUSES_614.as_bytes()).unwrap();
+        let running: Vec<Status> = all
+            .into_iter()
+            .filter(|s| s.description == "Review in progress")
+            .collect();
+        let seen = Activity {
+            statuses: running,
+            ..activity(COMMENTS_614, "", NO_THREADS)
+        };
+        let summoned = iso("2026-09-29T05:53:21Z");
+        assert_eq!(seen.read(HEAD_614, summoned), Reading::Processing);
+        assert!(seen.heard(HEAD_614, summoned));
+        assert!(
+            !seen.heard(HEAD_614, iso("2026-09-29T06:10:00Z")),
+            "a later summon"
+        );
     }
 
     #[test]
