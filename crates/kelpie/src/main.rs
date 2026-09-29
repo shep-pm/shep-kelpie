@@ -9,6 +9,9 @@
 //! <params>`: what the relay's own settings gate on. Both send
 //! `rule <params>` to the project's runner on the shepherd `SHEP_HOME`
 //! names; the relay runs them, never the maintainer.
+//!
+//! `kelpie relay-gate <kelpie>`: the hook that refuses the relay every
+//! other tool call. Claude Code runs it, like `confine`.
 
 #![forbid(unsafe_code)]
 
@@ -16,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use kelpie::confine::{Verdict, judge};
+use kelpie::relay::gate;
 use kelpie::relay::rule::{self, Ruling};
 use kelpie::shep_home;
 
@@ -30,13 +34,10 @@ fn main() -> ExitCode {
         [command, rest @ ..] if command == "lease" => kelpie::lease::cli::main(rest),
         [role, folders @ ..] if role == "confine" && !folders.is_empty() => {
             let folders: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
-            match judge(std::io::stdin().lock(), &folders) {
-                Verdict::Allow => ExitCode::SUCCESS,
-                Verdict::Refuse(why) => {
-                    eprintln!("{why}");
-                    ExitCode::from(REFUSE)
-                }
-            }
+            hook(judge(std::io::stdin().lock(), &folders))
+        }
+        [role, kelpie_path] if role == "relay-gate" => {
+            hook(gate::judge(std::io::stdin().lock(), kelpie_path))
         }
         [role, project, id] if role == "relay-yes" => {
             with_shep_home(role, |home| rule::send(home, project, Ruling::Yes(id)))
@@ -46,10 +47,21 @@ fn main() -> ExitCode {
         }),
         _ => {
             eprintln!(
-                "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>",
+                "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>\n       kelpie relay-gate <kelpie>",
                 kelpie::lease::cli::USAGE
             );
             ExitCode::from(2)
+        }
+    }
+}
+
+// A PreToolUse hook's answer: a refusal's reason goes to Claude on stderr.
+fn hook(verdict: Verdict) -> ExitCode {
+    match verdict {
+        Verdict::Allow => ExitCode::SUCCESS,
+        Verdict::Refuse(why) => {
+            eprintln!("{why}");
+            ExitCode::from(REFUSE)
         }
     }
 }
