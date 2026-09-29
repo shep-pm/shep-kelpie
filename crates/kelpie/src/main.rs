@@ -40,6 +40,9 @@ fn main() -> ExitCode {
         [role, project] if role == "runner" => kelpie::sheep::run(project),
         [role] if role == "dog" => kelpie::dog::run(),
         [command, rest @ ..] if command == "lease" => kelpie::lease::cli::main(rest),
+        [role, domains @ ..] if role == "browse-guard" => {
+            hook(kelpie::browse::judge(std::io::stdin().lock(), domains))
+        }
         [role, folders @ ..] if role == "confine" && !folders.is_empty() => {
             let folders: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
             hook(judge(std::io::stdin().lock(), &folders))
@@ -68,7 +71,7 @@ fn main() -> ExitCode {
         }),
         _ => {
             eprintln!(
-                "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie tools install\n       kelpie shots-mcp <tools> <job>\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>\n       kelpie relay-gate <kelpie>",
+                "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie browse-guard <domain>...\n       kelpie tools install\n       kelpie shots-mcp <tools> <job>\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>\n       kelpie relay-gate <kelpie>",
                 kelpie::lease::cli::USAGE
             );
             ExitCode::from(2)

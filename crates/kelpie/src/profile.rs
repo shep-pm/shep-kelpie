@@ -87,6 +87,9 @@ const PUSH_FLAGS: [&str; 9] = [
     "Bash(git push * +*)",
 ];
 
+// Every Playwright MCP tool, which `kelpie browse-guard` holds to the preview
+const PLAYWRIGHT_TOOLS: &str = "mcp__playwright__.*";
+
 // The mach service a dev server's file watcher looks up on macOS
 const DEV_SERVER_MACH: [&str; 1] = ["com.apple.FSEvents"];
 
@@ -207,6 +210,15 @@ impl WorkerProfile<'_> {
             .map(|p| shell_quote(&p.to_string_lossy()))
             .join(" ");
         let mut pre = vec![entry(Some(FILE_TOOLS), &confine)];
+        if let Some(domains) = self.preview {
+            let guard = [self.kelpie.to_string_lossy().as_ref(), "browse-guard"]
+                .into_iter()
+                .chain(domains.iter().map(NonBlank::as_str))
+                .map(shell_quote)
+                .collect::<Vec<_>>()
+                .join(" ");
+            pre.push(entry(Some(PLAYWRIGHT_TOOLS), &guard));
+        }
         let mut post = Vec::new();
         for hook in self.guard_hooks {
             let e = entry(
@@ -447,6 +459,23 @@ mod tests {
             let rule = format!("mcp__playwright__{tool}");
             assert!(deny.contains(&rule.as_str()), "{rule}");
         }
+    }
+
+    #[test]
+    fn a_preview_holds_every_playwright_tool_to_kelpies_browse_guard() {
+        let domains = [NonBlank::try_from("*.leekduck.com".to_owned()).unwrap()];
+        assert_eq!(
+            with_preview(&domains)["hooks"]["PreToolUse"][1],
+            json!({
+                "matcher": "mcp__playwright__.*",
+                "hooks": [{
+                    "type": "command",
+                    "command": "'/opt/kelpie' 'browse-guard' '*.leekduck.com'",
+                }],
+            })
+        );
+        let hooks = settings(&[])["hooks"].to_string();
+        assert!(!hooks.contains("browse-guard"), "{hooks}");
     }
 
     #[test]
