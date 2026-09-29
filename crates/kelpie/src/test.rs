@@ -78,6 +78,8 @@ pub(crate) fn a_work_item() -> WorkItem {
         title: "Add a thing".into(),
         branch: "kelpie/42".into(),
         rework: false,
+        adopted: false,
+        arrived: None,
         worktree: "/k/wt/shep/42".into(),
         build: "/k/targets/shep/42".into(),
         worker: WorkerModel {
@@ -447,6 +449,7 @@ pub(crate) enum ScriptedRound {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SeenRound {
     pub(crate) worktree: PathBuf,
+    pub(crate) base: String,
     pub(crate) out: PathBuf,
     pub(crate) round: u32,
 }
@@ -475,11 +478,13 @@ impl Reviewer for FakeReviewer {
     fn round(
         &self,
         worktree: &Path,
+        base: &str,
         out: &Path,
         round: u32,
     ) -> Result<Vec<Finding>, ReviewerError> {
         self.seen.lock().unwrap().push(SeenRound {
             worktree: worktree.to_owned(),
+            base: base.to_owned(),
             out: out.to_owned(),
             round,
         });

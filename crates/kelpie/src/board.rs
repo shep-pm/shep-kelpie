@@ -63,6 +63,8 @@ pub struct OpenPullRequest {
     pub head: String,
     /// The issues on the same repo that it closes when it merges
     pub closes: Vec<u64>,
+    /// Its labels' names
+    pub labels: Vec<String>,
 }
 
 /// Why the board passed over a ready issue
@@ -119,10 +121,18 @@ pub enum Skip {
         /// Why, as the refusal reads
         error: String,
     },
+    /// An adopted pull request that could not start this poll, and still waits
+    Adopt {
+        /// The pull request
+        pull_request: u64,
+        /// Why, as the refusal reads
+        error: String,
+    },
 }
 
 impl Skip {
-    /// The issue passed over
+    /// The issue passed over, or 0 for an adopted pull request, which goes
+    /// before every issue
     pub fn issue(&self) -> u64 {
         match self {
             Self::PullRequest { issue, .. }
@@ -132,6 +142,7 @@ impl Skip {
             | Self::Label { issue, .. }
             | Self::Failed { issue, .. }
             | Self::Rework { issue, .. } => *issue,
+            Self::Adopt { .. } => 0,
         }
     }
 }
@@ -328,6 +339,7 @@ mod tests {
             number: 40,
             head: "feat/2".into(),
             closes: vec![2],
+            labels: vec![],
         }];
         let pick = pick(&[ready(2), taken, ready(5)], &open, &[]);
         assert_eq!(pick.issue, Some(5));

@@ -43,6 +43,9 @@ pub struct ProjectState {
     /// one. None of them starts another.
     #[serde(default)]
     pub reworked: Vec<String>,
+    /// Pull requests adopted and waiting for the work item in flight, oldest first
+    #[serde(default)]
+    pub adopted: Vec<Waiting>,
     /// Leases this project holds
     pub leases: Vec<LeaseHeld>,
     /// What the week had spent when today began, once usage has been read
@@ -65,11 +68,23 @@ impl ProjectState {
             last_ruling: 0,
             finished: Vec::new(),
             reworked: Vec::new(),
+            adopted: Vec::new(),
             leases: Vec::new(),
             pacing: None,
             notices: Vec::new(),
         }
     }
+}
+
+/// A pull request adopted and waiting its turn
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Waiting {
+    /// The pull request
+    pub pull_request: u64,
+    /// Whether `ready-for-agent` adopted it, so taking the label off takes it back
+    pub by_label: bool,
 }
 
 /// Whether a project takes work
@@ -585,6 +600,16 @@ mod tests {
         }];
         state.finished = vec![22, 30];
         state.reworked = vec!["PRR_1".into()];
+        state.adopted = vec![
+            Waiting {
+                pull_request: 614,
+                by_label: false,
+            },
+            Waiting {
+                pull_request: 638,
+                by_label: true,
+            },
+        ];
         state.pacing = Some(DayStart {
             week_resets_at: Timestamp(9),
             day: 1,
@@ -637,6 +662,10 @@ mod tests {
                 "last_ruling": 8,
                 "finished": [22, 30],
                 "reworked": ["PRR_1"],
+                "adopted": [
+                    { "pull_request": 614, "by_label": false },
+                    { "pull_request": 638, "by_label": true },
+                ],
                 "leases": [{ "resource": "coderabbit", "since": 8 }],
                 "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
                 "notices": [{ "issue": 22, "pull_request": 30, "head": "c0ffee" }],

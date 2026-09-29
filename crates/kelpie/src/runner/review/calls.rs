@@ -41,34 +41,36 @@ const NO_TOOLS: [&str; 11] = [
 
 pub(super) fn reviewer_call(
     worktree: &Path,
+    base: &str,
     worker_folder: &Path,
     model: &RoleModel,
 ) -> Result<ClaudeCall, String> {
-    let diff = diff_against_base(worktree)?;
+    let diff = diff_against(worktree, base)?;
     let settings = review_settings(worker_folder)?;
     build_call(
         Role::Reviewer,
         worktree,
         model,
         settings,
-        reviewer_prompt(&base_ref(), &diff),
+        reviewer_prompt(base, &diff),
     )
 }
 
 pub(in crate::runner) fn judge_call(
     worktree: &Path,
+    base: &str,
     worker_folder: &Path,
     model: &RoleModel,
     finding: &Finding,
 ) -> Result<ClaudeCall, String> {
-    let diff = diff_against_base(worktree)?;
+    let diff = diff_against(worktree, base)?;
     let settings = judge_settings(worker_folder)?;
     build_call(
         Role::Judge,
         worktree,
         model,
         settings,
-        judge_prompt(&base_ref(), &diff, finding),
+        judge_prompt(base, &diff, finding),
     )
 }
 
@@ -110,16 +112,11 @@ fn judge_settings(worker_folder: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// `origin/main`: the ref every call in this loop diffs against
-fn base_ref() -> String {
-    format!("origin/{}", crate::worktree::BASE)
-}
-
-fn diff_against_base(worktree: &Path) -> Result<String, String> {
+fn diff_against(worktree: &Path, base: &str) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(worktree)
-        .args(["diff", &base_ref()])
+        .args(["diff", base])
         .stdin(Stdio::null())
         .output()
         .map_err(|e| format!("cannot run git diff: {e}"))?;

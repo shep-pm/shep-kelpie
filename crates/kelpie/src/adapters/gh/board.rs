@@ -47,7 +47,7 @@ pub(super) fn open_pull_requests(repo: &ForgeSlug) -> Result<Vec<OpenPullRequest
             "--limit",
             LIST_LIMIT,
             "--json",
-            "number,headRefName,closingIssuesReferences",
+            "number,headRefName,closingIssuesReferences,labels",
         ])?,
         repo,
     )
@@ -104,7 +104,6 @@ fn parse_ready_issues(stdout: &[u8]) -> Result<Vec<ReadyIssue>, ForgeError> {
         .collect())
 }
 
-// A pull request can close issues on other repos, which are not this board's.
 fn parse_pull_requests(
     stdout: &[u8],
     repo: &ForgeSlug,
@@ -115,39 +114,49 @@ fn parse_pull_requests(
         number: u64,
         head_ref_name: String,
         closing_issues_references: Vec<Closes>,
-    }
-    #[derive(Deserialize)]
-    struct Closes {
-        number: u64,
-        repository: Repository,
-    }
-    #[derive(Deserialize)]
-    struct Repository {
-        name: String,
-        owner: Owner,
-    }
-    #[derive(Deserialize)]
-    struct Owner {
-        login: String,
+        labels: Vec<Label>,
     }
     let listed: Vec<Listed> = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
-    let ours = |r: &Repository| {
-        let (owner, name) = repo.as_str().split_once('/').unwrap_or_default();
-        r.owner.login.eq_ignore_ascii_case(owner) && r.name.eq_ignore_ascii_case(name)
-    };
     Ok(listed
         .into_iter()
         .map(|pr| OpenPullRequest {
             number: pr.number,
             head: pr.head_ref_name,
-            closes: pr
-                .closing_issues_references
-                .into_iter()
-                .filter(|c| ours(&c.repository))
-                .map(|c| c.number)
-                .collect(),
+            closes: closed_here(pr.closing_issues_references, repo),
+            labels: pr.labels.into_iter().map(|l| l.name).collect(),
         })
         .collect())
+}
+
+/// An issue a pull request closes, on whichever repo it is
+#[derive(Deserialize)]
+pub(super) struct Closes {
+    number: u64,
+    repository: Repository,
+}
+
+#[derive(Deserialize)]
+struct Repository {
+    name: String,
+    owner: Owner,
+}
+
+#[derive(Deserialize)]
+struct Owner {
+    login: String,
+}
+
+// A pull request can close issues on other repos, which are not this board's.
+pub(super) fn closed_here(closes: Vec<Closes>, repo: &ForgeSlug) -> Vec<u64> {
+    let (owner, name) = repo.as_str().split_once('/').unwrap_or_default();
+    closes
+        .into_iter()
+        .filter(|c| {
+            let r = &c.repository;
+            r.owner.login.eq_ignore_ascii_case(owner) && r.name.eq_ignore_ascii_case(name)
+        })
+        .map(|c| c.number)
+        .collect()
 }
 
 #[cfg(test)]
@@ -237,12 +246,31 @@ mod tests {
         let prs = parse_pull_requests(PR_LIST.as_bytes(), &slug).unwrap();
         assert_eq!(
             prs,
-            [OpenPullRequest {
-                number: 22,
-                head: "feat/10-kelpie-dog-leases".into(),
-                closes: vec![10],
-            }]
+            [
+                OpenPullRequest {
+                    number: 81,
+                    head: "worktree-kelpie-79".into(),
+                    closes: vec![79],
+                    labels: vec![],
+                },
+                OpenPullRequest {
+                    number: 55,
+                    head: "feat/54-see-the-ui".into(),
+                    closes: vec![54],
+                    labels: vec![],
+                },
+            ]
         );
+    }
+
+    // The recording carries no labels, and gh writes them as it does on an issue.
+    #[test]
+    fn an_open_pull_requests_labels_are_read_by_name() {
+        let slug = ForgeSlug::try_from("shep-pm/shep".to_owned()).unwrap();
+        let listed = br#"[{"closingIssuesReferences":[],"headRefName":"fix/x","number":614,
+            "labels":[{"id":"LA_1","name":"ready-for-agent","description":"","color":"0e8a16"}]}]"#;
+        let prs = parse_pull_requests(listed, &slug).unwrap();
+        assert_eq!(prs[0].labels, [READY]);
     }
 
     #[test]
