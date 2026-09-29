@@ -13,6 +13,7 @@ use super::gate::short;
 use super::report::{Begin, StepReport};
 use super::rework::HUMAN;
 use crate::ports::Timestamp;
+use crate::settings::MergeAuthority;
 use crate::state::{Fix, ProjectState, Resume, Ruling, RulingKind, StateError};
 use crate::work_item::{CodeRabbitStage, Known, Phase, Review, Turn, WorkItem, foreign_change};
 use crate::worktree;
@@ -136,6 +137,8 @@ impl Runner {
                 RulingKind::Rebase { .. } | RulingKind::StillRed { .. }
             )
         );
+        // Any answer to a refused merge gives the next one its catch-up again.
+        let refusal_answered = matches!(ruling.kind, RulingKind::MergeRefused { .. });
         // Only the ruling the work item is parked on moves it. Any other,
         // which nothing leaves behind today, is answered by clearing it.
         let parked_on = |item: &WorkItem| item.phase == Phase::Ruling { id };
@@ -166,8 +169,16 @@ impl Runner {
             if accepts.is_some() {
                 item.claude_files_accepted = accepts;
             }
-            if vouches {
-                item.known.head = None;
+            let regate = match (vouches, self.settings.merge_authority) {
+                (true, MergeAuthority::Auto) => regate(&self.settings.repo, item)?,
+                (true, MergeAuthority::Ask) => {
+                    item.known.head = None;
+                    false
+                }
+                (false, _) => false,
+            };
+            if refusal_answered {
+                item.merge_refused = false;
             }
             let worker = match moved {
                 Move::Phase(phase) => {
@@ -207,6 +218,9 @@ impl Runner {
                     Some((Turn::Next { prompt }, Phase::Implement, review))
                 }
             };
+            if regate {
+                item.phase = Phase::Review(Review::first());
+            }
             if let Some((turn, phase, force)) = worker {
                 item.turn = turn;
                 item.phase = phase;
@@ -294,6 +308,28 @@ impl Runner {
     }
 }
 
+// Under `auto` no merge ruling follows a yes that vouches for the branch,
+// so a head the gates never saw is adopted and goes back through them.
+// Returns whether it does; an unchanged head keeps its place.
+fn regate(repo: &std::path::Path, item: &mut WorkItem) -> Result<bool, RuleError> {
+    let known = item.known.head.clone();
+    let tip = worktree::origin_head(repo, &item.branch)
+        .map_err(|e| RuleError::Adopt(known.clone().unwrap_or_default(), e.to_string()))?;
+    let from = match known {
+        Some(known) => known,
+        None => worktree::head(repo, &item.worktree)
+            .map_err(|e| RuleError::Adopt(tip.clone(), e.to_string()))?,
+    };
+    if from == tip && item.known.head.is_some() {
+        return Ok(false);
+    }
+    worktree::adopt(repo, &item.worktree, &item.branch, &from, &tip)
+        .map_err(|e| RuleError::Adopt(tip.clone(), e.to_string()))?;
+    item.known.head = Some(tip);
+    item.coderabbit.satisfied = false;
+    Ok(true)
+}
+
 /// Adds a ruling to `next` and parks its work item on it
 ///
 /// Returns the work item's issue, and the ruling's id and question.
@@ -336,6 +372,10 @@ fn comment(kind: &RulingKind) -> Option<String> {
             short(head),
             checks.join(", ")
         ),
+        // The forge's own words stay off a public pull request.
+        RulingKind::MergeRefused { head, .. } => {
+            format!("Merging at {} was refused twice.", short(head))
+        }
         RulingKind::Closed => "This pull request was closed without merging.".to_owned(),
         RulingKind::ReviewGuard { review } => format!(
             "The review of this pull request has run {} rounds without settling.",
@@ -448,8 +488,14 @@ fn decide(
         (Answer::Yes, RulingKind::Merge { head }) => Phase::Merge {
             head,
             readied: None,
+            auto: false,
         },
-        (Answer::Yes, RulingKind::Rebase { .. } | RulingKind::StillRed { .. }) => Phase::Ci {
+        (
+            Answer::Yes,
+            RulingKind::Rebase { .. }
+            | RulingKind::StillRed { .. }
+            | RulingKind::MergeRefused { .. },
+        ) => Phase::Ci {
             head: None,
             since: now,
         },
@@ -508,6 +554,11 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
              no fix: {}. {yes} has kelpie look again",
             short(head),
             checks.join(", ")
+        ),
+        RulingKind::MergeRefused { head, reason } => format!(
+            "Kelpie could not merge {about} at {} after catching it up: {reason}. \
+             {yes} has kelpie look again and merge once every gate passes",
+            short(head)
         ),
         RulingKind::Closed => format!(
             "{} was closed without merging. {yes} drops the work \

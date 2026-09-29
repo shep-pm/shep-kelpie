@@ -215,6 +215,7 @@ impl Runner {
     pub fn status(&self) -> Status<'_> {
         Status {
             project: self.project.as_str(),
+            merge_authority: self.settings.merge_authority,
             run: self.state.run,
             since: self.state.since,
             work_item: self.state.work_item.as_ref().map(WorkItemStatus::from),
@@ -302,6 +303,9 @@ impl Runner {
             known: Known::default(),
             claude_files_accepted: None,
             qwen: QwenTally::default(),
+            merge_refused: false,
+            merge_tried: None,
+            summon_owed: false,
             calls: Vec::new(),
         }
     }

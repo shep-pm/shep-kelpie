@@ -49,13 +49,15 @@ pub struct Settings {
 
 /// Who decides a merge
 ///
-/// The first build asks the maintainer every time. `auto` and
-/// `ask-surface` are refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+/// `auto` replaces only the merge ruling: every other ruling still asks.
+/// `ask-surface` is refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MergeAuthority {
     /// Kelpie asks for a ruling before every merge
     Ask,
+    /// Kelpie merges once every gate passes, then posts a notice of the merge
+    Auto,
 }
 
 /// The model and effort for each role that calls Claude
@@ -559,11 +561,20 @@ mod tests {
     }
 
     #[test]
-    fn merge_authority_other_than_ask_is_refused() {
+    fn merge_authority_auto_is_accepted() {
         let text = EXAMPLE.replace("merge_authority = \"ask\"", "merge_authority = \"auto\"");
+        assert_eq!(parse(&text).unwrap().merge_authority, MergeAuthority::Auto);
+    }
+
+    #[test]
+    fn merge_authority_ask_surface_is_refused() {
+        let text = EXAMPLE.replace(
+            "merge_authority = \"ask\"",
+            "merge_authority = \"ask-surface\"",
+        );
         let err = parse_err(&text);
         assert!(err.contains("merge_authority"), "{err}");
-        assert!(err.contains("unknown variant `auto`"), "{err}");
+        assert!(err.contains("unknown variant `ask-surface`"), "{err}");
     }
 
     #[test]

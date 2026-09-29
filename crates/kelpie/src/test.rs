@@ -111,6 +111,9 @@ pub(crate) fn a_work_item() -> WorkItem {
         },
         claude_files_accepted: None,
         qwen: crate::work_item::QwenTally::default(),
+        merge_refused: false,
+        merge_tried: None,
+        summon_owed: false,
         calls: vec![CallRecord {
             role: Role::Worker,
             at: Timestamp(10),
@@ -705,6 +708,15 @@ impl Rig {
     /// Turns the CodeRabbit gate on, as the example settings have it for shep
     pub(crate) fn coderabbit_on(&self) {
         self.edit_settings(|s| s.replace(CODERABBIT_OFF, CODERABBIT_ON));
+    }
+
+    /// Makes the project's merge authority `auto`, read when a runner next opens
+    pub(crate) fn merge_auto(&self) {
+        let (ask, auto) = ("merge_authority = \"ask\"", "merge_authority = \"auto\"");
+        self.edit_settings(|s| {
+            assert!(s.contains(ask), "the example's merge authority moved");
+            s.replace(ask, auto)
+        });
     }
 
     pub(crate) fn edit_settings(&self, edit: impl FnOnce(String) -> String) {
