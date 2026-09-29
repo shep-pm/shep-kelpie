@@ -116,9 +116,14 @@ mod tests {
 
     #[test]
     fn a_yes_has_one_command_and_a_choice_is_passed_on_as_typed() {
-        assert!(INSTRUCTIONS.contains("`kelpie relay-yes` is the only command that sends a yes"));
-        assert!(INSTRUCTIONS.contains("Never send a yes\nthrough `kelpie relay-answer`"));
-        assert!(INSTRUCTIONS.contains("exactly as they came, never reworded"));
+        // The instructions are hard-wrapped, so compare on single spaces.
+        let flat = INSTRUCTIONS
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(flat.contains("`kelpie relay-yes` is the only command that sends a yes"));
+        assert!(flat.contains("Never send a yes through `kelpie relay-answer`"));
+        assert!(flat.contains("exactly as they came, never reworded"));
     }
 
     #[test]
