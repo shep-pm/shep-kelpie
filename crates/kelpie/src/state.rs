@@ -203,6 +203,16 @@ pub enum RulingKind {
         /// The turn as it stood before it failed, which a yes puts back
         retry: Turn,
     },
+    /// The pull request changes Claude Code's own files, which run outside
+    /// the sandbox. A yes accepts them at this head; a no stops the work item.
+    ClaudeFiles {
+        /// The head that changes them
+        head: String,
+        /// The files it changes
+        files: Vec<String>,
+        /// The phase the gate was in, which a yes goes back to
+        phase: Phase,
+    },
     /// The pull request's labels or ready state changed outside kelpie. A
     /// yes accepts the change and kelpie carries on watching it.
     ForeignChange {

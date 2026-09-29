@@ -124,6 +124,10 @@ impl Runner {
             (&answer, &ruling.kind),
             (Answer::Yes, RulingKind::CodeRabbitCap { .. })
         );
+        let accepts = match (&answer, &ruling.kind) {
+            (Answer::Yes, RulingKind::ClaudeFiles { head, .. }) => Some(head.clone()),
+            _ => None,
+        };
         // These ask the maintainer to fix the branch, so a yes vouches for its head.
         let vouches = matches!(
             (&answer, &ruling.kind),
@@ -159,6 +163,9 @@ impl Runner {
         let moved = decide(id, answer, ruling, now, head_moved)?;
         if let Some(item) = next.work_item.as_mut().filter(|item| parked_on(item)) {
             item.coderabbit.cap_cleared |= lifts_cap;
+            if accepts.is_some() {
+                item.claude_files_accepted = accepts;
+            }
             if vouches {
                 item.known.head = None;
             }
@@ -352,6 +359,10 @@ fn comment(kind: &RulingKind) -> Option<String> {
         RulingKind::TurnFailed { .. } => {
             "The work on this pull request hit an error and stopped.".to_owned()
         }
+        RulingKind::ClaudeFiles { files, .. } => format!(
+            "This pull request changes Claude Code's own files: {}.",
+            files.join(", ")
+        ),
         RulingKind::ForeignChange { description, .. } => {
             format!("This pull request was changed: {description}.")
         }
@@ -416,9 +427,14 @@ fn decide(
             };
             return Ok(Move::Retry { turn, phase });
         }
-        (Answer::No(_), RulingKind::TurnTimeout { .. } | RulingKind::TurnFailed { .. }) => {
-            Phase::Done { merged: false }
-        }
+        // A worker cannot write Claude Code's own files, so a note would not help it.
+        (
+            Answer::No(_),
+            RulingKind::TurnTimeout { .. }
+            | RulingKind::TurnFailed { .. }
+            | RulingKind::ClaudeFiles { .. },
+        ) => Phase::Done { merged: false },
+        (Answer::Yes, RulingKind::ClaudeFiles { phase, .. }) => phase,
         (Answer::Yes, RulingKind::ForeignChange { known, .. }) => return Ok(Move::Accept(known)),
         // A no's fix is new code, unreviewed: it goes through the
         // qwen-review loop again before CI, whatever ruling this answers.
@@ -543,6 +559,17 @@ fn question(project: &str, id: u64, issue: u64, number: Option<u64>, kind: &Ruli
                  and {no} stops the work item, keeping its branch and pull request \
                  on the forge.",
                 reason.trim()
+            );
+        }
+        RulingKind::ClaudeFiles { head, files, .. } => {
+            return format!(
+                "{} at {} changes Claude Code's own files, which run outside the \
+                 worker's sandbox: {}. {yes} accepts them at that head and kelpie \
+                 carries on, and {no} stops the work item, keeping its branch and \
+                 pull request on the forge.",
+                capitalized(&about),
+                short(head),
+                files.join(", ")
             );
         }
         RulingKind::ForeignChange { description, .. } => {

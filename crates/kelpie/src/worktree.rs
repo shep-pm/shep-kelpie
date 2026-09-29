@@ -58,6 +58,13 @@ pub enum WorktreeError {
         /// What creating it failed with
         kind: io::ErrorKind,
     },
+    /// A file or folder in the worktree could not be read
+    Unreadable {
+        /// The file or folder
+        path: PathBuf,
+        /// What reading it failed with
+        kind: io::ErrorKind,
+    },
     /// A build folder could not be removed
     Remove {
         /// The folder
@@ -87,6 +94,9 @@ impl fmt::Display for WorktreeError {
             ),
             Self::Folder { path, kind } => {
                 write!(f, "cannot create {}: {kind}", path.display())
+            }
+            Self::Unreadable { path, kind } => {
+                write!(f, "cannot read {}: {kind}", path.display())
             }
             Self::Remove { path, kind } => {
                 write!(f, "cannot remove {}: {kind}", path.display())
@@ -527,7 +537,7 @@ fn create(path: &Path) -> Result<(), WorktreeError> {
     })
 }
 
-fn git<I, S>(cwd: &Path, args: I) -> Result<String, WorktreeError>
+pub(crate) fn git<I, S>(cwd: &Path, args: I) -> Result<String, WorktreeError>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
