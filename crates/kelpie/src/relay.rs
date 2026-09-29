@@ -334,8 +334,8 @@ mod tests {
     fn only_a_plain_absolute_path_is_typed_bare() {
         let bare = |p: &'static str| BarePath::of(Path::new(p)).map(|b| b.to_string());
         assert_eq!(
-            bare("/Users/m/.kelpie/bin/kelpie").as_deref(),
-            Some("/Users/m/.kelpie/bin/kelpie")
+            bare("/Users/me/.kelpie/bin/kelpie").as_deref(),
+            Some("/Users/me/.kelpie/bin/kelpie")
         );
         for refused in [
             "kelpie",

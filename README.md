@@ -2,7 +2,20 @@
 
 A [shep](https://github.com/shep-pm/shep) dog that runs Claude Code workers on your projects, from a planned work item to a merged pull request. It holds the merge gate, the review budgets and the pacing in code, and calls Claude only for the work and for judgement.
 
-First build under way. A project runner reads its settings, keeps its state, and answers `status`, `start` and `pause`.
+This is early. It runs the maintainer's own projects and changes without notice, and there is no release yet.
+
+## What it needs
+
+- shep 0.11
+- Rust 1.88 or later, to build it
+- Claude Code, signed in
+- `git`, and `gh` signed in to the account that opens the pull requests
+- a GitHub repo per project, with `ready-for-agent` and `ready-for-human` labels
+- a local review command or an OpenAI-compatible endpoint, or `review.local` set to `off`
+
+## Merging
+
+A project on `merge_authority = "auto"` merges its pull requests without asking once every gate passes, and posts a notice after. The example settings use `ask`, which raises a ruling before every merge.
 
 ## Running a project
 
@@ -49,6 +62,8 @@ Each pull request goes through a review loop before CI. Rounds alternate between
 - `kind = "off"`: every round is the Claude round, and one that finds nothing above a nit ends the loop
 - `kind = "endpoint"`: kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server
 - `kind = "command"`: a command of your own that keeps the contract below
+
+`review.local_rounds` caps the local rounds per work item. Once they are spent, every round is Claude's and one clean Claude round ends the loop.
 
 A file without the table runs `~/.claude/scripts/qwen-review.sh`, the maintainer's own command. A missing command or an endpoint that doesn't answer stops the runner at start.
 

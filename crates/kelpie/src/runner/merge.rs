@@ -650,7 +650,7 @@ mod tests {
     // with no pull request, in a project the maintainer paused.
     #[test]
     fn drop_clears_a_work_item_in_a_paused_project_and_the_board_never_retakes_it() {
-        let rig = Rig::new("hazels-lab");
+        let rig = Rig::new("webapp");
         let runner = rig.open().unwrap();
         rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
@@ -658,7 +658,7 @@ mod tests {
             .script([Scripted::Reply(Usage::default(), Cost(1))]);
         step(&runner).unwrap();
         rig.ask(&runner, "pause", None);
-        let build = rig.home.path().join("kelpie/targets/hazels-lab/7");
+        let build = rig.home.path().join("kelpie/targets/webapp/7");
         assert!(rig.worktree_7().exists() && build.exists());
 
         let status = rig.ask(&runner, "drop", None);
@@ -737,7 +737,7 @@ mod tests {
     // merge, before GitHub closed the issue, and dispatched it again.
     #[test]
     fn an_issue_whose_work_item_finished_is_never_dispatched_again() {
-        let (rig, runner, _) = Rig::parked("hazels-lab");
+        let (rig, runner, _) = Rig::parked("webapp");
         rig.forge.list_ready(7, false);
         rig.forge.list_ready(8, true);
         rig.ask(&runner, "rule", Some("1 yes"));

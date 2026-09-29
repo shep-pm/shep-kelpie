@@ -153,7 +153,7 @@ mod tests {
                 settings: &settings,
                 kelpie_settings: &kelpie_settings,
             };
-            load(tables, files, Path::new("/home/maintainer"))
+            load(tables, files, Path::new("/home/me"))
         }
     }
 
