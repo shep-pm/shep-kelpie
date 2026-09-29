@@ -49,7 +49,7 @@ impl Scene {
                 id: 1,
                 name: "shep".into(),
                 outcome: ActionOutcome::Replied {
-                    body: "merging #71".into(),
+                    body: STATUS.into(),
                 },
             }])
         })
@@ -84,6 +84,9 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
+// What a runner replies to a ruling it took: its status, as JSON.
+const STATUS: &str = r#"{"project":"shep","rulings":[]}"#;
+
 fn rule_trigger(params: &str) -> Request {
     Request::Trigger {
         selector: SelectorSpec::Name("shep".into()),
@@ -99,7 +102,10 @@ async fn relay_yes_reaches_the_shepherd_at_shep_home_not_the_shep_on_path() {
     let mut sent = scene.shepherd(kelpie::relay::rule::SHEP_VERSION).await;
     let output = scene.kelpie(&["relay-yes", "shep", "3"]).await;
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "merging #71\n");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!("{STATUS}\n")
+    );
     assert_eq!(sent.try_recv().unwrap().body, rule_trigger("3 yes"));
     assert!(!scene.decoy_ran(), "the shep on PATH ran");
 }

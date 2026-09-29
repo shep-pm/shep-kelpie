@@ -82,19 +82,27 @@ async fn deliver(shep_home: &Path, project: &str, ruling: Ruling<'_>) -> Result<
         return Err(skew(shep_home, Some(running)));
     }
     let mut outcome = trigger(&client, project, RELAY_RULE, &params).await?;
-    // A runner started before `relay-rule` existed takes the same ruling as `rule`.
+    // shep-channel answers an action a runner never registered itself, in
+    // plain text: a runner started before `relay-rule` takes it as `rule`.
     if let Some(ActionOutcome::Replied { body }) = &outcome
-        && refusal(body).is_some_and(|why| why == format!("unknown action `{RELAY_RULE}`"))
+        && body.trim() == format!("unknown action: {RELAY_RULE}")
     {
         outcome = trigger(&client, project, "rule", &params).await?;
     }
     match outcome {
-        Some(ActionOutcome::Replied { body }) => match refusal(&body) {
-            None => Ok(body),
-            Some(why) => Err(format!(
-                "{project}'s runner refused the ruling: {why}. \
+        // A runner always replies JSON, so anything else never reached one.
+        Some(ActionOutcome::Replied { body }) => match serde_json::from_str(&body) {
+            Err(_) => Err(format!(
+                "{project}'s runner did not take the ruling, and answered {body:?}. \
                  Tell the maintainer, and send nothing else."
             )),
+            Ok(reply) => match refusal(&reply) {
+                None => Ok(body),
+                Some(why) => Err(format!(
+                    "{project}'s runner refused the ruling: {why}. \
+                     Tell the maintainer, and send nothing else."
+                )),
+            },
         },
         Some(other) => Err(format!("{project}'s runner did not answer: {other:?}")),
         None => Err(format!("kelpie's shepherd runs no sheep named {project}")),
@@ -124,13 +132,9 @@ async fn trigger(
     Ok(rows.into_iter().next().map(|row| row.outcome))
 }
 
-// The `error` a runner's reply carries, if any. A reply that is not JSON
-// carries none.
-fn refusal(body: &str) -> Option<String> {
-    match serde_json::from_str::<serde_json::Value>(body)
-        .ok()?
-        .get("error")?
-    {
+// The `error` a runner's reply carries, if any.
+fn refusal(reply: &serde_json::Value) -> Option<String> {
+    match reply.get("error")? {
         serde_json::Value::Null => None,
         serde_json::Value::String(why) => Some(why.clone()),
         why => Some(why.to_string()),
@@ -205,6 +209,9 @@ mod tests {
         .await
     }
 
+    // What a runner replies to a ruling it took: its status, as JSON.
+    const STATUS: &str = r#"{"project":"shep","rulings":[]}"#;
+
     fn replied(body: &str) -> ActionOutcome {
         ActionOutcome::Replied { body: body.into() }
     }
@@ -234,8 +241,8 @@ mod tests {
         let socket = home.path().join("run/shep.sock");
         let mut sent = fake_daemon_answering_with_ack(&socket, ack(SHEP_VERSION), |request| {
             let body = match request {
-                Request::Trigger { action, .. } if action == "rule" => "merging #71",
-                _ => r#"{"error":"unknown action `relay-rule`"}"#,
+                Request::Trigger { action, .. } if action == "rule" => STATUS,
+                _ => "unknown action: relay-rule",
             };
             Response::Triggered(vec![ActionReply {
                 id: 1,
@@ -245,7 +252,7 @@ mod tests {
         })
         .await;
         let reply = deliver_in_time(home.path(), Ruling::Yes("3")).await;
-        assert_eq!(reply, Ok("merging #71".into()));
+        assert_eq!(reply, Ok(STATUS.into()));
         assert_eq!(sent.try_recv().unwrap().body, rule_trigger("3 yes"));
         assert_eq!(sent.try_recv().unwrap().body, trigger_of("rule", "3 yes"));
     }
@@ -255,16 +262,34 @@ mod tests {
     #[tokio::test]
     async fn a_yes_reaches_the_projects_rule_action() {
         let home = scratch_home();
-        let mut sent = shepherd(home.path(), SHEP_VERSION, replied("merging #71")).await;
+        let mut sent = shepherd(home.path(), SHEP_VERSION, replied(STATUS)).await;
         let reply = deliver_in_time(home.path(), Ruling::Yes("3")).await;
-        assert_eq!(reply, Ok("merging #71".into()));
+        assert_eq!(reply, Ok(STATUS.into()));
         assert_eq!(sent.try_recv().unwrap().body, rule_trigger("3 yes"));
+    }
+
+    // shep-channel's own replies: a panicked handler, and an action no
+    // runner registered.
+    #[tokio::test]
+    async fn a_reply_that_is_not_a_runners_json_fails_the_command() {
+        for body in ["action handler failed: boom", "unknown action: rule"] {
+            let home = scratch_home();
+            let _sent = shepherd(home.path(), SHEP_VERSION, replied(body)).await;
+            let failed = deliver_in_time(home.path(), Ruling::Yes("3"))
+                .await
+                .unwrap_err();
+            assert!(
+                failed.starts_with("shep's runner did not take the ruling"),
+                "{failed}"
+            );
+            assert!(failed.contains(body), "{failed}");
+        }
     }
 
     #[tokio::test]
     async fn a_ruling_gets_shep_trigger_s_full_minute() {
         let home = scratch_home();
-        let mut sent = shepherd(home.path(), SHEP_VERSION, replied("")).await;
+        let mut sent = shepherd(home.path(), SHEP_VERSION, replied(STATUS)).await;
         deliver_in_time(home.path(), Ruling::Yes("3"))
             .await
             .unwrap();
@@ -275,9 +300,9 @@ mod tests {
     async fn a_no_or_an_answer_passes_through_verbatim() {
         for params in ["3 no rename the flag", "3 answer use --dry-run"] {
             let home = scratch_home();
-            let mut sent = shepherd(home.path(), SHEP_VERSION, replied("")).await;
+            let mut sent = shepherd(home.path(), SHEP_VERSION, replied(STATUS)).await;
             let reply = deliver_in_time(home.path(), Ruling::NoOrAnswer(params)).await;
-            assert_eq!(reply, Ok(String::new()), "{params:?}");
+            assert_eq!(reply, Ok(STATUS.into()), "{params:?}");
             assert_eq!(sent.try_recv().unwrap().body, rule_trigger(params));
         }
     }
@@ -299,7 +324,7 @@ mod tests {
     async fn a_shepherd_on_another_minor_or_major_gets_no_ruling() {
         for version in ["0.8.2", "0.9.4", "0.11.0", "1.10.1", "0.100.1"] {
             let home = scratch_home();
-            let mut sent = shepherd(home.path(), version, replied("merging #71")).await;
+            let mut sent = shepherd(home.path(), version, replied(STATUS)).await;
             let refused = deliver_in_time(home.path(), Ruling::Yes("3"))
                 .await
                 .unwrap_err();
@@ -320,9 +345,9 @@ mod tests {
     async fn a_patch_release_of_the_pinned_line_gets_the_ruling() {
         for version in ["0.10.0", "0.10.2"] {
             let home = scratch_home();
-            let mut sent = shepherd(home.path(), version, replied("merging #71")).await;
+            let mut sent = shepherd(home.path(), version, replied(STATUS)).await;
             let reply = deliver_in_time(home.path(), Ruling::Yes("3")).await;
-            assert_eq!(reply, Ok("merging #71".into()), "{version}");
+            assert_eq!(reply, Ok(STATUS.into()), "{version}");
             assert_eq!(sent.try_recv().unwrap().body, rule_trigger("3 yes"));
         }
     }
