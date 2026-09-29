@@ -108,10 +108,19 @@ fn first_prompt(number: u64, issue: &Issue) -> String {
     )
 }
 
+/// What a step can work on
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Slot {
+    /// The open work item for this issue
+    Item(u64),
+    /// The board, while a slot is free under `max_items`
+    Board,
+}
+
 impl Runner {
-    // Steps each open work item from the one after the last to act, until
-    // one acts. `start_over` is the item whose session died unborn, which
-    // begins the same turn again.
+    // Steps each open work item, and the board while a slot is free, from
+    // the one after the last to act, until one acts. `start_over` is the
+    // item whose session died unborn, which begins the same turn again.
     fn begin_turn(&mut self, start_over: Option<u64>) -> Result<Begin, StateError> {
         if self.state.run != RunState::Running {
             return Ok(Begin::Idle);
@@ -120,20 +129,25 @@ impl Runner {
             self.focus = Some(issue);
             return self.begin_item(true);
         }
-        if self.state.work_items.is_empty() {
-            self.focus = None;
-            return self.dispatch();
-        }
         let mut waiting = None;
-        for issue in self.rotation() {
-            self.focus = Some(issue);
-            match self.begin_item(false)? {
+        for slot in self.rotation() {
+            let begin = match slot {
+                Slot::Item(issue) => {
+                    self.focus = Some(issue);
+                    self.begin_item(false)?
+                }
+                Slot::Board => {
+                    self.focus = None;
+                    self.dispatch()?
+                }
+            };
+            match begin {
                 Begin::Idle => {}
                 Begin::Report(report) if report.waits() => {
                     waiting.get_or_insert(report);
                 }
                 begin => {
-                    self.last_acted = Some(issue);
+                    self.last_acted = Some(slot);
                     return Ok(begin);
                 }
             }
@@ -141,14 +155,17 @@ impl Runner {
         Ok(waiting.map_or(Begin::Idle, Begin::Report))
     }
 
-    // The open work items' issues, oldest first, from the one after the
-    // last to act, so one that keeps acting cannot starve the rest
-    fn rotation(&self) -> Vec<u64> {
-        let mut issues: Vec<u64> = self.state.work_items.iter().map(|i| i.issue).collect();
-        if let Some(at) = issues.iter().position(|&i| Some(i) == self.last_acted) {
-            issues.rotate_left(at + 1);
+    // The open work items oldest first, then the board while a slot is
+    // free, from the one after the last to act, so one that keeps acting
+    // cannot starve the rest
+    fn rotation(&self) -> Vec<Slot> {
+        let items = self.state.work_items.iter().map(|i| Slot::Item(i.issue));
+        let board = self.slot_free().then_some(Slot::Board);
+        let mut slots: Vec<Slot> = items.chain(board).collect();
+        if let Some(at) = slots.iter().position(|&s| Some(s) == self.last_acted) {
+            slots.rotate_left(at + 1);
         }
-        issues
+        slots
     }
 
     fn begin_item(&mut self, start_over: bool) -> Result<Begin, StateError> {

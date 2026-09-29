@@ -2,8 +2,8 @@
 //!
 //! The maintainer adopts one with `adopt <pr>`, or with `ready-for-agent` on
 //! one whose branch isn't `kelpie/N`, seen on the board's poll. Adopted pull
-//! requests wait in the state file for the work item in flight, one at a
-//! time, and go before the board's issues. Each starts at CI on its branch as
+//! requests wait in the state file for a free slot, one at a time, and go
+//! before the board's issues. Each starts at CI on its branch as
 //! `origin` holds it, with its labels, ready state and head taken as kelpie's
 //! own. A review asking for changes is the worker's first turn instead. The
 //! branch's owner may still be pushing, so only a push the worker's worktree
@@ -43,6 +43,8 @@ pub enum AdoptError {
     Author(u64, String),
     /// The pull request names no issue on the repo that it closes
     NoIssue(u64),
+    /// A work item for the issue it closes is open
+    InFlight(u64),
     /// The forge could not say which account kelpie acts as
     Viewer(ForgeError),
     /// The forge could not show the pull request's issue
@@ -83,6 +85,7 @@ impl fmt::Display for AdoptError {
             Self::NoIssue(number) => {
                 write!(f, "pull request #{number} names no issue it closes")
             }
+            Self::InFlight(issue) => write!(f, "the work item for #{issue} is in flight"),
             Self::Viewer(e) => write!(f, "cannot read the account kelpie acts as: {e}"),
             Self::Issue(issue, e) => write!(f, "cannot read issue #{issue}: {e}"),
             Self::Label(e) => e.fmt(f),
@@ -119,8 +122,8 @@ impl AdoptError {
 }
 
 impl Runner {
-    /// Adopts open pull request `number`, which waits for the work item in
-    /// flight and any adopted before it
+    /// Adopts open pull request `number`, which waits for a free slot and
+    /// any adopted before it
     ///
     /// Adopting one already waiting or in flight changes nothing.
     ///
@@ -171,9 +174,6 @@ impl Runner {
         open: &[OpenPullRequest],
     ) -> Result<(Option<Begin>, Vec<Skip>), StateError> {
         let mut skipped = Vec::new();
-        if !self.state.work_items.is_empty() {
-            return Ok((None, skipped));
-        }
         let mut labelled: Vec<u64> = open
             .iter()
             .filter(|pr| pr.labels.iter().any(|l| l == READY))
@@ -214,6 +214,8 @@ impl Runner {
                     self.let_go(number)?;
                     continue;
                 }
+                // It waits for the work item on its issue to end.
+                Err(AdoptError::InFlight(_)) => continue,
                 Err(e) if e.settled() => match self.refuse_adoption(number, &e)? {
                     Ok(begin) => begin,
                     Err(e) => {
@@ -320,6 +322,9 @@ impl Runner {
             .reviewed(&repo, number)
             .map_err(|e| AdoptError::PullRequest(number, e))?;
         let issue = self.adoptable(number, &pr)?;
+        if self.state.item(issue).is_some() {
+            return Err(AdoptError::InFlight(issue));
+        }
         let found = self
             .ports
             .forge

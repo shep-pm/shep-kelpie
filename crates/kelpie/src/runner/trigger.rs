@@ -44,7 +44,7 @@ pub struct Status<'a> {
     pub work_items: Vec<WorkItemStatus<'a>>,
     /// How many work items may be open at once
     pub max_items: u32,
-    /// Pull requests adopted and waiting for the work item in flight, oldest first
+    /// Pull requests adopted and waiting for a free slot, oldest first
     pub adopted: &'a [Waiting],
     /// Ready issues the board passed over on its last poll, and why
     pub skipped: &'a [Skip],
@@ -56,7 +56,7 @@ pub struct Status<'a> {
     pub pacer: PacerStatus<'a>,
 }
 
-/// The work item in flight, as `status` shows it
+/// An open work item, as `status` shows it
 #[derive(Debug, Serialize)]
 pub struct WorkItemStatus<'a> {
     /// The issue it resolves

@@ -164,9 +164,9 @@ pub struct Runner {
     // The issue of the work item a step or trigger is working on, set before
     // anything reads it: every change to a work item goes to this one
     focus: Option<u64>,
-    // The issue of the work item that last did something in a step, kept in
-    // memory only, so the next step starts with the one after it
-    last_acted: Option<u64>,
+    // What last did something in a step, kept in memory only, so the next
+    // step starts with the one after it
+    last_acted: Option<turn::Slot>,
 }
 
 impl Runner {

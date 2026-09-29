@@ -1,10 +1,10 @@
-//! Dispatch: the board's next issue becomes the work item in flight
+//! Dispatch: the board's next issue opens a work item in a free slot
 //!
-//! A running project with nothing in flight asks the board on every step,
-//! after starting any pull request it adopted and checking its open pull
-//! requests for one asking for a rework.
-//! One work item is in flight at a time, so a queued issue waits until the
-//! one in flight is gone.
+//! A running project with fewer than `max_items` open asks the board on its
+//! steps, after starting any pull request it adopted and checking its open
+//! pull requests for one asking for a rework. A queued issue waits until a
+//! slot is free, and an issue, or a pull request, whose work item is open
+//! waits for it to end.
 
 use super::Runner;
 use super::report::{Begin, StepReport};
@@ -27,6 +27,8 @@ impl Runner {
                 }));
             }
         };
+        // An issue in flight is not passed over: it is being worked on.
+        ready.retain(|issue| self.state.item(issue.number).is_none());
         // An adopted pull request, then one asking for a rework, goes before
         // any ready issue, and one that cannot start is passed over like one.
         let (begin, mut failed) = self.adopt_waiting(&open)?;

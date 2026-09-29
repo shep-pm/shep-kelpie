@@ -30,7 +30,7 @@ pub enum ReworkBy {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "step", rename_all = "kebab-case")]
 pub enum StepReport {
-    /// The board's oldest free issue became the work item in flight
+    /// The board's oldest free issue opened a work item
     Dispatched {
         /// The work item's issue
         issue: u64,
@@ -39,8 +39,8 @@ pub enum StepReport {
         /// Older ready issues the board passed over, and why
         skipped: Vec<Skip>,
     },
-    /// A pull request kelpie opened asked for a rework, which became the
-    /// work item in flight
+    /// A pull request kelpie opened asked for a rework, which opened a work
+    /// item
     Reworked {
         /// The work item's issue
         issue: u64,
@@ -52,7 +52,7 @@ pub enum StepReport {
         /// requesting changes
         by: ReworkBy,
     },
-    /// An adopted pull request became the work item in flight
+    /// An adopted pull request opened a work item
     Adopted {
         /// The work item's issue: the one the pull request closes
         issue: u64,

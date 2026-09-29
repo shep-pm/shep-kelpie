@@ -4,24 +4,35 @@ use std::sync::Mutex;
 
 use serde_json::json;
 
+use crate::board::Skip;
 use crate::lease::LeaseKind;
-use crate::ports::Checks;
+use crate::ports::{Checks, Cost, Usage};
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{Rig, Scripted, Told};
 
 // A running project that may hold two work items open, with issues 7 and 8
 // ready to open pull requests 71 and 81
 fn two_slots(project: &str) -> (Rig, Mutex<Runner>) {
+    let (rig, runner) = running(two_slot_rig(project));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.forge.open_pull_request(81, "kelpie/8", &[8]);
+    (rig, runner)
+}
+
+// A running project with two slots and nothing open or opened yet
+fn two_free_slots(project: &str) -> (Rig, Mutex<Runner>) {
+    running(two_slot_rig(project))
+}
+
+fn two_slot_rig(project: &str) -> Rig {
     let rig = Rig::new(project);
     rig.edit_settings(|s| s.replace("max_items = 1", "max_items = 2"));
-    running(rig)
+    rig
 }
 
 fn running(rig: Rig) -> (Rig, Mutex<Runner>) {
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
-    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-    rig.forge.open_pull_request(81, "kelpie/8", &[8]);
     (rig, runner)
 }
 
@@ -86,10 +97,11 @@ fn phases(rig: &Rig, runner: &Mutex<Runner>) -> Vec<(u64, String)> {
 
 #[test]
 fn an_item_waiting_on_coderabbit_yields_to_one_implementing_and_reviewing() {
-    let rig = Rig::new("shep");
-    rig.edit_settings(|s| s.replace("max_items = 1", "max_items = 2"));
+    let rig = two_slot_rig("shep");
     rig.coderabbit_on();
     let (rig, runner) = running(rig);
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.forge.open_pull_request(81, "kelpie/8", &[8]);
     rig.leases.withhold(true);
     rig.ask(&runner, "add", Some("7"));
     rig.claude.script([
@@ -277,4 +289,90 @@ fn with_one_slot_a_second_add_is_refused_as_before() {
         json!({ "error": "the work item for #7 is in flight" })
     );
     assert_eq!(rig.ask(&runner, "drop", None)["work_items"], json!([]));
+}
+
+fn dispatched(report: Option<StepReport>) -> (u64, Vec<Skip>) {
+    match report {
+        Some(StepReport::Dispatched { issue, skipped, .. }) => (issue, skipped),
+        other => panic!("nothing was dispatched: {other:?}"),
+    }
+}
+
+fn open_items(rig: &Rig, runner: &Mutex<Runner>) -> Vec<u64> {
+    let status = rig.ask(runner, "status", None);
+    let items = status["work_items"].as_array().unwrap().clone();
+    items.iter().map(|i| i["issue"].as_u64().unwrap()).collect()
+}
+
+#[test]
+fn the_board_fills_a_free_slot_and_never_takes_an_open_issue_again() {
+    let (rig, runner) = two_free_slots("zeus");
+    for issue in [7, 8, 9] {
+        rig.forge.list_ready(issue, false);
+    }
+    rig.claude.script([
+        Scripted::Reply(Usage::default(), Cost(1)),
+        Scripted::Reply(Usage::default(), Cost(1)),
+    ]);
+    assert_eq!(dispatched(step(&runner).unwrap()), (7, vec![]));
+    assert_eq!(issue_of(step(&runner).unwrap()), 7, "#7's first turn");
+    // #7 is still ready on the forge, and in flight here.
+    assert_eq!(dispatched(step(&runner).unwrap()), (8, vec![]));
+    assert_eq!(issue_of(step(&runner).unwrap()), 8, "#8's first turn");
+
+    // Both slots are taken, and each turn has ended, so #9 waits.
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(open_items(&rig, &runner), [7, 8]);
+
+    rig.ask(&runner, "drop", Some("7"));
+    let (issue, skipped) = dispatched(step(&runner).unwrap());
+    assert_eq!(issue, 9);
+    assert_eq!(skipped, [Skip::Finished { issue: 7 }]);
+    assert_eq!(open_items(&rig, &runner), [8, 9]);
+}
+
+#[test]
+fn an_adoption_goes_before_the_board_into_a_free_slot() {
+    let (rig, runner) = two_free_slots("shep");
+    rig.forge.list_ready(3, false);
+    rig.push_by_hand("fix/timeline", "work.txt");
+    rig.forge.open_pull_request(80, "fix/timeline", &[5]);
+    rig.ask(&runner, "add", Some("7"));
+    rig.ask(&runner, "adopt", Some("80"));
+
+    rig.claude
+        .script([Scripted::Reply(Usage::default(), Cost(1))]);
+    assert_eq!(issue_of(step(&runner).unwrap()), 7, "#7's first turn");
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Adopted {
+            issue: 5,
+            pull_request: 80,
+            ..
+        })
+    ));
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["adopted"], json!([]));
+    assert_eq!(status["work_items"][1]["phase"]["state"], "ci");
+    assert_eq!(open_items(&rig, &runner), [7, 5], "no slot is left for #3");
+}
+
+#[test]
+fn an_adoption_for_an_issue_in_flight_waits_for_it_to_end() {
+    let (rig, runner) = two_free_slots("rotom");
+    rig.push_by_hand("fix/seven", "work.txt");
+    rig.forge.open_pull_request(90, "fix/seven", &[7]);
+    rig.ask(&runner, "add", Some("7"));
+    rig.ask(&runner, "adopt", Some("90"));
+
+    rig.claude
+        .script([Scripted::Reply(Usage::default(), Cost(1))]);
+    assert_eq!(issue_of(step(&runner).unwrap()), 7, "#7's first turn");
+    assert_eq!(step(&runner).unwrap(), None, "#90 waits for #7");
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(
+        status["adopted"],
+        json!([{ "pull_request": 90, "by_label": false }])
+    );
+    assert_eq!(open_items(&rig, &runner), [7]);
 }

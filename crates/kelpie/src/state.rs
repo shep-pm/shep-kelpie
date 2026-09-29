@@ -51,7 +51,7 @@ pub struct ProjectState {
     /// one. None of them starts another.
     #[serde(default)]
     pub reworked: Vec<String>,
-    /// Pull requests adopted and waiting for the work item in flight, oldest first
+    /// Pull requests adopted and waiting for a free slot, oldest first
     #[serde(default)]
     pub adopted: Vec<Waiting>,
     /// Leases this project holds
