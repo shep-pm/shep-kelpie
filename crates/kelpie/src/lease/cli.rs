@@ -333,20 +333,26 @@ async fn ask_dog(action: &str, params: &str) -> Result<Value, String> {
             params: Some(params.to_owned()).filter(|p| !p.is_empty()),
         })
     };
-    let rows = |reply: Result<Response, _>| match reply {
+    let triggered = |reply: Result<Response, _>| match reply {
         Ok(Response::Triggered(rows)) => Ok(rows),
         Ok(other) => Err(format!("the shepherd answered {other:?}")),
         Err(e) => Err(format!("cannot ask the dog: {e}")),
     };
     // A dog set up from a Flockfile before `shep kelpie add` has its old name.
-    let mut found = rows(ask(dog::NAME).await)?;
+    let mut found = triggered(ask(dog::NAME).await)?;
     if found.is_empty() {
-        found = rows(ask(dog::OLD_NAME).await)?;
+        found = triggered(ask(dog::OLD_NAME).await)?;
     }
     let body = match found.into_iter().next().map(|row| row.outcome) {
         Some(ActionOutcome::Replied { body }) => body,
         Some(other) => return Err(format!("the dog did not answer: {other:?}")),
-        None => return Err(format!("no sheep named {} is running", dog::NAME)),
+        None => {
+            return Err(format!(
+                "no sheep named {} or {} is running",
+                dog::NAME,
+                dog::OLD_NAME
+            ));
+        }
     };
     let value: Value =
         serde_json::from_str(&body).map_err(|e| format!("the dog answered {body:?} ({e})"))?;

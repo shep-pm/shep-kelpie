@@ -475,9 +475,8 @@ impl StateStore {
         let mut bytes = serde_json::to_vec_pretty(state).expect("state serializes to JSON");
         bytes.push(b'\n');
         // A project `shep kelpie add` set up has no folder of its own yet.
-        let folder = self.path.parent().map_or(Ok(()), std::fs::create_dir_all);
-        folder
-            .and_then(|()| write_atomically(&self.path, &bytes))
+        let made = self.path.parent().map_or(Ok(()), std::fs::create_dir_all);
+        made.and_then(|()| write_atomically(&self.path, &bytes))
             .map_err(|e| StateError::Write {
                 path: self.path.clone(),
                 kind: e.kind(),

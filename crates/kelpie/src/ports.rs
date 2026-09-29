@@ -72,7 +72,7 @@ pub trait Forge: Send {
     ///
     /// # Errors
     ///
-    /// [`ForgeError`] when the forge refuses, such as for a label it has.
+    /// [`ForgeError`] when the forge refuses, such as when `repo` already has it.
     fn create_label(&self, repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError>;
 
     /// Issue `number` on `repo`
@@ -283,7 +283,7 @@ pub enum Checks {
 pub struct NewLabel {
     /// Its name
     pub name: &'static str,
-    /// Its colour, as six hex digits
+    /// Its colour, as six lowercase hex digits with no `#`, as GitHub takes it
     pub color: &'static str,
     /// What it means, shown beside it on the forge
     pub description: &'static str,

@@ -31,6 +31,13 @@ async fn client(shepherd: &FakeShepherd) -> Client {
     shepherd::connect(shepherd.home()).await.unwrap()
 }
 
+// Every call against the fake shepherd, bounded so a hang fails by name.
+async fn in_time<T>(call: impl Future<Output = T>) -> T {
+    tokio::time::timeout(PATIENCE, call)
+        .await
+        .expect("the call neither ended nor failed in time")
+}
+
 fn project(name: &str) -> ProjectName {
     ProjectName::try_from(name).unwrap()
 }
@@ -44,10 +51,7 @@ async fn start_brings_up_the_dog_and_the_runner_then_reaches_the_runner() {
     shepherd.holds(launch(&shepherd).dog(), false);
 
     let client = client(&shepherd).await;
-    let started = tokio::time::timeout(PATIENCE, start(&client, &project("koji")))
-        .await
-        .unwrap()
-        .unwrap();
+    let started = in_time(start(&client, &project("koji"))).await.unwrap();
     assert_eq!(started, [r#"{"action":"start","sheep":"koji"}"#]);
     assert!(shepherd.sheep("koji").unwrap().1);
     assert!(shepherd.sheep("kelpie-dog").unwrap().1);
@@ -69,7 +73,7 @@ async fn start_leaves_a_running_runner_running() {
     let mut shepherd = FakeShepherd::new().await;
     runner(&shepherd, "koji", Path::new("/src/koji"), true);
     let client = client(&shepherd).await;
-    start(&client, &project("koji")).await.unwrap();
+    in_time(start(&client, &project("koji"))).await.unwrap();
     let writes = shepherd.writes();
     assert!(
         !writes.iter().any(|w| matches!(w, Request::Restart { .. })),
@@ -81,7 +85,7 @@ async fn start_leaves_a_running_runner_running() {
 async fn start_without_a_runner_says_to_add_one() {
     let shepherd = FakeShepherd::new().await;
     let client = client(&shepherd).await;
-    let err = start(&client, &project("koji")).await.unwrap_err();
+    let err = in_time(start(&client, &project("koji"))).await.unwrap_err();
     assert!(err.contains("`shep kelpie add`"), "{err}");
 }
 
@@ -92,9 +96,9 @@ async fn the_project_here_is_the_one_whose_settings_name_this_checkout() {
     runner(&shepherd, "koji", Path::new("/src/koji"), false);
     runner(&shepherd, "reactmap", Path::new("/src/reactmap"), false);
     let client = client(&shepherd).await;
-    let found = project_here(&client, Path::new("/src/reactmap"), &home).await;
+    let found = in_time(project_here(&client, Path::new("/src/reactmap"), &home)).await;
     assert_eq!(found, Ok(project("reactmap")));
-    let err = project_here(&client, Path::new("/src/other"), &home)
+    let err = in_time(project_here(&client, Path::new("/src/other"), &home))
         .await
         .unwrap_err();
     assert!(err.starts_with("no project runs from /src/other"), "{err}");
@@ -106,9 +110,11 @@ async fn pause_reaches_a_running_runner_and_names_one_that_is_not() {
     runner(&shepherd, "koji", Path::new("/src/koji"), true);
     runner(&shepherd, "reactmap", Path::new("/src/reactmap"), false);
     let client = client(&shepherd).await;
-    let paused = pause(&client, &project("koji")).await.unwrap();
+    let paused = in_time(pause(&client, &project("koji"))).await.unwrap();
     assert_eq!(paused, [r#"{"action":"pause","sheep":"koji"}"#]);
-    let err = pause(&client, &project("reactmap")).await.unwrap_err();
+    let err = in_time(pause(&client, &project("reactmap")))
+        .await
+        .unwrap_err();
     assert_eq!(err, "reactmap's runner is not running");
 }
 
@@ -119,7 +125,7 @@ async fn status_reports_every_project() {
     runner(&shepherd, "reactmap", Path::new("/src/reactmap"), false);
     shepherd.holds(launch(&shepherd).dog(), true);
     let client = client(&shepherd).await;
-    let lines = status(&client).await.unwrap();
+    let lines = in_time(status(&client)).await.unwrap();
     assert_eq!(
         lines,
         [
@@ -135,8 +141,8 @@ async fn a_runner_still_taking_its_actions_is_starting() {
     runner(&shepherd, "koji", Path::new("/src/koji"), true);
     let client = client(&shepherd).await;
     shepherd.just_started("koji");
-    assert_eq!(status(&client).await.unwrap(), ["koji: starting"]);
+    assert_eq!(in_time(status(&client)).await.unwrap(), ["koji: starting"]);
     shepherd.just_started("koji");
-    let err = pause(&client, &project("koji")).await.unwrap_err();
+    let err = in_time(pause(&client, &project("koji"))).await.unwrap_err();
     assert_eq!(err, "koji's runner is starting: ask again in a moment");
 }

@@ -282,10 +282,9 @@ fn settings(
                 "ci".into(),
                 Value::Bool(root.join(".github/workflows").is_dir()),
             );
-            let mut coderabbit = Map::new();
-            coderabbit.insert("enabled".into(), Value::Bool(public));
-            coderabbit.insert("divisor".into(), Value::from(1000));
-            table.insert("coderabbit".into(), Value::Object(coderabbit));
+            if let Some(Value::Object(coderabbit)) = table.get_mut("coderabbit") {
+                coderabbit.insert("enabled".into(), Value::Bool(public));
+            }
             let local = if place.home.join(&QWEN_REVIEW[2..]).is_file() {
                 [("kind", "command"), ("command", QWEN_REVIEW)].as_slice()
             } else {

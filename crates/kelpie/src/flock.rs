@@ -187,6 +187,7 @@ impl Launch {
             app.env
                 .insert("KELPIE_HOME".to_owned(), home.display().to_string());
         }
+        app.autorestart = true;
         app.channel = true;
         app.shutdown_with_message = true;
         app.kill_timeout = UpDuration::from_millis(10_000);
@@ -255,6 +256,38 @@ mod tests {
             let slug = forge_of(url).unwrap_or_else(|| panic!("{url}"));
             assert_eq!(slug.as_str(), "Hazels-Lab/hazels-lab-website", "{url}");
         }
+    }
+
+    #[test]
+    fn a_checkout_is_its_top_folder_and_origin_s_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let git = |args: &[&str]| {
+            let ran = Command::new("git").arg("-C").arg(&root).args(args).output();
+            assert!(ran.unwrap().status.success(), "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        let inside = root.join("src/deep");
+        std::fs::create_dir_all(&inside).unwrap();
+        let err = Checkout::of(&inside).unwrap_err();
+        assert!(err.ends_with("has no `origin` remote"), "{err}");
+
+        git(&["remote", "add", "origin", "git@github.com:shep-pm/koji.git"]);
+        let checkout = Checkout::of(&inside).unwrap();
+        assert_eq!(checkout.root, root);
+        assert_eq!(checkout.forge.as_str(), "shep-pm/koji");
+
+        git(&[
+            "remote",
+            "set-url",
+            "origin",
+            "https://gitlab.com/shep-pm/koji",
+        ]);
+        let err = Checkout::of(&root).unwrap_err();
+        assert!(err.contains("only with GitHub repos"), "{err}");
+        let outside = tempfile::tempdir().unwrap();
+        let err = Checkout::of(outside.path()).unwrap_err();
+        assert!(err.ends_with("is not in a git checkout"), "{err}");
     }
 
     #[test]

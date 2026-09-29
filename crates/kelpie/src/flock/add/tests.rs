@@ -111,6 +111,7 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
 async fn add_twice_changes_nothing() {
     let mut scene = Scene::new().await;
     scene.add().await.unwrap();
+    // Reading the writes takes them, so only the second add's are left.
     scene.shepherd.writes();
     let before = scene.shepherd.sheep("hazels-lab");
 

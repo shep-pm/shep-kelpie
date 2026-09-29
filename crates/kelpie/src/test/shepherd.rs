@@ -24,8 +24,8 @@ struct Sheep {
     config: AppConfig,
     online: bool,
     dog: bool,
-    // Triggers a runner just started leaves unanswered, still opening its channel
-    opening: usize,
+    // Whether a runner just started is still taking its actions
+    opening: bool,
 }
 
 /// The shepherd, its home, and what it was sent
@@ -74,7 +74,7 @@ impl FakeShepherd {
             config,
             online,
             dog: false,
-            opening: 0,
+            opening: false,
         };
         self.flock.lock().unwrap().push(sheep);
     }
@@ -83,13 +83,18 @@ impl FakeShepherd {
     pub(crate) fn just_started(&self, name: &str) {
         let mut flock = self.flock.lock().unwrap();
         let sheep = flock.iter_mut().find(|s| s.config.name == name).unwrap();
-        sheep.opening = 1;
+        sheep.opening = true;
     }
 
     /// Puts an adopted dog named `name` in the flock, running
     pub(crate) fn holds_dog(&self, name: &str) {
-        self.holds(AppConfig::minimal(name, "/opt/kelpie"), true);
-        self.flock.lock().unwrap().last_mut().unwrap().dog = true;
+        let sheep = Sheep {
+            config: AppConfig::minimal(name, "/opt/kelpie"),
+            online: true,
+            dog: true,
+            opening: false,
+        };
+        self.flock.lock().unwrap().push(sheep);
     }
 
     /// The config of the sheep named `name`, and whether it runs
@@ -162,7 +167,7 @@ fn answer(flock: &mut Vec<Sheep>, request: &Request) -> Response {
                         config: app.clone(),
                         online: false,
                         dog: false,
-                        opening: 0,
+                        opening: false,
                     });
                 }
             }
@@ -187,7 +192,7 @@ fn answer(flock: &mut Vec<Sheep>, request: &Request) -> Response {
         Request::Restart { selector } => {
             let at = named(flock, selector).unwrap();
             flock[at].online = true;
-            flock[at].opening = 1;
+            flock[at].opening = true;
             Response::Restarted {
                 accepted: vec![info(at, &flock[at])],
                 refused: Vec::new(),
@@ -204,8 +209,8 @@ fn answer(flock: &mut Vec<Sheep>, request: &Request) -> Response {
             // shep-channel answers an action nobody took in plain text.
             let outcome = if !sheep.online {
                 ActionOutcome::NoChannel
-            } else if sheep.opening > 0 {
-                sheep.opening -= 1;
+            } else if sheep.opening {
+                sheep.opening = false;
                 ActionOutcome::Replied {
                     body: format!("unknown action: {action}"),
                 }

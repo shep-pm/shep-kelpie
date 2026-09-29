@@ -51,9 +51,7 @@ impl Forge for Gh {
             "--limit",
             "1000",
         ])?;
-        let labels: Vec<Label> =
-            serde_json::from_slice(&stdout).map_err(|_| unreadable(&stdout))?;
-        Ok(labels.into_iter().map(|l| l.name).collect())
+        parse_label_names(&stdout)
     }
 
     fn create_label(&self, repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError> {
@@ -227,10 +225,19 @@ fn parse_default_branch(stdout: &[u8]) -> Result<String, ForgeError> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct View {
-        default_branch_ref: Label,
+        default_branch_ref: BranchRef,
+    }
+    #[derive(Deserialize)]
+    struct BranchRef {
+        name: String,
     }
     let view: View = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
     Ok(view.default_branch_ref.name)
+}
+
+fn parse_label_names(stdout: &[u8]) -> Result<Vec<String>, ForgeError> {
+    let labels: Vec<Label> = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
+    Ok(labels.into_iter().map(|l| l.name).collect())
 }
 
 fn parse_issue(stdout: &[u8]) -> Result<Issue, ForgeError> {
@@ -372,6 +379,16 @@ mod tests {
             read(r#"{"visibility":"SECRET"}"#),
             Err(ForgeError::Unreadable(_))
         ));
+    }
+
+    #[test]
+    fn a_repo_s_label_names_are_read() {
+        let read = |s: &str| parse_label_names(s.as_bytes());
+        assert_eq!(
+            read(r#"[{"name":"bug"},{"name":"review please"}]"#),
+            Ok(vec!["bug".to_owned(), "review please".to_owned()])
+        );
+        assert!(matches!(read("{}"), Err(ForgeError::Unreadable(_))));
     }
 
     #[test]
