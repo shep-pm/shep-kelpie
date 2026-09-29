@@ -21,7 +21,7 @@ impl LocalReviewer {
     /// Fails with [`ReviewerError::Spilled`] when a model `local` would use
     /// sits partly on the CPU, and records where it sits for `status`
     pub(super) fn check_seat(&self, local: &LocalRound) -> Result<(), ReviewerError> {
-        let Some((host, model)) = local.ollama() else {
+        let Some((host, asked)) = local.ollama() else {
             return Ok(());
         };
         let Some(seats) = read_seats(&host)? else {
@@ -30,7 +30,7 @@ impl LocalReviewer {
         };
         let mut used: Vec<ModelSeat> = seats
             .into_iter()
-            .filter(|seat| model.is_none_or(|model| names(&seat.name, model)))
+            .filter(|seat| asked.is_none_or(|asked| names(&seat.name, asked)))
             .collect();
         // The worst placement first, so a spilled one is what `status` shows.
         used.sort_by_key(ModelSeat::gpu_percent);
@@ -47,8 +47,11 @@ impl LocalReviewer {
 
 // Ollama names a model with its tag, and takes the bare name for `:latest`.
 fn names(loaded: &str, asked: &str) -> bool {
-    let bare = |name: &str| name.strip_suffix(":latest").unwrap_or(name).to_owned();
     bare(loaded) == bare(asked)
+}
+
+fn bare(name: &str) -> &str {
+    name.strip_suffix(":latest").unwrap_or(name)
 }
 
 // None where the host has no `/api/ps` to read.
