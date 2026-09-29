@@ -1,4 +1,4 @@
-//! How many CodeRabbit rounds a pull request gets: a fixed number when the
+//! How many review bot rounds a pull request gets: a fixed number when the
 //! project sets one, or else ceil(changed / divisor) + 1, where changed is
 //! added plus removed lines outside generated files
 

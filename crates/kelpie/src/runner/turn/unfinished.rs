@@ -7,9 +7,9 @@
 use std::time::Duration;
 
 use crate::ports::Timestamp;
-use crate::runner::Runner;
 use crate::runner::report::{Begin, StepReport};
 use crate::runner::ruling::park;
+use crate::runner::{Names, Runner};
 use crate::state::{ProjectState, RulingKind, StateError};
 use crate::work_item::Turn;
 
@@ -24,7 +24,7 @@ impl Runner {
         next.item_mut(issue)
             .expect("the work item checked above")
             .turn = Turn::Ended { at: now };
-        let mut report = timed_out(self.project.as_str(), &mut next, issue);
+        let mut report = timed_out(self.names(), &mut next, issue);
         self.save(next)?;
         self.fill_comment_failed(&mut report);
         Ok(Begin::Report(report))
@@ -36,14 +36,14 @@ impl Runner {
 // finds a turn already past its ceiling with no call spent. The caller sets
 // `item.turn` beforehand: this only raises the ruling. `comment_failed` is
 // filled in afterwards, once the ruling has actually been posted.
-pub(super) fn timed_out(project: &str, next: &mut ProjectState, issue: u64) -> StepReport {
+pub(super) fn timed_out(names: Names<'_>, next: &mut ProjectState, issue: u64) -> StepReport {
     let item = next
         .item_mut(issue)
         .expect("a turn ceiling is about an open work item");
     let (session, pull_request) = (item.session.clone(), item.pull_request);
     let phase = Some(item.phase.clone());
     let (id, question) = park(
-        project,
+        names,
         next,
         issue,
         pull_request,
@@ -63,7 +63,7 @@ pub(super) fn timed_out(project: &str, next: &mut ProjectState, issue: u64) -> S
 // keeping the turn as it stood so a yes can put it back. `comment_failed` is
 // filled in afterwards, once the ruling has actually been posted.
 pub(in crate::runner) fn failed(
-    project: &str,
+    names: Names<'_>,
     next: &mut ProjectState,
     issue: u64,
     at: Timestamp,
@@ -83,7 +83,7 @@ pub(in crate::runner) fn failed(
         phase: item.phase.clone(),
         retry,
     };
-    let (id, question) = park(project, next, issue, pull_request, kind);
+    let (id, question) = park(names, next, issue, pull_request, kind);
     StepReport::Failed {
         issue,
         pull_request,

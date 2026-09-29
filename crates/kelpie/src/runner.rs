@@ -23,6 +23,7 @@ use crate::work_item::{
 mod adopt;
 mod alert;
 mod claude_files;
+#[cfg(test)]
 mod coderabbit;
 mod dispatch;
 mod gate;
@@ -35,6 +36,7 @@ mod replies;
 mod report;
 mod reread;
 mod review;
+mod review_bot;
 mod rework;
 mod ruling;
 #[cfg(test)]
@@ -43,13 +45,14 @@ mod shots;
 mod trigger;
 mod turn;
 
+pub use crate::coderabbit::LABEL as SUMMON_LABEL;
 pub use adopt::AdoptError;
 pub use merge::DropError;
 pub use pace::PacerStatus;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
 pub use replies::READ_EVERY;
 pub use report::StepReport;
-pub use rework::ReworkError;
+pub use rework::{HUMAN, ReworkError};
 pub use ruling::{Answer, RuleError};
 use trigger::issue_list;
 pub use trigger::{ACTIONS, RELAY_RULE, Status, WorkItemStatus, answer, is_no_or_answer};
@@ -261,6 +264,13 @@ impl Runner {
     /// The project's settings, as read when the runner started
     pub fn settings(&self) -> &Settings {
         &self.settings
+    }
+
+    fn names(&self) -> Names<'_> {
+        Names {
+            project: self.project.as_str(),
+            bot: self.ports.review_bot.name(),
+        }
     }
 
     /// The project's state as `status` reports it
@@ -487,6 +497,13 @@ fn check_local(settings: &Settings, ports: &Ports) -> Result<(), SettingsError> 
         })
 }
 
+// What a ruling's question names: its project, and the review bot it may be about.
+#[derive(Debug, Clone, Copy)]
+struct Names<'a> {
+    project: &'a str,
+    bot: &'a str,
+}
+
 fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError> {
     if !settings.coderabbit.enabled {
         return Ok(());
@@ -499,8 +516,9 @@ fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError>
     Err(SettingsError::Invalid {
         setting: "coderabbit.enabled",
         reason: format!(
-            "{} is {visibility}, and CodeRabbit's free plan reviews public repos only",
-            settings.forge.as_str()
+            "{} is {visibility}, and {}'s free plan reviews public repos only",
+            settings.forge.as_str(),
+            ports.review_bot.name()
         ),
     }
     .into())
@@ -553,7 +571,10 @@ mod tests {
     fn a_failed_save_is_reported_and_changes_nothing() {
         let rig = Rig::new("xilriws");
         let runner = rig.open().unwrap();
-        std::fs::remove_dir_all(rig.paths().state.parent().unwrap()).unwrap();
+        let folder = rig.paths().state.parent().unwrap().to_owned();
+        std::fs::remove_dir_all(&folder).unwrap();
+        // A file where the folder was, which a save cannot make a folder of.
+        std::fs::write(&folder, "").unwrap();
         let reply = rig.ask(&runner, "start", None);
         assert!(
             reply["error"]

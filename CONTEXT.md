@@ -73,12 +73,14 @@ _Avoid_: summary (Claude's compaction output)
 The checks a pull request must pass before it merges.
 
 **Lease**:
-Kelpie-granted use of a shared resource: the GPU, or the CodeRabbit window.
+Kelpie-granted use of a shared resource: the GPU, or a pull request
+reviewer's window, such as CodeRabbit's.
 _Avoid_: lock (the file the lease is built on)
 
 **Summon**:
-Anything that makes CodeRabbit spend the hourly review window. On shep that is
-adding the `review please` label, or pushing to a pull request that carries it.
+Anything that makes a pull request reviewer spend its review window. For
+CodeRabbit on shep that is adding the `review please` label, pushing to a pull
+request that carries it, or asking for a full review in a comment.
 Only the project manager summons.
 
 **Shots**:
@@ -94,6 +96,13 @@ project runs it through kelpie's own reviewer against an OpenAI-compatible
 server, through a command such as the maintainer's qwen-review script, or
 not at all.
 _Avoid_: qwen round (qwen is one model it can run)
+
+**Pull request reviewer**:
+A reviewer summoned on the pull request that answers there, within a rate
+window of its own. CodeRabbit is one. A **review bot** is one that works
+the GitHub way, by label, status and review threads, and a **profile**
+says how each bot does it. The other kind of reviewer is the local round's.
+_Avoid_: outside reviewer, remote reviewer
 
 **Ruling**:
 A decision only the maintainer makes. A worker waiting on one is **parked**.

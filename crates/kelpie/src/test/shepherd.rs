@@ -1,0 +1,231 @@
+//! A shepherd whose flock lives in memory, for `shep kelpie add`, `start`,
+//! `pause` and `status`
+//!
+//! It keeps each sheep's config and status, answers the requests those
+//! commands send as shep 0.11 does, and records every request.
+
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use shep_client::shep_core::config::AppConfig;
+use shep_client::shep_core::protocol::request::{
+    ActionOutcome, ActionReply, DogSource, ProcessInfo, Response, SheepConfigView,
+};
+use shep_client::shep_core::protocol::{Envelope, Request, SelectorSpec};
+use shep_client::shep_core::status::ProcStatus;
+use shep_client::testing::{fake_daemon_answering_with_ack, sample_ack};
+use tokio::sync::mpsc::UnboundedReceiver;
+
+use crate::shepherd::SHEP_VERSION;
+
+/// One sheep: its config, whether it runs, and whether a dog holds its name
+#[derive(Debug, Clone)]
+struct Sheep {
+    config: AppConfig,
+    online: bool,
+    dog: bool,
+    // Whether a runner just started is still taking its actions
+    opening: bool,
+}
+
+/// The shepherd, its home, and what it was sent
+pub(crate) struct FakeShepherd {
+    home: tempfile::TempDir,
+    flock: Arc<Mutex<Vec<Sheep>>>,
+    sent: UnboundedReceiver<Envelope>,
+}
+
+impl FakeShepherd {
+    /// A shepherd on the pinned shep with an empty flock
+    pub(crate) async fn new() -> Self {
+        Self::on(SHEP_VERSION).await
+    }
+
+    /// A shepherd that says it runs `version`
+    pub(crate) async fn on(version: &str) -> Self {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir(home.path().join("run")).unwrap();
+        let mut ack = sample_ack();
+        ack.daemon_version = version.into();
+        let flock = Arc::new(Mutex::new(Vec::new()));
+        let answers = Arc::clone(&flock);
+        let sent =
+            fake_daemon_answering_with_ack(&home.path().join("run/shep.sock"), ack, move |r| {
+                answer(&mut answers.lock().unwrap(), r)
+            })
+            .await;
+        Self { home, flock, sent }
+    }
+
+    pub(crate) fn home(&self) -> &Path {
+        self.home.path()
+    }
+
+    /// A folder inside the shepherd's scratch home, for a checkout or kelpie's home
+    pub(crate) fn scratch(&self, name: &str) -> PathBuf {
+        let folder = self.home.path().join(name);
+        std::fs::create_dir_all(&folder).unwrap();
+        folder
+    }
+
+    /// Puts `config` in the flock, running or not
+    pub(crate) fn holds(&self, config: AppConfig, online: bool) {
+        let sheep = Sheep {
+            config,
+            online,
+            dog: false,
+            opening: false,
+        };
+        self.flock.lock().unwrap().push(sheep);
+    }
+
+    /// Has `name`, just started, answer its next trigger as a runner still opening
+    pub(crate) fn just_started(&self, name: &str) {
+        let mut flock = self.flock.lock().unwrap();
+        let sheep = flock.iter_mut().find(|s| s.config.name == name).unwrap();
+        sheep.opening = true;
+    }
+
+    /// Puts an adopted dog named `name` in the flock, running
+    pub(crate) fn holds_dog(&self, name: &str) {
+        let sheep = Sheep {
+            config: AppConfig::minimal(name, "/opt/kelpie"),
+            online: true,
+            dog: true,
+            opening: false,
+        };
+        self.flock.lock().unwrap().push(sheep);
+    }
+
+    /// The config of the sheep named `name`, and whether it runs
+    pub(crate) fn sheep(&self, name: &str) -> Option<(AppConfig, bool)> {
+        let flock = self.flock.lock().unwrap();
+        let sheep = flock.iter().find(|s| s.config.name == name)?;
+        Some((sheep.config.clone(), sheep.online))
+    }
+
+    /// The requests sent since the last look, leaving out the reads
+    pub(crate) fn writes(&mut self) -> Vec<Request> {
+        std::iter::from_fn(|| self.sent.try_recv().ok())
+            .map(|e| e.body)
+            .filter(|r| {
+                !matches!(
+                    r,
+                    Request::ListFlock
+                        | Request::DogSheepSettings { .. }
+                        | Request::SheepConfig { .. }
+                )
+            })
+            .collect()
+    }
+}
+
+fn info(id: usize, sheep: &Sheep) -> ProcessInfo {
+    let status = if sheep.online {
+        ProcStatus::Online
+    } else {
+        ProcStatus::Stopped
+    };
+    let mut info = ProcessInfo::builder(u32::try_from(id).unwrap(), &sheep.config.name, status);
+    if sheep.dog {
+        info = info.dog(Some(DogSource::Adopted {
+            path: sheep.config.script.clone(),
+        }));
+    }
+    info.build()
+}
+
+fn named(flock: &[Sheep], selector: &SelectorSpec) -> Option<usize> {
+    let SelectorSpec::Name(name) = selector else {
+        panic!("kelpie named no sheep: {selector:?}");
+    };
+    flock.iter().position(|s| &s.config.name == name)
+}
+
+fn answer(flock: &mut Vec<Sheep>, request: &Request) -> Response {
+    let rows = |flock: &[Sheep]| flock.iter().enumerate().map(|(i, s)| info(i, s)).collect();
+    match request {
+        Request::ListFlock => Response::Flock(rows(flock)),
+        Request::DogSheepSettings { dog } => Response::DogSheepSettings {
+            tables: flock
+                .iter()
+                .filter_map(|s| Some((s.config.name.clone(), s.config.dogs.get(dog)?.clone())))
+                .collect(),
+        },
+        Request::SheepConfig { name } => {
+            let sheep = flock.iter().find(|s| &s.config.name == name).unwrap();
+            Response::SheepConfig(Box::new(SheepConfigView::new(
+                sheep.config.clone(),
+                Vec::new(),
+                Vec::new(),
+            )))
+        }
+        Request::Add { apps } => {
+            for app in apps {
+                if !flock.iter().any(|s| s.config.name == app.name) {
+                    flock.push(Sheep {
+                        config: app.clone(),
+                        online: false,
+                        dog: false,
+                        opening: false,
+                    });
+                }
+            }
+            Response::Added(rows(flock))
+        }
+        Request::SetSheepDogSettings { name, dog, table } => {
+            let sheep = flock.iter_mut().find(|s| &s.config.name == name).unwrap();
+            match table {
+                Some(table) => sheep.config.dogs.insert(dog.clone(), table.clone()),
+                None => sheep.config.dogs.remove(dog),
+            };
+            Response::SheepDogSettingsSet {
+                name: name.clone(),
+                dog: dog.clone(),
+            }
+        }
+        Request::Delete { selector } => {
+            let at = named(flock, selector).unwrap();
+            flock.remove(at);
+            Response::Deleted(vec![u32::try_from(at).unwrap()])
+        }
+        Request::Restart { selector } => {
+            let at = named(flock, selector).unwrap();
+            flock[at].online = true;
+            flock[at].opening = true;
+            Response::Restarted {
+                accepted: vec![info(at, &flock[at])],
+                refused: Vec::new(),
+            }
+        }
+        Request::Trigger {
+            selector, action, ..
+        } => {
+            let Some(at) = named(flock, selector) else {
+                return Response::Triggered(Vec::new());
+            };
+            let sheep = &mut flock[at];
+            // A runner opens its channel before it takes its actions, and
+            // shep-channel answers an action nobody took in plain text.
+            let outcome = if !sheep.online {
+                ActionOutcome::NoChannel
+            } else if sheep.opening {
+                sheep.opening = false;
+                ActionOutcome::Replied {
+                    body: format!("unknown action: {action}"),
+                }
+            } else {
+                ActionOutcome::Replied {
+                    body: serde_json::json!({ "sheep": sheep.config.name, "action": action })
+                        .to_string(),
+                }
+            };
+            Response::Triggered(vec![ActionReply {
+                id: u32::try_from(at).unwrap(),
+                name: sheep.config.name.clone(),
+                outcome,
+            }])
+        }
+        other => panic!("kelpie asked {other:?}"),
+    }
+}

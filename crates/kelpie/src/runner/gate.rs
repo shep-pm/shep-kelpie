@@ -105,11 +105,11 @@ impl Runner {
         }
     }
 
-    // Green CI goes to a CodeRabbit round while one is owed. Then `auto`
+    // Green CI goes to a review bot round while one is owed. Then `auto`
     // merges by the path a yes takes, and `ask` raises the merge ruling
     // with the pull request handed back `ready-for-human`.
     fn passed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
-        if self.coderabbit_due() {
+        if self.review_bot_due() {
             return self.start_round(head);
         }
         if let Some(begin) = self.shots_before_merge(number, &head)? {
