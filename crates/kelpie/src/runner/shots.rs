@@ -66,6 +66,7 @@ impl Runner {
                 .collect(),
             env,
             server_pid: self.paths.shots(item.issue).join(SERVER_PID),
+            shep_home: self.paths.shep_home.clone(),
         }
     }
 

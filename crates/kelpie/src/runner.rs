@@ -1,12 +1,11 @@
 //! The project runner
 //!
 //! One runner per project, run as a sheep under kelpie's own shepherd. It
-//! reads the project's settings when it starts, keeps the project's state
+//! checks the project's settings when it starts, keeps the project's state
 //! file, answers the maintainer's triggers, and runs the worker's turns.
 //! Every change is saved before it takes effect in memory.
 
 use std::fmt;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -33,6 +32,7 @@ mod pace;
 mod paths;
 mod question;
 mod report;
+mod reread;
 mod review;
 mod rework;
 mod ruling;
@@ -174,34 +174,28 @@ pub struct Runner {
 }
 
 impl Runner {
-    /// Reads kelpie's settings, the project's settings and its state, and
-    /// checks the settings hold
+    /// Checks the project's settings hold, and reads its state
     ///
-    /// `home` is the maintainer's home folder, for `~/` in settings.
-    /// `kelpie` is the kelpie binary, which each worker's file-tool hook runs.
+    /// `settings` and `kelpie_settings` are as [`crate::settings::source::load`]
+    /// read them. `kelpie` is the kelpie binary, which each worker's file-tool
+    /// hook runs.
     ///
     /// # Errors
     ///
     /// [`OpenError`] naming the setting, forge call or file that failed.
     pub fn open(
         project: ProjectName,
+        settings: Settings,
+        kelpie_settings: KelpieSettings,
         paths: &ProjectPaths,
-        home: &Path,
         kelpie: &Path,
         ports: Ports,
     ) -> Result<Self, OpenError> {
-        let settings = Settings::load(&paths.settings, home)?;
-        let (channels, webhook) = ruling_channels(&settings, &paths.kelpie_settings)?;
+        let (channels, webhook) = ruling_channels(&settings, kelpie_settings)?;
         check_repo(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;
         check_coderabbit(&settings, &ports)?;
-        ports
-            .reviewer
-            .check(&settings.review.local)
-            .map_err(|reason| SettingsError::Invalid {
-                setting: "review.local",
-                reason,
-            })?;
+        check_local(&settings, &ports)?;
         let store = StateStore::new(paths.state.clone());
         let mut state = store
             .load()?
@@ -446,19 +440,11 @@ fn check_repo(settings: &Settings) -> Result<(), SettingsError> {
 }
 
 // The project's channels, else kelpie's, else every one; and the webhook
-// they need. A kelpie settings file that is absent is one with nothing in it,
-// which only a project that posts to the webhook cannot do without.
+// they need, which only a project that posts to the webhook cannot do without.
 fn ruling_channels(
     settings: &Settings,
-    file: &Path,
+    kelpie: KelpieSettings,
 ) -> Result<(Channels, Option<Webhook>), SettingsError> {
-    let kelpie = match KelpieSettings::load(file) {
-        Err(SettingsError::Read {
-            kind: io::ErrorKind::NotFound,
-            ..
-        }) => KelpieSettings::default(),
-        loaded => loaded?,
-    };
     let channels = (settings.ruling_channels.clone())
         .or(kelpie.ruling_channels)
         .unwrap_or_default();
@@ -469,13 +455,23 @@ fn ruling_channels(
         Some(webhook) => Ok((channels, Some(webhook))),
         None => Err(SettingsError::Invalid {
             setting: "ruling_channels",
-            reason: format!(
-                "rulings go to the webhook, and {} names none: add a `[webhook]` \
-                 table, or drop `webhook` from `ruling_channels`",
-                file.display()
-            ),
+            reason: "rulings go to the webhook, and kelpie's settings name none: add a \
+                     `webhook` table to its [kelpie] section of dogs.toml, or drop `webhook` \
+                     from `ruling_channels`"
+                .to_owned(),
         }),
     }
+}
+
+// The local round's command is there, or its endpoint answers.
+fn check_local(settings: &Settings, ports: &Ports) -> Result<(), SettingsError> {
+    ports
+        .reviewer
+        .check(&settings.review.local)
+        .map_err(|reason| SettingsError::Invalid {
+            setting: "review.local",
+            reason,
+        })
 }
 
 fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError> {
@@ -631,14 +627,5 @@ mod tests {
         rig.forge.set_visibility(Visibility::Private);
         rig.open().unwrap();
         assert_eq!(rig.forge.calls(), 0);
-    }
-
-    #[test]
-    fn a_missing_settings_file_stops_the_runner_naming_it() {
-        let rig = Rig::new("koji");
-        std::fs::remove_file(&rig.paths().settings).unwrap();
-        let err = rig.open().unwrap_err().to_string();
-        assert!(err.starts_with("cannot read settings file "), "{err}");
-        assert!(err.contains("projects/koji/settings.toml"), "{err}");
     }
 }

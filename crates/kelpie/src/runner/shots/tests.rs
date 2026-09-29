@@ -13,7 +13,7 @@ fn with_preview(project: &str) -> Rig {
     let rig = Rig::new(project);
     rig.land_launch_file();
     rig.edit_settings(|s| {
-        format!("{s}\n[preview]\nroutes = [\"/\", \"/events\"]\ndomains = [\"api.example.com\"]\n")
+        format!("{s}\n[app.dogs.kelpie.preview]\nroutes = [\"/\", \"/events\"]\ndomains = [\"api.example.com\"]\n")
     });
     rig
 }

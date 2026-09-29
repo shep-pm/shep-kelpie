@@ -69,6 +69,9 @@ pub struct ProjectPaths {
     pub worker: PathBuf,
     /// Kelpie's own tools for showing a work item's UI, which every project shares
     pub tools: Tools,
+    /// The shepherd's home, which a worker may not read. Kelpie's own shepherd,
+    /// `<kelpie home>/shep`, unless the runner's `SHEP_HOME` names another.
+    pub shep_home: PathBuf,
     worktrees: PathBuf,
     builds: PathBuf,
     shots: PathBuf,
@@ -90,6 +93,7 @@ impl ProjectPaths {
             state: folder.join("state.json"),
             worker: folder.join("worker"),
             tools: Tools::under(kelpie_home),
+            shep_home: kelpie_home.join("shep"),
             worktrees: kelpie_home.join("wt").join(project.as_str()),
             builds: kelpie_home.join("targets").join(project.as_str()),
             shots: kelpie_home.join("shots").join(project.as_str()),

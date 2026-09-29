@@ -6,9 +6,13 @@ First build under way. A project runner reads its settings, keeps its state, and
 
 ## Running a project
 
-Settings live at `~/.kelpie/projects/<project>/settings.toml`. Start from `crates/kelpie/settings.example.toml`, which holds the defaults for shep.
+Kelpie needs shep 0.11. A project's settings are its runner sheep's `[app.dogs.kelpie]` table, in the runner's Flockfile entry. Start from `crates/kelpie/settings.example.toml`, which is that entry with the defaults for shep.
 
-Every runner also reads `~/.kelpie/settings.toml`, which names the webhook rulings are posted to. Start from `crates/kelpie/kelpie-settings.example.toml`, and keep the file private: the URL is a credential. `ruling_channels` there, or in a project's own settings, picks the webhook, the relay or both. Both is the default, and only a project that posts to the webhook needs a `[webhook]` table.
+Kelpie's own settings are its `[kelpie]` section of `dogs.toml` in the shepherd's home. Start from `crates/kelpie/kelpie-settings.example.toml`, and keep `dogs.toml` private: the webhook's URL is a credential. `ruling_channels` there, or in a project's table, picks the webhook, the relay or both. Both is the default, and only a project that posts to the webhook needs a `webhook` table.
+
+Lookout edits both once kelpie is adopted as a dog, which is how shep finds its settings schema: `shep adopt /path/to/kelpie --name kelpie`, then `shep disable kelpie`, both with `SHEP_HOME=~/.kelpie/shep`. Adopting starts it, and the dog still runs from the Flockfile below, so the disable stops that start. A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start.
+
+A project set up before the tables still loads `~/.kelpie/projects/<project>/settings.toml` and `~/.kelpie/settings.toml`, and its runner logs a notice. `SHEP_HOME=~/.kelpie/shep kelpie settings move <project>` writes both into their tables, after kelpie is adopted. It never overwrites a table and never deletes a file.
 
 Kelpie runs under its own shepherd, with `SHEP_HOME=~/.kelpie/shep`. Each runner is a sheep in its flock, and so is the dog, which holds the leases every runner asks before a summon:
 
@@ -36,11 +40,11 @@ kill_timeout = "10s"
 
 `kill_timeout` matters too. `shep stop` and `restart` give a runner only that long after the shutdown message, 1.6s by default, then SIGKILL. A runner needs about 7s to stop cleanly, so set it to `10s` or more.
 
-Then `SHEP_HOME=~/.kelpie/shep shep trigger shep status`.
+Then `SHEP_HOME=~/.kelpie/shep shep trigger shep status`. `shep describe shep` labels each Claude session the runner starts with its issue and role, such as `#114 worker`.
 
 ## The local round
 
-Each pull request goes through a review loop before CI. Rounds alternate between a local model and a Claude session, local first, and the loop ends once one of each in a row finds nothing above a nit. `[review.local]` in a project's settings picks the local round:
+Each pull request goes through a review loop before CI. Rounds alternate between a local model and a Claude session, local first, and the loop ends once one of each in a row finds nothing above a nit. `review.local` in a project's table picks the local round:
 
 - `kind = "off"`: every round is the Claude round, and one that finds nothing above a nit ends the loop
 - `kind = "endpoint"`: kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server

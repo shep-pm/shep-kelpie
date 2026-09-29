@@ -48,6 +48,7 @@ pub(super) struct Screens<'a> {
 }
 
 pub(super) fn reviewer_call(
+    issue: u64,
     worktree: &Path,
     base: &str,
     worker_folder: &Path,
@@ -60,12 +61,13 @@ pub(super) fn reviewer_call(
     if let Some(shots) = shots {
         prompt.push_str(&shots_prompt(shots.run));
     }
-    build_call(Role::Reviewer, worktree, model, settings, prompt)
+    build_call(Role::Reviewer, issue, worktree, model, settings, prompt)
 }
 
 // A finding that names a PNG under `shots` is about a screenshot, and its
 // judge may open that folder with Read and nothing else.
 pub(in crate::runner) fn judge_call(
+    issue: u64,
     worktree: &Path,
     base: &str,
     worker_folder: &Path,
@@ -83,7 +85,7 @@ pub(in crate::runner) fn judge_call(
             finding.file
         ));
     }
-    build_call(Role::Judge, worktree, model, settings, prompt)
+    build_call(Role::Judge, issue, worktree, model, settings, prompt)
 }
 
 // Whether `file` is a PNG really inside `dir`, kelpie's shots folder. A
@@ -106,6 +108,7 @@ fn is_shot(file: &str, dir: &Path) -> bool {
 // role, settings and prompt its caller worked out.
 fn build_call(
     role: Role,
+    issue: u64,
     worktree: &Path,
     model: &RoleModel,
     settings: PathBuf,
@@ -114,6 +117,7 @@ fn build_call(
     let session = new_session_id().map_err(|e| format!("cannot draw a session id: {e}"))?;
     Ok(ClaudeCall {
         role,
+        issue,
         model: model.model.as_str().to_owned(),
         effort: model.effort,
         session: Session::New(session),
