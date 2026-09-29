@@ -48,12 +48,19 @@ impl FakeAlerts {
             time,
             text: Some(text.to_owned()),
             said: vec![text.to_owned()],
+            cut: false,
         });
     }
 
     /// Writes a post to the topic with `text` to answer with, if any, and
     /// every other text it carries, such as a title or a tag
     pub(crate) fn post_raw(&self, text: Option<&str>, others: &[&str], time: Timestamp) {
+        self.post_cut(text, others, false, time);
+    }
+
+    /// [`Self::post_raw`], for a post that is `cut`, as ntfy turns a long
+    /// message into an attachment
+    pub(crate) fn post_cut(&self, text: Option<&str>, others: &[&str], cut: bool, time: Timestamp) {
         let mut topic = self.topic.lock().unwrap();
         let id = format!("m{}", topic.len() + 1);
         let said = text.into_iter().chain(others.iter().copied());
@@ -62,6 +69,7 @@ impl FakeAlerts {
             time,
             text: text.map(str::to_owned),
             said: said.map(str::to_owned).collect(),
+            cut,
         });
     }
 
@@ -88,6 +96,7 @@ impl Alerts for FakeAlerts {
             time: self.clock.as_ref().map_or(Timestamp(0), Clock::now),
             text: None,
             said: vec![alert.title.clone(), alert.text.clone()],
+            cut: false,
         });
         Ok(())
     }

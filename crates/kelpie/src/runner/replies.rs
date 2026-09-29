@@ -13,7 +13,6 @@
 //! from the topic are off for every project until `kelpie totp --unlock`.
 
 use std::collections::VecDeque;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -26,7 +25,7 @@ use crate::relay::Wants;
 use crate::settings::SettingsError;
 use crate::state::{LastRead, RulingKind, StateError};
 use crate::totp::answers::{Answers, Claim, FAILURES, Failure};
-use crate::totp::{STEP, Secret, digits_of};
+use crate::totp::{STEP, Secret, steps_near};
 use crate::webhook::{Webhook, WebhookKind};
 
 /// Seconds between reads of the topic while a ruling waits on it
@@ -52,8 +51,19 @@ pub(super) struct Reading {
     next: Option<Timestamp>,
     /// Until when the topic is read with no ruling waiting on it
     until: Option<Timestamp>,
-    /// Reads failed in a row
+    /// Reads failed in a row, or tries to spend the codes of the reply at
+    /// the head of the queue
     failures: u32,
+    /// Whether the reply at the head of the queue could not have its codes
+    /// spent, and waits there until `next`
+    held: bool,
+}
+
+/// What spending a reply's codes found: the secret they were checked
+/// against, and the step of each right code, with whose it is
+struct Spent {
+    secret: Option<Secret>,
+    claims: Vec<(u64, Claim)>,
 }
 
 /// What a runner checks replies against: the secret's file, read afresh for
@@ -142,7 +152,8 @@ impl StepReport {
         if let Self::ReplyRefused { line_failed, .. }
         | Self::ReplyToSettled { line_failed, .. }
         | Self::ReplyCodeUsed { line_failed, .. }
-        | Self::RepliesLocked { line_failed } = &mut self
+        | Self::RepliesLocked { line_failed }
+        | Self::ReplyTooLong { line_failed } = &mut self
         {
             *line_failed = failed.map(|e| e.to_string());
         }
@@ -234,13 +245,39 @@ impl Runner {
         }
     }
 
-    // Handles the oldest reply read, then moves past it. A save that fails
-    // between the two leaves the reply to be read again, when its step is
-    // found claimed by it and it is handled again.
+    // Handles the oldest reply read, then moves past it. Its codes are
+    // spent first, and when they cannot be, it stays at the head of the
+    // queue and the read position stays behind it, so no later reply is
+    // handled before it. A save that fails between handling and moving on
+    // leaves the reply to be read again, when its step is found claimed by
+    // it and it is handled again.
     fn handle_next(&mut self) -> Option<Result<Handled, StateError>> {
-        let reply = self.reading.queue.pop_front()?;
-        let spent = self.spend(&reply);
-        let handled = (reply.text.as_deref()).map(|text| self.handle(text, &reply, spent));
+        let now = self.ports.clock.now();
+        if self.reading.held && self.reading.next.is_some_and(|at| now < at) {
+            return None;
+        }
+        let reply = self.reading.queue.front()?.clone();
+        let spent = match self.spend(&reply) {
+            Ok(spent) => spent,
+            Err(reason) => {
+                self.reading.held = true;
+                self.reading.failures = self.reading.failures.saturating_add(1);
+                let wait = backoff(READ_EVERY, self.reading.failures, BACKOFF_MAX);
+                let retry_at = Timestamp(now.0.saturating_add(wait));
+                self.reading.next = Some(retry_at);
+                return Some(Ok(Some((
+                    StepReport::RepliesFailed { reason, retry_at },
+                    None,
+                ))));
+            }
+        };
+        self.reading.held = false;
+        self.reading.queue.pop_front();
+        let handled = if reply.cut {
+            self.too_long()
+        } else {
+            (reply.text.as_deref()).map(|text| self.handle(text, &reply, spent))
+        };
         let mut next = self.state.clone();
         next.replies.last = Some(LastRead {
             id: reply.id,
@@ -256,51 +293,80 @@ impl Runner {
     // anything else about it is read: whether answers are on, whether it is
     // kelpie's own or has text to answer with, which project it names, how
     // old it is, or how the code was typed. Every text the post carries
-    // counts, its title included.
-    fn spend(&self, reply: &Reply) -> Vec<(u64, io::Result<Claim>)> {
+    // counts, its title included. A post kelpie cannot read in full claims
+    // every step a code sent with it could name.
+    //
+    // A secret that cannot be read, or a claim that cannot be written, is an
+    // error, never a reply with nothing to spend.
+    fn spend(&self, reply: &Reply) -> Result<Spent, String> {
         let Some(auth) = &self.totp else {
-            return Vec::new();
+            return Ok(Spent {
+                secret: None,
+                claims: Vec::new(),
+            });
         };
-        let Ok(Some(secret)) = Secret::load(&auth.secret) else {
-            return Vec::new();
+        let secret = Secret::load(&auth.secret).map_err(|e| e.to_string())?;
+        let Some(secret) = secret else {
+            // No secret, no code can answer anything.
+            return Ok(Spent {
+                secret: None,
+                claims: Vec::new(),
+            });
+        };
+        let steps = if reply.cut {
+            steps_near(reply.time).to_vec()
+        } else {
+            secret.steps_in(&reply.said, reply.time)
         };
         let now = self.ports.clock.now();
-        let mut claims: Vec<(u64, io::Result<Claim>)> = Vec::new();
-        for said in &reply.said {
-            for step in secret.steps_in(&digits_of(said), reply.time) {
-                if !claims.iter().any(|(claimed, _)| *claimed == step) {
-                    claims.push((step, auth.answers.claim(step, &reply.id, now)));
-                }
-            }
+        let mut claims = Vec::new();
+        for step in steps {
+            let claim = auth.answers.claim(step, &reply.id, now);
+            let claim = claim.map_err(|e| format!("cannot record a code as used: {e}"))?;
+            claims.push((step, claim));
         }
-        claims
+        Ok(Spent {
+            secret: Some(secret),
+            claims,
+        })
     }
 
-    fn handle(
-        &mut self,
-        text: &str,
-        reply: &Reply,
-        spent: Vec<(u64, io::Result<Claim>)>,
-    ) -> (StepReport, Option<Line>) {
-        let ignored = (StepReport::ReplyIgnored, None);
-        let Some(webhook) = self.replies_on().cloned() else {
-            return ignored;
+    // A line for the topic about `id`, or about answers as a whole
+    fn line(&self, id: Option<u64>, text: String) -> Option<Line> {
+        // Not `replies_on`: the line saying answers are off goes out once they are.
+        let ntfy = self
+            .webhook
+            .as_ref()
+            .filter(|w| w.kind == WebhookKind::Ntfy);
+        let webhook = ntfy?.clone();
+        let project = self.project.as_str();
+        let title = match id {
+            Some(id) => format!("kelpie: {project} ruling {id}"),
+            None => format!("kelpie: {project} answers"),
         };
-        let Some(auth) = &self.totp else {
+        let reply = None;
+        Some((webhook, Alert { title, text, reply }))
+    }
+
+    // A post kelpie cannot read in full answers nothing, and says so.
+    fn too_long(&self) -> Handled {
+        self.replies_on()?;
+        let text = "That reply was too long to read, so it answered nothing and any code \
+                    in it is spent. Send a shorter reply with a new code."
+            .to_owned();
+        let report = StepReport::ReplyTooLong { line_failed: None };
+        Some((report, self.line(None, text)))
+    }
+
+    fn handle(&mut self, text: &str, reply: &Reply, spent: Spent) -> (StepReport, Option<Line>) {
+        let ignored = (StepReport::ReplyIgnored, None);
+        if self.replies_on().is_none() {
+            return ignored;
+        }
+        let (Some(auth), Some(secret)) = (&self.totp, spent.secret) else {
             return ignored;
         };
         let project = self.project.as_str().to_owned();
-        let line = |id: Option<u64>, text: String| {
-            let title = match id {
-                Some(id) => format!("kelpie: {project} ruling {id}"),
-                None => "kelpie: answers are off".to_owned(),
-            };
-            let reply = None;
-            Some((webhook.clone(), Alert { title, text, reply }))
-        };
-        let Ok(Some(secret)) = Secret::load(&auth.secret) else {
-            return ignored;
-        };
         let now = self.ports.clock.now();
         // Older than the window, a reply is read only so its code is spent.
         if reply.time.0 < now.0.saturating_sub(WINDOW) {
@@ -314,11 +380,14 @@ impl Runner {
             return ignored;
         }
         let claim = match secret.verify(typed, reply.time) {
-            Some(step) => spent
-                .into_iter()
-                .find_map(|(claimed, claim)| (claimed == step).then_some(claim))
-                // Spent above, unless the secret was rotated in between.
-                .unwrap_or_else(|| auth.answers.claim(step, &reply.id, now)),
+            // Every step `verify` takes was spent above, from this text.
+            Some(step) => {
+                let claim = spent.claims.iter().find(|(claimed, _)| *claimed == step);
+                let Some((_, claim)) = claim else {
+                    return ignored;
+                };
+                *claim
+            }
             None => {
                 return match auth.answers.fail(&reply.id) {
                     Ok(Failure::LockedNow) => {
@@ -329,7 +398,8 @@ impl Runner {
                              about moving to a new one."
                         );
                         let report = StepReport::RepliesLocked { line_failed: None };
-                        (report, line(None, text))
+                        let line = self.line(None, text);
+                        (report, line)
                     }
                     Ok(Failure::Counted) | Err(_) => ignored,
                 };
@@ -339,29 +409,16 @@ impl Runner {
         let Some((_, id, answer)) = named else {
             return ignored;
         };
-        let refused = |reason: String| {
-            let text = format!("Ruling {id} was not answered: {reason}.");
-            let report = StepReport::ReplyRefused {
+        if claim == Claim::Replayed {
+            let text = format!(
+                "Ruling {id} was not answered: that code was used already. \
+                 Send the reply again with the next one."
+            );
+            let report = StepReport::ReplyCodeUsed {
                 id,
-                reason,
                 line_failed: None,
             };
-            (report, line(Some(id), text))
-        };
-        match claim {
-            Ok(Claim::Ours) => {}
-            Ok(Claim::Replayed) => {
-                let text = format!(
-                    "Ruling {id} was not answered: that code was used already. \
-                     Send the reply again with the next one."
-                );
-                let report = StepReport::ReplyCodeUsed {
-                    id,
-                    line_failed: None,
-                };
-                return (report, line(Some(id), text));
-            }
-            Err(e) => return refused(format!("the code could not be recorded as used: {e}")),
+            return (report, self.line(Some(id), text));
         }
         let _ = auth.answers.forgive();
         let pending = self.state.rulings.iter().any(|r| r.id == id);
@@ -375,11 +432,20 @@ impl Runner {
                 id,
                 line_failed: None,
             };
-            return (report, line(Some(id), text));
+            return (report, self.line(Some(id), text));
         }
         match self.rule_and_tell(id, answer) {
             Ok(()) => (StepReport::ReplyAnswered { id }, None),
-            Err(e) => refused(e.to_string()),
+            Err(e) => {
+                let reason = e.to_string();
+                let text = format!("Ruling {id} was not answered: {reason}.");
+                let report = StepReport::ReplyRefused {
+                    id,
+                    reason,
+                    line_failed: None,
+                };
+                (report, self.line(Some(id), text))
+            }
         }
     }
 }

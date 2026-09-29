@@ -321,6 +321,13 @@ pub enum StepReport {
     /// ignored. Its text is not logged, since anyone holding the topic can
     /// write it.
     ReplyIgnored,
+    /// A post on the topic held text kelpie could not read in full: every
+    /// step a code in it could name was spent, it answered nothing, and the
+    /// topic was told to send a shorter reply
+    ReplyTooLong {
+        /// Why the line for the topic could not be posted, if it could not
+        line_failed: Option<String>,
+    },
     /// A wrong code turned answers from the topic off, for every project,
     /// until the maintainer turns them back on, and the topic was told so
     RepliesLocked {

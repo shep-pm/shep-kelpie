@@ -195,19 +195,26 @@ impl Secret {
         (bits & 0x7fff_ffff) % 1_000_000
     }
 
-    /// The steps, `at`'s and the one before, whose code is six digits in a
-    /// row of `digits`
-    pub fn steps_in(&self, digits: &[u8], at: Timestamp) -> Vec<u64> {
-        let now = step_of(at);
-        let mut steps = Vec::new();
-        for step in [now, now.saturating_sub(1)] {
+    /// The steps whose code is six digits in a row in any of `texts`,
+    /// among the ones a code sent at `at` could name: see [`steps_near`]
+    ///
+    /// The candidate codes are computed once, however many texts there are.
+    pub fn steps_in(&self, texts: &[String], at: Timestamp) -> Vec<u64> {
+        let candidates = steps_near(at).map(|step| {
             let code = self.code(step);
-            let code: Vec<u8> = (0..6)
+            let digits: Vec<u8> = (0..6)
                 .rev()
                 .map(|i| (code / 10u32.pow(i) % 10) as u8)
                 .collect();
-            if digits.windows(6).any(|window| window == code.as_slice()) && !steps.contains(&step) {
-                steps.push(step);
+            (step, digits)
+        });
+        let mut steps = Vec::new();
+        for text in texts {
+            let digits = digits_of(text);
+            for (step, code) in &candidates {
+                if !steps.contains(step) && digits.windows(6).any(|w| w == code.as_slice()) {
+                    steps.push(*step);
+                }
             }
         }
         steps
@@ -286,6 +293,15 @@ fn digit(c: char) -> Option<u8> {
 /// match only spends a step early.
 pub fn digits_of(text: &str) -> Vec<u8> {
     text.chars().filter_map(digit).collect()
+}
+
+/// The steps a code sent at `at` could name: the one before, which
+/// [`Secret::verify`] still takes, `at`'s own, and the one after, from a
+/// phone whose clock runs ahead of ntfy's, which a replay could send once
+/// it comes
+pub fn steps_near(at: Timestamp) -> [u64; 3] {
+    let now = step_of(at);
+    [now.saturating_sub(1), now, now.saturating_add(1)]
 }
 
 /// The time step `at` falls in
@@ -425,11 +441,14 @@ mod tests {
         let folder = path.parent().unwrap();
         for mode in [0o750, 0o705, 0o770, 0o707] {
             fs::set_permissions(folder, fs::Permissions::from_mode(mode)).unwrap();
+            let err = Secret::load(&path).unwrap_err();
             assert_eq!(
-                Secret::load(&path),
-                Err(SecretError::FolderExposed(folder.to_owned())),
+                err,
+                SecretError::FolderExposed(folder.to_owned()),
                 "{mode:o}"
             );
+            assert!(err.to_string().contains("`chmod 700` it"), "{err}");
+            assert!(!err.to_string().contains("chmod 600"), "{err}");
         }
     }
 
@@ -513,13 +532,20 @@ mod tests {
     }
 
     #[test]
-    fn a_step_is_found_wherever_its_code_sits_in_the_digits() {
+    fn a_step_is_found_wherever_its_code_sits_in_any_text() {
         let at = Timestamp(1_111_111_109);
-        let digits = digits_of("koji 14 no rename it 081 804.");
-        assert_eq!(RFC.steps_in(&digits, at), [step_of(at)]);
+        let step = step_of(at);
+        let texts = |t: &[&str]| t.iter().map(|t| (*t).to_owned()).collect::<Vec<_>>();
+        let sent = texts(&["koji 14 no rename it", "081 804."]);
+        assert_eq!(RFC.steps_in(&sent, at), [step]);
         let next = Timestamp(at.0 + STEP);
-        assert_eq!(RFC.steps_in(&digits, next), [step_of(at)]);
-        assert_eq!(RFC.steps_in(&digits_of("081805"), at), Vec::<u64>::new());
+        assert_eq!(RFC.steps_in(&sent, next), [step]);
+        // A phone clock ahead sends the next step's code, which a replay
+        // could send once that step comes.
+        let ahead = format!("{:06}", RFC.code(step + 1));
+        assert_eq!(RFC.steps_in(&texts(&[&ahead]), at), [step + 1]);
+        assert_eq!(RFC.steps_in(&texts(&["081805"]), at), Vec::<u64>::new());
+        assert_eq!(steps_near(at), [step - 1, step, step + 1]);
     }
 
     #[test]

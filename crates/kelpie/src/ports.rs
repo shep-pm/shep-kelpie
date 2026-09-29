@@ -578,6 +578,9 @@ pub struct Reply {
     /// Every text it carries, its title included, whose codes are spent
     /// though only `text` can answer
     pub said: Vec<String>,
+    /// Whether it carries text kelpie cannot read in full, as ntfy turns a
+    /// long message into an attachment
+    pub cut: bool,
 }
 
 /// Posts alerts to the maintainer's webhook, and reads replies to them

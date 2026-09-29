@@ -73,12 +73,14 @@ pub(super) fn parse(output: &str) -> Option<Vec<Reply>> {
         let mut said = Vec::new();
         strings(&whole, &mut said);
         let ours = line.tags.iter().any(|t| t == TAG);
-        let text = line.message.filter(|_| !ours && line.attachment.is_none());
+        let cut = line.attachment.is_some();
+        let text = line.message.filter(|_| !ours && !cut);
         replies.push(Reply {
             id: line.id,
             time: Timestamp(line.time),
             text,
             said,
+            cut,
         });
     }
     Some(replies)
@@ -134,6 +136,8 @@ mod tests {
             "a button's body"
         );
         assert!(replies[4].said.iter().any(|s| s == "attachment.txt"));
+        let cut: Vec<_> = replies.iter().map(|r| r.cut).collect();
+        assert_eq!(cut, [false, false, false, false, true, false]);
         assert!(
             !replies[0].said.iter().any(|s| s == "kelpie-probe-topic"),
             "not the topic"
@@ -155,6 +159,7 @@ mod tests {
                 time: Timestamp(2),
                 text: Some("1 yes x".into()),
                 said: vec!["1 yes x".into()],
+                cut: false,
             }])
         );
     }

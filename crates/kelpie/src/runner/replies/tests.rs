@@ -610,3 +610,113 @@ fn a_code_in_a_title_or_a_tagged_post_is_spent() {
         assert_eq!(phase(&rig, &runner), json!({ "state": "ruling", "id": 1 }));
     }
 }
+
+// ntfy turns a message over 4,095 bytes into an attachment, whose text
+// kelpie never reads, so any code in it would stay unspent.
+#[test]
+fn a_post_too_long_to_read_spends_every_step_it_could_name() {
+    let (rig, runner, _) = alerted("koji");
+    let now = rig.clock.now();
+    let code = rig.code_at(now);
+    rig.alerts.post_cut(
+        Some("You received a file: attachment.txt"),
+        &["attachment.txt"],
+        true,
+        now,
+    );
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReplyTooLong { line_failed: None })
+    );
+    assert_eq!(
+        lines(&rig),
+        [
+            "That reply was too long to read, so it answered nothing and any code \
+          in it is spent. Send a shorter reply with a new code."
+        ]
+    );
+    for sent in [now, Timestamp(now.0 + STEP)] {
+        rig.alerts.reply(&format!("koji 1 yes {code}"), sent);
+        rig.clock.advance(READ_EVERY);
+        assert!(
+            matches!(
+                step(&runner).unwrap(),
+                Some(StepReport::ReplyCodeUsed { id: 1, .. })
+            ),
+            "{sent:?}"
+        );
+    }
+    assert_eq!(phase(&rig, &runner), json!({ "state": "ruling", "id": 1 }));
+}
+
+// A phone whose clock runs ahead sends the next step's code, which a
+// reader could replay once that step comes.
+#[test]
+fn a_code_for_the_next_step_is_spent_before_it_comes() {
+    let (rig, runner, _) = alerted("koji");
+    let now = rig.clock.now();
+    let ahead = rig.code_at(Timestamp(now.0 + STEP));
+    rig.alerts
+        .reply(&format!("koji 1 no rename it {ahead}"), now);
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::ReplyIgnored));
+    rig.clock.advance(STEP);
+    rig.alerts
+        .reply(&format!("koji 1 yes {ahead}"), rig.clock.now());
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReplyCodeUsed { id: 1, .. })
+    ));
+    assert_eq!(phase(&rig, &runner), json!({ "state": "ruling", "id": 1 }));
+}
+
+// Probed in review: a secret that could not be read, or a claim that could
+// not be written, let the read move past the reply with its code unspent,
+// and a replay behind it answered.
+#[test]
+fn a_code_that_cannot_be_spent_holds_the_reply_until_it_can() {
+    use std::os::unix::fs::PermissionsExt;
+    let set = |path: &std::path::Path, mode| {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    for fault in ["the secret others may read", "no claim can be written"] {
+        let (rig, runner, _) = alerted("koji");
+        let totp = rig.paths().totp;
+        let (path, broken, fixed) = if fault.starts_with("the secret") {
+            (totp.join("secret"), 0o644, 0o600)
+        } else {
+            crate::totp::private_dir(&totp.join("used")).unwrap();
+            (totp.join("used"), 0o500, 0o700)
+        };
+        let now = rig.clock.now();
+        let code = rig.code_at(now);
+        set(&path, broken);
+        rig.alerts
+            .reply(&format!("koji 1 no rename it {code}"), now);
+        rig.alerts.reply(&format!("koji 1 yes {code}"), now);
+        let held = step(&runner).unwrap();
+        assert!(
+            matches!(held, Some(StepReport::RepliesFailed { .. })),
+            "{fault}: {held:?}"
+        );
+        assert_eq!(step(&runner).unwrap(), None, "{fault}: held, not skipped");
+        assert_eq!(lines(&rig), [""; 0], "{fault}: nothing says a code is live");
+
+        set(&path, fixed);
+        rig.clock.advance(READ_EVERY);
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            seen.extend(step(&runner).unwrap());
+        }
+        assert!(
+            seen.contains(&StepReport::ReplyAnswered { id: 1 }),
+            "{fault}: {seen:?}"
+        );
+        assert!(
+            seen.iter()
+                .any(|r| matches!(r, StepReport::ReplyCodeUsed { id: 1, .. })),
+            "{fault}: {seen:?}"
+        );
+        let phase = phase(&rig, &runner);
+        assert_ne!(phase["state"], "merge", "{fault}: {phase}");
+    }
+}
