@@ -97,6 +97,13 @@ enum Move {
     /// A yes on a foreign change: kelpie adopts it. A new head goes
     /// through the qwen-review loop, and anything else back to CI.
     Accept(Known),
+    /// A no on a head moved from `from` to `to`: the worker builds on `to`,
+    /// taking a turn with this prompt
+    Decline {
+        prompt: String,
+        from: String,
+        to: String,
+    },
 }
 
 impl Runner {
@@ -125,10 +132,20 @@ impl Runner {
                 RulingKind::Rebase { .. } | RulingKind::StillRed { .. }
             )
         );
-        let moved = decide(id, answer, ruling, now)?;
         // Only the ruling the work item is parked on moves it. Any other,
         // which nothing leaves behind today, is answered by clearing it.
         let parked_on = |item: &WorkItem| item.phase == Phase::Ruling { id };
+        let parked = next.work_item.as_ref().filter(|item| parked_on(item));
+        let head_moved = match (parked, &ruling.kind) {
+            (Some(item), RulingKind::ForeignChange { known: seen, .. }) => {
+                match (&item.known.head, &seen.head) {
+                    (Some(from), Some(to)) if from != to => Some((from.clone(), to.clone())),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        let moved = decide(id, answer, ruling, now, head_moved)?;
         if let Some(item) = next.work_item.as_mut().filter(|item| parked_on(item)) {
             item.coderabbit.cap_cleared |= lifts_cap;
             if vouches {
@@ -162,6 +179,14 @@ impl Runner {
                     };
                     item.known = known;
                     None
+                }
+                Move::Decline { prompt, from, to } => {
+                    let (repo, branch) = (&self.settings.repo, &item.branch);
+                    worktree::adopt(repo, &item.worktree, branch, &from, &to)
+                        .map_err(|e| RuleError::Adopt(to.clone(), e.to_string()))?;
+                    item.known.head = Some(to);
+                    let review = Some(Phase::Review(Review::first()));
+                    Some((Turn::Next { prompt }, Phase::Implement, review))
                 }
             };
             if let Some((turn, phase, force)) = worker {
@@ -250,7 +275,22 @@ pub(super) fn park(
 }
 
 // A yes, a no or an answer that does not fit the ruling is refused.
-fn decide(id: u64, answer: Answer, ruling: Ruling, now: Timestamp) -> Result<Move, RuleError> {
+fn decide(
+    id: u64,
+    answer: Answer,
+    ruling: Ruling,
+    now: Timestamp,
+    head_moved: Option<(String, String)>,
+) -> Result<Move, RuleError> {
+    // The declined commit stays on `origin`, so the worker must build on it
+    // or its push is refused.
+    if let (Answer::No(note), Some((from, to))) = (&answer, head_moved) {
+        return Ok(Move::Decline {
+            prompt: declined_prompt(ruling.pull_request, &to, note),
+            from,
+            to,
+        });
+    }
     let phase = match (answer, ruling.kind) {
         (Answer::Text(text), RulingKind::Question { resume, .. }) => {
             // A question resumes exactly where it interrupted the qwen-review
@@ -455,6 +495,20 @@ fn note_prompt(number: Option<u64>, note: &str) -> String {
     format!("The maintainer answered no on {about}, with this note:\n\n{note}\n")
 }
 
+fn declined_prompt(number: Option<u64>, head: &str, note: &str) -> String {
+    let about = number.map_or_else(
+        || "your branch".to_owned(),
+        |n| format!("pull request #{n}"),
+    );
+    format!(
+        "Someone other than you pushed commit {} to {about}, and the maintainer \
+         declined it, with this note:\n\n{note}\n\nYour worktree is now at that commit. \
+         Revert or change it with a new commit on top, and push with \
+         `git push origin HEAD`. Do not force-push.\n",
+        short(head)
+    )
+}
+
 fn answer_prompt(text: &str) -> String {
     format!("The maintainer answered your question:\n\n{text}\n")
 }
@@ -587,6 +641,48 @@ mod tests {
             rig.ask(&runner, "rule", Some("1 yes")),
             json!({ "error": "no ruling 1 is pending" })
         );
+    }
+
+    #[test]
+    fn a_no_on_a_commit_pushed_by_hand_has_the_worker_build_on_it_without_force() {
+        let (rig, runner, _) = Rig::with_pull_request("rotom");
+        let by_hand = rig.push_by_hand("kelpie/7", "by-hand.txt");
+        assert!(matches!(
+            rig.verdict(&runner),
+            Some(StepReport::Ruling { id: 1, .. })
+        ));
+        rig.ask(&runner, "rule", Some("1 no revert it"));
+        // A plain push from the worktree: the stand-in panics if it is refused.
+        rig.claude.script([
+            Scripted::Push("revert.txt", "reverted\n"),
+            Scripted::Text("CLEAN"),
+        ]);
+        step(&runner).unwrap();
+        let noted = rig.claude.calls().pop().unwrap();
+        assert_eq!(
+            noted.prompt,
+            format!(
+                "Someone other than you pushed commit {} to pull request #71, and the \
+                 maintainer declined it, with this note:\n\nrevert it\n\nYour worktree is \
+                 now at that commit. Revert or change it with a new commit on top, and \
+                 push with `git push origin HEAD`. Do not force-push.\n",
+                &by_hand[..7]
+            )
+        );
+        let pushed = rig.forge.head_of("kelpie/7").unwrap();
+        let parent = crate::test::git(&rig.worktree_7(), &["rev-parse", "HEAD^"]);
+        assert_eq!(parent, by_hand);
+
+        step(&runner).unwrap(); // review round 1, qwen: clean by default
+        step(&runner).unwrap(); // review round 2, claude: scripted clean above
+        rig.forge.set_checks(&pushed, Checks::Passed);
+        let Some(StepReport::Ruling {
+            id: 2, question, ..
+        }) = rig.verdict(&runner)
+        else {
+            panic!("no second ruling");
+        };
+        assert!(question.starts_with("Merge pull request #71"), "{question}");
     }
 
     #[test]
