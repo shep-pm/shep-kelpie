@@ -4,7 +4,7 @@ use std::time::Duration;
 use shep_client::shep_core::config::AppConfig;
 
 use super::*;
-use crate::settings::LocalRound;
+use crate::settings::{ForgeSlug, LocalRound};
 use crate::shepherd;
 use crate::test::{FakeForge, FakeShepherd};
 
@@ -77,8 +77,6 @@ impl Scene {
         Settings::from_table(table, "hazels-lab", &self.home, &self.home).unwrap()
     }
 }
-
-use crate::settings::ForgeSlug;
 
 // Real sockets under a real clock: a paused one would time out the
 // handshake while the fake's socket is merely waiting.

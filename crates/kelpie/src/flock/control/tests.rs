@@ -19,12 +19,11 @@ fn launch(shepherd: &FakeShepherd) -> Launch {
     }
 }
 
-/// Registers project `name`'s runner, running from `root`
+/// Registers project `name`'s runner for the checkout at `root`, up when `online`
 fn runner(shepherd: &FakeShepherd, name: &str, root: &Path, online: bool) {
     let mut table = crate::test::project_table(EXAMPLE);
     table.insert("repo".into(), Value::String(root.display().to_string()));
-    let name = ProjectName::try_from(name).unwrap();
-    shepherd.holds(launch(shepherd).runner(&name, table), online);
+    shepherd.holds(launch(shepherd).runner(&project(name), table), online);
 }
 
 async fn client(shepherd: &FakeShepherd) -> Client {
@@ -142,6 +141,7 @@ async fn a_runner_still_taking_its_actions_is_starting() {
     let client = client(&shepherd).await;
     shepherd.just_started("koji");
     assert_eq!(in_time(status(&client)).await.unwrap(), ["koji: starting"]);
+    // Each answer from a runner still starting uses the flag up.
     shepherd.just_started("koji");
     let err = in_time(pause(&client, &project("koji"))).await.unwrap_err();
     assert_eq!(err, "koji's runner is starting: ask again in a moment");

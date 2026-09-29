@@ -138,7 +138,7 @@ pub async fn status(client: &Client) -> Result<Vec<String>, String> {
 
 /// What a runner's sheep made of a trigger
 enum Answered {
-    /// The runner's own answer, which is always JSON
+    /// The runner's own answer, which is always a JSON object
     Runner(String),
     /// A plain-text answer: shep-channel's `unknown action`, from a runner
     /// that has opened its channel and not yet taken its actions
@@ -164,7 +164,7 @@ async fn trigger(client: &Client, sheep: &str, action: &str) -> Result<Answered,
     };
     Ok(match rows.into_iter().next().map(|row| row.outcome) {
         Some(ActionOutcome::Replied { body })
-            if serde_json::from_str::<serde_json::Value>(&body).is_ok() =>
+            if serde_json::from_str::<serde_json::Map<_, _>>(&body).is_ok() =>
         {
             Answered::Runner(body)
         }
