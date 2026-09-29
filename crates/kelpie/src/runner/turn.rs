@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use super::Runner;
 use super::adopt;
+use super::alert::{post_due, tell_settled};
 use super::instructions;
 use super::question::asked;
 use super::report::{Begin, StepReport};
@@ -51,19 +52,9 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
             Arc::clone(&runner.ports.alerts),
         )
     };
-    let due = lock(runner).alert_due();
-    if let Some(due) = due {
-        // The relay is a faster, nicer path when it is reachable, but the
-        // webhook is what actually keeps a ruling from being lost, so it
-        // posts every ruling regardless of how the relay's send went.
-        if let Some(message) = &due.relay {
-            if lock(runner).relay_clear_due() {
-                let _ = relay.clear();
-            }
-            let _ = relay.send(&message.text, &message.model, message.effort);
-        }
-        let sent = alerts.post(&due.webhook, &due.alert);
-        return lock(runner).alert_sent(due.of, sent).map(Some);
+    tell_settled(runner, relay.as_ref());
+    if let Some(posted) = post_due(runner, relay.as_ref(), alerts.as_ref()) {
+        return posted.map(Some);
     }
     let mut start_over = false;
     loop {

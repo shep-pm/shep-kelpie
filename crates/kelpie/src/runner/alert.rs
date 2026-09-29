@@ -11,11 +11,14 @@
 //! A notice of an automatic merge takes the same path, webhook only, once
 //! no ruling is waiting to be posted.
 
+use std::sync::Mutex;
+
 use super::Runner;
 use super::gate::short;
 use super::report::StepReport;
-use crate::ports::{Alert, AlertError, Timestamp};
-use crate::relay;
+use super::trigger::lock;
+use crate::ports::{Alert, AlertError, Alerts, Relay, Timestamp};
+use crate::relay::{self, Settled};
 use crate::settings::Effort;
 use crate::state::{Notice, StateError};
 use crate::webhook::Webhook;
@@ -66,24 +69,112 @@ pub(super) struct RelayMessage {
 #[derive(Debug)]
 pub(super) struct Due {
     pub(super) of: Posting,
-    /// None for a notice, which needs no answer
+    /// None for a notice, which needs no answer, and for a ruling the relay
+    /// already holds, whose retry is for the webhook alone
     pub(super) relay: Option<RelayMessage>,
     pub(super) webhook: Webhook,
     pub(super) alert: Alert,
 }
 
+/// A message for the relay about a ruling settled without it
+#[derive(Debug)]
+pub(super) struct SettledNotice {
+    id: u64,
+    /// Queued only because the ruling's relay send was still out
+    provisional: bool,
+    text: String,
+}
+
+/// A pending ruling the relay holds, and whether only because its send is out
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Relayed {
+    id: u64,
+    provisional: bool,
+}
+
+/// Tells a running relay of each ruling settled without it since the last
+/// step
+///
+/// Best-effort, like the send: a relay that misses one leaves a late tap
+/// to `rule`'s own refusal.
+pub(super) fn tell_settled(runner: &Mutex<Runner>, relay: &dyn Relay) {
+    let notices = std::mem::take(&mut lock(runner).relay_notices);
+    for notice in notices {
+        let _ = relay.tell(&notice.text);
+    }
+}
+
+/// Posts the oldest ruling or notice due to the webhook, and sends a ruling
+/// to the relay unless the relay already holds it
+///
+/// Returns `None` when nothing is due. The relay is a faster, nicer path
+/// when it is reachable, but the webhook is what keeps a ruling from being
+/// lost, so it posts every ruling whatever the relay's send did.
+pub(super) fn post_due(
+    runner: &Mutex<Runner>,
+    relay: &dyn Relay,
+    alerts: &dyn Alerts,
+) -> Option<Result<StepReport, StateError>> {
+    let due = lock(runner).alert_due()?;
+    let relayed = match &due.relay {
+        None => true,
+        Some(message) => {
+            let clear_due = lock(runner).relay_clear_due();
+            if clear_due
+                && relay.clear().is_ok()
+                && let Err(e) = lock(runner).relay_emptied()
+            {
+                return Some(Err(e));
+            }
+            relay
+                .send(&message.text, &message.model, message.effort)
+                .is_ok()
+        }
+    };
+    let sent = alerts.post(&due.webhook, &due.alert);
+    Some(lock(runner).alert_sent(due.of, relayed, sent))
+}
+
 impl Runner {
+    /// The pending rulings the relay holds, or is being sent
+    pub(super) fn relayed(&self) -> Vec<Relayed> {
+        let relayed = self.state.rulings.iter();
+        let relayed = relayed.filter(|r| r.relayed || self.relaying == Some(r.id));
+        let relayed = relayed.map(|r| Relayed {
+            id: r.id,
+            provisional: !r.relayed,
+        });
+        relayed.collect()
+    }
+
+    /// Queues a message to the relay for each of `relayed` no longer pending
+    pub(super) fn settled_without_relay(&mut self, relayed: &[Relayed], how: &Settled) {
+        for held in relayed {
+            if !self.state.rulings.iter().any(|r| r.id == held.id) {
+                self.relay_notices.push(SettledNotice {
+                    id: held.id,
+                    provisional: held.provisional,
+                    text: relay::settled(self.project.as_str(), held.id, how),
+                });
+            }
+        }
+    }
+
     /// The oldest ruling not yet posted, or else the oldest notice, unless
-    /// its last failure says wait
-    pub(super) fn alert_due(&self) -> Option<Due> {
+    /// its last failure says wait. A ruling sent to the relay is held as the
+    /// one being relayed until [`Self::alert_sent`].
+    pub(super) fn alert_due(&mut self) -> Option<Due> {
         let now = self.ports.clock.now();
         let waiting = |of| self.retry.is_some_and(|r| r.of == of && now < r.at);
         let project = self.project.as_str();
         if let Some(ruling) = self.state.rulings.iter().find(|r| !r.alerted) {
             let of = Posting::Ruling(ruling.id);
-            return (!waiting(of)).then(|| Due {
+            if waiting(of) {
+                return None;
+            }
+            let due = Due {
                 of,
-                relay: Some(RelayMessage {
+                relay: (!ruling.relayed).then(|| RelayMessage {
                     text: relay::message(
                         project,
                         ruling.id,
@@ -98,7 +189,11 @@ impl Runner {
                     title: format!("kelpie: {project} ruling {}", ruling.id),
                     text: ruling.question.clone(),
                 },
-            });
+            };
+            if due.relay.is_some() {
+                self.relaying = Some(ruling.id);
+            }
+            return Some(due);
         }
         let notice = self.state.notices.first()?;
         let of = Posting::Notice {
@@ -127,13 +222,46 @@ impl Runner {
         due
     }
 
-    /// Records how the post of `of` went
+    /// Forgets which rulings the relay holds, once a clear left it holding none
+    fn relay_emptied(&mut self) -> Result<(), StateError> {
+        if !self.state.rulings.iter().any(|r| r.relayed) {
+            return Ok(());
+        }
+        let mut next = self.state.clone();
+        for ruling in &mut next.rulings {
+            ruling.relayed = false;
+        }
+        self.save(next)
+    }
+
+    /// Records how the post of `of` went, and for a ruling whether the relay
+    /// holds it
     pub(super) fn alert_sent(
         &mut self,
         of: Posting,
+        relayed: bool,
         sent: Result<(), AlertError>,
     ) -> Result<StepReport, StateError> {
+        let mut next = self.state.clone();
+        let mut newly_relayed = false;
+        if let Posting::Ruling(id) = of {
+            self.relaying = None;
+            // A message queued for a ruling answered while its send was out
+            // is kept only if the relay did take the ruling.
+            if !relayed {
+                self.relay_notices
+                    .retain(|notice| !(notice.id == id && notice.provisional));
+            }
+            // An answer can land while the post is out, and takes the ruling with it.
+            if let Some(ruling) = next.rulings.iter_mut().find(|r| r.id == id) {
+                newly_relayed = relayed && !ruling.relayed;
+                ruling.relayed |= relayed;
+            }
+        }
         if let Err(e) = sent {
+            if newly_relayed {
+                self.save(next)?;
+            }
             let failures = match self.retry {
                 Some(r) if r.of == of => r.failures.saturating_add(1),
                 _ => 1,
@@ -162,9 +290,7 @@ impl Runner {
             });
         }
         self.retry = None;
-        let mut next = self.state.clone();
         let report = match of {
-            // An answer can land while the post is out, and takes the ruling with it.
             Posting::Ruling(id) => {
                 if let Some(ruling) = next.rulings.iter_mut().find(|r| r.id == id) {
                     ruling.alerted = true;
@@ -348,7 +474,11 @@ mod tests {
         let (rig, runner, _) = Rig::parked("reactmap");
         let due = runner.lock().unwrap().alert_due().unwrap();
         rig.ask(&runner, "rule", Some("1 no not yet"));
-        let report = runner.lock().unwrap().alert_sent(due.of, Ok(())).unwrap();
+        let report = runner
+            .lock()
+            .unwrap()
+            .alert_sent(due.of, false, Ok(()))
+            .unwrap();
         assert_eq!(report, StepReport::Alerted { id: 1 });
         assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
         assert!(runner.lock().unwrap().alert_due().is_none());
@@ -397,6 +527,173 @@ mod tests {
             rig.ask(&runner, "status", None)["rulings"][0]["alerted"],
             true
         );
+    }
+
+    #[test]
+    fn answering_a_relayed_ruling_by_trigger_tells_the_relay_once() {
+        let (rig, runner, _) = Rig::parked("shep");
+        rig.relay.set_up(true);
+        step(&runner).unwrap();
+        rig.ask(&runner, "rule", Some("1 no rename the flag"));
+        rig.claude.script([Scripted::Text("CLEAN")]);
+        step(&runner).unwrap();
+        step(&runner).unwrap();
+        assert_eq!(
+            rig.relay.told(),
+            ["[kelpie]\nproject=shep ruling=1 settled=no\n\n\
+              Ruling 1 was answered with a no: rename the flag"]
+        );
+    }
+
+    #[test]
+    fn a_ruling_the_relay_never_took_tells_it_nothing() {
+        let (rig, runner, _) = Rig::parked("koji");
+        step(&runner).unwrap(); // the rig's relay is down, so the send fails
+        rig.relay.set_up(true);
+        rig.ask(&runner, "rule", Some("1 yes"));
+        step(&runner).unwrap();
+        assert_eq!(rig.relay.told(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_relays_own_answer_tells_it_nothing() {
+        let (rig, runner, _) = Rig::parked("rotom");
+        rig.relay.set_up(true);
+        step(&runner).unwrap();
+        let reply = rig.ask(&runner, "relay-rule", Some("1 no rename the flag"));
+        assert_eq!(reply["rulings"], json!([]), "{reply}");
+        step(&runner).unwrap();
+        assert_eq!(rig.relay.told(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_ruling_answered_while_its_relay_send_is_out_is_told_once_the_relay_took_it() {
+        let (rig, runner, _) = Rig::parked("shep");
+        rig.relay.set_up(true);
+        let due = runner.lock().unwrap().alert_due().unwrap();
+        rig.ask(&runner, "rule", Some("1 yes"));
+        runner
+            .lock()
+            .unwrap()
+            .alert_sent(due.of, true, Ok(()))
+            .unwrap();
+        step(&runner).unwrap();
+        assert_eq!(
+            rig.relay.told(),
+            ["[kelpie]\nproject=shep ruling=1 settled=yes\n\nRuling 1 was answered with a yes"]
+        );
+    }
+
+    #[test]
+    fn a_ruling_answered_while_a_failed_relay_send_is_out_tells_it_nothing() {
+        let (rig, runner, _) = Rig::parked("koji");
+        rig.relay.set_up(true);
+        let due = runner.lock().unwrap().alert_due().unwrap();
+        rig.ask(&runner, "rule", Some("1 no not yet"));
+        runner
+            .lock()
+            .unwrap()
+            .alert_sent(due.of, false, Ok(()))
+            .unwrap();
+        rig.claude.script([Scripted::Text("CLEAN")]);
+        step(&runner).unwrap();
+        assert_eq!(rig.relay.told(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn dropping_the_work_item_tells_the_relay_its_ruling_is_settled() {
+        let (rig, runner, _) = Rig::parked("golbat");
+        rig.relay.set_up(true);
+        step(&runner).unwrap();
+        rig.ask(&runner, "drop", None);
+        step(&runner).unwrap();
+        assert_eq!(
+            rig.relay.told(),
+            ["[kelpie]\nproject=golbat ruling=1 settled=dropped\n\n\
+              Ruling 1 was settled when its work item was dropped"]
+        );
+    }
+
+    #[test]
+    fn a_webhook_retry_does_not_send_the_relay_its_question_again() {
+        let (rig, runner, _) = Rig::parked("shep");
+        rig.relay.set_up(true);
+        rig.alerts.set_down(true);
+        step(&runner).unwrap();
+        rig.alerts.set_down(false);
+        rig.clock.advance(60);
+        assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+        assert_eq!(rig.relay.sent().len(), 1);
+    }
+
+    // A send that fails for a ruling the relay already holds leaves it held.
+    #[test]
+    fn a_failed_send_keeps_the_notice_for_a_ruling_the_relay_already_holds() {
+        let (rig, runner, _) = Rig::parked("koji");
+        rig.relay.set_up(true);
+        rig.alerts.set_down(true);
+        step(&runner).unwrap();
+        rig.clock.advance(60);
+        let due = runner.lock().unwrap().alert_due().unwrap();
+        rig.ask(&runner, "rule", Some("1 yes"));
+        let failed = Err(AlertError::Refused(503));
+        runner
+            .lock()
+            .unwrap()
+            .alert_sent(due.of, false, failed)
+            .unwrap();
+        step(&runner).unwrap();
+        assert_eq!(rig.relay.told().len(), 1);
+    }
+
+    #[test]
+    fn a_cleared_relay_is_told_nothing_of_a_question_it_never_asked() {
+        let (rig, runner, _) = Rig::parked("rotom");
+        rig.relay.set_up(true);
+        step(&runner).unwrap(); // clears, then relays ruling 1
+        drop(runner);
+        // A second ruling raised a day later, while ruling 1 still waits.
+        let path = rig.paths().state;
+        let mut state: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let mut second = state["rulings"][0].clone();
+        second["id"] = json!(2);
+        second["kind"] = json!({ "kind": "closed" });
+        second["alerted"] = json!(false);
+        second["relayed"] = json!(false);
+        state["rulings"].as_array_mut().unwrap().push(second);
+        std::fs::write(&path, state.to_string()).unwrap();
+        let runner = rig.open().unwrap();
+        rig.clock.advance(Rig::DAY);
+        assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 2 }));
+        assert_eq!(rig.relay.clears(), 2);
+        let rulings = &rig.ask(&runner, "status", None)["rulings"];
+        assert_eq!(
+            (&rulings[0]["relayed"], &rulings[1]["relayed"]),
+            (&json!(false), &json!(true))
+        );
+        rig.ask(&runner, "rule", Some("1 no not yet"));
+        rig.claude.script([Scripted::Text("CLEAN")]);
+        step(&runner).unwrap();
+        assert_eq!(rig.relay.told(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_relayed_ruling_stays_relayed_across_a_failed_post_and_a_restart() {
+        let (rig, runner, _) = Rig::parked("reactmap");
+        rig.relay.set_up(true);
+        rig.alerts.set_down(true);
+        step(&runner).unwrap();
+        let ruling = &rig.ask(&runner, "status", None)["rulings"][0];
+        assert_eq!(
+            (&ruling["alerted"], &ruling["relayed"]),
+            (&json!(false), &json!(true))
+        );
+        drop(runner);
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "rule", Some("1 yes"));
+        step(&runner).unwrap();
+        assert_eq!(rig.relay.told().len(), 1);
     }
 
     #[test]

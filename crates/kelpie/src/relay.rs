@@ -139,6 +139,39 @@ pub fn message(project: &str, ruling_id: u64, wants: Wants, question: &str) -> S
     format!("[kelpie]\nproject={project} ruling={ruling_id} wants={wants}\n\n{question}")
 }
 
+/// How a ruling the relay was sent was settled without it
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Settled {
+    /// Answered with a yes
+    Yes,
+    /// Answered with a no and this note
+    No(String),
+    /// The worker's question, answered with this text
+    Answer(String),
+    /// Its work item was dropped
+    Dropped,
+}
+
+/// What kelpie tells the relay when a ruling it was sent is settled some
+/// other way, so a late tap on it runs nothing
+///
+/// `project` takes the same care as in [`message`].
+pub fn settled(project: &str, ruling_id: u64, how: &Settled) -> String {
+    let (word, how) = match how {
+        Settled::Yes => ("yes", "answered with a yes".to_owned()),
+        Settled::No(note) => ("no", format!("answered with a no: {note}")),
+        Settled::Answer(text) => ("answer", format!("answered: {text}")),
+        Settled::Dropped => (
+            "dropped",
+            "settled when its work item was dropped".to_owned(),
+        ),
+    };
+    format!(
+        "[kelpie]\nproject={project} ruling={ruling_id} settled={word}\n\n\
+         Ruling {ruling_id} was {how}"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,5 +349,45 @@ mod tests {
             message("shep", 4, Wants::Answer, "The worker asks: …"),
             "[kelpie]\nproject=shep ruling=4 wants=answer\n\nThe worker asks: …"
         );
+    }
+
+    #[test]
+    fn a_settled_ruling_names_how_in_its_header_and_its_line() {
+        assert_eq!(
+            settled("shep", 3, &Settled::Yes),
+            "[kelpie]\nproject=shep ruling=3 settled=yes\n\nRuling 3 was answered with a yes"
+        );
+        assert_eq!(
+            settled("shep", 3, &Settled::No("rename it".into())),
+            "[kelpie]\nproject=shep ruling=3 settled=no\n\nRuling 3 was answered with a no: rename it"
+        );
+        assert_eq!(
+            settled("shep", 4, &Settled::Answer("--dry-run".into())),
+            "[kelpie]\nproject=shep ruling=4 settled=answer\n\nRuling 4 was answered: --dry-run"
+        );
+        assert_eq!(
+            settled("shep", 5, &Settled::Dropped),
+            "[kelpie]\nproject=shep ruling=5 settled=dropped\n\n\
+             Ruling 5 was settled when its work item was dropped"
+        );
+    }
+
+    #[test]
+    fn the_instructions_cover_a_settled_ruling() {
+        let text = instructions_text();
+        assert!(text.contains("`settled=<how>`"), "{text}");
+        assert!(
+            text.contains("never asked about that ruling, do nothing"),
+            "{text}"
+        );
+        assert!(
+            text.contains("tell them in one line that it is settled"),
+            "{text}"
+        );
+        assert!(
+            text.contains("already settled, and how, and run nothing"),
+            "{text}"
+        );
+        assert!(text.contains("cannot be taken back"), "{text}");
     }
 }
