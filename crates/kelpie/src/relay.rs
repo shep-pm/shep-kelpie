@@ -9,6 +9,8 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
+pub mod rule;
+
 /// The relay's fixed `--name`, so a lookup always finds the same session
 pub const NAME: &str = "kelpie-relay";
 
