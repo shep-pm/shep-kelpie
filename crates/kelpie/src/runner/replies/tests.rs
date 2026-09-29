@@ -263,7 +263,7 @@ fn reading_resumes_after_the_last_reply_across_a_restart() {
     let (rig, runner, _) = alerted("koji");
     rig.alerts.reply("hello from the phone", rig.clock.now());
     assert_eq!(step(&runner).unwrap(), Some(StepReport::ReplyIgnored));
-    let floor = Timestamp(rig.clock.now().0 - WINDOW);
+    let floor = Timestamp(rig.clock.now().0 - WINDOW - 2 * STEP);
     assert_eq!(rig.alerts.reads(), [Since::Time(floor)]);
     drop(runner);
 
@@ -286,14 +286,14 @@ fn an_old_position_reads_from_the_window_instead() {
     let state = rig.paths().state;
     let mut saved: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
-    let old = rig.clock.now().0 - WINDOW - 1;
+    let old = rig.clock.now().0 - WINDOW - 2 * STEP - 1;
     saved["replies"] = json!({ "last": { "id": "lapsed", "time": old } });
     std::fs::write(&state, saved.to_string()).unwrap();
 
     let runner = rig.open().unwrap();
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     step(&runner).unwrap();
-    let floor = Timestamp(rig.clock.now().0 - WINDOW);
+    let floor = Timestamp(rig.clock.now().0 - WINDOW - 2 * STEP);
     assert_eq!(rig.alerts.reads(), [Since::Time(floor)]);
 }
 
@@ -434,7 +434,9 @@ fn five_wrong_codes_turn_answers_off_until_the_terminal_turns_them_on() {
     assert_eq!(
         lines(&rig),
         ["Answers from ntfy are off after 5 wrong codes. \
-          Turn them back on with `kelpie totp --unlock` on the terminal."]
+          Turn them back on with `kelpie totp --unlock` on the terminal. \
+          Anyone can post to a topic whose name they know, so think \
+          about moving to a new one."]
     );
     assert!(!lock(&runner).awaits_reply());
 
@@ -468,4 +470,70 @@ fn a_secret_others_may_read_stops_the_runner() {
         panic!("the runner started");
     };
     assert!(e.to_string().contains("may be read by others"), "{e}");
+}
+
+// Probed in review: a right code in any shape but the exact one was never
+// claimed, so a reader of the topic could reuse it with the exact shape.
+#[test]
+fn a_right_code_in_any_shape_is_spent_before_a_replay() {
+    for shape in [
+        "koji 1 no rename it {code}.",
+        "{code} koji 1 no rename it",
+        "koji 1 no rename it {spaced}",
+        "{code}",
+        "koji 1 no rename it {wide}",
+    ] {
+        let (rig, runner, _) = alerted("koji");
+        let now = rig.clock.now();
+        let code = rig.code_at(now);
+        let spaced = format!("{} {}", &code[..3], &code[3..]);
+        let wide: String = code
+            .chars()
+            .map(|c| char::from_u32(u32::from(c) - u32::from('0') + 0xff10).unwrap())
+            .collect();
+        let sent = shape
+            .replace("{code}", &code)
+            .replace("{spaced}", &spaced)
+            .replace("{wide}", &wide);
+        rig.alerts.reply(&sent, now);
+        assert_eq!(
+            step(&runner).unwrap(),
+            Some(StepReport::ReplyIgnored),
+            "{sent}"
+        );
+        rig.alerts.reply(&format!("koji 1 yes {code}"), now);
+        rig.clock.advance(READ_EVERY);
+        assert!(
+            matches!(
+                step(&runner).unwrap(),
+                Some(StepReport::ReplyCodeUsed { id: 1, .. })
+            ),
+            "{sent}"
+        );
+        assert_eq!(
+            phase(&rig, &runner),
+            json!({ "state": "ruling", "id": 1 }),
+            "{sent}"
+        );
+    }
+}
+
+// A reply just too old to act on still spends its code, so a replay just
+// inside the window finds it used.
+#[test]
+fn a_reply_older_than_the_window_is_read_only_to_spend_its_code() {
+    let (rig, runner, _) = alerted("koji");
+    let now = rig.clock.now();
+    let sent = Timestamp(now.0 - WINDOW - 10);
+    let code = rig.code_at(sent);
+    rig.alerts
+        .reply(&format!("koji 1 no not this {code}"), sent);
+    rig.alerts
+        .reply(&format!("koji 1 yes {code}"), Timestamp(sent.0 + 20));
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::ReplyIgnored));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReplyCodeUsed { id: 1, .. })
+    ));
+    assert_eq!(phase(&rig, &runner), json!({ "state": "ruling", "id": 1 }));
 }

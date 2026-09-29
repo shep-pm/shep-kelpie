@@ -24,8 +24,8 @@ use crate::ports::{Alert, AlertError, Alerts, Reply, ReplyWith, Since, Takes, Ti
 use crate::relay::Wants;
 use crate::settings::SettingsError;
 use crate::state::{LastRead, RulingKind, StateError};
-use crate::totp::Secret;
 use crate::totp::answers::{Answers, Claim, FAILURES, Failure};
+use crate::totp::{STEP, Secret, codes_in};
 use crate::webhook::{Webhook, WebhookKind};
 
 /// Seconds between reads of the topic while a ruling waits on it
@@ -200,7 +200,9 @@ impl Runner {
             return None;
         }
         // A read after an id ntfy no longer holds returns its whole cache.
-        let floor = Timestamp(now.0.saturating_sub(WINDOW));
+        // It reaches two steps past the window, so the code of a reply just
+        // too old to act on is still spent before a replay of it is read.
+        let floor = Timestamp(now.0.saturating_sub(WINDOW + 2 * STEP));
         let since = match &self.state.replies.last {
             Some(last) if last.time >= floor => Since::After(last.id.clone()),
             _ => Since::Time(floor),
@@ -256,12 +258,6 @@ impl Runner {
         let Some(auth) = &self.totp else {
             return ignored;
         };
-        let Some((rest, typed)) = text.trim().rsplit_once(char::is_whitespace) else {
-            return ignored;
-        };
-        if typed.len() != 6 || !typed.bytes().all(|b| b.is_ascii_digit()) {
-            return ignored;
-        }
         let project = self.project.as_str().to_owned();
         let line = |id: Option<u64>, text: String| {
             let title = match id {
@@ -274,16 +270,42 @@ impl Runner {
         let Ok(Some(secret)) = Secret::load(&auth.secret) else {
             return ignored;
         };
-        // A right code is claimed before anything else is read, so no later
-        // reply can reuse it, whatever this one said.
+        // Every right code anywhere in the reply is claimed before anything
+        // else is read, so no later reply can reuse it, whatever shape this
+        // one had and whatever it said.
+        let now = self.ports.clock.now();
+        let mut claims = Vec::new();
+        for code in codes_in(text) {
+            if let Some(step) = secret.verify(&code, reply.time)
+                && !claims.iter().any(|(claimed, _)| *claimed == step)
+            {
+                claims.push((step, auth.answers.claim(step, &reply.id, now)));
+            }
+        }
+        // Older than the window, a reply is read only so its code is spent.
+        if reply.time.0 < now.0.saturating_sub(WINDOW) {
+            return ignored;
+        }
+        // Only the exact shape acts: six digits, last.
+        let Some((rest, typed)) = text.trim().rsplit_once(char::is_whitespace) else {
+            return ignored;
+        };
+        if typed.len() != 6 || !typed.bytes().all(|b| b.is_ascii_digit()) {
+            return ignored;
+        }
         let claim = match secret.verify(typed, reply.time) {
-            Some(step) => auth.answers.claim(step, &reply.id, self.ports.clock.now()),
+            Some(step) => claims
+                .into_iter()
+                .find_map(|(claimed, claim)| (claimed == step).then_some(claim))
+                .expect("a right code was claimed above"),
             None => {
                 return match auth.answers.fail(&reply.id) {
                     Ok(Failure::LockedNow) => {
                         let text = format!(
                             "Answers from ntfy are off after {FAILURES} wrong codes. \
-                             Turn them back on with `kelpie totp --unlock` on the terminal."
+                             Turn them back on with `kelpie totp --unlock` on the terminal. \
+                             Anyone can post to a topic whose name they know, so think \
+                             about moving to a new one."
                         );
                         let report = StepReport::RepliesLocked { line_failed: None };
                         (report, line(None, text))

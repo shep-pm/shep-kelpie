@@ -88,6 +88,14 @@ impl Secret {
         if file.metadata().map_err(io)?.mode() & 0o077 != 0 {
             return Err(SecretError::Exposed(path.to_owned()));
         }
+        // Someone who can write the folder can put their own secret in it.
+        let folder = path.parent().unwrap_or(Path::new("."));
+        let folder_mode = fs::metadata(folder)
+            .map_err(|e| SecretError::Io(folder.to_owned(), e.kind()))?
+            .mode();
+        if folder_mode & 0o077 != 0 {
+            return Err(SecretError::Exposed(folder.to_owned()));
+        }
         let mut text = String::new();
         file.read_to_string(&mut text).map_err(io)?;
         decode(text.trim())
@@ -105,7 +113,12 @@ impl Secret {
         if let Some(secret) = Self::load(path)? {
             return Ok(secret);
         }
-        Self::write(path)
+        match Self::write(path, false) {
+            // Another `kelpie totp` wrote one first: that one is the secret.
+            Err(SecretError::Io(_, io::ErrorKind::AlreadyExists)) => Self::load(path)?
+                .ok_or_else(|| SecretError::Io(path.to_owned(), io::ErrorKind::NotFound)),
+            written => written,
+        }
     }
 
     /// A fresh secret in place of the one in `path`, for one that may have
@@ -115,12 +128,14 @@ impl Secret {
     ///
     /// [`SecretError`] when the file cannot be written.
     pub fn rotate(path: &Path) -> Result<Self, SecretError> {
-        Self::write(path)
+        Self::write(path, true)
     }
 
-    // Draws a secret and puts it in `path` whole: written beside it, synced,
-    // then renamed over it, so a reader sees the old secret or the new one.
-    fn write(path: &Path) -> Result<Self, SecretError> {
+    // Draws a secret and puts it in `path` whole: written beside it and
+    // synced, then renamed over the old one when `replace`, else linked into
+    // place, which fails when a secret is already there. The folder is synced
+    // after, so a crash cannot bring the old secret back.
+    fn write(path: &Path, replace: bool) -> Result<Self, SecretError> {
         let io = |e: io::Error| SecretError::Io(path.to_owned(), e.kind());
         let mut bytes = [0u8; 20];
         fs::File::open("/dev/urandom")
@@ -136,9 +151,18 @@ impl Secret {
             .mode(0o600)
             .open(&fresh)
             .map_err(io)?;
-        writeln!(file, "{}", encode(&bytes))
+        let placed = writeln!(file, "{}", encode(&bytes))
             .and_then(|()| file.sync_all())
-            .and_then(|()| fs::rename(&fresh, path))
+            .and_then(|()| {
+                if replace {
+                    fs::rename(&fresh, path)
+                } else {
+                    fs::hard_link(&fresh, path)
+                }
+            });
+        let _ = fs::remove_file(&fresh);
+        placed
+            .and_then(|()| fs::File::open(folder)?.sync_all())
             .map_err(io)?;
         Ok(Self(bytes))
     }
@@ -204,6 +228,45 @@ pub fn show(path: &Path, rotate: bool) -> Result<String, SecretError> {
          with its code:\n\n{qr}\n\n{uri}\n\nThe secret is in {}. Keep it private.\n",
         path.display()
     ))
+}
+
+/// Every six digits in a row in `text` that could be a code, however it
+/// was typed: full-width digits read as digits, spaces inside a group of
+/// digits are dropped, and a longer run gives each six in a row
+///
+/// For claiming, never for acting: a right code anywhere in a reply is
+/// spent, so a phone's stray period or a code typed first leaves nothing
+/// for a reader of the topic to reuse.
+pub fn codes_in(text: &str) -> Vec<String> {
+    let mut codes = Vec::new();
+    let mut run = String::new();
+    let mut flush = |run: &mut String| {
+        let digits: Vec<char> = run.chars().collect();
+        for window in digits.windows(6) {
+            codes.push(window.iter().collect());
+        }
+        run.clear();
+    };
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        let digit = match c {
+            '0'..='9' => Some(c),
+            // Full-width digits, which some keyboards type
+            '\u{ff10}'..='\u{ff19}' => char::from_u32(u32::from(c) - 0xff10 + u32::from('0')),
+            _ => None,
+        };
+        match digit {
+            Some(d) => run.push(d),
+            None if c.is_whitespace()
+                && !run.is_empty()
+                && chars.peek().is_some_and(|n| {
+                    n.is_ascii_digit() || ('\u{ff10}'..='\u{ff19}').contains(n)
+                }) => {}
+            None => flush(&mut run),
+        }
+    }
+    flush(&mut run);
+    codes
 }
 
 /// The time step `at` falls in
@@ -335,6 +398,39 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_others_may_use_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("totp/secret");
+        Secret::load_or_create(&path).unwrap();
+        let folder = path.parent().unwrap();
+        for mode in [0o750, 0o705, 0o770, 0o707] {
+            fs::set_permissions(folder, fs::Permissions::from_mode(mode)).unwrap();
+            assert_eq!(
+                Secret::load(&path),
+                Err(SecretError::Exposed(folder.to_owned())),
+                "{mode:o}"
+            );
+        }
+    }
+
+    #[test]
+    fn two_first_runs_at_once_keep_one_secret() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("totp/secret");
+        let first = Secret::write(&path, false).unwrap();
+        // The second lost the race: it keeps the first's secret.
+        let err = Secret::write(&path, false).unwrap_err();
+        assert_eq!(
+            err,
+            SecretError::Io(path.clone(), io::ErrorKind::AlreadyExists)
+        );
+        assert_eq!(Secret::load_or_create(&path).unwrap(), first);
+        let left: Vec<_> = fs::read_dir(path.parent().unwrap()).unwrap().collect();
+        assert_eq!(left.len(), 1, "no stray file beside it");
+    }
+
+    #[test]
     fn a_rotated_secret_replaces_the_old_one_whole() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("totp/secret");
@@ -361,6 +457,21 @@ mod tests {
         );
         let rotated = show(&path, true).unwrap();
         assert!(!rotated.contains(&uri), "a fresh secret");
+    }
+
+    #[test]
+    fn every_way_of_typing_a_code_is_found() {
+        let found = |text: &str| codes_in(text);
+        assert_eq!(found("koji 1 no rename it 123456."), ["123456"]);
+        assert_eq!(found("123456 koji 1 yes"), ["123456"]);
+        assert_eq!(found("koji 1 yes 123 456"), ["123456"]);
+        assert_eq!(found("123456"), ["123456"]);
+        assert_eq!(found("koji 1 yes １２３４５６"), ["123456"]);
+        assert_eq!(found("koji 1 yes 1234567"), ["123456", "234567"]);
+        // The ruling id runs into the code when only a space parts them.
+        assert!(found("koji 14 123456").contains(&"123456".to_owned()));
+        assert_eq!(found("koji 1 yes 12345"), Vec::<String>::new());
+        assert_eq!(found("koji 1 yes"), Vec::<String>::new());
     }
 
     #[test]

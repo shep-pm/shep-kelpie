@@ -59,6 +59,7 @@ impl Answers {
     /// The OS's error when the claim cannot be written or read; the reply
     /// then answers nothing.
     pub fn claim(&self, step: u64, message: &str, now: Timestamp) -> io::Result<Claim> {
+        let message = plain(message)?;
         let used = self.0.join("used");
         private_dir(&used)?;
         let name = used.join(step.to_string());
@@ -87,14 +88,17 @@ impl Answers {
             }
             Err(e) => return Err(e),
         };
-        // A reply is read at most an hour after it is sent.
-        let oldest = step_of(now).saturating_sub(3600 / STEP);
+        // A reply is read at most an hour after it is sent. The step is ntfy's
+        // clock and `now` this machine's, so the older of the two decides: a
+        // clock running ahead never lets go of a claim still in use.
+        let oldest = step.min(step_of(now)).saturating_sub(3600 / STEP);
         for entry in fs::read_dir(&used)?.flatten() {
-            let old = entry
-                .file_name()
-                .to_str()
-                .and_then(|n| n.parse::<u64>().ok());
-            if old.is_some_and(|old| old < oldest) {
+            let name = entry.file_name();
+            let name = name.to_str().unwrap_or_default();
+            // A claim is its step; one a crash left half made, `.<step>.…`.
+            let of = name.strip_prefix('.').unwrap_or(name);
+            let of = of.split('.').next().and_then(|n| n.parse::<u64>().ok());
+            if of.is_some_and(|of| of < oldest) {
                 let _ = fs::remove_file(entry.path());
             }
         }
@@ -108,6 +112,7 @@ impl Answers {
     ///
     /// The OS's error when the count cannot be written.
     pub fn fail(&self, message: &str) -> io::Result<Failure> {
+        let message = plain(message)?;
         let failed = self.0.join("failed");
         private_dir(&failed)?;
         let counted = OpenOptions::new()
@@ -170,6 +175,21 @@ impl Answers {
     }
 }
 
+// A message id goes into a file name, so only letters and digits pass.
+fn plain(message: &str) -> io::Result<&str> {
+    let plain = !message.is_empty()
+        && message.len() <= 64
+        && message.bytes().all(|b| b.is_ascii_alphanumeric());
+    if plain {
+        Ok(message)
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "a message id that is not plain letters and digits",
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,6 +215,43 @@ mod tests {
         assert!(!home.path().join(format!("used/{step}")).exists(), "let go");
         let left: Vec<_> = fs::read_dir(home.path().join("used")).unwrap().collect();
         assert_eq!(left.len(), 1, "no half-written claim left beside them");
+    }
+
+    #[test]
+    fn a_clock_running_ahead_never_lets_go_of_a_claim_in_use() {
+        let home = tempfile::tempdir().unwrap();
+        let answers = Answers::in_folder(home.path().to_owned());
+        let step = step_of(NOW);
+        assert_eq!(answers.claim(step, "m1", NOW).unwrap(), Claim::Ours);
+        let ahead = Timestamp(NOW.0 + 2 * 3600);
+        assert_eq!(answers.claim(step, "m2", ahead).unwrap(), Claim::Replayed);
+        assert_eq!(answers.claim(step - 1, "m3", ahead).unwrap(), Claim::Ours);
+        assert_eq!(answers.claim(step, "m4", ahead).unwrap(), Claim::Replayed);
+    }
+
+    #[test]
+    fn a_half_made_claim_is_let_go_and_odd_ids_are_refused() {
+        let home = tempfile::tempdir().unwrap();
+        let answers = Answers::in_folder(home.path().to_owned());
+        let step = step_of(NOW);
+        answers.claim(step, "m1", NOW).unwrap();
+        let stray = home.path().join(format!("used/.{step}.m9.123"));
+        fs::write(&stray, "m9").unwrap();
+        let later = Timestamp(NOW.0 + 2 * 3600);
+        answers.claim(step_of(later), "m2", later).unwrap();
+        assert!(!stray.exists());
+        for odd in ["", "../x", "a/b", "m.1", &"a".repeat(65)] {
+            let claim = answers.claim(step, odd, NOW);
+            assert_eq!(
+                claim.unwrap_err().kind(),
+                io::ErrorKind::InvalidInput,
+                "{odd:?}"
+            );
+            assert_eq!(
+                answers.fail(odd).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
     }
 
     #[test]
