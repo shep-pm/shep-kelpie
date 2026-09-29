@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::settings::{SkillChoice, SkillName, StepSkills};
+use crate::settings::{SettingsError, SkillChoice, SkillName, StepSkills};
 
 mod vendored;
 
@@ -181,12 +181,22 @@ impl Skills {
         Self { steps, plugins }
     }
 
-    /// `prompt`, started with `step`'s slash command where it has a skill
+    /// `prompt`, started with `step`'s slash command and kelpie's headless
+    /// rules where it has a skill
     pub fn invoke(&self, step: Step, prompt: &str) -> String {
         match self.command(step) {
-            Some(command) => format!("{command} {prompt}"),
+            Some(command) => format!("{command} {}{FORMAT_RULE}\n{prompt}", rules(step)),
             None => prompt.to_owned(),
         }
+    }
+
+    /// The headless rules for the skills a worker runs inside its turn, if
+    /// it has any
+    pub fn worker_rules(&self) -> Option<String> {
+        [Step::Tests, Step::Pr]
+            .into_iter()
+            .any(|step| self.command(step).is_some())
+            .then(|| rules(Step::Tests))
     }
 
     /// `step`'s slash command, such as `/mattpocock:tdd`, if it has a skill
@@ -218,6 +228,72 @@ impl Skills {
             })
         })
     }
+}
+
+/// Refuses a chosen folder inside `folder`, where kelpie writes its own
+/// plugins and would delete it
+///
+/// # Errors
+///
+/// [`SettingsError::Invalid`] naming the step and the folder.
+pub fn check(chosen: &StepSkills, folder: &Path) -> Result<(), SettingsError> {
+    let inside = |path: &Path| {
+        path.starts_with(folder)
+            || matches!(
+                (path.canonicalize(), folder.canonicalize()),
+                (Ok(path), Ok(folder)) if path.starts_with(&folder)
+            )
+    };
+    for step in Step::ALL {
+        let path = match chosen.choice(step) {
+            Some(SkillChoice::Path { path }) => path,
+            Some(SkillChoice::Plugin { plugin, .. }) => plugin,
+            Some(SkillChoice::None {}) | None => continue,
+        };
+        if inside(path) {
+            return Err(SettingsError::Invalid {
+                setting: "skills",
+                reason: format!(
+                    "the {step} step's {} is inside {}, which kelpie rewrites: keep it elsewhere",
+                    path.display(),
+                    folder.display()
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+// A skill is written for someone at the keyboard. Kelpie runs it with nobody
+// there, so these win wherever the skill says otherwise.
+const HEADLESS: &str = "Kelpie runs this skill headless. Where the skill and these rules \
+    disagree, these rules win.\n\
+    - No one is here to answer or confirm. Where the skill says to ask, confirm or wait, \
+    decide yourself and go on.\n\
+    - Spawn no sub-agents, and use no Agent or Task tool.\n";
+
+// Every invoked step replies to kelpie, which reads only its own format.
+const FORMAT_RULE: &str = "- Reply in the format kelpie asks for below. Where the skill \
+    names another format, kelpie's wins.\n";
+
+/// The headless rules for `step`'s skill, one bullet per line
+fn rules(step: Step) -> String {
+    let own = match step {
+        Step::Implement | Step::Tests | Step::Ci | Step::Pr => {
+            "- Record each decision you made in the skill's place in your pull request's \
+             body. One only the maintainer can make still ends your turn in a \
+             `<kelpie-question>` block.\n\
+             - Run no /code-review or other review of your own: kelpie reviews the pull \
+             request once you push.\n"
+        }
+        Step::Review => {
+            "- Run no commands. Review the diff below, and check it with Read, Grep and Glob.\n"
+        }
+        Step::Triage | Step::Planning | Step::Spec | Step::Reset | Step::Retro => {
+            "- Record each decision you made in the skill's place in your reply.\n"
+        }
+    };
+    format!("{HEADLESS}{own}")
 }
 
 /// Splits the slash command that starts `prompt`, if one does, from the rest
@@ -301,6 +377,13 @@ fn in_plugin(plugin: &Path, skill: &SkillName) -> Result<Loaded, String> {
         .as_str()
         .filter(|n| !n.is_empty())
         .ok_or_else(|| format!("{} names no plugin", manifest_path.display()))?;
+    // Two plugins of one name would leave Claude Code to pick which skill runs.
+    if name == PLUGIN || name.starts_with("kelpie-") {
+        return Err(format!(
+            "the plugin in {} is named {name}, which is kelpie's own",
+            plugin.display()
+        ));
+    }
     let listed = manifest["skills"]
         .as_array()
         .into_iter()

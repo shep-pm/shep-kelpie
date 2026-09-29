@@ -94,12 +94,16 @@ fn adopt_starts_at_ci_and_the_first_turn_names_the_file_ahead_of_the_red_run() {
          You did not write its code. {} holds the pull request's title and body, \
          its issue, and the review to fix, if it has one. Your branch is the pull \
          request's as `origin` holds it. The pull request is already open, so do \
-         not open another.\n\n\
-         CI failed on your pull request #80 at {}: test. ",
+         not open another.\n\n",
         file_5(&rig).display(),
+    );
+    let prompt = &seen.call.prompt;
+    assert!(prompt.starts_with(&named), "{prompt}");
+    let red = format!(
+        "\nCI failed on your pull request #80 at {}: test. ",
         &head[..7]
     );
-    assert!(seen.call.prompt.starts_with(&named), "{}", seen.call.prompt);
+    assert!(prompt.contains(&red), "{prompt}");
     rig.assert_worker_reads(&seen, &file_5(&rig));
 
     let fixed = rig.forge.head_of("fix/timeline").unwrap();

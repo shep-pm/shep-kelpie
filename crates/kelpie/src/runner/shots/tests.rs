@@ -380,7 +380,10 @@ fn the_claude_round_gets_the_latest_shots_and_may_open_them() {
     );
     assert_eq!(
         round.settings,
-        json!({ "permissions": { "additionalDirectories": [dir] } })
+        json!({ "permissions": {
+            "deny": ["Agent", "Task", "Bash"],
+            "additionalDirectories": [dir],
+        } })
     );
     assert_eq!(rig.shots.jobs().len(), 1, "one run of one head");
 }

@@ -151,8 +151,9 @@ command = "node ~/.claude/hooks/git-gh-guard.js"
 # lists each step and its default. `path` is a skill folder of your own,
 # `plugin` a skill in a Claude Code plugin's folder, and `none` runs kelpie's
 # own prompt. A skill that cannot load runs kelpie's prompt too, and the log
-# and `status` say why.
+# and `status` say why. Kelpie rewrites `~/.kelpie/projects/<project>/skills/`
+# at every start, so a folder of your own inside it stops the runner.
 # [app.dogs.kelpie.skills]
-# review = { kind = "path", path = "~/.kelpie/projects/shep/skills/review" }
+# review = { kind = "path", path = "~/skills/review" }
 # ci = { kind = "plugin", plugin = "~/plugins/house", skill = "debug" }
 # retro = { kind = "none" }

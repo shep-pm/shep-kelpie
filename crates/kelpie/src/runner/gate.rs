@@ -293,10 +293,11 @@ pub(super) mod tests {
         let [first, fix] = rig.claude.calls().try_into().unwrap();
         assert_eq!(fix.session, Session::Resume(first.session.id().clone()));
         let named = format!(
-            "/mattpocock:diagnosing-bugs CI failed on your pull request #71 at {}: lint, test. ",
+            "\nCI failed on your pull request #71 at {}: lint, test. ",
             &head[..7]
         );
-        assert!(fix.prompt.starts_with(&named), "{}", fix.prompt);
+        assert!(fix.prompt.starts_with("/mattpocock:diagnosing-bugs "));
+        assert!(fix.prompt.contains(&named), "{}", fix.prompt);
 
         let fixed = rig.forge.head_of("kelpie/7").unwrap();
         assert_ne!(fixed, head);

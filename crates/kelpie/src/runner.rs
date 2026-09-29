@@ -210,6 +210,7 @@ impl Runner {
         let totp = replies::authenticator(webhook.as_ref(), &paths.totp)?;
         check_repo(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;
+        crate::skills::check(&settings.skills, &paths.skills)?;
         let skills = Skills::load(&settings.skills, &paths.skills);
         check_coderabbit(&settings, &ports)?;
         check_local(&settings, &ports)?;

@@ -13,10 +13,25 @@ fn choose(rig: &Rig, table: &str) {
     rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.skills]\n{table}"));
 }
 
+// A plugin folder whose manifest names it `name`
+fn plugin_folder(at: &Path, name: &str) {
+    fs::create_dir_all(at.join(".claude-plugin")).unwrap();
+    let manifest = json!({ "name": name }).to_string();
+    fs::write(at.join(".claude-plugin/plugin.json"), manifest).unwrap();
+}
+
 fn skill_folder(at: &Path, text: &str) {
     fs::create_dir_all(at.join("references")).unwrap();
     fs::write(at.join("SKILL.md"), text).unwrap();
     fs::write(at.join("references/more.md"), "more\n").unwrap();
+}
+
+// Asserts `prompt` runs `command` under kelpie's headless rules, then asks `then`
+#[track_caller]
+fn assert_invoked(prompt: &str, command: &str, then: &str) {
+    let rules = format!("{command} Kelpie runs this skill headless. Where the skill");
+    assert!(prompt.starts_with(&rules), "{prompt}");
+    assert!(prompt.contains(&format!("\n{then}")), "{prompt}");
 }
 
 fn call_of(rig: &Rig, role: Role) -> ClaudeCall {
@@ -32,23 +47,22 @@ fn each_step_runs_its_default_skill_from_kelpies_own_copy() {
     let (rig, runner, head) = Rig::with_pull_request("shep");
     let plugin = rig.paths().skills.join("mattpocock");
     let worker = call_of(&rig, Role::Worker);
-    assert!(
-        worker
-            .prompt
-            .starts_with("/mattpocock:implement Your work item is issue #7: "),
-        "{}",
-        worker.prompt
-    );
+    let (implement, first) = ("/mattpocock:implement", "Your work item is issue #7: ");
+    assert_invoked(&worker.prompt, implement, first);
+    assert!(worker.prompt.contains("Run no /code-review"));
     assert_eq!(worker.plugin_dirs, std::slice::from_ref(&plugin));
     let reviewer = call_of(&rig, Role::Reviewer);
-    assert!(
-        reviewer
-            .prompt
-            .starts_with("/mattpocock:code-review You are a founding engineer"),
-        "{}",
-        reviewer.prompt
-    );
+    let review = "/mattpocock:code-review";
+    assert_invoked(&reviewer.prompt, review, "You are a founding engineer");
+    assert!(reviewer.prompt.contains("- Run no commands."));
+    assert!(reviewer.prompt.contains("kelpie's wins"));
     assert_eq!(reviewer.plugin_dirs, std::slice::from_ref(&plugin));
+    let seen = rig.claude.all_seen();
+    let reviewed = seen.iter().find(|s| s.call.role == Role::Reviewer).unwrap();
+    assert_eq!(
+        reviewed.settings["permissions"]["deny"],
+        json!(["Agent", "Task", "Bash"])
+    );
     for step in Step::ALL {
         let skill = plugin.join("skills").join(step.default_skill());
         assert!(skill.join("SKILL.md").is_file(), "{step}");
@@ -60,12 +74,11 @@ fn each_step_runs_its_default_skill_from_kelpies_own_copy() {
     rig.claude.script([Scripted::Push("fix.txt", "fixed\n")]);
     step(&runner).unwrap();
     let fix = rig.claude.calls().pop().unwrap();
-    assert!(
-        fix.prompt
-            .starts_with("/mattpocock:diagnosing-bugs CI failed on your pull request #71"),
-        "{}",
-        fix.prompt
+    let (ci, red) = (
+        "/mattpocock:diagnosing-bugs",
+        "CI failed on your pull request #71",
     );
+    assert_invoked(&fix.prompt, ci, red);
 
     let status = rig.ask(&runner, "status", None);
     assert_eq!(
@@ -89,13 +102,8 @@ fn a_projects_skill_folder_replaces_the_default() {
         );
     });
     let worker = call_of(&rig, Role::Worker);
-    assert!(
-        worker
-            .prompt
-            .starts_with("/kelpie-implement:build-it Your work item is issue #7: "),
-        "{}",
-        worker.prompt
-    );
+    let first = "Your work item is issue #7: ";
+    assert_invoked(&worker.prompt, "/kelpie-implement:build-it", first);
     let own = rig.paths().skills.join("implement");
     assert!(
         worker.plugin_dirs.contains(&own),
@@ -121,12 +129,7 @@ fn a_projects_skill_folder_replaces_the_default() {
 fn a_skill_in_a_projects_plugin_replaces_the_default() {
     let (rig, _runner, _) = Rig::with_pull_request_set("shep", |rig| {
         let plugin = rig.home.path().join("house-plugin");
-        fs::create_dir_all(plugin.join(".claude-plugin")).unwrap();
-        fs::write(
-            plugin.join(".claude-plugin/plugin.json"),
-            r#"{"name": "house"}"#,
-        )
-        .unwrap();
+        plugin_folder(&plugin, "house");
         skill_folder(&plugin.join("skills/review-hard"), "Review hard.\n");
         choose(
             rig,
@@ -137,13 +140,8 @@ fn a_skill_in_a_projects_plugin_replaces_the_default() {
         );
     });
     let reviewer = call_of(&rig, Role::Reviewer);
-    assert!(
-        reviewer
-            .prompt
-            .starts_with("/house:review-hard You are a founding engineer"),
-        "{}",
-        reviewer.prompt
-    );
+    let review = "You are a founding engineer";
+    assert_invoked(&reviewer.prompt, "/house:review-hard", review);
     let plugin = rig.home.path().join("house-plugin");
     assert!(
         reviewer.plugin_dirs.contains(&plugin),
@@ -157,12 +155,7 @@ fn a_skill_that_cannot_load_falls_back_to_kelpies_prompt_and_says_why() {
     let rig = Rig::new("shep");
     let gone = rig.home.path().join("gone");
     let plugin = rig.home.path().join("empty-plugin");
-    fs::create_dir_all(plugin.join(".claude-plugin")).unwrap();
-    fs::write(
-        plugin.join(".claude-plugin/plugin.json"),
-        r#"{"name": "e"}"#,
-    )
-    .unwrap();
+    plugin_folder(&plugin, "e");
     choose(
         &rig,
         &format!(
@@ -241,4 +234,74 @@ fn a_misspelt_step_or_skill_name_stops_the_runner() {
     );
     let err = rig.open().unwrap_err().to_string();
     assert!(err.contains("must be a skill's name"), "{err}");
+}
+
+#[test]
+fn a_changed_skill_takes_effect_without_a_restart() {
+    let rig = Rig::new("shep");
+    let runner = rig.open().unwrap();
+    choose(&rig, "review = { kind = \"none\" }\n");
+    let line = runner
+        .lock()
+        .unwrap()
+        .reread(rig.settings(), rig.kelpie_settings())
+        .unwrap();
+    assert_eq!(
+        line.as_deref(),
+        Some("settings changed: skills now in effect")
+    );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["skills"][5]["skill"], json!(null));
+    assert_eq!(status["skills"][3]["skill"], "/mattpocock:implement");
+}
+
+#[test]
+fn a_folder_of_the_projects_inside_kelpies_own_stops_the_runner() {
+    let rig = Rig::new("shep");
+    let mine = rig.paths().skills.join("review");
+    skill_folder(&mine, "Review.\n");
+    choose(
+        &rig,
+        "review = { kind = \"path\", path = \"skills/review\" }\n",
+    );
+    let err = rig.open().unwrap_err().to_string();
+    assert!(
+        err.starts_with("setting `skills`: the review step's "),
+        "{err}"
+    );
+    assert!(mine.join("SKILL.md").is_file(), "the folder is left alone");
+
+    let rig = Rig::new("shep");
+    let runner = rig.open().unwrap();
+    choose(
+        &rig,
+        "ci = { kind = \"plugin\", plugin = \"skills/mattpocock\", skill = \"x\" }\n",
+    );
+    let refused = runner
+        .lock()
+        .unwrap()
+        .reread(rig.settings(), rig.kelpie_settings());
+    assert!(refused.is_err(), "{refused:?}");
+}
+
+#[test]
+fn a_projects_plugin_may_not_take_kelpies_own_names() {
+    for name in ["mattpocock", "kelpie-review"] {
+        let rig = Rig::new("shep");
+        let plugin = rig.home.path().join("theirs");
+        plugin_folder(&plugin, name);
+        skill_folder(&plugin.join("skills/code-review"), "Review.\n");
+        choose(
+            &rig,
+            &format!(
+                "review = {{ kind = \"plugin\", plugin = \"{}\", skill = \"code-review\" }}\n",
+                plugin.display()
+            ),
+        );
+        let runner = rig.open().unwrap();
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["skills"][5]["skill"], json!(null), "{name}");
+        let fallback = status["skills"][5]["fallback"].as_str().unwrap();
+        assert!(fallback.ends_with(&format!("is named {name}, which is kelpie's own")));
+    }
 }

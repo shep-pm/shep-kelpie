@@ -50,6 +50,7 @@ impl Runner {
         if settings.review.local != self.settings.review.local {
             check_local(&settings, &self.ports)?;
         }
+        crate::skills::check(&settings.skills, &self.paths.skills)?;
         let skills = (settings.skills != self.settings.skills)
             .then(|| Skills::load(&settings.skills, &self.paths.skills));
         self.settings = settings;

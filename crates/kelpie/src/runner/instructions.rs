@@ -54,6 +54,10 @@ pub(super) fn compose(extra: Option<&str>, worktree: &Path, skills: &Skills) -> 
         text.push('\n');
         text.push_str(&lines.concat());
     }
+    if let Some(rules) = skills.worker_rules() {
+        text.push('\n');
+        text.push_str(&rules);
+    }
     if let Some(extra) = extra.filter(|e| !e.trim().is_empty()) {
         text.push_str("\n# This project's instructions\n\n");
         text.push_str(extra);
@@ -157,12 +161,18 @@ mod tests {
         let runner = rig.open().unwrap();
         let text = first_instructions(&rig, &runner);
         let lines = text.strip_prefix(INSTRUCTIONS).expect(&text);
+        let (named, rules) = lines.split_once("\n\n").expect(lines);
         assert_eq!(
-            lines,
+            named,
             "\nWrite your tests the way the `/mattpocock:tdd` skill says.\n\
              Write your pull request's body with the `/mattpocock:pr` skill, and still end \
-             it with `Resolves #<issue>`.\n"
+             it with `Resolves #<issue>`."
         );
+        assert!(
+            rules.starts_with("Kelpie runs this skill headless."),
+            "{rules}"
+        );
+        assert!(rules.contains("Run no /code-review"), "{rules}");
     }
 
     #[test]

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Vendors the mattpocock/skills that kelpie's steps run, at one pinned commit,
 # into crates/kelpie/skills/. Run it from the repo's root with the commit to
-# pin, then update SKILLS in crates/kelpie/src/skills/vendored.rs to match and
+# pin, then update FILES in crates/kelpie/src/skills/vendored.rs to match and
 # run the tests. `blobs.txt` is `git ls-tree` at the pin, so the vendored
 # copies can be checked against it without the network.
 set -eu

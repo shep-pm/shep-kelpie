@@ -67,18 +67,22 @@ impl StepSkills {
 
     // Every folder the choices name, which expand `~/` and are taken from
     // the settings file's folder.
+    // Destructured without `..`, so a new step fails to compile until it is here.
     pub(super) fn paths_mut(&mut self) -> impl Iterator<Item = &mut PathBuf> {
+        let Self {
+            triage,
+            planning,
+            spec,
+            implement,
+            tests,
+            review,
+            ci,
+            pr,
+            reset,
+            retro,
+        } = self;
         [
-            &mut self.triage,
-            &mut self.planning,
-            &mut self.spec,
-            &mut self.implement,
-            &mut self.tests,
-            &mut self.review,
-            &mut self.ci,
-            &mut self.pr,
-            &mut self.reset,
-            &mut self.retro,
+            triage, planning, spec, implement, tests, review, ci, pr, reset, retro,
         ]
         .into_iter()
         .filter_map(|choice| match choice {
