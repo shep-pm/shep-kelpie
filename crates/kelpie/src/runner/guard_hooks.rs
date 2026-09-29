@@ -40,7 +40,9 @@ fn unresolved(command: &str, home: &Path, path: Option<&OsStr>) -> Option<String
         .split_whitespace()
         .map(|w| w.trim_matches(['\'', '"']))
         .skip_while(|w| w.contains('=') && !w.starts_with(['/', '~', '$']));
-    let program = words.next()?;
+    let Some(program) = words.next() else {
+        return Some("its program".to_owned());
+    };
     let found = match expand(program, home) {
         Some(file) => file.is_file(),
         None if program.contains('/') => false,
@@ -92,6 +94,7 @@ mod tests {
             ("kelpie-no-such-guard --strict", "kelpie-no-such-guard"),
             ("/nowhere/guard", "/nowhere/guard"),
             ("~/.claude/hooks/gone.sh", "~/.claude/hooks/gone.sh"),
+            ("GUARD_MODE=strict", "its program"),
         ] {
             let rig = Rig::new("koji");
             let err = open_with_hook(&rig, command).unwrap_err();
