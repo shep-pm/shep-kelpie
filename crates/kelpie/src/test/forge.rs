@@ -53,6 +53,9 @@ pub(crate) struct FakeForge {
     saved_at_comment: Arc<Mutex<Vec<serde_json::Value>>>,
     default_branch: Arc<Mutex<String>>,
     repo_labels: Arc<Mutex<Vec<String>>>,
+    pushes: Arc<AtomicBool>,
+    bot_seen: Arc<AtomicBool>,
+    viewer_down: Arc<Mutex<Option<ForgeError>>>,
     /// Pull requests' labels, and what CodeRabbit posts
     pub(crate) coderabbit: FakeCodeRabbit,
 }
@@ -107,6 +110,9 @@ impl FakeForge {
             saved_at_comment: Arc::default(),
             default_branch: Arc::new(Mutex::new("main".to_owned())),
             repo_labels: Arc::default(),
+            pushes: Arc::new(AtomicBool::new(true)),
+            bot_seen: Arc::new(AtomicBool::new(true)),
+            viewer_down: Arc::default(),
             coderabbit: FakeCodeRabbit::default(),
         }
     }
@@ -128,6 +134,21 @@ impl FakeForge {
 
     pub(crate) fn set_visibility(&self, visibility: Visibility) {
         *self.visibility.lock().unwrap() = visibility;
+    }
+
+    /// Whether the account may push to the repo, which it may until a test says not
+    pub(crate) fn set_can_push(&self, pushes: bool) {
+        self.pushes.store(pushes, Ordering::SeqCst);
+    }
+
+    /// Whether a review bot has ever commented on the repo, which it has until a test says not
+    pub(crate) fn set_review_bot_seen(&self, seen: bool) {
+        self.bot_seen.store(seen, Ordering::SeqCst);
+    }
+
+    /// Makes asking who the account is fail with `error`, as `gh` does when it is logged out
+    pub(crate) fn set_viewer_down(&self, error: ForgeError) {
+        *self.viewer_down.lock().unwrap() = Some(error);
     }
 
     pub(crate) fn set_default_branch(&self, branch: &str) {
@@ -413,6 +434,14 @@ impl Forge for FakeForge {
         Ok(())
     }
 
+    fn can_push(&self, _repo: &ForgeSlug) -> Result<bool, ForgeError> {
+        Ok(self.pushes.load(Ordering::SeqCst))
+    }
+
+    fn review_bot_seen(&self, _repo: &ForgeSlug, _login: Login<'_>) -> Result<bool, ForgeError> {
+        Ok(self.bot_seen.load(Ordering::SeqCst))
+    }
+
     fn issue(&self, _repo: &ForgeSlug, number: u64) -> Result<Issue, ForgeError> {
         if self.missing.lock().unwrap().contains(&number) {
             return Err(ForgeError::Failed(format!("no issue #{number}")));
@@ -498,7 +527,10 @@ impl Forge for FakeForge {
 
     fn viewer(&self) -> Result<String, ForgeError> {
         self.viewer_reads.fetch_add(1, Ordering::SeqCst);
-        Ok(VIEWER.to_owned())
+        match &*self.viewer_down.lock().unwrap() {
+            Some(error) => Err(error.clone()),
+            None => Ok(VIEWER.to_owned()),
+        }
     }
 
     fn comment(&self, _repo: &ForgeSlug, number: u64, body: &str) -> Result<(), ForgeError> {

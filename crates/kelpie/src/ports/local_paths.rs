@@ -70,6 +70,14 @@ impl Forge for Guarded {
         self.forge.create_label(repo, label)
     }
 
+    fn can_push(&self, repo: &ForgeSlug) -> Result<bool, ForgeError> {
+        self.forge.can_push(repo)
+    }
+
+    fn review_bot_seen(&self, repo: &ForgeSlug, login: Login<'_>) -> Result<bool, ForgeError> {
+        self.forge.review_bot_seen(repo, login)
+    }
+
     fn issue(&self, repo: &ForgeSlug, number: u64) -> Result<Issue, ForgeError> {
         self.forge.issue(repo, number)
     }

@@ -8,6 +8,9 @@
 //! `status`: a checkout's project in the maintainer's own flock, run as
 //! `shep kelpie <command>` in the checkout.
 //!
+//! `kelpie doctor [<project>] [--test-alert]`: checks what the projects need
+//! on this machine, and changes nothing. Run as `shep kelpie doctor`.
+//!
 //! `kelpie confine <folder>...`: the hook that holds a worker's file tools
 //! to its folders. Claude Code runs it; it is not for the maintainer.
 //!
@@ -61,6 +64,7 @@ fn main() -> ExitCode {
         [command, rest @ ..] if ["add", "start", "pause", "status"].contains(&command.as_str()) => {
             kelpie::flock::main(command, rest)
         }
+        [command, rest @ ..] if command == "doctor" => kelpie::doctor::main(rest),
         [role, domains @ ..] if role == "browse-guard" => {
             hook(kelpie::browse::judge(std::io::stdin().lock(), domains))
         }
@@ -114,7 +118,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: kelpie add [<project>]\n       kelpie start [<project>]\n       kelpie pause [<project>]\n       kelpie status\n       kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie browse-guard <domain>...\n       kelpie settings move <project> [<sheep>]\n       kelpie tools install\n       kelpie totp [--rotate | --unlock]\n       kelpie shots-mcp <tools> <job>\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>\n       kelpie relay-gate <kelpie>",
+                "usage: kelpie add [<project>]\n       kelpie start [<project>]\n       kelpie pause [<project>]\n       kelpie status\n       kelpie doctor [<project>] [--test-alert]\n       kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie browse-guard <domain>...\n       kelpie settings move <project> [<sheep>]\n       kelpie tools install\n       kelpie totp [--rotate | --unlock]\n       kelpie shots-mcp <tools> <job>\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>\n       kelpie relay-gate <kelpie>",
                 kelpie::lease::cli::USAGE
             );
             ExitCode::from(2)

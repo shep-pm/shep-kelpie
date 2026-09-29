@@ -1,5 +1,6 @@
 //! GitHub, through the `gh` command line
 
+mod access;
 mod board;
 mod review;
 pub(crate) mod review_bot;
@@ -67,6 +68,14 @@ impl Forge for Gh {
             label.description,
         ])
         .map(drop)
+    }
+
+    fn can_push(&self, repo: &ForgeSlug) -> Result<bool, ForgeError> {
+        access::can_push(repo)
+    }
+
+    fn review_bot_seen(&self, repo: &ForgeSlug, login: Login<'_>) -> Result<bool, ForgeError> {
+        access::review_bot_seen(repo, login)
     }
 
     fn issue(&self, repo: &ForgeSlug, number: u64) -> Result<Issue, ForgeError> {

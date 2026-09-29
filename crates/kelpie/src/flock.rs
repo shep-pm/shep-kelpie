@@ -241,7 +241,9 @@ async fn flock(client: &Client) -> Result<Vec<ProcessInfo>, String> {
 }
 
 /// Every sheep's `[app.dogs.kelpie]` table, by sheep
-async fn tables(client: &Client) -> Result<BTreeMap<String, Map<String, Value>>, String> {
+pub(crate) async fn tables(
+    client: &Client,
+) -> Result<BTreeMap<String, Map<String, Value>>, String> {
     match client
         .request(Request::DogSheepSettings { dog: DOG.into() })
         .await
