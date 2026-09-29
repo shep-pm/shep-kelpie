@@ -22,6 +22,7 @@ pub mod preview;
 pub mod profile;
 pub mod relay;
 pub mod runner;
+pub mod schema;
 pub mod settings;
 pub mod sheep;
 pub mod shep_home;

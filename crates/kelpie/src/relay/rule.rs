@@ -325,7 +325,10 @@ mod tests {
         let manifest = include_str!("../../../../Cargo.toml");
         for krate in ["shep-client", "shep-channel"] {
             let pin = format!("{krate} = {{ version = \"={SHEP_VERSION}\"");
-            assert!(manifest.contains(&pin), "{krate} is not pinned to {SHEP_VERSION}");
+            assert!(
+                manifest.contains(&pin),
+                "{krate} is not pinned to {SHEP_VERSION}"
+            );
         }
     }
 

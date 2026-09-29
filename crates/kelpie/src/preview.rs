@@ -22,7 +22,7 @@ pub const LAUNCH_FILE: &str = ".claude/launch.json";
 pub const LOCAL_HOSTS: [&str; 2] = ["localhost", "127.0.0.1"];
 
 /// The `[preview]` table of a project's settings. Every key is optional.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Preview {
     /// The launch configuration kelpie starts, by name. The file's first
@@ -56,7 +56,17 @@ fn default_routes() -> Vec<Route> {
 
 /// A path on the dev server, starting with `/`
 // wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(try_from = "String", into = "String")]
 pub struct Route(String);
 

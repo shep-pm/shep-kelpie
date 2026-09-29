@@ -1,3 +1,5 @@
+//! `kelpie --schema` and `--version`: shep's probes, answered for lookout
+//!
 //! `kelpie runner <project>`: a project's runner, run as a sheep
 //! `kelpie dog`: the kelpie dog, run as a sheep
 //! `kelpie lease ...`: the maintainer's lease commands
@@ -35,6 +37,7 @@ use kelpie::shep_home;
 const REFUSE: u8 = 2;
 
 fn main() -> ExitCode {
+    kelpie::schema::probe();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.as_slice() {
         [role, project] if role == "runner" => kelpie::sheep::run(project),

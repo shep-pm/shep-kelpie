@@ -8,12 +8,15 @@
 use std::fmt;
 use std::path::Path;
 
+use schemars::JsonSchema;
 use serde::Deserialize;
+use shep_client::dogs::dog_config;
 
 use crate::settings::SettingsError;
 
 /// What every project shares
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[dog_config]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KelpieSettings {
     /// Where every ruling is posted, so the maintainer hears of it away
@@ -22,17 +25,19 @@ pub struct KelpieSettings {
 }
 
 /// The maintainer's webhook
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[dog_config]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Webhook {
     /// What kind of service it is, which decides the post's shape
     pub kind: WebhookKind,
     /// Where to post
+    #[shep(secret)]
     pub url: WebhookUrl,
 }
 
 /// A service kelpie can post an alert to
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum WebhookKind {
     /// A Discord channel's webhook, which takes JSON
@@ -44,7 +49,7 @@ pub enum WebhookKind {
 /// A webhook's URL: a credential, since anyone holding it can post
 ///
 /// `Debug` does not leak the URL, and nothing else prints it.
-#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(try_from = "String")]
 pub struct WebhookUrl(String);
 

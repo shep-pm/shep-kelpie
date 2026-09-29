@@ -13,9 +13,12 @@ publish = false
 [workspace.dependencies]
 # Zone-aware dates, for the reset times `/usage` prints in the maintainer's zone
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-zoneinfo"] }
+# The settings' JSON Schema, in the version shep-client builds it with
+schemars = { version = "1.2.2", default-features = false, features = ["derive", "std"] }
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
-shep-client = { version = "=0.11.0", default-features = false }
+# `schema` answers shep's `--schema` probe, which lookout edits kelpie's settings from
+shep-client = { version = "=0.11.0", default-features = false, features = ["schema"] }
 shep-channel = { version = "=0.11.0", default-features = false, features = ["client"] }
 tokio = { version = "1", default-features = false, features = ["macros", "process", "rt", "signal", "sync", "time"] }
 toml = { version = "0.9", default-features = false, features = ["std", "parse", "serde"] }

@@ -15,12 +15,15 @@ use std::io;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use shep_client::dogs::dog_config;
 
 use crate::preview::Preview;
 
 /// Everything kelpie reads about one project
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[dog_config]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
     /// The project's own checkout. A leading `~/` is the home folder.
@@ -56,7 +59,7 @@ pub struct Settings {
 ///
 /// `auto` replaces only the merge ruling: every other ruling still asks.
 /// `ask-surface` is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum MergeAuthority {
     /// Kelpie asks for a ruling before every merge
@@ -66,7 +69,7 @@ pub enum MergeAuthority {
 }
 
 /// The model and effort for each role that calls Claude
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Models {
     /// The worker's sessions
@@ -80,7 +83,7 @@ pub struct Models {
 }
 
 /// One role's model and effort
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RoleModel {
     /// A model id or alias, passed to `claude --model` as written
@@ -91,7 +94,7 @@ pub struct RoleModel {
 
 /// A Claude effort level
 // wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Effort {
     /// `low`
@@ -127,7 +130,7 @@ impl Effort {
 }
 
 /// The qwen-review loop's settings
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Review {
     /// Rounds after which the worker is parked for a ruling
@@ -135,7 +138,7 @@ pub struct Review {
 }
 
 /// The CodeRabbit gate's settings
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CodeRabbit {
     /// Whether pull requests go through CodeRabbit rounds at all
@@ -148,7 +151,7 @@ pub struct CodeRabbit {
 }
 
 /// Usage pacing settings
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Pacing {
     /// Whether the daily allowance and the 5-hour window hold anything
@@ -166,7 +169,7 @@ fn default_pacing_enabled() -> bool {
 }
 
 /// What every worker is started with
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Worker {
     /// Domains the worker's sandbox may reach besides GitHub, such as a
@@ -198,7 +201,7 @@ fn default_turn_timeout() -> NonZeroU32 {
 }
 
 /// One of the maintainer's guard hooks, run by path
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GuardHook {
     /// The Claude Code hook event it runs on
@@ -210,7 +213,7 @@ pub struct GuardHook {
 }
 
 /// A Claude Code hook event a guard can run on
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 pub enum HookEvent {
     /// Before a tool call, which the hook can refuse
     PreToolUse,
@@ -219,7 +222,7 @@ pub enum HookEvent {
 }
 
 /// An environment variable's name: capitals, digits and `_`, not starting with a digit
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, JsonSchema)]
 #[serde(try_from = "String")]
 pub struct EnvName(String);
 
@@ -247,7 +250,7 @@ impl TryFrom<String> for EnvName {
 }
 
 /// A folder inside the build folder: relative, with no `..`
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(try_from = "String")]
 pub struct BuildDir(PathBuf);
 
@@ -275,7 +278,7 @@ impl TryFrom<String> for BuildDir {
 }
 
 /// A string with something other than whitespace in it
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(try_from = "String")]
 pub struct NonBlank(String);
 
@@ -299,7 +302,7 @@ impl TryFrom<String> for NonBlank {
 }
 
 /// A forge repo as `owner/name`
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(try_from = "String")]
 pub struct ForgeSlug(String);
 
@@ -328,9 +331,9 @@ impl TryFrom<String> for ForgeSlug {
 }
 
 /// Hours in a working day, from 1 to 24
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(try_from = "i64")]
-pub struct KickoffHours(u8);
+pub struct KickoffHours(#[schemars(range(min = 1, max = 24))] u8);
 
 impl KickoffHours {
     /// The number of hours
@@ -417,7 +420,7 @@ impl Settings {
         Ok(settings)
     }
 
-    fn parse(text: &str, home: &Path) -> Result<Self, String> {
+    pub(crate) fn parse(text: &str, home: &Path) -> Result<Self, String> {
         let mut settings: Self = toml::from_str(text).map_err(|e| e.to_string())?;
         if let Ok(rest) = settings.repo.strip_prefix("~") {
             settings.repo = home.join(rest);
