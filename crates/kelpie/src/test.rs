@@ -570,6 +570,7 @@ impl Rig {
     pub(crate) fn new(project: &str) -> Self {
         let home = tempfile::tempdir().unwrap();
         let meter = FakeMeter::idle();
+        let clock = FakeClock::at(Self::EPOCH);
         let rig = Self {
             project: ProjectName::try_from(project).unwrap(),
             claude: FakeClaude {
@@ -580,10 +581,10 @@ impl Rig {
             meter,
             reviewer: FakeReviewer::default(),
             relay: Arc::new(FakeRelay::default()),
-            alerts: FakeAlerts::default(),
+            alerts: FakeAlerts::on(clock.clone()),
             leases: FakeLeases::default(),
             shots: FakeShots::default(),
-            clock: FakeClock::at(Self::EPOCH),
+            clock,
             home,
         };
         rig.make_repo();
@@ -604,7 +605,32 @@ impl Rig {
             Self::WEBHOOK_URL
         );
         std::fs::write(&paths.kelpie_settings, kelpie).unwrap();
+        std::fs::create_dir_all(&paths.totp).unwrap();
+        std::fs::write(
+            paths.totp.join("secret"),
+            format!("{}\n", Self::TOTP_SECRET),
+        )
+        .unwrap();
         rig
+    }
+
+    /// The rig's authenticator secret: RFC 6238's SHA-1 key, in base32
+    pub(crate) const TOTP_SECRET: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+
+    /// The maintainer's authenticator code at `at`
+    pub(crate) fn code_at(&self, at: Timestamp) -> String {
+        let secret = crate::totp::Secret::load(&self.paths().totp.join("secret"));
+        let secret = secret.unwrap().expect("the rig writes a secret");
+        format!("{:06}", secret.code(crate::totp::step_of(at)))
+    }
+
+    /// Writes `text` ending with the code of the moment to the topic, as the
+    /// maintainer's phone would, and returns the code
+    pub(crate) fn reply(&self, text: &str) -> String {
+        let now = self.clock.now();
+        let code = self.code_at(now);
+        self.alerts.reply(&format!("{text} {code}"), now);
+        code
     }
 
     /// The webhook the rig's kelpie settings name

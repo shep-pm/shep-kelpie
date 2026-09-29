@@ -1,81 +1,25 @@
 //! What an ntfy post carries beyond its text, and reading the topic back
 //!
-//! A ruling's alert ends with the replies that answer it, each carrying the
-//! ruling's one-time code, and a yes-or-no ruling's alert carries buttons
-//! that post those replies to the topic. Everything kelpie posts is tagged
+//! A ruling's alert ends with the replies that answer it, each ending with
+//! the maintainer's authenticator code. Everything kelpie posts is tagged
 //! `kelpie`, so reading the topic back skips it.
 
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use crate::ports::{Reply, ReplyWith, Since, Takes};
+use crate::ports::{Reply, ReplyWith, Since, Takes, Timestamp};
 
 /// The tag on everything kelpie posts, which a read skips
 pub(super) const TAG: &str = "kelpie";
 
-/// The note a Send back button's no carries, since a button cannot ask for one
-pub(super) const SEND_BACK_NOTE: &str =
-    "Sent back from ntfy with no note. Ask the maintainer what to change.";
-
-/// The line that ends a ruling's alert: the replies that answer it, and
-/// whether it has buttons
-pub(super) fn reply_line(reply: &ReplyWith, buttons: bool) -> String {
-    let (id, code) = (reply.id, reply.code.expose());
-    let tap = if buttons {
-        "Tap a button, or reply"
-    } else {
-        "Reply"
+/// The line that ends a ruling's alert: the replies that answer it
+pub(super) fn reply_line(reply: &ReplyWith) -> String {
+    let id = reply.id;
+    let replies = match reply.takes {
+        Takes::Answer => format!("`{id} answer <text> <code>`"),
+        Takes::YesOrNo => format!("`{id} yes <code>` or `{id} no <note> <code>`"),
     };
-    match reply.takes {
-        Takes::Answer => format!("\n\nReply here with `{id} answer <text> {code}`."),
-        Takes::YesOrNo { .. } => {
-            format!("\n\n{tap} here with `{id} yes {code}` or `{id} no <note> {code}`.")
-        }
-    }
-}
-
-/// The `Actions` header's JSON for a ruling's buttons, or `None` for a
-/// ruling that takes a typed answer, or a topic whose URL carries a query
-///
-/// Each button posts to the topic itself at the lowest priority, so the
-/// reply does not buzz the phone again, and clears the alert. Leave posts
-/// a line tagged as kelpie's, which a read skips. A button's URL is on the
-/// message for every reader, so a URL with a query, such as an `auth`
-/// token that can publish, gets no buttons: a reader who may only read
-/// would otherwise be handed that token.
-pub(super) fn actions(url: &str, reply: &ReplyWith) -> Option<String> {
-    let Takes::YesOrNo { yes } = reply.takes else {
-        return None;
-    };
-    if url.contains('?') {
-        return None;
-    }
-    let (id, code) = (reply.id, reply.code.expose());
-    let button = |label: &str, body: String, tags: Option<&str>| {
-        let mut headers = json!({ "X-Priority": "1" });
-        if let Some(tags) = tags {
-            headers["X-Tags"] = Value::from(tags);
-        }
-        json!({
-            "action": "http",
-            "label": label,
-            "url": url,
-            "method": "POST",
-            "headers": headers,
-            "body": body,
-            "clear": true,
-        })
-    };
-    let buttons = json!([
-        button(yes, format!("{id} yes {code}"), None),
-        button(
-            "Send back",
-            format!("{id} no {SEND_BACK_NOTE} {code}"),
-            None
-        ),
-        button("Leave", format!("Ruling {id} left for later."), Some(TAG)),
-    ]);
-    Some(buttons.to_string())
+    format!("\n\nReply here with {replies}, where <code> is kelpie's authenticator code.")
 }
 
 /// The URL that reads the topic's cached messages since `since` and closes
@@ -102,6 +46,7 @@ pub(super) fn poll_url(url: &str, since: &Since) -> String {
 #[derive(Deserialize)]
 struct Line {
     id: String,
+    time: u64,
     event: String,
     #[serde(default)]
     message: Option<String>,
@@ -126,7 +71,11 @@ pub(super) fn parse(output: &str) -> Option<Vec<Reply>> {
         }
         let ours = line.tags.iter().any(|t| t == TAG);
         let text = line.message.filter(|_| !ours && line.attachment.is_none());
-        replies.push(Reply { id: line.id, text });
+        replies.push(Reply {
+            id: line.id,
+            time: Timestamp(line.time),
+            text,
+        });
     }
     Some(replies)
 }
@@ -134,17 +83,8 @@ pub(super) fn parse(output: &str) -> Option<Vec<Reply>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::{OneTimeCode, Timestamp};
 
     const POLL: &str = include_str!("../../fixtures/ntfy-poll.jsonl");
-
-    fn reply(takes: Takes) -> ReplyWith {
-        ReplyWith {
-            id: 3,
-            code: OneTimeCode::draw().unwrap(),
-            takes,
-        }
-    }
 
     #[test]
     fn a_recorded_poll_reads_as_replies_skipping_kelpies_own_and_files() {
@@ -162,6 +102,7 @@ mod tests {
             ]
         );
         assert_eq!(replies[0].id, "W3EqiUm5rsNq");
+        assert_eq!(replies[0].time, Timestamp(1_790_683_787));
         assert_eq!(replies[5].id, "dvMOjwjVgxy8");
     }
 
@@ -169,13 +110,14 @@ mod tests {
     fn a_poll_that_is_not_ntfys_is_refused_and_odd_ids_are_skipped() {
         assert_eq!(parse("<html>rate limited</html>"), None);
         assert_eq!(parse(""), Some(vec![]));
-        let odd = r#"{"id":"a&since=all","event":"message","message":"1 yes x"}
-{"id":"k1","event":"keepalive"}
-{"id":"ok1","event":"message","message":"1 yes x"}"#;
+        let odd = r#"{"id":"a&since=all","time":1,"event":"message","message":"1 yes x"}
+{"id":"k1","time":1,"event":"keepalive"}
+{"id":"ok1","time":2,"event":"message","message":"1 yes x"}"#;
         assert_eq!(
             parse(odd),
             Some(vec![Reply {
                 id: "ok1".into(),
+                time: Timestamp(2),
                 text: Some("1 yes x".into())
             }])
         );
@@ -198,61 +140,20 @@ mod tests {
     }
 
     #[test]
-    fn every_reply_and_button_carries_the_rulings_code() {
-        let yes_or_no = reply(Takes::YesOrNo { yes: "Merge" });
-        let code = yes_or_no.code.expose().to_owned();
-        let line = reply_line(&yes_or_no, true);
-        assert!(line.starts_with("\n\nTap a button, or reply"), "{line}");
-        assert!(line.contains(&format!("`3 yes {code}`")), "{line}");
-        assert!(line.contains(&format!("`3 no <note> {code}`")), "{line}");
-
-        let url = "https://ntfy.sh/topic";
-        let buttons: Value = serde_json::from_str(&actions(url, &yes_or_no).unwrap()).unwrap();
-        let shown: Vec<_> = buttons
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|b| (b["label"].as_str().unwrap(), b["body"].as_str().unwrap()))
-            .collect();
-        let send_back = format!("3 no {SEND_BACK_NOTE} {code}");
+    fn the_reply_line_names_what_the_ruling_takes() {
+        let yes_or_no = ReplyWith {
+            id: 3,
+            takes: Takes::YesOrNo,
+        };
         assert_eq!(
-            shown,
-            [
-                ("Merge", format!("3 yes {code}").as_str()),
-                ("Send back", send_back.as_str()),
-                ("Leave", "Ruling 3 left for later."),
-            ]
+            reply_line(&yes_or_no),
+            "\n\nReply here with `3 yes <code>` or `3 no <note> <code>`, \
+             where <code> is kelpie's authenticator code."
         );
-        for button in buttons.as_array().unwrap() {
-            assert_eq!(button["url"], url);
-            assert_eq!(button["method"], "POST");
-            assert_eq!(button["clear"], true);
-            assert_eq!(button["headers"]["X-Priority"], "1");
-        }
-        assert_eq!(buttons[2]["headers"]["X-Tags"], TAG);
-        assert!(buttons[0]["headers"].get("X-Tags").is_none());
-
-        let question = reply(Takes::Answer);
-        let code = question.code.expose().to_owned();
-        assert_eq!(actions(url, &question), None);
-        assert_eq!(
-            reply_line(&question, false),
-            format!("\n\nReply here with `3 answer <text> {code}`.")
-        );
-    }
-
-    // Every reader sees a button's URL, and may hold only a token that reads.
-    #[test]
-    fn a_topic_url_carrying_a_token_gets_no_buttons() {
-        let yes_or_no = reply(Takes::YesOrNo { yes: "Merge" });
-        assert_eq!(
-            actions("https://ntfy.example/topic?auth=abc", &yes_or_no),
-            None
-        );
-        let code = yes_or_no.code.expose().to_owned();
-        assert_eq!(
-            reply_line(&yes_or_no, false),
-            format!("\n\nReply here with `3 yes {code}` or `3 no <note> {code}`.")
-        );
+        let question = ReplyWith {
+            id: 3,
+            takes: Takes::Answer,
+        };
+        assert!(reply_line(&question).contains("`3 answer <text> <code>`"));
     }
 }

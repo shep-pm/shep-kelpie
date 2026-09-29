@@ -18,7 +18,6 @@ use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::coderabbit::Activity;
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
-pub use crate::one_time_code::OneTimeCode;
 use crate::settings::{Effort, ForgeSlug};
 use crate::shots::{ShotsJob, ShotsRun};
 use crate::webhook::Webhook;
@@ -518,33 +517,28 @@ pub struct Alert {
     pub reply: Option<ReplyWith>,
 }
 
-/// What a reply to a ruling's alert must carry, and what it takes
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The ruling a reply on the webhook's topic answers, and what it takes
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReplyWith {
     /// The ruling
     pub id: u64,
-    /// Its one-time code, without which a reply is ignored
-    pub code: OneTimeCode,
     /// What answers it
     pub takes: Takes,
 }
 
-/// What answers a ruling, and so which buttons its alert shows
+/// What answers a ruling
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Takes {
-    /// The worker's question: a typed answer, so no buttons
+    /// The worker's question: an answer
     Answer,
-    /// A yes, whose button says `yes`, or a no with a note
-    YesOrNo {
-        /// The yes button's label: `Merge` on a merge ruling, else `Yes`
-        yes: &'static str,
-    },
+    /// A yes, or a no with a note
+    YesOrNo,
 }
 
 /// Where a read of the webhook's replies starts
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Since {
-    /// Every message from this time on, for the first read
+    /// Every message from this time on
     Time(Timestamp),
     /// Every message after the one with this id
     After(String),
@@ -555,6 +549,8 @@ pub enum Since {
 pub struct Reply {
     /// The webhook's id for it, which the next read starts after
     pub id: String,
+    /// When the webhook took it, which the sender cannot set
+    pub time: Timestamp,
     /// Its text, or `None` for kelpie's own posts and anything but plain text
     pub text: Option<String>,
 }

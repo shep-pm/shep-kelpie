@@ -285,13 +285,13 @@ pub enum StepReport {
         /// When the post is tried again at the earliest
         retry_at: Timestamp,
     },
-    /// A reply on the webhook's topic, carrying a ruling's code, answered it
+    /// A reply on the webhook's topic, carrying the authenticator code, answered it
     ReplyAnswered {
         /// The ruling's id
         id: u64,
     },
-    /// A reply carrying a ruling's code was refused by `rule`, and the
-    /// topic was told why
+    /// A reply carrying the authenticator code was refused, by `rule` or
+    /// because its code could not be recorded, and the topic was told why
     ReplyRefused {
         /// The ruling's id
         id: u64,
@@ -300,15 +300,23 @@ pub enum StepReport {
         /// Why the line for the topic could not be posted, if it could not
         line_failed: Option<String>,
     },
-    /// A reply carried the code of a ruling already settled: it ran nothing,
-    /// and the topic was told so
+    /// A reply with the authenticator code named a ruling already settled:
+    /// it ran nothing, and the topic was told so
     ReplyToSettled {
         /// The ruling's id
         id: u64,
         /// Why the line for the topic could not be posted, if it could not
         line_failed: Option<String>,
     },
-    /// A message on the webhook's topic carried no ruling's code, and was
+    /// A reply carried a right code that already answered a reply: it ran
+    /// nothing, and the topic was told so
+    ReplyCodeUsed {
+        /// The ruling's id
+        id: u64,
+        /// Why the line for the topic could not be posted, if it could not
+        line_failed: Option<String>,
+    },
+    /// A message on the webhook's topic carried no right code, and was
     /// ignored. Its text is not logged, since anyone holding the topic can
     /// write it.
     ReplyIgnored,

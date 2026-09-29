@@ -13,6 +13,11 @@ publish = false
 [workspace.dependencies]
 # Zone-aware dates, for the reset times `/usage` prints in the maintainer's zone
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-zoneinfo"] }
+# The authenticator codes that answer a ruling from ntfy (RFC 6238 TOTP)
+hmac = { version = "0.13", default-features = false }
+sha1 = { version = "0.11", default-features = false }
+# The terminal QR code `kelpie totp` prints for an authenticator app to scan
+qrcode = { version = "0.14", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 shep-client = { version = "=0.10.1", default-features = false }

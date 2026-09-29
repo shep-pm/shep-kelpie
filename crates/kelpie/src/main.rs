@@ -8,6 +8,9 @@
 //! `kelpie tools install`: installs the tools kelpie shows a work item's UI
 //! with, under kelpie's home.
 //!
+//! `kelpie totp`: prints the authenticator secret that answers a ruling from
+//! ntfy, as a URI and a QR code to scan, drawing it the first time.
+//!
 //! `kelpie shots-mcp <tools> <job>`: a worker's shots tool, an MCP server
 //! Claude Code starts from the worker's MCP config.
 //!
@@ -51,6 +54,7 @@ fn main() -> ExitCode {
             hook(gate::judge(std::io::stdin().lock(), kelpie_path))
         }
         [command, sub] if command == "tools" && sub == "install" => install_tools(),
+        [command] if command == "totp" => totp(),
         [role, tools, job] if role == "shots-mcp" => {
             let shots = ShotsCli::new(Tools::at(PathBuf::from(tools)));
             stop_on_signal(shots.clone());
@@ -71,7 +75,7 @@ fn main() -> ExitCode {
         }),
         _ => {
             eprintln!(
-                "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie browse-guard <domain>...\n       kelpie tools install\n       kelpie shots-mcp <tools> <job>\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>\n       kelpie relay-gate <kelpie>",
+                "usage: kelpie runner <project>\n       kelpie dog\n{}\n       kelpie confine <folder>...\n       kelpie browse-guard <domain>...\n       kelpie tools install\n       kelpie totp\n       kelpie shots-mcp <tools> <job>\n       kelpie relay-yes <project> <id>\n       kelpie relay-answer <project> <params>\n       kelpie relay-gate <kelpie>",
                 kelpie::lease::cli::USAGE
             );
             ExitCode::from(2)
@@ -113,11 +117,31 @@ fn stop_on_signal(shots: ShotsCli) {
 }
 
 // Kelpie's home is `KELPIE_HOME`, or `~/.kelpie`, as the runner reads it.
-fn install_tools() -> ExitCode {
-    let home = std::env::var_os("KELPIE_HOME")
+fn kelpie_home() -> Option<PathBuf> {
+    std::env::var_os("KELPIE_HOME")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".kelpie")));
-    let Some(home) = home else {
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".kelpie")))
+}
+
+fn totp() -> ExitCode {
+    let Some(home) = kelpie_home() else {
+        eprintln!("HOME is not set");
+        return ExitCode::FAILURE;
+    };
+    match kelpie::totp::show(&home.join("totp/secret")) {
+        Ok(text) => {
+            print!("{text}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn install_tools() -> ExitCode {
+    let Some(home) = kelpie_home() else {
         eprintln!("HOME is not set");
         return ExitCode::FAILURE;
     };

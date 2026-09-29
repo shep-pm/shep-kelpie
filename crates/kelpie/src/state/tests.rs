@@ -170,13 +170,10 @@ fn the_file_format_is_pinned() {
         week_used_pct: 10,
     });
     state.replies = Replies {
-        after: Some("W3EqiUm5rsNq".into()),
-        codes: vec![Code {
-            ruling: 1,
-            code: serde_json::from_value(serde_json::json!("7hq2mx9d")).unwrap(),
-            drawn: Timestamp(5),
-            settled: None,
-        }],
+        last: Some(LastRead {
+            id: "W3EqiUm5rsNq".into(),
+            time: Timestamp(5),
+        }),
     };
     store.save(&state).unwrap();
     let text = fs::read_to_string(dir.path().join("state.json")).unwrap();
@@ -233,10 +230,7 @@ fn the_file_format_is_pinned() {
             "leases": [{ "resource": "coderabbit", "since": 8 }],
             "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
             "notices": [{ "issue": 22, "pull_request": 30, "head": "c0ffee" }],
-            "replies": {
-                "after": "W3EqiUm5rsNq",
-                "codes": [{ "ruling": 1, "code": "7hq2mx9d", "drawn": 5, "settled": null }],
-            },
+            "replies": { "last": { "id": "W3EqiUm5rsNq", "time": 5 } },
         })
     );
 }

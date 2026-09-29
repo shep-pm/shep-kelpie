@@ -12,12 +12,10 @@
 # keys are required. The URL is a credential: anyone holding it can post, or
 # read an ntfy topic. Keep this file private.
 #
-# On ntfy a ruling is answered in the topic too: tap a button on its alert,
-# or reply with the line the alert ends on, which carries the ruling's
-# one-time code. Anyone who can read the topic can read the code, so keep
-# the topic's name unguessable, or protect it with an `?auth=` token in `url`.
-# A `url` with a token gets no buttons, since every reader would see it:
-# answer those rulings by typed reply.
+# On ntfy a ruling is answered in the topic too: reply with the line the
+# alert ends on, with the code from your authenticator app last. Run
+# `kelpie totp` once to get the secret to scan. A reader of the topic can read
+# rulings but not answer them.
 [webhook]
 kind = "ntfy"
 url = "https://ntfy.sh/your-private-topic"

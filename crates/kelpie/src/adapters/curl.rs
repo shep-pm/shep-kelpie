@@ -111,16 +111,14 @@ fn config(webhook: &Webhook, alert: &Alert) -> String {
             )
         }
         WebhookKind::Ntfy => {
-            let mut headers = vec![
+            let headers = vec![
                 format!("Title: {}", alert.title),
                 format!("Tags: {}", ntfy::TAG),
             ];
             let mut text = alert.text.clone();
             if let Some(reply) = &alert.reply {
-                let actions = ntfy::actions(webhook.url.expose(), reply);
                 // The reply line goes last, where a cut keeps it.
-                text.push_str(&ntfy::reply_line(reply, actions.is_some()));
-                headers.extend(actions.map(|a| format!("Actions: {a}")));
+                text.push_str(&ntfy::reply_line(reply));
             }
             (headers, fit(&text, NTFY_MAX))
         }
@@ -191,7 +189,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::ports::{Clock, OneTimeCode, ReplyWith, Takes, Timestamp};
+    use crate::ports::{Clock, ReplyWith, Takes, Timestamp};
     use crate::webhook::WebhookUrl;
 
     fn webhook(kind: WebhookKind, url: &str) -> Webhook {
@@ -316,46 +314,49 @@ mod tests {
         );
         assert_eq!(got.body, text);
         assert!(got.headers.contains(&"Tags: kelpie".to_owned()), "{got:?}");
-        assert!(
-            !got.headers.iter().any(|h| h.starts_with("Actions:")),
-            "{got:?}"
-        );
     }
 
     #[test]
-    fn an_ntfy_ruling_ends_with_its_reply_and_carries_its_buttons() {
+    fn an_ntfy_ruling_ends_with_its_reply() {
         let (url, served) = stand_in(200);
-        let reply = ReplyWith {
-            id: 3,
-            code: OneTimeCode::draw().unwrap(),
-            takes: Takes::YesOrNo { yes: "Merge" },
-        };
-        let code = reply.code.expose().to_owned();
         let alert = Alert {
-            reply: Some(reply),
+            reply: Some(ReplyWith {
+                id: 3,
+                takes: Takes::YesOrNo,
+            }),
             ..alert("Merge pull request #71?")
         };
         Curl.post(&webhook(WebhookKind::Ntfy, &url), &alert)
             .unwrap();
         let got = served.join().unwrap();
+        assert_eq!(
+            got.body,
+            "Merge pull request #71?\n\nReply here with `3 yes <code>` or \
+             `3 no <note> <code>`, where <code> is kelpie's authenticator code."
+        );
+    }
+
+    #[test]
+    fn a_long_ntfy_ruling_is_cut_but_keeps_its_reply() {
+        let (url, served) = stand_in(200);
+        let alert = Alert {
+            reply: Some(ReplyWith {
+                id: 3,
+                takes: Takes::YesOrNo,
+            }),
+            ..alert(&"a".repeat(6000))
+        };
+        Curl.post(&webhook(WebhookKind::Ntfy, &url), &alert)
+            .unwrap();
+        let got = served.join().unwrap();
+        assert!(got.body.len() <= NTFY_MAX, "{}", got.body.len());
+        assert!(got.body.contains("[…cut; the whole question is in status]"));
         assert!(
             got.body
-                .starts_with("Merge pull request #71?\n\nTap a button"),
-            "{got:?}"
+                .ends_with("where <code> is kelpie's authenticator code."),
+            "{}",
+            &got.body[got.body.len() - 200..]
         );
-        assert!(
-            got.body.ends_with(&format!("`3 no <note> {code}`.")),
-            "{got:?}"
-        );
-        let actions = got
-            .headers
-            .iter()
-            .find_map(|h| h.strip_prefix("Actions: "))
-            .expect("the buttons");
-        let actions: serde_json::Value = serde_json::from_str(actions).unwrap();
-        assert_eq!(actions[0]["label"], "Merge");
-        assert_eq!(actions[0]["body"], format!("3 yes {code}"));
-        assert_eq!(actions[0]["url"], url.as_str());
     }
 
     #[test]
@@ -375,46 +376,44 @@ mod tests {
         assert_eq!(replies[1].text.as_deref(), Some("3 yes 7hq2mx9d"));
     }
 
-    // What a tap on an alert's button does, measured end to end on a real
-    // topic: the alert goes up with its buttons, the button's post lands on
-    // the topic, and a read gives back that post and skips the alert.
+    // A typed reply measured end to end on a real topic: the alert goes up
+    // with its reply line, the reply lands with ntfy's own time, and a read
+    // gives back that reply and skips the alert.
     #[test]
     #[ignore = "posts to a scratch ntfy topic: KELPIE_NTFY_SCRATCH=https://ntfy.sh/<topic>"]
-    fn a_buttons_reply_on_a_real_topic_reads_back() {
+    fn a_reply_on_a_real_topic_reads_back() {
         let url = std::env::var("KELPIE_NTFY_SCRATCH").expect("KELPIE_NTFY_SCRATCH");
         let webhook = webhook(WebhookKind::Ntfy, &url);
-        let reply = ReplyWith {
-            id: 3,
-            code: OneTimeCode::draw().unwrap(),
-            takes: Takes::YesOrNo { yes: "Merge" },
-        };
-        let since = Since::Time(crate::adapters::SystemClock.now());
+        let now = crate::adapters::SystemClock.now();
         let alert = Alert {
-            reply: Some(reply.clone()),
+            reply: Some(ReplyWith {
+                id: 3,
+                takes: Takes::YesOrNo,
+            }),
             ..alert("Merge pull request #71 at 4d2c9e1 into main?")
         };
         Curl.post(&webhook, &alert).unwrap();
-        let actions = ntfy::actions(&url, &reply).unwrap();
-        let actions: serde_json::Value = serde_json::from_str(&actions).unwrap();
-        // The Merge button's own request, as the app sends it
-        let merge = &actions[0];
+        // What the phone's app sends for a typed reply
         let status = Command::new("curl")
-            .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "-X", "POST"])
-            .args(["-H", "X-Priority: 1", "--data-raw"])
-            .arg(merge["body"].as_str().unwrap())
-            .arg(merge["url"].as_str().unwrap())
+            .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "--data-raw"])
+            .arg("3 yes 123456")
+            .arg(&url)
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&status.stdout), "200");
         // ntfy.sh writes its cache in batches, so a read at once can miss a post.
         thread::sleep(Duration::from_secs(3));
-        let replies = Curl.replies(&webhook, &since).unwrap();
+        let replies = Curl.replies(&webhook, &Since::Time(now)).unwrap();
         let texts: Vec<_> = replies.iter().map(|r| r.text.clone()).collect();
-        let code = reply.code.expose();
-        assert_eq!(texts, [None, Some(format!("3 yes {code}"))]);
+        assert_eq!(texts, [None, Some("3 yes 123456".to_owned())]);
+        assert!(
+            replies[1].time.0.abs_diff(now.0) < 60,
+            "{:?}",
+            replies[1].time
+        );
         let after = Since::After(replies[0].id.clone());
-        let [tap] = Curl.replies(&webhook, &after).unwrap().try_into().unwrap();
-        assert_eq!(tap.id, replies[1].id);
+        let [typed] = Curl.replies(&webhook, &after).unwrap().try_into().unwrap();
+        assert_eq!(typed.id, replies[1].id);
     }
 
     #[test]

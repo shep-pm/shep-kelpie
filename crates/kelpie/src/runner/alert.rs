@@ -123,10 +123,7 @@ pub(super) fn post_due(
     relay: &dyn Relay,
     alerts: &dyn Alerts,
 ) -> Option<Result<StepReport, StateError>> {
-    let due = match lock(runner).alert_due()? {
-        Ok(due) => due,
-        Err(e) => return Some(Err(e)),
-    };
+    let due = lock(runner).alert_due()?;
     let mut relayed = due.relay_held;
     let mut relay_failed = None;
     if let Some(message) = &due.relay {
@@ -190,9 +187,8 @@ impl Runner {
 
     /// The oldest ruling not yet posted, or else the oldest notice, unless
     /// its last failure says wait. A ruling sent to the relay is held as the
-    /// one being relayed until [`Self::alert_sent`]. A ruling's one-time
-    /// code, on a webhook that takes replies, is saved before it is posted.
-    pub(super) fn alert_due(&mut self) -> Option<Result<Due, StateError>> {
+    /// one being relayed until [`Self::alert_sent`].
+    pub(super) fn alert_due(&mut self) -> Option<Due> {
         let now = self.ports.clock.now();
         let waiting = |retry: Option<Retry>, of| retry.is_some_and(|r| r.of == of && now < r.at);
         if let Some(ruling) = self.state.rulings.iter().find(|r| !r.alerted) {
@@ -200,10 +196,8 @@ impl Runner {
             if waiting(self.retry, Posting::Ruling(id)) {
                 return None;
             }
-            return Some(
-                self.reply_with(id, &kind)
-                    .map(|reply| self.ruling_due(id, reply)),
-            );
+            let reply = self.reply_with(id, &kind);
+            return Some(self.ruling_due(id, reply));
         }
         let project = self.project.as_str();
         let notice = self.state.notices.first()?;
@@ -211,14 +205,12 @@ impl Runner {
             issue: notice.issue,
             pull_request: notice.pull_request,
         };
-        (!waiting(self.retry, of)).then(|| {
-            Ok(Due {
-                of,
-                relay: None,
-                relay_held: false,
-                webhook: self.webhook.clone(),
-                alert: notice_alert(project, notice),
-            })
+        (!waiting(self.retry, of)).then(|| Due {
+            of,
+            relay: None,
+            relay_held: false,
+            webhook: self.webhook.clone(),
+            alert: notice_alert(project, notice),
         })
     }
 
@@ -338,6 +330,8 @@ impl Runner {
                 if let Some(ruling) = next.rulings.iter_mut().find(|r| r.id == id) {
                     ruling.alerted = true;
                 }
+                // A reply may come even if the ruling is settled first.
+                self.read_replies_from(self.ports.clock.now());
                 StepReport::Alerted { id }
             }
             Posting::Notice {
@@ -527,7 +521,7 @@ mod tests {
     #[test]
     fn a_ruling_answered_while_its_post_is_out_is_not_posted_again() {
         let (rig, runner, _) = Rig::parked("reactmap");
-        let due = runner.lock().unwrap().alert_due().unwrap().unwrap();
+        let due = runner.lock().unwrap().alert_due().unwrap();
         rig.ask(&runner, "rule", Some("1 no not yet"));
         let report = runner
             .lock()
@@ -625,7 +619,7 @@ mod tests {
     fn a_ruling_answered_while_its_relay_send_is_out_is_told_once_the_relay_took_it() {
         let (rig, runner, _) = Rig::parked("shep");
         rig.relay.set_up(true);
-        let due = runner.lock().unwrap().alert_due().unwrap().unwrap();
+        let due = runner.lock().unwrap().alert_due().unwrap();
         rig.ask(&runner, "rule", Some("1 yes"));
         runner
             .lock()
@@ -643,7 +637,7 @@ mod tests {
     fn a_ruling_answered_while_a_failed_relay_send_is_out_tells_it_nothing() {
         let (rig, runner, _) = Rig::parked("koji");
         rig.relay.set_up(true);
-        let due = runner.lock().unwrap().alert_due().unwrap().unwrap();
+        let due = runner.lock().unwrap().alert_due().unwrap();
         rig.ask(&runner, "rule", Some("1 no not yet"));
         runner
             .lock()
@@ -689,7 +683,7 @@ mod tests {
         rig.alerts.set_down(true);
         step(&runner).unwrap();
         rig.clock.advance(60);
-        let due = runner.lock().unwrap().alert_due().unwrap().unwrap();
+        let due = runner.lock().unwrap().alert_due().unwrap();
         rig.ask(&runner, "rule", Some("1 yes"));
         let failed = Err(AlertError::Refused(503));
         runner

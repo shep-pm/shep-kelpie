@@ -16,6 +16,7 @@ use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Ports, SessionId, Timestamp, Visibility};
 use crate::settings::{Settings, SettingsError};
 use crate::state::{ProjectState, RunState, StateError, StateStore};
+use crate::totp::{Secret, Used};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{
     CodeRabbitTally, Known, Phase, QwenTally, ReviewCallState, Turn, WorkItem, new_session_id,
@@ -158,6 +159,10 @@ pub struct Runner {
     relaying: Option<u64>,
     // Reading the webhook's topic for replies, kept in memory only
     reading: replies::Reading,
+    // The authenticator secret a reply's code is checked against, read when
+    // the runner starts, and the codes already used. None where replies are
+    // not read: a webhook other than ntfy, or no secret yet.
+    totp: Option<(Secret, Used)>,
     // The account kelpie acts as, read once a run when a rework first needs it
     viewer: Option<String>,
 }
@@ -181,6 +186,7 @@ impl Runner {
     ) -> Result<Self, OpenError> {
         let settings = Settings::load(&paths.settings, home)?;
         let (channels, webhook) = ruling_channels(&settings, &paths.kelpie_settings)?;
+        let totp = replies::authenticator(webhook.as_ref(), &paths.totp)?;
         check_repo(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;
         check_coderabbit(&settings, &ports)?;
@@ -227,6 +233,7 @@ impl Runner {
             relay_notices: Vec::new(),
             relaying: None,
             reading: replies::Reading::default(),
+            totp,
             viewer: None,
         })
     }
