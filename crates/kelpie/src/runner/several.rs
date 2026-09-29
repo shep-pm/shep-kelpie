@@ -374,5 +374,6 @@ fn an_adoption_for_an_issue_in_flight_waits_for_it_to_end() {
         status["adopted"],
         json!([{ "pull_request": 90, "by_label": false }])
     );
+    assert_eq!(status["skipped"], json!([]), "waiting is not failing");
     assert_eq!(open_items(&rig, &runner), [7]);
 }
