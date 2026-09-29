@@ -8,7 +8,6 @@
 //! no quota, and its refusal was never seen, so one reads as any comment
 //! of its since the summon that says a limit was reached.
 
-use crate::lease::LeaseKind;
 use crate::ports::{Finding, Severity, Timestamp};
 use crate::review_bot::{Activity, Bot, CLOCK_SLACK, Login, Profile, Reading, Thread, one_line};
 
@@ -36,10 +35,6 @@ impl Profile for Cubic {
 
     fn login(&self) -> Login<'_> {
         LOGIN
-    }
-
-    fn lease(&self) -> LeaseKind {
-        Bot::Cubic.lease()
     }
 
     fn label(&self) -> Option<&str> {
@@ -285,6 +280,10 @@ mod tests {
         ));
         assert_eq!((p1.severity, p1.line), (Severity::High, 0));
         assert_eq!(p1.what, "It drops the error.");
+        assert_eq!(
+            Cubic.finding(&thread("P0: It leaks.")).severity,
+            Severity::High
+        );
         let bare = Cubic.finding(&thread("It drops the error."));
         assert_eq!(bare.severity, Severity::Medium);
         assert_eq!(
@@ -307,6 +306,7 @@ mod tests {
             Reading::Refused { opens: None }
         );
         assert!(Cubic.heard(&refusal, "c0ffee", Timestamp(100)));
+        assert!(refused("The reviewed-line limit was exceeded."));
         let warning = Activity {
             comments: vec![Comment {
                 body: "You're at about 91% of the monthly reviewed-line limit.".into(),

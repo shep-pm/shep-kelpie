@@ -144,7 +144,7 @@ impl Window {
         }
     }
 
-    /// Forgets summons older than an hour before `now`
+    /// Forgets summons older than the span before `now`
     pub fn prune(&mut self, now: Timestamp) {
         self.summons.retain(|at| at.0 + self.span > now.0);
     }

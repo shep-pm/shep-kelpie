@@ -364,7 +364,12 @@ impl Runner {
             .map(|b| self.profile(b))
             .collect();
         let mut rounds = 0u32;
-        for bot in bots.iter().filter(|_| self.settings.coderabbit.enabled) {
+        let counted = if self.settings.coderabbit.enabled {
+            &bots[..]
+        } else {
+            &[]
+        };
+        for bot in counted {
             let activity = self
                 .ports
                 .forge

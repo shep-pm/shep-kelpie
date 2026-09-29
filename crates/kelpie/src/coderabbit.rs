@@ -7,7 +7,6 @@
 //! never from that range. A third: a summon CodeRabbit finds nothing new in
 //! is marked done on the head's commit status, and posts nothing at all.
 
-use crate::lease::LeaseKind;
 use crate::ports::{Finding, Severity, Timestamp};
 pub use crate::review_bot::{Activity, Comment, Reading, Review, Status, Thread};
 use crate::review_bot::{Bot, CLOCK_SLACK, Login, Profile, one_line};
@@ -35,10 +34,6 @@ impl Profile for CodeRabbit {
 
     fn login(&self) -> Login<'_> {
         LOGIN
-    }
-
-    fn lease(&self) -> LeaseKind {
-        LeaseKind::coderabbit()
     }
 
     fn label(&self) -> Option<&str> {

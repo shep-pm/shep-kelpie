@@ -32,7 +32,7 @@ pub enum Bot {
 }
 
 impl Bot {
-    /// Its name as settings write it, which is also its lease's
+    /// Its name as settings write it, which also names its lease
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Coderabbit => "coderabbit",
@@ -235,7 +235,9 @@ pub trait Profile: Send + Sync + fmt::Debug {
     fn login(&self) -> Login<'_>;
 
     /// The lease on the rate window each summon spends
-    fn lease(&self) -> LeaseKind;
+    fn lease(&self) -> LeaseKind {
+        self.bot().lease()
+    }
 
     /// The label whose adding summons it, if one does
     fn label(&self) -> Option<&str>;

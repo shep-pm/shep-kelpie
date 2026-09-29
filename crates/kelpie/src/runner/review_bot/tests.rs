@@ -15,9 +15,10 @@ const HOLDS: &str = r#"{"holds": true, "severity": "medium", "reason": "real"}"#
 const LABEL: &str = "stand-in please";
 const LOGIN: &str = "stand-in[bot]";
 
-// A bot unlike CodeRabbit in every part its profile names: its own login,
-// label and lease, no full review, a refusal that names its opening, a
-// "done" status, and its severity in brackets.
+// A bot unlike CodeRabbit in every part its profile names, though it takes
+// CodeRabbit's place in the list: its own login, label and lease, no full
+// review, a refusal that names its opening, a "done" status, and its
+// severity in brackets.
 #[derive(Debug)]
 struct StandIn;
 

@@ -82,7 +82,7 @@ pub struct WorkItem {
     /// Whether a review round or judge call is in flight
     #[serde(default)]
     pub review_call: ReviewCallState,
-    /// Its CodeRabbit rounds so far
+    /// Its pull request reviewer rounds so far, from every bot
     #[serde(default)]
     pub coderabbit: CodeRabbitTally,
     /// The pull request's labels, ready state and head, as kelpie and its
@@ -128,7 +128,7 @@ pub struct Conflict {
     pub turns: u32,
 }
 
-/// A work item's CodeRabbit rounds so far
+/// A work item's pull request reviewer rounds so far, from every bot
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -137,12 +137,12 @@ pub struct CodeRabbitTally {
     pub rounds: u32,
     /// Whether the maintainer let the rounds past their cap
     pub cap_cleared: bool,
-    /// Whether CodeRabbit is satisfied with the code as it stands. A
+    /// Whether the reviewers are satisfied with the code as it stands. A
     /// worker's turn changes the code, so it clears this.
     pub satisfied: bool,
 }
 
-/// Where one CodeRabbit round stands
+/// Where one review bot round stands
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "stage", rename_all = "kebab-case", deny_unknown_fields)]
@@ -154,7 +154,7 @@ pub enum CodeRabbitStage {
         /// When kelpie marked the draft ready, until the forge reads it so
         #[serde(default, skip_serializing_if = "Option::is_none")]
         readied: Option<Timestamp>,
-        /// Whether the summon asks for a full review whatever CodeRabbit read
+        /// Whether the summon asks for a full review whatever the bot read
         /// before, because the last one was answered with nothing new
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         full: bool,
@@ -172,7 +172,7 @@ pub enum CodeRabbitStage {
         /// Whether it asked for a full review
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         full: bool,
-        /// Whether CodeRabbit gave no sign of it and it went out once more
+        /// Whether the bot gave no sign of it and it went out once more
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         resent: bool,
     },

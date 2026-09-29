@@ -399,8 +399,8 @@ fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
             "{bot} has run {rounds} rounds here, its cap, \
              and {held} of its findings still hold."
         ),
-        RulingKind::CodeRabbitSilent { bot, head } => {
-            format!("{} never reviewed {}.", bot.name(), short(head))
+        RulingKind::CodeRabbitSilent { bot: silent, head } => {
+            format!("{} never reviewed {}.", silent.name(), short(head))
         }
         RulingKind::Question { asked, .. } => asked.clone(),
         RulingKind::TurnTimeout { .. } => {
