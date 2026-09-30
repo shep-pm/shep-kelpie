@@ -1,14 +1,18 @@
 //! The rig's lease book: grants what is asked at once, unless a test holds
-//! the grants back, and keeps every ask, return of a held lease and window
-//! fact in order
+//! the grants back or hands it a real book, and keeps every ask, return of
+//! a held lease and window fact in order
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::lease::LeaseKind;
+use super::FakeClock;
+use crate::lease::book::LeaseBook;
 use crate::lease::wire::WindowFact;
-use crate::ports::Leases;
+use crate::lease::{Epoch, Holder, LeaseKind};
+use crate::ports::{Leases, Timestamp};
+use crate::review_bot::Reviewers;
+use crate::runner::ProjectName;
 
 /// What the runner told the dog
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +30,8 @@ pub(crate) struct FakeLeases {
     told: Arc<Mutex<Vec<Told>>>,
     held: Arc<Mutex<BTreeSet<LeaseKind>>>,
     withheld: Arc<AtomicBool>,
+    closed: Arc<Mutex<BTreeSet<LeaseKind>>>,
+    book: Arc<Mutex<Option<(LeaseBook, Holder)>>>,
 }
 
 impl FakeLeases {
@@ -40,6 +46,30 @@ impl FakeLeases {
         self.withheld.store(withheld, Ordering::SeqCst);
     }
 
+    /// Holds back grants of `kind` alone, as a dog whose window for it is
+    /// closed does, or lets its next ask through
+    pub(crate) fn close(&self, kind: &LeaseKind, closed: bool) {
+        let mut all = self.closed.lock().unwrap();
+        if closed {
+            all.insert(kind.clone());
+        } else {
+            all.remove(kind);
+        }
+    }
+
+    /// Answers from a real lease book on `clock` from now on, as the runner
+    /// of `project`, in a dog whose section defines `reviewers`. Each ask
+    /// ticks the book, as the dog's own tick would between steps.
+    pub(crate) fn use_book(&self, clock: FakeClock, project: &str, reviewers: Reviewers) {
+        let mut book = LeaseBook::new(Box::new(clock));
+        book.set_reviewers(reviewers);
+        let me = Holder::Runner {
+            project: ProjectName::try_from(project).unwrap(),
+            epoch: Epoch(1),
+        };
+        *self.book.lock().unwrap() = Some((book, me));
+    }
+
     /// Grants `kind` between steps, as the dog's `grant` trigger does
     pub(crate) fn grant(&self, kind: &LeaseKind) {
         self.held.lock().unwrap().insert(kind.clone());
@@ -47,6 +77,9 @@ impl FakeLeases {
 
     /// Whether the runner holds `kind` now
     pub(crate) fn held(&self, kind: &LeaseKind) -> bool {
+        if let Some((book, me)) = self.book.lock().unwrap().as_ref() {
+            return book.holder(kind) == Some(me);
+        }
         self.held.lock().unwrap().contains(kind)
     }
 }
@@ -54,7 +87,13 @@ impl FakeLeases {
 impl Leases for FakeLeases {
     fn want(&self, kind: &LeaseKind) {
         self.told.lock().unwrap().push(Told::Want(kind.clone()));
-        if !self.withheld.load(Ordering::SeqCst) {
+        if let Some((book, me)) = self.book.lock().unwrap().as_mut() {
+            book.ask(kind, me.clone());
+            book.tick();
+            return;
+        }
+        let closed = self.closed.lock().unwrap().contains(kind);
+        if !self.withheld.load(Ordering::SeqCst) && !closed {
             self.held.lock().unwrap().insert(kind.clone());
         }
     }
@@ -64,12 +103,28 @@ impl Leases for FakeLeases {
     }
 
     fn give_back(&self, kind: &LeaseKind) {
-        if self.held.lock().unwrap().remove(kind) {
+        let returned = match self.book.lock().unwrap().as_mut() {
+            Some((book, me)) => {
+                let held = book.holder(kind) == Some(&*me);
+                book.give_back(kind, me);
+                held
+            }
+            None => self.held.lock().unwrap().remove(kind),
+        };
+        if returned {
             self.told.lock().unwrap().push(Told::Return(kind.clone()));
         }
     }
 
-    fn window(&self, _kind: &LeaseKind, fact: WindowFact, value: u64) {
+    fn window(&self, kind: &LeaseKind, fact: WindowFact, value: u64) {
+        if let Some((book, _)) = self.book.lock().unwrap().as_mut() {
+            let at = Timestamp(value);
+            let _ = match fact {
+                WindowFact::Summoned => book.summoned(kind, at),
+                WindowFact::Opens => book.refused(kind, at),
+                WindowFact::Quota(per_hour) => book.quota(kind, per_hour, at),
+            };
+        }
         let told = Told::Window(fact, value);
         let mut all = self.told.lock().unwrap();
         // The runner raises a fact again each look; the dog reads it once.

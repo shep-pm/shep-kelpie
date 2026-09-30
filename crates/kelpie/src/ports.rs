@@ -856,8 +856,8 @@ pub struct Ports {
     pub meter: Box<dyn Meter>,
     /// The local round's runner, shared so a round runs without holding the runner
     pub reviewer: Arc<dyn Reviewer>,
-    /// The pull request reviewer a review bot round summons
-    pub review_bot: Arc<dyn Profile>,
+    /// A profile for each review bot a round may summon
+    pub review_bots: Vec<Arc<dyn Profile>>,
     /// The maintainer's relay session, sent every ruling alongside the webhook
     pub relay: Arc<dyn Relay>,
     /// The maintainer's webhook, shared so a post runs without holding the runner

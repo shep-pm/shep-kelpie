@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
 use crate::ports::{Finding, Timestamp};
+use crate::review_bot::Bot;
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
 
 /// The state file's format version
@@ -285,10 +286,13 @@ pub enum RulingKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         head: Option<String>,
     },
-    /// CodeRabbit never reviewed this head after a summon. A yes looks at
+    /// A review bot never reviewed this head after a summon. A yes looks at
     /// CI again, and summons again once it is green.
     #[serde(rename = "coderabbit-silent")]
     CodeRabbitSilent {
+        /// The bot summoned. CodeRabbit when absent.
+        #[serde(default, skip_serializing_if = "Bot::is_coderabbit")]
+        bot: Bot,
         /// The head the summon was for
         head: String,
     },
@@ -410,8 +414,10 @@ pub struct LeaseHeld {
 pub enum Resource {
     /// The GPU the qwen-review loop runs on
     Gpu,
-    /// The review bot's window, which is CodeRabbit's
+    /// CodeRabbit's review window
     Coderabbit,
+    /// cubic's review window
+    Cubic,
 }
 
 /// Why the state file cannot be read or written

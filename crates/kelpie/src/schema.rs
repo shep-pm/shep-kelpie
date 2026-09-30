@@ -128,6 +128,7 @@ mod tests {
     fn examples_with_every_key() -> Vec<String> {
         let text = include_str!("../settings.example.toml")
             .replace("# ruling_channels =", "ruling_channels =")
+            .replace("# pull_request_reviewers =", "pull_request_reviewers =")
             .replace("build_env = {}", "build_env = { BUN = \"bun\" }")
             .replace(
                 "# instructions_file = \"~/.kelpie/projects/shep/worker-instructions.md\"",
@@ -199,7 +200,10 @@ mod tests {
         let mut root = schema();
         root.as_object_mut().unwrap().remove(SHEEP_SCHEMA_KEY);
         let example = include_str!("../kelpie-settings.example.toml")
-            .replace("# ruling_channels =", "ruling_channels =");
+            .replace("# ruling_channels =", "ruling_channels =")
+            .replace("# [kelpie.reviewers.", "[kelpie.reviewers.")
+            .replace("# reviews =", "reviews =")
+            .replace("# hours =", "hours =");
         let example: toml::Table = toml::from_str(&example).unwrap();
         let section = toml::to_string(&example["kelpie"]).unwrap();
         assert_eq!(keys_of_schema(&root), keys_of_table(&root, &root, &section));

@@ -6,7 +6,8 @@
 //! `shep trigger kelpie <status|take|return>`. Its flock entry needs
 //! `channel = true`, and `shutdown_with_message = true` for a clean stop.
 //! The book is saved to `<kelpie home>/dog/book.json` after every change
-//! and loaded on start.
+//! and loaded on start, with a review window for each reviewer kelpie's
+//! `[kelpie]` section defines.
 
 pub mod desk;
 pub mod triggers;
@@ -27,12 +28,13 @@ use shep_client::shep_core::status::ProcStatus;
 use tokio::sync::mpsc;
 
 use crate::adapters::SystemClock;
-use crate::lease::LeaseKind;
 use crate::lease::gpu::{self, GpuLock};
 use crate::lease::saved::{BookFile, SavedBook};
 use crate::lease::wire::{GRANT, grant_params};
 use crate::ports::Clock;
+use crate::review_bot::Reviewers;
 use crate::shep_home;
+use crate::webhook::KelpieSettings;
 use desk::{Delivery, Desk};
 use triggers::ACTIONS;
 
@@ -136,26 +138,55 @@ impl Kept {
 
 // Another build's file, or none, starts an empty book. One that claims
 // this build's format and cannot be read may have held a summon, so its
-// empty book starts with the CodeRabbit window closed for the hour, as if
+// empty book starts with every review window closed for its span, as if
 // a summon had just been accepted. The first change overwrites the file.
-fn open(file: BookFile, clock: Box<dyn Clock>, gpu: GpuLock) -> Kept {
+fn open(file: BookFile, clock: Box<dyn Clock>, gpu: GpuLock, reviewers: Reviewers) -> Kept {
     let empty = || SavedBook::new(Vec::new(), Vec::new(), Vec::new());
     let (last, unread) = match file.load() {
         Ok(Some(saved)) => (saved, false),
         Ok(None) => (empty(), false),
         Err(e) => {
-            println!(
-                "{e}: starting with an empty book and the CodeRabbit window closed for an hour"
-            );
+            println!("{e}: starting with an empty book and every review window closed");
             (empty(), true)
         }
     };
     let now = clock.now();
-    let mut desk = Desk::restore(clock, gpu, last.clone());
+    let mut desk = Desk::restore(clock, gpu, last.clone(), reviewers);
     if unread {
-        desk.book.summoned(&LeaseKind::coderabbit(), now);
+        for (bot, _) in reviewers.defined() {
+            desk.book.summoned(&bot.lease(), now);
+        }
     }
     Kept { desk, file, last }
+}
+
+// The review windows kelpie's section defines. A section that cannot be
+// read books CodeRabbit's alone, as a dog did before definitions.
+async fn reviewers(client: &Client) -> Reviewers {
+    let section = client.request(Request::DogConfig {
+        name: crate::shepherd::DOG.into(),
+    });
+    let text = match section.await {
+        Ok(Response::DogSection { toml }) => toml.as_str().to_owned(),
+        Ok(other) => {
+            println!("no [kelpie] section in the shepherd's answer: {other:?}");
+            return Reviewers::default();
+        }
+        Err(e) => {
+            println!("cannot read the [kelpie] section: {e}");
+            return Reviewers::default();
+        }
+    };
+    if text.trim().is_empty() {
+        return Reviewers::default();
+    }
+    match KelpieSettings::from_section(&text) {
+        Ok(kelpie) => kelpie.reviewers,
+        Err(e) => {
+            println!("{e}: booking CodeRabbit's window alone");
+            Reviewers::default()
+        }
+    }
 }
 
 async fn serve() -> Result<(), String> {
@@ -189,7 +220,13 @@ async fn serve() -> Result<(), String> {
             .map_err(|e| format!("cannot make {}: {e}", folder.display()))?;
     }
     println!("the book is {}", file.path().display());
-    let desk = Arc::new(Mutex::new(open(file, Box::new(SystemClock), lock)));
+    let reviewers = reviewers(&client).await;
+    let desk = Arc::new(Mutex::new(open(
+        file,
+        Box::new(SystemClock),
+        lock,
+        reviewers,
+    )));
     let (deliver, mut to_deliver) = mpsc::unbounded_channel::<Vec<Delivery>>();
     for action in ACTIONS {
         let (desk, deliver) = (Arc::clone(&desk), deliver.clone());
@@ -358,12 +395,18 @@ async fn deliver_grant(client: &Client, grant: &Delivery) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lease::LeaseKind;
     use crate::test::FakeClock;
 
     const NOW: u64 = 1_790_000_000;
 
     fn opened(dir: &std::path::Path, file: BookFile) -> Kept {
-        open(file, Box::new(FakeClock::at(NOW)), GpuLock::under(dir))
+        open(
+            file,
+            Box::new(FakeClock::at(NOW)),
+            GpuLock::under(dir),
+            Reviewers::default(),
+        )
     }
 
     fn window(kept: &mut Kept) -> serde_json::Value {
@@ -375,7 +418,12 @@ mod tests {
     }
 
     fn kept(dir: &std::path::Path, file: BookFile) -> Kept {
-        let desk = Desk::new(Box::new(FakeClock::at(1_790_000_000)), GpuLock::under(dir));
+        let gpu = GpuLock::under(dir);
+        let desk = Desk::new(
+            Box::new(FakeClock::at(1_790_000_000)),
+            gpu,
+            Reviewers::default(),
+        );
         let last = desk.saved();
         Kept { desk, file, last }
     }

@@ -13,6 +13,7 @@ use crate::lease::saved::{SavedBook, SavedRun, SavedRunId, SavedTotals};
 use crate::lease::wire::{MetricName, Total, Totals, WindowFact, WindowMetric};
 use crate::lease::{Epoch, Holder, LeaseKind};
 use crate::ports::{Clock, Timestamp};
+use crate::review_bot::Reviewers;
 use crate::runner::ProjectName;
 
 /// A grant the dog must deliver to a runner as a `grant` trigger
@@ -74,22 +75,30 @@ pub struct Desk {
 }
 
 impl Desk {
-    /// A desk with an empty book, reading the GPU lock at `gpu`
-    pub fn new(clock: Box<dyn Clock>, gpu: GpuLock) -> Self {
+    /// A desk with an empty book, reading the GPU lock at `gpu`, with a
+    /// window for each reviewer in `reviewers`
+    pub fn new(clock: Box<dyn Clock>, gpu: GpuLock, reviewers: Reviewers) -> Self {
         Self::restore(
             clock,
             gpu,
             SavedBook::new(Vec::new(), Vec::new(), Vec::new()),
+            reviewers,
         )
     }
 
-    /// A desk holding what [`Desk::saved`] kept, reading the GPU lock at `gpu`
+    /// A desk holding what [`Desk::saved`] kept, reading the GPU lock at `gpu`,
+    /// with each window in `reviewers` as it defines it
     ///
     /// Its runners are as they were when it was saved: a [`Desk::resync`]
     /// against the live flock reclaims from those since gone or restarted.
-    pub fn restore(clock: Box<dyn Clock>, gpu: GpuLock, saved: SavedBook) -> Self {
+    pub fn restore(
+        clock: Box<dyn Clock>,
+        gpu: GpuLock,
+        saved: SavedBook,
+        reviewers: Reviewers,
+    ) -> Self {
         let mut book = LeaseBook::restore(clock, saved.leases);
-        book.add_window(LeaseKind::coderabbit());
+        book.set_reviewers(reviewers);
         let runs = saved
             .runs
             .into_iter()
@@ -299,14 +308,26 @@ pub(super) mod tests {
     pub(crate) struct World {
         pub(crate) desk: Desk,
         pub(crate) clock: FakeClock,
+        reviewers: Reviewers,
         _temp: tempfile::TempDir,
     }
 
     pub(crate) fn world() -> World {
+        world_with(Reviewers::default())
+    }
+
+    // A dog whose section defines `reviewers`.
+    pub(crate) fn world_with(reviewers: Reviewers) -> World {
         let _temp = tempfile::tempdir().unwrap();
         let clock = FakeClock::at(EPOCH);
-        let desk = Desk::new(Box::new(clock.clone()), GpuLock::under(_temp.path()));
-        World { desk, clock, _temp }
+        let gpu = GpuLock::under(_temp.path());
+        let desk = Desk::new(Box::new(clock.clone()), gpu, reviewers);
+        World {
+            desk,
+            clock,
+            reviewers,
+            _temp,
+        }
     }
 
     pub(crate) fn stand_in() -> LeaseKind {
@@ -338,7 +359,7 @@ pub(super) mod tests {
             file.save(&self.desk.saved()).unwrap();
             let saved = file.load().unwrap().expect("a saved book");
             let gpu = GpuLock::under(self._temp.path());
-            self.desk = Desk::restore(Box::new(self.clock.clone()), gpu, saved);
+            self.desk = Desk::restore(Box::new(self.clock.clone()), gpu, saved, self.reviewers);
         }
 
         pub(crate) fn book_line(&mut self) -> Value {
@@ -735,6 +756,45 @@ pub(super) mod tests {
         assert_eq!(w.raise("koji", koji.want(&cr)), []);
         w.clock.advance(600);
         assert_eq!(w.desk.tick(), [coderabbit_grant("koji", 101)]);
+    }
+
+    #[test]
+    fn each_defined_reviewer_gets_its_own_window_and_keeps_it_across_a_restart() {
+        let month = crate::review_bot::ReviewWindow {
+            reviews: std::num::NonZeroU32::new(20).unwrap(),
+            hours: std::num::NonZeroU32::new(720).unwrap(),
+        };
+        let mut w = world_with(Reviewers {
+            cubic: Some(month),
+            ..Reviewers::default()
+        });
+        let (cr, cubic) = (
+            LeaseKind::coderabbit(),
+            crate::review_bot::Bot::Cubic.lease(),
+        );
+        assert_eq!(w.line("cubic")["window"]["quota"], 20);
+        let mut koji = Asker::new(Epoch(101));
+        w.raise("koji", koji.window(&cr, WindowFact::Summoned, EPOCH));
+        assert_eq!(
+            w.raise("koji", koji.want(&cr)),
+            [],
+            "CodeRabbit's hour is spent"
+        );
+        let granted = w.raise("koji", koji.want(&cubic));
+        assert_eq!(
+            granted,
+            [Delivery {
+                kind: cubic.clone(),
+                ..grant("koji", 101)
+            }]
+        );
+        w.raise(
+            "koji",
+            koji.window(&cubic, WindowFact::Opens, EPOCH + 7 * 86_400),
+        );
+        w.restart();
+        assert_eq!(w.line("cubic")["window"]["opens"], EPOCH + 7 * 86_400);
+        assert_eq!(w.line("coderabbit")["window"]["opens"], EPOCH + 3600);
     }
 
     #[test]

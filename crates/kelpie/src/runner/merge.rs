@@ -306,7 +306,7 @@ impl Runner {
         if merged && let Some(begin) = self.follow_ups()? {
             return Ok(begin);
         }
-        self.release()?;
+        self.release_all()?;
         let item = self.current().expect("a finish is of a work item");
         // First, so a failure here leaves everything else for the retry.
         if let Some(number) = item.pull_request

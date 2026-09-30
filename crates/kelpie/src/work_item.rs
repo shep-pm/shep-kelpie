@@ -11,9 +11,11 @@ use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage, Verdict};
 use crate::shots::ShotsRecord;
 
 mod follow_ups;
+mod round;
 mod spend;
 
 pub use follow_ups::FollowUps;
+pub use round::{CodeRabbitStage, CodeRabbitTally, OpenThread};
 pub use spend::{QwenTally, RoleSpend, Spend};
 
 /// The work item in flight
@@ -83,7 +85,7 @@ pub struct WorkItem {
     /// Whether a review round or judge call is in flight
     #[serde(default)]
     pub review_call: ReviewCallState,
-    /// Its CodeRabbit rounds so far
+    /// Its pull request reviewer rounds so far, from every bot
     #[serde(default)]
     pub coderabbit: CodeRabbitTally,
     /// The pull request's labels, ready state and head, as kelpie and its
@@ -135,78 +137,6 @@ pub struct Conflict {
     pub main: String,
     /// How many conflict turns this work item has had, this one included
     pub turns: u32,
-}
-
-/// A work item's CodeRabbit rounds so far
-// wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CodeRabbitTally {
-    /// Rounds whose review covered the head
-    pub rounds: u32,
-    /// Whether the maintainer let the rounds past their cap
-    pub cap_cleared: bool,
-    /// Whether CodeRabbit is satisfied with the code as it stands. A
-    /// worker's turn changes the code, so it clears this.
-    pub satisfied: bool,
-}
-
-/// Where one CodeRabbit round stands
-// wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "stage", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum CodeRabbitStage {
-    /// Waiting for the CodeRabbit lease, to summon a review of `head`
-    Lease {
-        /// The head CI passed on
-        head: String,
-        /// When kelpie marked the draft ready, until the forge reads it so
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        readied: Option<Timestamp>,
-        /// Whether the summon asks for a full review whatever CodeRabbit read
-        /// before, because the last one was answered with nothing new
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        full: bool,
-    },
-    /// The label went on, or the comment asking for a full review was
-    /// posted, at `at`. The lease goes back once CodeRabbit answers.
-    Summoned {
-        /// The head the summon is for
-        head: String,
-        /// When the summon was made
-        at: Timestamp,
-        /// Whether it asked for a full review
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        full: bool,
-        /// Whether CodeRabbit gave no sign of it and it went out once more
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        resent: bool,
-    },
-    /// The open threads of a review of `head`, judged in order
-    Judging {
-        /// The head the review covered
-        head: String,
-        /// Every thread still open, as a finding
-        threads: Vec<OpenThread>,
-        /// The judge's verdict on each thread judged so far, same order
-        verdicts: Vec<Verdict>,
-    },
-    /// The findings the judge held were sent to the worker; waiting for its fix
-    Fixing {
-        /// The head the findings are on, which a fix moves
-        head: String,
-    },
-}
-
-/// A CodeRabbit thread still open, as the judge reads it
-// wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct OpenThread {
-    /// The forge's id, which resolving it takes
-    pub id: String,
-    /// What it says
-    pub finding: Finding,
 }
 
 /// The labels, ready state and head kelpie believes a pull request carries
@@ -550,6 +480,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::review_bot::Bot;
     use crate::test::a_work_item;
 
     #[test]
@@ -626,6 +557,7 @@ mod tests {
         );
         assert_eq!(
             value(Phase::CodeRabbit(CodeRabbitStage::Summoned {
+                bot: Bot::Coderabbit,
                 head: "c0ffee".into(),
                 at: Timestamp(12),
                 full: false,
@@ -647,7 +579,11 @@ mod tests {
             })),
             json!({ "state": "coderabbit", "stage": "lease", "head": "c0ffee", "full": true })
         );
+        let cubic = json!({ "state": "coderabbit", "stage": "summoned", "bot": "cubic", "head": "c0ffee", "at": 12, "full": true });
+        let by_cubic: Phase = serde_json::from_value(cubic.clone()).unwrap();
+        assert_eq!(value(by_cubic), cubic);
         let judging = Phase::CodeRabbit(CodeRabbitStage::Judging {
+            bot: Bot::Cubic,
             head: "c0ffee".into(),
             threads: vec![OpenThread {
                 id: "PRRT_1".into(),
@@ -663,6 +599,7 @@ mod tests {
         });
         let pinned = value(judging.clone());
         assert_eq!(pinned["threads"][0]["id"], "PRRT_1");
+        assert_eq!(pinned["bot"], "cubic");
         assert_eq!(serde_json::from_value::<Phase>(pinned).unwrap(), judging);
         assert_eq!(
             value(Phase::Ruling { id: 3 }),

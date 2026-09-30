@@ -22,3 +22,17 @@
 [kelpie.webhook]
 kind = "ntfy"
 url = "https://ntfy.sh/your-private-topic"
+
+# The pull request reviewers a project may list, each by its window: so many
+# reviews in so many hours, account-wide, which the dog holds. CodeRabbit is
+# defined with one review an hour when absent, and its review footers raise
+# that. cubic is listed only once defined here. Its free plan gives a
+# private repo 20 reviews a month; a public repo draws on a fair-use pool of
+# reviewed lines it does not publish. The dog reads these when it starts.
+# [kelpie.reviewers.coderabbit]
+# reviews = 1
+# hours = 1
+#
+# [kelpie.reviewers.cubic]
+# reviews = 20
+# hours = 720

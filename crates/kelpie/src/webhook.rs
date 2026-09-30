@@ -1,7 +1,8 @@
-//! Kelpie's own settings: the webhook, and the channels rulings go to
+//! Kelpie's own settings: the webhook, the channels rulings go to, and the
+//! pull request reviewers
 //!
 //! Kelpie's `[kelpie]` section of `dogs.toml`, or the file under kelpie's
-//! home it had before one, shared by every project. Both parts are
+//! home it had before one, shared by every project. Every part is
 //! optional: the `webhook` table, whose keys are both required, is needed
 //! only by a project whose rulings go to the webhook. The URL is a
 //! credential, so no error, log line or status carries it.
@@ -15,6 +16,7 @@ use serde::Deserialize;
 use shep_client::dogs::dog_config;
 
 use crate::channels::Channels;
+use crate::review_bot::Reviewers;
 use crate::settings::SettingsError;
 
 /// What every project shares
@@ -30,6 +32,9 @@ pub struct KelpieSettings {
     /// Every channel when absent.
     #[serde(default)]
     pub ruling_channels: Option<Channels>,
+    /// The pull request reviewers a project may list, each by its window
+    #[serde(default)]
+    pub reviewers: Reviewers,
 }
 
 /// The maintainer's webhook
@@ -111,8 +116,10 @@ fn authority(rest: &str) -> &str {
 
 /// What a malformed file is told, since the parser's own message could quote the URL
 const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntfy`) \
-                     and an `https://` `url`, and `ruling_channels`, a list of \
-                     `webhook` and `relay`, and nothing else";
+                     and an `https://` `url`, `ruling_channels`, a list of \
+                     `webhook` and `relay`, and `[reviewers.coderabbit]` and \
+                     `[reviewers.cubic]` tables with `reviews` and `hours`, \
+                     and nothing else";
 
 impl KelpieSettings {
     /// Reads and checks kelpie's settings file
