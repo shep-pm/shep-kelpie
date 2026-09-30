@@ -265,7 +265,7 @@ fn a_failed_run_posts_nothing_and_the_merge_ruling_says_so() {
         format!(
             "Merge pull request #71 at {} into main? Kelpie's shots of it failed, so \
              none of this head's are on the pull request (an earlier head's may be); \
-             the runner's log says why. `shep trigger lab rule '1 yes'` merges it, and `shep trigger lab rule '1 no <note>'` \
+             the runner's log says why. `shep kelpie rule 1 yes` merges it, and `shep kelpie rule 1 no <note>` \
              sends the worker your note.",
             &head[..7]
         )

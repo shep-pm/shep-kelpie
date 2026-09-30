@@ -246,8 +246,8 @@ pub(super) mod tests {
         assert_eq!(
             question,
             format!(
-                "Merge pull request #71 at {} into main? `shep trigger shep rule '1 yes'` \
-                 merges it, and `shep trigger shep rule '1 no <note>'` sends the worker your note.",
+                "Merge pull request #71 at {} into main? `shep kelpie rule 1 yes` \
+                 merges it, and `shep kelpie rule 1 no <note>` sends the worker your note.",
                 &head[..7]
             )
         );
@@ -525,8 +525,8 @@ pub(super) mod tests {
         assert_eq!(
             question,
             "Pull request #71 changed outside kelpie: the `bug` label was added. \
-             `shep trigger shep rule '1 yes'` accepts it and kelpie carries on, and \
-             `shep trigger shep rule '1 no <note>'` sends the worker your note."
+             `shep kelpie rule 1 yes` accepts it and kelpie carries on, and \
+             `shep kelpie rule 1 no <note>` sends the worker your note."
         );
         assert_eq!(
             rig.ask(&runner, "status", None)["rulings"][0]["kind"],

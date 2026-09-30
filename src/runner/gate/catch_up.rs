@@ -218,7 +218,7 @@ mod tests {
             question.starts_with(
                 "Kelpie cannot rebase pull request #71 onto main: \
                  it conflicts with main in work.txt. Once the branch is fixed, \
-                 `shep trigger shep rule '1 yes'` has kelpie look again"
+                 `shep kelpie rule 1 yes` has kelpie look again"
             ),
             "{question}"
         );
