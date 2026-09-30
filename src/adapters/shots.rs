@@ -371,6 +371,9 @@ fn last_lines(text: &str, n: usize) -> String {
 }
 
 #[cfg(test)]
+mod left;
+
+#[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
