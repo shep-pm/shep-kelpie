@@ -149,6 +149,8 @@ mod tests {
     impl Shots for Recorder {
         fn stop_left(&self, _server_pid: &Path) {}
 
+        fn stop_orphans(&self, _folders: &[std::path::PathBuf]) {}
+
         fn take(&self, job: &ShotsJob) -> ShotsRun {
             self.0.lock().unwrap().push(job.clone());
             ShotsRun {

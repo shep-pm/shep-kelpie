@@ -841,6 +841,11 @@ pub trait Shots: Send + Sync {
     /// such as one the worker's shots tool started before its `claude` was
     /// killed. Reads that one file, never a folder's listing.
     fn stop_left(&self, server_pid: &std::path::Path);
+
+    /// Stops dev servers nothing runs any more that sit under `folders`,
+    /// the worktrees and build folders kelpie owns. Matches only by those
+    /// folders, never by a program's name or a port alone.
+    fn stop_orphans(&self, folders: &[std::path::PathBuf]);
 }
 
 /// A runner's side of the dog's book leases

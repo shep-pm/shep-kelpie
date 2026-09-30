@@ -243,7 +243,10 @@ impl Runner {
             }
             store.save(&state)?;
         }
-        // A dev server the last run's worker left behind holds its port.
+        // A dev server the last run left behind holds its port, and one the
+        // state file no longer names, such as a merged item's, is found by
+        // the folders it works in.
+        ports.shots.stop_orphans(&paths.owned());
         for item in &state.work_items {
             ports
                 .shots
