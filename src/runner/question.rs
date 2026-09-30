@@ -318,7 +318,7 @@ mod tests {
         };
         assert_eq!(
             comment_failed.as_deref(),
-            Some("not posted: the text names a folder on this machine")
+            Some("not posted: the text names something private to this machine")
         );
         assert_eq!(rig.forge.comments(), []);
         assert!(question.contains(&log.display().to_string()), "{question}");

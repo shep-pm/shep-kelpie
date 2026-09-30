@@ -1,48 +1,35 @@
 //! Keeping this machine's paths off the forge
 //!
 //! Everything kelpie posts to the forge goes through [`Guarded`], which
-//! refuses a body naming a local folder: the home folder, kelpie's home,
-//! which holds every worktree, build and shots folder, and the project's
-//! checkout. A post that names one is never sent.
+//! refuses a text [`LocalPaths`] finds something of this machine's in: its
+//! folders, a path under `~`, an address on a local network, or a name the
+//! project keeps private. A post that names one is never sent.
 
 use std::fmt;
-use std::path::Path;
 
 use super::{Forge, ForgeError, Issue, NewLabel, OpenIssue, PullRequest, Reviewed, Visibility};
 use crate::board::{OpenPullRequest, ReadyIssue};
+use crate::local_paths::{LocalPaths, Surface};
 use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
 
-/// A forge that refuses to post any text naming a local folder
+/// A forge that refuses to post any text naming something of this machine's
 pub struct Guarded {
     forge: Box<dyn Forge>,
-    local: Vec<String>,
+    local: LocalPaths,
 }
 
 impl Guarded {
-    /// `forge`, refusing posts that name any of `folders`
-    ///
-    /// A folder with no parent, such as `/`, names nothing and is left out.
-    pub fn new<'a>(forge: Box<dyn Forge>, folders: impl IntoIterator<Item = &'a Path>) -> Self {
-        let local = folders
-            .into_iter()
-            .filter(|folder| folder.parent().is_some())
-            .map(Path::to_string_lossy)
-            .map(|folder| folder.trim_end_matches('/').to_owned())
-            .filter(|folder| !folder.is_empty())
-            .collect();
+    /// `forge`, refusing posts that `local` finds something in
+    pub fn new(forge: Box<dyn Forge>, local: LocalPaths) -> Self {
         Self { forge, local }
     }
 
     fn check(&self, body: &str) -> Result<(), ForgeError> {
-        if self
-            .local
-            .iter()
-            .any(|folder| body.contains(folder.as_str()))
-        {
-            return Err(ForgeError::LocalPath);
+        match self.local.find(body, Surface::Prose) {
+            Some(_) => Err(ForgeError::LocalPath),
+            None => Ok(()),
         }
-        Ok(())
     }
 }
 
@@ -164,3 +151,6 @@ impl Forge for Guarded {
         self.forge.merge(repo, number, head)
     }
 }
+
+#[cfg(test)]
+mod tests;

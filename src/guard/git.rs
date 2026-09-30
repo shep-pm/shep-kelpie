@@ -32,7 +32,7 @@ pub(super) struct Git<'a> {
 pub(super) fn judge(
     git: Git<'_>,
     cwd: Option<&Path>,
-    home: Option<&Home>,
+    home: &Home,
     checkout: Checkout<'_>,
     reads: &mut Reads,
 ) -> Vec<String> {
@@ -42,7 +42,7 @@ pub(super) fn judge(
     let mut configured = false;
     let sub = loop {
         match rest.next() {
-            Some("-C") => dir = moved(dir.as_deref(), rest.next().unwrap_or_default(), home),
+            Some("-C") => dir = moved(dir.as_deref(), rest.next().unwrap_or_default(), home.path()),
             Some("-c" | "--config-env") => {
                 configured = true;
                 rest.next();
@@ -83,9 +83,6 @@ pub(super) fn judge(
             sub.chars().take(40).collect::<String>()
         )];
     }
-    let Some(home) = home else {
-        return Vec::new();
-    };
     let args: Vec<String> = rest.map(str::to_owned).collect();
     let mut out = Vec::new();
     if sub == "commit" || sub == "tag" {
@@ -93,8 +90,8 @@ pub(super) fn judge(
             .into_iter()
             .chain(files(&args, &["--file"], &['F'], dir.as_deref()))
             .chain(git.heredocs.iter().cloned());
-        if messages.into_iter().any(|m| home.is_in(&m)) {
-            out.push(home.refusal(&format!("this {sub}'s message"), WRITE));
+        if let Some(leak) = home.find_in_prose(messages) {
+            out.push(home.refusal(&format!("this {sub}'s message"), leak, WRITE));
         }
     }
     if !matches!(sub, "commit" | "push") {
@@ -381,18 +378,20 @@ fn read(
             // `origin`'s, which the worker cannot move, unlike its own branch's.
             let base = format!("refs/remotes/origin/{BASE}");
             let log = run(&["log", "--format=%B", source, "--not", &base])?;
-            if home.is_in(&log) {
-                out.push(home.refusal("a message in the commits this push sends", REWRITE));
+            if let Some(leak) = home.find_in_prose([log]) {
+                let what = "a message in the commits this push sends";
+                out.push(home.refusal(what, leak, REWRITE));
             }
             let sent = patches(&["log", "-p", "--format=", source, "--not", &base])?;
-            for file in home.added(&sent) {
-                out.push(home.refusal(&format!("{file} in the commits this push sends"), REWRITE));
+            for (file, leak) in home.added(&sent) {
+                let what = format!("{file} in the commits this push sends");
+                out.push(home.refusal(&what, leak, REWRITE));
             }
         }
         Read::Commit { all } => {
             let range = if *all { "HEAD" } else { "--cached" };
-            for file in home.added(&patches(&["diff", range])?) {
-                out.push(home.refusal(&format!("this commit's {file}"), WRITE));
+            for (file, leak) in home.added(&patches(&["diff", range])?) {
+                out.push(home.refusal(&format!("this commit's {file}"), leak, WRITE));
             }
         }
     }

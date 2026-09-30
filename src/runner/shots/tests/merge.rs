@@ -333,7 +333,7 @@ fn a_shots_comment_naming_a_local_folder_is_refused_once_and_the_ruling_says_so(
     };
     assert_eq!(
         reason,
-        "not posted: the text names a folder on this machine"
+        "not posted: the text names something private to this machine"
     );
     let Some(StepReport::Ruling { question, .. }) = step(&runner).unwrap() else {
         panic!("the merge ruling did not follow");
@@ -343,9 +343,107 @@ fn a_shots_comment_naming_a_local_folder_is_refused_once_and_the_ruling_says_so(
         "{question}"
     );
     assert_eq!(rig.forge.comments(), [], "nothing on the pull request");
+    assert_eq!(
+        rig.forge.head_of("kelpie-shots/71"),
+        None,
+        "no images pushed"
+    );
     step(&runner).unwrap(); // the ruling's alert
     rig.clock.advance(600);
     assert_eq!(step(&runner).unwrap(), None, "never tried again");
+}
+
+// A dev server's stack-frame URL carries the home folder percent-encoded. The
+// other encodings are the forge port's own tests.
+#[test]
+fn a_comment_refused_for_what_a_page_printed_pushes_no_images() {
+    for template in [
+        "console: http://localhost:5173/{home}/src/main.ts",
+        concat!("console: fetch http://192.", "168.1.20:8080/api failed"),
+    ] {
+        let rig = with_preview("lab");
+        let encoded = rig.home.path().display().to_string().replace('/', "%2F");
+        let printed = template.replace("{home}", &encoded);
+        let runner = started(&rig);
+        rig.claude.script([
+            Scripted::Push("work.txt", "work\n"),
+            Scripted::Text("CLEAN"),
+        ]);
+        rig.shots
+            .script([ScriptedShots::Problems(vec![printed.clone()])]);
+        for _ in 0..4 {
+            step(&runner).unwrap(); // the turn, qwen, the shots, claude
+        }
+        let head = rig.forge.head_of("kelpie/7").unwrap();
+        rig.forge.set_checks(&head, Checks::Passed);
+        let Some(StepReport::ShotsNotPosted { reason, .. }) = rig.verdict(&runner) else {
+            panic!("the shots comment was not refused: {printed}");
+        };
+        assert_eq!(
+            reason, "not posted: the text names something private to this machine",
+            "{printed}"
+        );
+        assert_eq!(rig.forge.comments(), [], "{printed}");
+        assert_eq!(rig.forge.head_of("kelpie-shots/71"), None, "{printed}");
+    }
+}
+
+#[test]
+fn a_page_the_dev_server_answers_with_a_server_error_posts_no_shots() {
+    for script in [
+        ScriptedShots::Status(500),
+        ScriptedShots::Problems(vec!["HTTP 500 http://localhost:5173/src/main.ts".into()]),
+    ] {
+        let rig = with_preview("lab");
+        let runner = started(&rig);
+        rig.claude.script([
+            Scripted::Push("work.txt", "work\n"),
+            Scripted::Text("CLEAN"),
+        ]);
+        rig.shots.script([script.clone()]);
+        for _ in 0..4 {
+            step(&runner).unwrap(); // the turn, qwen, the shots, claude
+        }
+        let head = rig.forge.head_of("kelpie/7").unwrap();
+        rig.forge.set_checks(&head, Checks::Passed);
+        let Some(StepReport::Ruling { question, .. }) = rig.verdict(&runner) else {
+            panic!("the merge ruling did not come: {script:?}");
+        };
+        assert!(
+            question.contains("Kelpie's shots of it failed"),
+            "{question}"
+        );
+        assert_eq!(rig.forge.comments(), [], "{script:?}");
+        assert_eq!(rig.forge.head_of("kelpie-shots/71"), None, "{script:?}");
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(
+            status["work_item"]["shots_failed"],
+            "the dev server answered HTTP 500 for / at mobile, light",
+            "{script:?}"
+        );
+    }
+}
+
+#[test]
+fn a_server_error_from_another_origin_does_not_fail_the_run() {
+    let rig = with_preview("lab");
+    let runner = started(&rig);
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    let other = "HTTP 500 https://api.example.com/v1/events".to_owned();
+    rig.shots.script([ScriptedShots::Problems(vec![other])]);
+    for _ in 0..4 {
+        step(&runner).unwrap(); // the turn, qwen, the shots, claude
+    }
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::ShotsPosted { .. })
+    ));
+    assert!(rig.forge.head_of("kelpie-shots/71").is_some());
 }
 
 #[test]

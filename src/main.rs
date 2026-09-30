@@ -66,7 +66,7 @@ fn main() -> ExitCode {
     match args.as_slice() {
         [role, project] if role == "runner" => shep_kelpie::sheep::run(project),
         [command, rest @ ..] if command == "lease" => shep_kelpie::lease::cli::main(rest),
-        [role, git_common_dir, worktree] if role == "guard" => {
+        [role, git_common_dir, worktree, private_names @ ..] if role == "guard" => {
             let home = std::env::var_os("HOME").map(PathBuf::from);
             let checkout = Checkout {
                 git_common_dir: Path::new(git_common_dir),
@@ -75,6 +75,7 @@ fn main() -> ExitCode {
             hook(guard::judge(
                 std::io::stdin().lock(),
                 home.as_deref(),
+                private_names,
                 checkout,
             ))
         }

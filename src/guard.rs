@@ -2,11 +2,11 @@
 //!
 //! Kelpie adds it to every worker, before any hook a project names. It
 //! refuses two things a worker's commit or pull request would carry out:
-//! the home folder's path, which names the machine's user and every
-//! worktree sits under, and a pull request title that is not a
-//! conventional commit. It reads the command's own text and, for a commit
-//! or a push in the worker's worktree, the lines it adds or sends. It never
-//! echoes what it matched. It refuses the ways of running a command it
+//! whatever [`LocalPaths`] finds of this machine's (the home folder's path,
+//! which every worktree sits under, and the rest the shared check knows),
+//! and a pull request title that is not a conventional commit. It reads the
+//! command's own text and, for a commit or a push in the worker's worktree,
+//! the lines it adds or sends. It never echoes what it matched. It refuses the ways of running a command it
 //! knows it cannot read; it is not a shell, and does not find them all.
 //!
 //! The hook runs outside the sandbox, so it runs git the way kelpie's own
@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::confine::Verdict;
+use crate::local_paths::{Leak, LocalPaths, Surface};
 use wrap::{SHELLS, program, script};
 
 /// Where the worker's own git lives
@@ -50,8 +51,14 @@ const MAX_SHELLS: usize = 4;
 // a command nested in parentheses is judged once per level around it.
 const MAX_COMMANDS: usize = 200;
 
-/// Judges the tool call in `input`, with `home` the home folder whose path stays in
-pub fn judge(input: impl Read, home: Option<&Path>, checkout: Checkout<'_>) -> Verdict {
+/// Judges the tool call in `input`, with `home` the home folder whose path
+/// stays in, and `private_names` the words the project keeps off the forge
+pub fn judge(
+    input: impl Read,
+    home: Option<&Path>,
+    private_names: &[String],
+    checkout: Checkout<'_>,
+) -> Verdict {
     #[derive(Deserialize)]
     struct Call {
         tool_name: String,
@@ -88,7 +95,7 @@ pub fn judge(input: impl Read, home: Option<&Path>, checkout: Checkout<'_>) -> V
         return Verdict::Allow;
     };
     let judging = Judging {
-        home: home.and_then(Home::new),
+        home: Home::new(home, private_names),
         checkout,
     };
     let mut call_state = CallState::default();
@@ -101,7 +108,7 @@ pub fn judge(input: impl Read, home: Option<&Path>, checkout: Checkout<'_>) -> V
 
 /// One Bash call being judged
 struct Judging<'a> {
-    home: Option<Home>,
+    home: Home,
     checkout: Checkout<'a>,
 }
 
@@ -142,7 +149,7 @@ impl Judging<'_> {
                 ));
             }
         };
-        let home = self.home.as_ref();
+        let home = &self.home;
         for command in &commands {
             state.commands += 1;
             if state.commands > MAX_COMMANDS {
@@ -173,8 +180,8 @@ impl Judging<'_> {
             let found = match program(&run.words[0]) {
                 "cd" | "pushd" => {
                     cwd = match run.words.get(1) {
-                        Some(to) => moved(cwd.as_deref(), to, home),
-                        None => home.map(|h| h.path.clone()),
+                        Some(to) => moved(cwd.as_deref(), to, home.path()),
+                        None => home.path().map(Path::to_owned),
                     };
                     Vec::new()
                 }
@@ -229,14 +236,14 @@ fn agent_isolation(worktree: &Path, name: &str) -> Option<String> {
 }
 
 // Where `cd` or `git -C` moves from `cwd`: `None` when it cannot be told.
-fn moved(cwd: Option<&Path>, to: &str, home: Option<&Home>) -> Option<PathBuf> {
+fn moved(cwd: Option<&Path>, to: &str, home: Option<&Path>) -> Option<PathBuf> {
     // A folder the shell works out when it runs.
     if to.contains(['$', '`', '*', '?', '[']) {
         return None;
     }
     match to.strip_prefix('~') {
-        Some("") => Some(home?.path.clone()),
-        Some(rest) => Some(home?.path.join(rest.strip_prefix('/')?)),
+        Some("") => Some(home?.to_owned()),
+        Some(rest) => Some(home?.join(rest.strip_prefix('/')?)),
         None if to == "-" => None,
         None if Path::new(to).is_absolute() => Some(PathBuf::from(to)),
         None => Some(cwd?.join(to)),
@@ -244,12 +251,7 @@ fn moved(cwd: Option<&Path>, to: &str, home: Option<&Home>) -> Option<PathBuf> {
 }
 
 // `gh` publishing verbs: their titles, bodies and notes, and a pull request's title.
-fn gh(
-    words: &[String],
-    heredocs: &[String],
-    cwd: Option<&Path>,
-    home: Option<&Home>,
-) -> Vec<String> {
+fn gh(words: &[String], heredocs: &[String], cwd: Option<&Path>, home: &Home) -> Vec<String> {
     // The group and verb are the first two words that are not flags, which
     // may come before them: `gh pr -R owner/repo create`.
     let mut positions = Vec::new();
@@ -300,15 +302,13 @@ fn gh(
             ));
         }
     }
-    if let Some(home) = home {
-        let texts = titles
-            .into_iter()
-            .chain(values(args, &["--body", "--notes"], &['b', 'n']))
-            .chain(files(args, &["--body-file", "--notes-file"], &['F'], cwd))
-            .chain(heredocs.iter().cloned());
-        if texts.into_iter().any(|t| home.is_in(&t)) {
-            out.push(home.refusal(&format!("this `gh {} {}`", verb.0, verb.1), WRITE));
-        }
+    let texts = titles
+        .into_iter()
+        .chain(values(args, &["--body", "--notes"], &['b', 'n']))
+        .chain(files(args, &["--body-file", "--notes-file"], &['F'], cwd))
+        .chain(heredocs.iter().cloned());
+    if let Some(leak) = home.find_in_prose(texts) {
+        out.push(home.refusal(&format!("this `gh {} {}`", verb.0, verb.1), leak, WRITE));
     }
     out
 }
@@ -379,52 +379,62 @@ fn conventional(title: &str) -> bool {
     TYPES.contains(&kind) && !summary.trim().is_empty()
 }
 
-/// The home folder's path, as text that must not leave the machine
+/// The home folder, and what else of this machine's a text must not name
 struct Home {
-    path: PathBuf,
-    text: String,
+    path: Option<PathBuf>,
+    local: LocalPaths,
 }
 
 impl Home {
-    // `/` alone would match every absolute path.
-    fn new(path: &Path) -> Option<Self> {
-        let text = path.to_str()?.trim_end_matches('/').to_lowercase();
-        (text.len() > 1 && text.starts_with('/')).then(|| Self {
-            path: path.to_owned(),
-            text,
-        })
+    // `/` alone would match every absolute path, and a relative one none.
+    fn new(path: Option<&Path>, private_names: &[String]) -> Self {
+        let path = path
+            .filter(|p| {
+                let text = p.to_str().unwrap_or_default().trim_end_matches('/');
+                text.len() > 1 && text.starts_with('/')
+            })
+            .map(Path::to_owned);
+        let names = private_names.iter().map(String::as_str);
+        Self {
+            local: LocalPaths::new(path.as_deref(), names),
+            path,
+        }
     }
 
-    // Whether `written` names the folder, or a path under it.
-    fn is_in(&self, written: &str) -> bool {
-        let written = written.to_lowercase();
-        written.match_indices(&self.text).any(|(at, _)| {
-            written[at + self.text.len()..]
-                .chars()
-                .next()
-                .is_none_or(|c| !(c.is_alphanumeric() || c == '_' || c == '-'))
-        })
+    fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
     }
 
-    // The files whose added lines in `patches` name the folder.
-    fn added(&self, patches: &str) -> Vec<String> {
+    // What the first of `texts` to name this machine names.
+    fn find_in_prose(&self, texts: impl IntoIterator<Item = String>) -> Option<Leak> {
+        texts
+            .into_iter()
+            .find_map(|t| self.local.find(&t, Surface::Prose))
+    }
+
+    // Each file whose added lines in `patches` name this machine, and what they name.
+    fn added(&self, patches: &str) -> Vec<(String, Leak)> {
         let mut file = "";
-        let mut out: Vec<String> = Vec::new();
+        let mut out: Vec<(String, Leak)> = Vec::new();
         for line in patches.lines() {
             if let Some(name) = line.strip_prefix("+++ ") {
                 file = name.strip_prefix("b/").unwrap_or(name);
-            } else if line.starts_with('+') && self.is_in(line) && !out.iter().any(|f| f == file) {
-                out.push(file.to_owned());
+            } else if line.starts_with('+')
+                && !out.iter().any(|(f, _)| f == file)
+                && let Some(leak) = self.local.find(line, Surface::Code)
+            {
+                out.push((file.to_owned(), leak));
             }
         }
-        out.into_iter().map(|f| format!("`{f}`")).collect()
+        out.into_iter()
+            .map(|(f, leak)| (format!("`{f}`"), leak))
+            .collect()
     }
 
-    fn refusal(&self, what: &str, fix: &str) -> String {
+    fn refusal(&self, what: &str, leak: Leak, fix: &str) -> String {
         format!(
-            "{what} carries the home folder's absolute path, which names this machine's user. \
-             {fix} Write a path in the repo from its root (`src/lib.rs`), and one outside it \
-             with `~` for the home folder."
+            "{what} carries {leak}. {fix} Write a path in the repo from its root \
+             (`src/lib.rs`), and leave out one outside it."
         )
     }
 }
@@ -434,5 +444,7 @@ const WRITE: &str = "Take it out, then try again.";
 const REWRITE: &str = "Those commits have not left this machine: take it out and rewrite \
                        them, since a new commit on top would still send the old one.";
 
+#[cfg(test)]
+mod machine_tests;
 #[cfg(test)]
 mod tests;

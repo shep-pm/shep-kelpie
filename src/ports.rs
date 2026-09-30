@@ -371,7 +371,7 @@ pub enum ForgeError {
     Failed(String),
     /// The tool succeeded but its output was not what was asked for
     Unreadable(String),
-    /// The text to post names a folder on this machine, so kelpie never sent it
+    /// The text to post names something private to this machine, so kelpie never sent it
     LocalPath,
 }
 
@@ -381,7 +381,9 @@ impl fmt::Display for ForgeError {
             Self::Spawn(error) => write!(f, "cannot run gh: {error}"),
             Self::Failed(stderr) => write!(f, "gh failed: {}", stderr.trim()),
             Self::Unreadable(output) => write!(f, "unreadable gh output: {}", output.trim()),
-            Self::LocalPath => f.write_str("not posted: the text names a folder on this machine"),
+            Self::LocalPath => {
+                f.write_str("not posted: the text names something private to this machine")
+            }
         }
     }
 }

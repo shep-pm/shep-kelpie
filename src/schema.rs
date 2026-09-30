@@ -145,6 +145,7 @@ mod tests {
             .replace("# configuration =", "configuration =")
             .replace("# routes =", "routes =")
             .replace("# domains =", "domains =")
+            .replace("# private_names =", "private_names =")
             .replace("# local_rounds =", "local_rounds =")
             .replace("# rounds =", "rounds =")
             .replace("# ollama =", "ollama =")

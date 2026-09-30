@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use super::Runner;
 use super::gate::short;
 use super::report::{Begin, StepReport};
+use crate::local_paths::Surface;
 use crate::ports::{ForgeError, Timestamp};
 use crate::preview;
 use crate::settings::NonBlank;
@@ -136,8 +137,13 @@ impl Runner {
     pub(super) fn end_shots(
         &mut self,
         head: String,
-        run: ShotsRun,
+        mut run: ShotsRun,
     ) -> Result<Option<StepReport>, StateError> {
+        // A page the dev server failed on shows its error, with the path of
+        // the module that threw it, so no shot of it goes anywhere.
+        if run.failed.is_none() {
+            run.failed = run.server_error();
+        }
         let mut next = self.state.clone();
         let Some(item) = self.current_in(&mut next) else {
             return Ok(None);
@@ -204,7 +210,12 @@ impl Runner {
         let head = record.head.as_str();
         let (issue, comment) = (item.issue, item.shots_comment);
         let mut failures = Vec::new();
-        let commit = if record.run.files().next().is_some() {
+        let forge = &self.settings.forge;
+        // The images go to the remote only once their comment passes the
+        // check. The comment's own text does not depend on the commit.
+        let unsent = publish::comment(forge, number, head, None, &record.run);
+        let refusal = self.local.find(&unsent, Surface::Prose);
+        let commit = if refusal.is_none() && record.run.files().next().is_some() {
             let message = format!("Shots of {} for #{number}", short(head));
             let pushed = publish::push(
                 &self.settings.repo,
@@ -216,11 +227,11 @@ impl Runner {
         } else {
             None
         };
-        let forge = &self.settings.forge;
         let body = publish::comment(forge, number, head, commit.as_deref(), &record.run);
         // Only a comment someone deleted gets a new one: any other failure
         // would leave two shots comments on the pull request.
         let posted = match comment {
+            _ if refusal.is_some() => Err(ForgeError::LocalPath),
             Some(id) => match self.ports.forge.edit_comment(forge, id, &body) {
                 Err(ForgeError::Failed(e)) if e.contains(GONE) => {
                     self.ports.forge.post_comment(forge, number, &body)

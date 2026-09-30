@@ -53,6 +53,11 @@ generated = [
     "web/src/data/cli-reference.generated.txt",
 ]
 
+# Words that stay off the forge, whatever their case: kelpie posts no text
+# naming one, and a worker's commits and `gh` calls may not either. A project
+# whose CI checks a list of private names keeps the same list here.
+# private_names = ["Acme Corp"]
+
 [app.dogs.kelpie.models.worker]
 model = "claude-sonnet-5"
 effort = "medium"
