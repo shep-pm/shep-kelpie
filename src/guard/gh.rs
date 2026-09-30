@@ -17,9 +17,9 @@ const TYPES: [&str; 11] = [
     "feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert",
 ];
 
-// gh's own commands and their short names, besides `api`, `auth`, `alias`
-// and `extension`, which are refused by name.
-const COMMANDS: [&str; 30] = [
+// gh's own commands and their short names, besides `api`, `auth`, `alias`,
+// `co` and `extension`, which are refused by name.
+const COMMANDS: [&str; 31] = [
     "agent-task",
     "attestation",
     "browse",
@@ -50,6 +50,7 @@ const COMMANDS: [&str; 30] = [
     "ssh-key",
     "status",
     "variable",
+    "workflow",
 ];
 
 const MANAGER_ONLY: &str = "only the project manager merges a pull request, marks one ready \
@@ -96,11 +97,9 @@ pub(super) fn judge(
             return vec!["`gh auth` handles the maintainer's token, which no worker needs.".into()];
         }
         ("pr", Some("merge" | "ready")) => return vec![MANAGER_ONLY.into()],
-        ("alias" | "extension" | "extensions" | "ext", _) => {
+        ("alias" | "co" | "extension" | "extensions" | "ext", _) => {
             return vec![
-                "kelpie runs no gh alias or extension: run the gh command it stands \
-                         for."
-                    .into(),
+                "kelpie runs no gh alias or extension: run the gh command it stands for.".into(),
             ];
         }
         (group, _) if !COMMANDS.contains(&group) => {
@@ -189,4 +188,66 @@ fn conventional(title: &str) -> bool {
         None => head,
     };
     TYPES.contains(&kind) && !summary.trim().is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Every command `gh help` lists in gh 2.96.0, `co` its one alias.
+    const GH_HELP: [&str; 35] = [
+        "auth",
+        "browse",
+        "codespace",
+        "discussion",
+        "gist",
+        "issue",
+        "org",
+        "pr",
+        "project",
+        "release",
+        "repo",
+        "skill",
+        "cache",
+        "run",
+        "workflow",
+        "co",
+        "agent-task",
+        "alias",
+        "api",
+        "attestation",
+        "completion",
+        "config",
+        "copilot",
+        "extension",
+        "gpg-key",
+        "label",
+        "licenses",
+        "preview",
+        "ruleset",
+        "search",
+        "secret",
+        "ssh-key",
+        "status",
+        "variable",
+        "help",
+    ];
+
+    #[test]
+    fn every_command_gh_lists_is_known_by_name() {
+        for name in GH_HELP {
+            let found = judge(&["gh", name, "list"].map(str::to_owned), &[], None, None);
+            assert!(
+                found.iter().all(|f| !f.contains("not one")),
+                "{name}: {found:?}"
+            );
+        }
+        let found = judge(
+            &["gh", "workflow", "view", "ci"].map(str::to_owned),
+            &[],
+            None,
+            None,
+        );
+        assert!(found.is_empty(), "{found:?}");
+    }
 }

@@ -76,11 +76,12 @@ pub(super) fn judge(
         }
     };
     // An alias or an external command could be anything, and no alias
-    // shares a built-in's name.
+    // shares a built-in's name. Some built-ins run a command of their own,
+    // as `submodule foreach` does, so they are left out too.
     if !BUILTINS.contains(&sub) {
         return vec![format!(
-            "kelpie runs only git's own commands, and `{}` is not one: run the command it \
-             stands for.",
+            "kelpie runs only the git commands it knows, and `{}` is not one: run the plain \
+             git command you need, or the one an alias stands for.",
             sub.chars().take(40).collect::<String>()
         )];
     }
@@ -188,7 +189,7 @@ fn unknown_option(option: &str) -> String {
 }
 
 // Git's own commands a worker may run. `--version` and `--help` come as options.
-const BUILTINS: [&str; 75] = [
+const BUILTINS: [&str; 77] = [
     "add",
     "am",
     "annotate",
@@ -257,12 +258,14 @@ const BUILTINS: [&str; 75] = [
     "shortlog",
     "show",
     "show-ref",
+    "sparse-checkout",
     "stash",
     "status",
     "switch",
     "symbolic-ref",
     "tag",
     "update-ref",
+    "var",
     "worktree",
 ];
 

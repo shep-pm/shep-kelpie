@@ -93,7 +93,7 @@ fn what_only_the_project_manager_does_in_gh_is_refused_in_every_shape() {
         ("gh --repo o/r api graphql -f query=x", "gh api"),
         ("gh auth token", "gh auth"),
         ("gh -R o/r auth status", "gh auth"),
-        ("gh co 3", "not one"),
+        ("gh co 3", "alias or extension"),
         ("gh ext exec merge", "alias or extension"),
         ("gh alias set m 'pr merge'", "alias or extension"),
     ] {
