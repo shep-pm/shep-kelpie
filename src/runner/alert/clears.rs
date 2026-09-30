@@ -48,7 +48,7 @@ fn the_daily_clear_sends_an_open_ruling_to_the_relay_again() {
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 2 }));
     assert_eq!(step(&runner).unwrap(), None);
-    assert_eq!(rig.relay.clear_count(), Ok(2));
+    assert_eq!(rig.relay.clears(), 2);
     assert_eq!(
         sent_headers(&rig),
         [
@@ -83,7 +83,7 @@ fn a_clear_because_the_relays_files_changed_sends_an_open_ruling_again() {
 
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 2 }));
-    assert_eq!(rig.relay.clear_count(), Ok(2));
+    assert_eq!(rig.relay.clears(), 2);
     assert_eq!(sent_headers(&rig).len(), 3);
     assert_eq!(rig.alerts.posts().len(), 2);
     assert_eq!(relayed(&rig, &runner), [json!(true), json!(true)]);
@@ -178,10 +178,15 @@ fn a_clear_by_another_projects_runner_sends_an_open_ruling_again_once() {
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     assert_eq!(step(&runner).unwrap(), None);
 
+    clearing.clock.advance(Rig::DAY);
     assert_eq!(
         step(&clearing_runner).unwrap(),
         Some(StepReport::Alerted { id: 1 }),
-        "rotom's first send clears the relay"
+    );
+    assert_eq!(
+        rig.relay.clears(),
+        2,
+        "rotom's send a day on clears the relay"
     );
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     assert_eq!(step(&runner).unwrap(), None, "and only once");
@@ -201,7 +206,7 @@ fn a_clear_while_a_runner_is_down_is_seen_once_it_is_back() {
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     drop(runner);
 
-    rig.relay.clear().unwrap();
+    rig.relay.clear(rig.clock.now()).unwrap();
     let runner = rig.open().unwrap();
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     assert_eq!(step(&runner).unwrap(), None);
@@ -218,4 +223,36 @@ fn a_restart_with_no_clear_in_between_sends_nothing_again() {
     let runner = rig.open().unwrap();
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(sent_for(&rig, "mew").len(), 1);
+}
+
+#[test]
+fn a_ruling_settled_after_another_runners_clear_is_not_told_to_the_fresh_relay() {
+    let (clearing, clearing_runner, _) = Rig::parked("rotom");
+    let (rig, runner) = on_the_same_relay(&clearing, "mew");
+    rig.relay.set_up(true);
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    clearing.clock.advance(Rig::DAY);
+    assert_eq!(
+        step(&clearing_runner).unwrap(),
+        Some(StepReport::Alerted { id: 1 })
+    );
+
+    rig.ask(&runner, "rule", Some("1 no not yet"));
+    step(&runner).unwrap();
+    assert_eq!(rig.relay.told(), Vec::<String>::new());
+}
+
+#[test]
+fn every_runner_on_one_relay_clears_it_once_a_day_between_them() {
+    let (clearing, clearing_runner, _) = Rig::parked("rotom");
+    let (rig, runner) = on_the_same_relay(&clearing, "mew");
+    rig.relay.set_up(true);
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    clearing.clock.advance(Rig::DAY - 1);
+    assert_eq!(
+        step(&clearing_runner).unwrap(),
+        Some(StepReport::Alerted { id: 1 })
+    );
+    assert_eq!(rig.relay.clears(), 1, "mew's clear counts for rotom's day");
+    assert_eq!(step(&runner).unwrap(), None, "and resends nothing");
 }

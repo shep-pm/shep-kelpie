@@ -1,12 +1,12 @@
-//! The rig's relay: recording every send and counting every clear, and refusing sends
+//! The rig's relay: recording every send and clear, and refusing sends
 //! until a test says it is up. Down by default, so a test that never
 //! mentions the relay still exercises the webhook alone, as every ruling
 //! did before the relay existed.
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::ports::{Relay, RelayError};
+use crate::ports::{Cleared, Relay, RelayError, Timestamp};
 use crate::settings::Effort;
 
 /// A relay that records what it is sent, and refuses sends until a test
@@ -15,7 +15,7 @@ use crate::settings::Effort;
 pub(crate) struct FakeRelay {
     sent: Mutex<Vec<(String, String, Effort)>>,
     told: Mutex<Vec<String>>,
-    clears: AtomicU64,
+    cleared: Mutex<Cleared>,
     up: AtomicBool,
     stale: AtomicBool,
 }
@@ -32,6 +32,11 @@ impl FakeRelay {
         self.told.lock().unwrap().clone()
     }
 
+    /// How many times the relay was cleared, by any runner on it
+    pub(crate) fn clears(&self) -> u64 {
+        self.cleared.lock().unwrap().count
+    }
+
     /// Makes sends succeed (`up: true`, a reachable relay) or fail
     /// (`up: false`, an unreachable one)
     pub(crate) fn set_up(&self, up: bool) {
@@ -45,16 +50,15 @@ impl FakeRelay {
 }
 
 impl Relay for FakeRelay {
-    fn renew(&self) -> Result<bool, RelayError> {
-        let stale = self.stale.swap(false, Ordering::SeqCst);
-        if stale {
-            self.clears.fetch_add(1, Ordering::SeqCst);
+    fn renew(&self, now: Timestamp) -> Result<(), RelayError> {
+        if self.stale.swap(false, Ordering::SeqCst) {
+            self.clear(now)?;
         }
-        Ok(stale)
+        Ok(())
     }
 
-    fn clear_count(&self) -> Result<u64, RelayError> {
-        Ok(self.clears.load(Ordering::SeqCst))
+    fn cleared(&self) -> Result<Cleared, RelayError> {
+        Ok(*self.cleared.lock().unwrap())
     }
 
     fn send(&self, message: &str, model: &str, effort: Effort) -> Result<(), RelayError> {
@@ -76,8 +80,10 @@ impl Relay for FakeRelay {
         Ok(())
     }
 
-    fn clear(&self) -> Result<(), RelayError> {
-        self.clears.fetch_add(1, Ordering::SeqCst);
+    fn clear(&self, now: Timestamp) -> Result<(), RelayError> {
+        let mut cleared = self.cleared.lock().unwrap();
+        cleared.count += 1;
+        cleared.last = Some(now);
         Ok(())
     }
 }

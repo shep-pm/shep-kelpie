@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use crate::ports::{Relay, RelayError};
+use crate::ports::{Cleared, Relay, RelayError, Timestamp};
 use crate::relay::{self, NAME};
 use crate::settings::Effort;
 
@@ -213,14 +213,15 @@ impl RelayCli {
         Err(RelayError::NeverAppeared)
     }
 
-    // Every project's runner shares this folder, so a clear adds a line to
-    // this file beside the relay's own: appends that small never tear, and
-    // the count only grows, so two clears at once are never counted as one.
+    // Every project's runner shares this folder, so a clear adds a line
+    // with its time to this file beside the relay's own: appends that small
+    // never tear, and the count only grows, so two clears at once are never
+    // counted as one.
     fn clears_file(&self) -> PathBuf {
         self.folder.join("clears")
     }
 
-    fn count_clear(&self) -> Result<(), RelayError> {
+    fn count_clear(&self, now: Timestamp) -> Result<(), RelayError> {
         let unwritable = |e: io::Error| RelayError::CannotCount(e.to_string());
         fs::create_dir_all(&self.folder).map_err(unwritable)?;
         let mut file = OpenOptions::new()
@@ -228,7 +229,8 @@ impl RelayCli {
             .append(true)
             .open(self.clears_file())
             .map_err(unwritable)?;
-        file.write_all(b"\n").map_err(unwritable)
+        file.write_all(format!("{}\n", now.0).as_bytes())
+            .map_err(unwritable)
     }
 
     fn sessions(&self) -> PathBuf {
@@ -286,18 +288,23 @@ impl Relay for RelayCli {
         self.deliver(&found, message)
     }
 
-    fn renew(&self) -> Result<bool, RelayError> {
+    fn renew(&self, now: Timestamp) -> Result<(), RelayError> {
         let (_, _, changed) = self.write_relay_files()?;
         if changed {
-            self.clear()?;
+            self.clear(now)?;
         }
-        Ok(changed)
+        Ok(())
     }
 
-    fn clear_count(&self) -> Result<u64, RelayError> {
-        match fs::read(self.clears_file()) {
-            Ok(lines) => Ok(lines.iter().filter(|&&b| b == b'\n').count() as u64),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(0),
+    fn cleared(&self) -> Result<Cleared, RelayError> {
+        match fs::read_to_string(self.clears_file()) {
+            Ok(text) => Ok(Cleared {
+                count: text.lines().count() as u64,
+                last: (text.lines().last())
+                    .and_then(|line| line.parse().ok())
+                    .map(Timestamp),
+            }),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Cleared::default()),
             Err(e) => Err(RelayError::CannotCount(e.to_string())),
         }
     }
@@ -309,11 +316,14 @@ impl Relay for RelayCli {
         }
     }
 
-    fn clear(&self) -> Result<(), RelayError> {
-        if let Some(found) = self.find()? {
-            self.stop_and_remove(&found.id)?;
+    // Counted first: a clear counted but never made costs each runner one
+    // resend, while one made but never counted would lose its rulings.
+    fn clear(&self, now: Timestamp) -> Result<(), RelayError> {
+        self.count_clear(now)?;
+        match self.find()? {
+            Some(found) => self.stop_and_remove(&found.id),
+            None => Ok(()),
         }
-        self.count_clear()
     }
 }
 
@@ -481,7 +491,7 @@ mod tests {
     #[test]
     fn the_clear_stops_then_removes_the_running_relay_after_the_stale_ones() {
         let dir = tempfile::tempdir().unwrap();
-        fake_claude(dir.path()).clear().unwrap();
+        fake_claude(dir.path()).clear(Timestamp(7)).unwrap();
         let calls = calls(dir.path());
         assert_eq!(
             calls,
@@ -652,8 +662,9 @@ mod tests {
         let relay = fake_claude(dir.path());
         fs::create_dir_all(dir.path().join("relay")).unwrap();
         fs::write(dir.path().join("relay/settings.json"), "{}").unwrap();
-        assert_eq!(relay.renew(), Ok(true));
-        assert_eq!(relay.clear_count(), Ok(1));
+        assert_eq!(relay.renew(Timestamp(7)), Ok(()));
+        let last = Some(Timestamp(7));
+        assert_eq!(relay.cleared(), Ok(Cleared { count: 1, last }));
         let calls = calls(dir.path());
         assert!(calls.contains(&"stop e9a38e1e".to_owned()), "{calls:?}");
         assert!(calls.contains(&"rm e9a38e1e".to_owned()), "{calls:?}");
@@ -664,8 +675,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let relay = fake_claude(dir.path());
         relay.write_relay_files().unwrap();
-        assert_eq!(relay.renew(), Ok(false));
-        assert_eq!(relay.clear_count(), Ok(0));
+        assert_eq!(relay.renew(Timestamp(7)), Ok(()));
+        assert_eq!(relay.cleared(), Ok(Cleared::default()));
         let _ = relay.send("[kelpie]", "claude-haiku-4-5-20251001", Effort::Low);
         let calls = calls(dir.path());
         assert!(!calls.contains(&"rm e9a38e1e".to_owned()), "{calls:?}");
@@ -681,10 +692,25 @@ mod tests {
             dir.path().join("shep"),
             "/k/bin/kelpie".into(),
         );
-        assert_eq!(other.clear_count(), Ok(0));
-        clearing.clear().unwrap();
-        clearing.clear().unwrap();
-        assert_eq!(other.clear_count(), Ok(2));
+        assert_eq!(other.cleared(), Ok(Cleared::default()));
+        clearing.clear(Timestamp(100)).unwrap();
+        clearing.clear(Timestamp(200)).unwrap();
+        let last = Some(Timestamp(200));
+        assert_eq!(other.cleared(), Ok(Cleared { count: 2, last }));
+    }
+
+    #[test]
+    fn a_clear_that_cannot_be_counted_deletes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut relay = fake_claude(dir.path());
+        fs::write(dir.path().join("not-a-folder"), "").unwrap();
+        relay.folder = dir.path().join("not-a-folder/relay");
+        let cleared = relay.clear(Timestamp(7));
+        assert!(
+            matches!(cleared, Err(RelayError::CannotCount(_))),
+            "{cleared:?}"
+        );
+        assert!(!dir.path().join("calls").exists(), "claude never ran");
     }
 
     #[test]
