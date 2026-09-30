@@ -109,13 +109,15 @@ impl Wants {
             | RulingKind::MergeRefused { .. }
             | RulingKind::Closed
             | RulingKind::ReviewGuard { .. }
+            | RulingKind::LocalModelSpilled { .. }
             | RulingKind::FixNotPushed { .. }
             | RulingKind::CodeRabbitCap { .. }
             | RulingKind::CodeRabbitSilent { .. }
             | RulingKind::TurnTimeout { .. }
             | RulingKind::TurnFailed { .. }
             | RulingKind::ClaudeFiles { .. }
-            | RulingKind::ForeignChange { .. } => Self::YesOrNo,
+            | RulingKind::ForeignChange { .. }
+            | RulingKind::FollowUp { .. } => Self::YesOrNo,
         }
     }
 

@@ -13,6 +13,7 @@ use super::{
 use crate::channels::Channels;
 use crate::review_bot::Bot;
 use crate::settings::Settings;
+use crate::skills::Skills;
 use crate::webhook::{KelpieSettings, Webhook};
 
 impl Runner {
@@ -60,6 +61,9 @@ impl Runner {
         if settings.review.local != self.settings.review.local {
             check_local(&settings, &self.ports)?;
         }
+        crate::skills::check(&settings.skills, &self.paths.skills)?;
+        let skills = (settings.skills != self.settings.skills)
+            .then(|| Skills::load(&settings.skills, &self.paths.skills));
         self.settings = settings;
         self.reviewers = reviewers;
         self.extra_instructions = extra_instructions;
@@ -76,6 +80,12 @@ impl Runner {
                 "; {} from the runner's next start",
                 waiting.join(" and ")
             ));
+        }
+        if let Some(skills) = skills {
+            for notice in skills.notices() {
+                line.push_str(&format!("\n{notice}"));
+            }
+            self.skills = skills;
         }
         Ok(Some(line))
     }
@@ -106,6 +116,7 @@ fn changed((old, went, was): Reach<'_>, (new, goes, now): Reach<'_>) -> Vec<&'st
         ("pacing", old.pacing != new.pacing),
         ("worker", old.worker != new.worker),
         ("preview", old.preview != new.preview),
+        ("skills", old.skills != new.skills),
         ("webhook", was != now),
     ]
     .into_iter()

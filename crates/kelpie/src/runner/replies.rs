@@ -10,7 +10,7 @@
 //! but not answer them, and each step's code answers once, whatever the
 //! reply that first sent it said: a right code is claimed before anything
 //! else about the reply is read. After [`FAILURES`] wrong codes, answers
-//! from the topic are off for every project until `kelpie totp --unlock`.
+//! from the topic are off for every project until `shep kelpie totp --unlock`.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -83,7 +83,7 @@ type Line = (Webhook, Alert);
 type Handled = Option<(StepReport, Option<Line>)>;
 
 /// The authenticator a runner checks replies against: on an ntfy webhook,
-/// the one `kelpie totp` keeps under `folder`
+/// the one `shep kelpie totp` keeps under `folder`
 ///
 /// `None` elsewhere. The secret need not exist yet: until it does, alerts
 /// say nothing of replies and the topic is not read.
@@ -395,7 +395,7 @@ impl Runner {
                     Ok(Failure::LockedNow) => {
                         let text = format!(
                             "Answers from ntfy are off after {FAILURES} wrong codes. \
-                             Turn them back on with `kelpie totp --unlock` on the terminal. \
+                             Turn them back on with `shep kelpie totp --unlock` on the terminal. \
                              Anyone can post to a topic whose name they know, so think \
                              about moving to a new one."
                         );

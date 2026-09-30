@@ -321,3 +321,179 @@ fn the_start_check_asks_the_server_for_its_models() {
         "{err}"
     );
 }
+
+// Ollama's `/api/ps` with one loaded model.
+fn ps(name: &str, size: u64, vram: u64) -> String {
+    json!({ "models": [{
+        "name": name, "model": name, "size": size, "size_vram": vram,
+        "context_length": 8192, "expires_at": "2026-09-29T21:14:03+01:00",
+    }] })
+    .to_string()
+}
+
+// The placement is read only under the GPU lock kelpie holds, so a round
+// here holds one, in a folder of its own.
+fn leased(url: &str) -> LocalRound {
+    let mut local = local(url, 8192);
+    let LocalRound::Endpoint(endpoint) = &mut local else {
+        unreachable!()
+    };
+    endpoint.gpu_lease = true;
+    local
+}
+
+fn round(
+    dir: &Path,
+    reviewer: &LocalReviewer,
+    local: &LocalRound,
+) -> Result<Vec<Finding>, ReviewerError> {
+    let worktree = repo(dir, "fn a() {}\nfn b() {}\n");
+    reviewer.round(local, &worktree, "origin/main", &dir.join("out"), 1)
+}
+
+fn reviewer(dir: &Path) -> LocalReviewer {
+    LocalReviewer::default().with_temp_dir(dir.join("tmp"))
+}
+
+#[test]
+fn a_model_fully_on_the_gpu_runs_and_is_seated_for_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let recorded = include_str!("../../../../fixtures/ollama-ps.json");
+    let server = StandInEndpoint::start([]).with_ps(recorded);
+    let mut local = leased(server.url());
+    let LocalRound::Endpoint(endpoint) = &mut local else {
+        unreachable!()
+    };
+    endpoint.model = NonBlank::try_from("Qwen3-Coder:30b".to_owned()).unwrap();
+    let reviewer = reviewer(dir.path());
+    assert_eq!(reviewer.seat(), None, "nothing read before a round");
+    assert_eq!(round(dir.path(), &reviewer, &local), Ok(vec![]));
+    assert_eq!(server.requests().len(), 1, "the round ran");
+    let seat = reviewer.seat().unwrap();
+    assert_eq!(seat.name, "qwen3-coder:30b", "names match in any case");
+    assert_eq!(seat.gpu_percent(), 100);
+    assert_eq!(seat.context_length, Some(32768));
+    assert_eq!(
+        seat.expires_at.as_deref(),
+        Some("2026-09-29T21:14:03.118463+01:00")
+    );
+}
+
+#[test]
+fn a_model_partly_on_the_cpu_fails_the_round_before_it_asks_anything() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = StandInEndpoint::start([]).with_ps(&ps("coder:latest", 1000, 400));
+    let reviewer = reviewer(dir.path());
+    let result = round(dir.path(), &reviewer, &leased(server.url()));
+    assert_eq!(
+        result,
+        Err(ReviewerError::Spilled(
+            "the local model coder:latest is 40% on the GPU, \
+             so its rounds would run at CPU speed"
+                .into()
+        ))
+    );
+    assert!(server.requests().is_empty(), "no chat request was sent");
+    assert_eq!(reviewer.seat().unwrap().gpu_percent(), 40);
+}
+
+#[test]
+fn a_round_kelpie_holds_no_lock_for_is_not_checked() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = StandInEndpoint::start([]).with_ps(&ps("coder", 1000, 0));
+    let reviewer = reviewer(dir.path());
+    let unleased = local(server.url(), 8192);
+    assert_eq!(round(dir.path(), &reviewer, &unleased), Ok(vec![]));
+    assert_eq!(reviewer.seat(), None);
+}
+
+#[test]
+fn a_model_that_is_not_loaded_yet_is_not_checked() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = StandInEndpoint::start([]).with_ps(&ps("another:7b", 1000, 0));
+    let reviewer = reviewer(dir.path());
+    assert_eq!(
+        round(dir.path(), &reviewer, &leased(server.url())),
+        Ok(vec![])
+    );
+    assert_eq!(reviewer.seat(), None);
+}
+
+#[test]
+fn a_server_with_no_api_ps_is_not_checked() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = StandInEndpoint::start([]);
+    let reviewer = reviewer(dir.path());
+    let local = leased(server.url());
+    assert_eq!(round(dir.path(), &reviewer, &local), Ok(vec![]));
+    assert_eq!(server.requests().len(), 1, "the round ran");
+    assert_eq!(reviewer.seat(), None);
+    let page = StandInEndpoint::start([]).with_ps("<html>hello</html>");
+    let local = leased(page.url());
+    assert_eq!(round(dir.path(), &reviewer, &local), Ok(vec![]));
+}
+
+fn command(script: &Path, host: &str, model: Option<&str>) -> LocalRound {
+    LocalRound::Command(crate::settings::LocalCommand {
+        command: script.to_owned(),
+        gpu_lease: true,
+        ollama: Some(EndpointUrl::try_from(host.to_owned()).unwrap()),
+        ollama_model: model.map(|m| NonBlank::try_from(m.to_owned()).unwrap()),
+    })
+}
+
+#[test]
+fn a_command_names_its_ollama_host_and_is_stopped_before_it_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let ran = dir.path().join("ran");
+    let script = dir.path().join("review");
+    crate::test::write_script(&script, &format!("#!/bin/sh\ntouch '{}'\n", ran.display()));
+    let server = StandInEndpoint::start([]).with_ps(&ps("anything:1b", 1000, 0));
+    let reviewer = reviewer(dir.path());
+    let result = round(
+        dir.path(),
+        &reviewer,
+        &command(&script, server.host(), None),
+    );
+    assert!(
+        matches!(result, Err(ReviewerError::Spilled(_))),
+        "{result:?}"
+    );
+    assert!(!ran.exists(), "the command never started");
+}
+
+#[test]
+fn a_command_that_names_its_model_ignores_the_host_s_others() {
+    let dir = tempfile::tempdir().unwrap();
+    let ran = dir.path().join("ran");
+    let script = dir.path().join("review");
+    crate::test::write_script(&script, &format!("#!/bin/sh\ntouch '{}'\n", ran.display()));
+    let server = StandInEndpoint::start([]).with_ps(&ps("someone-elses:70b", 1000, 0));
+    let reviewer = reviewer(dir.path());
+    let ours = command(&script, server.host(), Some("mine:14b"));
+    let _ = round(dir.path(), &reviewer, &ours);
+    assert!(
+        ran.exists(),
+        "another model's spill does not fail this round"
+    );
+    let theirs = command(&script, server.host(), Some("someone-elses:70b"));
+    let result = round(dir.path(), &reviewer, &theirs);
+    assert!(
+        matches!(result, Err(ReviewerError::Spilled(_))),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn an_ollama_host_that_cannot_be_reached_fails_the_round_and_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = unreachable_url();
+    let err = round(dir.path(), &reviewer(dir.path()), &leased(&url)).unwrap_err();
+    let ReviewerError::Failed(why) = err else {
+        panic!("{err:?}")
+    };
+    assert!(
+        why.starts_with("cannot reach http://127.0.0.1:1/api/ps: "),
+        "{why}"
+    );
+}

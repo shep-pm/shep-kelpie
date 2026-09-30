@@ -434,7 +434,7 @@ fn five_wrong_codes_turn_answers_off_until_the_terminal_turns_them_on() {
     assert_eq!(
         lines(&rig),
         ["Answers from ntfy are off after 5 wrong codes. \
-          Turn them back on with `kelpie totp --unlock` on the terminal. \
+          Turn them back on with `shep kelpie totp --unlock` on the terminal. \
           Anyone can post to a topic whose name they know, so think \
           about moving to a new one."]
     );

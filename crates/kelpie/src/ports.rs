@@ -18,13 +18,19 @@ use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
 use crate::review_bot::{Activity, Login, Profile};
-use crate::settings::{Effort, ForgeSlug, LocalRound};
+use crate::settings::{Effort, ForgeSlug};
 use crate::shots::{ShotsJob, ShotsRun};
 use crate::webhook::Webhook;
 
 mod local_paths;
+mod model_seat;
+mod relay;
+mod reviewer;
 
 pub use local_paths::Guarded;
+pub use model_seat::ModelSeat;
+pub use relay::{Relay, RelayError};
+pub use reviewer::{Reviewer, ReviewerError};
 
 /// Seconds since the Unix epoch
 // wire format: changing this is a breaking change to the state file
@@ -145,6 +151,26 @@ pub trait Forge: Send {
     ///
     /// [`ForgeError`] when the comment is gone or cannot be edited.
     fn edit_comment(&self, repo: &ForgeSlug, id: u64, body: &str) -> Result<(), ForgeError>;
+
+    /// The open issues on `repo`, for telling a finding already filed
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn open_issues(&self, repo: &ForgeSlug) -> Result<Vec<OpenIssue>, ForgeError>;
+
+    /// Opens an issue on `repo` with these labels, and returns its number
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses, or its answer names no number.
+    fn create_issue(
+        &self,
+        repo: &ForgeSlug,
+        title: &str,
+        body: &str,
+        labels: &[&str],
+    ) -> Result<u64, ForgeError>;
 
     /// Marks draft pull request `number` ready for review
     ///
@@ -309,6 +335,17 @@ pub struct Issue {
     pub labels: Vec<String>,
 }
 
+/// An open issue, as the follow-up check reads it
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenIssue {
+    /// Its number
+    pub number: u64,
+    /// Its title
+    pub title: String,
+    /// Its body, as written
+    pub body: String,
+}
+
 /// Why a forge call failed
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ForgeError {
@@ -409,6 +446,8 @@ pub struct ClaudeCall {
     pub prompt: String,
     /// The MCP servers the session starts with, beside any the repo names
     pub mcp_config: Option<PathBuf>,
+    /// The plugin folders its steps' skills are in, each passed to `--plugin-dir`
+    pub plugin_dirs: Vec<PathBuf>,
     /// Kills the call, and returns [`ClaudeError::TimedOut`], once it has
     /// run this long
     pub timeout: Option<Duration>,
@@ -669,69 +708,6 @@ impl fmt::Display for AlertError {
 
 impl core::error::Error for AlertError {}
 
-/// Sends a ruling to the maintainer's relay session
-///
-/// The relay is one background Claude Code session, found by its fixed
-/// name so a second one is never started. Sending only delivers the
-/// message: the relay's own reply, if any, is not read here. The
-/// maintainer's answer comes back later through `shep trigger`, on its own.
-pub trait Relay: Send + Sync {
-    /// Sends `message`, starting the relay first if none is running
-    ///
-    /// `model` and `effort` are passed to `--model`/`--effort` only when a
-    /// start is needed: a relay already running keeps what it started with.
-    ///
-    /// # Errors
-    ///
-    /// [`RelayError`] when the relay cannot be started or reached.
-    fn send(&self, message: &str, model: &str, effort: Effort) -> Result<(), RelayError>;
-
-    /// Sends `message` to the relay if one is running, and never starts one
-    ///
-    /// A relay started afresh never asked what `message` is about.
-    ///
-    /// # Errors
-    ///
-    /// [`RelayError`] when a running relay cannot be reached.
-    fn tell(&self, message: &str) -> Result<(), RelayError>;
-
-    /// Deletes the relay, if one exists, conversation included, so kelpie
-    /// starts a fresh one next time and nothing a worker's question tried
-    /// to carry into it survives the clear
-    ///
-    /// # Errors
-    ///
-    /// [`RelayError`] when a running relay could not be deleted. Not an
-    /// error when none was running.
-    fn clear(&self) -> Result<(), RelayError>;
-}
-
-/// Why the relay could not be reached
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RelayError {
-    /// The relay session could not be started, with the reason
-    CannotStart(String),
-    /// The relay was started but never appeared in `claude agents --json --all`
-    NeverAppeared,
-    /// Its messaging socket could not be reached, with the reason
-    Unreachable(String),
-    /// A running relay could not be stopped, with the reason
-    CannotStop(String),
-}
-
-impl fmt::Display for RelayError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::CannotStart(reason) => write!(f, "cannot start the relay: {reason}"),
-            Self::NeverAppeared => f.write_str("the relay never appeared after starting"),
-            Self::Unreachable(reason) => write!(f, "cannot reach the relay: {reason}"),
-            Self::CannotStop(reason) => write!(f, "cannot stop the relay: {reason}"),
-        }
-    }
-}
-
-impl core::error::Error for RelayError {}
-
 /// How serious a review finding is
 ///
 /// Qwen and the Claude review round report only these three; the judge may
@@ -836,61 +812,6 @@ pub struct Verdict {
     /// One sentence
     pub reason: String,
 }
-
-/// Runs one local round, of the kind the project's settings choose
-pub trait Reviewer: Send + Sync {
-    /// Checks, as the runner starts, that `local` can run: its command is
-    /// there, or its endpoint answers
-    ///
-    /// # Errors
-    ///
-    /// Why it cannot, naming the command or the endpoint.
-    fn check(&self, local: &LocalRound) -> Result<(), String>;
-
-    /// Runs `local` for round `round` against `worktree`'s diff from `base`,
-    /// usually `origin/main`, writing its findings under `out`
-    ///
-    /// # Errors
-    ///
-    /// [`ReviewerError`] when the round cannot be run or did not finish.
-    fn round(
-        &self,
-        local: &LocalRound,
-        worktree: &std::path::Path,
-        base: &str,
-        out: &std::path::Path,
-        round: u32,
-    ) -> Result<Vec<Finding>, ReviewerError>;
-}
-
-/// Why a local round did not produce findings
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReviewerError {
-    /// The command could not be started, with the OS's reason
-    Spawn(String),
-    /// The command ran and exited unsuccessfully, with this on stderr
-    Failed(String),
-    /// The command exited successfully but left no completion marker
-    Incomplete,
-    /// The round was ended because the runner is stopping
-    Stopped,
-    /// The endpoint answered with something other than a chat completion
-    Unreadable(String),
-}
-
-impl fmt::Display for ReviewerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Spawn(error) => write!(f, "cannot run the local round: {error}"),
-            Self::Failed(stderr) => write!(f, "the local round failed: {}", stderr.trim()),
-            Self::Incomplete => f.write_str("the local round left no completion marker"),
-            Self::Stopped => f.write_str("the local round was stopped with the runner"),
-            Self::Unreadable(reply) => write!(f, "the local round's reply is unreadable: {reply}"),
-        }
-    }
-}
-
-impl core::error::Error for ReviewerError {}
 
 /// Takes a work item's shots
 pub trait Shots: Send + Sync {

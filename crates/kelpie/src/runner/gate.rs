@@ -19,6 +19,7 @@ use super::rework::HUMAN;
 use crate::board::READY;
 use crate::ports::{Checks, PullRequestState, Timestamp};
 use crate::settings::MergeAuthority;
+use crate::skills::Step;
 use crate::state::{RulingKind, StateError};
 use crate::work_item::{Phase, Turn, foreign_change};
 use crate::worktree::{self, Base};
@@ -149,7 +150,9 @@ impl Runner {
             return self.raise(number, RulingKind::StillRed { head, checks });
         }
         let issue = item.issue;
-        let prompt = red_prompt(number, &head, &checks);
+        let prompt = self
+            .skills
+            .invoke(Step::Ci, &red_prompt(number, &head, &checks));
         let red = head.clone();
         self.update(|item| {
             item.red_head = Some(red);
@@ -290,10 +293,11 @@ pub(super) mod tests {
         let [first, fix] = rig.claude.calls().try_into().unwrap();
         assert_eq!(fix.session, Session::Resume(first.session.id().clone()));
         let named = format!(
-            "CI failed on your pull request #71 at {}: lint, test. ",
+            "\nCI failed on your pull request #71 at {}: lint, test. ",
             &head[..7]
         );
-        assert!(fix.prompt.starts_with(&named), "{}", fix.prompt);
+        assert!(fix.prompt.starts_with("/mattpocock:diagnosing-bugs "));
+        assert!(fix.prompt.contains(&named), "{}", fix.prompt);
 
         let fixed = rig.forge.head_of("kelpie/7").unwrap();
         assert_ne!(fixed, head);

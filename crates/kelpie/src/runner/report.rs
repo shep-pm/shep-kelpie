@@ -254,6 +254,19 @@ pub enum StepReport {
         /// Its qwen rounds
         qwen: QwenTally,
     },
+    /// Findings a merged pull request left unfixed were filed
+    FollowUpsFiled {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The issues opened, one per finding
+        opened: Vec<u64>,
+        /// The open issues that already held a finding, and got a comment
+        commented: Vec<u64>,
+        /// How many findings were left out because the text names a folder on this machine
+        skipped: usize,
+    },
     /// A ruling was posted to the maintainer's webhook
     Alerted {
         /// The ruling's id
@@ -558,6 +571,9 @@ pub(super) enum ReviewResult {
     Findings(Result<Vec<Finding>, String>),
     /// The judge's verdict on one finding
     Verdict(Result<Verdict, String>),
+    /// The local model sat partly or wholly on the CPU, so the round did not
+    /// run, and why
+    Spilled(String),
     /// The call was ended because the runner is stopping, before it came
     /// back with anything
     Stopped,

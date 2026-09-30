@@ -125,7 +125,7 @@ impl Rig {
     /// The rig's authenticator secret: RFC 6238's SHA-1 key, in base32
     pub(crate) const TOTP_SECRET: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
 
-    /// Writes [`Self::TOTP_SECRET`] where `kelpie totp` would, for its owner alone
+    /// Writes [`Self::TOTP_SECRET`] where `shep kelpie totp` would, for its owner alone
     pub(crate) fn write_totp_secret(&self) {
         use std::os::unix::fs::PermissionsExt;
         let folder = self.paths().totp;

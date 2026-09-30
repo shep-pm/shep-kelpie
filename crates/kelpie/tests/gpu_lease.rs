@@ -108,15 +108,28 @@ fn run_removes_the_lock_when_interrupted() {
     let s = Scratch::new();
     // Its own process group, so the interrupt reaches kelpie and the
     // command together, as a terminal's does.
+    // The command says when it has started, since an interrupt before that
+    // reaches only kelpie, and the unit test in `lease/cli.rs` covers it.
+    let started = s.temp.path().join("started");
+    let script = r#"touch "$0"; exec sleep 30"#;
     let child = {
         use std::os::unix::process::CommandExt;
-        s.kelpie(&["lease", "run", "gpu", "--", "sleep", "30"])
-            .process_group(0)
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap()
+        s.kelpie(&[
+            "lease",
+            "run",
+            "gpu",
+            "--",
+            "sh",
+            "-c",
+            script,
+            started.to_str().unwrap(),
+        ])
+        .process_group(0)
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap()
     };
-    until("the lock", Duration::from_secs(5), || s.lock().exists());
+    until("the command", Duration::from_secs(5), || started.exists());
     let group = format!("-{}", child.id());
     Command::new("kill")
         .args(["-INT", "--", &group])

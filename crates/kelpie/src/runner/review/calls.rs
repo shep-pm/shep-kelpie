@@ -14,6 +14,7 @@ use crate::ports::{ClaudeCall, Finding, Role, Session, Severity, Verdict};
 use crate::runner::turn;
 use crate::settings::RoleModel;
 use crate::shots::ShotsRun;
+use crate::skills::{Skills, Step};
 use crate::work_item::new_session_id;
 
 /// The Claude round's throwaway settings: no sandbox fencing, no bypassed
@@ -24,6 +25,9 @@ const REVIEW_SETTINGS_FILE: &str = "review-settings.json";
 /// The judge's throwaway settings: every tool denied, so its one-shot answer
 /// is schema-constrained text and nothing it read on the side
 const JUDGE_SETTINGS_FILE: &str = "judge-settings.json";
+
+/// The tools a Claude round never uses: sub-agents, under either name, and commands
+const REVIEWER_DENIES: [&str; 3] = ["Agent", "Task", "Bash"];
 
 /// Every tool name a Claude Code call can reach, denied outright for the judge
 const NO_TOOLS: [&str; 11] = [
@@ -54,6 +58,7 @@ pub(super) fn reviewer_call(
     worker_folder: &Path,
     model: &RoleModel,
     shots: Option<Screens<'_>>,
+    skills: &Skills,
 ) -> Result<ClaudeCall, String> {
     let diff = diff_against(worktree, base)?;
     let settings = review_settings(worker_folder, shots.map(|s| s.dir))?;
@@ -61,7 +66,10 @@ pub(super) fn reviewer_call(
     if let Some(shots) = shots {
         prompt.push_str(&shots_prompt(shots.run));
     }
-    build_call(Role::Reviewer, issue, worktree, model, settings, prompt)
+    let prompt = skills.invoke(Step::Review, &prompt);
+    let mut call = build_call(Role::Reviewer, issue, worktree, model, settings, prompt)?;
+    call.plugin_dirs = skills.plugin_dirs().to_vec();
+    Ok(call)
 }
 
 // A finding that names a PNG under `shots` is about a screenshot, and its
@@ -104,8 +112,8 @@ fn is_shot(file: &str, dir: &Path) -> bool {
 }
 
 // The shape every call the review loop makes itself shares: a fresh
-// session, the worktree as its folder, no instructions file, and whatever
-// role, settings and prompt its caller worked out.
+// session, the worktree as its folder, no instructions file, no plugins unless
+// the caller adds them, and whatever role, settings and prompt it worked out.
 fn build_call(
     role: Role,
     issue: u64,
@@ -127,16 +135,18 @@ fn build_call(
         prompt,
         timeout: None,
         mcp_config: None,
+        plugin_dirs: Vec::new(),
     })
 }
 
 fn review_settings(worker_folder: &Path, shots: Option<&Path>) -> Result<PathBuf, String> {
     let path = worker_folder.join(REVIEW_SETTINGS_FILE);
-    let settings = match shots {
+    // A review skill may spawn sub-agents or run commands; the round does neither.
+    let mut settings = serde_json::json!({ "permissions": { "deny": REVIEWER_DENIES } });
+    if let Some(dir) = shots {
         // Read outside the worktree is refused under `-p` unless the folder is added.
-        Some(dir) => serde_json::json!({ "permissions": { "additionalDirectories": [dir] } }),
-        None => serde_json::json!({}),
-    };
+        settings["permissions"]["additionalDirectories"] = serde_json::json!([dir]);
+    }
     let text = serde_json::to_string_pretty(&settings).expect("settings are JSON");
     turn::write(worker_folder, &path, &text)?;
     Ok(path)
@@ -381,8 +391,58 @@ mod tests {
             .expect("a reviewer round ran");
         assert_eq!(
             reviewer.settings,
-            json!({}),
-            "no tool is denied, unlike the judge's"
+            json!({ "permissions": { "deny": ["Agent", "Task", "Bash"] } }),
+            "Read, Grep and Glob stay, unlike the judge's"
         );
+    }
+
+    // The review skill answers under its own headings and spawns sub-agents
+    // unless kelpie's headless rules and denies hold it to kelpie's format.
+    #[test]
+    #[ignore = "runs one real Claude round through the vendored code-review skill, about 1 min"]
+    fn a_live_claude_round_through_the_code_review_skill_reads_as_findings() {
+        use crate::adapters::ClaudeCli;
+        use crate::ports::{Claude, read_review};
+        use crate::settings::{Effort, StepSkills};
+        use crate::test::git;
+
+        let home = tempfile::tempdir().unwrap();
+        let repo = home.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(
+            repo.join("lib.rs"),
+            "pub fn half(n: u32) -> u32 {\n    n / 2\n}\n",
+        )
+        .unwrap();
+        git(&repo, &["add", "."]);
+        git(
+            &repo,
+            &[
+                "-c",
+                "user.name=k",
+                "-c",
+                "user.email=k@k",
+                "commit",
+                "-qm",
+                "half",
+            ],
+        );
+        let base = git(&repo, &["rev-parse", "HEAD"]);
+        let changed = "/// Returns the average of `a` and `b`\npub fn average(a: u32, b: u32) -> u32 {\n    \
+                       (a + b) / 2\n}\n\npub fn half(n: u32) -> u32 {\n    n / 2\n}\n";
+        std::fs::write(repo.join("lib.rs"), changed).unwrap();
+
+        let skills = Skills::load(&StepSkills::default(), &home.path().join("skills"));
+        let model = RoleModel {
+            model: "claude-sonnet-5".to_owned().try_into().unwrap(),
+            effort: Effort::Medium,
+        };
+        let worker = home.path().join("worker");
+        let call = reviewer_call(71, &repo, &base, &worker, &model, None, &skills).unwrap();
+        let reply = ClaudeCli::default().run(&call).expect("the round ran");
+        println!("--- reply ---\n{}\n--- end ---", reply.text);
+        let findings = read_review(&reply.text).expect("the reply reads as a review");
+        println!("{} finding(s): {findings:#?}", findings.len());
     }
 }

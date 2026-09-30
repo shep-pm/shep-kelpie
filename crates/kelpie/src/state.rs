@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
-use crate::ports::Timestamp;
+use crate::ports::{Finding, Timestamp};
 use crate::review_bot::Bot;
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
 
@@ -165,6 +165,9 @@ pub struct Ruling {
     /// any other way
     #[serde(default)]
     pub relayed: bool,
+    /// Whether a clear took it from the relay, which is sent it again
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resend: bool,
 }
 
 /// Where reading replies on the webhook's topic has got to
@@ -249,6 +252,15 @@ pub enum RulingKind {
         /// The review, at the round the guard stopped it on
         review: Review,
     },
+    /// The local model sat partly or wholly on the CPU, so a review round was
+    /// not run. A yes runs the same round again, once the model is back on
+    /// the GPU.
+    LocalModelSpilled {
+        /// The review, at the round that was not run
+        review: Review,
+        /// Which model, and how much of it is on the GPU
+        reason: String,
+    },
     /// The worker's fix turn for held findings ended with nothing pushed. A
     /// yes sends it the same findings again.
     FixNotPushed {
@@ -283,6 +295,16 @@ pub enum RulingKind {
         bot: Bot,
         /// The head the summon was for
         head: String,
+    },
+    /// A merged pull request left confirmed findings unfixed. A yes files
+    /// each as an issue on the project, and a no drops them.
+    FollowUp {
+        /// The findings, at the judge's severity
+        findings: Vec<Finding>,
+        /// Why the forge would not take them, when it has refused for hours
+        /// and a yes tries again. None when the ruling comes before filing.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        refused: Option<String>,
     },
     /// The worker ended its turn on a question. The answer is its next turn.
     Question {

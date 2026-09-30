@@ -11,8 +11,10 @@ use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage, Verdict};
 use crate::review_bot::Bot;
 use crate::shots::ShotsRecord;
 
+mod follow_ups;
 mod spend;
 
+pub use follow_ups::FollowUps;
 pub use spend::{QwenTally, RoleSpend, Spend};
 
 /// The work item in flight
@@ -111,6 +113,14 @@ pub struct WorkItem {
     /// The pull request's shots comment, once posted
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shots_comment: Option<u64>,
+    /// Every finding kelpie has sent the worker to fix, across rounds. The
+    /// worker can only defer one of these.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub held: Vec<Finding>,
+    /// The findings the worker left unfixed, read once the pull request
+    /// merges. None until then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_ups: Option<FollowUps>,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
 }
@@ -440,6 +450,17 @@ pub enum ReviewStage {
 }
 
 impl WorkItem {
+    /// Remembers findings sent to the worker, once each
+    pub fn record_held(&mut self, held: &[Finding]) {
+        let same =
+            |a: &Finding, b: &Finding| (&a.file, a.line, &a.what) == (&b.file, b.line, &b.what);
+        for finding in held {
+            if !self.held.iter().any(|known| same(known, finding)) {
+                self.held.push(finding.clone());
+            }
+        }
+    }
+
     /// Records the head kelpie's own catch-up with `main` pushed, which
     /// CodeRabbit has not read
     pub fn caught_up(&mut self, head: Option<String>) {

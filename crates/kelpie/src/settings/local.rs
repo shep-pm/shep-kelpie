@@ -36,6 +36,8 @@ impl Default for LocalRound {
         Self::Command(LocalCommand {
             command: PathBuf::from(QWEN_REVIEW),
             gpu_lease: false,
+            ollama: None,
+            ollama_model: None,
         })
     }
 }
@@ -52,6 +54,50 @@ impl LocalRound {
             Self::Off {} => false,
             Self::Endpoint(endpoint) => endpoint.gpu_lease,
             Self::Command(command) => command.gpu_lease,
+        }
+    }
+
+    /// Why the settings are refused, when one cannot work as written
+    ///
+    /// # Errors
+    ///
+    /// The message, naming the setting.
+    pub fn check(&self) -> Result<(), String> {
+        let Self::Command(command) = self else {
+            return Ok(());
+        };
+        match (&command.ollama, &command.ollama_model) {
+            (Some(_), _) if !command.gpu_lease => Err("`review.local.ollama` needs \
+                 `gpu_lease = true`: without it kelpie reads `/api/ps` while another \
+                 round may hold the GPU lock, and would rule on that round's model"
+                .into()),
+            (None, Some(_)) => Err("`review.local.ollama_model` needs `ollama`".into()),
+            _ => Ok(()),
+        }
+    }
+
+    /// The Ollama host to read `/api/ps` from before a round, and the model
+    /// to look for there
+    ///
+    /// Only where kelpie holds the GPU lock around the round: a read without
+    /// it races whoever holds the lock, who may reload the model spilled. An
+    /// endpoint's host is its URL without the `/v1`, and its model is the one
+    /// it asks. A command names its host in `ollama` and may name its model
+    /// in `ollama_model`, else every model the host has loaded is looked at.
+    pub fn ollama(&self) -> Option<(String, Option<&str>)> {
+        match self {
+            Self::Off {} => None,
+            Self::Endpoint(endpoint) if endpoint.gpu_lease => {
+                let url = endpoint.url.as_str();
+                let host = url.strip_suffix("/v1").unwrap_or(url);
+                Some((host.to_owned(), Some(endpoint.model.as_str())))
+            }
+            Self::Endpoint(_) => None,
+            Self::Command(command) => {
+                let host = command.ollama.as_ref()?;
+                let model = command.ollama_model.as_ref().map(NonBlank::as_str);
+                Some((host.as_str().to_owned(), model))
+            }
         }
     }
 }
@@ -82,6 +128,18 @@ pub struct LocalCommand {
     /// and off for a command that takes the lock itself.
     #[serde(default)]
     pub gpu_lease: bool,
+    /// The Ollama host the command's model runs on, such as
+    /// `http://localhost:11434`. Kelpie reads its `/api/ps` before each round.
+    /// Off when absent, since a command does not say where its model is.
+    /// Needs `gpu_lease = true`, so kelpie reads it only while it holds the
+    /// GPU lock.
+    #[serde(default)]
+    pub ollama: Option<EndpointUrl>,
+    /// The one model on that host the command uses, as Ollama names it.
+    /// Without it every model the host has loaded is checked, and one that
+    /// is spilled for another reason fails the round too.
+    #[serde(default)]
+    pub ollama_model: Option<NonBlank>,
 }
 
 /// An `http://` or `https://` URL, kept without a trailing `/`
@@ -168,7 +226,55 @@ mod tests {
         LocalRound::Command(LocalCommand {
             command: PathBuf::from(path),
             gpu_lease: false,
+            ollama: None,
+            ollama_model: None,
         })
+    }
+
+    #[test]
+    fn the_ollama_host_is_an_endpoints_url_or_a_commands_own_setting() {
+        let table = "[app.dogs.kelpie.review.local]\nkind = \"endpoint\"\n\
+                     url = \"http://gpu-box:11434/v1/\"\nmodel = \"coder\"\ncontext = 8192\n";
+        assert_eq!(
+            with_table(table).unwrap().review.local.ollama(),
+            None,
+            "not read where kelpie holds no GPU lock"
+        );
+        let table = format!("{table}gpu_lease = true\n");
+        assert_eq!(
+            with_table(&table).unwrap().review.local.ollama(),
+            Some(("http://gpu-box:11434".to_owned(), Some("coder")))
+        );
+        let table = "[app.dogs.kelpie.review.local]\nkind = \"command\"\n\
+                     command = \"/opt/review\"\ngpu_lease = true\n";
+        assert_eq!(with_table(table).unwrap().review.local.ollama(), None);
+        let table = format!("{table}ollama = \"http://gpu-box:11434/\"\n");
+        assert_eq!(
+            with_table(&table).unwrap().review.local.ollama(),
+            Some(("http://gpu-box:11434".to_owned(), None))
+        );
+        let table = format!("{table}ollama_model = \"coder:14b\"\n");
+        assert_eq!(
+            with_table(&table).unwrap().review.local.ollama(),
+            Some(("http://gpu-box:11434".to_owned(), Some("coder:14b")))
+        );
+        assert_eq!(LocalRound::Off {}.ollama(), None);
+    }
+
+    #[test]
+    fn an_ollama_host_without_the_gpu_lease_or_a_model_without_a_host_is_refused() {
+        let table = "[app.dogs.kelpie.review.local]\nkind = \"command\"\n\
+                     command = \"/opt/review\"\n";
+        let err = with_table(&format!("{table}ollama = \"http://h:1\"\n")).unwrap_err();
+        assert!(
+            err.contains("`review.local.ollama` needs `gpu_lease = true`"),
+            "{err}"
+        );
+        let err = with_table(&format!("{table}ollama_model = \"m\"\ngpu_lease = true\n"));
+        assert!(
+            err.unwrap_err()
+                .contains("`review.local.ollama_model` needs `ollama`")
+        );
     }
 
     #[test]

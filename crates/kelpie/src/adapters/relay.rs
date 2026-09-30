@@ -260,17 +260,20 @@ impl RelayCli {
 
 impl Relay for RelayCli {
     fn send(&self, message: &str, model: &str, effort: Effort) -> Result<(), RelayError> {
-        let (settings, instructions, changed) = self.write_relay_files()?;
-        // A relay reads both files only when it starts, so one started on
-        // older ones is cleared, and the send starts a fresh one.
-        if changed {
-            self.clear()?;
-        }
+        let (settings, instructions, _) = self.write_relay_files()?;
         let (found, fresh) = self.ensure_running(&settings, &instructions, model, effort)?;
         if fresh {
             thread::sleep(SOCKET_GRACE);
         }
         self.deliver(&found, message)
+    }
+
+    fn renew(&self) -> Result<bool, RelayError> {
+        let (_, _, changed) = self.write_relay_files()?;
+        if changed {
+            self.clear()?;
+        }
+        Ok(changed)
     }
 
     fn tell(&self, message: &str) -> Result<(), RelayError> {
@@ -617,15 +620,13 @@ mod tests {
         );
     }
 
-    // The fake's roster still lists the live relay after it is removed, so
-    // each send goes on to fail reading its session; the calls are the test.
     #[test]
-    fn a_relay_started_on_older_files_is_cleared_before_a_send() {
+    fn a_relay_started_on_older_files_is_cleared_by_a_renew() {
         let dir = tempfile::tempdir().unwrap();
         let relay = fake_claude(dir.path());
         fs::create_dir_all(dir.path().join("relay")).unwrap();
         fs::write(dir.path().join("relay/settings.json"), "{}").unwrap();
-        let _ = relay.send("[kelpie]", "claude-haiku-4-5-20251001", Effort::Low);
+        assert_eq!(relay.renew(), Ok(true));
         let calls = calls(dir.path());
         assert!(calls.contains(&"stop e9a38e1e".to_owned()), "{calls:?}");
         assert!(calls.contains(&"rm e9a38e1e".to_owned()), "{calls:?}");
@@ -636,6 +637,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let relay = fake_claude(dir.path());
         relay.write_relay_files().unwrap();
+        assert_eq!(relay.renew(), Ok(false));
         let _ = relay.send("[kelpie]", "claude-haiku-4-5-20251001", Effort::Low);
         let calls = calls(dir.path());
         assert!(!calls.contains(&"rm e9a38e1e".to_owned()), "{calls:?}");
