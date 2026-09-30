@@ -1,18 +1,22 @@
-//! Kelpie in the maintainer's own flock: `shep kelpie add`, `start`,
-//! `pause` and `status`
+//! Kelpie in the maintainer's own flock: `shep kelpie <verb>`
 //!
 //! shep runs an adopted dog as `shep kelpie <args>`, in the caller's folder,
 //! with `SHEP_HOME` naming the shepherd. `add` registers a checkout's runner
-//! as a sheep of that shepherd, and the others drive it with the triggers
-//! `shep trigger` sends. The adopted kelpie, enabled, is the dog that holds
-//! the leases (ADR 0004).
+//! as a sheep of that shepherd, and every other verb sends it the trigger
+//! `shep trigger` would, to the project `-p` names or whose repo holds the
+//! folder. The adopted kelpie, enabled, is the dog that holds the leases
+//! (ADR 0004).
 
 pub mod add;
 pub mod control;
+pub mod rule;
+mod verbs;
+
+pub use verbs::{USAGE, VERBS, main, split_project};
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{Command, Stdio};
 
 use serde_json::{Map, Value};
 use shep_client::Client;
@@ -22,76 +26,9 @@ use shep_client::shep_core::protocol::{Request, SelectorSpec};
 use shep_client::shep_core::status::ProcStatus;
 use shep_client::shep_core::values::UpDuration;
 
-use crate::adapters::Gh;
-use crate::runner::{ProjectName, ProjectPaths};
+use crate::runner::ProjectName;
 use crate::settings::ForgeSlug;
-use crate::shepherd::{self, DOG};
-
-/// Runs `kelpie <command> <args>` for `add`, `start`, `pause` or `status`
-pub fn main(command: &str, args: &[String]) -> ExitCode {
-    let ran = crate::shep_home::required(crate::shep_home::FLOCK_FIX)
-        .and_then(|shep_home| shepherd::block_on(run(&shep_home, command, args)));
-    match ran {
-        Ok(lines) => {
-            for line in lines {
-                println!("{line}");
-            }
-            ExitCode::SUCCESS
-        }
-        Err(message) => {
-            eprintln!("kelpie {command}: {message}");
-            ExitCode::FAILURE
-        }
-    }
-}
-
-async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<String>, String> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or("HOME is not set")?;
-    let here = std::env::current_dir().map_err(|e| format!("cannot read this folder: {e}"))?;
-    let client = shepherd::connect(shep_home)
-        .await
-        .map_err(|e| e.describe(shep_home))?;
-    let named = match args {
-        [] => None,
-        [name] => Some(ProjectName::try_from(name.as_str()).map_err(|e| e.to_string())?),
-        _ => return Err(format!("usage: kelpie {command} [<project>]")),
-    };
-    // Named, or the one this checkout runs.
-    let project = async || match &named {
-        Some(name) => Ok(name.clone()),
-        None => control::project_here(&client, &Checkout::of(&here)?.root, &home).await,
-    };
-    match (command, args) {
-        ("add", _) => {
-            let checkout = Checkout::of(&here)?;
-            let name = match named {
-                Some(name) => name,
-                None => ProjectName::try_from(checkout.forge.name()).map_err(|e| e.to_string())?,
-            };
-            let kelpie_home = std::env::var_os("KELPIE_HOME").map(PathBuf::from);
-            let launch = Launch {
-                kelpie: std::env::current_exe()
-                    .map_err(|e| format!("cannot find kelpie itself: {e}"))?,
-                shep_home: shep_home.to_owned(),
-                kelpie_home: kelpie_home.clone(),
-            };
-            let kelpie_home = kelpie_home.unwrap_or_else(|| home.join(".kelpie"));
-            let old = ProjectPaths::under(&kelpie_home, &name).settings;
-            let place = add::Place {
-                checkout: &checkout,
-                home: &home,
-                old_settings: &old,
-            };
-            add::add(&client, &Gh, &launch, &name, place).await
-        }
-        ("start", _) => control::start(&client, &project().await?).await,
-        ("pause", _) => control::pause(&client, &project().await?).await,
-        ("status", []) => control::status(&client).await,
-        _ => Err(format!("usage: kelpie {command}")),
-    }
-}
+use crate::shepherd::DOG;
 
 /// A git checkout, and the forge repo its `origin` remote names
 #[derive(Debug, Clone, PartialEq, Eq)]

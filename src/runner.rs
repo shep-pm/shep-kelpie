@@ -16,6 +16,7 @@ use crate::ports::{ForgeError, Guarded, Ports, SessionId, Timestamp, Visibility}
 use crate::review_bot::{Bot, Profile, Reviewers};
 use crate::settings::{Settings, SettingsError};
 use crate::skills::Skills;
+use crate::state::ids::RulingIds;
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{
@@ -48,6 +49,7 @@ mod several;
 mod shots;
 mod trigger;
 mod turn;
+mod words;
 
 pub use crate::coderabbit::LABEL as SUMMON_LABEL;
 pub use adopt::AdoptError;
@@ -62,6 +64,7 @@ use trigger::issue_list;
 pub use trigger::{ACTIONS, RELAY_RULE, Status, WorkItemStatus, answer, is_no_or_answer};
 pub use trigger::{GateError, WhichItem};
 pub use turn::step;
+pub use words::read_answer;
 
 #[cfg(test)]
 pub(crate) use gate::CHECKS_SETTLE;
@@ -305,6 +308,7 @@ impl Runner {
         Names {
             project: self.project.as_str(),
             bot: names.join("/"),
+            ids: RulingIds::under(&self.paths.kelpie_home),
         }
     }
 
@@ -551,11 +555,12 @@ fn check_local(settings: &Settings, ports: &Ports) -> Result<(), SettingsError> 
 }
 
 // What a ruling's question names: its project, and the review bots it may
-// be about, as one name.
+// be about, as one name, and where its id comes from.
 #[derive(Debug, Clone)]
 struct Names<'a> {
     project: &'a str,
     bot: String,
+    ids: RulingIds,
 }
 
 // Every listed reviewer needs a definition in kelpie's settings and a profile.

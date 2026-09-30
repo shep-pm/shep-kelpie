@@ -134,9 +134,9 @@ mod tests {
             question,
             format!(
                 "Pull request #71 at {} changes Claude Code's own files, which run outside \
-                 the worker's sandbox: .claude/settings.json. `shep trigger shep rule '1 yes'` \
+                 the worker's sandbox: .claude/settings.json. `shep kelpie rule 1 yes` \
                  accepts them at that head and kelpie carries on, and \
-                 `shep trigger shep rule '1 no <note>'` stops the work item, keeping its \
+                 `shep kelpie rule 1 no <note>` stops the work item, keeping its \
                  branch and pull request on the forge.",
                 short(&head)
             )

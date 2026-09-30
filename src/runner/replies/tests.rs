@@ -51,7 +51,6 @@ fn the_alert_says_how_to_reply_and_carries_no_code() {
     assert_eq!(
         alert.reply,
         Some(ReplyWith {
-            project: "koji".into(),
             id: 1,
             takes: Takes::YesOrNo
         })
@@ -100,13 +99,12 @@ fn a_reply_without_the_right_code_is_ignored() {
     let wrong = format!("{:06}", (code.parse::<u32>().unwrap() + 1) % 1_000_000);
     for reply in [
         "koji 1 yes".to_owned(),
-        format!("1 yes {code}"),
         format!("1 yes {wrong}"),
         format!("1 yes {stale}"),
         format!("1 yes {}", &code[..5]),
         format!("1 yes {code}0"),
         format!("{code} 1 yes"),
-        format!("1 merge {code}"),
+        format!("1 {code}"),
         format!("2 yes {code}"),
         "hello from the phone".to_owned(),
     ] {
@@ -188,7 +186,7 @@ fn a_reply_to_a_settled_ruling_runs_nothing_and_the_topic_is_told() {
 fn a_reply_rule_refuses_is_told_on_the_topic() {
     let (rig, runner, _) = alerted("koji");
     rig.reply("koji 1 answer merge it");
-    let reason = "ruling 1 is not a question, so it takes a yes, or a no with a note";
+    let reason = "it takes `yes`, or `no <note>`";
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::ReplyRefused {
@@ -241,6 +239,60 @@ fn a_questions_answer_by_reply_is_the_workers_next_turn() {
         answered.prompt,
         "The maintainer answered your question:\n\nuse --dry-run, it matches shep.\n"
     );
+}
+
+#[test]
+fn a_reply_takes_the_same_answers_as_the_terminal_without_the_project() {
+    let (rig, runner, _) = alerted("koji");
+    rig.reply("1 no rename it");
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReplyAnswered { id: 1 })
+    );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["rulings"], json!([]));
+    assert_ne!(
+        status["work_item"]["phase"],
+        json!({ "state": "ruling", "id": 1 })
+    );
+}
+
+#[test]
+fn a_yes_by_reply_to_a_question_is_the_answer_s_text() {
+    let rig = Rig::new("rotom");
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.ask(&runner, "add", Some("7"));
+    rig.claude.script([Scripted::Say(
+        "Done.\n\n<kelpie-question>\nShall I keep the old flag?\n</kelpie-question>\n",
+    )]);
+    step(&runner).unwrap();
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+
+    rig.reply("1 yes");
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReplyAnswered { id: 1 })
+    );
+    rig.claude.script([Scripted::Say("kept")]);
+    step(&runner).unwrap();
+    let [_, answered] = rig.claude.calls().try_into().unwrap();
+    assert_eq!(
+        answered.prompt,
+        "The maintainer answered your question:\n\nyes\n"
+    );
+}
+
+// Every project reads the one topic, and an id names its project.
+#[test]
+fn a_reply_to_another_project_s_ruling_answers_nothing_here() {
+    let (rig, runner, _) = alerted("koji");
+    let ids = RulingIds::under(&rig.paths().kelpie_home);
+    assert_eq!(ids.claim("rotom", 0), 2);
+    rig.reply("2 yes");
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::ReplyIgnored));
+    assert_eq!(phase(&rig, &runner), json!({ "state": "ruling", "id": 1 }));
+    assert_eq!(lines(&rig), [""; 0]);
 }
 
 #[test]
@@ -377,7 +429,7 @@ fn a_secret_kelpie_did_not_write_stops_the_runner_naming_the_file() {
 #[test]
 fn a_right_code_is_spent_even_when_its_reply_answers_nothing() {
     let (rig, runner, _) = alerted("koji");
-    let code = rig.reply("koji 1 no");
+    let code = rig.reply("koji 1");
     assert_eq!(step(&runner).unwrap(), Some(StepReport::ReplyIgnored));
     rig.alerts
         .reply(&format!("koji 1 yes {code}"), rig.clock.now());
