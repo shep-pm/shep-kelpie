@@ -1,12 +1,12 @@
 //! Answering rulings from the webhook's topic
 //!
-//! On an ntfy webhook a reply on the topic answers a ruling when it names
-//! the project and ends with the maintainer's authenticator code (see
-//! [`crate::totp`]): `<project> <id> yes <code>`, `<project> <id> no <note>
-//! <code>` or `<project> <id> answer <text> <code>`, the part after the
-//! project read by `rule`'s own parser. The code is checked against the time
-//! ntfy took the reply, which no sender can set. It is never on the topic
-//! before the maintainer sends it, so a reader of the topic can read rulings
+//! On an ntfy webhook a reply on the topic answers a ruling when it ends
+//! with the maintainer's authenticator code (see [`crate::totp`]): `<id> yes
+//! <code>`, `<id> no <note> <code>` or `<id> <text> <code>`, read by the
+//! ruling's kind as `shep kelpie rule` reads it, and may name the project
+//! first. The code is checked against the time ntfy took the reply, which
+//! no sender can set. It is never on the topic before the maintainer sends
+//! it, so a reader of the topic can read rulings
 //! but not answer them, and each step's code answers once, whatever the
 //! reply that first sent it said: a right code is claimed before anything
 //! else about the reply is read. After [`FAILURES`] wrong codes, answers
@@ -16,10 +16,11 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use super::Runner;
 use super::alert::backoff;
 use super::report::StepReport;
-use super::trigger::{lock, read_rule};
-use super::{Answer, Runner};
+use super::trigger::lock;
+use super::words::read_answer;
 use crate::ports::{Alert, AlertError, Alerts, Reply, ReplyWith, Since, Takes, Timestamp};
 use crate::relay::Wants;
 use crate::settings::SettingsError;
@@ -27,6 +28,7 @@ use crate::state::{LastRead, RulingKind, StateError};
 use crate::totp::answers::{Answers, Claim, FAILURES, Failure};
 use crate::totp::{STEP, Secret, steps_near};
 use crate::webhook::{Webhook, WebhookKind};
+use whose::{Whose, read_reply};
 
 /// Seconds between reads of the topic while a ruling waits on it
 pub const READ_EVERY: u64 = 15;
@@ -138,14 +140,6 @@ pub(super) fn answer_replies(
     }
 }
 
-/// A reply's text without its code, read as the project it names and
-/// `rule`'s params
-fn read_reply(text: &str) -> Option<(&str, u64, Answer)> {
-    let (project, params) = text.trim().split_once(char::is_whitespace)?;
-    let (id, answer) = read_rule(params.trim())?;
-    Some((project, id, answer))
-}
-
 impl StepReport {
     // Records why the line for the topic could not be posted, if it could not.
     fn with_line_failed(mut self, failed: Option<AlertError>) -> Self {
@@ -188,8 +182,7 @@ impl Runner {
             Wants::Answer => Takes::Answer,
             Wants::YesOrNo => Takes::YesOrNo,
         };
-        let project = self.project.as_str().to_owned();
-        Some(ReplyWith { project, id, takes })
+        Some(ReplyWith { id, takes })
     }
 
     /// Keeps reading the topic until [`LATE`] after `now`: a ruling's alert
@@ -407,10 +400,13 @@ impl Runner {
                 };
             }
         };
-        let named = read_reply(rest).filter(|(named, ..)| *named == project);
-        let Some((_, id, answer)) = named else {
+        let Some((named, id, words)) = read_reply(rest) else {
             return ignored;
         };
+        let whose = self.whose(named, id);
+        if whose == Whose::Theirs {
+            return ignored;
+        }
         if claim == Claim::Replayed {
             let text = format!(
                 "Ruling {id} was not answered: that code was used already. \
@@ -423,11 +419,13 @@ impl Runner {
             return (report, self.line(Some(id), text));
         }
         let _ = auth.answers.forgive();
-        let pending = self.state.rulings.iter().any(|r| r.id == id);
-        if !pending {
-            if id > self.state.last_ruling {
-                return ignored;
-            }
+        if let Whose::Unsure(why) = whose {
+            let reason =
+                format!("{why}, so name the project first: `{project} {id} <answer> <code>`");
+            return self.reply_refused(id, reason);
+        }
+        let pending = self.state.rulings.iter().find(|r| r.id == id);
+        let Some(pending) = pending else {
             let text =
                 format!("Ruling {id} on {project} is already settled, so that reply ran nothing.");
             let report = StepReport::ReplyToSettled {
@@ -435,22 +433,30 @@ impl Runner {
                 line_failed: None,
             };
             return (report, self.line(Some(id), text));
-        }
+        };
+        let answer = match read_answer(Wants::of(&pending.kind), words) {
+            Ok(answer) => answer,
+            Err(reason) => return self.reply_refused(id, reason),
+        };
         match self.rule_and_tell(id, answer) {
             Ok(()) => (StepReport::ReplyAnswered { id }, None),
-            Err(e) => {
-                let reason = e.to_string();
-                let text = format!("Ruling {id} was not answered: {reason}.");
-                let report = StepReport::ReplyRefused {
-                    id,
-                    reason,
-                    line_failed: None,
-                };
-                (report, self.line(Some(id), text))
-            }
+            Err(e) => self.reply_refused(id, e.to_string()),
         }
     }
+
+    // A reply that answered nothing, and the line saying why.
+    fn reply_refused(&self, id: u64, reason: String) -> (StepReport, Option<Line>) {
+        let text = format!("Ruling {id} was not answered: {reason}.");
+        let report = StepReport::ReplyRefused {
+            id,
+            reason,
+            line_failed: None,
+        };
+        (report, self.line(Some(id), text))
+    }
 }
+
+mod whose;
 
 #[cfg(test)]
 mod tests;

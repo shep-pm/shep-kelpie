@@ -192,7 +192,7 @@ mod tests {
             question,
             format!(
                 "The worker on issue #7 asks:\n\n{QUESTION}\n\n\
-                 `shep trigger rotom rule '1 answer <text>'` sends the worker your answer."
+                 `shep kelpie rule 1 <text>` sends the worker your answer."
             )
         );
         let status = rig.ask(&runner, "status", None);

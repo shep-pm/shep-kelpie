@@ -241,8 +241,8 @@ fn a_merge_the_forge_refuses_is_caught_up_once_then_parks_and_a_yes_looks_again(
         status["rulings"][0]["question"],
         format!(
             "Kelpie could not merge pull request #71 at {} after catching it up: {refused}. \
-             `shep trigger reactmap rule '{id} yes'` has kelpie look again and merge once \
-             every gate passes, and `shep trigger reactmap rule '{id} no <note>'` sends \
+             `shep kelpie rule {id} yes` has kelpie look again and merge once \
+             every gate passes, and `shep kelpie rule {id} no <note>` sends \
              the worker your note.",
             &head[..7]
         )

@@ -925,8 +925,8 @@ fn a_commit_pushed_by_hand_after_the_round_parks_rather_than_reaching_the_merge_
         question,
         format!(
             "Pull request #71 changed outside kelpie: its head moved to {}, a commit \
-             the worker did not push. `shep trigger koji rule '{id} yes'` accepts it \
-             and kelpie carries on, and `shep trigger koji rule '{id} no <note>'` \
+             the worker did not push. `shep kelpie rule {id} yes` accepts it \
+             and kelpie carries on, and `shep kelpie rule {id} no <note>` \
              sends the worker your note.",
             &by_hand[..7]
         )
