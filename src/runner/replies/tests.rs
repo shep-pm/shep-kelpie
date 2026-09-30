@@ -5,6 +5,7 @@ use serde_json::json;
 use super::*;
 use crate::ports::{Clock, Session};
 use crate::runner::{OpenError, step};
+use crate::state::ids::RulingIds;
 use crate::test::{Rig, Scripted};
 use crate::totp::STEP;
 
@@ -293,6 +294,47 @@ fn a_reply_to_another_project_s_ruling_answers_nothing_here() {
     assert_eq!(step(&runner).unwrap(), Some(StepReport::ReplyIgnored));
     assert_eq!(phase(&rig, &runner), json!({ "state": "ruling", "id": 1 }));
     assert_eq!(lines(&rig), [""; 0]);
+}
+
+// Probed in review: an id from before claims, open here, may be another
+// project's too when that project's state is open or cannot be read.
+#[test]
+fn an_unclaimed_id_another_project_may_hold_needs_the_project_named() {
+    let (rig, runner, _) = alerted("koji");
+    let kelpie = rig.paths().kelpie_home;
+    std::fs::remove_file(kelpie.join("rulings/1")).unwrap();
+    let lab = kelpie.join("projects/lab/state.json");
+    std::fs::create_dir_all(lab.parent().unwrap()).unwrap();
+    for (lab_state, why) in [
+        ("{".to_owned(), "lab's rulings cannot be read"),
+        (
+            std::fs::read_to_string(rig.paths().state).unwrap(),
+            "ruling 1 is also waiting on lab",
+        ),
+    ] {
+        std::fs::write(&lab, lab_state).unwrap();
+        rig.reply("1 yes");
+        let reason = format!("{why}, so name the project first: `koji 1 <answer> <code>`");
+        assert_eq!(
+            step(&runner).unwrap(),
+            Some(StepReport::ReplyRefused {
+                id: 1,
+                reason: reason.clone(),
+                line_failed: None
+            })
+        );
+        assert_eq!(
+            lines(&rig).last().unwrap(),
+            &format!("Ruling 1 was not answered: {reason}.")
+        );
+        assert_eq!(phase(&rig, &runner), json!({ "state": "ruling", "id": 1 }));
+        rig.clock.advance(STEP);
+    }
+    rig.reply("koji 1 yes");
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReplyAnswered { id: 1 })
+    );
 }
 
 #[test]

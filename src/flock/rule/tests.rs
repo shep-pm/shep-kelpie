@@ -1,6 +1,8 @@
 use std::path::Path;
 
 use super::*;
+
+const FORMS: &str = "It takes `shep kelpie rule 14 yes` or `shep kelpie rule 14 no <note>`";
 use crate::ports::Timestamp;
 use crate::state::{ProjectState, Resume, RulingKind, StateStore};
 
@@ -74,15 +76,19 @@ fn each_answer_form_reads_right_for_its_ruling_s_kind() {
     );
     assert_eq!(
         answer(&["14", "use", "--dry-run"]),
-        Err("ruling 14 was not answered: it takes `yes`, or `no <note>`".into())
+        Err(format!(
+            "ruling 14 was not answered: it takes `yes`, or `no <note>`. {FORMS}"
+        ))
     );
     assert_eq!(
         answer(&["14", "no"]),
-        Err("ruling 14 was not answered: a no takes a note for the worker: `no <note>`".into())
+        Err(format!(
+            "ruling 14 was not answered: a no takes a note for the worker: `no <note>`. {FORMS}"
+        ))
     );
     assert_eq!(
         answer(&["14"]),
-        Err("ruling 14 takes `yes`, or `no <note>`".into())
+        Err("ruling 14 takes `shep kelpie rule 14 yes` or `shep kelpie rule 14 no <note>`".into())
     );
 }
 
@@ -117,7 +123,8 @@ fn an_id_open_on_two_projects_needs_the_project() {
     let err = prepare(&ids, None, &["3", "yes"], None).unwrap_err();
     assert_eq!(
         err,
-        "ruling 3 is waiting on koji and rotom, so name one with `-p <project>`"
+        "ruling 3 is waiting on koji and rotom, so name one: \
+         `shep kelpie rule -p <project> 3 <answer>`"
     );
     let sent = prepare(&ids, Some(&project("rotom")), &["3", "yes"], None);
     assert_eq!(sent, Ok((project("rotom"), "3 yes".into())));
@@ -190,7 +197,9 @@ fn the_picker_asks_again_until_the_answer_fits() {
     );
     assert!(shown.contains("No ruling 16 is listed.\n"), "{shown}");
     assert!(
-        shown.contains("ruling 14 was not answered: it takes `yes`, or `no <note>`\n"),
+        shown.contains(&format!(
+            "ruling 14 was not answered: it takes `yes`, or `no <note>`. {FORMS}\n"
+        )),
         "{shown}"
     );
 }
@@ -210,17 +219,48 @@ fn the_picker_sends_nothing_on_an_empty_answer_or_the_input_s_end() {
     }
 }
 
+// Probed in review: with lab's state unreadable, an unclaimed 3 open on
+// koji could be lab's too, so a yes to it must name the project.
 #[test]
-fn a_state_file_that_cannot_be_read_is_named() {
+fn an_unclaimed_id_with_a_state_file_unread_needs_the_project() {
     let (home, ids) = two_projects();
     let broken = home.path().join("projects/lab/state.json");
     std::fs::create_dir_all(broken.parent().unwrap()).unwrap();
     std::fs::write(&broken, "{").unwrap();
-    let err = prepare(&ids, None, &["16", "yes"], None).unwrap_err();
+    let err = prepare(&ids, None, &["14", "yes"], None).unwrap_err();
     assert!(
-        err.starts_with("no ruling 16 is waiting: `shep kelpie rule` lists those that are\nlab's rulings cannot be read: "),
+        err.starts_with(
+            "ruling 14 does not say which project it is on, and lab's rulings cannot be read, \
+             so name the project: `shep kelpie rule -p <project> 14 <answer>`\n\
+             lab's rulings cannot be read: "
+        ),
         "{err}"
     );
-    let sent = prepare(&ids, None, &["14", "yes"], None);
+    let sent = prepare(&ids, Some(&project("koji")), &["14", "yes"], None);
     assert_eq!(sent, Ok((project("koji"), "14 yes".into())));
+
+    // A claimed id names its project, whatever cannot be read.
+    assert_eq!(ids.claim("koji", 15), 16);
+    waiting(home.path(), "koji", vec![yes_or_no(14), yes_or_no(16)]);
+    let sent = prepare(&ids, None, &["16", "yes"], None);
+    assert_eq!(sent, Ok((project("koji"), "16 yes".into())));
+}
+
+#[test]
+fn the_picker_takes_the_answer_on_the_id_s_line() {
+    let (_home, ids) = two_projects();
+    for (typed, sent) in [
+        ("14 no rename it\n", "14 no rename it"),
+        ("14 koji\nyes\n", "14 yes"),
+        ("14 maybe\nyes\n", "14 yes"),
+    ] {
+        let mut input = typed.as_bytes();
+        let mut output = Vec::new();
+        let ask = Some((
+            &mut input as &mut dyn BufRead,
+            &mut output as &mut dyn Write,
+        ));
+        let answered = prepare(&ids, None, &[], ask);
+        assert_eq!(answered, Ok((project("koji"), sent.into())), "{typed:?}");
+    }
 }

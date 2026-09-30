@@ -21,8 +21,9 @@ usage: shep kelpie rule <id> yes
        shep kelpie rule                  lists the rulings waiting, and asks
 
 Quotes are optional. In zsh a note with ?, *, ! or an apostrophe still
-needs them: shep kelpie rule 14 no \"it's the wrong flag\". Words after
-`--` are the answer's, even `-p`.";
+needs them: shep kelpie rule 14 no \"it's the wrong flag\". `-p` goes
+before the answer: after its first word, and after a `--`, it is the
+answer's own.";
 
 /// A ruling to answer: its project, and `rule`'s params
 pub type Answering = (ProjectName, String);
@@ -44,26 +45,42 @@ pub fn prepare(
     ask: Option<(&mut dyn BufRead, &mut dyn Write)>,
 ) -> Result<Answering, String> {
     let mut open = Vec::new();
-    let mut unread = String::new();
+    let mut unread = Vec::new();
+    let mut why = String::new();
     for (project, state) in ids.states() {
         if named.is_some_and(|n| n.as_str() != project) {
             continue;
         }
         match state {
             Ok(state) => open.extend(state.rulings.into_iter().map(|r| (project.clone(), r))),
-            Err(e) => unread.push_str(&format!("\n{project}'s rulings cannot be read: {e}")),
+            Err(e) => {
+                why.push_str(&format!("\n{project}'s rulings cannot be read: {e}"));
+                unread.push(project);
+            }
         }
     }
-    prepare_from(ids, &open, named, args, ask).map_err(|e| e + &unread)
+    let waiting = Waiting {
+        open: &open,
+        unread: &unread,
+    };
+    prepare_from(ids, waiting, named, args, ask).map_err(|e| e + &why)
+}
+
+// The rulings `rule` can see, and the projects whose rulings it cannot.
+#[derive(Clone, Copy)]
+struct Waiting<'a> {
+    open: &'a [(String, Ruling)],
+    unread: &'a [String],
 }
 
 fn prepare_from(
     ids: &RulingIds,
-    open: &[(String, Ruling)],
+    waiting: Waiting<'_>,
     named: Option<&ProjectName>,
     args: &[&str],
     ask: Option<(&mut dyn BufRead, &mut dyn Write)>,
 ) -> Result<Answering, String> {
+    let open = waiting.open;
     let [id, words @ ..] = args else {
         if open.is_empty() {
             return Err("no rulings are waiting".into());
@@ -77,24 +94,38 @@ fn prepare_from(
         };
     };
     let id = number(id).ok_or_else(|| format!("{id:?} is not a ruling's id\n\n{HELP}"))?;
-    let (project, ruling) = find(ids, open, named, id)?;
+    let (project, ruling) = find(ids, waiting, named, id)?;
     if words.is_empty() {
-        return Err(format!("ruling {id} {}", takes(&ruling)));
+        return Err(format!("ruling {id} takes {}", forms(&ruling)));
     }
     Ok((project, params(&ruling, &words.join(" "))?))
 }
 
-// Ruling `id` among `open`, on `named` or the project it was given to.
+// Ruling `id` among those waiting, on `named` or the project it was given
+// to. An id with no claim may be on a project whose rulings cannot be
+// read, so then only `named` finds it.
 fn find(
     ids: &RulingIds,
-    open: &[(String, Ruling)],
+    waiting: Waiting<'_>,
     named: Option<&ProjectName>,
     id: u64,
 ) -> Result<(ProjectName, Ruling), String> {
+    let Waiting { open, unread } = waiting;
     // `open` holds only `named`'s rulings when it is given.
     let owner = named
         .map(|n| n.as_str().to_owned())
         .or_else(|| ids.owner(id));
+    if owner.is_none() && !unread.is_empty() {
+        return Err(format!(
+            "ruling {id} does not say which project it is on, and {} rulings cannot be read, \
+             so name the project: `shep kelpie rule -p <project> {id} <answer>`",
+            unread
+                .iter()
+                .map(|p| format!("{p}'s"))
+                .collect::<Vec<_>>()
+                .join(" and ")
+        ));
+    }
     let on: Vec<&(String, Ruling)> = open
         .iter()
         .filter(|(project, r)| r.id == id && owner.as_ref().is_none_or(|o| o == project))
@@ -108,7 +139,7 @@ fn find(
             "no ruling {id} is waiting: `shep kelpie rule` lists those that are"
         )),
         more => Err(format!(
-            "ruling {id} is waiting on {}, so name one with `-p <project>`",
+            "ruling {id} is waiting on {}, so name one: `shep kelpie rule -p <project> {id} <answer>`",
             more.iter()
                 .map(|(project, _)| project.as_str())
                 .collect::<Vec<_>>()
@@ -120,15 +151,24 @@ fn find(
 // `words` as `rule`'s params for `ruling`.
 fn params(ruling: &Ruling, words: &str) -> Result<String, String> {
     let answer = read_answer(Wants::of(&ruling.kind), words);
-    let answer = answer.map_err(|why| format!("ruling {} was not answered: {why}", ruling.id))?;
+    let answer = answer.map_err(|why| {
+        let id = ruling.id;
+        format!(
+            "ruling {id} was not answered: {why}. It takes {}",
+            forms(ruling)
+        )
+    })?;
     Ok(answer.params(ruling.id))
 }
 
-// What ruling `ruling` takes, after its id.
-fn takes(ruling: &Ruling) -> &'static str {
+// The commands that answer `ruling`.
+fn forms(ruling: &Ruling) -> String {
+    let id = ruling.id;
     match Wants::of(&ruling.kind) {
-        Wants::Answer => "is the worker's question: `shep kelpie rule <id> <text>` answers it",
-        Wants::YesOrNo => "takes `yes`, or `no <note>`",
+        Wants::Answer => format!("your answer to the worker: `shep kelpie rule {id} <text>`"),
+        Wants::YesOrNo => {
+            format!("`shep kelpie rule {id} yes` or `shep kelpie rule {id} no <note>`")
+        }
     }
 }
 
@@ -172,7 +212,8 @@ fn pick(
             None => "Which ruling? ".to_owned(),
         };
         let line = read(output, &prompt).ok_or_else(nothing)?;
-        let (id, project) = line.split_once(' ').unwrap_or((&line, ""));
+        let (id, rest) = line.split_once(' ').unwrap_or((&line, ""));
+        let rest = rest.trim();
         let id = match (number(id), only) {
             (Some(id), _) => id,
             (None, Some(only)) if line.is_empty() => only,
@@ -181,12 +222,23 @@ fn pick(
                 continue;
             }
         };
-        let chosen: Vec<&(String, Ruling)> = open
-            .iter()
-            .filter(|(p, r)| r.id == id && (project.is_empty() || p == project.trim()))
-            .collect();
+        // What follows the id names a project when one holds it, and is
+        // the answer otherwise.
+        let with_id = open.iter().filter(|(_, r)| r.id == id);
+        let on_project: Vec<_> = with_id.clone().filter(|(p, _)| p == rest).collect();
+        let (chosen, words): (Vec<_>, &str) = match on_project.as_slice() {
+            [_] => (on_project, ""),
+            _ => (with_id.collect(), rest),
+        };
         match chosen.as_slice() {
-            [(project, ruling)] => break (project.clone(), ruling.clone()),
+            [(project, ruling)] if words.is_empty() => break (project.clone(), ruling.clone()),
+            [(project, ruling)] => match params(ruling, words) {
+                Ok(params) => return answering(project, params),
+                Err(why) => {
+                    say(output, &format!("{why}\n"));
+                    break (project.clone(), ruling.clone());
+                }
+            },
             [] => say(output, &format!("No ruling {id} is listed.\n")),
             _ => say(
                 output,
@@ -204,13 +256,15 @@ fn pick(
             return Err(nothing());
         }
         match params(&ruling, &words) {
-            Ok(params) => {
-                let project = ProjectName::try_from(project.as_str()).map_err(|e| e.to_string())?;
-                return Ok((project, params));
-            }
+            Ok(params) => return answering(&project, params),
             Err(why) => say(output, &format!("{why}\n")),
         }
     }
+}
+
+fn answering(project: &str, params: String) -> Result<Answering, String> {
+    let project = ProjectName::try_from(project).map_err(|e| e.to_string())?;
+    Ok((project, params))
 }
 
 // A prompt or a line for the terminal. One that cannot be written loses

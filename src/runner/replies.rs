@@ -19,16 +19,16 @@ use std::sync::Mutex;
 use super::Runner;
 use super::alert::backoff;
 use super::report::StepReport;
-use super::trigger::{lock, number};
+use super::trigger::lock;
 use super::words::read_answer;
 use crate::ports::{Alert, AlertError, Alerts, Reply, ReplyWith, Since, Takes, Timestamp};
 use crate::relay::Wants;
 use crate::settings::SettingsError;
-use crate::state::ids::RulingIds;
 use crate::state::{LastRead, RulingKind, StateError};
 use crate::totp::answers::{Answers, Claim, FAILURES, Failure};
 use crate::totp::{STEP, Secret, steps_near};
 use crate::webhook::{Webhook, WebhookKind};
+use whose::{Whose, read_reply};
 
 /// Seconds between reads of the topic while a ruling waits on it
 pub const READ_EVERY: u64 = 15;
@@ -138,21 +138,6 @@ pub(super) fn answer_replies(
             return Some(Ok(report));
         }
     }
-}
-
-/// A reply's text without its code, read as the project it names, if it
-/// names one, the ruling's id and the answer's words
-fn read_reply(text: &str) -> Option<(Option<&str>, u64, &str)> {
-    let (first, rest) = text.trim().split_once(char::is_whitespace)?;
-    let (named, id, words) = match number(first) {
-        Some(id) => (None, id, rest),
-        None => {
-            let (id, words) = rest.trim_start().split_once(char::is_whitespace)?;
-            (Some(first), number(id)?, words)
-        }
-    };
-    let words = words.trim();
-    (!words.is_empty()).then_some((named, id, words))
 }
 
 impl StepReport {
@@ -418,7 +403,8 @@ impl Runner {
         let Some((named, id, words)) = read_reply(rest) else {
             return ignored;
         };
-        if !self.ours(named, id) {
+        let whose = self.whose(named, id);
+        if whose == Whose::Theirs {
             return ignored;
         }
         if claim == Claim::Replayed {
@@ -433,6 +419,11 @@ impl Runner {
             return (report, self.line(Some(id), text));
         }
         let _ = auth.answers.forgive();
+        if let Whose::Unsure(why) = whose {
+            let reason =
+                format!("{why}, so name the project first: `{project} {id} <answer> <code>`");
+            return self.reply_refused(id, reason);
+        }
         let pending = self.state.rulings.iter().find(|r| r.id == id);
         let Some(pending) = pending else {
             let text =
@@ -463,28 +454,9 @@ impl Runner {
         };
         (report, self.line(Some(id), text))
     }
-
-    // Whether ruling `id` is this project's, for a reply naming `named` or
-    // no project. An id from before claims is this project's when named
-    // and within its ids, or when unnamed and open here and nowhere else.
-    fn ours(&self, named: Option<&str>, id: u64) -> bool {
-        let project = self.project.as_str();
-        if named.is_some_and(|named| named != project) {
-            return false;
-        }
-        let ids = RulingIds::under(&self.paths.kelpie_home);
-        if let Some(owner) = ids.owner(id) {
-            return owner == project;
-        }
-        match named {
-            Some(_) => id <= self.state.last_ruling,
-            None => {
-                let open = ids.open().into_iter().filter(|(_, r)| r.id == id);
-                self.state.rulings.iter().any(|r| r.id == id) && open.count() <= 1
-            }
-        }
-    }
 }
+
+mod whose;
 
 #[cfg(test)]
 mod tests;
