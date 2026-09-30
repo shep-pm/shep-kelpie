@@ -499,6 +499,22 @@ async fn shep_kelpie_lease_take_reaches_the_adopted_dog() {
     assert!(names.contains(&(DOG.to_owned(), true)), "{names:?}");
 }
 
+// A shepherd with no dog named `kelpie`, as one still running the dog as
+// `kelpie-dog` is: shep refuses the trigger with `NotFound`, and the lease
+// commands say the dog is not enabled. A fake shepherd cannot send that.
+#[tokio::test]
+#[ignore = "needs a shepherd at KELPIE_TEST_SHEP or ~/.kelpie/bin/shep"]
+async fn shep_kelpie_lease_take_names_a_dog_that_is_not_enabled() {
+    let shepherd = Shepherd::runners();
+    let take = shepherd
+        .kelpie(&["lease", "take", "stand-in"])
+        .output()
+        .unwrap();
+    assert!(!take.status.success());
+    let said = String::from_utf8_lossy(&take.stderr);
+    assert!(said.contains("kelpie's dog is not enabled"), "{said}");
+}
+
 // Adopted with no arguments, kelpie runs the dog; before it held the
 // leases it exited 2 on every start.
 #[tokio::test]
