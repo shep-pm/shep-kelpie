@@ -136,7 +136,7 @@ shep kelpie rule 14 yes
 shep kelpie rule 14 no rename the flag
 ```
 
-On ntfy you can reply in the topic. Run `shep kelpie totp` once and scan the QR code into an authenticator app, then reply with the line the alert ends on, such as `14 yes <code>`, with the app's code last. In the Claude app, tap an answer or reply in words.
+On ntfy you can reply in the topic after a one-time `shep kelpie totp`, as the reference below describes. In the Claude app, tap an answer or reply in words.
 
 ### 8. Pause
 
@@ -154,7 +154,7 @@ The current turn finishes, then the worker parks. `shep kelpie start` resumes it
 - Rust 1.88 or later, to build it
 - Claude Code, signed in
 - `git`, and `gh` signed in to the account that opens the pull requests
-- a GitHub repo per project, with `ready-for-agent` and `ready-for-human` labels
+- a GitHub repo per project, where `add` makes the `ready-for-agent`, `ready-for-human` and `review please` labels it lacks
 - a local review command or an OpenAI-compatible endpoint, or a project that lists `claude` alone
 
 ### Merging
