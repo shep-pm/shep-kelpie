@@ -347,6 +347,8 @@ pub struct Issue {
     pub body: String,
     /// Its labels' names
     pub labels: Vec<String>,
+    /// Whether it is still open
+    pub open: bool,
 }
 
 /// An open issue, as the follow-up check reads it
