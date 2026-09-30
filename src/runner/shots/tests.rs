@@ -202,6 +202,16 @@ fn a_dev_server_the_worker_left_is_stopped_when_its_turn_ends_and_on_restart() {
 }
 
 #[test]
+fn a_starting_runner_sweeps_its_own_worktrees_and_build_folders_for_orphaned_servers() {
+    let rig = with_preview("lab");
+    assert!(rig.shots.swept().is_empty());
+    drop(started(&rig));
+    let home = rig.home.path().join("kelpie");
+    let own = [home.join("wt/lab"), home.join("targets/lab")];
+    assert_eq!(rig.shots.swept(), [own.to_vec()]);
+}
+
+#[test]
 fn a_worker_with_a_launch_file_gets_playwright_and_the_shots_tool() {
     let rig = with_preview("lab");
     let runner = started(&rig);
