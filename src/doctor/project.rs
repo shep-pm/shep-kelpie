@@ -2,6 +2,7 @@
 
 use serde_json::{Map, Value};
 
+use super::host::Host;
 use super::{Here, Line, Probes, rulings};
 use crate::flock::add::LABELS;
 use crate::ports::{NewLabel, Visibility};
@@ -100,7 +101,7 @@ pub(super) fn checks(
         probes,
     ));
     if settings.preview.enabled {
-        lines.push(preview(at("preview tools"), here));
+        lines.push(preview(at("preview tools"), here, probes.host));
     }
     if let Some(kelpie) = kelpie {
         let project = settings.ruling_channels.as_ref();
@@ -202,13 +203,27 @@ fn local_round(subject: String, local: &LocalRound, probes: Probes<'_>) -> Line 
     }
 }
 
-fn preview(subject: String, here: Here<'_>) -> Line {
+fn preview(subject: String, here: Here<'_>, host: &dyn Host) -> Line {
     let tools = Tools::under(here.kelpie_home);
     let missing = tools.missing();
     if missing.is_empty() {
-        return Line::ok(
+        let libraries = host.browser_gaps(&tools.browsers());
+        if libraries.is_empty() {
+            return Line::ok(
+                subject,
+                format!("installed under {}", tools.dir().display()),
+            );
+        }
+        return Line::missing(
             subject,
-            format!("installed under {}", tools.dir().display()),
+            format!(
+                "headless Chromium cannot load {}, so every run skips its screenshots, with a line only in the log",
+                libraries.join(", ")
+            ),
+            format!(
+                "run `sudo node {} install-deps chromium-headless-shell`",
+                tools.playwright_cli().display()
+            ),
         );
     }
     Line::missing(

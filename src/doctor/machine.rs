@@ -5,7 +5,7 @@ use std::path::Path;
 use shep_client::Client;
 
 use super::Line;
-use super::host::Host;
+use super::host::{Host, apt_package};
 use crate::ports::{Clock, Forge, ForgeError, Meter, MeterError};
 use crate::shepherd::ConnectRefused;
 
@@ -87,14 +87,22 @@ pub(super) fn sandbox(host: &dyn Host) -> Line {
         return Line::ok("sandbox", "Claude Code's sandbox can run");
     }
     let list = gaps.join(" and ");
+    let fix = match gaps.as_slice() {
+        ["sandbox-exec"] => "restore `/usr/bin/sandbox-exec`, which macOS ships".to_owned(),
+        _ => {
+            let packages: Vec<_> = gaps.iter().map(|g| apt_package(g)).collect();
+            format!(
+                "install {list} with your package manager, such as `sudo apt-get install {}` on Debian and Ubuntu",
+                packages.join(" ")
+            )
+        }
+    };
     Line::missing(
         "sandbox",
         format!(
             "Claude Code's sandbox needs {list}, which this machine lacks, so no worker can start"
         ),
-        format!(
-            "install {list} with your package manager, such as `sudo apt-get install bubblewrap socat` on Debian"
-        ),
+        fix,
     )
 }
 

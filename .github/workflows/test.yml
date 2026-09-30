@@ -59,3 +59,13 @@ jobs:
       # Matches `rust-version` in Cargo.toml, which matches shep's.
       - run: rustup toolchain install 1.88 --profile minimal
       - run: cargo +1.88 check --all-targets --locked
+
+  # The macOS-only code (APFS name folding in the fence, the GPU lock's
+  # temporary folder) runs nowhere else, so this runs the whole suite there.
+  test-macos:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal
+      - run: cargo test --locked

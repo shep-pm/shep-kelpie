@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{Map, Value, json};
@@ -23,11 +23,27 @@ const WEBHOOK: &str =
     "[webhook]\nkind = \"ntfy\"\nurl = \"https://ntfy.example.invalid/kelpie-s3cr3t-topic\"\n";
 
 #[derive(Debug)]
-struct FakeHost(Vec<&'static str>);
+struct FakeHost {
+    sandbox: Vec<&'static str>,
+    libraries: Vec<String>,
+}
+
+impl FakeHost {
+    fn complete() -> Self {
+        Self {
+            sandbox: Vec::new(),
+            libraries: Vec::new(),
+        }
+    }
+}
 
 impl Host for FakeHost {
     fn sandbox_gaps(&self) -> Vec<&'static str> {
-        self.0.clone()
+        self.sandbox.clone()
+    }
+
+    fn browser_gaps(&self, _browsers: &Path) -> Vec<String> {
+        self.libraries.clone()
     }
 }
 
@@ -60,7 +76,7 @@ impl Scene {
             meter: FakeMeter::idle(),
             reviewer: FakeReviewer::default(),
             alerts: FakeAlerts::on(clock.clone()),
-            host: FakeHost(Vec::new()),
+            host: FakeHost::complete(),
             clock,
             shepherd,
         };
@@ -262,12 +278,51 @@ async fn gh_missing_or_logged_out_is_told_its_fix() {
 #[tokio::test]
 async fn a_sandbox_the_machine_lacks_names_what_it_lacks() {
     let mut scene = Scene::new().await;
-    scene.host = FakeHost(vec!["bwrap", "socat"]);
+    scene.host.sandbox = vec!["bwrap", "socat"];
     let report = scene.report().await;
     let (what, fix) = missing(&report, "sandbox");
     assert!(what.contains("bwrap and socat"), "{what}");
-    assert!(fix.contains("bubblewrap"), "{fix}");
+    assert!(
+        fix.contains("sudo apt-get install bubblewrap socat"),
+        "{fix}"
+    );
     assert!(!report.passed());
+}
+
+#[tokio::test]
+async fn a_missing_sandbox_program_names_the_package_that_holds_it() {
+    let mut scene = Scene::new().await;
+    scene.host.sandbox = vec!["socat"];
+    let (_, fix) = missing(&scene.report().await, "sandbox");
+    assert!(fix.contains("sudo apt-get install socat"), "{fix}");
+    assert!(!fix.contains("bubblewrap"), "{fix}");
+}
+
+#[tokio::test]
+async fn a_chromium_that_cannot_load_a_library_names_it_and_the_command_that_installs_them() {
+    let mut scene = Scene::new().await;
+    scene.runs("golbat", |t| {
+        t.insert("preview".into(), json!({ "enabled": true }));
+    });
+    let tools = Tools::under(&scene.kelpie_home);
+    for file in [
+        tools.playwright_mcp(),
+        tools.playwright_cli(),
+        tools.sandbox(),
+    ] {
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, "").unwrap();
+    }
+    std::fs::create_dir_all(tools.browsers().join("chromium-headless-shell")).unwrap();
+    scene.host.libraries = vec!["libnss3.so".into(), "libasound.so.2".into()];
+
+    let (what, fix) = missing(&scene.report().await, "golbat: preview tools");
+
+    assert!(what.contains("libnss3.so, libasound.so.2"), "{what}");
+    assert!(
+        fix.ends_with("install-deps chromium-headless-shell`") && fix.contains("sudo node "),
+        "{fix}"
+    );
 }
 
 #[tokio::test]
