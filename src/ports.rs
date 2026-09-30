@@ -29,7 +29,7 @@ mod reviewer;
 
 pub use local_paths::Guarded;
 pub use model_seat::ModelSeat;
-pub use relay::{Relay, RelayError};
+pub use relay::{Cleared, Relay, RelayError};
 pub use reviewer::{Reviewer, ReviewerError};
 
 /// Seconds since the Unix epoch

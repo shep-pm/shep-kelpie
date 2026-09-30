@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use super::Runner;
 use super::adopt;
-use super::alert::{post_due, tell_settled};
+use super::alert::{post_due, see_clears, tell_settled};
 use super::claude_files::Unchecked;
 use super::instructions;
 use super::question::asked;
@@ -66,6 +66,7 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
             Arc::clone(&runner.ports.shots),
         )
     };
+    see_clears(runner, relay.as_ref())?;
     tell_settled(runner, relay.as_ref());
     if let Some(posted) = post_due(runner, relay.as_ref(), alerts.as_ref()) {
         return posted.map(Some);
