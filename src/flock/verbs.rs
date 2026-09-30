@@ -83,7 +83,7 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
         (None, named) => Ok(named.clone()),
     };
     match (command, args.as_slice()) {
-        ("add", [issue]) if issue.bytes().all(|b| b.is_ascii_digit()) => {
+        ("add", [issue]) if !issue.is_empty() && issue.bytes().all(|b| b.is_ascii_digit()) => {
             send("add", Some(issue)).await
         }
         ("add", [] | [_]) => {

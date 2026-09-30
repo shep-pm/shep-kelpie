@@ -22,7 +22,7 @@ pub fn read_answer(wants: Wants, words: &str) -> Result<Answer, String> {
     match wants {
         Wants::Answer => {
             let text = match words.split_once(char::is_whitespace) {
-                Some(("answer", rest)) if !rest.trim().is_empty() => rest.trim(),
+                Some(("answer", rest)) => rest.trim_start(),
                 _ => words,
             };
             if text.is_empty() {
