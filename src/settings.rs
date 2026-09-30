@@ -188,7 +188,7 @@ pub struct CodeRabbit {
     pub enabled: bool,
     /// Changed lines per extra round: the cap is `ceil(changed / divisor) + 1`
     pub divisor: NonZeroU32,
-    /// A fixed number of rounds per work item, in place of the divisor's cap
+    /// A fixed number of rounds per pull request, in place of the divisor's cap
     ///
     /// The last round's held findings go to the worker, and its fix push
     /// summons no further round. The divisor's cap when absent.
