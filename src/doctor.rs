@@ -191,6 +191,10 @@ pub async fn check(shep_home: &Path, probes: Probes<'_>, here: Here<'_>, ask: As
     match shepherd::connect(shep_home).await {
         Ok(client) => {
             lines.push(machine::shepherd(&client, shep_home));
+            lines.push(match flock::flock(&client).await {
+                Ok(rows) => machine::dog(&rows),
+                Err(e) => Line::missing("dog", e, "put the shepherd right"),
+            });
             lines.extend(projects(&client, probes, here, ask).await);
         }
         Err(refused) => {

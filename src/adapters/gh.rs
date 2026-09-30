@@ -89,7 +89,7 @@ impl Forge for Gh {
             "--repo",
             repo.as_str(),
             "--json",
-            "title,body,labels",
+            "title,body,labels,state",
         ])?)
     }
 
@@ -276,12 +276,14 @@ fn parse_issue(stdout: &[u8]) -> Result<Issue, ForgeError> {
         title: String,
         body: Option<String>,
         labels: Vec<Label>,
+        state: String,
     }
     let view: View = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
     Ok(Issue {
         title: view.title,
         body: view.body.unwrap_or_default(),
         labels: view.labels.into_iter().map(|l| l.name).collect(),
+        open: view.state != "CLOSED",
     })
 }
 
@@ -393,7 +395,7 @@ fn checks(rollup: &[Check]) -> Checks {
 mod tests {
     use super::*;
 
-    // Recorded from gh 2.96 on this repo: `gh issue view 6 --json title,body,labels`.
+    // Recorded from gh 2.96 on this repo: `gh issue view 6 --json title,body,labels,state`.
     const ISSUE: &str = include_str!("../../fixtures/gh-issue-view.json");
 
     #[test]
@@ -441,11 +443,19 @@ mod tests {
             issue.body
         );
         assert_eq!(issue.labels, ["ready-for-agent"]);
+        assert!(!issue.open);
+    }
+
+    #[test]
+    fn an_open_issue_is_read_as_open() {
+        let issue = parse_issue(br#"{"title":"t","body":"","labels":[],"state":"OPEN"}"#).unwrap();
+        assert!(issue.open);
     }
 
     #[test]
     fn an_issue_without_a_body_has_an_empty_one() {
-        let issue = parse_issue(br#"{"title":"t","body":null,"labels":[]}"#).unwrap();
+        let issue =
+            parse_issue(br#"{"title":"t","body":null,"labels":[],"state":"OPEN"}"#).unwrap();
         assert_eq!(issue.body, "");
     }
 

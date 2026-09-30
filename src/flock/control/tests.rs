@@ -151,6 +151,27 @@ async fn start_with_kelpie_s_dog_stopped_says_to_read_its_bleats() {
     assert_eq!(shepherd.writes(), []);
 }
 
+// Shep lists a dog that is up and never named itself as silent, and it
+// holds nothing.
+#[tokio::test]
+async fn start_with_kelpie_s_dog_silent_says_so_and_how_to_bring_it_back() {
+    let mut shepherd = FakeShepherd::new().await;
+    runner(&shepherd, "koji", Path::new("/src/koji"), false);
+    shepherd.holds_dog("kelpie", true);
+    shepherd.never_names("kelpie");
+    let client = client(&shepherd).await;
+    let err = in_time(start(&client, &project("koji"))).await.unwrap_err();
+    assert!(err.starts_with("kelpie's dog is silent"), "{err}");
+    assert!(err.contains("`shep bleats kelpie`"), "{err}");
+
+    shepherd.gives_up_on("kelpie");
+    let err = in_time(start(&client, &project("koji"))).await.unwrap_err();
+    assert!(err.contains("shep has given up on it"), "{err}");
+    assert!(err.contains("`shep restart kelpie`"), "{err}");
+    assert_eq!(shepherd.writes(), []);
+    assert!(!shepherd.sheep("koji").unwrap().1);
+}
+
 #[tokio::test]
 async fn the_project_here_is_the_one_whose_settings_name_this_checkout() {
     let shepherd = FakeShepherd::new().await;

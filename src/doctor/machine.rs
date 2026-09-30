@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use shep_client::Client;
+use shep_client::shep_core::protocol::request::ProcessInfo;
 
 use super::Line;
 use super::host::Host;
@@ -105,6 +106,14 @@ pub(super) fn shepherd(client: &Client, shep_home: &Path) -> Line {
         "shepherd",
         format!("shep {version} at {}", shep_home.display()),
     )
+}
+
+/// kelpie's dog, which holds the leases and is `online` only once it has named itself
+pub(super) fn dog(rows: &[ProcessInfo]) -> Line {
+    match crate::flock::dog_problem(rows) {
+        None => Line::ok("dog", "kelpie's dog is running and has named itself"),
+        Some((what, fix)) => Line::missing("dog", what, fix),
+    }
 }
 
 /// The shepherd kelpie could not use, and why

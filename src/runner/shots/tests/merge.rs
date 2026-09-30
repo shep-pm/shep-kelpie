@@ -264,8 +264,8 @@ fn a_failed_run_posts_nothing_and_the_merge_ruling_says_so() {
         question,
         format!(
             "Merge pull request #71 at {} into main? Kelpie's shots of it failed, so \
-             none are on the pull request; the runner's log says why. \
-             `shep trigger lab rule '1 yes'` merges it, and `shep trigger lab rule '1 no <note>'` \
+             none of this head's are on the pull request (an earlier head's may be); \
+             the runner's log says why. `shep trigger lab rule '1 yes'` merges it, and `shep trigger lab rule '1 no <note>'` \
              sends the worker your note.",
             &head[..7]
         )
@@ -302,8 +302,8 @@ fn under_auto_a_failed_run_posts_nothing_and_the_notice_says_so() {
         notice.text,
         format!(
             "Pull request #71 for issue #7 merged into main at {} on lab, every gate passed. \
-             Kelpie's shots of it failed, so none are on the pull request; the runner's log \
-             says why. Nothing to answer.",
+             Kelpie's shots of it failed, so none of this head's are on the pull request (an earlier head's may be); \
+             the runner's log says why. Nothing to answer.",
             &head[..7]
         )
     );
