@@ -14,6 +14,7 @@ mod host;
 mod leases;
 mod local;
 mod ntfy;
+mod orphans;
 mod process;
 mod relay;
 mod shots;

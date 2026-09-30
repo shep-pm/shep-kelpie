@@ -4,7 +4,8 @@
 //! project had before one. Unknown keys are refused, so a misspelt or
 //! malformed setting stops the runner with a message naming it. Every
 //! setting is required except the ones added after the first build
-//! (`max_items`, `review.local`, `review.local_rounds`, `coderabbit.rounds`,
+//! (`max_items`, `review.local`, `review.reviewers`, `review.local_rounds`,
+//! `coderabbit.rounds`,
 //! `pacing.enabled`, `worker.allowed_domains`, `worker.build_env`,
 //! `worker.instructions_file`, `worker.turn_timeout`, `worker.guard_hooks`,
 //! `ruling_channels`, `pull_request_reviewers`, `[preview]` and `[skills]`).
@@ -30,9 +31,13 @@ mod table;
 
 pub use table::table_of;
 mod local;
+mod reviewers;
 mod skills;
 
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
+pub use reviewers::{
+    CLAUDE, ClaudeSession, Definition, LeaseName, LoopReviewer, QWEN, ReviewerName, Runs,
+};
 pub use skills::{SkillChoice, SkillName, StepSkills};
 
 /// Everything kelpie reads about one project
@@ -190,13 +195,17 @@ impl Effort {
 pub struct Review {
     /// Rounds after which the worker is parked for a ruling
     pub loop_guard: NonZeroU32,
-    /// The local round, `[review.local]`. The maintainer's qwen-review
-    /// script when absent, as every file before this table ran it.
+    /// The reviewers the loop runs, in order, from `claude` and those
+    /// kelpie's `[local_reviewers]` define. When absent or empty, the local
+    /// round in `review.local` and then `claude`.
     #[serde(default)]
-    pub local: LocalRound,
-    /// At most this many local rounds per work item. Once they are spent,
-    /// every round is Claude's and one clean Claude round ends the loop.
-    /// No limit when absent.
+    pub reviewers: Vec<ReviewerName>,
+    /// The older form of a local round, `[review.local]`, which alternates
+    /// with `claude`. The maintainer's qwen-review script when absent.
+    #[serde(default)]
+    pub local: Option<LocalRound>,
+    /// At most this many rounds from local reviewers per work item. Once
+    /// they are spent, only Claude reviewers run. No limit when absent.
     #[serde(default)]
     pub local_rounds: Option<NonZeroU32>,
 }
@@ -212,7 +221,7 @@ pub struct CodeRabbit {
     pub enabled: bool,
     /// Changed lines per extra round: the cap is `ceil(changed / divisor) + 1`
     pub divisor: NonZeroU32,
-    /// A fixed number of rounds per work item, in place of the divisor's cap
+    /// A fixed number of rounds per pull request, in place of the divisor's cap
     ///
     /// The last round's held findings go to the worker, and its fix push
     /// summons no further round. The divisor's cap when absent.
@@ -549,8 +558,16 @@ impl Settings {
     pub(crate) fn parse(text: &str, home: &Path) -> Result<Self, String> {
         let mut settings: Self = toml::from_str(text).map_err(|e| e.to_string())?;
         settings.expand(home);
-        settings.review.local.check()?;
+        settings.check_local()?;
         Ok(settings)
+    }
+
+    // The older local round can work as written.
+    pub(crate) fn check_local(&self) -> Result<(), String> {
+        match &self.review.local {
+            Some(local) => local.check("review.local"),
+            None => Ok(()),
+        }
     }
 
     // `~/` in a path setting is the home folder.
@@ -575,8 +592,8 @@ impl Settings {
     // The paths that expand `~/` and are taken from the project's folder.
     fn files_mut(&mut self) -> impl Iterator<Item = &mut PathBuf> {
         let local = match &mut self.review.local {
-            LocalRound::Command(local) => Some(&mut local.command),
-            LocalRound::Off {} | LocalRound::Endpoint(_) => None,
+            Some(LocalRound::Command(local)) => Some(&mut local.command),
+            _ => None,
         };
         [self.worker.instructions_file.as_mut(), local]
             .into_iter()

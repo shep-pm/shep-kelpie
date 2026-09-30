@@ -249,6 +249,7 @@ mod tests {
                     "round": 1,
                     "consecutive_clean": 0,
                     "guard_cleared": false,
+                    "reviewer": "qwen",
                     "stage": {
                         "stage": "fixing",
                         "clean": false,
@@ -295,6 +296,7 @@ mod tests {
                 "consecutive_clean": 0,
                 "guard_cleared": false,
                 "stage": { "stage": "round" },
+                "last": "qwen",
             }),
             "a MEDIUM finding, fixed, still resets the streak"
         );

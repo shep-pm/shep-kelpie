@@ -4,9 +4,9 @@
 //! did before the relay existed.
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::ports::{Relay, RelayError};
+use crate::ports::{Cleared, Relay, RelayError, Timestamp};
 use crate::settings::Effort;
 
 /// A relay that records what it is sent, and refuses sends until a test
@@ -15,7 +15,7 @@ use crate::settings::Effort;
 pub(crate) struct FakeRelay {
     sent: Mutex<Vec<(String, String, Effort)>>,
     told: Mutex<Vec<String>>,
-    clears: AtomicUsize,
+    cleared: Mutex<Cleared>,
     up: AtomicBool,
     stale: AtomicBool,
 }
@@ -32,9 +32,9 @@ impl FakeRelay {
         self.told.lock().unwrap().clone()
     }
 
-    /// How many times the relay was cleared
-    pub(crate) fn clears(&self) -> usize {
-        self.clears.load(Ordering::SeqCst)
+    /// How many times the relay was cleared, by any runner on it
+    pub(crate) fn clears(&self) -> u64 {
+        self.cleared.lock().unwrap().count
     }
 
     /// Makes sends succeed (`up: true`, a reachable relay) or fail
@@ -50,12 +50,15 @@ impl FakeRelay {
 }
 
 impl Relay for FakeRelay {
-    fn renew(&self) -> Result<bool, RelayError> {
-        let stale = self.stale.swap(false, Ordering::SeqCst);
-        if stale {
-            self.clears.fetch_add(1, Ordering::SeqCst);
+    fn renew(&self, now: Timestamp) -> Result<(), RelayError> {
+        if self.stale.swap(false, Ordering::SeqCst) {
+            self.clear(now)?;
         }
-        Ok(stale)
+        Ok(())
+    }
+
+    fn cleared(&self) -> Result<Cleared, RelayError> {
+        Ok(*self.cleared.lock().unwrap())
     }
 
     fn send(&self, message: &str, model: &str, effort: Effort) -> Result<(), RelayError> {
@@ -77,8 +80,10 @@ impl Relay for FakeRelay {
         Ok(())
     }
 
-    fn clear(&self) -> Result<(), RelayError> {
-        self.clears.fetch_add(1, Ordering::SeqCst);
+    fn clear(&self, now: Timestamp) -> Result<(), RelayError> {
+        let mut cleared = self.cleared.lock().unwrap();
+        cleared.count += 1;
+        cleared.last = Some(now);
         Ok(())
     }
 }

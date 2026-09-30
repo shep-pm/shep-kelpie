@@ -1,8 +1,8 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 
-use crate::ports::Clock;
+use crate::ports::{Clock, Relay};
 use crate::runner::{Runner, StepReport, step};
 use crate::test::Rig;
 
@@ -152,4 +152,107 @@ fn a_resend_owed_to_a_channel_since_turned_off_is_not_sent() {
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 2 }));
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(rig.relay.sent().len(), 1, "only the first ruling's send");
+}
+
+// A second project's rig and runner, on the same relay as `rig`
+fn on_the_same_relay(rig: &Rig, project: &str) -> (Rig, Mutex<Runner>) {
+    let (mut other, runner, _) = Rig::parked(project);
+    drop(runner);
+    other.relay = Arc::clone(&rig.relay);
+    let runner = other.open().unwrap();
+    (other, runner)
+}
+
+// The header lines sent to the relay for `project`'s rulings, in order
+fn sent_for(rig: &Rig, project: &str) -> Vec<String> {
+    let headers = sent_headers(rig).into_iter();
+    let prefix = format!("project={project} ");
+    headers.filter(|h| h.starts_with(&prefix)).collect()
+}
+
+#[test]
+fn a_clear_by_another_projects_runner_sends_an_open_ruling_again_once() {
+    let (clearing, clearing_runner, _) = Rig::parked("rotom");
+    let (rig, runner) = on_the_same_relay(&clearing, "mew");
+    rig.relay.set_up(true);
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    assert_eq!(step(&runner).unwrap(), None);
+
+    clearing.clock.advance(Rig::DAY);
+    assert_eq!(
+        step(&clearing_runner).unwrap(),
+        Some(StepReport::Alerted { id: 1 }),
+    );
+    assert_eq!(
+        rig.relay.clears(),
+        2,
+        "rotom's send a day on clears the relay"
+    );
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    assert_eq!(step(&runner).unwrap(), None, "and only once");
+    assert_eq!(sent_for(&rig, "mew").len(), 2);
+    assert_eq!(
+        rig.alerts.posts().len(),
+        1,
+        "the webhook is not posted twice"
+    );
+    assert_eq!(relayed(&rig, &runner), [json!(true)]);
+}
+
+#[test]
+fn a_clear_while_a_runner_is_down_is_seen_once_it_is_back() {
+    let (rig, runner, _) = Rig::parked("mew");
+    rig.relay.set_up(true);
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    drop(runner);
+
+    rig.relay.clear(rig.clock.now()).unwrap();
+    let runner = rig.open().unwrap();
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(sent_for(&rig, "mew").len(), 2);
+}
+
+#[test]
+fn a_restart_with_no_clear_in_between_sends_nothing_again() {
+    let (rig, runner, _) = Rig::parked("mew");
+    rig.relay.set_up(true);
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    drop(runner);
+
+    let runner = rig.open().unwrap();
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(sent_for(&rig, "mew").len(), 1);
+}
+
+#[test]
+fn a_ruling_settled_after_another_runners_clear_is_not_told_to_the_fresh_relay() {
+    let (clearing, clearing_runner, _) = Rig::parked("rotom");
+    let (rig, runner) = on_the_same_relay(&clearing, "mew");
+    rig.relay.set_up(true);
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    clearing.clock.advance(Rig::DAY);
+    assert_eq!(
+        step(&clearing_runner).unwrap(),
+        Some(StepReport::Alerted { id: 1 })
+    );
+
+    rig.ask(&runner, "rule", Some("1 no not yet"));
+    step(&runner).unwrap();
+    assert_eq!(rig.relay.told(), Vec::<String>::new());
+}
+
+#[test]
+fn every_runner_on_one_relay_clears_it_once_a_day_between_them() {
+    let (clearing, clearing_runner, _) = Rig::parked("rotom");
+    let (rig, runner) = on_the_same_relay(&clearing, "mew");
+    rig.relay.set_up(true);
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    clearing.clock.advance(Rig::DAY - 1);
+    assert_eq!(
+        step(&clearing_runner).unwrap(),
+        Some(StepReport::Alerted { id: 1 })
+    );
+    assert_eq!(rig.relay.clears(), 1, "mew's clear counts for rotom's day");
+    assert_eq!(step(&runner).unwrap(), None, "and resends nothing");
 }

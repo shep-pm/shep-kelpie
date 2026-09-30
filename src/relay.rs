@@ -134,7 +134,7 @@ impl Wants {
 
 /// What kelpie sends the relay for one ruling
 ///
-/// The question already carries the exact `shep trigger` command a
+/// The question already carries the exact `shep kelpie` command a
 /// maintainer typing by hand would use; the relay uses its own
 /// `kelpie relay-*` subcommands instead, keyed off the header line so it
 /// never has to parse the question to find them. `project` must not carry
@@ -239,6 +239,7 @@ mod tests {
         };
         for denied in [
             "shep trigger shep rule '1 yes'",
+            "shep kelpie rule 1 yes",
             "shep daemon reload",
             "echo hi",
         ] {

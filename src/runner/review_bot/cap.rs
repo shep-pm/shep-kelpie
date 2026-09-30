@@ -55,7 +55,7 @@ fn counted(numstat: &str, generated: &[String]) -> u64 {
 
 /// Whether `path` matches `glob`: `*` and `?` stay inside one folder,
 /// `**` spans folders, and `**/` may match none
-pub(super) fn matches(glob: &str, path: &str) -> bool {
+pub(in crate::runner) fn matches(glob: &str, path: &str) -> bool {
     matches_bytes(glob.as_bytes(), path.as_bytes())
 }
 

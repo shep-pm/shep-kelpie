@@ -13,9 +13,9 @@ use crate::pacer::HoldKind;
 use crate::ports::{
     ClaudeCall, Cost, Finding, Role, SessionId, Severity, Timestamp, Usage, Verdict,
 };
-use crate::settings::LocalRound;
+use crate::settings::{LocalRound, ReviewerName};
 use crate::shots::ShotsJob;
-use crate::work_item::{QwenTally, ReviewerKind, Spend};
+use crate::work_item::{QwenTally, Spend};
 
 /// What asked for a rework on the pull request itself
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -421,7 +421,7 @@ pub enum StepReport {
         /// The round
         round: u32,
         /// Which reviewer ran it
-        reviewer: ReviewerKind,
+        reviewer: ReviewerName,
         /// How many findings it reported
         findings: usize,
     },
@@ -620,6 +620,7 @@ pub(super) enum ReviewCall {
         base: String,
         out: PathBuf,
         round: u32,
+        criteria: String,
     },
     /// A fresh Claude review round
     ClaudeRound(ClaudeCall),

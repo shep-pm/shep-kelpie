@@ -29,7 +29,7 @@ mod reviewer;
 
 pub use local_paths::Guarded;
 pub use model_seat::ModelSeat;
-pub use relay::{Relay, RelayError};
+pub use relay::{Cleared, Relay, RelayError};
 pub use reviewer::{Reviewer, ReviewerError};
 
 /// Seconds since the Unix epoch
@@ -660,8 +660,6 @@ pub struct Alert {
 /// The ruling a reply on the webhook's topic answers, and what it takes
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplyWith {
-    /// The project, which a reply names, since every project shares the topic
-    pub project: String,
     /// The ruling
     pub id: u64,
     /// What answers it
@@ -869,6 +867,11 @@ pub trait Shots: Send + Sync {
     /// such as one the worker's shots tool started before its `claude` was
     /// killed. Reads that one file, never a folder's listing.
     fn stop_left(&self, server_pid: &std::path::Path);
+
+    /// Stops dev servers nothing runs any more that sit under `folders`,
+    /// the worktrees and build folders kelpie owns. Matches only by those
+    /// folders, never by a program's name or a port alone.
+    fn stop_orphans(&self, folders: &[std::path::PathBuf]);
 }
 
 /// A runner's side of the dog's book leases

@@ -6,20 +6,13 @@ use crate::ports::{Finding, Role, Severity};
 use crate::runner::report::StepReport;
 use crate::runner::step;
 use crate::settings::LocalRound;
+use crate::settings::ReviewerName;
 use crate::test::{Answer, Rig, Scripted, ScriptedRound, StandInEndpoint, unreachable_url};
-use crate::work_item::ReviewerKind;
-
-const TABLE: &str = "[app.dogs.kelpie.review.local]\n\
-                     kind = \"command\"\n\
-                     command = \"~/.claude/scripts/qwen-review.sh\"\n";
 
 // A rig whose project runs `table` as its local round.
 fn rig_with(table: &str) -> Rig {
     let rig = Rig::new("koji");
-    rig.edit_settings(|s| {
-        assert!(s.contains(TABLE), "the example's local round moved");
-        s.replace(TABLE, table)
-    });
+    rig.edit_settings(|s| crate::test::with_tables(&s, table));
     rig
 }
 
@@ -89,6 +82,7 @@ fn with_the_local_round_off_a_round_after_a_fix_is_claudes_again() {
             "consecutive_clean": 0,
             "guard_cleared": false,
             "stage": { "stage": "round" },
+            "last": "claude",
         }),
     );
     step(&runner).unwrap(); // round 2, claude: scripted clean above
@@ -154,7 +148,7 @@ fn a_named_command_runs_in_place_of_the_script() {
         "[app.dogs.kelpie.review.local]\nkind = \"command\"\ncommand = \"{}\"\n",
         command.display()
     );
-    rig.edit_settings(|s| s.replace(TABLE, &table));
+    rig.edit_settings(|s| crate::test::with_tables(&s, &table));
     rig.reviewer.pass_through();
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
@@ -239,7 +233,9 @@ fn with_the_local_round_off_no_command_is_needed() {
     let rig = Rig::new("koji");
     std::fs::remove_file(rig.home.path().join(".claude/scripts/qwen-review.sh")).unwrap();
     assert!(rig.open().is_err(), "the default command is checked");
-    rig.edit_settings(|s| s.replace(TABLE, "[app.dogs.kelpie.review.local]\nkind = \"off\"\n"));
+    rig.edit_settings(|s| {
+        crate::test::with_tables(&s, "[app.dogs.kelpie.review.local]\nkind = \"off\"\n")
+    });
     assert!(rig.open().is_ok());
 }
 
@@ -278,20 +274,14 @@ fn past_its_local_rounds_every_round_is_claudes_and_one_clean_one_ends_the_loop(
             Some(StepReport::ReviewRound { reviewer, .. }) => reviewers.push(reviewer),
             // Only a Claude round is left to come back with nothing.
             Some(StepReport::ReviewFindingsSent { held: 0, .. }) => {
-                reviewers.push(ReviewerKind::Claude);
+                reviewers.push(ReviewerName::claude());
                 break;
             }
             _ => {}
         }
     }
-    assert_eq!(
-        reviewers,
-        [
-            ReviewerKind::Local,
-            ReviewerKind::Claude,
-            ReviewerKind::Claude
-        ]
-    );
+    let names: Vec<&str> = reviewers.iter().map(ReviewerName::as_str).collect();
+    assert_eq!(names, ["qwen", "claude", "claude"]);
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["work_item"]["phase"]["state"], "ci");
     assert_eq!(rig.reviewer.seen().len(), 1, "one local round");
@@ -317,4 +307,22 @@ fn local_rounds_spent_before_a_no_stay_spent_in_the_next_pass() {
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["work_item"]["phase"]["state"], "ci");
     assert_eq!(rig.reviewer.seen().len(), 1, "no second local round");
+}
+
+#[test]
+fn a_local_round_with_no_limit_set_leaves_the_state_file_as_it_was() {
+    let rig = Rig::new("koji");
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    step(&runner).unwrap(); // the worker's first turn
+    step(&runner).unwrap(); // round 1, local: clean by default
+    assert_eq!(rig.reviewer.seen().len(), 1, "the local round ran");
+    let saved = std::fs::read_to_string(rig.paths().state).unwrap();
+    assert!(!saved.contains("local_rounds"), "{saved}");
 }

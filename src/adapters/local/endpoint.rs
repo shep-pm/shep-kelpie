@@ -82,11 +82,13 @@ impl LocalReviewer {
         base: &str,
         out: &Path,
         round: u32,
+        criteria: &str,
     ) -> Result<Vec<Finding>, ReviewerError> {
         let diff = diff(worktree, base)?;
+        let system = system_prompt(criteria);
         let context = endpoint.context.get() as usize;
         let reply = context / REPLY_SHARE;
-        let prompt = PROMPT.len().div_ceil(BYTES_PER_TOKEN) + FRAMING_TOKENS;
+        let prompt = system.len().div_ceil(BYTES_PER_TOKEN) + FRAMING_TOKENS;
         let budget = context.saturating_sub(reply + prompt) * BYTES_PER_TOKEN;
         let folder = out.join(format!("round-{round}"));
         std::fs::create_dir_all(&folder).map_err(|e| failed(&folder, "create", &e))?;
@@ -100,7 +102,7 @@ impl LocalReviewer {
                 "stream": false,
                 "max_tokens": reply,
                 "messages": [
-                    { "role": "system", "content": PROMPT },
+                    { "role": "system", "content": system },
                     { "role": "user", "content": chunk },
                 ],
             });
@@ -200,6 +202,17 @@ impl LocalReviewer {
             ))),
             None => Ok(content.to_owned()),
         }
+    }
+}
+
+// A chunk is one part of the diff, so the issue only says what the change is for.
+fn system_prompt(criteria: &str) -> String {
+    match criteria.trim() {
+        "" => PROMPT.to_owned(),
+        criteria => format!(
+            "{PROMPT}\nThe issue this pull request resolves asks for the following. \
+             Use it to judge what the change is meant to do.\n\n{criteria}\n"
+        ),
     }
 }
 

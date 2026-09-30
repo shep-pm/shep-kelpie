@@ -373,7 +373,7 @@ pub(super) fn park(
     pull_request: Option<u64>,
     kind: RulingKind,
 ) -> (u64, String) {
-    let id = next.last_ruling + 1;
+    let id = names.ids.claim(names.project, next.last_ruling);
     let item = next
         .item_mut(issue)
         .expect("a ruling is about an open work item");
@@ -593,8 +593,8 @@ pub(super) fn question(
     number: Option<u64>,
     kind: &RulingKind,
 ) -> String {
-    let Names { project, bot } = names;
-    let trigger = |answer: &str| format!("`shep trigger {project} rule '{id} {answer}'`");
+    let Names { bot, .. } = names;
+    let trigger = |answer: &str| format!("`shep kelpie rule {id} {answer}`");
     let (yes, no) = (trigger("yes"), trigger("no <note>"));
     let about = number.map_or_else(
         || format!("issue #{issue}"),
@@ -662,7 +662,7 @@ pub(super) fn question(
         RulingKind::Question { asked, .. } => {
             return format!(
                 "The worker on {about} asks:\n\n{asked}\n\n{} sends the worker your answer.",
-                trigger("answer <text>")
+                trigger("<text>")
             );
         }
         RulingKind::TurnTimeout { .. } => {

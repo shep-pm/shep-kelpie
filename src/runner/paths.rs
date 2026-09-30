@@ -116,6 +116,12 @@ impl ProjectPaths {
         }
     }
 
+    /// The folders a dev server of this project's can work in: every
+    /// worktree and every build folder
+    pub fn owned(&self) -> [PathBuf; 2] {
+        [self.worktrees.clone(), self.builds.clone()]
+    }
+
     /// The worktree for the work item that resolves `issue`
     pub fn worktree(&self, issue: u64) -> PathBuf {
         self.worktrees.join(issue.to_string())

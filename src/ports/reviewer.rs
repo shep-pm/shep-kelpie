@@ -18,6 +18,9 @@ pub trait Reviewer: Send + Sync {
     /// Runs `local` for round `round` against `worktree`'s diff from `base`,
     /// usually `origin/main`, writing its findings under `out`
     ///
+    /// `criteria` is what the issue asks for, which the round checks the
+    /// diff against, as its prompt or a file the command is pointed at.
+    ///
     /// # Errors
     ///
     /// [`ReviewerError`] when the round cannot be run or did not finish.
@@ -28,6 +31,7 @@ pub trait Reviewer: Send + Sync {
         base: &str,
         out: &std::path::Path,
         round: u32,
+        criteria: &str,
     ) -> Result<Vec<Finding>, ReviewerError>;
 
     /// Where the local model sat when a round last looked, for `status`
