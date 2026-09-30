@@ -115,6 +115,9 @@ fn argv(call: &ClaudeCall) -> Vec<OsString> {
     if let Some(config) = &call.mcp_config {
         argv.extend(["--mcp-config".into(), config.into()]);
     }
+    for plugin in &call.plugin_dirs {
+        argv.extend(["--plugin-dir".into(), plugin.into()]);
+    }
     match &call.session {
         Session::New(id) => {
             argv.extend(["--session-id".into(), id.0.as_str().into()]);
@@ -228,6 +231,7 @@ mod tests {
             prompt: "implement #6".into(),
             timeout: None,
             mcp_config: None,
+            plugin_dirs: Vec::new(),
         }
     }
 
@@ -282,6 +286,21 @@ mod tests {
         assert_eq!(argv[at + 1], "/k/worker/mcp.json");
         let argv = strings(&call(Role::Worker, fresh()));
         assert!(!argv.iter().any(|a| a == "--mcp-config"));
+    }
+
+    #[test]
+    fn each_plugin_folder_is_its_own_plugin_dir() {
+        let mut with = call(Role::Reviewer, fresh());
+        with.plugin_dirs = vec!["/k/skills/mattpocock".into(), "/k/skills/review".into()];
+        let argv = strings(&with);
+        let dirs: Vec<&str> = argv
+            .windows(2)
+            .filter(|pair| pair[0] == "--plugin-dir")
+            .map(|pair| pair[1].as_str())
+            .collect();
+        assert_eq!(dirs, ["/k/skills/mattpocock", "/k/skills/review"]);
+        let argv = strings(&call(Role::Judge, fresh()));
+        assert!(!argv.iter().any(|a| a == "--plugin-dir"));
     }
 
     #[test]

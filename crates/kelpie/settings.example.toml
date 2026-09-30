@@ -3,7 +3,7 @@
 # it to the runner, and lookout edits it in the sheep's pane. Every key is
 # required except `max_items`, `review.local`, `pacing.enabled`,
 # `worker.allowed_domains`, `worker.build_env`, `worker.instructions_file`,
-# `worker.turn_timeout`, `ruling_channels` and `preview`, which a table
+# `worker.turn_timeout`, `ruling_channels`, `preview` and `skills`, which a table
 # written before them may leave out. This entry holds the first build's
 # defaults, for shep.
 
@@ -157,3 +157,15 @@ turn_timeout = 60
 # configuration = "dev"
 # routes = ["/", "/events"]
 # domains = ["pokemon-go-api.github.io", "leekduck.com", "*.leekduck.com"]
+
+# The skill each step runs. A step left out runs its default from kelpie's
+# own copy of mattpocock/skills, so the project installs nothing; the README
+# lists each step and its default. `path` is a skill folder of your own,
+# `plugin` a skill in a Claude Code plugin's folder, and `none` runs kelpie's
+# own prompt. A skill that cannot load runs kelpie's prompt too, and the log
+# and `status` say why. Kelpie rewrites `~/.kelpie/projects/<project>/skills/`
+# at every start, so a folder of your own inside it stops the runner.
+# [app.dogs.kelpie.skills]
+# review = { kind = "path", path = "~/skills/review" }
+# ci = { kind = "plugin", plugin = "~/plugins/house", skill = "debug" }
+# retro = { kind = "none" }

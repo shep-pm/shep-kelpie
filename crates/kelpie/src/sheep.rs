@@ -119,6 +119,9 @@ fn serve(project: &str) -> Result<(), String> {
         ports,
     )
     .map_err(|e| e.to_string())?;
+    for notice in runner.skill_notices() {
+        eprintln!("{notice}");
+    }
 
     if !shepherd.is_active() {
         return Err("no shepherd channel: run it under shep with `channel = true`".into());

@@ -57,6 +57,31 @@ To adopt kelpie in `~/.kelpie/shep` itself instead, run `SHEP_HOME=~/.kelpie/she
 
 A runner's Flockfile entry, for a project set up by hand, is in `crates/kelpie/settings.example.toml`. It needs `SHEP_HOME` as an absolute path in `env`, since a sheep starts without it, and `kill_timeout = "10s"` or more, since a runner needs about 7s to stop cleanly.
 
+## Skills
+
+Every step kelpie drives an agent through runs a skill, by default from [mattpocock/skills](https://github.com/mattpocock/skills) (MIT). Kelpie vendors the ones it uses in `crates/kelpie/skills/`, pinned to one upstream commit with its licence, and writes them out as a Claude Code plugin when a runner starts. A project installs nothing.
+
+| step | default skill | where it runs |
+|---|---|---|
+| `triage` | `triage` | not driven yet |
+| `planning` | `to-tickets` | not driven yet (#139) |
+| `spec` | `to-spec` | not driven yet |
+| `implement` | `implement` | the worker's first turn on an issue |
+| `tests` | `tdd` | named in the worker's instructions |
+| `review` | `code-review` | each Claude review round |
+| `ci` | `diagnosing-bugs` | the worker's turn on a red CI run |
+| `pr` | `pr` | named in the worker's instructions, unless the repo has a pull request template |
+| `reset` | `handoff` | not driven yet |
+| `retro` | `retro` | not driven yet (#104) |
+
+A step that runs a skill starts its prompt with the skill's slash command, such as `/mattpocock:implement`, and kelpie's own prompt follows as its arguments. To override one, set it in the project's `[app.dogs.kelpie.skills]` table:
+
+- `{ kind = "path", path = "..." }`: a skill folder with a `SKILL.md`, copied into a plugin of its own, `kelpie-<step>`
+- `{ kind = "plugin", plugin = "...", skill = "..." }`: a skill in a Claude Code plugin's folder
+- `{ kind = "none" }`: kelpie's own prompt, no skill
+
+A skill that can't load runs kelpie's own prompt instead. The runner logs why, and `status` shows it under `skills`. `scripts/vendor-skills.sh <commit>` moves the pin.
+
 ## The local round
 
 Each pull request goes through a review loop before CI. Rounds alternate between a local model and a Claude session, local first, and the loop ends once one of each in a row finds nothing above a nit. `review.local` in a project's table picks the local round:
