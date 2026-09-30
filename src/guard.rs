@@ -4,20 +4,24 @@
 //! refuses two things a worker's commit or pull request would carry out:
 //! the home folder's path, which names the machine's user and every
 //! worktree sits under, and a pull request title that is not a
-//! conventional commit. It reads the command's own text and, for a commit
-//! or a push in the worker's worktree, the lines it adds or sends. It never
-//! echoes what it matched. It reads git and gh wherever the call's own text
-//! runs them: behind a wrapper, in a shell's `-c`, `<<<` or heredoc, or in
-//! text git runs as a command. It refuses a shell reading a pipe, and a
-//! program named by a variable. It does not read a script file, `python -c`,
+//! conventional commit. It also refuses what only the project manager does:
+//! a merge, marking ready, a summons, and a push to the base branch. It
+//! reads the command's own text, the shell scripts it runs and, for a
+//! commit or a push in the worker's worktree, the lines it adds or sends. It
+//! never echoes what it matched. It reads git and gh wherever the call's
+//! text runs them: behind a wrapper, in a shell's `-c`, `<<<`, heredoc or
+//! script file, or in text git runs as a command. It refuses a shell reading
+//! a pipe, and a program named by a variable. It does not read `python -c`
 //! or a file a config names.
 //!
 //! The hook runs outside the sandbox, so it runs git the way kelpie's own
 //! worktree steps do, with the worktree's git dirs named and checked. A
 //! repo the worker made could name any program in its own config.
 
+mod gh;
 mod git;
 mod judging;
+mod script;
 mod shell;
 mod wrap;
 
@@ -38,11 +42,6 @@ pub struct Checkout<'a> {
     /// The work item's worktree
     pub worktree: &'a Path,
 }
-
-/// The conventional commit types a pull request title may start with
-const TYPES: [&str; 11] = [
-    "feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert",
-];
 
 // A message file larger than this is not a message.
 const MESSAGE_FILE_MAX: u64 = 1 << 20;
@@ -135,76 +134,6 @@ fn moved(cwd: Option<&Path>, to: &str, home: Option<&Home>) -> Option<PathBuf> {
     }
 }
 
-// `gh` publishing verbs: their titles, bodies and notes, and a pull request's title.
-fn gh(
-    words: &[String],
-    heredocs: &[String],
-    cwd: Option<&Path>,
-    home: Option<&Home>,
-) -> Vec<String> {
-    // The group and verb are the first two words that are not flags, which
-    // may come before them: `gh pr -R owner/repo create`.
-    let mut positions = Vec::new();
-    let mut i = 1;
-    while i < words.len() && positions.len() < 2 {
-        match words[i].as_str() {
-            "-R" | "--repo" => i += 1,
-            w if w.starts_with('-') => {}
-            _ => positions.push(i),
-        }
-        i += 1;
-    }
-    let [group, verb] = positions[..] else {
-        return Vec::new();
-    };
-    let verb = match (words[group].as_str(), words[verb].as_str()) {
-        (group, "new") => (group, "create"),
-        pair => pair,
-    };
-    let publishes = matches!(
-        verb,
-        ("pr", "create" | "edit" | "comment" | "review")
-            | ("issue", "create" | "edit" | "comment")
-            | ("release", "create" | "edit")
-    );
-    if !publishes {
-        return Vec::new();
-    }
-    let args = &words[i..];
-    let titles = values(args, &["--title"], &['t']);
-    let mut out = Vec::new();
-    if verb.0 == "pr" && verb.1 == "create" && titles.is_empty() {
-        out.push(
-            "`gh pr create` needs `--title`: without one, GitHub titles a pull request of \
-             several commits with the branch's name. Give it a conventional commit subject, \
-             such as `fix(parser): keep the last line`."
-                .to_owned(),
-        );
-    }
-    if verb.0 == "pr" {
-        // Not echoed: a title can carry the home folder's path too.
-        if !titles.iter().all(|t| conventional(t)) {
-            out.push(format!(
-                "this pull request's title is not a conventional commit. Write it as \
-                 `type(scope): summary`, the scope optional, with the type one of {}, and \
-                 `!` after the type or scope for a breaking change.",
-                TYPES.join(", ")
-            ));
-        }
-    }
-    if let Some(home) = home {
-        let texts = titles
-            .into_iter()
-            .chain(values(args, &["--body", "--notes"], &['b', 'n']))
-            .chain(files(args, &["--body-file", "--notes-file"], &['F'], cwd))
-            .chain(heredocs.iter().cloned());
-        if texts.into_iter().any(|t| home.is_in(&t)) {
-            out.push(home.refusal(&format!("this `gh {} {}`", verb.0, verb.1), WRITE));
-        }
-    }
-    out
-}
-
 // The values of a flag, as `--long v`, `--long=v`, `-s v`, `-sv` or `-xs v`.
 fn values(args: &[String], long: &[&str], short: &[char]) -> Vec<String> {
     let mut out = Vec::new();
@@ -248,27 +177,6 @@ fn files(args: &[String], long: &[&str], short: &[char], cwd: Option<&Path>) -> 
             small.then(|| fs::read_to_string(path).ok()).flatten()
         })
         .collect()
-}
-
-/// Whether `title` is a conventional commit subject
-fn conventional(title: &str) -> bool {
-    let Some((head, summary)) = title.split_once(": ") else {
-        return false;
-    };
-    let head = head.strip_suffix('!').unwrap_or(head);
-    let kind = match head.split_once('(') {
-        Some((kind, scope)) => {
-            let Some(scope) = scope.strip_suffix(')') else {
-                return false;
-            };
-            if scope.is_empty() || scope.contains(['(', ')', '\n']) {
-                return false;
-            }
-            kind
-        }
-        None => head,
-    };
-    TYPES.contains(&kind) && !summary.trim().is_empty()
 }
 
 /// The home folder's path, as text that must not leave the machine

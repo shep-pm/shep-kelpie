@@ -95,7 +95,7 @@ fn unknown_option(option: &str) -> String {
 }
 
 // Git's own commands a worker may run. `--version` and `--help` come as options.
-pub(super) const BUILTINS: [&str; 75] = [
+pub(super) const BUILTINS: [&str; 77] = [
     "add",
     "am",
     "annotate",
@@ -164,11 +164,13 @@ pub(super) const BUILTINS: [&str; 75] = [
     "shortlog",
     "show",
     "show-ref",
+    "sparse-checkout",
     "stash",
     "status",
     "switch",
     "symbolic-ref",
     "tag",
     "update-ref",
+    "var",
     "worktree",
 ];

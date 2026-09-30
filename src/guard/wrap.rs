@@ -10,8 +10,8 @@
 mod stdin;
 mod vars;
 
+use stdin::is_c_flag;
 pub(super) use stdin::{Shell, shell};
-use stdin::{is_c_flag, redirection, stdin_path};
 use vars::assignment;
 pub(super) use vars::{commands_assigned, configures_git, redirects_git, sets};
 
@@ -161,18 +161,9 @@ pub(super) fn unwrap(mut words: &[String]) -> Result<Option<Unwrapped<'_>>, Stri
                 );
             }
             "function" => return Err(FUNCTION.into()),
-            // A script file is not read, but stdin is a pipe the guard cannot see.
-            "source" | "." => {
-                return match rest.first() {
-                    Some(w) if stdin_path(w) || redirection(w).is_some_and(|r| r.stdin) => Err(
-                        "kelpie cannot check commands `source` reads from a pipe: run them \
-                         directly."
-                            .into(),
-                    ),
-                    _ => Ok(None),
-                };
-            }
-            name if OTHER_SHELLS.contains(&name) && shell(words) != Shell::Unread => {
+            name if OTHER_SHELLS.contains(&name)
+                && !matches!(shell(words), Shell::File(_) | Shell::Nothing) =>
+            {
                 return Err(other_shell(name));
             }
             _ => {
@@ -212,8 +203,9 @@ const SUDO_VALUED: [&str; 20] = [
 ];
 
 /// The refusal for a shell reading commands the call's text does not hold
-pub(super) const STDIN: &str = "kelpie cannot check a shell reading its commands from a pipe or \
-                                a file: run them directly, or with `bash -c`.";
+pub(super) const STDIN: &str = "kelpie cannot check commands a shell reads from a pipe or a \
+                                redirect: run them directly, or save them to a file and run it \
+                                with `bash <file>`.";
 
 /// The refusal for a shell function a command defines
 pub(super) const FUNCTION: &str =
@@ -227,6 +219,22 @@ pub(super) const BUILT: &str = "kelpie cannot check a command whose program the 
 /// The refusal for a script given to a shell the guard does not read
 pub(super) fn other_shell(name: &str) -> String {
     format!("kelpie cannot check a `{name}` script: run the commands directly, or with `bash -c`.")
+}
+
+/// The refusal for a push or a gh command among another program's words
+///
+/// `find -exec`, `caffeinate` and `flock` run the words after them as a
+/// command, and the guard does not know every such program.
+pub(super) fn hidden(words: &[String]) -> Option<String> {
+    let at = |name: &str| words[1..].iter().position(|w| program(w) == name);
+    let pushes = at("git").is_some_and(|i| words[i + 2..].iter().any(|w| w == "push"));
+    let gh = at("gh").is_some_and(|i| i + 2 < words.len());
+    (pushes || gh).then(|| {
+        format!(
+            "kelpie cannot check git or gh run through `{}`: run it directly.",
+            program(&words[0]).chars().take(40).collect::<String>()
+        )
+    })
 }
 
 /// A command's program, by name: `/usr/bin/git` is `git`
@@ -338,7 +346,6 @@ mod tests {
             "function f",
             "ksh < f",
             "script -qc x f",
-            "source /dev/stdin",
         ] {
             assert!(unwrap(&w(line)).is_err(), "{line}");
         }
@@ -390,10 +397,21 @@ mod tests {
             ("bash -o pipefail", "Stdin"),
             ("bash -", "Stdin"),
             ("bash <<", "Stdin"),
-            ("bash f.sh", "Unread"),
-            ("bash f.sh < in", "Unread"),
-            ("bash 2> err f.sh", "Unread"),
-            ("bash --version", "Unread"),
+            ("bash f.sh", "File(\"f.sh\")"),
+            ("bash f.sh < in", "File(\"f.sh\")"),
+            ("bash 2> err f.sh", "File(\"f.sh\")"),
+            ("sh -e push.sh x", "File(\"push.sh\")"),
+            ("bash -o pipefail push.sh", "File(\"push.sh\")"),
+            ("bash -- push.sh", "File(\"push.sh\")"),
+            ("bash --norc push.sh", "File(\"push.sh\")"),
+            ("zsh push.sh > out", "File(\"push.sh\")"),
+            ("bash > out push.sh", "File(\"push.sh\")"),
+            ("dash 2>&1 push.sh", "File(\"push.sh\")"),
+            ("sh -es", "Stdin"),
+            ("bash -x", "Stdin"),
+            ("bash <push.sh", "Stdin"),
+            ("sh 0<push.sh", "Stdin"),
+            ("bash --version", "Nothing"),
         ] {
             assert_eq!(shell_of(line), runs, "{line}");
         }

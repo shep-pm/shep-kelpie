@@ -397,7 +397,9 @@ pub(super) fn advance(
         0
     };
     let local = review.reviewer(local_rounds.saturating_sub(*ran)) == ReviewerKind::Local;
-    if local {
+    // With no limit set nothing is counted, so the state file stays as it was
+    // before the setting and an older binary reads it.
+    if local && local_rounds != u32::MAX {
         *ran = ran.saturating_add(1);
     }
     let alone = !local && *ran >= local_rounds;

@@ -105,7 +105,7 @@ fn a_shell_given_a_string_on_stdin_runs_it() {
         ],
     );
     refused(&["sh <<< 'gh pr create --title Parser'"]);
-    allowed(&["sh <<< 'cargo test'", "bash script.sh <<< input"]);
+    allowed(&["sh <<< 'cargo test'", "bash README.md <<< input"]);
 }
 
 #[test]
@@ -133,13 +133,13 @@ fn a_shell_reading_its_commands_from_a_pipe_or_file_is_refused() {
         "echo HEAD | xargs -I{} sh -c 'git push origin {}; gh pr create --title Parser'",
     ]);
     allowed(&[
-        "bash script.sh",
+        "bash README.md",
         "bash --version",
-        "sh -n script.sh",
+        "sh -n README.md",
         "bash -c 'cargo test'",
-        "bash script.sh < input.txt",
+        "bash README.md < input.txt",
         "ksh script.ksh",
-        "source env.sh",
+        "source README.md",
         "sudo -u me cargo test",
         "busybox ls",
     ]);
@@ -233,7 +233,10 @@ fn a_commit_or_push_after_git_makes_a_repo_in_the_same_call_is_refused() {
 fn a_bare_repo_in_the_worktree_is_a_repo_of_its_own() {
     let tree = WorkerTree::new();
     tree.git(&["init", "--quiet", "--bare", "b"]);
-    for command in ["git -C b push ../origin.git main", "cd b && git push"] {
+    for command in [
+        "git -C b push ../origin.git HEAD:refs/heads/x",
+        "cd b && git push",
+    ] {
         let why = refusal(tree.bash(command));
         assert!(
             why.contains("outside this worktree's own repo"),

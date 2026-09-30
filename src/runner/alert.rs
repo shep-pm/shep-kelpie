@@ -33,8 +33,8 @@ use crate::webhook::Webhook;
 const RETRY_FIRST: u64 = 60;
 const RETRY_MAX: u64 = 30 * 60;
 
-// The relay is cleared once a day, so its context never grows without
-// bound: see docs/design-log.md.
+// The relay is cleared once a day between every project's runners, so its
+// context never grows without bound: see docs/design-log.md.
 const CLEAR_EVERY: u64 = 24 * 60 * 60;
 
 /// What a post carries
@@ -100,6 +100,11 @@ pub(super) struct Relayed {
     provisional: bool,
 }
 
+// Whether a day has passed since the relay's last clear, by any runner
+fn clear_due(last: Option<Timestamp>, now: Timestamp) -> bool {
+    last.is_none_or(|last| now.0.saturating_sub(last.0) >= CLEAR_EVERY)
+}
+
 /// Tells a running relay of each ruling settled without it since the last
 /// step
 ///
@@ -109,6 +114,26 @@ pub(super) fn tell_settled(runner: &Mutex<Runner>, relay: &dyn Relay) {
     let notices = std::mem::take(&mut lock(runner).relay_notices);
     for notice in notices {
         let _ = relay.tell(&notice.text);
+    }
+}
+
+/// Reads the relay's clears, and when one by any project's runner since
+/// this runner last read them took rulings it held, marks each for a
+/// resend and drops every notice queued for the relay
+///
+/// Run before [`tell_settled`], since a relay started after a clear never
+/// asked what a queued notice is about. Seen even when nothing is due.
+///
+/// # Errors
+///
+/// [`StateError`] when the rulings marked cannot be saved.
+pub(super) fn see_clears(runner: &Mutex<Runner>, relay: &dyn Relay) -> Result<(), StateError> {
+    if !lock(runner).may_hold_relayed() {
+        return Ok(());
+    }
+    match relay.cleared() {
+        Ok(cleared) => lock(runner).relay_clears_seen(cleared.count).map(drop),
+        Err(_) => Ok(()),
     }
 }
 
@@ -127,27 +152,31 @@ pub(super) fn post_due(
     let mut due = lock(runner).alert_due()?;
     let mut relay_failed = None;
     if due.relay.is_some() {
-        // A notice never clears on the day: a clear would end a question still up.
-        let daily = matches!(due.of, Posting::Ruling(_)) && lock(runner).relay_clear_due();
-        let renewed = relay.renew();
-        let cleared =
-            renewed.as_ref().is_ok_and(|&cleared| cleared) || (daily && relay.clear().is_ok());
-        if cleared {
-            let mut runner = lock(runner);
-            if let Err(e) = runner.relay_emptied() {
-                return Some(Err(e));
-            }
-            // Every ruling the clear took goes back, oldest first.
-            due = runner.alert_due()?;
-        }
-        match (renewed, &due.relay) {
-            (Err(e), _) => relay_failed = Some(e),
-            (Ok(_), Some(message)) => {
-                if let Err(e) = relay.send(&message.text, &message.model, message.effort) {
-                    relay_failed = Some(e);
+        let now = lock(runner).ports.clock.now();
+        // A notice never clears on the day: a clear would end a question
+        // still up. A relay that cannot be cleared when due is not sent to,
+        // as one that cannot be renewed is not.
+        let daily = matches!(due.of, Posting::Ruling(_));
+        let renewed = relay.renew(now).and_then(|()| match relay.cleared()? {
+            cleared if daily && clear_due(cleared.last, now) => relay.clear(now),
+            _ => Ok(()),
+        });
+        match renewed.and_then(|()| relay.cleared()) {
+            Ok(cleared) => {
+                let mut runner = lock(runner);
+                match runner.relay_clears_seen(cleared.count) {
+                    Err(e) => return Some(Err(e)),
+                    // Every ruling the clear took goes back, oldest first.
+                    Ok(true) => due = runner.alert_due()?,
+                    Ok(false) => {}
                 }
             }
-            (Ok(_), None) => {}
+            Err(e) => relay_failed = Some(e),
+        }
+        if let (None, Some(message)) = (&relay_failed, &due.relay)
+            && let Err(e) = relay.send(&message.text, &message.model, message.effort)
+        {
+            relay_failed = Some(e);
         }
     }
     let relayed = due.relay_held || (due.relay.is_some() && relay_failed.is_none());
@@ -269,33 +298,31 @@ impl Runner {
         }
     }
 
-    /// Whether the relay is due a daily clear, which is recorded as done
-    /// once this returns true: called only when a ruling is about to be
-    /// sent, since a notice never clears: a clear ends a question still up.
-    pub(super) fn relay_clear_due(&mut self) -> bool {
-        let now = self.ports.clock.now();
-        let due = self
-            .relay_cleared
-            .is_none_or(|last| now.0.saturating_sub(last.0) >= CLEAR_EVERY);
-        if due {
-            self.relay_cleared = Some(now);
-        }
-        due
+    /// Whether the relay channel is on and the relay may hold one of this
+    /// project's rulings, or be owed a notice of one
+    fn may_hold_relayed(&self) -> bool {
+        self.channels.has(Channel::Relay)
+            && (!self.relay_notices.is_empty() || self.state.rulings.iter().any(|r| r.relayed))
     }
 
-    /// Records a clear, which left the relay holding no ruling: each one it
-    /// held is sent to it again
-    fn relay_emptied(&mut self) -> Result<(), StateError> {
-        self.relaying = None;
-        if !self.state.rulings.iter().any(|r| r.relayed) {
-            return Ok(());
+    /// Records `clears`, the relay's count of clears, and returns whether it
+    /// moved on since this runner last saw it: the relay then holds no
+    /// ruling, each one it held is sent to it again, and no notice queued
+    /// for it is told to the fresh one
+    fn relay_clears_seen(&mut self, clears: u64) -> Result<bool, StateError> {
+        if clears == self.state.relay_clears {
+            return Ok(false);
         }
+        self.relaying = None;
+        self.relay_notices.clear();
         let mut next = self.state.clone();
+        next.relay_clears = clears;
         for ruling in next.rulings.iter_mut().filter(|r| r.relayed) {
             ruling.relayed = false;
             ruling.resend = true;
         }
-        self.save(next)
+        self.save(next)?;
+        Ok(true)
     }
 
     /// Records how the post of `of` went, and for a ruling whether the relay

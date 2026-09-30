@@ -1,17 +1,18 @@
 //! One Bash call's commands, judged in order
 //!
 //! A command's program is judged in full: `cd` moves where the rest run,
-//! git and gh are checked, and a shell's script is read as commands of its
-//! own. Every git, gh or shell among the words of a program the guard does
-//! not know is judged too, as far as a command that may only name it can be.
+//! git and gh are checked, and a shell's script, in the call's text or in a
+//! file, is read as commands of its own. Every git, gh or shell among the
+//! words of a program the guard does not know is judged too, as far as a
+//! command that may only name it can be.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::wrap::{
     self, BUILT, FUNCTION, OTHER_SHELLS, Reach, SHELLS, STDIN, Shell, Unwrapped, configures_git,
     program, redirects_git,
 };
-use super::{Checkout, Home, MAX_COMMANDS, MAX_SHELLS, gh, git, moved, shell};
+use super::{Checkout, Home, MAX_COMMANDS, MAX_SHELLS, gh, git, moved, script, shell};
 
 /// One Bash call being judged
 pub(super) struct Judging<'a> {
@@ -31,6 +32,8 @@ pub(super) struct CallState {
     git_configured: bool,
     // Whether an earlier command made a repo.
     made_repo: bool,
+    // The text of each line being read, the call's own first.
+    texts: Vec<String>,
 }
 
 impl CallState {
@@ -56,14 +59,28 @@ impl CallState {
 }
 
 impl Judging<'_> {
-    // `cwd` is `None` once a `cd` goes somewhere the guard cannot follow.
     pub(super) fn line(
         &self,
         line: &str,
-        mut cwd: Option<PathBuf>,
+        cwd: Option<PathBuf>,
         shells: usize,
         state: &mut CallState,
     ) {
+        state.texts.push(line.to_owned());
+        self.commands(line, cwd, shells, state);
+        state.texts.pop();
+    }
+
+    // A script file a command runs, read as one more shell's commands.
+    fn script(&self, name: &str, cwd: Option<&Path>, shells: usize, state: &mut CallState) {
+        match script::read(name, cwd, self.home.as_ref(), &state.texts) {
+            Ok(text) => self.line(&text, cwd.map(Path::to_owned), shells + 1, state),
+            Err(refusal) => state.refuse(refusal),
+        }
+    }
+
+    // `cwd` is `None` once a `cd` goes somewhere the guard cannot follow.
+    fn commands(&self, line: &str, mut cwd: Option<PathBuf>, shells: usize, state: &mut CallState) {
         let commands = match shell::commands(line) {
             Ok(commands) if shells <= MAX_SHELLS => commands,
             Ok(_) => {
@@ -126,8 +143,16 @@ impl Judging<'_> {
         if run.moved {
             *cwd = None;
         }
-        if wrap::built(&run.words[0]) {
+        let name = &run.words[0];
+        if wrap::built(name) {
             return state.refuse(BUILT.into());
+        }
+        if name.contains('/') {
+            match script::interpreted(name, cwd.as_deref(), self.home.as_ref()) {
+                Ok(true) => self.script(name, cwd.as_deref(), shells, state),
+                Ok(false) => {}
+                Err(refusal) => state.refuse(refusal),
+            }
         }
         self.program(&run, heredocs, cwd, Reach::Runs, shells, state);
         self.named(&run, heredocs, cwd, shells, state);
@@ -205,17 +230,22 @@ impl Judging<'_> {
                 state.made_repo |= git::makes_repo(words);
                 found
             }
-            "gh" => gh(run.words, heredocs, cwd.as_deref(), home),
+            "gh" => gh::judge(run.words, heredocs, cwd.as_deref(), home),
             name if SHELLS.contains(&name) => {
                 // A variable set in front of a shell reaches its script.
                 state.git_redirected |= run.git_redirected;
                 state.git_configured |= run.git_configured;
                 let scripts = match wrap::shell(run.words) {
                     Shell::Text(scripts) => scripts,
+                    Shell::File(file) if reach == Reach::Runs => {
+                        self.script(file, cwd.as_deref(), shells, state);
+                        Vec::new()
+                    }
                     Shell::Stdin if heredocs.is_empty() && reach == Reach::Runs => {
                         return state.refuse(STDIN.into());
                     }
-                    Shell::Stdin | Shell::Unread => Vec::new(),
+                    // A file a program kelpie does not know names may be any text.
+                    Shell::File(_) | Shell::Stdin | Shell::Nothing => Vec::new(),
                 };
                 // A heredoc is read as commands, whether or not it is the script.
                 let heredocs = heredocs.iter().map(String::as_str);
@@ -224,11 +254,18 @@ impl Judging<'_> {
                 }
                 Vec::new()
             }
+            "source" | "." if reach == Reach::Runs => {
+                if let Some(file) = script::sourced(run.words) {
+                    self.script(file, cwd.as_deref(), shells, state);
+                }
+                Vec::new()
+            }
             name if OTHER_SHELLS.contains(&name)
                 && matches!(wrap::shell(run.words), Shell::Text(_)) =>
             {
                 vec![wrap::other_shell(name)]
             }
+            _ if reach == Reach::Runs => wrap::hidden(run.words).into_iter().collect(),
             _ => Vec::new(),
         };
         for refusal in found {

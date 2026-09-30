@@ -391,7 +391,7 @@ fn git_pointed_at_another_repo_or_run_by_alias_is_refused() {
         "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p",
     ] {
         let why = refusal(bash(command));
-        assert!(why.contains("git's own commands"), "{command}: {why}");
+        assert!(why.contains("git commands it knows"), "{command}: {why}");
     }
     // Config that could change what a commit or push does.
     for command in [
@@ -405,6 +405,15 @@ fn git_pointed_at_another_repo_or_run_by_alias_is_refused() {
         assert!(matches!(bash(command), Verdict::Refuse(_)), "{command}");
     }
     assert_eq!(bash("git -c color.ui=false log --oneline"), Verdict::Allow);
+    for command in ["git var GIT_EDITOR", "git sparse-checkout list"] {
+        assert_eq!(
+            bash_in(Path::new("/x"), command),
+            Verdict::Allow,
+            "{command}"
+        );
+    }
+    let why = refusal(bash_in(Path::new("/x"), "git submodule foreach 'git push'"));
+    assert!(why.contains("git commands it knows"), "{why}");
 }
 
 #[test]
@@ -721,7 +730,7 @@ fn a_replace_ref_does_not_hide_what_a_push_sends() {
     let why = refusal(tree.bash("git push origin HEAD"));
     assert!(why.contains("`leak.txt`"), "{why}");
     let why = refusal(tree.bash("git replace HEAD HEAD~1"));
-    assert!(why.contains("git's own commands"), "{why}");
+    assert!(why.contains("git commands it knows"), "{why}");
     tree.git(&["replace", "HEAD", "HEAD~1"]);
     let why = refusal(tree.bash("git push origin HEAD"));
     assert!(why.contains("`leak.txt`"), "a replace ref hid it: {why}");
@@ -835,4 +844,5 @@ fn an_unreadable_call_is_refused() {
     ));
 }
 
+mod manager;
 mod reach;

@@ -5,7 +5,8 @@
 //! trusted worktree git. A commit or push anywhere else, in a folder the
 //! guard cannot follow, or pointed at another repo or config is refused, as
 //! is any git command, option or push form it does not know: the guard can
-//! only vouch for the worktree as it stands.
+//! only vouch for the worktree as it stands. A push to the base branch is
+//! refused wherever it runs, since only the project manager changes it.
 
 mod front;
 mod runs;
@@ -80,25 +81,45 @@ pub(super) fn judge(
         ));
     }
     // An alias or an external command could be anything, and no alias
-    // shares a built-in's name.
+    // shares a built-in's name. Some built-ins run a command of their own,
+    // as `submodule foreach` does, so they are left out too.
     if !BUILTINS.contains(&sub) {
         if runs {
             out.push(format!(
-                "kelpie runs only git's own commands, and `{}` is not one: run the command it \
-                 stands for.",
+                "kelpie runs only the git commands it knows, and `{}` is not one: run the plain \
+                 git command you need, or the one an alias stands for.",
                 sub.chars().take(40).collect::<String>()
             ));
         }
         return out;
     }
-    let Some(home) = home else {
-        return out;
-    };
     let dir = front.moves.iter().fold(cwd.map(Path::to_owned), |dir, to| {
-        moved(dir.as_deref(), to, Some(home))
+        moved(dir.as_deref(), to, home)
     });
     let args = &git.words[at + 1..];
-    if sub == "commit" || sub == "tag" {
+    // Where a push goes is judged wherever it runs from.
+    let pushed = if sub == "push" {
+        match refspecs(args) {
+            Ok(specs) if specs.iter().any(Refspec::to_base) => {
+                out.push(to_base());
+                return out;
+            }
+            Ok(specs) => specs,
+            Err(refusal) => {
+                // Behind a program kelpie does not know, a push is refused below.
+                if runs {
+                    out.push(refusal);
+                    return out;
+                }
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    if let Some(home) = home
+        && (sub == "commit" || sub == "tag")
+    {
         let messages = values(args, &["--message"], &['m'])
             .into_iter()
             .chain(files(args, &["--file"], &['F'], dir.as_deref()))
@@ -107,7 +128,8 @@ pub(super) fn judge(
             out.push(home.refusal(&format!("this {sub}'s message"), WRITE));
         }
     }
-    if !matches!(sub, "commit" | "push") {
+    // A commit is read only for the home folder; a push, for its branch too.
+    if !(sub == "push" || sub == "commit" && home.is_some()) {
         return out;
     }
     if !runs {
@@ -140,15 +162,15 @@ pub(super) fn judge(
         return out;
     }
     let keys = if sub == "push" {
-        match sources(args) {
-            Ok(sources) => std::iter::once(Read::PushConfig)
-                .chain(sources.into_iter().map(Read::Push))
-                .collect(),
-            Err(refusal) => {
-                out.push(refusal);
-                return out;
-            }
-        }
+        let current = pushed.iter().any(Refspec::sends_current_branch);
+        let sent = pushed
+            .into_iter()
+            .filter(|spec| home.is_some() && !spec.source.is_empty())
+            .map(|spec| Read::Push(spec.source));
+        std::iter::once(Read::PushConfig)
+            .chain(current.then_some(Read::Branch))
+            .chain(sent)
+            .collect()
     } else {
         vec![Read::Commit {
             all: all_tracked(args),
@@ -182,6 +204,8 @@ enum Read {
     Commit { all: bool },
     /// What a push of this source sends past `origin`'s base branch
     Push(String),
+    /// The branch checked out, where a push of `HEAD` alone goes
+    Branch,
     /// Config that has a push send more than the refs it names
     PushConfig,
 }
@@ -224,8 +248,40 @@ const PUSH_FLAGS: [&str; 30] = [
 // Push options that take the next word, or an `=` value.
 const PUSH_VALUED: [&str; 4] = ["-o", "--push-option", "--repo", "--force-with-lease"];
 
-// What each of a push's refspecs sends from; `HEAD` when it names none.
-fn sources(args: &[String]) -> Result<Vec<String>, String> {
+/// One refspec of a push
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Refspec {
+    /// What it sends from, empty for a delete
+    source: String,
+    /// The branch it names on the remote, `None` when git takes the source's
+    destination: Option<String>,
+}
+
+impl Refspec {
+    // Git matches `main`, `heads/main` and `refs/heads/main` to the remote's
+    // branch. A source alone goes to the branch of its own name.
+    fn to_base(&self) -> bool {
+        let named = self.destination.as_deref().unwrap_or(&self.source);
+        let full = format!("refs/heads/{BASE}");
+        [BASE, &full["refs/".len()..], &full].contains(&named)
+    }
+
+    // `HEAD` or `@` alone goes to the branch checked out.
+    fn sends_current_branch(&self) -> bool {
+        self.destination.is_none() && matches!(self.source.as_str(), "HEAD" | "@")
+    }
+}
+
+/// The refusal for a push to the base branch
+fn to_base() -> String {
+    format!(
+        "only the project manager changes `{BASE}`, on the maintainer's ruling: push your own \
+         branch with `git push origin HEAD`."
+    )
+}
+
+// A push's refspecs; `HEAD` alone when it names none.
+fn refspecs(args: &[String]) -> Result<Vec<Refspec>, String> {
     let unknown = |word: &str| {
         Err(format!(
             "kelpie checks a push only in the forms it knows, and not with `{}`: push HEAD \
@@ -257,20 +313,28 @@ fn sources(args: &[String]) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
     for refspec in positional.iter().skip(1) {
         let refspec = refspec.strip_prefix('+').unwrap_or(refspec);
-        let (source, destination) = refspec.split_once(':').unwrap_or((refspec, refspec));
+        let (source, destination) = match refspec.split_once(':') {
+            Some((source, destination)) => (source, Some(destination)),
+            None => (refspec, None),
+        };
         if source.starts_with('-') {
             return Err("kelpie cannot read a push source that starts with `-`.".into());
         }
-        match (source.is_empty(), destination.is_empty()) {
-            // `:` alone pushes every branch that matches one on the remote.
-            (true, true) => return unknown(refspec),
-            // `:branch` deletes, and sends nothing.
-            (true, false) => {}
-            (false, _) => out.push(source.to_owned()),
+        // `:` alone pushes every branch that matches one on the remote, and
+        // `:branch` deletes.
+        if source.is_empty() && destination.is_none_or(str::is_empty) {
+            return unknown(refspec);
         }
+        out.push(Refspec {
+            source: source.to_owned(),
+            destination: destination.map(str::to_owned),
+        });
     }
     if positional.len() < 2 {
-        out.push("HEAD".into());
+        out.push(Refspec {
+            source: "HEAD".into(),
+            destination: None,
+        });
     }
     Ok(out)
 }
@@ -290,17 +354,38 @@ const PLAIN: [&str; 4] = [
     "--no-textconv",
 ];
 
-// What a commit adds, or a push sends, that names the home folder.
+// What a commit adds, or a push sends, that names the home folder, and a
+// push of `HEAD` from the base branch.
 fn read(
     key: &Read,
-    home: &Home,
+    home: Option<&Home>,
     run: impl Fn(&[&str]) -> Result<String, WorktreeError>,
 ) -> Result<Vec<String>, WorktreeError> {
     // `--unified` alone makes `git log` print patches, so only patch reads take these.
     let patches = |args: &[&str]| run(&[args, &PLAIN].concat());
     let mut out = Vec::new();
-    match key {
-        Read::Push(source) => {
+    match (key, home) {
+        (Read::Branch, _) => {
+            let branch = run(&["rev-parse", "--symbolic-full-name", "HEAD"])?;
+            if branch.trim() == format!("refs/heads/{BASE}") {
+                out.push(to_base());
+            }
+        }
+        (Read::PushConfig, _) => {
+            let config = run(&["config", "--list", "-z"])?;
+            for entry in config.split('\0') {
+                let (key, value) = entry.split_once('\n').unwrap_or((entry, ""));
+                let key = key.to_lowercase();
+                if runs::pushes_more(&key, &value.to_lowercase()) {
+                    out.push(format!(
+                        "this repo's git config sets `{key}`, which has a push send more than \
+                         the refs it names, and kelpie checks only those: unset it, then push."
+                    ));
+                }
+            }
+        }
+        (_, None) => {}
+        (Read::Push(source), Some(home)) => {
             // A file written and committed in one call is not staged when the
             // commit is judged, so the push reads what it sends. The base is
             // `origin`'s, which the worker cannot move, unlike its own branch's.
@@ -314,20 +399,7 @@ fn read(
                 out.push(home.refusal(&format!("{file} in the commits this push sends"), REWRITE));
             }
         }
-        Read::PushConfig => {
-            let config = run(&["config", "--list", "-z"])?;
-            for entry in config.split('\0') {
-                let (key, value) = entry.split_once('\n').unwrap_or((entry, ""));
-                let key = key.to_lowercase();
-                if runs::pushes_more(&key, &value.to_lowercase()) {
-                    out.push(format!(
-                        "this repo's git config sets `{key}`, which has a push send more than \
-                         the refs it names, and kelpie checks only those: unset it, then push."
-                    ));
-                }
-            }
-        }
-        Read::Commit { all } => {
+        (Read::Commit { all }, Some(home)) => {
             let range = if *all { "HEAD" } else { "--cached" };
             for file in home.added(&patches(&["diff", range])?) {
                 out.push(home.refusal(&format!("this commit's {file}"), WRITE));

@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use super::Timestamp;
 use crate::settings::Effort;
 
 /// Sends a ruling to the maintainer's relay session
@@ -12,15 +13,26 @@ use crate::settings::Effort;
 /// maintainer's answer comes back later through `shep trigger`, on its own.
 pub trait Relay: Send + Sync {
     /// Writes the relay's settings and instructions files, and clears a
-    /// relay started on older ones, which reads both only when it starts
+    /// relay started on older ones, at `now`, which reads both only when it
+    /// starts
     ///
-    /// Returns whether it cleared. Called before each [`Self::send`].
+    /// Called before each [`Self::send`].
     ///
     /// # Errors
     ///
     /// [`RelayError`] when the files cannot be written, or a running relay
-    /// on older ones could not be deleted.
-    fn renew(&self) -> Result<bool, RelayError>;
+    /// on older ones could not be cleared.
+    fn renew(&self, now: Timestamp) -> Result<(), RelayError>;
+
+    /// The relay's clears so far, by every project's runner
+    ///
+    /// Every project shares the one relay, so a count that moved on since a
+    /// runner last read it means a clear took that runner's rulings too.
+    ///
+    /// # Errors
+    ///
+    /// [`RelayError::CannotCount`] when the clears cannot be read.
+    fn cleared(&self) -> Result<Cleared, RelayError>;
 
     /// Sends `message`, starting the relay first if none is running
     ///
@@ -45,11 +57,24 @@ pub trait Relay: Send + Sync {
     /// starts a fresh one next time and nothing a worker's question tried
     /// to carry into it survives the clear
     ///
+    /// Counted in [`Self::cleared`], as made at `now`, before anything is
+    /// deleted, whether or not one was running: a clear that cannot be
+    /// counted deletes nothing.
+    ///
     /// # Errors
     ///
-    /// [`RelayError`] when a running relay could not be deleted. Not an
-    /// error when none was running.
-    fn clear(&self) -> Result<(), RelayError>;
+    /// [`RelayError`] when the clear cannot be counted, or a running relay
+    /// could not be deleted. Not an error when none was running.
+    fn clear(&self, now: Timestamp) -> Result<(), RelayError>;
+}
+
+/// The relay's clears so far, by every project's runner
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Cleared {
+    /// How many there have been
+    pub count: u64,
+    /// When the last one was made, if any was
+    pub last: Option<Timestamp>,
 }
 
 /// Why the relay could not be reached
@@ -63,6 +88,8 @@ pub enum RelayError {
     Unreachable(String),
     /// A running relay could not be stopped, with the reason
     CannotStop(String),
+    /// The count of clears could not be read or added to, with the reason
+    CannotCount(String),
 }
 
 impl fmt::Display for RelayError {
@@ -72,6 +99,7 @@ impl fmt::Display for RelayError {
             Self::NeverAppeared => f.write_str("the relay never appeared after starting"),
             Self::Unreachable(reason) => write!(f, "cannot reach the relay: {reason}"),
             Self::CannotStop(reason) => write!(f, "cannot stop the relay: {reason}"),
+            Self::CannotCount(reason) => write!(f, "cannot count the relay's clears: {reason}"),
         }
     }
 }

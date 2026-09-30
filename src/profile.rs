@@ -59,7 +59,8 @@ pub(crate) const CREDENTIALS: [&str; 12] = [
     "~/.kelpie/totp/**",
 ];
 
-// What only the project manager does: merge, mark ready, and summon.
+// What only the project manager does: merge, mark ready, and summon. `kelpie
+// guard` refuses these in any shape; these rules match a command's prefix only.
 const PM_ONLY: [&str; 5] = [
     "Bash(gh pr merge)",
     "Bash(gh pr merge *)",
@@ -68,8 +69,6 @@ const PM_ONLY: [&str; 5] = [
     "Bash(gh *review please*)",
 ];
 
-// `gh api` could merge or relabel around the rules above, and `gh auth token`
-// prints the maintainer's token. No worker needs either.
 // Tools no worker needs that reach past its fence: `Monitor` runs a command
 // or WebSocket no hook judges; `RemoteTrigger` starts cloud agents on the
 // maintainer's account with none of this file; `Workflow` agents escape the
@@ -85,6 +84,8 @@ const TOOLS_DENY: [&str; 5] = [
 // What `kelpie guard` judges: every command, and a subagent's isolation.
 const GUARDED_TOOLS: &str = "Bash|Agent|Task";
 
+// `gh api` could merge or relabel around the rules above, and `gh auth token`
+// prints the maintainer's token. No worker needs either.
 const GH_DENY: [&str; 4] = [
     "Bash(gh api)",
     "Bash(gh api *)",
@@ -278,7 +279,7 @@ impl WorkerProfile<'_> {
 
 // Pushes that name the branch kelpie cuts from, as `origin main`,
 // `HEAD:main` or `refs/heads/main`. A repo without branch protection
-// would otherwise take them.
+// would otherwise take them. The guard reads every spelling; these are its backup.
 fn push_to_base() -> impl Iterator<Item = String> {
     [" {b}", " {b} *", ":{b}*", "/{b}*"]
         .into_iter()

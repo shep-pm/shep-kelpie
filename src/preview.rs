@@ -370,6 +370,29 @@ fn run(command: &mut Command) -> Result<(), String> {
 /// Appended to kelpie's instructions for a worker on a project with the preview on
 pub const WORKER_INSTRUCTIONS: &str = include_str!("preview/worker-instructions.md");
 
+/// What [`WORKER_INSTRUCTIONS`] is followed by: the dev server's command, port and
+/// folder, the folder as [`Launch::dir`] resolves it for kelpie's own shots
+///
+/// A folder that does not resolve is said so, as the shots' run will fail on it.
+pub fn worker_server(launch: &Launch, worktree: &Path) -> String {
+    let command = std::iter::once(launch.runtime_executable.as_str())
+        .chain(launch.runtime_args.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let port = launch.port;
+    match launch.dir(worktree) {
+        Ok(dir) => format!(
+            "\nThe launch file starts `{command}` on port {port}, in `{}`. \
+             Start your dev server in that folder, as kelpie's shots do.\n",
+            dir.display()
+        ),
+        Err(why) => format!(
+            "\nThe launch file starts `{command}` on port {port}, but kelpie cannot find \
+             its folder: {why}. Its shots fail until that is fixed; say so in your final message.\n"
+        ),
+    }
+}
+
 /// Where one worker's MCP servers find what they run
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct McpFiles<'a> {
@@ -500,6 +523,15 @@ mod tests {
         assert_eq!(launch.dir(worktree.path()), Ok(root.join("web")));
         let no_cwd = parse_launch(PLAYGROUND, None).unwrap();
         assert_eq!(no_cwd.dir(worktree.path()), Ok(root));
+    }
+
+    #[test]
+    fn the_worker_is_told_when_the_folder_cannot_be_found() {
+        let worktree = worktree_with(SHEP);
+        let launch = parse_launch(SHEP, None).unwrap();
+        let told = worker_server(&launch, worktree.path());
+        assert!(told.contains("`npm run dev` on port 5173"), "{told}");
+        assert!(told.contains("cannot find its folder"), "{told}");
     }
 
     #[test]
