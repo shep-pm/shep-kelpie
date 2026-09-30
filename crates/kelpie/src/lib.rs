@@ -15,6 +15,7 @@ pub mod channels;
 pub mod coderabbit;
 pub mod confine;
 pub mod cubic;
+pub mod doctor;
 pub mod dog;
 pub mod fence;
 pub mod flock;

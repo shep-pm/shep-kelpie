@@ -85,6 +85,20 @@ pub trait Forge: Send {
     /// [`ForgeError`] when the forge refuses, such as when `repo` already has it.
     fn create_label(&self, repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError>;
 
+    /// Whether the account kelpie acts as may push to `repo`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn can_push(&self, repo: &ForgeSlug) -> Result<bool, ForgeError>;
+
+    /// Whether the review bot `login` has commented on any pull request of `repo`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn review_bot_seen(&self, repo: &ForgeSlug, login: Login<'_>) -> Result<bool, ForgeError>;
+
     /// Issue `number` on `repo`
     ///
     /// # Errors

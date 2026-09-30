@@ -154,15 +154,27 @@ pub async fn read_tables_with(client: &Client, sheep: &str) -> Result<Tables, St
         }
         other => return Err(asked("the sheep's tables", &format!("{other:?}"))),
     };
-    let kelpie = match client
+    let kelpie = read_section(client).await?;
+    Ok(Tables { project, kelpie })
+}
+
+/// Kelpie's `[kelpie]` section of `dogs.toml` as TOML text, empty when unset
+///
+/// # Errors
+///
+/// A message naming what the shepherd did not answer with.
+pub async fn read_section(client: &Client) -> Result<String, String> {
+    let asked = |e: &dyn core::fmt::Display| {
+        format!("kelpie's shepherd did not answer with kelpie's section: {e}")
+    };
+    match client
         .request(Request::DogConfig { name: DOG.into() })
         .await
-        .map_err(|e| asked("kelpie's section", &e))?
+        .map_err(|e| asked(&e))?
     {
-        Response::DogSection { toml } => toml.as_str().to_owned(),
-        other => return Err(asked("kelpie's section", &format!("{other:?}"))),
-    };
-    Ok(Tables { project, kelpie })
+        Response::DogSection { toml } => Ok(toml.as_str().to_owned()),
+        other => Err(asked(&format!("{other:?}"))),
+    }
 }
 
 #[cfg(test)]

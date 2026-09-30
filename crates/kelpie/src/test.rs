@@ -180,7 +180,7 @@ pub(crate) struct FakeMeter {
 }
 
 impl FakeMeter {
-    fn idle() -> Self {
+    pub(crate) fn idle() -> Self {
         Self {
             reading: Arc::new(Mutex::new(Ok(Rig::utilization(0, 0)))),
             reads: Arc::default(),

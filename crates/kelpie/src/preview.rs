@@ -332,6 +332,24 @@ impl Tools {
         self.package("@anthropic-ai/sandbox-runtime/dist/cli.js")
     }
 
+    /// What `kelpie tools install` has not put in place, by name
+    pub fn missing(&self) -> Vec<&'static str> {
+        let parts = [
+            ("the Playwright MCP server", self.playwright_mcp()),
+            ("Playwright", self.playwright_cli()),
+            ("the sandbox runtime", self.sandbox()),
+        ];
+        let mut missing: Vec<_> = (parts.into_iter())
+            .filter(|(_, file)| !file.is_file())
+            .map(|(name, _)| name)
+            .collect();
+        let browsers = std::fs::read_dir(self.browsers()).is_ok_and(|mut d| d.next().is_some());
+        if !browsers {
+            missing.push("headless Chromium");
+        }
+        missing
+    }
+
     fn package(&self, path: &str) -> PathBuf {
         self.0.join("node_modules").join(path)
     }

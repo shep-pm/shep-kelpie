@@ -32,6 +32,7 @@ struct Sheep {
 pub(crate) struct FakeShepherd {
     home: tempfile::TempDir,
     flock: Arc<Mutex<Vec<Sheep>>>,
+    section: Arc<Mutex<String>>,
     sent: UnboundedReceiver<Envelope>,
 }
 
@@ -49,12 +50,19 @@ impl FakeShepherd {
         ack.daemon_version = version.into();
         let flock = Arc::new(Mutex::new(Vec::new()));
         let answers = Arc::clone(&flock);
+        let section = Arc::new(Mutex::new(String::new()));
+        let held = Arc::clone(&section);
         let sent =
             fake_daemon_answering_with_ack(&home.path().join("run/shep.sock"), ack, move |r| {
-                answer(&mut answers.lock().unwrap(), r)
+                answer(&mut answers.lock().unwrap(), &held.lock().unwrap(), r)
             })
             .await;
-        Self { home, flock, sent }
+        Self {
+            home,
+            flock,
+            section,
+            sent,
+        }
     }
 
     pub(crate) fn home(&self) -> &Path {
@@ -77,6 +85,11 @@ impl FakeShepherd {
             opening: false,
         };
         self.flock.lock().unwrap().push(sheep);
+    }
+
+    /// Holds `toml` as kelpie's own `[kelpie]` section of `dogs.toml`
+    pub(crate) fn holds_section(&self, toml: &str) {
+        *self.section.lock().unwrap() = toml.to_owned();
     }
 
     /// Has `name`, just started, answer its next trigger as a runner still opening
@@ -113,6 +126,7 @@ impl FakeShepherd {
                     r,
                     Request::ListFlock
                         | Request::DogSheepSettings { .. }
+                        | Request::DogConfig { .. }
                         | Request::SheepConfig { .. }
                 )
             })
@@ -142,7 +156,7 @@ fn named(flock: &[Sheep], selector: &SelectorSpec) -> Option<usize> {
     flock.iter().position(|s| &s.config.name == name)
 }
 
-fn answer(flock: &mut Vec<Sheep>, request: &Request) -> Response {
+fn answer(flock: &mut Vec<Sheep>, section: &str, request: &Request) -> Response {
     let rows = |flock: &[Sheep]| flock.iter().enumerate().map(|(i, s)| info(i, s)).collect();
     match request {
         Request::ListFlock => Response::Flock(rows(flock)),
@@ -151,6 +165,9 @@ fn answer(flock: &mut Vec<Sheep>, request: &Request) -> Response {
                 .iter()
                 .filter_map(|s| Some((s.config.name.clone(), s.config.dogs.get(dog)?.clone())))
                 .collect(),
+        },
+        Request::DogConfig { .. } => Response::DogSection {
+            toml: section.to_owned().into(),
         },
         Request::SheepConfig { name } => {
             let sheep = flock.iter().find(|s| &s.config.name == name).unwrap();
