@@ -150,6 +150,15 @@ pub(super) fn pushes_more(key: &str, value: &str) -> bool {
     }
 }
 
+/// How to take back config `key` that has a push send more than the refs it names
+pub(super) fn push_fix(key: &str) -> String {
+    match key {
+        "push.default" => "git config push.default simple".to_owned(),
+        _ if key.ends_with(".push") => format!("git config --unset-all {key}"),
+        _ => format!("git config {key} false"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

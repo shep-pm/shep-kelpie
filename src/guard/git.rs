@@ -390,7 +390,9 @@ fn read(
                 if runs::pushes_more(&key, &value.to_lowercase()) {
                     out.push(format!(
                         "this repo's git config sets `{key}`, which has a push send more than \
-                         the refs it names, and kelpie checks only those: unset it, then push."
+                         the refs it names, and kelpie checks only those: take it back with \
+                         `{}`, adding `--global` if it is set there, then push.",
+                        runs::push_fix(&key)
                     ));
                 }
             }

@@ -271,6 +271,10 @@ fn push_config_that_sends_more_than_the_push_names_is_refused() {
         assert!(why.contains(&key.to_lowercase()), "{key}: {why}");
     }
     let tree = WorkerTree::new();
+    tree.git(&["config", "push.followTags", "true"]);
+    let why = refusal(tree.bash("git push origin HEAD"));
+    assert!(why.contains("`git config push.followtags false`"), "{why}");
+    let tree = WorkerTree::new();
     tree.git(&["config", "push.default", "simple"]);
     tree.git(&["config", "push.followTags", "false"]);
     assert_eq!(tree.bash("git push origin HEAD"), Verdict::Allow);
