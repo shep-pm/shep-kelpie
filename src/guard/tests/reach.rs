@@ -285,3 +285,19 @@ fn a_command_naming_git_many_times_is_refused_fast() {
     assert!(why.contains("too many commands"), "{why}");
     assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
 }
+
+#[test]
+fn a_shell_fed_stdin_behind_a_wrapper_the_guard_does_not_know_is_refused() {
+    refused(&[
+        "echo 'git push origin HEAD' | unbuffer sh",
+        "echo 'git push origin HEAD' | arch -arm64 bash",
+        "unbuffer bash -s < f.sh",
+        "echo 'git push' |& unbuffer zsh",
+    ]);
+    allowed(&[
+        "ps aux | grep bash",
+        "cat notes.md | grep -c sh",
+        "man bash",
+        "ls -l /bin/sh || unbuffer bash",
+    ]);
+}

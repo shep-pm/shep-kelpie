@@ -7,6 +7,8 @@
 //! This reads commands the way a shell would for the guard's purposes. It
 //! is not a shell, and it does not expand anything.
 
+use std::ops::Range;
+
 /// One command a Bash call runs
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Command {
@@ -16,6 +18,8 @@ pub(super) struct Command {
     pub heredocs: Vec<String>,
     /// Whether it defines a shell function, as `name() { ... }`
     pub defines_function: bool,
+    /// Whether a `|` feeds it the output of the command before
+    pub piped: bool,
 }
 
 // A heredoc's place in the lifted text: `<<`, then its index between these.
@@ -62,9 +66,11 @@ pub(super) fn commands(line: &str) -> Result<Vec<Command>, Unreadable> {
     let chars: Vec<char> = text.chars().collect();
     Ok(split(&chars)?
         .into_iter()
-        .filter_map(|segment| {
+        .filter_map(|range| {
+            let piped = piped(&chars, range.start);
+            let segment = &chars[range];
             // A word keeps its `<<`, not the mark after it.
-            let words: Vec<String> = words(&segment)
+            let words: Vec<String> = words(segment)
                 .into_iter()
                 .map(|w| w.split(MARK).step_by(2).collect())
                 .collect();
@@ -72,7 +78,8 @@ pub(super) fn commands(line: &str) -> Result<Vec<Command>, Unreadable> {
             let text: String = segment.iter().collect();
             (!words.is_empty()).then(|| Command {
                 defines_function: defines_function(&text),
-                heredocs: marks(&segment)
+                piped,
+                heredocs: marks(segment)
                     .into_iter()
                     .filter_map(|i| bodies.get(i).cloned())
                     .collect(),
@@ -234,7 +241,7 @@ fn body(chars: &[char], from: usize, delimiter: &str, strip: bool) -> (String, u
 //
 // One pass: each open `$( )`, `( )` or backtick body keeps the start of its
 // own current segment, so no body is scanned twice.
-fn split(chars: &[char]) -> Result<Vec<Vec<char>>, Unreadable> {
+fn split(chars: &[char]) -> Result<Vec<Range<usize>>, Unreadable> {
     let mut out = Vec::new();
     let mut stack: Vec<Context> = Vec::new();
     let mut start = 0;
@@ -264,7 +271,7 @@ fn split(chars: &[char]) -> Result<Vec<Vec<char>>, Unreadable> {
         if ch == '`' {
             if let Some(Context::Backtick(from)) = top {
                 stack.pop();
-                out.push(chars[from..i].to_vec());
+                out.push(from..i);
             } else {
                 stack.push(Context::Backtick(i + 1));
             }
@@ -294,16 +301,16 @@ fn split(chars: &[char]) -> Result<Vec<Vec<char>>, Unreadable> {
             ')' => {
                 if let Some(Context::Sub(from)) = top {
                     stack.pop();
-                    out.push(chars[from..i].to_vec());
+                    out.push(from..i);
                 }
             }
             '\n' | ';' | '&' | '|' => match stack.last_mut() {
                 None => {
-                    out.push(chars[start..i].to_vec());
+                    out.push(start..i);
                     start = i + 1;
                 }
                 Some(Context::Sub(from) | Context::Backtick(from)) => {
-                    out.push(chars[*from..i].to_vec());
+                    out.push(*from..i);
                     *from = i + 1;
                 }
                 Some(_) => {}
@@ -312,8 +319,18 @@ fn split(chars: &[char]) -> Result<Vec<Vec<char>>, Unreadable> {
         }
         i += 1;
     }
-    out.push(chars[start..].to_vec());
+    out.push(start..chars.len());
     Ok(out)
+}
+
+// Whether a segment starting at `start` follows a `|` or `|&`, not a `||`.
+fn piped(chars: &[char], start: usize) -> bool {
+    let before = |n: usize| start.checked_sub(n).and_then(|i| chars.get(i)).copied();
+    match (before(1), before(2), before(3)) {
+        (Some('|'), second, _) => second != Some('|'),
+        (Some('&'), Some('|'), third) => third != Some('|'),
+        _ => false,
+    }
 }
 
 // The heredoc indexes a segment's text names.

@@ -10,8 +10,9 @@
 pub(in crate::guard) enum Shell<'a> {
     /// Commands in the call's own text: its `-c` script, or its `<<<` strings
     Text(Vec<&'a str>),
-    /// Commands on stdin, which only a heredoc in the call's text would hold
-    Stdin,
+    /// Commands on stdin, which only a heredoc in the call's text would hold;
+    /// `asked` when `-s` or a redirect says so, not only a missing script
+    Stdin { asked: bool },
     /// The script in this file
     File(&'a str),
     /// Nothing: it prints its version or help
@@ -62,7 +63,9 @@ pub(in crate::guard) fn shell(words: &[String]) -> Shell<'_> {
     }
     match operand {
         Some(file) if !stdin && !stdin_path(file) => Shell::File(file),
-        _ if strings.is_empty() => Shell::Stdin,
+        _ if strings.is_empty() => Shell::Stdin {
+            asked: stdin || operand.is_some(),
+        },
         _ => Shell::Text(strings),
     }
 }

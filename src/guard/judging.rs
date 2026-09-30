@@ -14,6 +14,15 @@ use super::wrap::{
 };
 use super::{Checkout, Home, MAX_COMMANDS, MAX_SHELLS, gh, git, moved, script, shell};
 
+// What a command's stdin holds, as the call's text shows it.
+#[derive(Debug, Clone, Copy)]
+struct Input<'a> {
+    // The heredoc bodies it reads.
+    heredocs: &'a [String],
+    // Whether a `|` feeds it another command's output.
+    piped: bool,
+}
+
 /// One Bash call being judged
 pub(super) struct Judging<'a> {
     pub home: Option<Home>,
@@ -35,6 +44,12 @@ pub(super) struct CallState {
     // The text of each line being read, the call's own first.
     texts: Vec<String>,
 }
+
+// Programs that only read or print text, and run no word they are given.
+const READERS: [&str; 16] = [
+    "grep", "egrep", "fgrep", "rg", "ag", "ack", "cat", "less", "more", "head", "tail", "wc",
+    "sort", "uniq", "man", "which",
+];
 
 impl CallState {
     // Each refusal once, however many commands earn it.
@@ -110,7 +125,11 @@ impl Judging<'_> {
             }
             state.git_redirected |= wrap::sets(&command.words, redirects_git);
             state.git_configured |= wrap::sets(&command.words, configures_git);
-            self.command(&command.words, &command.heredocs, &mut cwd, shells, state);
+            let input = Input {
+                heredocs: &command.heredocs,
+                piped: command.piped,
+            };
+            self.command(&command.words, input, &mut cwd, shells, state);
         }
     }
 
@@ -118,7 +137,7 @@ impl Judging<'_> {
     fn command(
         &self,
         words: &[String],
-        heredocs: &[String],
+        input: Input<'_>,
         cwd: &mut Option<PathBuf>,
         shells: usize,
         state: &mut CallState,
@@ -133,7 +152,7 @@ impl Judging<'_> {
                     git_redirected: false,
                     git_configured: false,
                 };
-                return self.named(&run, heredocs, cwd, shells, state);
+                return self.named(&run, input, cwd, shells, state);
             }
             Err(refusal) => return state.refuse(refusal),
         };
@@ -154,24 +173,25 @@ impl Judging<'_> {
                 Err(refusal) => state.refuse(refusal),
             }
         }
-        self.program(&run, heredocs, cwd, Reach::Runs, shells, state);
-        self.named(&run, heredocs, cwd, shells, state);
+        self.program(&run, input, cwd, Reach::Runs, shells, state);
+        self.named(&run, input, cwd, shells, state);
     }
 
     // Each git, gh or shell among the words after `run`'s program.
     fn named(
         &self,
         run: &Unwrapped<'_>,
-        heredocs: &[String],
+        input: Input<'_>,
         cwd: &mut Option<PathBuf>,
         shells: usize,
         state: &mut CallState,
     ) {
+        // `ps | grep bash` searches for a shell, it does not run one.
+        let reader = READERS.contains(&program(&run.words[0]));
         for at in 1..run.words.len() {
             let name = program(&run.words[at]);
-            let judged = matches!(name, "git" | "gh")
-                || SHELLS.contains(&name)
-                || OTHER_SHELLS.contains(&name);
+            let shell = SHELLS.contains(&name) || OTHER_SHELLS.contains(&name);
+            let judged = matches!(name, "git" | "gh") || shell && !reader;
             if !judged {
                 continue;
             }
@@ -182,7 +202,7 @@ impl Judging<'_> {
                 words: &run.words[at..],
                 ..run.clone()
             };
-            self.program(&named, heredocs, cwd, Reach::Named, shells, state);
+            self.program(&named, input, cwd, Reach::Named, shells, state);
         }
     }
 
@@ -190,7 +210,7 @@ impl Judging<'_> {
     fn program(
         &self,
         run: &Unwrapped<'_>,
-        heredocs: &[String],
+        input: Input<'_>,
         cwd: &mut Option<PathBuf>,
         reach: Reach,
         shells: usize,
@@ -216,11 +236,11 @@ impl Judging<'_> {
                     self.line(&script, cwd.clone(), shells + 1, state);
                 }
                 if let Some(command) = git::bisect_run(words) {
-                    self.command(command, heredocs, cwd, shells, state);
+                    self.command(command, input, cwd, shells, state);
                 }
                 let git = git::Git {
                     words,
-                    heredocs,
+                    heredocs: input.heredocs,
                     redirected: run.git_redirected || state.git_redirected,
                     configured: run.git_configured || state.git_configured,
                     reach,
@@ -230,7 +250,7 @@ impl Judging<'_> {
                 state.made_repo |= git::makes_repo(words);
                 found
             }
-            "gh" => gh::judge(run.words, heredocs, cwd.as_deref(), home),
+            "gh" => gh::judge(run.words, input.heredocs, cwd.as_deref(), home),
             name if SHELLS.contains(&name) => {
                 // A variable set in front of a shell reaches its script.
                 state.git_redirected |= run.git_redirected;
@@ -241,14 +261,19 @@ impl Judging<'_> {
                         self.script(file, cwd.as_deref(), shells, state);
                         Vec::new()
                     }
-                    Shell::Stdin if heredocs.is_empty() && reach == Reach::Runs => {
+                    // Behind a program kelpie does not know, only a shell that is
+                    // fed stdin, or asks for it, is surely reading commands there.
+                    Shell::Stdin { asked }
+                        if input.heredocs.is_empty()
+                            && (reach == Reach::Runs || asked || input.piped) =>
+                    {
                         return state.refuse(STDIN.into());
                     }
                     // A file a program kelpie does not know names may be any text.
-                    Shell::File(_) | Shell::Stdin | Shell::Nothing => Vec::new(),
+                    Shell::File(_) | Shell::Stdin { .. } | Shell::Nothing => Vec::new(),
                 };
                 // A heredoc is read as commands, whether or not it is the script.
-                let heredocs = heredocs.iter().map(String::as_str);
+                let heredocs = input.heredocs.iter().map(String::as_str);
                 for script in scripts.into_iter().chain(heredocs) {
                     self.line(script, cwd.clone(), shells + 1, state);
                 }
