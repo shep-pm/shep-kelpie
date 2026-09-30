@@ -30,6 +30,12 @@ pub(crate) struct FakeForge {
     sub_issues: Arc<Mutex<HashMap<u64, Vec<u64>>>>,
     // The issues kelpie closed, with the comment each got
     closings: Arc<Mutex<Vec<(u64, String)>>>,
+    // Whether linking a sub-issue is refused, as on a repo without them
+    links_down: Arc<AtomicBool>,
+    // Whether the next link lands but its answer is lost
+    link_answers_lost: Arc<AtomicBool>,
+    // Whether closing an issue is refused
+    closes_down: Arc<AtomicBool>,
     open: Arc<Mutex<Vec<OpenPullRequest>>>,
     board_down: Arc<AtomicBool>,
     calls: Arc<AtomicUsize>,
@@ -106,6 +112,9 @@ impl FakeForge {
             closed: Arc::default(),
             sub_issues: Arc::default(),
             closings: Arc::default(),
+            links_down: Arc::default(),
+            link_answers_lost: Arc::default(),
+            closes_down: Arc::default(),
             open: Arc::default(),
             board_down: Arc::default(),
             calls: Arc::default(),
@@ -228,6 +237,21 @@ impl FakeForge {
     /// The issues issue `number` is blocked by, open or closed
     pub(crate) fn blockers(&self, number: u64) -> Vec<u64> {
         self.blockers_of(number).iter().map(|b| b.number).collect()
+    }
+
+    /// Makes linking a sub-issue fail, or work again
+    pub(crate) fn set_links_down(&self, down: bool) {
+        self.links_down.store(down, Ordering::SeqCst);
+    }
+
+    /// Makes the next link land on the forge but answer with an error
+    pub(crate) fn lose_next_link_answer(&self) {
+        self.link_answers_lost.store(true, Ordering::SeqCst);
+    }
+
+    /// Makes closing an issue fail, or work again
+    pub(crate) fn set_closes_down(&self, down: bool) {
+        self.closes_down.store(down, Ordering::SeqCst);
     }
 
     /// The issues kelpie closed, with the comment each got
@@ -549,11 +573,15 @@ impl Forge for FakeForge {
         if self.missing.lock().unwrap().contains(&number) {
             return Err(ForgeError::Failed(format!("no issue #{number}")));
         }
+        // Each read takes its own lock, so none may be held across another.
+        let open = !self.closed.lock().unwrap().contains(&number);
         Ok(Issue {
             title: format!("Title of #{number}"),
             body: format!("Body of #{number}.\n"),
             labels: self.labels_of(number),
-            open: !self.closed.lock().unwrap().contains(&number),
+            open,
+            parent: self.parent_of(number),
+            blocked_by: self.blockers(number),
         })
     }
 
@@ -709,9 +737,7 @@ impl Forge for FakeForge {
         body: &str,
         labels: &[&str],
     ) -> Result<u64, ForgeError> {
-        if let Some(why) = &*self.issues_down.lock().unwrap() {
-            return Err(ForgeError::Failed(why.clone()));
-        }
+        self.issues_up()?;
         if let Some(left) = self.creates_left.lock().unwrap().as_mut() {
             if *left == 0 {
                 return Err(ForgeError::Failed("issues are down".into()));
@@ -743,21 +769,35 @@ impl Forge for FakeForge {
 
     fn add_sub_issue(&self, _repo: &ForgeSlug, parent: u64, child: u64) -> Result<(), ForgeError> {
         self.issues_up()?;
+        if self.links_down.load(Ordering::SeqCst) {
+            return Err(ForgeError::Failed("sub-issues are not enabled".into()));
+        }
         if self.parent_of(child).is_some() {
             return Err(ForgeError::Failed(format!("#{child} already has a parent")));
         }
         self.link_sub_issue(parent, child);
+        if self.link_answers_lost.swap(false, Ordering::SeqCst) {
+            return Err(ForgeError::Failed("the connection dropped".into()));
+        }
         Ok(())
     }
 
-    fn add_blocker(&self, _repo: &ForgeSlug, number: u64, by: u64) -> Result<(), ForgeError> {
+    fn add_blocker(&self, _repo: &ForgeSlug, number: u64, blocker: u64) -> Result<(), ForgeError> {
         self.issues_up()?;
-        self.block(number, by);
+        if self.blockers(number).contains(&blocker) {
+            return Err(ForgeError::Failed(format!(
+                "#{number} is already blocked by #{blocker}"
+            )));
+        }
+        self.block(number, blocker);
         Ok(())
     }
 
     fn close_issue(&self, _repo: &ForgeSlug, number: u64, comment: &str) -> Result<(), ForgeError> {
         self.issues_up()?;
+        if self.closes_down.load(Ordering::SeqCst) {
+            return Err(ForgeError::Failed("closing is refused".into()));
+        }
         self.closed.lock().unwrap().insert(number);
         self.closings
             .lock()

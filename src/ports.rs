@@ -193,12 +193,12 @@ pub trait Forge: Send {
     /// [`ForgeError`] when the forge refuses or cannot be asked.
     fn add_sub_issue(&self, repo: &ForgeSlug, parent: u64, child: u64) -> Result<(), ForgeError>;
 
-    /// Marks issue `number` blocked by issue `by`
+    /// Marks issue `number` blocked by issue `blocker`
     ///
     /// # Errors
     ///
     /// [`ForgeError`] when the forge refuses or cannot be asked.
-    fn add_blocker(&self, repo: &ForgeSlug, number: u64, by: u64) -> Result<(), ForgeError>;
+    fn add_blocker(&self, repo: &ForgeSlug, number: u64, blocker: u64) -> Result<(), ForgeError>;
 
     /// Closes issue `number` with `comment`
     ///
@@ -370,6 +370,10 @@ pub struct Issue {
     pub labels: Vec<String>,
     /// Whether it is still open
     pub open: bool,
+    /// The issue it is a sub-issue of, if any
+    pub parent: Option<u64>,
+    /// The issues it is blocked by, as far as the forge lists them
+    pub blocked_by: Vec<u64>,
 }
 
 /// An open issue, as the follow-up check reads it

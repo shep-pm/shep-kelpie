@@ -77,8 +77,9 @@ effort = "medium"
 # decides whether it is one pull request or several. Several become
 # sub-issues of it, linked by what blocks what, and are worked in its place.
 # Under `ask` a split waits on a ruling; under `auto` it happens on its own.
+# Off until the sub-issue and blocked-by calls have run against a real repo.
 [app.dogs.kelpie.planning]
-enabled = true
+enabled = false
 
 [app.dogs.kelpie.review]
 loop_guard = 8

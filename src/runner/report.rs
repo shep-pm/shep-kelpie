@@ -103,8 +103,18 @@ pub enum StepReport {
         comment_failed: Option<String>,
     },
     /// A split could not finish this step, and carries on at the next
+    /// unless it was parked on a ruling
     SplitFailed {
         /// The issue being split
+        issue: u64,
+        /// Why
+        reason: String,
+        /// The ruling it is parked on, once the forge refused too often
+        ruling: Option<u64>,
+    },
+    /// A split was given up: its issue was closed or left the board
+    SplitDropped {
+        /// The issue
         issue: u64,
         /// Why
         reason: String,
@@ -120,6 +130,8 @@ pub enum StepReport {
         issue: u64,
         /// Why
         reason: String,
+        /// The ruling it is parked on, once the forge refused too often
+        ruling: Option<u64>,
     },
     /// Nothing was dispatched: the board could not be read, or the issue it
     /// picked could not be taken

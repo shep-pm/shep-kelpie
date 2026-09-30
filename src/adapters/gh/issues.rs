@@ -67,15 +67,14 @@ fn parse_open_issues(stdout: &[u8]) -> Result<Vec<OpenIssue>, ForgeError> {
         .collect())
 }
 
-// `gh issue create` prints the new issue's URL, which ends in its number.
 pub(super) fn add_sub_issue(repo: &ForgeSlug, parent: u64, child: u64) -> Result<(), ForgeError> {
     let id = format!("sub_issue_id={}", database_id(repo, child)?);
     let path = format!("repos/{}/issues/{parent}/sub_issues", repo.as_str());
     gh(&["api", "--method", "POST", &path, "-F", &id]).map(drop)
 }
 
-pub(super) fn add_blocker(repo: &ForgeSlug, number: u64, by: u64) -> Result<(), ForgeError> {
-    let id = format!("issue_id={}", database_id(repo, by)?);
+pub(super) fn add_blocker(repo: &ForgeSlug, number: u64, blocker: u64) -> Result<(), ForgeError> {
+    let id = format!("issue_id={}", database_id(repo, blocker)?);
     let path = format!(
         "repos/{}/issues/{number}/dependencies/blocked_by",
         repo.as_str()
@@ -109,6 +108,7 @@ fn parse_database_id(stdout: &[u8]) -> Result<u64, ForgeError> {
     text.trim().parse().map_err(|_| unreadable(stdout))
 }
 
+// `gh issue create` prints the new issue's URL, which ends in its number.
 fn parse_created(stdout: &[u8]) -> Result<u64, ForgeError> {
     let text = String::from_utf8_lossy(stdout);
     text.trim()

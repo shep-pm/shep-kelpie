@@ -128,23 +128,13 @@ fn default_planner() -> RoleModel {
 }
 
 /// Planning settings
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Planning {
     /// Whether a ready issue the board picks is planned first, and may
-    /// become sub-issues. On when absent.
-    #[serde(default = "default_planning_enabled")]
+    /// become sub-issues. Off when absent, until splits have run on a real repo.
+    #[serde(default)]
     pub enabled: bool,
-}
-
-impl Default for Planning {
-    fn default() -> Self {
-        Self { enabled: true }
-    }
-}
-
-fn default_planning_enabled() -> bool {
-    true
 }
 
 /// One role's model and effort

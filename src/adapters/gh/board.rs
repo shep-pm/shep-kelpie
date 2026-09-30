@@ -258,7 +258,9 @@ mod tests {
     #[test]
     fn the_board_asks_for_each_issues_parent_and_sub_issues() {
         let repo = ForgeSlug::try_from("shep-pm/shep".to_owned()).unwrap();
-        let fields = ready_args(&repo)[11].split(',').collect::<Vec<_>>();
+        let args = ready_args(&repo);
+        let json = args.iter().position(|&a| a == "--json").unwrap() + 1;
+        let fields = args[json].split(',').collect::<Vec<_>>();
         assert!(fields.contains(&"parent") && fields.contains(&"subIssuesSummary"));
     }
 

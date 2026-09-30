@@ -357,6 +357,20 @@ pub enum RulingKind {
         /// The pieces, blockers first
         pieces: Vec<Piece>,
     },
+    /// The forge refused a split step several times in a row. A yes tries
+    /// again, and a no gives the split up and works the issue whole.
+    SplitStuck {
+        /// The forge's last refusal
+        reason: String,
+        /// The sub-issues opened before it stopped
+        opened: Vec<u64>,
+    },
+    /// The forge refused several times to close an issue whose sub-issues
+    /// are all closed. A yes tries again, and a no leaves it open.
+    CloseStuck {
+        /// The forge's last refusal
+        reason: String,
+    },
     /// The pull request's labels or ready state changed outside kelpie. A
     /// yes accepts the change and kelpie carries on watching it.
     ForeignChange {

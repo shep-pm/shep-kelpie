@@ -38,7 +38,7 @@ impl Runner {
         // An issue in flight is left out, and not listed in `skipped`: it is
         // being worked on, not passed over.
         ready.retain(|issue| self.state.item(issue.number).is_none());
-        if let Some(begin) = self.close_split_done(&ready) {
+        if let Some(begin) = self.close_split_done(&ready)? {
             return Ok(begin);
         }
         // An adopted pull request, then one asking for a rework, goes before
@@ -97,8 +97,8 @@ impl Runner {
                 }
                 paced = true;
             }
-            let picked = ready.iter().find(|i| i.number == issue).cloned();
-            match picked.map(|i| self.plan_pick(&i)).transpose()?.flatten() {
+            let picked = ready.iter().find(|i| i.number == issue);
+            match picked.map(|i| self.plan_pick(i)).transpose()?.flatten() {
                 None => {}
                 Some(Planning::Skip(skip)) => {
                     waiting.push(skip);

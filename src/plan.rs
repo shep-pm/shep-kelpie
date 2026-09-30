@@ -26,9 +26,10 @@ pub enum Planned {
 }
 
 /// One piece of a split, which becomes a sub-issue
+///
+/// Unknown keys are ignored, so a reply with one extra key is still a plan.
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Piece {
     /// The sub-issue's title
     pub title: String,
@@ -72,13 +73,23 @@ pub enum Stage {
         /// The sub-issues opened so far, one per piece in order
         #[serde(default)]
         opened: Vec<u64>,
-        /// How many of those are linked as sub-issues
+        /// How many of those are linked as sub-issues, with their blockers
         #[serde(default)]
         linked: usize,
-        /// How many of those have their blockers marked too
-        #[serde(default)]
-        blocked: usize,
+        /// Steps in a row the forge refused
+        #[serde(default, skip_serializing_if = "is_zero")]
+        failures: u32,
     },
+    /// Its sub-issues are all closed, and closing it failed this many times
+    /// in a row
+    Closing {
+        /// Tries in a row the forge refused
+        failures: u32,
+    },
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 /// Reads the planning call's reply
@@ -241,6 +252,12 @@ mod tests {
         let blank = r#"{"split": true, "why": "x", "pieces": [
             {"title": "a", "body": "b"}, {"title": " ", "body": "d"}]}"#;
         assert_eq!(read(blank), Err("piece 2 is blank".into()));
+        let zero = r#"{"split": true, "why": "x", "pieces": [
+            {"title": "a", "body": "b"}, {"title": "c", "body": "d", "blocked_by": [0]}]}"#;
+        assert_eq!(
+            read(zero),
+            Err("piece 2 waits on piece 0, which is not earlier".into())
+        );
         assert_eq!(read("I would split it."), Err("no JSON object".into()));
     }
 
@@ -282,17 +299,26 @@ mod tests {
                 why: "w".into(),
                 pieces: vec![piece("a", &[]), piece("b", &[1])],
                 opened: vec![901],
-                linked: 1,
-                blocked: 0,
+                linked: 0,
+                failures: 2,
             },
         };
         let text = serde_json::to_string(&plan).unwrap();
         assert_eq!(
             text,
-            r#"{"issue":12,"stage":{"kind":"splitting","why":"w","pieces":[{"title":"a","body":"Build a."},{"title":"b","body":"Build b.","blocked_by":[1]}],"opened":[901],"linked":1,"blocked":0}}"#
+            r#"{"issue":12,"stage":{"kind":"splitting","why":"w","pieces":[{"title":"a","body":"Build a."},{"title":"b","body":"Build b.","blocked_by":[1]}],"opened":[901],"linked":0,"failures":2}}"#
         );
         assert_eq!(serde_json::from_str::<Plan>(&text).unwrap(), plan);
         let again = r#"{"issue":3,"stage":{"kind":"again","note":"n"}}"#;
         assert!(serde_json::from_str::<Plan>(again).is_ok());
+        let closing = r#"{"issue":4,"stage":{"kind":"closing","failures":1}}"#;
+        assert!(serde_json::from_str::<Plan>(closing).is_ok());
+    }
+
+    #[test]
+    fn a_piece_with_a_key_kelpie_does_not_know_is_still_read() {
+        let text = r#"{"split": true, "why": "w", "pieces": [
+            {"title": "a", "body": "b", "size": "small"}, {"title": "c", "body": "d"}]}"#;
+        assert!(matches!(read(text), Ok(Planned::Split { .. })));
     }
 }

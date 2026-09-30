@@ -24,7 +24,8 @@ When the board picks an issue, a planning call on Opus reads the repo at `main` 
 - Under `auto` the split happens on its own. Under `ask` it's a ruling: `yes` opens the sub-issues, `no` works the issue whole, and `answer <note>` plans it again with your note
 - An issue with sub-issues is never worked itself, and kelpie closes it once every sub-issue is closed
 - A sub-issue is never planned again, and neither is an issue added with `add`
-- `[planning] enabled = false` turns it off, and `[models.planner]` picks the model
+- Off by default until the sub-issue and blocked-by calls have run against a real repo: `[planning] enabled = true` turns it on, and `[models.planner]` picks the model
+- A split or a parent close the forge refuses three times in a row waits on a ruling, and the board goes on
 
 ## Running a project
 

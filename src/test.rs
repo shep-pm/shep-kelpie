@@ -165,7 +165,7 @@ const EXAMPLE_REPO: &str = "~/.kelpie/repos/shep";
 /// The CodeRabbit gate as `settings.example.toml` sets it, and turned off
 pub(crate) const CODERABBIT_ON: &str = "[app.dogs.kelpie.coderabbit]\nenabled = true\n";
 pub(crate) const CODERABBIT_OFF: &str = "[app.dogs.kelpie.coderabbit]\nenabled = false\n";
-/// Planning as `settings.example.toml` sets it, and turned off
+/// Planning turned on, and off as `settings.example.toml` sets it
 pub(crate) const PLANNING_ON: &str = "[app.dogs.kelpie.planning]\nenabled = true\n";
 pub(crate) const PLANNING_OFF: &str = "[app.dogs.kelpie.planning]\nenabled = false\n";
 
@@ -301,19 +301,18 @@ impl Rig {
         };
         rig.make_repo();
 
-        // CodeRabbit and planning are off unless a test turns them on: most
-        // tests are about what comes after dispatch, or before CodeRabbit.
+        // CodeRabbit is off unless a test turns it on, and planning is off as
+        // the example has it: most tests are about what comes before them.
         let example = include_str!("../settings.example.toml");
         assert!(example.contains(EXAMPLE_REPO), "the example's repo moved");
         assert!(example.contains(CODERABBIT_ON), "the example's gate moved");
         assert!(
-            example.contains(PLANNING_ON),
+            example.contains(PLANNING_OFF),
             "the example's planning moved"
         );
         let settings = example
             .replace(EXAMPLE_REPO, &rig.repo().display().to_string())
-            .replace(CODERABBIT_ON, CODERABBIT_OFF)
-            .replace(PLANNING_ON, PLANNING_OFF);
+            .replace(CODERABBIT_ON, CODERABBIT_OFF);
         let paths = rig.paths();
         std::fs::create_dir_all(paths.settings.parent().unwrap()).unwrap();
         std::fs::write(&paths.settings, settings).unwrap();
@@ -482,7 +481,7 @@ impl Rig {
         self.edit_settings(|s| s.replace(CODERABBIT_OFF, CODERABBIT_ON));
     }
 
-    /// Turns planning on, as the example settings have it
+    /// Turns planning on, which the example settings leave off
     pub(crate) fn planning_on(&self) {
         self.edit_settings(|s| s.replace(PLANNING_OFF, PLANNING_ON));
     }

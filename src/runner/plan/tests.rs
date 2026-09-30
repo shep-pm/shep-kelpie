@@ -309,7 +309,8 @@ fn a_split_the_forge_cuts_short_carries_on_without_opening_a_piece_twice() {
         step(&runner).unwrap(),
         Some(StepReport::SplitFailed {
             issue: 5,
-            reason: "cannot open piece 2: gh failed: issues are down".into()
+            reason: "cannot open piece 2: gh failed: issues are down".into(),
+            ruling: None,
         })
     );
     assert_eq!(rig.forge.sub_issues_of(5), [900]);
@@ -325,4 +326,149 @@ fn a_split_the_forge_cuts_short_carries_on_without_opening_a_piece_twice() {
     assert_eq!(rig.forge.created().len(), 2);
     assert_eq!(rig.forge.sub_issues_of(5), [900, 901]);
     assert_eq!(rig.forge.blockers(901), [900]);
+}
+
+fn auto_planning(project: &str) -> (Rig, Mutex<Runner>) {
+    let rig = Rig::new(project);
+    rig.planning_on();
+    rig.merge_auto();
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    (rig, runner)
+}
+
+#[test]
+fn a_split_the_forge_keeps_refusing_waits_on_a_ruling_and_the_board_goes_on() {
+    let (rig, runner) = auto_planning("golbat");
+    rig.forge.list_ready(5, false);
+    rig.forge.list_ready(6, false);
+    rig.forge.set_links_down(true);
+    rig.claude.script([Scripted::Text(TWO)]);
+    step(&runner).unwrap();
+    let refused = |ruling| StepReport::SplitFailed {
+        issue: 5,
+        reason: "cannot make #900 a sub-issue: gh failed: sub-issues are not enabled".into(),
+        ruling,
+    };
+    assert_eq!(step(&runner).unwrap(), Some(refused(None)));
+    assert_eq!(step(&runner).unwrap(), Some(refused(None)));
+    assert_eq!(step(&runner).unwrap(), Some(refused(Some(1))));
+    let status = rig.ask(&runner, "status", None);
+    let question = status["rulings"][0]["question"].as_str().unwrap();
+    assert!(
+        question.starts_with("Splitting issue #5 keeps failing: "),
+        "{question}"
+    );
+    assert!(question.contains("It opened #900 so far."), "{question}");
+
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    rig.claude.script([Scripted::Text(WHOLE)]);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Planned { issue: 6, .. })
+    ));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Dispatched { issue: 6, .. })
+    ));
+    assert_eq!(rig.forge.created().len(), 1);
+
+    // A yes tries again from where it stopped.
+    rig.ask(&runner, "drop", Some("6"));
+    rig.forge.set_links_down(false);
+    rig.ask(&runner, "rule", Some("1 yes"));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Split { issue: 5, .. })
+    ));
+    assert_eq!(rig.forge.sub_issues_of(5), [900, 901]);
+}
+
+#[test]
+fn a_link_that_landed_but_lost_its_answer_is_not_asked_for_again() {
+    let (rig, runner) = auto_planning("ditto");
+    rig.forge.list_ready(5, false);
+    rig.claude.script([Scripted::Text(TWO)]);
+    step(&runner).unwrap();
+    rig.forge.lose_next_link_answer();
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::SplitFailed { ruling: None, .. })
+    ));
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Split {
+            issue: 5,
+            sub_issues: vec![900, 901],
+            comment_failed: None,
+        })
+    );
+    assert_eq!(rig.forge.sub_issues_of(5), [900, 901]);
+    assert_eq!(rig.forge.blockers(901), [900]);
+}
+
+#[test]
+fn a_yes_on_a_split_whose_issue_was_closed_meanwhile_opens_nothing() {
+    let (rig, runner) = planning("eevee");
+    let id = asked(&rig, &runner);
+    rig.forge.close_issue(5);
+    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::SplitDropped {
+            issue: 5,
+            reason: "#5 was closed".into()
+        })
+    );
+    assert!(rig.forge.created().is_empty());
+}
+
+#[test]
+fn a_parent_the_forge_will_not_close_waits_on_a_ruling_and_the_board_goes_on() {
+    let rig = Rig::new("koji");
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.forge.list_ready(5, false);
+    rig.forge.list_ready(6, false);
+    rig.forge.link_sub_issue(5, 8);
+    rig.forge.close_issue(8);
+    rig.forge.set_closes_down(true);
+    let refused = |ruling| StepReport::ParentCloseFailed {
+        issue: 5,
+        reason: "gh failed: closing is refused".into(),
+        ruling,
+    };
+    assert_eq!(step(&runner).unwrap(), Some(refused(None)));
+    assert_eq!(step(&runner).unwrap(), Some(refused(None)));
+    assert_eq!(step(&runner).unwrap(), Some(refused(Some(1))));
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Dispatched { issue: 6, .. })
+    ));
+
+    rig.forge.set_closes_down(false);
+    rig.ask(&runner, "rule", Some("1 yes"));
+    rig.ask(&runner, "drop", Some("6"));
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::ParentClosed { issue: 5 })
+    );
+}
+
+#[test]
+fn a_planning_call_that_times_out_is_tried_once_more_in_a_fresh_session() {
+    let (rig, runner) = planning("zeus");
+    rig.forge.list_ready(5, false);
+    rig.claude
+        .script([Scripted::Fail(ClaudeError::TimedOut), Scripted::Text(WHOLE)]);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Planned {
+            outcome: PlanOutcome::Whole { .. },
+            ..
+        })
+    ));
+    let [first, again] = planner_calls(&rig).try_into().unwrap();
+    assert_ne!(first.session, again.session);
 }

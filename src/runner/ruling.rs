@@ -127,9 +127,14 @@ impl Runner {
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
         let ruling = next.rulings.remove(at);
-        if let RulingKind::Split { why, pieces } = ruling.kind {
-            let issue = ruling.issue.expect("a split ruling names its issue");
-            return self.rule_split(next, issue, why, pieces, answer);
+        if let (
+            Some(issue),
+            RulingKind::Split { .. }
+            | RulingKind::SplitStuck { .. }
+            | RulingKind::CloseStuck { .. },
+        ) = (ruling.issue, &ruling.kind)
+        {
+            return self.rule_plan(next, id, issue, ruling.kind, answer);
         }
         let lifts_cap = matches!(
             (&answer, &ruling.kind),
@@ -444,7 +449,9 @@ fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
         // Merged and done: nothing on the pull request waits on the maintainer.
         RulingKind::FollowUp { .. } => return None,
         // No pull request is open yet.
-        RulingKind::Split { .. } => return None,
+        RulingKind::Split { .. }
+        | RulingKind::SplitStuck { .. }
+        | RulingKind::CloseStuck { .. } => return None,
     };
     Some(format!("{said}\n\nWaiting on the maintainer."))
 }
@@ -569,7 +576,12 @@ fn decide(
             head: None,
             since: now,
         },
-        (_, RulingKind::Split { .. }) => unreachable!("`rule` answers a split before deciding"),
+        (
+            _,
+            RulingKind::Split { .. }
+            | RulingKind::SplitStuck { .. }
+            | RulingKind::CloseStuck { .. },
+        ) => unreachable!("`rule` answers a ruling on a plan before deciding"),
     };
     Ok(Move::Phase(phase))
 }
@@ -696,6 +708,27 @@ pub(super) fn question(
                 why.trim(),
                 crate::plan::list(pieces),
                 trigger("answer <note>")
+            );
+        }
+        RulingKind::SplitStuck { reason, opened } => {
+            let opened: Vec<String> = opened.iter().map(|n| format!("#{n}")).collect();
+            let opened = match opened.as_slice() {
+                [] => "It opened no sub-issue yet".to_owned(),
+                some => format!("It opened {} so far", some.join(", ")),
+            };
+            return format!(
+                "Splitting {about} keeps failing: {}. {opened}. {yes} tries again, and \
+                 {} gives the split up and works it whole.",
+                reason.trim(),
+                trigger("no <note>")
+            );
+        }
+        RulingKind::CloseStuck { reason } => {
+            return format!(
+                "Every sub-issue of {about} is closed, but closing it keeps failing: {}. \
+                 {yes} tries again, and {} leaves it open.",
+                reason.trim(),
+                trigger("no <note>")
             );
         }
         RulingKind::FollowUp { findings, refused } => {

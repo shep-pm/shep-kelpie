@@ -137,8 +137,8 @@ impl Forge for Guarded {
         self.forge.add_sub_issue(repo, parent, child)
     }
 
-    fn add_blocker(&self, repo: &ForgeSlug, number: u64, by: u64) -> Result<(), ForgeError> {
-        self.forge.add_blocker(repo, number, by)
+    fn add_blocker(&self, repo: &ForgeSlug, number: u64, blocker: u64) -> Result<(), ForgeError> {
+        self.forge.add_blocker(repo, number, blocker)
     }
 
     fn close_issue(&self, repo: &ForgeSlug, number: u64, comment: &str) -> Result<(), ForgeError> {
