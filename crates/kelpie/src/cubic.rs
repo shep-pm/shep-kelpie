@@ -49,14 +49,12 @@ impl Profile for Cubic {
         if self.covers(activity, head) {
             return Reading::Reviewed;
         }
+        // A refusal among its comments since the summon stands, whatever it
+        // posted after.
         let from = since.0.saturating_sub(CLOCK_SLACK);
-        let newest = activity
-            .comments
-            .iter()
-            .filter(|c| c.at.0 >= from)
-            .max_by_key(|c| c.at);
-        match newest {
-            Some(c) if refused(&c.body) => Reading::Refused { opens: None },
+        let mut since_summon = activity.comments.iter().filter(|c| c.at.0 >= from);
+        match since_summon.clone().next() {
+            Some(_) if since_summon.any(|c| refused(&c.body)) => Reading::Refused { opens: None },
             Some(_) => Reading::Processing,
             None => Reading::Silent,
         }
@@ -307,6 +305,16 @@ mod tests {
         );
         assert!(Cubic.heard(&refusal, "c0ffee", Timestamp(100)));
         assert!(refused("The reviewed-line limit was exceeded."));
+        let mut then_more = refusal.clone();
+        then_more.comments.push(Comment {
+            body: "Upgrade to keep reviewing.".into(),
+            at: Timestamp(140),
+        });
+        assert_eq!(
+            Cubic.read(&then_more, "c0ffee", Timestamp(100)),
+            Reading::Refused { opens: None },
+            "a later comment does not hide it"
+        );
         let warning = Activity {
             comments: vec![Comment {
                 body: "You're at about 91% of the monthly reviewed-line limit.".into(),
