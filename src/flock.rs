@@ -191,27 +191,49 @@ impl Launch {
 /// What stops the adopted kelpie holding the leases, with the fix, or
 /// `None` when it runs with its shepherd channel
 pub(crate) fn dog_down(rows: &[ProcessInfo]) -> Option<String> {
+    dog_problem(rows).map(|(what, fix)| format!("{what}: {fix}"))
+}
+
+/// What stops the adopted kelpie holding the leases, and the fix, apart
+///
+/// A dog that runs but never named itself to the shepherd is `silent` in
+/// shep's listing, and holds nothing: shep restarts it once and then gives
+/// up, so it reads as down with a fix of its own.
+pub(crate) fn dog_problem(rows: &[ProcessInfo]) -> Option<(String, String)> {
     let name = crate::dog::NAME;
     let row = rows.iter().find(|r| r.name == name);
-    match row.and_then(|r| Some((r.dog.as_ref()?, r.status))) {
+    let problem = |what: &str, fix: String| Some((what.to_owned(), fix));
+    match row.and_then(|r| Some((r.dog.as_ref()?, r.status, r.handshook, r.dog_stale))) {
         Some((
             DogSource::Adopted {
                 channel: false,
                 path,
             },
-            _,
-        )) => Some(format!(
-            "kelpie's dog has no shepherd channel, since kelpie was adopted before it asked for \
-             one: run `shep adopt {path} --name {name}`, then `shep disable {name}` and \
-             `shep enable {name}`"
-        )),
-        Some((DogSource::Adopted { .. }, ProcStatus::Online)) => None,
-        Some((DogSource::Adopted { .. }, _)) => Some(format!(
-            "kelpie's dog is not running: `shep bleats {name}` says why"
-        )),
-        _ => Some(format!(
-            "kelpie's dog is not enabled: `shep enable {name}` runs it"
-        )),
+            ..,
+        )) => problem(
+            "kelpie's dog has no shepherd channel, since kelpie was adopted before it asked for one",
+            format!(
+                "run `shep adopt {path} --name {name}`, then `shep disable {name}` and \
+                 `shep enable {name}`"
+            ),
+        ),
+        Some((DogSource::Adopted { .. }, ProcStatus::Online, _, Some(true))) => problem(
+            "kelpie's dog is silent and shep has given up on it",
+            format!("`shep bleats {name}` says why, and `shep restart {name}` runs it again"),
+        ),
+        Some((DogSource::Adopted { .. }, ProcStatus::Online, Some(false), _)) => problem(
+            "kelpie's dog is silent, since it has not named itself to the shepherd",
+            format!("give it a few seconds after a start, then `shep bleats {name}` says why"),
+        ),
+        Some((DogSource::Adopted { .. }, ProcStatus::Online, ..)) => None,
+        Some((DogSource::Adopted { .. }, ..)) => problem(
+            "kelpie's dog is not running",
+            format!("`shep bleats {name}` says why"),
+        ),
+        _ => problem(
+            "kelpie's dog is not enabled",
+            format!("`shep enable {name}` runs it"),
+        ),
     }
 }
 
@@ -242,7 +264,7 @@ async fn kelpie_sheep(
 }
 
 /// Every sheep in the flock
-async fn flock(client: &Client) -> Result<Vec<ProcessInfo>, String> {
+pub(crate) async fn flock(client: &Client) -> Result<Vec<ProcessInfo>, String> {
     match client.request(Request::ListFlock).await {
         Ok(Response::Flock(rows)) => Ok(rows),
         Ok(other) => Err(format!("the flock listing came back as {other:?}")),
