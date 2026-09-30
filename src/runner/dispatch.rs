@@ -8,7 +8,7 @@
 
 use super::Runner;
 use super::report::{Begin, StepReport};
-use crate::board::{self, Skip};
+use crate::board::{self, ReadyIssue, Skip};
 use crate::pacer::Scope;
 use crate::state::StateError;
 
@@ -29,6 +29,7 @@ impl Runner {
                 }));
             }
         };
+        self.trim_finished(&ready)?;
         // An issue in flight is left out, and not listed in `skipped`: it is
         // being worked on, not passed over.
         ready.retain(|issue| self.state.item(issue.number).is_none());
@@ -110,6 +111,29 @@ impl Runner {
                 }
             }
         }
+    }
+}
+
+impl Runner {
+    // The board skips a finished issue until the forge closes it, so an entry
+    // goes only once its issue reads as closed. One the forge lists ready is
+    // open, and one it cannot answer for stays.
+    fn trim_finished(&mut self, ready: &[ReadyIssue]) -> Result<(), StateError> {
+        let repo = &self.settings.forge;
+        let closed: Vec<u64> = self
+            .state
+            .finished
+            .iter()
+            .copied()
+            .filter(|&n| !ready.iter().any(|r| r.number == n))
+            .filter(|&n| self.ports.forge.issue(repo, n).is_ok_and(|i| !i.open))
+            .collect();
+        if closed.is_empty() {
+            return Ok(());
+        }
+        let mut next = self.state.clone();
+        next.finished.retain(|n| !closed.contains(n));
+        self.save(next)
     }
 }
 

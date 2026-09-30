@@ -51,6 +51,36 @@ jobs:
       - run: rustup toolchain install stable --profile minimal
       - run: cargo test --locked
 
+  # The tests `#[ignore]`d for needing a real shepherd. One of them is the
+  # only test that sees shep answer `NotFound`, which the fake shepherd
+  # cannot send.
+  real-shepherd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # The version in `SHEP_VERSION` (src/shepherd.rs) and Cargo.toml.
+      SHEP_VERSION: 0.12.0
+      KELPIE_TEST_SHEP: ${{ github.workspace }}/.shep/shep
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal
+      - name: Install the pinned shep
+        run: |
+          asset=shep-x86_64-unknown-linux-gnu
+          base=https://github.com/shep-pm/shep/releases/download/shep-v${SHEP_VERSION}
+          mkdir -p .shep
+          curl -fsSL --retry 3 -o ".shep/$asset.tar.gz" "$base/$asset.tar.gz"
+          curl -fsSL --retry 3 -o ".shep/$asset.sha256" "$base/$asset.sha256"
+          (cd .shep && sha256sum --check "$asset.sha256" && tar -xzf "$asset.tar.gz")
+          test "$("$KELPIE_TEST_SHEP" --version | head -n 1)" = "shep ${SHEP_VERSION}"
+      # A test binary that matches nothing passes, so the run must show
+      # tests that passed; a failing test fails the step on its own.
+      - name: Run the real-shepherd tests
+        run: |
+          set -o pipefail
+          cargo test --locked --test dog_smoke -- --ignored | tee dog_smoke.log
+          grep -Eq 'test result: ok\. [1-9][0-9]* passed' dog_smoke.log
+
   msrv:
     runs-on: ubuntu-latest
     timeout-minutes: 10
