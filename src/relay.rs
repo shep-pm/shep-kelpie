@@ -52,8 +52,8 @@ impl fmt::Display for BarePath<'_> {
 
 /// The relay's settings file's contents, with its commands run as `kelpie`
 ///
-/// `shep-kelpie relay-answer` carries a no's note or a question's answer, which
-/// never merges anything, so it is pre-allowed. `shep-kelpie relay-yes` can
+/// `kelpie relay-answer` carries a no's note or a question's answer, which
+/// never merges anything, so it is pre-allowed. `kelpie relay-yes` can
 /// carry a merge ruling's yes, so it needs the maintainer's tap every time;
 /// the rule names the exact subcommand, never a pattern a free-text answer
 /// could widen. Every other tool call is refused by [`gate`], never asked.

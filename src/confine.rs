@@ -1,4 +1,4 @@
-//! `shep-kelpie confine <folder>...`: a PreToolUse hook that holds Claude's file
+//! `kelpie confine <folder>...`: a PreToolUse hook that holds Claude's file
 //! tools to the folders named
 //!
 //! Claude Code's sandbox covers Bash only, and `bypassPermissions` lets the

@@ -1,44 +1,44 @@
-//! `shep-kelpie --schema` and `--version`: shep's probes, answered for lookout
+//! `kelpie --schema` and `--version`: shep's probes, answered for lookout
 //!
-//! `shep-kelpie runner <project>`: a project's runner, run as a sheep
-//! `shep-kelpie dog`: the shep-kelpie dog, run as a sheep
-//! `shep-kelpie lease ...`: the maintainer's lease commands
+//! `kelpie runner <project>`: a project's runner, run as a sheep
+//! `kelpie dog`: the kelpie dog, run as a sheep
+//! `shep kelpie lease ...`: the maintainer's lease commands
 //!
-//! `shep-kelpie add [<project>]`, `start [<project>]`, `pause [<project>]`,
+//! `shep kelpie add [<project>]`, `start [<project>]`, `pause [<project>]`,
 //! `status`: a checkout's project in the maintainer's own flock, run as
 //! `shep kelpie <command>` in the checkout.
 //!
-//! `shep-kelpie doctor [<project>] [--test-alert]`: checks what the projects need
+//! `shep kelpie doctor [<project>] [--test-alert]`: checks what the projects need
 //! on this machine, and changes nothing. Run as `shep kelpie doctor`.
 //!
-//! `shep-kelpie confine <folder>...`: the hook that holds a worker's file tools
+//! `kelpie confine <folder>...`: the hook that holds a worker's file tools
 //! to its folders. Claude Code runs it; it is not for the maintainer.
 //!
-//! `shep-kelpie guard <git common dir> <worktree>`: the hook on every worker's
+//! `kelpie guard <git common dir> <worktree>`: the hook on every worker's
 //! Bash calls that keeps the home folder's path and freeform pull request
 //! titles out of what it publishes. Claude Code runs it, like `confine`.
 //!
-//! `shep-kelpie settings move <project> [<sheep>]`: moves a project's settings
+//! `shep kelpie settings move <project> [<sheep>]`: moves a project's settings
 //! file, and kelpie's own, into their tables on kelpie's shepherd.
 //!
-//! `shep-kelpie tools install`: installs the tools kelpie shows a work item's UI
+//! `shep kelpie tools install`: installs the tools kelpie shows a work item's UI
 //! with, under kelpie's home.
 //!
-//! `shep-kelpie totp [--rotate]`, run as `shep kelpie totp [--rotate]` where kelpie
+//! `shep kelpie totp [--rotate]`, run as `shep kelpie totp [--rotate]` where kelpie
 //! is not on the PATH: prints the authenticator secret that answers a ruling
 //! from ntfy, as a URI and a QR code to scan, drawing it the first time, or
 //! afresh with `--rotate`. `shep kelpie totp --unlock` turns answers from
 //! ntfy back on after too many wrong codes.
 //!
-//! `shep-kelpie shots-mcp <tools> <job>`: a worker's shots tool, an MCP server
+//! `kelpie shots-mcp <tools> <job>`: a worker's shots tool, an MCP server
 //! Claude Code starts from the worker's MCP config.
 //!
-//! `shep-kelpie relay-yes <project> <id>`, `shep-kelpie relay-answer <project>
+//! `kelpie relay-yes <project> <id>`, `kelpie relay-answer <project>
 //! <params>`: what the relay's own settings gate on. Both send
 //! `relay-rule <params>` to the project's runner on the shepherd `SHEP_HOME`
 //! names; the relay runs them, never the maintainer.
 //!
-//! `shep-kelpie relay-gate <kelpie>`: the hook that refuses the relay every
+//! `kelpie relay-gate <kelpie>`: the hook that refuses the relay every
 //! other tool call. Claude Code runs it, like `confine`.
 
 #![forbid(unsafe_code)]
@@ -136,7 +136,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: shep-kelpie add [<project>]\n       shep-kelpie start [<project>]\n       shep-kelpie pause [<project>]\n       shep-kelpie status\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie runner <project>\n       shep-kelpie dog\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie browse-guard <domain>...\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n       shep-kelpie shots-mcp <tools> <job>\n       shep-kelpie relay-yes <project> <id>\n       shep-kelpie relay-answer <project> <params>\n       shep-kelpie relay-gate <kelpie>",
+                "usage: shep-kelpie add [<project>]\n       shep-kelpie start [<project>]\n       shep-kelpie pause [<project>]\n       shep-kelpie status\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie runner <project>\n       shep-kelpie dog\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie browse-guard <domain>...\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n       shep-kelpie shots-mcp <tools> <job>\n       shep-kelpie relay-yes <project> <id>\n       shep-kelpie relay-answer <project> <params>\n       shep-kelpie relay-gate <kelpie>\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.",
                 shep_kelpie::lease::cli::USAGE
             );
             ExitCode::from(2)
@@ -226,7 +226,7 @@ fn move_settings(project: &str, sheep: &str) -> ExitCode {
     let project = match ProjectName::try_from(project) {
         Ok(project) => project,
         Err(e) => {
-            eprintln!("shep-kelpie settings move: {e}");
+            eprintln!("shep kelpie settings move: {e}");
             return ExitCode::from(2);
         }
     };
@@ -247,7 +247,7 @@ fn move_settings(project: &str, sheep: &str) -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(message) => {
-                eprintln!("shep-kelpie settings move: {message}");
+                eprintln!("shep kelpie settings move: {message}");
                 ExitCode::FAILURE
             }
         }

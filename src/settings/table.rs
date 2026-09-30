@@ -40,7 +40,7 @@ impl Settings {
     }
 }
 
-/// A settings file's text as the table `shep-kelpie settings move` writes
+/// A settings file's text as the table `shep kelpie settings move` writes
 ///
 /// # Errors
 ///

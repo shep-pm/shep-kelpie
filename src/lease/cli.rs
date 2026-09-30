@@ -1,4 +1,4 @@
-//! `shep-kelpie lease`: the maintainer's lease commands
+//! `shep kelpie lease`: the maintainer's lease commands
 //!
 //! `run` waits for a lease, runs a command and returns the lease when the
 //! command exits, however it exits. `take` and `return` hold one for
@@ -30,13 +30,13 @@ pub const USAGE: &str = "\
 
 /// What a `take` holder writes as the lock's `what`, and `return` looks for
 const TAKE_WHAT: &str =
-    "shep-kelpie lease take, held for the maintainer until `shep-kelpie lease return gpu`";
+    "shep kelpie lease take, held for the maintainer until `shep kelpie lease return gpu`";
 
 /// How often a waiting maintainer asks the dog again; a local round trip
 /// through shep took about 30 ms in the transport series
 const DOG_POLL: Duration = Duration::from_secs(1);
 
-/// Runs `shep-kelpie lease <args>`
+/// Runs `shep kelpie lease <args>`
 pub fn main(args: &[String]) -> ExitCode {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -48,7 +48,7 @@ pub fn main(args: &[String]) -> ExitCode {
     match outcome {
         Ok(code) => code,
         Err(message) => {
-            eprintln!("shep-kelpie lease: {message}");
+            eprintln!("shep kelpie lease: {message}");
             ExitCode::FAILURE
         }
     }
@@ -68,7 +68,7 @@ async fn dispatch(args: &[String]) -> Result<ExitCode, String> {
         ["status"] => status().await,
         // take reads a holder's stdout alone, so its errors go there.
         ["hold", GPU] => Ok(hold_gpu().await.unwrap_or_else(|e| {
-            println!("shep-kelpie lease: {e}");
+            println!("shep kelpie lease: {e}");
             ExitCode::FAILURE
         })),
         _ => {
@@ -102,13 +102,13 @@ fn pid_or_unknown(pid: Option<u32>) -> String {
 fn said(waiting: Waiting<'_>) -> String {
     match waiting {
         Waiting::Held { waited, holder } => format!(
-            "shep-kelpie lease: waiting {waited}s for the GPU, now held by pid {} running {}",
+            "shep kelpie lease: waiting {waited}s for the GPU, now held by pid {} running {}",
             pid_or_unknown(holder.pid),
             holder.what
         ),
         Waiting::Cleared(dead) => {
             format!(
-                "shep-kelpie lease: clearing a stale lock, pid {} is gone",
+                "shep kelpie lease: clearing a stale lock, pid {} is gone",
                 pid_or_unknown(dead)
             )
         }
@@ -121,7 +121,7 @@ async fn run_gpu(command: &[&str]) -> Result<ExitCode, String> {
     let pid = std::process::id();
     let claim = Claim {
         pid,
-        what: format!("shep-kelpie lease run: {}", command.join(" ")),
+        what: format!("shep kelpie lease run: {}", command.join(" ")),
     };
     tokio::select! {
         taken = lock.take(&claim, gpu::scripts_naps, report) => {
@@ -144,7 +144,7 @@ async fn run_book(kind: &LeaseKind, command: &[&str]) -> Result<ExitCode, String
     let ran = run_command(command, &mut signals).await;
     let returned = ask_dog("return", kind.as_str())
         .await
-        .map_err(|e| format!("{e}: run `shep-kelpie lease return {kind}`"));
+        .map_err(|e| format!("{e}: run `shep kelpie lease return {kind}`"));
     both(ran, returned)
 }
 
@@ -162,16 +162,16 @@ async fn take_book(kind: &LeaseKind) -> Result<ExitCode, String> {
     if let Some(caught) = wait_for_grant(kind, &mut signals).await? {
         return Ok(caught.exit_code());
     }
-    println!("shep-kelpie lease: {kind} is yours until `shep-kelpie lease return {kind}`");
+    println!("shep kelpie lease: {kind} is yours until `shep kelpie lease return {kind}`");
     Ok(ExitCode::SUCCESS)
 }
 
 async fn return_book(kind: &LeaseKind) -> Result<ExitCode, String> {
     let reply = ask_dog("return", kind.as_str()).await?;
     if reply["returned"] == true {
-        println!("shep-kelpie lease: returned {kind}");
+        println!("shep kelpie lease: returned {kind}");
     } else {
-        println!("shep-kelpie lease: you did not hold {kind}, and any wait for it is withdrawn");
+        println!("shep kelpie lease: you did not hold {kind}, and any wait for it is withdrawn");
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -192,7 +192,7 @@ async fn wait_for_grant(kind: &LeaseKind, signals: &mut Signals) -> Result<Optio
         let ahead = reply["queued"].as_u64();
         let ahead = ahead.ok_or_else(|| format!("the dog answered {reply}"))?;
         if last_ahead != Some(ahead) {
-            eprintln!("shep-kelpie lease: waiting for {kind}, {ahead} ahead");
+            eprintln!("shep kelpie lease: waiting for {kind}, {ahead} ahead");
             last_ahead = Some(ahead);
         }
         tokio::select! {
@@ -205,7 +205,7 @@ async fn wait_for_grant(kind: &LeaseKind, signals: &mut Signals) -> Result<Optio
 // Withdraws the ask, or says how to, and hands the signal back.
 async fn withdraw(kind: &LeaseKind, caught: Caught) -> Caught {
     if let Err(e) = ask_dog("return", kind.as_str()).await {
-        eprintln!("shep-kelpie lease: {e}: run `shep-kelpie lease return {kind}`");
+        eprintln!("shep kelpie lease: {e}: run `shep kelpie lease return {kind}`");
     }
     caught
 }
@@ -214,7 +214,7 @@ fn take_gpu() -> Result<(), String> {
     let lock = gpu_lock();
     if let Some(holder) = lock.holder().filter(|h| h.live && h.what == TAKE_WHAT) {
         let pid = holder.pid.unwrap_or_default();
-        println!("shep-kelpie lease: the GPU lock is already held for you by pid {pid}");
+        println!("shep kelpie lease: the GPU lock is already held for you by pid {pid}");
         return Ok(());
     }
     // The holder outlives take, so it keeps none of take's own output
@@ -243,7 +243,7 @@ fn take_gpu() -> Result<(), String> {
         return Err(format!("the holder gave up ({status})"));
     }
     println!(
-        "shep-kelpie lease: pid {pid} holds the GPU lock at {} until `shep-kelpie lease return gpu`",
+        "shep kelpie lease: pid {pid} holds the GPU lock at {} until `shep kelpie lease return gpu`",
         lock.path().display()
     );
     Ok(())
@@ -284,7 +284,7 @@ fn return_gpu() -> Result<(), String> {
         .filter(|_| holder.what == TAKE_WHAT)
         .ok_or_else(|| {
             format!(
-                "the GPU lock is held by pid {} running {}, not by `shep-kelpie lease take gpu`",
+                "the GPU lock is held by pid {} running {}, not by `shep kelpie lease take gpu`",
                 pid_or_unknown(holder.pid),
                 holder.what
             )
@@ -293,7 +293,7 @@ fn return_gpu() -> Result<(), String> {
     lock.release(pid)
         .map_err(|e| format!("cannot remove {}: {e}", lock.path().display()))?;
     signal_process(pid, "TERM");
-    println!("shep-kelpie lease: returned the GPU lock");
+    println!("shep kelpie lease: returned the GPU lock");
     Ok(())
 }
 
@@ -314,7 +314,7 @@ async fn status() -> Result<ExitCode, String> {
                 "holder": holder,
             });
             println!("{}", serde_json::json!({ "leases": [gpu] }));
-            eprintln!("shep-kelpie lease: the dog did not answer, so this is the GPU alone: {e}");
+            eprintln!("shep kelpie lease: the dog did not answer, so this is the GPU alone: {e}");
             Ok(ExitCode::FAILURE)
         }
     }

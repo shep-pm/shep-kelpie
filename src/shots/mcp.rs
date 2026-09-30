@@ -1,4 +1,4 @@
-//! `shep-kelpie shots-mcp <tools> <job>`: the worker's shots tool, as an MCP server
+//! `kelpie shots-mcp <tools> <job>`: the worker's shots tool, as an MCP server
 //!
 //! Claude Code starts it from the worker's `--mcp-config`, outside the
 //! sandbox, which Chromium cannot start inside. It speaks MCP's stdio

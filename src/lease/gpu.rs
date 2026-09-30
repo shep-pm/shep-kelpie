@@ -300,14 +300,14 @@ mod tests {
         let (temp, lock) = lock();
         let me = std::process::id();
         assert_eq!(
-            lock.try_take(&claim(me, "shep-kelpie lease run: true"))
+            lock.try_take(&claim(me, "shep kelpie lease run: true"))
                 .unwrap(),
             Attempt::Taken
         );
         let dir = temp.path().join("qwen-review/gpu.lock");
         let read = |name| fs::read_to_string(dir.join(name)).unwrap();
         assert_eq!(read("pid"), format!("{me}\n"));
-        assert_eq!(read("what"), "shep-kelpie lease run: true\n");
+        assert_eq!(read("what"), "shep kelpie lease run: true\n");
         assert!(read("session").ends_with('\n'));
     }
 

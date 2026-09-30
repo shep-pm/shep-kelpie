@@ -23,7 +23,7 @@ impl Desk {
             ("status", Some(_)) => return error("`status` takes no params".into()),
             ("take" | "return", Some(GPU)) => {
                 return error(format!(
-                    "the GPU lease is the qwen scripts' lock: run `shep-kelpie lease {action} gpu`"
+                    "the GPU lease is the qwen scripts' lock: run `shep kelpie lease {action} gpu`"
                 ));
             }
             ("take" | "return", Some(kind)) => match LeaseKind::try_from(kind) {
@@ -139,7 +139,7 @@ mod tests {
             assert_eq!(
                 body["error"],
                 format!(
-                    "the GPU lease is the qwen scripts' lock: run `shep-kelpie lease {action} gpu`"
+                    "the GPU lease is the qwen scripts' lock: run `shep kelpie lease {action} gpu`"
                 )
             );
         }

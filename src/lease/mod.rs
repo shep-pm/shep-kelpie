@@ -109,7 +109,7 @@ pub struct Epoch(pub u64);
 /// Who holds or waits for a book lease
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Holder {
-    /// The maintainer, through `shep-kelpie lease`
+    /// The maintainer, through `shep kelpie lease`
     Maintainer,
     /// One run of a project's runner
     Runner {

@@ -1,4 +1,4 @@
-//! `shep-kelpie relay-yes` and `relay-answer`: a ruling sent to kelpie's shepherd
+//! `kelpie relay-yes` and `relay-answer`: a ruling sent to kelpie's shepherd
 //!
 //! Both reach the shepherd through [`crate::shepherd`], never a `shep`
 //! binary: an older one found on `PATH` can take over a newer shepherd. A
@@ -18,9 +18,9 @@ use crate::shepherd::{self, ConnectRefused};
 /// A ruling the relay passes on to a runner's `relay-rule` action
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ruling<'a> {
-    /// `shep-kelpie relay-yes`: the ruling's id, sent as `<id> yes`
+    /// `kelpie relay-yes`: the ruling's id, sent as `<id> yes`
     Yes(&'a str),
-    /// `shep-kelpie relay-answer`: a `<id> no <note>` or `<id> answer <text>`
+    /// `kelpie relay-answer`: a `<id> no <note>` or `<id> answer <text>`
     NoOrAnswer(&'a str),
 }
 

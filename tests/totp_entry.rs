@@ -1,6 +1,6 @@
 //! `shep kelpie totp`: shep starts the adopted kelpie with `totp` and its
 //! flags, in the caller's folder, with `SHEP_HOME` and `SHEP_DOG_NAME` set,
-//! and the command reaches the same code as `shep-kelpie totp`.
+//! and the command reaches the same code as `shep kelpie totp`.
 
 use std::path::Path;
 use std::process::{Command, Output, Stdio};

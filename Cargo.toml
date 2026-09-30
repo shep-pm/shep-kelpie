@@ -13,7 +13,7 @@ publish = false
 hmac = { version = "0.13", default-features = false }
 # Zone-aware dates, for the reset times `/usage` prints in the maintainer's zone
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-zoneinfo"] }
-# The terminal QR code `shep-kelpie totp` prints for an authenticator app to scan
+# The terminal QR code `shep kelpie totp` prints for an authenticator app to scan
 qrcode = { version = "0.14", default-features = false }
 # The settings' JSON Schema, in the version shep-client builds it with
 schemars = { version = "1.2.2", default-features = false, features = ["derive", "std"] }

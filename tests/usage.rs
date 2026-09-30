@@ -13,6 +13,6 @@ fn the_usage_text_names_shep_kelpie() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.starts_with("usage: shep-kelpie add"), "{stderr}");
-    assert!(!stderr.contains(" kelpie "), "{stderr}");
     assert!(stderr.contains("shep-kelpie lease status"), "{stderr}");
+    assert!(stderr.contains("run as `shep kelpie <verb>`"), "{stderr}");
 }

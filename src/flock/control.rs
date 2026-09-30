@@ -61,7 +61,7 @@ pub async fn project_here(
 ///
 /// # Errors
 ///
-/// A message when the project has no shep-kelpie runner, or it does not answer
+/// A message when the project has no kelpie runner, or it does not answer
 /// in time. Only kelpie's own sheep are ever started.
 pub async fn start(client: &Client, project: &ProjectName) -> Result<Vec<String>, String> {
     let rows = flock(client).await?;
@@ -106,7 +106,7 @@ pub async fn start(client: &Client, project: &ProjectName) -> Result<Vec<String>
 ///
 /// # Errors
 ///
-/// A message when the project has no shep-kelpie runner, or it is not running.
+/// A message when the project has no kelpie runner, or it is not running.
 pub async fn pause(client: &Client, project: &ProjectName) -> Result<Vec<String>, String> {
     kelpie_runner(client, &flock(client).await?, project).await?;
     let runner = project.as_str();
@@ -148,9 +148,8 @@ async fn kelpie_runner(
     project: &ProjectName,
 ) -> Result<Found, String> {
     let name = project.as_str();
-    let not_one = || {
-        format!("no shep-kelpie runner named {name} in this flock: `shep kelpie add` sets one up")
-    };
+    let not_one =
+        || format!("no kelpie runner named {name} in this flock: `shep kelpie add` sets one up");
     if !tables(client).await?.contains_key(name) {
         return Err(not_one());
     }

@@ -607,7 +607,7 @@ async fn a_named_project_is_the_only_one_checked() {
     };
     let report = scene.check(ask).await;
     let (what, fix) = missing(&report, "xilriws");
-    assert_eq!(what, "no shep-kelpie runner has this name");
+    assert_eq!(what, "no kelpie runner has this name");
     assert!(fix.contains("shep kelpie add"), "{fix}");
 }
 

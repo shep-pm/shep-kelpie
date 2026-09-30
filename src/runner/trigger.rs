@@ -264,7 +264,7 @@ pub(super) fn read_rule(params: &str) -> Option<(u64, Answer)> {
 /// Whether `params` reads as `rule`'s own `<id> no <note>` or
 /// `<id> answer <text>`, and never as `<id> yes`
 ///
-/// The relay's settings pre-allow `shep-kelpie relay-answer`, so this is what
+/// The relay's settings pre-allow `kelpie relay-answer`, so this is what
 /// keeps a "yes" the relay was talked into forwarding as an "answer" from
 /// reaching `rule` as one: the same parser `rule` itself reads decides it,
 /// not a second guess at the grammar.

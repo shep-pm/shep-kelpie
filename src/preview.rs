@@ -271,7 +271,7 @@ pub fn resolver_rules<'a>(domains: impl IntoIterator<Item = &'a str>) -> String 
 /// Kelpie's own copies of Playwright, its MCP server, the sandbox runtime
 /// and a headless Chromium, under `<kelpie home>/tools`
 ///
-/// `shep-kelpie tools install` fills it, at the versions [`PACKAGE`] pins.
+/// `shep kelpie tools install` fills it, at the versions [`PACKAGE`] pins.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tools(PathBuf);
 
@@ -332,7 +332,7 @@ impl Tools {
         self.package("@anthropic-ai/sandbox-runtime/dist/cli.js")
     }
 
-    /// What `shep-kelpie tools install` has not put in place, by name
+    /// What `shep kelpie tools install` has not put in place, by name
     pub fn missing(&self) -> Vec<&'static str> {
         let parts = [
             ("the Playwright MCP server", self.playwright_mcp()),

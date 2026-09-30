@@ -52,7 +52,7 @@ pub fn run(project: &str) -> ExitCode {
     match serve(project) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
-            eprintln!("shep-kelpie runner {project}: {message}");
+            eprintln!("kelpie runner {project}: {message}");
             ExitCode::FAILURE
         }
     }
