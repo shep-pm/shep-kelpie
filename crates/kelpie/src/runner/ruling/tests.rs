@@ -41,6 +41,7 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
             head: None,
         },
         RulingKind::CodeRabbitSilent {
+            bot: crate::review_bot::Bot::Coderabbit,
             head: "abcdef123".into(),
         },
         RulingKind::Question {

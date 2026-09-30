@@ -7,7 +7,7 @@
 //! (`max_items`, `review.local`, `review.local_rounds`, `coderabbit.rounds`,
 //! `pacing.enabled`, `worker.allowed_domains`, `worker.build_env`,
 //! `worker.instructions_file`, `worker.turn_timeout`, `worker.guard_hooks`,
-//! `ruling_channels`, `[preview]` and `[skills]`).
+//! `ruling_channels`, `pull_request_reviewers`, `[preview]` and `[skills]`).
 //! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
@@ -22,6 +22,7 @@ use shep_client::dogs::dog_config;
 
 use crate::channels::Channels;
 use crate::preview::Preview;
+use crate::review_bot::Bot;
 
 pub mod moving;
 pub mod source;
@@ -62,8 +63,13 @@ pub struct Settings {
     pub models: Models,
     /// The review loop
     pub review: Review,
-    /// The CodeRabbit gate
+    /// The CodeRabbit gate, which holds every pull request reviewer's rounds
     pub coderabbit: CodeRabbit,
+    /// The pull request reviewers a round may summon, in preference order,
+    /// from those kelpie's own settings define. Each round goes to the
+    /// first whose window is free. CodeRabbit alone when absent or empty.
+    #[serde(default)]
+    pub pull_request_reviewers: Vec<Bot>,
     /// Usage pacing
     pub pacing: Pacing,
     /// What every worker is started with
@@ -480,6 +486,21 @@ impl fmt::Display for SettingsError {
 impl core::error::Error for SettingsError {}
 
 impl Settings {
+    /// The pull request reviewers a round may summon, in preference order,
+    /// each once
+    pub fn reviewers(&self) -> Vec<Bot> {
+        let mut listed: Vec<Bot> = Vec::new();
+        for bot in &self.pull_request_reviewers {
+            if !listed.contains(bot) {
+                listed.push(*bot);
+            }
+        }
+        if listed.is_empty() {
+            listed.push(Bot::Coderabbit);
+        }
+        listed
+    }
+
     /// Reads and checks a settings file, expanding `~/` in `repo` against `home`
     ///
     /// # Errors

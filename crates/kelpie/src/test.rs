@@ -11,6 +11,7 @@ use tempfile::TempDir;
 
 use crate::board::WorkerModel;
 use crate::coderabbit::CodeRabbit;
+use crate::cubic::Cubic;
 use crate::ports::{
     Checks, Clock, Cost, Meter, MeterError, Ports, Relay, Role, SessionId, Timestamp, Usage,
     Utilization, Window,
@@ -26,6 +27,7 @@ use crate::work_item::{CallRecord, Known, Phase, Turn, WorkItem};
 mod alerts;
 mod claude;
 mod coderabbit;
+mod cubic;
 mod endpoint;
 mod forge;
 mod leases;
@@ -503,20 +505,20 @@ impl Rig {
 
     /// Starts a runner, as a restarted sheep would, on the rig's stand-ins
     pub(crate) fn open(&self) -> Result<Mutex<Runner>, OpenError> {
-        self.open_with(Arc::new(CodeRabbit))
+        self.open_with(vec![Arc::new(CodeRabbit), Arc::new(Cubic)])
     }
 
-    /// Starts a runner whose review bot rounds summon `review_bot`
+    /// Starts a runner whose review bot rounds summon the bots of `review_bots`
     pub(crate) fn open_with(
         &self,
-        review_bot: Arc<dyn Profile>,
+        review_bots: Vec<Arc<dyn Profile>>,
     ) -> Result<Mutex<Runner>, OpenError> {
         let ports = Ports {
             claude: Arc::new(self.claude.clone()),
             forge: Box::new(self.forge.clone()),
             meter: Box::new(self.meter.clone()),
             reviewer: Arc::new(self.reviewer.clone()),
-            review_bot,
+            review_bots,
             relay: Arc::clone(&self.relay) as Arc<dyn Relay>,
             alerts: Arc::new(self.alerts.clone()),
             leases: Arc::new(self.leases.clone()),
