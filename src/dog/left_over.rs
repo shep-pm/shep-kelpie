@@ -22,7 +22,8 @@ pub const NAME: &str = "kelpie-dog";
 /// # Errors
 ///
 /// A message when the shepherd refuses a request, or the sheep's entry sets
-/// `KELPIE_HOME`, whose value shep withholds, so its book may not be `book`.
+/// `KELPIE_HOME` or `HOME`, whose values shep withholds, so its book may
+/// not be `book`.
 pub async fn remove(client: &Client, book: &Path) -> Result<Option<String>, String> {
     let rows = match client.request(Request::ListFlock).await {
         Ok(Response::Flock(rows)) => rows,
@@ -43,10 +44,14 @@ pub async fn remove(client: &Client, book: &Path) -> Result<Option<String>, Stri
     if view.config.args != ["dog"] {
         return Ok(None);
     }
-    if view.env_keys.iter().any(|k| k == "KELPIE_HOME") {
+    if let Some(key) = view
+        .env_keys
+        .iter()
+        .find(|k| ["KELPIE_HOME", "HOME"].contains(&k.as_str()))
+    {
         return Err(format!(
-            "`{NAME}`, the sheep kelpie's dog ran as before, sets KELPIE_HOME, so its book may \
-             not be {}: move its book there, then `shep delete {NAME}` and `shep restart kelpie`",
+            "`{NAME}`, the sheep kelpie's dog ran as before, sets {key}, so its book may not be \
+             {}: move its book there, then `shep delete {NAME}` and `shep restart kelpie`",
             book.display()
         ));
     }
@@ -120,6 +125,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_dog_of_that_name_is_not_a_left_over() {
+        let mut shepherd = FakeShepherd::new().await;
+        shepherd.holds_dog(NAME, true);
+        assert_eq!(removed(&shepherd).await, Ok(None));
+        assert!(shepherd.sheep(NAME).is_some());
+        assert_eq!(shepherd.writes(), []);
+    }
+
+    #[tokio::test]
     async fn a_sheep_of_that_name_that_is_not_kelpie_s_stays() {
         let mut shepherd = FakeShepherd::new().await;
         shepherd.holds(sheep(NAME, &["serve"]), true);
@@ -129,16 +143,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_left_over_with_its_own_kelpie_home_is_refused_and_kept() {
-        let mut shepherd = FakeShepherd::new().await;
-        let mut left_over = sheep(NAME, &["dog"]);
-        left_over
-            .env
-            .insert("KELPIE_HOME".into(), "/elsewhere".into());
-        shepherd.holds(left_over, true);
-        let err = removed(&shepherd).await.unwrap_err();
-        assert!(err.contains("sets KELPIE_HOME"), "{err}");
-        assert!(shepherd.sheep(NAME).is_some());
-        assert_eq!(shepherd.writes(), []);
+    async fn a_left_over_with_its_own_kelpie_home_or_home_is_refused_and_kept() {
+        for key in ["KELPIE_HOME", "HOME"] {
+            let mut shepherd = FakeShepherd::new().await;
+            let mut left_over = sheep(NAME, &["dog"]);
+            left_over.env.insert(key.into(), "/elsewhere".into());
+            shepherd.holds(left_over, true);
+            let err = removed(&shepherd).await.unwrap_err();
+            assert!(err.contains(&format!("sets {key},")), "{err}");
+            assert!(shepherd.sheep(NAME).is_some());
+            assert_eq!(shepherd.writes(), []);
+        }
     }
 }
