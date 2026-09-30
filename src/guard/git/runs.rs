@@ -13,7 +13,9 @@ pub(in crate::guard) fn scripts(words: &[String]) -> Vec<String> {
     let Ok(Some(at)) = front(words).map(|f| f.sub) else {
         return Vec::new();
     };
+    let args = &words[at + 1..];
     let (long, short): (&[&str], &[char]) = match words[at].as_str() {
+        "grep" => return pager(args),
         "rebase" => (&["--exec"], &['x']),
         "difftool" => (&["--extcmd"], &['x']),
         "clone" => (&["--upload-pack"], &['u']),
@@ -26,7 +28,25 @@ pub(in crate::guard) fn scripts(words: &[String]) -> Vec<String> {
         .iter()
         .flat_map(|name| (3..=name.len()).map(|n| &name[..n]))
         .collect();
-    values(&words[at + 1..], &long, short)
+    values(args, &long, short)
+}
+
+// `git grep -O<pager>`: its value is optional, so only one joined to the option.
+fn pager(args: &[String]) -> Vec<String> {
+    let long = "--open-files-in-pager";
+    args.iter()
+        .take_while(|a| *a != "--")
+        .filter_map(|a| match a.split_once('=') {
+            Some((name, value)) if name.len() >= 3 && long.starts_with(name) => {
+                Some(value.to_owned())
+            }
+            _ if a.starts_with('-') && !a.starts_with("--") => {
+                let (_, value) = a.split_once('O')?;
+                (!value.is_empty()).then(|| value.to_owned())
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// The command `git bisect run` runs
@@ -114,11 +134,16 @@ mod tests {
             "git clone -u X a b",
             "git fetch --upload-pack=X",
             "git archive --remote=. --exec X",
+            "git grep -OX a",
+            "git grep -iOX a",
+            "git grep --open-files-in-pager=X a",
+            "git grep --open=X a",
         ] {
             assert_eq!(scripts(&w(line)), ["X"], "{line}");
         }
         assert!(scripts(&w("git rebase main -- --exec X")).is_empty());
         assert!(scripts(&w("git log --exec X")).is_empty());
+        assert!(scripts(&w("git grep -O a")).is_empty());
     }
 
     #[test]

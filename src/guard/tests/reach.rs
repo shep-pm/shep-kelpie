@@ -301,3 +301,9 @@ fn a_shell_fed_stdin_behind_a_wrapper_the_guard_does_not_know_is_refused() {
         "ls -l /bin/sh || unbuffer bash",
     ]);
 }
+
+#[test]
+fn a_pager_git_grep_opens_files_in_is_read_as_a_script() {
+    sends_notes(&unpushed(), &["git grep -O'git push origin HEAD' notes"]);
+    allowed(&["git grep -O notes", "git grep -Oless notes"]);
+}
