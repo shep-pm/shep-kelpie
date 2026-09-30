@@ -11,7 +11,7 @@ This is early. It runs the maintainer's own projects and changes without notice,
 - Claude Code, signed in
 - `git`, and `gh` signed in to the account that opens the pull requests
 - a GitHub repo per project, with `ready-for-agent` and `ready-for-human` labels
-- a local review command or an OpenAI-compatible endpoint, or `review.local` set to `off`
+- a local review command or an OpenAI-compatible endpoint, or a project that lists `claude` alone
 
 ## Merging
 
@@ -85,17 +85,54 @@ A step that runs a skill starts its prompt with the skill's slash command, such 
 
 A skill that can't load runs kelpie's own prompt instead. The runner logs why, and `status` shows it under `skills`. `scripts/vendor-skills.sh <commit>` moves the pin.
 
-## The local round
+## The review loop
 
-Each pull request goes through a review loop before CI. Rounds alternate between a local model and a Claude session, local first, and the loop ends once one of each in a row finds nothing above a nit. `review.local` in a project's table picks the local round:
+Each pull request goes through a review loop before CI. A project lists its reviewers in `review.reviewers`, in the order the loop runs them, and kelpie's own settings define each one by name in `[kelpie.local_reviewers.<name>]`:
 
-- `kind = "off"`: every round is the Claude round, and one that finds nothing above a nit ends the loop
-- `kind = "endpoint"`: kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server
 - `kind = "command"`: a command of your own that keeps the contract below
+- `kind = "endpoint"`: kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server
+- `kind = "claude"`: a fresh Claude session on its own `model` and `effort`
 
-`review.local_rounds` caps the local rounds per work item. Once they are spent, every round is Claude's and one clean Claude round ends the loop.
+`claude` is always defined: the project's own Claude round on `models.reviewer`. The loop ends once two rounds in a row, from two different reviewers, find nothing above a nit, and those nits get fixed with no further round. Where only one reviewer can run, one clean round ends it.
 
-A file without the table runs `~/.claude/scripts/qwen-review.sh`, the maintainer's own command. A missing command or an endpoint that doesn't answer stops the runner at start.
+A local model alone:
+
+```toml
+# the project's [app.dogs.kelpie.review]
+reviewers = ["qwen"]
+
+# kelpie's [kelpie] section
+[kelpie.local_reviewers.qwen]
+kind = "endpoint"
+url = "http://localhost:11434/v1"
+model = "qwen2.5-coder:14b"
+context = 32768
+lease = "gpu"
+```
+
+Claude alone:
+
+```toml
+reviewers = ["claude"]
+```
+
+Both, with a deeper Claude round only where it pays:
+
+```toml
+reviewers = ["qwen", "claude", "opus"]
+
+[kelpie.local_reviewers.opus]
+kind = "claude"
+model = "claude-opus-5-5"
+effort = "high"
+paths = ["src/runner/merge/**", "src/guard/**"]
+```
+
+`paths` limits a reviewer to pull requests that change a file under one of its globs, and the loop skips it elsewhere. Every round's prompt carries the issue's acceptance criteria: the section under an "Acceptance criteria" heading, or the whole body without one.
+
+A project that lists none runs `review.local` and then `claude`, and a table with neither runs `~/.claude/scripts/qwen-review.sh`, the maintainer's own command, then Claude. `review.local` is the older form: it takes the same keys as a definition, or `kind = "off"`, and the runner says so at start. `review.local_rounds` caps the rounds from local reviewers per work item. Once they are spent, only Claude reviewers run.
+
+A missing command or an endpoint that doesn't answer stops the runner at start.
 
 An endpoint takes `url` (the base, up to and including `/v1`), `model`, and `context`, the context size in tokens the server gives that model. Kelpie diffs the pull request, cuts the diff to fit that context, and sends each piece with its own review prompt, `src/adapters/local/review-prompt.md`. Set `context` to what the server really uses: Ollama gives its OpenAI-compatible endpoint a small default context unless `OLLAMA_CONTEXT_LENGTH` says more, and drops whatever doesn't fit without saying so.
 
@@ -104,12 +141,13 @@ A command is run as `<command> --dir <worktree> --round <n> --diff <base>`, with
 - `QWEN_REVIEW_OUT`: the folder to write in
 - `KELPIE_REVIEW_HEAD`: the commit under review
 - `TMPDIR`: the folder the GPU lock lives under
+- `KELPIE_REVIEW_CRITERIA`: a file holding the issue's acceptance criteria
 
 It writes `round-<n>.txt` in that folder, one finding per line as `SEVERITY|path:line|what|why` with `HIGH`, `MEDIUM` or `LOW`, and then an empty `round-<n>.txt.done`. Kelpie reads nothing without the marker, and nothing from stdout. A nonzero exit fails the round. A command that writes `LOW|<path>:0|not reviewed: <n> lines exceeds the chunk limit|...` is run again with `--files <hunk file>` in place of `--diff`, on that file alone. If that run fails, the placeholder stays as the finding.
 
-`gpu_lease = true`, on either kind, has kelpie hold the GPU lock around each round. Leave it off for a command that takes the lock itself, as `qwen-review.sh` does.
+`lease` names the lock kelpie holds around each round of a command or an endpoint. `gpu` is this machine's GPU lock, the one the qwen scripts take. Any other name is a lock of its own, so a reviewer on another machine's GPU never waits on this one's. Leave it off for a command that takes the lock itself, as `qwen-review.sh` does. `gpu_lease = true` is the older spelling of `lease = "gpu"`.
 
-Under `gpu_lease = true`, before a round against Ollama, kelpie reads the host's `/api/ps`. An endpoint's host is its `url` without the `/v1`. A command names its host with `ollama = "http://localhost:11434"`, which needs `gpu_lease = true`, and its model with `ollama_model`, else every model the host has loaded is checked. A model partly or wholly on the CPU fails the round and raises a ruling, and a yes runs the round again once the model is back on the GPU. A host with no `/api/ps` is not checked, and `status` shows the model's name, its share on the GPU, its context length and when it unloads.
+With a lease, before a round against Ollama, kelpie reads the host's `/api/ps`. An endpoint's host is its `url` without the `/v1`. A command names its host with `ollama = "http://localhost:11434"`, which needs a lease, and its model with `ollama_model`, else every model the host has loaded is checked. A model partly or wholly on the CPU fails the round and raises a ruling, and a yes runs the round again once the model is back on the GPU. A host with no `/api/ps` is not checked, and `status` shows the model's name, its share on the GPU, its context length and when it unloads.
 
 Issues labelled `ready-for-agent` are the board. On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep trigger <project> rework <pr>`. On any other open pull request of kelpie's account, `ready-for-agent` adopts it, the same as `shep trigger <project> adopt <pr>`. Kelpie puts `ready-for-human` on each pull request it hands back.
 
