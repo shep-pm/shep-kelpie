@@ -16,6 +16,16 @@ fn parse_err(text: &str) -> String {
     parse(text).expect_err("the settings should be refused")
 }
 
+// The example with its commented project hook switched on, on `event`.
+fn with_hook(event: &str) -> String {
+    let hook = "# [[app.dogs.kelpie.worker.guard_hooks]]\n# event = \"PreToolUse\"\n# matcher = \"Bash\"\n# command = \"~/";
+    assert!(EXAMPLE.contains(hook), "the example's hook moved");
+    let on = format!(
+        "[[app.dogs.kelpie.worker.guard_hooks]]\nevent = \"{event}\"\nmatcher = \"Bash\"\ncommand = \"~/"
+    );
+    EXAMPLE.replace(hook, &on)
+}
+
 #[test]
 fn the_example_holds_the_first_build_defaults() {
     let s = parse(EXAMPLE).unwrap();
@@ -48,7 +58,10 @@ fn the_example_holds_the_first_build_defaults() {
     assert_eq!(s.pacing.kickoff_hours.get(), 8);
     assert_eq!(s.worker.turn_timeout.get(), 60);
     assert!(s.generated.iter().any(|g| g == "Cargo.lock"));
-    assert_eq!(s.worker.guard_hooks[0].event, HookEvent::PreToolUse);
+    assert!(
+        s.worker.guard_hooks.is_empty(),
+        "kelpie's own guard needs none"
+    );
     let domains: Vec<&str> = s
         .worker
         .allowed_domains
@@ -317,9 +330,24 @@ fn an_unreadable_file_names_its_path() {
 }
 
 #[test]
+fn a_projects_own_guard_hooks_are_read() {
+    let [hook] = parse(&with_hook("PostToolUse"))
+        .unwrap()
+        .worker
+        .guard_hooks
+        .try_into()
+        .unwrap();
+    assert_eq!(hook.event, HookEvent::PostToolUse);
+    assert_eq!(
+        hook.matcher.map(|m| m.as_str().to_owned()),
+        Some("Bash".into())
+    );
+    assert_eq!(hook.command.as_str(), "~/.kelpie/hooks/lint-guard");
+}
+
+#[test]
 fn a_table_names_a_malformed_key_in_a_list_of_tables() {
-    let text = EXAMPLE.replace("event = \"PreToolUse\"", "event = \"Stop\"");
-    let err = parse_err(&text);
+    let err = parse_err(&with_hook("Stop"));
     assert!(
         err.contains("`worker.guard_hooks.event = \"Stop\"`"),
         "{err}"

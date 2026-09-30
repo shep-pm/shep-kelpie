@@ -8,16 +8,18 @@
 
 mod command;
 mod endpoint;
+mod ollama;
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use super::process::Processes;
 use crate::lease::gpu::{self, Attempt, Claim, GpuLock};
-use crate::ports::{Finding, Reviewer, ReviewerError};
+use crate::ports::{Finding, ModelSeat, Reviewer, ReviewerError};
 use crate::settings::LocalRound;
 
 /// How often a round waiting on the GPU lock looks for a stop
@@ -30,6 +32,8 @@ const STOP_POLL: Duration = Duration::from_millis(100);
 pub struct LocalReviewer {
     temp_dir: PathBuf,
     processes: Processes,
+    // Where the model sat when a round last looked, for `status`.
+    seat: Arc<Mutex<Option<ModelSeat>>>,
 }
 
 impl Default for LocalReviewer {
@@ -37,6 +41,7 @@ impl Default for LocalReviewer {
         Self {
             temp_dir: gpu::temp_dir(),
             processes: Processes::default(),
+            seat: Arc::default(),
         }
     }
 }
@@ -128,6 +133,7 @@ impl Reviewer for LocalReviewer {
             true => Some(self.hold_gpu(round, worktree)?),
             false => None,
         };
+        self.check_seat(local)?;
         match local {
             LocalRound::Off {} => Ok(Vec::new()),
             LocalRound::Command(local) => self.command_round(local, worktree, base, out, round),
@@ -135,6 +141,10 @@ impl Reviewer for LocalReviewer {
                 self.endpoint_round(endpoint, worktree, base, out, round)
             }
         }
+    }
+
+    fn seat(&self) -> Option<ModelSeat> {
+        self.last_seat()
     }
 }
 
@@ -201,6 +211,8 @@ mod tests {
         LocalRound::Command(LocalCommand {
             command: path.to_owned(),
             gpu_lease,
+            ollama: None,
+            ollama_model: None,
         })
     }
 

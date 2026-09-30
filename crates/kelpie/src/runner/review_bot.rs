@@ -546,6 +546,7 @@ impl Runner {
             return Ok(self.gate_failed(reason));
         }
         let prompt = fix_prompt(self.bot().name(), number, round, held.len(), &path);
+        self.update(|item| item.record_held(&held))?;
         let head = match self.origin_head() {
             Ok(head) => head,
             Err(reason) => return Ok(self.gate_failed(reason)),

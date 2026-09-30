@@ -133,22 +133,39 @@ mod tests {
                 "# instructions_file = \"~/.kelpie/projects/shep/worker-instructions.md\"",
                 "instructions_file = \"worker.md\"",
             )
+            .replace(
+                "# [[app.dogs.kelpie.worker.guard_hooks]]\n# event = \"PreToolUse\"\n# matcher = \"Bash\"\n# command =",
+                "[[app.dogs.kelpie.worker.guard_hooks]]\nevent = \"PreToolUse\"\nmatcher = \"Bash\"\ncommand =",
+            )
             .replace("# [app.dogs.kelpie.preview]", "[app.dogs.kelpie.preview]")
             .replace("# enabled = true", "enabled = true")
             .replace("# configuration =", "configuration =")
             .replace("# routes =", "routes =")
             .replace("# domains =", "domains =")
             .replace("# local_rounds =", "local_rounds =")
-            .replace("# rounds =", "rounds =");
+            .replace("# rounds =", "rounds =")
+            .replace("# ollama =", "ollama =")
+            .replace("# ollama_model =", "ollama_model =");
         let command = "kind = \"command\"\ncommand = \"~/.claude/scripts/qwen-review.sh\"\n";
         assert!(text.contains(command), "the example's local round moved");
         let endpoint = "kind = \"endpoint\"\nurl = \"http://localhost:11434/v1\"\n\
                         model = \"m\"\ncontext = 32768\ngpu_lease = true\n";
         let command_with_lease = format!("{command}gpu_lease = true\n");
+        // Each kind of skill once, every step naming it.
+        let kinds = [
+            "{ kind = \"path\", path = \"skills/mine\" }",
+            "{ kind = \"plugin\", plugin = \"plugins/house\", skill = \"mine\" }",
+            "{ kind = \"none\" }",
+        ];
         [command_with_lease.as_str(), endpoint, "kind = \"off\"\n"]
             .into_iter()
-            .map(|local| {
-                let text = text.replace(command, local);
+            .zip(kinds)
+            .map(|(local, kind)| {
+                let mut text = text.replace(command, local);
+                text.push_str("\n[app.dogs.kelpie.skills]\n");
+                for step in crate::skills::Step::ALL {
+                    text.push_str(&format!("{step} = {kind}\n"));
+                }
                 toml::to_string(&crate::test::project_table(&text)).unwrap()
             })
             .collect()

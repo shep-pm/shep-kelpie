@@ -1,44 +1,46 @@
 //! The main seam's rig: a runner on stand-ins for Claude, the forge, the
 //! webhook and the clock, over a real git repo in a throwaway home
 
-use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tempfile::TempDir;
 
-use crate::adapters::LocalReviewer;
 use crate::board::WorkerModel;
 use crate::coderabbit::CodeRabbit;
 use crate::ports::{
-    Checks, Claude, ClaudeCall, ClaudeError, ClaudeReply, Clock, Cost, Finding, Meter, MeterError,
-    Ports, Relay, Reviewer, ReviewerError, Role, SessionId, Timestamp, Usage, Utilization, Window,
+    Checks, Clock, Cost, Meter, MeterError, Ports, Relay, Role, SessionId, Timestamp, Usage,
+    Utilization, Window,
 };
 use crate::review_bot::Profile;
 use crate::runner::{
     CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
 };
-use crate::settings::{Effort, LocalRound, Settings, SettingsError};
+use crate::settings::{Effort, Settings, SettingsError};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{CallRecord, Known, Phase, Turn, WorkItem};
 
 mod alerts;
+mod claude;
 mod coderabbit;
 mod endpoint;
 mod forge;
 mod leases;
 mod relay;
+mod reviewer;
 mod shepherd;
 mod shots;
 
 pub(crate) use alerts::FakeAlerts;
+pub(crate) use claude::{FakeClaude, Hold, LEFT_BEHIND, Scripted, Seen};
 pub(crate) use endpoint::{Answer, StandInEndpoint, unreachable_url};
 pub(crate) use forge::FakeForge;
 pub(crate) use leases::{FakeLeases, Told};
 pub(crate) use relay::FakeRelay;
+pub(crate) use reviewer::{FakeReviewer, ScriptedRound};
 pub(crate) use shepherd::FakeShepherd;
 pub(crate) use shots::{FakeShots, ScriptedShots};
 
@@ -127,6 +129,8 @@ pub(crate) fn a_work_item() -> WorkItem {
         rebased: false,
         shots: None,
         shots_comment: None,
+        held: Vec::new(),
+        follow_ups: None,
         calls: vec![CallRecord {
             role: Role::Worker,
             at: Timestamp(10),
@@ -162,258 +166,6 @@ pub(crate) const CODERABBIT_OFF: &str = "[app.dogs.kelpie.coderabbit]\nenabled =
 
 /// A launch file like the playground's
 const LAUNCH: &str = r#"{"version": "0.0.1", "configurations": [{"name": "dev", "runtimeExecutable": "bun", "runtimeArgs": ["run", "dev"], "port": 3000}]}"#;
-
-/// The file a killed worker leaves in its worktree, to find after a restart
-pub(crate) const LEFT_BEHIND: &str = "left-behind.txt";
-
-/// What the stand-in Claude does with its next call
-#[derive(Debug, Clone)]
-pub(crate) enum Scripted {
-    /// Answers with this usage, and this cost for the session so far
-    Reply(Usage, Cost),
-    /// Answers like [`Self::Reply`], with the account's usage as given by
-    /// the time it does: the call itself spent it
-    Spend(Utilization, Usage, Cost),
-    /// Fails with this error
-    Fail(ClaudeError),
-    /// Leaves [`LEFT_BEHIND`] in the worktree, then dies with the runner
-    Kill,
-    /// Commits this file with this text on the worktree's branch, pushes
-    /// it the way a worker does, and answers
-    Push(&'static str, &'static str),
-    /// Writes this file with this text in the worktree, commits nothing,
-    /// and answers: a write that got past the fence
-    Plant(&'static str, &'static str),
-    /// Merges `origin/main` into the worktree's branch, keeping main's
-    /// side of any conflict, and pushes it without force, as a worker
-    /// resolving a conflict does
-    MergeMain,
-    /// Answers with this exact text and no cost: a review round or judge
-    /// one-shot, whose reply is read rather than acted on
-    Text(&'static str),
-    /// Answers like [`Self::Text`], with this cost for the session
-    Billed(&'static str, Cost),
-    /// Answers with this final message
-    Say(&'static str),
-    /// Blocks until the test releases it, then answers
-    Hold(Hold),
-}
-
-/// A call in flight that a test lets go of when it chooses
-#[derive(Debug, Clone, Default)]
-pub(crate) struct Hold(Arc<(Mutex<Held>, Condvar)>);
-
-#[derive(Debug, Default)]
-struct Held {
-    entered: bool,
-    released: bool,
-    returned: bool,
-}
-
-impl Hold {
-    /// Waits up to `within` for the call to begin, and says whether it did
-    pub(crate) fn entered(&self, within: Duration) -> bool {
-        let (held, changed) = &*self.0;
-        let held = held.lock().unwrap();
-        let (held, _) = changed
-            .wait_timeout_while(held, within, |h| !h.entered)
-            .unwrap();
-        held.entered
-    }
-
-    /// Lets the call answer
-    pub(crate) fn release(&self) {
-        let (held, changed) = &*self.0;
-        held.lock().unwrap().released = true;
-        changed.notify_all();
-    }
-
-    /// Whether the call has answered
-    pub(crate) fn returned(&self) -> bool {
-        self.0.0.lock().unwrap().returned
-    }
-
-    /// Waits up to `within` for the call to answer, and says whether it did
-    pub(crate) fn answered(&self, within: Duration) -> bool {
-        let (held, changed) = &*self.0;
-        let held = held.lock().unwrap();
-        let (held, _) = changed
-            .wait_timeout_while(held, within, |h| !h.returned)
-            .unwrap();
-        held.returned
-    }
-
-    fn block(&self) {
-        let (held, changed) = &*self.0;
-        let mut held = held.lock().unwrap();
-        held.entered = true;
-        changed.notify_all();
-        let mut held = changed.wait_while(held, |h| !h.released).unwrap();
-        held.returned = true;
-        changed.notify_all();
-    }
-}
-
-/// A call as the stand-in Claude saw it
-#[derive(Debug, Clone)]
-pub(crate) struct Seen {
-    /// The call
-    pub(crate) call: ClaudeCall,
-    /// The settings file it named, as it stood during the call
-    pub(crate) settings: serde_json::Value,
-    /// Whether its build folder existed when the call started
-    pub(crate) build_existed: bool,
-}
-
-/// Records every call and answers from a script, failing once it runs out
-#[derive(Debug, Clone, Default)]
-pub(crate) struct FakeClaude {
-    seen: Arc<Mutex<Vec<Seen>>>,
-    script: Arc<Mutex<VecDeque<Scripted>>>,
-    meter: Option<FakeMeter>,
-}
-
-impl FakeClaude {
-    /// The worker's own calls, in order: what every test before the review
-    /// loop existed already asserted on, so a reviewer or judge call never
-    /// shows up and shifts their counts.
-    pub(crate) fn calls(&self) -> Vec<ClaudeCall> {
-        self.seen().into_iter().map(|s| s.call).collect()
-    }
-
-    /// The worker's own calls, with the settings file each one saw
-    pub(crate) fn seen(&self) -> Vec<Seen> {
-        self.all_seen()
-            .into_iter()
-            .filter(|s| s.call.role == Role::Worker)
-            .collect()
-    }
-
-    /// Every call, worker, reviewer and judge alike, in order
-    pub(crate) fn all_calls(&self) -> Vec<ClaudeCall> {
-        self.all_seen().into_iter().map(|s| s.call).collect()
-    }
-
-    /// Every call, with the settings file each one saw
-    pub(crate) fn all_seen(&self) -> Vec<Seen> {
-        self.seen.lock().unwrap().clone()
-    }
-
-    /// Queues answers for its next calls, oldest first
-    pub(crate) fn script(&self, steps: impl IntoIterator<Item = Scripted>) {
-        self.script.lock().unwrap().extend(steps);
-    }
-}
-
-impl Claude for FakeClaude {
-    fn run(&self, call: &ClaudeCall) -> Result<ClaudeReply, ClaudeError> {
-        let settings: serde_json::Value = std::fs::read_to_string(&call.settings)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default();
-        let build = settings["env"]["CARGO_TARGET_DIR"].as_str().map(Path::new);
-        let build_existed = build.is_some_and(Path::is_dir);
-        self.seen.lock().unwrap().push(Seen {
-            call: call.clone(),
-            settings,
-            build_existed,
-        });
-        let next = self.script.lock().unwrap().pop_front();
-        let next = match next {
-            Some(Scripted::Spend(account, usage, cost)) => {
-                if let Some(meter) = &self.meter {
-                    meter.set(account);
-                }
-                Some(Scripted::Reply(usage, cost))
-            }
-            other => other,
-        };
-        match next {
-            Some(Scripted::Reply(usage, session_cost)) => Ok(ClaudeReply {
-                session_id: call.session.id().clone(),
-                text: "done".into(),
-                usage,
-                session_cost,
-            }),
-            Some(Scripted::Spend(..)) => unreachable!("turned into a reply above"),
-            Some(Scripted::Fail(error)) => Err(error),
-            Some(Scripted::Kill) => {
-                std::fs::write(call.cwd.join(LEFT_BEHIND), "work in progress\n").unwrap();
-                panic!("the runner is killed mid-turn");
-            }
-            Some(Scripted::Text(text)) => Ok(ClaudeReply {
-                session_id: call.session.id().clone(),
-                text: text.to_owned(),
-                usage: Usage::default(),
-                session_cost: Cost(0),
-            }),
-            Some(Scripted::Billed(text, cost)) => Ok(ClaudeReply {
-                session_id: call.session.id().clone(),
-                text: text.to_owned(),
-                usage: Usage::default(),
-                session_cost: cost,
-            }),
-            Some(Scripted::Say(text)) => Ok(ClaudeReply {
-                session_id: call.session.id().clone(),
-                text: text.into(),
-                usage: Usage::default(),
-                session_cost: Cost(0),
-            }),
-            Some(Scripted::Hold(hold)) => {
-                hold.block();
-                Ok(ClaudeReply {
-                    session_id: call.session.id().clone(),
-                    text: "done".into(),
-                    usage: Usage::default(),
-                    session_cost: Cost(0),
-                })
-            }
-            Some(Scripted::Plant(file, text)) => {
-                write_in(&call.cwd, file, text);
-                Ok(ClaudeReply {
-                    session_id: call.session.id().clone(),
-                    text: "done".into(),
-                    usage: Usage::default(),
-                    session_cost: Cost(0),
-                })
-            }
-            Some(Scripted::Push(file, text)) => {
-                write_in(&call.cwd, file, text);
-                git(&call.cwd, &["add", file]);
-                git(&call.cwd, &["commit", "--quiet", "-m", file]);
-                git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);
-                Ok(ClaudeReply {
-                    session_id: call.session.id().clone(),
-                    text: "pushed".into(),
-                    usage: Usage::default(),
-                    session_cost: Cost(0),
-                })
-            }
-            Some(Scripted::MergeMain) => {
-                git(&call.cwd, &["fetch", "--quiet", "origin", "main"]);
-                git(
-                    &call.cwd,
-                    &[
-                        "merge",
-                        "--quiet",
-                        "-X",
-                        "theirs",
-                        "--no-edit",
-                        "origin/main",
-                    ],
-                );
-                git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);
-                Ok(ClaudeReply {
-                    session_id: call.session.id().clone(),
-                    text: "merged".into(),
-                    usage: Usage::default(),
-                    session_cost: Cost(0),
-                })
-            }
-            None => Err(ClaudeError::Failed("the rig scripts no reply".into())),
-        }
-    }
-}
 
 /// A meter that reports what a test sets, and counts its reads
 ///
@@ -476,84 +228,6 @@ impl Clock for FakeClock {
     }
 }
 
-/// What the stand-in reviewer answers for its next round
-#[derive(Debug, Clone)]
-pub(crate) enum ScriptedRound {
-    /// These findings
-    Findings(Vec<Finding>),
-    /// Fails with this error
-    Fail(ReviewerError),
-}
-
-/// One round as the stand-in reviewer saw it
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SeenRound {
-    pub(crate) local: LocalRound,
-    pub(crate) worktree: PathBuf,
-    pub(crate) base: String,
-    pub(crate) out: PathBuf,
-    pub(crate) round: u32,
-}
-
-/// A local round's stand-in. Clean (no findings) once its script runs out, so
-/// tests that do not care about the review loop see it pass straight through.
-/// Its start check is the real one, and [`Self::pass_through`] makes its
-/// rounds real too.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct FakeReviewer {
-    seen: Arc<Mutex<Vec<SeenRound>>>,
-    script: Arc<Mutex<VecDeque<ScriptedRound>>>,
-    real: Arc<Mutex<Option<LocalReviewer>>>,
-}
-
-impl FakeReviewer {
-    /// Every round asked of it, in order
-    pub(crate) fn seen(&self) -> Vec<SeenRound> {
-        self.seen.lock().unwrap().clone()
-    }
-
-    /// Runs every later round with the real reviewer, after noting it
-    pub(crate) fn pass_through(&self) {
-        *self.real.lock().unwrap() = Some(LocalReviewer::default());
-    }
-
-    /// Queues answers for its next rounds, oldest first
-    pub(crate) fn script(&self, rounds: impl IntoIterator<Item = ScriptedRound>) {
-        self.script.lock().unwrap().extend(rounds);
-    }
-}
-
-impl Reviewer for FakeReviewer {
-    fn check(&self, local: &LocalRound) -> Result<(), String> {
-        LocalReviewer::default().check(local)
-    }
-
-    fn round(
-        &self,
-        local: &LocalRound,
-        worktree: &Path,
-        base: &str,
-        out: &Path,
-        round: u32,
-    ) -> Result<Vec<Finding>, ReviewerError> {
-        self.seen.lock().unwrap().push(SeenRound {
-            local: local.clone(),
-            worktree: worktree.to_owned(),
-            base: base.to_owned(),
-            out: out.to_owned(),
-            round,
-        });
-        if let Some(real) = &*self.real.lock().unwrap() {
-            return real.round(local, worktree, base, out, round);
-        }
-        match self.script.lock().unwrap().pop_front() {
-            Some(ScriptedRound::Findings(findings)) => Ok(findings),
-            Some(ScriptedRound::Fail(e)) => Err(e),
-            None => Ok(Vec::new()),
-        }
-    }
-}
-
 /// One project's world: kelpie's home, the maintainer's home, and the
 /// project's repo cloned from a bare origin
 #[derive(Debug)]
@@ -609,10 +283,7 @@ impl Rig {
         let clock = FakeClock::at(Self::EPOCH);
         let rig = Self {
             project: ProjectName::try_from(project).unwrap(),
-            claude: FakeClaude {
-                meter: Some(meter.clone()),
-                ..FakeClaude::default()
-            },
+            claude: FakeClaude::metered(meter.clone()),
             forge: FakeForge::new(home.path().join("origin.git")),
             meter,
             reviewer: FakeReviewer::default(),

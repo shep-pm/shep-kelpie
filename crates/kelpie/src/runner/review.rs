@@ -19,6 +19,7 @@ use std::path::Path;
 
 use super::Runner;
 use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, Spent, StepReport};
+use super::ruling::park;
 use super::shots::RoundShots;
 use crate::ports::{
     Claude, ClaudeCall, ClaudeError, ClaudeReply, Finding, Reviewer, ReviewerError, Severity,
@@ -73,6 +74,7 @@ impl Runner {
                             &worker_folder,
                             &model,
                             shots,
+                            &self.skills,
                         ) {
                             Ok(call) => {
                                 self.mark_review_call_running()?;
@@ -234,6 +236,7 @@ impl Runner {
         let held_count = held.len();
         let prompt = findings::fix_prompt(number, round, held_count, &path);
         self.update(|item| {
+            item.record_held(&held);
             item.turn = Turn::Next { prompt };
             item.phase = Phase::Review(Review {
                 stage: ReviewStage::Fixing {
@@ -290,6 +293,23 @@ impl Runner {
             .expect("review runs once a pull request is known");
         let round = review.round;
 
+        // Not a failed gate to wait out: the maintainer moves the model, so
+        // the round is parked on a ruling, which alerts.
+        if let ReviewResult::Spilled(reason) = &result {
+            let reason = reason.clone();
+            let kind = RulingKind::LocalModelSpilled { review, reason };
+            let (id, question) = park(self.names(), &mut next, issue, Some(number), kind);
+            self.save(next)?;
+            let comment_failed = self.post_ruling(Some(number), id);
+            return Ok(Some(StepReport::Ruling {
+                issue,
+                pull_request: number,
+                id,
+                question,
+                comment_failed,
+            }));
+        }
+
         let report = match result {
             ReviewResult::Findings(Err(reason)) => StepReport::GateFailed { issue, reason },
             // Nothing to judge: the round is clean at once.
@@ -329,6 +349,7 @@ impl Runner {
             }
             ReviewResult::Verdict(Err(reason)) => StepReport::GateFailed { issue, reason },
             ReviewResult::Stopped => unreachable!("a stopped call returns above"),
+            ReviewResult::Spilled(_) => unreachable!("a spilled model returns above"),
             ReviewResult::Verdict(Ok(verdict)) => {
                 let ReviewStage::Judging {
                     findings,
@@ -415,6 +436,10 @@ pub(super) fn run_review_call(
             round,
         } => match reviewer.round(&local, &worktree, &base, &out, round) {
             Err(ReviewerError::Stopped) => stopped(),
+            Err(ReviewerError::Spilled(reason)) => Reviewed {
+                result: ReviewResult::Spilled(reason),
+                spent: None,
+            },
             result => Reviewed {
                 result: ReviewResult::Findings(result.map_err(|e| e.to_string())),
                 spent: Some(Spent::Local),

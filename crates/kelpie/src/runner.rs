@@ -14,6 +14,7 @@ use crate::channels::{Channel, Channels};
 use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Guarded, Ports, SessionId, Timestamp, Visibility};
 use crate::settings::{Settings, SettingsError};
+use crate::skills::Skills;
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{
@@ -26,7 +27,9 @@ mod claude_files;
 #[cfg(test)]
 mod coderabbit;
 mod dispatch;
+mod follow_up;
 mod gate;
+mod guard_hooks;
 mod instructions;
 mod merge;
 mod pace;
@@ -145,6 +148,8 @@ pub struct Runner {
     settings: Settings,
     // The project's extra worker instructions, read once when the runner starts
     extra_instructions: Option<String>,
+    // Each step's skill, loaded when the runner starts or its settings change
+    skills: Skills,
     paths: ProjectPaths,
     kelpie: PathBuf,
     store: StateStore,
@@ -207,6 +212,14 @@ impl Runner {
         let totp = replies::authenticator(webhook.as_ref(), &paths.totp)?;
         check_repo(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        guard_hooks::check(
+            &settings,
+            home.as_deref(),
+            std::env::var_os("PATH").as_deref(),
+        )?;
+        crate::skills::check(&settings.skills, &paths.skills)?;
+        let skills = Skills::load(&settings.skills, &paths.skills);
         check_coderabbit(&settings, &ports)?;
         check_local(&settings, &ports)?;
         let store = StateStore::new(paths.state.clone());
@@ -240,6 +253,7 @@ impl Runner {
             project,
             settings,
             extra_instructions,
+            skills,
             paths: paths.clone(),
             kelpie: kelpie.to_owned(),
             store,
@@ -264,6 +278,11 @@ impl Runner {
     /// The project's settings, as read when the runner started
     pub fn settings(&self) -> &Settings {
         &self.settings
+    }
+
+    /// A log line for each step whose skill could not load
+    pub fn skill_notices(&self) -> impl Iterator<Item = String> + '_ {
+        self.skills.notices()
     }
 
     fn names(&self) -> Names<'_> {
@@ -293,6 +312,8 @@ impl Runner {
             rulings: &self.state.rulings,
             leases: &self.state.leases,
             pacer: self.pacer_status(self.ports.clock.now()),
+            skills: self.skills.status(),
+            local_model: self.ports.reviewer.seat().map(Into::into),
         }
     }
 
@@ -383,6 +404,8 @@ impl Runner {
             rebased: false,
             shots: None,
             shots_comment: None,
+            held: Vec::new(),
+            follow_ups: None,
             calls: Vec::new(),
         }
     }
