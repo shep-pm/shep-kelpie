@@ -4,7 +4,7 @@ Kelpie is a shep dog that runs Claude Code workers from a planned work item to a
 
 ## Where things stand
 
-The design is settled and the pillars are measured. The MVP is being built from #5 (one project, one worker, merge on `ask`, no GUI), one ticket at a time. The code is one Rust crate, `crates/kelpie`, with `#![forbid(unsafe_code)]`.
+The design is settled and the pillars are measured. The MVP is being built from #5 (one project, one worker, merge on `ask`, no GUI), one ticket at a time. The code is one Rust crate, `shep-kelpie`, at the repo root, with `#![forbid(unsafe_code)]`.
 
 - `docs/design-log.md`: status, every decision, the measured facts and the test plan. Read it before proposing anything a test has not settled.
 - `docs/specs/`: one spec per test series, and its results. The experiment code and raw results live in shep-pm/kelpie-lab, and results here cite its commits as "the experiments repo".
@@ -28,7 +28,7 @@ Gotchas:
 
 Invoke the `rust-house-style` skill before writing or reviewing Rust. The rules are shep-pm/rust-house-style, IR-1 to IR-48.
 
-CI (`.github/workflows/test.yml`) runs `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`, rustdoc with `-D warnings`, and `cargo +1.88 check` for the MSRV. Run the same before handing a branch over. `.github/workflows/file-size.yml` also fails any `.rs` file over 1000 lines (IR-48).
+CI (`.github/workflows/test.yml`) runs `cargo fmt --all --check`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`, rustdoc with `-D warnings`, and `cargo +1.88 check` for the MSRV. Run the same before handing a branch over. `.github/workflows/file-size.yml` also fails any `.rs` file over 1000 lines (IR-48).
 
 ## Writing and git
 
