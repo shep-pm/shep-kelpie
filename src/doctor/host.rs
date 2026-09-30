@@ -1,12 +1,35 @@
 //! What doctor asks of the machine itself, beyond the runner's ports
 
 use std::fmt;
+use std::path::Path;
 
 /// The machine kelpie runs on
 pub trait Host: Send + Sync + fmt::Debug {
     /// The programs Claude Code's sandbox needs that are not on this machine,
     /// none when it can run
     fn sandbox_gaps(&self) -> Vec<&'static str>;
+
+    /// The shared libraries the headless Chromium under `browsers` cannot
+    /// load, none when it can run or this machine needs no check
+    fn browser_gaps(&self, browsers: &Path) -> Vec<String>;
+}
+
+/// The `apt` package that holds `program`, as Debian and Ubuntu name it
+pub fn apt_package(program: &str) -> &str {
+    match program {
+        "bwrap" => "bubblewrap",
+        other => other,
+    }
+}
+
+/// The libraries `ldd` says it cannot find, from its output for one binary
+///
+/// A line reads `\tlibnss3.so => not found`.
+pub fn unresolved(ldd: &str) -> Vec<String> {
+    ldd.lines()
+        .filter_map(|line| line.trim().strip_suffix("=> not found"))
+        .map(|name| name.trim().to_owned())
+        .collect()
 }
 
 /// The programs Claude Code's sandbox needs on `os`, as `std::env::consts::OS` names it
@@ -36,6 +59,26 @@ mod tests {
         assert_eq!(sandbox_needs("macos"), ["sandbox-exec"]);
         assert_eq!(sandbox_needs("linux"), ["bwrap", "socat"]);
         assert!(sandbox_needs("windows").is_empty());
+    }
+
+    // `ldd` on a copy of `ls` whose `libselinux.so.1` was renamed, run on
+    // WSL2 Ubuntu 24.04 (shep-pm/shep-kelpie#135).
+    const LDD: &str = "\tlinux-vdso.so.1 (0x00007ffed48a4000)
+\tlibselinuy.so.1 => not found
+\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fcccd935000)
+\t/lib64/ld-linux-x86-64.so.2 (0x00007fcccdb74000)
+";
+
+    #[test]
+    fn a_library_ldd_cannot_find_is_named_and_the_rest_are_not() {
+        assert_eq!(unresolved(LDD), ["libselinuy.so.1"]);
+        assert!(unresolved("\tlibc.so.6 => /lib/libc.so.6 (0x1)\n").is_empty());
+    }
+
+    #[test]
+    fn bwrap_comes_from_the_bubblewrap_package() {
+        assert_eq!(apt_package("bwrap"), "bubblewrap");
+        assert_eq!(apt_package("socat"), "socat");
     }
 
     #[test]
