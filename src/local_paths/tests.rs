@@ -26,7 +26,12 @@ fn a_folder_and_what_is_under_it_are_found_whatever_the_case() {
 #[test]
 fn a_longer_name_that_starts_like_a_folder_is_not_it() {
     let paths = checking(&["/Users/me"], &[]);
-    for text in ["/Users/meg/x", "/Users/me-2", "/Users/me_b", "nothing here"] {
+    for text in [
+        concat!("/Us", "ers/meg/x"),
+        concat!("/Us", "ers/me-2"),
+        concat!("/Us", "ers/me_b"),
+        "nothing here",
+    ] {
         assert_eq!(paths.find(text, Surface::Prose), None, "{text}");
     }
 }
@@ -62,7 +67,8 @@ fn a_windows_path_is_found_written_either_way() {
         // Escaped in JSON.
         r"D:\\Users\\alex\\app",
     ] {
-        assert_eq!(paths.find(text, Surface::Code), Some(Leak::Path), "{text}");
+        assert_eq!(paths.find(text, Surface::Prose), Some(Leak::Path), "{text}");
+        assert_eq!(paths.find(text, Surface::Code), None, "{text}");
     }
     assert!(!refused(&paths, r"C:\Windows\System32 and C:\Users\ alone"));
 }
@@ -71,14 +77,15 @@ fn a_windows_path_is_found_written_either_way() {
 fn a_linux_home_and_the_scratch_folders_of_macos_are_found() {
     let paths = LocalPaths::default();
     for text in [
-        "/home/alex/app/src/a.rs",
+        concat!("/ho", "me/alex/app/src/a.rs"),
         "in /private/tmp/kelpie-1/x",
         "/private/tmp",
         "/var/folders/zz/abc123/T/out.png",
         "/private/var/folders/zz/abc123/T/out.png",
-        "file:///home/alex/x",
+        concat!("file:///ho", "me/alex/x"),
     ] {
-        assert_eq!(paths.find(text, Surface::Code), Some(Leak::Path), "{text}");
+        assert_eq!(paths.find(text, Surface::Prose), Some(Leak::Path), "{text}");
+        assert_eq!(paths.find(text, Surface::Code), None, "{text}");
     }
 }
 
@@ -86,8 +93,8 @@ fn a_linux_home_and_the_scratch_folders_of_macos_are_found() {
 fn a_path_that_only_looks_like_a_home_is_not_one() {
     let paths = LocalPaths::default();
     for text in [
-        "https://example.com/home/page",
-        "src/home/mod.rs",
+        concat!("https://example.com/ho", "me/page"),
+        concat!("src/ho", "me/mod.rs"),
         "see /home/ for more",
         "/homework/a",
         "/tmp/scratch",

@@ -121,7 +121,7 @@ impl Runner {
                     }
                 })?,
                 // Never sent, and never will be: retrying would only stall the work item.
-                Err(ForgeError::LocalPath) => skipped += 1,
+                Err(ForgeError::LocalPath { .. }) => skipped += 1,
                 Err(e) => {
                     let reason = format!("cannot file a follow-up for #{number}: {e}");
                     return self.forge_refused(number, reason);

@@ -25,9 +25,10 @@ impl Guarded {
         Self { forge, local }
     }
 
-    fn check(&self, body: &str) -> Result<(), ForgeError> {
-        match self.local.find(body, Surface::Prose) {
-            Some(_) => Err(ForgeError::LocalPath),
+    // `what` names the field, so a refusal says which one to fix.
+    fn check(&self, what: &'static str, text: &str) -> Result<(), ForgeError> {
+        match self.local.find(text, Surface::Prose) {
+            Some(leak) => Err(ForgeError::LocalPath { what, leak }),
             None => Ok(()),
         }
     }
@@ -90,17 +91,17 @@ impl Forge for Guarded {
     }
 
     fn comment(&self, repo: &ForgeSlug, number: u64, body: &str) -> Result<(), ForgeError> {
-        self.check(body)?;
+        self.check("the comment", body)?;
         self.forge.comment(repo, number, body)
     }
 
     fn post_comment(&self, repo: &ForgeSlug, number: u64, body: &str) -> Result<u64, ForgeError> {
-        self.check(body)?;
+        self.check("the comment", body)?;
         self.forge.post_comment(repo, number, body)
     }
 
     fn edit_comment(&self, repo: &ForgeSlug, id: u64, body: &str) -> Result<(), ForgeError> {
-        self.check(body)?;
+        self.check("the comment", body)?;
         self.forge.edit_comment(repo, id, body)
     }
 
@@ -115,8 +116,8 @@ impl Forge for Guarded {
         body: &str,
         labels: &[&str],
     ) -> Result<u64, ForgeError> {
-        self.check(title)?;
-        self.check(body)?;
+        self.check("the issue's title", title)?;
+        self.check("the issue's body", body)?;
         self.forge.create_issue(repo, title, body, labels)
     }
 

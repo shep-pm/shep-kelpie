@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use super::Runner;
 use super::gate::short;
 use super::report::{Begin, StepReport};
-use crate::local_paths::Surface;
+use crate::local_paths::{Leak, Surface};
 use crate::ports::{ForgeError, Timestamp};
 use crate::preview;
 use crate::settings::NonBlank;
@@ -23,6 +23,15 @@ use crate::worktree;
 
 #[cfg(test)]
 mod tests;
+
+// What the check found in the shots comment, as the forge port would refuse it.
+fn refused_error(leak: Option<Leak>) -> ForgeError {
+    let leak = leak.expect("a refusal names what it found");
+    ForgeError::LocalPath {
+        what: "the shots comment",
+        leak,
+    }
+}
 
 /// Seconds before a shots post that failed is tried again
 const SHOTS_RETRY: u64 = 60;
@@ -231,7 +240,7 @@ impl Runner {
         // Only a comment someone deleted gets a new one: any other failure
         // would leave two shots comments on the pull request.
         let posted = match comment {
-            _ if refusal.is_some() => Err(ForgeError::LocalPath),
+            _ if refusal.is_some() => Err(refused_error(refusal)),
             Some(id) => match self.ports.forge.edit_comment(forge, id, &body) {
                 Err(ForgeError::Failed(e)) if e.contains(GONE) => {
                     self.ports.forge.post_comment(forge, number, &body)
@@ -242,16 +251,19 @@ impl Runner {
         };
         // A body naming a local folder would be refused again, so the run
         // counts as failed: the ruling says so, and nothing retries.
-        let refused = matches!(posted, Err(ForgeError::LocalPath));
+        let refused = match &posted {
+            Err(e @ ForgeError::LocalPath { .. }) => Some(e.to_string()),
+            _ => None,
+        };
         let posted = posted.map_err(|e| failures.push(e.to_string())).ok();
         let done = posted.is_some() && failures.is_empty();
         let retry_at = Timestamp(self.ports.clock.now().0 + SHOTS_RETRY);
         self.update(|item| {
             if let Some(shots) = item.shots.as_mut() {
                 shots.posted = done;
-                shots.retry_at = (!done && !refused).then_some(retry_at);
-                if refused {
-                    shots.run.failed = Some(ForgeError::LocalPath.to_string());
+                shots.retry_at = (!done && refused.is_none()).then_some(retry_at);
+                if refused.is_some() {
+                    shots.run.failed.clone_from(&refused);
                 }
             }
             item.shots_comment = posted.or(item.shots_comment);

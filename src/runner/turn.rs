@@ -310,6 +310,8 @@ impl Runner {
             branch: &item.branch,
             kelpie: &self.kelpie,
             guard_hooks: &self.settings.worker.guard_hooks,
+            kelpie_home: &self.paths.kelpie_home,
+            repo: &self.settings.repo,
             private_names: &self.settings.private_names,
             allowed_domains: &self.settings.worker.allowed_domains,
             build_env: &self.settings.worker.build_env,

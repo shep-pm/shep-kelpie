@@ -54,8 +54,9 @@ generated = [
 ]
 
 # Words that stay off the forge, whatever their case: kelpie posts no text
-# naming one, and a worker's commits and `gh` calls may not either. A project
-# whose CI checks a list of private names keeps the same list here.
+# naming one, and a worker's commits and `gh` calls may not either. Each entry
+# is a literal word or phrase, matched as a whole word. A CI check's list is
+# often a regex, which this is not: spell out each name it would match.
 # private_names = ["Acme Corp"]
 
 [app.dogs.kelpie.models.worker]

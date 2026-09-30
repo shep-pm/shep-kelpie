@@ -12,14 +12,15 @@
 //!
 //! - a folder it was given, in its canonical form too, so a symlinked home
 //!   names the same place twice
-//! - `/home/<name>`, `C:\Users\<name>`, `/private/tmp` and `/var/folders`,
-//!   which name a machine's user or scratch space whoever the user is
 //! - a word from the project's own list of private names
 //!
-//! A [`Surface::Prose`] is text a person reads, so it also refuses a path
-//! under `~` and an address on a local network. Code and its patches are
-//! full of both (`~/` in a doc, `self.local`, an address in a fixture), so a
-//! [`Surface::Code`] leaves them be.
+//! A [`Surface::Prose`] is text a person reads, so it also refuses
+//! `/home/<name>`, `C:\Users\<name>`, `/private/tmp` and `/var/folders`,
+//! which name a machine's user or scratch space whoever the user is, a path
+//! under `~`, and an address on a local network. Code and its patches are
+//! full of all of them (another user's home in a fixture, `~/` in a doc, `self.local`,
+//! an address in a fixture), so a [`Surface::Code`] leaves them be and holds
+//! only to the folders it was given and the private names.
 
 use std::fmt;
 use std::fs;
@@ -113,7 +114,8 @@ impl LocalPaths {
     }
 
     fn find_in(&self, text: &str, surface: Surface) -> Option<Leak> {
-        if self.folders.iter().any(|f| names_folder(text, f)) || names_system_path(text) {
+        let system = surface == Surface::Prose && names_system_path(text);
+        if system || self.folders.iter().any(|f| names_folder(text, f)) {
             return Some(Leak::Path);
         }
         if self.names.iter().any(|n| has_word(text, n)) {

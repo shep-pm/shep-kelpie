@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::fence;
+use crate::guard::{FOLDER_FLAG, NAME_FLAG};
 use crate::settings::{BuildDir, EnvName, GuardHook, HookEvent, NonBlank};
 use crate::worktree::BASE;
 
@@ -143,6 +144,10 @@ pub struct WorkerProfile<'a> {
     pub kelpie: &'a Path,
     /// The project's own guard hooks, which run after kelpie's
     pub guard_hooks: &'a [GuardHook],
+    /// Kelpie's home, whose path the guard keeps off the forge
+    pub kelpie_home: &'a Path,
+    /// The project's checkout, whose path the guard keeps off the forge
+    pub repo: &'a Path,
     /// The words the project's settings keep off the forge, which the guard refuses
     pub private_names: &'a [NonBlank],
     /// The domains the project's settings add to GitHub's
@@ -258,8 +263,13 @@ impl WorkerProfile<'_> {
             self.worktree,
         ]
         .map(|p| shell_quote(&p.to_string_lossy()));
-        let names = self.private_names.iter().map(|n| shell_quote(n.as_str()));
-        let guard: Vec<String> = guard.into_iter().chain(names).collect();
+        let folders = [self.kelpie_home, self.repo]
+            .map(|p| shell_quote(&format!("{FOLDER_FLAG}{}", p.display())));
+        let names = self
+            .private_names
+            .iter()
+            .map(|n| shell_quote(&format!("{NAME_FLAG}{}", n.as_str())));
+        let guard: Vec<String> = guard.into_iter().chain(folders).chain(names).collect();
         pre.push(entry(Some(GUARDED_TOOLS), &guard.join(" ")));
         let mut post = Vec::new();
         for hook in self.guard_hooks {
@@ -334,6 +344,8 @@ mod tests {
             branch: "kelpie/7",
             kelpie: Path::new("/opt/kelpie's bin/kelpie"),
             guard_hooks: hooks,
+            kelpie_home: Path::new("/k"),
+            repo: Path::new("/k/repos/shep"),
             private_names: &[],
             allowed_domains: domains,
             build_env: &BTreeMap::new(),
@@ -420,6 +432,8 @@ mod tests {
             branch: "kelpie/7",
             kelpie: Path::new("/opt/kelpie"),
             guard_hooks: &[],
+            kelpie_home: Path::new("/k"),
+            repo: Path::new("/k/repos/shep"),
             private_names: &[],
             allowed_domains: &[],
             build_env: &build_env,
@@ -463,6 +477,8 @@ mod tests {
             branch: "kelpie/7",
             kelpie: Path::new("/opt/kelpie"),
             guard_hooks: &[],
+            kelpie_home: Path::new("/k"),
+            repo: Path::new("/k/repos/shep"),
             private_names: &[],
             allowed_domains: &[],
             build_env: &BTreeMap::new(),
@@ -705,7 +721,7 @@ mod tests {
                 "matcher": "Bash|Agent|Task",
                 "hooks": [{
                     "type": "command",
-                    "command": r"'/opt/kelpie'\''s bin/kelpie' 'guard' '/k/repos/shep/.git' '/k/wt/shep/7'",
+                    "command": r"'/opt/kelpie'\''s bin/kelpie' 'guard' '/k/repos/shep/.git' '/k/wt/shep/7' '--folder=/k' '--folder=/k/repos/shep'",
                 }],
             })
         );
@@ -726,6 +742,8 @@ mod tests {
             branch: "kelpie/7",
             kelpie: Path::new("/opt/kelpie"),
             guard_hooks: &[],
+            kelpie_home: Path::new("/k"),
+            repo: Path::new("/k/repos/shep"),
             private_names: &names,
             allowed_domains: &[],
             build_env: &BTreeMap::new(),
@@ -735,7 +753,7 @@ mod tests {
         .settings();
         assert_eq!(
             s["hooks"]["PreToolUse"][1]["hooks"][0]["command"],
-            r"'/opt/kelpie' 'guard' '/k/repos/shep/.git' '/k/wt/shep/7' 'Acme Corp' 'it'\''s'"
+            r"'/opt/kelpie' 'guard' '/k/repos/shep/.git' '/k/wt/shep/7' '--folder=/k' '--folder=/k/repos/shep' '--name=Acme Corp' '--name=it'\''s'"
         );
     }
 

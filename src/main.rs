@@ -66,18 +66,21 @@ fn main() -> ExitCode {
     match args.as_slice() {
         [role, project] if role == "runner" => shep_kelpie::sheep::run(project),
         [command, rest @ ..] if command == "lease" => shep_kelpie::lease::cli::main(rest),
-        [role, git_common_dir, worktree, private_names @ ..] if role == "guard" => {
+        [role, git_common_dir, worktree, local @ ..] if role == "guard" => {
             let home = std::env::var_os("HOME").map(PathBuf::from);
             let checkout = Checkout {
                 git_common_dir: Path::new(git_common_dir),
                 worktree: Path::new(worktree),
             };
-            hook(guard::judge(
-                std::io::stdin().lock(),
-                home.as_deref(),
-                private_names,
-                checkout,
-            ))
+            match guard::local_paths(home.as_deref(), local) {
+                Ok(local) => hook(guard::judge(
+                    std::io::stdin().lock(),
+                    home.as_deref(),
+                    local,
+                    checkout,
+                )),
+                Err(why) => hook(Verdict::Refuse(why)),
+            }
         }
         [command, rest @ ..] if ["add", "start", "pause", "status"].contains(&command.as_str()) => {
             shep_kelpie::flock::main(command, rest)

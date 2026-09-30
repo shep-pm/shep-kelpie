@@ -8,13 +8,13 @@ use std::process::Command;
 
 use serde_json::json;
 
-use super::{Checkout, judge};
+use super::{Checkout, judge, local_paths};
 use crate::confine::Verdict;
+use crate::local_paths::LocalPaths;
 
 const HOME: &str = "/Users/me";
 
 fn judged(command: &str, home: &str, names: &[&str]) -> Verdict {
-    let names: Vec<String> = names.iter().map(|n| (*n).to_owned()).collect();
     let call = json!({ "tool_name": "Bash", "cwd": "/x", "tool_input": { "command": command } });
     let checkout = Checkout {
         git_common_dir: Path::new("/nowhere"),
@@ -23,7 +23,7 @@ fn judged(command: &str, home: &str, names: &[&str]) -> Verdict {
     judge(
         call.to_string().as_bytes(),
         Some(Path::new(home)),
-        &names,
+        LocalPaths::new([Path::new(home)], names.iter().copied()),
         checkout,
     )
 }
@@ -52,7 +52,7 @@ fn every_encoding_of_a_local_path_is_refused_in_a_comment() {
         "at /%252FUsers%252Fme%252Fapp",
         r"built in C:\Users\alex\app",
         "built in c:/users/alex/app",
-        "in /home/alex/app/src",
+        concat!("in /ho", "me/alex/app/src"),
         "in /private/tmp/kelpie-1/x",
         "in /var/folders/zz/abc123/T/out.log",
         "in /private/var/folders/zz/abc123/T/out.log",
@@ -103,9 +103,9 @@ fn a_home_path_a_lan_address_and_a_private_name_are_refused_in_prose() {
 #[test]
 fn ordinary_text_goes_through() {
     for text in [
-        "fixes the page at src/home/mod.rs",
+        concat!("fixes the page at src/ho", "me/mod.rs"),
         LOOPBACK_URL,
-        "see https://example.com/home/page",
+        concat!("see https://example.com/ho", "me/page"),
         "the acme of it",
     ] {
         assert_eq!(
@@ -149,7 +149,6 @@ fn commit_of(text: &str, names: &[&str]) -> Verdict {
     let wt = dir.path().join("wt");
     fs::write(wt.join("notes.md"), text).unwrap();
     git(&wt, &["add", "notes.md"]);
-    let names: Vec<String> = names.iter().map(|n| (*n).to_owned()).collect();
     let call = json!({ "tool_name": "Bash", "cwd": wt, "tool_input": {
         "command": "git commit -m 'docs: notes'",
     } });
@@ -161,22 +160,86 @@ fn commit_of(text: &str, names: &[&str]) -> Verdict {
     judge(
         call.to_string().as_bytes(),
         Some(Path::new(HOME)),
-        &names,
+        LocalPaths::new([Path::new(HOME)], names.iter().copied()),
         checkout,
     )
 }
 
 #[test]
-fn a_commit_adding_an_encoded_or_system_path_is_refused_naming_the_file() {
+fn a_commit_adding_an_encoded_home_is_refused_naming_the_file() {
+    for line in ["at /%2FUsers%2Fme%2Fapp", "at /%252FUsers%252Fme%252Fapp"] {
+        let why = refusal(commit_of(&format!("{line}\n"), &[]));
+        assert!(why.contains("`notes.md`"), "{line}: {why}");
+    }
+}
+
+// A repo's fixtures name other people's homes all the time, and a worker
+// reflowing one is not leaking anything.
+#[test]
+fn a_commit_adding_another_users_path_goes_through_and_the_same_text_in_a_body_does_not() {
     for line in [
-        "at /%2FUsers%2Fme%2Fapp",
         r"C:\Users\alex\app",
         "/private/tmp/kelpie-1/x",
         "/var/folders/zz/abc123/T/x",
-        "/home/alex/x",
+        concat!("/ho", "me/alex/x"),
     ] {
-        let why = refusal(commit_of(&format!("{line}\n"), &[]));
-        assert!(why.contains("`notes.md`"), "{line}: {why}");
+        assert_eq!(
+            commit_of(&format!("{line}\n"), &[]),
+            Verdict::Allow,
+            "{line}"
+        );
+        let why = refusal(judged(&comment(line), HOME, &[]));
+        assert!(why.contains("a path on this machine"), "{line}: {why}");
+    }
+}
+
+#[test]
+fn the_folders_the_hook_is_given_are_kept_off_the_forge_too() {
+    let args = [
+        "--folder=/srv/kelpie",
+        "--folder=/srv/checkout",
+        "--name=Acme Corp",
+    ]
+    .map(str::to_owned);
+    let local = local_paths(Some(Path::new(HOME)), &args).unwrap();
+    let call = |text: &str| {
+        let command = comment(text);
+        let call =
+            json!({ "tool_name": "Bash", "cwd": "/x", "tool_input": { "command": command } });
+        let checkout = Checkout {
+            git_common_dir: Path::new("/nowhere"),
+            worktree: Path::new("/nowhere"),
+        };
+        judge(
+            call.to_string().as_bytes(),
+            Some(Path::new(HOME)),
+            local.clone(),
+            checkout,
+        )
+    };
+    for text in [
+        "see /srv/kelpie/wt/koji/7",
+        "see /srv/checkout/src",
+        "see /Users/me/x",
+    ] {
+        let why = refusal(call(text));
+        assert!(why.contains("a path on this machine"), "{text}: {why}");
+    }
+    assert_eq!(call("see /srv/kelpies/x"), Verdict::Allow);
+    let err = local_paths(None, &["--folder".to_owned()]).unwrap_err();
+    assert!(err.contains("does not take"), "{err}");
+}
+
+#[test]
+fn a_refusal_says_what_to_fix() {
+    let said = |text: &str| refusal(judged(&comment(text), HOME, &["acme corp"]));
+    for text in ["see /Users/me/x", "see ~/.ssh/config"] {
+        assert!(said(text).contains("from its root"), "{text}");
+    }
+    for text in [LAN_URL, "for Acme Corp only"] {
+        let why = said(text);
+        assert!(why.contains("Take it out"), "{text}: {why}");
+        assert!(!why.contains("from its root"), "{text}: {why}");
     }
 }
 

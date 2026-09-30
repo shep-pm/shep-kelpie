@@ -51,12 +51,39 @@ const MAX_SHELLS: usize = 4;
 // a command nested in parentheses is judged once per level around it.
 const MAX_COMMANDS: usize = 200;
 
-/// Judges the tool call in `input`, with `home` the home folder whose path
-/// stays in, and `private_names` the words the project keeps off the forge
+/// How the hook's command line names one more folder to keep off the forge
+pub const FOLDER_FLAG: &str = "--folder=";
+
+/// How the hook's command line names one private word
+pub const NAME_FLAG: &str = "--name=";
+
+/// What the hook keeps off the forge: `home`, then the folders and names `args` give
+///
+/// # Errors
+///
+/// What to tell the worker, when `args` holds one the hook does not know.
+pub fn local_paths(home: Option<&Path>, args: &[String]) -> Result<LocalPaths, String> {
+    let mut folders: Vec<&Path> = home.into_iter().collect();
+    let mut names = Vec::new();
+    for arg in args {
+        if let Some(folder) = arg.strip_prefix(FOLDER_FLAG) {
+            folders.push(Path::new(folder));
+        } else if let Some(name) = arg.strip_prefix(NAME_FLAG) {
+            names.push(name);
+        } else {
+            let shown: String = arg.chars().take(40).collect();
+            return Err(format!("kelpie guard does not take `{shown}`"));
+        }
+    }
+    Ok(LocalPaths::new(folders, names))
+}
+
+/// Judges the tool call in `input`, with `home` the home folder `~` names and
+/// `local` what the project keeps off the forge
 pub fn judge(
     input: impl Read,
     home: Option<&Path>,
-    private_names: &[String],
+    local: LocalPaths,
     checkout: Checkout<'_>,
 ) -> Verdict {
     #[derive(Deserialize)]
@@ -95,7 +122,7 @@ pub fn judge(
         return Verdict::Allow;
     };
     let judging = Judging {
-        home: Home::new(home, private_names),
+        home: Home::new(home, local),
         checkout,
     };
     let mut call_state = CallState::default();
@@ -387,18 +414,14 @@ struct Home {
 
 impl Home {
     // `/` alone would match every absolute path, and a relative one none.
-    fn new(path: Option<&Path>, private_names: &[String]) -> Self {
+    fn new(path: Option<&Path>, local: LocalPaths) -> Self {
         let path = path
             .filter(|p| {
                 let text = p.to_str().unwrap_or_default().trim_end_matches('/');
                 text.len() > 1 && text.starts_with('/')
             })
             .map(Path::to_owned);
-        let names = private_names.iter().map(String::as_str);
-        Self {
-            local: LocalPaths::new(path.as_deref(), names),
-            path,
-        }
+        Self { path, local }
     }
 
     fn path(&self) -> Option<&Path> {
@@ -431,11 +454,16 @@ impl Home {
             .collect()
     }
 
+    // A name or an address is taken out; a path is written from the repo's root.
     fn refusal(&self, what: &str, leak: Leak, fix: &str) -> String {
-        format!(
-            "{what} carries {leak}. {fix} Write a path in the repo from its root \
-             (`src/lib.rs`), and leave out one outside it."
-        )
+        let advice = match leak {
+            Leak::Path | Leak::Tilde => {
+                " Write a path in the repo from its root (`src/lib.rs`), and leave out one \
+                 outside it."
+            }
+            Leak::Name | Leak::Lan => "",
+        };
+        format!("{what} carries {leak}. {fix}{advice}")
     }
 }
 

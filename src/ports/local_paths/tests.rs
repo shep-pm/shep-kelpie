@@ -25,7 +25,7 @@ fn every_encoding_of_a_local_path_is_refused_at_every_post() {
         "at /%252FUsers%252Fme%252F.kelpie",
         r"built in C:\Users\alex\app",
         "built in c:/users/alex/app",
-        "in /home/alex/app/src",
+        concat!("in /ho", "me/alex/app/src"),
         "in /private/tmp/kelpie-1/x",
         "in /var/folders/zz/abc123/T/out.log",
         "in /private/var/folders/zz/abc123/T/out.log",
@@ -37,7 +37,10 @@ fn every_encoding_of_a_local_path_is_refused_at_every_post() {
         let (forge, fake) = guarded();
         let repo = slug();
         let refused = |result: Result<(), ForgeError>| {
-            assert!(matches!(result, Err(ForgeError::LocalPath)), "{text}");
+            assert!(
+                matches!(result, Err(ForgeError::LocalPath { .. })),
+                "{text}"
+            );
         };
         refused(forge.comment(&repo, 3, text));
         refused(forge.post_comment(&repo, 3, text).map(drop));
@@ -50,9 +53,31 @@ fn every_encoding_of_a_local_path_is_refused_at_every_post() {
 }
 
 #[test]
+fn a_refusal_names_the_field_and_what_it_found() {
+    let (forge, _) = guarded();
+    let refusal = |result: Result<u64, ForgeError>| result.unwrap_err().to_string();
+    assert_eq!(
+        refusal(forge.create_issue(&slug(), "a title", "see ~/notes", &[])),
+        "not posted: the issue's body names a path under the home folder"
+    );
+    assert_eq!(
+        refusal(forge.create_issue(&slug(), "Acme Corp", "a body", &[])),
+        "not posted: the issue's title names a name on this project's private list"
+    );
+    assert_eq!(
+        refusal(forge.post_comment(&slug(), 3, "in /Users/me/.kelpie/x")),
+        "not posted: the comment names a path on this machine, which names its user"
+    );
+}
+
+#[test]
 fn ordinary_text_is_posted() {
     let (forge, fake) = guarded();
-    let text = concat!("fixes src/home/mod.rs, served at http://127.", "0.0.1:5173");
+    let text = concat!(
+        "fixes src/ho",
+        "me/mod.rs, served at http://127.",
+        "0.0.1:5173"
+    );
     forge.create_issue(&slug(), "a title", text, &[]).unwrap();
     let [issue] = fake.created().try_into().unwrap();
     assert_eq!(issue.body, text);

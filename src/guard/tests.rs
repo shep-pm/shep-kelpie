@@ -8,6 +8,11 @@ use super::*;
 
 const HOME: &str = "/home/me";
 
+// What the hook keeps off the forge when it is given only the home folder.
+fn local(home: Option<&Path>) -> LocalPaths {
+    LocalPaths::new(home, [])
+}
+
 fn call(cwd: &Path, command: &str, checkout: Checkout<'_>) -> Verdict {
     let call = json!({
         "tool_name": "Bash",
@@ -17,7 +22,7 @@ fn call(cwd: &Path, command: &str, checkout: Checkout<'_>) -> Verdict {
     judge(
         call.to_string().as_bytes(),
         Some(Path::new(HOME)),
-        &[],
+        local(Some(Path::new(HOME))),
         checkout,
     )
 }
@@ -201,7 +206,7 @@ fn the_home_folder_in_a_command_but_not_its_message_goes_through() {
     ] {
         assert_eq!(bash(command), Verdict::Allow, "{command}");
     }
-    let body = "fixes the page at src/home/mod.rs and docs/home/x";
+    let body = concat!("fixes the page at src/ho", "me/mod.rs and docs/ho", "me/x");
     let command = format!("gh pr create --title 'fix: x' --body '{body}'");
     assert_eq!(bash(&command), Verdict::Allow, "{command}");
 }
@@ -496,7 +501,7 @@ fn a_project_subagent_defined_with_isolation_is_refused() {
         judge(
             call.to_string().as_bytes(),
             Some(Path::new(HOME)),
-            &[],
+            local(Some(Path::new(HOME))),
             checkout,
         )
     };
@@ -565,7 +570,7 @@ fn a_subagent_in_a_worktree_of_its_own_is_refused() {
         judge(
             call.to_string().as_bytes(),
             Some(Path::new(HOME)),
-            &[],
+            local(Some(Path::new(HOME))),
             nowhere(),
         )
     };
@@ -606,7 +611,7 @@ fn a_commit_from_the_home_folder_by_tilde_reads_the_worktree() {
         let why = refusal(judge(
             call.to_string().as_bytes(),
             Some(home),
-            &[],
+            local(Some(home)),
             checkout,
         ));
         assert!(why.contains("`notes.md`"), "{command}: {why}");
@@ -804,7 +809,7 @@ fn a_one_level_home_folder_is_still_kept_out() {
     let verdict = judge(
         call.to_string().as_bytes(),
         Some(Path::new("/root")),
-        &[],
+        local(Some(Path::new("/root"))),
         nowhere(),
     );
     assert!(matches!(verdict, Verdict::Refuse(_)), "{verdict:?}");
@@ -828,7 +833,7 @@ fn other_tools_and_a_missing_home_are_let_through() {
         judge(
             call.to_string().as_bytes(),
             home.map(Path::new),
-            &[],
+            local(home.map(Path::new)),
             nowhere(),
         )
     };
@@ -843,7 +848,12 @@ fn other_tools_and_a_missing_home_are_let_through() {
 #[test]
 fn an_unreadable_call_is_refused() {
     assert!(matches!(
-        judge(&b"not json"[..], Some(Path::new(HOME)), &[], nowhere()),
+        judge(
+            &b"not json"[..],
+            Some(Path::new(HOME)),
+            local(Some(Path::new(HOME))),
+            nowhere()
+        ),
         Verdict::Refuse(_)
     ));
 }

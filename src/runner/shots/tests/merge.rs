@@ -333,7 +333,7 @@ fn a_shots_comment_naming_a_local_folder_is_refused_once_and_the_ruling_says_so(
     };
     assert_eq!(
         reason,
-        "not posted: the text names something private to this machine"
+        "not posted: the shots comment names a path on this machine, which names its user"
     );
     let Some(StepReport::Ruling { question, .. }) = step(&runner).unwrap() else {
         panic!("the merge ruling did not follow");
@@ -379,9 +379,9 @@ fn a_comment_refused_for_what_a_page_printed_pushes_no_images() {
         let Some(StepReport::ShotsNotPosted { reason, .. }) = rig.verdict(&runner) else {
             panic!("the shots comment was not refused: {printed}");
         };
-        assert_eq!(
-            reason, "not posted: the text names something private to this machine",
-            "{printed}"
+        assert!(
+            reason.starts_with("not posted: the shots comment names "),
+            "{printed}: {reason}"
         );
         assert_eq!(rig.forge.comments(), [], "{printed}");
         assert_eq!(rig.forge.head_of("kelpie-shots/71"), None, "{printed}");
