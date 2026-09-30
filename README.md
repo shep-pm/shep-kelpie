@@ -35,13 +35,24 @@ shep kelpie start      # starts the runner, then the project
 shep kelpie pause
 shep kelpie status     # every project
 shep kelpie doctor     # what each project still needs on this machine
+shep kelpie rule 14 yes
 ```
+
+Every trigger the runner takes is also a verb: `add <issue>`, `rework <pr>`, `adopt <pr>`, `gate [<issue>]`, `drop [<issue>]` and `rule`. Each reaches the project whose repo holds the folder you run it in, a worktree of it included, or the one `-p <project>` names anywhere in the line. From anywhere else it lists the projects and guesses nothing. `shep trigger` still works.
+
+A ruling's id is unique across projects, so `rule` needs no project:
+
+- `shep kelpie rule 14 yes`
+- `shep kelpie rule 14 no rename the flag`
+- `shep kelpie rule 15 use --dry-run`, for a worker's question. A `yes` there is the answer's text
+
+Quotes are optional, but zsh still needs them around a note with `?`, `*`, `!` or an apostrophe. Words after `--` are the answer's, even `-p`. `shep kelpie rule` alone lists the rulings waiting and asks which to answer and how.
 
 `add` names the project after the repo, or `shep kelpie add <name>`. It makes `ready-for-agent`, `ready-for-human` and `review please` where the repo lacks them, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. `add` and `start` say how to bring the dog up when the adopted kelpie is not running with its channel. Worktrees, build folders and state go under `~/.kelpie`, never inside the checkout. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name.
 
 `doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, Claude Code's sandbox, the shepherd's version, each project's labels, CodeRabbit where a project turns it on, the local review command or endpoint where one is set, the preview tools for a project that shows its UI, and that rulings have a webhook where they go to one. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
 
-Lookout edits a project's table in the runner's pane, and kelpie's own settings in its `[kelpie]` section of `dogs.toml`. Start that section from `kelpie-settings.example.toml`, and keep `dogs.toml` private: the webhook's URL is a credential. `ruling_channels` there, or in a project's table, picks the webhook, the relay or both. Both is the default, and only a project that posts to the webhook needs a `webhook` table. Its `[kelpie.reviewers]` defines the pull request reviewers, CodeRabbit and cubic, by their review windows, and a project's `pull_request_reviewers` lists the ones it uses in preference order: each round goes to the first whose window is free. On an ntfy webhook, a ruling can be answered from the topic: run `shep kelpie totp` once and scan the QR code into an authenticator app, then reply with the line the alert ends on, such as `shep 14 yes <code>`, with the app's code last. Anyone who can read the topic can read rulings, but only a reply with the code of the moment answers one, and each code answers once. Five wrong codes turn answers off until `shep kelpie totp --unlock`, and `shep kelpie totp --rotate` replaces a secret that may have leaked. A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start.
+Lookout edits a project's table in the runner's pane, and kelpie's own settings in its `[kelpie]` section of `dogs.toml`. Start that section from `kelpie-settings.example.toml`, and keep `dogs.toml` private: the webhook's URL is a credential. `ruling_channels` there, or in a project's table, picks the webhook, the relay or both. Both is the default, and only a project that posts to the webhook needs a `webhook` table. Its `[kelpie.reviewers]` defines the pull request reviewers, CodeRabbit and cubic, by their review windows, and a project's `pull_request_reviewers` lists the ones it uses in preference order: each round goes to the first whose window is free. On an ntfy webhook, a ruling can be answered from the topic: run `shep kelpie totp` once and scan the QR code into an authenticator app, then reply with the line the alert ends on, such as `14 yes <code>`, with the app's code last. A reply takes the same answers as `shep kelpie rule`. Anyone who can read the topic can read rulings, but only a reply with the code of the moment answers one, and each code answers once. Five wrong codes turn answers off until `shep kelpie totp --unlock`, and `shep kelpie totp --rotate` replaces a secret that may have leaked. A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start.
 
 `shep describe <project>` labels each Claude session the runner starts with its issue and role, such as `#114 worker`.
 
@@ -111,7 +122,7 @@ It writes `round-<n>.txt` in that folder, one finding per line as `SEVERITY|path
 
 Under `gpu_lease = true`, before a round against Ollama, kelpie reads the host's `/api/ps`. An endpoint's host is its `url` without the `/v1`. A command names its host with `ollama = "http://localhost:11434"`, which needs `gpu_lease = true`, and its model with `ollama_model`, else every model the host has loaded is checked. A model partly or wholly on the CPU fails the round and raises a ruling, and a yes runs the round again once the model is back on the GPU. A host with no `/api/ps` is not checked, and `status` shows the model's name, its share on the GPU, its context length and when it unloads.
 
-Issues labelled `ready-for-agent` are the board. On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep trigger <project> rework <pr>`. On any other open pull request of kelpie's account, `ready-for-agent` adopts it, the same as `shep trigger <project> adopt <pr>`. Kelpie puts `ready-for-human` on each pull request it hands back.
+Issues labelled `ready-for-agent` are the board. On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep kelpie rework <pr>`. On any other open pull request of kelpie's account, `ready-for-agent` adopts it, the same as `shep kelpie adopt <pr>`. Kelpie puts `ready-for-human` on each pull request it hands back.
 
 - `CONTEXT.md`: the vocabulary
 - `docs/adr/`: decisions that are hard to reverse
