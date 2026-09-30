@@ -24,7 +24,7 @@ use crate::channels::Channel;
 use crate::ports::{Alert, AlertError, Alerts, Relay, ReplyWith, Timestamp};
 use crate::relay::{self, Settled};
 use crate::settings::Effort;
-use crate::state::{Notice, StateError};
+use crate::state::{Notice, Ruling, StateError};
 use crate::webhook::Webhook;
 
 // A failed post waits a minute, then twice as long after each failure, up
@@ -203,10 +203,11 @@ impl Runner {
     pub(super) fn alert_due(&mut self) -> Option<Due> {
         let now = self.ports.clock.now();
         let waiting = |retry: Option<Retry>, of| retry.is_some_and(|r| r.of == of && now < r.at);
-        let resend = self.channels.has(Channel::Relay);
-        if let Some(ruling) =
-            (self.state.rulings.iter()).find(|r| !r.alerted || (r.resend && resend))
-        {
+        let relay_on = self.channels.has(Channel::Relay);
+        // A resend still in its retry wait never holds back what comes after it.
+        let resend =
+            |r: &Ruling| r.resend && relay_on && !waiting(self.retry, Posting::Ruling(r.id));
+        if let Some(ruling) = (self.state.rulings.iter()).find(|r| !r.alerted || resend(r)) {
             let (id, kind) = (ruling.id, ruling.kind.clone());
             if waiting(self.retry, Posting::Ruling(id)) {
                 return None;

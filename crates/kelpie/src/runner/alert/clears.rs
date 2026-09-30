@@ -110,3 +110,46 @@ fn a_resend_the_relay_refuses_is_tried_again_and_kept_owed() {
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     assert_eq!(relayed(&rig, &runner)[0], json!(true));
 }
+
+#[test]
+fn a_resend_waiting_to_be_retried_holds_back_no_newer_ruling() {
+    let (rig, runner, _) = Rig::parked("rotom");
+    rig.relay.set_up(true);
+    step(&runner).unwrap();
+    let runner = second_ruling(&rig, runner);
+    rig.relay.set_stale();
+    rig.relay.set_up(false);
+
+    let Some(StepReport::AlertFailed {
+        id: 1, retry_at, ..
+    }) = step(&runner).unwrap()
+    else {
+        panic!("the resend was not tried");
+    };
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 2 }));
+    assert_eq!(rig.alerts.posts().len(), 2, "ruling 2 reached the webhook");
+
+    rig.relay.set_up(true);
+    rig.clock.advance(retry_at.0 - rig.clock.now().0);
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+}
+
+#[test]
+fn a_resend_owed_to_a_channel_since_turned_off_is_not_sent() {
+    let (rig, runner, _) = Rig::parked("rotom");
+    rig.relay.set_up(true);
+    step(&runner).unwrap();
+    let runner = second_ruling(&rig, runner);
+    rig.relay.set_stale();
+    rig.relay.set_up(false);
+    step(&runner).unwrap();
+    drop(runner);
+
+    rig.set_ruling_channels(r#"["webhook"]"#);
+    let runner = rig.open().unwrap();
+    rig.relay.set_up(true);
+    rig.clock.advance(3600);
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 2 }));
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(rig.relay.sent().len(), 1, "only the first ruling's send");
+}
