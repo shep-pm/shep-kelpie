@@ -6,7 +6,7 @@ use super::{Here, Line, Probes, rulings};
 use crate::flock::add::LABELS;
 use crate::ports::{NewLabel, Visibility};
 use crate::preview::Tools;
-use crate::runner::SUMMON_LABEL;
+use crate::runner::{ProjectName, ProjectPaths, SUMMON_LABEL, check_instructions, check_repo};
 use crate::settings::{LocalRound, Settings};
 use crate::webhook::KelpieSettings;
 
@@ -21,19 +21,29 @@ pub(super) fn checks(
     kelpie: Option<&KelpieSettings>,
 ) -> Vec<Line> {
     let at = |what: &str| format!("{sheep}: {what}");
-    let settings = match Settings::from_table(table, sheep, here.home, here.home) {
+    let wrong = |what: String| {
+        vec![Line::missing(
+            at("settings"),
+            what,
+            "correct the setting it names in the runner's `[app.dogs.kelpie]` table",
+        )]
+    };
+    // A relative path in the settings is taken from the project's own folder, as the runner does.
+    let paths = match ProjectName::try_from(sheep) {
+        Ok(name) => ProjectPaths::under(here.kelpie_home, &name),
+        Err(e) => return wrong(e.to_string()),
+    };
+    let folder = paths.settings.parent().unwrap_or(here.home);
+    let settings = match Settings::from_table(table, sheep, here.home, folder) {
         Ok(settings) => settings,
-        Err(e) => {
-            return vec![Line::missing(
-                at("settings"),
-                e.to_string(),
-                "correct the setting it names in the runner's `[app.dogs.kelpie]` table",
-            )];
-        }
+        Err(e) => return wrong(e.to_string()),
     };
     let repo = &settings.forge;
     let slug = repo.as_str();
-    let mut lines = Vec::new();
+    let mut lines = vec![checkout(at("checkout"), &settings)];
+    if settings.worker.instructions_file.is_some() {
+        lines.push(instructions(at("instructions"), &settings));
+    }
 
     lines.push(match probes.forge.can_push(repo) {
         Ok(true) => Line::ok(at("push access"), format!("may push to {slug}")),
@@ -97,6 +107,34 @@ pub(super) fn checks(
         lines.push(rulings::channel(at("rulings"), project, kelpie));
     }
     lines
+}
+
+fn checkout(subject: String, settings: &Settings) -> Line {
+    match check_repo(settings) {
+        Ok(()) => Line::ok(
+            subject,
+            format!(
+                "{} is a git checkout with an origin",
+                settings.repo.display()
+            ),
+        ),
+        Err(e) => Line::missing(
+            subject,
+            e.to_string(),
+            "set `repo` to where the checkout is, or run `shep kelpie add` in it",
+        ),
+    }
+}
+
+fn instructions(subject: String, settings: &Settings) -> Line {
+    match check_instructions(settings) {
+        Ok(()) => Line::ok(subject, "the worker's extra instructions can be read"),
+        Err(e) => Line::missing(
+            subject,
+            e.to_string(),
+            "put the file there, or correct `worker.instructions_file`",
+        ),
+    }
 }
 
 fn names(labels: &[NewLabel]) -> String {

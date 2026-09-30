@@ -449,7 +449,12 @@ impl Runner {
     }
 }
 
-fn check_repo(settings: &Settings) -> Result<(), SettingsError> {
+/// Whether `settings.repo` is a git checkout with an `origin`, which the runner needs to open
+///
+/// # Errors
+///
+/// [`SettingsError::Invalid`] naming `repo` and what is wrong with it.
+pub(crate) fn check_repo(settings: &Settings) -> Result<(), SettingsError> {
     let repo = &settings.repo;
     let invalid = |reason: String| SettingsError::Invalid {
         setting: "repo",
@@ -507,6 +512,15 @@ fn ruling_channels(
                 .to_owned(),
         }),
     }
+}
+
+/// Whether `worker.instructions_file`, when set, can be read, which the runner needs to open
+///
+/// # Errors
+///
+/// [`SettingsError::Invalid`] naming `worker.instructions_file`.
+pub(crate) fn check_instructions(settings: &Settings) -> Result<(), SettingsError> {
+    instructions::read_extra(settings).map(drop)
 }
 
 // The local round's command is there, or its endpoint answers.

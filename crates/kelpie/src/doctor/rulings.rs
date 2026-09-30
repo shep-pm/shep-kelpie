@@ -73,7 +73,11 @@ pub(super) fn test_alert(kelpie: Option<&KelpieSettings>, alerts: &dyn Alerts) -
         );
     };
     let Some(webhook) = &kelpie.webhook else {
-        return Line::missing(subject, "there is no webhook to post to", NO_WEBHOOK_FIX);
+        return Line::unsure(
+            subject,
+            "there is no webhook to post to",
+            "add one, as kelpie-settings.example.toml shows, or leave rulings to the relay",
+        );
     };
     let alert = Alert {
         title: "kelpie doctor".to_owned(),

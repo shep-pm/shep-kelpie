@@ -9,8 +9,8 @@ use crate::ports::{ForgeError, MeterError, Visibility};
 use crate::preview::Tools;
 use crate::shepherd::SHEP_VERSION;
 use crate::test::{
-    FakeAlerts, FakeClock, FakeForge, FakeMeter, FakeReviewer, FakeShepherd, project_table,
-    unreachable_url,
+    FakeAlerts, FakeClock, FakeForge, FakeMeter, FakeReviewer, FakeShepherd, git, project_table,
+    unreachable_url, write_script,
 };
 
 // Bounds every call against a fake shepherd, so a hang fails by name.
@@ -71,7 +71,14 @@ impl Scene {
     /// Puts a runner named `name` in the flock, with the default table as `edit` changes it
     fn runs(&self, name: &str, edit: impl FnOnce(&mut Map<String, Value>)) {
         let mut table = project_table(EXAMPLE);
-        table.insert("repo".into(), json!(self.home.join(name)));
+        let repo = self.home.join(name);
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q"]);
+        git(
+            &repo,
+            &["remote", "add", "origin", "https://github.com/o/r.git"],
+        );
+        table.insert("repo".into(), json!(repo));
         table.insert("forge".into(), json!(format!("shep-pm/{name}")));
         table["coderabbit"]["enabled"] = json!(false);
         table["review"]["local"] = json!({ "kind": "off" });
@@ -164,11 +171,13 @@ async fn a_machine_with_everything_in_place_passes_and_changes_nothing() {
             "gh",
             "sandbox",
             "shepherd",
+            "golbat: checkout",
             "golbat: push access",
             "golbat: labels",
             "golbat: coderabbit",
             "golbat: local review",
             "golbat: rulings",
+            "koji: checkout",
             "koji: push access",
             "koji: labels",
             "koji: local review",
@@ -203,6 +212,20 @@ async fn claude_missing_or_logged_out_is_told_its_fix() {
     assert!(what.contains("Not logged in"), "{what}");
     assert!(!what.contains("more"), "only the first line: {what}");
     assert_eq!(fix, "run `claude`, then `/login`");
+}
+
+#[tokio::test]
+async fn a_usage_claude_cannot_read_is_unsure_not_a_login_problem() {
+    let scene = Scene::new().await;
+    scene
+        .meter
+        .fail(MeterError::Unreadable("no `Current session:` line".into()));
+    let report = scene.report().await;
+    let Verdict::Unsure { next, .. } = verdict(&report, "claude") else {
+        panic!("{:#?}", report.render());
+    };
+    assert!(!next.contains("/login"), "{next}");
+    assert!(report.passed());
 }
 
 #[tokio::test]
@@ -360,6 +383,56 @@ async fn a_local_command_that_is_not_there_is_named() {
 }
 
 #[tokio::test]
+async fn a_relative_local_command_is_read_from_the_project_s_folder_as_the_runner_does() {
+    let scene = Scene::new().await;
+    scene.runs("golbat", |t| {
+        t["review"]["local"] = json!({ "kind": "command", "command": "review.sh" });
+    });
+    let folder = scene.kelpie_home.join("projects/golbat");
+    std::fs::create_dir_all(&folder).unwrap();
+
+    write_script(&scene.home.join("review.sh"), "#!/bin/sh\nexit 0\n");
+    let (what, _) = missing(&scene.report().await, "golbat: local review");
+    assert!(what.contains("projects/golbat/review.sh"), "{what}");
+
+    write_script(&folder.join("review.sh"), "#!/bin/sh\nexit 0\n");
+    assert_eq!(ok(&scene.report().await, "golbat: local review"), "ready");
+}
+
+#[tokio::test]
+async fn a_checkout_that_moved_is_missing_and_fails_the_run() {
+    let scene = Scene::new().await;
+    std::fs::rename(scene.home.join("koji"), scene.home.join("koji-moved")).unwrap();
+    let report = scene.report().await;
+    let (what, fix) = missing(&report, "koji: checkout");
+    assert!(what.contains("is not a folder"), "{what}");
+    assert!(fix.contains("shep kelpie add"), "{fix}");
+    assert!(!report.passed());
+
+    let plain = scene.home.join("koji");
+    std::fs::create_dir(&plain).unwrap();
+    let (what, _) = missing(&scene.report().await, "koji: checkout");
+    assert!(what.contains("is not a git work tree"), "{what}");
+}
+
+#[tokio::test]
+async fn extra_instructions_the_runner_cannot_read_are_missing() {
+    let scene = Scene::new().await;
+    let file = scene.home.join("rules.md");
+    scene.runs("golbat", |t| {
+        t["worker"]["instructions_file"] = json!(file);
+    });
+    let report = scene.report().await;
+    let (what, _) = missing(&report, "golbat: instructions");
+    assert!(what.contains("worker.instructions_file"), "{what}");
+    assert!(!subjects(&report).contains(&"koji: instructions"));
+    assert!(!report.passed());
+
+    std::fs::write(&file, "be kind\n").unwrap();
+    ok(&scene.report().await, "golbat: instructions");
+}
+
+#[tokio::test]
 async fn a_local_endpoint_nothing_answers_on_is_named() {
     let scene = Scene::new().await;
     scene.runs("golbat", |t| {
@@ -458,7 +531,10 @@ async fn a_test_alert_with_no_webhook_says_there_is_none_and_posts_nothing() {
         test_alert: true,
         ..Ask::default()
     };
-    let (what, _) = missing(&scene.check(ask).await, "test alert");
+    let report = scene.check(ask).await;
+    let Verdict::Unsure { what, .. } = verdict(&report, "test alert") else {
+        panic!("{:#?}", report.render());
+    };
     assert_eq!(what, "there is no webhook to post to");
     assert_eq!(scene.alerts.posts(), []);
 }

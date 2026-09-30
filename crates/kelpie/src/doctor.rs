@@ -243,7 +243,14 @@ async fn projects(client: &Client, probes: Probes<'_>, here: Here<'_>, ask: Ask<
 
 /// Runs `shep kelpie doctor [<project>] [--test-alert]`
 pub fn main(args: &[String]) -> ExitCode {
-    let ran = read_args(args).and_then(|(project, test_alert)| {
+    let (project, test_alert) = match read_args(args) {
+        Ok(read) => read,
+        Err(message) => {
+            eprintln!("kelpie doctor: {message}");
+            return ExitCode::from(2);
+        }
+    };
+    let ran = (|| -> Result<Report, String> {
         let shep_home = shep_home::required(shep_home::FLOCK_FIX)?;
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
@@ -271,7 +278,7 @@ pub fn main(args: &[String]) -> ExitCode {
             clock: &SystemClock,
         };
         shepherd::block_on(async { Ok(check(&shep_home, probes, here, ask).await) })
-    });
+    })();
     match ran {
         Ok(report) => {
             for line in report.render() {

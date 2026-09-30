@@ -17,7 +17,12 @@ fn first_line(text: &str) -> &str {
         .unwrap_or("no message")
 }
 
-/// `claude` installed and logged in: `/usage` answers only for an account
+fn says_logged_out(said: &str) -> bool {
+    let said = said.to_lowercase();
+    said.contains("/login") || said.contains("logged in")
+}
+
+/// `claude` installed and logged in:`/usage` answers only for an account
 pub(super) fn claude(meter: &dyn Meter, clock: &dyn Clock) -> Line {
     match meter.read(clock.now()) {
         Ok(_) => Line::ok("claude", "installed and logged in"),
@@ -26,13 +31,21 @@ pub(super) fn claude(meter: &dyn Meter, clock: &dyn Clock) -> Line {
             format!("cannot run `claude`: {why}"),
             "install Claude Code (https://claude.com/claude-code) and put `claude` on your PATH",
         ),
-        Err(MeterError::Unreadable(said)) => Line::missing(
+        Err(MeterError::Unreadable(said)) if says_logged_out(&said) => Line::missing(
             "claude",
             format!(
                 "`claude` runs but gave no usage, which it does only when logged in: {}",
                 first_line(&said)
             ),
             "run `claude`, then `/login`",
+        ),
+        Err(MeterError::Unreadable(said)) => Line::unsure(
+            "claude",
+            format!(
+                "`claude` runs, but its usage was unreadable: {}",
+                first_line(&said)
+            ),
+            "run `claude -p /usage` to see what it says",
         ),
         Err(e @ (MeterError::TimedOut | MeterError::Stopped)) => Line::unsure(
             "claude",
