@@ -4,7 +4,7 @@ use std::path::Path;
 use serde_json::json;
 
 use super::*;
-use crate::ports::{Checks, ClaudeCall, Role};
+use crate::ports::{AgentCall, Checks, Role};
 use crate::runner::step;
 use crate::test::{Rig, Scripted};
 
@@ -34,7 +34,7 @@ fn assert_invoked(prompt: &str, command: &str, then: &str) {
     assert!(prompt.contains(&format!("\n{then}")), "{prompt}");
 }
 
-fn call_of(rig: &Rig, role: Role) -> ClaudeCall {
+fn call_of(rig: &Rig, role: Role) -> AgentCall {
     rig.claude
         .all_calls()
         .into_iter()

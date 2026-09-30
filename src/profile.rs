@@ -1,27 +1,22 @@
-//! The worker's profile: the settings file and instructions kelpie starts it with
+//! The worker's profile: the sandbox and instructions kelpie starts it with
 //!
-//! The worker runs in `bypassPermissions`, so the file is its whole fence.
-//! Claude Code's sandbox confines Bash and its children, and fails closed.
-//! The sandbox does not cover Claude's own file tools, so a hook that runs
-//! `kelpie confine` holds those to the same folders. Both refuse Claude
-//! Code's own files in the worktree. Deny rules keep what only the project
-//! manager does, and credential paths, out of reach. `kelpie guard` judges
-//! every Bash call before any hook the project adds.
+//! The worker runs with no one to ask, so its sandbox is its whole fence.
+//! Writes go to its worktree, its build folder and what a commit and a push
+//! need, and never to Claude Code's own files in the worktree. Credential
+//! paths are unreadable, hosts are GitHub's and the project's, and what only
+//! the project manager does is a command it may not run. Each harness's
+//! adapter enforces the fence its own way.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use serde_json::{Value, json};
-
 use crate::fence;
-use crate::settings::{BuildDir, EnvName, GuardHook, HookEvent, NonBlank};
+use crate::ports::{Fence, Guard, Sandbox};
+use crate::settings::{BuildDir, EnvName, GuardHook, NonBlank};
 use crate::worktree::BASE;
 
 /// Kelpie's instructions to every worker, appended to its system prompt
 pub const INSTRUCTIONS: &str = include_str!("worker-instructions.md");
-
-/// The tools that write files without going through Bash
-const FILE_TOOLS: &str = "Edit|Write|MultiEdit|NotebookEdit";
 
 // Claude Code opens a worktree's whole common git dir to sandboxed writes.
 // These are the parts a commit and a push do not need, and whose change
@@ -38,9 +33,8 @@ const GIT_DENY: [&str; 8] = [
     "refs/tags",
 ];
 
-// Read and written by no worker. Also denied to sandboxed Bash, which takes
-// `Read` deny rules as its own. `~/.config/gh` stays readable: `gh` will not
-// start without its config, and the worker opens its own pull request.
+// Read and written by no worker. `~/.config/gh` stays readable: `gh` will
+// not start without its config, and the worker opens its own pull request.
 pub(crate) const CREDENTIALS: [&str; 12] = [
     "~/.ssh/**",
     "~/.aws/**",
@@ -60,68 +54,33 @@ pub(crate) const CREDENTIALS: [&str; 12] = [
 ];
 
 // What only the project manager does: merge, mark ready, and summon. `kelpie
-// guard` refuses these in any shape; these rules match a command's prefix only.
+// guard` refuses these in any shape; these match a command's prefix only.
 const PM_ONLY: [&str; 5] = [
-    "Bash(gh pr merge)",
-    "Bash(gh pr merge *)",
-    "Bash(gh pr ready)",
-    "Bash(gh pr ready *)",
-    "Bash(gh *review please*)",
+    "gh pr merge",
+    "gh pr merge *",
+    "gh pr ready",
+    "gh pr ready *",
+    "gh *review please*",
 ];
-
-// Tools no worker needs that reach past its fence: `Monitor` runs a command
-// or WebSocket no hook judges; `RemoteTrigger` starts cloud agents on the
-// maintainer's account with none of this file; `Workflow` agents escape the
-// worker's pacing; and kelpie, not the worker, owns its worktree.
-const TOOLS_DENY: [&str; 5] = [
-    "Monitor",
-    "RemoteTrigger",
-    "Workflow",
-    "EnterWorktree",
-    "ExitWorktree",
-];
-
-// What `kelpie guard` judges: every command, and a subagent's isolation.
-const GUARDED_TOOLS: &str = "Bash|Agent|Task";
 
 // `gh api` could merge or relabel around the rules above, and `gh auth token`
 // prints the maintainer's token. No worker needs either.
-const GH_DENY: [&str; 4] = [
-    "Bash(gh api)",
-    "Bash(gh api *)",
-    "Bash(gh auth)",
-    "Bash(gh auth *)",
-];
+const GH_DENY: [&str; 4] = ["gh api", "gh api *", "gh auth", "gh auth *"];
 
 // Pushes that rewrite or delete branches on the remote whatever they name:
 // `--mirror` and `--all` push every local branch, and a `+` refspec forces.
 // A rule's `*` needs something to match, so a flag straight after `push`
 // takes a rule of its own.
 const PUSH_FLAGS: [&str; 9] = [
-    "Bash(git push *--mirror*)",
-    "Bash(git push *--all*)",
-    "Bash(git push *--delete*)",
-    "Bash(git push -d*)",
-    "Bash(git push * -d*)",
-    "Bash(git push *--force*)",
-    "Bash(git push -f*)",
-    "Bash(git push * -f*)",
-    "Bash(git push * +*)",
-];
-
-// Every Playwright MCP tool, which `kelpie browse-guard` holds to the preview
-const PLAYWRIGHT_TOOLS: &str = "mcp__playwright__.*";
-
-// The mach service a dev server's file watcher looks up on macOS
-const DEV_SERVER_MACH: [&str; 1] = ["com.apple.FSEvents"];
-
-// The Playwright MCP server runs outside the sandbox. These tools read a local
-// file (or run code that could), so none is the worker's.
-const PLAYWRIGHT_DENY: [&str; 4] = [
-    "mcp__playwright__browser_run_code_unsafe",
-    "mcp__playwright__browser_file_upload",
-    "mcp__playwright__browser_drop",
-    "mcp__playwright__browser_set_storage_state",
+    "git push *--mirror*",
+    "git push *--all*",
+    "git push *--delete*",
+    "git push -d*",
+    "git push * -d*",
+    "git push *--force*",
+    "git push -f*",
+    "git push * -f*",
+    "git push * +*",
 ];
 
 // What `git push` and `gh` reach. A project adds its own, such as a registry.
@@ -140,7 +99,7 @@ pub struct WorkerProfile<'a> {
     pub git_dir: &'a Path,
     /// The work item's branch
     pub branch: &'a str,
-    /// The kelpie binary, which the file-tool hook runs
+    /// The kelpie binary, which runs kelpie's own checks
     pub kelpie: &'a Path,
     /// The project's own guard hooks, which run after kelpie's
     pub guard_hooks: &'a [GuardHook],
@@ -155,12 +114,12 @@ pub struct WorkerProfile<'a> {
 }
 
 impl WorkerProfile<'_> {
-    /// The settings file's contents
-    pub fn settings(&self) -> Value {
+    /// The worker's sandbox
+    pub fn sandbox(&self) -> Sandbox {
         let git = |p: &str| self.git_common_dir.join(p);
         let branch_ref = git("refs/heads").join(self.branch);
         let tracking_ref = git("refs/remotes/origin").join(self.branch);
-        let allow_write = vec![
+        let write = vec![
             self.worktree.to_owned(),
             self.build.to_owned(),
             git("objects"),
@@ -173,107 +132,67 @@ impl WorkerProfile<'_> {
             tracking_ref,
         ];
         // The clone's own base branch, which a push of every branch would carry.
-        let deny_write: Vec<PathBuf> = GIT_DENY
+        let no_write: Vec<PathBuf> = GIT_DENY
             .iter()
             .map(|p| git(p))
             .chain([git("refs/heads").join(BASE)])
             .chain(fence::deny_write(self.worktree))
             .collect();
-        // `//` roots a rule at `/`: a single `/` is taken from the settings file.
-        let shep_home = format!("Read(/{}/**)", self.shep_home.display());
-        let mut deny: Vec<String> = CREDENTIALS
+        let no_read = CREDENTIALS
             .iter()
-            .map(|p| format!("Read({p})"))
-            .chain([shep_home])
-            .chain(PM_ONLY.iter().map(|&r| r.to_owned()))
-            .chain(GH_DENY.iter().map(|&r| r.to_owned()))
-            .chain(TOOLS_DENY.iter().map(|&r| r.to_owned()))
-            .chain(push_to_base())
-            .chain(PUSH_FLAGS.iter().map(|&r| r.to_owned()))
+            .map(|&p| p.to_owned())
+            .chain([format!("{}/**", self.shep_home.display())])
             .collect();
-        let preview_domains = self.preview.unwrap_or_default();
-        let domains: Vec<&str> = GITHUB
+        let no_commands = PM_ONLY
+            .iter()
+            .chain(&GH_DENY)
+            .map(|&c| c.to_owned())
+            .chain(push_to_base())
+            .chain(PUSH_FLAGS.iter().map(|&c| c.to_owned()))
+            .collect();
+        let preview = self
+            .preview
+            .map(|domains| domains.iter().map(|d| d.as_str().to_owned()).collect());
+        let hosts = GITHUB
             .into_iter()
             .chain(self.allowed_domains.iter().map(NonBlank::as_str))
-            .chain(preview_domains.iter().map(NonBlank::as_str))
+            .chain(
+                self.preview
+                    .unwrap_or_default()
+                    .iter()
+                    .map(NonBlank::as_str),
+            )
+            .map(str::to_owned)
             .collect();
-        // Without `strictAllowlist`, `bypassPermissions` lets a host outside the list through.
-        let mut network = json!({ "allowedDomains": domains, "strictAllowlist": true });
-        if self.preview.is_some() {
-            // A dev server binds a local port, and its file watcher needs FSEvents.
-            network["allowLocalBinding"] = true.into();
-            network["allowMachLookup"] = json!(DEV_SERVER_MACH);
-            deny.extend(PLAYWRIGHT_DENY.iter().map(|&r| r.to_owned()));
-        }
-        json!({
-            "sandbox": {
-                "enabled": true,
-                "failIfUnavailable": true,
-                "allowUnsandboxedCommands": false,
-                // Without it, `gh` fails TLS verification on macOS: x509 OSStatus -26276.
-                "enableWeakerNetworkIsolation": true,
-                "filesystem": { "allowWrite": allow_write, "denyWrite": deny_write },
-                "network": network,
+        let fence = Fence {
+            write,
+            no_write,
+            no_read,
+            hosts,
+            no_commands,
+            env: self.env(),
+            preview,
+            guard: Guard {
+                kelpie: self.kelpie.to_owned(),
+                worktree: self.worktree.to_owned(),
+                build: self.build.to_owned(),
+                git_common_dir: self.git_common_dir.to_owned(),
             },
-            "permissions": { "deny": deny },
-            // A project's own settings could otherwise switch every hook off,
-            // `confine` and the guard with them. This file outranks them.
-            "disableAllHooks": false,
-            "hooks": self.hooks(),
-            "env": self.env(),
-        })
+            hooks: self.guard_hooks.to_vec(),
+        };
+        Sandbox {
+            read: Vec::new(),
+            fence: Some(Box::new(fence)),
+        }
     }
 
-    fn env(&self) -> Value {
-        let mut env = json!({ "CARGO_TARGET_DIR": self.build });
-        if self.preview.is_some() {
-            // Node's fetch ignores the sandbox's proxy without it.
-            env["NODE_USE_ENV_PROXY"] = "1".into();
-        }
-        for (name, dir) in self.build_env {
-            env[name.as_str()] = json!(self.build.join(dir.as_path()));
-        }
-        env
-    }
-
-    fn hooks(&self) -> Value {
-        let confine = [self.kelpie, Path::new("confine"), self.worktree, self.build]
-            .map(|p| shell_quote(&p.to_string_lossy()))
-            .join(" ");
-        let mut pre = vec![entry(Some(FILE_TOOLS), &confine)];
-        if let Some(domains) = self.preview {
-            let guard = [self.kelpie.to_string_lossy().as_ref(), "browse-guard"]
-                .into_iter()
-                .chain(domains.iter().map(NonBlank::as_str))
-                .map(shell_quote)
-                .collect::<Vec<_>>()
-                .join(" ");
-            pre.push(entry(Some(PLAYWRIGHT_TOOLS), &guard));
-        }
-        let guard = [
-            self.kelpie,
-            Path::new("guard"),
-            self.git_common_dir,
-            self.worktree,
-        ]
-        .map(|p| shell_quote(&p.to_string_lossy()));
-        pre.push(entry(Some(GUARDED_TOOLS), &guard.join(" ")));
-        let mut post = Vec::new();
-        for hook in self.guard_hooks {
-            let e = entry(
-                hook.matcher.as_ref().map(|m| m.as_str()),
-                hook.command.as_str(),
-            );
-            match hook.event {
-                HookEvent::PreToolUse => pre.push(e),
-                HookEvent::PostToolUse => post.push(e),
-            }
-        }
-        let mut hooks = json!({ "PreToolUse": pre });
-        if !post.is_empty() {
-            hooks["PostToolUse"] = post.into();
-        }
-        hooks
+    fn env(&self) -> BTreeMap<String, PathBuf> {
+        let cargo = ("CARGO_TARGET_DIR".to_owned(), self.build.to_owned());
+        let project = self
+            .build_env
+            .iter()
+            .map(|(name, dir)| (name.as_str().to_owned(), self.build.join(dir.as_path())));
+        [cargo].into_iter().chain(project).collect()
     }
 }
 
@@ -283,15 +202,7 @@ impl WorkerProfile<'_> {
 fn push_to_base() -> impl Iterator<Item = String> {
     [" {b}", " {b} *", ":{b}*", "/{b}*"]
         .into_iter()
-        .map(|p| format!("Bash(git push *{})", p.replace("{b}", BASE)))
-}
-
-fn entry(matcher: Option<&str>, command: &str) -> Value {
-    let mut entry = json!({ "hooks": [{ "type": "command", "command": command }] });
-    if let Some(matcher) = matcher {
-        entry["matcher"] = matcher.into();
-    }
-    entry
+        .map(|p| format!("git push *{}", p.replace("{b}", BASE)))
 }
 
 fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
@@ -300,15 +211,20 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     s.into()
 }
 
-/// `s` as one word to a POSIX shell
-fn shell_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', r"'\''"))
-}
-
 #[cfg(test)]
 mod tests {
+    use serde_json::{Value, json};
+
     use super::*;
-    use crate::settings::NonBlank;
+    use crate::ports::Tools;
+    use crate::settings::{HookEvent, NonBlank};
+
+    impl WorkerProfile<'_> {
+        // The profile as Claude Code's settings file carries it
+        fn settings(&self) -> Value {
+            crate::adapters::claude_settings(Tools::Work, &self.sandbox())
+        }
+    }
 
     fn guard(event: HookEvent, matcher: Option<&str>, command: &str) -> GuardHook {
         GuardHook {

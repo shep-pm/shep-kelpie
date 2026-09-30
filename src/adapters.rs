@@ -20,6 +20,8 @@ mod relay;
 mod shots;
 mod usage;
 
+#[cfg(test)]
+pub(crate) use claude::settings::{NO_TOOLS, settings as claude_settings};
 pub use claude::{ClaudeCli, LambLabels};
 pub use curl::Curl;
 pub use gh::Gh;

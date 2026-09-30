@@ -78,7 +78,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::ports::{ClaudeError, Severity};
+    use crate::ports::{AgentError, Severity};
     use crate::runner::{Runner, StepReport, step};
     use crate::test::{Rig, Scripted, ScriptedRound};
 
@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn a_timed_out_fix_turn_resumes_that_round() {
         let (rig, runner) = findings_sent();
-        rig.claude.script([Scripted::Fail(ClaudeError::TimedOut)]);
+        rig.claude.script([Scripted::Fail(AgentError::TimedOut)]);
         let Some(StepReport::TimedOut { id, .. }) = step(&runner).unwrap() else {
             panic!("the fix turn did not time out");
         };

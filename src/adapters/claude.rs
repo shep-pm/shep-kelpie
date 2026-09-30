@@ -9,8 +9,10 @@ use serde::Deserialize;
 
 use super::process::{Processes, RunError};
 use crate::ports::{
-    Claude, ClaudeCall, ClaudeError, ClaudeReply, Cost, Role, Session, SessionId, Usage,
+    AgentCall, AgentError, AgentReply, Agents, Cost, Role, Session, SessionId, Usage,
 };
+
+pub(crate) mod settings;
 
 /// What `claude -p --resume` prints when the session has no transcript
 const NO_SESSION: &str = "No conversation found with session ID";
@@ -62,14 +64,15 @@ impl ClaudeCli {
 
     /// Ends every call in flight, and refuses new ones, as the runner stops
     ///
-    /// A call ended this way returns [`ClaudeError::Stopped`].
+    /// A call ended this way returns [`AgentError::Stopped`].
     pub fn stop(&self) {
         self.processes.stop();
     }
 }
 
-impl Claude for ClaudeCli {
-    fn run(&self, call: &ClaudeCall) -> Result<ClaudeReply, ClaudeError> {
+impl Agents for ClaudeCli {
+    fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
+        write_settings(call)?;
         // Stdin is closed: a `claude -p` with an open stdin waits on it.
         let mut command = Command::new(&self.program);
         command.args(argv(call)).current_dir(&call.cwd);
@@ -83,18 +86,34 @@ impl Claude for ClaudeCli {
             .processes
             .output_telling(&mut command, call.timeout, &spawned);
         let output = run.map_err(|e| match e {
-            RunError::Io(e) => ClaudeError::Spawn(e.to_string()),
-            RunError::Stopped => ClaudeError::Stopped,
-            RunError::TimedOut => ClaudeError::TimedOut,
+            RunError::Io(e) => AgentError::Spawn(e.to_string()),
+            RunError::Stopped => AgentError::Stopped,
+            RunError::TimedOut => AgentError::TimedOut,
         })?;
         parse_result(&output, &call.session)
     }
 }
 
+// The settings file is written whole before each call, from the call alone.
+fn write_settings(call: &AgentCall) -> Result<(), AgentError> {
+    let text = serde_json::to_string_pretty(&settings::settings(call.tools, &call.sandbox))
+        .expect("settings are JSON");
+    let folder = call.settings.parent().unwrap_or(std::path::Path::new("/"));
+    std::fs::create_dir_all(folder)
+        .and_then(|()| std::fs::write(&call.settings, text))
+        .map_err(|e| {
+            AgentError::Setup(format!(
+                "cannot write {}: {}",
+                call.settings.display(),
+                e.kind()
+            ))
+        })
+}
+
 // `--setting-sources project` keeps the project's CLAUDE.md and skills and
 // drops the maintainer's own hooks, plugins and skills. It also drops the
 // worktree's `settings.local.json`, which nothing kelpie runs needs.
-fn argv(call: &ClaudeCall) -> Vec<OsString> {
+fn argv(call: &AgentCall) -> Vec<OsString> {
     let mut argv: Vec<OsString> = vec![
         "-p".into(),
         call.prompt.as_str().into(),
@@ -135,7 +154,7 @@ fn argv(call: &ClaudeCall) -> Vec<OsString> {
 
 // `claude -p` exits 1 on an error result but still prints its JSON, so the
 // JSON is read before the exit status.
-fn parse_result(output: &Output, session: &Session) -> Result<ClaudeReply, ClaudeError> {
+fn parse_result(output: &Output, session: &Session) -> Result<AgentReply, AgentError> {
     #[derive(Deserialize)]
     struct ResultMessage {
         is_error: bool,
@@ -157,21 +176,21 @@ fn parse_result(output: &Output, session: &Session) -> Result<ClaudeReply, Claud
     let stderr = String::from_utf8_lossy(&output.stderr);
     let r = match serde_json::from_slice::<ResultMessage>(&output.stdout) {
         Ok(r) if !r.is_error && output.status.success() => r,
-        Ok(r) => return Err(ClaudeError::Failed(r.result)),
-        Err(_) if output.status.success() => return Err(ClaudeError::Unreadable(stdout())),
+        Ok(r) => return Err(AgentError::Failed(r.result)),
+        Err(_) if output.status.success() => return Err(AgentError::Unreadable(stdout())),
         Err(_) => {
             return Err(match session {
                 Session::Resume(id) if stderr.contains(NO_SESSION) => {
-                    ClaudeError::NoSession(id.clone())
+                    AgentError::NoSession(id.clone())
                 }
-                _ => ClaudeError::Failed(stderr.into_owned()),
+                _ => AgentError::Failed(stderr.into_owned()),
             });
         }
     };
     let (Some(u), Some(cost)) = (r.usage, r.total_cost_usd.and_then(Cost::from_usd)) else {
-        return Err(ClaudeError::Unreadable(stdout()));
+        return Err(AgentError::Unreadable(stdout()));
     };
-    Ok(ClaudeReply {
+    Ok(AgentReply {
         session_id: SessionId(r.session_id),
         text: r.result,
         usage: Usage {
@@ -180,7 +199,7 @@ fn parse_result(output: &Output, session: &Session) -> Result<ClaudeReply, Claud
             cache_read: u.cache_read_input_tokens,
             output: u.output_tokens,
         },
-        session_cost: cost,
+        session_cost: Some(cost),
     })
 }
 
@@ -191,6 +210,7 @@ mod tests {
     use std::process::ExitStatus;
 
     use super::*;
+    use crate::ports::{Sandbox, Tools};
     use crate::settings::Effort;
 
     // Recorded from Claude Code 2.1.283 on Haiku: a call asked to say ok.
@@ -218,8 +238,8 @@ mod tests {
         Session::New(SessionId("7e812e8a-3bf1-42a7-bddf-0ab283b7372a".into()))
     }
 
-    fn call(role: Role, session: Session) -> ClaudeCall {
-        ClaudeCall {
+    fn call(role: Role, session: Session) -> AgentCall {
+        AgentCall {
             role,
             issue: 6,
             model: "claude-sonnet-5".into(),
@@ -232,10 +252,12 @@ mod tests {
             timeout: None,
             mcp_config: None,
             plugin_dirs: Vec::new(),
+            tools: Tools::Work,
+            sandbox: Sandbox::default(),
         }
     }
 
-    fn strings(call: &ClaudeCall) -> Vec<String> {
+    fn strings(call: &AgentCall) -> Vec<String> {
         argv(call)
             .into_iter()
             .map(|a| a.into_string().unwrap())
@@ -325,7 +347,7 @@ mod tests {
                 output: 53,
             }
         );
-        assert_eq!(reply.session_cost, Cost(17_648_300));
+        assert_eq!(reply.session_cost, Some(Cost(17_648_300)));
     }
 
     #[test]
@@ -342,7 +364,7 @@ mod tests {
                     cache_read: 13673,
                     output: 148,
                 },
-                Cost(20_085_300),
+                Some(Cost(20_085_300)),
             )
         );
         assert_eq!(
@@ -354,7 +376,7 @@ mod tests {
                     cache_read: 22657,
                     output: 34,
                 },
-                Cost(22_917_000),
+                Some(Cost(22_917_000)),
             )
         );
     }
@@ -362,39 +384,39 @@ mod tests {
     #[test]
     fn resuming_a_session_that_never_started_is_named() {
         let err = parse_result(&output(1, "", NO_SESSION_STDERR), &resume("0e2c")).unwrap_err();
-        assert_eq!(err, ClaudeError::NoSession(SessionId("0e2c".into())));
+        assert_eq!(err, AgentError::NoSession(SessionId("0e2c".into())));
     }
 
     #[test]
     fn the_same_stderr_for_a_new_session_is_a_plain_failure() {
         let err = parse_result(&output(1, "", NO_SESSION_STDERR), &fresh()).unwrap_err();
-        assert!(matches!(err, ClaudeError::Failed(_)), "{err:?}");
+        assert!(matches!(err, AgentError::Failed(_)), "{err:?}");
     }
 
     #[test]
     fn an_error_result_is_a_failure_carrying_its_text() {
         let text = RESULT.replace("\"is_error\":false", "\"is_error\":true");
         let err = parse_result(&output(1, &text, ""), &fresh()).unwrap_err();
-        assert_eq!(err, ClaudeError::Failed("ok".into()));
+        assert_eq!(err, AgentError::Failed("ok".into()));
     }
 
     #[test]
     fn a_result_without_its_cost_is_unreadable() {
         let text = RESULT.replace("\"total_cost_usd\":0.0176483,", "");
         let err = parse_result(&output(0, &text, ""), &fresh()).unwrap_err();
-        assert!(matches!(err, ClaudeError::Unreadable(_)), "{err:?}");
+        assert!(matches!(err, AgentError::Unreadable(_)), "{err:?}");
     }
 
     #[test]
     fn no_json_and_a_failed_exit_reports_stderr() {
         let err = parse_result(&output(1, "", "not logged in"), &fresh()).unwrap_err();
-        assert_eq!(err, ClaudeError::Failed("not logged in".into()));
+        assert_eq!(err, AgentError::Failed("not logged in".into()));
     }
 
     #[test]
     fn no_json_and_a_clean_exit_is_unreadable() {
         let err = parse_result(&output(0, "hello", ""), &fresh()).unwrap_err();
-        assert_eq!(err, ClaudeError::Unreadable("hello".into()));
+        assert_eq!(err, AgentError::Unreadable("hello".into()));
     }
 
     #[test]
@@ -434,6 +456,7 @@ mod tests {
         for role in [Role::Worker, Role::Reviewer, Role::Judge] {
             let mut call = call(role, fresh());
             call.cwd = dir.path().to_owned();
+            call.settings = dir.path().join("settings.json");
             cli.run(&call).unwrap();
         }
         let labels = lambs.0.lock().unwrap().clone();

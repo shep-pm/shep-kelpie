@@ -1,4 +1,4 @@
-//! The runner's ports: Claude, the forge, the account's usage, the
+//! The runner's ports: agents, the forge, the account's usage, the
 //! maintainer's webhook, kelpie's shots and the clock
 //!
 //! The work-item loop reaches the outside world only through these traits.
@@ -6,9 +6,7 @@
 //! so a test sees exactly the calls the runner makes.
 
 use std::fmt;
-use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -18,15 +16,20 @@ use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
 use crate::review_bot::{Activity, Login, Profile};
-use crate::settings::{Effort, ForgeSlug};
+use crate::settings::ForgeSlug;
 use crate::shots::{ShotsJob, ShotsRun};
 use crate::webhook::Webhook;
 
+mod agent;
 mod local_paths;
 mod model_seat;
 mod relay;
 mod reviewer;
 
+pub use agent::{
+    AgentCall, AgentError, AgentReply, Agents, Cost, Fence, Guard, Role, Sandbox, Session,
+    SessionId, Tools, Usage,
+};
 pub use local_paths::Guarded;
 pub use model_seat::ModelSeat;
 pub use relay::{Cleared, Relay, RelayError};
@@ -388,178 +391,6 @@ impl fmt::Display for ForgeError {
 
 impl core::error::Error for ForgeError {}
 
-/// Which role a Claude call is made for
-// wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Role {
-    /// A turn of the worker's session
-    Worker,
-    /// A Claude review round, always a fresh session
-    Reviewer,
-    /// A one-shot that judges findings
-    Judge,
-}
-
-impl Role {
-    /// The role's name, as a lamb's label carries it
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Worker => "worker",
-            Self::Reviewer => "reviewer",
-            Self::Judge => "judge",
-        }
-    }
-}
-
-/// A Claude session's id
-// wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct SessionId(pub String);
-
-/// Which session a call runs in
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Session {
-    /// A new session that takes this id
-    New(SessionId),
-    /// The existing session with this id
-    Resume(SessionId),
-}
-
-impl Session {
-    /// The session's id, new or resumed
-    pub fn id(&self) -> &SessionId {
-        match self {
-            Self::New(id) | Self::Resume(id) => id,
-        }
-    }
-}
-
-/// One headless Claude call
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClaudeCall {
-    /// The role it is made for
-    pub role: Role,
-    /// The issue of the work item it is made for, which its lamb is labelled with
-    pub issue: u64,
-    /// Passed to `--model` as written
-    pub model: String,
-    /// Passed to `--effort`
-    pub effort: Effort,
-    /// The session it runs in
-    pub session: Session,
-    /// The folder the session runs in
-    pub cwd: PathBuf,
-    /// The settings file kelpie wrote for the call
-    pub settings: PathBuf,
-    /// Kelpie's instructions, appended to the system prompt
-    ///
-    /// A resumed session keeps the instructions it started with, so they
-    /// are passed only when the session is new.
-    pub instructions: Option<PathBuf>,
-    /// The turn's prompt
-    pub prompt: String,
-    /// The MCP servers the session starts with, beside any the repo names
-    pub mcp_config: Option<PathBuf>,
-    /// The plugin folders its steps' skills are in, each passed to `--plugin-dir`
-    pub plugin_dirs: Vec<PathBuf>,
-    /// Kills the call, and returns [`ClaudeError::TimedOut`], once it has
-    /// run this long
-    pub timeout: Option<Duration>,
-}
-
-/// Tokens one call used, as `claude -p` reports them
-// wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Usage {
-    /// Uncached input tokens
-    pub input: u64,
-    /// Tokens written to the prompt cache
-    pub cache_write: u64,
-    /// Tokens read from the prompt cache
-    pub cache_read: u64,
-    /// Output tokens, thinking included
-    pub output: u64,
-}
-
-/// An amount of money in billionths of a US dollar
-// wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct Cost(pub u64);
-
-impl Cost {
-    const PER_USD: f64 = 1e9;
-
-    /// The nearest amount to `usd` dollars, or `None` when it is negative or not a number
-    pub fn from_usd(usd: f64) -> Option<Self> {
-        // The cast saturates, so an absurd figure cannot wrap.
-        (usd.is_finite() && usd >= 0.0).then(|| Self((usd * Self::PER_USD).round() as u64))
-    }
-
-    /// The amount in dollars
-    pub fn usd(self) -> f64 {
-        self.0 as f64 / Self::PER_USD
-    }
-}
-
-/// What a Claude call answered
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClaudeReply {
-    /// The session the call ran in
-    pub session_id: SessionId,
-    /// The final message's text
-    pub text: String,
-    /// What this call used
-    pub usage: Usage,
-    /// What the session has cost so far, this call included
-    pub session_cost: Cost,
-}
-
-/// Runs headless Claude calls
-pub trait Claude: Send + Sync {
-    /// Runs one call to its end
-    ///
-    /// # Errors
-    ///
-    /// [`ClaudeError`] when the call cannot run or does not succeed.
-    fn run(&self, call: &ClaudeCall) -> Result<ClaudeReply, ClaudeError>;
-}
-
-/// Why a Claude call failed
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ClaudeError {
-    /// `claude` could not be started, with the OS's reason
-    Spawn(String),
-    /// The session to resume has no transcript, so it never started
-    NoSession(SessionId),
-    /// The call was ended because the runner is stopping
-    Stopped,
-    /// The call ran past its turn's ceiling and was stopped
-    TimedOut,
-    /// `claude` exited without a result it reports as a success
-    Failed(String),
-    /// `claude`'s output was not the JSON result asked for
-    Unreadable(String),
-}
-
-impl fmt::Display for ClaudeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Spawn(error) => write!(f, "cannot run claude: {error}"),
-            Self::NoSession(id) => write!(f, "claude has no session {}", id.0),
-            Self::Stopped => f.write_str("claude was stopped with the runner"),
-            Self::TimedOut => f.write_str("claude ran past its turn's ceiling"),
-            Self::Failed(detail) => write!(f, "claude failed: {}", detail.trim()),
-            Self::Unreadable(output) => write!(f, "unreadable claude output: {}", output.trim()),
-        }
-    }
-}
-
-impl core::error::Error for ClaudeError {}
-
 /// How much of one usage window the account has spent
 // wire format: changing this is a breaking change to the pacer's status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -869,8 +700,8 @@ pub trait Leases: Send + Sync {
 
 /// Every port the runner uses, as one bundle
 pub struct Ports {
-    /// Headless Claude, shared so a turn runs without holding the runner
-    pub claude: Arc<dyn Claude>,
+    /// The agents every role runs on, shared so a turn runs without holding the runner
+    pub agents: Arc<dyn Agents>,
     /// The forge
     pub forge: Box<dyn Forge>,
     /// The account's usage

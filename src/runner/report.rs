@@ -11,7 +11,7 @@ use serde::Serialize;
 use crate::board::{Skip, WorkerModel};
 use crate::pacer::HoldKind;
 use crate::ports::{
-    ClaudeCall, Cost, Finding, Role, SessionId, Severity, Timestamp, Usage, Verdict,
+    AgentCall, Cost, Finding, Role, SessionId, Severity, Timestamp, Usage, Verdict,
 };
 use crate::settings::{LocalRound, ReviewerName};
 use crate::shots::ShotsJob;
@@ -522,7 +522,7 @@ impl StepReport {
 pub(super) enum Begin {
     Idle,
     Report(StepReport),
-    Call(ClaudeCall),
+    Call(AgentCall),
     Review(ReviewCall),
     /// A shots run of this head
     Shots(Box<ShotsJob>, String),
@@ -540,9 +540,9 @@ pub(super) enum ReviewCall {
         criteria: String,
     },
     /// A fresh Claude review round
-    ClaudeRound(ClaudeCall),
+    ClaudeRound(AgentCall),
     /// The judge's one-shot on a single finding
-    Judge(ClaudeCall),
+    Judge(AgentCall),
 }
 
 /// What a [`ReviewCall`] cost, for the work item's record
@@ -552,7 +552,7 @@ pub(super) enum Spent {
         role: Role,
         session: SessionId,
         usage: Usage,
-        session_cost: Cost,
+        session_cost: Option<Cost>,
     },
     /// A local round that ran, however it ended
     Local,
