@@ -737,13 +737,13 @@ impl Runner {
         Ok(report)
     }
 
-    /// Gives every listed bot's lease back and takes each one's label off,
-    /// when the work item leaves a round for good
+    /// Gives back the lease of every bot the round may hold and takes each
+    /// one's label off, when the work item leaves a round for good
     pub(super) fn leave_round(&mut self) {
         let Some(number) = self.current().and_then(|i| i.pull_request) else {
             return;
         };
-        for bot in self.settings.reviewers() {
+        for bot in self.round_bots() {
             let _ = self.release(bot);
             let _ = self.label(bot, number, false);
         }

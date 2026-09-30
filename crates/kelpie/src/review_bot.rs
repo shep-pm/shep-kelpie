@@ -68,6 +68,11 @@ impl Bot {
             Self::Cubic => Resource::Cubic,
         }
     }
+
+    /// The bot whose lease a state file row keeps, if it is a bot's
+    pub fn of(resource: Resource) -> Option<Self> {
+        Self::ALL.into_iter().find(|bot| bot.resource() == resource)
+    }
 }
 
 impl fmt::Display for Bot {

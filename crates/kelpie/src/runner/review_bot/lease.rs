@@ -73,12 +73,39 @@ impl Runner {
         self.save(next)
     }
 
-    /// Gives back every listed bot's lease, as [`Runner::release`] does each
+    /// Gives back the lease of every bot [`Runner::round_bots`] names, as
+    /// [`Runner::release`] does each
     pub(in crate::runner) fn release_all(&mut self) -> Result<(), StateError> {
-        for bot in self.settings.reviewers() {
+        for bot in self.round_bots() {
             self.release(bot)?;
         }
         Ok(())
+    }
+
+    /// Every listed bot, the one the round's phase names, and any this work
+    /// item holds a lease row for, which a list changed mid-round leaves out
+    pub(super) fn round_bots(&self) -> Vec<Bot> {
+        let mut bots = self.settings.reviewers();
+        let Some(item) = self.current() else {
+            return bots;
+        };
+        let phase = match &item.phase {
+            Phase::CodeRabbit(
+                CodeRabbitStage::Summoned { bot, .. } | CodeRabbitStage::Judging { bot, .. },
+            ) => Some(*bot),
+            _ => None,
+        };
+        let own = |l: &&LeaseHeld| l.issue == Some(item.issue);
+        let rows = self.state.leases.iter().filter(own);
+        for bot in phase
+            .into_iter()
+            .chain(rows.filter_map(|l| Bot::of(l.resource)))
+        {
+            if !bots.contains(&bot) {
+                bots.push(bot);
+            }
+        }
+        bots
     }
 
     // Whether this work item holds `bot`'s lease under its own row

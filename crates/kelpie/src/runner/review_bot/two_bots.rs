@@ -9,7 +9,7 @@ use crate::coderabbit::LABEL;
 use crate::cubic::SUMMON;
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
-use crate::ports::{Checks, Leases, Role, Timestamp};
+use crate::ports::{Checks, Leases, PullRequestState, Role, Timestamp};
 use crate::review_bot::{Bot, ReviewWindow, Reviewers};
 use crate::runner::coderabbit::tests::now;
 use crate::runner::{Runner, StepReport, step};
@@ -45,22 +45,41 @@ fn listing(project: &str, list: &str) -> Rig {
 fn ready(rig: &Rig) -> (Mutex<Runner>, String) {
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
-    rig.ask(&runner, "add", Some("7"));
-    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    let head = item_ready(rig, &runner, 7);
+    (runner, head)
+}
+
+// Issue `issue`'s pull request, numbered ten times it plus one, brought to
+// the same point.
+fn item_ready(rig: &Rig, runner: &Mutex<Runner>, issue: u64) -> String {
+    let branch = format!("kelpie/{issue}");
+    rig.ask(runner, "add", Some(&issue.to_string()));
+    rig.forge
+        .open_pull_request(issue * 10 + 1, &branch, &[issue]);
     rig.claude.script([
         Scripted::Push("work.txt", "work\n"),
         Scripted::Text("CLEAN"),
     ]);
-    step(&runner).unwrap(); // the worker's first turn: opens the pull request
-    step(&runner).unwrap(); // review round 1, qwen: clean by default
-    step(&runner).unwrap(); // review round 2, claude: scripted clean above
-    let head = rig.forge.head_of("kelpie/7").unwrap();
+    step(runner).unwrap(); // the worker's first turn: opens the pull request
+    step(runner).unwrap(); // review round 1, qwen: clean by default
+    step(runner).unwrap(); // review round 2, claude: scripted clean above
+    let head = rig.forge.head_of(&branch).unwrap();
     rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
-        rig.verdict(&runner),
+        rig.verdict(runner),
         Some(StepReport::MarkedReady { .. })
     ));
-    (runner, head)
+    head
+}
+
+// Rereads the project's list as `list`, as a settings change reaching the
+// runner does.
+fn relist(rig: &Rig, runner: &Mutex<Runner>, from: &str, to: &str) {
+    rig.edit_settings(|s| s.replace(from, to));
+    let mut runner = runner.lock().unwrap();
+    runner
+        .reread(rig.settings(), rig.kelpie_settings())
+        .unwrap();
 }
 
 fn labels(rig: &Rig) -> Vec<(u64, String, bool)> {
@@ -326,4 +345,40 @@ fn a_cubic_round_settles_an_adopted_pull_requests_owed_summon() {
     );
     assert_eq!(summons_by_comment(&rig), 1);
     assert_eq!(labels(&rig), []);
+}
+
+// cubic's lease row must go with the work item even when the list dropped
+// cubic mid-round, or it blocks cubic for every item once listed again.
+#[test]
+fn a_bot_dropped_mid_round_gives_its_lease_back_when_the_work_item_ends() {
+    let (both, just_coderabbit) = (r#"["coderabbit", "cubic"]"#, r#"["coderabbit"]"#);
+    let rig = listing("shep", both);
+    rig.leases.close(&cr(), true);
+    let (runner, head) = ready(&rig);
+    assert_eq!(step(&runner).unwrap(), summoned(&head));
+    relist(&rig, &runner, both, just_coderabbit);
+
+    rig.forge.set_state(71, PullRequestState::Merged);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Finished { .. })
+    ));
+    assert_eq!(rig.ask(&runner, "status", None)["leases"], json!([]));
+    assert!(!rig.leases.held(&cubic()));
+
+    relist(&rig, &runner, just_coderabbit, both);
+    let head = item_ready(&rig, &runner, 8);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Summoned {
+            issue: 8,
+            pull_request: 81,
+            head,
+        })
+    );
+    assert_eq!(
+        summons_by_comment(&rig),
+        2,
+        "cubic took the second round too"
+    );
 }
