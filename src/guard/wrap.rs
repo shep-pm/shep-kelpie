@@ -8,9 +8,12 @@
 //! gh, a shell other than the four it reads, `env -S` and `script -c`.
 
 mod stdin;
+mod vars;
 
 pub(super) use stdin::{Shell, shell};
 use stdin::{is_c_flag, redirection, stdin_path};
+use vars::assignment;
+pub(super) use vars::{commands_assigned, configures_git, redirects_git, sets};
 
 /// The shells whose `-c` script, `<<<` string or heredoc the guard reads as commands
 pub(super) const SHELLS: [&str; 4] = ["sh", "bash", "zsh", "dash"];
@@ -19,84 +22,6 @@ pub(super) const SHELLS: [&str; 4] = ["sh", "bash", "zsh", "dash"];
 pub(super) const OTHER_SHELLS: [&str; 12] = [
     "ksh", "mksh", "pdksh", "oksh", "yash", "fish", "csh", "tcsh", "ash", "posh", "rc", "elvish",
 ];
-
-// `GIT_` variables that change only how git shows or signs what it does.
-// Any other can point git at another repo, index or config.
-const GIT_HARMLESS: [&str; 12] = [
-    "GIT_PAGER",
-    "GIT_EDITOR",
-    "GIT_SEQUENCE_EDITOR",
-    "GIT_AUTHOR_NAME",
-    "GIT_AUTHOR_EMAIL",
-    "GIT_AUTHOR_DATE",
-    "GIT_COMMITTER_NAME",
-    "GIT_COMMITTER_EMAIL",
-    "GIT_COMMITTER_DATE",
-    "GIT_TERMINAL_PROMPT",
-    "GIT_MERGE_AUTOEDIT",
-    "GIT_OPTIONAL_LOCKS",
-];
-
-// Variables whose value git or gh runs as a shell command.
-const COMMAND_VARS: [&str; 16] = [
-    "GIT_EDITOR",
-    "GIT_SEQUENCE_EDITOR",
-    "GIT_PAGER",
-    "GIT_SSH",
-    "GIT_SSH_COMMAND",
-    "GIT_PROXY_COMMAND",
-    "GIT_ASKPASS",
-    "GIT_EXTERNAL_DIFF",
-    "SSH_ASKPASS",
-    "EDITOR",
-    "VISUAL",
-    "PAGER",
-    "GH_EDITOR",
-    "GH_PAGER",
-    "GH_BROWSER",
-    "BROWSER",
-];
-
-/// Whether setting `name` can point git at another repo or config
-pub(super) fn redirects_git(name: &str) -> bool {
-    name.starts_with("GIT_") && !GIT_HARMLESS.contains(&name)
-        || matches!(name, "HOME" | "XDG_CONFIG_HOME")
-}
-
-/// Whether setting `name` gives every git command config from the command's own text
-pub(super) fn configures_git(name: &str) -> bool {
-    matches!(
-        name,
-        "GIT_CONFIG_PARAMETERS" | "GIT_CONFIG_COUNT" | "GIT_ALLOW_PROTOCOL"
-    ) || name.starts_with("GIT_CONFIG_KEY_")
-        || name.starts_with("GIT_CONFIG_VALUE_")
-}
-
-/// Whether `words` set, for the commands after them, a variable `named`
-/// picks out: an `export`, a `declare -x`, or an assignment alone, which
-/// `set -a` would export
-pub(super) fn sets(words: &[String], named: fn(&str) -> bool) -> bool {
-    // A name the shell works out when it runs could be any of them.
-    let names = |words: &[String]| {
-        words.iter().filter(|w| !w.starts_with('-')).any(|w| {
-            let name = w.split_once('=').map_or(w.as_str(), |(n, _)| n);
-            !is_name(name) || named(name)
-        })
-    };
-    match words.first().map(|w| program(w)) {
-        Some("export" | "declare" | "typeset" | "local" | "readonly") => names(&words[1..]),
-        _ => words.iter().all(|w| assignment(w).is_some()) && names(words),
-    }
-}
-
-/// The values `words` assign to a variable git or gh runs as a command
-pub(super) fn commands_assigned(words: &[String]) -> impl Iterator<Item = &str> {
-    words
-        .iter()
-        .filter_map(|w| assignment(w))
-        .filter(|(name, _)| COMMAND_VARS.contains(name))
-        .map(|(_, value)| value)
-}
 
 /// How surely a command's words run the program the guard found in them
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -312,19 +237,6 @@ pub(super) fn program(word: &str) -> &str {
 /// Whether a command word is built when the command runs, as `$G` or `$(echo git)`
 pub(super) fn built(word: &str) -> bool {
     word.contains(['$', '`'])
-}
-
-fn assignment(word: &str) -> Option<(&str, &str)> {
-    let (name, value) = word.split_once('=')?;
-    is_name(name).then_some((name, value))
-}
-
-// A shell variable's name, as written.
-fn is_name(name: &str) -> bool {
-    name.chars()
-        .next()
-        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 // How many words a wrapper's own options take; `valued` take a separate value.
