@@ -7,7 +7,7 @@ use crate::flock::add::LABELS;
 use crate::ports::{NewLabel, Visibility};
 use crate::preview::Tools;
 use crate::runner::{ProjectName, ProjectPaths, SUMMON_LABEL, check_instructions, check_repo};
-use crate::settings::{LocalRound, Settings};
+use crate::settings::{Runs, Settings};
 use crate::webhook::KelpieSettings;
 
 /// Every check for the project on `sheep`, whose table is `table`
@@ -94,9 +94,11 @@ pub(super) fn checks(
             probes,
         ));
     }
-    lines.push(local_round(
+    lines.push(local_review(
         at("local review"),
-        &settings.review.local,
+        &settings,
+        kelpie,
+        here,
         probes,
     ));
     if settings.preview.enabled {
@@ -190,15 +192,48 @@ fn review_bot(subject: &str, settings: &Settings, probes: Probes<'_>) -> Line {
     }
 }
 
-fn local_round(subject: String, local: &LocalRound, probes: Probes<'_>) -> Line {
-    match probes.reviewer.check(local) {
-        Ok(()) if !local.is_on() => Line::ok(subject, "off, so every round is the Claude round"),
-        Ok(()) => Line::ok(subject, "ready"),
-        Err(reason) => Line::missing(
-            subject,
-            reason,
-            "install it, point `review.local` at one that exists, or set its `kind` to `off`",
-        ),
+// Every local reviewer the project lists can run.
+fn local_review(
+    subject: String,
+    settings: &Settings,
+    kelpie: Option<&KelpieSettings>,
+    here: Here<'_>,
+    probes: Probes<'_>,
+) -> Line {
+    let defined = kelpie
+        .map(|k| k.local_reviewers.clone())
+        .unwrap_or_default();
+    let lineup = match settings.lineup(&defined, here.home) {
+        Ok(lineup) => lineup,
+        Err(e) => {
+            return Line::missing(
+                subject,
+                e.to_string(),
+                "define it in kelpie's `[local_reviewers]`, or take it off `review.reviewers`",
+            );
+        }
+    };
+    let mut local = 0;
+    for reviewer in &lineup {
+        let Runs::Local(round) = &reviewer.runs else {
+            continue;
+        };
+        local += 1;
+        if let Err(reason) = probes.reviewer.check(round) {
+            let fix = match settings.review.reviewers.is_empty() {
+                true => {
+                    "install it, point `review.local` at one that exists, or set its `kind` to `off`"
+                }
+                false => {
+                    "install it, or point its `[local_reviewers]` definition at one that exists"
+                }
+            };
+            return Line::missing(subject, format!("{}: {reason}", reviewer.name), fix);
+        }
+    }
+    match local {
+        0 => Line::ok(subject, "off, so every round is the Claude round"),
+        _ => Line::ok(subject, "ready"),
     }
 }
 

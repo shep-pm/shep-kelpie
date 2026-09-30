@@ -147,24 +147,28 @@ mod tests {
             .replace("# domains =", "domains =")
             .replace("# local_rounds =", "local_rounds =")
             .replace("# rounds =", "rounds =")
-            .replace("# ollama =", "ollama =")
-            .replace("# ollama_model =", "ollama_model =");
-        let command = "kind = \"command\"\ncommand = \"~/.claude/scripts/qwen-review.sh\"\n";
-        assert!(text.contains(command), "the example's local round moved");
+            .replace("# reviewers = [\"qwen\", \"claude\", \"opus\"]", "reviewers = [\"qwen\"]");
+        assert!(
+            text.contains("reviewers = [\"qwen\"]"),
+            "the example's list moved"
+        );
+        let command = "kind = \"command\"\ncommand = \"~/.claude/scripts/qwen-review.sh\"\n\
+                       gpu_lease = true\nollama = \"http://localhost:11434\"\n\
+                       ollama_model = \"m\"\npaths = [\"src/**\"]\n";
         let endpoint = "kind = \"endpoint\"\nurl = \"http://localhost:11434/v1\"\n\
-                        model = \"m\"\ncontext = 32768\ngpu_lease = true\n";
-        let command_with_lease = format!("{command}gpu_lease = true\n");
+                        model = \"m\"\ncontext = 32768\nlease = \"gpu\"\n";
         // Each kind of skill once, every step naming it.
         let kinds = [
             "{ kind = \"path\", path = \"skills/mine\" }",
             "{ kind = \"plugin\", plugin = \"plugins/house\", skill = \"mine\" }",
             "{ kind = \"none\" }",
         ];
-        [command_with_lease.as_str(), endpoint, "kind = \"off\"\n"]
+        [command, endpoint, "kind = \"off\"\n"]
             .into_iter()
             .zip(kinds)
             .map(|(local, kind)| {
-                let mut text = text.replace(command, local);
+                let table = format!("[app.dogs.kelpie.review.local]\n{local}");
+                let mut text = crate::test::with_tables(&text, &table);
                 text.push_str("\n[app.dogs.kelpie.skills]\n");
                 for step in crate::skills::Step::ALL {
                     text.push_str(&format!("{step} = {kind}\n"));
@@ -205,7 +209,15 @@ mod tests {
             .replace("# ruling_channels =", "ruling_channels =")
             .replace("# [kelpie.reviewers.", "[kelpie.reviewers.")
             .replace("# reviews =", "reviews =")
-            .replace("# hours =", "hours =");
+            .replace("# hours =", "hours =")
+            .replace(
+                "# [kelpie.local_reviewers.qwen]\n# kind = \"command\"\n# command =",
+                "[kelpie.local_reviewers.qwen]\nkind = \"command\"\ncommand =",
+            );
+        assert!(
+            example.contains("\n[kelpie.local_reviewers.qwen]"),
+            "the example moved"
+        );
         let example: toml::Table = toml::from_str(&example).unwrap();
         let section = toml::to_string(&example["kelpie"]).unwrap();
         assert_eq!(keys_of_schema(&root), keys_of_table(&root, &root, &section));

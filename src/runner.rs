@@ -14,7 +14,7 @@ use crate::channels::{Channel, Channels};
 use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Guarded, Ports, SessionId, Timestamp, Visibility};
 use crate::review_bot::{Bot, Profile, Reviewers};
-use crate::settings::{Settings, SettingsError};
+use crate::settings::{LoopReviewer, Runs, Settings, SettingsError};
 use crate::skills::Skills;
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
@@ -162,6 +162,10 @@ pub struct Runner {
     skipped: Vec<Skip>,
     // The pull request reviewers kelpie's own settings define
     reviewers: Reviewers,
+    // The review loop's reviewers, in order, from the project's list
+    lineup: Vec<LoopReviewer>,
+    // The maintainer's home folder, for `~/` in kelpie's own settings
+    home: PathBuf,
     // None when rulings do not go to the webhook
     webhook: Option<Webhook>,
     channels: Channels,
@@ -209,21 +213,22 @@ impl Runner {
         let local = [home, paths.kelpie_home.as_path(), settings.repo.as_path()];
         ports.forge = Box::new(Guarded::new(ports.forge, local));
         let reviewers = kelpie_settings.reviewers;
+        let lineup = settings.lineup(&kelpie_settings.local_reviewers, home)?;
         let (channels, webhook) = ruling_channels(&settings, kelpie_settings)?;
         let totp = replies::authenticator(webhook.as_ref(), &paths.totp)?;
         check_repo(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;
-        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let env_home = std::env::var_os("HOME").map(PathBuf::from);
         guard_hooks::check(
             &settings,
-            home.as_deref(),
+            env_home.as_deref(),
             std::env::var_os("PATH").as_deref(),
         )?;
         check_reviewers(&settings, &reviewers, &ports)?;
         crate::skills::check(&settings.skills, &paths.skills)?;
         let skills = Skills::load(&settings.skills, &paths.skills);
         check_coderabbit(&settings, &ports)?;
-        check_local(&settings, &ports)?;
+        check_local(&settings, &lineup, &ports)?;
         let store = StateStore::new(paths.state.clone());
         let mut state = store
             .load()?
@@ -267,6 +272,8 @@ impl Runner {
             pacing: None,
             skipped: Vec::new(),
             reviewers,
+            lineup,
+            home: home.to_owned(),
             webhook,
             channels,
             retry: None,
@@ -538,15 +545,26 @@ pub(crate) fn check_instructions(settings: &Settings) -> Result<(), SettingsErro
     instructions::read_extra(settings).map(drop)
 }
 
-// The local round's command is there, or its endpoint answers.
-fn check_local(settings: &Settings, ports: &Ports) -> Result<(), SettingsError> {
-    ports
-        .reviewer
-        .check(&settings.review.local)
-        .map_err(|reason| SettingsError::Invalid {
-            setting: "review.local",
-            reason,
-        })
+// Each local reviewer's command is there, or its endpoint answers.
+fn check_local(
+    settings: &Settings,
+    lineup: &[LoopReviewer],
+    ports: &Ports,
+) -> Result<(), SettingsError> {
+    let setting = match settings.review.reviewers.is_empty() {
+        true => "review.local",
+        false => "review.reviewers",
+    };
+    for reviewer in lineup {
+        let Runs::Local(local) = &reviewer.runs else {
+            continue;
+        };
+        ports
+            .reviewer
+            .check(local)
+            .map_err(|reason| SettingsError::Invalid { setting, reason })?;
+    }
+    Ok(())
 }
 
 // What a ruling's question names: its project, and the review bots it may

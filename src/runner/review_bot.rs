@@ -20,7 +20,7 @@
 //! A project may list several bots. Each round goes to the first listed
 //! whose window is free, and the round cap counts rounds from all of them.
 
-mod cap;
+pub(super) mod cap;
 mod lease;
 #[cfg(test)]
 mod tests;
