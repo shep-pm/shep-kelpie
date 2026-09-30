@@ -62,16 +62,18 @@ impl WorkItem {
     /// `session_cost` by then, and returns what the call itself cost
     ///
     /// A session's calls each cost the change in it, so a fresh session's
-    /// only call costs all of it.
+    /// only call costs all of it. A harness that reports no cost leaves the
+    /// session's as it was, so the call costs nothing.
     pub fn record_call(
         &mut self,
         role: Role,
         at: Timestamp,
         session: SessionId,
         usage: Usage,
-        session_cost: Cost,
+        session_cost: Option<Cost>,
     ) -> Cost {
         let before = self.session_cost(&session);
+        let session_cost = session_cost.unwrap_or(before);
         let cost = Cost(session_cost.0.saturating_sub(before.0));
         self.calls.push(CallRecord {
             role,

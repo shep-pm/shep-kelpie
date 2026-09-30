@@ -6,7 +6,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use super::{FakeMeter, git, write_in};
-use crate::ports::{Claude, ClaudeCall, ClaudeError, ClaudeReply, Cost, Role, Usage, Utilization};
+use crate::ports::{AgentCall, AgentError, AgentReply, Agents, Cost, Role, Usage, Utilization};
 
 /// The file a killed worker leaves in its worktree, to find after a restart
 pub(crate) const LEFT_BEHIND: &str = "left-behind.txt";
@@ -20,7 +20,7 @@ pub(crate) enum Scripted {
     /// the time it does: the call itself spent it
     Spend(Utilization, Usage, Cost),
     /// Fails with this error
-    Fail(ClaudeError),
+    Fail(AgentError),
     /// Leaves [`LEFT_BEHIND`] in the worktree, then dies with the runner
     Kill,
     /// Commits this file with this text on the worktree's branch, pushes
@@ -103,7 +103,7 @@ impl Hold {
 #[derive(Debug, Clone)]
 pub(crate) struct Seen {
     /// The call
-    pub(crate) call: ClaudeCall,
+    pub(crate) call: AgentCall,
     /// The settings file it named, as it stood during the call
     pub(crate) settings: serde_json::Value,
     /// Whether its build folder existed when the call started
@@ -130,7 +130,7 @@ impl FakeClaude {
     /// The worker's own calls, in order: what every test before the review
     /// loop existed already asserted on, so a reviewer or judge call never
     /// shows up and shifts their counts.
-    pub(crate) fn calls(&self) -> Vec<ClaudeCall> {
+    pub(crate) fn calls(&self) -> Vec<AgentCall> {
         self.seen().into_iter().map(|s| s.call).collect()
     }
 
@@ -143,7 +143,7 @@ impl FakeClaude {
     }
 
     /// Every call, worker, reviewer and judge alike, in order
-    pub(crate) fn all_calls(&self) -> Vec<ClaudeCall> {
+    pub(crate) fn all_calls(&self) -> Vec<AgentCall> {
         self.all_seen().into_iter().map(|s| s.call).collect()
     }
 
@@ -158,8 +158,14 @@ impl FakeClaude {
     }
 }
 
-impl Claude for FakeClaude {
-    fn run(&self, call: &ClaudeCall) -> Result<ClaudeReply, ClaudeError> {
+impl Agents for FakeClaude {
+    // The file Claude Code would be started with, so a test reads what a
+    // call really left on disk.
+    fn prepare(&self, call: &AgentCall) -> Result<(), AgentError> {
+        crate::adapters::write_claude_settings(call)
+    }
+
+    fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
         let settings: serde_json::Value = std::fs::read_to_string(&call.settings)
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
@@ -182,11 +188,11 @@ impl Claude for FakeClaude {
             other => other,
         };
         match next {
-            Some(Scripted::Reply(usage, session_cost)) => Ok(ClaudeReply {
+            Some(Scripted::Reply(usage, session_cost)) => Ok(AgentReply {
                 session_id: call.session.id().clone(),
                 text: "done".into(),
                 usage,
-                session_cost,
+                session_cost: Some(session_cost),
             }),
             Some(Scripted::Spend(..)) => unreachable!("turned into a reply above"),
             Some(Scripted::Fail(error)) => Err(error),
@@ -194,40 +200,40 @@ impl Claude for FakeClaude {
                 std::fs::write(call.cwd.join(LEFT_BEHIND), "work in progress\n").unwrap();
                 panic!("the runner is killed mid-turn");
             }
-            Some(Scripted::Text(text)) => Ok(ClaudeReply {
+            Some(Scripted::Text(text)) => Ok(AgentReply {
                 session_id: call.session.id().clone(),
                 text: text.to_owned(),
                 usage: Usage::default(),
-                session_cost: Cost(0),
+                session_cost: Some(Cost(0)),
             }),
-            Some(Scripted::Billed(text, cost)) => Ok(ClaudeReply {
+            Some(Scripted::Billed(text, cost)) => Ok(AgentReply {
                 session_id: call.session.id().clone(),
                 text: text.to_owned(),
                 usage: Usage::default(),
-                session_cost: cost,
+                session_cost: Some(cost),
             }),
-            Some(Scripted::Say(text)) => Ok(ClaudeReply {
+            Some(Scripted::Say(text)) => Ok(AgentReply {
                 session_id: call.session.id().clone(),
                 text: text.into(),
                 usage: Usage::default(),
-                session_cost: Cost(0),
+                session_cost: Some(Cost(0)),
             }),
             Some(Scripted::Hold(hold)) => {
                 hold.block();
-                Ok(ClaudeReply {
+                Ok(AgentReply {
                     session_id: call.session.id().clone(),
                     text: "done".into(),
                     usage: Usage::default(),
-                    session_cost: Cost(0),
+                    session_cost: Some(Cost(0)),
                 })
             }
             Some(Scripted::Plant(file, text)) => {
                 write_in(&call.cwd, file, text);
-                Ok(ClaudeReply {
+                Ok(AgentReply {
                     session_id: call.session.id().clone(),
                     text: "done".into(),
                     usage: Usage::default(),
-                    session_cost: Cost(0),
+                    session_cost: Some(Cost(0)),
                 })
             }
             Some(Scripted::Push(file, text)) => {
@@ -235,11 +241,11 @@ impl Claude for FakeClaude {
                 git(&call.cwd, &["add", file]);
                 git(&call.cwd, &["commit", "--quiet", "-m", file]);
                 git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);
-                Ok(ClaudeReply {
+                Ok(AgentReply {
                     session_id: call.session.id().clone(),
                     text: "pushed".into(),
                     usage: Usage::default(),
-                    session_cost: Cost(0),
+                    session_cost: Some(Cost(0)),
                 })
             }
             Some(Scripted::MergeMain) => {
@@ -256,14 +262,14 @@ impl Claude for FakeClaude {
                     ],
                 );
                 git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);
-                Ok(ClaudeReply {
+                Ok(AgentReply {
                     session_id: call.session.id().clone(),
                     text: "merged".into(),
                     usage: Usage::default(),
-                    session_cost: Cost(0),
+                    session_cost: Some(Cost(0)),
                 })
             }
-            None => Err(ClaudeError::Failed("the rig scripts no reply".into())),
+            None => Err(AgentError::Failed("the rig scripts no reply".into())),
         }
     }
 }

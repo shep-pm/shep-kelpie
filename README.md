@@ -247,8 +247,9 @@ Each pull request goes through a review loop before CI. A project lists its revi
 - `kind = "command"`: a command of your own that keeps the contract below
 - `kind = "endpoint"`: kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server
 - `kind = "claude"`: a fresh Claude session on its own `model` and `effort`
+- `kind = "session"`: a fresh session on the agent its `agent` names (see Agents below)
 
-`claude` is always defined: the project's own Claude round on `models.reviewer`. The loop ends once two rounds in a row, from two different reviewers, find nothing above a nit, and those nits get fixed with no further round. Where only one reviewer can run, one clean round ends it.
+`claude` is always defined: the project's own Claude round on its reviewer's agent, `models.reviewer` unless the project names one. The loop ends once two rounds in a row, from two different reviewers, find nothing above a nit, and those nits get fixed with no further round. Where only one reviewer can run, one clean round ends it.
 
 A local model alone:
 
@@ -288,6 +289,24 @@ paths = ["src/runner/merge/**", "src/guard/**"]
 A project that lists none runs `review.local` and then `claude`, and a table with neither runs `~/.claude/scripts/qwen-review.sh`, the maintainer's own command, then Claude. `review.local` is the older form: it takes the same keys as a definition, or `kind = "off"`, and the runner says so at start. `review.local_rounds` caps the rounds from local reviewers per work item. Once they are spent, only Claude reviewers run.
 
 A missing command or an endpoint that doesn't answer stops the runner at start.
+
+## Agents
+
+An agent is a harness plus the model and effort it runs on. Claude Code is the one harness for now. Kelpie's own settings define agents by name, and a project names one per role, over its `models` entry:
+
+```toml
+# kelpie's [kelpie] section
+[kelpie.agents.opus-high]
+harness = "claude-code"
+model = "claude-opus-5-5"
+effort = "high"
+
+# the project's table
+[app.dogs.kelpie.agents]
+judge = "opus-high"
+```
+
+A role left out keeps its `models` entry, so a project that names none runs as before. A local reviewer of kind `session` names an agent from the same list. An agent nobody defines stops the runner at start, naming it.
 
 An endpoint takes `url` (the base, up to and including `/v1`), `model`, and `context`, the context size in tokens the server gives that model. Kelpie diffs the pull request, cuts the diff to fit that context, and sends each piece with its own review prompt, `src/adapters/local/review-prompt.md`. Set `context` to what the server really uses: Ollama gives its OpenAI-compatible endpoint a small default context unless `OLLAMA_CONTEXT_LENGTH` says more, and drops whatever doesn't fit without saying so.
 

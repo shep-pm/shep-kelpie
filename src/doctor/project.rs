@@ -200,16 +200,15 @@ fn local_review(
     here: Here<'_>,
     probes: Probes<'_>,
 ) -> Line {
-    let defined = kelpie
-        .map(|k| k.local_reviewers.clone())
-        .unwrap_or_default();
-    let lineup = match settings.lineup(&defined, here.home) {
+    let none = KelpieSettings::default();
+    let lineup = match settings.lineup(kelpie.unwrap_or(&none), here.home) {
         Ok(lineup) => lineup,
         Err(e) => {
             return Line::missing(
                 subject,
                 e.to_string(),
-                "define it in kelpie's `[local_reviewers]`, or take it off `review.reviewers`",
+                "define it in kelpie's `[local_reviewers]` or `[agents]`, or take it off \
+                 `review.reviewers` or `agents`",
             );
         }
     };
