@@ -159,7 +159,7 @@ fn a_big_issue_under_ask_waits_on_a_ruling_and_a_yes_splits_it() {
     let question = status["rulings"][0]["question"].as_str().unwrap();
     assert!(question.starts_with("Planning would split issue #5 into 2 pull requests."));
     assert!(question.contains("1. Store the thing\n2. Show the thing (after 1)"));
-    assert!(question.contains(&format!("`shep trigger zeus rule '{id} answer <note>'`")));
+    assert!(question.contains(&format!("`shep kelpie rule {id} answer <note>`")));
     assert!(rig.forge.created().is_empty());
 
     // Nothing else on the board, so once the ruling is out the project waits on it.
