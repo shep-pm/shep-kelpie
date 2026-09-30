@@ -164,6 +164,9 @@ pub struct Ruling {
     /// any other way
     #[serde(default)]
     pub relayed: bool,
+    /// Whether a clear took it from the relay, which is sent it again
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resend: bool,
 }
 
 /// Where reading replies on the webhook's topic has got to

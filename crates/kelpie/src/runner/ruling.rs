@@ -378,6 +378,7 @@ pub(super) fn park(
         kind,
         alerted: false,
         relayed: false,
+        resend: false,
     });
     (id, text)
 }
