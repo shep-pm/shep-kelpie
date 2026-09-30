@@ -30,9 +30,9 @@ impl Files<'_> {
     /// The command that moves both files into their tables
     pub fn move_command(&self) -> String {
         if self.sheep == self.project {
-            format!("kelpie settings move {}", self.project)
+            format!("shep-kelpie settings move {}", self.project)
         } else {
-            format!("kelpie settings move {} {}", self.project, self.sheep)
+            format!("shep-kelpie settings move {} {}", self.project, self.sheep)
         }
     }
 }
@@ -185,7 +185,7 @@ mod tests {
             project,
             format!(
                 "shep's settings come from {}, as there is no table for them. \
-                 `kelpie settings move shep` moves them into it.",
+                 `shep-kelpie settings move shep` moves them into it.",
                 home.settings().display()
             )
         );
@@ -193,7 +193,10 @@ mod tests {
             kelpie.starts_with("kelpie's own settings come from "),
             "{kelpie}"
         );
-        assert!(kelpie.contains("`kelpie settings move shep`"), "{kelpie}");
+        assert!(
+            kelpie.contains("`shep-kelpie settings move shep`"),
+            "{kelpie}"
+        );
         assert!(home.settings().exists() && home.kelpie_settings().exists());
     }
 
@@ -203,7 +206,7 @@ mod tests {
             .load(&Tables::default(), "shep-runner")
             .unwrap();
         assert!(
-            loaded.notices[0].contains("`kelpie settings move shep shep-runner`"),
+            loaded.notices[0].contains("`shep-kelpie settings move shep shep-runner`"),
             "{:?}",
             loaded.notices
         );

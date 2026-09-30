@@ -67,7 +67,7 @@ impl ShotsCli {
         for tool in [self.tools.sandbox(), self.tools.playwright_cli()] {
             if !tool.is_file() {
                 return Err(format!(
-                    "{} is missing: run `kelpie tools install`",
+                    "{} is missing: run `shep-kelpie tools install`",
                     tool.display()
                 ));
             }
@@ -476,7 +476,7 @@ mod tests {
     // WebSocket and a fetch to this machine's LAN address, which the
     // review's listener caught before the browser had resolver rules.
     #[test]
-    #[ignore = "needs kelpie's tools: KELPIE_TOOLS=<dir> from `kelpie tools install`"]
+    #[ignore = "needs kelpie's tools: KELPIE_TOOLS=<dir> from `shep-kelpie tools install`"]
     fn a_page_reaches_neither_a_host_off_the_list_nor_the_lan() {
         use std::io::{BufRead, BufReader, Write as _};
         use std::net::{IpAddr, SocketAddr, UdpSocket};
@@ -748,7 +748,7 @@ mod tests {
         });
         let reason = run.failed.unwrap();
         assert!(
-            reason.ends_with("is missing: run `kelpie tools install`"),
+            reason.ends_with("is missing: run `shep-kelpie tools install`"),
             "{reason}"
         );
     }

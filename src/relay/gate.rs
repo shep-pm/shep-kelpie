@@ -1,4 +1,4 @@
-//! `kelpie relay-gate <kelpie>`: the PreToolUse hook that holds the relay to
+//! `shep-kelpie relay-gate <kelpie>`: the PreToolUse hook that holds the relay to
 //! its two kelpie commands
 //!
 //! Permission rules alone cannot refuse "everything else": a command no rule
@@ -125,7 +125,7 @@ mod tests {
         for command in [
             "shep trigger kelpie-scratch rule '6 yes'",
             "shep daemon reload",
-            "kelpie relay-yes kelpie-scratch 6",
+            "shep-kelpie relay-yes kelpie-scratch 6",
             "echo hello",
             "/k/bin/kelpie runner shep",
             "/k/bin/kelpie relay-yes shep 3 && shep daemon reload",

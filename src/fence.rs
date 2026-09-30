@@ -2,7 +2,7 @@
 //!
 //! Every Claude call in a worktree loads its `.claude` folder and `.mcp.json`:
 //! settings and their hooks, agents, skills and MCP servers. A hook there runs
-//! outside the sandbox, so the sandbox and `kelpie confine` refuse writes to
+//! outside the sandbox, so the sandbox and `shep-kelpie confine` refuse writes to
 //! them, each call checks them against `main`'s, and a pull request that
 //! changes them waits on the maintainer. Names match in any case, since macOS
 //! reads `.CLAUDE` as `.claude`.

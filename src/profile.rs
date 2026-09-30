@@ -3,9 +3,9 @@
 //! The worker runs in `bypassPermissions`, so the file is its whole fence.
 //! Claude Code's sandbox confines Bash and its children, and fails closed.
 //! The sandbox does not cover Claude's own file tools, so a hook that runs
-//! `kelpie confine` holds those to the same folders. Both refuse Claude
+//! `shep-kelpie confine` holds those to the same folders. Both refuse Claude
 //! Code's own files in the worktree. Deny rules keep what only the project
-//! manager does, and credential paths, out of reach. `kelpie guard` judges
+//! manager does, and credential paths, out of reach. `shep-kelpie guard` judges
 //! every Bash call before any hook the project adds.
 
 use std::collections::BTreeMap;
@@ -82,7 +82,7 @@ const TOOLS_DENY: [&str; 5] = [
     "ExitWorktree",
 ];
 
-// What `kelpie guard` judges: every command, and a subagent's isolation.
+// What `shep-kelpie guard` judges: every command, and a subagent's isolation.
 const GUARDED_TOOLS: &str = "Bash|Agent|Task";
 
 const GH_DENY: [&str; 4] = [
@@ -108,7 +108,7 @@ const PUSH_FLAGS: [&str; 9] = [
     "Bash(git push * +*)",
 ];
 
-// Every Playwright MCP tool, which `kelpie browse-guard` holds to the preview
+// Every Playwright MCP tool, which `shep-kelpie browse-guard` holds to the preview
 const PLAYWRIGHT_TOOLS: &str = "mcp__playwright__.*";
 
 // The mach service a dev server's file watcher looks up on macOS

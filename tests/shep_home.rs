@@ -3,7 +3,7 @@
 
 use std::process::{Command, Output, Stdio};
 
-const KELPIE: &str = env!("CARGO_BIN_EXE_kelpie");
+const KELPIE: &str = env!("CARGO_BIN_EXE_shep-kelpie");
 
 // A scratch home, and no `SHEP_HOME` however the test is run.
 fn kelpie(args: &[&str]) -> Output {

@@ -1,4 +1,4 @@
-//! The kelpie dog: the lease book, run as a sheep under kelpie's shepherd
+//! The shep-kelpie dog: the lease book, run as a sheep under kelpie's shepherd
 //!
 //! It listens on the shepherd's bus for runners' lease metrics and their
 //! process events, keeps the book on its [`desk`], and grants with a
@@ -38,7 +38,7 @@ use crate::webhook::KelpieSettings;
 use desk::{Delivery, Desk};
 use triggers::ACTIONS;
 
-/// The dog's sheep name, which `kelpie lease` triggers
+/// The dog's sheep name, which `shep-kelpie lease` triggers
 ///
 /// Not `kelpie`, which is the adopted dog's: `shep disable kelpie` deletes a
 /// sheep of that name, and `shep adopt` refuses one.
@@ -66,7 +66,7 @@ pub fn run() -> ExitCode {
     match served {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
-            eprintln!("kelpie dog: {message}");
+            eprintln!("shep-kelpie dog: {message}");
             ExitCode::FAILURE
         }
     }

@@ -10,16 +10,16 @@ use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use kelpie::flock::Launch;
-use kelpie::lease::wire::Asker;
-use kelpie::lease::{Epoch, LeaseKind};
 use serde_json::{Value, json};
 use shep_client::Client;
 use shep_client::shep_core::protocol::Request;
 use shep_client::shep_core::protocol::request::{ActionOutcome, Response, SelectorSpec};
 use shep_client::shep_core::status::ProcStatus;
+use shep_kelpie::flock::Launch;
+use shep_kelpie::lease::wire::Asker;
+use shep_kelpie::lease::{Epoch, LeaseKind};
 
-const KELPIE: &str = env!("CARGO_BIN_EXE_kelpie");
+const KELPIE: &str = env!("CARGO_BIN_EXE_shep-kelpie");
 const STAND_IN: &str = "KELPIE_TEST_STAND_IN";
 
 fn shep_binary() -> PathBuf {
@@ -485,7 +485,7 @@ async fn the_dog_moves_to_kelpie_dog_with_its_book_and_frees_the_name() {
         shep_home: home.clone(),
         kelpie_home: Some(home),
     };
-    let lines = kelpie::flock::add::move_dog(&client, &launch)
+    let lines = shep_kelpie::flock::add::move_dog(&client, &launch)
         .await
         .unwrap();
     assert!(lines[0].starts_with("dog `kelpie`: deleted"), "{lines:?}");

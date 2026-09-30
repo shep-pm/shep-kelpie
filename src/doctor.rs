@@ -229,7 +229,7 @@ async fn projects(client: &Client, probes: Probes<'_>, here: Here<'_>, ask: Ask<
     if let Some(name) = ask.project.filter(|n| !tables.contains_key(n.as_str())) {
         lines.push(Line::missing(
             name.as_str(),
-            "no kelpie runner has this name",
+            "no shep-kelpie runner has this name",
             "`shep kelpie add` in its checkout sets one up",
         ));
     }
@@ -246,7 +246,7 @@ pub fn main(args: &[String]) -> ExitCode {
     let (project, test_alert) = match read_args(args) {
         Ok(read) => read,
         Err(message) => {
-            eprintln!("kelpie doctor: {message}");
+            eprintln!("shep-kelpie doctor: {message}");
             return ExitCode::from(2);
         }
     };
@@ -291,13 +291,13 @@ pub fn main(args: &[String]) -> ExitCode {
             }
         }
         Err(message) => {
-            eprintln!("kelpie doctor: {message}");
+            eprintln!("shep-kelpie doctor: {message}");
             ExitCode::FAILURE
         }
     }
 }
 
-const USAGE: &str = "usage: kelpie doctor [<project>] [--test-alert]";
+const USAGE: &str = "usage: shep-kelpie doctor [<project>] [--test-alert]";
 
 fn read_args(args: &[String]) -> Result<(Option<ProjectName>, bool), String> {
     let (flags, names): (Vec<_>, Vec<_>) = args.iter().partition(|a| a.starts_with("--"));

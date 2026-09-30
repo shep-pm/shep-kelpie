@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn generated_files_are_left_out_of_the_count() {
-        let numstat = "10\t2\tcrates/kelpie/src/lib.rs\n\
+        let numstat = "10\t2\tsrc/lib.rs\n\
                        900\t850\tCargo.lock\n\
                        40\t0\tcrates/shep-cli/tests/snapshots/status.snap\n\
                        300\t300\tweb/src/data/cli-reference.generated.txt\n\

@@ -1,4 +1,4 @@
-//! `kelpie settings move`: a project's files into their tables
+//! `shep-kelpie settings move`: a project's files into their tables
 //!
 //! Writes the project's settings file as its runner sheep's
 //! `[app.dogs.kelpie]` table, and kelpie's own file as its `[kelpie]`

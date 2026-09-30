@@ -1,4 +1,4 @@
-//! `kelpie browse-guard <domain>...`: a PreToolUse hook that holds a worker's
+//! `shep-kelpie browse-guard <domain>...`: a PreToolUse hook that holds a worker's
 //! Playwright tools to the preview
 //!
 //! The Playwright MCP server runs outside the sandbox, and its own fence

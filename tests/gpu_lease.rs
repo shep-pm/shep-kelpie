@@ -1,4 +1,4 @@
-//! `kelpie lease` on the GPU, end to end against the real binary
+//! `shep-kelpie lease` on the GPU, end to end against the real binary
 //!
 //! Every test takes a lock under its own scratch `TMPDIR`, never the
 //! maintainer's. The ignored test runs the maintainer's own qwen-review
@@ -8,9 +8,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-const KELPIE: &str = env!("CARGO_BIN_EXE_kelpie");
+const KELPIE: &str = env!("CARGO_BIN_EXE_shep-kelpie");
 const TAKE_WHAT: &str =
-    "kelpie lease take, held for the maintainer until `kelpie lease return gpu`";
+    "shep-kelpie lease take, held for the maintainer until `shep-kelpie lease return gpu`";
 
 // A scratch temporary folder and no shepherd, so no test reaches the
 // maintainer's lock or dog.
@@ -98,7 +98,7 @@ fn run_holds_the_lock_in_the_scripts_format_while_the_command_runs() {
     let mut lines = seen.lines();
     let pid: u32 = lines.next().unwrap().parse().unwrap();
     assert_ne!(pid, 0);
-    let what = format!("kelpie lease run: {}", command.join(" "));
+    let what = format!("shep-kelpie lease run: {}", command.join(" "));
     assert_eq!(lines.next(), Some(what.as_str()));
     assert!(!lock.exists(), "the lock outlived the command");
 }
@@ -225,7 +225,7 @@ fn return_refuses_a_lock_it_did_not_take() {
     assert_eq!(out.status.code(), Some(1));
     assert!(
         text(&out.stderr).contains(&format!(
-            "held by pid {} running round 2 in /tmp/hunks, not by `kelpie lease take gpu`",
+            "held by pid {} running round 2 in /tmp/hunks, not by `shep-kelpie lease take gpu`",
             round.id()
         )),
         "{}",
@@ -307,7 +307,7 @@ fn an_unknown_lease_command_prints_usage() {
     let s = Scratch::new();
     let out = s.kelpie(&["lease", "run", "gpu", "--"]).output().unwrap();
     assert_eq!(out.status.code(), Some(2));
-    assert!(text(&out.stderr).contains("kelpie lease take <kind>"));
+    assert!(text(&out.stderr).contains("shep-kelpie lease take <kind>"));
 }
 
 fn qwen_review() -> PathBuf {
@@ -337,7 +337,7 @@ fn a_qwen_run_waits_behind_take_and_proceeds_after_return() {
     assert!(take.status.success(), "{}", text(&take.stderr));
     let probe = qwen(true).output().unwrap();
     assert_eq!(probe.status.code(), Some(4), "{}", text(&probe.stderr));
-    assert!(text(&probe.stderr).contains("kelpie lease take"));
+    assert!(text(&probe.stderr).contains("shep-kelpie lease take"));
 
     let round = qwen(false).spawn().unwrap();
     std::thread::sleep(Duration::from_secs(2));

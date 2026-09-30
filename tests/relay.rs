@@ -14,7 +14,7 @@ use tempfile::TempDir;
 use tokio::process::Command;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-const KELPIE: &str = env!("CARGO_BIN_EXE_kelpie");
+const KELPIE: &str = env!("CARGO_BIN_EXE_shep-kelpie");
 
 // Bounds each run of the binary, so a hang fails by name.
 const PATIENCE: Duration = Duration::from_secs(20);
@@ -90,7 +90,7 @@ const STATUS: &str = r#"{"project":"shep","rulings":[]}"#;
 fn rule_trigger(params: &str) -> Request {
     Request::Trigger {
         selector: SelectorSpec::Name("shep".into()),
-        action: kelpie::runner::RELAY_RULE.into(),
+        action: shep_kelpie::runner::RELAY_RULE.into(),
         params: Some(params.into()),
     }
 }
@@ -99,7 +99,7 @@ fn rule_trigger(params: &str) -> Request {
 #[tokio::test]
 async fn relay_yes_reaches_the_shepherd_at_shep_home_not_the_shep_on_path() {
     let scene = Scene::new();
-    let mut sent = scene.shepherd(kelpie::shepherd::SHEP_VERSION).await;
+    let mut sent = scene.shepherd(shep_kelpie::shepherd::SHEP_VERSION).await;
     let output = scene.kelpie(&["relay-yes", "shep", "3"]).await;
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
@@ -113,7 +113,7 @@ async fn relay_yes_reaches_the_shepherd_at_shep_home_not_the_shep_on_path() {
 #[tokio::test]
 async fn relay_answer_reaches_the_shepherd_at_shep_home_not_the_shep_on_path() {
     let scene = Scene::new();
-    let mut sent = scene.shepherd(kelpie::shepherd::SHEP_VERSION).await;
+    let mut sent = scene.shepherd(shep_kelpie::shepherd::SHEP_VERSION).await;
     let output = scene
         .kelpie(&["relay-answer", "shep", "3 no rename the flag"])
         .await;

@@ -5,10 +5,10 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-use kelpie::relay::BarePath;
 use serde_json::json;
+use shep_kelpie::relay::BarePath;
 
-const KELPIE: &str = env!("CARGO_BIN_EXE_kelpie");
+const KELPIE: &str = env!("CARGO_BIN_EXE_shep-kelpie");
 
 // Claude Code runs a hook's command through the shell, with the call on stdin.
 fn hook(tool: &str, command: &str) -> Output {
@@ -17,7 +17,7 @@ fn hook(tool: &str, command: &str) -> Output {
 
 fn hook_run_as(kelpie_path: &str, tool: &str, command: &str) -> Output {
     let program = BarePath::of(Path::new(kelpie_path)).unwrap();
-    let settings = kelpie::relay::settings(Path::new("/k/shep"), program);
+    let settings = shep_kelpie::relay::settings(Path::new("/k/shep"), program);
     let line = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
         .as_str()
         .unwrap()

@@ -102,9 +102,9 @@ async fn start_and_pause_leave_a_sheep_that_is_not_kelpie_s_alone() {
     let client = client(&shepherd).await;
     for name in ["web", "koji"] {
         let err = in_time(start(&client, &project(name))).await.unwrap_err();
-        assert!(err.starts_with("no kelpie runner named"), "{err}");
+        assert!(err.starts_with("no shep-kelpie runner named"), "{err}");
         let err = in_time(pause(&client, &project(name))).await.unwrap_err();
-        assert!(err.starts_with("no kelpie runner named"), "{err}");
+        assert!(err.starts_with("no shep-kelpie runner named"), "{err}");
     }
     assert_eq!(shepherd.writes(), []);
     assert!(

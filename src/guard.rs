@@ -1,4 +1,4 @@
-//! `kelpie guard`: the PreToolUse hook on every worker's Bash and Agent calls
+//! `shep-kelpie guard`: the PreToolUse hook on every worker's Bash and Agent calls
 //!
 //! Kelpie adds it to every worker, before any hook a project names. It
 //! refuses two things a worker's commit or pull request would carry out:

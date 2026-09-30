@@ -1,6 +1,6 @@
 //! Kelpie's copy of mattpocock/skills, built into the binary
 //!
-//! `scripts/vendor-skills.sh` fetches it into `crates/kelpie/skills/` at the
+//! `scripts/vendor-skills.sh` fetches it into `skills/` at the
 //! pinned commit, with its licence and the pin's `git ls-tree` in
 //! `blobs.txt`. The runner writes it out as a Claude Code plugin when it
 //! starts, so a project installs nothing.

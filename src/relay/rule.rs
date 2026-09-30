@@ -1,4 +1,4 @@
-//! `kelpie relay-yes` and `relay-answer`: a ruling sent to kelpie's shepherd
+//! `shep-kelpie relay-yes` and `relay-answer`: a ruling sent to kelpie's shepherd
 //!
 //! Both reach the shepherd through [`crate::shepherd`], never a `shep`
 //! binary: an older one found on `PATH` can take over a newer shepherd. A
@@ -18,9 +18,9 @@ use crate::shepherd::{self, ConnectRefused};
 /// A ruling the relay passes on to a runner's `relay-rule` action
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ruling<'a> {
-    /// `kelpie relay-yes`: the ruling's id, sent as `<id> yes`
+    /// `shep-kelpie relay-yes`: the ruling's id, sent as `<id> yes`
     Yes(&'a str),
-    /// `kelpie relay-answer`: a `<id> no <note>` or `<id> answer <text>`
+    /// `shep-kelpie relay-answer`: a `<id> no <note>` or `<id> answer <text>`
     NoOrAnswer(&'a str),
 }
 
@@ -388,8 +388,8 @@ mod tests {
     }
 
     #[test]
-    fn the_version_is_the_one_the_workspace_pins() {
-        let manifest = include_str!("../../../../Cargo.toml");
+    fn the_version_is_the_one_the_manifest_pins() {
+        let manifest = include_str!("../../Cargo.toml");
         for krate in ["shep-client", "shep-channel"] {
             let pin = format!("{krate} = {{ version = \"={SHEP_VERSION}\"");
             assert!(

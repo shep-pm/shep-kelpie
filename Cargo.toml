@@ -1,8 +1,6 @@
-[workspace]
-resolver = "3"
-members = ["crates/*"]
-
-[workspace.package]
+[package]
+name = "shep-kelpie"
+description = "A shep dog that runs Claude Code workers from a planned work item to a merged pull request"
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.88"
@@ -10,32 +8,36 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/shep-pm/shep-kelpie"
 publish = false
 
-[workspace.dependencies]
-# Zone-aware dates, for the reset times `/usage` prints in the maintainer's zone
-jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-zoneinfo"] }
+[dependencies]
 # The authenticator codes that answer a ruling from ntfy (RFC 6238 TOTP)
 hmac = { version = "0.13", default-features = false }
-sha1 = { version = "0.11", default-features = false }
-# The terminal QR code `kelpie totp` prints for an authenticator app to scan
+# Zone-aware dates, for the reset times `/usage` prints in the maintainer's zone
+jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-zoneinfo"] }
+# The terminal QR code `shep-kelpie totp` prints for an authenticator app to scan
 qrcode = { version = "0.14", default-features = false }
 # The settings' JSON Schema, in the version shep-client builds it with
 schemars = { version = "1.2.2", default-features = false, features = ["derive", "std"] }
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
+sha1 = { version = "0.11", default-features = false }
+shep-channel = { version = "=0.11.0", default-features = false, features = ["client"] }
 # `schema` answers shep's `--schema` probe, which lookout edits kelpie's settings from
 shep-client = { version = "=0.11.0", default-features = false, features = ["schema"] }
-shep-channel = { version = "=0.11.0", default-features = false, features = ["client"] }
 tokio = { version = "1", default-features = false, features = ["macros", "process", "rt", "signal", "sync", "time"] }
 toml = { version = "0.9", default-features = false, features = ["std", "parse", "display", "serde"] }
+
+[dev-dependencies]
+# Only for the fake shepherds the relay's commands are tested against
+shep-client = { version = "=0.11.0", default-features = false, features = ["schema", "test-support"] }
 # Only for throwaway homes and repos in tests
 tempfile = { version = "3", default-features = false }
 
-[workspace.lints.rust]
+[lints.rust]
 missing_docs = "deny"
 missing_debug_implementations = "deny"
 unsafe_code = "forbid"
 
-[workspace.lints.clippy]
+[lints.clippy]
 all = { level = "warn", priority = -1 }
 
 # Debug info dominates a debug build, and dependencies never need theirs.
