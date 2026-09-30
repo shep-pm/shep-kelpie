@@ -332,7 +332,7 @@ impl Runner {
             .map_err(|e| AdoptError::Issue(issue, e))?;
         let worker = worker_override(&found.labels)
             .map_err(AdoptError::Label)?
-            .unwrap_or_else(|| WorkerModel::from(&self.settings.models.worker));
+            .unwrap_or_else(|| WorkerModel::from(&self.agents.worker));
         let session = new_session_id().map_err(|e| AdoptError::Session(e.to_string()))?;
         let fresh = self.fresh(issue, found.title.clone(), worker.clone(), session);
         // A start that failed part way leaves a worktree on a head `origin`

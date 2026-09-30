@@ -1,22 +1,24 @@
 //! The review loop's reviewers, by name
 //!
 //! Kelpie's `[local_reviewers]` define each one: a local model at an
-//! endpoint, a command, or a Claude session with its model and effort. A
-//! project lists them in `review.reviewers`, in the order the loop runs
-//! them. `claude` is always defined: the project's own Claude round on
-//! `models.reviewer`. A project that lists none runs `review.local`, the
+//! endpoint, a command, a Claude session with its model and effort, or a
+//! session on an agent kelpie's `[agents]` define. A project lists them in
+//! `review.reviewers`, in the order the loop runs them. `claude` is always
+//! defined: the project's own Claude round on its reviewer's agent. A project that lists none runs `review.local`, the
 //! maintainer's qwen-review script when that is absent too, then `claude`.
 
-use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::agents::find;
 use super::{
-    Effort, Endpoint, LocalCommand, LocalRound, NonBlank, RoleModel, Settings, SettingsError,
+    AgentName, Effort, Endpoint, LocalCommand, LocalRound, NonBlank, RoleModel, Settings,
+    SettingsError,
 };
+use crate::webhook::KelpieSettings;
 
 /// The name of the project's own Claude round, which kelpie always defines
 pub const CLAUDE: &str = "claude";
@@ -109,7 +111,7 @@ impl TryFrom<String> for LeaseName {
     }
 }
 
-fn lowercase_name(value: &str) -> bool {
+pub(super) fn lowercase_name(value: &str) -> bool {
     let allowed = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-';
     !value.is_empty() && value.chars().all(allowed)
 }
@@ -124,6 +126,20 @@ pub enum Definition {
     Command(LocalCommand),
     /// A fresh Claude session on its own model and effort
     Claude(ClaudeSession),
+    /// A fresh session on an agent kelpie's `[agents]` define
+    Session(AgentSession),
+}
+
+/// A session on a named agent that reviews a round
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentSession {
+    /// The agent, from kelpie's `[agents]`
+    pub agent: AgentName,
+    /// Globs of the files a pull request must change for this reviewer to
+    /// run. Every pull request when absent.
+    #[serde(default)]
+    pub paths: Vec<NonBlank>,
 }
 
 /// A Claude session that reviews a round
@@ -198,18 +214,19 @@ impl LoopReviewer {
 impl Settings {
     /// The reviewers the project's loop runs, in order, each once
     ///
-    /// `defined` is kelpie's `[local_reviewers]`, and `~/` in a command
-    /// expands against `home`.
+    /// Reviewers and agents are `kelpie`'s, and `~/` in a command expands
+    /// against `home`.
     ///
     /// # Errors
     ///
-    /// [`SettingsError::Invalid`] naming a reviewer that is not defined, or
-    /// one whose definition cannot work.
+    /// [`SettingsError::Invalid`] naming a reviewer or agent that is not
+    /// defined, or a reviewer whose definition cannot work.
     pub fn lineup(
         &self,
-        defined: &BTreeMap<ReviewerName, Definition>,
+        kelpie: &KelpieSettings,
         home: &Path,
     ) -> Result<Vec<LoopReviewer>, SettingsError> {
+        let defined = &kelpie.local_reviewers;
         let invalid = |reason: String| SettingsError::Invalid {
             setting: SETTING,
             reason,
@@ -217,10 +234,10 @@ impl Settings {
         if defined.contains_key(&ReviewerName::claude()) {
             return Err(invalid(format!(
                 "kelpie's `[local_reviewers.{CLAUDE}]` is taken: `{CLAUDE}` is each \
-                 project's own Claude round on `models.reviewer`, so name yours otherwise"
+                 project's own Claude round on its reviewer's agent, so name yours otherwise"
             )));
         }
-        let claude = LoopReviewer::claude(&self.models.reviewer);
+        let claude = LoopReviewer::claude(&self.role_agents(&kelpie.agents)?.reviewer);
         if self.review.reviewers.is_empty() {
             let local = (self.review.local.clone()).unwrap_or_else(|| LocalRound::default_at(home));
             if !local.is_on() {
@@ -265,6 +282,15 @@ impl Settings {
                     Runs::Local(LocalRound::Command(command))
                 }
                 Definition::Claude(session) => Runs::Claude(session),
+                Definition::Session(AgentSession { agent, paths }) => {
+                    let at = format!("{at}.agent");
+                    let model = find(&kelpie.agents, &agent, &at, SETTING)?;
+                    Runs::Claude(ClaudeSession {
+                        model: model.model,
+                        effort: model.effort,
+                        paths,
+                    })
+                }
             };
             if let Runs::Local(local) = &runs {
                 local.check(&at).map_err(invalid)?;

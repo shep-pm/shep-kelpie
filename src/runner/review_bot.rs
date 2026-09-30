@@ -545,7 +545,7 @@ impl Runner {
         let item = self.item();
         let (issue, worktree, folder) =
             (item.issue, item.worktree.clone(), self.paths.worker.clone());
-        let model = self.settings.models.judge.clone();
+        let model = self.agents.judge.clone();
         // A review bot reviews the whole pull request, so its judge diffs from `main`.
         let main = format!("origin/{}", crate::worktree::BASE);
         match calls::judge_call(

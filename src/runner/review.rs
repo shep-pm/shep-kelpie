@@ -107,7 +107,7 @@ impl Runner {
                     return self.finalize_round(review, findings, verdicts);
                 }
                 let finding = findings[verdicts.len()].clone();
-                let model = self.settings.models.judge.clone();
+                let model = self.agents.judge.clone();
                 let shots = self.preview_on().then(|| self.paths.shots(issue));
                 match calls::judge_call(
                     issue,

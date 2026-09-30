@@ -37,6 +37,14 @@ url = "https://ntfy.sh/your-private-topic"
 # reviews = 20
 # hours = 720
 
+# The agents a project may name for its worker, reviewer and judge, and its
+# session reviewers: a harness, and the model and effort it runs on. The one
+# harness is Claude Code, `claude-code`.
+# [kelpie.agents.opus-high]
+# harness = "claude-code"
+# model = "claude-opus-5-5"
+# effort = "high"
+
 # The review loop's reviewers a project may list in `review.reviewers`, by
 # name. `claude` is always the project's own Claude round, so it is not
 # defined here. The README says what each kind does.
@@ -46,8 +54,9 @@ url = "https://ntfy.sh/your-private-topic"
 # `endpoint` is kelpie's own reviewer: any OpenAI-compatible server (Ollama,
 # LM Studio, llama.cpp's server), its model, and the context size the server
 # gives that model, in tokens. `claude` is a fresh Claude session on its own
-# model and effort. A missing command or an unreachable endpoint stops the
-# runner of a project that lists it.
+# model and effort, and `session` a fresh session on the agent its `agent`
+# names from `[kelpie.agents]` above. A missing command or an unreachable
+# endpoint stops the runner of a project that lists it.
 #
 # `lease` is the lock kelpie holds around each round. `gpu` is this
 # machine's GPU lock, the one the qwen scripts take, so leave it off for a

@@ -5,7 +5,7 @@
 # `review.local_rounds`, `pacing.enabled`,
 # `worker.allowed_domains`, `worker.build_env`, `worker.instructions_file`,
 # `worker.turn_timeout`, `ruling_channels`, `pull_request_reviewers`,
-# `preview` and `skills`, which a table
+# `preview`, `skills` and `agents`, which a table
 # written before them may leave out. This entry holds the first build's
 # defaults, for shep.
 
@@ -69,6 +69,14 @@ effort = "low"
 [app.dogs.kelpie.models.relay]
 model = "claude-haiku-4-5-20251001"
 effort = "low"
+
+# The agent each role runs on, from those kelpie's `[kelpie.agents]` define,
+# over its `models` entry. A role left out keeps `models` on Claude Code.
+# The relay stays on `models.relay`.
+# [app.dogs.kelpie.agents]
+# worker = "opus-high"
+# reviewer = "opus-high"
+# judge = "opus-high"
 
 [app.dogs.kelpie.review]
 loop_guard = 8
