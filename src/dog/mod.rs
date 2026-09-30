@@ -11,6 +11,7 @@
 
 pub mod desk;
 pub mod left_over;
+mod link;
 pub mod triggers;
 
 use std::collections::HashMap;
@@ -20,12 +21,12 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use shep_client::Client;
 use shep_client::shep_core::protocol::request::{ActionOutcome, Response};
 use shep_client::shep_core::protocol::{
     BusEvent, ChildMessage, ProcessEventKind, Request, SelectorSpec,
 };
 use shep_client::shep_core::status::ProcStatus;
+use shep_client::{EventStream, Lagged, ReconnectingClient};
 use tokio::sync::mpsc;
 
 use crate::adapters::SystemClock;
@@ -157,7 +158,7 @@ fn open(file: BookFile, clock: Box<dyn Clock>, gpu: GpuLock, reviewers: Reviewer
 
 // The review windows kelpie's section defines. A section that cannot be
 // read books CodeRabbit's alone, as a dog did before definitions.
-async fn reviewers(client: &Client) -> Reviewers {
+async fn reviewers(client: &ReconnectingClient) -> Reviewers {
     let section = client.request(Request::DogConfig {
         name: crate::shepherd::DOG.into(),
     });
@@ -203,22 +204,10 @@ async fn serve() -> Result<(), String> {
         return Err(no_channel());
     }
     let socket = shep_home::required(shep_home::DOG_FIX)?.join("run/shep.sock");
-    let connect = |what: &'static str| {
-        let socket = socket.clone();
-        async move {
-            Client::connect(&socket).await.map_err(|e| {
-                format!(
-                    "cannot reach the shepherd at {} {what}: {e}",
-                    socket.display()
-                )
-            })
-        }
-    };
-    let (listener, client) = (connect("for events").await?, connect("for requests").await?);
-    let mut events = listener
-        .subscribe(vec!["channel.metric".into(), "process.*".into()])
-        .await
-        .map_err(|e| format!("cannot subscribe to the shepherd's bus: {e}"))?;
+    let identity = link::identity();
+    let listener = link::connect(&socket, &identity, "for events").await?;
+    let client = link::connect(&socket, &identity, "for requests").await?;
+    let mut events = link::subscribe(&listener, link::BUDGET).await?;
 
     let lock = GpuLock::under(&gpu::temp_dir());
     println!("the GPU lock is {}", lock.path().display());
@@ -265,9 +254,21 @@ async fn serve() -> Result<(), String> {
     let mut ticks = tokio::time::interval(WINDOW_TICK);
     let ended = loop {
         let grants = tokio::select! {
-            event = events.next() => match on_event(event, &desk, &client, &mut names).await {
-                Ok(grants) => grants,
-                Err(e) => break Err(e),
+            event = events.next() => {
+                let read = match event {
+                    Some(event) => on_event(event, &desk, &client, &mut names).await,
+                    None => match rejoin(&listener, &client, &desk, &mut names).await {
+                        Ok((stream, grants)) => {
+                            events = stream;
+                            Ok(grants)
+                        }
+                        Err(e) => Err(e),
+                    },
+                };
+                match read {
+                    Ok(grants) => grants,
+                    Err(e) => break Err(e),
+                }
             },
             Some(grants) = to_deliver.recv() => grants,
             _ = ticks.tick() => lock_desk(&desk).change(Desk::tick),
@@ -288,21 +289,43 @@ fn lock_desk(desk: &Mutex<Kept>) -> std::sync::MutexGuard<'_, Kept> {
     desk.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-type Event = Option<Result<BusEvent, shep_client::Lagged>>;
+// The shepherd restarted: the bus stream ended with its connection, which
+// the reconnecting clients have since re-made under the dog's name. The
+// dog subscribes again and reads the flock, since what happened while it
+// was cut off is gone.
+async fn rejoin(
+    listener: &ReconnectingClient,
+    client: &ReconnectingClient,
+    desk: &Mutex<Kept>,
+    names: &mut HashMap<u32, String>,
+) -> Result<(EventStream, Vec<Delivery>), String> {
+    println!("the shepherd's bus closed: waiting for it to come back");
+    let events = link::subscribe(listener, link::BUDGET).await?;
+    let deadline = tokio::time::Instant::now() + link::BUDGET;
+    let grants = loop {
+        link::wait_for(client, link::BUDGET).await?;
+        match resync(desk, client, names).await {
+            Ok(grants) => break grants,
+            Err(e) if tokio::time::Instant::now() >= deadline => return Err(e),
+            Err(_) => link::pause().await,
+        }
+    };
+    println!("the shepherd is back: subscribed again");
+    Ok((events, grants))
+}
 
 async fn on_event(
-    event: Event,
+    event: Result<BusEvent, Lagged>,
     desk: &Mutex<Kept>,
-    client: &Client,
+    client: &ReconnectingClient,
     names: &mut HashMap<u32, String>,
 ) -> Result<Vec<Delivery>, String> {
     let event = match event {
-        None => return Err("the shepherd closed its bus".into()),
-        Some(Err(lagged)) => {
+        Err(lagged) => {
             println!("missed bus events ({lagged:?}): checking every runner");
             return resync(desk, client, names).await;
         }
-        Some(Ok(event)) => event,
+        Ok(event) => event,
     };
     match event {
         BusEvent::Channel {
@@ -339,7 +362,7 @@ async fn on_event(
 
 async fn resync(
     desk: &Mutex<Kept>,
-    client: &Client,
+    client: &ReconnectingClient,
     names: &mut HashMap<u32, String>,
 ) -> Result<Vec<Delivery>, String> {
     let listed = flock(client).await?;
@@ -352,7 +375,7 @@ struct Flock {
     live: HashMap<String, u32>,
 }
 
-async fn flock(client: &Client) -> Result<Flock, String> {
+async fn flock(client: &ReconnectingClient) -> Result<Flock, String> {
     let reply = client
         .request(Request::ListFlock)
         .await
@@ -371,7 +394,7 @@ async fn flock(client: &Client) -> Result<Flock, String> {
 
 // A grant that does not arrive is not retried: the runner raises its
 // totals again while it waits, and a runner that is gone is reclaimed.
-async fn deliver_grant(client: &Client, grant: &Delivery) {
+async fn deliver_grant(client: &ReconnectingClient, grant: &Delivery) {
     let Delivery {
         project,
         kind,

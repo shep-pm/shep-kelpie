@@ -16,7 +16,9 @@ use serde_json::{Value, json};
 use shep_client::Client;
 use shep_client::shep_core::config::AppConfig;
 use shep_client::shep_core::protocol::Request;
-use shep_client::shep_core::protocol::request::{ActionOutcome, DogSource, Response, SelectorSpec};
+use shep_client::shep_core::protocol::request::{
+    ActionOutcome, DogSource, ProcessInfo, Response, SelectorSpec,
+};
 use shep_client::shep_core::status::ProcStatus;
 use shep_kelpie::lease::wire::Asker;
 use shep_kelpie::lease::{Epoch, LeaseKind};
@@ -223,6 +225,14 @@ async fn until(what: &str, mut probe: impl AsyncFnMut() -> bool) {
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
+}
+
+async fn dog_row(client: &Client) -> ProcessInfo {
+    match client.request(Request::ListFlock).await.unwrap() {
+        Response::Flock(rows) => rows.into_iter().find(|r| r.name == DOG),
+        other => panic!("{other:?}"),
+    }
+    .expect("the dog's row")
 }
 
 async fn holds(client: &Client, runner: &str) -> bool {
@@ -526,12 +536,15 @@ async fn an_adopted_start_runs_the_dog_instead_of_exiting() {
         trigger(&client, DOG, "status", None).await["leases"].is_array()
     })
     .await;
-    let rows = match client.request(Request::ListFlock).await.unwrap() {
-        Response::Flock(rows) => rows,
-        other => panic!("{other:?}"),
-    };
-    let dog = rows.iter().find(|r| r.name == DOG).expect("the dog's row");
+    // A dog that connects without naming itself is listed `silent`, which
+    // is no handshake; the wait is for the shepherd to record the name.
+    until("the dog to name itself", async || {
+        dog_row(&client).await.handshook == Some(true)
+    })
+    .await;
+    let dog = dog_row(&client).await;
     assert_eq!(dog.status, ProcStatus::Online);
+    assert_eq!(dog.dog_stale, Some(false), "shep gave up on the dog");
     assert_eq!(dog.restarts, 0, "the dog restarted");
     assert!(
         matches!(dog.dog, Some(DogSource::Adopted { channel: true, .. })),
