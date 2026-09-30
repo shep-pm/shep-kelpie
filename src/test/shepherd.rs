@@ -27,6 +27,16 @@ struct Sheep {
     dog: Option<bool>,
     // Whether a runner just started is still taking its actions
     opening: bool,
+    // What shep says of a dog's handshake, and whether it gave the dog up
+    heard: Heard,
+}
+
+/// Whether a dog has named itself to the shepherd
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Heard {
+    Named,
+    Silent,
+    GivenUp,
 }
 
 /// The shepherd, its home, and what it was sent
@@ -84,6 +94,7 @@ impl FakeShepherd {
             online,
             dog: None,
             opening: false,
+            heard: Heard::Named,
         };
         self.flock.lock().unwrap().push(sheep);
     }
@@ -108,8 +119,25 @@ impl FakeShepherd {
             online: true,
             dog: Some(channel),
             opening: false,
+            heard: Heard::Named,
         };
         self.flock.lock().unwrap().push(sheep);
+    }
+
+    /// Has the dog named `name` run without ever naming itself in its handshake
+    pub(crate) fn never_names(&self, name: &str) {
+        self.hears(name, Heard::Silent);
+    }
+
+    /// Has shep give up on the dog named `name` after restarting it once for silence
+    pub(crate) fn gives_up_on(&self, name: &str) {
+        self.hears(name, Heard::GivenUp);
+    }
+
+    fn hears(&self, name: &str, heard: Heard) {
+        let mut flock = self.flock.lock().unwrap();
+        let sheep = flock.iter_mut().find(|s| s.config.name == name).unwrap();
+        sheep.heard = heard;
     }
 
     /// Stops the sheep or dog named `name`, as a crash loop that gave up would
@@ -151,10 +179,13 @@ fn info(id: usize, sheep: &Sheep) -> ProcessInfo {
     };
     let mut info = ProcessInfo::builder(u32::try_from(id).unwrap(), &sheep.config.name, status);
     if let Some(channel) = sheep.dog {
-        info = info.dog(Some(DogSource::Adopted {
-            path: sheep.config.script.clone(),
-            channel,
-        }));
+        info = info
+            .dog(Some(DogSource::Adopted {
+                path: sheep.config.script.clone(),
+                channel,
+            }))
+            .handshook(Some(sheep.heard == Heard::Named))
+            .dog_stale(Some(sheep.heard == Heard::GivenUp));
     }
     info.build()
 }
@@ -195,6 +226,7 @@ fn answer(flock: &mut Vec<Sheep>, section: &str, request: &Request) -> Response 
                         online: false,
                         dog: None,
                         opening: false,
+                        heard: Heard::Named,
                     });
                 }
             }

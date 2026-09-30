@@ -52,6 +52,7 @@ impl Scene {
         let forge = FakeForge::new(PathBuf::from("/nowhere"));
         forge.set_repo_labels(&["bug", "ready-for-agent", "ready-for-human", "review please"]);
         shepherd.holds_section(WEBHOOK);
+        shepherd.holds_dog("kelpie", true);
         let clock = FakeClock::at(1_000);
         let scene = Self {
             home: shepherd.scratch("home"),
@@ -171,6 +172,7 @@ async fn a_machine_with_everything_in_place_passes_and_changes_nothing() {
             "gh",
             "sandbox",
             "shepherd",
+            "dog",
             "golbat: checkout",
             "golbat: push access",
             "golbat: labels",
@@ -191,6 +193,34 @@ async fn a_machine_with_everything_in_place_passes_and_changes_nothing() {
         report.render().last().unwrap(),
         "nothing a project needs is missing"
     );
+}
+
+// Shep lists a dog that is up and never named itself as silent, then gives
+// up on it, and a dog in either state holds no lease.
+#[tokio::test]
+async fn a_dog_that_never_named_itself_is_missing_and_told_its_fix() {
+    let scene = Scene::new().await;
+    scene.shepherd.never_names("kelpie");
+    let report = scene.report().await;
+    let (what, fix) = missing(&report, "dog");
+    assert!(what.contains("silent"), "{what}");
+    assert!(fix.contains("`shep bleats kelpie`"), "{fix}");
+    assert!(!report.passed());
+
+    scene.shepherd.gives_up_on("kelpie");
+    let report = scene.report().await;
+    let (what, fix) = missing(&report, "dog");
+    assert!(what.contains("given up"), "{what}");
+    assert!(fix.contains("`shep restart kelpie`"), "{fix}");
+}
+
+#[tokio::test]
+async fn a_flock_with_no_dog_is_told_to_enable_it() {
+    let scene = Scene::new().await;
+    scene.shepherd.stops("kelpie");
+    let report = scene.report().await;
+    let (what, _) = missing(&report, "dog");
+    assert_eq!(what, "kelpie's dog is not running");
 }
 
 #[tokio::test]

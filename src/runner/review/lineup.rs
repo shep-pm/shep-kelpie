@@ -78,9 +78,14 @@ impl Runner {
         })
     }
 
-    /// Whether `review`'s round was run by a local reviewer, which
-    /// `review.local_rounds` counts
-    pub(super) fn ran_local(&self, review: &Review) -> bool {
+    /// Whether `review`'s round counts toward `review.local_rounds`: a local
+    /// reviewer's, where a limit is set
+    ///
+    /// With no limit nothing is counted, so an older binary reads the state file.
+    pub(super) fn counts_local(&self, review: &Review) -> bool {
+        if self.settings.review.local_rounds.is_none() {
+            return false;
+        }
         match &review.reviewer {
             Some(name) => self.listed(name).is_some_and(|r| r.is_local()),
             // An older state file ran the local round on odd rounds.

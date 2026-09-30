@@ -158,7 +158,7 @@ impl Runner {
             None => None,
         };
         let now = self.ports.clock.now();
-        let local = self.ran_local(&review);
+        let local = self.counts_local(&review);
         self.update(|item| {
             item.phase = advance(review, clean, now, local, &mut item.local_rounds)
         })?;
@@ -225,7 +225,7 @@ impl Runner {
                 ..f
             })
             .collect();
-        let local = self.ran_local(&review);
+        let local = self.counts_local(&review);
         if held.is_empty() {
             self.update(|item| {
                 item.phase = advance(review, true, now, local, &mut item.local_rounds);
@@ -291,7 +291,7 @@ impl Runner {
         let local = self
             .current()
             .and_then(|item| match &item.phase {
-                Phase::Review(review) => Some(self.ran_local(review)),
+                Phase::Review(review) => Some(self.counts_local(review)),
                 _ => None,
             })
             .unwrap_or(false);
@@ -404,7 +404,7 @@ impl Runner {
 /// could run, or when the round before was clean and someone else's. An
 /// older state file names no reviewers, and its rounds strictly alternated.
 /// `ran` counts the work item's local rounds, this one included when
-/// `local` says it was one.
+/// `local` says it counts.
 pub(super) fn advance(
     review: Review,
     clean: bool,
