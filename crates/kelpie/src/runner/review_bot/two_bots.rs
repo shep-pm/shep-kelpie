@@ -382,3 +382,42 @@ fn a_bot_dropped_mid_round_gives_its_lease_back_when_the_work_item_ends() {
         "cubic took the second round too"
     );
 }
+
+// CodeRabbit left a thread open on an older head, and cubic takes the next
+// round: that thread still needs a ruling before the round is satisfied.
+#[test]
+fn the_other_bots_open_threads_are_judged_with_the_rounds_own() {
+    let rig = listing("shep", r#"["coderabbit", "cubic"]"#);
+    rig.leases.close(&cr(), true);
+    rig.forge
+        .coderabbit
+        .review(71, "0lderhead", Rig::EPOCH, &["Close the file."]);
+    let (runner, head) = ready(&rig);
+    assert_eq!(step(&runner).unwrap(), summoned(&head));
+    let summon = now(&rig);
+    rig.forge
+        .coderabbit
+        .cubic_review(71, &head, summon + 300, &[]);
+    rig.clock.advance(300);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::CodeRabbitReviewed {
+            issue: 7,
+            pull_request: 71,
+            round: 1,
+            open_threads: 1
+        })
+    );
+}
+
+// Reading CodeRabbit fails while its window is closed: cubic still takes
+// the round.
+#[test]
+fn a_first_bot_that_cannot_be_read_leaves_the_round_to_the_next() {
+    let rig = listing("shep", r#"["coderabbit", "cubic"]"#);
+    rig.leases.close(&cr(), true);
+    let (runner, head) = ready(&rig);
+    rig.forge.coderabbit.set_down(true);
+    assert_eq!(step(&runner).unwrap(), summoned(&head));
+    assert_eq!(summons_by_comment(&rig), 1);
+}

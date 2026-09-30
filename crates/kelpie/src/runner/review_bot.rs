@@ -34,7 +34,7 @@ use super::review::{calls, findings, record_spent};
 
 use crate::lease::wire::WindowFact;
 use crate::ports::{Finding, PullRequestState, Timestamp, Verdict};
-use crate::review_bot::{Activity, Bot, Reading};
+use crate::review_bot::{Activity, Bot, Profile, Reading};
 use crate::state::{Fix, RulingKind, StateError};
 use crate::work_item::{CodeRabbitStage, OpenThread, Phase, Turn, WorkItem};
 
@@ -134,26 +134,30 @@ impl Runner {
     ) -> Result<Begin, StateError> {
         let number = self.number();
         let first = self.settings.reviewers()[0];
-        let activity = match self.activity(first, number) {
-            Ok(activity) => activity,
-            Err(reason) => return Ok(self.gate_failed(reason)),
-        };
-        if self.lands_unsummoned(first, &head, &activity) {
-            return self.review_landed(number, first, &activity);
+        // A first bot that cannot be read still leaves the round to another.
+        let read_first = self.activity(first, number);
+        if let Ok(activity) = &read_first
+            && self.lands_unsummoned(first, &head, activity)
+        {
+            return self.review_landed(number, first, activity);
         }
         if let Some(begin) = self.ready_for_review(number, &head, readied, full)? {
             return Ok(begin);
         }
         let Some(bot) = self.choose_bot()? else {
-            return Ok(Begin::Idle);
+            return Ok(match read_first {
+                Ok(_) => Begin::Idle,
+                Err(reason) => self.gate_failed(reason),
+            });
         };
-        let activity = if bot == first {
-            activity
+        let read = if bot == first {
+            read_first
         } else {
-            match self.activity(bot, number) {
-                Ok(activity) => activity,
-                Err(reason) => return Ok(self.gate_failed(reason)),
-            }
+            self.activity(bot, number)
+        };
+        let activity = match read {
+            Ok(activity) => activity,
+            Err(reason) => return Ok(self.gate_failed(reason)),
         };
         if self.lands_unsummoned(bot, &head, &activity) {
             self.release(bot)?;
@@ -498,14 +502,15 @@ impl Runner {
             self.update(|item| item.rebased = false)?;
         }
         let head = self.round_head();
-        let profile = self.profile(bot);
-        let threads: Vec<OpenThread> = activity
-            .open_threads()
-            .map(|t| OpenThread {
-                id: t.id.clone(),
-                finding: profile.finding(t),
-            })
-            .collect();
+        let mut threads = open_threads(&*self.profile(bot), activity);
+        // Another listed bot's threads still open are findings too, so the
+        // round is satisfied only with none open from any of them.
+        for other in self.settings.reviewers().into_iter().filter(|b| *b != bot) {
+            match self.activity(other, number) {
+                Ok(theirs) => threads.extend(open_threads(&*self.profile(other), &theirs)),
+                Err(reason) => return Ok(self.gate_failed(reason)),
+            }
+        }
         let round = self.item().coderabbit.rounds + 1;
         let open_threads = threads.len();
         if threads.is_empty() {
@@ -822,6 +827,14 @@ impl Runner {
             .pull_request
             .expect("a review bot round is of a known pull request")
     }
+}
+
+fn open_threads(profile: &dyn Profile, activity: &Activity) -> Vec<OpenThread> {
+    let open = activity.open_threads().map(|t| OpenThread {
+        id: t.id.clone(),
+        finding: profile.finding(t),
+    });
+    open.collect()
 }
 
 fn fix_prompt(bot: &str, number: u64, round: u32, count: usize, path: &std::path::Path) -> String {

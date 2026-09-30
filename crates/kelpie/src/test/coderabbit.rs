@@ -186,7 +186,8 @@ impl FakeCodeRabbit {
 
     pub(super) fn activity(&self, number: u64, login: &str) -> Result<Activity, ForgeError> {
         self.logins.lock().unwrap().push(login.to_owned());
-        if self.down.load(Ordering::SeqCst) {
+        let coderabbit = login == crate::coderabbit::LOGIN.rest;
+        if coderabbit && self.down.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("CodeRabbit's comments are down".into()));
         }
         let activity = self.activity.lock().unwrap();
