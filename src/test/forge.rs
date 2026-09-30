@@ -499,14 +499,17 @@ impl Forge for FakeForge {
             title: format!("Title of #{number}"),
             body: format!("Body of #{number}.\n"),
             labels: self.labels_of(number),
+            open: !self.closed.lock().unwrap().contains(&number),
         })
     }
 
     fn ready_issues(&self, _repo: &ForgeSlug) -> Result<Vec<ReadyIssue>, ForgeError> {
         self.board()?;
         let ready = self.ready.lock().unwrap().clone();
+        let closed = self.closed.lock().unwrap().clone();
         Ok(ready
             .into_iter()
+            .filter(|i| !closed.contains(&i.number))
             .map(|i| ReadyIssue {
                 labels: self.labels_of(i.number),
                 blocked_by: self.blockers_of(i.number),

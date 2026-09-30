@@ -759,4 +759,37 @@ mod tests {
         assert_eq!(status["work_item"], json!(null));
         assert_eq!(rig.claude.calls().len(), calls);
     }
+
+    fn finished_on_disk(rig: &Rig) -> serde_json::Value {
+        let text = std::fs::read_to_string(rig.paths().state).unwrap();
+        serde_json::from_str::<serde_json::Value>(&text).unwrap()["finished"].clone()
+    }
+
+    #[test]
+    fn a_finished_issue_leaves_the_state_file_once_its_issue_is_closed() {
+        let (rig, runner, _) = Rig::parked("webapp");
+        rig.forge.list_ready(7, false);
+        rig.ask(&runner, "rule", Some("1 yes"));
+        assert!(finished(ready_then_merge(&rig, &runner)));
+        assert_eq!(finished_on_disk(&rig), json!([7]));
+
+        assert_eq!(step(&runner).unwrap(), None);
+        assert_eq!(finished_on_disk(&rig), json!([7]), "the issue is open");
+
+        rig.forge.close_issue(7);
+        assert_eq!(step(&runner).unwrap(), None);
+        assert_eq!(finished_on_disk(&rig), json!([]));
+    }
+
+    #[test]
+    fn a_finished_issue_the_forge_cannot_answer_for_stays() {
+        let (rig, runner, _) = Rig::parked("webapp");
+        rig.forge.list_ready(7, false);
+        rig.ask(&runner, "rule", Some("1 yes"));
+        assert!(finished(ready_then_merge(&rig, &runner)));
+
+        rig.forge.remove_issue(7);
+        assert_eq!(step(&runner).unwrap(), None);
+        assert_eq!(finished_on_disk(&rig), json!([7]));
+    }
 }
