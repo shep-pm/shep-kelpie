@@ -161,7 +161,7 @@ async fn a_sheep_that_is_not_kelpie_s_keeps_its_name() {
 #[tokio::test]
 async fn an_enabled_dog_that_holds_the_project_s_name_is_not_kelpie_s() {
     let scene = Scene::new().await;
-    scene.shepherd.holds_dog("koji");
+    scene.shepherd.holds_dog("koji", false);
     let err = scene.add().await.unwrap_err();
     assert!(err.contains("is not kelpie's"), "{err}");
 }
@@ -279,7 +279,7 @@ async fn a_flockfile_runner_or_a_broken_table_for_this_checkout_is_refused() {
 #[tokio::test]
 async fn kelpie_adopted_and_enabled_is_told_to_disable() {
     let scene = Scene::new().await;
-    scene.shepherd.holds_dog("kelpie");
+    scene.shepherd.holds_dog("kelpie", false);
     let lines = scene.add().await.unwrap();
     assert!(lines[0].ends_with("run `shep disable kelpie`"), "{lines:?}");
     assert!(scene.shepherd.sheep("kelpie-dog").is_some());

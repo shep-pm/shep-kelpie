@@ -2,7 +2,7 @@
 //! `pause` and `status`
 //!
 //! It keeps each sheep's config and status, answers the requests those
-//! commands send as shep 0.11 does, and records every request.
+//! commands send as shep 0.12 does, and records every request.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -18,12 +18,13 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::shepherd::SHEP_VERSION;
 
-/// One sheep: its config, whether it runs, and whether a dog holds its name
+/// One sheep: its config, whether it runs, and whether a dog holds its
+/// name, which is `Some` saying whether that dog has the channel
 #[derive(Debug, Clone)]
 struct Sheep {
     config: AppConfig,
     online: bool,
-    dog: bool,
+    dog: Option<bool>,
     // Whether a runner just started is still taking its actions
     opening: bool,
 }
@@ -81,7 +82,7 @@ impl FakeShepherd {
         let sheep = Sheep {
             config,
             online,
-            dog: false,
+            dog: None,
             opening: false,
         };
         self.flock.lock().unwrap().push(sheep);
@@ -99,12 +100,13 @@ impl FakeShepherd {
         sheep.opening = true;
     }
 
-    /// Puts an adopted dog named `name` in the flock, running
-    pub(crate) fn holds_dog(&self, name: &str) {
+    /// Puts an adopted dog named `name` in the flock, running, with the
+    /// shepherd channel or without
+    pub(crate) fn holds_dog(&self, name: &str, channel: bool) {
         let sheep = Sheep {
             config: AppConfig::minimal(name, "/opt/kelpie"),
             online: true,
-            dog: true,
+            dog: Some(channel),
             opening: false,
         };
         self.flock.lock().unwrap().push(sheep);
@@ -141,9 +143,10 @@ fn info(id: usize, sheep: &Sheep) -> ProcessInfo {
         ProcStatus::Stopped
     };
     let mut info = ProcessInfo::builder(u32::try_from(id).unwrap(), &sheep.config.name, status);
-    if sheep.dog {
+    if let Some(channel) = sheep.dog {
         info = info.dog(Some(DogSource::Adopted {
             path: sheep.config.script.clone(),
+            channel,
         }));
     }
     info.build()
@@ -183,7 +186,7 @@ fn answer(flock: &mut Vec<Sheep>, section: &str, request: &Request) -> Response 
                     flock.push(Sheep {
                         config: app.clone(),
                         online: false,
-                        dog: false,
+                        dog: None,
                         opening: false,
                     });
                 }
@@ -224,7 +227,9 @@ fn answer(flock: &mut Vec<Sheep>, section: &str, request: &Request) -> Response 
             let sheep = &mut flock[at];
             // A runner opens its channel before it takes its actions, and
             // shep-channel answers an action nobody took in plain text.
-            let outcome = if !sheep.online {
+            let outcome = if sheep.dog == Some(false) {
+                ActionOutcome::DogNoChannel
+            } else if !sheep.online {
                 ActionOutcome::NoChannel
             } else if sheep.opening {
                 sheep.opening = false;

@@ -117,7 +117,7 @@ async fn start_and_pause_leave_a_sheep_that_is_not_kelpie_s_alone() {
 async fn start_with_kelpie_adopted_and_enabled_and_no_dog_says_to_disable_it() {
     let mut shepherd = FakeShepherd::new().await;
     runner(&shepherd, "koji", Path::new("/src/koji"), false);
-    shepherd.holds_dog("kelpie");
+    shepherd.holds_dog("kelpie", false);
     let client = client(&shepherd).await;
     let err = in_time(start(&client, &project("koji"))).await.unwrap_err();
     assert!(err.contains("run `shep disable kelpie`"), "{err}");
