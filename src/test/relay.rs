@@ -53,7 +53,7 @@ impl Relay for FakeRelay {
         Ok(stale)
     }
 
-    fn clears(&self) -> Result<u64, RelayError> {
+    fn clear_count(&self) -> Result<u64, RelayError> {
         Ok(self.clears.load(Ordering::SeqCst))
     }
 

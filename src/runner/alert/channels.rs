@@ -23,7 +23,7 @@ fn webhook_only_never_starts_a_relay() {
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     assert_eq!(rig.alerts.posts().len(), 1);
     assert!(rig.relay.sent().is_empty());
-    assert_eq!(rig.relay.clears(), Ok(0), "not even a clear of one");
+    assert_eq!(rig.relay.clear_count(), Ok(0), "not even a clear of one");
 
     rig.ask(&runner, "rule", Some("1 no try again"));
     step(&runner).unwrap();
@@ -183,7 +183,11 @@ fn relay_only_sends_the_merge_notice_to_the_relay() {
             &head[..7]
         )
     );
-    assert_eq!(rig.relay.clears(), Ok(0), "a notice never ends a question");
+    assert_eq!(
+        rig.relay.clear_count(),
+        Ok(0),
+        "a notice never ends a question"
+    );
     assert_eq!(step(&runner).unwrap(), None, "and is sent once");
     assert_eq!(rig.relay.sent().len(), 1);
 }

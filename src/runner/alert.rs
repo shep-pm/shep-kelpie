@@ -127,7 +127,7 @@ pub(super) fn post_due(
     // A clear by another project's runner takes this one's rulings too, and
     // is seen even when nothing here is due.
     if lock(runner).holds_relayed()
-        && let Ok(clears) = relay.clears()
+        && let Ok(clears) = relay.clear_count()
         && let Err(e) = lock(runner).relay_clears_seen(clears)
     {
         return Some(Err(e));
@@ -138,10 +138,11 @@ pub(super) fn post_due(
         // A notice never clears on the day: a clear would end a question still up.
         let daily = matches!(due.of, Posting::Ruling(_)) && lock(runner).relay_clear_due();
         let renewed = relay.renew();
-        if daily && renewed == Ok(false) {
+        // A renew that cleared already counts as the day's clear.
+        if daily && renewed != Ok(true) {
             let _ = relay.clear();
         }
-        match renewed.and_then(|_| relay.clears()) {
+        match renewed.and_then(|_| relay.clear_count()) {
             Ok(clears) => {
                 let mut runner = lock(runner);
                 match runner.relay_clears_seen(clears) {
@@ -769,7 +770,7 @@ mod tests {
         let (rig, runner, _) = Rig::parked("rotom");
         rig.relay.set_up(true);
         step(&runner).unwrap();
-        assert_eq!(rig.relay.clears(), Ok(1), "the first alert clears it");
+        assert_eq!(rig.relay.clear_count(), Ok(1), "the first alert clears it");
 
         rig.ask(&runner, "rule", Some("1 no not yet"));
         rig.claude.script([
@@ -788,7 +789,7 @@ mod tests {
         rig.clock.advance(3600);
         step(&runner).unwrap();
         assert_eq!(
-            rig.relay.clears(),
+            rig.relay.clear_count(),
             Ok(1),
             "less than a day since the last clear"
         );
@@ -806,6 +807,6 @@ mod tests {
         rig.forge.set_checks(&head, Checks::Passed);
         rig.verdict(&runner);
         step(&runner).unwrap();
-        assert_eq!(rig.relay.clears(), Ok(2), "a full day passed");
+        assert_eq!(rig.relay.clear_count(), Ok(2), "a full day passed");
     }
 }

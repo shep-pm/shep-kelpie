@@ -48,7 +48,7 @@ fn the_daily_clear_sends_an_open_ruling_to_the_relay_again() {
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 2 }));
     assert_eq!(step(&runner).unwrap(), None);
-    assert_eq!(rig.relay.clears(), Ok(2));
+    assert_eq!(rig.relay.clear_count(), Ok(2));
     assert_eq!(
         sent_headers(&rig),
         [
@@ -83,7 +83,7 @@ fn a_clear_because_the_relays_files_changed_sends_an_open_ruling_again() {
 
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 2 }));
-    assert_eq!(rig.relay.clears(), Ok(2));
+    assert_eq!(rig.relay.clear_count(), Ok(2));
     assert_eq!(sent_headers(&rig).len(), 3);
     assert_eq!(rig.alerts.posts().len(), 2);
     assert_eq!(relayed(&rig, &runner), [json!(true), json!(true)]);
@@ -166,8 +166,8 @@ fn on_the_same_relay(rig: &Rig, project: &str) -> (Rig, Mutex<Runner>) {
 // The header lines sent to the relay for `project`'s rulings, in order
 fn sent_for(rig: &Rig, project: &str) -> Vec<String> {
     let headers = sent_headers(rig).into_iter();
-    let project = format!("project={project} ");
-    headers.filter(|h| h.starts_with(&project)).collect()
+    let prefix = format!("project={project} ");
+    headers.filter(|h| h.starts_with(&prefix)).collect()
 }
 
 #[test]

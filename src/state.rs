@@ -66,8 +66,9 @@ pub struct ProjectState {
     /// Where reading the webhook's replies has got to
     #[serde(default)]
     pub replies: Replies,
-    /// How many clears of the relay, by any project's runner, this one has
-    /// seen: its rulings marked relayed were sent after the last of them
+    /// The relay's count of clears, by any project's runner, when this
+    /// runner last read it. Every ruling marked relayed was sent after that
+    /// many clears, so a higher count means the relay no longer holds it.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub relay_clears: u64,
 }

@@ -221,7 +221,7 @@ impl RelayCli {
     }
 
     fn count_clear(&self) -> Result<(), RelayError> {
-        let unwritable = |e: io::Error| RelayError::Clears(e.to_string());
+        let unwritable = |e: io::Error| RelayError::CannotCount(e.to_string());
         fs::create_dir_all(&self.folder).map_err(unwritable)?;
         let mut file = OpenOptions::new()
             .create(true)
@@ -294,11 +294,11 @@ impl Relay for RelayCli {
         Ok(changed)
     }
 
-    fn clears(&self) -> Result<u64, RelayError> {
+    fn clear_count(&self) -> Result<u64, RelayError> {
         match fs::read(self.clears_file()) {
             Ok(lines) => Ok(lines.iter().filter(|&&b| b == b'\n').count() as u64),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(0),
-            Err(e) => Err(RelayError::Clears(e.to_string())),
+            Err(e) => Err(RelayError::CannotCount(e.to_string())),
         }
     }
 
@@ -653,7 +653,7 @@ mod tests {
         fs::create_dir_all(dir.path().join("relay")).unwrap();
         fs::write(dir.path().join("relay/settings.json"), "{}").unwrap();
         assert_eq!(relay.renew(), Ok(true));
-        assert_eq!(relay.clears(), Ok(1));
+        assert_eq!(relay.clear_count(), Ok(1));
         let calls = calls(dir.path());
         assert!(calls.contains(&"stop e9a38e1e".to_owned()), "{calls:?}");
         assert!(calls.contains(&"rm e9a38e1e".to_owned()), "{calls:?}");
@@ -665,7 +665,7 @@ mod tests {
         let relay = fake_claude(dir.path());
         relay.write_relay_files().unwrap();
         assert_eq!(relay.renew(), Ok(false));
-        assert_eq!(relay.clears(), Ok(0));
+        assert_eq!(relay.clear_count(), Ok(0));
         let _ = relay.send("[kelpie]", "claude-haiku-4-5-20251001", Effort::Low);
         let calls = calls(dir.path());
         assert!(!calls.contains(&"rm e9a38e1e".to_owned()), "{calls:?}");
@@ -681,10 +681,10 @@ mod tests {
             dir.path().join("shep"),
             "/k/bin/kelpie".into(),
         );
-        assert_eq!(other.clears(), Ok(0));
+        assert_eq!(other.clear_count(), Ok(0));
         clearing.clear().unwrap();
         clearing.clear().unwrap();
-        assert_eq!(other.clears(), Ok(2));
+        assert_eq!(other.clear_count(), Ok(2));
     }
 
     #[test]

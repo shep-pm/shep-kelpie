@@ -29,8 +29,8 @@ pub trait Relay: Send + Sync {
     ///
     /// # Errors
     ///
-    /// [`RelayError::Clears`] when the count cannot be read.
-    fn clears(&self) -> Result<u64, RelayError>;
+    /// [`RelayError::CannotCount`] when the count cannot be read.
+    fn clear_count(&self) -> Result<u64, RelayError>;
 
     /// Sends `message`, starting the relay first if none is running
     ///
@@ -55,7 +55,7 @@ pub trait Relay: Send + Sync {
     /// starts a fresh one next time and nothing a worker's question tried
     /// to carry into it survives the clear
     ///
-    /// Counted in [`Self::clears`] once it succeeds, whether or not one was
+    /// Counted in [`Self::clear_count`] once it succeeds, whether or not one was
     /// running.
     ///
     /// # Errors
@@ -77,7 +77,7 @@ pub enum RelayError {
     /// A running relay could not be stopped, with the reason
     CannotStop(String),
     /// The count of clears could not be read or added to, with the reason
-    Clears(String),
+    CannotCount(String),
 }
 
 impl fmt::Display for RelayError {
@@ -87,7 +87,7 @@ impl fmt::Display for RelayError {
             Self::NeverAppeared => f.write_str("the relay never appeared after starting"),
             Self::Unreachable(reason) => write!(f, "cannot reach the relay: {reason}"),
             Self::CannotStop(reason) => write!(f, "cannot stop the relay: {reason}"),
-            Self::Clears(reason) => write!(f, "cannot count the relay's clears: {reason}"),
+            Self::CannotCount(reason) => write!(f, "cannot count the relay's clears: {reason}"),
         }
     }
 }
