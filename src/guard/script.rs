@@ -146,12 +146,25 @@ pub(super) fn interpreted(
     }
     let text = fs::read_to_string(&path).unwrap_or_default();
     let first = text.lines().next().unwrap_or_default();
-    let mut words = first
-        .trim_start_matches("#!")
-        .split_whitespace()
-        .map(program);
-    let shell = match words.next() {
-        Some("env") => words.find(|w| !w.starts_with('-')),
+    let mut words = first.trim_start_matches("#!").split_whitespace();
+    let shell = match words.next().map(program) {
+        // `env`'s own options and assignments come before the program.
+        Some("env") => {
+            let mut program_word = None;
+            while let Some(word) = words.next() {
+                match word {
+                    "-u" | "--unset" | "-C" | "--chdir" | "-P" => {
+                        words.next();
+                    }
+                    w if w.starts_with('-') || w.contains('=') => {}
+                    w => {
+                        program_word = Some(program(w));
+                        break;
+                    }
+                }
+            }
+            program_word
+        }
         first => first,
     };
     match shell {

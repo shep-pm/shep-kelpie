@@ -172,6 +172,13 @@ fn a_script_file_is_read_for_its_commands() {
     ] {
         refused_with(dir.bash(command), TO_BASE, command);
     }
+    for (file, shebang) in [
+        ("a.sh", "#!/usr/bin/env LC_ALL=C bash"),
+        ("b.sh", "#!/usr/bin/env -u PATH -S PATH=/x:/bin sh -e"),
+    ] {
+        dir.write(file, &format!("{shebang}\ngh pr merge 1\n"));
+        refused_with(dir.bash(&format!("./{file}")), MANAGER, shebang);
+    }
     let dir = Scripts::with("merge", "gh pr merge 1\n");
     refused_with(dir.bash("./merge"), MANAGER, "a script with no #! line");
     let dir = Scripts::with("outer.sh", "bash inner.sh\n");
