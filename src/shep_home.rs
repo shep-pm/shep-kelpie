@@ -1,9 +1,9 @@
 //! `SHEP_HOME`, which kelpie's shepherd does not pass to a sheep
 //!
 //! A sheep starts with only `HOME`, `LANG`, `PATH`, `USER` and its `SHEP_*`
-//! variables, so a runner or the dog reads `SHEP_HOME` only when its flock
-//! entry sets it in `env`. Both refuse to start without it, rather than
-//! fall back to a shepherd that is not kelpie's.
+//! variables, so a runner reads `SHEP_HOME` only when its flock entry sets
+//! it in `env`. It refuses to start without it, rather than fall back to a
+//! shepherd that is not kelpie's.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -11,6 +11,10 @@ use std::path::PathBuf;
 /// What to do about a missing `SHEP_HOME` in a sheep
 pub const FLOCKFILE_FIX: &str = "add `env = { SHEP_HOME = \"/path/to/kelpie/shep\" }` \
      to this sheep's entry in the Flockfile, the path being kelpie's shepherd (`~/.kelpie/shep`)";
+
+/// What to do about a missing `SHEP_HOME` in the adopted dog
+pub const DOG_FIX: &str =
+    "shep sets it for an adopted dog, so start the dog with `shep enable kelpie`";
 
 /// What to do about a missing `SHEP_HOME` in a relay command
 pub const RELAY_FIX: &str =

@@ -1,7 +1,7 @@
 //! `kelpie --schema` and `--version`: shep's probes, answered for lookout
 //!
 //! `kelpie runner <project>`: a project's runner, run as a sheep
-//! `kelpie dog`: the kelpie dog, run as a sheep
+//! `kelpie`, started by shep as the adopted dog: the lease dog
 //! `shep kelpie lease ...`: the maintainer's lease commands
 //!
 //! `shep kelpie add [<project>]`, `start [<project>]`, `pause [<project>]`,
@@ -65,7 +65,6 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.as_slice() {
         [role, project] if role == "runner" => shep_kelpie::sheep::run(project),
-        [role] if role == "dog" => shep_kelpie::dog::run(),
         [command, rest @ ..] if command == "lease" => shep_kelpie::lease::cli::main(rest),
         [role, git_common_dir, worktree] if role == "guard" => {
             let home = std::env::var_os("HOME").map(PathBuf::from);
@@ -124,19 +123,10 @@ fn main() -> ExitCode {
                 rule::send(home, project, Ruling::NoOrAnswer(params))
             })
         }
-        // Adopted for `shep kelpie` and lookout's settings panes, shep starts
-        // kelpie with no arguments. The dog runs as a sheep of its own, since
-        // an adopted dog gets no shepherd channel.
-        [] if std::env::var_os("SHEP_DOG_NAME").is_some() => {
-            eprintln!(
-                "kelpie is adopted for `shep kelpie` and lookout's settings panes, and its dog \
-                 runs as the `kelpie-dog` sheep: run `shep disable kelpie` to stop this start"
-            );
-            ExitCode::from(2)
-        }
+        [] if std::env::var_os("SHEP_DOG_NAME").is_some() => shep_kelpie::dog::run(),
         _ => {
             eprintln!(
-                "usage: shep-kelpie add [<project>]\n       shep-kelpie start [<project>]\n       shep-kelpie pause [<project>]\n       shep-kelpie status\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie runner <project>\n       shep-kelpie dog\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie browse-guard <domain>...\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n       shep-kelpie shots-mcp <tools> <job>\n       shep-kelpie relay-yes <project> <id>\n       shep-kelpie relay-answer <project> <params>\n       shep-kelpie relay-gate <kelpie>\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.",
+                "usage: shep-kelpie add [<project>]\n       shep-kelpie start [<project>]\n       shep-kelpie pause [<project>]\n       shep-kelpie status\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie browse-guard <domain>...\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n       shep-kelpie shots-mcp <tools> <job>\n       shep-kelpie relay-yes <project> <id>\n       shep-kelpie relay-answer <project> <params>\n       shep-kelpie relay-gate <kelpie>\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.",
                 shep_kelpie::lease::cli::USAGE
             );
             ExitCode::from(2)
