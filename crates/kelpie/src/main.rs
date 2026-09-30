@@ -21,9 +21,10 @@
 //! `kelpie tools install`: installs the tools kelpie shows a work item's UI
 //! with, under kelpie's home.
 //!
-//! `kelpie totp [--rotate]`: prints the authenticator secret that answers a
-//! ruling from ntfy, as a URI and a QR code to scan, drawing it the first
-//! time, or afresh with `--rotate`. `kelpie totp --unlock` turns answers from
+//! `kelpie totp [--rotate]`, run as `shep kelpie totp [--rotate]` where kelpie
+//! is not on the PATH: prints the authenticator secret that answers a ruling
+//! from ntfy, as a URI and a QR code to scan, drawing it the first time, or
+//! afresh with `--rotate`. `shep kelpie totp --unlock` turns answers from
 //! ntfy back on after too many wrong codes.
 //!
 //! `kelpie shots-mcp <tools> <job>`: a worker's shots tool, an MCP server

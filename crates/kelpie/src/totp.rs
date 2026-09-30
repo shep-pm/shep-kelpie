@@ -3,7 +3,7 @@
 //! RFC 6238 TOTP: HMAC-SHA-1, 30-second steps, six digits, which every
 //! authenticator app reads from an `otpauth://` URI. Kelpie draws the secret
 //! once, keeps it under its home with only the owner able to read it, and
-//! never posts it anywhere: `kelpie totp` shows it to the maintainer to scan.
+//! never posts it anywhere: `shep kelpie totp` shows it to the maintainer to scan.
 //! Anyone who can read the ntfy topic sees each code the maintainer sends, so
 //! a step answers once across every project: see [`answers`].
 
@@ -59,18 +59,18 @@ impl fmt::Display for SecretError {
             Self::Io(path, kind) => write!(f, "cannot use {}: {kind}", path.display()),
             Self::Malformed(path) => write!(
                 f,
-                "{} is not an authenticator secret kelpie wrote: remove it and run `kelpie totp`",
+                "{} is not an authenticator secret kelpie wrote: remove it and run `shep kelpie totp`",
                 path.display()
             ),
             Self::Exposed(path) => write!(
                 f,
-                "{} may be read by others: `chmod 600` it, or run `kelpie totp --rotate` \
+                "{} may be read by others: `chmod 600` it, or run `shep kelpie totp --rotate` \
                  if someone else may have read it",
                 path.display()
             ),
             Self::FolderExposed(folder) => write!(
                 f,
-                "{} may be used by others: `chmod 700` it, and run `kelpie totp --rotate` \
+                "{} may be used by others: `chmod 700` it, and run `shep kelpie totp --rotate` \
                  if someone else may have read or replaced the secret in it",
                 folder.display()
             ),
@@ -123,7 +123,7 @@ impl Secret {
             return Ok(secret);
         }
         match Self::write(path, false) {
-            // Another `kelpie totp` wrote one first: that one is the secret.
+            // Another `shep kelpie totp` wrote one first: that one is the secret.
             Err(SecretError::Io(_, io::ErrorKind::AlreadyExists)) => Self::load(path)?
                 .ok_or_else(|| SecretError::Io(path.to_owned(), io::ErrorKind::NotFound)),
             written => written,
@@ -234,7 +234,7 @@ impl Secret {
     }
 }
 
-/// What `kelpie totp` prints: the secret in `path`, drawn the first time or
+/// What `shep kelpie totp` prints: the secret in `path`, drawn the first time or
 /// drawn afresh when `rotate`, as the URI an authenticator app takes and a
 /// QR code of it for the terminal
 ///
