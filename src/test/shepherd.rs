@@ -112,6 +112,13 @@ impl FakeShepherd {
         self.flock.lock().unwrap().push(sheep);
     }
 
+    /// Stops the sheep or dog named `name`, as a crash loop that gave up would
+    pub(crate) fn stops(&self, name: &str) {
+        let mut flock = self.flock.lock().unwrap();
+        let sheep = flock.iter_mut().find(|s| s.config.name == name).unwrap();
+        sheep.online = false;
+    }
+
     /// The config of the sheep named `name`, and whether it runs
     pub(crate) fn sheep(&self, name: &str) -> Option<(AppConfig, bool)> {
         let flock = self.flock.lock().unwrap();

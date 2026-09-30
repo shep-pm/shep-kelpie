@@ -135,6 +135,22 @@ async fn start_with_kelpie_s_dog_down_says_how_to_bring_it_up() {
     assert!(!shepherd.sheep("koji").unwrap().1);
 }
 
+// A dog that crash-looped to a stop grants nothing, whatever its channel.
+#[tokio::test]
+async fn start_with_kelpie_s_dog_stopped_says_to_read_its_bleats() {
+    let mut shepherd = FakeShepherd::new().await;
+    runner(&shepherd, "koji", Path::new("/src/koji"), false);
+    shepherd.holds_dog("kelpie", true);
+    shepherd.stops("kelpie");
+    let client = client(&shepherd).await;
+    let err = in_time(start(&client, &project("koji"))).await.unwrap_err();
+    assert_eq!(
+        err,
+        "kelpie's dog is not running: `shep bleats kelpie` says why"
+    );
+    assert_eq!(shepherd.writes(), []);
+}
+
 #[tokio::test]
 async fn the_project_here_is_the_one_whose_settings_name_this_checkout() {
     let shepherd = FakeShepherd::new().await;

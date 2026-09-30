@@ -19,6 +19,7 @@ use shep_client::Client;
 use shep_client::shep_core::config::{AppConfig, DogTable};
 use shep_client::shep_core::protocol::request::{DogSource, ProcessInfo, Response};
 use shep_client::shep_core::protocol::{Request, SelectorSpec};
+use shep_client::shep_core::status::ProcStatus;
 use shep_client::shep_core::values::UpDuration;
 
 use crate::adapters::Gh;
@@ -191,16 +192,22 @@ impl Launch {
 /// `None` when it runs with its shepherd channel
 pub(crate) fn dog_down(rows: &[ProcessInfo]) -> Option<String> {
     let name = crate::dog::NAME;
-    match rows
-        .iter()
-        .find(|r| r.name == name)
-        .and_then(|r| r.dog.as_ref())
-    {
-        Some(DogSource::Adopted { channel: true, .. }) => None,
-        Some(DogSource::Adopted { path, .. }) => Some(format!(
+    let row = rows.iter().find(|r| r.name == name);
+    match row.and_then(|r| Some((r.dog.as_ref()?, r.status))) {
+        Some((
+            DogSource::Adopted {
+                channel: false,
+                path,
+            },
+            _,
+        )) => Some(format!(
             "kelpie's dog has no shepherd channel, since kelpie was adopted before it asked for \
              one: run `shep adopt {path} --name {name}`, then `shep disable {name}` and \
              `shep enable {name}`"
+        )),
+        Some((DogSource::Adopted { .. }, ProcStatus::Online)) => None,
+        Some((DogSource::Adopted { .. }, _)) => Some(format!(
+            "kelpie's dog is not running: `shep bleats {name}` says why"
         )),
         _ => Some(format!(
             "kelpie's dog is not enabled: `shep enable {name}` runs it"
