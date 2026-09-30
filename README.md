@@ -6,7 +6,7 @@ This is early. It runs the maintainer's own projects and changes without notice,
 
 ## What it needs
 
-- shep 0.11
+- shep 0.12
 - Rust 1.88 or later, to build it
 - Claude Code, signed in
 - `git`, and `gh` signed in to the account that opens the pull requests
@@ -19,25 +19,25 @@ A project on `merge_authority = "auto"` merges its pull requests without asking 
 
 ## Running a project
 
-Kelpie needs shep 0.11 and runs in your own shepherd, beside your other sheep. Adopt it once, then leave it disabled: it runs the dog as a sheep of its own, since an adopted dog gets no channel for the lease commands.
+Kelpie needs shep 0.12 and runs in your own shepherd, beside your other sheep. Adopt it once and leave it enabled: the adopted kelpie is the dog that holds the leases every runner asks before a summon, and it asks shep for the channel the lease commands reach it on.
 
 ```sh
-shep adopt /path/to/shep-kelpie --name kelpie && shep disable kelpie
+shep adopt /path/to/shep-kelpie --name kelpie
 ```
 
-Not while a sheep named `kelpie` runs, such as a dog from an older Flockfile: shep refuses the adopt, and `disable` deletes any sheep of that name. The move below covers that case.
+A kelpie adopted before it asked for the channel has none until it is adopted again: run the same `shep adopt`, then `shep disable kelpie` and `shep enable kelpie`. A `kelpie-dog` sheep left from before is removed when the adopted kelpie starts, and its book at `~/.kelpie/dog/book.json` is kept as it is. The adopted kelpie gets no `KELPIE_HOME` from shep, so its book is always under `~/.kelpie`.
 
 Then, in the checkout of any GitHub repo whose default branch is `main`:
 
 ```sh
 shep kelpie add        # labels, settings, and the runner, stopped
-shep kelpie start      # starts the runner and the dog, then the project
+shep kelpie start      # starts the runner, then the project
 shep kelpie pause
 shep kelpie status     # every project
 shep kelpie doctor     # what each project still needs on this machine
 ```
 
-`add` names the project after the repo, or `shep kelpie add <name>`. It makes `ready-for-agent`, `ready-for-human` and `review please` where the repo lacks them, and registers two sheep: the runner, holding the project's settings as its `[app.dogs.kelpie]` table, and `kelpie-dog`, which holds the leases every runner asks before a summon. Worktrees, build folders and state go under `~/.kelpie`, never inside the checkout. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name.
+`add` names the project after the repo, or `shep kelpie add <name>`. It makes `ready-for-agent`, `ready-for-human` and `review please` where the repo lacks them, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. `add` and `start` say how to bring the dog up when the adopted kelpie is not running with its channel. Worktrees, build folders and state go under `~/.kelpie`, never inside the checkout. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name.
 
 `doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, Claude Code's sandbox, the shepherd's version, each project's labels, CodeRabbit where a project turns it on, the local review command or endpoint where one is set, the preview tools for a project that shows its UI, and that rulings have a webhook where they go to one. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
 
@@ -56,7 +56,7 @@ An install from before `shep kelpie` runs its runners and dog from a Flockfile u
 3. For each project: `cd ~/.kelpie/repos/<project> && shep kelpie add <project> && shep kelpie start`. `add` makes the project's table from `~/.kelpie/projects/<project>/settings.toml`, and the runner keeps its state file
 4. Once: `shep kelpie settings move <project>`, which moves `~/.kelpie/settings.toml` into the `[kelpie]` section
 
-To adopt kelpie in `~/.kelpie/shep` itself instead, run `SHEP_HOME=~/.kelpie/shep ~/.kelpie/bin/kelpie add <project>` in a project's checkout first. `shep adopt` refuses the name `kelpie` while the Flockfile's dog holds it, so `add` replaces that sheep with `kelpie-dog`, running on the same book. Then adopt as above, and drop the `kelpie` entry from the Flockfile. `add` refuses to carry `TMPDIR` or `PATH` from that entry, since this shell's may differ and the GPU lock lives under `TMPDIR`: take them out of the entry first.
+To adopt kelpie in `~/.kelpie/shep` itself instead, drop the dog's `kelpie` entry from the Flockfile and `SHEP_HOME=~/.kelpie/shep shep delete kelpie` first, since `shep adopt` refuses a name a sheep holds. The adopted dog reads the same book.
 
 A runner's Flockfile entry, for a project set up by hand, is in `settings.example.toml`. It needs `SHEP_HOME` as an absolute path in `env`, since a sheep starts without it, and `kill_timeout = "10s"` or more, since a runner needs about 7s to stop cleanly.
 
