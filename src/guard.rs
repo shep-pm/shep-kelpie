@@ -4,16 +4,20 @@
 //! refuses two things a worker's commit or pull request would carry out:
 //! the home folder's path, which names the machine's user and every
 //! worktree sits under, and a pull request title that is not a
-//! conventional commit. It reads the command's own text and, for a commit
-//! or a push in the worker's worktree, the lines it adds or sends. It never
-//! echoes what it matched. It refuses the ways of running a command it
-//! knows it cannot read; it is not a shell, and does not find them all.
+//! conventional commit. It also refuses what only the project manager does:
+//! a merge, marking ready, a summons, and a push to the base branch. It
+//! reads the command's own text, the shell scripts it runs and, for a
+//! commit or a push in the worker's worktree, the lines it adds or sends. It
+//! never echoes what it matched. It refuses the ways of running a command
+//! it knows it cannot read; it is not a shell, and does not find them all.
 //!
 //! The hook runs outside the sandbox, so it runs git the way kelpie's own
 //! worktree steps do, with the worktree's git dirs named and checked. A
 //! repo the worker made could name any program in its own config.
 
+mod gh;
 mod git;
+mod script;
 mod shell;
 mod wrap;
 
@@ -34,11 +38,6 @@ pub struct Checkout<'a> {
     /// The work item's worktree
     pub worktree: &'a Path,
 }
-
-/// The conventional commit types a pull request title may start with
-const TYPES: [&str; 11] = [
-    "feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert",
-];
 
 // A message file larger than this is not a message.
 const MESSAGE_FILE_MAX: u64 = 1 << 20;
@@ -113,6 +112,8 @@ struct CallState {
     reads: git::Reads,
     // Whether an earlier command exported a variable that redirects git.
     git_redirected: bool,
+    // The text of each line being read, the call's own first.
+    texts: Vec<String>,
 }
 
 impl CallState {
@@ -125,8 +126,22 @@ impl CallState {
 }
 
 impl Judging<'_> {
+    fn line(&self, line: &str, cwd: Option<PathBuf>, shells: usize, state: &mut CallState) {
+        state.texts.push(line.to_owned());
+        self.commands(line, cwd, shells, state);
+        state.texts.pop();
+    }
+
+    // A script file a command runs, read as one more shell's commands.
+    fn script(&self, name: &str, cwd: Option<&Path>, shells: usize, state: &mut CallState) {
+        match script::read(name, cwd, self.home.as_ref(), &state.texts) {
+            Ok(text) => self.line(&text, cwd.map(Path::to_owned), shells + 1, state),
+            Err(refusal) => state.refuse(refusal),
+        }
+    }
+
     // `cwd` is `None` once a `cd` goes somewhere the guard cannot follow.
-    fn line(&self, line: &str, mut cwd: Option<PathBuf>, shells: usize, state: &mut CallState) {
+    fn commands(&self, line: &str, mut cwd: Option<PathBuf>, shells: usize, state: &mut CallState) {
         let commands = match shell::commands(line) {
             Ok(commands) if shells <= MAX_SHELLS => commands,
             Ok(_) => {
@@ -170,7 +185,23 @@ impl Judging<'_> {
             if run.moved {
                 cwd = None;
             }
-            let found = match program(&run.words[0]) {
+            let name = &run.words[0];
+            if name.contains(['$', '`']) {
+                state.refuse(
+                    "kelpie cannot check a command whose program the shell works out when it \
+                     runs: name the program."
+                        .into(),
+                );
+                continue;
+            }
+            if name.contains('/') {
+                match script::interpreted(name, cwd.as_deref(), home) {
+                    Ok(true) => self.script(name, cwd.as_deref(), shells, state),
+                    Ok(false) => {}
+                    Err(refusal) => state.refuse(refusal),
+                }
+            }
+            let found = match program(name) {
                 "cd" | "pushd" => {
                     cwd = match run.words.get(1) {
                         Some(to) => moved(cwd.as_deref(), to, home),
@@ -191,10 +222,23 @@ impl Judging<'_> {
                     };
                     git::judge(git, cwd.as_deref(), home, self.checkout, &mut state.reads)
                 }
-                "gh" => gh(run.words, &command.heredocs, cwd.as_deref(), home),
+                "gh" => gh::judge(run.words, &command.heredocs, cwd.as_deref(), home),
                 name if SHELLS.contains(&name) => {
-                    if let Some(script) = script(run.words) {
-                        self.line(script, cwd.clone(), shells + 1, state);
+                    let runs = match script(run.words) {
+                        Some(script) => {
+                            self.line(script, cwd.clone(), shells + 1, state);
+                            script::Runs::Nothing
+                        }
+                        None => script::shell(run.words),
+                    };
+                    let heredoc = !command.heredocs.is_empty();
+                    match runs {
+                        script::Runs::File(file) => {
+                            self.script(file, cwd.as_deref(), shells, state)
+                        }
+                        script::Runs::Stdin if !heredoc => state.refuse(script::STDIN.into()),
+                        script::Runs::Unreadable => state.refuse(script::STDIN.into()),
+                        script::Runs::Stdin | script::Runs::Nothing => {}
                     }
                     // A shell reading its commands from a heredoc.
                     for body in &command.heredocs {
@@ -202,7 +246,13 @@ impl Judging<'_> {
                     }
                     Vec::new()
                 }
-                _ => Vec::new(),
+                "source" | "." => {
+                    if let script::Runs::File(file) = script::sourced(run.words) {
+                        self.script(file, cwd.as_deref(), shells, state);
+                    }
+                    Vec::new()
+                }
+                _ => wrap::hidden(run.words).into_iter().collect(),
             };
             for refusal in found {
                 state.refuse(refusal);
@@ -241,76 +291,6 @@ fn moved(cwd: Option<&Path>, to: &str, home: Option<&Home>) -> Option<PathBuf> {
         None if Path::new(to).is_absolute() => Some(PathBuf::from(to)),
         None => Some(cwd?.join(to)),
     }
-}
-
-// `gh` publishing verbs: their titles, bodies and notes, and a pull request's title.
-fn gh(
-    words: &[String],
-    heredocs: &[String],
-    cwd: Option<&Path>,
-    home: Option<&Home>,
-) -> Vec<String> {
-    // The group and verb are the first two words that are not flags, which
-    // may come before them: `gh pr -R owner/repo create`.
-    let mut positions = Vec::new();
-    let mut i = 1;
-    while i < words.len() && positions.len() < 2 {
-        match words[i].as_str() {
-            "-R" | "--repo" => i += 1,
-            w if w.starts_with('-') => {}
-            _ => positions.push(i),
-        }
-        i += 1;
-    }
-    let [group, verb] = positions[..] else {
-        return Vec::new();
-    };
-    let verb = match (words[group].as_str(), words[verb].as_str()) {
-        (group, "new") => (group, "create"),
-        pair => pair,
-    };
-    let publishes = matches!(
-        verb,
-        ("pr", "create" | "edit" | "comment" | "review")
-            | ("issue", "create" | "edit" | "comment")
-            | ("release", "create" | "edit")
-    );
-    if !publishes {
-        return Vec::new();
-    }
-    let args = &words[i..];
-    let titles = values(args, &["--title"], &['t']);
-    let mut out = Vec::new();
-    if verb.0 == "pr" && verb.1 == "create" && titles.is_empty() {
-        out.push(
-            "`gh pr create` needs `--title`: without one, GitHub titles a pull request of \
-             several commits with the branch's name. Give it a conventional commit subject, \
-             such as `fix(parser): keep the last line`."
-                .to_owned(),
-        );
-    }
-    if verb.0 == "pr" {
-        // Not echoed: a title can carry the home folder's path too.
-        if !titles.iter().all(|t| conventional(t)) {
-            out.push(format!(
-                "this pull request's title is not a conventional commit. Write it as \
-                 `type(scope): summary`, the scope optional, with the type one of {}, and \
-                 `!` after the type or scope for a breaking change.",
-                TYPES.join(", ")
-            ));
-        }
-    }
-    if let Some(home) = home {
-        let texts = titles
-            .into_iter()
-            .chain(values(args, &["--body", "--notes"], &['b', 'n']))
-            .chain(files(args, &["--body-file", "--notes-file"], &['F'], cwd))
-            .chain(heredocs.iter().cloned());
-        if texts.into_iter().any(|t| home.is_in(&t)) {
-            out.push(home.refusal(&format!("this `gh {} {}`", verb.0, verb.1), WRITE));
-        }
-    }
-    out
 }
 
 // The values of a flag, as `--long v`, `--long=v`, `-s v`, `-sv` or `-xs v`.
@@ -356,27 +336,6 @@ fn files(args: &[String], long: &[&str], short: &[char], cwd: Option<&Path>) -> 
             small.then(|| fs::read_to_string(path).ok()).flatten()
         })
         .collect()
-}
-
-/// Whether `title` is a conventional commit subject
-fn conventional(title: &str) -> bool {
-    let Some((head, summary)) = title.split_once(": ") else {
-        return false;
-    };
-    let head = head.strip_suffix('!').unwrap_or(head);
-    let kind = match head.split_once('(') {
-        Some((kind, scope)) => {
-            let Some(scope) = scope.strip_suffix(')') else {
-                return false;
-            };
-            if scope.is_empty() || scope.contains(['(', ')', '\n']) {
-                return false;
-            }
-            kind
-        }
-        None => head,
-    };
-    TYPES.contains(&kind) && !summary.trim().is_empty()
 }
 
 /// The home folder's path, as text that must not leave the machine

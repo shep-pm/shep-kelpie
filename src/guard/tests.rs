@@ -834,3 +834,5 @@ fn an_unreadable_call_is_refused() {
         Verdict::Refuse(_)
     ));
 }
+
+mod manager;
