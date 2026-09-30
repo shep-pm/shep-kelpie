@@ -77,6 +77,13 @@ effort = "low"
 model = "claude-haiku-4-5-20251001"
 effort = "low"
 
+[models.planner]
+model = "claude-opus-5-5"
+effort = "medium"
+
+[planning]
+enabled = true
+
 [review]
 loop_guard = 8
 

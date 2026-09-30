@@ -17,6 +17,15 @@ This is early. It runs the maintainer's own projects and changes without notice,
 
 A project on `merge_authority = "auto"` merges its pull requests without asking once every gate passes, and posts a notice after. The example settings use `ask`, which raises a ruling before every merge.
 
+## Planning
+
+When the board picks an issue, a planning call on Opus reads the repo at `main` and decides whether it is one pull request or several. Most stay one. Several become sub-issues of the issue, each with its labels and blocked by the pieces it needs first, and the issue gets one comment with the plan.
+
+- Under `auto` the split happens on its own. Under `ask` it's a ruling: `yes` opens the sub-issues, `no` works the issue whole, and `answer <note>` plans it again with your note
+- An issue with sub-issues is never worked itself, and kelpie closes it once every sub-issue is closed
+- A sub-issue is never planned again, and neither is an issue added with `add`
+- `[planning] enabled = false` turns it off, and `[models.planner]` picks the model
+
 ## Running a project
 
 Kelpie needs shep 0.12 and runs in your own shepherd, beside your other sheep. Adopt it once and leave it enabled: the adopted kelpie is the dog that holds the leases every runner asks before a summon, and it asks shep for the channel the lease commands reach it on.
@@ -67,7 +76,7 @@ Every step kelpie drives an agent through runs a skill, by default from [mattpoc
 | step | default skill | where it runs |
 |---|---|---|
 | `triage` | `triage` | not driven yet |
-| `planning` | `to-tickets` | not driven yet (#139) |
+| `planning` | `to-tickets` | the planning call on each issue the board picks |
 | `spec` | `to-spec` | not driven yet |
 | `implement` | `implement` | the worker's first turn on an issue |
 | `tests` | `tdd` | named in the worker's instructions |

@@ -133,6 +133,19 @@ impl Forge for Guarded {
         self.forge.create_issue(repo, title, body, labels)
     }
 
+    fn add_sub_issue(&self, repo: &ForgeSlug, parent: u64, child: u64) -> Result<(), ForgeError> {
+        self.forge.add_sub_issue(repo, parent, child)
+    }
+
+    fn add_blocker(&self, repo: &ForgeSlug, number: u64, by: u64) -> Result<(), ForgeError> {
+        self.forge.add_blocker(repo, number, by)
+    }
+
+    fn close_issue(&self, repo: &ForgeSlug, number: u64, comment: &str) -> Result<(), ForgeError> {
+        self.check(comment)?;
+        self.forge.close_issue(repo, number, comment)
+    }
+
     fn mark_ready(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
         self.forge.mark_ready(repo, number)
     }

@@ -1,0 +1,105 @@
+[
+  {
+    "assignees": [],
+    "blockedBy": {
+      "nodes": [],
+      "totalCount": 0
+    },
+    "labels": [
+      {
+        "id": "MDU6TGFiZWwxNjk4MDc2MTcz",
+        "name": "enhancement",
+        "description": "a request to improve CLI",
+        "color": "0dd8ac"
+      },
+      {
+        "id": "LA_kwDODKw3uc8AAAABZDtRDQ",
+        "name": "gh-issue",
+        "description": "relating to the gh issue command",
+        "color": "430568"
+      }
+    ],
+    "number": 14529,
+    "parent": null,
+    "subIssuesSummary": {
+      "completed": 0,
+      "percentCompleted": 0,
+      "total": 6
+    }
+  },
+  {
+    "assignees": [],
+    "blockedBy": {
+      "nodes": [],
+      "totalCount": 0
+    },
+    "labels": [
+      {
+        "id": "MDU6TGFiZWwxNjk4MDc2MTcz",
+        "name": "enhancement",
+        "description": "a request to improve CLI",
+        "color": "0dd8ac"
+      },
+      {
+        "id": "LA_kwDODKw3uc8AAAABZDtRDQ",
+        "name": "gh-issue",
+        "description": "relating to the gh issue command",
+        "color": "430568"
+      }
+    ],
+    "number": 14528,
+    "parent": {
+      "id": "I_kwDODKw3uc8AAAABTSoO1A",
+      "number": 14529,
+      "state": "OPEN",
+      "title": "RFC: `gh issue artifact`",
+      "url": "https://github.com/cli/cli/issues/14529"
+    },
+    "subIssuesSummary": {
+      "completed": 0,
+      "percentCompleted": 0,
+      "total": 0
+    }
+  },
+  {
+    "assignees": [
+      {
+        "id": "MDQ6VXNlcjM2NzI4OTMx",
+        "login": "babakks",
+        "name": "Babak K. Shandiz",
+        "databaseId": 36728931
+      }
+    ],
+    "blockedBy": {
+      "nodes": [],
+      "totalCount": 0
+    },
+    "labels": [
+      {
+        "id": "MDU6TGFiZWwxODE1OTc4NDIw",
+        "name": "tech-debt",
+        "description": "A chore that addresses technical debt",
+        "color": "c9f26a"
+      },
+      {
+        "id": "MDU6TGFiZWwyMzg1ODU4OTA5",
+        "name": "core",
+        "description": "This issue is not accepting PRs from outside contributors",
+        "color": "e25944"
+      },
+      {
+        "id": "LA_kwDODKw3uc8AAAACE8wBYA",
+        "name": "stale",
+        "description": "",
+        "color": "333333"
+      }
+    ],
+    "number": 12438,
+    "parent": null,
+    "subIssuesSummary": {
+      "completed": 2,
+      "percentCompleted": 66,
+      "total": 3
+    }
+  }
+]

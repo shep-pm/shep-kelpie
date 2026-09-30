@@ -121,6 +121,12 @@ impl ProjectPaths {
         self.worktrees.join(issue.to_string())
     }
 
+    /// The detached worktree at `origin/main` a planning call reads, beside
+    /// the work items' own, under a name no issue number takes
+    pub fn plan(&self) -> PathBuf {
+        self.worktrees.join("plan")
+    }
+
     /// The build folder for the work item that resolves `issue`
     pub fn build(&self, issue: u64) -> PathBuf {
         self.builds.join(issue.to_string())

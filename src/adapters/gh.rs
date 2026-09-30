@@ -170,6 +170,18 @@ impl Forge for Gh {
         issues::create_issue(repo, title, body, labels)
     }
 
+    fn add_sub_issue(&self, repo: &ForgeSlug, parent: u64, child: u64) -> Result<(), ForgeError> {
+        issues::add_sub_issue(repo, parent, child)
+    }
+
+    fn add_blocker(&self, repo: &ForgeSlug, number: u64, by: u64) -> Result<(), ForgeError> {
+        issues::add_blocker(repo, number, by)
+    }
+
+    fn close_issue(&self, repo: &ForgeSlug, number: u64, comment: &str) -> Result<(), ForgeError> {
+        issues::close_issue(repo, number, comment)
+    }
+
     fn mark_ready(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
         let number = number.to_string();
         gh(&["pr", "ready", &number, "--repo", repo.as_str()]).map(drop)

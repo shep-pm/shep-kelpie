@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
+use crate::plan::{Piece, Plan};
 use crate::ports::{Finding, Timestamp};
 use crate::review_bot::Bot;
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
@@ -55,6 +56,9 @@ pub struct ProjectState {
     /// Pull requests adopted and waiting for a free slot, oldest first
     #[serde(default)]
     pub adopted: Vec<Waiting>,
+    /// Issues planned, or being planned, before their work items open
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plans: Vec<Plan>,
     /// Leases this project holds
     pub leases: Vec<LeaseHeld>,
     /// What the week had spent when today began, once usage has been read
@@ -82,6 +86,7 @@ impl ProjectState {
             finished: Vec::new(),
             reworked: Vec::new(),
             adopted: Vec::new(),
+            plans: Vec::new(),
             leases: Vec::new(),
             pacing: None,
             notices: Vec::new(),
@@ -342,6 +347,15 @@ pub enum RulingKind {
         files: Vec<String>,
         /// The phase the gate was in, which a yes goes back to
         phase: Phase,
+    },
+    /// The planning call would split the issue into these pieces, before any
+    /// work item opens. A yes opens them as sub-issues, a no works the issue
+    /// whole, and an answer plans it again with the maintainer's note.
+    Split {
+        /// Why, for the issue's comment
+        why: String,
+        /// The pieces, blockers first
+        pieces: Vec<Piece>,
     },
     /// The pull request's labels or ready state changed outside kelpie. A
     /// yes accepts the change and kelpie carries on watching it.

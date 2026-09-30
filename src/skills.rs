@@ -289,7 +289,12 @@ fn rules(step: Step) -> String {
         Step::Review => {
             "- Run no commands. Review the diff below, and check it with Read, Grep and Glob.\n"
         }
-        Step::Triage | Step::Planning | Step::Spec | Step::Reset | Step::Retro => {
+        Step::Planning => {
+            "- Run no commands and publish nothing: open no issue, write no file, set no \
+             label. Kelpie opens the tickets your reply describes, and links them itself.\n\
+             - Record each decision you made in the skill's place in your reply.\n"
+        }
+        Step::Triage | Step::Spec | Step::Reset | Step::Retro => {
             "- Record each decision you made in the skill's place in your reply.\n"
         }
     };

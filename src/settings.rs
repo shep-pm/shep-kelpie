@@ -70,6 +70,9 @@ pub struct Settings {
     /// first whose window is free. CodeRabbit alone when absent or empty.
     #[serde(default)]
     pub pull_request_reviewers: Vec<Bot>,
+    /// Planning, which decides whether a ready issue is one pull request or several
+    #[serde(default)]
+    pub planning: Planning,
     /// Usage pacing
     pub pacing: Pacing,
     /// What every worker is started with
@@ -111,6 +114,37 @@ pub struct Models {
     pub judge: RoleModel,
     /// The session that carries rulings to the maintainer
     pub relay: RoleModel,
+    /// The one-shot that plans a ready issue before it opens a work item.
+    /// Opus 5.5 at medium effort when absent.
+    #[serde(default = "default_planner")]
+    pub planner: RoleModel,
+}
+
+fn default_planner() -> RoleModel {
+    RoleModel {
+        model: NonBlank("claude-opus-5-5".to_owned()),
+        effort: Effort::Medium,
+    }
+}
+
+/// Planning settings
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Planning {
+    /// Whether a ready issue the board picks is planned first, and may
+    /// become sub-issues. On when absent.
+    #[serde(default = "default_planning_enabled")]
+    pub enabled: bool,
+}
+
+impl Default for Planning {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+fn default_planning_enabled() -> bool {
+    true
 }
 
 /// One role's model and effort

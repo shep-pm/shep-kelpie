@@ -35,6 +35,7 @@ mod instructions;
 mod merge;
 mod pace;
 mod paths;
+mod plan;
 mod question;
 mod replies;
 mod report;
@@ -376,6 +377,7 @@ impl Runner {
             .unwrap_or_else(|| WorkerModel::from(&self.settings.models.worker));
         let session = new_session_id().map_err(|e| AddError::Session(e.to_string()))?;
         let mut next = self.state.clone();
+        next.plans.retain(|p| p.issue != issue);
         next.work_items
             .push(self.fresh(issue, found.title, worker.clone(), session));
         self.save(next).map_err(AddError::State)?;

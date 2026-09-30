@@ -186,6 +186,27 @@ pub trait Forge: Send {
         labels: &[&str],
     ) -> Result<u64, ForgeError>;
 
+    /// Makes issue `child` a sub-issue of issue `parent`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses or cannot be asked.
+    fn add_sub_issue(&self, repo: &ForgeSlug, parent: u64, child: u64) -> Result<(), ForgeError>;
+
+    /// Marks issue `number` blocked by issue `by`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses or cannot be asked.
+    fn add_blocker(&self, repo: &ForgeSlug, number: u64, by: u64) -> Result<(), ForgeError>;
+
+    /// Closes issue `number` with `comment`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses or cannot be asked.
+    fn close_issue(&self, repo: &ForgeSlug, number: u64, comment: &str) -> Result<(), ForgeError>;
+
     /// Marks draft pull request `number` ready for review
     ///
     /// # Errors
@@ -399,6 +420,8 @@ pub enum Role {
     Reviewer,
     /// A one-shot that judges findings
     Judge,
+    /// A one-shot that plans a ready issue before any work item opens
+    Planner,
 }
 
 impl Role {
@@ -408,6 +431,7 @@ impl Role {
             Self::Worker => "worker",
             Self::Reviewer => "reviewer",
             Self::Judge => "judge",
+            Self::Planner => "planner",
         }
     }
 }

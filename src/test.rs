@@ -165,6 +165,9 @@ const EXAMPLE_REPO: &str = "~/.kelpie/repos/shep";
 /// The CodeRabbit gate as `settings.example.toml` sets it, and turned off
 pub(crate) const CODERABBIT_ON: &str = "[app.dogs.kelpie.coderabbit]\nenabled = true\n";
 pub(crate) const CODERABBIT_OFF: &str = "[app.dogs.kelpie.coderabbit]\nenabled = false\n";
+/// Planning as `settings.example.toml` sets it, and turned off
+pub(crate) const PLANNING_ON: &str = "[app.dogs.kelpie.planning]\nenabled = true\n";
+pub(crate) const PLANNING_OFF: &str = "[app.dogs.kelpie.planning]\nenabled = false\n";
 
 /// A launch file like the playground's
 const LAUNCH: &str = r#"{"version": "0.0.1", "configurations": [{"name": "dev", "runtimeExecutable": "bun", "runtimeArgs": ["run", "dev"], "port": 3000}]}"#;
@@ -298,14 +301,19 @@ impl Rig {
         };
         rig.make_repo();
 
-        // CodeRabbit is off unless a test turns it on: most tests are about
-        // what comes before it or does not involve it.
+        // CodeRabbit and planning are off unless a test turns them on: most
+        // tests are about what comes after dispatch, or before CodeRabbit.
         let example = include_str!("../settings.example.toml");
         assert!(example.contains(EXAMPLE_REPO), "the example's repo moved");
         assert!(example.contains(CODERABBIT_ON), "the example's gate moved");
+        assert!(
+            example.contains(PLANNING_ON),
+            "the example's planning moved"
+        );
         let settings = example
             .replace(EXAMPLE_REPO, &rig.repo().display().to_string())
-            .replace(CODERABBIT_ON, CODERABBIT_OFF);
+            .replace(CODERABBIT_ON, CODERABBIT_OFF)
+            .replace(PLANNING_ON, PLANNING_OFF);
         let paths = rig.paths();
         std::fs::create_dir_all(paths.settings.parent().unwrap()).unwrap();
         std::fs::write(&paths.settings, settings).unwrap();
@@ -472,6 +480,11 @@ impl Rig {
     /// Turns the CodeRabbit gate on, as the example settings have it for shep
     pub(crate) fn coderabbit_on(&self) {
         self.edit_settings(|s| s.replace(CODERABBIT_OFF, CODERABBIT_ON));
+    }
+
+    /// Turns planning on, as the example settings have it
+    pub(crate) fn planning_on(&self) {
+        self.edit_settings(|s| s.replace(PLANNING_OFF, PLANNING_ON));
     }
 
     /// Makes the project's merge authority `auto`, read when a runner next opens
