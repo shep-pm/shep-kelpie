@@ -526,6 +526,15 @@ mod tests {
     }
 
     #[test]
+    fn the_worker_is_told_when_the_folder_cannot_be_found() {
+        let worktree = worktree_with(SHEP);
+        let launch = parse_launch(SHEP, None).unwrap();
+        let told = worker_server(&launch, worktree.path());
+        assert!(told.contains("`npm run dev` on port 5173"), "{told}");
+        assert!(told.contains("cannot find its folder"), "{told}");
+    }
+
+    #[test]
     fn a_cwd_that_leaves_the_worktree_is_refused() {
         for cwd in ["..", "../other", "web/../..", "/tmp"] {
             let text = SHEP.replace("\"cwd\": \"web\"", &format!("\"cwd\": {cwd:?}"));
