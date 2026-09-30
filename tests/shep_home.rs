@@ -39,12 +39,27 @@ fn a_runner_without_shep_home_names_the_flockfile_line() {
 // Adopted before kelpie asked for the channel, shep starts it with none.
 #[test]
 fn the_adopted_dog_without_its_channel_names_the_adopt_again() {
-    let output = kelpie_with(&[], &[("SHEP_DOG_NAME", "kelpie"), ("SHEP_HOME", "/s")]);
+    let dog = [
+        ("SHEP_DOG_NAME", "kelpie"),
+        ("SHEP_NAME", "kelpie"),
+        ("SHEP_HOME", "/s"),
+    ];
+    let output = kelpie_with(&[], &dog);
     assert!(!output.status.success());
     let stderr = stderr(&output);
     assert!(stderr.contains("no shepherd channel"), "{stderr}");
     let adopt = format!("`shep adopt {KELPIE} --name kelpie`");
     assert!(stderr.contains(&adopt), "{stderr}");
+}
+
+// `shep kelpie` with no verb sets SHEP_DOG_NAME and no SHEP_NAME.
+#[test]
+fn a_bare_shep_kelpie_prints_the_usage_and_runs_no_dog() {
+    let output = kelpie_with(&[], &[("SHEP_DOG_NAME", "kelpie"), ("SHEP_HOME", "/s")]);
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = stderr(&output);
+    assert!(stderr.starts_with("usage: "), "{stderr}");
+    assert!(!stderr.contains("shepherd channel"), "{stderr}");
 }
 
 #[test]

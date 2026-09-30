@@ -123,7 +123,14 @@ fn main() -> ExitCode {
                 rule::send(home, project, Ruling::NoOrAnswer(params))
             })
         }
-        [] if std::env::var_os("SHEP_DOG_NAME").is_some() => shep_kelpie::dog::run(),
+        // `shep kelpie` with no verb also sets SHEP_DOG_NAME; only the
+        // shepherd's own start sets SHEP_NAME.
+        [] if ["SHEP_DOG_NAME", "SHEP_NAME"]
+            .iter()
+            .all(|key| std::env::var_os(key).is_some()) =>
+        {
+            shep_kelpie::dog::run()
+        }
         _ => {
             eprintln!(
                 "usage: shep-kelpie add [<project>]\n       shep-kelpie start [<project>]\n       shep-kelpie pause [<project>]\n       shep-kelpie status\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie browse-guard <domain>...\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n       shep-kelpie shots-mcp <tools> <job>\n       shep-kelpie relay-yes <project> <id>\n       shep-kelpie relay-answer <project> <params>\n       shep-kelpie relay-gate <kelpie>\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.",
