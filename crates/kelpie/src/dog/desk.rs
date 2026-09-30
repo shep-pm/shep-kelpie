@@ -98,9 +98,7 @@ impl Desk {
         reviewers: Reviewers,
     ) -> Self {
         let mut book = LeaseBook::restore(clock, saved.leases);
-        for (bot, window) in reviewers.defined() {
-            book.add_window(bot.lease(), window);
-        }
+        book.set_reviewers(reviewers);
         let runs = saved
             .runs
             .into_iter()

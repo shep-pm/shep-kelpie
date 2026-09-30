@@ -1,5 +1,6 @@
 //! Rounds with CodeRabbit and cubic both listed, through the runner's stand-ins
 
+use std::num::NonZeroU32;
 use std::sync::Mutex;
 
 use serde_json::json;
@@ -8,8 +9,8 @@ use crate::coderabbit::LABEL;
 use crate::cubic::SUMMON;
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
-use crate::ports::{Checks, Role, Timestamp};
-use crate::review_bot::Bot;
+use crate::ports::{Checks, Leases, Role, Timestamp};
+use crate::review_bot::{Bot, ReviewWindow, Reviewers};
 use crate::runner::coderabbit::tests::now;
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{Rig, Scripted, Told};
@@ -176,9 +177,18 @@ fn both_windows_busy_waits_and_the_first_to_free_up_takes_the_round() {
 }
 
 #[test]
-fn a_cubic_refusal_parks_it_for_its_window_and_the_next_round_goes_elsewhere() {
+fn a_cubic_refusal_closes_its_window_in_the_dogs_book_and_the_next_round_goes_elsewhere() {
     let rig = listing("shep", r#"["cubic", "coderabbit"]"#);
-    rig.leases.close(&cr(), true);
+    let month = ReviewWindow {
+        reviews: NonZeroU32::new(20).unwrap(),
+        hours: NonZeroU32::new(720).unwrap(),
+    };
+    let dog = Reviewers {
+        cubic: Some(month),
+        ..Reviewers::default()
+    };
+    rig.leases.use_book(rig.clock.clone(), "shep", dog);
+    rig.leases.window(&cr(), WindowFact::Summoned, now(&rig));
     let (runner, head) = ready(&rig);
     assert_eq!(step(&runner).unwrap(), summoned(&head));
     let summon = now(&rig);
@@ -193,23 +203,43 @@ fn a_cubic_refusal_parks_it_for_its_window_and_the_next_round_goes_elsewhere() {
             opens,
         })
     );
-    assert!(
-        rig.leases
-            .told()
-            .contains(&Told::Window(WindowFact::Opens, opens.0))
-    );
     assert!(!rig.leases.held(&cubic()));
     assert_eq!(
         rig.ask(&runner, "status", None)["work_item"]["phase"]["stage"],
         "lease"
     );
+    for _ in 0..3 {
+        rig.clock.advance(60);
+        assert_eq!(step(&runner).unwrap(), None, "both windows closed");
+    }
+    assert_eq!(summons_by_comment(&rig), 1, "no second summon of cubic");
 
-    // The dog holds cubic's window closed for the month it was told.
-    rig.leases.close(&cubic(), true);
-    rig.leases.close(&cr(), false);
+    rig.clock.advance(3600);
     assert_eq!(step(&runner).unwrap(), summoned(&head));
     assert_eq!(labels(&rig), [(71, LABEL.to_owned(), true)]);
-    assert_eq!(summons_by_comment(&rig), 1, "cubic's first summon alone");
+    assert_eq!(summons_by_comment(&rig), 1);
+}
+
+// The runner's own settings define cubic, but the dog started before they
+// did, so its book has no window for cubic.
+#[test]
+fn a_bot_the_dogs_book_does_not_define_is_never_granted() {
+    let rig = listing("shep", r#"["cubic", "coderabbit"]"#);
+    rig.leases
+        .use_book(rig.clock.clone(), "shep", Reviewers::default());
+    rig.leases.window(&cr(), WindowFact::Summoned, now(&rig));
+    let (runner, head) = ready(&rig);
+    for _ in 0..3 {
+        rig.clock.advance(60);
+        assert_eq!(step(&runner).unwrap(), None);
+    }
+    assert!(!rig.leases.held(&cubic()));
+    assert_eq!(summons_by_comment(&rig), 0);
+
+    rig.clock.advance(3600);
+    assert_eq!(step(&runner).unwrap(), summoned(&head));
+    assert_eq!(labels(&rig), [(71, LABEL.to_owned(), true)]);
+    assert_eq!(summons_by_comment(&rig), 0);
 }
 
 #[test]

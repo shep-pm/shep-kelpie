@@ -32,6 +32,9 @@ pub enum Bot {
 }
 
 impl Bot {
+    /// Every bot kelpie has a profile for
+    pub const ALL: [Self; 2] = [Self::Coderabbit, Self::Cubic];
+
     /// Its name as settings write it, which also names its lease
     pub fn as_str(self) -> &'static str {
         match self {
@@ -99,7 +102,7 @@ impl Reviewers {
 
     /// Every defined bot and its window
     pub fn defined(&self) -> impl Iterator<Item = (Bot, ReviewWindow)> + '_ {
-        [Bot::Coderabbit, Bot::Cubic]
+        Bot::ALL
             .into_iter()
             .filter_map(|bot| Some((bot, self.window(bot)?)))
     }

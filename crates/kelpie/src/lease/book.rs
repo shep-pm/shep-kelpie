@@ -14,7 +14,7 @@ use super::saved::{SavedHeld, SavedLease};
 use super::window::{Window, WindowStatus};
 use super::{Epoch, Holder, LeaseKind};
 use crate::ports::{Clock, Timestamp};
-use crate::review_bot::ReviewWindow;
+use crate::review_bot::{Bot, ReviewWindow, Reviewers};
 use crate::runner::ProjectName;
 
 /// What asking for a lease came to
@@ -54,6 +54,10 @@ pub struct LeaseStatus {
     /// Its review window, for a kind that has one
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window: Option<WindowStatus>,
+    /// Whether it is a review bot kelpie's settings do not define, which
+    /// is never granted
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub undefined: bool,
 }
 
 #[derive(Debug, Default)]
@@ -73,6 +77,8 @@ impl Lease {
 pub struct LeaseBook {
     clock: Box<dyn Clock>,
     leases: BTreeMap<LeaseKind, Lease>,
+    // Review bots kelpie's settings leave undefined, which are never granted.
+    barred: BTreeSet<LeaseKind>,
 }
 
 impl std::fmt::Debug for LeaseBook {
@@ -89,6 +95,7 @@ impl LeaseBook {
         Self {
             clock,
             leases: BTreeMap::new(),
+            barred: BTreeSet::new(),
         }
     }
 
@@ -105,7 +112,11 @@ impl LeaseBook {
                 (lease.kind, restored)
             })
             .collect();
-        Self { clock, leases }
+        Self {
+            clock,
+            leases,
+            barred: BTreeSet::new(),
+        }
     }
 
     /// Every lease as the book file keeps it
@@ -122,6 +133,21 @@ impl LeaseBook {
                 window: lease.window.as_ref().map(Window::saved),
             })
             .collect()
+    }
+
+    /// Gives each review bot `reviewers` defines its window, and bars the
+    /// rest: a bot with no window would be granted freely, so it waits
+    /// until a definition reaches the dog.
+    pub fn set_reviewers(&mut self, reviewers: Reviewers) {
+        self.barred.clear();
+        for bot in Bot::ALL {
+            match reviewers.window(bot) {
+                Some(window) => self.add_window(bot.lease(), window),
+                None => {
+                    self.barred.insert(bot.lease());
+                }
+            }
+        }
     }
 
     /// Gives `kind` a review window as `definition` sets it, so it is
@@ -162,7 +188,7 @@ impl LeaseBook {
                 window.prune(now);
             }
             if lease.held.is_none() {
-                grants.extend(grant_next(kind, lease, now));
+                grants.extend(grant_next(kind, lease, now, &self.barred));
             }
         }
         grants
@@ -188,9 +214,10 @@ impl LeaseBook {
     /// Asking again while waiting keeps the place already in the queue.
     pub fn ask(&mut self, kind: &LeaseKind, holder: Holder) -> Asked {
         let now = self.clock.now();
+        let barred = self.barred.contains(kind);
         let lease = self.leases.entry(kind.clone()).or_default();
         match &lease.held {
-            None if lease.queue.is_empty() && lease.open(now) => {
+            None if lease.queue.is_empty() && lease.open(now) && !barred => {
                 granted(lease, holder, now);
                 return Asked::Granted;
             }
@@ -218,7 +245,7 @@ impl LeaseBook {
         lease.queue.retain(|w| w != holder);
         if lease.held.as_ref().is_some_and(|(h, _)| h == holder) {
             lease.held = None;
-            return grant_next(kind, lease, now);
+            return grant_next(kind, lease, now, &self.barred);
         }
         None
     }
@@ -239,7 +266,7 @@ impl LeaseBook {
             lease.queue.retain(|w| !stale(w));
             if lease.held.as_ref().is_some_and(|(h, _)| stale(h)) {
                 lease.held = None;
-                grants.extend(grant_next(kind, lease, now));
+                grants.extend(grant_next(kind, lease, now, &self.barred));
             }
         }
         grants
@@ -275,13 +302,19 @@ impl LeaseBook {
                 since: lease.held.as_ref().map(|(_, since)| *since),
                 queue: lease.queue.iter().cloned().collect(),
                 window: lease.window.as_ref().map(|w| w.status(now)),
+                undefined: self.barred.contains(kind),
             })
             .collect()
     }
 }
 
-fn grant_next(kind: &LeaseKind, lease: &mut Lease, now: Timestamp) -> Option<Grant> {
-    if !lease.open(now) {
+fn grant_next(
+    kind: &LeaseKind,
+    lease: &mut Lease,
+    now: Timestamp,
+    barred: &BTreeSet<LeaseKind>,
+) -> Option<Grant> {
+    if !lease.open(now) || barred.contains(kind) {
         return None;
     }
     let holder = lease.queue.pop_front()?;
@@ -601,6 +634,35 @@ mod tests {
         assert_eq!(book.refused(&stand_in(), Timestamp(EPOCH + 600)), []);
         assert_eq!(book.ask(&stand_in(), runner("koji", 1)), Asked::AlreadyHeld);
         assert!(status(&book)[0].get("window").is_none());
+    }
+
+    #[test]
+    fn a_review_bot_with_no_definition_is_never_granted_until_it_has_one() {
+        let (mut book, _) = book();
+        book.set_reviewers(Reviewers::default());
+        let cubic = Bot::Cubic.lease();
+        assert_eq!(
+            book.ask(&cubic, runner("koji", 1)),
+            Asked::Queued { ahead: 0 }
+        );
+        assert_eq!(book.refused(&cubic, Timestamp(EPOCH + 600)), []);
+        assert_eq!(book.tick(), []);
+        assert_eq!(status(&book)[1]["undefined"], true);
+        assert_eq!(
+            book.ask(&Bot::Coderabbit.lease(), runner("koji", 1)),
+            Asked::Granted
+        );
+        let month = ReviewWindow {
+            reviews: std::num::NonZeroU32::new(20).unwrap(),
+            hours: std::num::NonZeroU32::new(720).unwrap(),
+        };
+        book.set_reviewers(Reviewers {
+            cubic: Some(month),
+            ..Reviewers::default()
+        });
+        let granted = book.tick();
+        assert_eq!(granted.len(), 1);
+        assert_eq!(granted[0].kind, cubic);
     }
 
     // The dog restarting is a new book on the same clock from the file.
