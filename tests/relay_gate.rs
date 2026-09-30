@@ -1,7 +1,7 @@
 //! The relay's PreToolUse hook, run as its settings write it, against the
 //! real binary: kelpie's two commands pass, and `shep` does not.
 
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
@@ -30,12 +30,17 @@ fn hook_run_as(kelpie_path: &str, tool: &str, command: &str) -> Output {
         .spawn()
         .unwrap();
     let call = json!({ "tool_name": tool, "tool_input": { "command": command } });
-    child
+    // A hook that refuses may exit before it reads the call, so the write can
+    // find the pipe closed. That is the hook's right, and the exit status and
+    // output are what the test judges.
+    let written = child
         .stdin
         .take()
         .unwrap()
-        .write_all(call.to_string().as_bytes())
-        .unwrap();
+        .write_all(call.to_string().as_bytes());
+    if let Err(err) = written {
+        assert_eq!(err.kind(), ErrorKind::BrokenPipe, "{err}");
+    }
     child.wait_with_output().unwrap()
 }
 
