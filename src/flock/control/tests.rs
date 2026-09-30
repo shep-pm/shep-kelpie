@@ -45,16 +45,15 @@ fn project(name: &str) -> ProjectName {
 // Real sockets under a real clock: a paused one would time out the
 // handshake while the fake's socket is merely waiting.
 #[tokio::test]
-async fn start_brings_up_the_dog_and_the_runner_then_reaches_the_runner() {
+async fn start_brings_up_the_runner_then_reaches_it() {
     let mut shepherd = FakeShepherd::new().await;
     runner(&shepherd, "koji", Path::new("/src/koji"), false);
-    shepherd.holds(launch(&shepherd).dog(), false);
+    shepherd.holds_dog("kelpie", true);
 
     let client = client(&shepherd).await;
     let started = in_time(start(&client, &project("koji"))).await.unwrap();
     assert_eq!(started, [r#"{"action":"start","sheep":"koji"}"#]);
     assert!(shepherd.sheep("koji").unwrap().1);
-    assert!(shepherd.sheep("kelpie-dog").unwrap().1);
     let restarts: Vec<_> = shepherd
         .writes()
         .into_iter()
@@ -65,13 +64,14 @@ async fn start_brings_up_the_dog_and_the_runner_then_reaches_the_runner() {
             _ => None,
         })
         .collect();
-    assert_eq!(restarts, ["kelpie-dog", "koji"]);
+    assert_eq!(restarts, ["koji"]);
 }
 
 #[tokio::test]
 async fn start_leaves_a_running_runner_running() {
     let mut shepherd = FakeShepherd::new().await;
     runner(&shepherd, "koji", Path::new("/src/koji"), true);
+    shepherd.holds_dog("kelpie", true);
     let client = client(&shepherd).await;
     in_time(start(&client, &project("koji"))).await.unwrap();
     let writes = shepherd.writes();
@@ -113,14 +113,41 @@ async fn start_and_pause_leave_a_sheep_that_is_not_kelpie_s_alone() {
     );
 }
 
+// A runner with no dog is never granted a lease, so it is left stopped.
 #[tokio::test]
-async fn start_with_kelpie_adopted_and_enabled_and_no_dog_says_to_disable_it() {
+async fn start_with_kelpie_s_dog_down_says_how_to_bring_it_up() {
     let mut shepherd = FakeShepherd::new().await;
     runner(&shepherd, "koji", Path::new("/src/koji"), false);
-    shepherd.holds_dog("kelpie");
     let client = client(&shepherd).await;
     let err = in_time(start(&client, &project("koji"))).await.unwrap_err();
-    assert!(err.contains("run `shep disable kelpie`"), "{err}");
+    assert_eq!(
+        err,
+        "kelpie's dog is not enabled: `shep enable kelpie` runs it"
+    );
+
+    shepherd.holds_dog("kelpie", false);
+    let err = in_time(start(&client, &project("koji"))).await.unwrap_err();
+    assert!(
+        err.contains("run `shep adopt /opt/kelpie --name kelpie`"),
+        "{err}"
+    );
+    assert_eq!(shepherd.writes(), []);
+    assert!(!shepherd.sheep("koji").unwrap().1);
+}
+
+// A dog that crash-looped to a stop grants nothing, whatever its channel.
+#[tokio::test]
+async fn start_with_kelpie_s_dog_stopped_says_to_read_its_bleats() {
+    let mut shepherd = FakeShepherd::new().await;
+    runner(&shepherd, "koji", Path::new("/src/koji"), false);
+    shepherd.holds_dog("kelpie", true);
+    shepherd.stops("kelpie");
+    let client = client(&shepherd).await;
+    let err = in_time(start(&client, &project("koji"))).await.unwrap_err();
+    assert_eq!(
+        err,
+        "kelpie's dog is not running: `shep bleats kelpie` says why"
+    );
     assert_eq!(shepherd.writes(), []);
 }
 
@@ -158,7 +185,7 @@ async fn status_reports_every_project() {
     let shepherd = FakeShepherd::new().await;
     runner(&shepherd, "koji", Path::new("/src/koji"), true);
     runner(&shepherd, "reactmap", Path::new("/src/reactmap"), false);
-    shepherd.holds(launch(&shepherd).dog(), true);
+    shepherd.holds_dog("kelpie", true);
     let client = client(&shepherd).await;
     let lines = in_time(status(&client)).await.unwrap();
     assert_eq!(

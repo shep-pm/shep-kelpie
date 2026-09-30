@@ -5,17 +5,19 @@
 //! `[app.dogs.kelpie]` table. The webhook's URL is marked a secret, so
 //! lookout draws it `<set>`.
 
+use shep_client::dogs::Probe;
+
 use crate::settings::Settings;
 use crate::webhook::KelpieSettings;
 
 /// Answers `--version` or `--schema` and exits, or returns when neither was asked
 ///
-/// The first line of `main`, before anything opens a socket.
+/// The first line of `main`, before anything opens a socket. The version
+/// answer asks for the shepherd channel, which the lease dog serves.
 pub fn probe() {
-    shep_client::dogs::probe_with_sheep::<KelpieSettings, Settings>(
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION"),
-    );
+    Probe::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
+        .ask_for_channel()
+        .answer_with_sheep::<KelpieSettings, Settings>();
 }
 
 #[cfg(test)]

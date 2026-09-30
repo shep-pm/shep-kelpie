@@ -1,9 +1,10 @@
 //! `shep kelpie start`, `pause` and `status`: the runner's own triggers,
 //! sent over the shepherd's socket
 //!
-//! `start` first starts the dog's sheep and the runner's when they are not
-//! running, then waits for the runner to answer, since a runner just
-//! started reads its settings before it opens its channel.
+//! `start` first checks the adopted kelpie holds the leases, starts the
+//! runner's sheep when it is not running, then waits for the runner to
+//! answer, since a runner just started reads its settings before it opens
+//! its channel.
 
 use std::path::Path;
 use std::time::Duration;
@@ -13,8 +14,7 @@ use shep_client::shep_core::protocol::{Request, SelectorSpec};
 use shep_client::shep_core::status::ProcStatus;
 use shep_client::{Client, TRIGGER_DEADLINE};
 
-use super::{Found, flock, kelpie_sheep, resume, tables};
-use crate::dog;
+use super::{flock, kelpie_sheep, resume, tables};
 use crate::runner::ProjectName;
 use crate::settings::Settings;
 use crate::shepherd;
@@ -57,34 +57,22 @@ pub async fn project_here(
     }
 }
 
-/// Starts `project`'s runner and its dog when they are down, then sends it `start`
+/// Starts `project`'s runner when it is down, then sends it `start`
 ///
 /// # Errors
 ///
-/// A message when the project has no kelpie runner, or it does not answer
-/// in time. Only kelpie's own sheep are ever started.
+/// A message when the adopted kelpie is not running as the dog with its
+/// channel, the project has no kelpie runner, or it does not answer in
+/// time. Only kelpie's own runners are ever started.
 pub async fn start(client: &Client, project: &ProjectName) -> Result<Vec<String>, String> {
     let rows = flock(client).await?;
     let runner = kelpie_runner(client, &rows, project).await?;
-    let adopted = rows
-        .iter()
-        .any(|r| r.name == dog::OLD_NAME && r.dog.is_some());
-    let dog = match kelpie_sheep(client, &rows, dog::NAME, &["dog"]).await? {
-        Some(dog) => Some(dog),
-        None if adopted => {
-            return Err(format!(
-                "kelpie is adopted and enabled, and this flock has no `{}`: run `shep disable \
-                 {}`, then `shep kelpie add`",
-                dog::NAME,
-                dog::OLD_NAME
-            ));
-        }
-        None => kelpie_sheep(client, &rows, dog::OLD_NAME, &["dog"]).await?,
-    };
-    for found in dog.iter().chain([&runner]) {
-        if found.row.status != ProcStatus::Online {
-            resume(client, &found.row.name).await?;
-        }
+    // A runner with no dog is never granted a lease.
+    if let Some(down) = super::dog_down(&rows) {
+        return Err(down);
+    }
+    if runner.status != ProcStatus::Online {
+        resume(client, &runner.name).await?;
     }
     let runner = project.as_str();
     let waited = tokio::time::Instant::now();
@@ -146,7 +134,7 @@ async fn kelpie_runner(
     client: &Client,
     rows: &[ProcessInfo],
     project: &ProjectName,
-) -> Result<Found, String> {
+) -> Result<ProcessInfo, String> {
     let name = project.as_str();
     let not_one =
         || format!("no kelpie runner named {name} in this flock: `shep kelpie add` sets one up");

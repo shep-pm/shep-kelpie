@@ -3,10 +3,9 @@
 //!
 //! shep runs an adopted dog as `shep kelpie <args>`, in the caller's folder,
 //! with `SHEP_HOME` naming the shepherd. `add` registers a checkout's runner
-//! as a sheep of that shepherd, beside the `kelpie-dog` sheep that holds the
-//! leases, and the others drive it with the triggers `shep trigger` sends.
-//! An adopted dog gets no shepherd channel, so the dog runs as that sheep
-//! and the adopted kelpie stays disabled (ADR 0003).
+//! as a sheep of that shepherd, and the others drive it with the triggers
+//! `shep trigger` sends. The adopted kelpie, enabled, is the dog that holds
+//! the leases (ADR 0004).
 
 pub mod add;
 pub mod control;
@@ -18,8 +17,9 @@ use std::process::{Command, ExitCode, Stdio};
 use serde_json::{Map, Value};
 use shep_client::Client;
 use shep_client::shep_core::config::{AppConfig, DogTable};
-use shep_client::shep_core::protocol::request::{ProcessInfo, Response};
+use shep_client::shep_core::protocol::request::{DogSource, ProcessInfo, Response};
 use shep_client::shep_core::protocol::{Request, SelectorSpec};
+use shep_client::shep_core::status::ProcStatus;
 use shep_client::shep_core::values::UpDuration;
 
 use crate::adapters::Gh;
@@ -169,11 +169,6 @@ impl Launch {
         app
     }
 
-    /// The dog, which holds the leases every runner asks for
-    pub fn dog(&self) -> AppConfig {
-        self.app(crate::dog::NAME, &["dog"])
-    }
-
     // A runner needs about 7s to stop cleanly, so shep's 1.6s default kill
     // timeout is raised, and it stops on the channel's shutdown message.
     fn app(&self, name: &str, args: &[&str]) -> AppConfig {
@@ -193,13 +188,31 @@ impl Launch {
     }
 }
 
-/// One of kelpie's sheep, as the flock holds it
-#[derive(Debug, Clone)]
-pub(crate) struct Found {
-    /// Its row in the flock
-    pub row: ProcessInfo,
-    /// The names of the variables its entry sets, whose values shep withholds
-    pub env_keys: Vec<String>,
+/// What stops the adopted kelpie holding the leases, with the fix, or
+/// `None` when it runs with its shepherd channel
+pub(crate) fn dog_down(rows: &[ProcessInfo]) -> Option<String> {
+    let name = crate::dog::NAME;
+    let row = rows.iter().find(|r| r.name == name);
+    match row.and_then(|r| Some((r.dog.as_ref()?, r.status))) {
+        Some((
+            DogSource::Adopted {
+                channel: false,
+                path,
+            },
+            _,
+        )) => Some(format!(
+            "kelpie's dog has no shepherd channel, since kelpie was adopted before it asked for \
+             one: run `shep adopt {path} --name {name}`, then `shep disable {name}` and \
+             `shep enable {name}`"
+        )),
+        Some((DogSource::Adopted { .. }, ProcStatus::Online)) => None,
+        Some((DogSource::Adopted { .. }, _)) => Some(format!(
+            "kelpie's dog is not running: `shep bleats {name}` says why"
+        )),
+        _ => Some(format!(
+            "kelpie's dog is not enabled: `shep enable {name}` runs it"
+        )),
+    }
 }
 
 /// The sheep named `name`, if the flock has one, refusing one that is not
@@ -209,7 +222,7 @@ async fn kelpie_sheep(
     rows: &[ProcessInfo],
     name: &str,
     args: &[&str],
-) -> Result<Option<Found>, String> {
+) -> Result<Option<ProcessInfo>, String> {
     let Some(row) = rows.iter().find(|r| r.name == name) else {
         return Ok(None);
     };
@@ -221,10 +234,7 @@ async fn kelpie_sheep(
         name: name.to_owned(),
     };
     match client.request(request).await {
-        Ok(Response::SheepConfig(view)) if view.config.args == args => Ok(Some(Found {
-            row: row.clone(),
-            env_keys: view.env_keys,
-        })),
+        Ok(Response::SheepConfig(view)) if view.config.args == args => Ok(Some(row.clone())),
         Ok(Response::SheepConfig(_)) => Err(taken()),
         Ok(other) => Err(format!("the shepherd answered {other:?} for `{name}`")),
         Err(e) => Err(format!("cannot read `{name}`'s config: {e}")),
@@ -366,11 +376,5 @@ mod tests {
         assert!(app.channel && app.shutdown_with_message && app.autorestart);
         assert_eq!(app.kill_timeout.as_millis(), 10_000);
         assert_eq!(app.dogs.get(DOG).map(DogTable::as_map), Some(&table));
-        let dog = launch.dog();
-        assert_eq!(
-            (dog.name.as_str(), dog.args.as_slice()),
-            ("kelpie-dog", &["dog".to_owned()][..])
-        );
-        assert!(dog.dogs.is_empty());
     }
 }

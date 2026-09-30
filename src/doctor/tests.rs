@@ -272,7 +272,7 @@ async fn a_sandbox_the_machine_lacks_names_what_it_lacks() {
 
 #[tokio::test]
 async fn a_shepherd_on_another_minor_names_both_versions_and_no_project_is_checked() {
-    let shepherd = FakeShepherd::on("0.12.0").await;
+    let shepherd = FakeShepherd::on("0.13.0").await;
     let mut scene = Scene::new().await;
     scene.shepherd = shepherd;
 
@@ -280,7 +280,7 @@ async fn a_shepherd_on_another_minor_names_both_versions_and_no_project_is_check
 
     let (what, _) = missing(&report, "shepherd");
     assert!(
-        what.contains("shep 0.12.0") && what.contains(SHEP_VERSION),
+        what.contains("shep 0.13.0") && what.contains(SHEP_VERSION),
         "{what}"
     );
     assert!(matches!(

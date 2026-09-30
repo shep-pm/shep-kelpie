@@ -1,15 +1,16 @@
-//! The kelpie dog: the lease book, run as a sheep under kelpie's shepherd
+//! The kelpie dog: the lease book, run by the adopted `kelpie`
 //!
-//! It listens on the shepherd's bus for runners' lease metrics and their
-//! process events, keeps the book on its [`desk`], and grants with a
-//! `grant` trigger on the runner. The maintainer reaches it with
-//! `shep trigger kelpie <status|take|return>`. Its flock entry needs
-//! `channel = true`, and `shutdown_with_message = true` for a clean stop.
-//! The book is saved to `<kelpie home>/dog/book.json` after every change
-//! and loaded on start, with a review window for each reviewer kelpie's
-//! `[kelpie]` section defines.
+//! Shep starts the adopted kelpie with no arguments, and that start is the
+//! dog. It asks for the shepherd channel in its `--version` answer, so
+//! `shep trigger kelpie <status|take|return>` reaches it. It listens on the
+//! shepherd's bus for runners' lease metrics and their process events,
+//! keeps the book on its [`desk`], and grants with a `grant` trigger on the
+//! runner. The book is saved to `<kelpie home>/dog/book.json` after every
+//! change and loaded on start, with a review window for each reviewer
+//! kelpie's `[kelpie]` section defines.
 
 pub mod desk;
+pub mod left_over;
 pub mod triggers;
 
 use std::collections::HashMap;
@@ -38,14 +39,8 @@ use crate::webhook::KelpieSettings;
 use desk::{Delivery, Desk};
 use triggers::ACTIONS;
 
-/// The dog's sheep name, which `shep kelpie lease` triggers
-///
-/// Not `kelpie`, which is the adopted dog's: `shep disable kelpie` deletes a
-/// sheep of that name, and `shep adopt` refuses one.
-pub const NAME: &str = "kelpie-dog";
-
-/// The dog's sheep name in a Flockfile written before `shep kelpie add`
-pub const OLD_NAME: &str = "kelpie";
+/// The dog's name, which kelpie is adopted under and `shep kelpie lease` triggers
+pub const NAME: &str = crate::shepherd::DOG;
 
 /// How long queued replies get to reach the shepherd before the dog exits
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
@@ -54,7 +49,7 @@ const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 /// quotes waits to the minute, so a few seconds late costs nothing.
 const WINDOW_TICK: Duration = Duration::from_secs(10);
 
-/// Runs the dog until the shepherd stops it
+/// Runs the dog until the shepherd stops it, as the adopted kelpie's start
 pub fn run() -> ExitCode {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -189,12 +184,25 @@ async fn reviewers(client: &Client) -> Reviewers {
     }
 }
 
+/// Why the dog has no shepherd channel, and the fix
+///
+/// Kelpie asks for it at `shep adopt`, which records the ask, so an
+/// adoption from before the ask has none until kelpie is adopted again.
+pub fn no_channel() -> String {
+    let path = std::env::current_exe()
+        .map_or_else(|_| "<path to kelpie>".into(), |p| p.display().to_string());
+    format!(
+        "no shepherd channel, since kelpie was adopted before it asked for one: run \
+         `shep adopt {path} --name {NAME}`, then `shep disable {NAME}` and `shep enable {NAME}`"
+    )
+}
+
 async fn serve() -> Result<(), String> {
-    let socket = shep_home::required(shep_home::FLOCKFILE_FIX)?.join("run/shep.sock");
     let shepherd = shep_channel::serve();
     if !shepherd.is_active() {
-        return Err("no shepherd channel: run it under shep with `channel = true`".into());
+        return Err(no_channel());
     }
+    let socket = shep_home::required(shep_home::DOG_FIX)?.join("run/shep.sock");
     let connect = |what: &'static str| {
         let socket = socket.clone();
         async move {
@@ -215,6 +223,9 @@ async fn serve() -> Result<(), String> {
     let lock = GpuLock::under(&gpu::temp_dir());
     println!("the GPU lock is {}", lock.path().display());
     let file = BookFile::new(book_path()?);
+    if let Some(removed) = left_over::remove(&client, file.path()).await? {
+        println!("{removed}");
+    }
     if let Some(folder) = file.path().parent() {
         std::fs::create_dir_all(folder)
             .map_err(|e| format!("cannot make {}: {e}", folder.display()))?;
