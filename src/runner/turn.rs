@@ -28,6 +28,7 @@ use crate::pacer::Scope;
 use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Issue, Role, Session};
 use crate::preview::{self, McpFiles, WORKER_INSTRUCTIONS};
 use crate::profile::WorkerProfile;
+use crate::settings::NonBlank;
 use crate::skills::{Step, split_command};
 use crate::state::{Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
@@ -327,6 +328,10 @@ impl Runner {
         );
         let mcp_config = if previewed {
             text.push_str(WORKER_INSTRUCTIONS);
+            let config = self.settings.preview.configuration.as_ref();
+            if let Ok(launch) = preview::launch(&self.settings.repo, config.map(NonBlank::as_str)) {
+                text.push_str(&preview::worker_server(&launch, &item.worktree));
+            }
             Some(self.write_mcp_config(item)?)
         } else {
             None

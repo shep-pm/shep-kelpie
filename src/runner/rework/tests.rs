@@ -376,8 +376,8 @@ fn a_rework_of_a_pull_request_coderabbit_reviewed_spends_no_second_round() {
     let rig = Rig::new("shep");
     rig.coderabbit_on();
     rig.edit_settings(|s| s.replace("divisor = 1000\n", "divisor = 1000\nrounds = 1\n"));
-    reviewed_71(&rig);
-    let reviewed = rig.forge.head_of("kelpie/7").unwrap();
+    let reviewed = reviewed_71(&rig);
+    rig.push_by_hand("kelpie/7", "later.txt");
     rig.forge.coderabbit.review(
         71,
         &reviewed,
@@ -406,6 +406,44 @@ fn a_rework_of_a_pull_request_coderabbit_reviewed_spends_no_second_round() {
     let summons = rig.forge.coderabbit.label_log().into_iter();
     let summon = crate::runner::coderabbit::LABEL;
     assert_eq!(summons.filter(|(_, l, _)| l == summon).count(), 0);
+}
+
+#[test]
+fn a_review_of_the_current_head_is_left_out_of_a_reworks_count_as_an_adoptions_is() {
+    let rig = Rig::new("shep");
+    rig.coderabbit_on();
+    rig.edit_settings(|s| s.replace("divisor = 1000\n", "divisor = 1000\nrounds = 2\n"));
+    let head = reviewed_71(&rig);
+    rig.forge
+        .coderabbit
+        .review(71, &head, crate::runner::coderabbit::tests::now(&rig), &[]);
+    let runner = running(&rig);
+    rig.ask(&runner, "rework", Some("71"));
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["coderabbit"]["rounds"], json!(0));
+}
+
+#[test]
+fn a_rework_is_refused_while_the_forge_cannot_show_coderabbits_reviews() {
+    let rig = Rig::new("shep");
+    rig.coderabbit_on();
+    rig.edit_settings(|s| s.replace("divisor = 1000\n", "divisor = 1000\nrounds = 2\n"));
+    reviewed_71(&rig);
+    let runner = running(&rig);
+    rig.forge.coderabbit.set_down(true);
+    let answer = rig.ask(&runner, "rework", Some("71"));
+    let error = answer["error"].as_str().unwrap();
+    assert!(
+        error.starts_with("cannot read CodeRabbit's reviews of #71"),
+        "{error}"
+    );
+    assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
+    rig.forge.coderabbit.set_down(false);
+    assert!(
+        rig.ask(&runner, "rework", Some("71"))
+            .get("error")
+            .is_none()
+    );
 }
 
 mod asked;

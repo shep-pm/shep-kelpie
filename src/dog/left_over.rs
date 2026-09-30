@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use shep_client::Client;
+use shep_client::ReconnectingClient;
 use shep_client::shep_core::protocol::request::Response;
 use shep_client::shep_core::protocol::{Request, SelectorSpec};
 
@@ -24,7 +24,7 @@ pub const NAME: &str = "kelpie-dog";
 /// A message when the shepherd refuses a request, or the sheep's entry sets
 /// `KELPIE_HOME` or `HOME`, whose values shep withholds, so its book may
 /// not be `book`.
-pub async fn remove(client: &Client, book: &Path) -> Result<Option<String>, String> {
+pub async fn remove(client: &ReconnectingClient, book: &Path) -> Result<Option<String>, String> {
     let rows = match client.request(Request::ListFlock).await {
         Ok(Response::Flock(rows)) => rows,
         Ok(other) => return Err(format!("the flock listing came back as {other:?}")),
@@ -77,7 +77,6 @@ mod tests {
     use shep_client::shep_core::config::AppConfig;
 
     use super::*;
-    use crate::shepherd;
     use crate::test::FakeShepherd;
 
     // Bounds every call against a fake shepherd, so a hang fails by name.
@@ -90,7 +89,8 @@ mod tests {
     }
 
     async fn removed(shepherd: &FakeShepherd) -> Result<Option<String>, String> {
-        let client = shepherd::connect(shepherd.home()).await.unwrap();
+        let socket = shepherd.home().join("run/shep.sock");
+        let client = ReconnectingClient::connect(&socket).await.unwrap();
         let book = Path::new("/k/dog/book.json");
         tokio::time::timeout(PATIENCE, remove(&client, book))
             .await

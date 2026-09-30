@@ -221,7 +221,7 @@ pub enum RulingKind {
     Merge {
         /// The head the question is about
         head: String,
-        /// Whether kelpie's shots of that head failed, so none are on the pull request
+        /// Whether kelpie's shots of that head failed, so none of that head's are on the pull request
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         shots_failed: bool,
     },

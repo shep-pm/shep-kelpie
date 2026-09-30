@@ -318,3 +318,21 @@ fn local_rounds_spent_before_a_no_stay_spent_in_the_next_pass() {
     assert_eq!(status["work_item"]["phase"]["state"], "ci");
     assert_eq!(rig.reviewer.seen().len(), 1, "no second local round");
 }
+
+#[test]
+fn a_local_round_with_no_limit_set_leaves_the_state_file_as_it_was() {
+    let rig = Rig::new("koji");
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    step(&runner).unwrap(); // the worker's first turn
+    step(&runner).unwrap(); // round 1, local: clean by default
+    assert_eq!(rig.reviewer.seen().len(), 1, "the local round ran");
+    let saved = std::fs::read_to_string(rig.paths().state).unwrap();
+    assert!(!saved.contains("local_rounds"), "{saved}");
+}

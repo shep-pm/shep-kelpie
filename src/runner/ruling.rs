@@ -30,8 +30,9 @@ const FAILED_CONTINUE: &str = "Your last turn failed before it finished. \
 
 /// What the merge ruling and the notice say of a failed shots run: no path,
 /// and none of the run's own words
-pub(super) const SHOTS_FAILED: &str = " Kelpie's shots of it failed, so none are on the \
-                                        pull request; the runner's log says why.";
+pub(super) const SHOTS_FAILED: &str = " Kelpie's shots of it failed, so none of this head's are \
+                                        on the pull request (an earlier head's may be); \
+                                        the runner's log says why.";
 
 /// The maintainer's answer to a ruling
 #[derive(Debug, Clone, PartialEq, Eq)]

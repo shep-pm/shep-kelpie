@@ -1,2 +1,7 @@
 .claude/settings.local.json
 /target
+
+# what a review round leaves in the worktree it runs from
+/.round-*.pid
+/.cut-at
+/.hunks-digest
