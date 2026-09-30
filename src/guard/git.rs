@@ -97,6 +97,17 @@ pub(super) fn judge(
         moved(dir.as_deref(), to, home)
     });
     let args = &git.words[at + 1..];
+    if sub == "config"
+        && let Some(key) = runs::config_set(args)
+        && !runs::safe(key)
+    {
+        out.push(format!(
+            "kelpie cannot check git once its config names a program for it to run, and \
+             `{}` can: set only keys that run nothing, such as `color.*`, `user.*` or \
+             `core.quotepath`.",
+            key.chars().take(40).collect::<String>()
+        ));
+    }
     // Where a push goes is judged wherever it runs from.
     let pushed = if sub == "push" {
         match refspecs(args) {

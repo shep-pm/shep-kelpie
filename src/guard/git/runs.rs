@@ -2,8 +2,9 @@
 //!
 //! Some options hand git a shell command: `rebase --exec`, `difftool -x`,
 //! `--upload-pack`. The guard reads each as a script. Config set in the
-//! command is read from a list of keys that run nothing, and config that has
-//! a push send more than the refs it names is refused.
+//! command, or written with `git config`, is read from a list of keys that
+//! run nothing, and config that has a push send more than the refs it names
+//! is refused.
 
 use super::front::front;
 use crate::guard::values;
@@ -101,6 +102,41 @@ pub(super) fn safe(key: &str) -> bool {
     key.contains('.') && SAFE_SECTIONS.contains(&section) || SAFE_KEYS.contains(&key.as_str())
 }
 
+/// The key a `git config` command sets, when it sets one
+pub(super) fn config_set(args: &[String]) -> Option<&str> {
+    // Options that read, or take no key and value, set nothing.
+    const READS: [&str; 12] = [
+        "--get",
+        "--get-all",
+        "--get-regexp",
+        "--get-urlmatch",
+        "--list",
+        "-l",
+        "--unset",
+        "--unset-all",
+        "--rename-section",
+        "--remove-section",
+        "--edit",
+        "-e",
+    ];
+    let mut positional = Vec::new();
+    let mut words = args.iter();
+    while let Some(word) = words.next() {
+        match word.as_str() {
+            w if READS.contains(&w) => return None,
+            "-f" | "--file" | "--blob" | "--type" | "--default" | "--comment" => {
+                words.next();
+            }
+            w if w.starts_with('-') => {}
+            w => positional.push(w),
+        }
+    }
+    match positional[..] {
+        ["set", key, ..] | [key, _, ..] if !matches!(key, "get" | "list" | "unset") => Some(key),
+        _ => None,
+    }
+}
+
 /// Whether config `key`, set to `value`, has a push send more than the refs it names
 pub(super) fn pushes_more(key: &str, value: &str) -> bool {
     let on = !matches!(value, "false" | "no" | "off" | "0");
@@ -165,6 +201,23 @@ mod tests {
             "",
         ] {
             assert!(!safe(key), "{key}");
+        }
+    }
+
+    #[test]
+    fn git_config_sets_a_key_only_with_a_value() {
+        for (line, key) in [
+            ("git config core.pager x", Some("core.pager")),
+            ("git config --global core.pager x", Some("core.pager")),
+            ("git config set core.pager x", Some("core.pager")),
+            ("git config --add -f f alias.p x", Some("alias.p")),
+            ("git config core.pager", None),
+            ("git config --get core.pager", None),
+            ("git config get core.pager", None),
+            ("git config --unset core.pager", None),
+            ("git config -l", None),
+        ] {
+            assert_eq!(config_set(&w(line)[2..]), key, "{line}");
         }
     }
 }

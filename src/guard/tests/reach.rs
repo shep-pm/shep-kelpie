@@ -307,3 +307,17 @@ fn a_pager_git_grep_opens_files_in_is_read_as_a_script() {
     sends_notes(&unpushed(), &["git grep -O'git push origin HEAD' notes"]);
     allowed(&["git grep -O notes", "git grep -Oless notes"]);
 }
+
+#[test]
+fn git_config_written_to_name_a_program_is_refused() {
+    refused(&[
+        "git config core.pager 'git push' && git -p log",
+        "git config --global core.editor x",
+        "git config set alias.p '!git push'",
+    ]);
+    allowed(&[
+        "git config user.name t",
+        "git config --get core.pager",
+        "git config --list",
+    ]);
+}
