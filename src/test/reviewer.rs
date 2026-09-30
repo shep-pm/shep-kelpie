@@ -25,6 +25,7 @@ pub(crate) struct SeenRound {
     pub(crate) base: String,
     pub(crate) out: PathBuf,
     pub(crate) round: u32,
+    pub(crate) criteria: String,
 }
 
 /// A local round's stand-in. Clean (no findings) once its script runs out, so
@@ -73,6 +74,7 @@ impl Reviewer for FakeReviewer {
         base: &str,
         out: &Path,
         round: u32,
+        criteria: &str,
     ) -> Result<Vec<Finding>, ReviewerError> {
         self.seen.lock().unwrap().push(SeenRound {
             local: local.clone(),
@@ -80,9 +82,10 @@ impl Reviewer for FakeReviewer {
             base: base.to_owned(),
             out: out.to_owned(),
             round,
+            criteria: criteria.to_owned(),
         });
         if let Some(real) = &*self.real.lock().unwrap() {
-            return real.round(local, worktree, base, out, round);
+            return real.round(local, worktree, base, out, round, criteria);
         }
         match self.script.lock().unwrap().pop_front() {
             Some(ScriptedRound::Findings(findings)) => Ok(findings),

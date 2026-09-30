@@ -376,6 +376,7 @@ mod tests {
                 "consecutive_clean": 1,
                 "guard_cleared": false,
                 "stage": { "stage": "round" },
+                "last": "qwen",
             }),
             "resumed round 1, not restarted at round 1 again"
         );

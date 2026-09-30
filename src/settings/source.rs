@@ -13,6 +13,12 @@ use super::{Settings, SettingsError};
 use crate::shepherd::Tables;
 use crate::webhook::KelpieSettings;
 
+/// What a project still on `review.local` is told at start
+pub const OLD_LOCAL: &str = "`review.local` still runs, before the Claude round, but the \
+     newer form names reviewers: define the local one in kelpie's \
+     `[local_reviewers.<name>]` and list the loop in `review.reviewers`, \
+     such as `[\"qwen\", \"claude\"]`.";
+
 /// The files a project had before its tables, and whose they are
 #[derive(Debug, Clone, Copy)]
 pub struct Files<'a> {
@@ -83,6 +89,9 @@ pub fn load(tables: &Tables, files: Files<'_>, home: &Path) -> Result<Loaded, Se
     } else {
         KelpieSettings::default()
     };
+    if settings.review.local.is_some() {
+        notices.push(OLD_LOCAL.to_owned());
+    }
     Ok(Loaded {
         settings,
         kelpie,
@@ -172,6 +181,24 @@ mod tests {
         assert_eq!(loaded.settings.forge.as_str(), "shep-pm/from-table");
         assert_eq!(loaded.kelpie.webhook.unwrap().kind, WebhookKind::Discord);
         assert!(loaded.notices.is_empty(), "{:?}", loaded.notices);
+    }
+
+    #[test]
+    fn the_older_local_round_still_loads_with_a_notice_naming_the_new_form() {
+        let local = "[app.dogs.kelpie.review.local]\nkind = \"off\"\n";
+        let entry = crate::test::with_tables(EXAMPLE, local);
+        let tables = Tables {
+            project: Some(crate::test::project_table(&entry)),
+            kelpie: SECTION.into(),
+        };
+        let loaded = Home::with_files().load(&tables, "shep").unwrap();
+        assert_eq!(
+            loaded.settings.review.local,
+            Some(super::super::LocalRound::Off {})
+        );
+        assert_eq!(loaded.notices, [OLD_LOCAL]);
+        assert!(OLD_LOCAL.contains("`[local_reviewers.<name>]`"));
+        assert!(OLD_LOCAL.contains("`review.reviewers`"));
     }
 
     #[test]

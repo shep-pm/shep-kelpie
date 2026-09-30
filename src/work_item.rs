@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::board::WorkerModel;
 use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage, Verdict};
+use crate::settings::ReviewerName;
 use crate::shots::ShotsRecord;
 
 mod follow_ups;
@@ -294,11 +295,10 @@ pub enum ReviewCallState {
 
 /// Where the review loop stands
 ///
-/// With a local round, rounds alternate, local first: an odd round is the
-/// local one, an even one Claude's, and the loop ends once two rounds in a
-/// row hold nothing above a nit (LOW). Without one, every round is Claude's,
-/// and one such round ends it. The worker's fix turn for each round is folded
-/// in before the next.
+/// Rounds go down the project's reviewers in order. The loop ends once two
+/// rounds in a row, from two different reviewers, hold nothing above a nit
+/// (LOW), or once one does where only one reviewer could run. The worker's
+/// fix turn for each round is folded in before the next.
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -311,6 +311,17 @@ pub struct Review {
     pub guard_cleared: bool,
     /// Where this round stands
     pub stage: ReviewStage,
+    /// Who reviews this round, once it has started. None in an older state
+    /// file, whose rounds alternated local first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewer: Option<ReviewerName>,
+    /// Who reviewed the round before, if any
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last: Option<ReviewerName>,
+    /// Whether this round's reviewer was the only one that could run, so
+    /// one clean round ends the loop
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub alone: bool,
 }
 
 impl Review {
@@ -321,29 +332,11 @@ impl Review {
             consecutive_clean: 0,
             guard_cleared: false,
             stage: ReviewStage::Round,
+            reviewer: None,
+            last: None,
+            alone: false,
         }
     }
-
-    /// Which reviewer runs this round, given how many local rounds the work
-    /// item has left: 0 with the local round off
-    pub fn reviewer(&self, local_left: u32) -> ReviewerKind {
-        if local_left > 0 && self.round % 2 == 1 {
-            ReviewerKind::Local
-        } else {
-            ReviewerKind::Claude
-        }
-    }
-}
-
-/// Which reviewer a review round runs
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ReviewerKind {
-    /// The project's local round, named for the first model it ran
-    #[serde(rename = "qwen")]
-    Local,
-    /// A fresh Claude session, never the worker's
-    Claude,
 }
 
 /// Where one review round stands
@@ -544,8 +537,7 @@ mod tests {
             value(Phase::Review(Review {
                 round: 2,
                 consecutive_clean: 1,
-                guard_cleared: false,
-                stage: ReviewStage::Round,
+                ..Review::first()
             })),
             json!({
                 "state": "review",
@@ -553,6 +545,26 @@ mod tests {
                 "consecutive_clean": 1,
                 "guard_cleared": false,
                 "stage": { "stage": "round" },
+            })
+        );
+        let name = |n: &str| Some(ReviewerName::try_from(n.to_owned()).unwrap());
+        assert_eq!(
+            value(Phase::Review(Review {
+                round: 3,
+                reviewer: name("opus"),
+                last: name("qwen"),
+                alone: true,
+                ..Review::first()
+            })),
+            json!({
+                "state": "review",
+                "round": 3,
+                "consecutive_clean": 0,
+                "guard_cleared": false,
+                "stage": { "stage": "round" },
+                "reviewer": "opus",
+                "last": "qwen",
+                "alone": true,
             })
         );
         assert_eq!(
@@ -685,42 +697,6 @@ mod tests {
         assert_eq!(
             value(saved_before_the_head),
             json!({ "stage": "fixing", "clean": true })
-        );
-    }
-
-    #[test]
-    fn rounds_alternate_local_first_and_are_all_claudes_without_one() {
-        let review = Review::first();
-        assert_eq!(review.reviewer(u32::MAX), ReviewerKind::Local);
-        assert_eq!(
-            Review { round: 2, ..review }.reviewer(u32::MAX),
-            ReviewerKind::Claude
-        );
-        for round in 1..=3 {
-            let review = Review {
-                round,
-                ..Review::first()
-            };
-            assert_eq!(review.reviewer(0), ReviewerKind::Claude, "round {round}");
-        }
-    }
-
-    #[test]
-    fn with_no_local_round_left_every_round_is_claudes() {
-        let round = |round| Review {
-            round,
-            ..Review::first()
-        };
-        assert_eq!(round(3).reviewer(1), ReviewerKind::Local);
-        assert_eq!(round(3).reviewer(0), ReviewerKind::Claude);
-        assert_eq!(round(4).reviewer(1), ReviewerKind::Claude);
-    }
-
-    #[test]
-    fn the_local_reviewer_keeps_its_wire_name() {
-        assert_eq!(
-            serde_json::to_value(ReviewerKind::Local).unwrap(),
-            json!("qwen")
         );
     }
 
