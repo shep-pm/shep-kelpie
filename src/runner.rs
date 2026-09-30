@@ -15,7 +15,7 @@ use crate::local_paths::LocalPaths;
 use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Guarded, Ports, SessionId, Timestamp, Visibility};
 use crate::review_bot::{Bot, Profile, Reviewers};
-use crate::settings::{LoopReviewer, NonBlank, Runs, Settings, SettingsError};
+use crate::settings::{LoopReviewer, NonBlank, RoleAgents, Runs, Settings, SettingsError};
 use crate::skills::Skills;
 use crate::state::ids::RulingIds;
 use crate::state::{ProjectState, RunState, StateError, StateStore};
@@ -25,6 +25,8 @@ use crate::work_item::{
 };
 
 mod adopt;
+#[cfg(test)]
+mod agents_tests;
 mod alert;
 mod claude_files;
 #[cfg(test)]
@@ -170,6 +172,8 @@ pub struct Runner {
     reviewers: Reviewers,
     // The review loop's reviewers, in order, from the project's list
     lineup: Vec<LoopReviewer>,
+    // The model and effort each role runs on, from the agent it names
+    agents: RoleAgents,
     // The maintainer's home folder, for `~/` in kelpie's own settings
     home: PathBuf,
     // None when rulings do not go to the webhook
@@ -221,7 +225,8 @@ impl Runner {
         let local = LocalPaths::new(folders, names);
         ports.forge = Box::new(Guarded::new(ports.forge, local.clone()));
         let reviewers = kelpie_settings.reviewers;
-        let lineup = settings.lineup(&kelpie_settings.local_reviewers, home)?;
+        let agents = settings.role_agents(&kelpie_settings.agents)?;
+        let lineup = settings.lineup(&kelpie_settings, home)?;
         let (channels, webhook) = ruling_channels(&settings, kelpie_settings)?;
         let totp = replies::authenticator(webhook.as_ref(), &paths.totp)?;
         check_repo(&settings)?;
@@ -282,6 +287,7 @@ impl Runner {
             skipped: Vec::new(),
             reviewers,
             lineup,
+            agents,
             home: home.to_owned(),
             webhook,
             channels,
@@ -389,7 +395,7 @@ impl Runner {
             .map_err(AddError::Forge)?;
         let worker = worker_override(&found.labels)
             .map_err(AddError::Label)?
-            .unwrap_or_else(|| WorkerModel::from(&self.settings.models.worker));
+            .unwrap_or_else(|| WorkerModel::from(&self.agents.worker));
         let session = new_session_id().map_err(|e| AddError::Session(e.to_string()))?;
         let mut next = self.state.clone();
         next.work_items

@@ -32,7 +32,7 @@ impl Runner {
 }
 
 // Parks the work item on a turn-ceiling ruling and builds its report. Shared
-// by a call that actually hit `ClaudeError::TimedOut` and by a restart that
+// by a call that actually hit `AgentError::TimedOut` and by a restart that
 // finds a turn already past its ceiling with no call spent. The caller sets
 // `item.turn` beforehand: this only raises the ruling. `comment_failed` is
 // filled in afterwards, once the ruling has actually been posted.

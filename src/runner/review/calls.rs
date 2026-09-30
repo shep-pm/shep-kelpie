@@ -4,45 +4,23 @@
 //! Neither is the worker's: both draw a fresh session id and run under
 //! their own throwaway settings, never the worker's own. The Claude round
 //! keeps its read tools, to check its own work against the worktree; the
-//! judge has every tool denied, so its answer is exactly the JSON it was
-//! asked for and nothing it read on the side.
+//! judge has no tools, so its answer is exactly the JSON it was asked for
+//! and nothing it read on the side.
 
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::ports::{ClaudeCall, Finding, Role, Session, Severity, Verdict};
-use crate::runner::turn;
+use crate::ports::{AgentCall, Finding, Role, Sandbox, Session, Severity, Tools, Verdict};
 use crate::settings::RoleModel;
 use crate::shots::ShotsRun;
 use crate::skills::{Skills, Step};
 use crate::work_item::new_session_id;
 
-/// The Claude round's throwaway settings: no sandbox fencing, no bypassed
-/// permissions, but Read, Grep and Glob still work by default so it can
-/// check its own work against the worktree
+/// Where the Claude round's throwaway settings go
 const REVIEW_SETTINGS_FILE: &str = "review-settings.json";
 
-/// The judge's throwaway settings: every tool denied, so its one-shot answer
-/// is schema-constrained text and nothing it read on the side
+/// Where the judge's throwaway settings go
 const JUDGE_SETTINGS_FILE: &str = "judge-settings.json";
-
-/// The tools a Claude round never uses: sub-agents, under either name, and commands
-const REVIEWER_DENIES: [&str; 3] = ["Agent", "Task", "Bash"];
-
-/// Every tool name a Claude Code call can reach, denied outright for the judge
-const NO_TOOLS: [&str; 11] = [
-    "Bash",
-    "Read",
-    "Edit",
-    "Write",
-    "MultiEdit",
-    "NotebookEdit",
-    "Glob",
-    "Grep",
-    "WebFetch",
-    "WebSearch",
-    "Task",
-];
 
 /// Kelpie's shots for a Claude round, and the folder they sit under
 #[derive(Debug, Clone, Copy)]
@@ -67,7 +45,7 @@ pub(super) fn reviewer_call(
     model: &RoleModel,
     shots: Option<Screens<'_>>,
     skills: &Skills,
-) -> Result<ClaudeCall, String> {
+) -> Result<AgentCall, String> {
     let Round {
         issue,
         worktree,
@@ -76,7 +54,6 @@ pub(super) fn reviewer_call(
         criteria,
     } = round;
     let diff = diff_against(worktree, base)?;
-    let settings = review_settings(worker_folder, shots.map(|s| s.dir))?;
     let mut prompt = reviewer_prompt(base, &diff);
     if !criteria.trim().is_empty() {
         prompt.push_str(&format!(
@@ -89,7 +66,11 @@ pub(super) fn reviewer_call(
         prompt.push_str(&shots_prompt(shots.run));
     }
     let prompt = skills.invoke(Step::Review, &prompt);
-    let mut call = build_call(Role::Reviewer, issue, worktree, model, settings, prompt)?;
+    let mut call = build_call(Role::Reviewer, issue, worktree, model, prompt)?;
+    call.settings = worker_folder.join(REVIEW_SETTINGS_FILE);
+    // A review skill may spawn sub-agents or run commands; the round does neither.
+    call.tools = Tools::Review;
+    call.sandbox.read = shots.map(|s| s.dir.to_owned()).into_iter().collect();
     call.plugin_dirs = skills.plugin_dirs().to_vec();
     Ok(call)
 }
@@ -104,10 +85,9 @@ pub(in crate::runner) fn judge_call(
     model: &RoleModel,
     finding: &Finding,
     shots: Option<&Path>,
-) -> Result<ClaudeCall, String> {
+) -> Result<AgentCall, String> {
     let diff = diff_against(worktree, base)?;
     let shot = shots.filter(|dir| is_shot(&finding.file, dir));
-    let settings = judge_settings(worker_folder, shot)?;
     let mut prompt = judge_prompt(base, &diff, finding);
     if shot.is_some() {
         prompt.push_str(&format!(
@@ -115,7 +95,10 @@ pub(in crate::runner) fn judge_call(
             finding.file
         ));
     }
-    build_call(Role::Judge, issue, worktree, model, settings, prompt)
+    let mut call = build_call(Role::Judge, issue, worktree, model, prompt)?;
+    call.settings = worker_folder.join(JUDGE_SETTINGS_FILE);
+    call.sandbox.read = shot.map(Path::to_owned).into_iter().collect();
+    Ok(call)
 }
 
 // Whether `file` is a PNG really inside `dir`, kelpie's shots folder. A
@@ -134,58 +117,32 @@ fn is_shot(file: &str, dir: &Path) -> bool {
 }
 
 // The shape every call the review loop makes itself shares: a fresh
-// session, the worktree as its folder, no instructions file, no plugins unless
-// the caller adds them, and whatever role, settings and prompt it worked out.
+// session, the worktree as its folder, no instructions file, no tools, no
+// fence and no plugins unless the caller adds them, and the role and prompt.
 fn build_call(
     role: Role,
     issue: u64,
     worktree: &Path,
     model: &RoleModel,
-    settings: PathBuf,
     prompt: String,
-) -> Result<ClaudeCall, String> {
+) -> Result<AgentCall, String> {
     let session = new_session_id().map_err(|e| format!("cannot draw a session id: {e}"))?;
-    Ok(ClaudeCall {
+    Ok(AgentCall {
         role,
         issue,
         model: model.model.as_str().to_owned(),
         effort: model.effort,
         session: Session::New(session),
         cwd: worktree.to_owned(),
-        settings,
+        settings: PathBuf::new(),
         instructions: None,
         prompt,
         timeout: None,
         mcp_config: None,
         plugin_dirs: Vec::new(),
+        tools: Tools::Answer,
+        sandbox: Sandbox::default(),
     })
-}
-
-fn review_settings(worker_folder: &Path, shots: Option<&Path>) -> Result<PathBuf, String> {
-    let path = worker_folder.join(REVIEW_SETTINGS_FILE);
-    // A review skill may spawn sub-agents or run commands; the round does neither.
-    let mut settings = serde_json::json!({ "permissions": { "deny": REVIEWER_DENIES } });
-    if let Some(dir) = shots {
-        // Read outside the worktree is refused under `-p` unless the folder is added.
-        settings["permissions"]["additionalDirectories"] = serde_json::json!([dir]);
-    }
-    let text = serde_json::to_string_pretty(&settings).expect("settings are JSON");
-    turn::write(worker_folder, &path, &text)?;
-    Ok(path)
-}
-
-fn judge_settings(worker_folder: &Path, shot: Option<&Path>) -> Result<PathBuf, String> {
-    let path = worker_folder.join(JUDGE_SETTINGS_FILE);
-    let settings = match shot {
-        Some(dir) => {
-            let deny: Vec<&str> = NO_TOOLS.into_iter().filter(|t| *t != "Read").collect();
-            serde_json::json!({ "permissions": { "deny": deny, "additionalDirectories": [dir] } })
-        }
-        None => serde_json::json!({ "permissions": { "deny": NO_TOOLS } }),
-    };
-    let text = serde_json::to_string_pretty(&settings).expect("settings are JSON");
-    turn::write(worker_folder, &path, &text)?;
-    Ok(path)
 }
 
 fn shots_prompt(run: &ShotsRun) -> String {
@@ -302,6 +259,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::adapters::NO_TOOLS;
     use crate::runner::step;
     use crate::test::{Rig, Scripted, ScriptedRound};
 
@@ -424,7 +382,7 @@ mod tests {
     #[ignore = "runs one real Claude round through the vendored code-review skill, about 1 min"]
     fn a_live_claude_round_through_the_code_review_skill_reads_as_findings() {
         use crate::adapters::ClaudeCli;
-        use crate::ports::{Claude, read_review};
+        use crate::ports::{Agents, read_review};
         use crate::settings::{Effort, StepSkills};
         use crate::test::git;
 
@@ -469,7 +427,9 @@ mod tests {
             criteria: "",
         };
         let call = reviewer_call(round, &model, None, &skills).unwrap();
-        let reply = ClaudeCli::default().run(&call).expect("the round ran");
+        let cli = ClaudeCli::default();
+        cli.prepare(&call).expect("the settings were written");
+        let reply = cli.run(&call).expect("the round ran");
         println!("--- reply ---\n{}\n--- end ---", reply.text);
         let findings = read_review(&reply.text).expect("the reply reads as a review");
         println!("{} finding(s): {findings:#?}", findings.len());

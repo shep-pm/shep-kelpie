@@ -25,7 +25,7 @@ use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, Spent, StepReport
 use super::ruling::park;
 use super::shots::RoundShots;
 use crate::ports::{
-    Claude, ClaudeCall, ClaudeError, ClaudeReply, Finding, Reviewer, ReviewerError, Severity,
+    AgentCall, AgentError, AgentReply, Agents, Finding, Reviewer, ReviewerError, Severity,
     Timestamp, Verdict, read_review,
 };
 use crate::settings::{ReviewerName, Runs};
@@ -92,7 +92,7 @@ impl Runner {
                             shots,
                             &self.skills,
                         );
-                        match call {
+                        match call.and_then(|call| self.prepared(call)) {
                             Ok(call) => {
                                 self.round_started(&chosen)?;
                                 Ok(Begin::Review(ReviewCall::ClaudeRound(call)))
@@ -107,7 +107,7 @@ impl Runner {
                     return self.finalize_round(review, findings, verdicts);
                 }
                 let finding = findings[verdicts.len()].clone();
-                let model = self.settings.models.judge.clone();
+                let model = self.agents.judge.clone();
                 let shots = self.preview_on().then(|| self.paths.shots(issue));
                 match calls::judge_call(
                     issue,
@@ -117,7 +117,9 @@ impl Runner {
                     &model,
                     &finding,
                     shots.as_deref(),
-                ) {
+                )
+                .and_then(|call| self.prepared(call))
+                {
                     Ok(call) => {
                         self.mark_review_call_running()?;
                         Ok(Begin::Review(ReviewCall::Judge(call)))
@@ -444,7 +446,7 @@ pub(super) fn advance(
 /// A call stopped with the runner comes back as [`ReviewResult::Stopped`]
 /// rather than an error, so `end_review` can tell it from a failed gate.
 pub(super) fn run_review_call(
-    claude: &dyn Claude,
+    claude: &dyn Agents,
     reviewer: &dyn Reviewer,
     action: ReviewCall,
 ) -> Reviewed {
@@ -470,7 +472,7 @@ pub(super) fn run_review_call(
         ReviewCall::ClaudeRound(call) => {
             let (reply, spent) = run_claude(claude, &call);
             match reply {
-                Err(ClaudeError::Stopped) => stopped(),
+                Err(AgentError::Stopped) => stopped(),
                 reply => Reviewed {
                     result: ReviewResult::Findings(reply.map_err(|e| e.to_string()).and_then(
                         |reply| {
@@ -488,7 +490,7 @@ pub(super) fn run_review_call(
         ReviewCall::Judge(call) => {
             let (reply, spent) = run_claude(claude, &call);
             match reply {
-                Err(ClaudeError::Stopped) => stopped(),
+                Err(AgentError::Stopped) => stopped(),
                 reply => Reviewed {
                     result: ReviewResult::Verdict(reply.map_err(|e| e.to_string()).and_then(
                         |reply| {
@@ -538,9 +540,9 @@ fn stopped() -> Reviewed {
 
 // A reply that came back cost something even if what it said is unusable.
 fn run_claude(
-    claude: &dyn Claude,
-    call: &ClaudeCall,
-) -> (Result<ClaudeReply, ClaudeError>, Option<Spent>) {
+    claude: &dyn Agents,
+    call: &AgentCall,
+) -> (Result<AgentReply, AgentError>, Option<Spent>) {
     let reply = claude.run(call);
     let spent = reply.as_ref().ok().map(|reply| Spent::Claude {
         role: call.role,

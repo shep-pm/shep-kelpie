@@ -2,22 +2,166 @@
 
 A [shep](https://github.com/shep-pm/shep) dog that runs Claude Code workers on your projects, from a planned work item to a merged pull request. It holds the merge gate, the review budgets and the pacing in code, and calls Claude only for the work and for judgement.
 
-This is early. It runs the maintainer's own projects and changes without notice, and there is no release yet.
+This is early. It changes without notice, and there is no release yet.
 
-## What it needs
+## Getting started
+
+From nothing to a worker on your repo. The output below is what each command printed on a scratch shepherd and a fresh checkout.
+
+### Before you start
+
+You need these on your machine:
+
+- [shep](https://github.com/shep-pm/shep) 0.12 and Rust 1.88 or later, to build kelpie
+- Claude Code, signed in
+- `git`, and `gh` signed in to the account that opens the pull requests
+- a GitHub repo whose default branch is `main`, and a checkout of it
+
+### 1. Install
+
+There is no release binary yet. Build it from source:
+
+```sh
+cargo install --git https://github.com/shep-pm/shep-kelpie --locked
+```
+
+```
+  Installing /path/to/bin/shep-kelpie
+   Installed package `shep-kelpie v0.0.0 (https://github.com/shep-pm/shep-kelpie#61f0979f)` (executable `shep-kelpie`)
+```
+
+The binary is `shep-kelpie`, and `cargo install` puts it on your `PATH`.
+
+### 2. Adopt it in your shepherd
+
+```sh
+shep adopt shep-kelpie --name kelpie
+```
+
+```
+notice[dog_version]: kelpie reports version 0.0.0, shep protocol 11
+notice[dog_channel]: kelpie asked for the shepherd channel, so it runs with channel and shutdown_with_message: `shep trigger kelpie <action>` reaches it, and shep stops it with a message rather than a signal
+NAME    SOURCE   SHEPHERD  STATUS
+kelpie  adopted  false     will start with the next shepherd
+```
+
+If no shepherd is running, `shep muster` starts one, and kelpie with it. Then `shep dogs` shows it:
+
+```
+ID  NAME    STATUS  PID    RESTARTS  EXIT  CPU  MEM   UPTIME  SOURCE
+0   kelpie  online  23814  0         -     -    8.5M  4s      adopted
+```
+
+Adopt it once and leave it enabled. It is the dog that holds the leases every project's runner asks before a summon.
+
+### 3. Install the UI tools, if a project shows a UI
+
+Skip this for a project with no UI to show.
+
+```sh
+shep kelpie tools install
+```
+
+```
+installed kelpie's tools in /path/to/.kelpie/tools
+```
+
+It downloads a headless Chrome of about 95 MiB, and puts it under kelpie's home.
+
+### 4. Add your project
+
+In the checkout:
+
+```sh
+shep kelpie add
+```
+
+```
+label `ready-for-agent`: already on shep-pm/shep
+label `ready-for-human`: already on shep-pm/shep
+label `review please`: already on shep-pm/shep
+runner `scratch`: added with its settings, stopped until `shep kelpie start`
+```
+
+On a repo without those labels, `add` makes them. The project is named after the repo, or `shep kelpie add <name>`, as `scratch` was here.
+
+### 5. Check the machine
+
+```sh
+shep kelpie doctor
+```
+
+```
+ok       claude: installed and logged in
+ok       gh: logged in as <you>
+ok       sandbox: Claude Code's sandbox can run
+ok       shepherd: shep 0.12.0 at /path/to/.shep
+ok       dog: kelpie's dog is running and has named itself
+ok       scratch: checkout: /path/to/checkout is a git checkout with an origin
+ok       scratch: push access: may push to shep-pm/shep
+ok       scratch: labels: shep-pm/shep has `ready-for-agent`, `ready-for-human`, `review please`
+ok       scratch: coderabbit: CodeRabbit has commented on a pull request of shep-pm/shep
+ok       scratch: local review: ready
+MISSING  scratch: rulings: rulings go to the webhook, and kelpie's settings name none. Fix: add a `webhook` table to kelpie's [kelpie] section of dogs.toml, as kelpie-settings.example.toml shows, or drop `webhook` from `ruling_channels`
+1 thing a project needs is missing
+```
+
+Each `MISSING` line names its fix, and `doctor` exits non-zero until they are done. A ruling is a question kelpie cannot settle itself, such as a merge, and it must reach you. Pick where:
+
+- ntfy or Discord: add the `[kelpie.webhook]` table to `dogs.toml` in the shepherd's home, from `kelpie-settings.example.toml`
+- the Claude app on your phone: put `ruling_channels = ["relay"]` in the `[kelpie]` section of that file instead
+
+Run `shep kelpie doctor` again. With the relay alone it ends:
+
+```
+ok       scratch: rulings: rulings go to the relay session, and the webhook is off
+nothing a project needs is missing
+```
+
+### 6. Start it, and label a first issue
+
+```sh
+shep kelpie start
+```
+
+Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria. The runner gives it to a worker, which opens a draft pull request. Kelpie then runs the review loop and CI, and asks you for a ruling before it merges. `shep kelpie status` shows every project, and `shep kelpie add <issue>` puts an issue on the board without the label.
+
+### 7. Answer a ruling
+
+A ruling reaches the channel you chose in step 5. Answer it from there, or from the terminal:
+
+```sh
+shep kelpie rule          # lists the rulings waiting
+shep kelpie rule 14 yes
+shep kelpie rule 14 no rename the flag
+```
+
+On ntfy you can reply in the topic after a one-time `shep kelpie totp`, as the reference below describes. In the Claude app, tap an answer or reply in words.
+
+### 8. Pause
+
+```sh
+shep kelpie pause
+```
+
+The current turn finishes, then the worker parks. `shep kelpie start` resumes it.
+
+## Reference
+
+### What it needs
 
 - shep 0.12
 - Rust 1.88 or later, to build it
 - Claude Code, signed in
 - `git`, and `gh` signed in to the account that opens the pull requests
-- a GitHub repo per project, with `ready-for-agent` and `ready-for-human` labels
+- a GitHub repo per project, where `add` makes the `ready-for-agent`, `ready-for-human` and `review please` labels it lacks
 - a local review command or an OpenAI-compatible endpoint, or a project that lists `claude` alone
 
-## Merging
+### Merging
 
 A project on `merge_authority = "auto"` merges its pull requests without asking once every gate passes, and posts a notice after. The example settings use `ask`, which raises a ruling before every merge.
 
-## Running a project
+### Running a project
 
 Kelpie needs shep 0.12 and runs in your own shepherd, beside your other sheep. Adopt it once and leave it enabled: the adopted kelpie is the dog that holds the leases every runner asks before a summon, and it asks shep for the channel the lease commands reach it on.
 
@@ -71,7 +215,7 @@ To adopt kelpie in `~/.kelpie/shep` itself instead, drop the dog's `kelpie` entr
 
 A runner's Flockfile entry, for a project set up by hand, is in `settings.example.toml`. It needs `SHEP_HOME` as an absolute path in `env`, since a sheep starts without it, and `kill_timeout = "10s"` or more, since a runner needs about 7s to stop cleanly.
 
-## Skills
+### Skills
 
 Every step kelpie drives an agent through runs a skill, by default from [mattpocock/skills](https://github.com/mattpocock/skills) (MIT). Kelpie vendors the ones it uses in `skills/`, pinned to one upstream commit with its licence, and writes them out as a Claude Code plugin when a runner starts. A project installs nothing.
 
@@ -96,15 +240,16 @@ A step that runs a skill starts its prompt with the skill's slash command, such 
 
 A skill that can't load runs kelpie's own prompt instead. The runner logs why, and `status` shows it under `skills`. `scripts/vendor-skills.sh <commit>` moves the pin.
 
-## The review loop
+### The review loop
 
 Each pull request goes through a review loop before CI. A project lists its reviewers in `review.reviewers`, in the order the loop runs them, and kelpie's own settings define each one by name in `[kelpie.local_reviewers.<name>]`:
 
 - `kind = "command"`: a command of your own that keeps the contract below
 - `kind = "endpoint"`: kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server
 - `kind = "claude"`: a fresh Claude session on its own `model` and `effort`
+- `kind = "session"`: a fresh session on the agent its `agent` names (see Agents below)
 
-`claude` is always defined: the project's own Claude round on `models.reviewer`. The loop ends once two rounds in a row, from two different reviewers, find nothing above a nit, and those nits get fixed with no further round. Where only one reviewer can run, one clean round ends it.
+`claude` is always defined: the project's own Claude round on its reviewer's agent, `models.reviewer` unless the project names one. The loop ends once two rounds in a row, from two different reviewers, find nothing above a nit, and those nits get fixed with no further round. Where only one reviewer can run, one clean round ends it.
 
 A local model alone:
 
@@ -144,6 +289,24 @@ paths = ["src/runner/merge/**", "src/guard/**"]
 A project that lists none runs `review.local` and then `claude`, and a table with neither runs `~/.claude/scripts/qwen-review.sh`, the maintainer's own command, then Claude. `review.local` is the older form: it takes the same keys as a definition, or `kind = "off"`, and the runner says so at start. `review.local_rounds` caps the rounds from local reviewers per work item. Once they are spent, only Claude reviewers run.
 
 A missing command or an endpoint that doesn't answer stops the runner at start.
+
+## Agents
+
+An agent is a harness plus the model and effort it runs on. Claude Code is the one harness for now. Kelpie's own settings define agents by name, and a project names one per role, over its `models` entry:
+
+```toml
+# kelpie's [kelpie] section
+[kelpie.agents.opus-high]
+harness = "claude-code"
+model = "claude-opus-5-5"
+effort = "high"
+
+# the project's table
+[app.dogs.kelpie.agents]
+judge = "opus-high"
+```
+
+A role left out keeps its `models` entry, so a project that names none runs as before. A local reviewer of kind `session` names an agent from the same list. An agent nobody defines stops the runner at start, naming it.
 
 An endpoint takes `url` (the base, up to and including `/v1`), `model`, and `context`, the context size in tokens the server gives that model. Kelpie diffs the pull request, cuts the diff to fit that context, and sends each piece with its own review prompt, `src/adapters/local/review-prompt.md`. Set `context` to what the server really uses: Ollama gives its OpenAI-compatible endpoint a small default context unless `OLLAMA_CONTEXT_LENGTH` says more, and drops whatever doesn't fit without saying so.
 

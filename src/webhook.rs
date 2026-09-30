@@ -1,5 +1,5 @@
 //! Kelpie's own settings: the webhook, the channels rulings go to, the
-//! pull request reviewers and the local reviewers
+//! pull request reviewers, the local reviewers and the agents
 //!
 //! Kelpie's `[kelpie]` section of `dogs.toml`, or the file under kelpie's
 //! home it had before one, shared by every project. Every part is
@@ -18,7 +18,7 @@ use shep_client::dogs::dog_config;
 
 use crate::channels::Channels;
 use crate::review_bot::Reviewers;
-use crate::settings::{Definition, ReviewerName, SettingsError};
+use crate::settings::{Agent, AgentName, Definition, ReviewerName, SettingsError};
 
 /// What every project shares
 #[dog_config]
@@ -40,6 +40,9 @@ pub struct KelpieSettings {
     /// by name. `claude` is always the project's own Claude round.
     #[serde(default)]
     pub local_reviewers: BTreeMap<ReviewerName, Definition>,
+    /// The agents a project's roles and session reviewers may name
+    #[serde(default)]
+    pub agents: BTreeMap<AgentName, Agent>,
 }
 
 /// The maintainer's webhook
@@ -125,8 +128,9 @@ const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntf
                      `webhook` and `relay`, and `[reviewers.coderabbit]` and \
                      `[reviewers.cubic]` tables with `reviews` and `hours`, \
                      `[local_reviewers.<name>]` tables with a `kind` of \
-                     `endpoint`, `command` or `claude` and that kind's keys, \
-                     and nothing else";
+                     `endpoint`, `command`, `claude` or `session` and that \
+                     kind's keys, `[agents.<name>]` tables with `harness`, \
+                     `model` and `effort`, and nothing else";
 
 impl KelpieSettings {
     /// Reads and checks kelpie's settings file

@@ -25,7 +25,7 @@ use super::rework;
 use super::ruling::park;
 use super::trigger::lock;
 use crate::pacer::Scope;
-use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Issue, Role, Session};
+use crate::ports::{AgentCall, AgentError, AgentReply, Issue, Role, Session, Tools};
 use crate::preview::{self, McpFiles, WORKER_INSTRUCTIONS};
 use crate::profile::WorkerProfile;
 use crate::settings::NonBlank;
@@ -59,7 +59,7 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
     let (claude, reviewer, relay, alerts, shots) = {
         let runner = lock(runner);
         (
-            Arc::clone(&runner.ports.claude),
+            Arc::clone(&runner.ports.agents),
             Arc::clone(&runner.ports.reviewer),
             Arc::clone(&runner.ports.relay),
             Arc::clone(&runner.ports.alerts),
@@ -89,7 +89,7 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
             Begin::Report(report) => return Ok(Some(report)),
             Begin::Call(call) => {
                 let result = claude.run(&call);
-                if start_over.is_none() && matches!(result, Err(ClaudeError::NoSession(_))) {
+                if start_over.is_none() && matches!(result, Err(AgentError::NoSession(_))) {
                     start_over = issue;
                     continue;
                 }
@@ -250,7 +250,7 @@ impl Runner {
         if remaining.is_zero() {
             // The ceiling passed while kelpie was down, before a new call
             // could even be tried: park it as a call that hit
-            // `ClaudeError::TimedOut` would, with no call spent.
+            // `AgentError::TimedOut` would, with no call spent.
             return self.park_ceiling_passed(now);
         }
         let issue = item.issue;
@@ -286,7 +286,7 @@ impl Runner {
         session: Session,
         prompt: Option<String>,
         timeout: Duration,
-    ) -> Result<ClaudeCall, String> {
+    ) -> Result<AgentCall, String> {
         let start = if item.rework || item.adopted {
             Start::Pushed
         } else {
@@ -323,8 +323,6 @@ impl Runner {
         let folder = &self.paths.worker;
         let settings = folder.join("settings.json");
         let instructions = folder.join("instructions.md");
-        let text = serde_json::to_string_pretty(&profile.settings()).expect("settings are JSON");
-        write(folder, &settings, &text)?;
         let mut text = instructions::compose(
             self.extra_instructions.as_deref(),
             &item.worktree,
@@ -355,7 +353,7 @@ impl Runner {
                     .invoke(Step::Implement, &first_prompt(item.issue, &issue))
             }
         };
-        Ok(ClaudeCall {
+        self.prepared(AgentCall {
             role: Role::Worker,
             issue: item.issue,
             model: item.worker.model.clone(),
@@ -368,7 +366,21 @@ impl Runner {
             timeout: Some(timeout),
             mcp_config,
             plugin_dirs: self.skills.plugin_dirs().to_vec(),
+            tools: Tools::Work,
+            sandbox: profile.sandbox(),
         })
+    }
+
+    /// `call`, once its harness has what it needs on disk
+    ///
+    /// Done before the call is marked running, so a failure keeps the turn
+    /// it would have run for a retry.
+    pub(super) fn prepared(&self, call: AgentCall) -> Result<AgentCall, String> {
+        self.ports
+            .agents
+            .prepare(&call)
+            .map_err(|e| e.to_string())?;
+        Ok(call)
     }
 
     // The worker's MCP servers: Playwright's, fenced to the preview's
@@ -404,7 +416,7 @@ impl Runner {
 
     fn end_turn(
         &mut self,
-        result: Result<ClaudeReply, ClaudeError>,
+        result: Result<AgentReply, AgentError>,
     ) -> Result<Option<StepReport>, StateError> {
         // However the turn ended, a dev server its shots tool started is done.
         if let Some(item) = self.current() {
@@ -413,7 +425,7 @@ impl Runner {
                 .stop_left(&self.paths.shots(item.issue).join(crate::shots::SERVER_PID));
         }
         // A turn stopped with the runner stays running, to resume on restart.
-        if matches!(result, Err(ClaudeError::Stopped)) {
+        if matches!(result, Err(AgentError::Stopped)) {
             return Ok(None);
         }
         let now = self.ports.clock.now();
@@ -507,7 +519,7 @@ impl Runner {
                     }
                 }
             }
-            Err(ClaudeError::TimedOut) => {
+            Err(AgentError::TimedOut) => {
                 item.turn = Turn::Ended { at: now };
                 timed_out(self.names(), &mut next, issue)
             }

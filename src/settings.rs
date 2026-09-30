@@ -8,7 +8,8 @@
 //! `coderabbit.rounds`,
 //! `pacing.enabled`, `worker.allowed_domains`, `worker.build_env`,
 //! `worker.instructions_file`, `worker.turn_timeout`, `worker.guard_hooks`,
-//! `ruling_channels`, `pull_request_reviewers`, `[preview]` and `[skills]`).
+//! `ruling_channels`, `pull_request_reviewers`, `[preview]`, `[skills]` and
+//! `[agents]`).
 //! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
@@ -30,13 +31,16 @@ pub mod source;
 mod table;
 
 pub use table::table_of;
+mod agents;
 mod local;
 mod reviewers;
 mod skills;
 
+pub use agents::{Agent, AgentName, Harness, RoleAgentNames, RoleAgents};
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use reviewers::{
-    CLAUDE, ClaudeSession, Definition, LeaseName, LoopReviewer, QWEN, ReviewerName, Runs,
+    AgentSession, CLAUDE, ClaudeSession, Definition, LeaseName, LoopReviewer, QWEN, ReviewerName,
+    Runs,
 };
 pub use skills::{SkillChoice, SkillName, StepSkills};
 
@@ -71,6 +75,11 @@ pub struct Settings {
     pub private_names: Vec<NonBlank>,
     /// The model and effort for each role
     pub models: Models,
+    /// The agent each role runs on, from those kelpie's own settings
+    /// define, over `models`. A role left out keeps its `models` entry on
+    /// Claude Code.
+    #[serde(default)]
+    pub agents: RoleAgentNames,
     /// The review loop
     pub review: Review,
     /// The CodeRabbit gate, which holds every pull request reviewer's rounds
