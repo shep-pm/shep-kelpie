@@ -60,6 +60,19 @@ To adopt kelpie in `~/.kelpie/shep` itself instead, run `SHEP_HOME=~/.kelpie/she
 
 A runner's Flockfile entry, for a project set up by hand, is in `settings.example.toml`. It needs `SHEP_HOME` as an absolute path in `env`, since a sheep starts without it, and `kill_timeout = "10s"` or more, since a runner needs about 7s to stop cleanly.
 
+### Upgrading kelpie
+
+```sh
+shep kelpie upgrade --ref main          # build kelpie at a git ref and install it
+shep kelpie upgrade --release 0.3.0     # install a release
+shep kelpie upgrade --binary ./kelpie   # install a build made by hand, as it is
+shep kelpie upgrade --rollback          # put back the build the last upgrade replaced
+```
+
+The installed kelpie is `~/.kelpie/bin/shep-kelpie` (under `KELPIE_HOME` where that is set), and `shep kelpie add` registers it as the binary the dog and each runner run, once it exists. An upgrade keeps the build it replaces as `shep-kelpie.previous`, then restarts the dog and each running runner one at a time, never while a work item is merging: it waits, and says what it waits on. A stopped runner stays stopped and starts on the new build.
+
+Before it changes anything it asks the new build which shep it is made with (`shep-kelpie version --json`) and compares the minor with your shepherd's. If they differ it stops and says what to do: for a build on a newer shep, save the flock, stop the shepherd, install that shep, muster, then run the upgrade again. `--rollback` checks the previous build the same way.
+
 ## Skills
 
 Every step kelpie drives an agent through runs a skill, by default from [mattpocock/skills](https://github.com/mattpocock/skills) (MIT). Kelpie vendors the ones it uses in `skills/`, pinned to one upstream commit with its licence, and writes them out as a Claude Code plugin when a runner starts. A project installs nothing.

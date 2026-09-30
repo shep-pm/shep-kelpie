@@ -26,6 +26,7 @@ use crate::adapters::Gh;
 use crate::runner::{ProjectName, ProjectPaths};
 use crate::settings::ForgeSlug;
 use crate::shepherd::{self, DOG};
+use crate::upgrade::install::Layout;
 
 /// Runs `kelpie <command> <args>` for `add`, `start`, `pause` or `status`
 pub fn main(command: &str, args: &[String]) -> ExitCode {
@@ -70,14 +71,13 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
                 Some(name) => name,
                 None => ProjectName::try_from(checkout.forge.name()).map_err(|e| e.to_string())?,
             };
-            let kelpie_home = std::env::var_os("KELPIE_HOME").map(PathBuf::from);
+            let set_home = std::env::var_os("KELPIE_HOME").map(PathBuf::from);
+            let kelpie_home = set_home.clone().unwrap_or_else(|| home.join(".kelpie"));
             let launch = Launch {
-                kelpie: std::env::current_exe()
-                    .map_err(|e| format!("cannot find kelpie itself: {e}"))?,
+                kelpie: program(&kelpie_home)?,
                 shep_home: shep_home.to_owned(),
-                kelpie_home: kelpie_home.clone(),
+                kelpie_home: set_home,
             };
-            let kelpie_home = kelpie_home.unwrap_or_else(|| home.join(".kelpie"));
             let old = ProjectPaths::under(&kelpie_home, &name).settings;
             let place = add::Place {
                 checkout: &checkout,
@@ -90,6 +90,16 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
         ("pause", _) => control::pause(&client, &project().await?).await,
         ("status", []) => control::status(&client).await,
         _ => Err(format!("usage: kelpie {command}")),
+    }
+}
+
+// The binary kelpie's sheep run: the installed build when there is one, so
+// `upgrade` moves them, else the kelpie that is running.
+fn program(kelpie_home: &Path) -> Result<PathBuf, String> {
+    let installed = Layout::under(kelpie_home).installed();
+    match installed.is_file() {
+        true => Ok(installed),
+        false => std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}")),
     }
 }
 
@@ -200,11 +210,13 @@ pub(crate) struct Found {
     pub row: ProcessInfo,
     /// The names of the variables its entry sets, whose values shep withholds
     pub env_keys: Vec<String>,
+    /// The program its entry runs
+    pub script: String,
 }
 
 /// The sheep named `name`, if the flock has one, refusing one that is not
 /// kelpie's: a dog, or a sheep started with arguments other than `args`
-async fn kelpie_sheep(
+pub(crate) async fn kelpie_sheep(
     client: &Client,
     rows: &[ProcessInfo],
     name: &str,
@@ -224,6 +236,7 @@ async fn kelpie_sheep(
         Ok(Response::SheepConfig(view)) if view.config.args == args => Ok(Some(Found {
             row: row.clone(),
             env_keys: view.env_keys,
+            script: view.config.script,
         })),
         Ok(Response::SheepConfig(_)) => Err(taken()),
         Ok(other) => Err(format!("the shepherd answered {other:?} for `{name}`")),
@@ -232,7 +245,7 @@ async fn kelpie_sheep(
 }
 
 /// Every sheep in the flock
-async fn flock(client: &Client) -> Result<Vec<ProcessInfo>, String> {
+pub(crate) async fn flock(client: &Client) -> Result<Vec<ProcessInfo>, String> {
     match client.request(Request::ListFlock).await {
         Ok(Response::Flock(rows)) => Ok(rows),
         Ok(other) => Err(format!("the flock listing came back as {other:?}")),
@@ -274,7 +287,7 @@ async fn send(
 /// Starts `name`, which the caller has seen registered and not running
 ///
 /// A restart, so a sheep that is running is restarted: callers check first.
-async fn resume(client: &Client, name: &str) -> Result<(), String> {
+pub(crate) async fn resume(client: &Client, name: &str) -> Result<(), String> {
     let request = Request::Restart {
         selector: SelectorSpec::Name(name.to_owned()),
     };
@@ -284,6 +297,16 @@ async fn resume(client: &Client, name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sheep_run_the_installed_build_once_there_is_one() {
+        let home = tempfile::tempdir().unwrap();
+        assert_eq!(program(home.path()), Ok(std::env::current_exe().unwrap()));
+        let installed = Layout::under(home.path()).installed();
+        std::fs::create_dir_all(installed.parent().unwrap()).unwrap();
+        std::fs::write(&installed, "").unwrap();
+        assert_eq!(program(home.path()), Ok(installed));
+    }
 
     #[test]
     fn a_github_remote_names_its_repo_over_https_or_ssh() {

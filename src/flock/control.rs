@@ -160,7 +160,7 @@ async fn kelpie_runner(
 }
 
 /// What a runner's sheep made of a trigger
-enum Answered {
+pub(crate) enum Answered {
     /// The runner's own answer, which is always a JSON object
     Runner(String),
     /// A plain-text answer: shep-channel's `unknown action`, from a runner
@@ -171,7 +171,11 @@ enum Answered {
 }
 
 // What `sheep` made of `action`, under `shep trigger`'s own budget.
-async fn trigger(client: &Client, sheep: &str, action: &str) -> Result<Answered, String> {
+pub(crate) async fn trigger(
+    client: &Client,
+    sheep: &str,
+    action: &str,
+) -> Result<Answered, String> {
     let request = Request::Trigger {
         selector: SelectorSpec::Name(sheep.to_owned()),
         action: action.to_owned(),

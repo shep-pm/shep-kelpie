@@ -4,6 +4,7 @@
 //! It keeps each sheep's config and status, answers the requests those
 //! commands send as shep 0.11 does, and records every request.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -26,6 +27,8 @@ struct Sheep {
     dog: bool,
     // Whether a runner just started is still taking its actions
     opening: bool,
+    // What its next `status` answers, the last one repeating
+    says: VecDeque<String>,
 }
 
 /// The shepherd, its home, and what it was sent
@@ -83,6 +86,7 @@ impl FakeShepherd {
             online,
             dog: false,
             opening: false,
+            says: VecDeque::new(),
         };
         self.flock.lock().unwrap().push(sheep);
     }
@@ -99,6 +103,13 @@ impl FakeShepherd {
         sheep.opening = true;
     }
 
+    /// Has `name` answer its `status` triggers with `bodies` in turn, the last one from then on
+    pub(crate) fn says(&self, name: &str, bodies: &[&str]) {
+        let mut flock = self.flock.lock().unwrap();
+        let sheep = flock.iter_mut().find(|s| s.config.name == name).unwrap();
+        sheep.says = bodies.iter().map(|&b| b.to_owned()).collect();
+    }
+
     /// Puts an adopted dog named `name` in the flock, running
     pub(crate) fn holds_dog(&self, name: &str) {
         let sheep = Sheep {
@@ -106,6 +117,7 @@ impl FakeShepherd {
             online: true,
             dog: true,
             opening: false,
+            says: VecDeque::new(),
         };
         self.flock.lock().unwrap().push(sheep);
     }
@@ -185,6 +197,7 @@ fn answer(flock: &mut Vec<Sheep>, section: &str, request: &Request) -> Response 
                         online: false,
                         dog: false,
                         opening: false,
+                        says: VecDeque::new(),
                     });
                 }
             }
@@ -231,6 +244,12 @@ fn answer(flock: &mut Vec<Sheep>, section: &str, request: &Request) -> Response 
                 ActionOutcome::Replied {
                     body: format!("unknown action: {action}"),
                 }
+            } else if action == "status" && !sheep.says.is_empty() {
+                let body = match sheep.says.len() {
+                    1 => sheep.says[0].clone(),
+                    _ => sheep.says.pop_front().unwrap(),
+                };
+                ActionOutcome::Replied { body }
             } else {
                 ActionOutcome::Replied {
                     body: serde_json::json!({ "sheep": sheep.config.name, "action": action })
