@@ -12,7 +12,7 @@ pub mod control;
 pub mod rule;
 mod verbs;
 
-pub use verbs::{USAGE, VERBS, main, split_project};
+pub use verbs::{USAGE, VERBS, main, split_project, verb_first};
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

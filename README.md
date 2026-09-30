@@ -46,7 +46,7 @@ A ruling's id is unique across projects, so `rule` needs no project:
 - `shep kelpie rule 14 no rename the flag`
 - `shep kelpie rule 15 use --dry-run`, for a worker's question. A `yes` there is the answer's text
 
-Quotes are optional, but zsh still needs them around a note with `?`, `*`, `!` or an apostrophe. Words after `--` are the answer's, even `-p`. `shep kelpie rule` alone lists the rulings waiting and asks which to answer and how.
+Quotes are optional, but zsh still needs them around a note with `?`, `*`, `!` or an apostrophe. `-p` goes before the answer: after its first word, and after a `--`, a `-p` is part of the answer. `shep kelpie rule` alone lists the rulings waiting and asks which to answer and how.
 
 `add` names the project after the repo, or `shep kelpie add <name>`. It makes `ready-for-agent`, `ready-for-human` and `review please` where the repo lacks them, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. `add` and `start` say how to bring the dog up when the adopted kelpie is not running with its channel. Worktrees, build folders and state go under `~/.kelpie`, never inside the checkout. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name.
 

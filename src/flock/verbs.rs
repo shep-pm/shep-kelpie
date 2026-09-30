@@ -26,8 +26,9 @@ usage: shep kelpie add [<project>]       registers this checkout as a project
        shep kelpie rework <pr> | adopt <pr>
        shep kelpie gate [<issue>] | drop [<issue>]
 
-`-p <project>` or `--project <project>` goes anywhere in the line. Without
-it, the project is the one whose repo holds this folder.";
+`-p <project>` or `--project <project>` goes anywhere in the line, before a
+ruling's answer. Without it, the project is the one whose repo holds this
+folder.";
 
 /// Runs `kelpie <command> <args>` for one of [`VERBS`]
 pub fn main(command: &str, args: &[String]) -> ExitCode {
@@ -41,7 +42,7 @@ pub fn main(command: &str, args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(message) => {
-            eprintln!("kelpie {command}: {message}");
+            eprintln!("shep kelpie {command}: {message}");
             ExitCode::FAILURE
         }
     }
@@ -55,7 +56,8 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
     let kelpie_home = kelpie_home_set
         .clone()
         .unwrap_or_else(|| home.join(".kelpie"));
-    let (named, args) = split_project(args)?;
+    // A ruling's answer starts after its id and first word.
+    let (named, args) = split_project(args, (command == "rule").then_some(2))?;
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     if command == "rule" {
         return answer(shep_home, &kelpie_home, named.as_ref(), &args).await;
@@ -150,15 +152,25 @@ async fn answer(
 /// `-p <project>`, `--project <project>` or `--project=<project>` from
 /// anywhere in `args` before a `--`, and the rest in order
 ///
+/// With `words_from`, everything after that many other arguments is words,
+/// so a ruling's answer can carry `-p`.
+///
 /// # Errors
 ///
 /// A message when the project is given twice, has no name after it, or is
 /// not a project name.
-pub fn split_project(args: &[String]) -> Result<(Option<ProjectName>, Vec<String>), String> {
+pub fn split_project(
+    args: &[String],
+    words_from: Option<usize>,
+) -> Result<(Option<ProjectName>, Vec<String>), String> {
     let mut named = None;
     let mut rest = Vec::new();
     let mut args = args.iter();
     while let Some(arg) = args.next() {
+        if words_from.is_some_and(|from| rest.len() >= from) {
+            rest.push(arg.clone());
+            continue;
+        }
         let name = match arg.as_str() {
             "--" => {
                 rest.extend(args.by_ref().cloned());
@@ -184,6 +196,25 @@ pub fn split_project(args: &[String]) -> Result<(Option<ProjectName>, Vec<String
     Ok((named, rest))
 }
 
+/// `args` with a verb that follows leading project flags moved first, so
+/// `shep kelpie -p koji rule 14 yes` reaches `rule`
+pub fn verb_first(mut args: Vec<String>) -> Vec<String> {
+    let mut at = 0;
+    while let Some(arg) = args.get(at) {
+        match arg.as_str() {
+            "-p" | "--project" => at += 2,
+            flag if flag.starts_with("--project=") => at += 1,
+            verb if at > 0 && VERBS.contains(&verb) => {
+                let verb = args.remove(at);
+                args.insert(0, verb);
+                break;
+            }
+            _ => break,
+        }
+    }
+    args
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,20 +227,44 @@ mod tests {
     fn the_project_goes_anywhere_in_the_line_before_a_double_dash() {
         let koji = ProjectName::try_from("koji").ok();
         for line in [
-            "-p koji rule 14 yes",
-            "rule 14 yes -p koji",
-            "rule --project koji 14 yes",
-            "rule 14 --project=koji yes",
+            "-p koji 3 7",
+            "3 7 -p koji",
+            "3 --project koji 7",
+            "3 7 --project=koji",
         ] {
-            let (named, rest) = split_project(&words(line)).unwrap();
+            let (named, rest) = split_project(&words(line), None).unwrap();
             assert_eq!(named, koji, "{line}");
-            assert_eq!(rest, words("rule 14 yes"), "{line}");
+            assert_eq!(rest, words("3 7"), "{line}");
         }
-        let (named, rest) = split_project(&words("rule 14 no -- drop the -p flag")).unwrap();
+        let (named, rest) = split_project(&words("14 no -- drop the -p flag"), None).unwrap();
         assert_eq!(named, None);
-        assert_eq!(rest, words("rule 14 no drop the -p flag"));
-        for refused in ["rule -p", "-p koji -p rotom rule", "rule -p ../koji"] {
-            assert!(split_project(&words(refused)).is_err(), "{refused}");
+        assert_eq!(rest, words("14 no drop the -p flag"));
+        for refused in ["-p", "-p koji -p rotom", "-p ../koji"] {
+            assert!(split_project(&words(refused), None).is_err(), "{refused}");
         }
+    }
+
+    #[test]
+    fn a_ruling_s_answer_keeps_a_p_as_its_own_words() {
+        let koji = ProjectName::try_from("koji").ok();
+        for line in ["-p koji 14 yes", "14 -p koji yes", "14 --project=koji yes"] {
+            let (named, rest) = split_project(&words(line), Some(2)).unwrap();
+            assert_eq!(named, koji, "{line}");
+            assert_eq!(rest, words("14 yes"), "{line}");
+        }
+        let line = words("14 no pass -p koji through");
+        let (named, rest) = split_project(&line, Some(2)).unwrap();
+        assert_eq!(named, None);
+        assert_eq!(rest, line);
+    }
+
+    #[test]
+    fn a_verb_after_the_project_goes_first() {
+        let moved = |line| verb_first(words(line));
+        assert_eq!(moved("-p koji rule 14 yes"), words("rule -p koji 14 yes"));
+        assert_eq!(moved("--project=koji gate"), words("gate --project=koji"));
+        assert_eq!(moved("rule -p koji 14 yes"), words("rule -p koji 14 yes"));
+        assert_eq!(moved("-p koji runner x"), words("-p koji runner x"));
+        assert_eq!(moved("-p"), words("-p"));
     }
 }

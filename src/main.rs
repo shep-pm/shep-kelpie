@@ -62,7 +62,7 @@ const REFUSE: u8 = 2;
 
 fn main() -> ExitCode {
     shep_kelpie::schema::probe();
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args = shep_kelpie::flock::verb_first(std::env::args().skip(1).collect());
     match args.as_slice() {
         [role, project] if role == "runner" => shep_kelpie::sheep::run(project),
         [command, rest @ ..] if command == "lease" => shep_kelpie::lease::cli::main(rest),
