@@ -8,8 +8,8 @@
 /// The shells whose `-c` script, or heredoc, the guard reads as commands
 pub(super) const SHELLS: [&str; 4] = ["sh", "bash", "zsh", "dash"];
 
-// Shells the guard does not read, whose `-c` scripts are refused.
-const OTHER_SHELLS: [&str; 12] = [
+/// Shells the guard does not read, whose scripts are refused
+pub(super) const OTHER_SHELLS: [&str; 12] = [
     "ksh", "mksh", "pdksh", "oksh", "yash", "fish", "csh", "tcsh", "ash", "busybox", "posh", "rc",
 ];
 
@@ -153,6 +153,22 @@ pub(super) fn unwrap(mut words: &[String]) -> Result<Option<Unwrapped<'_>>, Stri
 /// The refusal for a shell function a command defines
 pub(super) const FUNCTION: &str =
     "kelpie cannot check a shell function's body when it runs: run the commands directly.";
+
+/// The refusal for a push or a gh command among another program's words
+///
+/// `find -exec`, `caffeinate` and `flock` run the words after them as a
+/// command, and the guard does not know every such program.
+pub(super) fn hidden(words: &[String]) -> Option<String> {
+    let at = |name: &str| words[1..].iter().position(|w| program(w) == name);
+    let pushes = at("git").is_some_and(|i| words[i + 2..].iter().any(|w| w == "push"));
+    let gh = at("gh").is_some_and(|i| i + 2 < words.len());
+    (pushes || gh).then(|| {
+        format!(
+            "kelpie cannot check git or gh run through `{}`: run it directly.",
+            program(&words[0]).chars().take(40).collect::<String>()
+        )
+    })
+}
 
 /// A command's program, by name: `/usr/bin/git` is `git`
 pub(super) fn program(word: &str) -> &str {

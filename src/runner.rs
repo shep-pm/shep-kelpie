@@ -170,9 +170,6 @@ pub struct Runner {
     channels: Channels,
     // The last failed webhook post, kept in memory so a restart tries at once
     retry: Option<alert::Retry>,
-    // When the relay was last cleared, kept in memory only: a restart may
-    // clear a session sooner than a full day, never later.
-    relay_cleared: Option<Timestamp>,
     // Notices for the relay of rulings settled without it, kept in memory
     // only: one lost to a restart leaves the question up, and `rule`
     // refuses a tap on it.
@@ -248,7 +245,10 @@ impl Runner {
             }
             store.save(&state)?;
         }
-        // A dev server the last run's worker left behind holds its port.
+        // A dev server the last run left behind holds its port, and one the
+        // state file no longer names, such as a merged item's, is found by
+        // the folders it works in.
+        ports.shots.stop_orphans(&paths.owned());
         for item in &state.work_items {
             ports
                 .shots
@@ -276,7 +276,6 @@ impl Runner {
             webhook,
             channels,
             retry: None,
-            relay_cleared: None,
             relay_notices: Vec::new(),
             relaying: None,
             reading: replies::Reading::default(),

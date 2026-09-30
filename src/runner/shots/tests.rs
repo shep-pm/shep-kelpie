@@ -84,11 +84,29 @@ fn a_launch_file_on_main_without_the_setting_takes_no_shots() {
     assert_eq!(shots_comments(&rig), Vec::<String>::new());
 }
 
+const WEB_LAUNCH: &str = r#"{"configurations": [{"name": "web", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 5173, "cwd": "web"}]}"#;
+
+#[test]
+fn the_worker_is_told_the_folder_kelpie_starts_the_dev_server_in() {
+    let rig = Rig::new("shep");
+    rig.land("web/package.json", "{}\n");
+    rig.land(crate::preview::LAUNCH_FILE, WEB_LAUNCH);
+    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.preview]\nenabled = true\n"));
+    let runner = started(&rig);
+    rig.claude.script([Scripted::Text("CLEAN")]);
+    step(&runner).unwrap();
+    let [worker] = rig.claude.calls().try_into().unwrap();
+    let web = worker.cwd.canonicalize().unwrap().join("web");
+    let instructions = std::fs::read_to_string(rig.paths().worker.join("instructions.md"));
+    let instructions = instructions.unwrap();
+    let told = format!("`npm run dev` on port 5173, in `{}`", web.display());
+    assert!(instructions.contains(&told), "{instructions}");
+}
+
 // shep's dev server lives in `web/`, so only a change there is worth shots.
 fn with_web_preview(project: &str, change: &'static str) -> (Rig, std::sync::Mutex<Runner>) {
     let rig = Rig::new(project);
-    let launch = r#"{"configurations": [{"name": "web", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 5173, "cwd": "web"}]}"#;
-    rig.land(crate::preview::LAUNCH_FILE, launch);
+    rig.land(crate::preview::LAUNCH_FILE, WEB_LAUNCH);
     rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.preview]\nenabled = true\n"));
     let runner = started(&rig);
     rig.claude
@@ -199,6 +217,16 @@ fn a_dev_server_the_worker_left_is_stopped_when_its_turn_ends_and_on_restart() {
     drop(runner);
     rig.open().unwrap();
     assert_eq!(rig.shots.stopped(), [recorded.clone(), recorded]);
+}
+
+#[test]
+fn a_starting_runner_sweeps_its_own_worktrees_and_build_folders_for_orphaned_servers() {
+    let rig = with_preview("lab");
+    assert!(rig.shots.swept().is_empty());
+    drop(started(&rig));
+    let home = rig.home.path().join("kelpie");
+    let own = [home.join("wt/lab"), home.join("targets/lab")];
+    assert_eq!(rig.shots.swept(), [own.to_vec()]);
 }
 
 #[test]

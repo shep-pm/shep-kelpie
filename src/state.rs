@@ -66,6 +66,15 @@ pub struct ProjectState {
     /// Where reading the webhook's replies has got to
     #[serde(default)]
     pub replies: Replies,
+    /// The relay's count of clears, by any project's runner, when this
+    /// runner last read it. Every ruling marked relayed was sent after that
+    /// many clears, so a higher count means the relay no longer holds it.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub relay_clears: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 impl ProjectState {
@@ -86,6 +95,7 @@ impl ProjectState {
             pacing: None,
             notices: Vec::new(),
             replies: Replies::default(),
+            relay_clears: 0,
         }
     }
 
@@ -219,7 +229,7 @@ pub enum RulingKind {
     Merge {
         /// The head the question is about
         head: String,
-        /// Whether kelpie's shots of that head failed, so none are on the pull request
+        /// Whether kelpie's shots of that head failed, so none of that head's are on the pull request
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         shots_failed: bool,
     },

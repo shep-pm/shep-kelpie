@@ -245,35 +245,38 @@ fn signal_group(pgid: u32, signal: &str) {
         .status();
 }
 
+fn group_running(pgid: u32) -> bool {
+    Command::new("pgrep")
+        .args(["-g", &pgid.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 /// Stops process group `pgid`, which no `Processes` holds: SIGTERM, then
 /// SIGKILL once [`STOP_GRACE`] has passed with any of it still running
 pub(super) fn stop_group(pgid: u32) {
-    let alive = || {
-        Command::new("pgrep")
-            .args(["-g", &pgid.to_string()])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
-    };
     signal_group(pgid, "TERM");
     let deadline = Instant::now() + STOP_GRACE;
-    while Instant::now() < deadline && alive() {
+    while Instant::now() < deadline && group_running(pgid) {
         thread::sleep(POLL);
     }
     signal_group(pgid, "KILL");
 }
 
 // SIGTERM to `child`'s whole process group, then SIGKILL once `grace` has
-// passed with it still running. `child.kill()` also runs as a fallback for a
-// system with no `kill` binary on `PATH`, though that alone would miss
-// anything the child had spawned.
+// passed with any of it still running. A leader that exits on SIGTERM can
+// leave a member that ignores it, so the wait is for the group, and the
+// leader is reaped on the way since a zombie still counts as a member.
+// `child.kill()` also runs as a fallback for a system with no `pkill` on
+// `PATH`, though that alone would miss anything the child had spawned.
 fn stop_child(child: &mut Child, grace: Duration) {
     let pid = child.id();
     signal_group(pid, "TERM");
     let deadline = Instant::now() + grace;
     while Instant::now() < deadline {
-        if matches!(child.try_wait(), Ok(Some(_))) {
+        if matches!(child.try_wait(), Ok(Some(_))) && !group_running(pid) {
             return;
         }
         thread::sleep(POLL);

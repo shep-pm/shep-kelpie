@@ -122,7 +122,7 @@ command = "~/.claude/scripts/qwen-review.sh"
 [app.dogs.kelpie.coderabbit]
 enabled = true
 divisor = 1000
-# A fixed number of rounds per work item, in place of the divisor's cap of
+# A fixed number of rounds per pull request, in place of the divisor's cap of
 # ceil(changed lines / divisor) + 1. The last round's held findings go to the
 # worker, and its fix goes to CI and the merge with no further summon.
 # rounds = 1
