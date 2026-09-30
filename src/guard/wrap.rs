@@ -1,16 +1,23 @@
 //! What a command runs once the programs wrapped around it are taken off
 //!
-//! `env`, `timeout`, `nice` and the like run the command after their own
-//! options, so the guard judges that command. Some ways of running a command
-//! it cannot read are refused: `eval`, `xargs` running git or gh, a shell
-//! other than the four it reads, and `env -S`. Others it does not know of.
+//! `env`, `sudo`, `timeout` and the like run the command after their own
+//! options, so the guard judges that command. A shell's commands are read
+//! from its `-c` script, a `<<<` string or a heredoc, and a shell reading
+//! them from a pipe or a file on stdin is refused. So are other ways of
+//! running a command the guard cannot read: `eval`, `xargs` running git or
+//! gh, a shell other than the four it reads, `env -S` and `script -c`.
 
-/// The shells whose `-c` script, or heredoc, the guard reads as commands
+mod stdin;
+
+pub(super) use stdin::{Shell, shell};
+use stdin::{is_c_flag, redirection, stdin_path};
+
+/// The shells whose `-c` script, `<<<` string or heredoc the guard reads as commands
 pub(super) const SHELLS: [&str; 4] = ["sh", "bash", "zsh", "dash"];
 
-// Shells the guard does not read, whose `-c` scripts are refused.
-const OTHER_SHELLS: [&str; 12] = [
-    "ksh", "mksh", "pdksh", "oksh", "yash", "fish", "csh", "tcsh", "ash", "busybox", "posh", "rc",
+/// Shells the guard does not read, whose scripts are refused
+pub(super) const OTHER_SHELLS: [&str; 12] = [
+    "ksh", "mksh", "pdksh", "oksh", "yash", "fish", "csh", "tcsh", "ash", "posh", "rc", "elvish",
 ];
 
 // `GIT_` variables that change only how git shows or signs what it does.
@@ -30,27 +37,74 @@ const GIT_HARMLESS: [&str; 12] = [
     "GIT_OPTIONAL_LOCKS",
 ];
 
+// Variables whose value git or gh runs as a shell command.
+const COMMAND_VARS: [&str; 16] = [
+    "GIT_EDITOR",
+    "GIT_SEQUENCE_EDITOR",
+    "GIT_PAGER",
+    "GIT_SSH",
+    "GIT_SSH_COMMAND",
+    "GIT_PROXY_COMMAND",
+    "GIT_ASKPASS",
+    "GIT_EXTERNAL_DIFF",
+    "SSH_ASKPASS",
+    "EDITOR",
+    "VISUAL",
+    "PAGER",
+    "GH_EDITOR",
+    "GH_PAGER",
+    "GH_BROWSER",
+    "BROWSER",
+];
+
 /// Whether setting `name` can point git at another repo or config
 pub(super) fn redirects_git(name: &str) -> bool {
     name.starts_with("GIT_") && !GIT_HARMLESS.contains(&name)
         || matches!(name, "HOME" | "XDG_CONFIG_HOME")
 }
 
-/// Whether `words` set, for the commands after them, a variable that
-/// redirects git: an `export`, a `declare -x`, or an assignment alone,
-/// which `set -a` would export
-pub(super) fn sets_git_redirect(words: &[String]) -> bool {
+/// Whether setting `name` gives every git command config from the command's own text
+pub(super) fn configures_git(name: &str) -> bool {
+    matches!(
+        name,
+        "GIT_CONFIG_PARAMETERS" | "GIT_CONFIG_COUNT" | "GIT_ALLOW_PROTOCOL"
+    ) || name.starts_with("GIT_CONFIG_KEY_")
+        || name.starts_with("GIT_CONFIG_VALUE_")
+}
+
+/// Whether `words` set, for the commands after them, a variable `named`
+/// picks out: an `export`, a `declare -x`, or an assignment alone, which
+/// `set -a` would export
+pub(super) fn sets(words: &[String], named: fn(&str) -> bool) -> bool {
     // A name the shell works out when it runs could be any of them.
     let names = |words: &[String]| {
         words.iter().filter(|w| !w.starts_with('-')).any(|w| {
             let name = w.split_once('=').map_or(w.as_str(), |(n, _)| n);
-            !is_name(name) || redirects_git(name)
+            !is_name(name) || named(name)
         })
     };
     match words.first().map(|w| program(w)) {
         Some("export" | "declare" | "typeset" | "local" | "readonly") => names(&words[1..]),
         _ => words.iter().all(|w| assignment(w).is_some()) && names(words),
     }
+}
+
+/// The values `words` assign to a variable git or gh runs as a command
+pub(super) fn commands_assigned(words: &[String]) -> impl Iterator<Item = &str> {
+    words
+        .iter()
+        .filter_map(|w| assignment(w))
+        .filter(|(name, _)| COMMAND_VARS.contains(name))
+        .map(|(_, value)| value)
+}
+
+/// How surely a command's words run the program the guard found in them
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Reach {
+    /// It is the command's program, or runs behind a wrapper the guard knows
+    Runs,
+    /// It is a word of a program the guard does not know, which may only name it
+    Named,
 }
 
 /// A command with its wrappers taken off
@@ -62,6 +116,8 @@ pub(super) struct Unwrapped<'a> {
     pub moved: bool,
     /// Whether an assignment points git at another repo
     pub git_redirected: bool,
+    /// Whether an assignment gives git config from the command's text
+    pub git_configured: bool,
 }
 
 /// `words` with their wrappers taken off; `Ok(None)` when they run nothing
@@ -72,12 +128,14 @@ pub(super) struct Unwrapped<'a> {
 pub(super) fn unwrap(mut words: &[String]) -> Result<Option<Unwrapped<'_>>, String> {
     let mut moved = false;
     let mut git_redirected = false;
+    let mut git_configured = false;
     loop {
         let Some(first) = words.first() else {
             return Ok(None);
         };
         if let Some((name, _)) = assignment(first) {
             git_redirected |= redirects_git(name);
+            git_configured |= configures_git(name);
             words = &words[1..];
             continue;
         }
@@ -86,10 +144,10 @@ pub(super) fn unwrap(mut words: &[String]) -> Result<Option<Unwrapped<'_>>, Stri
             "env" => {
                 let (skip, chdir) = env_options(rest)?;
                 moved |= chdir;
-                git_redirected |= rest[..skip]
-                    .iter()
-                    .filter_map(|w| assignment(w))
-                    .any(|(name, _)| redirects_git(name));
+                for (name, _) in rest[..skip].iter().filter_map(|w| assignment(w)) {
+                    git_redirected |= redirects_git(name);
+                    git_configured |= configures_git(name);
+                }
                 &rest[skip..]
             }
             "timeout" => {
@@ -97,9 +155,53 @@ pub(super) fn unwrap(mut words: &[String]) -> Result<Option<Unwrapped<'_>>, Stri
                 // Then the duration.
                 rest.get(skip + 1..).unwrap_or_default()
             }
-            "nice" => {
-                let skip = options(rest, &["-n", "--adjustment"]);
+            "nice" => &rest[options(rest, &["-n", "--adjustment"])..],
+            "sudo" => {
+                let skip = options(rest, &SUDO_VALUED);
+                let short = |w: &String| w.starts_with('-') && !w.starts_with("--");
+                moved |= rest[..skip]
+                    .iter()
+                    .any(|w| w.starts_with("--chdir") || short(w) && w.starts_with("-D"));
+                // `-s` and `-i` with no command start a shell on stdin.
+                let shell = rest[..skip].iter().any(|w| {
+                    matches!(w.as_str(), "--shell" | "--login")
+                        || short(w) && !w.starts_with("-D") && w.contains(['s', 'i'])
+                });
+                if shell && skip == rest.len() {
+                    return Err(STDIN.into());
+                }
                 &rest[skip..]
+            }
+            "doas" => {
+                let skip = options(rest, &["-u", "-C", "-a"]);
+                if skip == rest.len() && rest.iter().any(|w| w == "-s") {
+                    return Err(STDIN.into());
+                }
+                &rest[skip..]
+            }
+            "su" => {
+                return Err(
+                    "kelpie cannot check commands run through `su`: run them directly.".into(),
+                );
+            }
+            "busybox" => rest,
+            "caffeinate" => &rest[options(rest, &["-t", "-w"])..],
+            "stdbuf" => &rest[options(rest, &["-i", "-o", "-e"])..],
+            "script" => {
+                let skip = options(rest, &["-t", "-T"]);
+                if rest[..skip]
+                    .iter()
+                    .any(|w| is_c_flag(w) || w.starts_with("--command"))
+                {
+                    return Err(
+                        "kelpie cannot check a command `script -c` runs: run it directly.".into(),
+                    );
+                }
+                // Then the file it records to, and with no command, a shell on stdin.
+                match rest.get(skip + 1..) {
+                    Some(command) if !command.is_empty() => command,
+                    _ => return Err(STDIN.into()),
+                }
             }
             "exec" => &rest[options(rest, &["-a"])..],
             "command" => {
@@ -134,44 +236,82 @@ pub(super) fn unwrap(mut words: &[String]) -> Result<Option<Unwrapped<'_>>, Stri
                 );
             }
             "function" => return Err(FUNCTION.into()),
-            name if OTHER_SHELLS.contains(&name) && runs_script(rest) => {
-                return Err(format!(
-                    "kelpie cannot check a `{name}` script: run the commands directly, or with `bash -c`."
-                ));
+            // A script file is not read, but stdin is a pipe the guard cannot see.
+            "source" | "." => {
+                return match rest.first() {
+                    Some(w) if stdin_path(w) || redirection(w).is_some_and(|r| r.stdin) => Err(
+                        "kelpie cannot check commands `source` reads from a pipe: run them \
+                         directly."
+                            .into(),
+                    ),
+                    _ => Ok(None),
+                };
+            }
+            name if OTHER_SHELLS.contains(&name) && shell(words) != Shell::Unread => {
+                return Err(other_shell(name));
             }
             _ => {
                 return Ok(Some(Unwrapped {
                     words,
                     moved,
                     git_redirected,
+                    git_configured,
                 }));
             }
         };
     }
 }
 
+// `sudo`'s options that take the next word.
+const SUDO_VALUED: [&str; 20] = [
+    "-u",
+    "-g",
+    "-C",
+    "-D",
+    "-h",
+    "-p",
+    "-r",
+    "-t",
+    "-T",
+    "-U",
+    "--user",
+    "--group",
+    "--close-from",
+    "--chdir",
+    "--host",
+    "--prompt",
+    "--role",
+    "--type",
+    "--command-timeout",
+    "--other-user",
+];
+
+/// The refusal for a shell reading commands the call's text does not hold
+pub(super) const STDIN: &str = "kelpie cannot check a shell reading its commands from a pipe or \
+                                a file: run them directly, or with `bash -c`.";
+
 /// The refusal for a shell function a command defines
 pub(super) const FUNCTION: &str =
     "kelpie cannot check a shell function's body when it runs: run the commands directly.";
+
+/// The refusal for a command whose program the shell works out when it runs
+pub(super) const BUILT: &str = "kelpie cannot check a command whose program the shell works \
+                                out when it runs, from a variable or a substitution: write the \
+                                program's name out.";
+
+/// The refusal for a script given to a shell the guard does not read
+pub(super) fn other_shell(name: &str) -> String {
+    format!("kelpie cannot check a `{name}` script: run the commands directly, or with `bash -c`.")
+}
 
 /// A command's program, by name: `/usr/bin/git` is `git`
 pub(super) fn program(word: &str) -> &str {
     word.rsplit('/').next().unwrap_or(word)
 }
 
-/// The script a shell runs with `-c`, `-lc` and the like
-pub(super) fn script(words: &[String]) -> Option<&str> {
-    let at = words[1..].iter().position(|w| is_c_flag(w))?;
-    words.get(at + 2).map(String::as_str)
-}
-
-fn is_c_flag(word: &str) -> bool {
-    word.starts_with('-') && !word.starts_with("--") && word.contains('c')
-}
-
-// A shell given a script to run, as `-c` or a heredoc on stdin.
-fn runs_script(rest: &[String]) -> bool {
-    rest.iter().any(|w| is_c_flag(w) || w.starts_with("<<"))
+/// Whether a command word is built when the command runs, as `$G` or `$(echo git)`
+pub(super) fn built(word: &str) -> bool {
+    word.contains(['$', '`'])
 }
 
 fn assignment(word: &str) -> Option<(&str, &str)> {
@@ -284,6 +424,9 @@ mod tests {
             "env -S x",
             "env --split-string=x",
             "function f",
+            "ksh < f",
+            "script -qc x f",
+            "source /dev/stdin",
         ] {
             assert!(unwrap(&w(line)).is_err(), "{line}");
         }
@@ -313,13 +456,35 @@ mod tests {
             "export $(printf GIT_DIR=/x)",
             "export $V",
         ] {
-            assert!(sets_git_redirect(&w(line)), "{line}");
+            assert!(sets(&w(line), redirects_git), "{line}");
         }
         for line in ["export GIT_PAGER=cat", "A=1", "GIT_DIR=/x git log"] {
-            assert!(!sets_git_redirect(&w(line)), "{line}");
+            assert!(!sets(&w(line), redirects_git), "{line}");
         }
         let words = w("GIT_PAGER=cat git log");
         assert!(!unwrap(&words).unwrap().unwrap().git_redirected);
+    }
+
+    #[test]
+    fn a_shell_runs_its_text_its_stdin_or_a_file() {
+        let shell_of = |line: &str| format!("{:?}", shell(&w(line)));
+        for (line, runs) in [
+            ("bash -c x", "Text([\"x\"])"),
+            ("sh <<< x", "Text([\"x\"])"),
+            ("sh 2>/dev/null <<<x", "Text([\"x\"])"),
+            ("bash", "Stdin"),
+            ("bash -s a b", "Stdin"),
+            ("bash < f", "Stdin"),
+            ("bash -o pipefail", "Stdin"),
+            ("bash -", "Stdin"),
+            ("bash <<", "Stdin"),
+            ("bash f.sh", "Unread"),
+            ("bash f.sh < in", "Unread"),
+            ("bash 2> err f.sh", "Unread"),
+            ("bash --version", "Unread"),
+        ] {
+            assert_eq!(shell_of(line), runs, "{line}");
+        }
     }
 
     #[test]
