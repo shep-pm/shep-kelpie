@@ -427,7 +427,9 @@ mod tests {
             criteria: "",
         };
         let call = reviewer_call(round, &model, None, &skills).unwrap();
-        let reply = ClaudeCli::default().run(&call).expect("the round ran");
+        let cli = ClaudeCli::default();
+        cli.prepare(&call).expect("the settings were written");
+        let reply = cli.run(&call).expect("the round ran");
         println!("--- reply ---\n{}\n--- end ---", reply.text);
         let findings = read_review(&reply.text).expect("the reply reads as a review");
         println!("{} finding(s): {findings:#?}", findings.len());

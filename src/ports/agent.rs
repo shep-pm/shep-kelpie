@@ -136,8 +136,8 @@ pub struct AgentCall {
     pub session: Session,
     /// The folder the session runs in
     pub cwd: PathBuf,
-    /// Where the harness's settings for the call go, which its adapter
-    /// writes from `tools` and `sandbox`
+    /// Where the harness's settings for the call go, which
+    /// [`Agents::prepare`] writes from `tools` and `sandbox`
     pub settings: PathBuf,
     /// Kelpie's instructions, appended to the system prompt
     ///
@@ -211,6 +211,13 @@ pub struct AgentReply {
 
 /// Runs agent sessions, one call at a time per session
 pub trait Agents: Send + Sync {
+    /// Writes what the harness needs on disk for `call`, before it is due
+    ///
+    /// # Errors
+    ///
+    /// [`AgentError::Setup`] when that cannot be written.
+    fn prepare(&self, call: &AgentCall) -> Result<(), AgentError>;
+
     /// Runs one call to its end
     ///
     /// # Errors

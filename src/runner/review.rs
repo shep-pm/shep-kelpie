@@ -92,7 +92,7 @@ impl Runner {
                             shots,
                             &self.skills,
                         );
-                        match call {
+                        match call.and_then(|call| self.prepared(call)) {
                             Ok(call) => {
                                 self.round_started(&chosen)?;
                                 Ok(Begin::Review(ReviewCall::ClaudeRound(call)))
@@ -117,7 +117,9 @@ impl Runner {
                     &model,
                     &finding,
                     shots.as_deref(),
-                ) {
+                )
+                .and_then(|call| self.prepared(call))
+                {
                     Ok(call) => {
                         self.mark_review_call_running()?;
                         Ok(Begin::Review(ReviewCall::Judge(call)))

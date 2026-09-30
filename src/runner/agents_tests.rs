@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
 use crate::ports::{Checks, Finding, Role, Severity};
-use crate::runner::Runner;
+use crate::runner::{Runner, StepReport, step};
 use crate::settings::Effort;
 use crate::test::{Rig, Scripted, ScriptedRound};
 
@@ -127,6 +127,43 @@ fn naming_an_agent_while_the_runner_runs_takes_effect_at_the_next_dispatch() {
         (call.model.as_str(), call.effort),
         ("claude-haiku-4-5-20251001", Effort::Low)
     );
+}
+
+// The write comes before the turn is marked running, so a yes retries the
+// red CI turn itself rather than resuming one that never began.
+#[test]
+fn a_settings_file_that_cannot_be_written_keeps_the_turn_for_its_retry() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge
+        .set_checks(&head, Checks::Failed(vec!["test".into()]));
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::CiFailed { .. })
+    ));
+    let calls = rig.claude.calls().len();
+    // The first turn's file makes way for a folder of the same name.
+    let taken = rig.paths().worker.join("settings.json");
+    std::fs::remove_file(&taken).unwrap();
+    std::fs::create_dir(&taken).unwrap();
+    let Some(StepReport::Failed { question, .. }) = step(&runner).unwrap() else {
+        panic!("the turn did not fail");
+    };
+    assert!(question.contains("cannot write "), "{question}");
+    assert_eq!(rig.claude.calls().len(), calls, "no call ran");
+    step(&runner).unwrap(); // the alert
+
+    std::fs::remove_dir(&taken).unwrap();
+    rig.ask(&runner, "rule", Some("1 yes"));
+    rig.claude.script([Scripted::Say("fixed")]);
+    step(&runner).unwrap();
+    let retry = rig.claude.calls().pop().unwrap();
+    assert!(
+        retry.prompt.starts_with("/mattpocock:diagnosing-bugs "),
+        "{}",
+        retry.prompt
+    );
+    let written = std::fs::read_to_string(&taken).unwrap();
+    assert!(written.contains("\"sandbox\""), "{written}");
 }
 
 #[test]

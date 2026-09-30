@@ -556,7 +556,9 @@ impl Runner {
             &model,
             &next.finding,
             None,
-        ) {
+        )
+        .and_then(|call| self.prepared(call))
+        {
             Ok(call) => {
                 self.mark_review_call_running()?;
                 Ok(Begin::Review(ReviewCall::Judge(call)))

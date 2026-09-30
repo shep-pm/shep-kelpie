@@ -348,6 +348,29 @@ mod tests {
     }
 
     #[test]
+    fn a_projects_build_env_wins_over_the_previews_own_variable() {
+        let build_env = BTreeMap::from([(
+            EnvName::try_from("NODE_USE_ENV_PROXY".to_owned()).unwrap(),
+            BuildDir::try_from("node".to_owned()).unwrap(),
+        )]);
+        let s = WorkerProfile {
+            worktree: Path::new("/k/wt/lab/7"),
+            build: Path::new("/k/targets/lab/7"),
+            git_common_dir: Path::new("/k/repos/lab/.git"),
+            git_dir: Path::new("/k/repos/lab/.git/worktrees/7"),
+            branch: "kelpie/7",
+            kelpie: Path::new("/opt/kelpie"),
+            guard_hooks: &[],
+            allowed_domains: &[],
+            build_env: &build_env,
+            preview: Some(&[]),
+            shep_home: Path::new("/srv/shep"),
+        }
+        .settings();
+        assert_eq!(s["env"]["NODE_USE_ENV_PROXY"], "/k/targets/lab/7/node");
+    }
+
+    #[test]
     fn the_network_is_github_and_the_projects_own_domains_only() {
         assert_eq!(
             strings(&settings(&[])["sandbox"]["network"]["allowedDomains"]),

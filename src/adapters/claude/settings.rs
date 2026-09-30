@@ -133,11 +133,15 @@ fn read_rule(path: &str) -> String {
     }
 }
 
+// The project's own variables come last, so one it names wins.
 fn env(fence: &Fence) -> Value {
-    let mut env = json!(fence.env);
+    let mut env = json!({});
     if fence.preview.is_some() {
         // Node's fetch ignores the sandbox's proxy without it.
         env["NODE_USE_ENV_PROXY"] = "1".into();
+    }
+    for (name, value) in &fence.env {
+        env[name.as_str()] = json!(value);
     }
     env
 }

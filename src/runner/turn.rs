@@ -350,7 +350,7 @@ impl Runner {
                     .invoke(Step::Implement, &first_prompt(item.issue, &issue))
             }
         };
-        Ok(AgentCall {
+        self.prepared(AgentCall {
             role: Role::Worker,
             issue: item.issue,
             model: item.worker.model.clone(),
@@ -366,6 +366,18 @@ impl Runner {
             tools: Tools::Work,
             sandbox: profile.sandbox(),
         })
+    }
+
+    /// `call`, once its harness has what it needs on disk
+    ///
+    /// Done before the call is marked running, so a failure keeps the turn
+    /// it would have run for a retry.
+    pub(super) fn prepared(&self, call: AgentCall) -> Result<AgentCall, String> {
+        self.ports
+            .agents
+            .prepare(&call)
+            .map_err(|e| e.to_string())?;
+        Ok(call)
     }
 
     // The worker's MCP servers: Playwright's, fenced to the preview's

@@ -104,7 +104,7 @@ impl Hold {
 pub(crate) struct Seen {
     /// The call
     pub(crate) call: AgentCall,
-    /// The settings file Claude Code would start it with
+    /// The settings file it named, as it stood during the call
     pub(crate) settings: serde_json::Value,
     /// Whether its build folder existed when the call started
     pub(crate) build_existed: bool,
@@ -159,8 +159,17 @@ impl FakeClaude {
 }
 
 impl Agents for FakeClaude {
+    // The file Claude Code would be started with, so a test reads what a
+    // call really left on disk.
+    fn prepare(&self, call: &AgentCall) -> Result<(), AgentError> {
+        crate::adapters::write_claude_settings(call)
+    }
+
     fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
-        let settings = crate::adapters::claude_settings(call.tools, &call.sandbox);
+        let settings: serde_json::Value = std::fs::read_to_string(&call.settings)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
         let build = settings["env"]["CARGO_TARGET_DIR"].as_str().map(Path::new);
         let build_existed = build.is_some_and(Path::is_dir);
         self.seen.lock().unwrap().push(Seen {

@@ -71,8 +71,11 @@ impl ClaudeCli {
 }
 
 impl Agents for ClaudeCli {
+    fn prepare(&self, call: &AgentCall) -> Result<(), AgentError> {
+        write_settings(call)
+    }
+
     fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
-        write_settings(call)?;
         // Stdin is closed: a `claude -p` with an open stdin waits on it.
         let mut command = Command::new(&self.program);
         command.args(argv(call)).current_dir(&call.cwd);
@@ -94,8 +97,8 @@ impl Agents for ClaudeCli {
     }
 }
 
-// The settings file is written whole before each call, from the call alone.
-fn write_settings(call: &AgentCall) -> Result<(), AgentError> {
+/// Writes the call's settings file whole, from the call alone
+pub(crate) fn write_settings(call: &AgentCall) -> Result<(), AgentError> {
     let text = serde_json::to_string_pretty(&settings::settings(call.tools, &call.sandbox))
         .expect("settings are JSON");
     let folder = call.settings.parent().unwrap_or(std::path::Path::new("/"));
@@ -334,6 +337,33 @@ mod tests {
     }
 
     #[test]
+    fn prepare_writes_the_settings_file_the_call_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut review = call(Role::Reviewer, fresh());
+        review.settings = dir.path().join("worker/review-settings.json");
+        review.tools = Tools::Review;
+        review.sandbox.read = vec![dir.path().join("shots")];
+        ClaudeCli::default().prepare(&review).unwrap();
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&review.settings).unwrap()).unwrap();
+        assert_eq!(
+            written,
+            serde_json::json!({ "permissions": {
+                "deny": ["Agent", "Task", "Bash"],
+                "additionalDirectories": [dir.path().join("shots")],
+            } })
+        );
+
+        std::fs::create_dir_all(dir.path().join("taken/settings.json")).unwrap();
+        review.settings = dir.path().join("taken/settings.json");
+        let err = ClaudeCli::default().prepare(&review).unwrap_err();
+        assert!(
+            matches!(&err, AgentError::Setup(reason) if reason.starts_with("cannot write ")),
+            "{err:?}"
+        );
+    }
+
+    #[test]
     fn a_success_result_is_read() {
         let reply = parse_result(&output(0, RESULT, ""), &fresh()).unwrap();
         assert_eq!(reply.session_id.0, "f83901c5-6d39-421b-b709-7828b56ba237");
@@ -457,6 +487,7 @@ mod tests {
             let mut call = call(role, fresh());
             call.cwd = dir.path().to_owned();
             call.settings = dir.path().join("settings.json");
+            cli.prepare(&call).unwrap();
             cli.run(&call).unwrap();
         }
         let labels = lambs.0.lock().unwrap().clone();
