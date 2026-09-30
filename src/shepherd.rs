@@ -13,7 +13,7 @@ use shep_client::shep_core::protocol::{Request, RpcErrorCode};
 use shep_client::{Client, ConnectError, RequestError};
 
 /// The shep version kelpie is built with, pinned in the workspace manifest
-pub const SHEP_VERSION: &str = "0.11.0";
+pub const SHEP_VERSION: &str = "0.12.0";
 
 /// The name kelpie's tables are kept under: `[app.dogs.kelpie]` on a
 /// runner sheep, and `[kelpie]` in `dogs.toml`
@@ -236,7 +236,7 @@ mod tests {
     // handshake while the fake's socket is merely waiting.
     #[tokio::test]
     async fn a_runner_reads_its_own_sheep_s_table_and_kelpie_s_section() {
-        let (home, _sent) = shepherd("0.11.2").await;
+        let (home, _sent) = shepherd("0.12.2").await;
         let tables = read_in_time(home.path(), "koji").await.unwrap();
         assert_eq!(tables.project, Some(table("shep-pm/koji")));
         assert_eq!(tables.kelpie, "[webhook]\nkind = \"ntfy\"\n");
@@ -268,17 +268,16 @@ mod tests {
 
     #[tokio::test]
     async fn a_shepherd_on_another_minor_is_refused_by_name() {
-        for version in ["0.10.1", "0.12.0"] {
+        for version in ["0.11.0", "0.13.0"] {
             let (home, mut sent) = shepherd(version).await;
             let err = read_in_time(home.path(), "shep").await.unwrap_err();
             assert!(err.contains(&format!("runs shep {version}")), "{err}");
-            assert!(err.contains("takes only a 0.11.x shepherd"), "{err}");
+            assert!(err.contains("takes only a 0.12.x shepherd"), "{err}");
             assert!(sent.try_recv().is_err(), "{version} was asked for a table");
         }
     }
 
     #[test]
-    #[ignore = "shep is a dependency by commit until 0.12.0 is on crates.io"]
     fn the_checked_version_is_the_one_the_manifest_pins() {
         let manifest = include_str!("../Cargo.toml");
         for krate in ["shep-client", "shep-channel"] {
