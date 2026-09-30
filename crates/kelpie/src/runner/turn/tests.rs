@@ -47,17 +47,18 @@ fn the_first_turn_starts_the_workers_session_in_its_own_worktree() {
         call.session
     );
     assert_eq!(call.cwd, worktree);
-    assert_eq!(
-        call.prompt,
-        "Your work item is issue #7: Title of #7\n\nBody of #7.\n"
+    assert!(call.prompt.starts_with("/mattpocock:implement "));
+    assert!(
+        call.prompt
+            .ends_with("\nYour work item is issue #7: Title of #7\n\nBody of #7.\n"),
+        "{}",
+        call.prompt
     );
     let worker = rig.paths().worker;
     assert_eq!(call.settings, worker.join("settings.json"));
     assert_eq!(call.instructions, Some(worker.join("instructions.md")));
-    assert_eq!(
-        fs::read_to_string(worker.join("instructions.md")).unwrap(),
-        INSTRUCTIONS
-    );
+    let instructions = fs::read_to_string(worker.join("instructions.md")).unwrap();
+    assert!(instructions.starts_with(INSTRUCTIONS), "{instructions}");
     assert!(seen.build_existed, "the build folder came after the worker");
 
     assert_eq!(git(&worktree, &["branch", "--show-current"]), "kelpie/7");
@@ -514,9 +515,12 @@ fn a_foreign_folder_where_the_worktree_goes_fails_the_turn_before_any_call() {
         "{:?}",
         call.session
     );
-    assert_eq!(
-        call.prompt,
-        "Your work item is issue #7: Title of #7\n\nBody of #7.\n"
+    assert!(call.prompt.starts_with("/mattpocock:implement "));
+    assert!(
+        call.prompt
+            .ends_with("\nYour work item is issue #7: Title of #7\n\nBody of #7.\n"),
+        "{}",
+        call.prompt
     );
 }
 

@@ -109,6 +109,7 @@ impl Wants {
             | RulingKind::MergeRefused { .. }
             | RulingKind::Closed
             | RulingKind::ReviewGuard { .. }
+            | RulingKind::LocalModelSpilled { .. }
             | RulingKind::FixNotPushed { .. }
             | RulingKind::CodeRabbitCap { .. }
             | RulingKind::CodeRabbitSilent { .. }

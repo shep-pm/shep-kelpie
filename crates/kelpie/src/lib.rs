@@ -32,6 +32,7 @@ pub mod sheep;
 pub mod shep_home;
 pub mod shepherd;
 pub mod shots;
+pub mod skills;
 pub mod state;
 pub mod totp;
 pub mod webhook;

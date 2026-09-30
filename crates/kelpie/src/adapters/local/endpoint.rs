@@ -40,8 +40,8 @@ const REPLY_SHARE: usize = 4;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(1800);
 
 /// Seconds `curl` gets to connect, and to finish the start check
-const CONNECT_TIMEOUT: &str = "10";
-const CHECK_TIMEOUT: &str = "15";
+pub(super) const CONNECT_TIMEOUT: &str = "10";
+pub(super) const CHECK_TIMEOUT: &str = "15";
 
 /// How much of a reply an error quotes
 const QUOTE: usize = 300;
@@ -207,7 +207,7 @@ fn failed(path: &Path, verb: &str, e: &std::io::Error) -> ReviewerError {
     ReviewerError::Failed(format!("cannot {verb} {}: {e}", path.display()))
 }
 
-fn quote(text: &str) -> String {
+pub(super) fn quote(text: &str) -> String {
     let text = text.trim();
     match text.char_indices().nth(QUOTE) {
         Some((at, _)) => format!("{}…", &text[..at]),

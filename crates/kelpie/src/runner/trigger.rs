@@ -9,9 +9,10 @@ use serde::Serialize;
 use super::pace::PacerStatus;
 use super::{Answer, Runner};
 use crate::board::{Skip, WorkerModel};
-use crate::ports::{SessionId, Timestamp};
+use crate::ports::{ModelSeat, SessionId, Timestamp};
 use crate::relay::Settled;
 use crate::settings::MergeAuthority;
+use crate::skills::StepSkill;
 use crate::state::{LeaseHeld, Ruling, RunState, StateError, Waiting};
 use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Turn, WorkItem};
 
@@ -55,6 +56,39 @@ pub struct Status<'a> {
     pub leases: &'a [LeaseHeld],
     /// What usage was when last read, and why nothing new is starting
     pub pacer: PacerStatus<'a>,
+    /// The skill each step runs, and why any chosen one could not load
+    pub skills: &'a [StepSkill],
+    /// Where the local model sat when a round last looked, when there was
+    /// an Ollama host to ask
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_model: Option<LocalModelStatus>,
+}
+
+/// The local model's placement, as Ollama's `/api/ps` last said
+///
+/// `/api/ps` has no utilization, so this says where the model sits and not
+/// how busy the GPU is.
+#[derive(Debug, Serialize)]
+pub struct LocalModelStatus {
+    /// The model's name
+    pub name: String,
+    /// How much of it is on the GPU, in whole percent
+    pub gpu_percent: u64,
+    /// The context length it was loaded with, in tokens
+    pub context_length: Option<u64>,
+    /// When Ollama unloads it
+    pub expires_at: Option<String>,
+}
+
+impl From<ModelSeat> for LocalModelStatus {
+    fn from(seat: ModelSeat) -> Self {
+        Self {
+            gpu_percent: seat.gpu_percent(),
+            name: seat.name,
+            context_length: seat.context_length,
+            expires_at: seat.expires_at,
+        }
+    }
 }
 
 /// An open work item, as `status` shows it
@@ -381,6 +415,7 @@ mod tests {
     use super::*;
     use crate::ports::{Checks, Cost, Usage};
     use crate::runner::{StepReport, step};
+    use crate::skills::Step;
     use crate::test::{Rig, Scripted};
 
     // A running project with issue 7 in flight
@@ -437,6 +472,11 @@ mod tests {
                 "rulings": [],
                 "leases": [],
                 "pacer": { "enabled": true, "reading": null, "holding": null },
+                "skills": Step::ALL.map(|step| json!({
+                    "step": step.as_str(),
+                    "skill": format!("/mattpocock:{}", step.default_skill()),
+                    "fallback": null,
+                })),
             })
         );
     }
