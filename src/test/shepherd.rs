@@ -258,7 +258,9 @@ fn answer(flock: &mut Vec<Sheep>, section: &str, request: &Request) -> Response 
             }
         }
         Request::Trigger {
-            selector, action, ..
+            selector,
+            action,
+            params,
         } => {
             let Some(at) = named(flock, selector) else {
                 return Response::Triggered(Vec::new());
@@ -276,9 +278,12 @@ fn answer(flock: &mut Vec<Sheep>, section: &str, request: &Request) -> Response 
                     body: format!("unknown action: {action}"),
                 }
             } else {
+                let mut body = serde_json::json!({ "sheep": sheep.config.name, "action": action });
+                if let Some(params) = params {
+                    body["params"] = params.as_str().into();
+                }
                 ActionOutcome::Replied {
-                    body: serde_json::json!({ "sheep": sheep.config.name, "action": action })
-                        .to_string(),
+                    body: body.to_string(),
                 }
             };
             Response::Triggered(vec![ActionReply {

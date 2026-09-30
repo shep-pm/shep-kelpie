@@ -94,7 +94,7 @@ guard_hooks = []
 turn_timeout = 60
 "#;
 
-/// The maintainer's own local-round command, run when it is installed
+/// The maintainer's own local-round command, which the default loop runs
 const QWEN_REVIEW: &str = "~/.claude/scripts/qwen-review.sh";
 
 /// Registers `place.checkout` as project `name`, and says what it did
@@ -261,17 +261,11 @@ fn settings(
             let installed = QWEN_REVIEW
                 .strip_prefix("~/")
                 .is_some_and(|script| place.home.join(script).is_file());
-            let local = if installed {
-                [("kind", "command"), ("command", QWEN_REVIEW)].as_slice()
-            } else {
-                [("kind", "off")].as_slice()
-            };
-            let local = local
-                .iter()
-                .map(|&(k, v)| (k.to_owned(), text(v)))
-                .collect();
-            if let Some(Value::Object(review)) = table.get_mut("review") {
-                review.insert("local".into(), Value::Object(local));
+            // With the script, the default loop runs it and then Claude.
+            let review = table.get_mut("review");
+            if let (false, Some(Value::Object(review))) = (installed, review) {
+                let claude = Value::Array(vec![text(crate::settings::CLAUDE)]);
+                review.insert("reviewers".into(), claude);
             }
             table
         }

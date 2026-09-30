@@ -51,18 +51,40 @@ pub(super) struct Screens<'a> {
     pub(super) run: &'a ShotsRun,
 }
 
+/// What a Claude round reviews, and against what
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Round<'a> {
+    pub(super) issue: u64,
+    pub(super) worktree: &'a Path,
+    pub(super) base: &'a str,
+    pub(super) worker_folder: &'a Path,
+    /// What the issue asks for, which the round checks the diff against
+    pub(super) criteria: &'a str,
+}
+
 pub(super) fn reviewer_call(
-    issue: u64,
-    worktree: &Path,
-    base: &str,
-    worker_folder: &Path,
+    round: Round<'_>,
     model: &RoleModel,
     shots: Option<Screens<'_>>,
     skills: &Skills,
 ) -> Result<ClaudeCall, String> {
+    let Round {
+        issue,
+        worktree,
+        base,
+        worker_folder,
+        criteria,
+    } = round;
     let diff = diff_against(worktree, base)?;
     let settings = review_settings(worker_folder, shots.map(|s| s.dir))?;
     let mut prompt = reviewer_prompt(base, &diff);
+    if !criteria.trim().is_empty() {
+        prompt.push_str(&format!(
+            "\n\nThe issue this pull request resolves asks for the following. \
+             Report anything it asks for that the diff leaves undone or gets wrong, \
+             in the same format.\n\n{criteria}"
+        ));
+    }
     if let Some(shots) = shots {
         prompt.push_str(&shots_prompt(shots.run));
     }
@@ -439,7 +461,14 @@ mod tests {
             effort: Effort::Medium,
         };
         let worker = home.path().join("worker");
-        let call = reviewer_call(71, &repo, &base, &worker, &model, None, &skills).unwrap();
+        let round = Round {
+            issue: 71,
+            worktree: &repo,
+            base: &base,
+            worker_folder: &worker,
+            criteria: "",
+        };
+        let call = reviewer_call(round, &model, None, &skills).unwrap();
         let reply = ClaudeCli::default().run(&call).expect("the round ran");
         println!("--- reply ---\n{}\n--- end ---", reply.text);
         let findings = read_review(&reply.text).expect("the reply reads as a review");

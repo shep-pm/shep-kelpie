@@ -4,7 +4,7 @@ use std::time::Duration;
 use shep_client::shep_core::config::AppConfig;
 
 use super::*;
-use crate::settings::{ForgeSlug, LocalRound};
+use crate::settings::{ForgeSlug, ReviewerName};
 use crate::shepherd;
 use crate::test::{FakeForge, FakeShepherd};
 
@@ -97,7 +97,8 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
     assert_eq!(settings.forge.as_str(), "shep-pm/koji-website");
     assert!(settings.ci, "the checkout has workflows");
     assert!(!settings.coderabbit.enabled, "the repo is private");
-    assert_eq!(settings.review.local, LocalRound::Off {});
+    assert_eq!(settings.review.local, None);
+    assert_eq!(settings.review.reviewers, [ReviewerName::claude()]);
     assert_eq!(
         scene.forge.repo_labels_now(),
         ["bug", "ready-for-agent", "ready-for-human", "review please"]

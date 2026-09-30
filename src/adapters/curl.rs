@@ -274,7 +274,7 @@ mod tests {
     #[test]
     fn discord_gets_the_title_and_question_as_json_that_pings_nobody() {
         let (url, served) = stand_in(204);
-        let text = "Merge pull request #71? `shep trigger x rule '3 yes'` \"quoted\"\\ @everyone";
+        let text = "Merge pull request #71? `shep kelpie rule 3 yes` \"quoted\"\\ @everyone";
         Curl.post(&webhook(WebhookKind::Discord, &url), &alert(text))
             .unwrap();
         let got = served.join().unwrap();
@@ -321,7 +321,6 @@ mod tests {
         let (url, served) = stand_in(200);
         let alert = Alert {
             reply: Some(ReplyWith {
-                project: "koji".into(),
                 id: 3,
                 takes: Takes::YesOrNo,
             }),
@@ -332,8 +331,8 @@ mod tests {
         let got = served.join().unwrap();
         assert_eq!(
             got.body,
-            "Merge pull request #71?\n\nReply here with `koji 3 yes <code>` or \
-             `koji 3 no <note> <code>`, where <code> is kelpie's authenticator code."
+            "Merge pull request #71?\n\nReply here with `3 yes <code>` or \
+             `3 no <note> <code>`, where <code> is kelpie's authenticator code."
         );
     }
 
@@ -342,7 +341,6 @@ mod tests {
         let (url, served) = stand_in(200);
         let alert = Alert {
             reply: Some(ReplyWith {
-                project: "koji".into(),
                 id: 3,
                 takes: Takes::YesOrNo,
             }),
@@ -389,7 +387,6 @@ mod tests {
         let now = crate::adapters::SystemClock.now();
         let alert = Alert {
             reply: Some(ReplyWith {
-                project: "koji".into(),
                 id: 3,
                 takes: Takes::YesOrNo,
             }),
@@ -489,14 +486,14 @@ mod tests {
     #[test]
     fn a_long_question_is_cut_in_the_middle_keeping_its_triggers() {
         let text = format!(
-            "{}\n{}`shep trigger x rule '3 yes'`",
+            "{}\n{}`shep kelpie rule 3 yes`",
             "a".repeat(3000),
             "b".repeat(300)
         );
         let fitted = fit(&text, DISCORD_MAX);
         assert!(fitted.len() <= DISCORD_MAX, "{}", fitted.len());
         assert!(fitted.starts_with("aaa"));
-        assert!(fitted.ends_with("`shep trigger x rule '3 yes'`"));
+        assert!(fitted.ends_with("`shep kelpie rule 3 yes`"));
         assert!(fitted.contains("[…cut; the whole question is in status]"));
         assert_eq!(fit("short", DISCORD_MAX), "short");
 
