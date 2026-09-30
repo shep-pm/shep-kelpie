@@ -66,6 +66,14 @@ pub struct ProjectState {
     /// Where reading the webhook's replies has got to
     #[serde(default)]
     pub replies: Replies,
+    /// How many clears of the relay, by any project's runner, this one has
+    /// seen: its rulings marked relayed were sent after the last of them
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub relay_clears: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 impl ProjectState {
@@ -86,6 +94,7 @@ impl ProjectState {
             pacing: None,
             notices: Vec::new(),
             replies: Replies::default(),
+            relay_clears: 0,
         }
     }
 

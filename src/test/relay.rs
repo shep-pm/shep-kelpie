@@ -1,10 +1,10 @@
-//! The rig's relay: recording every send and clear, and refusing sends
+//! The rig's relay: recording every send and counting every clear, and refusing sends
 //! until a test says it is up. Down by default, so a test that never
 //! mentions the relay still exercises the webhook alone, as every ruling
 //! did before the relay existed.
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::ports::{Relay, RelayError};
 use crate::settings::Effort;
@@ -15,7 +15,7 @@ use crate::settings::Effort;
 pub(crate) struct FakeRelay {
     sent: Mutex<Vec<(String, String, Effort)>>,
     told: Mutex<Vec<String>>,
-    clears: AtomicUsize,
+    clears: AtomicU64,
     up: AtomicBool,
     stale: AtomicBool,
 }
@@ -30,11 +30,6 @@ impl FakeRelay {
     /// Every message told to a running relay, oldest first
     pub(crate) fn told(&self) -> Vec<String> {
         self.told.lock().unwrap().clone()
-    }
-
-    /// How many times the relay was cleared
-    pub(crate) fn clears(&self) -> usize {
-        self.clears.load(Ordering::SeqCst)
     }
 
     /// Makes sends succeed (`up: true`, a reachable relay) or fail
@@ -56,6 +51,10 @@ impl Relay for FakeRelay {
             self.clears.fetch_add(1, Ordering::SeqCst);
         }
         Ok(stale)
+    }
+
+    fn clears(&self) -> Result<u64, RelayError> {
+        Ok(self.clears.load(Ordering::SeqCst))
     }
 
     fn send(&self, message: &str, model: &str, effort: Effort) -> Result<(), RelayError> {

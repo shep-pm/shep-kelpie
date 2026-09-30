@@ -1,8 +1,8 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 
-use crate::ports::Clock;
+use crate::ports::{Clock, Relay};
 use crate::runner::{Runner, StepReport, step};
 use crate::test::Rig;
 
@@ -48,7 +48,7 @@ fn the_daily_clear_sends_an_open_ruling_to_the_relay_again() {
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 2 }));
     assert_eq!(step(&runner).unwrap(), None);
-    assert_eq!(rig.relay.clears(), 2);
+    assert_eq!(rig.relay.clears(), Ok(2));
     assert_eq!(
         sent_headers(&rig),
         [
@@ -83,7 +83,7 @@ fn a_clear_because_the_relays_files_changed_sends_an_open_ruling_again() {
 
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 2 }));
-    assert_eq!(rig.relay.clears(), 2);
+    assert_eq!(rig.relay.clears(), Ok(2));
     assert_eq!(sent_headers(&rig).len(), 3);
     assert_eq!(rig.alerts.posts().len(), 2);
     assert_eq!(relayed(&rig, &runner), [json!(true), json!(true)]);
@@ -152,4 +152,70 @@ fn a_resend_owed_to_a_channel_since_turned_off_is_not_sent() {
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 2 }));
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(rig.relay.sent().len(), 1, "only the first ruling's send");
+}
+
+// A second project's rig and runner, on the same relay as `rig`
+fn on_the_same_relay(rig: &Rig, project: &str) -> (Rig, Mutex<Runner>) {
+    let (mut other, runner, _) = Rig::parked(project);
+    drop(runner);
+    other.relay = Arc::clone(&rig.relay);
+    let runner = other.open().unwrap();
+    (other, runner)
+}
+
+// The header lines sent to the relay for `project`'s rulings, in order
+fn sent_for(rig: &Rig, project: &str) -> Vec<String> {
+    let headers = sent_headers(rig).into_iter();
+    let project = format!("project={project} ");
+    headers.filter(|h| h.starts_with(&project)).collect()
+}
+
+#[test]
+fn a_clear_by_another_projects_runner_sends_an_open_ruling_again_once() {
+    let (clearing, clearing_runner, _) = Rig::parked("rotom");
+    let (rig, runner) = on_the_same_relay(&clearing, "mew");
+    rig.relay.set_up(true);
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(
+        step(&clearing_runner).unwrap(),
+        Some(StepReport::Alerted { id: 1 }),
+        "rotom's first send clears the relay"
+    );
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    assert_eq!(step(&runner).unwrap(), None, "and only once");
+    assert_eq!(sent_for(&rig, "mew").len(), 2);
+    assert_eq!(
+        rig.alerts.posts().len(),
+        1,
+        "the webhook is not posted twice"
+    );
+    assert_eq!(relayed(&rig, &runner), [json!(true)]);
+}
+
+#[test]
+fn a_clear_while_a_runner_is_down_is_seen_once_it_is_back() {
+    let (rig, runner, _) = Rig::parked("mew");
+    rig.relay.set_up(true);
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    drop(runner);
+
+    rig.relay.clear().unwrap();
+    let runner = rig.open().unwrap();
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(sent_for(&rig, "mew").len(), 2);
+}
+
+#[test]
+fn a_restart_with_no_clear_in_between_sends_nothing_again() {
+    let (rig, runner, _) = Rig::parked("mew");
+    rig.relay.set_up(true);
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    drop(runner);
+
+    let runner = rig.open().unwrap();
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(sent_for(&rig, "mew").len(), 1);
 }

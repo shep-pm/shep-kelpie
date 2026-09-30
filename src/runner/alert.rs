@@ -124,30 +124,39 @@ pub(super) fn post_due(
     relay: &dyn Relay,
     alerts: &dyn Alerts,
 ) -> Option<Result<StepReport, StateError>> {
+    // A clear by another project's runner takes this one's rulings too, and
+    // is seen even when nothing here is due.
+    if lock(runner).holds_relayed()
+        && let Ok(clears) = relay.clears()
+        && let Err(e) = lock(runner).relay_clears_seen(clears)
+    {
+        return Some(Err(e));
+    }
     let mut due = lock(runner).alert_due()?;
     let mut relay_failed = None;
     if due.relay.is_some() {
         // A notice never clears on the day: a clear would end a question still up.
         let daily = matches!(due.of, Posting::Ruling(_)) && lock(runner).relay_clear_due();
         let renewed = relay.renew();
-        let cleared =
-            renewed.as_ref().is_ok_and(|&cleared| cleared) || (daily && relay.clear().is_ok());
-        if cleared {
-            let mut runner = lock(runner);
-            if let Err(e) = runner.relay_emptied() {
-                return Some(Err(e));
-            }
-            // Every ruling the clear took goes back, oldest first.
-            due = runner.alert_due()?;
+        if daily && renewed == Ok(false) {
+            let _ = relay.clear();
         }
-        match (renewed, &due.relay) {
-            (Err(e), _) => relay_failed = Some(e),
-            (Ok(_), Some(message)) => {
-                if let Err(e) = relay.send(&message.text, &message.model, message.effort) {
-                    relay_failed = Some(e);
+        match renewed.and_then(|_| relay.clears()) {
+            Ok(clears) => {
+                let mut runner = lock(runner);
+                match runner.relay_clears_seen(clears) {
+                    Err(e) => return Some(Err(e)),
+                    // Every ruling the clear took goes back, oldest first.
+                    Ok(true) => due = runner.alert_due()?,
+                    Ok(false) => {}
                 }
             }
-            (Ok(_), None) => {}
+            Err(e) => relay_failed = Some(e),
+        }
+        if let (None, Some(message)) = (&relay_failed, &due.relay)
+            && let Err(e) = relay.send(&message.text, &message.model, message.effort)
+        {
+            relay_failed = Some(e);
         }
     }
     let relayed = due.relay_held || (due.relay.is_some() && relay_failed.is_none());
@@ -283,19 +292,28 @@ impl Runner {
         due
     }
 
-    /// Records a clear, which left the relay holding no ruling: each one it
-    /// held is sent to it again
-    fn relay_emptied(&mut self) -> Result<(), StateError> {
-        self.relaying = None;
-        if !self.state.rulings.iter().any(|r| r.relayed) {
-            return Ok(());
+    /// Whether the relay channel is on and holds any of this project's
+    /// rulings
+    fn holds_relayed(&self) -> bool {
+        self.channels.has(Channel::Relay) && self.state.rulings.iter().any(|r| r.relayed)
+    }
+
+    /// Records `clears`, the relay's count of clears, and returns whether it
+    /// moved on since this runner last saw it: the relay then holds no
+    /// ruling, and each one it held is sent to it again
+    fn relay_clears_seen(&mut self, clears: u64) -> Result<bool, StateError> {
+        if clears == self.state.relay_clears {
+            return Ok(false);
         }
+        self.relaying = None;
         let mut next = self.state.clone();
+        next.relay_clears = clears;
         for ruling in next.rulings.iter_mut().filter(|r| r.relayed) {
             ruling.relayed = false;
             ruling.resend = true;
         }
-        self.save(next)
+        self.save(next)?;
+        Ok(true)
     }
 
     /// Records how the post of `of` went, and for a ruling whether the relay
@@ -751,7 +769,7 @@ mod tests {
         let (rig, runner, _) = Rig::parked("rotom");
         rig.relay.set_up(true);
         step(&runner).unwrap();
-        assert_eq!(rig.relay.clears(), 1, "the first alert clears it");
+        assert_eq!(rig.relay.clears(), Ok(1), "the first alert clears it");
 
         rig.ask(&runner, "rule", Some("1 no not yet"));
         rig.claude.script([
@@ -771,7 +789,7 @@ mod tests {
         step(&runner).unwrap();
         assert_eq!(
             rig.relay.clears(),
-            1,
+            Ok(1),
             "less than a day since the last clear"
         );
 
@@ -788,6 +806,6 @@ mod tests {
         rig.forge.set_checks(&head, Checks::Passed);
         rig.verdict(&runner);
         step(&runner).unwrap();
-        assert_eq!(rig.relay.clears(), 2, "a full day passed");
+        assert_eq!(rig.relay.clears(), Ok(2), "a full day passed");
     }
 }

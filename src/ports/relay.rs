@@ -22,6 +22,16 @@ pub trait Relay: Send + Sync {
     /// on older ones could not be deleted.
     fn renew(&self) -> Result<bool, RelayError>;
 
+    /// How many times the relay has been cleared, by any project's runner
+    ///
+    /// Every project shares the one relay, so a count that moved on since a
+    /// runner last read it means a clear took that runner's rulings too.
+    ///
+    /// # Errors
+    ///
+    /// [`RelayError::Clears`] when the count cannot be read.
+    fn clears(&self) -> Result<u64, RelayError>;
+
     /// Sends `message`, starting the relay first if none is running
     ///
     /// `model` and `effort` are passed to `--model`/`--effort` only when a
@@ -45,10 +55,13 @@ pub trait Relay: Send + Sync {
     /// starts a fresh one next time and nothing a worker's question tried
     /// to carry into it survives the clear
     ///
+    /// Counted in [`Self::clears`] once it succeeds, whether or not one was
+    /// running.
+    ///
     /// # Errors
     ///
-    /// [`RelayError`] when a running relay could not be deleted. Not an
-    /// error when none was running.
+    /// [`RelayError`] when a running relay could not be deleted, or the
+    /// clear not counted. Not an error when none was running.
     fn clear(&self) -> Result<(), RelayError>;
 }
 
@@ -63,6 +76,8 @@ pub enum RelayError {
     Unreachable(String),
     /// A running relay could not be stopped, with the reason
     CannotStop(String),
+    /// The count of clears could not be read or added to, with the reason
+    Clears(String),
 }
 
 impl fmt::Display for RelayError {
@@ -72,6 +87,7 @@ impl fmt::Display for RelayError {
             Self::NeverAppeared => f.write_str("the relay never appeared after starting"),
             Self::Unreachable(reason) => write!(f, "cannot reach the relay: {reason}"),
             Self::CannotStop(reason) => write!(f, "cannot stop the relay: {reason}"),
+            Self::Clears(reason) => write!(f, "cannot count the relay's clears: {reason}"),
         }
     }
 }
