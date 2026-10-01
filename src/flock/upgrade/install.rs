@@ -183,7 +183,14 @@ impl Lock {
                     let holder = std::fs::read_to_string(&path)
                         .ok()
                         .and_then(|text| text.trim().parse::<u32>().ok());
-                    if let Some(holder) = holder.filter(|&holder| alive(holder)) {
+                    // A file with no pid yet is a holder between creating and writing it.
+                    let Some(holder) = holder else {
+                        return Err(format!(
+                            "{} holds no process id: if no upgrade is running, remove it",
+                            path.display()
+                        ));
+                    };
+                    if alive(holder) {
                         return Err(format!(
                             "an upgrade is already in progress (process {holder}): wait for it to \
                              end"

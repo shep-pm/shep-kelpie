@@ -335,6 +335,16 @@ fn a_second_upgrade_is_refused_while_one_runs() {
 }
 
 #[test]
+fn a_lock_with_no_pid_yet_is_never_taken_from_its_holder() {
+    let rig = Rig::new();
+    std::fs::write(rig.install().lock(), "").unwrap();
+    let err = rig.upgrade(&main_ref()).unwrap_err();
+    assert!(err.contains("holds no process id"), "{err}");
+    assert!(rig.install().lock().exists());
+    assert_eq!(rig.log(), Vec::<String>::new());
+}
+
+#[test]
 fn a_lock_whose_holder_is_gone_is_cleared_and_released_when_the_upgrade_ends() {
     let rig = Rig::new();
     std::fs::write(rig.install().lock(), "4242\n").unwrap();

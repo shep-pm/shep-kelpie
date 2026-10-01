@@ -104,7 +104,7 @@ impl Machine for Host {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .status()
-            .is_ok_and(|status| status.success())
+            .map_or(true, |status| status.success())
     }
 
     fn sleep(&self, time: Duration) {
