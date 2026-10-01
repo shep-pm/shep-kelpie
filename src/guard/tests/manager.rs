@@ -121,11 +121,13 @@ fn gh_a_worker_runs_goes_through() {
 fn git_or_gh_run_by_another_program_is_refused() {
     for command in [
         "find . -exec gh pr merge 1 ;",
-        "caffeinate -i git push origin HEAD:main",
         "flock /tmp/l /usr/bin/git push origin HEAD",
     ] {
         refused_with(anywhere(command), "run through", command);
     }
+    // A wrapper the guard knows is taken off, and the push judged.
+    let command = "caffeinate -i git push origin HEAD:main";
+    refused_with(anywhere(command), TO_BASE, command);
     for command in [
         "G=gh; $G pr merge 1",
         "$(echo gh) pr merge 1",
@@ -226,16 +228,15 @@ fn a_script_the_guard_cannot_read_is_refused() {
         "cannot read the script",
         "missing",
     );
-    for command in [
-        "cat push.sh | bash",
-        "bash < push.sh",
-        "bash -s < push.sh",
-        "bash <<< 'git push origin HEAD:main'",
-    ] {
+    for command in ["cat push.sh | bash", "bash < push.sh", "bash -s < push.sh"] {
         refused_with(dir.bash(command), "reads from a pipe", command);
     }
-    let heredoc = "bash <<'EOF'\ngit push origin HEAD:main\nEOF";
-    refused_with(dir.bash(heredoc), TO_BASE, heredoc);
+    for command in [
+        "bash <<'EOF'\ngit push origin HEAD:main\nEOF",
+        "bash <<< 'git push origin HEAD:main'",
+    ] {
+        refused_with(dir.bash(command), TO_BASE, command);
+    }
     dir.write("fish.sh", "#!/usr/bin/env fish\ngit push\n");
     refused_with(dir.bash("./fish.sh"), "`fish` script", "a fish script");
 }
