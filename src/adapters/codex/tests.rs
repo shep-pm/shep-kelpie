@@ -475,8 +475,13 @@ fn live() -> CodexCli {
 }
 
 fn run_raw(codex: &CodexCli, call: &AgentCall) -> Output {
+    let files = Files::of(call);
     let mut command = codex.sandboxed_command(call).unwrap();
-    command.stdin(std::process::Stdio::null()).output().unwrap()
+    let outputs = [files.stdout.as_path(), files.stderr.as_path()];
+    codex
+        .processes
+        .output_to_files(&mut command, None, &|_| {}, outputs)
+        .unwrap()
 }
 
 // A worker's turn that writes one file through apply_patch, then the same
@@ -576,6 +581,7 @@ fn measure_a_codex_worker_on_a_real_issue() {
         world.call(Role::Worker, Session::New(id(WORKER_ID))),
     );
     call.model = env("KELPIE_CODEX_MODEL").as_str().into();
+    call.cwd.clone_from(&repo);
     call.prompt = std::fs::read_to_string(env("KELPIE_ISSUE")).unwrap();
     codex.prepare(&call).unwrap();
     let started = Instant::now();
@@ -611,6 +617,7 @@ fn measure_a_claude_code_worker_on_the_same_issue() {
             ..world.call(Role::Worker, Session::New(id(WORKER_ID)))
         },
     );
+    call.cwd.clone_from(&repo);
     call.prompt = std::fs::read_to_string(env("KELPIE_ISSUE")).unwrap();
     claude.prepare(&call).unwrap();
     let started = Instant::now();

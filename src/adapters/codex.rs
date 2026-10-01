@@ -159,9 +159,11 @@ impl Agents for CodexCli {
                 lambs.label(pid, &label);
             }
         };
+        // Codex dies of a full stdout pipe the sandbox's Node made non-blocking (Facts).
+        let outputs = [files.stdout.as_path(), files.stderr.as_path()];
         let run = self
             .processes
-            .output_telling(&mut command, call.timeout, &spawned);
+            .output_to_files(&mut command, call.timeout, &spawned, outputs);
         let output = run.map_err(|e| match e {
             RunError::Io(e) => AgentError::Spawn(CODEX, e.to_string()),
             RunError::Stopped => AgentError::Stopped,
@@ -288,6 +290,10 @@ struct Files {
     scratch: PathBuf,
     /// Where the sandbox's settings go
     sandbox_settings: PathBuf,
+    /// Codex's stdout and stderr, which kelpie opens for it outside the
+    /// call's reach and reads when it ends
+    stdout: PathBuf,
+    stderr: PathBuf,
 }
 
 impl Files {
@@ -297,6 +303,8 @@ impl Files {
             threads: call.settings.with_extension("threads"),
             scratch: call.settings.with_extension("tmp"),
             sandbox_settings: call.settings.with_extension("sandbox.json"),
+            stdout: call.settings.with_extension("stdout.jsonl"),
+            stderr: call.settings.with_extension("stderr.log"),
         }
     }
 
