@@ -262,6 +262,7 @@ mod tests {
     use crate::adapters::NO_TOOLS;
     use crate::runner::step;
     use crate::test::{Rig, Scripted, ScriptedRound};
+    use crate::trim::deny_with_trim;
 
     #[test]
     fn only_a_png_really_inside_the_shots_folder_is_a_shot() {
@@ -340,15 +341,9 @@ mod tests {
             .iter()
             .find(|s| s.call.role == Role::Judge)
             .expect("the judge ran");
-        let denied: Vec<&str> = judge.settings["permissions"]["deny"]
-            .as_array()
-            .expect("a deny list")
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
         assert_eq!(
-            denied[..NO_TOOLS.len()],
-            NO_TOOLS,
+            judge.settings["permissions"]["deny"],
+            deny_with_trim(&NO_TOOLS),
             "every tool denied, then the trimmed features"
         );
     }
@@ -374,8 +369,8 @@ mod tests {
             .find(|s| s.call.role == Role::Reviewer)
             .expect("a reviewer round ran");
         assert_eq!(
-            reviewer.settings["permissions"]["deny"].as_array().unwrap()[..3],
-            ["Agent", "Task", "Bash"],
+            reviewer.settings["permissions"]["deny"],
+            deny_with_trim(&["Agent", "Task", "Bash"]),
             "Read, Grep and Glob stay, unlike the judge's"
         );
         assert!(!reviewer.settings.to_string().contains("\"Read\""));

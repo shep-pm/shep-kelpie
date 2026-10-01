@@ -33,7 +33,8 @@ const WORK_DENY: [&str; 5] = [
 const REVIEW_DENY: [&str; 3] = ["Agent", "Task", "Bash"];
 
 /// Every tool name a Claude Code call can reach, denied outright to an answer
-pub(crate) const NO_TOOLS: [&str; 11] = [
+pub(crate) const NO_TOOLS: [&str; 12] = [
+    "Agent",
     "Bash",
     "Read",
     "Edit",
@@ -203,14 +204,12 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::trim::deny_with_trim;
 
     #[test]
     fn a_review_round_keeps_its_read_tools_and_reads_its_folders() {
         let bare = settings(Tools::Review, &Reach::default());
-        assert_eq!(
-            bare["permissions"]["deny"].as_array().unwrap()[..3],
-            ["Agent", "Task", "Bash"]
-        );
+        assert_eq!(bare["permissions"]["deny"], deny_with_trim(&REVIEW_DENY));
         let shots = Reach {
             read: vec![PathBuf::from("/k/shots/7")],
             fence: None,
@@ -224,17 +223,14 @@ mod tests {
     #[test]
     fn an_answer_reads_nothing_unless_its_sandbox_lists_a_folder() {
         let none = settings(Tools::Answer, &Reach::default());
-        assert_eq!(
-            none["permissions"]["deny"].as_array().unwrap()[..NO_TOOLS.len()],
-            NO_TOOLS
-        );
+        assert_eq!(none["permissions"]["deny"], deny_with_trim(&NO_TOOLS));
         let shot = Reach {
             read: vec![PathBuf::from("/k/shots/7")],
             fence: None,
         };
         let deny = settings(Tools::Answer, &shot)["permissions"]["deny"].clone();
-        assert!(deny.to_string().contains("\"Bash\""), "{deny}");
-        assert!(!deny.to_string().contains("\"Read\""), "{deny}");
+        let without_read: Vec<&str> = NO_TOOLS.into_iter().filter(|t| *t != "Read").collect();
+        assert_eq!(deny, deny_with_trim(&without_read));
     }
 
     #[test]
@@ -251,33 +247,19 @@ mod tests {
                 assert_eq!(s[key], true, "{tools:?} {key}");
             }
             assert!(s.get("disableRemoteControl").is_none(), "{tools:?}");
+            assert_eq!(s["enableArtifact"], false, "{tools:?}");
+            let own: &[&str] = match tools {
+                Tools::Work => &WORK_DENY,
+                Tools::Review => &REVIEW_DENY,
+                Tools::Answer => &NO_TOOLS,
+            };
+            assert_eq!(s["permissions"]["deny"], deny_with_trim(own), "{tools:?}");
+            // What kelpie's own calls use stays, unless the role denies it itself.
             let deny = s["permissions"]["deny"].to_string();
-            for tool in [
-                "EnterPlanMode",
-                "ExitPlanMode",
-                "DesignSync",
-                "NotebookEdit",
-                "CronCreate",
-                "CronDelete",
-                "CronList",
-                "RemoteTrigger",
-                "ScheduleWakeup",
-                "EnterWorktree",
-                "ExitWorktree",
-            ] {
-                assert!(deny.contains(&format!("\"{tool}\"")), "{tools:?} {tool}");
-            }
-            for kept in [
-                "SendMessage",
-                "Agent\"",
-                "Skill",
-                "ToolSearch",
-                "TaskCreate",
-            ] {
-                if kept == "Agent\"" && tools == Tools::Review {
-                    continue;
+            for kept in ["SendMessage", "Agent", "Skill", "ToolSearch", "TaskCreate"] {
+                if !own.contains(&kept) {
+                    assert!(!deny.contains(&format!("\"{kept}\"")), "{tools:?} {kept}");
                 }
-                assert!(!deny.contains(kept), "{tools:?} {kept}");
             }
         }
     }

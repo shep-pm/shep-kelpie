@@ -38,6 +38,8 @@ pub(crate) fn trimmed(mut settings: Value) -> Value {
     ] {
         settings[key] = json!(true);
     }
+    // `disableArtifact` is deprecated in 2.1.286 in favour of this.
+    settings["enableArtifact"] = json!(false);
     let deny = &mut settings["permissions"]["deny"];
     let mut rules = deny.as_array().cloned().unwrap_or_default();
     for tool in TRIM_DENY {
@@ -49,9 +51,24 @@ pub(crate) fn trimmed(mut settings: Value) -> Value {
     settings
 }
 
+/// What a role's `deny` list must be: its own rules, then every trimmed tool it lacks
+#[cfg(test)]
+pub(crate) fn deny_with_trim(own: &[&str]) -> Value {
+    let mut rules: Vec<&str> = own.to_vec();
+    rules.extend(TRIM_DENY.iter().filter(|t| !own.contains(t)));
+    json!(rules)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_artifact_tool_is_off_under_both_keys() {
+        let s = trimmed(json!({}));
+        assert_eq!(s["disableArtifact"], true);
+        assert_eq!(s["enableArtifact"], false);
+    }
 
     #[test]
     fn a_denied_tool_already_listed_is_not_listed_twice() {

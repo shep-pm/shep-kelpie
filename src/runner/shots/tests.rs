@@ -5,6 +5,7 @@ use crate::profile::INSTRUCTIONS;
 use crate::runner::{Runner, StepReport, step};
 use crate::shots::publish::MARKER;
 use crate::test::{Rig, Scripted, ScriptedShots};
+use crate::trim::deny_with_trim;
 
 mod merge;
 
@@ -407,8 +408,8 @@ fn the_claude_round_gets_the_latest_shots_and_may_open_them() {
             .contains("gives its location as the PNG's full path and `:0`")
     );
     assert_eq!(
-        round.settings["permissions"]["deny"].as_array().unwrap()[..3],
-        ["Agent", "Task", "Bash"]
+        round.settings["permissions"]["deny"],
+        deny_with_trim(&["Agent", "Task", "Bash"])
     );
     assert_eq!(
         round.settings["permissions"]["additionalDirectories"],

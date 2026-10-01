@@ -381,8 +381,8 @@ mod tests {
         let written: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&review.settings).unwrap()).unwrap();
         assert_eq!(
-            written["permissions"]["deny"].as_array().unwrap()[..3],
-            ["Agent", "Task", "Bash"]
+            written["permissions"]["deny"],
+            crate::trim::deny_with_trim(&["Agent", "Task", "Bash"])
         );
         assert_eq!(
             written["permissions"]["additionalDirectories"],
