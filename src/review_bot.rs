@@ -141,13 +141,10 @@ pub struct CodexReviewer {
     pub hours: NonZeroU32,
     /// Whether Codex reviews a pull request when it leaves draft, as the
     /// repo's Codex settings may say. Then marking ready is its summon, taken
-    /// under its lease, and kelpie posts no comment for it. On when absent.
-    #[serde(default = "yes")]
+    /// under its lease, and kelpie posts no comment for it. Off when absent:
+    /// it was never seen to.
+    #[serde(default)]
     pub reviews_on_ready: bool,
-}
-
-fn yes() -> bool {
-    true
 }
 
 impl CodexReviewer {

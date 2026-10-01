@@ -17,8 +17,7 @@ use crate::test::{Rig, Scripted, Told};
 
 pub(super) const HOLDS: &str = r#"{"holds": true, "severity": "medium", "reason": "real"}"#;
 const CUBIC_WINDOW: &str = "\n[reviewers.cubic]\nreviews = 20\nhours = 720\n";
-pub(super) const CODEX_WINDOW: &str =
-    "\n[reviewers.codex]\nreviews = 10\nhours = 168\nreviews_on_ready = false\n";
+pub(super) const CODEX_WINDOW: &str = "\n[reviewers.codex]\nreviews = 10\nhours = 168\n";
 const MONTH: u64 = 720 * 3600;
 
 pub(super) fn cr() -> LeaseKind {

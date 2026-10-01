@@ -144,12 +144,12 @@ fn a_usage_limit_reply_parks_codex_and_the_round_goes_to_the_next_reviewer() {
     assert_eq!(comments_of(&rig, SUMMON), 1);
 }
 
-// A project listing `list`, with Codex reviewing a pull request when it
-// leaves draft, which its definition says unless it says otherwise.
+// A project listing `list`, with Codex defined as reviewing a pull request
+// when it leaves draft.
 fn on_ready(list: &str) -> Rig {
     let rig = listing("shep", list);
     let kelpie = std::fs::read_to_string(rig.paths().kelpie_settings).unwrap();
-    rig.set_kelpie_settings(&kelpie.replace("reviews_on_ready = false\n", ""));
+    rig.set_kelpie_settings(&format!("{kelpie}reviews_on_ready = true\n"));
     rig
 }
 
