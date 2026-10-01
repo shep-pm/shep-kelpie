@@ -176,10 +176,8 @@ impl Runner {
         let found = match forge.issue(repo, issue) {
             Ok(found) => found,
             Err(e) => {
-                return WholeWorker::Defaulted {
-                    reason: format!("cannot read #{issue} to label it: {e}"),
-                    comment_failed: None,
-                };
+                return self
+                    .default_whole_worker(issue, format!("cannot read #{issue} to label it: {e}"));
             }
         };
         if plan::already_has_worker(&found.labels) {
@@ -188,13 +186,18 @@ impl Runner {
         if let Some(label) = plan::resolved_label(named) {
             return match forge.set_issue_label(repo, issue, &label, true) {
                 Ok(()) => WholeWorker::Picked { label },
-                Err(e) => WholeWorker::Defaulted {
-                    reason: format!("cannot add `{label}` to #{issue}: {e}"),
-                    comment_failed: None,
-                },
+                Err(e) => self
+                    .default_whole_worker(issue, format!("cannot add `{label}` to #{issue}: {e}")),
             };
         }
-        let reason = plan::fallback_reason(named);
+        self.default_whole_worker(issue, plan::fallback_reason(named))
+    }
+
+    // Leaves `issue` to the project's own worker for `reason`, and always
+    // tries the comment saying so: `comment_failed` then tells a failed
+    // attempt apart from one never made.
+    fn default_whole_worker(&self, issue: u64, reason: String) -> WholeWorker {
+        let (forge, repo) = (&self.ports.forge, &self.settings.forge);
         let body = format!(
             "Kelpie kept this issue whole. {reason}, so it runs on the project's default \
              worker."

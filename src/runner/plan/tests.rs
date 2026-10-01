@@ -158,6 +158,63 @@ fn a_whole_issue_s_unknown_pick_defaults_and_leaves_a_comment() {
 }
 
 #[test]
+fn a_whole_issue_the_forge_cannot_read_still_gets_a_fallback_comment() {
+    let rig = Rig::new("ekans");
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.forge.list_ready(5, false);
+    rig.forge.remove_issue(5);
+
+    let outcome = runner.lock().unwrap().apply_whole_worker(5, None);
+    let WholeWorker::Defaulted {
+        reason,
+        comment_failed,
+    } = outcome
+    else {
+        panic!("expected a defaulted worker, got {outcome:?}")
+    };
+    assert!(reason.contains("cannot read #5"), "{reason}");
+    // A read failure still tries the comment, and this one lands: `None`
+    // here means the attempt succeeded, not that none was made.
+    assert_eq!(comment_failed, None);
+    let [(on, comment)] = rig.forge.comments().try_into().unwrap();
+    assert_eq!(on, 5);
+    assert!(comment.contains("cannot read #5"), "{comment}");
+}
+
+#[test]
+fn a_whole_issue_s_label_write_failure_still_gets_a_fallback_comment() {
+    let rig = Rig::new("arbok");
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.forge.list_ready(5, false);
+    rig.forge.set_labels_down(true);
+
+    let outcome = runner
+        .lock()
+        .unwrap()
+        .apply_whole_worker(5, Some("sonnet-medium"));
+    let WholeWorker::Defaulted {
+        reason,
+        comment_failed,
+    } = outcome
+    else {
+        panic!("expected a defaulted worker, got {outcome:?}")
+    };
+    assert!(
+        reason.contains("cannot add `worker:sonnet-medium`"),
+        "{reason}"
+    );
+    assert_eq!(comment_failed, None);
+    let [(on, comment)] = rig.forge.comments().try_into().unwrap();
+    assert_eq!(on, 5);
+    assert!(
+        comment.contains("cannot add `worker:sonnet-medium`"),
+        "{comment}"
+    );
+}
+
+#[test]
 fn the_planning_call_reads_main_and_may_change_nothing() {
     let (rig, runner) = planning("golbat");
     rig.land("docs/notes.md", "on main\n");
