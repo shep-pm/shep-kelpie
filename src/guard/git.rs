@@ -8,11 +8,17 @@
 //! only vouch for the worktree as it stands. A push to the base branch is
 //! refused wherever it runs, since only the project manager changes it.
 
+mod front;
+mod runs;
+
 use std::collections::HashMap;
 use std::path::Path;
 
+use super::wrap::Reach;
 use super::{Checkout, Home, REWRITE, WRITE, files, moved, values};
 use crate::worktree::{self, BASE, WorktreeError};
+use front::{BUILTINS, front};
+pub(super) use runs::{bisect_run, makes_repo, scripts};
 
 /// The worktree reads one call has made, so none runs twice
 #[derive(Debug, Default)]
@@ -27,92 +33,122 @@ pub(super) struct Git<'a> {
     pub heredocs: &'a [String],
     /// Whether an assignment in front points it at another repo
     pub redirected: bool,
+    /// Whether an assignment gives it config from the call's text
+    pub configured: bool,
+    /// Whether it surely runs, or may only be named
+    pub reach: Reach,
+    /// Whether the call made a repo before it
+    pub after_new_repo: bool,
 }
 
 /// Judges one git command run in `cwd`
 pub(super) fn judge(
     git: Git<'_>,
     cwd: Option<&Path>,
-    home: Option<&Home>,
+    home: &Home,
     checkout: Checkout<'_>,
     reads: &mut Reads,
 ) -> Vec<String> {
-    let mut rest = git.words[1..].iter().map(String::as_str);
-    let mut dir = cwd.map(Path::to_owned);
-    let mut redirected = git.redirected;
-    let mut configured = false;
-    let sub = loop {
-        match rest.next() {
-            Some("-C") => dir = moved(dir.as_deref(), rest.next().unwrap_or_default(), home),
-            Some("-c" | "--config-env") => {
-                configured = true;
-                rest.next();
-            }
-            Some("--git-dir" | "--work-tree") => {
-                redirected = true;
-                rest.next();
-            }
-            Some("--bare") => redirected = true,
-            Some("--namespace" | "--super-prefix" | "--attr-source") => {
-                rest.next();
-            }
-            Some(w) if w.starts_with("--") && w.contains('=') => {
-                match w.split_once('=').map_or(w, |(name, _)| name) {
-                    "--git-dir" | "--work-tree" => redirected = true,
-                    "--config-env" | "--exec-path" => configured = true,
-                    "--namespace" | "--super-prefix" | "--attr-source" | "--list-cmds" => {}
-                    _ => return vec![unknown_option(w)],
-                }
-            }
-            Some(w) if GIT_FLAGS.contains(&w) => {}
-            // These print and run no command.
-            Some(
-                "--version" | "-v" | "--help" | "-h" | "--html-path" | "--man-path" | "--info-path"
-                | "--exec-path",
-            ) => return Vec::new(),
-            Some(w) if w.starts_with('-') => return vec![unknown_option(w)],
-            Some(w) => break w,
-            None => return Vec::new(),
-        }
+    let runs = git.reach == Reach::Runs;
+    // A program kelpie does not know may only name git, as `rg git` does.
+    let front = match front(git.words) {
+        Ok(front) => front,
+        Err(refusal) if runs => return vec![refusal],
+        Err(_) => return Vec::new(),
     };
+    let Some(at) = front.sub else {
+        return Vec::new();
+    };
+    let sub = git.words[at].as_str();
+    let mut out = Vec::new();
+    if git.configured {
+        out.push(
+            "kelpie cannot check git given config in its environment (`GIT_CONFIG_*` or \
+             `GIT_ALLOW_PROTOCOL`), which can name a program git runs: run it without."
+                .to_owned(),
+        );
+    }
+    if let Some(key) = front
+        .config
+        .iter()
+        .map(|c| runs::key(c))
+        .find(|k| !runs::safe(k))
+    {
+        out.push(format!(
+            "kelpie cannot check git run with the config `{}`, which can name a program git \
+             runs: run it without.",
+            key.chars().take(40).collect::<String>()
+        ));
+    }
     // An alias or an external command could be anything, and no alias
     // shares a built-in's name. Some built-ins run a command of their own,
     // as `submodule foreach` does, so they are left out too.
     if !BUILTINS.contains(&sub) {
-        return vec![format!(
-            "kelpie runs only the git commands it knows, and `{}` is not one: run the plain \
-             git command you need, or the one an alias stands for.",
-            sub.chars().take(40).collect::<String>()
-        )];
+        if runs {
+            out.push(format!(
+                "kelpie runs only the git commands it knows, and `{}` is not one: run the plain \
+                 git command you need, or the one an alias stands for.",
+                sub.chars().take(40).collect::<String>()
+            ));
+        }
+        return out;
     }
-    let args: Vec<String> = rest.map(str::to_owned).collect();
+    let dir = front.moves.iter().fold(cwd.map(Path::to_owned), |dir, to| {
+        moved(dir.as_deref(), to, home.path())
+    });
+    let args = &git.words[at + 1..];
+    if sub == "config"
+        && let Some(key) = runs::config_set(args)
+        && !runs::safe(key)
+    {
+        out.push(format!(
+            "kelpie cannot check git once its config names a program for it to run, and \
+             `{}` can: set only keys that run nothing, such as `color.*`, `user.*` or \
+             `core.quotepath`.",
+            key.chars().take(40).collect::<String>()
+        ));
+    }
     // Where a push goes is judged wherever it runs from.
     let pushed = if sub == "push" {
-        match refspecs(&args) {
-            Ok(specs) if specs.iter().any(Refspec::to_base) => return vec![to_base()],
+        match refspecs(args) {
+            Ok(specs) if specs.iter().any(Refspec::to_base) => {
+                out.push(to_base());
+                return out;
+            }
             Ok(specs) => specs,
-            Err(refusal) => return vec![refusal],
+            Err(refusal) => {
+                // Behind a program kelpie does not know, a push is refused below.
+                if runs {
+                    out.push(refusal);
+                    return out;
+                }
+                Vec::new()
+            }
         }
     } else {
         Vec::new()
     };
-    let mut out = Vec::new();
-    if let Some(home) = home
-        && (sub == "commit" || sub == "tag")
-    {
-        let messages = values(&args, &["--message"], &['m'])
+    if sub == "commit" || sub == "tag" {
+        let messages = values(args, &["--message"], &['m'])
             .into_iter()
-            .chain(files(&args, &["--file"], &['F'], dir.as_deref()))
+            .chain(files(args, &["--file"], &['F'], dir.as_deref()))
             .chain(git.heredocs.iter().cloned());
-        if messages.into_iter().any(|m| home.is_in(&m)) {
-            out.push(home.refusal(&format!("this {sub}'s message"), WRITE));
+        if let Some(leak) = home.find_in_prose(messages) {
+            out.push(home.refusal(&format!("this {sub}'s message"), leak, WRITE));
         }
     }
-    // A commit is read only for the home folder; a push, for its branch too.
-    if !(sub == "push" || sub == "commit" && home.is_some()) {
+    // A commit is read for what names this machine; a push, for its branch too.
+    if !matches!(sub, "commit" | "push") {
         return out;
     }
-    if redirected || configured {
+    if !runs {
+        out.push(format!(
+            "kelpie checks a {sub} only when git is the command's program, or runs behind a \
+             wrapper it knows such as `env` or `sudo`: run git directly."
+        ));
+        return out;
+    }
+    if git.redirected || front.redirected || front.configured {
         out.push(format!(
             "kelpie checks a {sub} only in this worktree's own git, as its config stands: run \
              it without `--git-dir`, `--work-tree`, `-c`, `--config-env` or a `GIT_` variable."
@@ -126,20 +162,27 @@ pub(super) fn judge(
         ));
         return out;
     }
+    // A folder there before the call may hold a repo the call makes.
+    if git.after_new_repo {
+        out.push(format!(
+            "this {sub} follows a `git init`, `git clone` or `git worktree add` in the same \
+             call, which makes a repo kelpie does not check: run it in a call of its own."
+        ));
+        return out;
+    }
     let keys = if sub == "push" {
         let current = pushed.iter().any(Refspec::sends_current_branch);
         let sent = pushed
             .into_iter()
-            .filter(|spec| home.is_some() && !spec.source.is_empty())
+            .filter(|spec| !spec.source.is_empty())
             .map(|spec| Read::Push(spec.source));
-        current
-            .then_some(Read::Branch)
-            .into_iter()
+        std::iter::once(Read::PushConfig)
+            .chain(current.then_some(Read::Branch))
             .chain(sent)
             .collect()
     } else {
         vec![Read::Commit {
-            all: all_tracked(&args),
+            all: all_tracked(args),
         }]
     };
     for key in keys {
@@ -163,112 +206,6 @@ pub(super) fn judge(
     out
 }
 
-// Git's options before its command that take no value.
-const GIT_FLAGS: [&str; 12] = [
-    "-p",
-    "--paginate",
-    "-P",
-    "--no-pager",
-    "--no-replace-objects",
-    "--no-lazy-fetch",
-    "--no-optional-locks",
-    "--no-advice",
-    "--literal-pathspecs",
-    "--glob-pathspecs",
-    "--noglob-pathspecs",
-    "--icase-pathspecs",
-];
-
-// An option the guard does not know could take the word after it, which it
-// would then read as the command.
-fn unknown_option(option: &str) -> String {
-    format!(
-        "kelpie cannot read the git option `{}`: run git without it.",
-        option.chars().take(40).collect::<String>()
-    )
-}
-
-// Git's own commands a worker may run. `--version` and `--help` come as options.
-const BUILTINS: [&str; 77] = [
-    "add",
-    "am",
-    "annotate",
-    "apply",
-    "archive",
-    "bisect",
-    "blame",
-    "branch",
-    "bundle",
-    "cat-file",
-    "check-attr",
-    "check-ignore",
-    "check-ref-format",
-    "checkout",
-    "cherry",
-    "cherry-pick",
-    "clean",
-    "clone",
-    "commit",
-    "commit-graph",
-    "commit-tree",
-    "config",
-    "count-objects",
-    "describe",
-    "diff",
-    "diff-files",
-    "diff-index",
-    "diff-tree",
-    "difftool",
-    "fetch",
-    "for-each-ref",
-    "format-patch",
-    "fsck",
-    "gc",
-    "grep",
-    "hash-object",
-    "help",
-    "init",
-    "log",
-    "ls-files",
-    "ls-remote",
-    "ls-tree",
-    "merge",
-    "merge-base",
-    "merge-file",
-    "merge-tree",
-    "mergetool",
-    "mv",
-    "name-rev",
-    "notes",
-    "prune",
-    "pull",
-    "push",
-    "range-diff",
-    "read-tree",
-    "rebase",
-    "reflog",
-    "remote",
-    "repack",
-    "reset",
-    "restore",
-    "rev-list",
-    "rev-parse",
-    "revert",
-    "rm",
-    "shortlog",
-    "show",
-    "show-ref",
-    "sparse-checkout",
-    "stash",
-    "status",
-    "switch",
-    "symbolic-ref",
-    "tag",
-    "update-ref",
-    "var",
-    "worktree",
-];
-
 /// One read of the worktree's git, keyed so a call makes it once
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Read {
@@ -278,6 +215,8 @@ enum Read {
     Push(String),
     /// The branch checked out, where a push of `HEAD` alone goes
     Branch,
+    /// Config that has a push send more than the refs it names
+    PushConfig,
 }
 
 // Push options that take no value. Git takes an abbreviated long option, so
@@ -424,42 +363,58 @@ const PLAIN: [&str; 4] = [
     "--no-textconv",
 ];
 
-// What a commit adds, or a push sends, that names the home folder, and a
+// What a commit adds, or a push sends, that names this machine, and a
 // push of `HEAD` from the base branch.
 fn read(
     key: &Read,
-    home: Option<&Home>,
+    home: &Home,
     run: impl Fn(&[&str]) -> Result<String, WorktreeError>,
 ) -> Result<Vec<String>, WorktreeError> {
     // `--unified` alone makes `git log` print patches, so only patch reads take these.
     let patches = |args: &[&str]| run(&[args, &PLAIN].concat());
     let mut out = Vec::new();
-    match (key, home) {
-        (Read::Branch, _) => {
+    match key {
+        Read::Branch => {
             let branch = run(&["rev-parse", "--symbolic-full-name", "HEAD"])?;
             if branch.trim() == format!("refs/heads/{BASE}") {
                 out.push(to_base());
             }
         }
-        (_, None) => {}
-        (Read::Push(source), Some(home)) => {
+        Read::PushConfig => {
+            let config = run(&["config", "--list", "-z"])?;
+            for entry in config.split('\0') {
+                let (key, value) = entry.split_once('\n').unwrap_or((entry, ""));
+                let key = key.to_lowercase();
+                if runs::pushes_more(&key, &value.to_lowercase()) {
+                    out.push(format!(
+                        "this repo's git config sets `{key}`, which has a push send more than \
+                         the refs it names, and kelpie checks only those: take it back with \
+                         `{}`, adding `--global` if it is set there, then push.",
+                        runs::push_fix(&key)
+                    ));
+                }
+            }
+        }
+        Read::Push(source) => {
             // A file written and committed in one call is not staged when the
             // commit is judged, so the push reads what it sends. The base is
             // `origin`'s, which the worker cannot move, unlike its own branch's.
             let base = format!("refs/remotes/origin/{BASE}");
             let log = run(&["log", "--format=%B", source, "--not", &base])?;
-            if home.is_in(&log) {
-                out.push(home.refusal("a message in the commits this push sends", REWRITE));
+            if let Some(leak) = home.find_in_prose([log]) {
+                let what = "a message in the commits this push sends";
+                out.push(home.refusal(what, leak, REWRITE));
             }
             let sent = patches(&["log", "-p", "--format=", source, "--not", &base])?;
-            for file in home.added(&sent) {
-                out.push(home.refusal(&format!("{file} in the commits this push sends"), REWRITE));
+            for (file, leak) in home.added(&sent) {
+                let what = format!("{file} in the commits this push sends");
+                out.push(home.refusal(&what, leak, REWRITE));
             }
         }
-        (Read::Commit { all }, Some(home)) => {
+        Read::Commit { all } => {
             let range = if *all { "HEAD" } else { "--cached" };
-            for file in home.added(&patches(&["diff", range])?) {
-                out.push(home.refusal(&format!("this commit's {file}"), WRITE));
+            for (file, leak) in home.added(&patches(&["diff", range])?) {
+                out.push(home.refusal(&format!("this commit's {file}"), leak, WRITE));
             }
         }
     }
@@ -467,16 +422,18 @@ fn read(
 }
 
 // Whether `dir` is the worker's own repo: in the worktree and in no repo it
-// made there. A folder the guard cannot follow (`None`), or one that is not
-// there when the hook runs, such as one the call will make, is not.
+// made there, bare ones too. A folder the guard cannot follow (`None`), or
+// one that is not there when the hook runs, such as one the call will make, is not.
 fn in_own_repo(worktree: &Path, dir: Option<&Path>) -> bool {
     let (Ok(worktree), Some(Ok(dir))) = (worktree.canonicalize(), dir.map(Path::canonicalize))
     else {
         return false;
     };
     dir.starts_with(&worktree)
-        && dir
-            .ancestors()
-            .take_while(|a| *a != worktree)
-            .all(|a| a.join(".git").symlink_metadata().is_err())
+        && dir.ancestors().take_while(|a| *a != worktree).all(|a| {
+            a.join(".git").symlink_metadata().is_err()
+                && !["HEAD", "objects", "refs"]
+                    .iter()
+                    .all(|name| a.join(name).symlink_metadata().is_ok())
+        })
 }
