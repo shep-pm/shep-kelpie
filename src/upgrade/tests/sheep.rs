@@ -86,6 +86,70 @@ async fn an_upgrade_gives_up_on_a_merge_that_does_not_end_and_restarts_nothing()
 }
 
 #[tokio::test]
+async fn a_runner_whose_status_times_out_is_waited_on_not_taken_for_idle() {
+    let mut rig = Rig::new().await;
+    // Three triggers delivered and unanswered, then an idle runner.
+    rig.shepherd
+        .replies("koji", &[None, None, None, Some(IDLE)]);
+    let new = rig.build("new", "0.3.0", "0.12.0");
+    let (ran, said) = rig.install(&new).await;
+    ran.unwrap();
+
+    let writes = rig.shepherd.writes();
+    let first_restart = writes
+        .iter()
+        .position(|w| matches!(w, Request::Restart { .. }))
+        .expect("a restart");
+    assert_eq!(
+        looks_at(&writes[..first_restart], "koji").count(),
+        4,
+        "{writes:?}"
+    );
+    assert!(
+        said.iter()
+            .any(|l| l == "waiting: `koji` did not answer `status`"),
+        "{said:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_runner_that_never_answers_status_is_named_and_nothing_restarts() {
+    let mut rig = Rig::new().await;
+    rig.shepherd.replies("koji", &[None]);
+    let new = rig.build("new", "0.3.0", "0.12.0");
+    let patience = Patience {
+        merge: Duration::from_millis(100),
+        ..FAST
+    };
+    let action = Action::Install(Source::Binary(new));
+    let err = rig.upgrade_within(action, patience).await.0.unwrap_err();
+    assert!(err.contains("`koji` did not answer `status`"), "{err}");
+    assert!(err.contains("nothing was restarted"), "{err}");
+    assert_eq!(rig.restarts(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn a_restarted_sheep_that_never_answers_again_is_named() {
+    let mut rig = Rig::new().await;
+    // Two idle looks (before the dog, before the runner), then silence.
+    rig.shepherd
+        .replies("koji", &[Some(IDLE), Some(IDLE), None]);
+    let new = rig.build("new", "0.3.0", "0.12.0");
+    let patience = Patience {
+        start: Duration::from_secs(1),
+        ..FAST
+    };
+    let action = Action::Install(Source::Binary(new));
+    let err = rig.upgrade_within(action, patience).await.0.unwrap_err();
+    assert!(
+        err.contains("`koji` did not answer in 1s after its restart"),
+        "{err}"
+    );
+    assert!(err.contains("shep bleats koji"), "{err}");
+    assert_eq!(rig.restarts(), ["kelpie", "koji"]);
+}
+
+#[tokio::test]
 async fn a_sheep_that_is_stopped_stays_stopped() {
     let mut rig = Rig::new().await;
     rig.runs("paused", &rig.installed.clone(), false);

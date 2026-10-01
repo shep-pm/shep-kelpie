@@ -3,7 +3,9 @@
 //! One sheep at a time, the dog first: every runner asks it for leases, so it
 //! is back before any runner goes down. A runner is restarted only when its
 //! `status` shows no merge in flight, and the dog only when no runner has
-//! one. A sheep that is stopped stays stopped: it starts on the new build.
+//! one. A runner that does not answer `status` is not a runner with no merge:
+//! it is waited on, and named if the wait runs out. A sheep that is stopped
+//! stays stopped: it starts on the new build.
 //!
 //! The installed kelpie is the program the adopted dog runs, and every sheep
 //! restarted must run that same path, or the restart would not move it.
@@ -28,7 +30,7 @@ pub struct Patience {
     pub poll: Duration,
     /// For a sheep it restarted to answer its `status`
     pub start: Duration,
-    /// For a merge in flight to end
+    /// For a merge in flight to end, or a runner to say whether it has one
     pub merge: Duration,
 }
 
@@ -138,7 +140,8 @@ impl Plan {
 /// # Errors
 ///
 /// A message naming the sheep that could not be restarted, did not come back,
-/// or kept a merge in flight for longer than `patience.merge`. The sheep restarted before it are on the new build,
+/// or kept a merge in flight, or would not say whether it had one, for longer
+/// than `patience.merge`. The sheep restarted before it are on the new build,
 /// and running the upgrade again finishes the rest.
 pub async fn restart_all(
     client: &Client,
@@ -201,6 +204,8 @@ async fn bounce(
 }
 
 // Returns once none of `names` has a merge in flight, asking again until then.
+// A runner that does not answer is waited on like one that is merging, and
+// named when the wait runs out.
 async fn wait_out_merges(
     client: &Client,
     names: &[&str],
@@ -220,6 +225,8 @@ async fn wait_out_merges(
                 ),
                 // Not taking its actions yet: it may be mid-merge from before.
                 Answered::Starting => busy.push(format!("`{name}` is starting")),
+                // Delivered and unanswered: whether it merges is unknown.
+                Answered::TimedOut => busy.push(format!("`{name}` did not answer `status`")),
                 Answered::Down => {}
             }
         }
