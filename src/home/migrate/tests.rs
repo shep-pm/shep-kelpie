@@ -138,17 +138,76 @@ fn a_populated_old_home_moves_and_the_second_run_moves_nothing() {
 }
 
 #[test]
-fn a_second_home_takes_nothing_from_an_old_home_moved_into_the_first() {
+fn a_second_shepherd_with_nothing_left_to_move_starts() {
     let root = tempfile::tempdir().unwrap();
     let old = root.path().join(".kelpie");
     let (first, second) = (root.path().join("a/kelpie"), root.path().join("b/kelpie"));
     write(&old.join("totp/secret"), "s");
     run(&shared(&old, &first)).unwrap();
 
-    let error = run(&shared(&old, &second)).unwrap_err();
+    assert_eq!(run(&shared(&old, &second)), Ok(Vec::new()));
+    assert_eq!(
+        run(&project(&old, &second, &koji()).unwrap()),
+        Ok(Vec::new())
+    );
+}
+
+#[test]
+fn a_second_home_is_refused_what_the_old_home_still_holds_for_the_first() {
+    let root = tempfile::tempdir().unwrap();
+    let old = root.path().join(".kelpie");
+    let (first, second) = (root.path().join("a/kelpie"), root.path().join("b/kelpie"));
+    write(&old.join("totp/secret"), "s");
+    write(&old.join("projects/koji/state.json"), "{}");
+    run(&shared(&old, &first)).unwrap();
+
+    let error = run(&project(&old, &second, &koji()).unwrap()).unwrap_err();
 
     assert!(error.contains(&first.display().to_string()), "{error}");
-    assert!(!second.exists());
+    assert!(error.contains("KELPIE_HOME"), "{error}");
+    assert!(old.join("projects/koji/state.json").is_file());
+}
+
+#[test]
+fn a_shared_file_made_in_the_new_home_first_is_kept_and_the_rest_moves() {
+    let root = tempfile::tempdir().unwrap();
+    let (old, new) = (root.path().join(".kelpie"), root.path().join("kelpie"));
+    write(&old.join("tools/package.json"), "old");
+    write(&old.join("totp/secret"), "s");
+    write(&new.join("tools/package.json"), "installed first");
+
+    let lines = run(&shared(&old, &new)).unwrap();
+
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("left") && l.contains("tools")),
+        "{lines:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(new.join("tools/package.json")).unwrap(),
+        "installed first"
+    );
+    assert!(
+        !fs::symlink_metadata(old.join("tools"))
+            .unwrap()
+            .is_symlink()
+    );
+    assert_eq!(fs::read_link(old.join("totp")).unwrap(), new.join("totp"));
+}
+
+#[test]
+fn a_project_folder_that_is_a_shepherds_home_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join(".kelpie");
+    write(&home.join("projects/shep/state.json"), "{}");
+    write(&home.join("shep/flock.json"), "{}");
+    let shep = ProjectName::try_from("shep").unwrap();
+
+    let error = run(&project(&home, &home, &shep).unwrap()).unwrap_err();
+
+    assert!(error.contains("shepherd's home"), "{error}");
+    assert!(home.join("projects/shep/state.json").is_file());
 }
 
 #[test]

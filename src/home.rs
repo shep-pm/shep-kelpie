@@ -129,12 +129,13 @@ pub fn or_old(path: PathBuf, old: &str) -> PathBuf {
     }
     old_home()
         .map(|home| home.join(old))
-        .filter(|was| fs_is_file(was))
+        .filter(|was| unmoved(was))
         .unwrap_or(path)
 }
 
-fn fs_is_file(path: &Path) -> bool {
-    std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file())
+/// Whether `path` is there and is not a link a move left
+pub fn unmoved(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| !m.file_type().is_symlink())
 }
 
 /// Whether `socket` is short enough to bind, naming it and the fix when not

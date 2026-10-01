@@ -20,6 +20,7 @@ use crate::adapters::{ClaudeCli, Curl, Gh, LocalReviewer, SystemClock, SystemHos
 use crate::coderabbit::CodeRabbit;
 use crate::flock;
 use crate::ports::{Alerts, Clock, Forge, Meter, Reviewer};
+use crate::preview::Tools;
 use crate::review_bot::Profile;
 use crate::runner::ProjectName;
 use crate::shep_home;
@@ -187,12 +188,22 @@ pub struct Ask<'a> {
     pub test_alert: bool,
 }
 
+/// Kelpie's tools, or the old home's while no runner has moved them
+pub(crate) fn tools(here: Here<'_>) -> Tools {
+    let tools = Tools::under(here.kelpie_home);
+    let old = here.old_home.map(|old| old.join("tools"));
+    match old {
+        Some(old) if !tools.dir().exists() && crate::home::unmoved(&old) => Tools::at(old),
+        _ => tools,
+    }
+}
+
 /// Checks the machine and each project the shepherd at `shep_home` holds
 pub async fn check(shep_home: &Path, probes: Probes<'_>, here: Here<'_>, ask: Ask<'_>) -> Report {
     let mut lines = vec![
         machine::claude(probes.meter, probes.clock),
         machine::gh(probes.forge),
-        machine::sandbox(probes.host, here.kelpie_home),
+        machine::sandbox(probes.host, &tools(here)),
     ];
     lines.extend(
         here.old_home

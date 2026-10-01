@@ -68,19 +68,20 @@ fn serve(project: &str) -> Result<(), String> {
         .map(PathBuf::from)
         .ok_or("HOME is not set")?;
     let kelpie_home = crate::home::kelpie_home_of(&shep_home);
-    let old = crate::home::old_home();
-    if let Some(old) = &old {
-        settle::moved(old, &kelpie_home, &project)?;
-    }
-    let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
     let mut paths = ProjectPaths::under(&kelpie_home, &shep_home, &project);
     let (door, why) = crate::lease::door::worker_socket(&shep_home);
     if let Some(why) = why {
         println!("{why}");
     }
     paths.door = door;
-    // A socket kelpie cannot bind would otherwise fail a call deep in a work item.
+    // A socket kelpie cannot bind would otherwise fail a call deep in a work
+    // item, and it is checked before anything moves into a home it refuses.
     paths.sockets_fit()?;
+    let old = crate::home::old_home();
+    if let Some(old) = &old {
+        settle::moved(old, &kelpie_home, &project)?;
+    }
+    let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
     // Every agent call runs inside the sandbox runtime, so a runner without one stops here.
     if !paths.tools.sandbox().is_file() {
         return Err(SandboxError::Missing(paths.tools.sandbox()).to_string());
@@ -131,9 +132,6 @@ fn serve(project: &str) -> Result<(), String> {
         eprintln!("{notice}");
     }
     let (settings, kelpie_settings) = (loaded.settings, loaded.kelpie);
-    // Before the runner opens, since opening prunes worktrees git cannot find.
-    let [worktrees, _] = paths.owned();
-    settle::repair(&settings.repo, &worktrees);
     if let Some(old) = &old {
         settle::sweep_when_restarted(old, &kelpie_home, &paths.shep_home);
     }

@@ -40,6 +40,10 @@ pub const MARKER: &str = ".moved-from";
 /// The file the old home keeps once a move began, naming kelpie's new home
 pub const CLAIM: &str = ".moved-to";
 
+/// The file naming the process that made the links, which the sweep does
+/// not wait on, since it already runs this build
+pub const LINKED_BY: &str = ".linked-by";
+
 /// What a shepherd keeps at the top of its home, which kelpie never moves from
 const SHEPHERDS: [&str; 3] = ["flock.json", "shep.toml", "run"];
 
@@ -165,7 +169,6 @@ pub fn dog(old: &Path, dog: &Path) -> Plan {
 /// taken, or when the new place is inside the old home. Nothing after it moves.
 pub fn run(plan: &Plan) -> Result<Vec<String>, String> {
     let marker = plan.place.join(MARKER);
-    claim(plan, false)?;
     if marker.exists() || plan.moves.iter().all(|m| !owed(m)) {
         return Ok(Vec::new());
     }
@@ -175,6 +178,13 @@ pub fn run(plan: &Plan) -> Result<Vec<String>, String> {
             plan.old.display()
         )]);
     }
+    if let Some(found) = SHEPHERDS.iter().find(|f| plan.place.join(f).exists()) {
+        return Err(format!(
+            "cannot move into {}: it holds {found}, so it is a shepherd's home",
+            plan.place.display()
+        ));
+    }
+    claim(plan, false)?;
     // Its paths would all name the old home, and break when the shepherd leaves it.
     if plan.home != plan.old && plan.home.starts_with(&plan.old) {
         return Err(format!(
@@ -200,6 +210,11 @@ pub fn run(plan: &Plan) -> Result<Vec<String>, String> {
     }
     for m in &plan.moves {
         remove_empty_parents(&m.from, m.empties);
+    }
+    if plan.moves.iter().any(|m| m.link) && !links(&plan.old, &plan.home).is_empty() {
+        let by = plan.place.join(LINKED_BY);
+        fs::write(&by, std::process::id().to_string())
+            .map_err(|e| format!("cannot write {}: {e}", by.display()))?;
     }
     let old = plan.old.as_os_str().as_encoded_bytes();
     fs::write(&marker, old).map_err(|e| format!("cannot write {}: {e}", marker.display()))?;
@@ -311,8 +326,9 @@ fn claim(plan: &Plan, take: bool) -> Result<(), String> {
     match fs::read(&file) {
         Ok(named) if named == plan.home.as_os_str().as_encoded_bytes() => Ok(()),
         Ok(named) => Err(format!(
-            "{} was moved into {}, not {}: start this runner with the SHEP_HOME or KELPIE_HOME \
-             that names that home",
+            "{} was moved into {}, not {}, and still holds files of kelpie's: start this runner \
+             with the SHEP_HOME that names that home, or give a separate shepherd's runners a \
+             KELPIE_HOME of their own",
             plan.old.display(),
             String::from_utf8_lossy(&named),
             plan.home.display()
@@ -341,6 +357,12 @@ fn one(m: &Move) -> Result<Option<String>, String> {
     }
     let (from, to) = (m.from.display(), m.to.display());
     let mut line = if fs::symlink_metadata(&m.from).is_ok() {
+        // A shared file made in the new home first, such as by `tools install`, is kept.
+        if fs::symlink_metadata(&m.to).is_ok() && m.link {
+            return Ok(Some(format!(
+                "left {from} where it is: {to} is already there"
+            )));
+        }
         if fs::symlink_metadata(&m.to).is_ok() {
             return Err(format!(
                 "cannot move {from}: {to} is already there. Keep one of them and remove the other"

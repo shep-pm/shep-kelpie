@@ -226,7 +226,9 @@ fn totp(rotate: bool) -> ExitCode {
     let Some(home) = kelpie_home() else {
         return ExitCode::FAILURE;
     };
-    match shep_kelpie::totp::show(&home.join("totp/secret"), rotate) {
+    // The secret stays in the old home until a runner's start moves it.
+    let secret = shep_kelpie::home::or_old(home.join("totp/secret"), "totp/secret");
+    match shep_kelpie::totp::show(&secret, rotate) {
         Ok(text) => {
             print!("{text}");
             ExitCode::SUCCESS
@@ -242,7 +244,8 @@ fn unlock() -> ExitCode {
     let Some(home) = kelpie_home() else {
         return ExitCode::FAILURE;
     };
-    match shep_kelpie::totp::answers::Answers::in_folder(home.join("totp")).unlock() {
+    let folder = shep_kelpie::home::or_old(home.join("totp"), "totp");
+    match shep_kelpie::totp::answers::Answers::in_folder(folder).unlock() {
         Ok(()) => {
             println!("answers from ntfy are on again");
             ExitCode::SUCCESS

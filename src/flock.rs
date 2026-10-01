@@ -202,18 +202,22 @@ pub(crate) async fn kelpie_sheep(
 }
 
 /// Whether every running sheep started as a kelpie runner has been up for
-/// less than `age`
+/// less than `age`, but the one whose process is `except`
 ///
 /// # Errors
 ///
 /// A message when the flock or a sheep's config cannot be read.
-pub(crate) async fn runners_younger_than(client: &Client, age: Duration) -> Result<bool, String> {
+pub(crate) async fn runners_younger_than(
+    client: &Client,
+    age: Duration,
+    except: Option<u32>,
+) -> Result<bool, String> {
     let rows = flock(client).await?;
     let up = rows
         .iter()
         .filter(|r| r.dog.is_none() && r.status == ProcStatus::Online);
     for row in up {
-        if Duration::from_millis(row.uptime_ms) < age {
+        if Duration::from_millis(row.uptime_ms) < age || (except.is_some() && row.pid == except) {
             continue;
         }
         let request = Request::SheepConfig {
@@ -303,6 +307,38 @@ pub(crate) async fn resume(client: &Client, name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The runner that made the links counts as older than them, since shep
+    // counts uptime from the spawn.
+    #[tokio::test]
+    async fn every_runner_but_the_one_named_must_be_younger_than_the_links() {
+        let shepherd = crate::test::FakeShepherd::new().await;
+        let launch = Launch {
+            kelpie: "/opt/kelpie".into(),
+            shep_home: shepherd.home().to_owned(),
+            kelpie_home: None,
+        };
+        for name in ["koji", "lab"] {
+            let project = ProjectName::try_from(name).unwrap();
+            shepherd.holds(launch.runner(&project, Map::new()), true);
+        }
+        shepherd.holds(AppConfig::minimal("web", "/srv/web"), true);
+        shepherd.up_for("koji", 100, 600_000);
+        shepherd.up_for("lab", 200, 1_000);
+        shepherd.up_for("web", 300, 600_000);
+        let client = crate::shepherd::connect(shepherd.home()).await.unwrap();
+        let age = Duration::from_secs(60);
+
+        assert_eq!(runners_younger_than(&client, age, None).await, Ok(false));
+        assert_eq!(
+            runners_younger_than(&client, age, Some(100)).await,
+            Ok(true)
+        );
+        assert_eq!(
+            runners_younger_than(&client, age, Some(200)).await,
+            Ok(false)
+        );
+    }
 
     #[test]
     fn a_github_remote_names_its_repo_over_https_or_ssh() {
