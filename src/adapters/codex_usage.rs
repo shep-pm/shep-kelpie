@@ -188,6 +188,9 @@ mod tests {
 
     // Written by hand from `codex app-server generate-json-schema`, on codex-cli 0.146.0.
     const SHAPED: &str = include_str!("../../fixtures/codex-rate-limits.json");
+    // Recorded from codex-cli 0.159.3 on kelpie's own login, a Plus plan,
+    // with its account id zeroed.
+    const PLUS: &str = include_str!("../../fixtures/codex-rate-limits-plus.json");
     // Recorded from codex-cli 0.146.0 on a login whose workspace is deactivated.
     const REFUSED: &str = include_str!("../../fixtures/codex-rate-limits-402.json");
 
@@ -206,6 +209,24 @@ mod tests {
                 Window {
                     used_pct: 41,
                     resets_at: Timestamp(1_791_158_400)
+                },
+            )
+        );
+    }
+
+    #[test]
+    fn a_live_answer_reads_as_both_windows_with_resets_in_seconds() {
+        let usage = parse(PLUS, NOW).unwrap();
+        assert_eq!(
+            (usage.session, usage.week),
+            (
+                Window {
+                    used_pct: 0,
+                    resets_at: Timestamp(1_790_884_973)
+                },
+                Window {
+                    used_pct: 1,
+                    resets_at: Timestamp(1_791_434_416)
                 },
             )
         );
