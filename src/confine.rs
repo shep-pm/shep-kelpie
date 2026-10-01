@@ -364,7 +364,10 @@ mod tests {
     fn a_codex_patch_with_any_file_outside_or_fenced_is_refused() {
         let w = world();
         for body in [
-            format!("*** Add File: src/ok.rs\n+x\n*** Add File: {}\n+x", w.path("home/.zshrc")),
+            format!(
+                "*** Add File: src/ok.rs\n+x\n*** Add File: {}\n+x",
+                w.path("home/.zshrc")
+            ),
             "*** Update File: src/lib.rs\n*** Move to: ../home/lib.rs\n@@\n-a\n+b".into(),
             "*** Delete File: ../home/.zshrc".into(),
             "*** Add File: .codex/config.toml\n+x".into(),
@@ -380,7 +383,10 @@ mod tests {
     fn a_codex_patch_is_read_wherever_its_call_carries_it() {
         let w = world();
         let text = "*** Begin Patch\n*** Add File: ../home/x\n+x\n*** End Patch";
-        for input in [json!({ "input": text }), json!({ "command": ["apply_patch", text] })] {
+        for input in [
+            json!({ "input": text }),
+            json!({ "command": ["apply_patch", text] }),
+        ] {
             let verdict = w.judge_tool("apply_patch", input.clone());
             assert!(matches!(verdict, Verdict::Refuse(_)), "{input}");
         }

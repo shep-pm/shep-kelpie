@@ -369,7 +369,9 @@ impl Settings {
         // Only Claude Code runs the preview's MCP servers and the project's hooks.
         let other = match &worker.harness {
             AgentHarness::Pi(_) => Some(("pi", "pi runs no MCP servers")),
-            AgentHarness::Codex => Some(("codex", "kelpie bridges MCP servers to Claude Code only")),
+            AgentHarness::Codex => {
+                Some(("codex", "kelpie bridges MCP servers to Claude Code only"))
+            }
             _ => None,
         };
         if let (Some((harness, why)), Some(name)) = (other, &self.agents.worker) {

@@ -360,7 +360,10 @@ fn argv(call: &AgentCall, files: &Files) -> Vec<OsString> {
 /// call's plugins holds leaves the prompt as it is.
 fn skill_prompt(call: &AgentCall) -> (String, Option<PathBuf>) {
     match step_skill(call) {
-        Some(step) => (format!("/skill:{} {}", step.name, step.rest), Some(step.dir)),
+        Some(step) => (
+            format!("/skill:{} {}", step.name, step.rest),
+            Some(step.dir),
+        ),
         None => (call.prompt.clone(), None),
     }
 }

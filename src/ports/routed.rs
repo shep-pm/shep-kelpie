@@ -15,11 +15,7 @@ pub struct Routed {
 
 impl Routed {
     /// Claude Code's calls to `claude_code`, pi's to `pi` and Codex's to `codex`
-    pub fn new(
-        claude_code: Arc<dyn Agents>,
-        pi: Arc<dyn Agents>,
-        codex: Arc<dyn Agents>,
-    ) -> Self {
+    pub fn new(claude_code: Arc<dyn Agents>, pi: Arc<dyn Agents>, codex: Arc<dyn Agents>) -> Self {
         Self {
             claude_code,
             pi,

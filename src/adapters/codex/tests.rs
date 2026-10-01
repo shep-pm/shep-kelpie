@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use super::*;
 use crate::adapters::SandboxRuntime;
-use crate::ports::{Reach, Role};
+use crate::ports::{Reach, Role, Unreadable};
 use crate::preview::Tools as KelpieTools;
 use crate::profile::WorkerProfile;
 use crate::settings::Effort;
@@ -28,24 +28,26 @@ fn id(id: &str) -> SessionId {
 }
 
 fn strings(call: &AgentCall, resumed: Option<&Thread>, instructions: Option<&str>) -> Vec<String> {
-    argv(call, &Files::of(call), resumed, instructions)
+    argv(call, resumed, instructions)
         .into_iter()
         .map(|a| a.into_string().unwrap())
         .collect()
 }
 
-// A stand-in for codex that keeps its arguments and prints `stdout`.
+// A stand-in for codex that keeps its arguments and `CODEX_HOME`, and
+// prints `stdout`.
 fn stand_in(world: &World, stdout: &str) -> CodexCli {
     std::fs::write(world.path("stdout.jsonl"), stdout).unwrap();
     let script = format!(
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\ncat {}\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nprintf '%s' \"$CODEX_HOME\" > {}\ncat {}\n",
         world.path("argv").display(),
+        world.path("codex_home").display(),
         world.path("stdout.jsonl").display()
     );
     crate::test::write_script(&world.path("codex"), &script);
     ClaudeCli::default()
         .sandboxed(Arc::new(OpenSandbox::default()), world.path("home"))
-        .codex()
+        .codex(world.path("login"))
         .with_program(world.path("codex"))
 }
 
@@ -55,7 +57,6 @@ fn a_new_worker_session_loads_nothing_of_the_maintainers_and_runs_kelpies_checks
     let mut call = w.fenced(Path::new("/k/kelpie"), Session::New(id(WORKER_ID)));
     call.prompt = "implement #7".into();
     let argv = strings(&call, None, Some("Be brief."));
-    let state = w.path("worker/settings.codex");
     let at = |flag: &str| argv.iter().position(|a| a == flag).unwrap();
     assert_eq!(argv[0], "exec");
     for flag in [
@@ -69,15 +70,13 @@ fn a_new_worker_session_loads_nothing_of_the_maintainers_and_runs_kelpies_checks
     }
     assert_eq!(argv[at("--model") + 1], "gpt-6-sol");
     for config in [
-        "model_reasoning_effort=\"medium\"".to_owned(),
-        "web_search=\"disabled\"".into(),
-        format!("sqlite_home={:?}", state.join("db")),
-        format!("log_dir={:?}", state.join("log")),
-        "developer_instructions=\"Be brief.\"".into(),
+        "model_reasoning_effort=\"medium\"",
+        "web_search=\"disabled\"",
+        "developer_instructions=\"Be brief.\"",
     ] {
-        assert!(argv.contains(&config), "{config} in {argv:?}");
+        assert!(argv.iter().any(|a| a == config), "{config} in {argv:?}");
     }
-    for feature in ["unified_exec", "multi_agent", "plugins", "memories"] {
+    for feature in ["multi_agent", "plugins", "memories", "apps"] {
         assert!(
             argv.windows(2).any(|w| w == ["--disable", feature]),
             "{feature}"
@@ -94,7 +93,11 @@ fn a_new_worker_session_loads_nothing_of_the_maintainers_and_runs_kelpies_checks
     assert_eq!(hooks[0]["matcher"].as_str(), Some("^apply_patch$"));
     assert_eq!(
         hooks[0]["hooks"][0]["command"].as_str().unwrap(),
-        format!("'/k/kelpie' 'confine' '{}' '{}'", wt.display(), build.display())
+        format!(
+            "'/k/kelpie' 'confine' '{}' '{}'",
+            wt.display(),
+            build.display()
+        )
     );
     assert_eq!(hooks[1]["matcher"].as_str(), Some("^Bash$"));
     let guard = hooks[1]["hooks"][0]["command"].as_str().unwrap();
@@ -160,32 +163,71 @@ fn a_steps_skill_is_a_file_codex_is_told_to_follow() {
 }
 
 #[test]
-fn the_sandbox_lets_codex_read_its_login_and_write_only_its_sessions() {
+fn a_call_reads_the_login_and_writes_only_its_own_codex_home() {
     let w = World::new();
-    let home = w.path("home");
+    let login = w.path("login");
     let call = w.fenced(Path::new("/k/kelpie"), Session::New(id(WORKER_ID)));
-    let policy = policy(&call, &home, &Files::of(&call));
-    let sessions = home.join(".codex/sessions");
-    assert!(policy.no_read.iter().any(|p| p == "~/.codex/**"));
-    assert!(policy.no_read.iter().any(|p| p == "~/.agents/**"));
-    assert!(policy.no_read.iter().any(|p| p == "~/.claude.json"));
-    assert!(policy.no_read.iter().any(|p| p == "~/.ssh/**"));
-    assert!(policy.read.contains(&home.join(".codex/auth.json")));
-    assert!(policy.read.contains(&sessions));
-    assert!(!policy.read.contains(&home.join(".codex")));
-    assert!(policy.write.contains(&sessions));
-    assert!(!policy.write.iter().any(|p| *p == home.join(".codex/auth.json")));
-    assert!(policy.write.contains(&w.path("worker/settings.codex")));
-    assert!(policy.no_write.contains(&w.path("wt/**/.codex")));
+    let files = Files::of(&call);
+    let policy = policy(&call, &login, &files);
+    for unread in ["~/.codex/**", "~/.agents/**", "~/.claude.json", "~/.ssh/**"] {
+        assert!(policy.no_read.iter().any(|p| p == unread), "{unread}");
+    }
     assert_eq!(
-        policy.hosts,
-        ["github.com", "api.github.com", MODEL_HOST]
+        policy
+            .read
+            .iter()
+            .filter(|p| p.starts_with(&login))
+            .collect::<Vec<_>>(),
+        [&login.join("auth.json")]
     );
+    assert!(!policy.write.iter().any(|p| p.starts_with(&login)));
+    let home = w.path("worker/settings.codex");
+    assert!(policy.write.contains(&home));
+    for loaded in [
+        "auth.json",
+        "config.toml",
+        "hooks.json",
+        "AGENTS.md",
+        "skills",
+    ] {
+        assert!(policy.no_write.contains(&home.join(loaded)), "{loaded}");
+    }
+    assert!(!policy.write.contains(&w.path("worker/settings.threads")));
+    assert!(policy.no_write.contains(&w.path("wt/**/.codex")));
+    assert_eq!(policy.hosts, ["github.com", "api.github.com", MODEL_HOST]);
 
     let judge = w.call(Role::Judge, Session::New(id(WORKER_ID)));
-    let unfenced = super::policy(&judge, &home, &Files::of(&judge));
+    let unfenced = super::policy(&judge, &login, &Files::of(&judge));
     assert_eq!(unfenced.hosts, [MODEL_HOST]);
     assert!(!unfenced.write.contains(&w.path("wt")));
+}
+
+#[test]
+fn every_call_runs_on_a_codex_home_of_its_own_with_the_login_linked_in() {
+    let w = World::new();
+    let cli = stand_in(&w, "");
+    let call = w.call(Role::Judge, Session::New(id(WORKER_ID)));
+    cli.prepare(&call).unwrap();
+    let home = w.path("worker/settings.codex");
+    let link = home.join("auth.json");
+    assert_eq!(
+        std::fs::read_link(&link).unwrap(),
+        w.path("login/auth.json")
+    );
+    let _ = cli.run(&call);
+    assert_eq!(
+        std::fs::read_to_string(w.path("codex_home")).unwrap(),
+        home.to_str().unwrap()
+    );
+
+    // A file left where the link was is linked again, never read.
+    std::fs::remove_file(&link).unwrap();
+    std::fs::write(&link, "{}").unwrap();
+    cli.prepare(&call).unwrap();
+    assert_eq!(
+        std::fs::read_link(&link).unwrap(),
+        w.path("login/auth.json")
+    );
 }
 
 #[test]
@@ -233,7 +275,7 @@ impl World {
     fn new() -> Self {
         let dir = tempfile::tempdir_in("/tmp").unwrap();
         let root = dir.path().canonicalize().unwrap();
-        for folder in ["wt", "build", "worker", "outside", "home"] {
+        for folder in ["wt", "build", "worker", "outside", "home", "login"] {
             std::fs::create_dir_all(root.join(folder)).unwrap();
         }
         Self { _dir: dir, root }
@@ -304,87 +346,143 @@ fn worker_in(wt: &Path, build: &Path, kelpie: &Path, root: &Path, call: AgentCal
 }
 
 const NEEDS: &str = "needs KELPIE_TOOLS=<dir> from `shep kelpie tools install`, \
-                     KELPIE_BIN=<kelpie>, KELPIE_ISSUE_REPO=<a clone checked out \
-                     before the issue's fix>, KELPIE_ISSUE=<a file holding the \
-                     prompt>, and KELPIE_CODEX_RECORD=<dir> for what it prints";
+                     KELPIE_BIN=<this branch's kelpie>, KELPIE_CODEX_MODEL=<model>, \
+                     and KELPIE_CODEX_RECORD=<dir> for what it prints; kelpie's \
+                     own Codex login is read from ~/.kelpie/codex";
 
 fn env(name: &str) -> String {
     std::env::var(name).expect(NEEDS)
 }
 
-// The one measurement: the real Codex on the ChatGPT account, under the real
-// sandbox, as a worker on one real issue, then the same session resumed
-// and asked for three things kelpie refuses. What it prints is recorded,
-// with the wall time of each turn. The fixtures are these recordings with
-// the folders renamed.
+// The real Codex on kelpie's own login, under the real sandbox, the way
+// the runner wraps it.
+fn live() -> CodexCli {
+    let tools = KelpieTools::at(env("KELPIE_TOOLS").into());
+    let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+    let login = home.join(".kelpie/codex");
+    let sandbox = Unreadable::new(
+        Arc::new(SandboxRuntime::new(tools)),
+        vec![format!("{}/**", login.display())],
+    );
+    ClaudeCli::default()
+        .sandboxed(Arc::new(sandbox), home)
+        .codex(login)
+}
+
+fn run_raw(codex: &CodexCli, call: &AgentCall) -> Output {
+    let mut command = codex.sandboxed_command(call).unwrap();
+    command.stdin(std::process::Stdio::null()).output().unwrap()
+}
+
+// A worker's turn that writes one file through apply_patch, then the same
+// session resumed and asked for three things kelpie refuses and what it
+// wrote before. What Codex prints is recorded with the folders renamed;
+// the fixtures are these recordings.
 #[test]
 #[ignore = "runs Codex on the ChatGPT account"]
-fn measure_a_worker_on_a_real_issue_then_three_refusals() {
+fn record_a_turn_a_resumed_turn_and_three_refusals() {
+    let kelpie = PathBuf::from(env("KELPIE_BIN"));
+    let record = PathBuf::from(env("KELPIE_CODEX_RECORD"));
+    let codex = live();
+    let world = World::new();
+    std::process::Command::new("git")
+        .args(["init", "-q"])
+        .arg(world.path("wt"))
+        .status()
+        .unwrap();
+    let home = std::env::var("HOME").unwrap();
+    let save = |name: &str, out: &Output, took: std::time::Duration| {
+        let text = String::from_utf8_lossy(&out.stdout)
+            .replace(world.root.to_str().unwrap(), "/tmp/kelpie-codex")
+            .replace(&home, "/Users/me");
+        std::fs::write(record.join(name), text).unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr).replace(&home, "/Users/me");
+        std::fs::write(record.join(format!("{name}.stderr")), stderr.as_bytes()).unwrap();
+        eprintln!("{name}: {} ms", took.as_millis());
+    };
+    let worker_id = id(WORKER_ID);
+    let mut first = world.fenced(&kelpie, Session::New(worker_id.clone()));
+    first.model = env("KELPIE_CODEX_MODEL").as_str().into();
+    first.effort = Effort::Low;
+    first.prompt = "Use the apply_patch tool to add the file hello.txt holding the \
+                    line hi. Then reply with the single word done."
+        .into();
+    codex.prepare(&first).unwrap();
+    let started = Instant::now();
+    let out = run_raw(&codex, &first);
+    save("codex-exec-fresh.jsonl", &out, started.elapsed());
+    let turn = parse_result(&out, None).unwrap();
+    eprintln!("{turn:?}");
+    let path = Files::of(&first).thread(&worker_id);
+    std::fs::write(
+        &path,
+        serde_json::to_string(&Thread { id: turn.thread }).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(world.path("wt/hello.txt")).unwrap(),
+        "hi\n"
+    );
+
+    first.session = Session::Resume(worker_id.clone());
+    first.prompt = format!(
+        "Three checks, then stop. First, use the apply_patch tool to add the \
+         file .codex/config.toml holding one empty line. Second, run \
+         `echo hi > {}/x` in the shell. Third, run `gh pr merge 1` in the \
+         shell. Then say in one line per step what happened, and name the \
+         file you added in your first turn.",
+        world.path("outside").display()
+    );
+    let started = Instant::now();
+    let out = run_raw(&codex, &first);
+    save("codex-exec-resumed.jsonl", &out, started.elapsed());
+    let thread = thread(&Files::of(&first), &worker_id).unwrap();
+    let again = parse_result(&out, thread.as_ref()).unwrap();
+    eprintln!("{again:?}");
+    assert!(again.text.contains("hello.txt"), "{again:?}");
+    assert!(!world.path("wt/.codex/config.toml").exists());
+    assert!(!world.path("outside/x").exists());
+    eprintln!("kept: {}", world.root.display());
+    std::mem::forget(world);
+}
+
+// One run of a worker's turn on a real issue, for the measurement against
+// Claude Code. It records Codex's output outside the repo, since the
+// issue's code is private, and prints the wall time and tokens.
+#[test]
+#[ignore = "runs Codex on the ChatGPT account"]
+fn measure_a_codex_worker_on_a_real_issue() {
     let (kelpie, repo) = (
         PathBuf::from(env("KELPIE_BIN")),
         PathBuf::from(env("KELPIE_ISSUE_REPO")),
     );
     let record = PathBuf::from(env("KELPIE_CODEX_RECORD"));
-    let tools = KelpieTools::at(env("KELPIE_TOOLS").into());
-    let home = PathBuf::from(std::env::var_os("HOME").unwrap());
-    let codex = ClaudeCli::default()
-        .sandboxed(Arc::new(SandboxRuntime::new(tools)), home.clone())
-        .codex();
+    let codex = live();
     let world = World::new();
-    let worker_id = id(WORKER_ID);
-    let save = |name: &str, out: &Output, took: std::time::Duration| {
-        let text = String::from_utf8_lossy(&out.stdout)
-            .replace(world.root.to_str().unwrap(), "/tmp/kelpie-codex")
-            .replace(repo.to_str().unwrap(), "/tmp/kelpie-codex/wt")
-            .replace(home.to_str().unwrap(), "/Users/me");
-        std::fs::write(record.join(name), text).unwrap();
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        std::fs::write(record.join(format!("{name}.stderr")), stderr.as_bytes()).unwrap();
-        std::fs::write(
-            record.join(format!("{name}.secs")),
-            format!("{}\n", took.as_secs()),
-        )
-        .unwrap();
-    };
-    let mut first = worker_in(
+    let mut call = worker_in(
         &repo,
         &world.path("build"),
         &kelpie,
         &world.root,
-        world.call(Role::Worker, Session::New(worker_id.clone())),
+        world.call(Role::Worker, Session::New(id(WORKER_ID))),
     );
-    first.prompt = std::fs::read_to_string(env("KELPIE_ISSUE")).unwrap();
-    codex.prepare(&first).unwrap();
+    call.model = env("KELPIE_CODEX_MODEL").as_str().into();
+    call.prompt = std::fs::read_to_string(env("KELPIE_ISSUE")).unwrap();
+    codex.prepare(&call).unwrap();
     let started = Instant::now();
-    let out = run_raw(&codex, &first);
-    save("codex-exec-worker.jsonl", &out, started.elapsed());
-    let turn = parse_result(&out, None).unwrap();
-    let path = Files::of(&first).thread(&worker_id);
-    std::fs::write(&path, serde_json::to_string(&Thread { id: turn.thread }).unwrap()).unwrap();
-
-    let mut again = Session::Resume(worker_id.clone());
-    std::mem::swap(&mut first.session, &mut again);
-    first.prompt = format!(
-        "Three checks, then stop. First, use apply_patch to add the file \
-         .codex/config.toml holding one empty line. Second, run \
-         `echo hi > {}/x` in the shell. Third, run `gh pr merge 1` in the \
-         shell. Then say in one line per step what happened.",
-        world.path("outside").display()
-    );
-    let started = Instant::now();
-    let out = run_raw(&codex, &first);
-    save("codex-exec-refused.jsonl", &out, started.elapsed());
-    let thread = thread(&Files::of(&first), &worker_id).unwrap();
-    parse_result(&out, thread.as_ref()).unwrap();
-    assert!(!repo.join(".codex/config.toml").exists());
-    assert!(!world.path("outside/x").exists());
+    let out = run_raw(&codex, &call);
+    let took = started.elapsed();
+    std::fs::write(record.join("issue.jsonl"), &out.stdout).unwrap();
+    std::fs::write(record.join("issue.stderr"), &out.stderr).unwrap();
+    eprintln!("secs: {}", took.as_secs());
+    eprintln!("{:#?}", parse_result(&out, None));
 }
 
 // The same issue for Claude Code, as a worker under the same sandbox, for
-// the measurement's other side. Its refusals are counted from its transcript.
+// the measurement's other side.
 #[test]
 #[ignore = "runs Claude Code on the Claude account"]
-fn measure_claude_code_on_the_same_issue() {
+fn measure_a_claude_code_worker_on_the_same_issue() {
     let (kelpie, repo) = (
         PathBuf::from(env("KELPIE_BIN")),
         PathBuf::from(env("KELPIE_ISSUE_REPO")),
@@ -400,7 +498,7 @@ fn measure_claude_code_on_the_same_issue() {
         &world.root,
         AgentCall {
             harness: AgentHarness::ClaudeCode,
-            model: "claude-sonnet-5-5".into(),
+            model: env("KELPIE_CLAUDE_MODEL").as_str().into(),
             ..world.call(Role::Worker, Session::New(id(WORKER_ID)))
         },
     );
@@ -410,65 +508,6 @@ fn measure_claude_code_on_the_same_issue() {
     let reply = claude.run(&call);
     eprintln!("secs: {}", started.elapsed().as_secs());
     eprintln!("{reply:#?}");
-    reply.unwrap();
-}
-
-// Codex as a worker in its sandbox with the model's host taken out, so it
-// starts and fails at its first request without spending the account.
-#[test]
-#[ignore = "runs Codex with no host to reach"]
-fn probe_codex_starts_in_the_sandbox() {
-    let kelpie = PathBuf::from(env("KELPIE_BIN"));
-    let tools = KelpieTools::at(env("KELPIE_TOOLS").into());
-    let home = PathBuf::from(std::env::var_os("HOME").unwrap());
-    let codex = ClaudeCli::default()
-        .sandboxed(Arc::new(SandboxRuntime::new(tools)), home)
-        .codex();
-    let world = World::new();
-    std::process::Command::new("git")
-        .args(["init", "-q"])
-        .arg(world.path("wt"))
-        .status()
-        .unwrap();
-    let mut call = world.fenced(&kelpie, Session::New(id(WORKER_ID)));
-    call.prompt = "Reply with the single word ok.".into();
-    codex.prepare(&call).unwrap();
-    let codex_home = std::env::var("HOME").unwrap() + "/.codex";
-    // Each way of opening Codex's home wider than the adapter does, to find what it needs.
-    let opened: Vec<String> = std::env::var("KELPIE_PROBE_OPEN")
-        .unwrap_or_default()
-        .split(',')
-        .filter(|s| !s.is_empty())
-        .map(|s| format!("{codex_home}/{s}"))
-        .collect();
-    let mut command = codex.sandboxed_command(&call).unwrap();
-    let settings = Files::of(&call).sandbox_settings;
-    let mut srt: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
-    let hosts = srt["network"]["allowedDomains"].as_array_mut().unwrap();
-    hosts.retain(|h| h != MODEL_HOST);
-    for path in &opened {
-        let path = path.trim_end_matches('/');
-        srt["filesystem"]["allowRead"].as_array_mut().unwrap().push(path.into());
-        srt["filesystem"]["allowWrite"].as_array_mut().unwrap().push(path.into());
-    }
-    for path in std::env::var("KELPIE_PROBE_READ").unwrap_or_default().split(',') {
-        if !path.is_empty() {
-            let path = format!("{codex_home}/{path}");
-            srt["filesystem"]["allowRead"].as_array_mut().unwrap().push(path.trim_end_matches('/').into());
-        }
-    }
-    std::fs::write(&settings, srt.to_string()).unwrap();
-    let out = command.stdin(std::process::Stdio::null()).output().unwrap();
     eprintln!("kept: {}", world.root.display());
     std::mem::forget(world);
-    eprintln!("opened: {opened:?}");
-    eprintln!("status: {}", out.status);
-    eprintln!("stdout:\n{}", String::from_utf8_lossy(&out.stdout));
-    eprintln!("stderr:\n{}", String::from_utf8_lossy(&out.stderr));
-}
-
-fn run_raw(codex: &CodexCli, call: &AgentCall) -> Output {
-    let mut command = codex.sandboxed_command(call).unwrap();
-    command.stdin(std::process::Stdio::null()).output().unwrap()
 }

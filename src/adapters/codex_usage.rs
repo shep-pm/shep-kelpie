@@ -7,7 +7,12 @@
 //!
 //! The shape is the app server's generated JSON schema: a successful
 //! answer has not been read from a live account yet.
+//!
+//! It reads kelpie's own login, in `codex_home`, never the maintainer's
+//! `~/.codex`. It runs outside the sandbox, so a login near its expiry is
+//! refreshed here, where the refreshed one can be saved.
 
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
@@ -44,13 +49,16 @@ const FURTHEST_SECS: u64 = 8 * 24 * 3600;
 #[derive(Debug, Clone)]
 pub struct CodexMeter {
     processes: Processes,
+    codex_home: PathBuf,
 }
 
 impl ClaudeCli {
-    /// A Codex meter whose reads end with this one's calls when the runner stops
-    pub fn codex_meter(&self) -> CodexMeter {
+    /// A Codex meter on the login in `codex_home`, whose reads end with this
+    /// one's calls when the runner stops
+    pub fn codex_meter(&self, codex_home: PathBuf) -> CodexMeter {
         CodexMeter {
             processes: self.processes.clone(),
+            codex_home,
         }
     }
 }
@@ -60,7 +68,9 @@ impl Meter for CodexMeter {
         let answer = self
             .processes
             .answer_within(
-                Command::new("codex").arg("app-server"),
+                Command::new("codex")
+                    .arg("app-server")
+                    .env("CODEX_HOME", &self.codex_home),
                 REQUESTS,
                 LIMIT,
                 &answers_read,

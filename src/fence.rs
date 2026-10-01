@@ -44,6 +44,8 @@ pub const HARNESSES: [OwnFiles; 3] = [
         credentials: &["~/.claude/.credentials.json", "~/.claude.json"],
         program: "claude",
     },
+    // The maintainer's own. Kelpie's Codex login is in `codex_home`, which
+    // `ports::Unreadable` keeps from every call but Codex's link to it.
     OwnFiles {
         harness: "Codex",
         folders: &[".codex"],

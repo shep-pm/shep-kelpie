@@ -107,7 +107,7 @@ impl Scene {
     async fn check(&self, ask: Ask<'_>) -> Report {
         let probes = Probes {
             meter: &self.meter,
-            codex_meter: &self.codex_meter,
+            codex_meter: &|_: &Path| Box::new(self.codex_meter.clone()) as Box<dyn Meter>,
             forge: &self.forge,
             reviewer: &self.reviewer,
             review_bot: &CodeRabbit,
@@ -387,7 +387,7 @@ async fn no_shepherd_is_a_missing_shepherd_naming_its_home() {
     let elsewhere = tempfile::tempdir().unwrap();
     let probes = Probes {
         meter: &scene.meter,
-        codex_meter: &scene.codex_meter,
+        codex_meter: &|_: &Path| Box::new(scene.codex_meter.clone()) as Box<dyn Meter>,
         forge: &scene.forge,
         reviewer: &scene.reviewer,
         review_bot: &CodeRabbit,

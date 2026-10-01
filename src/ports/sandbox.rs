@@ -8,6 +8,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 
 /// What a sandboxed process may do, beyond reading files
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -67,6 +68,39 @@ pub trait Sandbox: Send + Sync + fmt::Debug {
     ) -> Result<Command, SandboxError>;
 }
 
+/// A sandbox that keeps some paths unread by every call it runs, whatever
+/// the call's policy says
+///
+/// Kelpie's own Codex login is kept this way, so a call on any harness
+/// leaves it unread. A call that names a file there in its policy's `read`
+/// may still read that file.
+#[derive(Debug, Clone)]
+pub struct Unreadable {
+    inner: Arc<dyn Sandbox>,
+    paths: Vec<String>,
+}
+
+impl Unreadable {
+    /// `inner`, with `paths`, absolute or under `~/` with `**` globs,
+    /// added to every policy's `no_read`
+    pub fn new(inner: Arc<dyn Sandbox>, paths: Vec<String>) -> Self {
+        Self { inner, paths }
+    }
+}
+
+impl Sandbox for Unreadable {
+    fn wrap(
+        &self,
+        policy: &Policy,
+        settings: &Path,
+        command: &Command,
+    ) -> Result<Command, SandboxError> {
+        let mut policy = policy.clone();
+        policy.no_read.extend(self.paths.iter().cloned());
+        self.inner.wrap(&policy, settings, command)
+    }
+}
+
 /// Why a process could not be put in its sandbox
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SandboxError {
@@ -94,3 +128,45 @@ impl fmt::Display for SandboxError {
 }
 
 impl core::error::Error for SandboxError {}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+
+    // Keeps the last policy it was handed.
+    #[derive(Debug, Default)]
+    struct Seen(Mutex<Option<Policy>>);
+
+    impl Sandbox for Seen {
+        fn wrap(
+            &self,
+            policy: &Policy,
+            _: &Path,
+            command: &Command,
+        ) -> Result<Command, SandboxError> {
+            *self.0.lock().unwrap() = Some(policy.clone());
+            let mut same = Command::new(command.get_program());
+            same.args(command.get_args());
+            Ok(same)
+        }
+    }
+
+    #[test]
+    fn every_call_leaves_the_paths_unread_beside_its_own() {
+        let seen = Arc::new(Seen::default());
+        let sandbox = Unreadable::new(seen.clone(), vec!["/k/codex/**".into()]);
+        let policy = Policy {
+            no_read: vec!["~/.ssh/**".into()],
+            read: vec![PathBuf::from("/k/codex/auth.json")],
+            ..Policy::default()
+        };
+        sandbox
+            .wrap(&policy, Path::new("/s.json"), &Command::new("true"))
+            .unwrap();
+        let wrapped = seen.0.lock().unwrap().clone().unwrap();
+        assert_eq!(wrapped.no_read, ["~/.ssh/**", "/k/codex/**"]);
+        assert_eq!(wrapped.read, policy.read);
+    }
+}

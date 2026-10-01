@@ -1,15 +1,16 @@
 //! Codex, headless as `codex exec --json`, one process per call, on the
-//! ChatGPT account the `codex` command line is logged in to
+//! ChatGPT account kelpie's own Codex login is signed in to
 //!
 //! Each call runs whole inside kelpie's sandbox, as Claude Code's do, with
 //! Codex's own sandbox and approvals off: on macOS a sandbox cannot start
-//! inside another. Codex keeps its login and its sessions in `~/.codex`,
-//! and the sandbox lets a call read the login and read and write the
-//! sessions, and nothing else there. Kelpie never reads either. The
-//! maintainer's own Codex config, rules, skills and instructions stay
-//! unread. A fenced call runs kelpie's checks as Codex's own `PreToolUse`
-//! hooks: `kelpie confine` on each `apply_patch`, the tool Codex writes
-//! files with, and `kelpie guard` on each shell command.
+//! inside another. Kelpie's login lives in `codex_home`, apart from the
+//! maintainer's `~/.codex`, which no call reads. Each call gets a Codex home
+//! of its own beside its settings, holding its sessions and Codex's
+//! database, with the login's `auth.json` linked in for Codex to read and
+//! not write. Kelpie never reads the login itself. A fenced call runs
+//! kelpie's checks as Codex's own `PreToolUse` hooks: `kelpie confine` on
+//! each `apply_patch`, the tool Codex writes files with, and `kelpie guard`
+//! on each shell command.
 //!
 //! Codex names its own sessions, so kelpie keeps which Codex session each
 //! of its session ids is, beside the call's settings.
@@ -48,25 +49,38 @@ const HARNESS: &str = "Codex";
 /// every call reaches
 ///
 /// Not `auth.openai.com`, where a login is refreshed: the sandbox lets the
-/// login be read, not written, so a refresh there would be lost. The
-/// Codex usage read runs outside the sandbox before each dispatch, and
-/// refreshes it there.
+/// login be read, not written, and a refreshed login that could not be
+/// saved would be lost. The Codex usage read runs outside the sandbox
+/// before each dispatch, on kelpie's own login, and refreshes it there.
 const MODEL_HOST: &str = "chatgpt.com";
 
-/// Codex's home, as a path the sandbox reads under `~/`
-const HOME: &str = "~/.codex/**";
+/// The maintainer's own Codex home, which no call reads
+const MAINTAINERS_HOME: &str = "~/.codex/**";
 
 /// Other people's skills Codex finds outside its home, which no call reads
 const SKILLS: &str = "~/.agents/**";
 
+/// The login's file in a Codex home
+const AUTH: &str = "auth.json";
+
+/// What Codex loads from its home as its login, config, hooks, rules,
+/// skills or instructions, which a call may not write there: a worker
+/// could otherwise plant what its next turn loads
+const LOADED: [&str; 6] = [
+    AUTH,
+    "config.toml",
+    "hooks.json",
+    "AGENTS.md",
+    "rules",
+    "skills",
+];
+
 /// Codex's features no call runs, each one a way past the call's tools,
 /// its hooks or its sandbox
 ///
-/// `unified_exec` keeps a shell running between tool calls, and its
-/// `write_stdin` runs no hook, so commands typed there would pass no check.
-/// Without it Codex runs each command as a tool call of its own.
-const FEATURES_OFF: [&str; 17] = [
-    "unified_exec",
+/// `unified_exec` is not among them: Codex turns it back on unless an
+/// administrator's `requirements.toml` pins it off (Facts).
+const FEATURES_OFF: [&str; 16] = [
     // A crew of Codex's own, whose calls kelpie's checks were not measured on
     "multi_agent",
     "apps",
@@ -95,19 +109,19 @@ pub struct CodexCli {
     program: OsString,
     lambs: Option<Arc<dyn LambLabels>>,
     sandbox: Arc<dyn Sandbox>,
-    home: PathBuf,
+    login: PathBuf,
 }
 
 impl ClaudeCli {
-    /// Codex, run the way this runs Claude Code: same sandbox, same lamb
-    /// labels and home, and stopped with it
-    pub fn codex(&self) -> CodexCli {
+    /// Codex on the login in `codex_home`, run the way this runs Claude
+    /// Code: same sandbox and lamb labels, and stopped with it
+    pub fn codex(&self, codex_home: PathBuf) -> CodexCli {
         CodexCli {
             processes: self.processes.clone(),
             program: "codex".into(),
             lambs: self.lambs.clone(),
             sandbox: Arc::clone(&self.sandbox),
-            home: self.home.clone(),
+            login: codex_home,
         }
     }
 }
@@ -128,12 +142,12 @@ impl Agents for CodexCli {
         is_codex(call)?;
         refuse_unsupported(call)?;
         let files = Files::of(call);
-        for folder in [files.threads(), files.state.clone(), self.sessions()] {
-            std::fs::create_dir_all(&folder).map_err(|e| {
+        for folder in [&files.threads, &files.home] {
+            std::fs::create_dir_all(folder).map_err(|e| {
                 AgentError::Setup(format!("cannot make {}: {}", folder.display(), e.kind()))
             })?;
         }
-        Ok(())
+        link_login(&self.login, &files.home)
     }
 
     fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
@@ -173,10 +187,6 @@ impl Agents for CodexCli {
 }
 
 impl CodexCli {
-    fn sessions(&self) -> PathBuf {
-        self.home.join(".codex").join("sessions")
-    }
-
     fn sandboxed_command(&self, call: &AgentCall) -> Result<Command, AgentError> {
         is_codex(call)?;
         let files = Files::of(call);
@@ -213,15 +223,16 @@ impl CodexCli {
         };
         let mut command = Command::new(&self.program);
         command
-            .args(argv(call, &files, resumed.as_ref(), instructions.as_deref()))
+            .args(argv(call, resumed.as_ref(), instructions.as_deref()))
             .current_dir(&call.cwd)
+            .env("CODEX_HOME", &files.home)
             .env("TMPDIR", &files.scratch);
         if let Some(fence) = &call.reach.fence {
             command.envs(&fence.env);
         }
         self.sandbox
             .wrap(
-                &policy(call, &self.home, &files),
+                &policy(call, &self.login, &files),
                 &files.sandbox_settings,
                 &command,
             )
@@ -265,9 +276,12 @@ fn refuse_unsupported(call: &AgentCall) -> Result<(), AgentError> {
 
 /// The files one call keeps beside its settings path
 struct Files {
-    /// Kelpie's own folder for the call's Codex state: its sessions' ids,
-    /// and Codex's database and logs
-    state: PathBuf,
+    /// The call's own Codex home: its sessions, Codex's database and logs,
+    /// and the login linked in
+    home: PathBuf,
+    /// Which Codex session each of kelpie's session ids is, out of the
+    /// call's reach
+    threads: PathBuf,
     /// The call's temporary files, emptied before each call
     scratch: PathBuf,
     /// Where the sandbox's settings go
@@ -277,19 +291,33 @@ struct Files {
 impl Files {
     fn of(call: &AgentCall) -> Self {
         Self {
-            state: call.settings.with_extension("codex"),
+            home: call.settings.with_extension("codex"),
+            threads: call.settings.with_extension("threads"),
             scratch: call.settings.with_extension("tmp"),
             sandbox_settings: call.settings.with_extension("sandbox.json"),
         }
     }
 
-    fn threads(&self) -> PathBuf {
-        self.state.join("threads")
-    }
-
     fn thread(&self, id: &SessionId) -> PathBuf {
-        self.threads().join(format!("{}.json", id.0))
+        self.threads.join(format!("{}.json", id.0))
     }
+}
+
+// Links the login into the call's home, so Codex signs in without kelpie
+// reading it. A link that points elsewhere, or a file left in its place,
+// is made again.
+fn link_login(login: &Path, home: &Path) -> Result<(), AgentError> {
+    let target = login.join(AUTH);
+    let link = home.join(AUTH);
+    let setup = |e: std::io::Error| {
+        AgentError::Setup(format!("cannot link {}: {}", link.display(), e.kind()))
+    };
+    match std::fs::read_link(&link) {
+        Ok(to) if to == target => return Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        _ => std::fs::remove_file(&link).map_err(setup)?,
+    }
+    std::os::unix::fs::symlink(&target, &link).map_err(setup)
 }
 
 /// The Codex session one of kelpie's session ids is
@@ -335,14 +363,9 @@ fn config(key: &str, value: impl Into<toml::Value>) -> OsString {
     format!("{key}={}", value.into()).into()
 }
 
-// Codex loads nothing of the maintainer's: no config, no rules, no skills
-// or instructions from its home. It does read the repo's AGENTS.md.
-fn argv(
-    call: &AgentCall,
-    files: &Files,
-    resumed: Option<&Thread>,
-    instructions: Option<&str>,
-) -> Vec<OsString> {
+// Codex loads no config or rules from its home, which holds none anyway.
+// It does read the repo's AGENTS.md.
+fn argv(call: &AgentCall, resumed: Option<&Thread>, instructions: Option<&str>) -> Vec<OsString> {
     let mut argv: Vec<OsString> = vec!["exec".into()];
     if resumed.is_some() {
         argv.push("resume".into());
@@ -360,15 +383,12 @@ fn argv(
         .map(OsString::from),
     );
     argv.push(call.model.as_str().into());
-    let state = |name: &str| files.state.join(name).to_string_lossy().into_owned();
     argv.extend(
         [
             // Codex's levels share Claude Code's names; a model refuses one it lacks.
             config("model_reasoning_effort", call.effort.as_str()),
             config("web_search", "disabled"),
             config("check_for_update_on_startup", false),
-            config("sqlite_home", state("db")),
-            config("log_dir", state("log")),
         ]
         .into_iter()
         .flat_map(|c| [OsString::from("-c"), c]),
@@ -461,7 +481,7 @@ fn hooks(fence: &Fence) -> toml::Value {
 }
 
 /// The whole call's policy: its fence, or none, and what Codex itself needs
-fn policy(call: &AgentCall, home: &Path, files: &Files) -> Policy {
+fn policy(call: &AgentCall, login: &Path, files: &Files) -> Policy {
     let mut policy = match &call.reach.fence {
         Some(fence) => fence_policy(fence),
         None => Policy {
@@ -472,16 +492,18 @@ fn policy(call: &AgentCall, home: &Path, files: &Files) -> Policy {
     policy.no_read.extend(fence::others_credentials(HARNESS));
     policy
         .no_read
-        .extend([HOME, SKILLS].map(str::to_owned));
-    let codex = home.join(".codex");
-    let sessions = codex.join("sessions");
+        .extend([MAINTAINERS_HOME, SKILLS].map(str::to_owned));
     policy
         .write
-        .extend([files.state.clone(), files.scratch.clone(), sessions.clone()]);
-    // Codex reads its login to run; kelpie never does.
+        .extend([files.home.clone(), files.scratch.clone()]);
+    policy
+        .no_write
+        .extend(LOADED.map(|name| files.home.join(name)));
+    // Codex reads the login through its link to run; kelpie never does.
     policy.read.extend(
-        [codex.join("auth.json"), sessions, files.state.clone(), files.scratch.clone()]
+        [login.join(AUTH), files.home.clone(), files.scratch.clone()]
             .into_iter()
+            .chain(call.instructions.iter().cloned())
             .chain(call.plugin_dirs.iter().cloned())
             .chain(call.reach.read.iter().cloned()),
     );

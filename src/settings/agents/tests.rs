@@ -308,10 +308,13 @@ const CODEX: &str =
 #[test]
 fn a_codex_agent_runs_every_role_but_the_relay_on_the_codex_account() {
     let names = "worker = \"gpt\"\nreviewer = \"gpt\"\njudge = \"gpt\"\nplanner = \"gpt\"\n";
-    let agents = project(names)
-        .role_agents(&kelpie(CODEX).agents)
-        .unwrap();
-    for role in [&agents.worker, &agents.reviewer, &agents.judge, &agents.planner] {
+    let agents = project(names).role_agents(&kelpie(CODEX).agents).unwrap();
+    for role in [
+        &agents.worker,
+        &agents.reviewer,
+        &agents.judge,
+        &agents.planner,
+    ] {
         assert_eq!(role.harness, AgentHarness::Codex);
         assert_eq!(pair(role), ("gpt-6-sol", Effort::Medium));
     }

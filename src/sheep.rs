@@ -23,7 +23,7 @@ use crate::codex::Codex;
 use crate::cubic::Cubic;
 use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
-use crate::ports::{Leases, Ports, Routed, SandboxError};
+use crate::ports::{Leases, Ports, Routed, SandboxError, Unreadable};
 use crate::runner::{ACTIONS, ProjectName, ProjectPaths, READ_EVERY, Runner, answer, step};
 use crate::shep_home;
 
@@ -81,10 +81,33 @@ fn serve(project: &str) -> Result<(), String> {
         return Err(SandboxError::Missing(paths.tools.sandbox()).to_string());
     }
     let shepherd = shep_channel::serve();
-    let claude = ClaudeCli::labelling(Arc::new(shepherd.clone())).sandboxed(
-        Arc::new(SandboxRuntime::new(paths.tools.clone())),
+    let sheep = std::env::var("SHEP_NAME")
+        .ok()
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| project.as_str().to_owned());
+    let mut look = Look::new(
+        shep_home.clone(),
+        sheep,
+        project.as_str().to_owned(),
+        paths.settings.clone(),
+        paths.kelpie_settings.clone(),
         home.clone(),
     );
+    let loaded = look.read()?;
+    for notice in &loaded.notices {
+        eprintln!("{notice}");
+    }
+    let (settings, kelpie_settings) = (loaded.settings, loaded.kelpie);
+    let codex_home = kelpie_settings
+        .codex_home(&home, &kelpie_home)
+        .map_err(|e| e.to_string())?;
+    // Kelpie's Codex login is read by Codex alone, from its link in a call's own home.
+    let sandbox = Unreadable::new(
+        Arc::new(SandboxRuntime::new(paths.tools.clone())),
+        vec![format!("{}/**", codex_home.display())],
+    );
+    let claude =
+        ClaudeCli::labelling(Arc::new(shepherd.clone())).sandboxed(Arc::new(sandbox), home.clone());
     let reviewer = LocalReviewer::default();
     let shots = ShotsCli::new(paths.tools.clone());
     let epoch = Epoch(u64::from(std::process::id()));
@@ -93,11 +116,11 @@ fn serve(project: &str) -> Result<(), String> {
         agents: Arc::new(Routed::new(
             Arc::new(claude.clone()),
             Arc::new(claude.pi()),
-            Arc::new(claude.codex()),
+            Arc::new(claude.codex(codex_home.clone())),
         )),
         forge: Box::new(Gh),
         meter: Box::new(claude.meter()),
-        codex_meter: Box::new(claude.codex_meter()),
+        codex_meter: Box::new(claude.codex_meter(codex_home)),
         reviewer: Arc::new(reviewer.clone()),
         local_leases: Arc::new(reviewer.clone()),
         review_bots: vec![Arc::new(CodeRabbit), Arc::new(Cubic), Arc::new(Codex)],
@@ -112,23 +135,6 @@ fn serve(project: &str) -> Result<(), String> {
         leases: Arc::clone(&leases) as Arc<dyn Leases>,
         clock: Box::new(SystemClock),
     };
-    let sheep = std::env::var("SHEP_NAME")
-        .ok()
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| project.as_str().to_owned());
-    let mut look = Look::new(
-        shep_home,
-        sheep,
-        project.as_str().to_owned(),
-        paths.settings.clone(),
-        paths.kelpie_settings.clone(),
-        home.clone(),
-    );
-    let loaded = look.read()?;
-    for notice in &loaded.notices {
-        eprintln!("{notice}");
-    }
-    let (settings, kelpie_settings) = (loaded.settings, loaded.kelpie);
     let runner = Runner::open(
         project,
         settings,
