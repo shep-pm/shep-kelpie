@@ -51,6 +51,7 @@ pub(crate) struct FakeForge {
     merge_answers_lost: Arc<AtomicBool>,
     // Whether the repo has a merge queue, and where each pull request stands in it
     queue_on: Arc<AtomicBool>,
+    disarmed: Arc<Mutex<Vec<u64>>>,
     queue: Arc<Mutex<HashMap<u64, QueueStanding>>>,
     labels_down: Arc<AtomicBool>,
     unreadable: Arc<Mutex<HashSet<u64>>>,
@@ -131,6 +132,7 @@ impl FakeForge {
             merges_down: Arc::default(),
             merge_answers_lost: Arc::default(),
             queue_on: Arc::default(),
+            disarmed: Arc::default(),
             queue: Arc::default(),
             labels_down: Arc::default(),
             unreadable: Arc::default(),
@@ -377,53 +379,6 @@ impl FakeForge {
     /// Makes merging fail, or work again
     pub(crate) fn set_merges_down(&self, down: bool) {
         self.merges_down.store(down, Ordering::SeqCst);
-    }
-
-    /// Turns the repo's merge queue on: a merge then queues the pull request
-    pub(crate) fn set_merge_queue(&self, on: bool) {
-        self.queue_on.store(on, Ordering::SeqCst);
-    }
-
-    /// Lets the queue merge pull request `number`, as it does once the checks
-    /// on top of the pull requests ahead of it pass
-    pub(crate) fn queue_merges(&self, number: u64) {
-        self.queue
-            .lock()
-            .unwrap()
-            .entry(number)
-            .or_insert_with(not_queued)
-            .queued = false;
-        self.set_state(number, PullRequestState::Merged);
-    }
-
-    /// Puts pull request `number` in the queue, as a merge call that the
-    /// runner never saw answered would have
-    pub(crate) fn queue_enqueues(&self, number: u64) {
-        self.queue
-            .lock()
-            .unwrap()
-            .entry(number)
-            .or_insert_with(not_queued)
-            .queued = true;
-    }
-
-    /// Drops pull request `number` from the queue with no removal on record
-    pub(crate) fn queue_forgets(&self, number: u64) {
-        self.queue
-            .lock()
-            .unwrap()
-            .entry(number)
-            .or_insert_with(not_queued)
-            .queued = false;
-    }
-
-    /// Has the queue remove pull request `number` unmerged, for `reason`
-    pub(crate) fn queue_removes(&self, number: u64, reason: &str) {
-        let mut queue = self.queue.lock().unwrap();
-        let standing = queue.entry(number).or_insert_with(not_queued);
-        standing.queued = false;
-        standing.removals += 1;
-        standing.reason = Some(reason.to_owned());
     }
 
     /// Makes a merge land but answer an error, as a timed-out call would
@@ -945,12 +900,7 @@ impl Forge for FakeForge {
         }
         self.merges.lock().unwrap().push((number, head.to_owned()));
         if self.queue_on.load(Ordering::SeqCst) {
-            self.queue
-                .lock()
-                .unwrap()
-                .entry(number)
-                .or_insert_with(not_queued)
-                .queued = true;
+            self.enters_queue(number);
             return Ok(());
         }
         self.set_state(number, PullRequestState::Merged);
@@ -962,20 +912,14 @@ impl Forge for FakeForge {
 
     fn merge_queue(&self, _repo: &ForgeSlug, number: u64) -> Result<QueueStanding, ForgeError> {
         self.opened(number)?;
-        Ok(self
-            .queue
-            .lock()
-            .unwrap()
-            .get(&number)
-            .cloned()
-            .unwrap_or_else(not_queued))
+        Ok(self.standing(number))
+    }
+
+    fn disable_auto_merge(&self, _repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
+        self.opened(number)?;
+        self.disarm(number);
+        Ok(())
     }
 }
 
-fn not_queued() -> QueueStanding {
-    QueueStanding {
-        queued: false,
-        removals: 0,
-        reason: None,
-    }
-}
+mod queue;

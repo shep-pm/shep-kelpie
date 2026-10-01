@@ -11,7 +11,7 @@ use crate::settings::ForgeSlug;
 // filtered `totalCount` counts every timeline item, so the nodes are counted.
 const QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
     repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
-    isInMergeQueue \
+    isInMergeQueue autoMergeRequest { enabledAt } \
     timelineItems(itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT], last: 100) { \
     nodes { ... on RemovedFromMergeQueueEvent { reason } } } } } }";
 
@@ -49,6 +49,8 @@ fn parse_standing(stdout: &[u8]) -> Result<QueueStanding, ForgeError> {
     struct Pr {
         #[serde(rename = "isInMergeQueue")]
         queued: bool,
+        #[serde(rename = "autoMergeRequest")]
+        auto_merge: Option<serde_json::Value>,
         #[serde(rename = "timelineItems")]
         removals: Removals,
     }
@@ -68,6 +70,7 @@ fn parse_standing(stdout: &[u8]) -> Result<QueueStanding, ForgeError> {
         .ok_or_else(|| unreadable(stdout))?;
     Ok(QueueStanding {
         queued: pr.queued,
+        armed: pr.auto_merge.is_some(),
         removals: u32::try_from(pr.removals.nodes.len()).unwrap_or(u32::MAX),
         reason: pr.removals.nodes.into_iter().last().and_then(|r| r.reason),
     })
@@ -83,11 +86,14 @@ mod tests {
 
     #[test]
     fn a_queued_pull_request_with_no_removal_reads_as_queued() {
-        let pr = reply(r#"{"isInMergeQueue":true,"timelineItems":{"nodes":[]}}"#);
+        let pr = reply(
+            r#"{"isInMergeQueue":true,"autoMergeRequest":null,"timelineItems":{"nodes":[]}}"#,
+        );
         assert_eq!(
             parse_standing(pr.as_bytes()).unwrap(),
             QueueStanding {
                 queued: true,
+                armed: false,
                 removals: 0,
                 reason: None
             }
@@ -95,15 +101,26 @@ mod tests {
     }
 
     #[test]
+    fn an_armed_auto_merge_reads_as_armed() {
+        let pr = reply(
+            r#"{"isInMergeQueue":false,"autoMergeRequest":{"enabledAt":"2026-09-30T10:00:00Z"},
+            "timelineItems":{"nodes":[]}}"#,
+        );
+        let standing = parse_standing(pr.as_bytes()).unwrap();
+        assert!(standing.armed && !standing.queued, "{standing:?}");
+    }
+
+    #[test]
     fn a_removed_pull_request_carries_the_latest_reason_and_the_count() {
         let pr = reply(
-            r#"{"isInMergeQueue":false,"timelineItems":{"nodes":[
+            r#"{"isInMergeQueue":false,"autoMergeRequest":null,"timelineItems":{"nodes":[
             {"reason":"older"},{"reason":"Required status check \"test\" failed."}]}}"#,
         );
         assert_eq!(
             parse_standing(pr.as_bytes()).unwrap(),
             QueueStanding {
                 queued: false,
+                armed: false,
                 removals: 2,
                 reason: Some("Required status check \"test\" failed.".into()),
             }

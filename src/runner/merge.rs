@@ -129,7 +129,10 @@ impl Runner {
                 let notice = (auto && pr.head == head) || tried == Some(pr.head.clone());
                 return self.merged(issue, number, pr.head, notice);
             }
-            PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
+            PullRequestState::Closed => {
+                self.update(|item| item.merge_queued = None)?;
+                return self.raise(number, RulingKind::Closed);
+            }
         }
         // Queued, the pull request is tested on top of the ones ahead of it
         // while `main` moves under it, so none of the gates below apply.
@@ -204,7 +207,9 @@ impl Runner {
         // A queued pull request is not merged yet and a second merge call
         // would refuse it, so a restart that lost the mark finds it here.
         let removals = match self.ports.forge.merge_queue(&repo, number) {
-            Ok(standing) if standing.queued => return self.queue_marked(standing.removals),
+            Ok(standing) if standing.queued || standing.armed => {
+                return self.queue_marked(standing.removals);
+            }
             Ok(standing) => standing.removals,
             Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}'s queue: {e}"))),
         };
@@ -212,6 +217,15 @@ impl Runner {
             let reason = format!("cannot merge #{number}: {e}");
             if !auto {
                 return Ok(self.gate_failed(reason));
+            }
+            // A lost answer may have queued it rather than merged it.
+            let waiting = self
+                .ports
+                .forge
+                .merge_queue(&repo, number)
+                .is_ok_and(|standing| standing.queued || standing.armed);
+            if waiting {
+                return self.queue_marked(removals);
             }
             match self.ports.forge.pull_request(&repo, number) {
                 Ok(pr) if pr.state == PullRequestState::Merged && pr.head == head => {}

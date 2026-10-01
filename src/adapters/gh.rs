@@ -229,6 +229,19 @@ impl Forge for Gh {
     fn merge_queue(&self, repo: &ForgeSlug, number: u64) -> Result<QueueStanding, ForgeError> {
         queue::standing(repo, number)
     }
+
+    fn disable_auto_merge(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
+        let number = number.to_string();
+        let args = [
+            "pr",
+            "merge",
+            &number,
+            "--repo",
+            repo.as_str(),
+            "--disable-auto",
+        ];
+        gh(&args).map(drop)
+    }
 }
 
 // A merge commit, and only of the head the ruling was about. No

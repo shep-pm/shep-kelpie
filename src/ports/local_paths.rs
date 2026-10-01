@@ -180,6 +180,10 @@ impl Forge for Guarded {
     fn merge_queue(&self, repo: &ForgeSlug, number: u64) -> Result<QueueStanding, ForgeError> {
         self.forge.merge_queue(repo, number)
     }
+
+    fn disable_auto_merge(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
+        self.forge.disable_auto_merge(repo, number)
+    }
 }
 
 #[cfg(test)]

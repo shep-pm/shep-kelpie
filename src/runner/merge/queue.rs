@@ -8,9 +8,10 @@
 use super::super::Runner;
 use super::super::gate::{settled, short};
 use super::super::report::Begin;
+use crate::ports::Checks;
 use crate::skills::Step;
 use crate::state::{RulingKind, StateError};
-use crate::work_item::MergeQueued;
+use crate::work_item::{MergeQueued, Phase};
 
 impl Runner {
     // Saved before anything else, so a restart goes on waiting on the queue.
@@ -39,14 +40,18 @@ impl Runner {
         if standing.queued {
             return Ok(Begin::Idle);
         }
+        if standing.armed {
+            return self.armed(number, head);
+        }
         let removed = standing.removals > queued.removals;
         if !removed && !settled(queued.since, self.ports.clock.now()) {
             return Ok(Begin::Idle);
         }
-        let reason = standing
-            .reason
-            .filter(|_| removed)
-            .unwrap_or_else(|| "it is neither merged nor in the queue".to_owned());
+        let reason = match (removed, standing.reason) {
+            (true, Some(reason)) => reason,
+            (true, None) => "it was taken out of the queue by hand".to_owned(),
+            (false, _) => "it is neither merged nor in the queue".to_owned(),
+        };
         self.update(|item| item.merge_queued = None)?;
         let item = self.current().expect("a merge is of a work item");
         if item.red_head.as_deref() == Some(head.as_str()) {
@@ -56,6 +61,33 @@ impl Runner {
             .skills
             .invoke(Step::Ci, &queue_prompt(number, &head, &reason));
         self.back_to_worker(number, head, vec!["merge queue".to_owned()], prompt)
+    }
+
+    // Auto-merge queues whatever head the branch has once it can, so one
+    // that waits on a head kelpie never gated is disarmed and goes back to CI.
+    fn armed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
+        let repo = self.settings.forge.clone();
+        let pr = match self.ports.forge.pull_request(&repo, number) {
+            Ok(pr) => pr,
+            Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}: {e}"))),
+        };
+        let reason = if pr.head != head {
+            format!("#{number} moved to {}", short(&pr.head))
+        } else if self.settings.ci && matches!(pr.checks, Checks::Failed(_)) {
+            format!("CI on #{number} is no longer green")
+        } else {
+            return Ok(Begin::Idle);
+        };
+        let item = self.current().expect("a merge is of a work item");
+        let (issue, auto) = match item.phase {
+            Phase::Merge { auto, .. } => (item.issue, auto),
+            _ => return Ok(Begin::Idle),
+        };
+        if let Err(e) = self.ports.forge.disable_auto_merge(&repo, number) {
+            return Ok(self.gate_failed(format!("cannot disarm auto-merge on #{number}: {e}")));
+        }
+        self.update(|item| item.merge_queued = None)?;
+        self.withdraw(issue, number, auto, reason)
     }
 }
 
@@ -77,7 +109,7 @@ mod tests {
 
     use serde_json::json;
 
-    use crate::ports::{Cost, Session, Usage};
+    use crate::ports::{Checks, Cost, PullRequestState, Session, Usage};
     use crate::runner::gate::CHECKS_SETTLE;
     use crate::runner::{Runner, StepReport, step};
     use crate::test::{Rig, Scripted};
@@ -223,6 +255,55 @@ mod tests {
         assert!(matches!(
             step(&runner).unwrap(),
             Some(StepReport::CiFailed { .. })
+        ));
+    }
+
+    // A merge call that could not queue yet armed auto-merge instead.
+    fn armed(project: &str) -> (Rig, Mutex<Runner>, String) {
+        let (rig, runner, head) = Rig::parked(project);
+        rig.forge.set_merge_queue(true);
+        rig.ask(&runner, "rule", Some("1 yes"));
+        step(&runner).unwrap();
+        rig.forge.arm_auto_merge(71);
+        rig.clock.advance(CHECKS_SETTLE);
+        assert_eq!(step(&runner).unwrap(), None);
+        assert_eq!(rig.forge.merges(), [], "armed, so no merge call");
+        (rig, runner, head)
+    }
+
+    #[test]
+    fn an_armed_auto_merge_is_waited_on_not_sent_back_to_the_worker() {
+        let (rig, runner, _) = armed("lapras");
+        rig.clock.advance(CHECKS_SETTLE * 2);
+        assert_eq!(step(&runner).unwrap(), None);
+        assert!(rig.forge.disarmed().is_empty());
+
+        rig.forge.queue_merges(71);
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Finished { merged: true, .. })
+        ));
+    }
+
+    #[test]
+    fn an_armed_auto_merge_on_red_ci_is_disarmed_before_the_gates_look_again() {
+        let (rig, runner, head) = armed("snorlax");
+        rig.forge
+            .set_checks(&head, Checks::Failed(vec!["test".into()]));
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::YesWithdrawn { .. })
+        ));
+        assert_eq!(rig.forge.disarmed(), [71]);
+    }
+
+    #[test]
+    fn a_queued_pull_request_closed_by_hand_raises_the_closed_ruling() {
+        let (rig, runner, _) = queued("eevee");
+        rig.forge.set_state(71, PullRequestState::Closed);
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Ruling { .. })
         ));
     }
 }

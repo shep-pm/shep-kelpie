@@ -278,6 +278,17 @@ pub trait Forge: Send {
     ///
     /// [`ForgeError`] when the forge refuses or cannot be asked.
     fn merge_queue(&self, repo: &ForgeSlug, number: u64) -> Result<QueueStanding, ForgeError>;
+
+    /// Disarms auto-merge on pull request `number`
+    ///
+    /// With a merge queue required, a merge call on a pull request that
+    /// cannot be queued yet arms auto-merge, which later queues whatever
+    /// head the branch has then.
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses or cannot be asked.
+    fn disable_auto_merge(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError>;
 }
 
 /// Where a pull request stands in the merge queue
@@ -285,6 +296,8 @@ pub trait Forge: Send {
 pub struct QueueStanding {
     /// Whether it is in the queue now
     pub queued: bool,
+    /// Whether auto-merge is armed on it, to queue it once it can be
+    pub armed: bool,
     /// How many times the queue has removed it, merged or not
     pub removals: u32,
     /// What the forge gave for the latest removal
