@@ -3,8 +3,10 @@
 use std::env;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::process::{Command, Stdio};
 
-use crate::doctor::host::{Host, gaps, sandbox_needs};
+use crate::doctor::host::{Host, gaps, missing_playwright_packages, sandbox_needs};
+use crate::preview::Tools;
 
 /// The machine kelpie is running on
 #[derive(Debug, Clone, Copy, Default)]
@@ -13,6 +15,33 @@ pub struct SystemHost;
 impl Host for SystemHost {
     fn sandbox_gaps(&self) -> Vec<&'static str> {
         gaps(sandbox_needs(env::consts::OS), on_path)
+    }
+
+    fn playwright_gaps(&self, tools: &Tools) -> Result<Vec<String>, String> {
+        let cli = tools.playwright_cli();
+        if !cli.is_file() {
+            // `missing()` already reports the tools themselves as absent.
+            return Ok(Vec::new());
+        }
+        let output = Command::new("node")
+            .arg(cli)
+            .args(["install-deps", "--dry-run", "chromium-headless-shell"])
+            .env("PLAYWRIGHT_BROWSERS_PATH", tools.browsers())
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| format!("cannot run `node`: {e}"))?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let packages = missing_playwright_packages(&stdout);
+        if !packages.is_empty() || output.status.success() {
+            return Ok(packages);
+        }
+        let said = String::from_utf8_lossy(&output.stderr);
+        let first = said
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .unwrap_or("install-deps --dry-run failed with no message");
+        Err(first.to_owned())
     }
 }
 

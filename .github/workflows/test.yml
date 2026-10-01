@@ -52,6 +52,17 @@ jobs:
       - run: rustup toolchain install stable --profile minimal
       - run: cargo test --locked
 
+  # Beta readiness (shep-pm/shep-kelpie#135): development runs on macOS, so
+  # the macOS-only code (APFS's name folding in the fence, the GPU lock's
+  # `getconf DARWIN_USER_TEMP_DIR` fallback) would otherwise never run in CI.
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install stable --profile minimal
+      - run: cargo test --locked
+
   # The tests `#[ignore]`d for needing a real shepherd. One of them is the
   # only test that sees shep answer `NotFound`, which the fake shepherd
   # cannot send.

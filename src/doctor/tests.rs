@@ -23,11 +23,27 @@ const WEBHOOK: &str =
     "[webhook]\nkind = \"ntfy\"\nurl = \"https://ntfy.example.invalid/kelpie-s3cr3t-topic\"\n";
 
 #[derive(Debug)]
-struct FakeHost(Vec<&'static str>);
+struct FakeHost {
+    sandbox_gaps: Vec<&'static str>,
+    playwright_gaps: Result<Vec<String>, String>,
+}
+
+impl FakeHost {
+    fn new(sandbox_gaps: Vec<&'static str>) -> Self {
+        Self {
+            sandbox_gaps,
+            playwright_gaps: Ok(Vec::new()),
+        }
+    }
+}
 
 impl Host for FakeHost {
     fn sandbox_gaps(&self) -> Vec<&'static str> {
-        self.0.clone()
+        self.sandbox_gaps.clone()
+    }
+
+    fn playwright_gaps(&self, _tools: &Tools) -> Result<Vec<String>, String> {
+        self.playwright_gaps.clone()
     }
 }
 
@@ -71,7 +87,7 @@ impl Scene {
             codex_meter: FakeMeter::idle(),
             reviewer: FakeReviewer::default(),
             alerts: FakeAlerts::on(clock.clone()),
-            host: FakeHost(Vec::new()),
+            host: FakeHost::new(Vec::new()),
             clock,
             shepherd,
         };
@@ -345,7 +361,7 @@ async fn gh_missing_or_logged_out_is_told_its_fix() {
 #[tokio::test]
 async fn a_sandbox_the_machine_lacks_names_what_it_lacks() {
     let mut scene = Scene::new().await;
-    scene.host = FakeHost(vec!["bwrap", "socat"]);
+    scene.host = FakeHost::new(vec!["bwrap", "socat"]);
     let report = scene.report().await;
     let (what, fix) = missing(&report, "sandbox");
     assert!(what.contains("bwrap and socat"), "{what}");
@@ -685,6 +701,58 @@ async fn preview_tools_are_checked_only_for_a_project_that_shows_its_ui() {
     std::fs::create_dir_all(tools.browsers().join("chromium-headless-shell")).unwrap();
     let found = ok(&scene.report().await, "golbat: preview tools");
     assert!(found.starts_with("installed under "), "{found}");
+}
+
+#[tokio::test]
+async fn preview_tools_installed_but_missing_system_libraries_are_named_with_the_fix() {
+    let mut scene = Scene::new().await;
+    scene.runs("golbat", |t| {
+        t.insert("preview".into(), json!({ "enabled": true }));
+    });
+    let tools = Tools::under(&scene.kelpie_home);
+    for file in [
+        tools.playwright_mcp(),
+        tools.playwright_cli(),
+        tools.sandbox(),
+    ] {
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, "").unwrap();
+    }
+    std::fs::create_dir_all(tools.browsers().join("chromium-headless-shell")).unwrap();
+    scene.host = FakeHost::new(Vec::new());
+    scene.host.playwright_gaps = Ok(vec!["libnspr4".into(), "libnss3".into()]);
+
+    let (what, fix) = missing(&scene.report().await, "golbat: preview tools");
+    assert!(what.contains("libnspr4, libnss3"), "{what}");
+    assert!(what.contains("skips its screenshots"), "{what}");
+    assert_eq!(fix, "run `npx playwright install-deps`");
+}
+
+#[tokio::test]
+async fn a_system_library_check_that_cannot_run_is_unsure_not_missing() {
+    let mut scene = Scene::new().await;
+    scene.runs("golbat", |t| {
+        t.insert("preview".into(), json!({ "enabled": true }));
+    });
+    let tools = Tools::under(&scene.kelpie_home);
+    for file in [
+        tools.playwright_mcp(),
+        tools.playwright_cli(),
+        tools.sandbox(),
+    ] {
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, "").unwrap();
+    }
+    std::fs::create_dir_all(tools.browsers().join("chromium-headless-shell")).unwrap();
+    scene.host = FakeHost::new(Vec::new());
+    scene.host.playwright_gaps = Err("cannot run `node`: No such file or directory".into());
+
+    let report = scene.report().await;
+    assert!(matches!(
+        verdict(&report, "golbat: preview tools"),
+        Verdict::Unsure { .. }
+    ));
+    assert!(report.passed(), "{:#?}", report.render());
 }
 
 #[tokio::test]

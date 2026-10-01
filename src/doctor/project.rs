@@ -2,6 +2,7 @@
 
 use serde_json::{Map, Value};
 
+use super::host::Host;
 use super::{Here, Line, Probes, rulings};
 use crate::flock::add::LABELS;
 use crate::ports::{NewLabel, Visibility};
@@ -101,7 +102,7 @@ pub(super) fn checks(
         probes,
     ));
     if settings.preview.enabled {
-        lines.push(preview(at("preview tools"), here));
+        lines.push(preview(at("preview tools"), here, probes.host));
     }
     if let Some(kelpie) = kelpie.filter(|kelpie| spends_codex(&settings, kelpie, here)) {
         lines.push(match kelpie.codex_home(here.home, here.kelpie_home) {
@@ -259,21 +260,39 @@ fn local_review(
     }
 }
 
-fn preview(subject: String, here: Here<'_>) -> Line {
+fn preview(subject: String, here: Here<'_>, host: &dyn Host) -> Line {
     let tools = super::tools(here);
     let missing = tools.missing();
-    if missing.is_empty() {
-        return Line::ok(
+    if !missing.is_empty() {
+        return Line::missing(
             subject,
-            format!("installed under {}", tools.dir().display()),
+            format!(
+                "the preview tools lack {}, so every run skips its screenshots, with a line only in the log",
+                missing.join(", ")
+            ),
+            "run `shep kelpie tools install`",
         );
     }
-    Line::missing(
-        subject,
-        format!(
-            "the preview tools lack {}, so every run skips its screenshots, with a line only in the log",
-            missing.join(", ")
+    match host.playwright_gaps(&tools) {
+        Ok(gaps) if gaps.is_empty() => Line::ok(
+            subject,
+            format!("installed under {}", tools.dir().display()),
         ),
-        "run `shep kelpie tools install`",
-    )
+        Ok(gaps) => Line::missing(
+            subject,
+            format!(
+                "headless Chromium needs {}, which this machine lacks, so every run skips its screenshots",
+                gaps.join(", ")
+            ),
+            "run `npx playwright install-deps`",
+        ),
+        Err(reason) => Line::unsure(
+            subject,
+            format!(
+                "installed under {}, but whether its system libraries are too could not be checked: {reason}",
+                tools.dir().display()
+            ),
+            "run `npx playwright install-deps --dry-run` yourself to see what it says",
+        ),
+    }
 }
