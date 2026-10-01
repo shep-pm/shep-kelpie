@@ -5,9 +5,10 @@
 //! is kept where [`Processes::stop`] can reach it. Only this module reaps
 //! them, and only under the lock, so a signalled pid is never a reused one.
 
-use std::io::{self, Read};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -113,16 +114,53 @@ impl Processes {
         })
     }
 
-    /// Starts `command` in its own process group, stdin closed, and leaves
-    /// it running, its output going where the caller pointed it
+    /// Writes `input` to `command`'s stdin and holds it open until a line of
+    /// its stdout is `wanted`, then ends it
     ///
-    /// [`Self::end`] stops it, and so does [`Self::stop`].
-    pub(super) fn start(&self, command: &mut Command) -> Result<u64, RunError> {
+    /// `None` when it closed its stdout first. Its stderr is dropped.
+    pub(super) fn answer_within(
+        &self,
+        command: &mut Command,
+        input: &str,
+        limit: Duration,
+        wanted: &dyn Fn(&str) -> bool,
+    ) -> Result<Option<String>, RunError> {
         let mut child = command
-            .stdin(Stdio::null())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
             .process_group(0)
             .spawn()
             .map_err(RunError::Io)?;
+        let stdin = child.stdin.take();
+        let lines = read_lines(child.stdout.take());
+        let id = self.keep(child)?;
+        // Dropped only once the answer is in: the program may exit on EOF.
+        let written = stdin.map(|mut stdin| stdin.write_all(input.as_bytes()).map(|()| stdin));
+        let deadline = Instant::now() + limit;
+        let answer = match written {
+            Some(Err(e)) => Err(RunError::Io(e)),
+            _ => loop {
+                if self.stopping() {
+                    break Err(RunError::Stopped);
+                }
+                let left = deadline.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    break Err(RunError::TimedOut);
+                }
+                match lines.recv_timeout(left.min(POLL)) {
+                    Ok(line) if wanted(&line) => break Ok(Some(line)),
+                    Ok(_) | Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => break Ok(None),
+                }
+            },
+        };
+        self.end(id);
+        answer
+    }
+
+    // Keeps `child` where `stop` reaches it, or ends it if the runner is stopping.
+    fn keep(&self, mut child: Child) -> Result<u64, RunError> {
         let mut running = self.lock();
         if running.stopping {
             stop_child(&mut child, Duration::ZERO);
@@ -132,6 +170,19 @@ impl Processes {
         let id = running.next;
         running.children.push((id, child));
         Ok(id)
+    }
+
+    /// Starts `command` in its own process group, stdin closed, and leaves
+    /// it running, its output going where the caller pointed it
+    ///
+    /// [`Self::end`] stops it, and so does [`Self::stop`].
+    pub(super) fn start(&self, command: &mut Command) -> Result<u64, RunError> {
+        let child = command
+            .stdin(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .map_err(RunError::Io)?;
+        self.keep(child)
     }
 
     /// The process id of child `id` from [`Self::start`], also its group's id
@@ -296,11 +347,58 @@ fn drain(pipe: Option<impl Read + Send + 'static>) -> thread::JoinHandle<Vec<u8>
     })
 }
 
+// Each line of `pipe` as it comes, until it closes.
+fn read_lines(pipe: Option<impl Read + Send + 'static>) -> Receiver<String> {
+    let (send, lines) = mpsc::channel();
+    thread::spawn(move || {
+        let Some(pipe) = pipe else { return };
+        for line in BufReader::new(pipe).lines() {
+            let Ok(line) = line else { return };
+            if send.send(line).is_err() {
+                return;
+            }
+        }
+    });
+    lines
+}
+
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
-
     use super::*;
+
+    #[test]
+    fn an_answer_comes_back_while_stdin_is_still_open() {
+        // The script exits only on EOF, so the answer arrives with stdin open.
+        let processes = Processes::default();
+        let script = "read first; echo \"noise\"; echo \"got $first\"; cat >/dev/null";
+        let answer = processes.answer_within(
+            Command::new("sh").args(["-c", script]),
+            "ask\n",
+            Duration::from_secs(10),
+            &|line| line.starts_with("got"),
+        );
+        assert_eq!(answer.unwrap().as_deref(), Some("got ask"));
+
+        let silent = processes.answer_within(
+            Command::new("sh").args(["-c", "echo nothing wanted"]),
+            "",
+            Duration::from_secs(10),
+            &|line| line.starts_with("got"),
+        );
+        assert_eq!(silent.unwrap(), None);
+    }
+
+    #[test]
+    fn an_answer_that_never_comes_times_out() {
+        let processes = Processes::default();
+        let answer = processes.answer_within(
+            Command::new("sh").args(["-c", "cat >/dev/null"]),
+            "ask\n",
+            Duration::from_millis(200),
+            &|_| true,
+        );
+        assert!(matches!(answer, Err(RunError::TimedOut)), "{answer:?}");
+    }
 
     #[test]
     fn a_child_runs_to_its_end_with_its_output() {

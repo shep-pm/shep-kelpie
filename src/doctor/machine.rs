@@ -48,11 +48,13 @@ pub(super) fn claude(meter: &dyn Meter, clock: &dyn Clock) -> Line {
             ),
             "run `claude -p /usage` to see what it says",
         ),
-        Err(e @ (MeterError::TimedOut | MeterError::Stopped)) => Line::unsure(
-            "claude",
-            e.to_string(),
-            "run `claude -p /usage` to see what it says",
-        ),
+        Err(e @ (MeterError::TimedOut | MeterError::Stopped | MeterError::Codex(_))) => {
+            Line::unsure(
+                "claude",
+                e.to_string(),
+                "run `claude -p /usage` to see what it says",
+            )
+        }
     }
 }
 

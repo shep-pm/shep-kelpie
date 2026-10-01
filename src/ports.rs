@@ -433,11 +433,15 @@ pub enum MeterError {
     Stopped,
     /// `claude` answered, but not with usage kelpie can read
     Unreadable(String),
+    /// `codex` could not be run, did not answer, or answered with no
+    /// usage kelpie can read, with which
+    Codex(String),
 }
 
 impl fmt::Display for MeterError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Codex(reason) => f.write_str(reason.trim()),
             Self::Spawn(error) => write!(f, "cannot run claude: {error}"),
             Self::TimedOut => f.write_str("claude did not answer /usage in time"),
             Self::Stopped => f.write_str("claude was stopped with the runner"),
