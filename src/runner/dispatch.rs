@@ -10,7 +10,6 @@ use super::Runner;
 use super::plan::Planning;
 use super::report::{Begin, StepReport};
 use crate::board::{self, ReadyIssue, Skip};
-use crate::pacer::Scope;
 use crate::state::StateError;
 
 impl Runner {

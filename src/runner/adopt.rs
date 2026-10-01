@@ -19,7 +19,6 @@ use super::rework::{HUMAN, review_text};
 use super::trigger;
 use super::turn;
 use crate::board::{LabelError, OpenPullRequest, READY, Skip, WorkerModel, worker_override};
-use crate::pacer::Scope;
 use crate::ports::{ForgeError, Issue, MaintainerReview, PullRequestState, Reviewed, Role};
 use crate::state::{StateError, Waiting};
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem, new_session_id};
