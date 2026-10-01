@@ -606,6 +606,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.31.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -981,7 +993,7 @@ dependencies = [
  "encoding_rs_io",
  "globset",
  "json5",
- "nix",
+ "nix 0.29.0",
  "pest",
  "quote 0.3.15",
  "regex",
@@ -1004,7 +1016,7 @@ version = "0.0.0"
 dependencies = [
  "hmac",
  "jiff",
- "nix",
+ "nix 0.31.3",
  "qrcode",
  "schemars",
  "serde",
