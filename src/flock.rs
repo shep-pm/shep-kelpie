@@ -176,7 +176,7 @@ pub(crate) fn dog_problem(rows: &[ProcessInfo]) -> Option<(String, String)> {
 
 /// The sheep named `name`, if the flock has one, refusing one that is not
 /// kelpie's: a dog, or a sheep started with arguments other than `args`
-async fn kelpie_sheep(
+pub(crate) async fn kelpie_sheep(
     client: &Client,
     rows: &[ProcessInfo],
     name: &str,
@@ -195,6 +195,18 @@ async fn kelpie_sheep(
     match client.request(request).await {
         Ok(Response::SheepConfig(view)) if view.config.args == args => Ok(Some(row.clone())),
         Ok(Response::SheepConfig(_)) => Err(taken()),
+        Ok(other) => Err(format!("the shepherd answered {other:?} for `{name}`")),
+        Err(e) => Err(format!("cannot read `{name}`'s config: {e}")),
+    }
+}
+
+/// The program `name`'s entry runs
+pub(crate) async fn script(client: &Client, name: &str) -> Result<String, String> {
+    let request = Request::SheepConfig {
+        name: name.to_owned(),
+    };
+    match client.request(request).await {
+        Ok(Response::SheepConfig(view)) => Ok(view.config.script),
         Ok(other) => Err(format!("the shepherd answered {other:?} for `{name}`")),
         Err(e) => Err(format!("cannot read `{name}`'s config: {e}")),
     }
@@ -243,7 +255,7 @@ async fn send(
 /// Starts `name`, which the caller has seen registered and not running
 ///
 /// A restart, so a sheep that is running is restarted: callers check first.
-async fn resume(client: &Client, name: &str) -> Result<(), String> {
+pub(crate) async fn resume(client: &Client, name: &str) -> Result<(), String> {
     let request = Request::Restart {
         selector: SelectorSpec::Name(name.to_owned()),
     };

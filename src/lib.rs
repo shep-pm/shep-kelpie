@@ -42,6 +42,7 @@ pub mod skills;
 pub mod state;
 pub mod totp;
 mod trim;
+pub mod upgrade;
 pub mod webhook;
 pub mod work_item;
 pub mod worktree;
