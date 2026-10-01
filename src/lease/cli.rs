@@ -64,9 +64,16 @@ async fn dispatch(args: &[String]) -> Result<ExitCode, String> {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
         ["run", GPU, "--", command @ ..] if !command.is_empty() => run_gpu(command).await,
-        ["run", CARGO_TEST, "--", command @ ..] if !command.is_empty() => Ok(ExitCode::from(
-            counted_run::run(&door::socket()?, command).await,
-        )),
+        ["run", CARGO_TEST, "--", command @ ..] if !command.is_empty() => {
+            let code = match door::socket() {
+                Ok(socket) => counted_run::run(&socket, command).await,
+                Err(e) => {
+                    eprintln!("shep kelpie lease: {e}");
+                    counted_run::NO_LEASE
+                }
+            };
+            Ok(ExitCode::from(code))
+        }
         ["run", kind, "--", command @ ..] if !command.is_empty() => {
             run_book(&kind_of(kind)?, command).await
         }

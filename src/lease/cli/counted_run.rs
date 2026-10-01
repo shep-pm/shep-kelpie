@@ -2,8 +2,10 @@
 //!
 //! The command's process tree inherits the connection, so the lease stays
 //! held until the last of it exits, however this process ends. When the
-//! command ends, this process gives the lease back outright. A dog that
-//! goes away mid-run is asked, once it is back, to count the run again.
+//! command ends, this process shuts the connection for every holder. A dog
+//! that goes away is asked again once it is back: a waiting run asks
+//! afresh, and a running one asks to be counted. A connection made on such
+//! a rejoin is this process's alone, since the command already runs.
 
 use std::path::Path;
 use std::time::Duration;
@@ -21,7 +23,7 @@ pub(crate) const NOT_RUN: u8 = 127;
 /// How often a run whose dog went away knocks again; a restart takes seconds
 const REJOIN_EVERY: Duration = Duration::from_secs(1);
 
-/// How many knocks before a run stops asking to be counted again
+/// How many knocks before a run stops asking again, waiting or running
 const REJOIN_TRIES: u32 = 60;
 
 /// How long a dog has to answer an ask; a live one answers at once
@@ -31,6 +33,12 @@ const ANSWER_WITHIN: Duration = Duration::from_secs(5);
 /// returns the number to exit with: the command's own, or [`NO_LEASE`],
 /// [`NOT_RUN`], or a caught signal's
 pub(crate) async fn run(socket: &Path, command: &[&str]) -> u8 {
+    run_with_patience(socket, command, REJOIN_TRIES).await
+}
+
+/// [`run`], knocking at most `tries` more times when the dog is gone
+pub(crate) async fn run_with_patience(socket: &Path, command: &[&str], tries: u32) -> u8 {
+    let patience = tries;
     let Some((program, args)) = command.split_first() else {
         return NOT_RUN;
     };
@@ -44,7 +52,7 @@ pub(crate) async fn run(socket: &Path, command: &[&str]) -> u8 {
         what: command.join(" "),
         running: false,
     };
-    let visit = match wait_for_turn(socket, &ask, &mut signals).await {
+    let visit = match wait_for_turn(socket, &ask, &mut signals, patience).await {
         Ok(Ok(visit)) => visit,
         Ok(Err(caught)) => return caught.number(),
         Err(e) => return failed(&unreached(&e), NO_LEASE),
@@ -77,7 +85,7 @@ pub(crate) async fn run(socket: &Path, command: &[&str]) -> u8 {
     let mut held = Some(visit);
     let mut tries = 0;
     loop {
-        let rejoining = held.is_none() && tries < REJOIN_TRIES;
+        let rejoining = held.is_none() && tries < patience;
         let event = tokio::select! {
             status = child.wait() => Event::Ended(status),
             caught = signals.recv() => Event::Caught(caught),
@@ -108,7 +116,7 @@ pub(crate) async fn run(socket: &Path, command: &[&str]) -> u8 {
                         held = Some(visit);
                         say("the dog counts this run again");
                     }
-                    Err(_) if tries == REJOIN_TRIES => {
+                    Err(_) if tries == patience => {
                         say("the dog did not come back, so this run is not counted");
                     }
                     Err(_) => {}
@@ -125,14 +133,51 @@ enum Event {
     Rejoin,
 }
 
-// Knocks and waits for the grant. A signal while waiting closes the
-// connection, which withdraws the ask, and is handed back.
+// Knocks and waits for the grant, knocking again for a while if the dog
+// is gone or goes away first. A signal while waiting closes the connection,
+// which withdraws the ask, and is handed back.
 async fn wait_for_turn(
     socket: &Path,
     ask: &Ask,
     signals: &mut Signals,
+    patience: u32,
 ) -> Result<Result<Visit, Caught>, String> {
-    let mut visit = Visit::knock(socket, ask).await?;
+    let mut tries = 0;
+    loop {
+        let lost = match one_turn(socket, ask, signals).await {
+            Turn::Granted(visit) => return Ok(Ok(visit)),
+            Turn::Caught(caught) => return Ok(Err(caught)),
+            Turn::Refused(why) => return Err(why),
+            Turn::Lost(why) => why,
+        };
+        tries += 1;
+        if tries > patience {
+            return Err(lost);
+        }
+        if tries == 1 {
+            say(&format!("{lost}: asking again while the dog comes back"));
+        }
+        tokio::select! {
+            () = tokio::time::sleep(REJOIN_EVERY) => {}
+            caught = signals.recv() => return Ok(Err(caught)),
+        }
+    }
+}
+
+enum Turn {
+    Granted(Visit),
+    Caught(Caught),
+    // The dog said no, which asking again would not change.
+    Refused(String),
+    // No dog, or it went away before granting.
+    Lost(String),
+}
+
+async fn one_turn(socket: &Path, ask: &Ask, signals: &mut Signals) -> Turn {
+    let mut visit = match Visit::knock(socket, ask).await {
+        Ok(visit) => visit,
+        Err(e) => return Turn::Lost(e),
+    };
     let mut first = true;
     loop {
         // The first answer comes at once from a live dog; a queue's grant can take hours.
@@ -145,21 +190,24 @@ async fn wait_for_turn(
                 .map_err(|_| "the dog took the ask and never answered".to_owned())?
         };
         let answer = tokio::select! {
-            answer = next => answer?,
-            caught = signals.recv() => return Ok(Err(caught)),
+            answer = next => answer,
+            caught = signals.recv() => return Turn::Caught(caught),
         };
         first = false;
         match answer {
-            Some(Answer::Granted) => return Ok(Ok(visit)),
-            Some(Answer::Queued(ahead)) => {
+            Ok(Some(Answer::Granted)) => return Turn::Granted(visit),
+            Ok(Some(Answer::Queued(ahead))) => {
                 say(&format!("waiting for {CARGO_TEST}, {ahead} ahead"));
             }
-            Some(Answer::Error(why)) => return Err(format!("the dog refused: {why}")),
-            None => {
-                return Err(format!(
+            Ok(Some(Answer::Error(why))) => {
+                return Turn::Refused(format!("the dog refused: {why}"));
+            }
+            Ok(None) => {
+                return Turn::Lost(format!(
                     "the dog closed the door before granting {CARGO_TEST}"
                 ));
             }
+            Err(e) => return Turn::Lost(e),
         }
     }
 }

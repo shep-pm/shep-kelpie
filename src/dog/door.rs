@@ -2,8 +2,10 @@
 //!
 //! Each connection gets a [`Ticket`], asks once, and is answered at once
 //! or when room opens. A command already running under a dog that went
-//! away is seated at once. Whatever ends the hold, a `return` line or the
-//! connection closing, its place is given back.
+//! away is seated at once, and for a [`REJOIN_GRACE`] after the door opens
+//! only such commands are: the others wait, so the runs a restart left
+//! going are counted before anyone new. Any line from a holder, or its
+//! connection closing, gives its place back.
 
 use std::collections::HashMap;
 use std::io;
@@ -32,6 +34,10 @@ const LONGEST_ASK: u64 = 64 * 1024;
 
 /// How long the door rests after a failed accept, such as out of files
 const ACCEPT_REST: Duration = Duration::from_millis(500);
+
+/// How long after the door opens only running commands are seated. A run
+/// whose dog went away knocks every second, so three seconds covers it.
+pub const REJOIN_GRACE: Duration = Duration::from_secs(3);
 
 // Waiters to wake when the lease grants them, by ticket.
 type Waiters = Arc<Mutex<HashMap<Ticket, oneshot::Sender<()>>>>;
@@ -76,8 +82,10 @@ pub fn open(socket: &Path) -> Result<UnixListener, String> {
     Ok(listener)
 }
 
-/// Answers every command that knocks at `listener`, for as long as it runs
-pub async fn serve(listener: UnixListener, desk: Arc<Mutex<Kept>>) {
+/// Answers every command that knocks at `listener`, for as long as it runs,
+/// granting nothing new for `grace` from now
+pub async fn serve(listener: UnixListener, desk: Arc<Mutex<Kept>>, grace: Duration) {
+    let fresh_from = tokio::time::Instant::now() + grace;
     let waiters = Waiters::default();
     let mut next = 0;
     loop {
@@ -95,7 +103,7 @@ pub async fn serve(listener: UnixListener, desk: Arc<Mutex<Kept>>) {
             desk: Arc::clone(&desk),
             waiters: Arc::clone(&waiters),
         };
-        tokio::spawn(visit(stream, place));
+        tokio::spawn(visit(stream, place, fresh_from));
     }
 }
 
@@ -119,7 +127,7 @@ impl Drop for Place {
     }
 }
 
-async fn visit(stream: UnixStream, place: Place) {
+async fn visit(stream: UnixStream, place: Place, fresh_from: tokio::time::Instant) {
     let (read, mut write) = stream.into_split();
     let mut reader = BufReader::new(read);
     let mut first = Vec::new();
@@ -140,6 +148,12 @@ async fn visit(stream: UnixStream, place: Place) {
         Err(e) => return say(&mut write, &Answer::Error(format!("not an ask: {e}"))).await,
     };
     let mut lines = reader.lines();
+    if !ask.running {
+        tokio::select! {
+            () = tokio::time::sleep_until(fresh_from) => {}
+            _ = lines.next_line() => return,
+        }
+    }
     let (wake, woken) = oneshot::channel();
     let taker = Taker {
         ticket: place.ticket,
@@ -171,7 +185,7 @@ async fn visit(stream: UnixStream, place: Place) {
     }
     println!("{CARGO_TEST}: granted to pid {pid} running {what}");
     say(&mut write, &Answer::Granted).await;
-    // A `return` line, anything else, or the connection's end gives it back.
+    // Any line, or the connection's end, gives it back.
     let _ = lines.next_line().await;
     println!("{CARGO_TEST}: pid {pid} gave it back");
 }

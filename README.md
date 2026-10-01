@@ -181,7 +181,7 @@ shep adopt /path/to/shep-kelpie --name kelpie
 
 A kelpie adopted before it asked for the channel has none until it is adopted again: run the same `shep adopt`, then `shep disable kelpie` and `shep enable kelpie`. A `kelpie-dog` sheep left from before is removed when the adopted kelpie starts, and its book at `~/.kelpie/dog/book.json` is kept as it is. The adopted kelpie gets no `KELPIE_HOME` from shep, so its book is always under `~/.kelpie`.
 
-The dog also holds `cargo-test`, a share of this machine for running tests. Workers run their test suites under it, and so can anything else on the machine: `shep kelpie lease run cargo-test -- cargo test` waits for a turn, runs the command and exits with its code, or 75 when it cannot reach the dog. Three hold it at once unless `[kelpie.leases]` says otherwise, the rest queue, and `shep kelpie lease status` shows who holds it and who waits. A command that ends or dies gives its turn back.
+The dog also holds `cargo-test`, a share of this machine for running tests. Workers run their test suites under it, and so can anything else on the machine: `shep kelpie lease run cargo-test -- cargo test` waits for a turn, runs the command and exits with its code, or 75 when it cannot reach the dog. Three hold it at once unless `[kelpie.leases]` says otherwise, the rest queue, and `shep kelpie lease status` shows who holds it and who waits. A command that ends or dies gives its turn back. One whose `lease run` was killed outright keeps it until the command, and anything it left running, exits: `status` shows how long each has held it.
 
 Then, in the checkout of any GitHub repo whose default branch is `main`:
 

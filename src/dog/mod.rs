@@ -250,7 +250,8 @@ async fn serve() -> Result<(), String> {
     match opened {
         Ok((socket, listener)) => {
             println!("the door is {}, {capacity} at a time", socket.display());
-            tokio::spawn(door::serve(listener, Arc::clone(&desk)));
+            let grace = door::REJOIN_GRACE;
+            tokio::spawn(door::serve(listener, Arc::clone(&desk), grace));
         }
         Err(e) => {
             println!("{e}: cargo-test cannot be taken until the dog restarts");

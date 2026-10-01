@@ -12,6 +12,9 @@ use crate::lease::saved::BookFile;
 use crate::review_bot::Reviewers;
 use crate::test::FakeClock;
 
+// A `Visit` made here can be inherited by a child another test forks at
+// that moment, which delays the dog hearing it close until that child
+// ends. Children here live seconds, well inside this bound.
 const BOUND: Duration = Duration::from_secs(10);
 
 // A dog's desk in `dir`, with `capacity` places in cargo-test.
@@ -34,7 +37,7 @@ fn door(capacity: u32) -> (tempfile::TempDir, PathBuf, Arc<Mutex<Kept>>) {
     let desk = kept(dir.path(), capacity);
     let socket = dir.path().join("lease.sock");
     let listener = open(&socket).unwrap();
-    tokio::spawn(serve(listener, Arc::clone(&desk)));
+    tokio::spawn(serve(listener, Arc::clone(&desk), Duration::ZERO));
     (dir, socket, desk)
 }
 
@@ -116,13 +119,17 @@ async fn door_child() {
             let code = counted_run::run(&socket, &["sh", "-c", script]).await;
             std::process::exit(code.into());
         }
+        Some(("hurry", script)) => {
+            let code = counted_run::run_with_patience(&socket, &["sh", "-c", script], 1).await;
+            std::process::exit(code.into());
+        }
         Some(("exec", program)) => {
             let code = counted_run::run(&socket, &[program]).await;
             std::process::exit(code.into());
         }
         _ if job == "dog" => {
             let dir = tempfile::tempdir().unwrap();
-            serve(open(&socket).unwrap(), kept(dir.path(), 1)).await;
+            serve(open(&socket).unwrap(), kept(dir.path(), 1), Duration::ZERO).await;
         }
         _ if job == "bind" => {
             let _left = std::os::unix::net::UnixListener::bind(&socket).unwrap();
@@ -211,7 +218,7 @@ async fn a_command_that_cannot_start_exits_as_a_shell_would() {
 #[tokio::test]
 async fn a_run_with_no_dog_says_so_with_its_own_exit_code() {
     let dir = tempfile::tempdir().unwrap();
-    let mut run = child(&dir.path().join("lease.sock"), "run:true");
+    let mut run = child(&dir.path().join("lease.sock"), "hurry:true");
     let no_lease = i32::from(counted_run::NO_LEASE);
     assert_eq!(exited(&mut run).await, Some(no_lease));
 }
@@ -245,35 +252,102 @@ async fn a_command_that_ends_gives_the_lease_back_whatever_it_left_running() {
     .await;
 }
 
-// The first dog is a child process, so killing it is its death, and no
-// fork of this process can have inherited its door.
-#[tokio::test]
-async fn a_run_whose_dog_restarts_is_counted_again_by_the_next() {
-    let dir = tempfile::tempdir().unwrap();
-    let socket = dir.path().join("lease.sock");
-    let mut first_dog = child(&socket, "dog");
+// A dog in a child process, killing which is its death. No fork of this
+// process can have inherited its door.
+async fn first_dog(socket: &Path) -> Child {
+    let dog = child(socket, "dog");
     until("the first dog never opened", || socket.exists()).await;
-    let mut run = child(&socket, "run:sleep 4");
-    let mut probe = Visit::knock(&socket, &ask("probe")).await.unwrap();
-    while answer(&mut probe).await == Some(Answer::Granted) {
+    dog
+}
+
+// Knocks until the door answers `Queued`, so whatever holds it took it first.
+async fn queued_behind(socket: &Path, what: &str) -> Visit {
+    loop {
+        let mut probe = Visit::knock(socket, &ask(what)).await.unwrap();
+        if answer(&mut probe).await != Some(Answer::Granted) {
+            return probe;
+        }
         drop(probe);
         tokio::time::sleep(Duration::from_millis(20)).await;
-        probe = Visit::knock(&socket, &ask("probe")).await.unwrap();
     }
-    drop(probe);
-    first_dog.kill().unwrap();
-    first_dog.wait().unwrap();
+}
+
+// The next dog starts full, so only `running` gets the run counted.
+#[tokio::test]
+async fn a_run_whose_dog_restarts_is_seated_by_the_next_even_when_full() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("lease.sock");
+    let mut dog = first_dog(&socket).await;
+    let mut run = child(&socket, "run:sleep 4");
+    drop(queued_behind(&socket, "probe").await);
+    dog.kill().unwrap();
+    dog.wait().unwrap();
 
     let next_desk = kept(dir.path(), 1);
-    tokio::spawn(serve(open(&socket).unwrap(), Arc::clone(&next_desk)));
+    tokio::spawn(serve(
+        open(&socket).unwrap(),
+        Arc::clone(&next_desk),
+        Duration::ZERO,
+    ));
+    let mut holder = Visit::knock(&socket, &ask("holder")).await.unwrap();
+    assert_eq!(answer(&mut holder).await, Some(Answer::Granted));
     until("the next dog never counted the run", || {
-        holders(&next_desk) == ["sh -c sleep 4"]
+        holders(&next_desk) == ["holder", "sh -c sleep 4"]
     })
     .await;
-    let mut waiter = Visit::knock(&socket, &ask("waiter")).await.unwrap();
-    assert_eq!(answer(&mut waiter).await, Some(Answer::Queued(0)));
     let _ = run.kill();
     let _ = run.wait();
+}
+
+// The dog goes away while the run waits; the run asks the next one afresh.
+#[tokio::test]
+async fn a_queued_run_whose_dog_restarts_waits_for_the_next() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("lease.sock");
+    let mut dog = first_dog(&socket).await;
+    let mut holder = Visit::knock(&socket, &ask("holder")).await.unwrap();
+    assert_eq!(answer(&mut holder).await, Some(Answer::Granted));
+    let marker = dir.path().join("ran");
+    let mut run = child(&socket, &format!("run:touch {}", marker.display()));
+    drop(queued_behind(&socket, "probe").await);
+    dog.kill().unwrap();
+    dog.wait().unwrap();
+    drop(holder);
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(!marker.exists(), "the run went ahead without a dog");
+
+    let next_desk = kept(dir.path(), 1);
+    tokio::spawn(serve(
+        open(&socket).unwrap(),
+        Arc::clone(&next_desk),
+        Duration::ZERO,
+    ));
+    assert_eq!(exited(&mut run).await, Some(0));
+    assert!(marker.exists());
+}
+
+// A restarted dog grants nothing new until the runs it lost have rejoined.
+#[tokio::test]
+async fn a_new_door_seats_running_commands_before_any_new_ask() {
+    let dir = tempfile::tempdir().unwrap();
+    let desk = kept(dir.path(), 1);
+    let socket = dir.path().join("lease.sock");
+    let grace = Duration::from_secs(2);
+    tokio::spawn(serve(open(&socket).unwrap(), Arc::clone(&desk), grace));
+    let mut fresh = Visit::knock(&socket, &ask("fresh")).await.unwrap();
+    let early = tokio::time::timeout(Duration::from_millis(500), fresh.answer()).await;
+    assert!(
+        early.is_err(),
+        "a new ask was answered in the grace: {early:?}"
+    );
+    let rejoining = Ask {
+        running: true,
+        ..ask("rejoining")
+    };
+    let mut rejoin = Visit::knock(&socket, &rejoining).await.unwrap();
+    assert_eq!(answer(&mut rejoin).await, Some(Answer::Granted));
+    assert_eq!(answer(&mut fresh).await, Some(Answer::Queued(0)));
+    assert_eq!(holders(&desk), ["rejoining"]);
 }
 
 #[tokio::test]

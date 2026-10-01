@@ -34,6 +34,39 @@ pub fn socket() -> Result<PathBuf, String> {
     socket_from(std::env::var_os(SOCKET_VAR), std::env::var_os("HOME"))
 }
 
+/// The door a runner lets its workers reach: [`socket`], unless that is
+/// relative or under the shepherd's home `shep_home`, when it is the
+/// default and the message says why
+///
+/// The path goes into the worker's sandbox, so it must never be shep's
+/// own socket.
+///
+/// # Errors
+///
+/// A message when `HOME` is not set.
+pub fn worker_socket(shep_home: &Path) -> Result<(PathBuf, Option<String>), String> {
+    let home = std::env::var_os("HOME");
+    let named = socket_from(std::env::var_os(SOCKET_VAR), home.clone())?;
+    checked(named, home, shep_home)
+}
+
+fn checked(
+    named: PathBuf,
+    home: Option<OsString>,
+    shep_home: &Path,
+) -> Result<(PathBuf, Option<String>), String> {
+    if named.is_absolute() && !named.starts_with(shep_home) {
+        return Ok((named, None));
+    }
+    let default = socket_from(None, home)?;
+    let why = format!(
+        "{SOCKET_VAR} names {}, which is relative or under the shepherd's home: workers get {}",
+        named.display(),
+        default.display()
+    );
+    Ok((default, Some(why)))
+}
+
 fn socket_from(named: Option<OsString>, home: Option<OsString>) -> Result<PathBuf, String> {
     match (named.filter(|n| !n.is_empty()), home) {
         (Some(named), _) => Ok(PathBuf::from(named)),
@@ -54,7 +87,8 @@ pub struct Ask {
     /// What it runs, for `status`
     pub what: String,
     /// Whether its command already runs under a grant from a dog that went
-    /// away, so the dog seats it at once rather than counting it twice
+    /// away, so the dog seats it at once rather than counting it twice.
+    /// The dog takes it on trust, as it does the rest of the ask.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub running: bool,
 }
@@ -66,15 +100,11 @@ pub struct Ask {
 pub enum Answer {
     /// Waiting, with this many ahead
     Queued(usize),
-    /// Held until the connection closes or the holder sends [`RETURN`]
+    /// Held until the connection closes
     Granted,
     /// Refused, saying why, and the dog closes the connection
     Error(String),
 }
-
-/// The line a holder sends to give the lease back while its connection
-/// stays open, as it may in a process its command left behind
-pub const RETURN: &str = "return";
 
 /// One command's connection to the door, holding its place while open
 #[derive(Debug)]
@@ -145,8 +175,11 @@ impl Visit {
     }
 
     /// Gives the lease back, whatever else still holds the connection
+    ///
+    /// Shutting the socket ends it for every process holding a copy, such
+    /// as one the command left running, so the dog hears the end at once.
     pub async fn give_back(mut self) {
-        let _ = self.ask.write_all(format!("{RETURN}\n").as_bytes()).await;
+        let _ = self.ask.shutdown().await;
     }
 }
 
@@ -170,6 +203,20 @@ mod tests {
             Ok(PathBuf::from("/home/me/.kelpie/dog/lease.sock"))
         );
         assert!(socket(None, None).is_err());
+    }
+
+    #[test]
+    fn a_worker_never_gets_shep_s_socket_or_a_relative_one() {
+        let home = || Some("/home/me".into());
+        let shep = Path::new("/home/me/.kelpie/shep");
+        let fine = PathBuf::from("/k/door.sock");
+        assert_eq!(checked(fine.clone(), home(), shep), Ok((fine, None)));
+        let default = PathBuf::from("/home/me/.kelpie/dog/lease.sock");
+        for bad in ["/home/me/.kelpie/shep/run/shep.sock", "door.sock"] {
+            let (door, why) = checked(PathBuf::from(bad), home(), shep).unwrap();
+            assert_eq!(door, default, "{bad}");
+            assert!(why.unwrap().contains(bad));
+        }
     }
 
     #[test]
