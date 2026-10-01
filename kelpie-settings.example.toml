@@ -45,6 +45,7 @@ url = "https://ntfy.sh/your-private-topic"
 # (`/usage`, the default on Claude Code), `codex` (Codex's own windows), or
 # `none` for a local model, which is never paced and holds `lease` for each
 # whole call instead. `lease` defaults to `gpu`, the qwen scripts' lock.
+# It must be the harness's own reader: Claude Code takes only `claude`.
 # [kelpie.agents.opus-high]
 # harness = "claude-code"
 # model = "claude-opus-5-5"
