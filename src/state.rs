@@ -480,6 +480,8 @@ pub enum Resource {
     Coderabbit,
     /// cubic's review window
     Cubic,
+    /// Codex's review allowance
+    Codex,
 }
 
 /// Why the state file cannot be read or written

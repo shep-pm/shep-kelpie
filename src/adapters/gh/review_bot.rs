@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use super::{gh, unreadable};
 use crate::ports::{ForgeError, Timestamp};
-use crate::review_bot::{Activity, Comment, Login, Review, Status, Thread};
+use crate::review_bot::{Activity, Comment, Login, Reaction, Review, Status, Thread};
 use crate::settings::ForgeSlug;
 
 // A pull request with more than 100 threads is not expected; one past it
@@ -14,6 +14,12 @@ const THREADS: &str = "query($owner: String!, $name: String!, $number: Int!) { \
     repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
     reviewThreads(first: 100) { nodes { id isResolved path line \
     comments(first: 1) { nodes { author { login } body } } } } } } }";
+
+// Codex reacts on the pull request itself: a thumbs up when it has nothing to
+// say, which it may leave with no comment.
+const REACTIONS: &str = "query($owner: String!, $name: String!, $number: Int!) { \
+    repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
+    reactions(last: 50) { nodes { content createdAt user { login } } } } } }";
 
 const RESOLVE: &str = "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) \
     { thread { isResolved } } }";
@@ -57,6 +63,18 @@ pub(super) fn activity(
         "-F",
         &format!("number={number}"),
     ])?;
+    let reactions = gh(&[
+        "api",
+        "graphql",
+        "-f",
+        &format!("query={REACTIONS}"),
+        "-f",
+        &format!("owner={owner}"),
+        "-f",
+        &format!("name={name}"),
+        "-F",
+        &format!("number={number}"),
+    ])?;
     // The pull request's own ref, so the head needs no read of its own.
     let statuses = gh(&[
         "api",
@@ -73,6 +91,7 @@ pub(super) fn activity(
         reviews: parse_reviews(&reviews)?,
         threads: parse_threads(&threads, login.graphql)?,
         statuses: parse_statuses(&statuses)?,
+        reactions: parse_reactions(&reactions, login.rest)?,
     })
 }
 
@@ -197,6 +216,59 @@ pub(crate) fn parse_statuses(stdout: &[u8]) -> Result<Vec<Status>, ForgeError> {
         .collect()
 }
 
+// Only the reactions `bot` left, by its REST login: a reaction's user comes
+// with the `[bot]` suffix, which another account of the same name lacks.
+pub(crate) fn parse_reactions(stdout: &[u8], bot: &str) -> Result<Vec<Reaction>, ForgeError> {
+    #[derive(Deserialize)]
+    struct Reply {
+        data: Data,
+    }
+    #[derive(Deserialize)]
+    struct Data {
+        repository: Repository,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Repository {
+        pull_request: PullRequest,
+    }
+    #[derive(Deserialize)]
+    struct PullRequest {
+        reactions: Nodes,
+    }
+    #[derive(Deserialize)]
+    struct Nodes {
+        nodes: Vec<Node>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Node {
+        content: String,
+        created_at: String,
+        user: Option<User>,
+    }
+    #[derive(Deserialize)]
+    struct User {
+        login: String,
+    }
+    let reply: Reply = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
+    reply
+        .data
+        .repository
+        .pull_request
+        .reactions
+        .nodes
+        .into_iter()
+        .filter(|node| node.user.as_ref().is_some_and(|u| u.login == bot))
+        .map(|node| {
+            Ok(Reaction {
+                content: node.content,
+                at: time(&node.created_at, stdout)?,
+            })
+        })
+        .collect()
+}
+
 // Only the threads whose first comment is by `bot`, its GraphQL login.
 pub(crate) fn parse_threads(stdout: &[u8], bot: &str) -> Result<Vec<Thread>, ForgeError> {
     #[derive(Deserialize)]
@@ -297,6 +369,30 @@ mod tests {
                 "{url}"
             );
         }
+    }
+
+    // Recorded from shep-pm/shep-kelpie#234: Codex's thumbs up at 04:43:06Z.
+    const REACTIONS_234: &str = include_str!("../../../fixtures/codex-reactions-234.json");
+
+    #[test]
+    fn a_reaction_is_read_by_the_bots_exact_login() {
+        let codex = crate::codex::LOGIN.rest;
+        let seen = parse_reactions(REACTIONS_234.as_bytes(), codex).unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].content, "THUMBS_UP");
+        assert_eq!(seen[0].at, Timestamp(1_790_829_786));
+        let cubic = crate::cubic::LOGIN.rest;
+        assert_eq!(
+            parse_reactions(REACTIONS_234.as_bytes(), cubic).unwrap(),
+            []
+        );
+        // The same name with no suffix is an account, not the app.
+        let account = REACTIONS_234.replace("connector[bot]", "connector");
+        assert_eq!(parse_reactions(account.as_bytes(), codex).unwrap(), []);
+        assert!(matches!(
+            parse_reactions(b"{}", codex),
+            Err(ForgeError::Unreadable(_))
+        ));
     }
 
     #[test]

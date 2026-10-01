@@ -28,7 +28,18 @@ url = "https://ntfy.sh/your-private-topic"
 # defined with one review an hour when absent, and its review footers raise
 # that. cubic is listed only once defined here. Its free plan gives a
 # private repo 20 reviews a month; a public repo draws on a fair-use pool of
-# reviewed lines it does not publish. The dog reads these when it starts.
+# reviewed lines it does not publish. Codex is listed only once defined here
+# too, with the weekly allowance its plan gives code reviews, which is the
+# window its "usage limits for code reviews" reply parks it for; its
+# reviews run on the ChatGPT plan, not the repo's. `reviews_on_ready` says
+# Codex reviews a pull request when it leaves draft, as the repo's Codex
+# settings may have it: then marking ready is the summon, taken under the
+# lease with no comment, since a comment on top would spend a second review
+# the window does not count. Off when absent, since it was never seen to:
+# turn it on only where Codex's automatic reviews are enabled, and kelpie
+# otherwise summons by comment. A round that goes
+# to another reviewer still marks the draft ready, so turn Codex's automatic
+# reviews off to keep it out of those. The dog reads these when it starts.
 # [kelpie.reviewers.coderabbit]
 # reviews = 1
 # hours = 1
@@ -36,6 +47,11 @@ url = "https://ntfy.sh/your-private-topic"
 # [kelpie.reviewers.cubic]
 # reviews = 20
 # hours = 720
+#
+# [kelpie.reviewers.codex]
+# reviews = 10
+# hours = 168
+# reviews_on_ready = false
 
 # How many commands may hold the `cargo-test` lease at once, 3 when absent.
 # A worker runs its test suite under it, as does anything on this machine

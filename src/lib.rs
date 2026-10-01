@@ -14,6 +14,7 @@ pub mod bridge;
 pub mod browse;
 pub mod channels;
 pub mod coderabbit;
+pub mod codex;
 pub mod confine;
 pub mod cubic;
 pub mod doctor;

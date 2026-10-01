@@ -19,6 +19,7 @@ use crate::adapters::{
     ClaudeCli, Curl, Gh, LocalReviewer, RelayCli, SandboxRuntime, ShepLeases, ShotsCli, SystemClock,
 };
 use crate::coderabbit::CodeRabbit;
+use crate::codex::Codex;
 use crate::cubic::Cubic;
 use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
@@ -95,7 +96,7 @@ fn serve(project: &str) -> Result<(), String> {
         codex_meter: Box::new(claude.codex_meter()),
         reviewer: Arc::new(reviewer.clone()),
         local_leases: Arc::new(reviewer.clone()),
-        review_bots: vec![Arc::new(CodeRabbit), Arc::new(Cubic)],
+        review_bots: vec![Arc::new(CodeRabbit), Arc::new(Cubic), Arc::new(Codex)],
         shots: Arc::new(shots.clone()),
         relay: Arc::new(RelayCli::new(
             home.clone(),

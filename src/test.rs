@@ -12,6 +12,7 @@ use tempfile::TempDir;
 use crate::adapters::LocalReviewer;
 use crate::board::WorkerModel;
 use crate::coderabbit::CodeRabbit;
+use crate::codex::Codex;
 use crate::cubic::Cubic;
 use crate::ports::{
     Checks, Clock, Cost, Meter, MeterError, Ports, Relay, Role, SessionId, Timestamp, Usage,
@@ -28,6 +29,7 @@ use crate::work_item::{CallRecord, Known, Phase, Turn, WorkItem};
 mod alerts;
 mod claude;
 mod coderabbit;
+mod codex;
 mod cubic;
 mod endpoint;
 mod forge;
@@ -536,7 +538,7 @@ impl Rig {
 
     /// Starts a runner, as a restarted sheep would, on the rig's stand-ins
     pub(crate) fn open(&self) -> Result<Mutex<Runner>, OpenError> {
-        self.open_with(vec![Arc::new(CodeRabbit), Arc::new(Cubic)])
+        self.open_with(vec![Arc::new(CodeRabbit), Arc::new(Cubic), Arc::new(Codex)])
     }
 
     /// Starts a runner whose review bot rounds summon the bots of `review_bots`
