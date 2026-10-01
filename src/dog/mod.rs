@@ -10,6 +10,7 @@
 //! kelpie's `[kelpie]` section defines.
 
 pub mod desk;
+mod door;
 pub mod left_over;
 mod link;
 pub mod triggers;
@@ -156,9 +157,9 @@ fn open(file: BookFile, clock: Box<dyn Clock>, gpu: GpuLock, reviewers: Reviewer
     Kept { desk, file, last }
 }
 
-// The review windows kelpie's section defines. A section that cannot be
-// read books CodeRabbit's alone, as a dog did before definitions.
-async fn reviewers(client: &ReconnectingClient) -> Reviewers {
+// Kelpie's section, for its review windows and leases. One that cannot be
+// read books CodeRabbit's window alone, at the default capacities.
+async fn settings(client: &ReconnectingClient) -> KelpieSettings {
     let section = client.request(Request::DogConfig {
         name: crate::shepherd::DOG.into(),
     });
@@ -166,23 +167,40 @@ async fn reviewers(client: &ReconnectingClient) -> Reviewers {
         Ok(Response::DogSection { toml }) => toml.as_str().to_owned(),
         Ok(other) => {
             println!("no [kelpie] section in the shepherd's answer: {other:?}");
-            return Reviewers::default();
+            return KelpieSettings::default();
         }
         Err(e) => {
             println!("cannot read the [kelpie] section: {e}");
-            return Reviewers::default();
+            return KelpieSettings::default();
         }
     };
     if text.trim().is_empty() {
-        return Reviewers::default();
+        return KelpieSettings::default();
     }
-    match KelpieSettings::from_section(&text) {
-        Ok(kelpie) => kelpie.reviewers,
-        Err(e) => {
-            println!("{e}: booking CodeRabbit's window alone");
-            Reviewers::default()
-        }
+    KelpieSettings::from_section(&text).unwrap_or_else(|e| {
+        println!("{e}");
+        salvage(&text)
+    })
+}
+
+// A section that does not parse whole: the `[leases]` table and the rest
+// are read apart, so a mistake in one leaves the other standing.
+fn salvage(text: &str) -> KelpieSettings {
+    let Ok(mut table) = text.parse::<toml::Table>() else {
+        println!("booking CodeRabbit's window alone, and cargo-test for 3 at a time");
+        return KelpieSettings::default();
+    };
+    let leases = table.remove("leases");
+    let rest = toml::to_string(&table).unwrap_or_default();
+    let mut settings = KelpieSettings::from_section(&rest).unwrap_or_else(|_| {
+        println!("booking CodeRabbit's window alone");
+        KelpieSettings::default()
+    });
+    match leases.map(toml::Value::try_into).transpose() {
+        Ok(leases) => settings.leases = leases.unwrap_or_default(),
+        Err(e) => println!("[leases] is not right ({e}): cargo-test is held by 3 at a time"),
     }
+    settings
 }
 
 /// Why the dog has no shepherd channel, and the fix
@@ -220,13 +238,26 @@ async fn serve() -> Result<(), String> {
             .map_err(|e| format!("cannot make {}: {e}", folder.display()))?;
     }
     println!("the book is {}", file.path().display());
-    let reviewers = reviewers(&client).await;
-    let desk = Arc::new(Mutex::new(open(
-        file,
-        Box::new(SystemClock),
-        lock,
-        reviewers,
-    )));
+    let settings = settings(&client).await;
+    let mut kept = open(file, Box::new(SystemClock), lock, settings.reviewers);
+    let capacity = settings.leases.cargo_test_capacity();
+    kept.desk.set_test_capacity(capacity);
+    let desk = Arc::new(Mutex::new(kept));
+    // The other leases do not need the door, so the dog runs on without it.
+    // It is bound before any handler can start a process that inherits it.
+    let opened = crate::lease::door::socket()
+        .and_then(|socket| door::open(&socket).map(|listener| (socket, listener)));
+    match opened {
+        Ok((socket, listener)) => {
+            println!("the door is {}, {capacity} at a time", socket.display());
+            let grace = door::REJOIN_GRACE;
+            tokio::spawn(door::serve(listener, Arc::clone(&desk), grace));
+        }
+        Err(e) => {
+            println!("{e}: cargo-test cannot be taken until the dog restarts");
+            lock_desk(&desk).desk.tests.close();
+        }
+    }
     let (deliver, mut to_deliver) = mpsc::unbounded_channel::<Vec<Delivery>>();
     for action in ACTIONS {
         let (desk, deliver) = (Arc::clone(&desk), deliver.clone());
@@ -542,6 +573,21 @@ mod tests {
             kept.desk.saved(),
             "the first change replaces the broken file"
         );
+    }
+
+    #[test]
+    fn a_bad_leases_table_leaves_the_review_windows_standing() {
+        let text = "[reviewers.cubic]\nreviews = 20\nhours = 720\n[leases]\ncargo-test = 0\n";
+        let settings = salvage(text);
+        assert!(settings.reviewers.cubic.is_some());
+        assert_eq!(settings.leases.cargo_test_capacity().get(), 3);
+    }
+
+    #[test]
+    fn bad_review_windows_leave_the_leases_standing() {
+        let settings = salvage("[reviewers.cubic]\nreviews = 0\n[leases]\ncargo-test = 5\n");
+        assert_eq!(settings.reviewers.cubic, None);
+        assert_eq!(settings.leases.cargo_test_capacity().get(), 5);
     }
 
     #[test]

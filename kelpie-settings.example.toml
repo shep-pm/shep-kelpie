@@ -37,6 +37,13 @@ url = "https://ntfy.sh/your-private-topic"
 # reviews = 20
 # hours = 720
 
+# How many commands may hold the `cargo-test` lease at once, 3 when absent.
+# A worker runs its test suite under it, as does anything on this machine
+# that runs `shep kelpie lease run cargo-test -- <command>`, and the rest
+# queue. The dog reads this when it starts.
+# [kelpie.leases]
+# cargo-test = 3
+
 # The agents a project may name for its worker, reviewer and judge, and its
 # session reviewers: a harness, and the model and effort it runs on. The
 # harnesses are Claude Code, `claude-code`, and pi, `pi`.

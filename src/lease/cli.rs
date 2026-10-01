@@ -4,7 +4,8 @@
 //! command exits, however it exits. `take` and `return` hold one for
 //! longer. The GPU lease is the qwen scripts' lock, taken here directly;
 //! a `take` leaves a holder process behind, since a lock whose pid is
-//! gone gets cleared. Every other kind is the dog's, reached through shep.
+//! gone gets cleared. `cargo-test` is held for one `run` at the dog's door.
+//! Every other kind is the dog's, reached through shep.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{ExitCode, ExitStatus, Stdio};
@@ -16,9 +17,13 @@ use shep_client::shep_core::protocol::Request;
 use shep_client::shep_core::protocol::request::{ActionOutcome, Response, SelectorSpec};
 use tokio::signal::unix::{Signal, SignalKind, signal};
 
+use super::counted::CARGO_TEST;
+use super::door;
 use super::gpu::{self, Claim, GpuLock, Waiting};
 use super::{GPU, LeaseKind};
 use crate::{dog, shepherd};
+
+pub(crate) mod counted_run;
 
 /// The usage lines for `shep-kelpie lease`
 pub const USAGE: &str = "\
@@ -26,7 +31,8 @@ pub const USAGE: &str = "\
        shep-kelpie lease take <kind>
        shep-kelpie lease return <kind>
        shep-kelpie lease status
-       <kind> is gpu, the qwen scripts' lock, or a lease the dog holds";
+       <kind> is gpu, the qwen scripts' lock, cargo-test, which a few
+       commands hold at once and only for a run, or a lease the dog holds";
 
 /// What a `take` holder writes as the lock's `what`, and `return` looks for
 const TAKE_WHAT: &str =
@@ -58,6 +64,16 @@ async fn dispatch(args: &[String]) -> Result<ExitCode, String> {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
         ["run", GPU, "--", command @ ..] if !command.is_empty() => run_gpu(command).await,
+        ["run", CARGO_TEST, "--", command @ ..] if !command.is_empty() => {
+            let code = match door::socket() {
+                Ok(socket) => counted_run::run(&socket, command).await,
+                Err(e) => {
+                    eprintln!("shep kelpie lease: {e}");
+                    counted_run::NO_LEASE
+                }
+            };
+            Ok(ExitCode::from(code))
+        }
         ["run", kind, "--", command @ ..] if !command.is_empty() => {
             run_book(&kind_of(kind)?, command).await
         }
@@ -392,12 +408,17 @@ fn signal_process(pid: u32, name: &str) {
 }
 
 fn exit_code(status: ExitStatus) -> ExitCode {
+    ExitCode::from(exit_number(status))
+}
+
+// The shell's number for how a command ended: its code, or 128 plus its signal.
+fn exit_number(status: ExitStatus) -> u8 {
     use std::os::unix::process::ExitStatusExt;
     let code = status
         .code()
         .or_else(|| status.signal().map(|s| 128 + s))
         .unwrap_or(1);
-    ExitCode::from(u8::try_from(code).unwrap_or(1))
+    u8::try_from(code).unwrap_or(1)
 }
 
 /// A signal kelpie caught while holding or waiting for a lease
@@ -411,11 +432,15 @@ enum Caught {
 impl Caught {
     // The shell's convention: 128 plus the signal's number.
     fn exit_code(self) -> ExitCode {
-        ExitCode::from(match self {
+        ExitCode::from(self.number())
+    }
+
+    fn number(self) -> u8 {
+        match self {
             Self::Hangup => 129,
             Self::Interrupt => 130,
             Self::Terminate => 143,
-        })
+        }
     }
 
     fn forward(self) -> Option<&'static str> {

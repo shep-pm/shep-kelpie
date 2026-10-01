@@ -54,7 +54,7 @@ impl Desk {
             "since": holder.as_ref().and_then(|h| h.since),
             "holder": holder,
         });
-        let mut leases = vec![gpu];
+        let mut leases = vec![gpu, json!(self.tests.status())];
         leases.extend(self.book.status().iter().map(|l| json!(l)));
         json!({ "leases": leases })
     }
@@ -103,6 +103,11 @@ mod tests {
                 "lock": lock.path(),
                 "since": null,
                 "holder": null,
+            }, {
+                "kind": "cargo-test",
+                "capacity": 3,
+                "holders": [],
+                "queue": [],
             }, {
                 "kind": "coderabbit",
                 "holder": null,

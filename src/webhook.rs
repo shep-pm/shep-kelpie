@@ -1,5 +1,6 @@
 //! Kelpie's own settings: the webhook, the channels rulings go to, the
-//! pull request reviewers, the local reviewers and the agents
+//! pull request reviewers, the local reviewers, the agents and the
+//! counted leases' capacities
 //!
 //! Kelpie's `[kelpie]` section of `dogs.toml`, or the file under kelpie's
 //! home it had before one, shared by every project. Every part is
@@ -10,6 +11,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::num::NonZeroU32;
 use std::path::Path;
 
 use schemars::JsonSchema;
@@ -17,6 +19,7 @@ use serde::Deserialize;
 use shep_client::dogs::dog_config;
 
 use crate::channels::Channels;
+use crate::lease::counted::CARGO_TEST_CAPACITY;
 use crate::review_bot::Reviewers;
 use crate::settings::{Agent, AgentName, Definition, ReviewerName, SettingsError};
 
@@ -43,6 +46,26 @@ pub struct KelpieSettings {
     /// The agents a project's roles and session reviewers may name
     #[serde(default)]
     pub agents: BTreeMap<AgentName, Agent>,
+    /// How many commands may hold each counted lease at once
+    #[serde(default)]
+    pub leases: Leases,
+}
+
+/// The counted leases' capacities
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Leases {
+    /// How many commands may hold `cargo-test` at once, as set: `None`
+    /// when absent, which [`Leases::cargo_test_capacity`] reads as 3
+    #[serde(default, rename = "cargo-test")]
+    pub cargo_test: Option<NonZeroU32>,
+}
+
+impl Leases {
+    /// How many commands may hold `cargo-test` at once
+    pub fn cargo_test_capacity(&self) -> NonZeroU32 {
+        self.cargo_test.unwrap_or(CARGO_TEST_CAPACITY)
+    }
 }
 
 /// The maintainer's webhook
@@ -130,7 +153,8 @@ const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntf
                      `[local_reviewers.<name>]` tables with a `kind` of \
                      `endpoint`, `command`, `claude` or `session` and that \
                      kind's keys, `[agents.<name>]` tables with `harness`, \
-                     `model` and `effort`, and nothing else";
+                     `model` and `effort`, a `[leases]` table with a \
+                     `cargo-test` count, and nothing else";
 
 impl KelpieSettings {
     /// Reads and checks kelpie's settings file
@@ -318,6 +342,18 @@ mod tests {
             "",
         ] {
             assert!(url(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn cargo_test_holds_three_unless_the_section_says() {
+        let absent = KelpieSettings::from_section("").unwrap();
+        assert_eq!(absent.leases.cargo_test_capacity().get(), 3);
+        let set = KelpieSettings::from_section("[leases]\ncargo-test = 5\n").unwrap();
+        assert_eq!(set.leases.cargo_test_capacity().get(), 5);
+        for bad in ["0", "-1", "4294967296", "\"3\""] {
+            let text = format!("[leases]\ncargo-test = {bad}\n");
+            assert!(KelpieSettings::from_section(&text).is_err(), "{bad}");
         }
     }
 

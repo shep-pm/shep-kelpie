@@ -11,12 +11,19 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::fence;
+use crate::lease::door;
 use crate::ports::{Fence, Guard, Reach};
 use crate::settings::{BuildDir, EnvName, GuardHook, NonBlank};
 use crate::worktree::BASE;
 
 /// Kelpie's instructions to every worker, appended to its system prompt
 pub const INSTRUCTIONS: &str = include_str!("worker-instructions.md");
+
+/// Kelpie's own worker instructions, naming `kelpie`, the binary a worker
+/// runs its tests under the machine's test lease with
+pub fn instructions(kelpie: &Path) -> String {
+    INSTRUCTIONS.replace("{kelpie}", &kelpie.display().to_string())
+}
 
 // Claude Code opens a worktree's whole common git dir to sandboxed writes.
 // These are the parts a commit and a push do not need, and whose change
@@ -117,6 +124,8 @@ pub struct WorkerProfile<'a> {
     pub preview: Option<&'a [NonBlank]>,
     /// The shepherd's home, whose `dogs.toml` holds the webhook's URL
     pub shep_home: &'a Path,
+    /// The dog's door, the one Unix socket the worker may connect to
+    pub door: &'a Path,
 }
 
 impl WorkerProfile<'_> {
@@ -177,6 +186,7 @@ impl WorkerProfile<'_> {
             hosts,
             no_commands,
             env: self.env(),
+            sockets: vec![self.door.to_owned()],
             preview,
             guard: Guard {
                 kelpie: self.kelpie.to_owned(),
@@ -200,11 +210,12 @@ impl WorkerProfile<'_> {
 
     fn env(&self) -> BTreeMap<String, PathBuf> {
         let cargo = ("CARGO_TARGET_DIR".to_owned(), self.build.to_owned());
+        let door = (door::SOCKET_VAR.to_owned(), self.door.to_owned());
         let project = self
             .build_env
             .iter()
             .map(|(name, dir)| (name.as_str().to_owned(), self.build.join(dir.as_path())));
-        [cargo].into_iter().chain(project).collect()
+        [cargo, door].into_iter().chain(project).collect()
     }
 }
 
@@ -272,6 +283,7 @@ mod tests {
             build_env: &BTreeMap::new(),
             preview: None,
             shep_home: Path::new("/srv/shep"),
+            door: Path::new("/k/dog/lease.sock"),
         }
         .settings()
     }
@@ -370,6 +382,7 @@ mod tests {
             build_env: &build_env,
             preview: None,
             shep_home: Path::new("/srv/shep"),
+            door: Path::new("/k/dog/lease.sock"),
         }
         .settings();
         assert_eq!(
@@ -377,6 +390,7 @@ mod tests {
             json!({
                 "CARGO_TARGET_DIR": "/k/targets/lab/7",
                 "BUN_INSTALL_CACHE_DIR": "/k/targets/lab/7/bun",
+                "KELPIE_LEASE_SOCKET": "/k/dog/lease.sock",
             })
         );
     }
@@ -402,6 +416,7 @@ mod tests {
             build_env: &build_env,
             preview: Some(&[]),
             shep_home: Path::new("/srv/shep"),
+            door: Path::new("/k/dog/lease.sock"),
         }
         .settings();
         assert_eq!(s["env"]["NODE_USE_ENV_PROXY"], "/k/targets/lab/7/node");
@@ -441,6 +456,7 @@ mod tests {
             build_env: &BTreeMap::new(),
             preview: Some(domains),
             shep_home: Path::new("/srv/shep"),
+            door: Path::new("/k/dog/lease.sock"),
         }
         .settings()
     }
@@ -457,6 +473,7 @@ mod tests {
                 "strictAllowlist": true,
                 "allowLocalBinding": true,
                 "allowMachLookup": ["com.apple.FSEvents"],
+                "allowUnixSockets": ["/k/dog/lease.sock"],
             })
         );
         assert_eq!(s["env"]["NODE_USE_ENV_PROXY"], "1");
@@ -662,13 +679,17 @@ mod tests {
         assert!(!allow.iter().any(|p| p.ends_with("/main")), "{allow:?}");
     }
 
-    // Unset, the sandbox blocks every Unix socket, kelpie's shepherd socket
+    // Every other Unix socket stays blocked, kelpie's shepherd socket
     // included, so a worker cannot `shep trigger` its own ruling's answer.
     #[test]
-    fn a_worker_reaches_no_unix_socket() {
+    fn a_worker_reaches_the_dogs_door_and_no_other_unix_socket() {
         let s = settings(&[]);
         let network = s["sandbox"]["network"].as_object().unwrap();
-        assert!(!network.contains_key("allowUnixSockets"), "{network:?}");
+        assert_eq!(network["allowUnixSockets"], json!(["/k/dog/lease.sock"]));
+        assert_eq!(
+            s["env"]["KELPIE_LEASE_SOCKET"], network["allowUnixSockets"][0],
+            "the worker asks at the one socket its sandbox lets it reach"
+        );
         assert!(!network.contains_key("allowAllUnixSockets"), "{network:?}");
     }
 
@@ -732,6 +753,7 @@ mod tests {
             build_env: &BTreeMap::new(),
             preview: None,
             shep_home: Path::new("/srv/shep"),
+            door: Path::new("/k/dog/lease.sock"),
         };
         let s = profile.settings();
         assert_eq!(

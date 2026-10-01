@@ -70,6 +70,11 @@ fn serve(project: &str) -> Result<(), String> {
     let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
     let mut paths = ProjectPaths::under(&kelpie_home, &project);
     paths.shep_home.clone_from(&shep_home);
+    let (door, why) = crate::lease::door::worker_socket(&shep_home)?;
+    if let Some(why) = why {
+        println!("{why}");
+    }
+    paths.door = door;
     // Every agent call runs inside the sandbox runtime, so a runner without one stops here.
     if !paths.tools.sandbox().is_file() {
         return Err(SandboxError::Missing(paths.tools.sandbox()).to_string());
