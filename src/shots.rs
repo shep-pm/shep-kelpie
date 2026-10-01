@@ -126,6 +126,25 @@ impl ShotsRun {
         }
     }
 
+    /// The first page the dev server failed on, if any
+    ///
+    /// A server error from the dev server's own origin, for the page or for
+    /// anything it loads, is a run that shows something other than the app:
+    /// Vite's error overlay prints a module's absolute path into the
+    /// picture, where no text check sees it. The answer names the page and
+    /// the status, never the URL.
+    pub fn server_error(&self) -> Option<String> {
+        self.shots.iter().find_map(|shot| {
+            let page = shot.status.filter(|s| (500..600).contains(s));
+            let code = page.or_else(|| shot.problems.iter().find_map(|p| own_server_error(p)))?;
+            Some(format!(
+                "the dev server answered HTTP {code} for {} at {}",
+                shot.route.as_str(),
+                shot.window()
+            ))
+        })
+    }
+
     /// Every PNG taken, in order
     pub fn files(&self) -> impl Iterator<Item = &Path> {
         self.shots.iter().filter_map(|s| s.file.as_deref())
@@ -173,9 +192,19 @@ impl ShotsRun {
     }
 }
 
+// The status in a `HTTP <status> <url>` problem, when it is a server error
+// from the dev server, which the capture always reaches as `localhost`.
+fn own_server_error(problem: &str) -> Option<u16> {
+    let (code, url) = problem.strip_prefix("HTTP ")?.split_once(' ')?;
+    let code: u16 = code.parse().ok().filter(|c| (500..600).contains(c))?;
+    let (_, rest) = url.split_once("://")?;
+    let host = rest.split(['/', ':', '?', '#']).next()?;
+    host.eq_ignore_ascii_case("localhost").then_some(code)
+}
+
 impl Shot {
-    /// `/events at mobile, dark`, with its status when it was not a 200
-    pub fn label(&self) -> String {
+    /// `mobile, dark`
+    fn window(&self) -> String {
         let viewport = match self.viewport {
             Viewport::Mobile => "mobile",
             Viewport::Desktop => "desktop",
@@ -184,11 +213,16 @@ impl Shot {
             Scheme::Light => "light",
             Scheme::Dark => "dark",
         };
+        format!("{viewport}, {scheme}")
+    }
+
+    /// `/events at mobile, dark`, with its status when it was not a 200
+    pub fn label(&self) -> String {
         let status = match self.status {
             Some(200) | None => String::new(),
             Some(code) => format!(" (HTTP {code})"),
         };
-        format!("{} at {viewport}, {scheme}{status}", self.route.as_str())
+        format!("{} at {}{status}", self.route.as_str(), self.window())
     }
 }
 
@@ -344,6 +378,44 @@ mod tests {
             routes(&[route("/")], &named),
             [route("/"), route("/events"), route("/raids")]
         );
+    }
+
+    #[test]
+    fn a_server_error_from_the_dev_server_is_named_by_page_never_by_url() {
+        let mut run = ShotsRun {
+            shots: plan(&[route("/events")], Path::new("/s")),
+            ..ShotsRun::default()
+        };
+        assert_eq!(run.server_error(), None);
+        run.shots[2].status = Some(503);
+        assert_eq!(
+            run.server_error().as_deref(),
+            Some("the dev server answered HTTP 503 for /events at desktop, light")
+        );
+        run.shots[2].status = Some(200);
+        run.shots[1].problems =
+            vec!["HTTP 500 http://localhost:5173/%2FUsers%2Fme%2Fapp%2Fsrc%2Fmain.ts".into()];
+        assert_eq!(
+            run.server_error().as_deref(),
+            Some("the dev server answered HTTP 500 for /events at mobile, dark")
+        );
+    }
+
+    #[test]
+    fn a_failure_that_is_not_the_dev_servers_is_not_a_server_error() {
+        let mut run = ShotsRun {
+            shots: plan(&[route("/")], Path::new("/s")),
+            ..ShotsRun::default()
+        };
+        run.shots[0].problems = vec![
+            "HTTP 404 http://localhost:5173/missing.png".into(),
+            "HTTP 500 https://api.example.com/v1/events".into(),
+            "HTTP 500 https://localhost.example.com/x".into(),
+            "console: HTTP 500 http://localhost:5173/x".into(),
+            "blocked https://cdn.example/a.png: not a preview domain".into(),
+        ];
+        run.shots[1].status = Some(404);
+        assert_eq!(run.server_error(), None);
     }
 
     #[test]

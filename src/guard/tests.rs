@@ -8,13 +8,23 @@ use super::*;
 
 const HOME: &str = "/home/me";
 
+// What the hook keeps off the forge when it is given only the home folder.
+fn local(home: Option<&Path>) -> LocalPaths {
+    LocalPaths::new(home, [])
+}
+
 fn call(cwd: &Path, command: &str, checkout: Checkout<'_>) -> Verdict {
     let call = json!({
         "tool_name": "Bash",
         "cwd": cwd,
         "tool_input": { "command": command },
     });
-    judge(call.to_string().as_bytes(), Some(Path::new(HOME)), checkout)
+    judge(
+        call.to_string().as_bytes(),
+        Some(Path::new(HOME)),
+        local(Some(Path::new(HOME))),
+        checkout,
+    )
 }
 
 // For a call with no worktree: every commit and push in it is refused.
@@ -182,10 +192,7 @@ fn a_message_naming_the_home_folder_is_refused_without_echoing_it() {
         "gh release create v1 --notes 'from /home/me'",
     ] {
         let why = refusal(bash(command));
-        assert!(
-            why.contains("home folder's absolute path"),
-            "{command}: {why}"
-        );
+        assert!(why.contains("a path on this machine"), "{command}: {why}");
         assert!(!why.to_lowercase().contains(HOME), "{command}: {why}");
     }
 }
@@ -199,9 +206,7 @@ fn the_home_folder_in_a_command_but_not_its_message_goes_through() {
     ] {
         assert_eq!(bash(command), Verdict::Allow, "{command}");
     }
-    // Longer names that start with the home folder's, built here so the
-    // repo's check on home paths does not read them as ones.
-    let body = format!("~/notes and {HOME}s/x and {HOME}-2");
+    let body = concat!("fixes the page at src/ho", "me/mod.rs and docs/ho", "me/x");
     let command = format!("gh pr create --title 'fix: x' --body '{body}'");
     assert_eq!(bash(&command), Verdict::Allow, "{command}");
 }
@@ -502,7 +507,12 @@ fn a_project_subagent_defined_with_isolation_is_refused() {
             git_common_dir: &common,
             worktree: &worktree,
         };
-        judge(call.to_string().as_bytes(), Some(Path::new(HOME)), checkout)
+        judge(
+            call.to_string().as_bytes(),
+            Some(Path::new(HOME)),
+            local(Some(Path::new(HOME))),
+            checkout,
+        )
     };
     assert!(matches!(agent("away"), Verdict::Refuse(_)));
     assert_eq!(agent("here"), Verdict::Allow);
@@ -569,6 +579,7 @@ fn a_subagent_in_a_worktree_of_its_own_is_refused() {
         judge(
             call.to_string().as_bytes(),
             Some(Path::new(HOME)),
+            local(Some(Path::new(HOME))),
             nowhere(),
         )
     };
@@ -606,7 +617,12 @@ fn a_commit_from_the_home_folder_by_tilde_reads_the_worktree() {
         "git -C ~/wt commit -m 'docs: notes'",
     ] {
         let call = json!({ "tool_name": "Bash", "cwd": "/", "tool_input": { "command": command } });
-        let why = refusal(judge(call.to_string().as_bytes(), Some(home), checkout));
+        let why = refusal(judge(
+            call.to_string().as_bytes(),
+            Some(home),
+            local(Some(home)),
+            checkout,
+        ));
         assert!(why.contains("`notes.md`"), "{command}: {why}");
     }
 }
@@ -802,6 +818,7 @@ fn a_one_level_home_folder_is_still_kept_out() {
     let verdict = judge(
         call.to_string().as_bytes(),
         Some(Path::new("/root")),
+        local(Some(Path::new("/root"))),
         nowhere(),
     );
     assert!(matches!(verdict, Verdict::Refuse(_)), "{verdict:?}");
@@ -814,11 +831,7 @@ fn every_problem_in_one_call_is_named_once() {
     ));
     assert!(!why.contains(HOME), "a title is not echoed: {why}");
     assert_eq!(why.matches("not a conventional commit").count(), 1, "{why}");
-    assert_eq!(
-        why.matches("home folder's absolute path").count(),
-        1,
-        "{why}"
-    );
+    assert_eq!(why.matches("a path on this machine").count(), 1, "{why}");
 }
 
 #[test]
@@ -826,11 +839,16 @@ fn other_tools_and_a_missing_home_are_let_through() {
     let call =
         json!({ "tool_name": "Write", "cwd": "/x", "tool_input": { "command": "gh pr create" } });
     let judged = |call: &serde_json::Value, home: Option<&str>| {
-        judge(call.to_string().as_bytes(), home.map(Path::new), nowhere())
+        judge(
+            call.to_string().as_bytes(),
+            home.map(Path::new),
+            local(home.map(Path::new)),
+            nowhere(),
+        )
     };
     assert_eq!(judged(&call, Some(HOME)), Verdict::Allow);
     let call = json!({ "tool_name": "Bash", "cwd": "/x", "tool_input": {
-        "command": "git commit -m '/home/me'",
+        "command": "gh pr comment 3 --body 'see /Users/me/wt'",
     } });
     assert_eq!(judged(&call, None), Verdict::Allow);
     assert_eq!(judged(&call, Some("/")), Verdict::Allow);
@@ -839,9 +857,15 @@ fn other_tools_and_a_missing_home_are_let_through() {
 #[test]
 fn an_unreadable_call_is_refused() {
     assert!(matches!(
-        judge(&b"not json"[..], Some(Path::new(HOME)), nowhere()),
+        judge(
+            &b"not json"[..],
+            Some(Path::new(HOME)),
+            local(Some(Path::new(HOME))),
+            nowhere()
+        ),
         Verdict::Refuse(_)
     ));
 }
 
 mod manager;
+mod reach;

@@ -2,77 +2,24 @@
 //!
 //! `bash push.sh`, `source push.sh` and `./push.sh` run commands the call's
 //! own text never shows, so the guard reads the file and judges them too. A
-//! shell reading its commands from a pipe or a redirect is refused, as is a
-//! script the guard cannot read, or one the same call could write first.
+//! script the guard cannot read is refused, as is one the same call could
+//! write first.
 
 use std::fs::{self, File};
 use std::io::Read as _;
 use std::path::Path;
 
+use super::moved;
 use super::wrap::{OTHER_SHELLS, SHELLS, program};
-use super::{Home, moved};
 
 // A script larger than this is not a worker's own.
 const SCRIPT_MAX: u64 = 1 << 20;
 
-/// What a shell runs, when no `-c` names its script
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Runs<'a> {
-    /// Nothing: it prints its version or help
-    Nothing,
-    /// The script in this file
-    File(&'a str),
-    /// What it reads on stdin, which only a heredoc shows
-    Stdin,
-    /// A redirect or here-string the guard does not read
-    Unreadable,
-}
-
-/// The refusal for a shell whose commands the guard cannot see
-pub(super) const STDIN: &str = "kelpie cannot check commands a shell reads from a pipe, a \
-                                redirect or a here-string: run them directly, or save them to \
-                                a file and run it with `bash <file>`.";
-
-/// What the shell in `words` runs besides a `-c` script
-pub(super) fn shell(words: &[String]) -> Runs<'_> {
-    let mut stdin = false;
-    let mut rest = words[1..].iter();
-    while let Some(word) = rest.next() {
-        let w = word.as_str();
-        match w {
-            "--version" | "--help" => return Runs::Nothing,
-            "-o" | "+o" | "-O" | "+O" | "--rcfile" | "--init-file" => {
-                rest.next();
-            }
-            "--" | "-" => break,
-            _ if w.starts_with("<<<") => return Runs::Unreadable,
-            _ if w.starts_with("<<") => {}
-            _ => match redirect(w) {
-                Some(Redirect::In) => return Runs::Unreadable,
-                Some(Redirect::Out { alone }) => {
-                    if alone {
-                        rest.next();
-                    }
-                }
-                None if w.starts_with("--") => {}
-                None if w.starts_with(['-', '+']) => stdin |= w[1..].contains('s'),
-                None if stdin => return Runs::Stdin,
-                None => return Runs::File(w),
-            },
-        }
-    }
-    match rest.next() {
-        Some(file) if !stdin => Runs::File(file),
-        _ => Runs::Stdin,
-    }
-}
-
 /// The file `source` or `.` runs
-pub(super) fn sourced(words: &[String]) -> Runs<'_> {
+pub(super) fn sourced(words: &[String]) -> Option<&str> {
     match words.get(1).map(String::as_str) {
-        Some("--") => words.get(2).map_or(Runs::Nothing, |f| Runs::File(f)),
-        Some(file) => Runs::File(file),
-        None => Runs::Nothing,
+        Some("--") => words.get(2).map(String::as_str),
+        file => file,
     }
 }
 
@@ -85,7 +32,7 @@ pub(super) fn sourced(words: &[String]) -> Runs<'_> {
 pub(super) fn read(
     name: &str,
     cwd: Option<&Path>,
-    home: Option<&Home>,
+    home: Option<&Path>,
     texts: &[String],
 ) -> Result<String, String> {
     let base = program(name);
@@ -119,7 +66,7 @@ pub(super) fn read(
 pub(super) fn interpreted(
     word: &str,
     cwd: Option<&Path>,
-    home: Option<&Home>,
+    home: Option<&Path>,
 ) -> Result<bool, String> {
     let Some(path) = moved(cwd, word, home) else {
         return Err(
@@ -187,26 +134,6 @@ const BINARIES: [&[u8]; 6] = [
     b"\xca\xfe\xba\xbe",
 ];
 
-/// A redirect a shell's words hold
-enum Redirect {
-    /// Its stdin, from a file or another descriptor
-    In,
-    /// Its output; `alone` when the file is the next word
-    Out { alone: bool },
-}
-
-fn redirect(word: &str) -> Option<Redirect> {
-    let op = word.trim_start_matches(|c: char| c.is_ascii_digit());
-    let op = op.strip_prefix('&').unwrap_or(op);
-    if op.starts_with('<') {
-        return Some(Redirect::In);
-    }
-    let target = op.strip_prefix('>')?.trim_start_matches(['>', '|', '&']);
-    Some(Redirect::Out {
-        alone: target.is_empty(),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,41 +143,10 @@ mod tests {
     }
 
     #[test]
-    fn a_shell_runs_the_file_after_its_options() {
-        for line in [
-            "bash push.sh",
-            "sh -e push.sh x",
-            "bash -o pipefail push.sh",
-            "bash -- push.sh",
-            "bash --norc push.sh",
-            "zsh push.sh > out",
-            "bash > out push.sh",
-            "dash 2>&1 push.sh",
-        ] {
-            assert_eq!(shell(&w(line)), Runs::File("push.sh"), "{line}");
-        }
-    }
-
-    #[test]
-    fn a_shell_reading_stdin_is_seen() {
-        for line in ["bash", "bash -s push.sh", "sh -es", "bash -x"] {
-            assert_eq!(shell(&w(line)), Runs::Stdin, "{line}");
-        }
-        for line in [
-            "bash < push.sh",
-            "bash <push.sh",
-            "sh 0<push.sh",
-            "bash <<< x",
-        ] {
-            assert_eq!(shell(&w(line)), Runs::Unreadable, "{line}");
-        }
-        assert_eq!(shell(&w("bash --version")), Runs::Nothing);
-    }
-
-    #[test]
     fn source_runs_its_file() {
-        assert_eq!(sourced(&w("source push.sh")), Runs::File("push.sh"));
-        assert_eq!(sourced(&w(". ./push.sh x")), Runs::File("./push.sh"));
-        assert_eq!(sourced(&w("source")), Runs::Nothing);
+        assert_eq!(sourced(&w("source push.sh")), Some("push.sh"));
+        assert_eq!(sourced(&w(". ./push.sh x")), Some("./push.sh"));
+        assert_eq!(sourced(&w("source -- push.sh")), Some("push.sh"));
+        assert_eq!(sourced(&w("source")), None);
     }
 }

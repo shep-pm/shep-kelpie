@@ -9,6 +9,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
+use crate::guard::{FOLDER_FLAG, NAME_FLAG};
 use crate::ports::{Fence, Reach, Tools};
 use crate::settings::HookEvent;
 
@@ -154,6 +155,16 @@ fn hooks(fence: &Fence) -> Value {
         &guard.worktree,
     ]
     .map(|p| shell_quote(&p.to_string_lossy()));
+    // What the guard keeps off the forge besides the home folder, as the forge port does.
+    let folders = guard
+        .folders
+        .iter()
+        .map(|p| shell_quote(&format!("{FOLDER_FLAG}{}", p.display())));
+    let names = guard
+        .private_names
+        .iter()
+        .map(|n| shell_quote(&format!("{NAME_FLAG}{n}")));
+    let commands: Vec<String> = commands.into_iter().chain(folders).chain(names).collect();
     pre.push(entry(Some(GUARDED_TOOLS), &commands.join(" ")));
     let mut post = Vec::new();
     for hook in &fence.hooks {
