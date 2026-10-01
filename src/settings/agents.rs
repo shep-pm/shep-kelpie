@@ -222,6 +222,9 @@ pub struct RoleAgentNames {
     /// The one-shot that judges every finding
     #[serde(default)]
     pub judge: Option<AgentName>,
+    /// The one-shot that plans a ready issue before it opens a work item
+    #[serde(default)]
+    pub planner: Option<AgentName>,
 }
 
 /// The model and effort each role runs on, from the agent it names
@@ -233,6 +236,8 @@ pub struct RoleAgents {
     pub reviewer: RoleModel,
     /// The judge's one-shots
     pub judge: RoleModel,
+    /// The planning call's one-shots
+    pub planner: RoleModel,
     /// What holds each role's calls back
     pub limits: RoleLimits,
 }
@@ -246,6 +251,8 @@ pub struct RoleLimits {
     pub reviewer: Limit,
     /// The judge's one-shots
     pub judge: Limit,
+    /// The planning call's one-shots
+    pub planner: Limit,
 }
 
 impl Settings {
@@ -267,14 +274,17 @@ impl Settings {
         let (reviewer, reviewer_limit) =
             pick("reviewer", &self.agents.reviewer, &self.models.reviewer)?;
         let (judge, judge_limit) = pick("judge", &self.agents.judge, &self.models.judge)?;
+        let (planner, planner_limit) = pick("planner", &self.agents.planner, &self.models.planner)?;
         Ok(RoleAgents {
             worker,
             reviewer,
             judge,
+            planner,
             limits: RoleLimits {
                 worker: worker_limit,
                 reviewer: reviewer_limit,
                 judge: judge_limit,
+                planner: planner_limit,
             },
         })
     }
