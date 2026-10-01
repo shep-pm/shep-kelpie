@@ -60,8 +60,8 @@ fn each_step_runs_its_default_skill_from_kelpies_own_copy() {
     let seen = rig.claude.all_seen();
     let reviewed = seen.iter().find(|s| s.call.role == Role::Reviewer).unwrap();
     assert_eq!(
-        reviewed.settings["permissions"]["deny"],
-        json!(["Agent", "Task", "Bash"])
+        reviewed.settings["permissions"]["deny"].as_array().unwrap()[..3],
+        ["Agent", "Task", "Bash"]
     );
     for step in Step::ALL {
         let skill = plugin.join("skills").join(step.default_skill());

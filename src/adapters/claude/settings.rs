@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use crate::guard::{FOLDER_FLAG, NAME_FLAG};
 use crate::ports::{Fence, Reach, Tools};
 use crate::settings::HookEvent;
+use crate::trim::trimmed;
 
 /// The tools that write files without going through Bash
 const FILE_TOOLS: &str = "Edit|Write|MultiEdit|NotebookEdit";
@@ -75,7 +76,7 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
             // Read outside the working folder is refused under `-p` unless the folder is added.
             permissions["additionalDirectories"] = json!(reach.read);
         }
-        return json!({ "permissions": permissions });
+        return trimmed(json!({ "permissions": permissions }));
     };
     if fence.preview.is_some() {
         deny.extend(PLAYWRIGHT_DENY.iter().map(|&r| r.to_owned()));
@@ -84,7 +85,7 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
     if !reach.read.is_empty() {
         permissions["additionalDirectories"] = json!(reach.read);
     }
-    json!({
+    trimmed(json!({
         // Kelpie's sandbox holds the whole process, and on macOS Claude Code's
         // own cannot start inside it: every command would be refused.
         "sandbox": { "enabled": false },
@@ -94,7 +95,7 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
         "disableAllHooks": false,
         "hooks": hooks(fence),
         "env": env(fence),
-    })
+    }))
 }
 
 fn tool_denies(tools: Tools, reach: &Reach) -> impl Iterator<Item = &'static str> {
@@ -207,8 +208,8 @@ mod tests {
     fn a_review_round_keeps_its_read_tools_and_reads_its_folders() {
         let bare = settings(Tools::Review, &Reach::default());
         assert_eq!(
-            bare,
-            json!({ "permissions": { "deny": ["Agent", "Task", "Bash"] } })
+            bare["permissions"]["deny"].as_array().unwrap()[..3],
+            ["Agent", "Task", "Bash"]
         );
         let shots = Reach {
             read: vec![PathBuf::from("/k/shots/7")],
@@ -223,13 +224,61 @@ mod tests {
     #[test]
     fn an_answer_reads_nothing_unless_its_sandbox_lists_a_folder() {
         let none = settings(Tools::Answer, &Reach::default());
-        assert_eq!(none, json!({ "permissions": { "deny": NO_TOOLS } }));
+        assert_eq!(
+            none["permissions"]["deny"].as_array().unwrap()[..NO_TOOLS.len()],
+            NO_TOOLS
+        );
         let shot = Reach {
             read: vec![PathBuf::from("/k/shots/7")],
             fence: None,
         };
         let deny = settings(Tools::Answer, &shot)["permissions"]["deny"].clone();
-        assert_eq!(deny.as_array().unwrap().len(), NO_TOOLS.len() - 1);
+        assert!(deny.to_string().contains("\"Bash\""), "{deny}");
         assert!(!deny.to_string().contains("\"Read\""), "{deny}");
+    }
+
+    #[test]
+    fn every_role_drops_the_features_it_never_uses() {
+        // A worker's fenced settings are pinned in `profile`'s tests.
+        for tools in [Tools::Work, Tools::Review, Tools::Answer] {
+            let s = settings(tools, &Reach::default());
+            for key in [
+                "disableBundledSkills",
+                "disableWorkflows",
+                "disableClaudeAiConnectors",
+                "disableArtifact",
+            ] {
+                assert_eq!(s[key], true, "{tools:?} {key}");
+            }
+            assert!(s.get("disableRemoteControl").is_none(), "{tools:?}");
+            let deny = s["permissions"]["deny"].to_string();
+            for tool in [
+                "EnterPlanMode",
+                "ExitPlanMode",
+                "DesignSync",
+                "NotebookEdit",
+                "CronCreate",
+                "CronDelete",
+                "CronList",
+                "RemoteTrigger",
+                "ScheduleWakeup",
+                "EnterWorktree",
+                "ExitWorktree",
+            ] {
+                assert!(deny.contains(&format!("\"{tool}\"")), "{tools:?} {tool}");
+            }
+            for kept in [
+                "SendMessage",
+                "Agent\"",
+                "Skill",
+                "ToolSearch",
+                "TaskCreate",
+            ] {
+                if kept == "Agent\"" && tools == Tools::Review {
+                    continue;
+                }
+                assert!(!deny.contains(kept), "{tools:?} {kept}");
+            }
+        }
     }
 }

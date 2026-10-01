@@ -381,12 +381,14 @@ mod tests {
         let written: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&review.settings).unwrap()).unwrap();
         assert_eq!(
-            written,
-            serde_json::json!({ "permissions": {
-                "deny": ["Agent", "Task", "Bash"],
-                "additionalDirectories": [dir.path().join("shots")],
-            } })
+            written["permissions"]["deny"].as_array().unwrap()[..3],
+            ["Agent", "Task", "Bash"]
         );
+        assert_eq!(
+            written["permissions"]["additionalDirectories"],
+            serde_json::json!([dir.path().join("shots")])
+        );
+        assert_eq!(written["disableBundledSkills"], true);
 
         std::fs::create_dir_all(dir.path().join("taken/settings.json")).unwrap();
         review.settings = dir.path().join("taken/settings.json");

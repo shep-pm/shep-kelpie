@@ -257,7 +257,6 @@ pub(in crate::runner) fn parse_verdict(text: &str) -> Option<Verdict> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
 
     use super::*;
     use crate::adapters::NO_TOOLS;
@@ -347,7 +346,11 @@ mod tests {
             .iter()
             .map(|v| v.as_str().unwrap())
             .collect();
-        assert_eq!(denied, NO_TOOLS, "every tool denied, nothing more or less");
+        assert_eq!(
+            denied[..NO_TOOLS.len()],
+            NO_TOOLS,
+            "every tool denied, then the trimmed features"
+        );
     }
 
     #[test]
@@ -371,10 +374,11 @@ mod tests {
             .find(|s| s.call.role == Role::Reviewer)
             .expect("a reviewer round ran");
         assert_eq!(
-            reviewer.settings,
-            json!({ "permissions": { "deny": ["Agent", "Task", "Bash"] } }),
+            reviewer.settings["permissions"]["deny"].as_array().unwrap()[..3],
+            ["Agent", "Task", "Bash"],
             "Read, Grep and Glob stay, unlike the judge's"
         );
+        assert!(!reviewer.settings.to_string().contains("\"Read\""));
     }
 
     // The review skill answers under its own headings and spawns sub-agents

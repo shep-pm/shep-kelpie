@@ -407,11 +407,12 @@ fn the_claude_round_gets_the_latest_shots_and_may_open_them() {
             .contains("gives its location as the PNG's full path and `:0`")
     );
     assert_eq!(
-        round.settings,
-        json!({ "permissions": {
-            "deny": ["Agent", "Task", "Bash"],
-            "additionalDirectories": [dir],
-        } })
+        round.settings["permissions"]["deny"].as_array().unwrap()[..3],
+        ["Agent", "Task", "Bash"]
+    );
+    assert_eq!(
+        round.settings["permissions"]["additionalDirectories"],
+        json!([dir])
     );
     assert_eq!(rig.shots.jobs().len(), 1, "one run of one head");
 }
