@@ -326,6 +326,43 @@ fn each_piece_of_a_split_gets_its_own_worker_pick() {
 }
 
 #[test]
+fn a_forge_refusing_a_piece_s_worker_label_does_not_fail_the_split() {
+    // `shep kelpie add` never creates a `worker:<model>-<effort>` label, so
+    // the forge may well refuse one kelpie has not made yet: that is never
+    // reason to fail the whole split, only to fall back quietly.
+    let rig = Rig::new("koffing");
+    rig.planning_on();
+    rig.merge_auto();
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.forge.list_ready(5, false);
+    rig.claude.script([Scripted::Text(
+        r#"{"split": true, "why": "Two slices.", "pieces": [
+            {"title": "Store the thing", "body": "Build the store.", "worker": "sonnet-high"},
+            {"title": "Show the thing", "body": "Build the screen.", "blocked_by": [1]}]}"#,
+    )]);
+    step(&runner).unwrap();
+    rig.forge.set_labels_down(true);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Split {
+            issue: 5,
+            sub_issues: vec![900, 901],
+            comment_failed: None,
+        })
+    );
+    assert_eq!(rig.forge.issue_labels(900), ["ready-for-agent"]);
+    let [(_, comment)] = rig.forge.comments().try_into().unwrap();
+    assert!(
+        comment.contains(
+            "- #900: Store the thing, worker defaulted to the project's: `sonnet-high` names a \
+             worker kelpie runs, but its label could not be confirmed"
+        ),
+        "{comment}"
+    );
+}
+
+#[test]
 fn a_piece_s_sub_issue_that_inherits_a_worker_label_from_its_parent_keeps_it() {
     let rig = Rig::new("tentacool");
     rig.planning_on();

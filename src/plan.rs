@@ -73,17 +73,22 @@ pub fn resolved_label(named: Option<&str>) -> Option<String> {
     }
 }
 
-/// Why [`resolved_label`] is `None` for what the reply named, in one phrase
+/// Why a worker the plan named, or a label it resolved to, is not the one
+/// that ended up running the issue or sub-issue, in one phrase
 ///
-/// Meaningless where `named` resolves after all: guarded rather than
-/// trusted to callers, so a mismatch between the two reads as a bug in
-/// this function, not a wrong word to the maintainer.
+/// Also fits a name [`resolved_label`] reads as `Some`, since writing that
+/// label is best effort too: the forge may refuse it, a `worker:` label
+/// `shep kelpie add` never created among them. A caller passing `named` by
+/// itself, with no write to blame, still reads sensibly rather than
+/// calling a valid pick unsupported.
 pub fn fallback_reason(named: Option<&str>) -> String {
     let Some(named) = named else {
         return "the plan named no worker".to_owned();
     };
     if resolved_label(Some(named)).is_some() {
-        return format!("`{named}` already names a worker kelpie runs");
+        return format!(
+            "`{named}` names a worker kelpie runs, but its label could not be confirmed"
+        );
     }
     match parse_worker_value(named) {
         Ok(WorkerLabel::Local) => {
@@ -388,14 +393,15 @@ mod tests {
 
     #[test]
     fn why_a_worker_falls_back_never_calls_a_resolved_one_unsupported() {
-        // `fallback_reason` is only meaningful where `resolved_label` is
-        // `None`; called on a name that does resolve, it must not claim
-        // that name is unsupported.
+        // A name that does resolve still reaches `fallback_reason` when
+        // its label could not be confirmed on the sub-issue (the write is
+        // best effort): it must not then claim that name is unsupported.
         let text = fallback_reason(Some("sonnet-medium"));
         assert!(
             !text.contains("is not a model and effort kelpie runs"),
             "{text}"
         );
+        assert!(text.contains("`sonnet-medium`"), "{text}");
     }
 
     #[test]

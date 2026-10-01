@@ -145,12 +145,15 @@ impl Runner {
                 }
             }
             // The copied parent labels may already carry one, which wins
-            // over the piece's own pick.
+            // over the piece's own pick. Writing the pick is best effort:
+            // `shep kelpie add` never creates a `worker:<model>-<effort>`
+            // label, so the forge may refuse one it does not have yet. A
+            // sub-issue the write misses just falls back to the project's
+            // own worker, and the comment says so once the split finishes.
             if !plan::already_has_worker(&shown.labels)
                 && let Some(label) = plan::resolved_label(piece.worker.as_deref())
-                && let Err(e) = forge.set_issue_label(repo, number, &label, true)
             {
-                return Ok(Err(format!("cannot add `{label}` to #{number}: {e}")));
+                let _ = forge.set_issue_label(repo, number, &label, true);
             }
             self.change_split(issue, |_, linked| *linked += 1)?;
         }
