@@ -186,7 +186,7 @@ pub async fn check(shep_home: &Path, probes: Probes<'_>, here: Here<'_>, ask: As
     let mut lines = vec![
         machine::claude(probes.meter, probes.clock),
         machine::gh(probes.forge),
-        machine::sandbox(probes.host),
+        machine::sandbox(probes.host, here.kelpie_home),
     ];
     match shepherd::connect(shep_home).await {
         Ok(client) => {

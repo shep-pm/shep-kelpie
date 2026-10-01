@@ -15,6 +15,8 @@ use crate::ports::{
 };
 use crate::preview::Tools;
 
+#[cfg(test)]
+mod escapes;
 pub(crate) mod sandbox;
 pub(crate) mod settings;
 

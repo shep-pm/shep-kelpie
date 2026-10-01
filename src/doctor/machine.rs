@@ -8,6 +8,7 @@ use shep_client::shep_core::protocol::request::ProcessInfo;
 use super::Line;
 use super::host::Host;
 use crate::ports::{Clock, Forge, ForgeError, Meter, MeterError};
+use crate::preview::Tools;
 use crate::shepherd::ConnectRefused;
 
 // A tool's own message can run to a page, and the first line says what went wrong.
@@ -81,22 +82,33 @@ pub(super) fn gh(forge: &dyn Forge) -> Line {
     }
 }
 
-/// Claude Code's sandbox available, which every worker runs in
-pub(super) fn sandbox(host: &dyn Host) -> Line {
+/// The sandbox runtime installed under `kelpie_home`, with what it needs, which every agent runs in
+pub(super) fn sandbox(host: &dyn Host, kelpie_home: &Path) -> Line {
     let gaps = host.sandbox_gaps();
-    if gaps.is_empty() {
-        return Line::ok("sandbox", "Claude Code's sandbox can run");
+    if !gaps.is_empty() {
+        let list = gaps.join(" and ");
+        return Line::missing(
+            "sandbox",
+            format!(
+                "the sandbox runtime needs {list}, which this machine lacks, so no agent can run"
+            ),
+            format!(
+                "install {list} with your package manager, such as `sudo apt-get install bubblewrap socat` on Debian"
+            ),
+        );
     }
-    let list = gaps.join(" and ");
-    Line::missing(
-        "sandbox",
-        format!(
-            "Claude Code's sandbox needs {list}, which this machine lacks, so no worker can start"
-        ),
-        format!(
-            "install {list} with your package manager, such as `sudo apt-get install bubblewrap socat` on Debian"
-        ),
-    )
+    let srt = Tools::under(kelpie_home).sandbox();
+    if !srt.is_file() {
+        return Line::missing(
+            "sandbox",
+            format!(
+                "the sandbox runtime is not at {}, so no runner starts",
+                srt.display()
+            ),
+            "run `shep kelpie tools install`",
+        );
+    }
+    Line::ok("sandbox", "the sandbox runtime can run")
 }
 
 /// The shepherd, on the pinned shep line

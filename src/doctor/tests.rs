@@ -65,6 +65,9 @@ impl Scene {
             clock,
             shepherd,
         };
+        let srt = Tools::under(&scene.kelpie_home).sandbox();
+        std::fs::create_dir_all(srt.parent().unwrap()).unwrap();
+        std::fs::write(srt, "").unwrap();
         scene.runs("koji", |_| {});
         scene
     }
@@ -297,6 +300,17 @@ async fn a_sandbox_the_machine_lacks_names_what_it_lacks() {
     let (what, fix) = missing(&report, "sandbox");
     assert!(what.contains("bwrap and socat"), "{what}");
     assert!(fix.contains("bubblewrap"), "{fix}");
+    assert!(!report.passed());
+}
+
+#[tokio::test]
+async fn a_machine_without_the_sandbox_runtime_is_told_to_install_it() {
+    let scene = Scene::new().await;
+    std::fs::remove_file(Tools::under(&scene.kelpie_home).sandbox()).unwrap();
+    let report = scene.report().await;
+    let (what, fix) = missing(&report, "sandbox");
+    assert!(what.contains("no runner starts"), "{what}");
+    assert_eq!(fix, "run `shep kelpie tools install`");
     assert!(!report.passed());
 }
 

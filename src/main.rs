@@ -21,8 +21,8 @@
 //! `shep kelpie settings move <project> [<sheep>]`: moves a project's settings
 //! file, and kelpie's own, into their tables on kelpie's shepherd.
 //!
-//! `shep kelpie tools install`: installs the tools kelpie shows a work item's UI
-//! with, under kelpie's home.
+//! `shep kelpie tools install`: installs the sandbox runtime every agent runs
+//! in, and the tools kelpie shows a work item's UI with, under kelpie's home.
 //!
 //! `shep kelpie totp [--rotate]`, run as `shep kelpie totp [--rotate]` where kelpie
 //! is not on the PATH: prints the authenticator secret that answers a ruling
@@ -31,7 +31,10 @@
 //! ntfy back on after too many wrong codes.
 //!
 //! `kelpie shots-mcp <tools> <job>`: a worker's shots tool, an MCP server
-//! Claude Code starts from the worker's MCP config.
+//! kelpie starts outside the worker's sandbox.
+//!
+//! `kelpie mcp-connect <socket>`: what an agent starts in place of such a
+//! server, inside its sandbox, which carries its stdio to the server's socket.
 //!
 //! `kelpie relay-yes <project> <id>`, `kelpie relay-answer <project>
 //! <params>`: what the relay's own settings gate on. Both send
