@@ -174,11 +174,14 @@ fn marking_a_draft_ready_is_codexs_summon_under_its_lease_and_no_comment_follows
         step(&runner).unwrap(),
         Some(StepReport::CodeRabbitReviewed { .. } | StepReport::CodeRabbitSatisfied { .. })
     ));
-    assert_eq!(
-        comments_of(&rig, SUMMON),
-        0,
-        "one review, and the book counted one"
-    );
+    assert_eq!(comments_of(&rig, SUMMON), 0, "one review");
+    let counted = rig
+        .leases
+        .told()
+        .into_iter()
+        .filter(|told| matches!(told, Told::Window(WindowFact::Summoned, _)))
+        .count();
+    assert_eq!(counted, 1, "and the book counted one");
 }
 
 #[test]

@@ -64,6 +64,7 @@ impl Runner {
                 full,
             };
             self.update(|item| item.phase = Phase::CodeRabbit(stage))?;
+            self.release(bot)?;
             let reason = format!("cannot mark #{number} ready: {e}");
             return Ok(Some(self.gate_failed(reason)));
         }

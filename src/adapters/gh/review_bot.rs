@@ -91,7 +91,7 @@ pub(super) fn activity(
         reviews: parse_reviews(&reviews)?,
         threads: parse_threads(&threads, login.graphql)?,
         statuses: parse_statuses(&statuses)?,
-        reactions: parse_reactions(&reactions, login.graphql)?,
+        reactions: parse_reactions(&reactions, login.rest)?,
     })
 }
 
@@ -216,8 +216,8 @@ pub(crate) fn parse_statuses(stdout: &[u8]) -> Result<Vec<Status>, ForgeError> {
         .collect()
 }
 
-// Only the reactions `bot` left, by its GraphQL login. A reaction's user comes
-// with the `[bot]` suffix that an author's login has dropped.
+// Only the reactions `bot` left, by its REST login: a reaction's user comes
+// with the `[bot]` suffix, which another account of the same name lacks.
 pub(crate) fn parse_reactions(stdout: &[u8], bot: &str) -> Result<Vec<Reaction>, ForgeError> {
     #[derive(Deserialize)]
     struct Reply {
@@ -259,13 +259,7 @@ pub(crate) fn parse_reactions(stdout: &[u8], bot: &str) -> Result<Vec<Reaction>,
         .reactions
         .nodes
         .into_iter()
-        .filter(|node| {
-            let by = node
-                .user
-                .as_ref()
-                .map(|u| u.login.trim_end_matches("[bot]"));
-            by == Some(bot)
-        })
+        .filter(|node| node.user.as_ref().is_some_and(|u| u.login == bot))
         .map(|node| {
             Ok(Reaction {
                 content: node.content,
@@ -381,17 +375,20 @@ mod tests {
     const REACTIONS_234: &str = include_str!("../../../fixtures/codex-reactions-234.json");
 
     #[test]
-    fn a_reaction_is_read_by_the_bots_login_with_or_without_its_suffix() {
-        let codex = crate::codex::LOGIN.graphql;
+    fn a_reaction_is_read_by_the_bots_exact_login() {
+        let codex = crate::codex::LOGIN.rest;
         let seen = parse_reactions(REACTIONS_234.as_bytes(), codex).unwrap();
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].content, "THUMBS_UP");
         assert_eq!(seen[0].at, Timestamp(1_790_829_786));
-        let cubic = crate::cubic::LOGIN.graphql;
+        let cubic = crate::cubic::LOGIN.rest;
         assert_eq!(
             parse_reactions(REACTIONS_234.as_bytes(), cubic).unwrap(),
             []
         );
+        // The same name with no suffix is an account, not the app.
+        let account = REACTIONS_234.replace("connector[bot]", "connector");
+        assert_eq!(parse_reactions(account.as_bytes(), codex).unwrap(), []);
         assert!(matches!(
             parse_reactions(b"{}", codex),
             Err(ForgeError::Unreadable(_))

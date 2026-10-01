@@ -68,11 +68,16 @@ impl Profile for Codex {
             return Reading::Refused { opens: None };
         }
         // A thumbs up is its review with nothing in it, and it may leave no
-        // comment, only the notice it answers every summon with.
+        // comment, only the notice it answers every summon with. It names no
+        // commit, so one that came with a comment on another is that review's.
+        let late = since_summon
+            .clone()
+            .filter_map(|c| commit_of(&c.body))
+            .any(|commit| !names(head, commit));
         let thumbs = activity
             .reactions
             .iter()
-            .find(|r| r.at.0 >= from && r.content == THUMBS_UP);
+            .find(|r| r.at.0 >= from && r.content == THUMBS_UP && !late);
         match (thumbs, since_summon.next()) {
             (Some(thumbs), _) => Reading::Completed { at: thumbs.at },
             (None, Some(_)) => Reading::Processing,
@@ -116,11 +121,14 @@ impl Profile for Codex {
 // names only the first ten characters, so a commit is read by its prefix.
 fn reviewed(activity: &Activity) -> impl Iterator<Item = &str> {
     let posted = activity.reviews.iter().filter(|r| says(&r.body, REVIEW));
-    let said = activity.comments.iter().filter_map(|c| {
-        let (_, after) = c.body.split_once(READ)?;
-        after.split('`').next().filter(|commit| !commit.is_empty())
-    });
+    let said = activity.comments.iter().filter_map(|c| commit_of(&c.body));
     posted.map(|r| r.commit.as_str()).chain(said)
+}
+
+// The commit a comment says it read, as far as it gives it.
+fn commit_of(body: &str) -> Option<&str> {
+    let (_, after) = body.split_once(READ)?;
+    after.split('`').next().filter(|commit| !commit.is_empty())
 }
 
 // Whether `commit`, whole or cut short, is `head`.
@@ -133,12 +141,25 @@ fn says(body: &str, phrase: &str) -> bool {
 }
 
 // Its refusal is meant to name the plan's usage limits for code reviews, but
-// was never recorded, so any comment naming a limit reached or exceeded is
-// read as one, as cubic's is. Its review footer names none.
+// was never recorded, so a comment naming a limit reached or exceeded, as a
+// phrase, is read as one. A comment that names the commit it read is a review,
+// whatever else it says.
 fn refused(body: &str) -> bool {
+    if commit_of(body).is_some() {
+        return false;
+    }
     let body = body.to_lowercase();
-    body.contains("usage limit")
-        || (body.contains("limit") && (body.contains("reached") || body.contains("exceeded")))
+    [
+        "usage limit",
+        "limits for code review",
+        "limit reached",
+        "limit exceeded",
+    ]
+    .iter()
+    .any(|phrase| body.contains(phrase))
+        || ["reached your", "exceeded your"]
+            .iter()
+            .any(|phrase| body.contains(phrase) && body.contains(" limit"))
 }
 
 /// A thread as a finding the judge can rule on
@@ -353,7 +374,7 @@ mod tests {
     #[test]
     fn its_thumbs_up_recorded_on_the_pull_request_is_a_review_with_nothing_in_it() {
         let seen = Activity {
-            reactions: parse_reactions(REACTIONS_234.as_bytes(), LOGIN.graphql).unwrap(),
+            reactions: parse_reactions(REACTIONS_234.as_bytes(), LOGIN.rest).unwrap(),
             ..Activity::default()
         };
         let summoned = iso("2026-10-01T04:39:19Z");
@@ -419,5 +440,52 @@ mod tests {
         };
         assert_eq!(Codex.reviewed_besides(&seen, "0ther"), 1);
         assert_eq!(Codex.reviewed_besides(&seen, HEAD_234), 0);
+    }
+
+    #[test]
+    fn a_thumbs_up_beside_a_review_of_another_commit_is_not_a_review_of_the_head() {
+        let seen = Activity {
+            comments: vec![comment(
+                "Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `aaaaaaaaaa`",
+                200,
+            )],
+            reactions: vec![Reaction {
+                content: "THUMBS_UP".into(),
+                at: Timestamp(201),
+            }],
+            ..Activity::default()
+        };
+        let head = "bbbbbbbbbbbbbbbbbbbb";
+        assert_eq!(Codex.read(&seen, head, Timestamp(100)), Reading::Processing);
+        assert_eq!(
+            Codex.read(&seen, "aaaaaaaaaabbbb", Timestamp(100)),
+            Reading::Reviewed
+        );
+    }
+
+    #[test]
+    fn a_stale_clean_comment_or_a_word_that_holds_limit_is_no_refusal() {
+        let stale = Activity {
+            comments: vec![comment(
+                "Codex Review: the usage limit is reached in `rate.rs`.\n\n**Reviewed commit:** `aaaaaaaaaa`",
+                200,
+            )],
+            ..Activity::default()
+        };
+        assert_eq!(
+            Codex.read(&stale, "bbbbbbbbbb", Timestamp(100)),
+            Reading::Processing
+        );
+        for text in [
+            "Delimiters reached the parser.",
+            "An unlimited plan exceeded nothing.",
+            "The rate-limited path was reached.",
+        ] {
+            assert!(!refused(text), "{text}");
+        }
+        assert!(refused(
+            "You have reached your Codex usage limits for code reviews."
+        ));
+        assert!(refused("Review limit exceeded."));
     }
 }
