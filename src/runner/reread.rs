@@ -57,7 +57,7 @@ impl Runner {
         if agents != self.agents {
             changed.push("agents");
         }
-        if gpu_metrics_url != self.gpu_metrics_url {
+        if gpu_metrics_url != self.gpu.url() {
             changed.push("gpu_metrics_url");
         }
         if changed.is_empty() && waiting.is_empty() {
@@ -80,7 +80,7 @@ impl Runner {
         self.reviewers = reviewers;
         self.lineup = lineup;
         self.agents = agents;
-        self.gpu_metrics_url = gpu_metrics_url;
+        self.gpu.point_at(gpu_metrics_url);
         self.extra_instructions = extra_instructions;
         self.channels = channels;
         self.webhook = webhook;

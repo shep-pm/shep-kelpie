@@ -15,13 +15,9 @@ use crate::board::{LabelError, Skip, WorkerModel, worker_for, worker_override};
 use crate::channels::{Channel, Channels};
 use crate::local_paths::LocalPaths;
 use crate::pacer::Assessment;
-use crate::ports::{
-    ForgeError, GpuMetrics, Guarded, Leased, Ports, SessionId, Timestamp, Visibility,
-};
+use crate::ports::{ForgeError, Guarded, Leased, Ports, SessionId, Timestamp, Visibility};
 use crate::review_bot::{Bot, Profile, Reviewers};
-use crate::settings::{
-    Account, EndpointUrl, LoopReviewer, NonBlank, RoleAgents, Runs, Settings, SettingsError,
-};
+use crate::settings::{Account, LoopReviewer, NonBlank, RoleAgents, Runs, Settings, SettingsError};
 use crate::skills::Skills;
 use crate::state::ids::RulingIds;
 use crate::state::{ProjectState, RunState, StateError, StateStore};
@@ -42,6 +38,7 @@ mod coderabbit;
 mod dispatch;
 mod follow_up;
 mod gate;
+mod gpu;
 #[cfg(test)]
 mod gpu_tests;
 mod guard_hooks;
@@ -71,6 +68,7 @@ mod words;
 pub use crate::coderabbit::LABEL as SUMMON_LABEL;
 pub use adopt::AdoptError;
 pub use claim::IN_PROGRESS;
+pub use gpu::GpuStatus;
 pub use merge::DropError;
 pub use pace::PacerStatus;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
@@ -80,9 +78,7 @@ pub use rework::{HUMAN, ReworkError};
 pub use ruling::{Answer, RuleError};
 pub use timings::{Totals, settle};
 use trigger::issue_list;
-pub use trigger::{
-    ACTIONS, GpuStatus, RELAY_RULE, Status, WorkItemStatus, answer, is_no_or_answer,
-};
+pub use trigger::{ACTIONS, RELAY_RULE, Status, WorkItemStatus, answer, is_no_or_answer};
 pub use trigger::{GateError, WhichItem};
 pub use turn::step;
 pub use words::read_answer;
@@ -194,8 +190,8 @@ pub struct Runner {
     agents: RoleAgents,
     // The maintainer's home folder, for `~/` in kelpie's own settings
     home: PathBuf,
-    // The page `status` reads the GPU from, when kelpie's settings name one
-    gpu_metrics_url: Option<EndpointUrl>,
+    // The GPU's last reading, from the page kelpie's settings name
+    gpu: gpu::GpuWatch,
     // None when rulings do not go to the webhook
     webhook: Option<Webhook>,
     channels: Channels,
@@ -252,7 +248,10 @@ impl Runner {
         let leases = Arc::clone(&ports.local_leases);
         ports.agents = Arc::new(Leased::new(Arc::clone(&ports.agents), leases));
         let reviewers = kelpie_settings.reviewers;
-        let gpu_metrics_url = kelpie_settings.gpu_metrics_url.clone();
+        let gpu = gpu::GpuWatch::start(
+            Arc::clone(&ports.gpu),
+            kelpie_settings.gpu_metrics_url.clone(),
+        );
         let agents = settings.role_agents(&kelpie_settings.agents)?;
         let lineup = settings.lineup(&kelpie_settings, home)?;
         let (channels, webhook) = ruling_channels(&settings, kelpie_settings)?;
@@ -320,7 +319,7 @@ impl Runner {
             lineup,
             agents,
             home: home.to_owned(),
-            gpu_metrics_url,
+            gpu,
             webhook,
             channels,
             retry: None,
@@ -366,20 +365,8 @@ impl Runner {
         }
     }
 
-    /// What reads the GPU's metrics page, and the page, when kelpie's
-    /// settings name one
-    pub fn gpu_probe(&self) -> Option<(Arc<dyn GpuMetrics>, EndpointUrl)> {
-        let url = self.gpu_metrics_url.clone()?;
-        Some((Arc::clone(&self.ports.gpu), url))
-    }
-
-    /// The project's state as `status` reports it, without the GPU
+    /// The project's state as `status` reports it
     pub fn status(&self) -> Status<'_> {
-        self.status_with(None)
-    }
-
-    /// The project's state as `status` reports it, with the GPU as read
-    pub fn status_with(&self, gpu: Option<GpuStatus>) -> Status<'_> {
         let now = self.ports.clock.now();
         Status {
             project: self.project.as_str(),
@@ -410,7 +397,7 @@ impl Runner {
             pacer: self.pacer_status(now),
             skills: self.skills.status(),
             local_model: self.ports.reviewer.seat().map(Into::into),
-            gpu,
+            gpu: self.gpu.status(),
             local_leases: self.local_leases(),
         }
     }

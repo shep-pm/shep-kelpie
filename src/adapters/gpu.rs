@@ -3,7 +3,7 @@
 //! The URL reaches curl as a config on its stdin, so no process listing
 //! shows the host, and no error carries it.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 
 use super::curl::render;
@@ -34,6 +34,7 @@ impl GpuMetrics for GpuCurl {
             ("proto", "=https,http".to_owned()),
             ("connect-timeout", CONNECT_TIMEOUT.to_string()),
             ("max-time", MAX_TIME.to_string()),
+            ("max-filesize", PAGE_MAX.to_string()),
             ("write-out", "\n%{http_code}".to_owned()),
         ]);
         let mut child = Command::new("curl")
@@ -46,17 +47,30 @@ impl GpuMetrics for GpuCurl {
         let mut stdin = child.stdin.take().expect("stdin was piped");
         let written = stdin.write_all(config.as_bytes());
         drop(stdin);
-        let output = child
-            .wait_with_output()
-            .map_err(|e| GpuError::Spawn(e.to_string()))?;
-        if written.is_err() || !output.status.success() {
-            return Err(GpuError::Unreachable(output.status.code().unwrap_or(-1)));
+        // Reading stops past the cap, so a server that streams without end
+        // fills no more than that.
+        let mut bytes = Vec::new();
+        let mut stdout = child.stdout.take().expect("stdout was piped");
+        let read = stdout
+            .by_ref()
+            .take(PAGE_MAX as u64 + 16)
+            .read_to_end(&mut bytes);
+        let capped = bytes.len() > PAGE_MAX;
+        if capped {
+            let _ = child.kill();
         }
-        let text = String::from_utf8_lossy(&output.stdout);
+        let exit = child.wait().map_err(|e| GpuError::Spawn(e.to_string()))?;
+        if capped {
+            return Err(GpuError::Unreadable);
+        }
+        if written.is_err() || read.is_err() || !exit.success() {
+            return Err(GpuError::Unreachable(exit.code().unwrap_or(-1)));
+        }
+        let text = String::from_utf8_lossy(&bytes);
         let (page, status) = text.rsplit_once('\n').unwrap_or(("", &text));
         match status.trim().parse::<u16>() {
-            Ok(200..=299) if page.len() <= PAGE_MAX => parse(page),
-            Ok(200..=299) | Err(_) => Err(GpuError::Unreadable),
+            Ok(200..=299) => parse(page),
+            Err(_) => Err(GpuError::Unreadable),
             Ok(status) => Err(GpuError::Refused(status)),
         }
     }
@@ -73,10 +87,16 @@ fn parse(page: &str) -> Result<Vec<Gpu>, GpuError> {
         let Some((name, labels, value)) = sample(line) else {
             continue;
         };
-        if ![UTILIZATION, MEMORY_USED, MEMORY_TOTAL, POWER, TEMPERATURE].contains(&name) {
-            continue;
-        }
         let id = label(labels, "uuid");
+        let figure = match name {
+            UTILIZATION => Figure::Utilization(tenths(value * 100.0)),
+            MEMORY_USED | MEMORY_TOTAL if value < 0.0 => continue,
+            MEMORY_USED => Figure::Used(value.round() as u64),
+            MEMORY_TOTAL => Figure::Total(value.round() as u64),
+            POWER => Figure::Power(tenths(value)),
+            TEMPERATURE => Figure::Temperature(tenths(value)),
+            _ => continue,
+        };
         let at = match gpus.iter().position(|gpu| gpu.id.as_deref() == id) {
             Some(at) => at,
             None => {
@@ -92,12 +112,12 @@ fn parse(page: &str) -> Result<Vec<Gpu>, GpuError> {
             }
         };
         let gpu = &mut gpus[at];
-        match name {
-            UTILIZATION => gpu.utilization_percent = Some(tenths(value * 100.0)),
-            MEMORY_USED => gpu.memory_used_bytes = bytes(value),
-            MEMORY_TOTAL => gpu.memory_total_bytes = bytes(value),
-            POWER => gpu.power_watts = Some(tenths(value)),
-            _ => gpu.temperature_celsius = Some(tenths(value)),
+        match figure {
+            Figure::Utilization(v) => gpu.utilization_percent = Some(v),
+            Figure::Used(v) => gpu.memory_used_bytes = Some(v),
+            Figure::Total(v) => gpu.memory_total_bytes = Some(v),
+            Figure::Power(v) => gpu.power_watts = Some(v),
+            Figure::Temperature(v) => gpu.temperature_celsius = Some(v),
         }
     }
     if gpus.is_empty() {
@@ -128,7 +148,13 @@ fn sample(line: &str) -> Option<(&str, &str, f64)> {
 
 // The quoted value of `key` among a sample's labels.
 fn label<'a>(labels: &'a str, key: &str) -> Option<&'a str> {
-    let start = labels.find(&format!("{key}=\""))? + key.len() + 2;
+    let own = format!("{key}=\"");
+    let at = if labels.starts_with(&own) {
+        0
+    } else {
+        labels.find(&format!(",{own}"))? + 1
+    };
+    let start = at + own.len();
     let end = labels[start..].find('"')?;
     Some(&labels[start..start + end])
 }
@@ -137,8 +163,13 @@ fn tenths(value: f64) -> f64 {
     (value * 10.0).round() / 10.0
 }
 
-fn bytes(value: f64) -> Option<u64> {
-    (value >= 0.0).then(|| value.round() as u64)
+// A reading, once its value has been accepted.
+enum Figure {
+    Utilization(f64),
+    Used(u64),
+    Total(u64),
+    Power(f64),
+    Temperature(f64),
 }
 
 #[cfg(test)]
@@ -154,7 +185,7 @@ mod tests {
         assert_eq!(
             gpus,
             [Gpu {
-                id: Some("GPU-3f2a6c1e-0b7d-4c55-9d1a-52f1d0c4a7e8".into()),
+                id: Some("3f2a6c1e-0b7d-4c55-9d1a-52f1d0c4a7e8".into()),
                 utilization_percent: Some(97.0),
                 memory_used_bytes: Some(20_132_659_200),
                 memory_total_bytes: Some(25_757_220_864),
@@ -176,6 +207,14 @@ mod tests {
             (gpus[1].temperature_celsius, gpus[1].power_watts),
             (Some(55.0), Some(90.0))
         );
+    }
+
+    #[test]
+    fn a_label_is_matched_whole_and_a_rejected_value_names_no_gpu() {
+        let page = "nvidia_smi_temperature_gpu{mig_uuid=\"x\",uuid=\"a\"} 40\n";
+        assert_eq!(parse(page).unwrap()[0].id.as_deref(), Some("a"));
+        let negative = "nvidia_smi_memory_used_bytes{uuid=\"a\"} -1\n";
+        assert_eq!(parse(negative), Err(GpuError::Unreadable));
     }
 
     #[test]

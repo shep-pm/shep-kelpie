@@ -1,21 +1,21 @@
 # HELP nvidia_smi_utilization_gpu_ratio utilization.gpu [%]
 # TYPE nvidia_smi_utilization_gpu_ratio gauge
-nvidia_smi_utilization_gpu_ratio{uuid="GPU-3f2a6c1e-0b7d-4c55-9d1a-52f1d0c4a7e8"} 0.97
+nvidia_smi_utilization_gpu_ratio{uuid="3f2a6c1e-0b7d-4c55-9d1a-52f1d0c4a7e8"} 0.97
 # HELP nvidia_smi_memory_used_bytes memory.used [MiB]
 # TYPE nvidia_smi_memory_used_bytes gauge
-nvidia_smi_memory_used_bytes{uuid="GPU-3f2a6c1e-0b7d-4c55-9d1a-52f1d0c4a7e8"} 2.01326592e+10
+nvidia_smi_memory_used_bytes{uuid="3f2a6c1e-0b7d-4c55-9d1a-52f1d0c4a7e8"} 2.01326592e+10
 # HELP nvidia_smi_memory_total_bytes memory.total [MiB]
 # TYPE nvidia_smi_memory_total_bytes gauge
-nvidia_smi_memory_total_bytes{uuid="GPU-3f2a6c1e-0b7d-4c55-9d1a-52f1d0c4a7e8"} 2.5757220864e+10
+nvidia_smi_memory_total_bytes{uuid="3f2a6c1e-0b7d-4c55-9d1a-52f1d0c4a7e8"} 2.5757220864e+10
 # HELP nvidia_smi_power_draw_watts power.draw [W]
 # TYPE nvidia_smi_power_draw_watts gauge
-nvidia_smi_power_draw_watts{uuid="GPU-3f2a6c1e-0b7d-4c55-9d1a-52f1d0c4a7e8"} 312.45
+nvidia_smi_power_draw_watts{uuid="3f2a6c1e-0b7d-4c55-9d1a-52f1d0c4a7e8"} 312.45
 # HELP nvidia_smi_temperature_gpu temperature.gpu
 # TYPE nvidia_smi_temperature_gpu gauge
-nvidia_smi_temperature_gpu{uuid="GPU-3f2a6c1e-0b7d-4c55-9d1a-52f1d0c4a7e8"} 71
+nvidia_smi_temperature_gpu{uuid="3f2a6c1e-0b7d-4c55-9d1a-52f1d0c4a7e8"} 71
 # HELP nvidia_smi_gpu_info A metric with a constant '1' value labeled by gpu uuid, name, driver_version, vbios_version.
 # TYPE nvidia_smi_gpu_info gauge
-nvidia_smi_gpu_info{driver_version="560.94",name="NVIDIA GeForce RTX 4090",uuid="GPU-3f2a6c1e-0b7d-4c55-9d1a-52f1d0c4a7e8",vbios_version="95.02.3C.00.A1"} 1
+nvidia_smi_gpu_info{driver_version="560.94",name="NVIDIA GeForce RTX 4090",uuid="3f2a6c1e-0b7d-4c55-9d1a-52f1d0c4a7e8",vbios_version="95.02.3C.00.A1"} 1
 # HELP go_goroutines Number of goroutines that currently exist.
 # TYPE go_goroutines gauge
 go_goroutines 8
