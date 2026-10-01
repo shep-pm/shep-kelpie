@@ -6,16 +6,21 @@ This is early. It changes without notice, and there is no release yet.
 
 ## Getting started
 
-From nothing to a worker on your repo. The output below is what each command printed on a scratch shepherd and a fresh checkout.
+From nothing to a worker on your repo. The examples use a project called `scratch`, on the repo `shep-pm/shep`.
 
 ### Before you start
 
 You need these on your machine:
 
-- [shep](https://github.com/shep-pm/shep) 0.12 and Rust 1.88 or later, to build kelpie
+- macOS or Linux
+- [shep](https://github.com/shep-pm/shep) 0.12 and Rust 1.88 or later, to build shep-kelpie
 - Claude Code, signed in
+- `node` and `npm`: `tools install` runs them, and so does every agent's sandbox
+- on Linux, `bwrap` and `socat`, which the sandbox needs
 - `git`, and `gh` signed in to the account that opens the pull requests
 - a GitHub repo whose default branch is `main`, and a checkout of it
+
+A runner is a sheep, so it gets the `PATH` your shepherd was started with, and it needs `claude`, `node`, `gh` and `git` on it. `shep kelpie doctor` runs in your shell, not the shepherd's, so it can pass while a runner fails to find one. Start the shepherd from a shell where `command -v claude node gh git` finds all four.
 
 ### 1. Install
 
@@ -45,7 +50,7 @@ NAME    SOURCE   SHEPHERD  STATUS
 kelpie  adopted  false     will start with the next shepherd
 ```
 
-If no shepherd is running, `shep muster` starts one, and kelpie with it. Then `shep dogs` shows it:
+Keep the name `kelpie`: the `shep kelpie` commands reach the dog by it. If no shepherd is running, `shep muster` starts one, and shep-kelpie with it. Then `shep dogs` shows it:
 
 ```
 ID  NAME    STATUS  PID    RESTARTS  EXIT  CPU  MEM   UPTIME  SOURCE
@@ -54,7 +59,7 @@ ID  NAME    STATUS  PID    RESTARTS  EXIT  CPU  MEM   UPTIME  SOURCE
 
 Adopt it once and leave it enabled. It is the dog that holds the leases every project's runner asks before a summon.
 
-### 3. Install kelpie's tools
+### 3. Install the tools
 
 Every project needs them. Each agent runs inside the sandbox runtime they bring, and a runner won't start without it.
 
@@ -66,7 +71,7 @@ shep kelpie tools install
 installed kelpie's tools in /path/to/.shep/kelpie/tools
 ```
 
-It downloads a headless Chrome of about 95 MiB, and puts it under kelpie's home, `$SHEP_HOME/kelpie`.
+It downloads a headless Chrome of about 95 MiB, and puts it under shep-kelpie's home, `$SHEP_HOME/kelpie`.
 
 ### 4. Add your project
 
@@ -79,11 +84,25 @@ shep kelpie add
 ```
 label `ready-for-agent`: already on shep-pm/shep
 label `ready-for-human`: already on shep-pm/shep
+label `in-progress`: already on shep-pm/shep
 label `review please`: already on shep-pm/shep
 runner `scratch`: added with its settings, stopped until `shep kelpie start`
 ```
 
-On a repo without those labels, `add` makes them. The project is named after the repo, or `shep kelpie add <name>`, as `scratch` was here.
+On a repo without those four labels, `add` makes them. The runner puts `in-progress` on an issue while a work item has it. The project is named after the repo, or `shep kelpie add <name>`, as `scratch` was here.
+
+`add` writes the project's settings with these defaults:
+
+- `merge_authority = "ask"`: you rule on every merge
+- `max_items = 1`: one work item at a time
+- `ci` is on when the checkout has `.github/workflows`
+- `coderabbit.enabled` is on for a public repo, off for a private one
+- `review.reviewers = ["claude"]`, unless `~/.claude/scripts/qwen-review.sh` exists
+- `pacing.enabled = true`
+- `worker.allowed_domains = []`
+- `worker.turn_timeout = 60`, in minutes
+
+The checkout is the project's repo, and shep-kelpie runs `git fetch`, `git worktree` and `git branch` against its `.git`. Its worktrees, build folders and state go under `$SHEP_HOME/kelpie/<project>`, never inside it. Add from a clone you don't work in if you'd rather keep your own checkout out of it.
 
 ### 5. Check the machine
 
@@ -99,17 +118,17 @@ ok       shepherd: shep 0.12.0 at /path/to/.shep
 ok       dog: kelpie's dog is running and has named itself
 ok       scratch: checkout: /path/to/checkout is a git checkout with an origin
 ok       scratch: push access: may push to shep-pm/shep
-ok       scratch: labels: shep-pm/shep has `ready-for-agent`, `ready-for-human`, `review please`
+ok       scratch: labels: shep-pm/shep has `ready-for-agent`, `ready-for-human`, `in-progress`, `review please`
 ok       scratch: coderabbit: CodeRabbit has commented on a pull request of shep-pm/shep
 ok       scratch: local review: ready
 MISSING  scratch: rulings: rulings go to the webhook, and kelpie's settings name none. Fix: add a `webhook` table to kelpie's [kelpie] section of dogs.toml, as kelpie-settings.example.toml shows, or drop `webhook` from `ruling_channels`
 1 thing a project needs is missing
 ```
 
-Each `MISSING` line names its fix, and `doctor` exits non-zero until they are done. A ruling is a question kelpie cannot settle itself, such as a merge, and it must reach you. Pick where:
+Each `MISSING` line names its fix, and `doctor` exits non-zero until they are done. A ruling is a question shep-kelpie cannot settle itself, such as a merge, and it must reach you. Pick where:
 
-- ntfy or Discord: add the `[kelpie.webhook]` table to `dogs.toml` in the shepherd's home, from `kelpie-settings.example.toml`
-- the Claude app on your phone: put `ruling_channels = ["relay"]` in the `[kelpie]` section of that file instead
+- ntfy or Discord: add a `[kelpie.webhook]` table to `dogs.toml` in the shepherd's home. Copy that table alone from `kelpie-settings.example.toml`, and put your own URL in it: the file's `url` is a public ntfy.sh topic anyone can read
+- the Claude app on your phone: put `ruling_channels = ["relay"]` in the `[kelpie]` section of that file instead. The relay is a Claude Code session started in your home folder, which Claude Code must already trust, with Remote Control on and the phone app signed in
 
 Run `shep kelpie doctor` again. With the relay alone it ends:
 
@@ -118,15 +137,44 @@ ok       scratch: rulings: rulings go to the relay session, and the webhook is o
 nothing a project needs is missing
 ```
 
-### 6. Start it, and label a first issue
+### 6. Open the sandbox to your registries
+
+A worker's sandbox reaches `github.com`, `api.github.com` and the model's API, and nothing else. `add` leaves `allowed_domains` empty, so a first issue on a repo with a cold cache can't fetch crates or npm packages. In the project's table, add the registries it builds from:
+
+```toml
+[app.dogs.kelpie.worker]
+allowed_domains = ["crates.io", "index.crates.io", "static.crates.io"]
+```
+
+For npm, that is `registry.npmjs.org`. A change reaches a running runner at its next wake.
+
+### 7. Start it, and label a first issue
 
 ```sh
 shep kelpie start
 ```
 
-Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria. The runner gives it to a worker, which opens a draft pull request. Kelpie then runs the review loop and CI, and asks you for a ruling before it merges. `shep kelpie status` shows every project, and `shep kelpie add <issue>` puts an issue on the board without the label. A worker whose first turn ends with no pull request and no question is sent back once, and asks you for a ruling if it stops short again.
+Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria. The runner gives it to a worker, which opens a draft pull request. Then the review loop runs, then CI, then on a repo with CodeRabbit on, CodeRabbit. Last, you get a ruling before the merge. `shep kelpie status` shows every project. A worker whose first turn ends with no pull request and no question is sent back once, and asks you for a ruling if it stops short again.
 
-### 7. Answer a ruling
+What decides whether, and when, the first issue starts:
+
+- The board skips an issue that is assigned to anyone or already has an open pull request, and one blocked by an issue that is still open. Don't assign it to yourself
+- Of the rest, `priority: P0` to `P3` labels order them, then the oldest goes first. A `worker:<model>-<effort>` label, such as `worker:opus-high`, picks the model that works it, from `opus`, `sonnet`, `haiku` and `fable`. `worker:local` picks the project's local worker
+- No turn starts while Claude's 5-hour window is at 50% or more, and no new work item starts once today's share of the week is spent. `shep kelpie status` says why under `pacer`, and `enabled = false` in the project's `[app.dogs.kelpie.pacing]` turns both off
+- On a public repo, after CI each pull request waits for CodeRabbit, at one review an hour. shep-kelpie asks for a review by putting the `review please` label on, so the repo's `.coderabbit.yaml` must review only labelled pull requests. Without that, CodeRabbit reviews every push on its own and spends the hour a round is waiting on:
+
+  ```yaml
+  reviews:
+    auto_review:
+      labels:
+        - "review please"
+  ```
+
+- `coderabbit.enabled` is the switch for every pull request reviewer, cubic and Codex too. A private repo has it off, so a private repo that wants cubic or Codex turns it on
+
+`shep kelpie add <issue>` opens a work item for an issue at once, without the label, ahead of the board's order and without planning. It queues nothing: while `max_items` work items are open, `add <issue>` is refused.
+
+### 8. Answer a ruling
 
 A ruling reaches the channel you chose in step 5. Answer it from there, or from the terminal:
 
@@ -136,26 +184,17 @@ shep kelpie rule 14 yes
 shep kelpie rule 14 no rename the flag
 ```
 
-On ntfy you can reply in the topic after a one-time `shep kelpie totp`, as the reference below describes. In the Claude app, tap an answer or reply in words.
+On ntfy you can reply in the topic after a one-time `shep kelpie totp`, as Settings below describes. In the Claude app, tap an answer or reply in words.
 
-### 8. Pause
+### 9. Pause, and find the log
 
 ```sh
 shep kelpie pause
 ```
 
-The current turn finishes, then the worker parks. `shep kelpie start` resumes it.
+The current turn finishes, then the worker parks. `shep kelpie start` resumes it. A runner's log is `shep bleats <project>`, and the dog's is `shep bleats kelpie`.
 
 ## Reference
-
-### What it needs
-
-- shep 0.12
-- Rust 1.88 or later, to build it
-- Claude Code, signed in
-- `git`, and `gh` signed in to the account that opens the pull requests
-- a GitHub repo per project, where `add` makes the `ready-for-agent`, `ready-for-human` and `review please` labels it lacks
-- a local review command or an OpenAI-compatible endpoint, or a project that lists `claude` alone
 
 ### Merging
 
@@ -165,25 +204,15 @@ A project on `merge_authority = "auto"` merges its pull requests without asking 
 
 When the board picks an issue, a planning call on Opus reads the repo at `main` and decides whether it is one pull request or several. Most stay one. Several become sub-issues of the issue, each with its labels and blocked by the pieces it needs first, and the issue gets one comment with the plan.
 
-- Under `auto` the split happens on its own. Under `ask` it's a ruling: `yes` opens the sub-issues, `no` works the issue whole, and `answer <note>` plans it again with your note
-- An issue with sub-issues is never worked itself, and kelpie closes it once every sub-issue is closed
+- Under `auto` the split happens on its own. Under `ask` it's a ruling: `yes` opens the sub-issues, and `no <note>` works the issue whole
+- An issue with sub-issues is never worked itself, and shep-kelpie closes it once every sub-issue is closed
 - A sub-issue is never planned again, and neither is an issue added with `add`
 - Off by default until the sub-issue and blocked-by calls have run against a real repo: `[planning] enabled = true` turns it on, and `[models.planner]` picks the model
 - A split or a parent close the forge refuses three times in a row waits on a ruling, and the board goes on
 
 ### Running a project
 
-Kelpie needs shep 0.12 and runs in your own shepherd, beside your other sheep. Adopt it once and leave it enabled: the adopted kelpie is the dog that holds the leases every runner asks before a summon, and it asks shep for the channel the lease commands reach it on.
-
-```sh
-shep adopt /path/to/shep-kelpie --name kelpie
-```
-
-A kelpie adopted before it asked for the channel has none until it is adopted again: run the same `shep adopt`, then `shep disable kelpie` and `shep enable kelpie`. A `kelpie-dog` sheep left from before is removed when the adopted kelpie starts, and its book is kept as it is. The adopted kelpie gets `SHEP_HOME` and no `KELPIE_HOME` from shep, so its book and its door are always under `$SHEP_HOME/kelpie/dog`.
-
-The dog also holds `cargo-test`, a share of this machine for running tests. Workers run their test suites under it, and so can anything else on the machine: `shep kelpie lease run cargo-test -- cargo test` waits for a turn, runs the command and exits with its code, or 75 when it cannot reach the dog. Three hold it at once unless `[kelpie.leases]` says otherwise, the rest queue, and `shep kelpie lease status` shows who holds it and who waits. A command that ends or dies gives its turn back. One whose `lease run` was killed outright keeps it until the command, and anything it left running, exits: `status` shows how long each has held it.
-
-Then, in the checkout of any GitHub repo whose default branch is `main`:
+shep-kelpie runs in your own shepherd, beside your other sheep. The adopted dog holds the leases every runner asks before a summon, and it asks shep for the channel the lease commands reach it on. `add` and `start` say how to bring the dog up when it is not running with its channel.
 
 ```sh
 shep kelpie add        # labels, settings, and the runner, stopped
@@ -196,7 +225,9 @@ shep kelpie rule 14 yes
 
 Every trigger the runner takes is also a verb: `add <issue>`, `rework <pr>`, `adopt <pr>`, `gate [<issue>]`, `drop [<issue>]`, `timings [<n>]` and `rule`. Each reaches the project whose repo holds the folder you run it in, a worktree of it included, or the one `-p <project>` names anywhere in the line. From anywhere else it lists the projects and guesses nothing. `shep trigger` still works.
 
-`timings [<n>]` totals where the time went over the last `n` finished work items (10 when left out), and answers JSON with the totals under `seconds` and a plain-text `table`, so `shep kelpie timings 20 | jq -r .table` prints it. `status` shows each open item's split under `timings`, and the ten most recent finished items under `history`. The state file keeps the last 100.
+- `drop [<issue>]` ends a work item without merging it. Its worktree, local branch and build folder go, and its pull request stays, labelled `ready-for-human`
+- `gate [<issue>]` sends a work item whose worker's turn ended with a pull request into the review gate, when it was never entered
+- `timings [<n>]` totals where the time went over the last `n` finished work items (10 when left out), and answers JSON with the totals under `seconds` and a plain-text `table`, so `shep kelpie timings 20 | jq -r .table` prints it. `status` shows each open item's split under `timings`, and the ten most recent finished items under `history`. The state file keeps the last 100
 
 A ruling's id is unique across projects, so `rule` needs no project:
 
@@ -204,53 +235,55 @@ A ruling's id is unique across projects, so `rule` needs no project:
 - `shep kelpie rule 14 no rename the flag`
 - `shep kelpie rule 15 use --dry-run`, for a worker's question. A `yes` there is the answer's text
 
-Quotes are optional, but zsh still needs them around a note with `?`, `*`, `!` or an apostrophe. `-p` goes before the answer: after its first word, and after a `--`, a `-p` is part of the answer. `shep kelpie rule` alone lists the rulings waiting and asks which to answer and how.
+Quotes are optional, but zsh still needs them around a note with `?`, `*`, `!` or an apostrophe. `-p` goes before the answer: after its first word, and after a `--`, a `-p` is part of the answer. `shep kelpie rule` alone lists the rulings waiting and asks which to answer and how. Each ruling's question says what `yes` and `no` do.
 
-`add` names the project after the repo, or `shep kelpie add <name>`. It makes `ready-for-agent`, `ready-for-human` and `review please` where the repo lacks them, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. `add` and `start` say how to bring the dog up when the adopted kelpie is not running with its channel. The checkout `add` runs in is the project's repo. Its worktrees go to `$SHEP_HOME/kelpie/<project>/worktrees`, with build folders, state and settings beside them, never inside the checkout. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name.
+`add` names the project after the repo, or `shep kelpie add <name>`. It makes the four labels where the repo lacks them, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name. `shep stop <project>` stops a runner, and `shep delete <project>` removes it.
 
 `doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's labels, CodeRabbit where a project turns it on, the local review command or endpoint where one is set, the preview tools for a project that shows its UI, and that rulings have a webhook where they go to one. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
 
-Lookout edits a project's table in the runner's pane, and kelpie's own settings in its `[kelpie]` section of `dogs.toml`. Start that section from `kelpie-settings.example.toml`, and keep `dogs.toml` private: the webhook's URL is a credential. `ruling_channels` there, or in a project's table, picks the webhook, the relay or both. Both is the default, and only a project that posts to the webhook needs a `webhook` table. Its `[kelpie.reviewers]` defines the pull request reviewers, CodeRabbit, cubic and Codex, by their review windows, and a project's `pull_request_reviewers` lists the ones it uses in preference order: each round goes to the first whose window is free. Codex's table also takes `reviews_on_ready`, off when absent: turn it on only where Codex's automatic reviews are enabled. Then marking a draft ready is its summon and kelpie posts no comment on top, so one round spends one review. On an ntfy webhook, a ruling can be answered from the topic: run `shep kelpie totp` once and scan the QR code into an authenticator app, then reply with the line the alert ends on, such as `14 yes <code>`, with the app's code last. A reply takes the same answers as `shep kelpie rule`. Anyone who can read the topic can read rulings, but only a reply with the code of the moment answers one, and each code answers once. Five wrong codes turn answers off until `shep kelpie totp --unlock`, and `shep kelpie totp --rotate` replaces a secret that may have leaked. A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start.
-
 `shep describe <project>` labels each Claude session the runner starts with its issue and role, such as `#114 worker`.
 
-Kelpie refuses a shepherd on another shep minor or major than the pinned one, naming both versions. The relay's `kelpie relay-*` commands talk to the shepherd's socket with the shep client kelpie is built with, never a `shep` on `PATH`.
+shep-kelpie refuses a shepherd on another shep minor or major than the pinned one, naming both versions. The relay's `kelpie relay-*` commands talk to the shepherd's socket with the shep client shep-kelpie is built with, never a `shep` on `PATH`.
 
-### Kelpie's home
+### Leases
 
-Kelpie keeps everything under `$SHEP_HOME/kelpie`, or the folder `KELPIE_HOME` names:
+The dog holds `cargo-test`, a share of this machine for running tests, and `gpu`, this machine's GPU lock. Workers run their test suites under `cargo-test`, and so can anything else on the machine: `shep kelpie lease run cargo-test -- cargo test` waits for a turn, runs the command and exits with its code, or 75 when it cannot reach the dog. Three hold it at once unless `[kelpie.leases]` says otherwise, the rest queue, and `shep kelpie lease status` shows who holds each lease and who waits. A command that ends or dies gives its turn back. One whose `lease run` was killed outright keeps it until the command, and anything it left running, exits: `status` shows how long each has held it.
+
+`shep kelpie lease take gpu` holds the GPU lock for you until `shep kelpie lease return gpu`, so whatever takes that lock waits. Use it when you need the GPU to yourself.
+
+### Settings
+
+A project's settings are its `[app.dogs.kelpie]` table, which lookout edits in the runner's pane. `settings.example.toml` lists every key, and shows a runner's Flockfile entry for a project set up by hand. It needs `SHEP_HOME` as an absolute path in `env`, since a sheep starts without it, and `kill_timeout = "10s"` or more, since a runner needs about 7s to stop cleanly.
+
+shep-kelpie's own settings, shared by every project, are the `[kelpie]` section of `dogs.toml`, which lookout edits in the dog's pane. Start from `kelpie-settings.example.toml`, and keep `dogs.toml` private: the webhook's URL is a credential.
+
+- `ruling_channels`, there or in a project's table, picks the webhook, the relay or both. Both is the default, and only a project that posts to the webhook needs a `webhook` table
+- `[kelpie.reviewers]` defines the pull request reviewers, CodeRabbit, cubic and Codex, by their review windows, and a project's `pull_request_reviewers` lists the ones it uses in preference order: each round goes to the first whose window is free. Codex's table also takes `reviews_on_ready`, off when absent: turn it on only where Codex's automatic reviews are enabled. Then marking a draft ready is its summon and shep-kelpie posts no comment on top, so one round spends one review
+- `gpu_metrics_url` is the GPU's Prometheus metrics page, such as `nvidia_gpu_exporter`'s `/metrics`. `status` then shows the GPU's load, memory, power and temperature under `gpu`, read every 15 seconds
+- A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start. The dog reads `[kelpie.leases]` and `[kelpie.reviewers]` only when it starts, so after a change run `shep restart kelpie`
+
+On an ntfy webhook, a ruling can be answered from the topic: run `shep kelpie totp` once and scan the QR code into an authenticator app, then reply with the line the alert ends on, such as `14 yes <code>`, with the app's code last. A reply takes the same answers as `shep kelpie rule`. Anyone who can read the topic can read rulings, but only a reply with the code of the moment answers one, and each code answers once. Five wrong codes turn answers off until `shep kelpie totp --unlock`, and `shep kelpie totp --rotate` replaces a secret that may have leaked.
+
+### shep-kelpie's home
+
+shep-kelpie keeps everything under `$SHEP_HOME/kelpie`, or the folder `KELPIE_HOME` names:
 
 - `settings.toml`, `totp`, `tools`, `relay` and `rulings`, shared by every project
-- `dog`, with the dog's book and its door, `lease.sock`. Always under `$SHEP_HOME/kelpie`, even with `KELPIE_HOME` set
+- `dog`, with the dog's book and its door, `lease.sock`. The adopted dog gets `SHEP_HOME` and no `KELPIE_HOME` from shep, so it is always under `$SHEP_HOME/kelpie`, even with `KELPIE_HOME` set for your own commands
 - `<project>`, with the project's `state.json`, worker files, `worktrees`, `builds`, `shots` and `playwright`
 
-So a project can't be named for one of kelpie's own folders. Socket paths must stay under 104 bytes, so a runner with a long `SHEP_HOME` refuses to start and names the path that is too long.
+So a project can't be named for one of shep-kelpie's own folders. Socket paths must stay under 104 bytes, so a runner with a long `SHEP_HOME` refuses to start and names the path that is too long. Keep a shepherd's `SHEP_HOME` short.
 
-An install from before kept all of this in `~/.kelpie`. The first start on the new build moves what kelpie owns, by name, and says what it moved: the dog moves its book, and each runner moves the shared files and its own project's. Only the dog and the runners move anything, and each move happens once. Everything else in `~/.kelpie` stays put, and a `~/.kelpie` that is itself a shepherd's home is never moved from. A move that can't finish stops the runner and names what is in the way, so it never opens without its state. A shared file already in the new home, such as tools from an early `shep kelpie tools install`, is kept, and the old one stays where it is. Until a runner moves them, `shep kelpie totp` and `doctor` read the old home's files.
-
-Each shared file leaves a link at its old place, so a runner still on the old build keeps working through an upgrade. A runner's start removes them once every other running runner has restarted on the new build, the next `shep kelpie upgrade` removes any left, and `shep kelpie doctor` names them meanwhile. Rolling back to a build from before this move means moving the files back to `~/.kelpie` by hand. A worker in flight may start its next turn in a new session, since Claude Code finds a session by its folder and the worktree moved.
-
-### Moving an install from `~/.kelpie/shep`
-
-An install from before `shep kelpie` runs its runners and dog from a Flockfile under `SHEP_HOME=~/.kelpie/shep`. Move it into your own shepherd before the first start of a build with kelpie's home under shep's: a runner refuses to move `~/.kelpie` into a home inside it. To move it:
-
-1. Take the runners and the dog out of the old shepherd by name, so no project runs twice, and stop it: `SHEP_HOME=~/.kelpie/shep shep delete <project>... kelpie`, then `SHEP_HOME=~/.kelpie/shep shep kill`. Name only kelpie's sheep, since that shepherd may run others. A `kill` alone leaves them in its saved roll, and a later `shep muster` there would start them beside the new ones. Their state files stay where they are
-2. Adopt kelpie in your own shepherd, as above
-3. For each project: `cd ~/.kelpie/repos/<project> && shep kelpie add <project> && shep kelpie start`. `add` makes the project's table from `~/.kelpie/projects/<project>/settings.toml`, and the runner's first start moves its state file into kelpie's home
-4. Once: `shep kelpie settings move <project>`, which moves `~/.kelpie/settings.toml` into the `[kelpie]` section
-
-A runner's Flockfile entry, for a project set up by hand, is in `settings.example.toml`. It needs `SHEP_HOME` as an absolute path in `env`, since a sheep starts without it, and `kill_timeout = "10s"` or more, since a runner needs about 7s to stop cleanly.
-
-### Upgrading kelpie
+### Upgrading
 
 ```sh
-shep kelpie upgrade --ref main          # build kelpie at a git ref and install it
+shep kelpie upgrade --ref main          # build shep-kelpie at a git ref and install it
 shep kelpie upgrade --release 0.3.0     # install a release (none is published yet)
 shep kelpie upgrade --binary ./kelpie   # install a build made by hand, as it is
 shep kelpie upgrade --rollback          # put back the build the last upgrade replaced
 ```
 
-The installed kelpie is whatever program the adopted dog runs, which the shepherd knows (`~/.cargo/bin/shep-kelpie` for the install above), and `shep kelpie add` registers runners that run the same path. An upgrade writes the new build beside that file and renames it over, as shep upgrades itself, so the running file's bytes are never edited in place. Before the swap it copies the file it replaces into `$SHEP_HOME/kelpie/builds` (resolved first if the path is a symlink), and `--rollback` puts that copy back the same way. Then it restarts the dog and each running runner one at a time, never while a work item is merging: it waits, and says what it waits on. A runner that does not answer `status` is waited on too, and named if it never does. A runner you stop while the upgrade waits stays stopped, and so does one stopped before it. A stopped runner starts on the new build when you start it.
+The installed shep-kelpie is whatever program the adopted dog runs, which the shepherd knows (`~/.cargo/bin/shep-kelpie` for the install above), and `shep kelpie add` registers runners that run the same path. An upgrade writes the new build beside that file and renames it over, as shep upgrades itself, so the running file's bytes are never edited in place. Before the swap it copies the file it replaces into `$SHEP_HOME/kelpie/builds` (resolved first if the path is a symlink), and `--rollback` puts that copy back the same way. Then it restarts the dog and each running runner one at a time, never while a work item is merging: it waits, and says what it waits on. A runner that does not answer `status` is waited on too, and named if it never does. A runner you stop while the upgrade waits stays stopped, and so does one stopped before it. A stopped runner starts on the new build when you start it.
 
 If an upgrade stops after the swap (a merge that outlasts the wait, a sheep that does not come back, Ctrl-C), the new build is already installed and the message says so. `shep kelpie upgrade --binary <installed path>` finishes the restarts and touches no file. `--rollback` does not: it swaps the two builds again.
 
@@ -260,7 +293,7 @@ Before it changes anything it asks the new build which shep it is made with (`sh
 
 ### Skills
 
-Every step kelpie drives an agent through runs a skill, by default from [mattpocock/skills](https://github.com/mattpocock/skills) (MIT). Kelpie vendors the ones it uses in `skills/`, pinned to one upstream commit with its licence, and writes them out as a Claude Code plugin when a runner starts. A project installs nothing.
+Every step shep-kelpie drives an agent through runs a skill, by default from [mattpocock/skills](https://github.com/mattpocock/skills) (MIT). shep-kelpie vendors the ones it uses in `skills/`, pinned to one upstream commit with its licence, and writes them out as a Claude Code plugin when a runner starts. A project installs nothing.
 
 | step | default skill | where it runs |
 |---|---|---|
@@ -275,20 +308,20 @@ Every step kelpie drives an agent through runs a skill, by default from [mattpoc
 | `reset` | `handoff` | not driven yet |
 | `retro` | `retro` | not driven yet (#104) |
 
-A step that runs a skill starts its prompt with the skill's slash command, such as `/mattpocock:implement`, and kelpie's own prompt follows as its arguments. To override one, set it in the project's `[app.dogs.kelpie.skills]` table:
+A step that runs a skill starts its prompt with the skill's slash command, such as `/mattpocock:implement`, and shep-kelpie's own prompt follows as its arguments. To override one, set it in the project's `[app.dogs.kelpie.skills]` table:
 
 - `{ kind = "path", path = "..." }`: a skill folder with a `SKILL.md`, copied into a plugin of its own, `kelpie-<step>`
 - `{ kind = "plugin", plugin = "...", skill = "..." }`: a skill in a Claude Code plugin's folder
-- `{ kind = "none" }`: kelpie's own prompt, no skill
+- `{ kind = "none" }`: shep-kelpie's own prompt, no skill
 
-A skill that can't load runs kelpie's own prompt instead. The runner logs why, and `status` shows it under `skills`. `scripts/vendor-skills.sh <commit>` moves the pin.
+A skill that can't load runs shep-kelpie's own prompt instead. The runner logs why, and `status` shows it under `skills`.
 
 ### The review loop
 
-Each pull request goes through a review loop before CI. A project lists its reviewers in `review.reviewers`, in the order the loop runs them, and kelpie's own settings define each one by name in `[kelpie.local_reviewers.<name>]`:
+Each pull request goes through a review loop before CI. A project lists its reviewers in `review.reviewers`, in the order the loop runs them, and shep-kelpie's own settings define each one by name in `[kelpie.local_reviewers.<name>]`:
 
 - `kind = "command"`: a command of your own that keeps the contract below
-- `kind = "endpoint"`: kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server
+- `kind = "endpoint"`: shep-kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server
 - `kind = "claude"`: a fresh Claude session on its own `model` and `effort`
 - `kind = "session"`: a fresh session on the agent its `agent` names (see Agents below)
 
@@ -300,7 +333,7 @@ A local model alone:
 # the project's [app.dogs.kelpie.review]
 reviewers = ["qwen"]
 
-# kelpie's [kelpie] section
+# shep-kelpie's [kelpie] section
 [kelpie.local_reviewers.qwen]
 kind = "endpoint"
 url = "http://localhost:11434/v1"
@@ -324,7 +357,7 @@ reviewers = ["qwen", "claude", "opus"]
 kind = "claude"
 model = "claude-opus-5-5"
 effort = "high"
-paths = ["src/runner/merge/**", "src/guard/**"]
+paths = ["src/auth/**", "migrations/**"]
 ```
 
 `paths` limits a reviewer to pull requests that change a file under one of its globs, and the loop skips it elsewhere. Every round's prompt carries the issue's acceptance criteria: the section under an "Acceptance criteria" heading, or the whole body without one.
