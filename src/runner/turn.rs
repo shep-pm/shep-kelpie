@@ -119,10 +119,12 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
                 return lock(runner).on(issue).end_turn(result);
             }
             Begin::Review(action) => {
-                // A failed save is let go. A GPU wait may then count as
+                // A failed save is told and let go. A GPU wait may then count as
                 // `local_round`, but the phases still sum to the wall time.
                 let watch = |stage| {
-                    let _ = lock(runner).on(issue).round_stage(stage);
+                    if let Err(e) = lock(runner).on(issue).round_stage(stage) {
+                        eprintln!("cannot save the local round's stage: {e}");
+                    }
                 };
                 let reviewed = run_review_call(claude.as_ref(), reviewer.as_ref(), action, &watch);
                 return lock(runner).on(issue).end_review(reviewed);
