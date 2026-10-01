@@ -246,6 +246,9 @@ impl Runner {
             // before its session existed starts it over, as a killed one does.
             Turn::Next { .. } if start_over => (Session::New(id), None, now),
             Turn::Next { prompt } => (Session::Resume(id), Some(prompt.clone()), now),
+            // A first turn that ended with no pull request and no question
+            // stopped short, maybe on a tool that failed.
+            Turn::Ended { .. } if item.pull_request.is_none() => return self.stopped_short(),
             Turn::Ended { .. } | Turn::Failed { .. } => return Ok(Begin::Idle),
         };
         let ceiling = self.turn_ceiling();
