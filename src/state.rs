@@ -345,7 +345,7 @@ pub enum RulingKind {
         /// The turn as it stood before it failed, which a yes puts back
         retry: Turn,
     },
-    /// The pull request changes Claude Code's own files, which run outside
+    /// The pull request changes agents' own files, which run outside
     /// the sandbox. A yes accepts them at this head; a no stops the work item.
     ClaudeFiles {
         /// The head that changes them

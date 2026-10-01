@@ -431,7 +431,7 @@ fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
             "The work on this pull request hit an error and stopped.".to_owned()
         }
         RulingKind::ClaudeFiles { files, .. } => format!(
-            "This pull request changes Claude Code's own files: {}.",
+            "This pull request changes agents' own files: {}.",
             files.join(", ")
         ),
         RulingKind::ForeignChange { description, .. } => {
@@ -500,7 +500,7 @@ fn decide(
             };
             return Ok(Move::Retry { turn, phase });
         }
-        // A worker cannot write Claude Code's own files, so a note would not help it.
+        // A worker cannot write agents' own files, so a note would not help it.
         (
             Answer::No(_),
             RulingKind::TurnTimeout { .. }
@@ -664,7 +664,7 @@ fn question(
         }
         RulingKind::ClaudeFiles { head, files, .. } => {
             return format!(
-                "{} at {} changes Claude Code's own files, which run outside the \
+                "{} at {} changes agents' own files, which run outside the \
                  worker's sandbox: {}. {yes} accepts them at that head and kelpie \
                  carries on, and {no} stops the work item, keeping its branch and \
                  pull request on the forge.",

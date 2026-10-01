@@ -2,7 +2,7 @@
 //!
 //! The worker runs with no one to ask, so its sandbox is its whole fence.
 //! Writes go to its worktree, its build folder and what a commit and a push
-//! need, and never to Claude Code's own files in the worktree. Credential
+//! need, and never to agents' own files in the worktree. Credential
 //! paths are unreadable, hosts are GitHub's and the project's, and what only
 //! the project manager does is a command it may not run. Each harness's
 //! adapter enforces the fence its own way.
@@ -313,6 +313,8 @@ mod tests {
                 "/k/wt/shep/7/.claude",
                 "/k/wt/shep/7/**/.claude",
                 "/k/wt/shep/7/.mcp.json",
+                "/k/wt/shep/7/.codex",
+                "/k/wt/shep/7/**/.codex",
             ]
         );
         assert_eq!(s["env"]["CARGO_TARGET_DIR"], "/k/targets/shep/7");
@@ -445,7 +447,7 @@ mod tests {
         }
     }
 
-    // The preview widens nothing the fence on Claude Code's own files holds.
+    // The preview widens nothing the fence on agents' own files holds.
     #[test]
     fn a_preview_keeps_the_fence_on_claude_files_beside_its_own() {
         let s = with_preview(&[]);

@@ -1,4 +1,4 @@
-//! Claude Code's own files, checked at the gate and before each Claude call
+//! Agents' own files, checked at the gate and before each Claude call
 //!
 //! A pull request that changes them parks the worker on a ruling before any
 //! review or CodeRabbit step, and before CI, since a change there is the
@@ -29,7 +29,7 @@ impl Runner {
         self.refuse_differing()
     }
 
-    /// Parks the worker if the branch on `origin` changes Claude Code's own files
+    /// Parks the worker if the branch on `origin` changes agents' own files
     pub(super) fn claude_files_changed(
         &mut self,
         unchecked: Unchecked,
@@ -47,7 +47,7 @@ impl Runner {
                 self.raise(number, kind).map(Some)
             }
             Err(e) if unchecked == Unchecked::Stop => Ok(Some(self.gate_failed(format!(
-                "cannot check #{number} for changes to Claude Code's own files: {e}"
+                "cannot check #{number} for changes to agents' own files: {e}"
             )))),
             Err(_) => Ok(None),
         }
@@ -60,11 +60,11 @@ impl Runner {
         match fence::differ(&self.settings.repo, &item.worktree, accepted) {
             Ok(files) if files.is_empty() => None,
             Ok(files) => Some(format!(
-                "Claude Code's own files in the worktree differ from main's: {}",
+                "agents' own files in the worktree differ from main's: {}",
                 files.join(", ")
             )),
             Err(e) => Some(format!(
-                "cannot check the worktree's Claude Code files: {e}"
+                "cannot check the worktree's agents' own files: {e}"
             )),
         }
     }
@@ -133,7 +133,7 @@ mod tests {
         assert_eq!(
             question,
             format!(
-                "Pull request #71 at {} changes Claude Code's own files, which run outside \
+                "Pull request #71 at {} changes agents' own files, which run outside \
                  the worker's sandbox: .claude/settings.json. `shep kelpie rule 1 yes` \
                  accepts them at that head and kelpie carries on, and \
                  `shep kelpie rule 1 no <note>` stops the work item, keeping its \
@@ -145,7 +145,7 @@ mod tests {
             rig.forge.comments(),
             [(
                 71,
-                "This pull request changes Claude Code's own files: .claude/settings.json.\
+                "This pull request changes agents' own files: .claude/settings.json.\
                  \n\nWaiting on the maintainer."
                     .to_owned()
             )]
@@ -309,7 +309,7 @@ mod tests {
         let question = failed(step(&runner).unwrap());
         assert!(
             question.contains(
-                "Claude Code's own files in the worktree differ from main's: \
+                "agents' own files in the worktree differ from main's: \
                  .claude/settings.local.json."
             ),
             "{question}"
