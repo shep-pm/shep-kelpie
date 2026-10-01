@@ -74,16 +74,25 @@ pub fn resolved_label(named: Option<&str>) -> Option<String> {
 }
 
 /// Why [`resolved_label`] is `None` for what the reply named, in one phrase
+///
+/// Meaningless where `named` resolves after all: guarded rather than
+/// trusted to callers, so a mismatch between the two reads as a bug in
+/// this function, not a wrong word to the maintainer.
 pub fn fallback_reason(named: Option<&str>) -> String {
-    match named.map(|named| (named, parse_worker_value(named))) {
-        Some((_, Ok(WorkerLabel::Local))) => {
+    let Some(named) = named else {
+        return "the plan named no worker".to_owned();
+    };
+    if resolved_label(Some(named)).is_some() {
+        return format!("`{named}` already names a worker kelpie runs");
+    }
+    match parse_worker_value(named) {
+        Ok(WorkerLabel::Local) => {
             "the plan named `local`, which only the maintainer picks by hand".to_owned()
         }
-        Some((named, _)) => format!(
+        _ => format!(
             "`{named}` is not a model and effort kelpie runs (from {})",
             worker_model_names().join(", ")
         ),
-        None => "the plan named no worker".to_owned(),
     }
 }
 
@@ -360,6 +369,18 @@ mod tests {
     fn why_a_worker_falls_back_names_what_the_reply_gave() {
         assert_eq!(fallback_reason(None), "the plan named no worker");
         assert!(fallback_reason(Some("nope-medium")).contains("`nope-medium`"));
+    }
+
+    #[test]
+    fn why_a_worker_falls_back_never_calls_a_resolved_one_unsupported() {
+        // `fallback_reason` is only meaningful where `resolved_label` is
+        // `None`; called on a name that does resolve, it must not claim
+        // that name is unsupported.
+        let text = fallback_reason(Some("sonnet-medium"));
+        assert!(
+            !text.contains("is not a model and effort kelpie runs"),
+            "{text}"
+        );
     }
 
     #[test]
