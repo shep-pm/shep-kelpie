@@ -7,6 +7,7 @@ use crate::lease::gpu::{Attempt, Claim, GpuLock};
 use crate::pacer::{HoldKind, RECHECK_SECS};
 use crate::ports::{Cost, MeterError, Role, Timestamp, Usage};
 use crate::runner::{Runner, StepReport, step};
+use crate::settings::AgentHarness;
 use crate::test::{Hold, Rig, Scripted};
 
 const AGENTS: &str = "[agents.codex]\nharness = \"stand-in\"\n\
@@ -267,6 +268,11 @@ fn a_local_worker_is_never_paced_and_holds_the_gpu_for_its_whole_turn() {
     assert_eq!((rig.meter.reads(), rig.codex_meter.reads()), (1, 0));
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["local_leases"], json!({ "gpu": null }));
+    let call = &rig.claude.all_calls()[0];
+    assert_eq!(
+        (call.harness.clone(), call.model.as_str()),
+        (AgentHarness::StandIn, "qwen3-coder")
+    );
 }
 
 #[test]
@@ -293,6 +299,72 @@ fn a_local_turn_waits_while_a_review_round_holds_the_gpu() {
     assert_eq!(rig.claude.calls().len(), 1);
 }
 
+// The project at `named`'s settings, reopened with `swap` applied to kelpie's own.
+fn reopened(rig: &Rig, runner: Mutex<Runner>, swap: (&str, &str)) -> Mutex<Runner> {
+    drop(runner);
+    let kelpie = std::fs::read_to_string(rig.paths().kelpie_settings).unwrap();
+    rig.set_kelpie_settings(&kelpie.replace(swap.0, swap.1));
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    runner
+}
+
+#[test]
+fn an_issue_given_to_the_local_worker_stays_on_its_agent_when_the_agent_changes() {
+    let (rig, runner) = named("rotom", "worker = \"qwen\"\n");
+    rig.forge.label(7, "worker:local");
+    rig.ask(&runner, "add", Some("7"));
+    let runner = reopened(&rig, runner, ("effort = \"low\"", "effort = \"high\""));
+    rig.claude.script([Scripted::Say("done")]);
+    step(&runner).unwrap();
+    let call = &rig.claude.calls()[0];
+    assert_eq!(call.harness, AgentHarness::StandIn);
+    assert_eq!(call.lease.as_ref().map(|l| l.as_str()), Some("gpu"));
+}
+
+#[test]
+fn an_issue_given_to_the_local_worker_fails_its_turn_once_no_local_agent_is_left() {
+    let (rig, runner) = named("rotom", "worker = \"qwen\"\n");
+    rig.forge.label(7, "worker:local");
+    rig.ask(&runner, "add", Some("7"));
+    let runner = reopened(&rig, runner, ("usage = \"none\"", "usage = \"codex\""));
+    let Some(StepReport::Failed { question, .. }) = step(&runner).unwrap() else {
+        panic!("the turn did not fail");
+    };
+    assert!(
+        question.contains("issue #7 is labelled for the local worker, and `agents.worker` names no local agent now"),
+        "{question}"
+    );
+    assert_eq!(rig.claude.calls(), []);
+}
+
+#[test]
+fn a_review_round_on_a_local_agent_runs_on_that_agent_under_its_lease() {
+    let (rig, first) = named("chelone", "reviewer = \"qwen\"\n");
+    drop(first);
+    let only_claude = "loop_guard = 8\nreviewers = [\"claude\"]\n";
+    rig.edit_settings(|s| s.replace("loop_guard = 8\n", only_claude));
+    let runner = rig.open().unwrap();
+    rig.meter.set(Rig::utilization(0, 1));
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+    rig.verdict(&runner);
+    rig.claude.script([Scripted::Text("CLEAN")]);
+    for _ in 0..5 {
+        rig.verdict(&runner);
+    }
+    let calls = rig.claude.all_calls();
+    let review = calls.iter().find(|c| c.role == Role::Reviewer).unwrap();
+    assert_eq!(review.harness, AgentHarness::StandIn);
+    assert_eq!(review.lease.as_ref().map(|l| l.as_str()), Some("gpu"));
+    assert_eq!(
+        calls[0].harness,
+        AgentHarness::ClaudeCode,
+        "the worker stays on Claude"
+    );
+}
+
 #[test]
 fn beside_a_local_worker_an_unlabelled_issue_runs_on_claude_and_its_window() {
     let (rig, runner) = named("rotom", "worker = \"qwen\"\n");
@@ -314,7 +386,7 @@ fn beside_a_local_worker_an_unlabelled_issue_runs_on_claude_and_its_window() {
         (call.model.as_str(), call.lease.as_ref()),
         ("claude-sonnet-5", None)
     );
-    assert_eq!(call.harness, crate::settings::AgentHarness::ClaudeCode);
+    assert_eq!(call.harness, AgentHarness::ClaudeCode);
 }
 
 #[test]

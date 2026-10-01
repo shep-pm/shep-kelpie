@@ -101,6 +101,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         worker: WorkerModel {
             model: "claude-opus-5-5".into(),
             effort: Effort::Medium,
+            local: false,
         },
         session: SessionId("5e55".into()),
         turn: Turn::Running {

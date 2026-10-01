@@ -57,7 +57,8 @@ impl Runner {
         // Picks that wait on a ruling on their plan
         let mut waiting = Vec::new();
         loop {
-            let pick = board::pick(&ready, &open, &self.state.finished);
+            let local = self.agents.limits.worker.lease().is_some();
+            let pick = board::pick(&ready, &open, &self.state.finished, local);
             let mut skipped = pick.skipped;
             skipped.extend(failed.iter().cloned());
             skipped.extend(waiting.iter().cloned());
@@ -184,6 +185,7 @@ mod tests {
         WorkerModel {
             model: "claude-sonnet-5".into(),
             effort: Effort::Medium,
+            local: false,
         }
     }
 

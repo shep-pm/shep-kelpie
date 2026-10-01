@@ -358,7 +358,7 @@ impl Runner {
                     .invoke(Step::Implement, &first_prompt(item.issue, &issue))
             }
         };
-        let (harness, limit) = self.worker_agent(item);
+        let (harness, limit) = self.worker_agent(item)?;
         self.prepared(AgentCall {
             role: Role::Worker,
             harness,
@@ -381,16 +381,30 @@ impl Runner {
 
     /// The harness `item`'s worker runs on, and what holds its turns back
     ///
-    /// The worker's agent runs the item, unless it runs another model: a
-    /// `worker:` label's, or `models`' beside a local agent. Those are
-    /// Claude models, on Claude Code and its account.
-    pub(super) fn worker_agent(&self, item: &WorkItem) -> (AgentHarness, Limit) {
-        match item.worker == WorkerModel::from(&self.agents.worker) {
-            true => (
-                self.agents.worker.harness.clone(),
-                self.agents.limits.worker.clone(),
-            ),
-            false => (AgentHarness::ClaudeCode, Limit::default()),
+    /// An item given to the local worker runs on the project's local agent.
+    /// Any other runs on the worker's agent if it is that agent's model, and
+    /// otherwise on Claude Code: a `worker:` label names a Claude model.
+    ///
+    /// # Errors
+    ///
+    /// Why not, when an item given to the local worker has none to run on.
+    pub(super) fn worker_agent(&self, item: &WorkItem) -> Result<(AgentHarness, Limit), String> {
+        let (agent, limit) = (&self.agents.worker, &self.agents.limits.worker);
+        let local = limit.lease().is_some();
+        let own = WorkerModel {
+            local: item.worker.local,
+            ..WorkerModel::from(agent)
+        };
+        match (item.worker.local, local) {
+            (true, false) => Err(format!(
+                "issue #{} is labelled for the local worker, and `agents.worker` names \
+                 no local agent now: name one again, or take the label off and drop \
+                 and add the issue",
+                item.issue
+            )),
+            (true, true) => Ok((agent.harness.clone(), limit.clone())),
+            (false, false) if item.worker == own => Ok((agent.harness.clone(), limit.clone())),
+            (false, _) => Ok((AgentHarness::ClaudeCode, Limit::default())),
         }
     }
 

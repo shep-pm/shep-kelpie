@@ -74,7 +74,11 @@ impl Runner {
     /// Paces `scope` on the limit of the work item's worker
     pub(super) fn pace_worker(&mut self, scope: Scope) -> Result<Pace, StateError> {
         let limit = match self.current() {
-            Some(item) => self.worker_agent(item).1,
+            Some(item) => match self.worker_agent(item) {
+                Ok((_, limit)) => limit,
+                // Its turn fails at once, saying why, so nothing waits on a window.
+                Err(_) => return Ok(Pace::Clear),
+            },
             None => self.agents.limits.worker.clone(),
         };
         self.pace(scope, &limit)
