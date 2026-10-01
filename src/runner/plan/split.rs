@@ -97,12 +97,13 @@ impl Runner {
             };
             let (forge, repo) = (&self.ports.forge, &self.settings.forge);
             let Some(piece) = pieces.get(linked) else {
-                let labelled: Vec<bool> = opened
+                let labelled: Vec<Option<bool>> = opened
                     .iter()
                     .map(|&n| {
                         forge
                             .issue(repo, n)
-                            .is_ok_and(|shown| plan::already_has_worker(&shown.labels))
+                            .map(|shown| plan::already_has_worker(&shown.labels))
+                            .ok()
                     })
                     .collect();
                 let comment = plan::comment(&why, &pieces, &opened, &labelled);

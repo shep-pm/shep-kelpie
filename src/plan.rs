@@ -260,14 +260,16 @@ pub fn list(pieces: &[Piece]) -> String {
 /// `labelled` says, for each piece in order, whether its sub-issue actually
 /// carries a `worker:` label once the split finishes: from the piece's own
 /// pick, or one it inherited from the parent's labels at its creation,
-/// either of which leaves nothing to say. Only a sub-issue with no `worker:`
-/// label at all, left to the project's own, is worth a note.
-pub fn comment(why: &str, pieces: &[Piece], opened: &[u64], labelled: &[bool]) -> String {
+/// either of which leaves nothing to say. `Some(false)`, with no `worker:`
+/// label at all, left to the project's own, is worth a note; `None`, where
+/// the forge could not be asked to say, is worth a different one, since it
+/// is not the same as confirming the project's own default runs it.
+pub fn comment(why: &str, pieces: &[Piece], opened: &[u64], labelled: &[Option<bool>]) -> String {
     let lines = pieces
         .iter()
         .zip(opened)
         .zip(labelled)
-        .map(|((piece, number), &labelled)| {
+        .map(|((piece, number), labelled)| {
             let after: Vec<String> = piece
                 .blocked_by
                 .iter()
@@ -278,13 +280,13 @@ pub fn comment(why: &str, pieces: &[Piece], opened: &[u64], labelled: &[bool]) -
                 [] => String::new(),
                 by => format!(", after {}", by.join(", ")),
             };
-            let defaulted = if labelled {
-                String::new()
-            } else {
-                format!(
+            let defaulted = match labelled {
+                Some(true) => String::new(),
+                Some(false) => format!(
                     ", worker defaulted to the project's: {}",
                     fallback_reason(piece.worker.as_deref())
-                )
+                ),
+                None => ", worker not confirmed: kelpie could not read its sub-issue back".into(),
             };
             format!("- #{number}: {}{after}{defaulted}", piece.title.trim())
         });
@@ -352,6 +354,19 @@ mod tests {
         };
         assert_eq!(pieces[0].worker, Some("opus-max".into()));
         assert_eq!(pieces[1].worker, None);
+    }
+
+    #[test]
+    fn an_unreadable_worker_label_still_wins_over_a_plan_s_pick() {
+        assert!(!already_has_worker(&["ready-for-agent".to_owned()]));
+        assert!(already_has_worker(&["worker:sonnet-medium".to_owned()]));
+        // Neither a label `worker_override` cannot parse, nor more than
+        // one, is "no label": both still win over the plan's pick.
+        assert!(already_has_worker(&["worker:nope".to_owned()]));
+        assert!(already_has_worker(&[
+            "worker:sonnet-medium".to_owned(),
+            "worker:opus-low".to_owned()
+        ]));
     }
 
     #[test]
@@ -441,7 +456,12 @@ mod tests {
     fn the_comment_names_each_sub_issue_and_what_it_waits_on() {
         let pieces = [piece("Schema", &[]), piece("Screen", &[1])];
         assert_eq!(
-            comment("Two slices.", &pieces, &[901, 902], &[true, true]),
+            comment(
+                "Two slices.",
+                &pieces,
+                &[901, 902],
+                &[Some(true), Some(true)]
+            ),
             "Kelpie planned this issue as 2 pull requests. Two slices.\n\n\
              - #901: Schema\n- #902: Screen, after #901\n\n\
              Each is worked on its own, and this issue closes when the last one does."
@@ -456,7 +476,12 @@ mod tests {
         let mut unknown = piece("Screen", &[]);
         unknown.worker = Some("nope".into());
         let pieces = [named, unknown];
-        let text = comment("Two slices.", &pieces, &[901, 902], &[true, false]);
+        let text = comment(
+            "Two slices.",
+            &pieces,
+            &[901, 902],
+            &[Some(true), Some(false)],
+        );
         assert!(!text.contains("- #901: Schema,"), "{text}");
         assert!(
             text.contains("- #902: Screen, worker defaulted to the project's: `nope`"),
@@ -470,8 +495,21 @@ mod tests {
         // still ended up carrying a `worker:` label, inherited from the
         // parent's own at creation: there is nothing to default to.
         let pieces = [piece("Schema", &[])];
-        let text = comment("One slice.", &pieces, &[901], &[true]);
+        let text = comment("One slice.", &pieces, &[901], &[Some(true)]);
         assert!(!text.contains("defaulted"), "{text}");
+    }
+
+    #[test]
+    fn a_sub_issue_the_forge_could_not_read_back_is_not_called_defaulted() {
+        // A forge error at comment time is not the same as confirming no
+        // `worker:` label landed: the comment must not claim one.
+        let pieces = [piece("Schema", &[])];
+        let text = comment("One slice.", &pieces, &[901], &[None]);
+        assert!(!text.contains("defaulted"), "{text}");
+        assert!(
+            text.contains("- #901: Schema, worker not confirmed"),
+            "{text}"
+        );
     }
 
     #[test]
