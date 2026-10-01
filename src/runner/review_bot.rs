@@ -21,6 +21,8 @@
 //! whose window is free, and the round cap counts rounds from all of them.
 
 pub(super) mod cap;
+#[cfg(test)]
+mod codex_bot;
 mod lease;
 #[cfg(test)]
 mod tests;

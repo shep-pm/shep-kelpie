@@ -28,7 +28,10 @@ url = "https://ntfy.sh/your-private-topic"
 # defined with one review an hour when absent, and its review footers raise
 # that. cubic is listed only once defined here. Its free plan gives a
 # private repo 20 reviews a month; a public repo draws on a fair-use pool of
-# reviewed lines it does not publish. The dog reads these when it starts.
+# reviewed lines it does not publish. Codex is listed only once defined here
+# too, with the weekly allowance its plan gives code reviews, which is the
+# window its "usage limits for code reviews" reply parks it for; its
+# reviews run on the ChatGPT plan, not the repo's. The dog reads these when it starts.
 # [kelpie.reviewers.coderabbit]
 # reviews = 1
 # hours = 1
@@ -36,6 +39,10 @@ url = "https://ntfy.sh/your-private-topic"
 # [kelpie.reviewers.cubic]
 # reviews = 20
 # hours = 720
+#
+# [kelpie.reviewers.codex]
+# reviews = 10
+# hours = 168
 
 # The agents a project may name for its worker, reviewer and judge, and its
 # session reviewers: a harness, and the model and effort it runs on. The one

@@ -15,11 +15,12 @@ use crate::runner::coderabbit::tests::now;
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{Rig, Scripted, Told};
 
-const HOLDS: &str = r#"{"holds": true, "severity": "medium", "reason": "real"}"#;
+pub(super) const HOLDS: &str = r#"{"holds": true, "severity": "medium", "reason": "real"}"#;
 const CUBIC_WINDOW: &str = "\n[reviewers.cubic]\nreviews = 20\nhours = 720\n";
+pub(super) const CODEX_WINDOW: &str = "\n[reviewers.codex]\nreviews = 10\nhours = 168\n";
 const MONTH: u64 = 720 * 3600;
 
-fn cr() -> LeaseKind {
+pub(super) fn cr() -> LeaseKind {
     LeaseKind::coderabbit()
 }
 
@@ -28,11 +29,11 @@ fn cubic() -> LeaseKind {
 }
 
 // A project listing `list`, with cubic defined in kelpie's own settings.
-fn listing(project: &str, list: &str) -> Rig {
+pub(super) fn listing(project: &str, list: &str) -> Rig {
     let rig = Rig::new(project);
     rig.coderabbit_on();
     let kelpie = std::fs::read_to_string(rig.paths().kelpie_settings).unwrap();
-    rig.set_kelpie_settings(&format!("{kelpie}{CUBIC_WINDOW}"));
+    rig.set_kelpie_settings(&format!("{kelpie}{CUBIC_WINDOW}{CODEX_WINDOW}"));
     if !list.is_empty() {
         let line = format!("[app.dogs.kelpie]\npull_request_reviewers = {list}\n");
         rig.edit_settings(|s| s.replacen("[app.dogs.kelpie]\n", &line, 1));
@@ -42,7 +43,7 @@ fn listing(project: &str, list: &str) -> Rig {
 
 // Pull request 71 with the qwen-review loop settled, green CI, and the
 // draft marked ready: the next step summons.
-fn ready(rig: &Rig) -> (Mutex<Runner>, String) {
+pub(super) fn ready(rig: &Rig) -> (Mutex<Runner>, String) {
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
     let head = item_ready(rig, &runner, 7);
@@ -82,17 +83,22 @@ fn relist(rig: &Rig, runner: &Mutex<Runner>, from: &str, to: &str) {
         .unwrap();
 }
 
-fn labels(rig: &Rig) -> Vec<(u64, String, bool)> {
+pub(super) fn labels(rig: &Rig) -> Vec<(u64, String, bool)> {
     let log = rig.forge.coderabbit.label_log();
     log.into_iter().filter(|(_, l, _)| l == LABEL).collect()
 }
 
 fn summons_by_comment(rig: &Rig) -> usize {
-    let comments = rig.forge.comments();
-    comments.iter().filter(|(_, body)| body == SUMMON).count()
+    comments_of(rig, SUMMON)
 }
 
-fn summoned(head: &str) -> Option<StepReport> {
+// How many of the runner's comments are exactly `text`.
+pub(super) fn comments_of(rig: &Rig, text: &str) -> usize {
+    let comments = rig.forge.comments();
+    comments.iter().filter(|(_, body)| body == text).count()
+}
+
+pub(super) fn summoned(head: &str) -> Option<StepReport> {
     Some(StepReport::Summoned {
         issue: 7,
         pull_request: 71,

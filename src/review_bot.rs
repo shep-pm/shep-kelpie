@@ -29,17 +29,20 @@ pub enum Bot {
     Coderabbit,
     /// cubic
     Cubic,
+    /// Codex, the ChatGPT Codex app
+    Codex,
 }
 
 impl Bot {
     /// Every bot kelpie has a profile for
-    pub const ALL: [Self; 2] = [Self::Coderabbit, Self::Cubic];
+    pub const ALL: [Self; 3] = [Self::Coderabbit, Self::Cubic, Self::Codex];
 
     /// Its name as settings write it, which also names its lease
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Coderabbit => "coderabbit",
             Self::Cubic => "cubic",
+            Self::Codex => "codex",
         }
     }
 
@@ -48,6 +51,7 @@ impl Bot {
         match self {
             Self::Coderabbit => "CodeRabbit",
             Self::Cubic => "cubic",
+            Self::Codex => "Codex",
         }
     }
 
@@ -66,6 +70,7 @@ impl Bot {
         match self {
             Self::Coderabbit => Resource::Coderabbit,
             Self::Cubic => Resource::Cubic,
+            Self::Codex => Resource::Codex,
         }
     }
 
@@ -94,6 +99,9 @@ pub struct Reviewers {
     /// cubic's window. Its free plan gives a private repo 20 reviews a month.
     #[serde(default)]
     pub cubic: Option<ReviewWindow>,
+    /// Codex's window: the weekly allowance its plan gives code reviews
+    #[serde(default)]
+    pub codex: Option<ReviewWindow>,
 }
 
 impl Reviewers {
@@ -102,6 +110,7 @@ impl Reviewers {
         match bot {
             Bot::Coderabbit => Some(self.coderabbit.unwrap_or(ReviewWindow::HOURLY)),
             Bot::Cubic => self.cubic,
+            Bot::Codex => self.codex,
         }
     }
 
@@ -339,5 +348,6 @@ mod tests {
     fn a_bots_name_is_its_lease() {
         assert_eq!(Bot::Coderabbit.lease(), LeaseKind::coderabbit());
         assert_eq!(Bot::Cubic.lease().as_str(), "cubic");
+        assert_eq!(Bot::Codex.lease().as_str(), "codex");
     }
 }
