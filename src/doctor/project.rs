@@ -5,7 +5,6 @@ use serde_json::{Map, Value};
 use super::{Here, Line, Probes, rulings};
 use crate::flock::add::LABELS;
 use crate::ports::{NewLabel, Visibility};
-use crate::preview::Tools;
 use crate::runner::{ProjectName, ProjectPaths, SUMMON_LABEL, check_instructions, check_repo};
 use crate::settings::{Account, Limit, Runs, Settings};
 use crate::webhook::KelpieSettings;
@@ -30,7 +29,7 @@ pub(super) fn checks(
     };
     // A relative path in the settings is taken from the project's own folder, as the runner does.
     let paths = match ProjectName::try_from(sheep) {
-        Ok(name) => ProjectPaths::under(here.kelpie_home, &name),
+        Ok(name) => ProjectPaths::under(here.kelpie_home, here.shep_home, &name),
         Err(e) => return wrong(e.to_string()),
     };
     let folder = paths.settings.parent().unwrap_or(here.home);
@@ -261,7 +260,7 @@ fn local_review(
 }
 
 fn preview(subject: String, here: Here<'_>) -> Line {
-    let tools = Tools::under(here.kelpie_home);
+    let tools = super::tools(here);
     let missing = tools.missing();
     if missing.is_empty() {
         return Line::ok(

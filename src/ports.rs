@@ -22,6 +22,7 @@ use crate::shots::{ShotsJob, ShotsRun};
 use crate::webhook::Webhook;
 
 mod agent;
+mod gpu;
 mod leased;
 mod local_paths;
 mod model_seat;
@@ -34,6 +35,7 @@ pub use agent::{
     AgentCall, AgentError, AgentReply, Agents, Cost, Fence, Guard, Reach, Role, Session, SessionId,
     Tools, Usage,
 };
+pub use gpu::{Gpu, GpuError, GpuMetrics};
 pub use leased::{Leased, LocalLeases};
 pub use local_paths::Guarded;
 pub use model_seat::ModelSeat;
@@ -797,6 +799,8 @@ pub struct Ports {
     pub local_leases: Arc<dyn LocalLeases>,
     /// A profile for each review bot a round may summon
     pub review_bots: Vec<Arc<dyn Profile>>,
+    /// The GPU's figures, for `status`
+    pub gpu: Arc<dyn GpuMetrics>,
     /// The maintainer's relay session, sent every ruling alongside the webhook
     pub relay: Arc<dyn Relay>,
     /// The maintainer's webhook, shared so a post runs without holding the runner

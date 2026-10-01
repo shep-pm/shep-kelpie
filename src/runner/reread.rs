@@ -40,6 +40,7 @@ impl Runner {
             settings.forge = self.settings.forge.clone();
         }
         let reviewers = kelpie.reviewers;
+        let gpu_metrics_url = kelpie.gpu_metrics_url.clone();
         let agents = settings.role_agents(&kelpie.agents)?;
         let lineup = settings.lineup(&kelpie, &self.home)?;
         let (channels, webhook) = ruling_channels(&settings, kelpie)?;
@@ -55,6 +56,9 @@ impl Runner {
         }
         if agents != self.agents {
             changed.push("agents");
+        }
+        if gpu_metrics_url != self.gpu.url() {
+            changed.push("gpu_metrics_url");
         }
         if changed.is_empty() && waiting.is_empty() {
             return Ok(None);
@@ -76,6 +80,7 @@ impl Runner {
         self.reviewers = reviewers;
         self.lineup = lineup;
         self.agents = agents;
+        self.gpu.point_at(gpu_metrics_url);
         self.extra_instructions = extra_instructions;
         self.channels = channels;
         self.webhook = webhook;

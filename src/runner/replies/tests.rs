@@ -303,7 +303,7 @@ fn an_unclaimed_id_another_project_may_hold_needs_the_project_named() {
     let (rig, runner, _) = alerted("koji");
     let kelpie = rig.paths().kelpie_home;
     std::fs::remove_file(kelpie.join("rulings/1")).unwrap();
-    let lab = kelpie.join("projects/lab/state.json");
+    let lab = kelpie.join("lab/state.json");
     std::fs::create_dir_all(lab.parent().unwrap()).unwrap();
     for (lab_state, why) in [
         ("{".to_owned(), "lab's rulings cannot be read"),

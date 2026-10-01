@@ -56,7 +56,7 @@ pub struct ClaudeCli {
     pub(super) home: PathBuf,
 }
 
-// The default home and tools are the maintainer's: `$HOME` and `~/.kelpie/tools`.
+// The default home and tools are the maintainer's: `$HOME` and kelpie's own tools.
 impl Default for ClaudeCli {
     fn default() -> Self {
         let home = std::env::var_os("HOME")
@@ -66,7 +66,9 @@ impl Default for ClaudeCli {
             processes: Processes::default(),
             program: "claude".into(),
             lambs: None,
-            sandbox: Arc::new(SandboxRuntime::new(Tools::under(&home.join(".kelpie")))),
+            sandbox: Arc::new(SandboxRuntime::new(Tools::under(
+                &crate::home::kelpie_home().unwrap_or_else(|_| home.join(crate::home::OLD)),
+            ))),
             home,
         }
     }

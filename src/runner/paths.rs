@@ -34,6 +34,10 @@ impl TryFrom<&str> for ProjectName {
         if value.is_empty() || value.starts_with('.') || !value.chars().all(allowed) {
             return Err(ProjectNameError(value.to_owned()));
         }
+        // A project's folder sits beside kelpie's own in kelpie's home.
+        if crate::home::OWN.contains(&value) {
+            return Err(ProjectNameError(value.to_owned()));
+        }
         Ok(Self(value.to_owned()))
     }
 }
@@ -54,8 +58,10 @@ impl fmt::Display for ProjectNameError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{:?} is not a project name: use letters, digits, - _ .",
-            self.0
+            "{:?} cannot name a project: use letters, digits, - _ . and not one of kelpie's \
+             own folders ({}), as in `shep kelpie add <another name>`",
+            self.0,
+            crate::home::OWN.join(" ")
         )
     }
 }
@@ -81,8 +87,7 @@ pub struct ProjectPaths {
     pub tools: Tools,
     /// Kelpie's home, which holds every folder here
     pub kelpie_home: PathBuf,
-    /// The shepherd's home, which a worker may not read. Kelpie's own shepherd,
-    /// `<kelpie home>/shep`, unless the runner's `SHEP_HOME` names another.
+    /// The shepherd's home, which a worker may not read outside its own folders
     pub shep_home: PathBuf,
     /// The dog's door, the one socket a worker may connect to. Under
     /// kelpie's home unless the runner sets it from its own environment.
@@ -94,14 +99,11 @@ pub struct ProjectPaths {
 }
 
 impl ProjectPaths {
-    /// `<kelpie home>/projects/<project>/`, beside kelpie's own
-    /// `<kelpie home>/settings.toml`, with worktrees under
-    /// `<kelpie home>/wt/<project>/`, build folders under
-    /// `<kelpie home>/targets/<project>/`, shots under
-    /// `<kelpie home>/shots/<project>/`, the Playwright server's files under
-    /// `<kelpie home>/playwright/<project>/`, and the shared `<kelpie home>/tools/`
-    pub fn under(kelpie_home: &Path, project: &ProjectName) -> Self {
-        let folder = kelpie_home.join("projects").join(project.as_str());
+    /// `<kelpie home>/<project>/`, holding the project's state, settings and
+    /// worker files, and its `worktrees`, `builds`, `shots` and `playwright`
+    /// folders, beside kelpie's own `settings.toml`, `totp` and `tools`
+    pub fn under(kelpie_home: &Path, shep_home: &Path, project: &ProjectName) -> Self {
+        let folder = kelpie_home.join(project.as_str());
         Self {
             kelpie_settings: kelpie_home.join("settings.toml"),
             totp: kelpie_home.join("totp"),
@@ -111,13 +113,24 @@ impl ProjectPaths {
             skills: folder.join("skills"),
             tools: Tools::under(kelpie_home),
             kelpie_home: kelpie_home.to_owned(),
-            shep_home: kelpie_home.join("shep"),
+            shep_home: shep_home.to_owned(),
             door: kelpie_home.join("dog/lease.sock"),
-            worktrees: kelpie_home.join("wt").join(project.as_str()),
-            builds: kelpie_home.join("targets").join(project.as_str()),
-            shots: kelpie_home.join("shots").join(project.as_str()),
-            playwright: kelpie_home.join("playwright").join(project.as_str()),
+            worktrees: folder.join("worktrees"),
+            builds: folder.join("builds"),
+            shots: folder.join("shots"),
+            playwright: folder.join("playwright"),
         }
+    }
+
+    /// Whether the door, and the longest socket a call opens (a 128-bit
+    /// random name in the worker folder), are short enough to bind
+    ///
+    /// # Errors
+    ///
+    /// A message naming the path that is too long.
+    pub fn sockets_fit(&self) -> Result<(), String> {
+        crate::home::socket_fits(&self.door)?;
+        crate::home::socket_fits(&self.worker.join(format!("{}.sock", "0".repeat(32))))
     }
 
     /// The folders a dev server of this project's can work in: every
@@ -161,9 +174,64 @@ mod tests {
 
     #[test]
     fn a_project_name_is_one_path_component() {
-        for bad in ["", "a/b", "..", ".hidden", "sp ace"] {
+        for bad in ["", "a/b", "..", ".hidden", "sp ace", "dog", "tools"] {
             assert!(ProjectName::try_from(bad).is_err(), "{bad:?}");
         }
         assert!(ProjectName::try_from("shep-kelpie_2.0").is_ok());
+    }
+
+    #[test]
+    fn a_socket_too_long_to_bind_is_named() {
+        let koji = ProjectName::try_from("koji").unwrap();
+        let fits = ProjectPaths::under(Path::new("/s/kelpie"), Path::new("/s"), &koji);
+        assert_eq!(fits.sockets_fit(), Ok(()));
+        let long = format!("/{}", "s".repeat(60));
+        let home = Path::new(&long);
+        let paths = ProjectPaths::under(&home.join("kelpie"), home, &koji);
+        let error = paths.sockets_fit().unwrap_err();
+        assert!(
+            error.contains(&paths.worker.display().to_string()),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_door_too_long_to_bind_is_named() {
+        let koji = ProjectName::try_from("koji").unwrap();
+        let long = format!("/{}", "s".repeat(90));
+        let mut paths = ProjectPaths::under(Path::new("/k"), Path::new(&long), &koji);
+        paths.door = Path::new(&long).join("kelpie/dog/lease.sock");
+        let error = paths.sockets_fit().unwrap_err();
+        assert!(error.contains("lease.sock"), "{error}");
+    }
+
+    // A worktree moved by a start that died before it relinked, or written
+    // relative by git: the runner points git at it again as it opens.
+    #[test]
+    fn an_opening_runner_repairs_git_s_links_to_its_worktrees() {
+        use crate::test::{Rig, git};
+        let rig = Rig::new("koji");
+        let was = rig.home.path().join("elsewhere/7");
+        git(
+            &rig.repo(),
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                "-b",
+                "kelpie/7",
+                was.to_str().unwrap(),
+            ],
+        );
+        let tree = rig.paths().worktree(7);
+        std::fs::create_dir_all(tree.parent().unwrap()).unwrap();
+        std::fs::rename(&was, &tree).unwrap();
+        let listed = || git(&rig.repo(), &["worktree", "list", "--porcelain"]);
+        assert!(listed().contains("prunable"), "{}", listed());
+
+        drop(rig.open().unwrap());
+
+        assert!(listed().contains("koji/worktrees/7"), "{}", listed());
+        assert!(!listed().contains("prunable"), "{}", listed());
     }
 }

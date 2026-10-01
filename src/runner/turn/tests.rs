@@ -6,7 +6,7 @@ use super::*;
 use crate::ports::{Cost, Usage};
 use crate::profile;
 use crate::settings::Effort;
-use crate::test::{LEFT_BEHIND, Rig, Scripted, git};
+use crate::test::{LEFT_BEHIND, Rig, Scripted, git, write_in};
 
 fn usage(n: u64) -> Usage {
     Usage {
@@ -35,7 +35,7 @@ fn the_first_turn_starts_the_workers_session_in_its_own_worktree() {
 
     let [seen] = rig.claude.seen().try_into().unwrap();
     let call = seen.call;
-    let worktree = rig.home.path().join("kelpie/wt/shep/7");
+    let worktree = rig.home.path().join("shep/kelpie/shep/worktrees/7");
     assert_eq!(call.role, Role::Worker);
     assert_eq!(
         (call.model.as_str(), call.effort),
@@ -78,7 +78,7 @@ fn the_branch_is_cut_from_the_latest_origin_main() {
     rig.ask(&runner, "add", Some("3"));
     rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
     step(&runner).unwrap();
-    let worktree = rig.home.path().join("kelpie/wt/reactmap/3");
+    let worktree = rig.home.path().join("shep/kelpie/reactmap/worktrees/3");
     assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), landed);
 }
 
@@ -88,11 +88,11 @@ fn the_settings_file_fences_writes_to_this_worktree_and_its_git_paths() {
     rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
     step(&runner).unwrap();
     let [seen] = rig.claude.seen().try_into().unwrap();
-    let kelpie = rig.home.path().join("kelpie");
+    let kelpie = rig.home.path().join("shep/kelpie");
     let git_dir = fs::canonicalize(rig.repo().join(".git")).unwrap();
     let allow = &seen.sandbox["filesystem"]["allowWrite"];
-    assert_eq!(allow[0], json!(kelpie.join("wt/koji/7")));
-    assert_eq!(allow[1], json!(kelpie.join("targets/koji/7")));
+    assert_eq!(allow[0], json!(kelpie.join("koji/worktrees/7")));
+    assert_eq!(allow[1], json!(kelpie.join("koji/builds/7")));
     assert_eq!(allow[2], json!(git_dir.join("objects")));
     assert_eq!(allow[3], json!(git_dir.join("worktrees/7")));
     assert_eq!(
@@ -104,7 +104,7 @@ fn the_settings_file_fences_writes_to_this_worktree_and_its_git_paths() {
         format!(
             "'/opt/kelpie/bin/kelpie' 'guard' '{}' '{}' '--folder={}' '--folder={}'",
             git_dir.display(),
-            kelpie.join("wt/koji/7").display(),
+            kelpie.join("koji/worktrees/7").display(),
             kelpie.display(),
             rig.repo().display()
         ),
@@ -113,15 +113,66 @@ fn the_settings_file_fences_writes_to_this_worktree_and_its_git_paths() {
 }
 
 #[test]
-fn a_worker_cannot_read_the_shepherd_s_home_wherever_it_is() {
+fn a_worker_reads_its_worktree_inside_the_shepherds_home_and_not_shep_s_socket() {
     let (rig, runner) = with_issue_7("koji");
+    let shep = rig.home.path().join("shep");
+    write_in(&shep, "run/shep.sock", "");
+    write_in(&shep, "dogs.toml", "");
+    write_in(&shep, "kelpie/rotom/state.json", "{}");
     rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
     step(&runner).unwrap();
     let [seen] = rig.claude.seen().try_into().unwrap();
-    let rule = format!("Read(/{}/**)", rig.home.path().join("shep").display());
-    let deny = seen.settings["permissions"]["deny"].as_array().unwrap();
-    assert!(deny.contains(&json!(rule)), "{rule} not in {deny:?}");
-    assert!(rule.starts_with("Read(//"), "{rule} is not rooted at /");
+    let kelpie = shep.join("kelpie");
+    let (worktree, build) = (
+        kelpie.join("koji/worktrees/7"),
+        kelpie.join("koji/builds/7"),
+    );
+    assert_eq!(seen.call.cwd, worktree);
+
+    // The sandbox denies the whole home and lets the worker back into its own folders.
+    let files = &seen.sandbox["filesystem"];
+    let shep_rule = format!("{}/**", shep.display());
+    assert!(
+        files["denyRead"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(shep_rule))
+    );
+    let allowed = files["allowRead"].as_array().unwrap();
+    for own in [&worktree, &build, &kelpie.join("koji/shots/7")] {
+        assert!(allowed.contains(&json!(own)), "{own:?} not in {allowed:?}");
+    }
+    assert!(
+        files["allowWrite"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(worktree))
+    );
+
+    // Claude Code's own rules take no exceptions, so they name each entry around them.
+    let deny: Vec<&str> = seen.settings["permissions"]["deny"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r.as_str().unwrap())
+        .collect();
+    let rule = |path: &Path| format!("Read(/{})", path.display());
+    for denied in [
+        rule(&shep.join("run/**")),
+        rule(&shep.join("dogs.toml")),
+        rule(&kelpie.join("rotom/**")),
+        rule(&kelpie.join("koji/state.json")),
+    ] {
+        assert!(deny.contains(&denied.as_str()), "{denied} not in {deny:?}");
+    }
+    for read in [&worktree, &build] {
+        let hidden = deny.iter().find(|rule| {
+            let glob = rule.trim_start_matches("Read(/").trim_end_matches(')');
+            let folder = glob.trim_end_matches("**").trim_end_matches('/');
+            read.starts_with(folder)
+        });
+        assert_eq!(hidden, None, "a rule hides {read:?}");
+    }
 }
 
 #[test]
@@ -191,7 +242,7 @@ fn a_worker_that_repoints_its_git_file_cannot_move_its_fence() {
 
     // What a worker could do from inside its worktree: a fake git dir
     // whose common dir is a folder it wants to write.
-    let worktree = rig.home.path().join("kelpie/wt/golbat/7");
+    let worktree = rig.home.path().join("shep/kelpie/golbat/worktrees/7");
     let wanted = rig.home.path().join("wanted");
     let fake = worktree.join("fake");
     for dir in ["refs", "objects"] {
@@ -262,7 +313,12 @@ fn a_paused_project_runs_no_turn_until_it_starts() {
     rig.ask(&runner, "add", Some("5"));
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(rig.claude.calls(), []);
-    assert!(!rig.home.path().join("kelpie/wt/chelone/5").exists());
+    assert!(
+        !rig.home
+            .path()
+            .join("shep/kelpie/chelone/worktrees/5")
+            .exists()
+    );
 
     rig.ask(&runner, "start", None);
     rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
@@ -518,7 +574,7 @@ fn a_restart_after_the_ceiling_passed_parks_it_with_no_call_spent() {
 #[test]
 fn a_foreign_folder_where_the_worktree_goes_fails_the_turn_before_any_call() {
     let (rig, runner) = with_issue_7("koji");
-    let folder = rig.home.path().join("kelpie/wt/koji/7");
+    let folder = rig.home.path().join("shep/kelpie/koji/worktrees/7");
     fs::create_dir_all(&folder).unwrap();
     let Some(StepReport::Failed { question, .. }) = step(&runner).unwrap() else {
         panic!("the turn ran in a folder kelpie did not make");

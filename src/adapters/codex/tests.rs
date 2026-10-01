@@ -517,6 +517,7 @@ fn worker_in(wt: &Path, build: &Path, kelpie: &Path, root: &Path, call: AgentCal
         build_env: &BTreeMap::new(),
         preview: None,
         shep_home: &root.join("shep"),
+        reads: &[],
         door: Path::new("/k/dog/lease.sock"),
     };
     AgentCall {

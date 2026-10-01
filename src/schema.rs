@@ -133,7 +133,7 @@ mod tests {
             .replace("# pull_request_reviewers =", "pull_request_reviewers =")
             .replace("build_env = {}", "build_env = { BUN = \"bun\" }")
             .replace(
-                "# instructions_file = \"~/.kelpie/projects/shep/worker-instructions.md\"",
+                "# instructions_file = \"~/.shep/kelpie/shep/worker-instructions.md\"",
                 "instructions_file = \"worker.md\"",
             )
             .replace(
@@ -214,6 +214,7 @@ mod tests {
         let example = include_str!("../kelpie-settings.example.toml")
             .replace("# ruling_channels =", "ruling_channels =")
             .replace("# codex_home =", "codex_home =")
+            .replace("# gpu_metrics_url =", "gpu_metrics_url =")
             .replace("# [kelpie.reviewers.", "[kelpie.reviewers.")
             .replace("# reviews =", "reviews =")
             .replace("# hours =", "hours =")

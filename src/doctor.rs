@@ -20,6 +20,7 @@ use crate::adapters::{ClaudeCli, Curl, Gh, LocalReviewer, SystemClock, SystemHos
 use crate::coderabbit::CodeRabbit;
 use crate::flock;
 use crate::ports::{Alerts, Clock, Forge, Meter, Reviewer};
+use crate::preview::Tools;
 use crate::review_bot::Profile;
 use crate::runner::ProjectName;
 use crate::shep_home;
@@ -171,6 +172,10 @@ pub struct Here<'a> {
     pub home: &'a Path,
     /// Kelpie's home, which holds its tools
     pub kelpie_home: &'a Path,
+    /// The shepherd's home kelpie's runners work theirs out from
+    pub shep_home: &'a Path,
+    /// The home kelpie used before, whose links an upgrade sweeps
+    pub old_home: Option<&'a Path>,
     /// Kelpie's own settings file from before the `[kelpie]` section
     pub kelpie_settings: &'a Path,
 }
@@ -184,13 +189,27 @@ pub struct Ask<'a> {
     pub test_alert: bool,
 }
 
+/// Kelpie's tools, or the old home's while no runner has moved them
+pub(crate) fn tools(here: Here<'_>) -> Tools {
+    let tools = Tools::under(here.kelpie_home);
+    let old = here.old_home.map(|old| old.join("tools"));
+    match old {
+        Some(old) if !tools.dir().exists() && crate::home::unmoved(&old) => Tools::at(old),
+        _ => tools,
+    }
+}
+
 /// Checks the machine and each project the shepherd at `shep_home` holds
 pub async fn check(shep_home: &Path, probes: Probes<'_>, here: Here<'_>, ask: Ask<'_>) -> Report {
     let mut lines = vec![
         machine::claude(probes.meter, probes.clock),
         machine::gh(probes.forge),
-        machine::sandbox(probes.host, here.kelpie_home),
+        machine::sandbox(probes.host, &tools(here)),
     ];
+    lines.extend(
+        here.old_home
+            .and_then(|old| machine::links(old, here.kelpie_home)),
+    );
     match shepherd::connect(shep_home).await {
         Ok(client) => {
             lines.push(machine::shepherd(&client, shep_home));
@@ -262,12 +281,13 @@ pub fn main(args: &[String]) -> ExitCode {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .ok_or("HOME is not set")?;
-        let kelpie_home = std::env::var_os("KELPIE_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".kelpie"));
+        let kelpie_home = crate::home::kelpie_home_of(&shep_home);
+        let old_home = crate::home::old_home();
         let here = Here {
             home: &home,
             kelpie_home: &kelpie_home,
+            shep_home: &shep_home,
+            old_home: old_home.as_deref(),
             kelpie_settings: &kelpie_home.join("settings.toml"),
         };
         let ask = Ask {

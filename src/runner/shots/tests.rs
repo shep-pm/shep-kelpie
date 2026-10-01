@@ -220,7 +220,10 @@ fn a_dev_server_the_worker_left_is_stopped_when_its_turn_ends_and_on_restart() {
         ))]);
     step(&runner).unwrap(); // a turn killed at its ceiling
     // The one file kelpie records its server in, never a folder to list
-    let recorded = rig.home.path().join("kelpie/shots/lab/7/dev-server.pid");
+    let recorded = rig
+        .home
+        .path()
+        .join("shep/kelpie/lab/shots/7/dev-server.pid");
     assert_eq!(rig.shots.stopped(), std::slice::from_ref(&recorded));
     drop(runner);
     rig.open().unwrap();
@@ -232,8 +235,8 @@ fn a_starting_runner_sweeps_its_own_worktrees_and_build_folders_for_orphaned_ser
     let rig = with_preview("lab");
     assert!(rig.shots.swept().is_empty());
     drop(started(&rig));
-    let home = rig.home.path().join("kelpie");
-    let own = [home.join("wt/lab"), home.join("targets/lab")];
+    let home = rig.home.path().join("shep/kelpie/lab");
+    let own = [home.join("worktrees"), home.join("builds")];
     assert_eq!(rig.shots.swept(), [own.to_vec()]);
 }
 
@@ -248,7 +251,7 @@ fn a_worker_with_a_launch_file_gets_playwright_and_the_shots_tool() {
     let worker = rig.paths().worker;
     assert_eq!(seen.call.mcp_config, Some(worker.join("mcp.json")));
     let mcp = read_json(&worker.join("mcp.json"));
-    let tools = rig.home.path().join("kelpie/tools");
+    let tools = rig.home.path().join("shep/kelpie/tools");
     assert_eq!(
         mcp["mcpServers"]["playwright"],
         json!({
@@ -276,7 +279,7 @@ fn a_worker_with_a_launch_file_gets_playwright_and_the_shots_tool() {
     assert_eq!(job["domains"], json!(["api.example.com"]));
     assert_eq!(
         job["out"],
-        json!(rig.home.path().join("kelpie/shots/lab/7"))
+        json!(rig.home.path().join("shep/kelpie/lab/shots/7"))
     );
 
     let network = &seen.sandbox["network"];
@@ -294,7 +297,7 @@ fn a_worker_with_a_launch_file_gets_playwright_and_the_shots_tool() {
         worker.join("mcp.json"),
         worker.join("playwright.json"),
         worker.join("shots-job.json"),
-        rig.home.path().join("kelpie/playwright/lab/7"),
+        rig.home.path().join("shep/kelpie/lab/playwright/7"),
     ] {
         assert!(written.exists(), "{written:?}");
         assert!(!written.starts_with(&worktree), "{written:?}");
@@ -311,7 +314,7 @@ fn a_worker_with_a_launch_file_gets_playwright_and_the_shots_tool() {
 fn playwrights_output_folder_is_kelpies_and_a_symlink_there_stops_the_turn() {
     let rig = with_preview("lab");
     let runner = started(&rig);
-    let out = rig.home.path().join("kelpie/playwright/lab/7");
+    let out = rig.home.path().join("shep/kelpie/lab/playwright/7");
     std::fs::create_dir_all(out.parent().unwrap()).unwrap();
     std::os::unix::fs::symlink(rig.home.path(), &out).unwrap();
     let Some(StepReport::Failed { id, question, .. }) = step(&runner).unwrap() else {
@@ -338,7 +341,7 @@ fn playwrights_output_folder_is_kelpies_and_a_symlink_there_stops_the_turn() {
     let seen = &rig.claude.seen()[0].settings;
     let allow = seen["sandbox"]["filesystem"]["allowWrite"].to_string();
     assert!(
-        !allow.contains("kelpie/shots"),
+        !allow.contains("lab/shots"),
         "the worker cannot write it: {allow}"
     );
 }
@@ -394,7 +397,7 @@ fn the_claude_round_gets_the_latest_shots_and_may_open_them() {
     };
     assert_eq!((of.as_str(), shots, problems), (head.as_str(), 8, vec![]));
     let [job] = rig.shots.jobs().try_into().unwrap();
-    let dir = rig.home.path().join("kelpie/shots/lab/7");
+    let dir = rig.home.path().join("shep/kelpie/lab/shots/7");
     assert_eq!(job.out, dir.join(&head[..7]));
     assert_eq!(job.worktree, rig.worktree_7());
 
@@ -434,7 +437,7 @@ fn a_finding_that_cites_a_screenshot_is_judged_with_it_open() {
     step(&runner).unwrap(); // round 1, qwen: clean
     step(&runner).unwrap(); // the shots
     let head = rig.forge.head_of("kelpie/7").unwrap();
-    let dir = rig.home.path().join("kelpie/shots/lab/7");
+    let dir = rig.home.path().join("shep/kelpie/lab/shots/7");
     let shot = dir.join(&head[..7]).join("events-mobile-dark.png");
     let finding = format!(
         "HIGH|{}:0|white text on white in dark mode|unreadable",
@@ -589,7 +592,7 @@ fn routes_the_worker_names_join_kelpies_next_run() {
     let runner = started(&rig);
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);
     step(&runner).unwrap(); // the worker's turn
-    let shots = rig.home.path().join("kelpie/shots/lab/7");
+    let shots = rig.home.path().join("shep/kelpie/lab/shots/7");
     let raids = crate::preview::Route::try_from("/raids".to_owned()).unwrap();
     crate::shots::name_routes(&shots, &[raids]).unwrap();
     step(&runner).unwrap(); // round 1, qwen

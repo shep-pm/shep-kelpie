@@ -10,11 +10,17 @@
 
 # The folder holding kelpie's own Codex login, apart from your `~/.codex`,
 # which no call reads. Sign it in once with
-# `CODEX_HOME=~/.kelpie/codex codex login --device-auth`. Every Codex call
-# runs on a home of its own with the login linked in. `<kelpie home>/codex`
-# when absent; a leading `~/` is the home folder. A runner reads it when it
-# starts.
-# codex_home = "~/.kelpie/codex"
+# `CODEX_HOME=$SHEP_HOME/kelpie/codex codex login --device-auth`. Every Codex
+# call runs on a home of its own with the login linked in. Kelpie's home's
+# `codex` when absent; a leading `~/` is the home folder. A runner reads it
+# when it starts.
+# codex_home = "~/.kelpie/shep/kelpie/codex"
+
+# The GPU's Prometheus metrics page, such as `nvidia_gpu_exporter`'s
+# `/metrics`. `status` shows the GPU's load, memory, power and temperature
+# from it, and says why when the page cannot be read. Nothing is read when
+# absent.
+# gpu_metrics_url = "http://gpu-box:9835/metrics"
 
 # Where the webhook posts a ruling, so the maintainer hears of it away from
 # the terminal. Needed only by a project whose rulings go to the webhook.

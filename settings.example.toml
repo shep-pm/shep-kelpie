@@ -13,13 +13,13 @@
 name = "shep"
 script = "/path/to/kelpie" # the dog's path (`shep dogs`), e.g. ~/.cargo/bin/shep-kelpie, which `upgrade` replaces
 args = ["runner", "shep"]
-env = { SHEP_HOME = "/path/to/home/.kelpie/shep" }
+env = { SHEP_HOME = "/path/to/home/.shep" }
 channel = true
 shutdown_with_message = true
 kill_timeout = "10s"
 
 [app.dogs.kelpie]
-repo = "~/.kelpie/repos/shep"
+repo = "~/GitHub/shep" # the checkout `shep kelpie add` ran in
 forge = "shep-pm/shep"
 
 # `ask` raises a ruling before every merge. `auto` merges once every gate
@@ -157,10 +157,10 @@ build_env = {}
 
 # A file of extra worker instructions, appended to kelpie's own: rules the
 # repo's docs don't carry. `~/` is the home folder, and a relative path is
-# taken from the project's folder,
-# `~/.kelpie/projects/<project>/`. A missing file stops the runner. Left out
+# taken from the project's folder in kelpie's home,
+# `$SHEP_HOME/kelpie/<project>/`. A missing file stops the runner. Left out
 # here, so shep's first-build defaults carry none.
-# instructions_file = "~/.kelpie/projects/shep/worker-instructions.md"
+# instructions_file = "~/.shep/kelpie/shep/worker-instructions.md"
 
 # A worker turn still running at this ceiling is more likely stuck than
 # busy: kelpie stops it, parks it and asks. A yes resumes the same session.
@@ -172,7 +172,7 @@ turn_timeout = 60
 # [[app.dogs.kelpie.worker.guard_hooks]]
 # event = "PreToolUse"
 # matcher = "Bash"
-# command = "~/.kelpie/hooks/lint-guard"
+# command = "~/bin/lint-guard"
 
 # Off unless `enabled = true`, and then only for a repo with
 # `.claude/launch.json` on `main`. Kelpie starts that file's dev server to

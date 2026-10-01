@@ -3,7 +3,7 @@ use super::*;
 const EXAMPLE: &str = include_str!("../../settings.example.toml");
 
 const HOME: &str = "/home/me";
-const FOLDER: &str = "/home/me/.kelpie/projects/shep";
+const FOLDER: &str = "/home/me/.shep/kelpie/shep";
 
 // A runner's Flockfile entry, read the way its runner reads the table.
 fn parse(entry: &str) -> Result<Settings, String> {
@@ -29,7 +29,7 @@ fn with_hook(event: &str) -> String {
 #[test]
 fn the_example_holds_the_first_build_defaults() {
     let s = parse(EXAMPLE).unwrap();
-    assert_eq!(s.repo, Path::new("/home/me/.kelpie/repos/shep"));
+    assert_eq!(s.repo, Path::new("/home/me/GitHub/shep"));
     assert_eq!(s.forge.as_str(), "shep-pm/shep");
     assert_eq!(s.merge_authority, MergeAuthority::Ask);
     assert!(s.ci);
@@ -325,7 +325,7 @@ fn private_names_are_read_and_default_to_none() {
 
 #[test]
 fn a_repo_path_without_a_tilde_is_kept() {
-    let text = EXAMPLE.replace("\"~/.kelpie/repos/shep\"", "\"/srv/shep\"");
+    let text = EXAMPLE.replace("\"~/GitHub/shep\"", "\"/srv/shep\"");
     assert_eq!(parse(&text).unwrap().repo, Path::new("/srv/shep"));
 }
 
@@ -356,7 +356,7 @@ fn a_projects_own_guard_hooks_are_read() {
         hook.matcher.map(|m| m.as_str().to_owned()),
         Some("Bash".into())
     );
-    assert_eq!(hook.command.as_str(), "~/.kelpie/hooks/lint-guard");
+    assert_eq!(hook.command.as_str(), "~/bin/lint-guard");
 }
 
 #[test]

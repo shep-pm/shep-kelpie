@@ -26,7 +26,7 @@ pub struct Files<'a> {
     pub project: &'a str,
     /// The runner's sheep, whose table holds the project's settings
     pub sheep: &'a str,
-    /// `<kelpie home>/projects/<project>/settings.toml`
+    /// `<kelpie home>/<project>/settings.toml`
     pub settings: &'a Path,
     /// `<kelpie home>/settings.toml`
     pub kelpie_settings: &'a Path,

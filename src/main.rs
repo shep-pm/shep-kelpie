@@ -227,19 +227,21 @@ fn stop_on_signal(shots: ShotsCli) {
     });
 }
 
-// Kelpie's home is `KELPIE_HOME`, or `~/.kelpie`, as the runner reads it.
+// Kelpie's home as the runner works it out. Only a runner or the dog moves
+// files into it, since only those always know their shepherd.
 fn kelpie_home() -> Option<PathBuf> {
-    std::env::var_os("KELPIE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".kelpie")))
+    shep_kelpie::home::kelpie_home()
+        .inspect_err(|e| eprintln!("{e}"))
+        .ok()
 }
 
 fn totp(rotate: bool) -> ExitCode {
     let Some(home) = kelpie_home() else {
-        eprintln!("HOME is not set");
         return ExitCode::FAILURE;
     };
-    match shep_kelpie::totp::show(&home.join("totp/secret"), rotate) {
+    // The secret stays in the old home until a runner's start moves it.
+    let secret = shep_kelpie::home::or_old(home.join("totp/secret"), "totp/secret");
+    match shep_kelpie::totp::show(&secret, rotate) {
         Ok(text) => {
             print!("{text}");
             ExitCode::SUCCESS
@@ -253,10 +255,10 @@ fn totp(rotate: bool) -> ExitCode {
 
 fn unlock() -> ExitCode {
     let Some(home) = kelpie_home() else {
-        eprintln!("HOME is not set");
         return ExitCode::FAILURE;
     };
-    match shep_kelpie::totp::answers::Answers::in_folder(home.join("totp")).unlock() {
+    let folder = shep_kelpie::home::or_old(home.join("totp"), "totp");
+    match shep_kelpie::totp::answers::Answers::in_folder(folder).unlock() {
         Ok(()) => {
             println!("answers from ntfy are on again");
             ExitCode::SUCCESS
@@ -269,7 +271,7 @@ fn unlock() -> ExitCode {
 }
 
 fn move_settings(project: &str, sheep: &str) -> ExitCode {
-    let (Some(home), Some(kelpie_home)) = (std::env::var_os("HOME"), kelpie_home()) else {
+    let Some(home) = std::env::var_os("HOME") else {
         eprintln!("HOME is not set");
         return ExitCode::FAILURE;
     };
@@ -280,14 +282,18 @@ fn move_settings(project: &str, sheep: &str) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let paths = ProjectPaths::under(&kelpie_home, &project);
-    let files = Files {
-        project: project.as_str(),
-        sheep,
-        settings: &paths.settings,
-        kelpie_settings: &paths.kelpie_settings,
-    };
     with_shep_home("settings move", shep_home::MOVE_FIX, |shep_home| {
+        let kelpie_home = shep_kelpie::home::kelpie_home_of(shep_home);
+        let paths = ProjectPaths::under(&kelpie_home, shep_home, &project);
+        let old = format!("projects/{project}/settings.toml");
+        let settings = shep_kelpie::home::or_old(paths.settings, &old);
+        let kelpie_settings = shep_kelpie::home::or_old(paths.kelpie_settings, "settings.toml");
+        let files = Files {
+            project: project.as_str(),
+            sheep,
+            settings: &settings,
+            kelpie_settings: &kelpie_settings,
+        };
         let moved = shepherd::block_on(moving::move_files(shep_home, files, Path::new(&home)));
         match moved {
             Ok(lines) => {
@@ -306,7 +312,6 @@ fn move_settings(project: &str, sheep: &str) -> ExitCode {
 
 fn install_tools() -> ExitCode {
     let Some(home) = kelpie_home() else {
-        eprintln!("HOME is not set");
         return ExitCode::FAILURE;
     };
     let tools = Tools::under(&home);

@@ -16,7 +16,6 @@ mod link;
 pub mod triggers;
 
 use std::collections::HashMap;
-use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -31,6 +30,7 @@ use shep_client::{EventStream, Lagged, ReconnectingClient};
 use tokio::sync::mpsc;
 
 use crate::adapters::SystemClock;
+use crate::home;
 use crate::lease::gpu::{self, GpuLock};
 use crate::lease::saved::{BookFile, SavedBook};
 use crate::lease::wire::{GRANT, grant_params};
@@ -70,44 +70,22 @@ pub fn run() -> ExitCode {
 }
 
 /// The shepherd's control socket: `$SHEP_HOME/run/shep.sock`, or under
-/// `~/.kelpie/shep` when `SHEP_HOME` is unset
+/// shep's own default `~/.shep` when `SHEP_HOME` is unset
 ///
 /// # Errors
 ///
-/// A message when neither `SHEP_HOME` nor `HOME` is set.
+/// A message when `SHEP_HOME` is relative, or neither it nor `HOME` is set.
 pub fn shepherd_socket() -> Result<PathBuf, String> {
-    socket_from(std::env::var_os("SHEP_HOME"), std::env::var_os("HOME"))
+    Ok(home::shep_home()?.join("run/shep.sock"))
 }
 
-fn socket_from(shep_home: Option<OsString>, home: Option<OsString>) -> Result<PathBuf, String> {
-    let shep_home = match (shep_home, home) {
-        (Some(shep_home), _) => PathBuf::from(shep_home),
-        (None, Some(home)) => PathBuf::from(home).join(".kelpie/shep"),
-        (None, None) => return Err("neither SHEP_HOME nor HOME is set".into()),
-    };
-    Ok(shep_home.join("run/shep.sock"))
-}
-
-/// The dog's book file: `<kelpie home>/dog/book.json`, where kelpie's
-/// home is `KELPIE_HOME`, or `~/.kelpie` when that is unset
+/// The dog's book file: `<kelpie home>/dog/book.json`
 ///
 /// # Errors
 ///
-/// A message when neither `KELPIE_HOME` nor `HOME` is set.
+/// A message when kelpie's home cannot be worked out.
 pub fn book_path() -> Result<PathBuf, String> {
-    book_path_from(std::env::var_os("KELPIE_HOME"), std::env::var_os("HOME"))
-}
-
-fn book_path_from(
-    kelpie_home: Option<OsString>,
-    home: Option<OsString>,
-) -> Result<PathBuf, String> {
-    let kelpie_home = match (kelpie_home, home) {
-        (Some(kelpie_home), _) => PathBuf::from(kelpie_home),
-        (None, Some(home)) => PathBuf::from(home).join(".kelpie"),
-        (None, None) => return Err("neither KELPIE_HOME nor HOME is set".into()),
-    };
-    Ok(kelpie_home.join("dog/book.json"))
+    Ok(home::kelpie_home()?.join("dog/book.json"))
 }
 
 // The desk and the file it is saved to, written whenever the book changes.
@@ -230,6 +208,13 @@ async fn serve() -> Result<(), String> {
     let lock = GpuLock::under(&gpu::temp_dir());
     println!("the GPU lock is {}", lock.path().display());
     let file = BookFile::new(book_path()?);
+    // The adopted dog never had `KELPIE_HOME`, so its old book was always under `~/.kelpie`.
+    if let (Some(folder), Some(user)) = (file.path().parent(), std::env::var_os("HOME")) {
+        let old = PathBuf::from(user).join(home::OLD);
+        for line in home::migrate::run(&home::migrate::dog(&old, folder))? {
+            println!("{line}");
+        }
+    }
     if let Some(removed) = left_over::remove(&client, file.path()).await? {
         println!("{removed}");
     }
@@ -588,37 +573,5 @@ mod tests {
         let settings = salvage("[reviewers.cubic]\nreviews = 0\n[leases]\ncargo-test = 5\n");
         assert_eq!(settings.reviewers.cubic, None);
         assert_eq!(settings.leases.cargo_test_capacity().get(), 5);
-    }
-
-    #[test]
-    fn the_socket_is_under_shep_home_or_kelpies_shepherd() {
-        let socket = |shep_home: Option<&str>, home: Option<&str>| {
-            socket_from(shep_home.map(Into::into), home.map(Into::into))
-        };
-        assert_eq!(
-            socket(Some("/s"), Some("/home/me")),
-            Ok(PathBuf::from("/s/run/shep.sock"))
-        );
-        assert_eq!(
-            socket(None, Some("/home/me")),
-            Ok(PathBuf::from("/home/me/.kelpie/shep/run/shep.sock"))
-        );
-        assert!(socket(None, None).is_err());
-    }
-
-    #[test]
-    fn the_book_is_under_kelpie_home_or_the_home_folder() {
-        let book = |kelpie_home: Option<&str>, home: Option<&str>| {
-            book_path_from(kelpie_home.map(Into::into), home.map(Into::into))
-        };
-        assert_eq!(
-            book(Some("/k"), Some("/home/me")),
-            Ok(PathBuf::from("/k/dog/book.json"))
-        );
-        assert_eq!(
-            book(None, Some("/home/me")),
-            Ok(PathBuf::from("/home/me/.kelpie/dog/book.json"))
-        );
-        assert!(book(None, None).is_err());
     }
 }

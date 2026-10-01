@@ -52,11 +52,11 @@ pub(crate) const CREDENTIALS: [&str; 12] = [
     "~/.npmrc",
     "~/.cargo/credentials",
     "~/.cargo/credentials.toml",
+    // Kelpie's old home, should a migration leave a project's state, the
+    // webhook URL's old file or the authenticator secret behind. Kelpie's
+    // home and the shepherd's are the profile's own.
     "~/.kelpie/projects/**",
-    // The webhook URL's old file. Not all of `~/.kelpie`: worktrees and build
-    // folders live there. The shepherd's home, with `dogs.toml`, is the profile's own.
     "~/.kelpie/settings.toml",
-    // The authenticator secret, which answers a ruling from ntfy
     "~/.kelpie/totp/**",
 ];
 
@@ -122,8 +122,12 @@ pub struct WorkerProfile<'a> {
     pub build_env: &'a BTreeMap<EnvName, BuildDir>,
     /// The preview's domains, for a project with the preview on; `None` with it off
     pub preview: Option<&'a [NonBlank]>,
-    /// The shepherd's home, whose `dogs.toml` holds the webhook's URL
+    /// The shepherd's home, whose `dogs.toml` holds the webhook's URL. The
+    /// worker reads none of it but its own folders in kelpie's.
     pub shep_home: &'a Path,
+    /// Kelpie's folders for this work item that the worker reads and does
+    /// not write: its shots and its browser's output
+    pub reads: &'a [PathBuf],
     /// The dog's door, the one Unix socket the worker may connect to
     pub door: &'a Path,
 }
@@ -153,10 +157,21 @@ impl WorkerProfile<'_> {
             .chain([git("refs/heads").join(BASE)])
             .chain(fence::deny_write(self.worktree))
             .collect();
+        // Kelpie's home is the shepherd's too unless `KELPIE_HOME` puts it elsewhere.
+        let homes = [self.shep_home, self.kelpie_home]
+            .into_iter()
+            .enumerate()
+            .filter(|&(i, home)| i == 0 || !home.starts_with(self.shep_home))
+            .map(|(_, home)| format!("{}/**", home.display()));
         let no_read = CREDENTIALS
             .iter()
             .map(|&p| p.to_owned())
-            .chain([format!("{}/**", self.shep_home.display())])
+            .chain(homes)
+            .collect();
+        let read = [self.worktree, self.build, self.kelpie]
+            .into_iter()
+            .map(Path::to_owned)
+            .chain(self.reads.iter().cloned())
             .collect();
         let no_commands = PM_ONLY
             .iter()
@@ -183,6 +198,7 @@ impl WorkerProfile<'_> {
             write,
             no_write,
             no_read,
+            read,
             hosts,
             no_commands,
             env: self.env(),
@@ -283,9 +299,70 @@ mod tests {
             build_env: &BTreeMap::new(),
             preview: None,
             shep_home: Path::new("/srv/shep"),
+            reads: &[],
             door: Path::new("/k/dog/lease.sock"),
         }
         .settings()
+    }
+
+    // A `KELPIE_HOME` set outside the shepherd's home holds the TOTP secret
+    // and other projects' state just the same.
+    #[test]
+    fn a_kelpie_home_outside_the_shepherds_is_denied_around_the_workers_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let (kelpie, shep) = (dir.path().join("k"), dir.path().join("shep"));
+        let (worktree, build) = (
+            kelpie.join("koji/worktrees/7"),
+            kelpie.join("koji/builds/7"),
+        );
+        for folder in [
+            &worktree,
+            &build,
+            &kelpie.join("totp"),
+            &kelpie.join("rotom"),
+            &shep,
+        ] {
+            std::fs::create_dir_all(folder).unwrap();
+        }
+        let s = WorkerProfile {
+            worktree: &worktree,
+            build: &build,
+            git_common_dir: Path::new("/r/.git"),
+            git_dir: Path::new("/r/.git/worktrees/7"),
+            branch: "kelpie/7",
+            kelpie: Path::new("/opt/kelpie"),
+            kelpie_home: &kelpie,
+            repo: Path::new("/r"),
+            private_names: &[],
+            guard_hooks: &[],
+            allowed_domains: &[],
+            build_env: &BTreeMap::new(),
+            preview: None,
+            shep_home: &shep,
+            reads: &[],
+            door: Path::new("/s/kelpie/dog/lease.sock"),
+        }
+        .settings();
+
+        let files = &s["sandbox"]["filesystem"];
+        let denied = strings(&files["denyRead"]);
+        for home in [&kelpie, &shep] {
+            assert!(
+                denied.contains(&format!("{}/**", home.display()).as_str()),
+                "{denied:?}"
+            );
+        }
+        assert!(strings(&files["allowRead"]).contains(&worktree.to_str().unwrap()));
+        let deny = strings(&s["permissions"]["deny"]);
+        for rule in ["totp/**", "rotom/**"] {
+            let rule = format!("Read(/{}/{rule})", kelpie.display());
+            assert!(deny.contains(&rule.as_str()), "{rule} not in {deny:?}");
+        }
+        let kelpie_rule = format!("Read(/{}/**)", kelpie.display());
+        assert!(
+            !deny.contains(&kelpie_rule.as_str()),
+            "it would hide the worktree"
+        );
     }
 
     fn strings(v: &Value) -> Vec<&str> {
@@ -384,6 +461,7 @@ mod tests {
             build_env: &build_env,
             preview: None,
             shep_home: Path::new("/srv/shep"),
+            reads: &[],
             door: Path::new("/k/dog/lease.sock"),
         }
         .settings();
@@ -418,6 +496,7 @@ mod tests {
             build_env: &build_env,
             preview: Some(&[]),
             shep_home: Path::new("/srv/shep"),
+            reads: &[],
             door: Path::new("/k/dog/lease.sock"),
         }
         .settings();
@@ -458,6 +537,7 @@ mod tests {
             build_env: &BTreeMap::new(),
             preview: Some(domains),
             shep_home: Path::new("/srv/shep"),
+            reads: &[],
             door: Path::new("/k/dog/lease.sock"),
         }
         .settings()
@@ -755,6 +835,7 @@ mod tests {
             build_env: &BTreeMap::new(),
             preview: None,
             shep_home: Path::new("/srv/shep"),
+            reads: &[],
             door: Path::new("/k/dog/lease.sock"),
         };
         let s = profile.settings();

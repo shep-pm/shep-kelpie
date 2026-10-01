@@ -7,6 +7,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use serde::Serialize;
 
+use super::gpu::GpuStatus;
 use super::pace::PacerStatus;
 use super::{Answer, Runner};
 use crate::board::{Skip, WorkerModel};
@@ -73,6 +74,10 @@ pub struct Status<'a> {
     /// an Ollama host to ask
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_model: Option<LocalModelStatus>,
+    /// The GPU's load as the metrics page last said, when kelpie's settings
+    /// name one
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu: Option<GpuStatus>,
     /// Who holds each lease a local agent's calls take, by its name, or
     /// null while it is free
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]

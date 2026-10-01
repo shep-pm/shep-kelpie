@@ -81,3 +81,29 @@ fn the_relay_commands_without_shep_home_refuse() {
         );
     }
 }
+
+// The move from the old home waits on the socket check, so a home the
+// runner refuses is never filled.
+#[test]
+fn a_runner_whose_sockets_would_be_too_long_moves_nothing() {
+    let home = tempfile::tempdir().unwrap();
+    let old = home.path().join(".kelpie");
+    std::fs::create_dir_all(old.join("totp")).unwrap();
+    std::fs::write(old.join("totp/secret"), "s").unwrap();
+    let shep = home.path().join("s".repeat(90));
+
+    let output = Command::new(KELPIE)
+        .args(["runner", "koji"])
+        .env_clear()
+        .env("HOME", home.path())
+        .env("SHEP_HOME", &shep)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = stderr(&output);
+    assert!(stderr.contains("longer than the 103"), "{stderr}");
+    assert!(old.join("totp/secret").is_file(), "the old home was moved");
+    assert!(!shep.join("kelpie").exists());
+}

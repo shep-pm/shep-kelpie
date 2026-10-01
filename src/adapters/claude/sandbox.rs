@@ -116,7 +116,7 @@ pub(crate) fn fence_policy(fence: &Fence) -> Policy {
         write: fence.write.clone(),
         no_write: fence.no_write.clone(),
         no_read: fence.no_read.clone(),
-        read: Vec::new(),
+        read: fence.read.clone(),
         hosts: fence.hosts.clone(),
         sockets: fence.sockets.clone(),
         forward: None,
@@ -280,6 +280,7 @@ mod tests {
                 build_env: &BTreeMap::new(),
                 preview: None,
                 shep_home: Path::new("/k/shep"),
+                reads: &[],
                 door: Path::new("/k/dog/lease.sock"),
             };
             AgentCall {

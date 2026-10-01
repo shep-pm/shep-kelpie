@@ -138,7 +138,7 @@ fn config(webhook: &Webhook, alert: &Alert) -> String {
 }
 
 // Quiet, then each option and its quoted value.
-fn render(lines: &[(&str, String)]) -> String {
+pub(super) fn render(lines: &[(&str, String)]) -> String {
     let options = lines
         .iter()
         .map(|(option, value)| format!("{option} = \"{}\"\n", quote(value)));

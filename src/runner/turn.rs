@@ -343,6 +343,10 @@ impl Runner {
             return Err(reason);
         }
         let previewed = self.previewed();
+        let reads = [
+            self.paths.shots(item.issue),
+            self.paths.playwright(item.issue),
+        ];
         let profile = WorkerProfile {
             worktree: &item.worktree,
             build: &item.build,
@@ -358,6 +362,7 @@ impl Runner {
             build_env: &self.settings.worker.build_env,
             preview: previewed.then_some(self.settings.preview.domains.as_slice()),
             shep_home: &self.paths.shep_home,
+            reads: &reads,
             door: &self.paths.door,
         };
         let folder = &self.paths.worker;

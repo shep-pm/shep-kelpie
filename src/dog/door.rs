@@ -23,9 +23,6 @@ use super::{Kept, lock_desk};
 use crate::lease::counted::{CARGO_TEST, Taken, Taker, Ticket};
 use crate::lease::door::{Answer, Ask};
 
-// macOS refuses a socket path of 104 bytes or more.
-const LONGEST_SOCKET: usize = 103;
-
 /// How long a connection has to send its ask before the dog hangs up
 const ASK_WITHIN: Duration = Duration::from_secs(10);
 
@@ -54,12 +51,7 @@ type Waiters = Arc<Mutex<HashMap<Ticket, oneshot::Sender<()>>>>;
 /// else, or cannot be bound.
 pub fn open(socket: &Path) -> Result<UnixListener, String> {
     let private = socket.with_extension(format!("{}.new", std::process::id()));
-    if private.as_os_str().len() > LONGEST_SOCKET {
-        return Err(format!(
-            "{} is too long a path for a socket",
-            socket.display()
-        ));
-    }
+    crate::home::socket_fits(&private)?;
     match std::fs::symlink_metadata(socket) {
         Ok(meta) if meta.file_type().is_socket() => {
             if std::os::unix::net::UnixStream::connect(socket).is_ok() {

@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use super::{ProjectState, Ruling, StateError, StateStore};
 use crate::totp::private_dir;
 
-/// The ids given under one kelpie home, and the projects' state files beside them
+/// The ids given under one kelpie home, and the projects' state files in its folders
 #[derive(Debug, Clone)]
 pub struct RulingIds {
     claims: PathBuf,
@@ -26,7 +26,7 @@ impl RulingIds {
     pub fn under(kelpie_home: &Path) -> Self {
         Self {
             claims: kelpie_home.join("rulings"),
-            projects: kelpie_home.join("projects"),
+            projects: kelpie_home.to_owned(),
         }
     }
 
@@ -84,9 +84,12 @@ impl RulingIds {
         let Ok(entries) = fs::read_dir(&self.projects) else {
             return Vec::new();
         };
+        // Kelpie's own files sit beside the projects' folders.
         let mut names: Vec<String> = entries
-            .filter_map(|e| e.ok()?.file_name().into_string().ok())
-            .filter(|name| !name.starts_with('.'))
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|name| !name.starts_with('.') && !crate::home::OWN.contains(&name.as_str()))
             .collect();
         names.sort();
         names
@@ -146,7 +149,7 @@ mod tests {
                 resend: false,
             })
             .collect();
-        let path = home.join("projects").join(name).join("state.json");
+        let path = home.join(name).join("state.json");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         StateStore::new(path).save(&state).unwrap();
     }
