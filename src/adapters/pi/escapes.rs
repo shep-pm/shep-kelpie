@@ -6,6 +6,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::tests::{WORKER_ID, World, id};
 use super::*;
@@ -101,25 +102,30 @@ fn a_worker_reaches_the_model_only_through_a_forwarder_that_passes_chat() {
         );
     }
 
-    // The model's own address, tried straight and through the proxy, and another port on its host.
-    let direct = server.url().replace("/v1", "/api/delete");
-    let straight = curl(&world, &call, &forwarder, &["-X", "DELETE", &direct]);
-    assert!(!said(&straight).contains("[200]"), "{}", said(&straight));
-    let by_proxy = curl(
-        &world,
-        &call,
-        &forwarder,
-        &["--noproxy", "", "-X", "DELETE", &direct],
-    );
-    assert!(!said(&by_proxy).contains("[200]"), "{}", said(&by_proxy));
-    let ssh = curl(
-        &world,
-        &call,
-        &forwarder,
-        &["--noproxy", "", "http://192.0.2.9:22/"],
-    );
-    assert!(!said(&ssh).contains("[200]"), "{}", said(&ssh));
-
+    // The model's own address and another port on its host, each tried straight
+    // and through the proxy. The second port counts every connection it gets.
+    let other = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let other_url = format!("http://{}/", other.local_addr().unwrap());
+    let reached = Arc::new(AtomicUsize::new(0));
+    let counting = Arc::clone(&reached);
+    std::thread::spawn(move || {
+        for _ in other.incoming().flatten() {
+            counting.fetch_add(1, Ordering::SeqCst);
+        }
+    });
+    let model = server.url().replace("/v1", "/api/delete");
+    for url in [&model, &other_url] {
+        let direct = ["--noproxy", "*", "-X", "DELETE", url];
+        let straight = curl(&world, &call, &forwarder, &direct);
+        assert!(said(&straight).ends_with("[000]"), "{}", said(&straight));
+        let proxied = ["--noproxy", "", "-X", "DELETE", url];
+        let reply = said(&curl(&world, &call, &forwarder, &proxied));
+        assert!(
+            reply.contains("blocked by network allowlist") && reply.ends_with("[403]"),
+            "{reply}"
+        );
+    }
+    assert_eq!(reached.load(Ordering::SeqCst), 0);
     assert_eq!(server.seen(), ["POST /v1/chat/completions HTTP/1.1"]);
 }
 

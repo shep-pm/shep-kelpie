@@ -370,6 +370,20 @@ impl Settings {
                 });
             }
         }
+        if let AgentHarness::Pi(server) = &worker.harness
+            && let Ok(upstream) = Upstream::new(&server.url)
+            && let Some(domain) =
+                (self.worker.allowed_domains.iter()).find(|d| upstream.is_reached_by(d.as_str()))
+        {
+            return Err(SettingsError::Invalid {
+                setting: "worker.allowed_domains",
+                reason: format!(
+                    "`{}` would give a pi worker the model server's host, or every local \
+                     port, past the forwarder: remove it",
+                    domain.as_str()
+                ),
+            });
+        }
         let (reviewer, reviewer_limit) =
             pick("reviewer", &self.agents.reviewer, &self.models.reviewer)?;
         let (judge, judge_limit) = pick("judge", &self.agents.judge, &self.models.judge)?;

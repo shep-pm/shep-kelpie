@@ -21,6 +21,7 @@ const QUOTE_MAX: usize = 200;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Upstream {
     address: String,
+    host: String,
     base: String,
 }
 
@@ -63,13 +64,13 @@ impl Upstream {
         if authority.contains('@') || unusable(authority) || unusable(base) {
             return Err(UpstreamError::Unusable);
         }
-        let address = if authority.ends_with(']') || !authority.contains(':') {
-            format!("{authority}:80")
-        } else {
-            authority.to_owned()
+        let (host, address) = match authority.rsplit_once(':') {
+            Some((host, port)) if !port.contains(']') => (host, authority.to_owned()),
+            _ => (authority, format!("{authority}:80")),
         };
         Ok(Self {
             address,
+            host: host.trim_matches(['[', ']']).to_ascii_lowercase(),
             base: base.to_owned(),
         })
     }
@@ -78,6 +79,22 @@ impl Upstream {
     #[inline]
     pub fn address(&self) -> &str {
         &self.address
+    }
+
+    /// Whether an allowed domain such as `*.example.com` would let a sandbox reach the server
+    ///
+    /// Loopback names count: the sandbox opens every local port to them.
+    pub fn is_reached_by(&self, domain: &str) -> bool {
+        let domain = domain.trim().trim_matches(['[', ']']).to_ascii_lowercase();
+        let loopback = ["localhost", "127.0.0.1", "::1", "0.0.0.0"];
+        let covers = |host: &str| match domain.strip_prefix("*.") {
+            Some(suffix) => host.ends_with(&format!(".{suffix}")),
+            None => host == domain,
+        };
+        covers(&self.host)
+            || loopback
+                .iter()
+                .any(|n| covers(n) || domain == format!("*.{n}"))
     }
 
     /// The path the one passed request asks for
@@ -158,6 +175,26 @@ mod tests {
         assert_eq!(u.judge("POST", "/v1/chat/completions"), Verdict::Allow);
         let proxied = "http://model.kelpie.test/v1/chat/completions";
         assert_eq!(u.judge("POST", proxied), Verdict::Allow);
+    }
+
+    #[test]
+    fn an_allowed_domain_that_would_reopen_the_server_or_the_loopback_is_named() {
+        let u = upstream("http://models.example.test:11434/v1");
+        for domain in [
+            "models.example.test",
+            "Models.Example.Test",
+            "*.example.test",
+            "localhost",
+            "127.0.0.1",
+            "[::1]",
+            "*.localhost",
+        ] {
+            assert!(u.is_reached_by(domain), "{domain}");
+        }
+        for domain in ["github.com", "example.test", "*.other.test", "notlocalhost"] {
+            assert!(!u.is_reached_by(domain), "{domain}");
+        }
+        assert!(upstream("http://[2001:db8::9]:80/v1").is_reached_by("2001:db8::9"));
     }
 
     #[test]

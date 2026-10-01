@@ -301,3 +301,22 @@ fn a_session_reviewer_on_pi_runs_on_pi() {
     assert_eq!(local.model().harness.harness(), Harness::Pi);
     assert_eq!(local.limit, Limit::Lease(LeaseName::gpu()));
 }
+
+#[test]
+fn a_pi_worker_may_not_be_allowed_the_model_host_or_the_loopback() {
+    for domain in ["box", "BOX", "localhost", "127.0.0.1", "*.localhost"] {
+        let mut settings = project("worker = \"qwen\"\n");
+        settings.worker.allowed_domains = vec![domain.to_owned().try_into().unwrap()];
+        let err = settings
+            .role_agents(&kelpie(QWEN).agents)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("worker.allowed_domains") && err.contains(domain),
+            "{err}"
+        );
+    }
+    let mut settings = project("worker = \"qwen\"\n");
+    settings.worker.allowed_domains = vec!["github.com".to_owned().try_into().unwrap()];
+    assert!(settings.role_agents(&kelpie(QWEN).agents).is_ok());
+}

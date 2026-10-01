@@ -1,43 +1,66 @@
 //! The outside half of [`crate::forwarder`]: one socket, for one call
 //!
-//! The sandbox's proxy hands the worker's model calls to this socket, in a
-//! folder the sandbox cannot read, and the sandbox itself may connect to no
-//! socket of it. Each connection carries one request, tunnelled or not. A chat call is sent on
-//! to the model server with `Connection: close` and its reply is copied back
-//! as it arrives. Anything else is refused by name, and no byte of it is sent
-//! on, so a second request cannot ride behind the first. Dropping the
-//! [`Forwarder`] stops every connection and removes the socket.
+//! The sandbox's proxy hands the worker's model calls to this socket. The
+//! sandbox may not connect to it, only the proxy does. Each connection carries
+//! one request, or one tunnel and the one request inside it. A chat call is
+//! sent on to the model server with `Connection: close` and its reply is
+//! copied back as it arrives. Anything else is refused by name, and no byte
+//! of it is sent on, so a second request cannot ride behind the first.
+//! Anything inside the sandbox can reach the socket through the proxy, so
+//! every read is bounded in bytes and in time and the connections are capped.
+//! Dropping the [`Forwarder`] stops every connection and removes the socket.
 
 use std::collections::HashMap;
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufReader, Write};
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
-
-use serde_json::json;
+use std::time::{Duration, Instant};
 
 use super::bridge::{LONGEST_SOCKET, unguessable};
 use crate::confine::Verdict;
 use crate::forwarder::Upstream;
+use http::{Head, Reply, Timed};
 
+mod http;
 #[cfg(test)]
 mod tests;
-
-/// The most a request's head may take, in bytes
-const HEAD_MAX: usize = 64 * 1024;
-
-/// The most a request's body may take, in bytes: a chat call carries its whole context
-const BODY_MAX: u64 = 64 << 20;
 
 /// Seconds the forwarder gives each address of the model server to connect
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long a client may take to send its whole request
+const REQUEST_WAIT: Duration = Duration::from_secs(30);
+
+/// How long a client may leave a reply unread before the forwarder drops it
+const REPLY_STALL: Duration = Duration::from_secs(60);
+
+/// How many connections are served at once. pi's calls come one at a time.
+const MAX_CONNECTIONS: usize = 8;
+
 /// The headers of a chat call that go on to the model server
 const PASSED: [&str; 4] = ["content-type", "accept", "authorization", "user-agent"];
+
+/// What a forwarder holds a client to
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Limits {
+    /// The connections served at once, the rest being refused
+    pub(crate) connections: usize,
+    /// How long a client may take to send its whole request
+    pub(crate) wait: Duration,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            connections: MAX_CONNECTIONS,
+            wait: REQUEST_WAIT,
+        }
+    }
+}
 
 // Both ends of each connection being served, so a stop can end them.
 type Open = Arc<Mutex<HashMap<u64, Ends>>>;
@@ -65,6 +88,19 @@ impl Forwarder {
     ///
     /// The reason, when the socket cannot be opened.
     pub(crate) fn open(folder: &Path, upstream: Upstream) -> Result<Self, String> {
+        Self::open_with(folder, upstream, Limits::default())
+    }
+
+    /// [`Forwarder::open`], holding clients to `limits`
+    ///
+    /// # Errors
+    ///
+    /// The reason, when the socket cannot be opened.
+    pub(crate) fn open_with(
+        folder: &Path,
+        upstream: Upstream,
+        limits: Limits,
+    ) -> Result<Self, String> {
         let socket = folder.join(format!("{}.sock", unguessable()?));
         if socket.as_os_str().len() > LONGEST_SOCKET {
             return Err(format!(
@@ -74,18 +110,43 @@ impl Forwarder {
         }
         std::fs::create_dir_all(folder)
             .map_err(|e| format!("cannot make {}: {e}", folder.display()))?;
+        sweep(folder);
         let listener = UnixListener::bind(&socket)
             .map_err(|e| format!("cannot open {}: {e}", socket.display()))?;
         let stopping = Arc::new(AtomicBool::new(false));
         let open: Open = Arc::default();
         let (stop, held) = (Arc::clone(&stopping), Arc::clone(&open));
-        let thread = thread::spawn(move || accept(&listener, &upstream, &stop, &held));
+        let thread = thread::Builder::new()
+            .name("forwarder".into())
+            .spawn(move || accept(&listener, &upstream, limits, &stop, &held))
+            .map_err(|e| format!("cannot start the forwarder: {e}"))?;
         Ok(Self {
             socket,
             stopping,
             open,
             thread: Some(thread),
         })
+    }
+}
+
+// Removes the sockets an earlier kelpie left in `folder` when it was killed
+// before it could. One that still answers belongs to a call in flight.
+fn sweep(folder: &Path) {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return;
+    };
+    for path in entries.filter_map(Result::ok).map(|e| e.path()) {
+        let ours = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_suffix(".sock"))
+            .is_some_and(|n| n.len() == 32 && n.bytes().all(|b| b.is_ascii_hexdigit()));
+        if ours
+            && UnixStream::connect(&path)
+                .is_err_and(|e| e.kind() == io::ErrorKind::ConnectionRefused)
+        {
+            let _ = std::fs::remove_file(&path);
+        }
     }
 }
 
@@ -111,79 +172,74 @@ fn end_all(open: &Open) {
     }
 }
 
-fn accept(listener: &UnixListener, upstream: &Upstream, stopping: &AtomicBool, open: &Open) {
+fn accept(
+    listener: &UnixListener,
+    upstream: &Upstream,
+    limits: Limits,
+    stopping: &Arc<AtomicBool>,
+    open: &Open,
+) {
     let ids = AtomicU64::new(0);
     let mut serving = Vec::new();
     for stream in listener.incoming() {
         if stopping.load(Ordering::SeqCst) {
             break;
         }
-        let Ok(client) = stream else { continue };
+        let Ok(mut client) = stream else { continue };
         let Ok(held) = client.try_clone() else {
             continue;
         };
+        let _ = client.set_write_timeout(Some(REPLY_STALL));
         let id = ids.fetch_add(1, Ordering::Relaxed);
-        open.lock().unwrap().insert(
-            id,
-            Ends {
-                client: held,
-                server: None,
-            },
-        );
-        let (upstream, open) = (upstream.clone(), Arc::clone(open));
-        let stop = stopping.load(Ordering::SeqCst);
-        serving.push(thread::spawn(move || {
-            if !stop {
-                serve(client, &upstream, &open, id);
+        {
+            let mut listed = open.lock().unwrap();
+            if listed.len() >= limits.connections {
+                drop(listed);
+                let busy = Reply::new(503, "kelpie serves only a few model calls at once");
+                let _ = busy.write(&mut client);
+                continue;
             }
-            open.lock().unwrap().remove(&id);
-        }));
+            listed.insert(
+                id,
+                Ends {
+                    client: held,
+                    server: None,
+                },
+            );
+        }
+        let (upstream, open, stopping) = (upstream.clone(), Arc::clone(open), Arc::clone(stopping));
+        let spawned = thread::Builder::new().name("forwarding".into()).spawn({
+            let open = Arc::clone(&open);
+            move || {
+                serve(client, &upstream, limits, &stopping, &open, id);
+                open.lock().unwrap().remove(&id);
+            }
+        });
+        match spawned {
+            Ok(handle) => serving.push(handle),
+            // The client is dropped with the closure, which closes its connection.
+            Err(_) => {
+                open.lock().unwrap().remove(&id);
+            }
+        }
         serving.retain(|t| !t.is_finished());
     }
-    // A connection accepted as the stop came is ended here, once it is listed.
+    // A connection listed as the stop came is ended here.
     end_all(open);
     for thread in serving {
         let _ = thread.join();
     }
 }
 
-/// A refusal or failure, as the reply the worker's harness reads
-struct Reply {
-    status: u16,
-    text: String,
-}
-
-impl Reply {
-    fn new(status: u16, text: impl Into<String>) -> Self {
-        Self {
-            status,
-            text: text.into(),
-        }
-    }
-
-    fn write(&self, to: &mut impl Write) -> io::Result<()> {
-        let reason = match self.status {
-            400 => "Bad Request",
-            403 => "Forbidden",
-            413 => "Content Too Large",
-            501 => "Not Implemented",
-            _ => "Bad Gateway",
-        };
-        let body = json!({ "error": { "message": self.text, "type": "kelpie_refused" } });
-        let body = body.to_string();
-        write!(
-            to,
-            "HTTP/1.1 {} {reason}\r\nContent-Type: application/json\r\n\
-             Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            self.status,
-            body.len()
-        )?;
-        to.flush()
-    }
-}
-
-fn serve(mut client: UnixStream, upstream: &Upstream, open: &Open, id: u64) {
-    if let Err(reply) = exchange(&mut client, upstream, open, id) {
+fn serve(
+    mut client: UnixStream,
+    upstream: &Upstream,
+    limits: Limits,
+    stopping: &AtomicBool,
+    open: &Open,
+    id: u64,
+) {
+    if let Err(reply) = exchange(&mut client, upstream, limits, stopping, open, id) {
         let _ = reply.write(&mut client);
     }
     let _ = client.shutdown(Shutdown::Both);
@@ -196,11 +252,17 @@ fn serve(mut client: UnixStream, upstream: &Upstream, open: &Open, id: u64) {
 fn exchange(
     client: &mut UnixStream,
     upstream: &Upstream,
+    limits: Limits,
+    stopping: &AtomicBool,
     open: &Open,
     id: u64,
 ) -> Result<(), Reply> {
     let gone = |_: io::Error| Reply::new(400, "kelpie could not read the request");
-    let mut reader = BufReader::new(client.try_clone().map_err(gone)?);
+    let timed = Timed {
+        stream: client.try_clone().map_err(gone)?,
+        deadline: Instant::now() + limits.wait,
+    };
+    let mut reader = BufReader::new(timed);
     let mut head = Head::read(&mut reader)?;
     if head.method == "CONNECT" {
         if let Verdict::Refuse(why) = upstream.judge_tunnel(&head.target) {
@@ -226,8 +288,15 @@ fn exchange(
             format!("kelpie could not reach the model server: {}", e.kind()),
         )
     })?;
-    if let Some(ends) = open.lock().unwrap().get_mut(&id) {
-        ends.server = server.try_clone().ok();
+    // Listed under the lock a stop takes, so a stop either sees this stream or is seen here.
+    {
+        let mut listed = open.lock().unwrap();
+        if stopping.load(Ordering::SeqCst) {
+            return Err(Reply::new(503, "kelpie is stopping"));
+        }
+        if let Some(ends) = listed.get_mut(&id) {
+            ends.server = server.try_clone().ok();
+        }
     }
     let unsent =
         |e: io::Error| Reply::new(502, format!("kelpie lost the model server: {}", e.kind()));
@@ -265,143 +334,4 @@ fn request(upstream: &Upstream, head: &Head, length: usize) -> Vec<u8> {
     }
     text.push_str("\r\n");
     text.into_bytes()
-}
-
-/// A request's line and headers, names in lower case
-#[derive(Debug)]
-struct Head {
-    method: String,
-    target: String,
-    headers: Vec<(String, String)>,
-}
-
-impl Head {
-    fn read(reader: &mut impl BufRead) -> Result<Self, Reply> {
-        let bad = |why: &str| Reply::new(400, format!("kelpie cannot read the request: {why}"));
-        let mut taken = 0;
-        let mut lines = Vec::new();
-        loop {
-            let mut line = String::new();
-            let n = reader
-                .read_line(&mut line)
-                .map_err(|_| bad("it is not text"))?;
-            taken += n;
-            if n == 0 {
-                return Err(bad("it ended early"));
-            }
-            if taken > HEAD_MAX {
-                return Err(bad("its head is too long"));
-            }
-            let line = line.trim_end_matches(['\r', '\n']);
-            if line.is_empty() && !lines.is_empty() {
-                break;
-            }
-            if !line.is_empty() {
-                lines.push(line.to_owned());
-            }
-        }
-        let mut first = lines[0].split(' ');
-        let (Some(method), Some(target), Some(version), None) =
-            (first.next(), first.next(), first.next(), first.next())
-        else {
-            return Err(bad("its first line is not a request line"));
-        };
-        if !version.starts_with("HTTP/1.") {
-            return Err(bad("it is not HTTP/1"));
-        }
-        let headers = lines[1..]
-            .iter()
-            .map(|line| {
-                let (name, value) = line
-                    .split_once(':')
-                    .ok_or_else(|| bad("a header has no name"))?;
-                Ok((name.trim().to_ascii_lowercase(), value.trim().to_owned()))
-            })
-            .collect::<Result<_, Reply>>()?;
-        Ok(Self {
-            method: method.to_owned(),
-            target: target.to_owned(),
-            headers,
-        })
-    }
-
-    fn values<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a str> {
-        self.headers
-            .iter()
-            .filter(move |(n, _)| n == name)
-            .map(|(_, v)| v.as_str())
-    }
-
-    fn expects_continue(&self) -> bool {
-        self.values("expect")
-            .any(|v| v.eq_ignore_ascii_case("100-continue"))
-    }
-
-    // The body, whole: counted by its length or decoded from its chunks. A
-    // request that says both is the shape of a smuggled one and is refused.
-    fn body(&self, reader: &mut impl BufRead) -> Result<Vec<u8>, Reply> {
-        let bad = |why: &str| Reply::new(400, format!("kelpie cannot read the request: {why}"));
-        let short = |_: io::Error| bad("its body ended early");
-        let encodings: Vec<_> = self.values("transfer-encoding").collect();
-        let lengths: Vec<_> = self.values("content-length").collect();
-        match (encodings.as_slice(), lengths.as_slice()) {
-            ([], []) => Ok(Vec::new()),
-            ([encoding], []) if encoding.eq_ignore_ascii_case("chunked") => chunked(reader)
-                .map_err(|e| match e.kind() {
-                    io::ErrorKind::FileTooLarge => Reply::new(413, "the request body is too large"),
-                    _ => bad("its chunks are not well formed"),
-                }),
-            ([_, ..], _) if !lengths.is_empty() => Err(bad("it gives a length and an encoding")),
-            ([_, ..], _) => Err(Reply::new(501, "kelpie reads only chunked bodies")),
-            ([], [first, rest @ ..]) => {
-                let length: u64 = first
-                    .parse()
-                    .map_err(|_| bad("its length is not a number"))?;
-                if rest.iter().any(|other| other != first) {
-                    return Err(bad("it gives two lengths"));
-                }
-                if length > BODY_MAX {
-                    return Err(Reply::new(413, "the request body is too large"));
-                }
-                let mut body = Vec::new();
-                reader.take(length).read_to_end(&mut body).map_err(short)?;
-                if body.len() as u64 == length {
-                    Ok(body)
-                } else {
-                    Err(bad("its body ended early"))
-                }
-            }
-        }
-    }
-}
-
-// Decodes a chunked body, its trailers read and dropped.
-fn chunked(reader: &mut impl BufRead) -> io::Result<Vec<u8>> {
-    let invalid = || io::Error::from(io::ErrorKind::InvalidData);
-    let mut body = Vec::new();
-    loop {
-        let mut line = String::new();
-        reader.read_line(&mut line)?;
-        let size = line.split(';').next().unwrap_or("").trim();
-        let size = u64::from_str_radix(size, 16).map_err(|_| invalid())?;
-        if size == 0 {
-            break;
-        }
-        if body.len() as u64 + size > BODY_MAX {
-            return Err(io::Error::from(io::ErrorKind::FileTooLarge));
-        }
-        let before = body.len();
-        reader.by_ref().take(size).read_to_end(&mut body)?;
-        let mut end = [0u8; 2];
-        reader.read_exact(&mut end)?;
-        if (body.len() - before) as u64 != size || &end != b"\r\n" {
-            return Err(invalid());
-        }
-    }
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line)? == 0 || line.trim_end().is_empty() {
-            return Ok(body);
-        }
-    }
 }

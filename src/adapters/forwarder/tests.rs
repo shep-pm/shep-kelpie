@@ -1,4 +1,5 @@
-use std::time::Duration;
+use std::io::Read;
+use std::time::{Duration, Instant};
 
 use super::*;
 use crate::settings::EndpointUrl;
@@ -12,9 +13,13 @@ fn upstream(url: &str) -> Upstream {
 
 // In `/tmp`, as macOS's own temporary folder is too long for a socket.
 fn forwarder(url: &str) -> (tempfile::TempDir, Forwarder) {
+    forwarder_with(url, Limits::default())
+}
+
+fn forwarder_with(url: &str, limits: Limits) -> (tempfile::TempDir, Forwarder) {
     let dir = tempfile::tempdir_in("/tmp").unwrap();
     let folder = dir.path().canonicalize().unwrap();
-    let forwarder = Forwarder::open(&folder, upstream(url)).unwrap();
+    let forwarder = Forwarder::open_with(&folder, upstream(url), limits).unwrap();
     (dir, forwarder)
 }
 
@@ -24,7 +29,8 @@ fn send(forwarder: &Forwarder, bytes: &[u8]) -> String {
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
-    stream.write_all(bytes).unwrap();
+    // A refusal may come, and the connection close, before all is written.
+    let _ = stream.write_all(bytes);
     let _ = stream.shutdown(Shutdown::Write);
     let mut reply = Vec::new();
     // A refusal may close before the body is read, which resets the read.
@@ -193,4 +199,173 @@ fn the_socket_has_a_name_no_one_can_guess() {
     let (_dir, forwarder) = forwarder(server.url());
     let name = forwarder.socket.file_name().unwrap().to_string_lossy();
     assert_eq!(name.len(), 32 + ".sock".len(), "{name}");
+}
+
+#[test]
+fn a_chunk_size_that_would_wrap_the_body_cap_is_refused() {
+    let server = StandInEndpoint::start([]);
+    let (_dir, forwarder) = forwarder(server.url());
+    let request =
+        format!("{CHAT}transfer-encoding: chunked\r\n\r\n1\r\na\r\nffffffffffffffff\r\nxxxx");
+    let reply = send(&forwarder, request.as_bytes());
+    assert!(status(&reply).contains("413"), "{reply}");
+    assert_eq!(server.seen(), Vec::<String>::new());
+}
+
+#[test]
+fn a_line_with_no_end_is_refused_before_it_is_buffered() {
+    let server = StandInEndpoint::start([]);
+    let (_dir, forwarder) = forwarder(server.url());
+    let endless = vec![b'a'; super::http::HEAD_MAX * 4];
+    let reply = send(&forwarder, &endless);
+    assert!(status(&reply).contains("400"), "{reply}");
+    let size_line = format!(
+        "{CHAT}transfer-encoding: chunked\r\n\r\n{}",
+        "f".repeat(5000)
+    );
+    let reply = send(&forwarder, size_line.as_bytes());
+    assert!(status(&reply).contains("400"), "{reply}");
+    let trailer = format!(
+        "{CHAT}transfer-encoding: chunked\r\n\r\n0\r\n{}",
+        "t".repeat(5000)
+    );
+    let reply = send(&forwarder, trailer.as_bytes());
+    assert!(status(&reply).contains("400"), "{reply}");
+    assert_eq!(server.seen(), Vec::<String>::new());
+}
+
+#[test]
+fn a_control_character_or_a_bad_name_in_a_header_is_refused() {
+    let server = StandInEndpoint::start([]);
+    let (_dir, forwarder) = forwarder(server.url());
+    for header in [
+        "content-type: a\rcontent-length: 5",
+        "content-type: a\x00b",
+        "content-type : application/json",
+        "bad name: x",
+    ] {
+        let request = format!("{CHAT}{header}\r\ncontent-length: 2\r\n\r\n{{}}");
+        let reply = send(&forwarder, request.as_bytes());
+        assert!(status(&reply).contains("400"), "{header:?}: {reply}");
+    }
+    assert_eq!(server.seen(), Vec::<String>::new());
+}
+
+#[test]
+fn connections_past_the_cap_are_turned_away_and_a_slow_client_is_timed_out() {
+    let server = StandInEndpoint::start([Answer::Says("ok")]);
+    let limits = Limits {
+        connections: 2,
+        wait: Duration::from_millis(1500),
+    };
+    let (_dir, forwarder) = forwarder_with(server.url(), limits);
+    let mut idle: Vec<_> = (0..2)
+        .map(|_| {
+            let stream = UnixStream::connect(&forwarder.socket).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            stream
+        })
+        .collect();
+    let turned_away = send(&forwarder, &chat("{}"));
+    assert!(status(&turned_away).contains("503"), "{turned_away}");
+    for stream in &mut idle {
+        let _ = stream.write_all(b"POST /v1/chat");
+        let mut reply = String::new();
+        let _ = stream.read_to_string(&mut reply);
+        assert!(status(&reply).contains("408"), "{reply}");
+    }
+    // A finished connection leaves the list just after its client sees it end.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut served = send(&forwarder, &chat("{}"));
+    while status(&served).contains("503") && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+        served = send(&forwarder, &chat("{}"));
+    }
+    assert!(status(&served).contains("200"), "{served}");
+}
+
+// A model server that answers a chat call in two parts, the second only once
+// the client says it has the first.
+fn two_part_server() -> (String, std::sync::mpsc::Sender<()>) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let (go, wait) = std::sync::mpsc::channel::<()>();
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut seen = Vec::new();
+        let mut byte = [0u8; 1];
+        while !seen.ends_with(b"\r\n\r\n{}") {
+            stream.read_exact(&mut byte).unwrap();
+            seen.push(byte[0]);
+        }
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\ndata: one\n\n")
+            .unwrap();
+        let _ = wait.recv_timeout(Duration::from_secs(10));
+        let _ = stream.write_all(b"data: two\n\n");
+    });
+    (url, go)
+}
+
+#[test]
+fn a_reply_is_relayed_as_it_arrives() {
+    let (url, go) = two_part_server();
+    let (_dir, forwarder) = forwarder(&url);
+    let mut stream = UnixStream::connect(&forwarder.socket).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    stream.write_all(&chat("{}")).unwrap();
+    let mut got = Vec::new();
+    let mut buf = [0u8; 256];
+    while !String::from_utf8_lossy(&got).contains("data: one") {
+        let n = stream.read(&mut buf).unwrap();
+        assert!(
+            n > 0,
+            "ended before the first part: {:?}",
+            String::from_utf8_lossy(&got)
+        );
+        got.extend(&buf[..n]);
+    }
+    go.send(()).unwrap();
+    stream.read_to_end(&mut got).unwrap();
+    assert!(String::from_utf8_lossy(&got).contains("data: two"));
+}
+
+#[test]
+fn dropping_the_forwarder_ends_a_call_the_model_server_never_answers() {
+    let (url, _go) = two_part_server();
+    let (_dir, forwarder) = forwarder(&url);
+    let mut stream = UnixStream::connect(&forwarder.socket).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    stream.write_all(&chat("{}")).unwrap();
+    let mut buf = [0u8; 256];
+    assert!(stream.read(&mut buf).unwrap() > 0);
+    let started = Instant::now();
+    drop(forwarder);
+    assert!(started.elapsed() < Duration::from_secs(5));
+    let mut rest = Vec::new();
+    assert!(stream.read_to_end(&mut rest).is_ok());
+}
+
+#[test]
+fn a_new_forwarder_clears_the_sockets_a_killed_one_left_and_nothing_else() {
+    let dir = tempfile::tempdir_in("/tmp").unwrap();
+    let folder = dir.path().canonicalize().unwrap();
+    let name = |c: char| format!("{}.sock", c.to_string().repeat(32));
+    let stale = folder.join(name('a'));
+    drop(UnixListener::bind(&stale).unwrap());
+    let live = folder.join(name('b'));
+    let _live = UnixListener::bind(&live).unwrap();
+    let other = folder.join("kept.sock");
+    drop(UnixListener::bind(&other).unwrap());
+    let server = StandInEndpoint::start([]);
+    let _forwarder = Forwarder::open(&folder, upstream(server.url())).unwrap();
+    assert!(!stale.exists());
+    assert!(live.exists());
+    assert!(other.exists());
 }
