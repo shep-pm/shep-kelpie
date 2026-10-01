@@ -149,10 +149,22 @@ impl Runner {
         if item.red_head.as_deref() == Some(head.as_str()) {
             return self.raise(number, RulingKind::StillRed { head, checks });
         }
-        let issue = item.issue;
         let prompt = self
             .skills
             .invoke(Step::Ci, &red_prompt(number, &head, &checks));
+        self.back_to_worker(number, head, checks, prompt)
+    }
+
+    // The failure becomes the worker's next turn, and this head is marked red
+    // so a second failure at it goes to the maintainer instead.
+    pub(super) fn back_to_worker(
+        &mut self,
+        number: u64,
+        head: String,
+        checks: Vec<String>,
+        prompt: String,
+    ) -> Result<Begin, StateError> {
+        let issue = self.current().expect("CI runs on a work item").issue;
         let red = head.clone();
         self.update(|item| {
             item.red_head = Some(red);

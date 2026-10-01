@@ -127,6 +127,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         qwen: crate::work_item::QwenTally::default(),
         merge_refused: false,
         merge_tried: None,
+        merge_queued: None,
         summon_owed: false,
         local_rounds: 0,
         rebased: false,

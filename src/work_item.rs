@@ -109,6 +109,10 @@ pub struct WorkItem {
     /// pull request later found merged at it is kelpie's merge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_tried: Option<String>,
+    /// The merge queue is holding this pull request, from the pass that
+    /// queued it until it merges or the queue removes it
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_queued: Option<MergeQueued>,
     /// Kelpie's last shots run, for a project with the preview on
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shots: Option<ShotsRecord>,
@@ -125,6 +129,17 @@ pub struct WorkItem {
     pub follow_ups: Option<FollowUps>,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
+}
+
+/// A pull request kelpie put in the merge queue
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MergeQueued {
+    /// How many removals the queue had made of it before kelpie queued it
+    pub removals: u32,
+    /// When kelpie queued it
+    pub since: Timestamp,
 }
 
 /// A conflict with `main` that went to the worker as its next turn

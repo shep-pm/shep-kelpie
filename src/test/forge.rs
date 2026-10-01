@@ -11,7 +11,7 @@ use super::coderabbit::FakeCodeRabbit;
 use crate::board::{Blocker, OpenPullRequest, READY, ReadyIssue, SubIssues};
 use crate::ports::{
     Checks, Forge, ForgeError, Issue, MaintainerReview, NewLabel, OpenIssue, PullRequest,
-    PullRequestState, Reviewed, Visibility,
+    PullRequestState, QueueStanding, Reviewed, Visibility,
 };
 use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
@@ -49,6 +49,10 @@ pub(crate) struct FakeForge {
     edits: Arc<Mutex<Vec<u64>>>,
     merges_down: Arc<AtomicBool>,
     merge_answers_lost: Arc<AtomicBool>,
+    // Whether the repo has a merge queue, and where each pull request stands in it
+    queue_on: Arc<AtomicBool>,
+    disarmed: Arc<Mutex<Vec<u64>>>,
+    queue: Arc<Mutex<HashMap<u64, QueueStanding>>>,
     labels_down: Arc<AtomicBool>,
     unreadable: Arc<Mutex<HashSet<u64>>>,
     viewer_reads: Arc<AtomicUsize>,
@@ -127,6 +131,9 @@ impl FakeForge {
             edits: Arc::default(),
             merges_down: Arc::default(),
             merge_answers_lost: Arc::default(),
+            queue_on: Arc::default(),
+            disarmed: Arc::default(),
+            queue: Arc::default(),
             labels_down: Arc::default(),
             unreadable: Arc::default(),
             viewer_reads: Arc::default(),
@@ -892,10 +899,27 @@ impl Forge for FakeForge {
             return Err(ForgeError::Failed(format!("cannot merge #{number}: {why}")));
         }
         self.merges.lock().unwrap().push((number, head.to_owned()));
+        if self.queue_on.load(Ordering::SeqCst) {
+            self.enters_queue(number);
+            return Ok(());
+        }
         self.set_state(number, PullRequestState::Merged);
         if self.merge_answers_lost.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("the answer was lost".into()));
         }
         Ok(())
     }
+
+    fn merge_queue(&self, _repo: &ForgeSlug, number: u64) -> Result<QueueStanding, ForgeError> {
+        self.opened(number)?;
+        Ok(self.standing(number))
+    }
+
+    fn disable_auto_merge(&self, _repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
+        self.opened(number)?;
+        self.disarm(number);
+        Ok(())
+    }
 }
+
+mod queue;
