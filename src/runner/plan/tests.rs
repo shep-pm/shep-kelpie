@@ -223,7 +223,13 @@ fn a_big_issue_under_auto_becomes_sub_issues_with_blockers_and_one_comment() {
     assert_eq!(rig.forge.blockers(901), [900]);
     let [(on, comment)] = rig.forge.comments().try_into().unwrap();
     assert_eq!(on, 5);
-    assert!(comment.contains("- #900: Store the thing\n- #901: Show the thing, after #900"));
+    // Neither piece named a worker, and the parent carried none to inherit,
+    // so both sub-issues default to the project's own.
+    assert!(comment.contains(
+        "- #900: Store the thing, worker defaulted to the project's: the plan named no worker\n\
+         - #901: Show the thing, after #900, worker defaulted to the project's: the plan named \
+         no worker"
+    ));
 
     // The frontier is worked first, and the split issue never is.
     let Some(StepReport::Dispatched { issue, skipped, .. }) = step(&runner).unwrap() else {
