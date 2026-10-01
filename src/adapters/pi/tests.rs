@@ -60,6 +60,18 @@ fn stand_in(world: &World, stdout: &str) -> PiCli {
 }
 
 #[test]
+fn a_pi_workers_commands_ask_for_the_test_lease_at_the_dogs_door() {
+    let w = World::new();
+    let call = w.fenced(URL, Path::new("/k/kelpie"), Session::New(id(WORKER_ID)));
+    let vars: Vec<String> = env_args(&call, &Files::of(&call))
+        .into_iter()
+        .map(|a| a.into_string().unwrap())
+        .collect();
+    let door = format!("{}=/k/dog/lease.sock", crate::lease::door::SOCKET_VAR);
+    assert!(vars.contains(&door), "{vars:?}");
+}
+
+#[test]
 fn a_new_worker_session_carries_its_model_tools_and_guard() {
     let w = World::new();
     let mut call = w.fenced(URL, Path::new("/k/kelpie"), Session::New(id(WORKER_ID)));
@@ -356,6 +368,11 @@ fn the_sandbox_lets_pi_write_only_its_sessions_and_reach_only_its_server() {
     assert!(policy.read.contains(&home));
     assert!(policy.read.contains(&w.path("worker/settings.guard.ts")));
     assert!(policy.hosts.contains(&"192.0.2.9".to_owned()));
+    assert_eq!(
+        policy.sockets,
+        [Path::new("/k/dog/lease.sock")],
+        "the dog's door"
+    );
     for credentials in ["~/.pi/**", "~/.codex/**", "~/.claude.json"] {
         assert!(
             policy.no_read.iter().any(|p| p == credentials),
@@ -611,6 +628,7 @@ impl World {
             build_env: &BTreeMap::new(),
             preview: None,
             shep_home: &self.path("shep"),
+            door: Path::new("/k/dog/lease.sock"),
         };
         AgentCall {
             role: Role::Worker,
