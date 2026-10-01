@@ -539,3 +539,107 @@ fn a_branch_left_behind_stays_a_refusal_for_a_new_work_item_even_when_it_matches
     );
     assert_eq!(rig.claude.calls(), []);
 }
+
+const SENT_BACK: &str = "Your last turn ended with no pull request for this work item \
+                         and no question. If a tool failed, try it again or find another \
+                         way, and open the draft pull request once the work is done. If \
+                         only the maintainer can unblock you, end your reply with a \
+                         <kelpie-question> block.";
+
+#[test]
+fn a_turn_that_ends_with_no_pull_request_and_no_question_sends_the_worker_back_once() {
+    let (rig, runner) = with_issue_7("zeus");
+    rig.claude.script([
+        Scripted::Say("cargo test failed in the sandbox, so I stopped."),
+        Scripted::Reply(usage(1), Cost(1)),
+    ]);
+    step(&runner).unwrap();
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Ended { issue: 7, .. })
+    ));
+    let [first, again] = rig.claude.calls().try_into().unwrap();
+    assert_eq!(again.session, Session::Resume(first.session.id().clone()));
+    assert_eq!(again.prompt, SENT_BACK);
+}
+
+#[test]
+fn a_second_turn_that_stops_short_parks_the_worker_on_a_ruling() {
+    let (rig, runner) = with_issue_7("zeus");
+    rig.claude.script([
+        Scripted::Reply(usage(1), Cost(1)),
+        Scripted::Reply(usage(1), Cost(1)),
+    ]);
+    step(&runner).unwrap();
+    step(&runner).unwrap();
+    let Some(StepReport::Failed {
+        issue: 7,
+        pull_request: None,
+        id: 1,
+        question,
+        ..
+    }) = step(&runner).unwrap()
+    else {
+        panic!("the worker was not parked");
+    };
+    assert!(
+        question.starts_with(
+            "The worker's turn on issue #7 failed: \
+             it ended twice with no pull request and no question."
+        ),
+        "{question}"
+    );
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(rig.claude.calls().len(), 2);
+
+    // A yes sends it back again, into the same session.
+    rig.ask(&runner, "rule", Some("1 yes"));
+    rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
+    step(&runner).unwrap();
+    let [first, _, third] = rig.claude.calls().try_into().unwrap();
+    assert_eq!(third.session, Session::Resume(first.session.id().clone()));
+    assert_eq!(third.prompt, SENT_BACK);
+}
+
+#[test]
+fn a_no_on_a_worker_that_stopped_short_stops_the_work_item() {
+    let (rig, runner) = with_issue_7("rotom");
+    rig.claude.script([
+        Scripted::Reply(usage(1), Cost(1)),
+        Scripted::Reply(usage(1), Cost(1)),
+    ]);
+    for _ in 0..3 {
+        step(&runner).unwrap();
+    }
+    rig.ask(&runner, "rule", Some("1 no the issue is already fixed"));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Finished {
+            issue: 7,
+            merged: false,
+            ..
+        })
+    ));
+    assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
+}
+
+#[test]
+fn a_pull_request_the_turns_end_missed_goes_to_review_instead() {
+    let (rig, runner) = with_issue_7("zeus");
+    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+    rig.forge.set_board_down(true);
+    step(&runner).unwrap();
+    // The forge cannot be asked, so nothing is sent back yet.
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::GateFailed { issue: 7, .. })
+    ));
+    rig.forge.set_board_down(false);
+    rig.forge.open_pull_request(70, "kelpie/7", &[7]);
+    step(&runner).unwrap();
+    let item = &rig.ask(&runner, "status", None)["work_item"];
+    assert_eq!(item["pull_request"], 70);
+    assert_eq!(item["phase"]["state"], "review");
+    assert_eq!(rig.claude.calls().len(), 1, "the worker was not sent back");
+}

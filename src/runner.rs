@@ -438,6 +438,7 @@ impl Runner {
             claude_files_accepted: None,
             qwen: QwenTally::default(),
             merge_refused: false,
+            sent_back: false,
             merge_tried: None,
             summon_owed: false,
             local_rounds: 0,

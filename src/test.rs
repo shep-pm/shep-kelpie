@@ -125,6 +125,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         claude_files_accepted: None,
         qwen: crate::work_item::QwenTally::default(),
         merge_refused: false,
+        sent_back: false,
         merge_tried: None,
         summon_owed: false,
         local_rounds: 0,

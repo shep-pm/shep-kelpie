@@ -77,6 +77,10 @@ fn both_parked(project: &str) -> (Rig, Mutex<Runner>) {
 }
 
 // The issue of the work item a step's report is about, as the runner logs it
+// A worker's reply that ends on a question, which keeps its work item open
+// and waiting on the maintainer
+const ASKS: &str = "<kelpie-question>\nWhich flag?\n</kelpie-question>\n";
+
 fn issue_of(report: Option<StepReport>) -> u64 {
     let logged = serde_json::to_value(&report).unwrap();
     logged["issue"]
@@ -376,17 +380,17 @@ fn the_board_fills_a_free_slot_and_never_takes_an_open_issue_again() {
     for issue in [7, 8, 9] {
         rig.forge.list_ready(issue, false);
     }
-    rig.claude.script([
-        Scripted::Reply(Usage::default(), Cost(1)),
-        Scripted::Reply(Usage::default(), Cost(1)),
-    ]);
+    rig.claude
+        .script([Scripted::Say(ASKS), Scripted::Say(ASKS)]);
     assert_eq!(dispatched(step(&runner).unwrap()), (7, vec![]));
     assert_eq!(issue_of(step(&runner).unwrap()), 7, "#7's first turn");
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     // #7 is still ready on the forge, and in flight here.
     assert_eq!(dispatched(step(&runner).unwrap()), (8, vec![]));
     assert_eq!(issue_of(step(&runner).unwrap()), 8, "#8's first turn");
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 2 }));
 
-    // Both slots are taken, and each turn has ended, so #9 waits.
+    // Both slots are taken, each by a worker waiting on its question, so #9 waits.
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(open_items(&rig, &runner), [7, 8]);
 
@@ -431,9 +435,9 @@ fn an_adoption_for_an_issue_in_flight_waits_for_it_to_end() {
     rig.ask(&runner, "add", Some("7"));
     rig.ask(&runner, "adopt", Some("90"));
 
-    rig.claude
-        .script([Scripted::Reply(Usage::default(), Cost(1))]);
+    rig.claude.script([Scripted::Say(ASKS)]);
     assert_eq!(issue_of(step(&runner).unwrap()), 7, "#7's first turn");
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     assert_eq!(step(&runner).unwrap(), None, "#90 waits for #7");
     let status = rig.ask(&runner, "status", None);
     assert_eq!(
