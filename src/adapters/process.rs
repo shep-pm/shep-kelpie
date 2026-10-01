@@ -64,7 +64,8 @@ impl Processes {
     }
 
     /// Like `output_telling`, with the child's stdout and stderr written to
-    /// the files `outputs` names, emptied first, and read back once it ends
+    /// the files `outputs` names, emptied first, and read back and removed
+    /// once it ends
     ///
     /// A pipe the child shares with a parent that makes it non-blocking, as
     /// Node does with its own, fails a write once the pipe is full, and a
@@ -143,8 +144,8 @@ impl Processes {
         Ok(match outputs {
             Some([out, err]) => Output {
                 status,
-                stdout: std::fs::read(out).map_err(RunError::Io)?,
-                stderr: std::fs::read(err).map_err(RunError::Io)?,
+                stdout: take(out)?,
+                stderr: take(err)?,
             },
             None => Output {
                 status,
@@ -387,6 +388,14 @@ fn drain(pipe: Option<impl Read + Send + 'static>) -> thread::JoinHandle<Vec<u8>
     })
 }
 
+// The whole of the file at `path`, which is then removed: a call's output
+// holds its commands' output, which is not kept once read.
+fn take(path: &Path) -> Result<Vec<u8>, RunError> {
+    let bytes = std::fs::read(path).map_err(RunError::Io)?;
+    let _ = std::fs::remove_file(path);
+    Ok(bytes)
+}
+
 // Each line of `pipe` as it comes, until it closes.
 fn read_lines(pipe: Option<impl Read + Send + 'static>) -> Receiver<String> {
     let (send, lines) = mpsc::channel();
@@ -460,6 +469,7 @@ mod tests {
         assert_eq!(output.stdout.len(), 1_048_576);
         assert!(output.stdout.iter().all(|&b| b == b'x'));
         assert_eq!(output.stderr, b"oops\n");
+        assert!(!out.exists() && !err.exists());
     }
 
     #[test]
