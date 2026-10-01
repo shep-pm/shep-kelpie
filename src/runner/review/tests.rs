@@ -596,7 +596,7 @@ fn a_claude_round_that_only_mentions_clean_fails_the_gate() {
 fn a_claude_round_stopped_with_the_runner_runs_again_on_restart() {
     let (rig, runner) = at_round_1("shep");
     step(&runner).unwrap(); // round 1, qwen: clean by default
-    rig.claude.script([Scripted::Fail(ClaudeError::Stopped)]);
+    rig.claude.script([Scripted::Fail(AgentError::Stopped)]);
     assert_eq!(step(&runner).unwrap(), None, "no failed gate is reported");
     drop(runner);
 
@@ -636,7 +636,7 @@ fn a_judge_call_stopped_with_the_runner_runs_again_on_restart() {
         why: "two threads write the same field".into(),
     }])]);
     step(&runner).unwrap(); // round 1's qwen call
-    rig.claude.script([Scripted::Fail(ClaudeError::Stopped)]);
+    rig.claude.script([Scripted::Fail(AgentError::Stopped)]);
     assert_eq!(step(&runner).unwrap(), None, "no failed gate is reported");
     drop(runner);
 

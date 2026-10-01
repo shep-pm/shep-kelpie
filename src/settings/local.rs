@@ -248,7 +248,7 @@ impl TryFrom<i64> for ContextSize {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use crate::webhook::KelpieSettings;
     use std::path::Path;
 
     use super::*;
@@ -279,7 +279,7 @@ mod tests {
     fn lineup(table: &str) -> Vec<LoopReviewer> {
         let settings = with_table(table).unwrap();
         settings
-            .lineup(&BTreeMap::new(), Path::new("/home/me"))
+            .lineup(&KelpieSettings::default(), Path::new("/home/me"))
             .unwrap()
     }
 

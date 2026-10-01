@@ -18,7 +18,7 @@ fn lineup(list: &str, section: &str) -> Result<Vec<LoopReviewer>, String> {
         .map_err(|e| e.to_string())?;
     let kelpie = KelpieSettings::from_section(section).map_err(|e| e.to_string())?;
     settings
-        .lineup(&kelpie.local_reviewers, Path::new(HOME))
+        .lineup(&kelpie, Path::new(HOME))
         .map_err(|e| e.to_string())
 }
 
@@ -100,7 +100,7 @@ fn the_older_local_round_cannot_be_set_beside_a_list() {
     let table = crate::test::project_table(&entry);
     let settings = Settings::from_table(&table, "shep", Path::new(HOME), Path::new("/p")).unwrap();
     let err = settings
-        .lineup(&BTreeMap::new(), Path::new(HOME))
+        .lineup(&KelpieSettings::default(), Path::new(HOME))
         .unwrap_err()
         .to_string();
     assert!(err.contains("cannot both be set"), "{err}");

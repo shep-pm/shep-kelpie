@@ -33,6 +33,13 @@ One Claude Code conversation, identified by its session id. Claude's word, kept
 as Claude uses it.
 _Avoid_: shift
 
+**Agent**:
+A harness that runs sessions (Claude Code today) with the model and effort it
+runs them on. Kelpie's settings define agents by name, and the worker, the
+Claude round and the judge each run on one a project names.
+_Avoid_: model (one part of an agent), bot (a review bot is a pull request
+reviewer)
+
 ## In shep's terms
 
 Kelpie is a **dog**: it watches its projects rather than being one. Each

@@ -40,7 +40,8 @@ impl Runner {
             settings.forge = self.settings.forge.clone();
         }
         let reviewers = kelpie.reviewers;
-        let lineup = settings.lineup(&kelpie.local_reviewers, &self.home)?;
+        let agents = settings.role_agents(&kelpie.agents)?;
+        let lineup = settings.lineup(&kelpie, &self.home)?;
         let (channels, webhook) = ruling_channels(&settings, kelpie)?;
         let mut changed = changed(
             (&self.settings, &self.channels, &self.webhook),
@@ -51,6 +52,9 @@ impl Runner {
         }
         if lineup != self.lineup && !changed.contains(&"review") {
             changed.push("local_reviewers");
+        }
+        if agents != self.agents {
+            changed.push("agents");
         }
         if changed.is_empty() && waiting.is_empty() {
             return Ok(None);
@@ -71,6 +75,7 @@ impl Runner {
         self.settings = settings;
         self.reviewers = reviewers;
         self.lineup = lineup;
+        self.agents = agents;
         self.extra_instructions = extra_instructions;
         self.channels = channels;
         self.webhook = webhook;

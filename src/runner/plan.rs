@@ -9,31 +9,20 @@ use std::time::Duration;
 
 use super::report::{Begin, PlanOutcome, StepReport};
 use super::ruling::question;
-use super::{Answer, RuleError, Runner, turn};
+use super::{Answer, RuleError, Runner};
 use crate::board::{ReadyIssue, Skip};
 use crate::plan::{self, Piece, Plan, Planned, Stage};
-use crate::ports::{Claude, ClaudeCall, ClaudeError, ClaudeReply, Role, Session, Usage};
+use crate::ports::{
+    AgentCall, AgentError, AgentReply, Agents, Cost, Role, Sandbox, Session, Tools, Usage,
+};
 use crate::settings::MergeAuthority;
 use crate::skills::Step;
 use crate::state::{ProjectState, Ruling, RulingKind, StateError};
 use crate::work_item::new_session_id;
 use crate::worktree;
 
-/// The planning call's throwaway settings: it reads the repo and changes nothing
+/// Where the planning call's throwaway settings go
 const PLANNER_SETTINGS_FILE: &str = "planner-settings.json";
-
-/// Every tool a planning call may not use: all but Read, Grep and Glob
-const PLANNER_DENIES: [&str; 9] = [
-    "Agent",
-    "Task",
-    "Bash",
-    "Edit",
-    "Write",
-    "MultiEdit",
-    "NotebookEdit",
-    "WebFetch",
-    "WebSearch",
-];
 
 /// Forge refusals in a row before a split or a close waits on a ruling
 /// instead, so one the forge will never take cannot hold up the board
@@ -47,7 +36,7 @@ pub(super) enum Planning {
     /// Passed over this poll
     Skip(Skip),
     /// The step does this instead of opening a work item
-    Begin(Begin),
+    Begin(Box<Begin>),
 }
 
 impl Runner {
@@ -90,59 +79,58 @@ impl Runner {
                 })
             }
         };
-        Ok(Some(Planning::Begin(begin)))
+        Ok(Some(Planning::Begin(Box::new(begin))))
     }
 
     fn planning_call(
         &self,
         number: u64,
         note: Option<&str>,
-    ) -> Result<(ClaudeCall, PathBuf), String> {
+    ) -> Result<(AgentCall, PathBuf), String> {
         let found = self.ports.forge.issue(&self.settings.forge, number);
         let found = found.map_err(|e| format!("cannot read the issue: {e}"))?;
-        let settings = self.paths.worker.join(PLANNER_SETTINGS_FILE);
-        let deny = serde_json::json!({ "permissions": { "deny": PLANNER_DENIES } });
-        let text = serde_json::to_string_pretty(&deny).expect("settings are JSON");
-        turn::write(&self.paths.worker, &settings, &text)?;
         let session = new_session_id().map_err(|e| format!("cannot draw a session id: {e}"))?;
         let view = self.paths.plan();
         worktree::view(&self.settings.repo, &view).map_err(|e| e.to_string())?;
         let asked = plan::prompt(number, &found.title, &found.body, note);
-        let model = &self.settings.models.planner;
+        let model = &self.agents.planner;
         let minutes = u64::from(self.settings.worker.turn_timeout.get());
-        let call = ClaudeCall {
+        // It reads and searches the repo, and runs no commands and no crew.
+        let call = AgentCall {
             role: Role::Planner,
             issue: number,
             model: model.model.as_str().to_owned(),
             effort: model.effort,
             session: Session::New(session),
             cwd: view.clone(),
-            settings,
+            settings: self.paths.worker.join(PLANNER_SETTINGS_FILE),
             instructions: None,
             prompt: self.skills.invoke(Step::Planning, &asked),
             mcp_config: None,
             plugin_dirs: self.skills.plugin_dirs().to_vec(),
             timeout: Some(Duration::from_secs(minutes * 60)),
+            tools: Tools::Review,
+            sandbox: Sandbox::default(),
         };
-        Ok((call, view))
+        Ok((self.prepared(call)?, view))
     }
 
     /// Records what the planning call decided, once it answers
     pub(super) fn end_plan(
         &mut self,
-        call: &ClaudeCall,
+        call: &AgentCall,
         view: &Path,
-        result: Result<ClaudeReply, ClaudeError>,
+        result: Result<AgentReply, AgentError>,
     ) -> Result<Option<StepReport>, StateError> {
         // One left behind is removed before the next call.
         let _ = worktree::remove_view(&self.settings.repo, view);
         let issue = call.issue;
         // A trigger may have opened its work item while the call ran.
-        if matches!(result, Err(ClaudeError::Stopped)) || self.state.item(issue).is_some() {
+        if matches!(result, Err(AgentError::Stopped)) || self.state.item(issue).is_some() {
             return Ok(None);
         }
         let (usage, cost_usd) = result.as_ref().map_or((Usage::default(), 0.0), |reply| {
-            (reply.usage, reply.session_cost.usd())
+            (reply.usage, reply.session_cost.map_or(0.0, Cost::usd))
         });
         let planned = result
             .map_err(|e| e.to_string())
@@ -282,21 +270,21 @@ fn splitting(why: String, pieces: Vec<Piece>) -> Stage {
 /// Runs a planning call, and once more in a fresh session when the first
 /// timed out or failed, as a usage limit does
 pub(super) fn run_planning(
-    claude: &dyn Claude,
-    call: &ClaudeCall,
-) -> Result<ClaudeReply, ClaudeError> {
-    let first = claude.run(call);
-    if !matches!(first, Err(ClaudeError::TimedOut | ClaudeError::Failed(_))) {
+    agents: &dyn Agents,
+    call: &AgentCall,
+) -> Result<AgentReply, AgentError> {
+    let first = agents.run(call);
+    if !matches!(first, Err(AgentError::TimedOut | AgentError::Failed(_))) {
         return first;
     }
     let Ok(session) = new_session_id() else {
         return first;
     };
-    let again = ClaudeCall {
+    let again = AgentCall {
         session: Session::New(session),
         ..call.clone()
     };
-    claude.run(&again)
+    agents.run(&again)
 }
 
 mod split;

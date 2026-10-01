@@ -21,7 +21,7 @@ fn planning(project: &str) -> (Rig, Mutex<Runner>) {
     (rig, runner)
 }
 
-fn planner_calls(rig: &Rig) -> Vec<ClaudeCall> {
+fn planner_calls(rig: &Rig) -> Vec<AgentCall> {
     let calls = rig.claude.all_calls().into_iter();
     calls.filter(|c| c.role == Role::Planner).collect()
 }
@@ -89,7 +89,7 @@ fn the_planning_call_reads_main_and_may_change_nothing() {
         Session::New(plan.call.session.id().clone())
     );
     let deny = plan.settings["permissions"]["deny"].as_array().unwrap();
-    for tool in ["Bash", "Edit", "Write", "Agent"] {
+    for tool in ["Bash", "Agent", "Task"] {
         assert!(deny.contains(&json!(tool)), "{tool}");
     }
     for tool in ["Read", "Grep", "Glob"] {
@@ -461,7 +461,7 @@ fn a_planning_call_that_times_out_is_tried_once_more_in_a_fresh_session() {
     let (rig, runner) = planning("zeus");
     rig.forge.list_ready(5, false);
     rig.claude
-        .script([Scripted::Fail(ClaudeError::TimedOut), Scripted::Text(WHOLE)]);
+        .script([Scripted::Fail(AgentError::TimedOut), Scripted::Text(WHOLE)]);
     assert!(matches!(
         step(&runner).unwrap(),
         Some(StepReport::Planned {

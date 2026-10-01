@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use serde_json::json;
 
-use crate::ports::{Checks, ClaudeError, PullRequestState};
+use crate::ports::{AgentError, Checks, PullRequestState};
 use crate::runner::coderabbit::tests::{fixed, hold_a_finding, now, reviewed_by_qwen};
 use crate::runner::coderabbit::{ANSWER_WAIT, REVIEW_WAIT};
 use crate::runner::rework::HUMAN;
@@ -386,7 +386,7 @@ fn a_workers_question_still_parks_on_a_ruling() {
 fn a_failed_turn_still_parks_on_a_ruling() {
     let (rig, runner) = auto_with_issue_7("golbat");
     rig.claude
-        .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
+        .script([Scripted::Fail(AgentError::Failed("overloaded".into()))]);
     let id = raised(step(&runner).unwrap());
     still_asks(&rig, &runner, id, "turn-failed");
 }
@@ -394,7 +394,7 @@ fn a_failed_turn_still_parks_on_a_ruling() {
 #[test]
 fn a_turn_past_its_ceiling_still_parks_on_a_ruling() {
     let (rig, runner) = auto_with_issue_7("rotom");
-    rig.claude.script([Scripted::Fail(ClaudeError::TimedOut)]);
+    rig.claude.script([Scripted::Fail(AgentError::TimedOut)]);
     let id = raised(step(&runner).unwrap());
     still_asks(&rig, &runner, id, "turn-timeout");
 }

@@ -107,7 +107,7 @@ impl Runner {
                 }
                 Some(Planning::Begin(begin)) => {
                     self.skipped = skipped;
-                    return Ok(begin);
+                    return Ok(*begin);
                 }
             }
             match self.add(issue) {
@@ -169,7 +169,7 @@ mod tests {
 
     use super::*;
     use crate::board::{Skip, WorkerModel};
-    use crate::ports::{ClaudeError, Cost, PullRequestState, Usage};
+    use crate::ports::{AgentError, Cost, PullRequestState, Usage};
     use crate::runner::{StepReport, step};
     use crate::settings::Effort;
     use crate::test::{Rig, Scripted};
@@ -475,7 +475,7 @@ mod tests {
         rig.forge.list_ready(7, false);
         step(&runner).unwrap();
         rig.claude
-            .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
+            .script([Scripted::Fail(AgentError::Failed("overloaded".into()))]);
         step(&runner).unwrap();
         assert_eq!(
             rig.ask(&runner, "status", None)["work_item"]["pull_request"],
