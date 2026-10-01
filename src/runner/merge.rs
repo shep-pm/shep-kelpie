@@ -131,6 +131,11 @@ impl Runner {
             }
             PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
         }
+        // Queued, the pull request is tested on top of the ones ahead of it
+        // while `main` moves under it, so none of the gates below apply.
+        if let Some(queued) = item.merge_queued {
+            return self.queued(number, head, queued);
+        }
         // The gate asks again once the project is no longer `auto`.
         if auto && self.settings.merge_authority != MergeAuthority::Auto {
             let reason = "the merge authority is no longer auto".to_owned();
@@ -196,6 +201,13 @@ impl Runner {
         if settling || !green {
             return Ok(Begin::Idle);
         }
+        // A queued pull request is not merged yet and a second merge call
+        // would refuse it, so a restart that lost the mark finds it here.
+        let removals = match self.ports.forge.merge_queue(&repo, number) {
+            Ok(standing) if standing.queued => return self.queue_marked(standing.removals),
+            Ok(standing) => standing.removals,
+            Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}'s queue: {e}"))),
+        };
         if let Err(e) = self.ports.forge.merge(&repo, number, &head) {
             let reason = format!("cannot merge #{number}: {e}");
             if !auto {
@@ -207,7 +219,12 @@ impl Runner {
                 Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}: {e}"))),
             }
         }
-        self.merged(issue, number, head, auto)
+        // With a merge queue on, the call only queued the pull request.
+        match self.ports.forge.pull_request(&repo, number) {
+            Ok(pr) if pr.state == PullRequestState::Open => self.queue_marked(removals),
+            Ok(_) => self.merged(issue, number, head, auto),
+            Err(e) => Ok(self.gate_failed(format!("cannot read #{number}: {e}"))),
+        }
     }
 
     // Nobody is asked before a merge under `auto`, so a head the gates never
@@ -364,6 +381,8 @@ impl Runner {
         Ok(Begin::Report(report))
     }
 }
+
+mod queue;
 
 #[cfg(test)]
 mod auto;

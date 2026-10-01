@@ -7,7 +7,9 @@
 
 use std::fmt;
 
-use super::{Forge, ForgeError, Issue, NewLabel, OpenIssue, PullRequest, Reviewed, Visibility};
+use super::{
+    Forge, ForgeError, Issue, NewLabel, OpenIssue, PullRequest, QueueStanding, Reviewed, Visibility,
+};
 use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::local_paths::{LocalPaths, Surface};
 use crate::review_bot::{Activity, Login};
@@ -173,6 +175,10 @@ impl Forge for Guarded {
 
     fn merge(&self, repo: &ForgeSlug, number: u64, head: &str) -> Result<(), ForgeError> {
         self.forge.merge(repo, number, head)
+    }
+
+    fn merge_queue(&self, repo: &ForgeSlug, number: u64) -> Result<QueueStanding, ForgeError> {
+        self.forge.merge_queue(repo, number)
     }
 }
 

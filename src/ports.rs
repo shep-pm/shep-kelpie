@@ -271,6 +271,24 @@ pub trait Forge: Send {
     ///
     /// [`ForgeError`] when the forge refuses, the head moved, or it cannot be asked.
     fn merge(&self, repo: &ForgeSlug, number: u64, head: &str) -> Result<(), ForgeError>;
+
+    /// Where pull request `number` stands in the repo's merge queue
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses or cannot be asked.
+    fn merge_queue(&self, repo: &ForgeSlug, number: u64) -> Result<QueueStanding, ForgeError>;
+}
+
+/// Where a pull request stands in the merge queue
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueStanding {
+    /// Whether it is in the queue now
+    pub queued: bool,
+    /// How many times the queue has removed it, merged or not
+    pub removals: u32,
+    /// What the forge gave for the latest removal
+    pub reason: Option<String>,
 }
 
 /// A pull request as the forge holds it
