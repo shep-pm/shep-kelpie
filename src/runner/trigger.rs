@@ -11,9 +11,9 @@ use super::pace::PacerStatus;
 use super::{Answer, Runner};
 use crate::board::{Skip, WorkerModel};
 use crate::lease::gpu::LockHolder;
-use crate::ports::{ModelSeat, SessionId, Timestamp};
+use crate::ports::{Gpu, GpuMetrics, ModelSeat, SessionId, Timestamp};
 use crate::relay::Settled;
-use crate::settings::MergeAuthority;
+use crate::settings::{EndpointUrl, MergeAuthority};
 use crate::skills::StepSkill;
 use crate::state::{Finished, LeaseHeld, Ruling, RunState, StateError, Waiting};
 use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Split, Turn, WorkItem};
@@ -73,10 +73,38 @@ pub struct Status<'a> {
     /// an Ollama host to ask
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_model: Option<LocalModelStatus>,
+    /// The GPU's load, read live from the metrics page when kelpie's settings
+    /// name one
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu: Option<GpuStatus>,
     /// Who holds each lease a local agent's calls take, by its name, or
     /// null while it is free
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub local_leases: BTreeMap<String, Option<LockHolder>>,
+}
+
+/// The GPU, as its metrics page said when `status` asked
+#[derive(Debug, Serialize)]
+pub struct GpuStatus {
+    /// Each GPU on the page
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub gpus: Vec<Gpu>,
+    /// Why the page could not be read
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl GpuStatus {
+    /// Reads the page at `url`, and says why when it cannot be read
+    pub(super) fn read(metrics: &dyn GpuMetrics, url: &EndpointUrl) -> Self {
+        match metrics.read(url) {
+            Ok(gpus) => Self { gpus, error: None },
+            Err(e) => Self {
+                gpus: Vec::new(),
+                error: Some(format!("cannot read the GPU metrics: {e}")),
+            },
+        }
+    }
 }
 
 /// The local model's placement, as Ollama's `/api/ps` last said
@@ -212,6 +240,15 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
         Ok(request) => request,
         Err(e) => return error(e),
     };
+    // The page is read before the lock is taken, so a slow GPU box holds up
+    // this answer and not the runner's steps.
+    let gpu = match &request {
+        Request::Status => {
+            let probe = lock(runner).gpu_probe();
+            probe.map(|(metrics, url)| GpuStatus::read(metrics.as_ref(), &url))
+        }
+        _ => None,
+    };
     // Memory changes only after a save succeeds, so a panicked holder
     // cannot have left the runner half changed.
     let mut runner = lock(runner);
@@ -243,7 +280,7 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
             serde_json::to_string(&runner.totals(last)).expect("totals serialize to JSON")
         }
         (Ok(()), None) => {
-            serde_json::to_string(&runner.status()).expect("status serializes to JSON")
+            serde_json::to_string(&runner.status_with(gpu)).expect("status serializes to JSON")
         }
         (Err(e), _) => error(e),
     }

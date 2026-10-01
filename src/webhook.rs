@@ -21,7 +21,7 @@ use shep_client::dogs::dog_config;
 use crate::channels::Channels;
 use crate::lease::counted::CARGO_TEST_CAPACITY;
 use crate::review_bot::Reviewers;
-use crate::settings::{Agent, AgentName, Definition, ReviewerName, SettingsError};
+use crate::settings::{Agent, AgentName, Definition, EndpointUrl, ReviewerName, SettingsError};
 
 /// What every project shares
 #[dog_config]
@@ -49,6 +49,10 @@ pub struct KelpieSettings {
     /// How many commands may hold each counted lease at once
     #[serde(default)]
     pub leases: Leases,
+    /// The GPU's Prometheus metrics page, such as `nvidia_gpu_exporter`'s
+    /// `/metrics`, which `status` reads. No GPU figures when absent.
+    #[serde(default)]
+    pub gpu_metrics_url: Option<EndpointUrl>,
 }
 
 /// The counted leases' capacities
@@ -154,7 +158,7 @@ const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntf
                      `endpoint`, `command`, `claude` or `session` and that \
                      kind's keys, `[agents.<name>]` tables with `harness`, \
                      `model` and `effort`, a `[leases]` table with a \
-                     `cargo-test` count, and nothing else";
+                     `cargo-test` count, a `gpu_metrics_url`, and nothing else";
 
 impl KelpieSettings {
     /// Reads and checks kelpie's settings file

@@ -29,6 +29,7 @@ struct Shared {
     requests: Vec<Value>,
     lines: Vec<String>,
     ps: Option<String>,
+    metrics: Option<String>,
 }
 
 /// A server on a free local port, until the test ends
@@ -48,6 +49,7 @@ impl StandInEndpoint {
             requests: Vec::new(),
             lines: Vec::new(),
             ps: None,
+            metrics: None,
         }));
         let serving = Arc::clone(&shared);
         // The thread outlives the test only while the test binary runs.
@@ -63,6 +65,17 @@ impl StandInEndpoint {
     pub(crate) fn with_ps(self, body: &str) -> Self {
         self.shared.lock().unwrap().ps = Some(body.to_owned());
         self
+    }
+
+    /// Has `/metrics` answer with this page, as a Prometheus exporter does
+    pub(crate) fn with_metrics(self, page: &str) -> Self {
+        self.shared.lock().unwrap().metrics = Some(page.to_owned());
+        self
+    }
+
+    /// The URL of its `/metrics` page
+    pub(crate) fn metrics_url(&self) -> String {
+        format!("{}/metrics", self.host())
     }
 
     /// Its Ollama host: the base URL without `/v1`
@@ -118,7 +131,12 @@ fn serve(stream: TcpStream, shared: &Mutex<Shared>) {
     if reader.read_exact(&mut body).is_err() {
         return;
     }
-    let (status, reply) = if request_line.contains("/api/ps ") {
+    let (status, reply) = if request_line.contains("/metrics ") {
+        match &shared.lock().unwrap().metrics {
+            Some(page) => (200, page.clone()),
+            None => (404, "404 page not found".to_owned()),
+        }
+    } else if request_line.contains("/api/ps ") {
         match &shared.lock().unwrap().ps {
             Some(body) => (200, body.clone()),
             None => (404, "404 page not found".to_owned()),
