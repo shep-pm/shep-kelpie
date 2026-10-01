@@ -470,7 +470,7 @@ mod tests {
         assert_eq!(rig.forge.head_of("kelpie/7"), None);
         assert_eq!(git(&rig.repo(), &["branch", "--list", "kelpie/7"]), "");
         assert!(!rig.worktree_7().exists());
-        assert!(!rig.home.path().join("kelpie/targets/koji/7").exists());
+        assert!(!rig.home.path().join("shep/kelpie/koji/builds/7").exists());
         let status = rig.ask(&runner, "status", None);
         assert_eq!(
             (&status["work_item"], &status["rulings"]),
@@ -713,7 +713,7 @@ mod tests {
             .script([Scripted::Reply(Usage::default(), Cost(1))]);
         step(&runner).unwrap();
         rig.ask(&runner, "pause", None);
-        let build = rig.home.path().join("kelpie/targets/webapp/7");
+        let build = rig.home.path().join("shep/kelpie/webapp/builds/7");
         assert!(rig.worktree_7().exists() && build.exists());
 
         let status = rig.ask(&runner, "drop", None);

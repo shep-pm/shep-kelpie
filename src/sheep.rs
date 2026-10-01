@@ -44,12 +44,13 @@ const BOARD_POLL: Duration = Duration::from_secs(60);
 const JOIN_BOUND: Duration = Duration::from_secs(2);
 
 mod look;
+mod settle;
 
 use look::Look;
 
 /// Runs `project`'s runner until the shepherd stops it
 ///
-/// Kelpie's home is `KELPIE_HOME`, or `~/.kelpie` when that is unset.
+/// Kelpie's home is `KELPIE_HOME`, or `$SHEP_HOME/kelpie` when that is unset.
 pub fn run(project: &str) -> ExitCode {
     match serve(project) {
         Ok(()) => ExitCode::SUCCESS,
@@ -66,17 +67,21 @@ fn serve(project: &str) -> Result<(), String> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or("HOME is not set")?;
-    let kelpie_home = std::env::var_os("KELPIE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".kelpie"));
-    let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
-    let mut paths = ProjectPaths::under(&kelpie_home, &project);
-    paths.shep_home.clone_from(&shep_home);
-    let (door, why) = crate::lease::door::worker_socket(&shep_home)?;
+    let kelpie_home = crate::home::kelpie_home_of(&shep_home);
+    let mut paths = ProjectPaths::under(&kelpie_home, &shep_home, &project);
+    let (door, why) = crate::lease::door::worker_socket(&shep_home);
     if let Some(why) = why {
         println!("{why}");
     }
     paths.door = door;
+    // A socket kelpie cannot bind would otherwise fail a call deep in a work
+    // item, and it is checked before anything moves into a home it refuses.
+    paths.sockets_fit()?;
+    let old = crate::home::old_home();
+    if let Some(old) = &old {
+        settle::moved(old, &kelpie_home, &project)?;
+    }
+    let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
     // Every agent call runs inside the sandbox runtime, so a runner without one stops here.
     if !paths.tools.sandbox().is_file() {
         return Err(SandboxError::Missing(paths.tools.sandbox()).to_string());
@@ -127,6 +132,9 @@ fn serve(project: &str) -> Result<(), String> {
         eprintln!("{notice}");
     }
     let (settings, kelpie_settings) = (loaded.settings, loaded.kelpie);
+    if let Some(old) = &old {
+        settle::sweep_when_restarted(old, &kelpie_home, &paths.shep_home);
+    }
     let runner = Runner::open(
         project,
         settings,

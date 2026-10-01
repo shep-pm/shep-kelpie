@@ -9,8 +9,8 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 /// What to do about a missing `SHEP_HOME` in a sheep
-pub const FLOCKFILE_FIX: &str = "add `env = { SHEP_HOME = \"/path/to/kelpie/shep\" }` \
-     to this sheep's entry in the Flockfile, the path being kelpie's shepherd (`~/.kelpie/shep`)";
+pub const FLOCKFILE_FIX: &str = "add `env = { SHEP_HOME = \"/path/to/shep\" }` \
+     to this sheep's entry in the Flockfile, the path being its shepherd's home";
 
 /// What to do about a missing `SHEP_HOME` in the adopted dog
 pub const DOG_FIX: &str =
@@ -21,8 +21,8 @@ pub const RELAY_FIX: &str =
     "the relay's settings set it in their `env` block, so this command did not run from the relay";
 
 /// What to do about a missing `SHEP_HOME` in `shep kelpie settings move`
-pub const MOVE_FIX: &str = "run it as `SHEP_HOME=~/.kelpie/shep kelpie settings move <project>`, \
-     naming kelpie's shepherd";
+pub const MOVE_FIX: &str = "run it as `shep kelpie settings move <project>`, \
+     which sets it to your shepherd";
 
 /// What to do about a missing `SHEP_HOME` in `shep kelpie add`, `start`, `pause` or `status`
 pub const FLOCK_FIX: &str = "run it as `shep kelpie <command>`, which sets it to your shepherd";
