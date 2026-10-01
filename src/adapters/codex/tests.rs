@@ -15,6 +15,18 @@ use crate::test::OpenSandbox;
 
 const WORKER_ID: &str = "5a2e9d40-1c7b-4b38-8e6f-2d4a9c1b7e53";
 
+/// A worker's turn on gpt-6-luna that added one file through apply_patch
+const FRESH: &str = include_str!("../../../fixtures/codex-exec-fresh.jsonl");
+/// The same session resumed: a patch `kelpie confine` refused, a write the
+/// sandbox refused, and a command `kelpie guard` refused
+const RESUMED: &str = include_str!("../../../fixtures/codex-exec-resumed.jsonl");
+/// A usage limit, written by hand from Codex's source, since the account
+/// was never run to one
+const LIMITED: &str = include_str!("../../../fixtures/codex-exec-usage-limit.jsonl");
+
+/// The Codex session the recordings ran in
+const THREAD: &str = "01a0f7fd-4ed5-7773-80ea-165edc292d8d";
+
 fn output(code: i32, stdout: &str, stderr: &str) -> Output {
     Output {
         status: ExitStatus::from_raw(code << 8),
@@ -44,7 +56,9 @@ fn stand_in(world: &World, stdout: &str) -> CodexCli {
         world.path("codex_home").display(),
         world.path("stdout.jsonl").display()
     );
-    crate::test::write_script(&world.path("codex"), &script);
+    if !world.path("codex").exists() {
+        crate::test::write_script(&world.path("codex"), &script);
+    }
     ClaudeCli::default()
         .sandboxed(Arc::new(OpenSandbox::default()), world.path("home"))
         .codex(world.path("login"))
@@ -112,6 +126,7 @@ fn a_resumed_session_names_codexs_own_id_after_the_options() {
     call.prompt = "-carry on".into();
     let thread = Thread {
         id: "019a0000-0000-7000-8000-000000000001".into(),
+        spent: Spent::default(),
     };
     let argv = strings(&call, Some(&thread), None);
     assert_eq!(argv[..2], ["exec", "resume"]);
@@ -227,6 +242,96 @@ fn every_call_runs_on_a_codex_home_of_its_own_with_the_login_linked_in() {
     assert_eq!(
         std::fs::read_link(&link).unwrap(),
         w.path("login/auth.json")
+    );
+}
+
+#[test]
+fn a_turn_answers_with_its_last_message_and_its_tokens() {
+    let w = World::new();
+    let cli = stand_in(&w, FRESH);
+    let call = w.call(Role::Worker, Session::New(id(WORKER_ID)));
+    cli.prepare(&call).unwrap();
+    let reply = cli.run(&call).unwrap();
+    assert_eq!(reply.text, "done");
+    assert_eq!(reply.session_id, id(WORKER_ID));
+    assert_eq!(reply.session_cost, None);
+    assert_eq!(
+        reply.usage,
+        Usage {
+            input: 6959,
+            cache_write: 0,
+            cache_read: 10752,
+            output: 44,
+        }
+    );
+}
+
+#[test]
+fn a_resumed_turn_counts_only_its_own_tokens_and_reads_past_refusals() {
+    let w = World::new();
+    let cli = stand_in(&w, FRESH);
+    let call = w.call(Role::Worker, Session::New(id(WORKER_ID)));
+    cli.prepare(&call).unwrap();
+    cli.run(&call).unwrap();
+
+    let cli = stand_in(&w, RESUMED);
+    let again = w.call(Role::Worker, Session::Resume(id(WORKER_ID)));
+    let reply = cli.run(&again).unwrap();
+    let argv = std::fs::read_to_string(w.path("argv")).unwrap();
+    assert!(argv.starts_with("exec\nresume\n"), "{argv}");
+    assert!(argv.contains(&format!("--\n{THREAD}\n")), "{argv}");
+    // Codex reports the session's tokens so far; the turn's own are the rest.
+    assert_eq!(
+        reply.usage,
+        Usage {
+            input: 3686,
+            cache_write: 0,
+            cache_read: 42752,
+            output: 427,
+        }
+    );
+    // A refused patch, write and command leave the turn's answer standing.
+    for refused in [
+        "blocked by a hook",
+        "operation not permitted",
+        "gh pr merge 1",
+    ] {
+        assert!(reply.text.contains(refused), "{refused}: {}", reply.text);
+    }
+    assert!(reply.text.contains("hello.txt"), "{}", reply.text);
+}
+
+#[test]
+fn a_session_resumed_as_another_is_unreadable() {
+    let w = World::new();
+    let cli = stand_in(&w, FRESH);
+    let call = w.call(Role::Worker, Session::New(id(WORKER_ID)));
+    cli.prepare(&call).unwrap();
+    cli.run(&call).unwrap();
+    let other = RESUMED.replace(THREAD, "01a0f7fd-0000-7000-8000-000000000000");
+    let cli = stand_in(&w, &other);
+    let again = w.call(Role::Worker, Session::Resume(id(WORKER_ID)));
+    assert!(matches!(
+        cli.run(&again),
+        Err(AgentError::Unreadable(CODEX, _))
+    ));
+}
+
+#[test]
+fn a_usage_limit_fails_the_turn_naming_it() {
+    let w = World::new();
+    let cli = stand_in(&w, LIMITED);
+    let call = w.call(Role::Worker, Session::New(id(WORKER_ID)));
+    cli.prepare(&call).unwrap();
+    let Err(AgentError::Failed(CODEX, why)) = cli.run(&call) else {
+        panic!("a usage limit was not a failure");
+    };
+    assert!(why.contains("hit your usage limit"), "{why}");
+    // Nothing started, so there is no session to resume.
+    let again = w.call(Role::Worker, Session::Resume(id(WORKER_ID)));
+    assert_eq!(
+        cli.run(&again),
+        Err(AgentError::NoSession(CODEX, id(WORKER_ID)))
     );
 }
 
@@ -416,7 +521,11 @@ fn record_a_turn_a_resumed_turn_and_three_refusals() {
     let path = Files::of(&first).thread(&worker_id);
     std::fs::write(
         &path,
-        serde_json::to_string(&Thread { id: turn.thread }).unwrap(),
+        serde_json::to_string(&Thread {
+            id: turn.thread,
+            spent: turn.spent,
+        })
+        .unwrap(),
     )
     .unwrap();
     assert_eq!(

@@ -169,18 +169,20 @@ impl Agents for CodexCli {
         })?;
         let known = thread(&files, call.session.id())?;
         let turn = parse_result(&output, known.as_ref())?;
-        if known.is_none() {
-            let record = Thread { id: turn.thread };
-            let path = files.thread(call.session.id());
-            let text = serde_json::to_string(&record).expect("a thread is JSON");
-            std::fs::write(&path, text).map_err(|e| {
-                AgentError::Setup(format!("cannot write {}: {}", path.display(), e.kind()))
-            })?;
-        }
+        let before = known.map(|k| k.spent).unwrap_or_default();
+        let record = Thread {
+            id: turn.thread,
+            spent: turn.spent,
+        };
+        let path = files.thread(call.session.id());
+        let text = serde_json::to_string(&record).expect("a thread is JSON");
+        std::fs::write(&path, text).map_err(|e| {
+            AgentError::Setup(format!("cannot write {}: {}", path.display(), e.kind()))
+        })?;
         Ok(AgentReply {
             session_id: call.session.id().clone(),
             text: turn.text,
-            usage: turn.usage,
+            usage: turn.spent.since(before),
             session_cost: None,
         })
     }
@@ -326,6 +328,46 @@ fn link_login(login: &Path, home: &Path) -> Result<(), AgentError> {
 struct Thread {
     /// Codex's own id for it
     id: String,
+    /// The session's tokens as Codex last reported them, which a resumed
+    /// turn's report runs on from
+    #[serde(default)]
+    spent: Spent,
+}
+
+/// A Codex session's tokens so far, as its last turn reported them
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct Spent {
+    /// Every input token, cached or not
+    input_tokens: u64,
+    /// The input tokens read from the cache
+    cached_input_tokens: u64,
+    /// The input tokens written to the cache
+    cache_write_input_tokens: u64,
+    /// Every output token, reasoning included
+    output_tokens: u64,
+}
+
+impl Spent {
+    /// What was spent after `before`, as kelpie counts a turn's tokens
+    ///
+    /// Codex counts cached input, read or written, within its input.
+    fn since(self, before: Self) -> Usage {
+        let less = |now: u64, then: u64| now.saturating_sub(then);
+        let cache_read = less(self.cached_input_tokens, before.cached_input_tokens);
+        let cache_write = less(
+            self.cache_write_input_tokens,
+            before.cache_write_input_tokens,
+        );
+        Usage {
+            input: less(self.input_tokens, before.input_tokens)
+                .saturating_sub(cache_read)
+                .saturating_sub(cache_write),
+            cache_write,
+            cache_read,
+            output: less(self.output_tokens, before.output_tokens),
+        }
+    }
 }
 
 /// The Codex session kelpie started as `id`, if any
@@ -531,14 +573,15 @@ struct Turn {
     thread: String,
     /// Its last message's text
     text: String,
-    /// What the turn used
-    usage: Usage,
+    /// The session's tokens so far, this turn's included
+    spent: Spent,
 }
 
 // `codex exec --json` prints one event per line: the session it runs in,
 // each item as it starts and ends, and the turn's end with its tokens or
-// its failure. The answer is the last agent message. A ChatGPT plan has
-// no price per call, so kelpie records each one as unpriced.
+// its failure. The answer is the last agent message. Its tokens are the
+// session's so far, a resumed session's earlier turns included (Facts). A
+// ChatGPT plan has no price per call, so kelpie records each one as unpriced.
 fn parse_result(output: &Output, known: Option<&Thread>) -> Result<Turn, AgentError> {
     #[derive(Deserialize)]
     struct Event {
@@ -567,6 +610,7 @@ fn parse_result(output: &Output, known: Option<&Thread>) -> Result<Turn, AgentEr
     struct TurnUsage {
         input_tokens: u64,
         cached_input_tokens: u64,
+        cache_write_input_tokens: u64,
         output_tokens: u64,
     }
     #[derive(Deserialize)]
@@ -603,12 +647,11 @@ fn parse_result(output: &Output, known: Option<&Thread>) -> Result<Turn, AgentEr
             }
             "turn.completed" => {
                 let u = event.usage.unwrap_or_default();
-                usage = Some(Usage {
-                    // Codex counts cached input within its input.
-                    input: u.input_tokens.saturating_sub(u.cached_input_tokens),
-                    cache_write: 0,
-                    cache_read: u.cached_input_tokens,
-                    output: u.output_tokens,
+                usage = Some(Spent {
+                    input_tokens: u.input_tokens,
+                    cached_input_tokens: u.cached_input_tokens,
+                    cache_write_input_tokens: u.cache_write_input_tokens,
+                    output_tokens: u.output_tokens,
                 });
             }
             "turn.failed" => failure = event.error.map(|e| e.message),
@@ -625,10 +668,10 @@ fn parse_result(output: &Output, known: Option<&Thread>) -> Result<Turn, AgentEr
         return Err(failed(tail(&stderr)));
     }
     match (thread, text, usage) {
-        (Some(thread), Some(text), Some(usage)) => Ok(Turn {
+        (Some(thread), Some(text), Some(spent)) => Ok(Turn {
             thread,
             text,
-            usage,
+            spent,
         }),
         _ => Err(AgentError::Unreadable(CODEX, tail(&stdout).to_owned())),
     }
