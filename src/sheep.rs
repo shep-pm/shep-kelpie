@@ -22,7 +22,6 @@ use crate::adapters::{
 use crate::coderabbit::CodeRabbit;
 use crate::codex::Codex;
 use crate::cubic::Cubic;
-use crate::home::migrate;
 use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
 use crate::ports::{Leases, Ports, Routed, SandboxError};
@@ -45,12 +44,13 @@ const BOARD_POLL: Duration = Duration::from_secs(60);
 const JOIN_BOUND: Duration = Duration::from_secs(2);
 
 mod look;
+mod settle;
 
 use look::Look;
 
 /// Runs `project`'s runner until the shepherd stops it
 ///
-/// Kelpie's home is `KELPIE_HOME`, or `~/.kelpie` when that is unset.
+/// Kelpie's home is `KELPIE_HOME`, or `$SHEP_HOME/kelpie` when that is unset.
 pub fn run(project: &str) -> ExitCode {
     match serve(project) {
         Ok(()) => ExitCode::SUCCESS,
@@ -68,27 +68,19 @@ fn serve(project: &str) -> Result<(), String> {
         .map(PathBuf::from)
         .ok_or("HOME is not set")?;
     let kelpie_home = crate::home::kelpie_home_of(&shep_home);
-    if let Some(old) = crate::home::old_home() {
-        let mut moves = migrate::shared(&old, &kelpie_home);
-        moves.extend(migrate::project(&old, &kelpie_home, &project));
-        for line in migrate::run(&kelpie_home, &moves)? {
-            println!("{line}");
-        }
-        if let Some(line) = migrate::repoint(&old, &kelpie_home, &project)? {
-            println!("{line}");
-        }
+    let old = crate::home::old_home();
+    if let Some(old) = &old {
+        settle::moved(old, &kelpie_home, &project)?;
     }
     let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
-    let mut paths = ProjectPaths::under(&kelpie_home, &project);
-    paths.shep_home.clone_from(&shep_home);
+    let mut paths = ProjectPaths::under(&kelpie_home, &shep_home, &project);
     let (door, why) = crate::lease::door::worker_socket(&shep_home);
     if let Some(why) = why {
         println!("{why}");
     }
     paths.door = door;
     // A socket kelpie cannot bind would otherwise fail a call deep in a work item.
-    crate::home::socket_fits(&paths.door)?;
-    crate::home::socket_fits(&paths.longest_socket())?;
+    paths.sockets_fit()?;
     // Every agent call runs inside the sandbox runtime, so a runner without one stops here.
     if !paths.tools.sandbox().is_file() {
         return Err(SandboxError::Missing(paths.tools.sandbox()).to_string());
@@ -139,6 +131,12 @@ fn serve(project: &str) -> Result<(), String> {
         eprintln!("{notice}");
     }
     let (settings, kelpie_settings) = (loaded.settings, loaded.kelpie);
+    // Before the runner opens, since opening prunes worktrees git cannot find.
+    let [worktrees, _] = paths.owned();
+    settle::repair(&settings.repo, &worktrees);
+    if let Some(old) = &old {
+        settle::sweep_when_restarted(old, &kelpie_home, &paths.shep_home);
+    }
     let runner = Runner::open(
         project,
         settings,

@@ -17,6 +17,7 @@ pub use verbs::{USAGE, VERBS, main, split_project, verb_first};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use serde_json::{Map, Value};
 use shep_client::Client;
@@ -198,6 +199,43 @@ pub(crate) async fn kelpie_sheep(
         Ok(other) => Err(format!("the shepherd answered {other:?} for `{name}`")),
         Err(e) => Err(format!("cannot read `{name}`'s config: {e}")),
     }
+}
+
+/// Whether every running sheep started as a kelpie runner has been up for
+/// less than `age`
+///
+/// # Errors
+///
+/// A message when the flock or a sheep's config cannot be read.
+pub(crate) async fn runners_younger_than(client: &Client, age: Duration) -> Result<bool, String> {
+    let rows = flock(client).await?;
+    let up = rows
+        .iter()
+        .filter(|r| r.dog.is_none() && r.status == ProcStatus::Online);
+    for row in up {
+        if Duration::from_millis(row.uptime_ms) < age {
+            continue;
+        }
+        let request = Request::SheepConfig {
+            name: row.name.clone(),
+        };
+        match client.request(request).await {
+            Ok(Response::SheepConfig(view))
+                if view.config.args.first().is_some_and(|a| a == "runner") =>
+            {
+                return Ok(false);
+            }
+            Ok(Response::SheepConfig(_)) => {}
+            Ok(other) => {
+                return Err(format!(
+                    "the shepherd answered {other:?} for `{}`",
+                    row.name
+                ));
+            }
+            Err(e) => return Err(format!("cannot read `{}`'s config: {e}", row.name)),
+        }
+    }
+    Ok(true)
 }
 
 /// The program `name`'s entry runs

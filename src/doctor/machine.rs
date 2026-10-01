@@ -119,6 +119,23 @@ pub(super) fn gh(forge: &dyn Forge) -> Line {
 }
 
 /// The sandbox runtime installed under `kelpie_home`, with what it needs, which every agent runs in
+/// The links the move from the old home `old` left there, while any remain
+pub(super) fn links(old: &Path, kelpie_home: &Path) -> Option<Line> {
+    let links = crate::home::migrate::links(old, kelpie_home);
+    let names: Vec<String> = links.iter().map(|l| l.display().to_string()).collect();
+    (!names.is_empty()).then(|| {
+        Line::unsure(
+            "old home",
+            format!(
+                "links left for runners on the old build: {}",
+                names.join(", ")
+            ),
+            "they go once every runner has restarted on this build, \
+             or at the next `shep kelpie upgrade`",
+        )
+    })
+}
+
 pub(super) fn sandbox(host: &dyn Host, kelpie_home: &Path) -> Line {
     let gaps = host.sandbox_gaps();
     if !gaps.is_empty() {

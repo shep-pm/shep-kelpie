@@ -99,7 +99,8 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
                 shep_home: shep_home.to_owned(),
                 kelpie_home: kelpie_home_set,
             };
-            let old = ProjectPaths::under(&kelpie_home, &name).settings;
+            let settings = ProjectPaths::under(&kelpie_home, shep_home, &name).settings;
+            let old = crate::home::or_old(settings, &format!("projects/{name}/settings.toml"));
             let place = add::Place {
                 checkout: &checkout,
                 home: &home,

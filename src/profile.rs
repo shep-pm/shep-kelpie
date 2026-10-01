@@ -305,6 +305,66 @@ mod tests {
         .settings()
     }
 
+    // A `KELPIE_HOME` set outside the shepherd's home holds the TOTP secret
+    // and other projects' state just the same.
+    #[test]
+    fn a_kelpie_home_outside_the_shepherds_is_denied_around_the_workers_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let (kelpie, shep) = (dir.path().join("k"), dir.path().join("shep"));
+        let (worktree, build) = (
+            kelpie.join("koji/worktrees/7"),
+            kelpie.join("koji/builds/7"),
+        );
+        for folder in [
+            &worktree,
+            &build,
+            &kelpie.join("totp"),
+            &kelpie.join("rotom"),
+            &shep,
+        ] {
+            std::fs::create_dir_all(folder).unwrap();
+        }
+        let s = WorkerProfile {
+            worktree: &worktree,
+            build: &build,
+            git_common_dir: Path::new("/r/.git"),
+            git_dir: Path::new("/r/.git/worktrees/7"),
+            branch: "kelpie/7",
+            kelpie: Path::new("/opt/kelpie"),
+            kelpie_home: &kelpie,
+            repo: Path::new("/r"),
+            private_names: &[],
+            guard_hooks: &[],
+            allowed_domains: &[],
+            build_env: &BTreeMap::new(),
+            preview: None,
+            shep_home: &shep,
+            reads: &[],
+            door: Path::new("/s/kelpie/dog/lease.sock"),
+        }
+        .settings();
+
+        let files = &s["sandbox"]["filesystem"];
+        let denied = strings(&files["denyRead"]);
+        for home in [&kelpie, &shep] {
+            assert!(
+                denied.contains(&format!("{}/**", home.display()).as_str()),
+                "{denied:?}"
+            );
+        }
+        assert!(strings(&files["allowRead"]).contains(&worktree.to_str().unwrap()));
+        let deny = strings(&s["permissions"]["deny"]);
+        for rule in ["totp/**", "rotom/**"] {
+            let rule = format!("Read(/{}/{rule})", kelpie.display());
+            assert!(deny.contains(&rule.as_str()), "{rule} not in {deny:?}");
+        }
+        let kelpie_rule = format!("Read(/{}/**)", kelpie.display());
+        assert!(
+            !deny.contains(&kelpie_rule.as_str()),
+            "it would hide the worktree"
+        );
+    }
+
     fn strings(v: &Value) -> Vec<&str> {
         v.as_array()
             .unwrap()

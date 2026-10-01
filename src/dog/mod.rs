@@ -211,7 +211,7 @@ async fn serve() -> Result<(), String> {
     // The adopted dog never had `KELPIE_HOME`, so its old book was always under `~/.kelpie`.
     if let (Some(folder), Some(user)) = (file.path().parent(), std::env::var_os("HOME")) {
         let old = PathBuf::from(user).join(home::OLD);
-        for line in home::migrate::run(folder, &home::migrate::dog(&old, folder))? {
+        for line in home::migrate::run(&home::migrate::dog(&old, folder))? {
             println!("{line}");
         }
     }

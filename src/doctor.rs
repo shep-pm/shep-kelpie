@@ -170,6 +170,10 @@ pub struct Here<'a> {
     pub home: &'a Path,
     /// Kelpie's home, which holds its tools
     pub kelpie_home: &'a Path,
+    /// The shepherd's home kelpie's runners work theirs out from
+    pub shep_home: &'a Path,
+    /// The home kelpie used before, whose links an upgrade sweeps
+    pub old_home: Option<&'a Path>,
     /// Kelpie's own settings file from before the `[kelpie]` section
     pub kelpie_settings: &'a Path,
 }
@@ -190,6 +194,10 @@ pub async fn check(shep_home: &Path, probes: Probes<'_>, here: Here<'_>, ask: As
         machine::gh(probes.forge),
         machine::sandbox(probes.host, here.kelpie_home),
     ];
+    lines.extend(
+        here.old_home
+            .and_then(|old| machine::links(old, here.kelpie_home)),
+    );
     match shepherd::connect(shep_home).await {
         Ok(client) => {
             lines.push(machine::shepherd(&client, shep_home));
@@ -262,9 +270,12 @@ pub fn main(args: &[String]) -> ExitCode {
             .map(PathBuf::from)
             .ok_or("HOME is not set")?;
         let kelpie_home = crate::home::kelpie_home_of(&shep_home);
+        let old_home = crate::home::old_home();
         let here = Here {
             home: &home,
             kelpie_home: &kelpie_home,
+            shep_home: &shep_home,
+            old_home: old_home.as_deref(),
             kelpie_settings: &kelpie_home.join("settings.toml"),
         };
         let ask = Ask {

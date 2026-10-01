@@ -45,6 +45,7 @@ struct Scene {
     clock: FakeClock,
     home: PathBuf,
     kelpie_home: PathBuf,
+    old_home: PathBuf,
 }
 
 impl Scene {
@@ -64,6 +65,7 @@ impl Scene {
         let scene = Self {
             home: shepherd.scratch("home"),
             kelpie_home: shepherd.scratch("kelpie"),
+            old_home: shepherd.scratch("old"),
             forge,
             meter: FakeMeter::idle(),
             codex_meter: FakeMeter::idle(),
@@ -118,6 +120,8 @@ impl Scene {
         let here = Here {
             home: &self.home,
             kelpie_home: &self.kelpie_home,
+            shep_home: self.shepherd.home(),
+            old_home: Some(&self.old_home),
             kelpie_settings: &self.kelpie_home.join("settings.toml"),
         };
         let done = check(self.shepherd.home(), probes, here, ask);
@@ -398,6 +402,8 @@ async fn no_shepherd_is_a_missing_shepherd_naming_its_home() {
     let here = Here {
         home: &scene.home,
         kelpie_home: &scene.kelpie_home,
+        shep_home: elsewhere.path(),
+        old_home: None,
         kelpie_settings: &scene.kelpie_home.join("settings.toml"),
     };
     let done = check(elsewhere.path(), probes, here, Ask::default());
@@ -752,4 +758,33 @@ fn arguments_are_a_project_and_the_test_alert_flag_in_either_order() {
     for bad in [&["--fix"][..], &["a", "b"], &["Not A Name"]] {
         assert!(args(bad).is_err(), "{bad:?}");
     }
+}
+
+#[tokio::test]
+async fn links_left_in_the_old_home_are_named_until_they_go() {
+    let scene = Scene::new().await;
+    assert!(
+        !scene
+            .report()
+            .await
+            .render()
+            .join("\n")
+            .contains("old home")
+    );
+    std::fs::create_dir_all(scene.kelpie_home.join("totp")).unwrap();
+    let link = scene.old_home.join("totp");
+    std::os::unix::fs::symlink(scene.kelpie_home.join("totp"), &link).unwrap();
+
+    let report = scene.report().await;
+
+    let line = report
+        .lines
+        .iter()
+        .find(|l| l.subject == "old home")
+        .expect("an old home line");
+    let Verdict::Unsure { what, .. } = &line.verdict else {
+        panic!("{line:?}");
+    };
+    assert!(what.contains(&link.display().to_string()), "{what}");
+    assert!(report.passed(), "an unsure line fails nothing");
 }

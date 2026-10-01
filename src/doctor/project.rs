@@ -30,7 +30,7 @@ pub(super) fn checks(
     };
     // A relative path in the settings is taken from the project's own folder, as the runner does.
     let paths = match ProjectName::try_from(sheep) {
-        Ok(name) => ProjectPaths::under(here.kelpie_home, &name),
+        Ok(name) => ProjectPaths::under(here.kelpie_home, here.shep_home, &name),
         Err(e) => return wrong(e.to_string()),
     };
     let folder = paths.settings.parent().unwrap_or(here.home);

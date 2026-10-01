@@ -58,7 +58,8 @@ impl fmt::Display for ProjectNameError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{:?} is not a project name: use letters, digits, - _ ., and none of {}",
+            "{:?} cannot name a project: use letters, digits, - _ . and not one of kelpie's \
+             own folders ({}), as in `shep kelpie add <another name>`",
             self.0,
             crate::home::OWN.join(" ")
         )
@@ -86,9 +87,7 @@ pub struct ProjectPaths {
     pub tools: Tools,
     /// Kelpie's home, which holds every folder here
     pub kelpie_home: PathBuf,
-    /// The shepherd's home, which a worker may not read outside its own
-    /// folders. The folder kelpie's home is in, unless the runner's `SHEP_HOME`
-    /// names another.
+    /// The shepherd's home, which a worker may not read outside its own folders
     pub shep_home: PathBuf,
     /// The dog's door, the one socket a worker may connect to. Under
     /// kelpie's home unless the runner sets it from its own environment.
@@ -103,7 +102,7 @@ impl ProjectPaths {
     /// `<kelpie home>/<project>/`, holding the project's state, settings and
     /// worker files, and its `worktrees`, `builds`, `shots` and `playwright`
     /// folders, beside kelpie's own `settings.toml`, `totp` and `tools`
-    pub fn under(kelpie_home: &Path, project: &ProjectName) -> Self {
+    pub fn under(kelpie_home: &Path, shep_home: &Path, project: &ProjectName) -> Self {
         let folder = kelpie_home.join(project.as_str());
         Self {
             kelpie_settings: kelpie_home.join("settings.toml"),
@@ -114,7 +113,7 @@ impl ProjectPaths {
             skills: folder.join("skills"),
             tools: Tools::under(kelpie_home),
             kelpie_home: kelpie_home.to_owned(),
-            shep_home: kelpie_home.parent().unwrap_or(kelpie_home).to_owned(),
+            shep_home: shep_home.to_owned(),
             door: kelpie_home.join("dog/lease.sock"),
             worktrees: folder.join("worktrees"),
             builds: folder.join("builds"),
@@ -123,10 +122,15 @@ impl ProjectPaths {
         }
     }
 
-    /// The longest socket a call of this project's opens, one the worker
-    /// folder holds under a 128-bit random name
-    pub fn longest_socket(&self) -> PathBuf {
-        self.worker.join(format!("{}.sock", "0".repeat(32)))
+    /// Whether the door, and the longest socket a call opens (a 128-bit
+    /// random name in the worker folder), are short enough to bind
+    ///
+    /// # Errors
+    ///
+    /// A message naming the path that is too long.
+    pub fn sockets_fit(&self) -> Result<(), String> {
+        crate::home::socket_fits(&self.door)?;
+        crate::home::socket_fits(&self.worker.join(format!("{}.sock", "0".repeat(32))))
     }
 
     /// The folders a dev server of this project's can work in: every
@@ -174,5 +178,20 @@ mod tests {
             assert!(ProjectName::try_from(bad).is_err(), "{bad:?}");
         }
         assert!(ProjectName::try_from("shep-kelpie_2.0").is_ok());
+    }
+
+    #[test]
+    fn a_socket_too_long_to_bind_is_named() {
+        let koji = ProjectName::try_from("koji").unwrap();
+        let fits = ProjectPaths::under(Path::new("/s/kelpie"), Path::new("/s"), &koji);
+        assert_eq!(fits.sockets_fit(), Ok(()));
+        let long = format!("/{}", "s".repeat(60));
+        let home = Path::new(&long);
+        let paths = ProjectPaths::under(&home.join("kelpie"), home, &koji);
+        let error = paths.sockets_fit().unwrap_err();
+        assert!(
+            error.contains(&paths.worker.display().to_string()),
+            "{error}"
+        );
     }
 }

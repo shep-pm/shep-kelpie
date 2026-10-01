@@ -125,7 +125,7 @@ async fn add_from_a_checkout_puts_its_worktrees_under_the_project_s_folder() {
     assert_eq!(runner.env["SHEP_HOME"], shep_home.display().to_string());
     assert!(!runner.env.contains_key("KELPIE_HOME"), "{:?}", runner.env);
     assert_eq!(scene.settings().repo, scene.checkout.root);
-    let paths = ProjectPaths::under(&crate::home::under(shep_home), &scene.name);
+    let paths = ProjectPaths::under(&crate::home::under(shep_home), shep_home, &scene.name);
     assert_eq!(paths.worktree(7), shep_home.join("kelpie/koji/worktrees/7"));
     assert_eq!(paths.build(7), shep_home.join("kelpie/koji/builds/7"));
     assert_eq!(paths.state, shep_home.join("kelpie/koji/state.json"));

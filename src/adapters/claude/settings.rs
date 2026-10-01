@@ -134,8 +134,9 @@ fn read_denials(no_read: &[String], read: &[PathBuf]) -> Vec<String> {
 
 // A rule for each entry of `dir` that is not, and holds none of, `read`.
 fn around(dir: &Path, read: &[PathBuf]) -> Vec<String> {
+    // A folder it cannot list is denied whole, as the sandbox denies it.
     let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
+        return vec![format!("{}/**", dir.display())];
     };
     let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
     paths.sort();

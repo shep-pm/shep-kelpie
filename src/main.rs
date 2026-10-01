@@ -214,24 +214,12 @@ fn stop_on_signal(shots: ShotsCli) {
     });
 }
 
-// Kelpie's home as the runner works it out, with kelpie's shared files
-// moved in from `~/.kelpie` first, as a runner's start moves them.
+// Kelpie's home as the runner works it out. Only a runner or the dog moves
+// files into it, since only those always know their shepherd.
 fn kelpie_home() -> Option<PathBuf> {
-    let home = match shep_kelpie::home::kelpie_home() {
-        Ok(home) => home,
-        Err(e) => {
-            eprintln!("{e}");
-            return None;
-        }
-    };
-    if let Some(old) = shep_kelpie::home::old_home() {
-        let moves = shep_kelpie::home::migrate::shared(&old, &home);
-        match shep_kelpie::home::migrate::run(&home, &moves) {
-            Ok(lines) => lines.iter().for_each(|line| eprintln!("{line}")),
-            Err(e) => eprintln!("{e}"),
-        }
-    }
-    Some(home)
+    shep_kelpie::home::kelpie_home()
+        .inspect_err(|e| eprintln!("{e}"))
+        .ok()
 }
 
 fn totp(rotate: bool) -> ExitCode {
@@ -271,9 +259,6 @@ fn move_settings(project: &str, sheep: &str) -> ExitCode {
         eprintln!("HOME is not set");
         return ExitCode::FAILURE;
     };
-    let Some(kelpie_home) = kelpie_home() else {
-        return ExitCode::FAILURE;
-    };
     let project = match ProjectName::try_from(project) {
         Ok(project) => project,
         Err(e) => {
@@ -281,14 +266,18 @@ fn move_settings(project: &str, sheep: &str) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let paths = ProjectPaths::under(&kelpie_home, &project);
-    let files = Files {
-        project: project.as_str(),
-        sheep,
-        settings: &paths.settings,
-        kelpie_settings: &paths.kelpie_settings,
-    };
     with_shep_home("settings move", shep_home::MOVE_FIX, |shep_home| {
+        let kelpie_home = shep_kelpie::home::kelpie_home_of(shep_home);
+        let paths = ProjectPaths::under(&kelpie_home, shep_home, &project);
+        let old = format!("projects/{project}/settings.toml");
+        let settings = shep_kelpie::home::or_old(paths.settings, &old);
+        let kelpie_settings = shep_kelpie::home::or_old(paths.kelpie_settings, "settings.toml");
+        let files = Files {
+            project: project.as_str(),
+            sheep,
+            settings: &settings,
+            kelpie_settings: &kelpie_settings,
+        };
         let moved = shepherd::block_on(moving::move_files(shep_home, files, Path::new(&home)));
         match moved {
             Ok(lines) => {

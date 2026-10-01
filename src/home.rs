@@ -23,19 +23,24 @@ const SHEP_DEFAULT: &str = ".shep";
 /// The folder kelpie kept everything in before it moved under shep's home
 pub const OLD: &str = ".kelpie";
 
-/// Kelpie's own entries in its home, which no project may be named for
-pub const OWN: [&str; 11] = [
-    ".migrate.lock",
+/// Kelpie's own entries in its home, and the old layout's that a home kept
+/// in place still has, which no project may be named for
+pub const OWN: [&str; 15] = [
     "builds",
     "codex",
     "dog",
+    "playwright",
+    "projects",
     "relay",
     "rulings",
     "settings.toml",
+    "shots",
+    "targets",
     "tools",
     "totp",
     "upgrade",
     "upgrade.lock",
+    "wt",
 ];
 
 /// The longest path a Unix socket may have, one byte short of macOS's 104
@@ -114,6 +119,22 @@ fn kelpie_home_from(
         Some(kelpie) => Ok(kelpie.into()),
         None => shep_home_from(shep, home).map(|shep| under(&shep)),
     }
+}
+
+/// `path` under kelpie's home, or where the old home kept it while no runner
+/// has moved it yet: `old`, relative to the old home
+pub fn or_old(path: PathBuf, old: &str) -> PathBuf {
+    if path.exists() {
+        return path;
+    }
+    old_home()
+        .map(|home| home.join(old))
+        .filter(|was| fs_is_file(was))
+        .unwrap_or(path)
+}
+
+fn fs_is_file(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file())
 }
 
 /// Whether `socket` is short enough to bind, naming it and the fix when not

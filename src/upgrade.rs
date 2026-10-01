@@ -215,6 +215,13 @@ pub async fn run(
             ));
         }
     }
+    // The build running this upgrade moved kelpie's home, so no runner reads
+    // the old one's links any more.
+    if let Some(old) = crate::home::old_home() {
+        crate::home::migrate::sweep(&old, scene.kelpie_home)
+            .into_iter()
+            .for_each(&mut *say);
+    }
     say(format!(
         "restarting onto it: if this stops before it finishes, {finish} finishes the restarts"
     ));
