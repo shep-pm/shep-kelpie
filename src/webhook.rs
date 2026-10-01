@@ -149,7 +149,7 @@ fn authority(rest: &str) -> &str {
 const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntfy`) \
                      and an `https://` `url`, `ruling_channels`, a list of \
                      `webhook` and `relay`, and `[reviewers.coderabbit]` and \
-                     `[reviewers.cubic]` tables with `reviews` and `hours`, \
+                     `[reviewers.cubic]` and `[reviewers.codex]` tables with `reviews` and `hours`, \
                      `[local_reviewers.<name>]` tables with a `kind` of \
                      `endpoint`, `command`, `claude` or `session` and that \
                      kind's keys, `[agents.<name>]` tables with `harness`, \

@@ -29,17 +29,20 @@ pub enum Bot {
     Coderabbit,
     /// cubic
     Cubic,
+    /// Codex, the ChatGPT Codex app
+    Codex,
 }
 
 impl Bot {
     /// Every bot kelpie has a profile for
-    pub const ALL: [Self; 2] = [Self::Coderabbit, Self::Cubic];
+    pub const ALL: [Self; 3] = [Self::Coderabbit, Self::Cubic, Self::Codex];
 
     /// Its name as settings write it, which also names its lease
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Coderabbit => "coderabbit",
             Self::Cubic => "cubic",
+            Self::Codex => "codex",
         }
     }
 
@@ -48,6 +51,7 @@ impl Bot {
         match self {
             Self::Coderabbit => "CodeRabbit",
             Self::Cubic => "cubic",
+            Self::Codex => "Codex",
         }
     }
 
@@ -66,6 +70,7 @@ impl Bot {
         match self {
             Self::Coderabbit => Resource::Coderabbit,
             Self::Cubic => Resource::Cubic,
+            Self::Codex => Resource::Codex,
         }
     }
 
@@ -94,6 +99,9 @@ pub struct Reviewers {
     /// cubic's window. Its free plan gives a private repo 20 reviews a month.
     #[serde(default)]
     pub cubic: Option<ReviewWindow>,
+    /// Codex's window: the weekly allowance its plan gives code reviews
+    #[serde(default)]
+    pub codex: Option<CodexReviewer>,
 }
 
 impl Reviewers {
@@ -102,6 +110,16 @@ impl Reviewers {
         match bot {
             Bot::Coderabbit => Some(self.coderabbit.unwrap_or(ReviewWindow::HOURLY)),
             Bot::Cubic => self.cubic,
+            Bot::Codex => self.codex.map(CodexReviewer::window),
+        }
+    }
+
+    /// Whether marking a draft ready is `bot`'s summon, because it reviews a
+    /// pull request when it leaves draft
+    pub fn ready_summons(&self, bot: Bot) -> bool {
+        match bot {
+            Bot::Codex => self.codex.is_some_and(|codex| codex.reviews_on_ready),
+            Bot::Coderabbit | Bot::Cubic => false,
         }
     }
 
@@ -110,6 +128,32 @@ impl Reviewers {
         Bot::ALL
             .into_iter()
             .filter_map(|bot| Some((bot, self.window(bot)?)))
+    }
+}
+
+/// Codex's definition: its window, and whether it reviews on its own
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CodexReviewer {
+    /// Reviews it allows at once
+    pub reviews: NonZeroU32,
+    /// Hours each accepted summon holds its place
+    pub hours: NonZeroU32,
+    /// Whether Codex reviews a pull request when it leaves draft, as the
+    /// repo's Codex settings may say. Then marking ready is its summon, taken
+    /// under its lease, and kelpie posts no comment for it. Off when absent:
+    /// it was never seen to.
+    #[serde(default)]
+    pub reviews_on_ready: bool,
+}
+
+impl CodexReviewer {
+    /// Its window
+    pub fn window(self) -> ReviewWindow {
+        ReviewWindow {
+            reviews: self.reviews,
+            hours: self.hours,
+        }
     }
 }
 
@@ -147,6 +191,18 @@ pub struct Activity {
     pub threads: Vec<Thread>,
     /// The commit statuses it set on the pull request's head, newest first
     pub statuses: Vec<Status>,
+    /// The reactions it left on the pull request's comments, oldest first
+    pub reactions: Vec<Reaction>,
+}
+
+/// A reaction a bot left on a comment, such as the thumbs up Codex gives
+/// a pull request it has nothing to say about
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reaction {
+    /// Which, as the forge names it: `THUMBS_UP`, `EYES`
+    pub content: String,
+    /// When it was left
+    pub at: Timestamp,
 }
 
 /// One of a bot's conversation comments, as last edited
@@ -302,6 +358,12 @@ impl Activity {
                 .filter(|s| s.at.0 >= from)
                 .cloned()
                 .collect(),
+            reactions: self
+                .reactions
+                .iter()
+                .filter(|r| r.at.0 >= from)
+                .cloned()
+                .collect(),
         }
     }
 
@@ -339,5 +401,6 @@ mod tests {
     fn a_bots_name_is_its_lease() {
         assert_eq!(Bot::Coderabbit.lease(), LeaseKind::coderabbit());
         assert_eq!(Bot::Cubic.lease().as_str(), "cubic");
+        assert_eq!(Bot::Codex.lease().as_str(), "codex");
     }
 }

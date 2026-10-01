@@ -23,7 +23,8 @@ use crate::state::ids::RulingIds;
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{
-    CodeRabbitTally, Known, Phase, QwenTally, ReviewCallState, Turn, WorkItem, new_session_id,
+    CodeRabbitTally, Known, Phase, QwenTally, ReviewCallState, Timings, Turn, WorkItem,
+    new_session_id,
 };
 
 mod adopt;
@@ -56,6 +57,7 @@ mod ruling;
 #[cfg(test)]
 mod several;
 mod shots;
+mod timings;
 mod trigger;
 mod turn;
 mod words;
@@ -70,6 +72,7 @@ pub use replies::READ_EVERY;
 pub use report::StepReport;
 pub use rework::{HUMAN, ReworkError};
 pub use ruling::{Answer, RuleError};
+pub use timings::{Totals, settle};
 use trigger::issue_list;
 pub use trigger::{ACTIONS, RELAY_RULE, Status, WorkItemStatus, answer, is_no_or_answer};
 pub use trigger::{GateError, WhichItem};
@@ -209,6 +212,8 @@ pub struct Runner {
     // What the runner carried on without, kept in memory only until
     // `take_notes` hands it out
     notes: Vec<String>,
+    // The turns this process runs, kept in memory only
+    live_turns: timings::LiveTurns,
 }
 
 impl Runner {
@@ -266,7 +271,7 @@ impl Runner {
             |item: &WorkItem| matches!(item.review_call, ReviewCallState::Running { .. });
         if state.work_items.iter().any(cut_short) {
             for item in state.work_items.iter_mut().filter(|item| cut_short(item)) {
-                item.review_call = ReviewCallState::Idle;
+                item.call_ended();
             }
             store.save(&state)?;
         }
@@ -282,6 +287,9 @@ impl Runner {
         // A new run is a new epoch, and the dog reclaims what the old one held.
         if !state.leases.is_empty() {
             state.leases.clear();
+            store.save(&state)?;
+        }
+        if timings::reload(&mut state, ports.clock.now()) {
             store.save(&state)?;
         }
         let mut runner = Self {
@@ -312,6 +320,7 @@ impl Runner {
             focus: None,
             last_acted: None,
             notes: Vec::new(),
+            live_turns: timings::LiveTurns::default(),
         };
         runner.settle_labels();
         Ok(runner)
@@ -347,28 +356,43 @@ impl Runner {
 
     /// The project's state as `status` reports it
     pub fn status(&self) -> Status<'_> {
+        let now = self.ports.clock.now();
         Status {
             project: self.project.as_str(),
             merge_authority: self.settings.merge_authority,
             run: self.state.run,
             since: self.state.since,
-            work_item: self.state.work_items.first().map(WorkItemStatus::from),
+            work_item: self
+                .state
+                .work_items
+                .first()
+                .map(|item| self.item_status(item, now)),
             work_items: self
                 .state
                 .work_items
                 .iter()
-                .map(WorkItemStatus::from)
+                .map(|item| self.item_status(item, now))
                 .collect(),
             max_items: self.settings.max_items.get(),
             adopted: &self.state.adopted,
             skipped: &self.skipped,
             rulings: &self.state.rulings,
             leases: &self.state.leases,
-            pacer: self.pacer_status(self.ports.clock.now()),
+            history: &self.state.history[self
+                .state
+                .history
+                .len()
+                .saturating_sub(trigger::STATUS_HISTORY)..],
+            pacer: self.pacer_status(now),
             skills: self.skills.status(),
             local_model: self.ports.reviewer.seat().map(Into::into),
             local_leases: self.local_leases(),
         }
+    }
+
+    fn item_status<'a>(&self, item: &'a WorkItem, now: Timestamp) -> WorkItemStatus<'a> {
+        let split = item.split(now, self.timing_phase(item));
+        WorkItemStatus::new(item, split)
     }
 
     /// Lets the project take work. Starting a running project changes nothing.
@@ -470,6 +494,7 @@ impl Runner {
             shots_comment: None,
             held: Vec::new(),
             follow_ups: None,
+            timings: Some(Timings::starting(self.ports.clock.now())),
             calls: Vec::new(),
         }
     }
@@ -506,7 +531,8 @@ impl Runner {
         self.save(next)
     }
 
-    fn save(&mut self, next: ProjectState) -> Result<(), StateError> {
+    fn save(&mut self, mut next: ProjectState) -> Result<(), StateError> {
+        self.charge(&mut next);
         self.store.save(&next)?;
         self.state = next;
         Ok(())

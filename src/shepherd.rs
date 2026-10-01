@@ -73,19 +73,33 @@ impl ConnectRefused {
 ///
 /// [`ConnectRefused`] when nothing answers or the version is not the pinned line.
 pub async fn connect(shep_home: &Path) -> Result<Client, ConnectRefused> {
-    let client = Client::connect(&shep_home.join("run/shep.sock"))
+    let client = connect_any(shep_home).await?;
+    let running = client.daemon().daemon_version.as_str();
+    if release_line(running) != release_line(SHEP_VERSION) {
+        return Err(ConnectRefused::Skew(Some(running.to_owned())));
+    }
+    Ok(client)
+}
+
+/// Connects to the shepherd at `shep_home` whatever shep line it runs
+///
+/// For `upgrade`, which asks a shepherd on a new minor whether the build it
+/// installs takes it. The shepherd's version is `client.daemon().daemon_version`.
+///
+/// # Errors
+///
+/// [`ConnectRefused::Unreachable`] when nothing answers, and
+/// [`ConnectRefused::Skew`] when the shep client speaks a protocol the
+/// shepherd does not.
+pub async fn connect_any(shep_home: &Path) -> Result<Client, ConnectRefused> {
+    Client::connect(&shep_home.join("run/shep.sock"))
         .await
         .map_err(|e| match e {
             ConnectError::ProtocolMismatch { daemon_version, .. } => {
                 ConnectRefused::Skew(daemon_version)
             }
             other => ConnectRefused::Unreachable(other.to_string()),
-        })?;
-    let running = client.daemon().daemon_version.as_str();
-    if release_line(running) != release_line(SHEP_VERSION) {
-        return Err(ConnectRefused::Skew(Some(running.to_owned())));
-    }
-    Ok(client)
+        })
 }
 
 /// Whether `error` is shep's answer to a request naming no sheep it has
@@ -96,8 +110,8 @@ pub fn names_no_sheep(error: &RequestError) -> bool {
     matches!(error, RequestError::Rpc(e) if e.code == RpcErrorCode::NotFound)
 }
 
-// A version's major and minor.
-fn release_line(version: &str) -> (Option<&str>, Option<&str>) {
+/// A version's major and minor, as written
+pub(crate) fn release_line(version: &str) -> (Option<&str>, Option<&str>) {
     let mut parts = version.split('.');
     (parts.next(), parts.next())
 }

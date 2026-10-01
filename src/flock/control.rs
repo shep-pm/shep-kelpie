@@ -154,6 +154,7 @@ pub async fn pause(client: &Client, project: &ProjectName) -> Result<Vec<String>
             "{runner}'s runner is starting: ask again in a moment"
         )),
         Answered::Down => Err(format!("{runner}'s runner is not running")),
+        Answered::TimedOut => Err(format!("{runner}'s runner did not answer in time")),
     }
 }
 
@@ -169,6 +170,7 @@ pub async fn status(client: &Client) -> Result<Vec<String>, String> {
             Answered::Runner(body) => format!("{sheep}: {body}"),
             Answered::Starting => format!("{sheep}: starting"),
             Answered::Down => format!("{sheep}: not running"),
+            Answered::TimedOut => format!("{sheep}: running, and did not answer in time"),
         };
         lines.push(line);
     }
@@ -201,6 +203,7 @@ pub async fn send(
             "{runner}'s runner is starting: ask again in a moment"
         )),
         Answered::Down => Err(format!("{runner}'s runner is not running")),
+        Answered::TimedOut => Err(format!("{runner}'s runner did not answer in time")),
     }
 }
 
@@ -234,7 +237,7 @@ async fn kelpie_runner(
 }
 
 /// What a runner's sheep made of a trigger
-enum Answered {
+pub(crate) enum Answered {
     /// The runner's own answer, which is always a JSON object
     Runner(String),
     /// A plain-text answer: shep-channel's `unknown action`, from a runner
@@ -242,10 +245,13 @@ enum Answered {
     Starting,
     /// No answer: the sheep is not running, or has no such name
     Down,
+    /// The action was delivered and nothing came back in time: the sheep is
+    /// running, and what it would have said is unknown
+    TimedOut,
 }
 
 // What `sheep` made of `action`, under `shep trigger`'s own budget.
-async fn trigger(
+pub(crate) async fn trigger(
     client: &Client,
     sheep: &str,
     action: &str,
@@ -272,6 +278,7 @@ async fn trigger(
             Answered::Runner(body)
         }
         Some(ActionOutcome::Replied { .. }) => Answered::Starting,
+        Some(ActionOutcome::TimedOut) => Answered::TimedOut,
         _ => Answered::Down,
     })
 }

@@ -24,7 +24,7 @@ use super::process::stop_group;
 use crate::bridge::{Filter, Passage};
 
 // macOS refuses a socket path of 104 bytes or more.
-const LONGEST_SOCKET: usize = 103;
+pub(super) const LONGEST_SOCKET: usize = 103;
 
 /// The sockets one call's MCP servers are reached through, open until dropped
 #[derive(Debug)]
@@ -229,7 +229,7 @@ fn serve(
 }
 
 // 128 random bits as hex, from the system's own source.
-fn unguessable() -> Result<String, String> {
+pub(super) fn unguessable() -> Result<String, String> {
     let mut bytes = [0u8; 16];
     std::fs::File::open("/dev/urandom")
         .and_then(|mut f| f.read_exact(&mut bytes))

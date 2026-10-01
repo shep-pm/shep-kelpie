@@ -22,7 +22,7 @@ const RESUMED: &str = include_str!("../../../fixtures/pi-p-resumed.jsonl");
 const REFUSED: &str = include_str!("../../../fixtures/pi-p-refused.jsonl");
 
 const FRESH_ID: &str = "0b6f3c1e-7d2a-4f4e-9a51-3c8d2e6f1a07";
-const WORKER_ID: &str = "5a2e9d40-1c7b-4b38-8e6f-2d4a9c1b7e53";
+pub(super) const WORKER_ID: &str = "5a2e9d40-1c7b-4b38-8e6f-2d4a9c1b7e53";
 const URL: &str = "http://192.0.2.9:11434/v1";
 
 fn output(code: i32, stdout: &str, stderr: &str) -> Output {
@@ -33,7 +33,7 @@ fn output(code: i32, stdout: &str, stderr: &str) -> Output {
     }
 }
 
-fn id(id: &str) -> SessionId {
+pub(super) fn id(id: &str) -> SessionId {
     SessionId(id.into())
 }
 
@@ -179,7 +179,7 @@ fn prepare_writes_pis_own_home_with_the_one_model() {
     assert_eq!(
         models,
         json!({ "providers": { "kelpie": {
-            "baseUrl": URL,
+            "baseUrl": "http://model.kelpie.test/v1",
             "api": "openai-completions",
             "apiKey": "kelpie",
             "models": [{ "id": "qwen3.8:27b", "contextWindow": 65536, "reasoning": true }],
@@ -187,6 +187,21 @@ fn prepare_writes_pis_own_home_with_the_one_model() {
     );
     assert!(home.join("sessions").is_dir());
     assert!(!w.path("worker/settings.guard.ts").exists());
+}
+
+#[test]
+fn a_model_server_the_forwarder_cannot_dial_fails_before_the_call() {
+    let w = World::new();
+    let call = w.call(
+        "https://192.0.2.9/v1",
+        Role::Judge,
+        Session::New(id(FRESH_ID)),
+    );
+    let err = stand_in(&w, FRESH).prepare(&call).unwrap_err();
+    assert!(
+        matches!(&err, AgentError::Setup(why) if why.contains("plain `http://`")),
+        "{err:?}"
+    );
 }
 
 #[test]
@@ -353,21 +368,30 @@ fn what_pi_cannot_give_a_worker_fails_before_the_call() {
 }
 
 #[test]
-fn the_sandbox_lets_pi_write_only_its_sessions_and_reach_only_its_server() {
+fn the_sandbox_lets_pi_write_only_its_sessions_and_reach_only_the_forwarder() {
     let w = World::new();
     let call = w.fenced(URL, Path::new("/k/kelpie"), Session::New(id(WORKER_ID)));
     let files = Files::of(&call);
-    let AgentHarness::Pi(server) = &call.harness else {
-        unreachable!()
-    };
-    let policy = policy(&call, server, &files);
+    let socket = w.path("worker/forwarder.sock");
+    let policy = policy(&call, &files, &socket);
     let home = w.path("worker/settings.pi");
     assert!(policy.write.contains(&home.join("sessions")));
     assert!(!policy.write.contains(&home));
     assert!(policy.write.contains(&w.path("wt")));
     assert!(policy.read.contains(&home));
     assert!(policy.read.contains(&w.path("worker/settings.guard.ts")));
-    assert!(policy.hosts.contains(&"192.0.2.9".to_owned()));
+    assert!(
+        !policy.hosts.iter().any(|h| h.contains("192.0.2.9")),
+        "{:?}",
+        policy.hosts
+    );
+    assert_eq!(
+        policy.forward,
+        Some(Forward {
+            host: "model.kelpie.test".into(),
+            socket: socket.clone()
+        })
+    );
     assert_eq!(
         policy.sockets,
         [Path::new("/k/dog/lease.sock")],
@@ -380,7 +404,7 @@ fn the_sandbox_lets_pi_write_only_its_sessions_and_reach_only_its_server() {
         );
     }
     let open = w.call(URL, Role::Judge, Session::New(id(FRESH_ID)));
-    let policy = super::policy(&open, server, &Files::of(&open));
+    let policy = super::policy(&open, &Files::of(&open), &socket);
     assert_eq!(
         policy.write,
         [
@@ -390,15 +414,16 @@ fn the_sandbox_lets_pi_write_only_its_sessions_and_reach_only_its_server() {
             home.join("models-store.json.lock"),
         ]
     );
-    assert_eq!(policy.hosts, ["192.0.2.9"]);
-}
-
-#[test]
-fn a_servers_host_is_its_url_without_scheme_port_or_path() {
-    assert_eq!(host("http://192.0.2.9:11434/v1"), "192.0.2.9");
-    assert_eq!(host("https://models.example/v1"), "models.example");
-    assert_eq!(host("http://[::1]:8080/v1"), "::1");
-    assert_eq!(host("http://user@host.example:1234/v1"), "host.example");
+    assert!(policy.hosts.is_empty(), "{:?}", policy.hosts);
+    assert_eq!(
+        policy.denied_hosts,
+        ["192.0.2.9", "localhost", "127.0.0.1", "[::1]"]
+    );
+    assert_eq!(policy.denied_addresses, ["192.0.2.9"]);
+    assert_eq!(
+        policy.forward.map(|f| f.host),
+        Some("model.kelpie.test".into())
+    );
 }
 
 #[test]
@@ -563,14 +588,14 @@ fn a_call_on_no_model_server_is_refused() {
     assert!(matches!(err, AgentError::Setup(_)), "{err:?}");
 }
 
-struct World {
+pub(super) struct World {
     _dir: tempfile::TempDir,
     root: PathBuf,
 }
 
 impl World {
     // Under `/tmp`, and canonical, so a recorded path reads the same each time.
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let dir = tempfile::tempdir_in("/tmp").unwrap();
         let root = dir.path().canonicalize().unwrap();
         for folder in ["wt", "build", "worker", "outside"] {
@@ -579,7 +604,7 @@ impl World {
         Self { _dir: dir, root }
     }
 
-    fn path(&self, p: &str) -> PathBuf {
+    pub(super) fn path(&self, p: &str) -> PathBuf {
         self.root.join(p)
     }
 
@@ -590,7 +615,7 @@ impl World {
         }
     }
 
-    fn call(&self, url: &str, role: Role, session: Session) -> AgentCall {
+    pub(super) fn call(&self, url: &str, role: Role, session: Session) -> AgentCall {
         AgentCall {
             harness: AgentHarness::Pi(Self::server(url)),
             role,
@@ -611,7 +636,7 @@ impl World {
         }
     }
 
-    fn fenced(&self, url: &str, kelpie: &Path, session: Session) -> AgentCall {
+    pub(super) fn fenced(&self, url: &str, kelpie: &Path, session: Session) -> AgentCall {
         let (wt, build, git) = (self.path("wt"), self.path("build"), self.path("wt/.git"));
         let profile = WorkerProfile {
             worktree: &wt,
@@ -706,6 +731,6 @@ fn record_a_turn_a_resumed_turn_and_two_refusals() {
 }
 
 fn run_raw(pi: &PiCli, call: &AgentCall) -> Output {
-    let mut command = pi.sandboxed_command(call).unwrap();
+    let (mut command, _forwarder) = pi.sandboxed_command(call).unwrap();
     command.stdin(std::process::Stdio::null()).output().unwrap()
 }

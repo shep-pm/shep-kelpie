@@ -4,6 +4,7 @@
 //! It keeps each sheep's config and status, answers the requests those
 //! commands send as shep 0.12 does, and records every request.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -29,6 +30,9 @@ struct Sheep {
     opening: bool,
     // What shep says of a dog's handshake, and whether it gave the dog up
     heard: Heard,
+    // What its next `status` answers, `None` being a delivery that times out,
+    // the last one repeating
+    says: VecDeque<Option<String>>,
 }
 
 /// Whether a dog has named itself to the shepherd
@@ -95,6 +99,7 @@ impl FakeShepherd {
             dog: None,
             opening: false,
             heard: Heard::Named,
+            says: VecDeque::new(),
         };
         self.flock.lock().unwrap().push(sheep);
     }
@@ -111,15 +116,34 @@ impl FakeShepherd {
         sheep.opening = true;
     }
 
+    /// Has `name` answer its `status` triggers with `bodies` in turn, the last one from then on
+    pub(crate) fn says(&self, name: &str, bodies: &[&str]) {
+        self.replies(name, &bodies.iter().map(|&b| Some(b)).collect::<Vec<_>>());
+    }
+
+    /// Has `name` answer its `status` triggers in turn, the last one from then
+    /// on: `None` is a trigger the shepherd delivers and no reply comes back for
+    pub(crate) fn replies(&self, name: &str, answers: &[Option<&str>]) {
+        let mut flock = self.flock.lock().unwrap();
+        let sheep = flock.iter_mut().find(|s| s.config.name == name).unwrap();
+        sheep.says = answers.iter().map(|b| b.map(str::to_owned)).collect();
+    }
+
     /// Puts an adopted dog named `name` in the flock, running, with the
     /// shepherd channel or without
     pub(crate) fn holds_dog(&self, name: &str, channel: bool) {
+        self.holds_dog_at(name, "/opt/kelpie", channel);
+    }
+
+    /// Puts an adopted dog named `name` that runs `program` in the flock, running
+    pub(crate) fn holds_dog_at(&self, name: &str, program: &str, channel: bool) {
         let sheep = Sheep {
-            config: AppConfig::minimal(name, "/opt/kelpie"),
+            config: AppConfig::minimal(name, program),
             online: true,
             dog: Some(channel),
             opening: false,
             heard: Heard::Named,
+            says: VecDeque::new(),
         };
         self.flock.lock().unwrap().push(sheep);
     }
@@ -227,6 +251,7 @@ fn answer(flock: &mut Vec<Sheep>, section: &str, request: &Request) -> Response 
                         dog: None,
                         opening: false,
                         heard: Heard::Named,
+                        says: VecDeque::new(),
                     });
                 }
             }
@@ -277,6 +302,11 @@ fn answer(flock: &mut Vec<Sheep>, section: &str, request: &Request) -> Response 
                 ActionOutcome::Replied {
                     body: format!("unknown action: {action}"),
                 }
+            } else if let Some(answer) = scripted(&mut sheep.says) {
+                match answer {
+                    Some(body) => ActionOutcome::Replied { body },
+                    None => ActionOutcome::TimedOut,
+                }
             } else {
                 let mut body = serde_json::json!({ "sheep": sheep.config.name, "action": action });
                 if let Some(params) = params {
@@ -293,5 +323,14 @@ fn answer(flock: &mut Vec<Sheep>, section: &str, request: &Request) -> Response 
             }])
         }
         other => panic!("kelpie asked {other:?}"),
+    }
+}
+
+// The next answer a sheep was told to give, the last one repeating.
+fn scripted(says: &mut VecDeque<Option<String>>) -> Option<Option<String>> {
+    match says.len() {
+        0 => None,
+        1 => says.front().cloned(),
+        _ => says.pop_front(),
     }
 }

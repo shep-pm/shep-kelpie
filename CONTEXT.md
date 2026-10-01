@@ -88,6 +88,15 @@ _Avoid_: summary (Claude's compaction output)
 **Gate**:
 The checks a pull request must pass before it merges.
 
+**Timings**:
+Where a work item's wall time went, by timing phase: `worker`, `gpu_wait`,
+`local_round`, `claude_round`, `judging`, `ci`, `coderabbit_window`,
+`coderabbit_review`, `ruling`, `merge`, `shots`, `paused` and `other`. Every
+second lands in exactly one. A timing phase is a bucket of time, not the
+stage a work item is in (its **phase**). `status` shows the open items'
+timings, and `timings <n>` totals the last `n` finished ones.
+_Avoid_: profile, metrics
+
 **Lease**:
 Kelpie-granted use of a shared resource: the GPU, a pull request
 reviewer's window, such as CodeRabbit's, or a share of the machine for
@@ -98,7 +107,8 @@ _Avoid_: lock (the file the lease is built on)
 Anything that makes a pull request reviewer spend its review window. For
 CodeRabbit on shep that is adding the `review please` label, pushing to a pull
 request that carries it, or asking for a full review in a comment. For
-cubic it is the `@cubic-dev-ai review` comment.
+cubic it is the `@cubic-dev-ai review` comment, and for Codex the
+`@codex review` comment.
 Only the project manager summons.
 
 **Shots**:
@@ -122,7 +132,7 @@ _Avoid_: qwen round (qwen is one model a local reviewer can run)
 
 **Pull request reviewer**:
 A reviewer summoned on the pull request that answers there, within a rate
-window of its own. CodeRabbit and cubic are two. A **review bot** is one
+window of its own. CodeRabbit, cubic and Codex are three. A **review bot** is one
 that works the GitHub way, by label or comment, status and review threads,
 and a **profile** says how each bot does it. A project lists its pull
 request reviewers in preference order, and each round goes to the first

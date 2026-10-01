@@ -19,6 +19,7 @@ use crate::adapters::{
     ClaudeCli, Curl, Gh, LocalReviewer, RelayCli, SandboxRuntime, ShepLeases, ShotsCli, SystemClock,
 };
 use crate::coderabbit::CodeRabbit;
+use crate::codex::Codex;
 use crate::cubic::Cubic;
 use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
@@ -99,7 +100,7 @@ fn serve(project: &str) -> Result<(), String> {
         codex_meter: Box::new(claude.codex_meter()),
         reviewer: Arc::new(reviewer.clone()),
         local_leases: Arc::new(reviewer.clone()),
-        review_bots: vec![Arc::new(CodeRabbit), Arc::new(Cubic)],
+        review_bots: vec![Arc::new(CodeRabbit), Arc::new(Cubic), Arc::new(Codex)],
         shots: Arc::new(shots.clone()),
         relay: Arc::new(RelayCli::new(
             home.clone(),
@@ -192,7 +193,12 @@ fn serve(project: &str) -> Result<(), String> {
         reviewer.stop();
         shots.stop();
     });
-    if !let_go {
+    if let_go {
+        if let Err(e) = crate::runner::settle(&runner) {
+            eprintln!("cannot save the work items' time: {e}");
+        }
+    } else {
+        // A step still in flight holds the runner's lock, and shutdown must not wait for it.
         eprintln!(
             "the worker was still in a step {}s after the stop; its calls are ended under it",
             JOIN_BOUND.as_secs()

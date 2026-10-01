@@ -21,7 +21,10 @@
 //! whose window is free, and the round cap counts rounds from all of them.
 
 pub(super) mod cap;
+#[cfg(test)]
+mod codex_bot;
 mod lease;
+mod on_ready;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -36,7 +39,7 @@ use crate::lease::wire::WindowFact;
 use crate::ports::{Finding, PullRequestState, Timestamp, Verdict};
 use crate::review_bot::{Activity, Bot, Profile, Reading};
 use crate::state::{Fix, RulingKind, StateError};
-use crate::work_item::{CodeRabbitStage, OpenThread, Phase, Turn, WorkItem};
+use crate::work_item::{CallKind, CodeRabbitStage, OpenThread, Phase, Turn, WorkItem};
 
 // A summon the bot gave no sign of in fifteen minutes may never have
 // reached it, and is sent once more. What counts as a sign is its profile's.
@@ -125,7 +128,8 @@ impl Runner {
     // a draft is marked ready first and the summon waits for the next pass:
     // the forge can show the old state for a few seconds after. `full` asks
     // for a full review whatever the bot read before. The first listed bot
-    // is read while the round waits, as its footer states its quota.
+    // is read while the round waits, as its footer states its quota. A bot that
+    // reviews a draft when it is marked ready is summoned by marking it.
     fn summon(
         &mut self,
         head: String,
@@ -140,6 +144,9 @@ impl Runner {
             && self.lands_unsummoned(first, &head, activity)
         {
             return self.review_landed(number, first, activity);
+        }
+        if let Some(begin) = self.summon_by_ready(&head, readied, full)? {
+            return Ok(begin);
         }
         if let Some(begin) = self.ready_for_review(number, &head, readied, full)? {
             return Ok(begin);
@@ -560,7 +567,7 @@ impl Runner {
         .and_then(|call| self.prepared(call))
         {
             Ok(call) => {
-                self.mark_review_call_running()?;
+                self.mark_review_call_running(CallKind::Judge)?;
                 Ok(Begin::Review(ReviewCall::Judge(call)))
             }
             Err(reason) => Ok(self.gate_failed(reason)),
