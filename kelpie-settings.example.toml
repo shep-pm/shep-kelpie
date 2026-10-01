@@ -40,6 +40,11 @@ url = "https://ntfy.sh/your-private-topic"
 # The agents a project may name for its worker, reviewer and judge, and its
 # session reviewers: a harness, and the model and effort it runs on. The one
 # harness is Claude Code, `claude-code`.
+#
+# `usage` is how its usage is read, and so which account paces it: `claude`
+# (`/usage`, the default on Claude Code), `codex` (Codex's own windows), or
+# `none` for a local model, which is never paced and holds `lease` for each
+# whole call instead. `lease` defaults to `gpu`, the qwen scripts' lock.
 # [kelpie.agents.opus-high]
 # harness = "claude-code"
 # model = "claude-opus-5-5"

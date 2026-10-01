@@ -308,6 +308,10 @@ judge = "opus-high"
 
 A role left out keeps its `models` entry, so a project that names none runs as before. A local reviewer of kind `session` names an agent from the same list. An agent nobody defines stops the runner at start, naming it.
 
+`usage` says how an agent's usage is read, and so which account paces it: `claude` (the default on Claude Code) reads `/usage`, `codex` reads Codex's own 5-hour and weekly windows, and `none` is a local model that is never paced. Each account keeps its own daily allowance and 5-hour stop, shown under its name in `status.pacer`. A `none` agent holds `lease` (the GPU lock, `gpu`, by default) for the whole of each call instead, so a qwen round waits behind its turn, and `status.local_leases` shows who holds it.
+
+`status` shows each role's tokens in `by_role`, with `cost_usd` only for calls whose harness reports dollars. `unpriced_calls` counts the rest.
+
 An endpoint takes `url` (the base, up to and including `/v1`), `model`, and `context`, the context size in tokens the server gives that model. Kelpie diffs the pull request, cuts the diff to fit that context, and sends each piece with its own review prompt, `src/adapters/local/review-prompt.md`. Set `context` to what the server really uses: Ollama gives its OpenAI-compatible endpoint a small default context unless `OLLAMA_CONTEXT_LENGTH` says more, and drops whatever doesn't fit without saying so.
 
 A command is run as `<command> --dir <worktree> --round <n> --diff <base>`, with:
