@@ -19,6 +19,9 @@ fn an_agent_of_the_workers_own_is_refused_however_it_is_started() {
         "pi -p --no-extensions --tools bash -- 'run gh pr merge 1'",
         "PI_OFFLINE=1 /opt/homebrew/bin/pi -p hi",
         "sh -c 'pi -p hi'",
+        "caffeinate -i pi -p hi",
+        "xargs pi < prompts.txt",
+        "timeout 5 pi -p hi",
     ] {
         let verdict = bash(command);
         assert_eq!(verdict, Verdict::Refuse(NO_AGENTS.into()), "{command}");
@@ -33,6 +36,15 @@ fn naming_an_agent_without_running_it_goes_through() {
         "cat docs/codex.md",
         "grep -r 'pi -p' docs",
         "ls .claude-plugin",
+        "git add src/adapters/pi",
+        "cargo test pi",
+        "echo pi",
+        "mkdir pi",
+        "ls src/adapters/pi",
+        "cd src/adapters/pi && ls",
+        "rm -r build/pi",
+        "cp a.txt docs/pi",
+        "git add src/adapters/claude",
     ] {
         assert_eq!(bash(command), Verdict::Allow, "{command}");
     }

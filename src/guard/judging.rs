@@ -51,6 +51,13 @@ const READERS: [&str; 16] = [
     "sort", "uniq", "man", "which",
 ];
 
+// Programs that take an agent's name only as a file or a word, never a program
+// to run: `git add src/adapters/pi` and `cargo test pi` start nothing.
+const NAMES_ONLY: [&str; 13] = [
+    "cd", "pushd", "ls", "mkdir", "rmdir", "rm", "cp", "mv", "touch", "echo", "printf", "git",
+    "cargo",
+];
+
 // Whether `name` starts an agent harness. The sandbox lets a worker reach the
 // model's endpoint, so one started from Bash would run with none of kelpie's hooks.
 fn starts_agent(name: &str) -> bool {
@@ -255,10 +262,11 @@ impl Judging<'_> {
     ) {
         // `ps | grep bash` searches for a shell, it does not run one.
         let reader = READERS.contains(&program(&run.words[0]));
+        let names_only = NAMES_ONLY.contains(&program(&run.words[0]));
         for at in 1..run.words.len() {
             let name = program(&run.words[at]);
             let shell = SHELLS.contains(&name) || OTHER_SHELLS.contains(&name);
-            let agent = starts_agent(name);
+            let agent = starts_agent(name) && !names_only;
             // `kill` is a common word, so only a program that feeds it pids names it.
             let kill = name == "kill" && matches!(program(&run.words[0]), "xargs" | "find");
             let killer = KILLERS.contains(&name) || kill;
