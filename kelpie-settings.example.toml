@@ -8,6 +8,12 @@
 # neither says. At least one is required.
 # ruling_channels = ["webhook", "relay"]
 
+# The GPU's Prometheus metrics page, such as `nvidia_gpu_exporter`'s
+# `/metrics`. `status` shows the GPU's load, memory, power and temperature
+# from it, and says why when the page cannot be read. Nothing is read when
+# absent.
+# gpu_metrics_url = "http://gpu-box:9835/metrics"
+
 # Where the webhook posts a ruling, so the maintainer hears of it away from
 # the terminal. Needed only by a project whose rulings go to the webhook.
 # `kind` is `discord` (a channel's webhook URL) or `ntfy` (a topic's URL); both

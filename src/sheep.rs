@@ -16,7 +16,8 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::adapters::{
-    ClaudeCli, Curl, Gh, LocalReviewer, RelayCli, SandboxRuntime, ShepLeases, ShotsCli, SystemClock,
+    ClaudeCli, Curl, Gh, GpuCurl, LocalReviewer, RelayCli, SandboxRuntime, ShepLeases, ShotsCli,
+    SystemClock,
 };
 use crate::coderabbit::CodeRabbit;
 use crate::codex::Codex;
@@ -107,6 +108,7 @@ fn serve(project: &str) -> Result<(), String> {
         meter: Box::new(claude.meter()),
         codex_meter: Box::new(claude.codex_meter()),
         reviewer: Arc::new(reviewer.clone()),
+        gpu: Arc::new(GpuCurl),
         local_leases: Arc::new(reviewer.clone()),
         review_bots: vec![Arc::new(CodeRabbit), Arc::new(Cubic), Arc::new(Codex)],
         shots: Arc::new(shots.clone()),
