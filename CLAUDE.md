@@ -37,7 +37,6 @@ Kelpie works this repo too, so these hold for a kelpie worker as for anyone:
 - Read the issue, its parent spec #5, `CONTEXT.md`, `docs/adr/` and `docs/design-log.md` first. The design is settled there; ask only for a decision they leave open.
 - Tests follow #5's testing decisions: the runner's work-item loop through its stand-ins, the dog's lease book with a fake clock, and adapter parsing against real recorded output. Tests assert only what the outside world sees.
 - One cargo command shape for the session, and one cargo command at a time.
-- Nothing kelpie sends a worker, reviewer, judge or relay mentions cost or budget. Budget talk makes agents stop early.
 - New measured facts go in the design log's Facts section in the same pull request.
 - Done when every acceptance criterion in the issue is met, with the evidence in the pull request's body, which ends `Resolves #<n>`.
 
