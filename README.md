@@ -220,24 +220,24 @@ Kelpie refuses a shepherd on another shep minor or major than the pinned one, na
 
 Kelpie keeps everything under `$SHEP_HOME/kelpie`, or the folder `KELPIE_HOME` names:
 
-- `settings.toml`, `totp`, `tools`, `codex`, `relay` and `rulings`, shared by every project
+- `settings.toml`, `totp`, `tools`, `relay` and `rulings`, shared by every project
 - `dog`, with the dog's book and its door, `lease.sock`. Always under `$SHEP_HOME/kelpie`, even with `KELPIE_HOME` set
 - `<project>`, with the project's `state.json`, worker files, `worktrees`, `builds`, `shots` and `playwright`
 
 So a project can't be named for one of kelpie's own folders. Socket paths must stay under 104 bytes, so a runner with a long `SHEP_HOME` refuses to start and names the path that is too long.
 
-An install from before kept all of this in `~/.kelpie`. The first start on the new build moves what kelpie owns, by name, and says what it moved: the dog moves its book, and each runner moves the shared files and its own project's. Everything else in `~/.kelpie` stays put. Each shared file leaves a link at its old place, so a runner still on the old build keeps working until it restarts. A worker in flight may start its next turn in a new session, since Claude Code finds a session by its folder and the worktree moved.
+An install from before kept all of this in `~/.kelpie`. The first start on the new build moves what kelpie owns, by name, and says what it moved: the dog moves its book, and each runner moves the shared files and its own project's. Only the dog and the runners move anything, and each move happens once. Everything else in `~/.kelpie` stays put, and a `~/.kelpie` that is itself a shepherd's home is never moved from. A move that can't finish stops the runner and names what is in the way, so it never opens without its state.
+
+Each shared file leaves a link at its old place, so a runner still on the old build keeps working through an upgrade. The links go once every running runner has restarted on the new build, or at the next `shep kelpie upgrade`, and `shep kelpie doctor` names any that are left. A worker in flight may start its next turn in a new session, since Claude Code finds a session by its folder and the worktree moved.
 
 ### Moving an install from `~/.kelpie/shep`
 
-An install from before `shep kelpie` runs its runners and dog from a Flockfile under `SHEP_HOME=~/.kelpie/shep`. It keeps working as it is. To move it into your own shepherd:
+An install from before `shep kelpie` runs its runners and dog from a Flockfile under `SHEP_HOME=~/.kelpie/shep`. Move it into your own shepherd before the first start of a build with kelpie's home under shep's: a runner refuses to move `~/.kelpie` into a home inside it. To move it:
 
 1. Take the runners and the dog out of the old shepherd by name, so no project runs twice, and stop it: `SHEP_HOME=~/.kelpie/shep shep delete <project>... kelpie`, then `SHEP_HOME=~/.kelpie/shep shep kill`. Name only kelpie's sheep, since that shepherd may run others. A `kill` alone leaves them in its saved roll, and a later `shep muster` there would start them beside the new ones. Their state files stay where they are
 2. Adopt kelpie in your own shepherd, as above
 3. For each project: `cd ~/.kelpie/repos/<project> && shep kelpie add <project> && shep kelpie start`. `add` makes the project's table from `~/.kelpie/projects/<project>/settings.toml`, and the runner's first start moves its state file into kelpie's home
 4. Once: `shep kelpie settings move <project>`, which moves `~/.kelpie/settings.toml` into the `[kelpie]` section
-
-To adopt kelpie in `~/.kelpie/shep` itself instead, drop the dog's `kelpie` entry from the Flockfile and `SHEP_HOME=~/.kelpie/shep shep delete kelpie` first, since `shep adopt` refuses a name a sheep holds. The adopted dog reads the same book.
 
 A runner's Flockfile entry, for a project set up by hand, is in `settings.example.toml`. It needs `SHEP_HOME` as an absolute path in `env`, since a sheep starts without it, and `kill_timeout = "10s"` or more, since a runner needs about 7s to stop cleanly.
 
