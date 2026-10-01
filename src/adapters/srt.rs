@@ -66,7 +66,11 @@ impl Sandbox for SandboxRuntime {
 /// `srt`'s settings file for `policy`
 pub(crate) fn srt_settings(policy: &Policy) -> Value {
     // Without `strictAllowlist`, a host off the list is asked about rather than refused.
-    let mut network = json!({ "allowedDomains": policy.hosts, "strictAllowlist": true });
+    let mut network = json!({
+        "allowedDomains": policy.hosts,
+        "deniedDomains": [],
+        "strictAllowlist": true,
+    });
     if policy.listen {
         network["allowLocalBinding"] = true.into();
     }

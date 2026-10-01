@@ -3,7 +3,7 @@
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -107,7 +107,8 @@ impl Agents for ClaudeCli {
     }
 
     fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
-        let mut command = self.sandboxed_command(call)?;
+        // The bridges stay open until the call has ended.
+        let (mut command, _bridges) = self.sandboxed_command(call)?;
         let label = format!("#{} {}", call.issue, call.role.as_str());
         let spawned = |pid| {
             if let Some(lambs) = &self.lambs {
@@ -123,35 +124,6 @@ impl Agents for ClaudeCli {
             RunError::TimedOut => AgentError::TimedOut,
         })?;
         parse_result(&output, &call.session)
-    }
-}
-
-impl ClaudeCli {
-    // The call's command inside its sandbox, with its scratch folder emptied
-    // and its transcript folder made. A scratch folder swapped for a link is
-    // removed, not followed.
-    fn sandboxed_command(&self, call: &AgentCall) -> Result<Command, AgentError> {
-        let policy = sandbox::policy(call, &self.home)?;
-        let scratch = sandbox::scratch(call);
-        let setup = |what: &Path, e: std::io::Error| {
-            AgentError::Setup(format!("cannot make {}: {}", what.display(), e.kind()))
-        };
-        match std::fs::remove_dir_all(&scratch) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(setup(&scratch, e)),
-            _ => {}
-        }
-        for folder in [&scratch, &sandbox::transcripts(&self.home, &call.cwd)?] {
-            std::fs::create_dir_all(folder).map_err(|e| setup(folder, e))?;
-        }
-        let mut command = Command::new(&self.program);
-        command
-            .args(argv(call))
-            .current_dir(&call.cwd)
-            .env("CLAUDE_CODE_TMPDIR", &scratch)
-            .env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1");
-        self.sandbox
-            .wrap(&policy, &sandbox::sandbox_settings(call), &command)
-            .map_err(|e| AgentError::Setup(e.to_string()))
     }
 }
 
@@ -174,7 +146,7 @@ pub(crate) fn write_settings(call: &AgentCall) -> Result<(), AgentError> {
 // `--setting-sources project` keeps the project's CLAUDE.md and skills and
 // drops the maintainer's own hooks, plugins and skills. It also drops the
 // worktree's `settings.local.json`, which nothing kelpie runs needs.
-fn argv(call: &AgentCall) -> Vec<OsString> {
+fn argv(call: &AgentCall, mcp_config: Option<&Path>) -> Vec<OsString> {
     let mut argv: Vec<OsString> = vec![
         "-p".into(),
         call.prompt.as_str().into(),
@@ -192,7 +164,7 @@ fn argv(call: &AgentCall) -> Vec<OsString> {
     if call.role == Role::Worker {
         argv.extend(["--permission-mode".into(), "bypassPermissions".into()]);
     }
-    if let Some(config) = &call.mcp_config {
+    if let Some(config) = mcp_config {
         argv.extend(["--mcp-config".into(), config.into()]);
     }
     for plugin in &call.plugin_dirs {
@@ -320,7 +292,7 @@ mod tests {
     }
 
     fn strings(call: &AgentCall) -> Vec<String> {
-        argv(call)
+        argv(call, call.mcp_config.as_deref())
             .into_iter()
             .map(|a| a.into_string().unwrap())
             .collect()

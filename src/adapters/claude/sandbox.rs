@@ -6,9 +6,90 @@
 //! sandbox stays off: on macOS a sandbox cannot start inside another.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
+use super::settings::PLAYWRIGHT_DENY;
+use super::{ClaudeCli, argv};
+use crate::adapters::bridge::Bridges;
+use crate::bridge::Filter;
 use crate::ports::{AgentCall, AgentError, Fence, Policy};
 use crate::profile::CREDENTIALS;
+
+impl ClaudeCli {
+    // The call's command inside its sandbox, with its scratch folder emptied
+    // and its transcript folder made, and the bridges to its MCP servers,
+    // which must stay open until it ends. A scratch folder swapped for a
+    // link is removed, not followed.
+    pub(super) fn sandboxed_command(
+        &self,
+        call: &AgentCall,
+    ) -> Result<(Command, Option<Bridges>), AgentError> {
+        let mut policy = policy(call, &self.home)?;
+        let scratch = scratch(call);
+        let setup = |what: &Path, e: std::io::Error| {
+            AgentError::Setup(format!("cannot make {}: {}", what.display(), e.kind()))
+        };
+        match std::fs::remove_dir_all(&scratch) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(setup(&scratch, e)),
+            _ => {}
+        }
+        for folder in [&scratch, &transcripts(&self.home, &call.cwd)?] {
+            std::fs::create_dir_all(folder).map_err(|e| setup(folder, e))?;
+        }
+        let bridges = match &call.mcp_config {
+            Some(config) => Some(bridge(call, config)?),
+            None => None,
+        };
+        let bridged = bridges.as_ref().map(|_| bridged_config(call));
+        if let (Some(bridges), Some(path)) = (&bridges, &bridged) {
+            let text = serde_json::to_string_pretty(&bridges.config).expect("config is JSON");
+            std::fs::write(path, text).map_err(|e| setup(path, e))?;
+            policy.read.push(path.clone());
+            policy.sockets.extend(bridges.sockets.iter().cloned());
+        }
+        let mut command = Command::new(&self.program);
+        command
+            .args(argv(call, bridged.as_deref()))
+            .current_dir(&call.cwd)
+            .env("CLAUDE_CODE_TMPDIR", &scratch)
+            .env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1");
+        let command = self
+            .sandbox
+            .wrap(&policy, &sandbox_settings(call), &command)
+            .map_err(|e| AgentError::Setup(e.to_string()))?;
+        Ok((command, bridges))
+    }
+}
+
+// The call's MCP servers, each run outside the sandbox behind a socket in
+// the folder of its settings file, which the sandbox cannot read or write.
+// Every message to them passes the preview's checks.
+fn bridge(call: &AgentCall, config: &Path) -> Result<Bridges, AgentError> {
+    let setup = |why: String| AgentError::Setup(why);
+    let Some(fence) = call.reach.fence.as_deref() else {
+        return Err(setup(
+            "kelpie bridges MCP servers only into a fenced call".into(),
+        ));
+    };
+    let text = std::fs::read_to_string(config)
+        .map_err(|e| setup(format!("cannot read {}: {}", config.display(), e.kind())))?;
+    let config: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| setup(format!("cannot parse {}: {e}", config.display())))?;
+    let filter = Filter {
+        domains: fence.preview.clone().unwrap_or_default(),
+        denied_tools: PLAYWRIGHT_DENY
+            .iter()
+            .map(|t| t.trim_start_matches("mcp__playwright__").to_owned())
+            .collect(),
+    };
+    let folder = call.settings.parent().unwrap_or(Path::new("/"));
+    Bridges::open(&config, folder, &fence.guard.kelpie, &call.cwd, &filter).map_err(setup)
+}
+
+/// The MCP config Claude Code is started with, which reaches each server through its bridge
+pub(crate) fn bridged_config(call: &AgentCall) -> PathBuf {
+    call.settings.with_extension("mcp.json")
+}
 
 /// The model's endpoint, the one host every call reaches
 ///
@@ -64,7 +145,6 @@ pub(crate) fn policy(call: &AgentCall, home: &Path) -> Result<Policy, AgentError
         [&call.settings, &scratch(call)]
             .into_iter()
             .chain(&call.instructions)
-            .chain(&call.mcp_config)
             .chain(&call.plugin_dirs)
             .chain(&call.reach.read)
             .cloned(),
@@ -113,6 +193,8 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
+    use serde_json::json;
+
     use super::*;
     use crate::adapters::{ClaudeCli, SandboxRuntime};
     use crate::ports::{Agents, Reach, Role, Session, SessionId, Tools};
@@ -130,7 +212,8 @@ mod tests {
     impl World {
         fn new() -> Self {
             let w = Self {
-                dir: tempfile::tempdir().unwrap(),
+                // In `/tmp`, short enough for the bridges' sockets
+                dir: tempfile::tempdir_in("/tmp").unwrap(),
             };
             for folder in ["home", "wt", "build", "worker"] {
                 std::fs::create_dir_all(w.path(folder)).unwrap();
@@ -265,6 +348,52 @@ mod tests {
         assert_eq!(policy.no_read, CREDENTIALS.map(str::to_owned));
         assert!(policy.read.contains(&w.path("shots")));
         assert!(!policy.verify_tls);
+    }
+
+    #[test]
+    fn a_workers_mcp_servers_are_reached_only_through_their_bridges() {
+        let w = World::new();
+        let config = w.path("worker/mcp.json");
+        let servers = json!({ "mcpServers": {
+            "playwright": { "command": "/bin/cat" },
+            "kelpie": { "command": "/bin/cat" },
+        } });
+        std::fs::write(&config, servers.to_string()).unwrap();
+        let mut call = w.worker();
+        call.mcp_config = Some(config.clone());
+        let sandbox = OpenSandbox::default();
+        let (command, bridges) = w
+            .cli(Arc::new(sandbox.clone()))
+            .sandboxed_command(&call)
+            .unwrap();
+        let bridges = bridges.expect("the call has MCP servers");
+        let args: Vec<_> = command.get_args().map(|a| a.to_owned()).collect();
+        let at = args.iter().position(|a| a == "--mcp-config").unwrap();
+        assert_eq!(args[at + 1], bridged_config(&call));
+        let [(policy, _)] = sandbox.wrapped().try_into().unwrap();
+        assert_eq!(policy.sockets, bridges.sockets);
+        assert_eq!(policy.sockets.len(), 2);
+        assert!(policy.read.contains(&bridged_config(&call)));
+        assert!(!policy.read.contains(&config), "the servers' own commands");
+        for socket in &policy.sockets {
+            assert_eq!(socket.parent(), Some(w.path("worker").as_path()));
+        }
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(bridged_config(&call)).unwrap()).unwrap();
+        assert_eq!(written, bridges.config);
+        assert_eq!(written["mcpServers"]["kelpie"]["command"], "/k/kelpie");
+    }
+
+    #[test]
+    fn an_unfenced_call_gets_no_bridge() {
+        let w = World::new();
+        let mut review = w.call(Role::Reviewer);
+        review.mcp_config = Some(w.path("worker/mcp.json"));
+        let cli = w.cli(Arc::new(OpenSandbox::default()));
+        let Err(AgentError::Setup(why)) = cli.sandboxed_command(&review) else {
+            panic!("a review got a bridge");
+        };
+        assert!(why.contains("only into a fenced call"), "{why}");
     }
 
     #[test]

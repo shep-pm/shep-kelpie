@@ -427,6 +427,7 @@ mod tests {
             s["sandbox"]["network"],
             json!({
                 "allowedDomains": ["github.com", "api.github.com", "pokemon-go-api.github.io"],
+                "deniedDomains": [],
                 "strictAllowlist": true,
                 "allowLocalBinding": true,
                 "allowMachLookup": ["com.apple.FSEvents"],

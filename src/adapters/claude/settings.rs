@@ -53,7 +53,7 @@ const PLAYWRIGHT_TOOLS: &str = "mcp__playwright__.*";
 
 // The Playwright MCP server runs outside the sandbox. These tools read a local
 // file (or run code that could), so none is the worker's.
-const PLAYWRIGHT_DENY: [&str; 4] = [
+pub(crate) const PLAYWRIGHT_DENY: [&str; 4] = [
     "mcp__playwright__browser_run_code_unsafe",
     "mcp__playwright__browser_file_upload",
     "mcp__playwright__browser_drop",

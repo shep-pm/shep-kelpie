@@ -10,6 +10,7 @@
 
 pub mod adapters;
 pub mod board;
+pub mod bridge;
 pub mod browse;
 pub mod channels;
 pub mod coderabbit;
