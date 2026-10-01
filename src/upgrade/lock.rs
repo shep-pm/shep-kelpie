@@ -25,7 +25,7 @@ impl Lock {
         let path = kelpie_home.join("upgrade.lock");
         fs::create_dir_all(kelpie_home)
             .map_err(|e| format!("cannot make {}: {e}", kelpie_home.display()))?;
-        for _ in 0..2 {
+        for _ in 0..3 {
             match fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
