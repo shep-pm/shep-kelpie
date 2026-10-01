@@ -72,6 +72,11 @@ fn a_saved_state_loads_back_whole() {
         day: 2,
         week_used_pct: 31,
     });
+    state.codex_pacing = Some(DayStart {
+        week_resets_at: Timestamp(1_790_600_000),
+        day: 3,
+        week_used_pct: 12,
+    });
     store.save(&state).unwrap();
     assert_eq!(store.load().unwrap(), Some(state));
 }

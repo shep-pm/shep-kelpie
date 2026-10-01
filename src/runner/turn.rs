@@ -215,7 +215,7 @@ impl Runner {
         if due && let Some(parked) = self.claude_files_changed(Unchecked::CarryOn)? {
             return Ok(parked);
         }
-        if due && let Some(held) = self.pace(Scope::Turn)?.holds() {
+        if due && let Some(held) = self.pace_worker(Scope::Turn)?.holds() {
             return Ok(held);
         }
         let item = self.current().expect("checked above");

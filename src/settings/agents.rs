@@ -146,9 +146,9 @@ impl Agent {
             Harness::ClaudeCode => UsageReader::Claude,
         });
         match (usage, &self.lease) {
-            (UsageReader::None, lease) => Ok(Limit::Lease(
-                lease.clone().unwrap_or_else(LeaseName::gpu),
-            )),
+            (UsageReader::None, lease) => {
+                Ok(Limit::Lease(lease.clone().unwrap_or_else(LeaseName::gpu)))
+            }
             (_, Some(_)) => Err("sets `lease`, which only an agent with `usage = \"none\"` takes"),
             (UsageReader::Claude, None) => Ok(Limit::Account(Account::Claude)),
             (UsageReader::Codex, None) => Ok(Limit::Account(Account::Codex)),

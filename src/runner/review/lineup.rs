@@ -101,7 +101,8 @@ impl Runner {
     fn listed(&self, name: &ReviewerName) -> Option<LoopReviewer> {
         let found = self.lineup.iter().find(|r| &r.name == name).cloned();
         found.or_else(|| {
-            (name == &ReviewerName::claude()).then(|| LoopReviewer::claude(&self.agents.reviewer, &self.agents.limits.reviewer))
+            (name == &ReviewerName::claude())
+                .then(|| LoopReviewer::claude(&self.agents.reviewer, &self.agents.limits.reviewer))
         })
     }
 

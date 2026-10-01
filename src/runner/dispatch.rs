@@ -80,7 +80,7 @@ impl Runner {
                 });
             };
             if !paced {
-                if let Some(held) = self.pace(Scope::Dispatch)?.holds() {
+                if let Some(held) = self.pace_worker(Scope::Dispatch)?.holds() {
                     self.skipped = skipped;
                     return Ok(held);
                 }

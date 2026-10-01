@@ -24,6 +24,7 @@ use super::Runner;
 use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, Spent, StepReport};
 use super::ruling::park;
 use super::shots::RoundShots;
+use crate::pacer::Scope;
 use crate::ports::{
     AgentCall, AgentError, AgentReply, Agents, Finding, Reviewer, ReviewerError, Severity,
     Timestamp, Verdict, read_review,
@@ -74,6 +75,9 @@ impl Runner {
                         }))
                     }
                     Runs::Claude(session) => {
+                        if let Some(held) = self.pace(Scope::Turn, &session.limit)?.holds() {
+                            return Ok(held);
+                        }
                         let shots = match self.round_shots()? {
                             RoundShots::Take(begin) => return Ok(begin),
                             RoundShots::Ready(shots) => shots,

@@ -471,7 +471,7 @@ mod tests {
                 "skipped": [],
                 "rulings": [],
                 "leases": [],
-                "pacer": { "enabled": true, "reading": null, "holding": null },
+                "pacer": { "enabled": true, "claude": { "reading": null, "holding": null } },
                 "skills": Step::ALL.map(|step| json!({
                     "step": step.as_str(),
                     "skill": format!("/mattpocock:{}", step.default_skill()),

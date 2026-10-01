@@ -80,7 +80,7 @@ impl Runner {
         self.channels = channels;
         self.webhook = webhook;
         // Read again under the new pacing settings at the next look.
-        self.pacing = None;
+        self.pacing.clear();
         let mut line = String::from("settings changed");
         if !changed.is_empty() {
             line.push_str(&format!(": {} now in effect", changed.join(", ")));

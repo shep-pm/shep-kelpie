@@ -16,7 +16,7 @@ use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
 use crate::review_bot::{Activity, Login, Profile};
-use crate::settings::ForgeSlug;
+use crate::settings::{Account, ForgeSlug};
 use crate::shots::{ShotsJob, ShotsRun};
 use crate::webhook::Webhook;
 
@@ -706,8 +706,10 @@ pub struct Ports {
     pub agents: Arc<dyn Agents>,
     /// The forge
     pub forge: Box<dyn Forge>,
-    /// The account's usage
+    /// The Claude account's usage, from `/usage`
     pub meter: Box<dyn Meter>,
+    /// The Codex account's usage
+    pub codex_meter: Box<dyn Meter>,
     /// The local round's runner, shared so a round runs without holding the runner
     pub reviewer: Arc<dyn Reviewer>,
     /// A profile for each review bot a round may summon
@@ -722,6 +724,16 @@ pub struct Ports {
     pub shots: Arc<dyn Shots>,
     /// The clock
     pub clock: Box<dyn Clock>,
+}
+
+impl Ports {
+    /// The meter that reads `account`'s usage
+    pub fn meter_of(&self, account: Account) -> &dyn Meter {
+        match account {
+            Account::Claude => self.meter.as_ref(),
+            Account::Codex => self.codex_meter.as_ref(),
+        }
+    }
 }
 
 impl fmt::Debug for Ports {

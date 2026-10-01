@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::pacer::DayStart;
 use crate::ports::{Finding, Timestamp};
 use crate::review_bot::Bot;
+use crate::settings::Account;
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
 
 /// The state file's format version
@@ -59,9 +60,13 @@ pub struct ProjectState {
     pub adopted: Vec<Waiting>,
     /// Leases this project holds
     pub leases: Vec<LeaseHeld>,
-    /// What the week had spent when today began, once usage has been read
+    /// What the Claude account's week had spent when today began, once
+    /// usage has been read
     #[serde(default)]
     pub pacing: Option<DayStart>,
+    /// The same for the Codex account, once a Codex agent's usage has been read
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_pacing: Option<DayStart>,
     /// Automatic merges not yet sent, oldest first
     #[serde(default)]
     pub notices: Vec<Notice>,
@@ -95,9 +100,26 @@ impl ProjectState {
             adopted: Vec::new(),
             leases: Vec::new(),
             pacing: None,
+            codex_pacing: None,
             notices: Vec::new(),
             replies: Replies::default(),
             relay_clears: 0,
+        }
+    }
+
+    /// What `account`'s week had spent when today began
+    pub fn day_start(&self, account: Account) -> Option<DayStart> {
+        match account {
+            Account::Claude => self.pacing,
+            Account::Codex => self.codex_pacing,
+        }
+    }
+
+    /// Where `account`'s day start is kept
+    pub fn day_start_mut(&mut self, account: Account) -> &mut Option<DayStart> {
+        match account {
+            Account::Claude => &mut self.pacing,
+            Account::Codex => &mut self.codex_pacing,
         }
     }
 

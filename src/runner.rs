@@ -5,6 +5,7 @@
 //! file, answers the maintainer's triggers, and runs the worker's turns.
 //! Every change is saved before it takes effect in memory.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -14,7 +15,7 @@ use crate::channels::{Channel, Channels};
 use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Guarded, Ports, SessionId, Timestamp, Visibility};
 use crate::review_bot::{Bot, Profile, Reviewers};
-use crate::settings::{LoopReviewer, RoleAgents, Runs, Settings, SettingsError};
+use crate::settings::{Account, LoopReviewer, RoleAgents, Runs, Settings, SettingsError};
 use crate::skills::Skills;
 use crate::state::ids::RulingIds;
 use crate::state::{ProjectState, RunState, StateError, StateStore};
@@ -35,6 +36,8 @@ mod follow_up;
 mod gate;
 mod guard_hooks;
 mod instructions;
+#[cfg(test)]
+mod limits_tests;
 mod merge;
 mod pace;
 mod paths;
@@ -161,8 +164,8 @@ pub struct Runner {
     store: StateStore,
     state: ProjectState,
     ports: Ports,
-    // The pacer's last reading of usage and when it was read, kept in memory only
-    pacing: Option<(Timestamp, Assessment)>,
+    // The pacer's last reading of each account's usage and when, kept in memory only
+    pacing: BTreeMap<Account, (Timestamp, Assessment)>,
     // What the board passed over on its last poll, kept in memory only
     skipped: Vec<Skip>,
     // The pull request reviewers kelpie's own settings define
@@ -277,7 +280,7 @@ impl Runner {
             store,
             state,
             ports,
-            pacing: None,
+            pacing: BTreeMap::new(),
             skipped: Vec::new(),
             reviewers,
             lineup,
