@@ -216,6 +216,7 @@ mod tests {
             .replace("# [kelpie.reviewers.", "[kelpie.reviewers.")
             .replace("# reviews =", "reviews =")
             .replace("# hours =", "hours =")
+            .replace("# reviews_on_ready =", "reviews_on_ready =")
             .replace(
                 "# [kelpie.local_reviewers.qwen]\n# kind = \"command\"\n# command =",
                 "[kelpie.local_reviewers.qwen]\nkind = \"command\"\ncommand =",
