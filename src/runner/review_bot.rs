@@ -553,7 +553,7 @@ impl Runner {
             &worktree,
             &main,
             &folder,
-            &model,
+            (&model, &self.agents.limits.judge),
             &next.finding,
             None,
         )

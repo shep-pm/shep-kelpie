@@ -481,15 +481,15 @@ fn a_claude_round_with_a_finding_records_a_reviewer_call_and_a_judge_call() {
     );
     assert_eq!(
         item["by_role"]["reviewer"],
-        json!({ "calls": 1, "cost_usd": 0.05 })
+        json!({ "calls": 1, "tokens": { "input": 0, "cache_write": 0, "cache_read": 0, "output": 0 }, "cost_usd": 0.05 })
     );
     assert_eq!(
         item["by_role"]["judge"],
-        json!({ "calls": 1, "cost_usd": 0.007 })
+        json!({ "calls": 1, "tokens": { "input": 0, "cache_write": 0, "cache_read": 0, "output": 0 }, "cost_usd": 0.007 })
     );
     assert_eq!(
         item["by_role"]["worker"],
-        json!({ "calls": 1, "cost_usd": 0.0 }),
+        json!({ "calls": 1, "tokens": { "input": 0, "cache_write": 0, "cache_read": 0, "output": 0 }, "cost_usd": 0.0 }),
         "the worker's turn cost nothing here, and is not the reviewer's"
     );
     assert_eq!(item["qwen"]["rounds"], 1);

@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::settings::{Effort, GuardHook};
+use crate::settings::{Effort, GuardHook, LeaseName};
 
 /// Which role an agent call is made for
 // wire format: changing this is a breaking change to the state file
@@ -163,6 +163,8 @@ pub struct AgentCall {
     pub timeout: Option<Duration>,
     /// The kinds of tool it may use
     pub tools: Tools,
+    /// The lease the call holds from start to end, for a local agent
+    pub lease: Option<LeaseName>,
     /// What it may reach
     pub reach: Reach,
 }
@@ -180,6 +182,15 @@ pub struct Usage {
     pub cache_read: u64,
     /// Output tokens, thinking included
     pub output: u64,
+}
+
+impl std::ops::AddAssign for Usage {
+    fn add_assign(&mut self, other: Self) {
+        self.input = self.input.saturating_add(other.input);
+        self.cache_write = self.cache_write.saturating_add(other.cache_write);
+        self.cache_read = self.cache_read.saturating_add(other.cache_read);
+        self.output = self.output.saturating_add(other.output);
+    }
 }
 
 /// An amount of money in billionths of a US dollar

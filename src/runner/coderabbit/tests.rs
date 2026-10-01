@@ -871,7 +871,7 @@ fn a_round_with_a_held_finding_records_a_judge_call_that_the_finished_totals_car
     let status = rig.ask(&runner, "status", None);
     assert_eq!(
         status["work_item"]["by_role"]["judge"],
-        json!({ "calls": 1, "cost_usd": 0.012 })
+        json!({ "calls": 1, "tokens": { "input": 0, "cache_write": 0, "cache_read": 0, "output": 0 }, "cost_usd": 0.012 })
     );
 
     rig.forge

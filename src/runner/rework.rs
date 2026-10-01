@@ -16,7 +16,6 @@ use super::report::{Begin, ReworkBy, StepReport};
 use super::trigger::{self, issue_list};
 use super::turn;
 use crate::board::{LabelError, OpenPullRequest, READY, Skip, WorkerModel, worker_override};
-use crate::pacer::Scope;
 use crate::ports::{ForgeError, MaintainerReview, PullRequestState, Reviewed};
 use crate::state::StateError;
 use crate::work_item::{CodeRabbitTally, Known, Phase, Review, WorkItem, new_session_id};
@@ -193,7 +192,7 @@ impl Runner {
                     continue;
                 }
             }
-            if let Some(held) = self.pace(Scope::Dispatch)?.holds() {
+            if let Some(held) = self.pace_dispatch()?.holds() {
                 return Ok((Some(held), skipped));
             }
             let review = pr.review.as_ref().map(|r| r.id.clone());

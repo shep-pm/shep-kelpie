@@ -16,6 +16,9 @@ pub(crate) const LEFT_BEHIND: &str = "left-behind.txt";
 pub(crate) enum Scripted {
     /// Answers with this usage, and this cost for the session so far
     Reply(Usage, Cost),
+    /// Answers with this usage and no cost, as a harness that reports
+    /// none does
+    Tokens(Usage),
     /// Answers like [`Self::Reply`], with the account's usage as given by
     /// the time it does: the call itself spent it
     Spend(Utilization, Usage, Cost),
@@ -203,6 +206,12 @@ impl Agents for FakeClaude {
                 text: "done".into(),
                 usage,
                 session_cost: Some(session_cost),
+            }),
+            Some(Scripted::Tokens(usage)) => Ok(AgentReply {
+                session_id: call.session.id().clone(),
+                text: "done".into(),
+                usage,
+                session_cost: None,
             }),
             Some(Scripted::Spend(..)) => unreachable!("turned into a reply above"),
             Some(Scripted::Fail(error)) => Err(error),

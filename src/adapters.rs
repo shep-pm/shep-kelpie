@@ -9,6 +9,7 @@ use crate::ports::{Clock, Timestamp};
 
 mod bridge;
 mod claude;
+mod codex_usage;
 mod curl;
 pub(crate) mod gh;
 mod host;
@@ -29,6 +30,7 @@ pub(crate) use claude::settings::{NO_TOOLS, settings as claude_settings};
 #[cfg(test)]
 pub(crate) use claude::write_settings as write_claude_settings;
 pub use claude::{ClaudeCli, LambLabels};
+pub use codex_usage::CodexMeter;
 pub use curl::Curl;
 pub use gh::Gh;
 pub use host::SystemHost;

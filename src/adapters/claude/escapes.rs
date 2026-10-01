@@ -68,6 +68,7 @@ impl World {
             plugin_dirs: Vec::new(),
             tools: Tools::Work,
             reach: profile.reach(),
+            lease: None,
         }
     }
 
@@ -332,6 +333,7 @@ fn a_live_worker_turn_runs_inside_the_sandbox_and_resumes() {
         plugin_dirs: Vec::new(),
         tools: Tools::Work,
         reach: profile.reach(),
+        lease: None,
     };
     cli.prepare(&call).unwrap();
     let reply = cli.run(&call).expect("the turn ran");

@@ -7,7 +7,7 @@ use crate::flock::add::LABELS;
 use crate::ports::{NewLabel, Visibility};
 use crate::preview::Tools;
 use crate::runner::{ProjectName, ProjectPaths, SUMMON_LABEL, check_instructions, check_repo};
-use crate::settings::{Runs, Settings};
+use crate::settings::{Account, Limit, Runs, Settings};
 use crate::webhook::KelpieSettings;
 
 /// Every check for the project on `sheep`, whose table is `table`
@@ -104,11 +104,33 @@ pub(super) fn checks(
     if settings.preview.enabled {
         lines.push(preview(at("preview tools"), here));
     }
+    if kelpie.is_some_and(|kelpie| spends_codex(&settings, kelpie, here)) {
+        let meter = probes.codex_meter;
+        lines.push(super::machine::codex(
+            at("codex usage"),
+            meter,
+            probes.clock,
+        ));
+    }
     if let Some(kelpie) = kelpie {
         let project = settings.ruling_channels.as_ref();
         lines.push(rulings::channel(at("rulings"), project, kelpie));
     }
     lines
+}
+
+// Whether a role or session reviewer runs on an agent that spends Codex.
+// Settings that do not resolve are another line's to report.
+fn spends_codex(settings: &Settings, kelpie: &KelpieSettings, here: Here<'_>) -> bool {
+    let codex = |limit: &Limit| *limit == Limit::Account(Account::Codex);
+    let roles = settings.role_agents(&kelpie.agents).ok();
+    let roles = roles.map(|agents| agents.limits);
+    let lineup = settings.lineup(kelpie, here.home).unwrap_or_default();
+    let sessions = lineup.iter().any(|r| match &r.runs {
+        Runs::Claude(session) => codex(&session.limit),
+        Runs::Local(_) => false,
+    });
+    sessions || roles.is_some_and(|l| [l.worker, l.reviewer, l.judge, l.planner].iter().any(codex))
 }
 
 fn checkout(subject: String, settings: &Settings) -> Line {

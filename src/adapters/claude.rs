@@ -290,6 +290,7 @@ mod tests {
             plugin_dirs: Vec::new(),
             tools: Tools::Work,
             reach: Reach::default(),
+            lease: None,
         }
     }
 

@@ -70,7 +70,7 @@ impl Runner {
             .find(|r| runs(r));
         let reviewer = match next {
             Some(reviewer) => reviewer.clone(),
-            None => LoopReviewer::claude(&self.agents.reviewer),
+            None => LoopReviewer::claude(&self.agents.reviewer, &self.agents.limits.reviewer),
         };
         Ok(Chosen {
             reviewer,
@@ -101,7 +101,8 @@ impl Runner {
     fn listed(&self, name: &ReviewerName) -> Option<LoopReviewer> {
         let found = self.lineup.iter().find(|r| &r.name == name).cloned();
         found.or_else(|| {
-            (name == &ReviewerName::claude()).then(|| LoopReviewer::claude(&self.agents.reviewer))
+            (name == &ReviewerName::claude())
+                .then(|| LoopReviewer::claude(&self.agents.reviewer, &self.agents.limits.reviewer))
         })
     }
 

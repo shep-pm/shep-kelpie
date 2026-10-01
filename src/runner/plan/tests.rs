@@ -54,7 +54,7 @@ fn a_small_issue_is_planned_whole_and_then_worked() {
                 why: "One small change.".into()
             },
             usage: Usage::default(),
-            cost_usd: 2.0,
+            cost_usd: Some(2.0),
         })
     );
     assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
@@ -285,7 +285,7 @@ fn a_reply_that_is_not_a_plan_works_the_issue_whole() {
                 reason: "no JSON object".into()
             },
             usage: Usage::default(),
-            cost_usd: 0.0,
+            cost_usd: Some(0.0),
         })
     );
     assert!(matches!(

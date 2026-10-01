@@ -11,7 +11,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::ports::{AgentCall, Finding, Reach, Role, Session, Severity, Tools, Verdict};
-use crate::settings::RoleModel;
+use crate::settings::{Limit, RoleModel};
 use crate::shots::ShotsRun;
 use crate::skills::{Skills, Step};
 use crate::work_item::new_session_id;
@@ -42,7 +42,7 @@ pub(super) struct Round<'a> {
 
 pub(super) fn reviewer_call(
     round: Round<'_>,
-    model: &RoleModel,
+    (model, limit): (&RoleModel, &Limit),
     shots: Option<Screens<'_>>,
     skills: &Skills,
 ) -> Result<AgentCall, String> {
@@ -66,7 +66,7 @@ pub(super) fn reviewer_call(
         prompt.push_str(&shots_prompt(shots.run));
     }
     let prompt = skills.invoke(Step::Review, &prompt);
-    let mut call = build_call(Role::Reviewer, issue, worktree, model, prompt)?;
+    let mut call = build_call(Role::Reviewer, issue, worktree, (model, limit), prompt)?;
     call.settings = worker_folder.join(REVIEW_SETTINGS_FILE);
     // A review skill may spawn sub-agents or run commands; the round does neither.
     call.tools = Tools::Review;
@@ -82,7 +82,7 @@ pub(in crate::runner) fn judge_call(
     worktree: &Path,
     base: &str,
     worker_folder: &Path,
-    model: &RoleModel,
+    (model, limit): (&RoleModel, &Limit),
     finding: &Finding,
     shots: Option<&Path>,
 ) -> Result<AgentCall, String> {
@@ -95,7 +95,7 @@ pub(in crate::runner) fn judge_call(
             finding.file
         ));
     }
-    let mut call = build_call(Role::Judge, issue, worktree, model, prompt)?;
+    let mut call = build_call(Role::Judge, issue, worktree, (model, limit), prompt)?;
     call.settings = worker_folder.join(JUDGE_SETTINGS_FILE);
     call.reach.read = shot.map(Path::to_owned).into_iter().collect();
     Ok(call)
@@ -123,7 +123,7 @@ fn build_call(
     role: Role,
     issue: u64,
     worktree: &Path,
-    model: &RoleModel,
+    (model, limit): (&RoleModel, &Limit),
     prompt: String,
 ) -> Result<AgentCall, String> {
     let session = new_session_id().map_err(|e| format!("cannot draw a session id: {e}"))?;
@@ -142,6 +142,7 @@ fn build_call(
         plugin_dirs: Vec::new(),
         tools: Tools::Answer,
         reach: Reach::default(),
+        lease: limit.lease().cloned(),
     })
 }
 
@@ -426,7 +427,7 @@ mod tests {
             worker_folder: &worker,
             criteria: "",
         };
-        let call = reviewer_call(round, &model, None, &skills).unwrap();
+        let call = reviewer_call(round, (&model, &Limit::default()), None, &skills).unwrap();
         let cli = ClaudeCli::default();
         cli.prepare(&call).expect("the settings were written");
         let reply = cli.run(&call).expect("the round ran");

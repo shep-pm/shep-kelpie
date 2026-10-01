@@ -1,5 +1,6 @@
 //! The maintainer's triggers and what `status` shows
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -9,6 +10,7 @@ use serde::Serialize;
 use super::pace::PacerStatus;
 use super::{Answer, Runner};
 use crate::board::{Skip, WorkerModel};
+use crate::lease::gpu::LockHolder;
 use crate::ports::{ModelSeat, SessionId, Timestamp};
 use crate::relay::Settled;
 use crate::settings::MergeAuthority;
@@ -62,6 +64,10 @@ pub struct Status<'a> {
     /// an Ollama host to ask
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_model: Option<LocalModelStatus>,
+    /// Who holds each lease a local agent's calls take, by its name, or
+    /// null while it is free
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub local_leases: BTreeMap<String, Option<LockHolder>>,
 }
 
 /// The local model's placement, as Ollama's `/api/ps` last said
@@ -118,8 +124,11 @@ pub struct WorkItemStatus<'a> {
     pub coderabbit: CodeRabbitTally,
     /// Claude calls made for it so far
     pub calls: usize,
-    /// What they have cost, in US dollars
+    /// What the calls whose harness reports dollars have cost, in US dollars
     pub cost_usd: f64,
+    /// Calls whose harness reported no dollars, which `cost_usd` leaves out
+    #[serde(skip_serializing_if = "is_zero")]
+    pub unpriced_calls: usize,
     /// Calls and cost by role
     pub by_role: Spend,
     /// Its qwen rounds, which cost no money
@@ -127,6 +136,10 @@ pub struct WorkItemStatus<'a> {
     /// Why kelpie's last shots run failed, when it did
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shots_failed: Option<&'a str>,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
@@ -145,6 +158,7 @@ impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
             coderabbit: item.coderabbit,
             calls: item.calls.len(),
             cost_usd: item.cost().usd(),
+            unpriced_calls: item.calls.iter().filter(|c| c.unpriced).count(),
             by_role: item.spend(),
             qwen: item.qwen,
             shots_failed: item.shots.as_ref().and_then(|r| r.run.failed.as_deref()),
@@ -471,7 +485,7 @@ mod tests {
                 "skipped": [],
                 "rulings": [],
                 "leases": [],
-                "pacer": { "enabled": true, "reading": null, "holding": null },
+                "pacer": { "enabled": true, "claude": { "reading": null, "holding": null } },
                 "skills": Step::ALL.map(|step| json!({
                     "step": step.as_str(),
                     "skill": format!("/mattpocock:{}", step.default_skill()),

@@ -38,6 +38,7 @@ struct Scene {
     shepherd: FakeShepherd,
     forge: FakeForge,
     meter: FakeMeter,
+    codex_meter: FakeMeter,
     reviewer: FakeReviewer,
     alerts: FakeAlerts,
     host: FakeHost,
@@ -65,6 +66,7 @@ impl Scene {
             kelpie_home: shepherd.scratch("kelpie"),
             forge,
             meter: FakeMeter::idle(),
+            codex_meter: FakeMeter::idle(),
             reviewer: FakeReviewer::default(),
             alerts: FakeAlerts::on(clock.clone()),
             host: FakeHost(Vec::new()),
@@ -105,6 +107,7 @@ impl Scene {
     async fn check(&self, ask: Ask<'_>) -> Report {
         let probes = Probes {
             meter: &self.meter,
+            codex_meter: &self.codex_meter,
             forge: &self.forge,
             reviewer: &self.reviewer,
             review_bot: &CodeRabbit,
@@ -142,6 +145,43 @@ fn ok(report: &Report, subject: &str) -> String {
         Verdict::Ok(found) => found.clone(),
         other => panic!("`{subject}` is {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn a_project_that_spends_codex_checks_codex_answers_its_usage() {
+    let scene = Scene::new().await;
+    let codex = "[agents.codex]\nharness = \"stand-in\"\nmodel = \"gpt-5-codex\"\n\
+                 effort = \"medium\"\nusage = \"codex\"\n";
+    scene.shepherd.holds_section(&format!("{WEBHOOK}{codex}"));
+    scene.runs("golbat", |t| {
+        t.insert("agents".into(), json!({ "worker": "codex" }));
+    });
+    let report = scene.report().await;
+    let found = ok(&report, "golbat: codex usage");
+    assert_eq!(found, "reads Codex usage: 5-hour window 0%, week 0%");
+    assert!(!subjects(&report).contains(&"koji: codex usage"));
+
+    let fixes = [
+        (
+            "cannot run codex: No such file or directory",
+            "install the Codex CLI",
+        ),
+        ("codex refused: 402 Payment Required", "codex login"),
+    ];
+    for (reason, fix) in fixes {
+        scene.codex_meter.fail(MeterError::Codex(reason.into()));
+        let (what, said) = missing(&scene.report().await, "golbat: codex usage");
+        assert_eq!(what, reason);
+        assert!(said.contains(fix), "{said}");
+    }
+    scene
+        .codex_meter
+        .fail(MeterError::Codex("codex did not answer in time".into()));
+    let report = scene.report().await;
+    assert!(matches!(
+        verdict(&report, "golbat: codex usage"),
+        Verdict::Unsure { .. }
+    ));
 }
 
 /// What is wrong and the fix, for a line that is missing
@@ -347,6 +387,7 @@ async fn no_shepherd_is_a_missing_shepherd_naming_its_home() {
     let elsewhere = tempfile::tempdir().unwrap();
     let probes = Probes {
         meter: &scene.meter,
+        codex_meter: &scene.codex_meter,
         forge: &scene.forge,
         reviewer: &scene.reviewer,
         review_bot: &CodeRabbit,

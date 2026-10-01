@@ -13,7 +13,7 @@ use std::path::Path;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::agents::find;
+use super::agents::{Limit, find};
 use super::{
     AgentName, Effort, Endpoint, LocalCommand, LocalRound, NonBlank, RoleModel, Settings,
     SettingsError,
@@ -154,6 +154,11 @@ pub struct ClaudeSession {
     /// run. Every pull request when absent.
     #[serde(default)]
     pub paths: Vec<NonBlank>,
+    /// What holds its calls back: the Claude account, or a session
+    /// agent's own limit
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub limit: Limit,
 }
 
 impl ClaudeSession {
@@ -185,14 +190,15 @@ pub enum Runs {
 }
 
 impl LoopReviewer {
-    /// The project's own Claude round on `model`
-    pub fn claude(model: &RoleModel) -> Self {
+    /// The project's own Claude round on `model`, held back by `limit`
+    pub fn claude(model: &RoleModel, limit: &Limit) -> Self {
         Self {
             name: ReviewerName::claude(),
             runs: Runs::Claude(ClaudeSession {
                 model: model.model.clone(),
                 effort: model.effort,
                 paths: Vec::new(),
+                limit: limit.clone(),
             }),
         }
     }
@@ -237,7 +243,8 @@ impl Settings {
                  project's own Claude round on its reviewer's agent, so name yours otherwise"
             )));
         }
-        let claude = LoopReviewer::claude(&self.role_agents(&kelpie.agents)?.reviewer);
+        let agents = self.role_agents(&kelpie.agents)?;
+        let claude = LoopReviewer::claude(&agents.reviewer, &agents.limits.reviewer);
         if self.review.reviewers.is_empty() {
             let local = (self.review.local.clone()).unwrap_or_else(|| LocalRound::default_at(home));
             if !local.is_on() {
@@ -284,11 +291,12 @@ impl Settings {
                 Definition::Claude(session) => Runs::Claude(session),
                 Definition::Session(AgentSession { agent, paths }) => {
                     let at = format!("{at}.agent");
-                    let model = find(&kelpie.agents, &agent, &at, SETTING)?;
+                    let (model, limit) = find(&kelpie.agents, &agent, &at, SETTING)?;
                     Runs::Claude(ClaudeSession {
                         model: model.model,
                         effort: model.effort,
                         paths,
+                        limit,
                     })
                 }
             };

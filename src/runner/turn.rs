@@ -25,7 +25,7 @@ use super::rework;
 use super::ruling::park;
 use super::trigger::lock;
 use crate::pacer::Scope;
-use crate::ports::{AgentCall, AgentError, AgentReply, Issue, Role, Session, Tools};
+use crate::ports::{AgentCall, AgentError, AgentReply, Cost, Issue, Role, Session, Tools};
 use crate::preview::{self, McpFiles, WORKER_INSTRUCTIONS};
 use crate::profile::WorkerProfile;
 use crate::settings::NonBlank;
@@ -219,7 +219,7 @@ impl Runner {
         if due && let Some(parked) = self.claude_files_changed(Unchecked::CarryOn)? {
             return Ok(parked);
         }
-        if due && let Some(held) = self.pace(Scope::Turn)?.holds() {
+        if due && let Some(held) = self.pace_worker(Scope::Turn)?.holds() {
             return Ok(held);
         }
         let item = self.current().expect("checked above");
@@ -372,6 +372,7 @@ impl Runner {
             plugin_dirs: self.skills.plugin_dirs().to_vec(),
             tools: Tools::Work,
             reach: profile.reach(),
+            lease: self.agents.limits.worker.lease().cloned(),
         })
     }
 
@@ -490,7 +491,7 @@ impl Runner {
                         issue,
                         session,
                         usage: reply.usage,
-                        cost_usd: cost.usd(),
+                        cost_usd: cost.map(Cost::usd),
                         work_item_cost_usd,
                         pull_request,
                     },
@@ -513,7 +514,7 @@ impl Runner {
                             issue,
                             session,
                             usage: reply.usage,
-                            cost_usd: cost.usd(),
+                            cost_usd: cost.map(Cost::usd),
                             work_item_cost_usd,
                             pull_request,
                             id,

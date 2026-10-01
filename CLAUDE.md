@@ -28,7 +28,7 @@ Gotchas:
 
 Invoke the `rust-house-style` skill before writing or reviewing Rust. The rules are shep-pm/rust-house-style, IR-1 to IR-48.
 
-CI (`.github/workflows/test.yml`) runs `cargo fmt --all --check`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`, rustdoc with `-D warnings`, and `cargo +1.88 check` for the MSRV. Run the same before handing a branch over. `.github/workflows/file-size.yml` also fails any `.rs` file over 1000 lines (IR-48).
+CI (`.github/workflows/test.yml`) runs `cargo fmt --all --check`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`, rustdoc with `-D warnings`, and `cargo +1.88 check` for the MSRV. Run the same before handing a branch over, except the MSRV check: CI and the merge gate run it, and it builds a second copy of every dependency. `.github/workflows/file-size.yml` also fails any `.rs` file over 1000 lines (IR-48).
 
 ## Writing and git
 

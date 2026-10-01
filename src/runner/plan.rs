@@ -75,7 +75,7 @@ impl Runner {
                     issue: number,
                     outcome: PlanOutcome::Failed { reason },
                     usage: Usage::default(),
-                    cost_usd: 0.0,
+                    cost_usd: None,
                 })
             }
         };
@@ -111,6 +111,7 @@ impl Runner {
             timeout: Some(Duration::from_secs(minutes * 60)),
             tools: Tools::Review,
             reach: Reach::default(),
+            lease: self.agents.limits.planner.lease().cloned(),
         };
         Ok((self.prepared(call)?, view))
     }
@@ -129,8 +130,8 @@ impl Runner {
         if matches!(result, Err(AgentError::Stopped)) || self.state.item(issue).is_some() {
             return Ok(None);
         }
-        let (usage, cost_usd) = result.as_ref().map_or((Usage::default(), 0.0), |reply| {
-            (reply.usage, reply.session_cost.map_or(0.0, Cost::usd))
+        let (usage, cost_usd) = result.as_ref().map_or((Usage::default(), None), |reply| {
+            (reply.usage, reply.session_cost.map(Cost::usd))
         });
         let planned = result
             .map_err(|e| e.to_string())

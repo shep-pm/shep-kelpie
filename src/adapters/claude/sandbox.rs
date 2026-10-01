@@ -255,6 +255,7 @@ mod tests {
                 plugin_dirs: Vec::new(),
                 tools: Tools::Answer,
                 reach: Reach::default(),
+                lease: None,
             }
         }
 
