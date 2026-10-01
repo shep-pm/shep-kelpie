@@ -11,11 +11,13 @@ use std::process::{Command, Stdio};
 
 use crate::board::{LabelError, Skip, WorkerModel, worker_override};
 use crate::channels::{Channel, Channels};
+use crate::local_paths::LocalPaths;
 use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Guarded, Ports, SessionId, Timestamp, Visibility};
 use crate::review_bot::{Bot, Profile, Reviewers};
-use crate::settings::{Settings, SettingsError};
+use crate::settings::{LoopReviewer, NonBlank, RoleAgents, Runs, Settings, SettingsError};
 use crate::skills::Skills;
+use crate::state::ids::RulingIds;
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{
@@ -23,6 +25,8 @@ use crate::work_item::{
 };
 
 mod adopt;
+#[cfg(test)]
+mod agents_tests;
 mod alert;
 mod claude_files;
 #[cfg(test)]
@@ -48,6 +52,7 @@ mod several;
 mod shots;
 mod trigger;
 mod turn;
+mod words;
 
 pub use crate::coderabbit::LABEL as SUMMON_LABEL;
 pub use adopt::AdoptError;
@@ -62,6 +67,7 @@ use trigger::issue_list;
 pub use trigger::{ACTIONS, RELAY_RULE, Status, WorkItemStatus, answer, is_no_or_answer};
 pub use trigger::{GateError, WhichItem};
 pub use turn::step;
+pub use words::read_answer;
 
 #[cfg(test)]
 pub(crate) use gate::CHECKS_SETTLE;
@@ -156,12 +162,20 @@ pub struct Runner {
     store: StateStore,
     state: ProjectState,
     ports: Ports,
+    // What no forge post may name, which `ports.forge` refuses too
+    local: LocalPaths,
     // The pacer's last reading of usage and when it was read, kept in memory only
     pacing: Option<(Timestamp, Assessment)>,
     // What the board passed over on its last poll, kept in memory only
     skipped: Vec<Skip>,
     // The pull request reviewers kelpie's own settings define
     reviewers: Reviewers,
+    // The review loop's reviewers, in order, from the project's list
+    lineup: Vec<LoopReviewer>,
+    // The model and effort each role runs on, from the agent it names
+    agents: RoleAgents,
+    // The maintainer's home folder, for `~/` in kelpie's own settings
+    home: PathBuf,
     // None when rulings do not go to the webhook
     webhook: Option<Webhook>,
     channels: Channels,
@@ -206,24 +220,28 @@ impl Runner {
         kelpie: &Path,
         mut ports: Ports,
     ) -> Result<Self, OpenError> {
-        let local = [home, paths.kelpie_home.as_path(), settings.repo.as_path()];
-        ports.forge = Box::new(Guarded::new(ports.forge, local));
+        let folders = [home, paths.kelpie_home.as_path(), settings.repo.as_path()];
+        let names = settings.private_names.iter().map(NonBlank::as_str);
+        let local = LocalPaths::new(folders, names);
+        ports.forge = Box::new(Guarded::new(ports.forge, local.clone()));
         let reviewers = kelpie_settings.reviewers;
+        let agents = settings.role_agents(&kelpie_settings.agents)?;
+        let lineup = settings.lineup(&kelpie_settings, home)?;
         let (channels, webhook) = ruling_channels(&settings, kelpie_settings)?;
         let totp = replies::authenticator(webhook.as_ref(), &paths.totp)?;
         check_repo(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;
-        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let env_home = std::env::var_os("HOME").map(PathBuf::from);
         guard_hooks::check(
             &settings,
-            home.as_deref(),
+            env_home.as_deref(),
             std::env::var_os("PATH").as_deref(),
         )?;
         check_reviewers(&settings, &reviewers, &ports)?;
         crate::skills::check(&settings.skills, &paths.skills)?;
         let skills = Skills::load(&settings.skills, &paths.skills);
         check_coderabbit(&settings, &ports)?;
-        check_local(&settings, &ports)?;
+        check_local(&settings, &lineup, &ports)?;
         let store = StateStore::new(paths.state.clone());
         let mut state = store
             .load()?
@@ -264,9 +282,13 @@ impl Runner {
             store,
             state,
             ports,
+            local,
             pacing: None,
             skipped: Vec::new(),
             reviewers,
+            lineup,
+            agents,
+            home: home.to_owned(),
             webhook,
             channels,
             retry: None,
@@ -304,6 +326,7 @@ impl Runner {
         Names {
             project: self.project.as_str(),
             bot: names.join("/"),
+            ids: RulingIds::under(&self.paths.kelpie_home),
         }
     }
 
@@ -372,7 +395,7 @@ impl Runner {
             .map_err(AddError::Forge)?;
         let worker = worker_override(&found.labels)
             .map_err(AddError::Label)?
-            .unwrap_or_else(|| WorkerModel::from(&self.settings.models.worker));
+            .unwrap_or_else(|| WorkerModel::from(&self.agents.worker));
         let session = new_session_id().map_err(|e| AddError::Session(e.to_string()))?;
         let mut next = self.state.clone();
         next.work_items
@@ -538,23 +561,35 @@ pub(crate) fn check_instructions(settings: &Settings) -> Result<(), SettingsErro
     instructions::read_extra(settings).map(drop)
 }
 
-// The local round's command is there, or its endpoint answers.
-fn check_local(settings: &Settings, ports: &Ports) -> Result<(), SettingsError> {
-    ports
-        .reviewer
-        .check(&settings.review.local)
-        .map_err(|reason| SettingsError::Invalid {
-            setting: "review.local",
-            reason,
-        })
+// Each local reviewer's command is there, or its endpoint answers.
+fn check_local(
+    settings: &Settings,
+    lineup: &[LoopReviewer],
+    ports: &Ports,
+) -> Result<(), SettingsError> {
+    let setting = match settings.review.reviewers.is_empty() {
+        true => "review.local",
+        false => "review.reviewers",
+    };
+    for reviewer in lineup {
+        let Runs::Local(local) = &reviewer.runs else {
+            continue;
+        };
+        ports
+            .reviewer
+            .check(local)
+            .map_err(|reason| SettingsError::Invalid { setting, reason })?;
+    }
+    Ok(())
 }
 
 // What a ruling's question names: its project, and the review bots it may
-// be about, as one name.
+// be about, as one name, and where its id comes from.
 #[derive(Debug, Clone)]
 struct Names<'a> {
     project: &'a str,
     bot: String,
+    ids: RulingIds,
 }
 
 // Every listed reviewer needs a definition in kelpie's settings and a profile.

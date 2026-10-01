@@ -1,18 +1,20 @@
-//! The review loop's local round, `[app.dogs.kelpie.review.local]`
+//! A local model's round: an OpenAI-compatible server, or a command
 //!
-//! The local round alternates with the Claude round, local first. A project
-//! turns it off, points kelpie's own reviewer at an OpenAI-compatible
-//! server, or names a command that keeps the README's contract. A file
-//! without the table runs the maintainer's qwen-review script.
+//! Kelpie's `[local_reviewers]` define these by name, and a project lists
+//! them in `review.reviewers`. The older form is one project's
+//! `[app.dogs.kelpie.review.local]`, alternating with the Claude round,
+//! local first. A table with neither runs the maintainer's qwen-review
+//! script, then the Claude round.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::NonBlank;
+use super::reviewers::LeaseName;
 
-/// The maintainer's qwen-review script, which a file without `[app.dogs.kelpie.review.local]` runs
+/// The maintainer's qwen-review script, which a table without a local round runs
 const QWEN_REVIEW: &str = "~/.claude/scripts/qwen-review.sh";
 
 // The smallest context the endpoint reviewer accepts, in tokens. At 4096 a
@@ -31,47 +33,75 @@ pub enum LocalRound {
     Command(LocalCommand),
 }
 
-impl Default for LocalRound {
-    fn default() -> Self {
+impl LocalRound {
+    /// The maintainer's qwen-review script under `home`, which a table
+    /// without either form of the local round runs
+    pub fn default_at(home: &Path) -> Self {
+        let script = QWEN_REVIEW.strip_prefix("~/").unwrap_or(QWEN_REVIEW);
         Self::Command(LocalCommand {
-            command: PathBuf::from(QWEN_REVIEW),
+            command: home.join(script),
+            lease: None,
             gpu_lease: false,
             ollama: None,
             ollama_model: None,
+            paths: Vec::new(),
         })
     }
-}
 
-impl LocalRound {
     /// Whether the project runs a local round at all
     pub fn is_on(&self) -> bool {
         !matches!(self, Self::Off {})
     }
 
-    /// Whether kelpie holds the GPU lock around each round
-    pub fn gpu_lease(&self) -> bool {
+    /// The lease kelpie holds around each round, if any
+    ///
+    /// `gpu_lease = true` is the older spelling of `lease = "gpu"`.
+    pub fn lease(&self) -> Option<LeaseName> {
+        let (lease, gpu_lease) = match self {
+            Self::Off {} => return None,
+            Self::Endpoint(endpoint) => (&endpoint.lease, endpoint.gpu_lease),
+            Self::Command(command) => (&command.lease, command.gpu_lease),
+        };
+        lease.clone().or_else(|| gpu_lease.then(LeaseName::gpu))
+    }
+
+    /// The globs a pull request must change a file under for this round to run
+    pub fn paths(&self) -> &[NonBlank] {
         match self {
-            Self::Off {} => false,
-            Self::Endpoint(endpoint) => endpoint.gpu_lease,
-            Self::Command(command) => command.gpu_lease,
+            Self::Off {} => &[],
+            Self::Endpoint(endpoint) => &endpoint.paths,
+            Self::Command(command) => &command.paths,
         }
     }
 
     /// Why the settings are refused, when one cannot work as written
     ///
+    /// `at` is the setting's dotted name, for the message.
+    ///
     /// # Errors
     ///
     /// The message, naming the setting.
-    pub fn check(&self) -> Result<(), String> {
+    pub fn check(&self, at: &str) -> Result<(), String> {
+        let (lease, gpu_lease) = match self {
+            Self::Off {} => return Ok(()),
+            Self::Endpoint(endpoint) => (&endpoint.lease, endpoint.gpu_lease),
+            Self::Command(command) => (&command.lease, command.gpu_lease),
+        };
+        if lease.is_some() && gpu_lease {
+            return Err(format!(
+                "`{at}` sets both `lease` and `gpu_lease`: keep `lease`"
+            ));
+        }
         let Self::Command(command) = self else {
             return Ok(());
         };
         match (&command.ollama, &command.ollama_model) {
-            (Some(_), _) if !command.gpu_lease => Err("`review.local.ollama` needs \
-                 `gpu_lease = true`: without it kelpie reads `/api/ps` while another \
-                 round may hold the GPU lock, and would rule on that round's model"
-                .into()),
-            (None, Some(_)) => Err("`review.local.ollama_model` needs `ollama`".into()),
+            (Some(_), _) if self.lease().is_none() => Err(format!(
+                "`{at}.ollama` needs a lease, such as `lease = \"gpu\"`: without \
+                 it kelpie reads `/api/ps` while another round may hold the model, \
+                 and would rule on that round's model"
+            )),
+            (None, Some(_)) => Err(format!("`{at}.ollama_model` needs `ollama`")),
             _ => Ok(()),
         }
     }
@@ -79,20 +109,20 @@ impl LocalRound {
     /// The Ollama host to read `/api/ps` from before a round, and the model
     /// to look for there
     ///
-    /// Only where kelpie holds the GPU lock around the round: a read without
-    /// it races whoever holds the lock, who may reload the model spilled. An
+    /// Only where kelpie holds a lease around the round: a read without it
+    /// races whoever holds the model, who may reload it spilled. An
     /// endpoint's host is its URL without the `/v1`, and its model is the one
     /// it asks. A command names its host in `ollama` and may name its model
     /// in `ollama_model`, else every model the host has loaded is looked at.
     pub fn ollama(&self) -> Option<(String, Option<&str>)> {
+        self.lease()?;
         match self {
             Self::Off {} => None,
-            Self::Endpoint(endpoint) if endpoint.gpu_lease => {
+            Self::Endpoint(endpoint) => {
                 let url = endpoint.url.as_str();
                 let host = url.strip_suffix("/v1").unwrap_or(url);
                 Some((host.to_owned(), Some(endpoint.model.as_str())))
             }
-            Self::Endpoint(_) => None,
             Self::Command(command) => {
                 let host = command.ollama.as_ref()?;
                 let model = command.ollama_model.as_ref().map(NonBlank::as_str);
@@ -112,9 +142,17 @@ pub struct Endpoint {
     pub model: NonBlank,
     /// The context size the server gives the model, in tokens
     pub context: ContextSize,
-    /// Whether kelpie holds the GPU lock around each round. Off when absent.
+    /// The lease kelpie holds around each round: `gpu` is this machine's
+    /// GPU lock, and any other name a lock of its own. None when absent.
+    #[serde(default)]
+    pub lease: Option<LeaseName>,
+    /// The older spelling of `lease = "gpu"`. Off when absent.
     #[serde(default)]
     pub gpu_lease: bool,
+    /// Globs of the files a pull request must change for this reviewer to
+    /// run. Every pull request when absent.
+    #[serde(default)]
+    pub paths: Vec<NonBlank>,
 }
 
 /// A command run for each local round
@@ -124,15 +162,18 @@ pub struct LocalCommand {
     /// Its path. A leading `~/` is the home folder, and a relative path is
     /// taken from the settings file's folder.
     pub command: PathBuf,
-    /// Whether kelpie holds the GPU lock around each round. Off when absent,
-    /// and off for a command that takes the lock itself.
+    /// The lease kelpie holds around each round: `gpu` is this machine's
+    /// GPU lock, and any other name a lock of its own. None when absent, as
+    /// for a command that takes the lock itself.
+    #[serde(default)]
+    pub lease: Option<LeaseName>,
+    /// The older spelling of `lease = "gpu"`. Off when absent.
     #[serde(default)]
     pub gpu_lease: bool,
     /// The Ollama host the command's model runs on, such as
     /// `http://localhost:11434`. Kelpie reads its `/api/ps` before each round.
     /// Off when absent, since a command does not say where its model is.
-    /// Needs `gpu_lease = true`, so kelpie reads it only while it holds the
-    /// GPU lock.
+    /// Needs a lease, so kelpie reads it only while it holds one.
     #[serde(default)]
     pub ollama: Option<EndpointUrl>,
     /// The one model on that host the command uses, as Ollama names it.
@@ -140,6 +181,10 @@ pub struct LocalCommand {
     /// is spilled for another reason fails the round too.
     #[serde(default)]
     pub ollama_model: Option<NonBlank>,
+    /// Globs of the files a pull request must change for this reviewer to
+    /// run. Every pull request when absent.
+    #[serde(default)]
+    pub paths: Vec<NonBlank>,
 }
 
 /// An `http://` or `https://` URL, kept without a trailing `/`
@@ -203,10 +248,11 @@ impl TryFrom<i64> for ContextSize {
 
 #[cfg(test)]
 mod tests {
+    use crate::webhook::KelpieSettings;
     use std::path::Path;
 
     use super::*;
-    use crate::settings::Settings;
+    use crate::settings::{LoopReviewer, Runs, Settings};
 
     const EXAMPLE: &str = include_str!("../../settings.example.toml");
 
@@ -214,20 +260,37 @@ mod tests {
                          kind = \"command\"\n\
                          command = \"~/.claude/scripts/qwen-review.sh\"\n";
 
-    // The example's runner entry with `table` for its local round.
+    // The example's runner entry with `table` as its older local round.
     fn with_table(table: &str) -> Result<Settings, String> {
-        assert!(EXAMPLE.contains(TABLE), "the example's local round moved");
-        let entry = crate::test::project_table(&EXAMPLE.replace(TABLE, table));
+        let entry = crate::test::project_table(&crate::test::with_tables(EXAMPLE, table));
         let (home, folder) = (Path::new("/home/me"), Path::new("/p"));
         Settings::from_table(&entry, "shep", home, folder).map_err(|e| e.to_string())
+    }
+
+    fn local(table: &str) -> LocalRound {
+        with_table(table)
+            .unwrap()
+            .review
+            .local
+            .expect("the table sets it")
+    }
+
+    // The loop `table` runs, with nothing defined in kelpie's settings.
+    fn lineup(table: &str) -> Vec<LoopReviewer> {
+        let settings = with_table(table).unwrap();
+        settings
+            .lineup(&KelpieSettings::default(), Path::new("/home/me"))
+            .unwrap()
     }
 
     fn command(path: &str) -> LocalRound {
         LocalRound::Command(LocalCommand {
             command: PathBuf::from(path),
+            lease: None,
             gpu_lease: false,
             ollama: None,
             ollama_model: None,
+            paths: Vec::new(),
         })
     }
 
@@ -236,68 +299,73 @@ mod tests {
         let table = "[app.dogs.kelpie.review.local]\nkind = \"endpoint\"\n\
                      url = \"http://gpu-box:11434/v1/\"\nmodel = \"coder\"\ncontext = 8192\n";
         assert_eq!(
-            with_table(table).unwrap().review.local.ollama(),
+            local(table).ollama(),
             None,
-            "not read where kelpie holds no GPU lock"
+            "not read where kelpie holds no lease"
         );
-        let table = format!("{table}gpu_lease = true\n");
+        let leased = format!("{table}gpu_lease = true\n");
         assert_eq!(
-            with_table(&table).unwrap().review.local.ollama(),
+            local(&leased).ollama(),
+            Some(("http://gpu-box:11434".to_owned(), Some("coder")))
+        );
+        let named = format!("{table}lease = \"gpu-box\"\n");
+        assert_eq!(
+            local(&named).ollama(),
             Some(("http://gpu-box:11434".to_owned(), Some("coder")))
         );
         let table = "[app.dogs.kelpie.review.local]\nkind = \"command\"\n\
                      command = \"/opt/review\"\ngpu_lease = true\n";
-        assert_eq!(with_table(table).unwrap().review.local.ollama(), None);
+        assert_eq!(local(table).ollama(), None);
         let table = format!("{table}ollama = \"http://gpu-box:11434/\"\n");
         assert_eq!(
-            with_table(&table).unwrap().review.local.ollama(),
+            local(&table).ollama(),
             Some(("http://gpu-box:11434".to_owned(), None))
         );
         let table = format!("{table}ollama_model = \"coder:14b\"\n");
         assert_eq!(
-            with_table(&table).unwrap().review.local.ollama(),
+            local(&table).ollama(),
             Some(("http://gpu-box:11434".to_owned(), Some("coder:14b")))
         );
         assert_eq!(LocalRound::Off {}.ollama(), None);
     }
 
     #[test]
-    fn an_ollama_host_without_the_gpu_lease_or_a_model_without_a_host_is_refused() {
+    fn an_ollama_host_without_a_lease_or_a_model_without_a_host_is_refused() {
         let table = "[app.dogs.kelpie.review.local]\nkind = \"command\"\n\
                      command = \"/opt/review\"\n";
         let err = with_table(&format!("{table}ollama = \"http://h:1\"\n")).unwrap_err();
-        assert!(
-            err.contains("`review.local.ollama` needs `gpu_lease = true`"),
-            "{err}"
-        );
+        assert!(err.contains("`review.local.ollama` needs a lease"), "{err}");
         let err = with_table(&format!("{table}ollama_model = \"m\"\ngpu_lease = true\n"));
         assert!(
             err.unwrap_err()
                 .contains("`review.local.ollama_model` needs `ollama`")
         );
-    }
-
-    #[test]
-    fn the_example_runs_the_qwen_review_script_from_the_home_folder() {
-        assert_eq!(
-            with_table(TABLE).unwrap().review.local,
-            command("/home/me/.claude/scripts/qwen-review.sh")
+        let err = with_table(&format!("{table}lease = \"gpu\"\ngpu_lease = true\n"));
+        assert!(
+            err.unwrap_err()
+                .contains("sets both `lease` and `gpu_lease`")
         );
     }
 
     #[test]
-    fn a_file_without_the_table_runs_the_same_script() {
+    fn a_table_with_neither_form_runs_the_qwen_review_script_from_the_home_folder_then_claude() {
+        let [qwen, claude] = lineup("").try_into().unwrap();
+        assert_eq!(qwen.name.as_str(), "qwen");
         assert_eq!(
-            with_table("").unwrap().review,
-            with_table(TABLE).unwrap().review
+            qwen.runs,
+            Runs::Local(command("/home/me/.claude/scripts/qwen-review.sh"))
         );
+        assert_eq!(claude.name.as_str(), "claude");
+        assert_eq!(lineup(TABLE), [qwen, claude]);
     }
 
     #[test]
     fn the_local_round_can_be_off() {
-        let s = with_table("[app.dogs.kelpie.review.local]\nkind = \"off\"\n").unwrap();
-        assert_eq!(s.review.local, LocalRound::Off {});
-        assert!(!s.review.local.is_on());
+        let table = "[app.dogs.kelpie.review.local]\nkind = \"off\"\n";
+        assert_eq!(local(table), LocalRound::Off {});
+        assert!(!local(table).is_on());
+        let [claude] = lineup(table).try_into().unwrap();
+        assert_eq!(claude.name.as_str(), "claude");
     }
 
     #[test]
@@ -305,7 +373,7 @@ mod tests {
         let table = "[app.dogs.kelpie.review.local]\nkind = \"endpoint\"\n\
                      url = \"http://localhost:11434/v1/\"\n\
                      model = \"qwen2.5-coder:14b\"\ncontext = 32768\ngpu_lease = true\n";
-        let LocalRound::Endpoint(e) = with_table(table).unwrap().review.local else {
+        let LocalRound::Endpoint(e) = local(table) else {
             panic!("not an endpoint");
         };
         assert_eq!(e.url.as_str(), "http://localhost:11434/v1");
@@ -315,13 +383,17 @@ mod tests {
     }
 
     #[test]
-    fn the_gpu_lease_is_off_unless_asked_for() {
+    fn the_lease_is_none_unless_asked_for_and_gpu_lease_is_the_gpu() {
         let table =
             "[app.dogs.kelpie.review.local]\nkind = \"command\"\ncommand = \"/opt/review\"\n";
-        assert!(!with_table(table).unwrap().review.local.gpu_lease());
-        let table = format!("{table}gpu_lease = true\n");
-        assert!(with_table(&table).unwrap().review.local.gpu_lease());
-        assert!(!LocalRound::Off {}.gpu_lease());
+        assert_eq!(local(table).lease(), None);
+        let gpu = format!("{table}gpu_lease = true\n");
+        assert_eq!(local(&gpu).lease(), Some(LeaseName::gpu()));
+        let named = format!("{table}lease = \"gpu-box\"\n");
+        assert_eq!(local(&named).lease().unwrap().as_str(), "gpu-box");
+        assert_eq!(LocalRound::Off {}.lease(), None);
+        let err = with_table(&format!("{table}lease = \"GPU box\"\n")).unwrap_err();
+        assert!(err.contains("must be lowercase letters"), "{err}");
     }
 
     #[test]
@@ -367,12 +439,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("settings.toml");
         let table = "[app.dogs.kelpie.review.local]\nkind = \"command\"\ncommand = \"review.sh\"\n";
-        let old_file = crate::test::project_table(&EXAMPLE.replace(TABLE, table));
+        let entry = crate::test::with_tables(EXAMPLE, table);
+        let old_file = crate::test::project_table(&entry);
         std::fs::write(&file, toml::to_string(&old_file).unwrap()).unwrap();
         let s = Settings::load(&file, Path::new("/home/me")).unwrap();
         assert_eq!(
             s.review.local,
-            command(&dir.path().join("review.sh").display().to_string())
+            Some(command(&dir.path().join("review.sh").display().to_string()))
         );
     }
 }

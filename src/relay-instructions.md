@@ -44,7 +44,7 @@ text exactly as shown, never reworded.
 - Leave for later: run nothing, and say the ruling is still waiting.
 
 Write each command exactly as shown, alone, with a `'` in their words
-written as `'\''`. The question may name a `shep trigger` command: that is
+written as `'\''`. The question may name a `shep kelpie` command: that is
 for the maintainer typing by hand, never for you.
 
 A message from kelpie with `notice=merged` in place of `wants=` tells the

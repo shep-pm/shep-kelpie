@@ -310,6 +310,20 @@ fn build_env_names_folders_inside_the_build_folder() {
 }
 
 #[test]
+fn private_names_are_read_and_default_to_none() {
+    assert_eq!(parse(EXAMPLE).unwrap().private_names, []);
+    let text = EXAMPLE.replace(
+        "generated = [",
+        "private_names = [\"Acme Corp\", \"zeta\"]\ngenerated = [",
+    );
+    let names: Vec<_> = parse(&text).unwrap().private_names;
+    let names: Vec<&str> = names.iter().map(NonBlank::as_str).collect();
+    assert_eq!(names, ["Acme Corp", "zeta"]);
+    let blank = EXAMPLE.replace("generated = [", "private_names = [\" \"]\ngenerated = [");
+    assert!(parse_err(&blank).contains("blank"), "{}", parse_err(&blank));
+}
+
+#[test]
 fn a_repo_path_without_a_tilde_is_kept() {
     let text = EXAMPLE.replace("\"~/.kelpie/repos/shep\"", "\"/srv/shep\"");
     assert_eq!(parse(&text).unwrap().repo, Path::new("/srv/shep"));
@@ -386,10 +400,11 @@ fn a_file_moves_into_an_equal_table() {
 #[test]
 fn a_table_s_local_command_expands_the_home_folder_and_takes_the_project_folder() {
     let command = |path: &str| {
-        let line = format!("command = \"{path}\"");
-        let text = EXAMPLE.replace("command = \"~/.claude/scripts/qwen-review.sh\"", &line);
+        let table =
+            format!("[app.dogs.kelpie.review.local]\nkind = \"command\"\ncommand = \"{path}\"\n");
+        let text = crate::test::with_tables(EXAMPLE, &table);
         match parse(&text).unwrap().review.local {
-            LocalRound::Command(local) => local.command,
+            Some(LocalRound::Command(local)) => local.command,
             other => panic!("{other:?}"),
         }
     };

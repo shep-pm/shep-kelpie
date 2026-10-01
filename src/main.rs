@@ -4,9 +4,9 @@
 //! `kelpie`, started by shep as the adopted dog: the lease dog
 //! `shep kelpie lease ...`: the maintainer's lease commands
 //!
-//! `shep kelpie add [<project>]`, `start [<project>]`, `pause [<project>]`,
-//! `status`: a checkout's project in the maintainer's own flock, run as
-//! `shep kelpie <command>` in the checkout.
+//! `shep kelpie add`, `start`, `pause`, `status`, `rule`, `rework`, `adopt`,
+//! `gate` and `drop`: a project in the maintainer's own flock, the one
+//! `-p` names or whose repo holds the folder it runs in.
 //!
 //! `shep kelpie doctor [<project>] [--test-alert]`: checks what the projects need
 //! on this machine, and changes nothing. Run as `shep kelpie doctor`.
@@ -62,23 +62,27 @@ const REFUSE: u8 = 2;
 
 fn main() -> ExitCode {
     shep_kelpie::schema::probe();
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args = shep_kelpie::flock::verb_first(std::env::args().skip(1).collect());
     match args.as_slice() {
         [role, project] if role == "runner" => shep_kelpie::sheep::run(project),
         [command, rest @ ..] if command == "lease" => shep_kelpie::lease::cli::main(rest),
-        [role, git_common_dir, worktree] if role == "guard" => {
+        [role, git_common_dir, worktree, local @ ..] if role == "guard" => {
             let home = std::env::var_os("HOME").map(PathBuf::from);
             let checkout = Checkout {
                 git_common_dir: Path::new(git_common_dir),
                 worktree: Path::new(worktree),
             };
-            hook(guard::judge(
-                std::io::stdin().lock(),
-                home.as_deref(),
-                checkout,
-            ))
+            match guard::local_paths(home.as_deref(), local) {
+                Ok(local) => hook(guard::judge(
+                    std::io::stdin().lock(),
+                    home.as_deref(),
+                    local,
+                    checkout,
+                )),
+                Err(why) => hook(Verdict::Refuse(why)),
+            }
         }
-        [command, rest @ ..] if ["add", "start", "pause", "status"].contains(&command.as_str()) => {
+        [command, rest @ ..] if shep_kelpie::flock::VERBS.contains(&command.as_str()) => {
             shep_kelpie::flock::main(command, rest)
         }
         [command, rest @ ..] if command == "doctor" => shep_kelpie::doctor::main(rest),
@@ -133,8 +137,10 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: shep-kelpie add [<project>]\n       shep-kelpie start [<project>]\n       shep-kelpie pause [<project>]\n       shep-kelpie status\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie browse-guard <domain>...\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n       shep-kelpie shots-mcp <tools> <job>\n       shep-kelpie relay-yes <project> <id>\n       shep-kelpie relay-answer <project> <params>\n       shep-kelpie relay-gate <kelpie>\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.",
-                shep_kelpie::lease::cli::USAGE
+                "usage: shep-kelpie add [<project>] | add <issue>\n       shep-kelpie start | pause | status\n       shep-kelpie rule [<id> <answer>]\n       shep-kelpie rework <pr> | adopt <pr>\n       shep-kelpie gate [<issue>] | drop [<issue>]\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie browse-guard <domain>...\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n       shep-kelpie shots-mcp <tools> <job>\n       shep-kelpie relay-yes <project> <id>\n       shep-kelpie relay-answer <project> <params>\n       shep-kelpie relay-gate <kelpie>\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.\n\n{}\n\n{}",
+                shep_kelpie::lease::cli::USAGE,
+                shep_kelpie::flock::USAGE,
+                shep_kelpie::flock::rule::HELP
             );
             ExitCode::from(2)
         }

@@ -62,7 +62,14 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
     for kind in kinds {
         let said = comment(&kind, "CodeRabbit").unwrap_or_default();
         assert!(said.ends_with("\n\nWaiting on the maintainer."), "{said}");
-        for internal in ["shep trigger", "rule '", "ruling", "yes", "<note>"] {
+        for internal in [
+            "shep trigger",
+            "shep kelpie",
+            "rule '",
+            "ruling",
+            "yes",
+            "<note>",
+        ] {
             assert!(!said.contains(internal), "{internal} in {said}");
         }
     }

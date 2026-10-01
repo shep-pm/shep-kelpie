@@ -20,7 +20,7 @@
 //! A project may list several bots. Each round goes to the first listed
 //! whose window is free, and the round cap counts rounds from all of them.
 
-mod cap;
+pub(super) mod cap;
 mod lease;
 #[cfg(test)]
 mod tests;
@@ -545,7 +545,7 @@ impl Runner {
         let item = self.item();
         let (issue, worktree, folder) =
             (item.issue, item.worktree.clone(), self.paths.worker.clone());
-        let model = self.settings.models.judge.clone();
+        let model = self.agents.judge.clone();
         // A review bot reviews the whole pull request, so its judge diffs from `main`.
         let main = format!("origin/{}", crate::worktree::BASE);
         match calls::judge_call(
@@ -556,7 +556,9 @@ impl Runner {
             &model,
             &next.finding,
             None,
-        ) {
+        )
+        .and_then(|call| self.prepared(call))
+        {
             Ok(call) => {
                 self.mark_review_call_running()?;
                 Ok(Begin::Review(ReviewCall::Judge(call)))

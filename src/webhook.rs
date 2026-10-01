@@ -1,5 +1,5 @@
-//! Kelpie's own settings: the webhook, the channels rulings go to, and the
-//! pull request reviewers
+//! Kelpie's own settings: the webhook, the channels rulings go to, the
+//! pull request reviewers, the local reviewers and the agents
 //!
 //! Kelpie's `[kelpie]` section of `dogs.toml`, or the file under kelpie's
 //! home it had before one, shared by every project. Every part is
@@ -8,6 +8,7 @@
 //! credential, so no error, log line or status carries it.
 //! `kelpie-settings.example.toml` beside this crate shows the section.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
@@ -17,7 +18,7 @@ use shep_client::dogs::dog_config;
 
 use crate::channels::Channels;
 use crate::review_bot::Reviewers;
-use crate::settings::SettingsError;
+use crate::settings::{Agent, AgentName, Definition, ReviewerName, SettingsError};
 
 /// What every project shares
 #[dog_config]
@@ -35,6 +36,13 @@ pub struct KelpieSettings {
     /// The pull request reviewers a project may list, each by its window
     #[serde(default)]
     pub reviewers: Reviewers,
+    /// The review loop's reviewers a project may list in `review.reviewers`,
+    /// by name. `claude` is always the project's own Claude round.
+    #[serde(default)]
+    pub local_reviewers: BTreeMap<ReviewerName, Definition>,
+    /// The agents a project's roles and session reviewers may name
+    #[serde(default)]
+    pub agents: BTreeMap<AgentName, Agent>,
 }
 
 /// The maintainer's webhook
@@ -119,7 +127,10 @@ const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntf
                      and an `https://` `url`, `ruling_channels`, a list of \
                      `webhook` and `relay`, and `[reviewers.coderabbit]` and \
                      `[reviewers.cubic]` tables with `reviews` and `hours`, \
-                     and nothing else";
+                     `[local_reviewers.<name>]` tables with a `kind` of \
+                     `endpoint`, `command`, `claude` or `session` and that \
+                     kind's keys, `[agents.<name>]` tables with `harness`, \
+                     `model` and `effort`, and nothing else";
 
 impl KelpieSettings {
     /// Reads and checks kelpie's settings file
@@ -187,6 +198,23 @@ mod tests {
         assert_eq!(webhook.kind, WebhookKind::Ntfy);
         assert!(webhook.url.expose().starts_with("https://ntfy.sh/"));
         assert_eq!(s.ruling_channels, None);
+    }
+
+    #[test]
+    fn the_example_s_local_reviewers_read_once_uncommented() {
+        let start = "# [kelpie.local_reviewers.qwen]";
+        let text = example();
+        let at = text
+            .find(start)
+            .expect("the example defines local reviewers");
+        let defined: String = text[at..]
+            .lines()
+            .map(|line| line.trim_start_matches('#').trim_start())
+            .map(|line| format!("{}\n", line.replace("[kelpie.", "[")))
+            .collect();
+        let s = KelpieSettings::parse(&defined).unwrap();
+        let names: Vec<&str> = s.local_reviewers.keys().map(|n| n.as_str()).collect();
+        assert_eq!(names, ["gpu-box", "opus", "qwen"]);
     }
 
     #[test]

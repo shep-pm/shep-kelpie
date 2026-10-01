@@ -25,7 +25,7 @@ struct Input<'a> {
 
 /// One Bash call being judged
 pub(super) struct Judging<'a> {
-    pub home: Option<Home>,
+    pub home: Home,
     pub checkout: Checkout<'a>,
 }
 
@@ -88,7 +88,7 @@ impl Judging<'_> {
 
     // A script file a command runs, read as one more shell's commands.
     fn script(&self, name: &str, cwd: Option<&Path>, shells: usize, state: &mut CallState) {
-        match script::read(name, cwd, self.home.as_ref(), &state.texts) {
+        match script::read(name, cwd, self.home.path(), &state.texts) {
             Ok(text) => self.line(&text, cwd.map(Path::to_owned), shells + 1, state),
             Err(refusal) => state.refuse(refusal),
         }
@@ -167,7 +167,7 @@ impl Judging<'_> {
             return state.refuse(BUILT.into());
         }
         if name.contains('/') {
-            match script::interpreted(name, cwd.as_deref(), self.home.as_ref()) {
+            match script::interpreted(name, cwd.as_deref(), self.home.path()) {
                 Ok(true) => self.script(name, cwd.as_deref(), shells, state),
                 Ok(false) => {}
                 Err(refusal) => state.refuse(refusal),
@@ -216,12 +216,12 @@ impl Judging<'_> {
         shells: usize,
         state: &mut CallState,
     ) {
-        let home = self.home.as_ref();
+        let home = &self.home;
         let found = match program(&run.words[0]) {
             "cd" | "pushd" => {
                 *cwd = match run.words.get(1) {
-                    Some(to) => moved(cwd.as_deref(), to, home),
-                    None => home.map(|h| h.path.clone()),
+                    Some(to) => moved(cwd.as_deref(), to, home.path()),
+                    None => home.path().map(Path::to_owned),
                 };
                 Vec::new()
             }

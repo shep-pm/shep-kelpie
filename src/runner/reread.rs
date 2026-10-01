@@ -40,6 +40,8 @@ impl Runner {
             settings.forge = self.settings.forge.clone();
         }
         let reviewers = kelpie.reviewers;
+        let agents = settings.role_agents(&kelpie.agents)?;
+        let lineup = settings.lineup(&kelpie, &self.home)?;
         let (channels, webhook) = ruling_channels(&settings, kelpie)?;
         let mut changed = changed(
             (&self.settings, &self.channels, &self.webhook),
@@ -47,6 +49,12 @@ impl Runner {
         );
         if reviewers != self.reviewers {
             changed.push("reviewers");
+        }
+        if lineup != self.lineup && !changed.contains(&"review") {
+            changed.push("local_reviewers");
+        }
+        if agents != self.agents {
+            changed.push("agents");
         }
         if changed.is_empty() && waiting.is_empty() {
             return Ok(None);
@@ -58,14 +66,16 @@ impl Runner {
         if listed(&settings) && !listed(&self.settings) {
             check_coderabbit(&settings, &self.ports)?;
         }
-        if settings.review.local != self.settings.review.local {
-            check_local(&settings, &self.ports)?;
+        if lineup != self.lineup {
+            check_local(&settings, &lineup, &self.ports)?;
         }
         crate::skills::check(&settings.skills, &self.paths.skills)?;
         let skills = (settings.skills != self.settings.skills)
             .then(|| Skills::load(&settings.skills, &self.paths.skills));
         self.settings = settings;
         self.reviewers = reviewers;
+        self.lineup = lineup;
+        self.agents = agents;
         self.extra_instructions = extra_instructions;
         self.channels = channels;
         self.webhook = webhook;
@@ -129,7 +139,7 @@ mod tests {
     use std::path::Path;
 
     use crate::ports::Visibility;
-    use crate::settings::MergeAuthority;
+    use crate::settings::{LocalRound, MergeAuthority};
     use crate::test::Rig;
     use crate::webhook::{KelpieSettings, WebhookKind};
 
@@ -195,6 +205,11 @@ mod tests {
     #[test]
     fn a_local_round_change_is_checked_as_a_start_checks_it() {
         let rig = Rig::new("shep");
+        let local = |command: &str| {
+            format!("[app.dogs.kelpie.review.local]\nkind = \"command\"\ncommand = \"{command}\"\n")
+        };
+        let qwen = local("~/.claude/scripts/qwen-review.sh");
+        rig.edit_settings(|s| crate::test::with_tables(&s, &qwen));
         let runner = rig.open().unwrap();
         let before = rig.settings().review.local;
         let missing = settings_with(&rig, |s| {
@@ -219,7 +234,49 @@ mod tests {
             line.as_deref(),
             Some("settings changed: review now in effect")
         );
-        assert!(!runner.settings().review.local.is_on());
+        assert_eq!(runner.settings().review.local, Some(LocalRound::Off {}));
+    }
+
+    #[test]
+    fn a_changed_local_reviewer_definition_is_checked_and_named() {
+        let rig = Rig::new("shep");
+        rig.edit_settings(|s| {
+            s.replace(
+                "loop_guard = 8\n",
+                "loop_guard = 8\nreviewers = [\"mine\", \"claude\"]\n",
+            )
+        });
+        let script = rig.home.path().join("review.sh");
+        crate::test::write_script(&script, "#!/bin/sh\nexit 0\n");
+        let base = std::fs::read_to_string(rig.paths().kelpie_settings).unwrap();
+        let define = |command: &str| {
+            format!("{base}[local_reviewers.mine]\nkind = \"command\"\ncommand = \"{command}\"\n")
+        };
+        rig.set_kelpie_settings(&define(&script.display().to_string()));
+        let runner = rig.open().unwrap();
+        let mut runner = runner.lock().unwrap();
+
+        rig.set_kelpie_settings(&define("/nonexistent/review.sh"));
+        let err = runner
+            .reread(rig.settings(), rig.kelpie_settings())
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .starts_with("setting `review.reviewers`: cannot run /nonexistent"),
+            "{err}"
+        );
+
+        rig.set_kelpie_settings(&define("~/review.sh"));
+        let line = runner
+            .reread(rig.settings(), rig.kelpie_settings())
+            .unwrap();
+        assert_eq!(line, None, "the same command, spelt from the home folder");
+
+        rig.set_kelpie_settings(&base);
+        let err = runner
+            .reread(rig.settings(), rig.kelpie_settings())
+            .unwrap_err();
+        assert!(err.to_string().contains("mine is not defined"), "{err}");
     }
 
     #[test]

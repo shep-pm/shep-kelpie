@@ -1,9 +1,9 @@
 //! The local round, over a command or an OpenAI-compatible endpoint
 //!
-//! A project's settings choose the kind. A command keeps the README's
+//! A reviewer's definition chooses the kind. A command keeps the README's
 //! contract, as the maintainer's qwen-review script does. An endpoint gets
-//! kelpie's own reviewer. Either way kelpie holds the GPU lock around a
-//! round only when the settings ask it to: the qwen-review script takes that
+//! kelpie's own reviewer. Either way kelpie holds a lease around a round
+//! only when the definition names one: the qwen-review script takes the GPU
 //! lock itself, and would wait forever behind kelpie's hold.
 
 mod command;
@@ -65,8 +65,8 @@ impl LocalReviewer {
     }
 
     // Waits on the scripts' own schedule, so kelpie keeps its place in line.
-    fn hold_gpu(&self, round: u32, worktree: &Path) -> Result<GpuHold, ReviewerError> {
-        let lock = GpuLock::under(&self.temp_dir);
+    fn hold(&self, lease: &str, round: u32, worktree: &Path) -> Result<GpuHold, ReviewerError> {
+        let lock = GpuLock::named(&self.temp_dir, lease);
         let claim = Claim {
             pid: std::process::id(),
             what: format!("kelpie local round {round} in {}", worktree.display()),
@@ -100,7 +100,7 @@ impl LocalReviewer {
     }
 }
 
-/// The GPU lock, held for one round and let go when dropped
+/// A lease's lock, held for one round and let go when dropped
 struct GpuHold {
     lock: GpuLock,
     pid: u32,
@@ -128,17 +128,20 @@ impl Reviewer for LocalReviewer {
         base: &str,
         out: &Path,
         round: u32,
+        criteria: &str,
     ) -> Result<Vec<Finding>, ReviewerError> {
-        let _hold = match local.gpu_lease() {
-            true => Some(self.hold_gpu(round, worktree)?),
-            false => None,
+        let _hold = match local.lease() {
+            Some(lease) => Some(self.hold(lease.as_str(), round, worktree)?),
+            None => None,
         };
         self.check_seat(local)?;
         match local {
             LocalRound::Off {} => Ok(Vec::new()),
-            LocalRound::Command(local) => self.command_round(local, worktree, base, out, round),
+            LocalRound::Command(command) => {
+                self.command_round(command, worktree, base, out, round, criteria)
+            }
             LocalRound::Endpoint(endpoint) => {
-                self.endpoint_round(endpoint, worktree, base, out, round)
+                self.endpoint_round(endpoint, worktree, base, out, round, criteria)
             }
         }
     }
@@ -204,15 +207,21 @@ fn head(worktree: &Path) -> Result<String, ReviewerError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::LocalCommand;
+    use crate::settings::{LeaseName, LocalCommand};
     use crate::test::write_script;
 
     fn command(path: &Path, gpu_lease: bool) -> LocalRound {
+        leased(path, gpu_lease.then(LeaseName::gpu))
+    }
+
+    fn leased(path: &Path, lease: Option<LeaseName>) -> LocalRound {
         LocalRound::Command(LocalCommand {
             command: path.to_owned(),
-            gpu_lease,
+            lease,
+            gpu_lease: false,
             ollama: None,
             ollama_model: None,
+            paths: Vec::new(),
         })
     }
 
@@ -265,12 +274,60 @@ mod tests {
         for (gpu_lease, seen) in [(false, "free"), (true, "held")] {
             let out = dir.path().join(format!("out-{gpu_lease}"));
             let local = command(&script, gpu_lease);
-            let findings = reviewer.round(&local, &worktree, "main", &out, 1).unwrap();
+            let findings = reviewer
+                .round(&local, &worktree, "main", &out, 1, "")
+                .unwrap();
             assert_eq!(findings[0].file, seen, "gpu_lease = {gpu_lease}");
             assert!(
                 lock.holder().is_none(),
                 "the lock is let go after the round"
             );
+        }
+    }
+
+    // Another holder keeps the other lease the whole time: a round that
+    // waited on it would never finish.
+    #[test]
+    fn each_reviewer_takes_only_its_own_lease() {
+        let dir = tempfile::tempdir().unwrap();
+        let temp = dir.path().join("tmp");
+        let worktree = dir.path().join("wt");
+        std::fs::create_dir_all(&worktree).unwrap();
+        crate::test::git(&worktree, &["init", "--quiet", "-b", "main"]);
+        crate::test::git(
+            &worktree,
+            &["commit", "--quiet", "--allow-empty", "-m", "init"],
+        );
+        let reviewer = LocalReviewer::default().with_temp_dir(temp.clone());
+        let parent = Claim {
+            pid: std::os::unix::process::parent_id(),
+            what: "someone else's round".into(),
+        };
+        for (own, other) in [("gpu", "gpu-box"), ("gpu-box", "gpu")] {
+            let (own_lock, other_lock) = (GpuLock::named(&temp, own), GpuLock::named(&temp, other));
+            assert_ne!(own_lock.path(), other_lock.path());
+            assert_eq!(other_lock.try_take(&parent).unwrap(), Attempt::Taken);
+            let script = dir.path().join(format!("review-{own}"));
+            write_script(
+                &script,
+                &format!(
+                    "#!/bin/sh\nmkdir -p \"$QWEN_REVIEW_OUT\"\n\
+                     if [ -d '{lock}' ]; then held=held; else held=free; fi\n\
+                     printf 'LOW|%s:1|seen|seen\\n' \"$held\" > \"$QWEN_REVIEW_OUT/round-1.txt\"\n\
+                     : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n",
+                    lock = own_lock.path().display(),
+                ),
+            );
+            let lease = LeaseName::try_from(own.to_owned()).unwrap();
+            let local = leased(&script, Some(lease));
+            let out = dir.path().join(format!("out-{own}"));
+            let findings = reviewer
+                .round(&local, &worktree, "main", &out, 1, "")
+                .unwrap();
+            assert_eq!(findings[0].file, "held", "{own} is held around its round");
+            assert!(own_lock.holder().is_none(), "{own} is let go after");
+            assert_eq!(other_lock.holder().and_then(|h| h.pid), Some(parent.pid));
+            other_lock.release(parent.pid).unwrap();
         }
     }
 
@@ -292,7 +349,7 @@ mod tests {
         let local = command(Path::new("/bin/true"), true);
         let out = dir.path().join("out");
         let started = std::time::Instant::now();
-        let result = reviewer.round(&local, dir.path(), "main", &out, 1);
+        let result = reviewer.round(&local, dir.path(), "main", &out, 1, "");
         stopping.join().unwrap();
         assert_eq!(result, Err(ReviewerError::Stopped));
         assert!(

@@ -7,7 +7,7 @@ use serde_json::json;
 use super::{ANSWER_WAIT, HEARD_WAIT, LABEL, REVIEW_WAIT};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
-use crate::ports::{Checks, ClaudeError, Cost, Role};
+use crate::ports::{AgentError, Checks, Cost, Role};
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::test::{Rig, Scripted, Told, git};
 
@@ -625,7 +625,7 @@ fn a_fix_turn_that_pushes_nothing_parks_instead_of_opening_round_two() {
 fn a_timed_out_fix_turn_resumes_that_round() {
     let (rig, runner, head) = summoned("mew");
     hold_a_finding(&rig, &runner, &head, "Name the flag.");
-    rig.claude.script([Scripted::Fail(ClaudeError::TimedOut)]);
+    rig.claude.script([Scripted::Fail(AgentError::TimedOut)]);
     let Some(StepReport::TimedOut { id, .. }) = step(&runner).unwrap() else {
         panic!("the fix turn did not time out");
     };
@@ -925,8 +925,8 @@ fn a_commit_pushed_by_hand_after_the_round_parks_rather_than_reaching_the_merge_
         question,
         format!(
             "Pull request #71 changed outside kelpie: its head moved to {}, a commit \
-             the worker did not push. `shep trigger koji rule '{id} yes'` accepts it \
-             and kelpie carries on, and `shep trigger koji rule '{id} no <note>'` \
+             the worker did not push. `shep kelpie rule {id} yes` accepts it \
+             and kelpie carries on, and `shep kelpie rule {id} no <note>` \
              sends the worker your note.",
             &by_hand[..7]
         )

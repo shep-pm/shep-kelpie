@@ -192,7 +192,7 @@ mod tests {
             question,
             format!(
                 "The worker on issue #7 asks:\n\n{QUESTION}\n\n\
-                 `shep trigger rotom rule '1 answer <text>'` sends the worker your answer."
+                 `shep kelpie rule 1 <text>` sends the worker your answer."
             )
         );
         let status = rig.ask(&runner, "status", None);
@@ -318,7 +318,7 @@ mod tests {
         };
         assert_eq!(
             comment_failed.as_deref(),
-            Some("not posted: the text names a folder on this machine")
+            Some("not posted: the comment names a path on this machine, which names its user")
         );
         assert_eq!(rig.forge.comments(), []);
         assert!(question.contains(&log.display().to_string()), "{question}");
@@ -376,6 +376,7 @@ mod tests {
                 "consecutive_clean": 1,
                 "guard_cleared": false,
                 "stage": { "stage": "round" },
+                "last": "qwen",
             }),
             "resumed round 1, not restarted at round 1 again"
         );

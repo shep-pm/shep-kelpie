@@ -159,6 +159,14 @@ pub(crate) fn project_table(entry: &str) -> serde_json::Map<String, serde_json::
     }
 }
 
+/// A runner entry like `settings.example.toml` with `tables` added to its
+/// kelpie table, such as an older `[app.dogs.kelpie.review.local]`
+pub(crate) fn with_tables(entry: &str, tables: &str) -> String {
+    const GATE: &str = "\n[app.dogs.kelpie.coderabbit]\n";
+    assert!(entry.contains(GATE), "the example's CodeRabbit table moved");
+    entry.replace(GATE, &format!("\n{tables}{GATE}"))
+}
+
 /// The `repo` in `settings.example.toml`, which the rig points at its own
 const EXAMPLE_REPO: &str = "~/.kelpie/repos/shep";
 
@@ -514,7 +522,7 @@ impl Rig {
         review_bots: Vec<Arc<dyn Profile>>,
     ) -> Result<Mutex<Runner>, OpenError> {
         let ports = Ports {
-            claude: Arc::new(self.claude.clone()),
+            agents: Arc::new(self.claude.clone()),
             forge: Box::new(self.forge.clone()),
             meter: Box::new(self.meter.clone()),
             reviewer: Arc::new(self.reviewer.clone()),

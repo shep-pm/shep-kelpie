@@ -33,6 +33,13 @@ One Claude Code conversation, identified by its session id. Claude's word, kept
 as Claude uses it.
 _Avoid_: shift
 
+**Agent**:
+A harness that runs sessions (Claude Code today) with the model and effort it
+runs them on. Kelpie's settings define agents by name, and the worker, the
+Claude round and the judge each run on one a project names.
+_Avoid_: model (one part of an agent), bot (a review bot is a pull request
+reviewer)
+
 ## In shep's terms
 
 Kelpie is a **dog**: it watches its projects rather than being one. Each
@@ -91,12 +98,17 @@ dark. A worker takes them with kelpie's shots tool; kelpie takes them before
 each Claude review round and the merge ruling.
 _Avoid_: preview (Claude Desktop's pane), snapshots (Playwright's page trees)
 
+**Local reviewer**:
+A reviewer in a project's review loop, named in kelpie's settings: a local
+model through kelpie's own reviewer against an OpenAI-compatible server, a
+command such as the maintainer's qwen-review script, or a Claude session on
+its own model. A project lists its local reviewers in the order the loop
+runs them, and `claude` is always one: the project's own Claude round.
+
 **Local round**:
-A review round on a local model, alternating with the Claude round. A
-project runs it through kelpie's own reviewer against an OpenAI-compatible
-server, through a command such as the maintainer's qwen-review script, or
-not at all.
-_Avoid_: qwen round (qwen is one model it can run)
+One round of the review loop, by one local reviewer. The loop ends once two
+in a row, from two different local reviewers, find nothing above a nit.
+_Avoid_: qwen round (qwen is one model a local reviewer can run)
 
 **Pull request reviewer**:
 A reviewer summoned on the pull request that answers there, within a rate
@@ -104,7 +116,7 @@ window of its own. CodeRabbit and cubic are two. A **review bot** is one
 that works the GitHub way, by label or comment, status and review threads,
 and a **profile** says how each bot does it. A project lists its pull
 request reviewers in preference order, and each round goes to the first
-whose window is free. The other kind of reviewer is the local round's.
+whose window is free. The other kind is a local reviewer.
 _Avoid_: outside reviewer, remote reviewer
 
 **Ruling**:

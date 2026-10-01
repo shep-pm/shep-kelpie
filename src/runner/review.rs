@@ -1,19 +1,22 @@
-//! The review loop: rounds alternating the local round and Claude, or
-//! Claude's alone, each judged finding by finding before the worker sees any
+//! The review loop: rounds down the project's reviewers in order, each
+//! judged finding by finding before the worker sees any
 //!
 //! A round with no raw findings is clean at once. One with findings waits
 //! for the judge, in order; once every finding is judged, the held ones (if
 //! any) go to the worker's next turn, and the round's cleanliness is decided
-//! by the judge's severities. Two clean rounds in a row, one from each
-//! reviewer since they strictly alternate, end the loop for [`super::gate`];
-//! with the local round off, one clean Claude round does. Past the round
-//! guard the worker parks for a ruling; a yes clears the guard for the rest
-//! of this work item.
+//! by the judge's severities. Two clean rounds in a row from two different
+//! reviewers end the loop for [`super::gate`]; where only one reviewer can
+//! run, one clean round does. Past the round guard the worker parks for a
+//! ruling; a yes clears the guard for the rest of this work item.
 
 pub(super) mod calls;
+mod criteria;
 pub(super) mod findings;
+mod lineup;
 #[cfg(test)]
 mod local;
+#[cfg(test)]
+mod several;
 
 use std::path::Path;
 
@@ -22,12 +25,14 @@ use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, Spent, StepReport
 use super::ruling::park;
 use super::shots::RoundShots;
 use crate::ports::{
-    Claude, ClaudeCall, ClaudeError, ClaudeReply, Finding, Reviewer, ReviewerError, Severity,
+    AgentCall, AgentError, AgentReply, Agents, Finding, Reviewer, ReviewerError, Severity,
     Timestamp, Verdict, read_review,
 };
+use crate::settings::{ReviewerName, Runs};
 use crate::state::{Fix, RulingKind, StateError};
-use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, ReviewerKind, Turn, WorkItem};
+use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, Turn, WorkItem};
 use crate::worktree;
+use lineup::Chosen;
 
 impl Runner {
     pub(super) fn review_step(&mut self) -> Result<Begin, StateError> {
@@ -48,36 +53,48 @@ impl Runner {
                 if !review.guard_cleared && review.round > self.settings.review.loop_guard.get() {
                     return self.raise(number, RulingKind::ReviewGuard { review });
                 }
-                match review.reviewer(self.local_left()) {
-                    ReviewerKind::Local => {
-                        self.mark_review_call_running()?;
+                let chosen = match self.choose_reviewer(&review, &worktree, &base) {
+                    Ok(chosen) => chosen,
+                    Err(reason) => return Ok(self.gate_failed(reason)),
+                };
+                let criteria = match self.criteria(issue) {
+                    Ok(criteria) => criteria,
+                    Err(reason) => return Ok(self.gate_failed(reason)),
+                };
+                match chosen.reviewer.runs.clone() {
+                    Runs::Local(local) => {
+                        self.round_started(&chosen)?;
                         Ok(Begin::Review(ReviewCall::Local {
-                            local: self.settings.review.local.clone(),
+                            local,
                             worktree,
                             base,
                             out: build.join("qwen-review"),
                             round: review.round,
+                            criteria,
                         }))
                     }
-                    ReviewerKind::Claude => {
+                    Runs::Claude(session) => {
                         let shots = match self.round_shots()? {
                             RoundShots::Take(begin) => return Ok(begin),
                             RoundShots::Ready(shots) => shots,
                         };
-                        let model = self.settings.models.reviewer.clone();
                         let dir = self.paths.shots(issue);
                         let shots = shots.as_ref().map(|run| calls::Screens { dir: &dir, run });
-                        match calls::reviewer_call(
-                            issue,
-                            &worktree,
-                            &base,
-                            &worker_folder,
-                            &model,
+                        let call = calls::reviewer_call(
+                            calls::Round {
+                                issue,
+                                worktree: &worktree,
+                                base: &base,
+                                worker_folder: &worker_folder,
+                                criteria: &criteria,
+                            },
+                            &session.model(),
                             shots,
                             &self.skills,
-                        ) {
+                        );
+                        match call.and_then(|call| self.prepared(call)) {
                             Ok(call) => {
-                                self.mark_review_call_running()?;
+                                self.round_started(&chosen)?;
                                 Ok(Begin::Review(ReviewCall::ClaudeRound(call)))
                             }
                             Err(reason) => Ok(self.gate_failed(reason)),
@@ -90,7 +107,7 @@ impl Runner {
                     return self.finalize_round(review, findings, verdicts);
                 }
                 let finding = findings[verdicts.len()].clone();
-                let model = self.settings.models.judge.clone();
+                let model = self.agents.judge.clone();
                 let shots = self.preview_on().then(|| self.paths.shots(issue));
                 match calls::judge_call(
                     issue,
@@ -100,7 +117,9 @@ impl Runner {
                     &model,
                     &finding,
                     shots.as_deref(),
-                ) {
+                )
+                .and_then(|call| self.prepared(call))
+                {
                     Ok(call) => {
                         self.mark_review_call_running()?;
                         Ok(Begin::Review(ReviewCall::Judge(call)))
@@ -141,7 +160,7 @@ impl Runner {
             None => None,
         };
         let now = self.ports.clock.now();
-        let local = self.local_rounds();
+        let local = self.counts_local(&review);
         self.update(|item| {
             item.phase = advance(review, clean, now, local, &mut item.local_rounds)
         })?;
@@ -159,23 +178,6 @@ impl Runner {
         worktree::origin_head(&self.settings.repo, &item.branch).map_err(|e| e.to_string())
     }
 
-    // How many local rounds a work item may run, which sets who reviews a
-    // round and how many clean rounds end the loop.
-    fn local_rounds(&self) -> u32 {
-        let review = &self.settings.review;
-        match review.local_rounds {
-            _ if !review.local.is_on() => 0,
-            Some(rounds) => rounds.get(),
-            None => u32::MAX,
-        }
-    }
-
-    // How many of them this work item has not run yet.
-    fn local_left(&self) -> u32 {
-        let ran = self.current().map_or(0, |item| item.local_rounds);
-        self.local_rounds().saturating_sub(ran)
-    }
-
     // Recorded in state before the runner's lock is released for the call
     // itself, the same as a worker's turn marks `Turn::Running`: `drop`
     // refuses while this is set, so a call in flight always has a work
@@ -183,6 +185,21 @@ impl Runner {
     pub(super) fn mark_review_call_running(&mut self) -> Result<(), StateError> {
         let since = self.ports.clock.now();
         self.update(|item| item.review_call = ReviewCallState::Running { since })
+    }
+
+    // Marks the call running and keeps who reviews the round, so a round
+    // cut short resumes with the same reviewer.
+    fn round_started(&mut self, chosen: &Chosen) -> Result<(), StateError> {
+        let since = self.ports.clock.now();
+        let name = chosen.reviewer.name.clone();
+        let alone = chosen.alone;
+        self.update(|item| {
+            item.review_call = ReviewCallState::Running { since };
+            if let Phase::Review(review) = &mut item.phase {
+                review.reviewer = Some(name);
+                review.alone = alone;
+            }
+        })
     }
 
     // Every held finding holds the judge's own severity, since the nit rule
@@ -210,7 +227,7 @@ impl Runner {
                 ..f
             })
             .collect();
-        let local = self.local_rounds();
+        let local = self.counts_local(&review);
         if held.is_empty() {
             self.update(|item| {
                 item.phase = advance(review, true, now, local, &mut item.local_rounds);
@@ -273,7 +290,13 @@ impl Runner {
             return self.review_bot_verdict(result, spent);
         }
         let now = self.ports.clock.now();
-        let local = self.local_rounds();
+        let local = self
+            .current()
+            .and_then(|item| match &item.phase {
+                Phase::Review(review) => Some(self.counts_local(review)),
+                _ => None,
+            })
+            .unwrap_or(false);
         let mut next = self.state.clone();
         // Tolerated the same way `end_turn` tolerates a turn's result
         // arriving with nothing (or something else) to apply it to: the
@@ -330,7 +353,7 @@ impl Runner {
                 if !matches!(review.stage, ReviewStage::Round) {
                     unreachable!("a round's findings only arrive while awaiting that round");
                 }
-                let reviewer = review.reviewer(local.saturating_sub(item.local_rounds));
+                let reviewer = review.reviewer.clone().unwrap_or_else(ReviewerName::claude);
                 let count = findings.len();
                 item.phase = Phase::Review(Review {
                     stage: ReviewStage::Judging {
@@ -379,44 +402,42 @@ impl Runner {
 
 /// Where the review phase goes after one round finishes, clean or not
 ///
-/// While local rounds are left, two clean rounds in a row end the loop, and
-/// the strict alternation means the pair is always one of each. Without
-/// one, or once the work item's `local_rounds` are spent, every round is
-/// Claude's, so one clean Claude round ends it. `ran` counts the work
-/// item's local rounds, across every pass of the loop, this one included.
+/// A clean round ends the loop when its reviewer was the only one that
+/// could run, or when the round before was clean and someone else's. An
+/// older state file names no reviewers, and its rounds strictly alternated.
+/// `ran` counts the work item's local rounds, this one included when
+/// `local` says it counts.
 pub(super) fn advance(
     review: Review,
     clean: bool,
     now: crate::ports::Timestamp,
-    local_rounds: u32,
+    local: bool,
     ran: &mut u32,
 ) -> Phase {
-    let consecutive_clean = if clean {
-        review.consecutive_clean + 1
-    } else {
-        0
-    };
-    let local = review.reviewer(local_rounds.saturating_sub(*ran)) == ReviewerKind::Local;
-    // With no limit set nothing is counted, so the state file stays as it was
-    // before the setting and an older binary reads it.
-    if local && local_rounds != u32::MAX {
+    if local {
         *ran = ran.saturating_add(1);
     }
-    let alone = !local && *ran >= local_rounds;
-    let needed = if alone { 1 } else { 2 };
-    if consecutive_clean >= needed {
-        Phase::Ci {
+    let someone_else = review.last.is_none() || review.last != review.reviewer;
+    let ends = clean && (review.alone || (review.consecutive_clean > 0 && someone_else));
+    if ends {
+        return Phase::Ci {
             head: None,
             since: now,
-        }
-    } else {
-        Phase::Review(Review {
-            round: review.round + 1,
-            consecutive_clean,
-            guard_cleared: review.guard_cleared,
-            stage: ReviewStage::Round,
-        })
+        };
     }
+    Phase::Review(Review {
+        round: review.round + 1,
+        consecutive_clean: if clean {
+            review.consecutive_clean + 1
+        } else {
+            0
+        },
+        guard_cleared: review.guard_cleared,
+        stage: ReviewStage::Round,
+        reviewer: None,
+        last: review.reviewer,
+        alone: false,
+    })
 }
 
 /// Runs `action` outside the runner's lock: the local round, or a fresh
@@ -425,7 +446,7 @@ pub(super) fn advance(
 /// A call stopped with the runner comes back as [`ReviewResult::Stopped`]
 /// rather than an error, so `end_review` can tell it from a failed gate.
 pub(super) fn run_review_call(
-    claude: &dyn Claude,
+    claude: &dyn Agents,
     reviewer: &dyn Reviewer,
     action: ReviewCall,
 ) -> Reviewed {
@@ -436,7 +457,8 @@ pub(super) fn run_review_call(
             base,
             out,
             round,
-        } => match reviewer.round(&local, &worktree, &base, &out, round) {
+            criteria,
+        } => match reviewer.round(&local, &worktree, &base, &out, round, &criteria) {
             Err(ReviewerError::Stopped) => stopped(),
             Err(ReviewerError::Spilled(reason)) => Reviewed {
                 result: ReviewResult::Spilled(reason),
@@ -450,7 +472,7 @@ pub(super) fn run_review_call(
         ReviewCall::ClaudeRound(call) => {
             let (reply, spent) = run_claude(claude, &call);
             match reply {
-                Err(ClaudeError::Stopped) => stopped(),
+                Err(AgentError::Stopped) => stopped(),
                 reply => Reviewed {
                     result: ReviewResult::Findings(reply.map_err(|e| e.to_string()).and_then(
                         |reply| {
@@ -468,7 +490,7 @@ pub(super) fn run_review_call(
         ReviewCall::Judge(call) => {
             let (reply, spent) = run_claude(claude, &call);
             match reply {
-                Err(ClaudeError::Stopped) => stopped(),
+                Err(AgentError::Stopped) => stopped(),
                 reply => Reviewed {
                     result: ReviewResult::Verdict(reply.map_err(|e| e.to_string()).and_then(
                         |reply| {
@@ -518,9 +540,9 @@ fn stopped() -> Reviewed {
 
 // A reply that came back cost something even if what it said is unusable.
 fn run_claude(
-    claude: &dyn Claude,
-    call: &ClaudeCall,
-) -> (Result<ClaudeReply, ClaudeError>, Option<Spent>) {
+    claude: &dyn Agents,
+    call: &AgentCall,
+) -> (Result<AgentReply, AgentError>, Option<Spent>) {
     let reply = claude.run(call);
     let spent = reply.as_ref().ok().map(|reply| Spent::Claude {
         role: call.role,

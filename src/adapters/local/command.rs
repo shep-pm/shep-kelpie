@@ -7,7 +7,7 @@
 //! disk, never from stdout: only the marker tells a finished `round-N.txt`
 //! from one a killed round left.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use super::LocalReviewer;
@@ -23,6 +23,7 @@ struct Round<'a> {
     base: &'a str,
     head: &'a str,
     round: u32,
+    criteria: Option<&'a Path>,
 }
 
 impl LocalReviewer {
@@ -36,14 +37,17 @@ impl LocalReviewer {
         base: &str,
         out: &Path,
         round: u32,
+        criteria: &str,
     ) -> Result<Vec<Finding>, ReviewerError> {
         let head = super::head(worktree)?;
+        let criteria = write_criteria(out, criteria)?;
         let at = Round {
             script: &local.command,
             worktree,
             base,
             head: &head,
             round,
+            criteria: criteria.as_deref(),
         };
         let findings = self.run(&at, out, None)?;
         let mut combined = Vec::with_capacity(findings.len());
@@ -83,6 +87,9 @@ impl LocalReviewer {
             .env("QWEN_REVIEW_OUT", out)
             .env("KELPIE_REVIEW_HEAD", at.head)
             .env("TMPDIR", &self.temp_dir);
+        if let Some(criteria) = at.criteria {
+            command.env("KELPIE_REVIEW_CRITERIA", criteria);
+        }
         match files {
             Some(files) => {
                 command.arg("--files").arg(files);
@@ -169,6 +176,20 @@ impl LocalReviewer {
     }
 }
 
+/// Writes what the issue asks for beside the round's findings, for a
+/// command that reads `KELPIE_REVIEW_CRITERIA`
+fn write_criteria(out: &Path, criteria: &str) -> Result<Option<PathBuf>, ReviewerError> {
+    if criteria.trim().is_empty() {
+        return Ok(None);
+    }
+    let path = out.join("criteria.md");
+    let cannot =
+        |e: std::io::Error| ReviewerError::Failed(format!("cannot write {}: {e}", path.display()));
+    std::fs::create_dir_all(out).map_err(cannot)?;
+    std::fs::write(&path, criteria).map_err(cannot)?;
+    Ok(Some(path))
+}
+
 fn is_skipped_for_size(finding: &Finding) -> bool {
     finding.severity == Severity::Low
         && finding.line == 0
@@ -191,6 +212,8 @@ mod tests {
             gpu_lease: false,
             ollama: None,
             ollama_model: None,
+            lease: None,
+            paths: Vec::new(),
         })
     }
 
@@ -221,7 +244,7 @@ mod tests {
         let head = crate::test::git(&worktree, &["rev-parse", "HEAD"]);
         let out = home.path().join("out");
         let findings = LocalReviewer::default()
-            .round(&local(&script), &worktree, "origin/main", &out, 1)
+            .round(&local(&script), &worktree, "origin/main", &out, 1, "")
             .unwrap();
         assert_eq!(findings[0].file, head);
     }
@@ -252,7 +275,7 @@ mod tests {
 
         assert_eq!(
             reviewer
-                .round(&local(&script), &worktree, "origin/main", &out, 1)
+                .round(&local(&script), &worktree, "origin/main", &out, 1, "")
                 .unwrap(),
             vec![]
         );
@@ -284,7 +307,7 @@ mod tests {
             LocalReviewer::default().with_temp_dir(PathBuf::from("/var/folders/xx/yy/T/"));
 
         let findings = reviewer
-            .round(&local(&script), &worktree, "origin/main", &out, 1)
+            .round(&local(&script), &worktree, "origin/main", &out, 1, "")
             .unwrap();
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].file, "/var/folders/xx/yy/T/");
@@ -308,7 +331,7 @@ mod tests {
         let reviewer = LocalReviewer::default();
 
         assert_eq!(
-            reviewer.round(&local(&script), &worktree, "origin/main", &out, 1),
+            reviewer.round(&local(&script), &worktree, "origin/main", &out, 1, ""),
             Err(ReviewerError::Incomplete)
         );
     }
@@ -329,7 +352,7 @@ mod tests {
         std::fs::write(out.join("round-1.txt"), "HIGH|old.rs:1|old|old\n").unwrap();
         std::fs::write(out.join("round-1.txt.done"), "").unwrap();
         assert_eq!(
-            LocalReviewer::default().round(&local(&script), &worktree, "origin/main", &out, 1),
+            LocalReviewer::default().round(&local(&script), &worktree, "origin/main", &out, 1, ""),
             Err(ReviewerError::Incomplete)
         );
     }
@@ -384,7 +407,7 @@ esac
 
         assert_eq!(
             reviewer
-                .round(&local(&script), &worktree, "origin/main", &out, 1)
+                .round(&local(&script), &worktree, "origin/main", &out, 1, "")
                 .unwrap(),
             vec![Finding {
                 severity: Severity::Medium,
@@ -422,7 +445,7 @@ esac
         };
         assert_eq!(
             reviewer
-                .round(&local(&script), &worktree, "origin/main", &out, 1)
+                .round(&local(&script), &worktree, "origin/main", &out, 1, "")
                 .unwrap(),
             vec![skip]
         );
@@ -470,7 +493,7 @@ esac
         let out = home.path().join("out");
         let reviewer = LocalReviewer::default();
         let findings = reviewer
-            .round(&local(&script), &worktree, "origin/main", &out, 1)
+            .round(&local(&script), &worktree, "origin/main", &out, 1, "")
             .unwrap();
         assert_eq!(
             findings,
@@ -538,7 +561,7 @@ esac
         let out = home.path().join("out");
         let reviewer = LocalReviewer::default();
         let findings = reviewer
-            .round(&local(&script), &worktree, "origin/main", &out, 1)
+            .round(&local(&script), &worktree, "origin/main", &out, 1, "")
             .unwrap();
         assert_eq!(findings.len(), 2, "{findings:?}");
         assert_eq!(findings[0].file, "sub/a/util.rs");

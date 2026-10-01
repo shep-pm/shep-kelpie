@@ -5,6 +5,8 @@
 //! to a temporary file that is synced and then renamed over the old one, so
 //! a runner killed mid-write leaves the previous state whole.
 
+pub mod ids;
+
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Write};

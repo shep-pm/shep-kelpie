@@ -77,7 +77,7 @@ fn serve(project: &str) -> Result<(), String> {
     let epoch = Epoch(u64::from(std::process::id()));
     let leases = Arc::new(ShepLeases::new(shepherd.clone(), Asker::new(epoch)));
     let ports = Ports {
-        claude: Arc::new(claude.clone()),
+        agents: Arc::new(claude.clone()),
         forge: Box::new(Gh),
         meter: Box::new(claude.meter()),
         reviewer: Arc::new(reviewer.clone()),
