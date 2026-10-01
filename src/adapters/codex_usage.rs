@@ -5,9 +5,14 @@
 //! when its stdin closes first, so the requests go in and the pipe stays
 //! open until the answer comes back.
 //!
-//! The shape is the app server's generated JSON schema: a successful
-//! answer has not been read from a live account yet.
+//! The shape is the app server's generated JSON schema, and a live Plus
+//! account's answer matched it.
+//!
+//! It reads kelpie's own login, in `codex_home`, never the maintainer's
+//! `~/.codex`. It runs outside the sandbox, so a login near its expiry is
+//! refreshed here, where the refreshed one can be saved.
 
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
@@ -44,13 +49,16 @@ const FURTHEST_SECS: u64 = 8 * 24 * 3600;
 #[derive(Debug, Clone)]
 pub struct CodexMeter {
     processes: Processes,
+    codex_home: PathBuf,
 }
 
 impl ClaudeCli {
-    /// A Codex meter whose reads end with this one's calls when the runner stops
-    pub fn codex_meter(&self) -> CodexMeter {
+    /// A Codex meter on the login in `codex_home`, whose reads end with this
+    /// one's calls when the runner stops
+    pub fn codex_meter(&self, codex_home: PathBuf) -> CodexMeter {
         CodexMeter {
             processes: self.processes.clone(),
+            codex_home,
         }
     }
 }
@@ -60,7 +68,9 @@ impl Meter for CodexMeter {
         let answer = self
             .processes
             .answer_within(
-                Command::new("codex").arg("app-server"),
+                Command::new("codex")
+                    .arg("app-server")
+                    .env("CODEX_HOME", &self.codex_home),
                 REQUESTS,
                 LIMIT,
                 &answers_read,
@@ -178,6 +188,9 @@ mod tests {
 
     // Written by hand from `codex app-server generate-json-schema`, on codex-cli 0.146.0.
     const SHAPED: &str = include_str!("../../fixtures/codex-rate-limits.json");
+    // Recorded from codex-cli 0.159.3 on kelpie's own login, a Plus plan,
+    // with its account id zeroed.
+    const PLUS: &str = include_str!("../../fixtures/codex-rate-limits-plus.json");
     // Recorded from codex-cli 0.146.0 on a login whose workspace is deactivated.
     const REFUSED: &str = include_str!("../../fixtures/codex-rate-limits-402.json");
 
@@ -196,6 +209,24 @@ mod tests {
                 Window {
                     used_pct: 41,
                     resets_at: Timestamp(1_791_158_400)
+                },
+            )
+        );
+    }
+
+    #[test]
+    fn a_live_answer_reads_as_both_windows_with_resets_in_seconds() {
+        let usage = parse(PLUS, NOW).unwrap();
+        assert_eq!(
+            (usage.session, usage.week),
+            (
+                Window {
+                    used_pct: 0,
+                    resets_at: Timestamp(1_790_884_973)
+                },
+                Window {
+                    used_pct: 1,
+                    resets_at: Timestamp(1_791_434_416)
                 },
             )
         );

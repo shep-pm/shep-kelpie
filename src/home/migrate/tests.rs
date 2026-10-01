@@ -61,6 +61,7 @@ fn populated(old: &Path, checkout: &Path) {
 // What a runner of koji and the dog move, in the order they move it.
 fn everything(old: &Path, new: &Path) -> Result<Vec<String>, String> {
     let mut lines = run(&shared(old, new))?;
+    lines.extend(run(&codex(old, new)?)?);
     lines.extend(run(&project(old, new, &koji())?)?);
     lines.extend(run(&dog(old, &new.join("dog")))?);
     lines.extend(repoint(old, new, &koji())?);
@@ -93,6 +94,11 @@ fn a_populated_old_home_moves_and_the_second_run_moves_nothing() {
     assert_eq!(fs::read_to_string(new.join("totp/secret")).unwrap(), "s");
     assert_eq!(fs::read_to_string(new.join("dog/book.json")).unwrap(), "{}");
     assert!(new.join("builds/shep-kelpie.previous").is_file());
+    assert_eq!(
+        fs::read_to_string(new.join("codex/auth.json")).unwrap(),
+        "{}"
+    );
+    assert!(!old.join("codex").exists());
     assert!(new.join("koji/worker/settings.json").is_file());
     assert!(new.join("koji/builds/debug/x").is_file());
     assert!(new.join("koji/shots/7/a.png").is_file());
@@ -118,7 +124,6 @@ fn a_populated_old_home_moves_and_the_second_run_moves_nothing() {
         "handoffs/one.md",
         "targets/bench141/x",
         "builds/by-hand",
-        "codex/auth.json",
         "projects/rotom/state.json",
     ] {
         assert!(old.join(kept).is_file(), "{kept} moved");
@@ -310,4 +315,55 @@ fn a_kelpie_home_set_by_hand_takes_the_new_layout_in_place() {
     assert!(home.join("koji/state.json").is_file());
     assert!(home.join("koji/worktrees/7/a.rs").is_file());
     assert!(!home.join("projects").exists());
+}
+
+// A shepherd that updated to the home move before kelpie had a Codex login
+// moved the shared files and left `codex` behind. The login still moves,
+// with each file's mode, and no new sign-in is needed.
+#[test]
+fn the_codex_login_moves_after_the_shared_files_moved_without_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let (old, new) = (
+        root.path().join("home/.kelpie"),
+        root.path().join("shep/kelpie"),
+    );
+    write(&old.join("settings.toml"), "[webhook]\n");
+    assert!(!run(&shared(&old, &new)).unwrap().is_empty());
+    assert!(new.join(MARKER).is_file());
+
+    write(&old.join("codex/auth.json"), "{}");
+    write(&old.join("codex/log/codex-login.log"), "signed in");
+    let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    fs::set_permissions(
+        old.join("codex/auth.json"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    fs::set_permissions(old.join("codex/log"), fs::Permissions::from_mode(0o750)).unwrap();
+    assert_eq!(run(&shared(&old, &new)), Ok(Vec::new()));
+
+    let lines = run(&codex(&old, &new).unwrap()).unwrap();
+    assert!(lines.join("\n").contains("auth.json"), "{lines:?}");
+    let login = new.join("codex");
+    assert_eq!(fs::read_to_string(login.join("auth.json")).unwrap(), "{}");
+    assert_eq!(mode(&login.join("auth.json")), 0o600);
+    assert_eq!(mode(&login.join("log")), 0o750);
+    assert_eq!(mode(&login), 0o700);
+    assert!(login.join("log/codex-login.log").is_file());
+    assert!(!old.join("codex").exists(), "the empty old folder goes");
+
+    // Done once: a login made at the old place again is never taken.
+    write(&old.join("codex/auth.json"), "a new one");
+    assert_eq!(run(&codex(&old, &new).unwrap()), Ok(Vec::new()));
+    assert_eq!(fs::read_to_string(login.join("auth.json")).unwrap(), "{}");
+}
+
+#[test]
+fn no_codex_login_moves_nothing_and_leaves_no_folder() {
+    let root = tempfile::tempdir().unwrap();
+    let (old, new) = (root.path().join("old"), root.path().join("new"));
+    fs::create_dir_all(&old).unwrap();
+    assert_eq!(run(&codex(&old, &new).unwrap()), Ok(Vec::new()));
+    assert!(!new.join("codex").exists());
 }

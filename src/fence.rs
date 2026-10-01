@@ -44,9 +44,12 @@ pub const HARNESSES: [OwnFiles; 3] = [
         credentials: &["~/.claude/.credentials.json", "~/.claude.json"],
         program: "claude",
     },
+    // The maintainer's own. Kelpie's Codex login is in `codex_home`, which
+    // `ports::Unreadable` keeps from every call but Codex's link to it.
+    // Codex lists skills in a repo's `.agents` whether or not it trusts the repo.
     OwnFiles {
         harness: "Codex",
-        folders: &[".codex"],
+        folders: &[".codex", ".agents"],
         root_files: &[],
         credentials: &["~/.codex/**"],
         program: "codex",
@@ -516,6 +519,8 @@ mod tests {
                 "/k/wt/7/.mcp.json",
                 "/k/wt/7/.codex",
                 "/k/wt/7/**/.codex",
+                "/k/wt/7/.agents",
+                "/k/wt/7/**/.agents",
                 "/k/wt/7/.pi",
                 "/k/wt/7/**/.pi",
             ]

@@ -71,6 +71,14 @@ pub(super) const NO_AGENTS: &str = "a worker does not start an agent of its own:
     its session already has kelpie's checks, and a new one would run without them. \
     Use your own tools, or a sub-agent, instead";
 
+// The names Codex takes a command for its own file tool by. It applies such a
+// patch itself, past `kelpie confine`, which sees only the tool's calls.
+const PATCHERS: [&str; 2] = ["apply_patch", "applypatch"];
+
+/// Why a worker may not write a patch from its shell
+pub(super) const NO_SHELL_PATCHES: &str = "kelpie checks a patch only through the \
+    apply_patch tool: call that tool instead of running a command of its name";
+
 // Programs that stop a process by name or pattern, which hits every match on
 // the machine, other sessions' processes among them.
 const KILLERS: [&str; 2] = ["pkill", "killall"];
@@ -331,6 +339,7 @@ impl Judging<'_> {
             }
             "gh" => gh::judge(run.words, input.heredocs, cwd.as_deref(), home),
             name if starts_agent(name) => vec![NO_AGENTS.into()],
+            name if PATCHERS.contains(&name) => vec![NO_SHELL_PATCHES.into()],
             name if KILLERS.contains(&name) => vec![NO_KILLING_BY_NAME.into()],
             "kill" if kills_by_name(&run.words[1..]) => vec![NO_KILLING_BY_NAME.into()],
             name if SHELLS.contains(&name) => {

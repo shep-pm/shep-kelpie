@@ -11,7 +11,8 @@ use serde::Deserialize;
 use super::process::{Processes, RunError};
 use super::srt::SandboxRuntime;
 use crate::ports::{
-    AgentCall, AgentError, AgentReply, Agents, Cost, Role, Sandbox, Session, SessionId, Usage,
+    AgentCall, AgentError, AgentReply, Agents, Cost, Role, Sandbox, Session, SessionId, Unreadable,
+    Usage,
 };
 use crate::preview::Tools;
 use crate::settings::Harness;
@@ -52,7 +53,7 @@ pub struct ClaudeCli {
     program: OsString,
     pub(super) lambs: Option<Arc<dyn LambLabels>>,
     pub(super) sandbox: Arc<dyn Sandbox>,
-    home: PathBuf,
+    pub(super) home: PathBuf,
 }
 
 // The default home and tools are the maintainer's: `$HOME` and kelpie's own tools.
@@ -89,6 +90,18 @@ impl ClaudeCli {
             program: program.into(),
             ..Self::default()
         }
+    }
+
+    /// Runs each call inside the sandbox runtime in `tools`, as Claude Code
+    /// with its home at `home`, the way a runner does
+    ///
+    /// No call on any harness reads kelpie's Codex login in `codex_home`,
+    /// apart from Codex's own link to its `auth.json`. pi and Codex made
+    /// from this share its sandbox.
+    pub fn in_runtime(self, tools: Tools, home: PathBuf, codex_home: &Path) -> Self {
+        let runtime = Arc::new(SandboxRuntime::new(tools));
+        let unread = vec![format!("{}/**", codex_home.display())];
+        self.sandboxed(Arc::new(Unreadable::new(runtime, unread)), home)
     }
 
     /// Runs each call inside `sandbox`, as Claude Code with its home at `home`
@@ -254,6 +267,36 @@ mod tests {
     use crate::ports::{Reach, Tools};
     use crate::settings::Effort;
     use crate::test::OpenSandbox;
+
+    #[test]
+    fn a_runners_calls_on_every_harness_leave_kelpies_codex_login_unread() {
+        let dir = tempfile::tempdir().unwrap();
+        let tools = crate::preview::Tools::at(dir.path().join("tools"));
+        std::fs::create_dir_all(tools.sandbox().parent().unwrap()).unwrap();
+        std::fs::write(tools.sandbox(), "").unwrap();
+        let login = dir.path().join("codex");
+        let claude = ClaudeCli::default().in_runtime(tools, dir.path().join("home"), &login);
+        let settings = dir.path().join("call.srt.json");
+        claude
+            .sandbox
+            .wrap(
+                &crate::ports::Policy::default(),
+                &settings,
+                &std::process::Command::new("claude"),
+            )
+            .unwrap();
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        let unread = format!("{}/**", login.display());
+        assert!(
+            written["filesystem"]["denyRead"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|p| p == unread.as_str()),
+            "{written}"
+        );
+    }
 
     // Recorded from Claude Code 2.1.283 on Haiku: a call asked to say ok.
     const RESULT: &str = include_str!("../../fixtures/claude-p-result.json");

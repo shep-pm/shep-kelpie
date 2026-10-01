@@ -23,6 +23,9 @@ use crate::state::write_atomically;
 /// old place for a runner still on the old build
 const SHARED: [&str; 5] = ["settings.toml", "totp", "tools", "relay", "rulings"];
 
+/// Kelpie's own Codex login, its `codex_home` when that is not set
+const CODEX: &str = "codex";
+
 /// The build the last upgrade replaced, which only `upgrade --rollback` reads
 const PREVIOUS_BUILD: &str = "builds/shep-kelpie.previous";
 
@@ -91,6 +94,46 @@ pub fn shared(old: &Path, new: &Path) -> Plan {
         place: new.to_owned(),
         moves: linked.chain([previous]).collect(),
     }
+}
+
+/// Kelpie's own Codex login, from `codex` in the old home `old` to `codex`
+/// in the home `new`
+///
+/// A plan of its own, whose marker is in the login's new folder, so the
+/// login moves even after the shared files moved without it. Each entry
+/// moves by rename, keeping its mode, into a folder only its owner opens,
+/// and the old folder goes once empty. Kelpie never reads the login.
+///
+/// # Errors
+///
+/// A message when the old `codex` is there and cannot be listed.
+pub fn codex(old: &Path, new: &Path) -> Result<Plan, String> {
+    let folder = new.join(CODEX);
+    let kept = old.join(CODEX);
+    let listed = match fs::read_dir(&kept) {
+        Ok(listed) => Some(listed),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("cannot list {}: {e}", kept.display())),
+    };
+    let mut moves: Vec<Move> = listed
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| Move {
+            from: entry.path(),
+            to: folder.join(entry.file_name()),
+            link: false,
+            empties: 1,
+        })
+        .collect();
+    moves.sort_by(|a, b| a.from.cmp(&b.from));
+    Ok(Plan {
+        old: old.to_owned(),
+        home: new.to_owned(),
+        claim: true,
+        place: folder,
+        moves,
+    })
 }
 
 /// Project `name`'s files, from the old layout under `old` to its own folder under `new`

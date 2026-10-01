@@ -5,8 +5,10 @@
 //! is kept where [`Processes::stop`] can reach it. Only this module reaps
 //! them, and only under the lock, so a signalled pid is never a reused one.
 
+use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::process::CommandExt;
+use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -47,7 +49,7 @@ impl Processes {
     /// Runs `command` to its end with stdin closed, collecting its output
     #[cfg(test)]
     pub(super) fn output(&self, command: &mut Command) -> Result<Output, RunError> {
-        self.run(command, None, &|_| {})
+        self.run(command, None, &|_| {}, None)
     }
 
     /// Like `output`, killing the child after `limit` if one is
@@ -58,7 +60,26 @@ impl Processes {
         limit: Option<Duration>,
         spawned: &dyn Fn(u32),
     ) -> Result<Output, RunError> {
-        self.run(command, limit.map(|l| Instant::now() + l), spawned)
+        self.run(command, limit.map(|l| Instant::now() + l), spawned, None)
+    }
+
+    /// Like `output_telling`, with the child's stdout and stderr written to
+    /// the files `outputs` names, emptied first, and read back and removed
+    /// once it ends
+    ///
+    /// A pipe the child shares with a parent that makes it non-blocking, as
+    /// Node does with its own, fails a write once the pipe is full, and a
+    /// program that does not wait and write again dies of it. A file never
+    /// fills that way.
+    pub(super) fn output_to_files(
+        &self,
+        command: &mut Command,
+        limit: Option<Duration>,
+        spawned: &dyn Fn(u32),
+        outputs: [&Path; 2],
+    ) -> Result<Output, RunError> {
+        let deadline = limit.map(|l| Instant::now() + l);
+        self.run(command, deadline, spawned, Some(outputs))
     }
 
     /// Like `output`, and kills the child once `limit` has passed
@@ -67,7 +88,7 @@ impl Processes {
         command: &mut Command,
         limit: Duration,
     ) -> Result<Output, RunError> {
-        self.run(command, Some(Instant::now() + limit), &|_| {})
+        self.run(command, Some(Instant::now() + limit), &|_| {}, None)
     }
 
     fn run(
@@ -75,14 +96,22 @@ impl Processes {
         command: &mut Command,
         deadline: Option<Instant>,
         spawned: &dyn Fn(u32),
+        outputs: Option<[&Path; 2]>,
     ) -> Result<Output, RunError> {
+        let (out, err) = match outputs {
+            Some([out, err]) => (
+                Stdio::from(File::create(out).map_err(RunError::Io)?),
+                Stdio::from(File::create(err).map_err(RunError::Io)?),
+            ),
+            None => (Stdio::piped(), Stdio::piped()),
+        };
         // Its own process group, led by its own pid, so a program it spawns
         // and leaves behind (a build, a test run) is reachable by signalling
         // the group, not just the one pid this struct tracks.
         let mut child = command
             .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdout(out)
+            .stderr(err)
             .process_group(0)
             .spawn()
             .map_err(RunError::Io)?;
@@ -108,10 +137,21 @@ impl Processes {
         if self.lock().stopping {
             return Err(RunError::Stopped);
         }
-        Ok(Output {
-            status,
-            stdout: stdout.join().unwrap_or_default(),
-            stderr: stderr.join().unwrap_or_default(),
+        let (stdout, stderr) = (
+            stdout.join().unwrap_or_default(),
+            stderr.join().unwrap_or_default(),
+        );
+        Ok(match outputs {
+            Some([out, err]) => Output {
+                status,
+                stdout: take(out)?,
+                stderr: take(err)?,
+            },
+            None => Output {
+                status,
+                stdout,
+                stderr,
+            },
         })
     }
 
@@ -348,6 +388,14 @@ fn drain(pipe: Option<impl Read + Send + 'static>) -> thread::JoinHandle<Vec<u8>
     })
 }
 
+// The whole of the file at `path`, which is then removed: a call's output
+// holds its commands' output, which is not kept once read.
+fn take(path: &Path) -> Result<Vec<u8>, RunError> {
+    let bytes = std::fs::read(path).map_err(RunError::Io)?;
+    let _ = std::fs::remove_file(path);
+    Ok(bytes)
+}
+
 // Each line of `pipe` as it comes, until it closes.
 fn read_lines(pipe: Option<impl Read + Send + 'static>) -> Receiver<String> {
     let (send, lines) = mpsc::channel();
@@ -399,6 +447,29 @@ mod tests {
             &|_| true,
         );
         assert!(matches!(answer, Err(RunError::TimedOut)), "{answer:?}");
+    }
+
+    #[test]
+    fn a_child_writing_to_files_gets_them_empty_and_its_output_comes_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let (out, err) = (dir.path().join("out"), dir.path().join("err"));
+        std::fs::write(&out, "left from before").unwrap();
+        let processes = Processes::default();
+        // More than a pipe holds, written by a child no one reads while it runs.
+        let script = "head -c 1048576 /dev/zero | tr '\\0' x; echo oops >&2";
+        let output = processes
+            .output_to_files(
+                Command::new("sh").args(["-c", script]),
+                Some(Duration::from_secs(30)),
+                &|_| {},
+                [&out, &err],
+            )
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout.len(), 1_048_576);
+        assert!(output.stdout.iter().all(|&b| b == b'x'));
+        assert_eq!(output.stderr, b"oops\n");
+        assert!(!out.exists() && !err.exists());
     }
 
     #[test]

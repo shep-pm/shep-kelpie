@@ -213,6 +213,7 @@ mod tests {
         root.as_object_mut().unwrap().remove(SHEEP_SCHEMA_KEY);
         let example = include_str!("../kelpie-settings.example.toml")
             .replace("# ruling_channels =", "ruling_channels =")
+            .replace("# codex_home =", "codex_home =")
             .replace("# gpu_metrics_url =", "gpu_metrics_url =")
             .replace("# [kelpie.reviewers.", "[kelpie.reviewers.")
             .replace("# reviews =", "reviews =")

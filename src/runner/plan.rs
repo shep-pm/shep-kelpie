@@ -96,6 +96,7 @@ impl Runner {
         let model = &self.agents.planner;
         let minutes = u64::from(self.settings.worker.turn_timeout.get());
         // It reads and searches the repo, and runs no commands and no crew.
+        // On Codex, which has no tool that only reads, it reads only its prompt.
         let call = AgentCall {
             role: Role::Planner,
             harness: model.harness.clone(),

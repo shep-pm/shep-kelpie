@@ -147,7 +147,8 @@ pub fn prompt(number: u64, title: &str, body: &str, note: Option<&str>) -> Strin
          The maintainer's rule: split only where each piece works, tests and ships on \
          its own, as a pull request that merges to main by itself. Never cut a piece \
          short to keep it small. Most issues stay whole.\n\n\
-         Read the repo with Read, Grep and Glob to judge the work. Change nothing, and \
+         Read the repo with Read, Grep and Glob, where you have them, to judge the work. \
+         Change nothing, and \
          publish nothing: kelpie opens the sub-issues from your reply.\n\n\
          Reply with one JSON object and nothing else, either\n\
          {{\"split\": false, \"why\": \"<one sentence>\"}}\n\
