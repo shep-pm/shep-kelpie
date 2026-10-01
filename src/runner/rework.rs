@@ -377,6 +377,7 @@ impl Runner {
             ..fresh
         });
         self.save(next).map_err(ReworkError::State)?;
+        self.mark_held(issue, true);
         Ok(worker)
     }
 }

@@ -192,6 +192,27 @@ pub trait Forge: Send {
         labels: &[&str],
     ) -> Result<u64, ForgeError>;
 
+    /// Makes issue `child` a sub-issue of issue `parent`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses or cannot be asked.
+    fn add_sub_issue(&self, repo: &ForgeSlug, parent: u64, child: u64) -> Result<(), ForgeError>;
+
+    /// Marks issue `number` blocked by issue `blocker`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses or cannot be asked.
+    fn add_blocker(&self, repo: &ForgeSlug, number: u64, blocker: u64) -> Result<(), ForgeError>;
+
+    /// Closes issue `number` with `comment`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses or cannot be asked.
+    fn close_issue(&self, repo: &ForgeSlug, number: u64, comment: &str) -> Result<(), ForgeError>;
+
     /// Marks draft pull request `number` ready for review
     ///
     /// # Errors
@@ -205,6 +226,19 @@ pub trait Forge: Send {
     ///
     /// [`ForgeError`] when the forge refuses or cannot be asked.
     fn set_label(
+        &self,
+        repo: &ForgeSlug,
+        number: u64,
+        label: &str,
+        on: bool,
+    ) -> Result<(), ForgeError>;
+
+    /// Adds `label` to issue `number`, or takes it off
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses or cannot be asked.
+    fn set_issue_label(
         &self,
         repo: &ForgeSlug,
         number: u64,
@@ -355,6 +389,10 @@ pub struct Issue {
     pub labels: Vec<String>,
     /// Whether it is still open
     pub open: bool,
+    /// The issue it is a sub-issue of, if any
+    pub parent: Option<u64>,
+    /// The issues it is blocked by, as far as the forge lists them
+    pub blocked_by: Vec<u64>,
 }
 
 /// An open issue, as the follow-up check reads it

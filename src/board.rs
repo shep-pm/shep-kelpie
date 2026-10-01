@@ -10,7 +10,8 @@
 //! is blocked by is open, even one with a pull request. An issue the runner
 //! picks but cannot take, because the forge cannot show it or its `worker:`
 //! label fails when `add` reads it, is skipped too, so it cannot stall the
-//! issues behind it.
+//! issues behind it. An issue with sub-issues is never worked itself: its
+//! sub-issues are.
 
 use std::fmt;
 
@@ -53,6 +54,26 @@ pub struct ReadyIssue {
     pub blocked_by: Vec<Blocker>,
     /// How many more blockers the forge counted but did not list
     pub unlisted_blockers: u64,
+    /// The issue it is a sub-issue of, if any
+    pub parent: Option<u64>,
+    /// Its own sub-issues, as the forge counts them
+    pub sub_issues: SubIssues,
+}
+
+/// How many sub-issues an issue has, and how many of them are closed
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SubIssues {
+    /// All of them
+    pub total: u64,
+    /// The closed ones
+    pub closed: u64,
+}
+
+impl SubIssues {
+    /// Whether it has sub-issues and every one is closed
+    pub fn all_closed(self) -> bool {
+        self.total > 0 && self.closed >= self.total
+    }
 }
 
 /// An issue a ready issue is blocked by
@@ -97,6 +118,20 @@ pub enum Skip {
     Assigned {
         /// The issue
         issue: u64,
+    },
+    /// It has sub-issues, which are worked in its place
+    Split {
+        /// The issue
+        issue: u64,
+        /// Its sub-issues still open
+        open: u64,
+    },
+    /// A ruling on splitting it waits on the maintainer
+    Planning {
+        /// The issue
+        issue: u64,
+        /// The ruling
+        ruling: u64,
     },
     /// An issue it is blocked by is still open
     Blocked {
@@ -148,6 +183,8 @@ impl Skip {
             Self::PullRequest { issue, .. }
             | Self::Finished { issue }
             | Self::Assigned { issue }
+            | Self::Split { issue, .. }
+            | Self::Planning { issue, .. }
             | Self::Blocked { issue, .. }
             | Self::Label { issue, .. }
             | Self::Failed { issue, .. }
@@ -198,6 +235,14 @@ pub fn pick(ready: &[ReadyIssue], open: &[OpenPullRequest], finished: &[u64]) ->
             });
         } else if issue.assigned {
             skipped.push(Skip::Assigned { issue: number });
+        } else if issue.sub_issues.total > 0 {
+            skipped.push(Skip::Split {
+                issue: number,
+                open: issue
+                    .sub_issues
+                    .total
+                    .saturating_sub(issue.sub_issues.closed),
+            });
         } else if !by.is_empty() || issue.unlisted_blockers > 0 {
             skipped.push(Skip::Blocked {
                 issue: number,
@@ -318,6 +363,8 @@ mod tests {
             labels: vec![READY.into()],
             blocked_by: vec![],
             unlisted_blockers: 0,
+            parent: None,
+            sub_issues: SubIssues::default(),
         }
     }
 
@@ -388,6 +435,20 @@ mod tests {
         let pick = pick(&[p0, ready(1)], &[], &[]);
         assert_eq!(pick.issue, Some(1));
         assert_eq!(pick.skipped.len(), 1);
+    }
+
+    #[test]
+    fn an_issue_with_sub_issues_is_never_picked_while_its_sub_issues_are() {
+        let mut parent = ready(4);
+        parent.sub_issues = SubIssues {
+            total: 3,
+            closed: 1,
+        };
+        let mut piece = ready(5);
+        piece.parent = Some(4);
+        let pick = pick(&[parent, piece], &[], &[]);
+        assert_eq!(pick.issue, Some(5));
+        assert_eq!(pick.skipped, [Skip::Split { issue: 4, open: 2 }]);
     }
 
     #[test]

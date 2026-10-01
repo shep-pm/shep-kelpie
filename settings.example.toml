@@ -5,7 +5,7 @@
 # `review.local_rounds`, `pacing.enabled`,
 # `worker.allowed_domains`, `worker.build_env`, `worker.instructions_file`,
 # `worker.turn_timeout`, `ruling_channels`, `pull_request_reviewers`,
-# `preview`, `skills` and `agents`, which a table
+# `preview`, `skills`, `agents`, `models.planner` and `planning`, which a table
 # written before them may leave out. This entry holds the first build's
 # defaults, for shep.
 
@@ -76,6 +76,18 @@ effort = "low"
 model = "claude-haiku-4-5-20251001"
 effort = "low"
 
+[app.dogs.kelpie.models.planner]
+model = "claude-opus-5-5"
+effort = "medium"
+
+# Before a ready issue opens a work item, a planning call reads the repo and
+# decides whether it is one pull request or several. Several become
+# sub-issues of it, linked by what blocks what, and are worked in its place.
+# Under `ask` a split waits on a ruling; under `auto` it happens on its own.
+# Off until the sub-issue and blocked-by calls have run against a real repo.
+[app.dogs.kelpie.planning]
+enabled = false
+
 # The agent each role runs on, from those kelpie's `[kelpie.agents]` define,
 # over its `models` entry. A role left out keeps `models` on Claude Code.
 # The relay stays on `models.relay`.
@@ -83,6 +95,7 @@ effort = "low"
 # worker = "opus-high"
 # reviewer = "opus-high"
 # judge = "opus-high"
+# planner = "opus-high"
 
 [app.dogs.kelpie.review]
 loop_guard = 8

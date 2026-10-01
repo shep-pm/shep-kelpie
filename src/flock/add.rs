@@ -19,12 +19,12 @@ use super::{Checkout, Launch, flock, kelpie_sheep, send, tables};
 use crate::board::READY;
 use crate::dog;
 use crate::ports::{Forge, NewLabel, Visibility};
-use crate::runner::{HUMAN, ProjectName, SUMMON_LABEL as SUMMON};
+use crate::runner::{HUMAN, IN_PROGRESS, ProjectName, SUMMON_LABEL as SUMMON};
 use crate::settings::{Settings, table_of};
 use crate::shepherd::DOG;
 
 /// The labels kelpie reads and sets on a project's issues and pull requests
-pub const LABELS: [NewLabel; 3] = [
+pub const LABELS: [NewLabel; 4] = [
     NewLabel {
         name: READY,
         color: "0e8a16",
@@ -34,6 +34,11 @@ pub const LABELS: [NewLabel; 3] = [
         name: HUMAN,
         color: "fbca04",
         description: "Kelpie handed this back and waits on the maintainer",
+    },
+    NewLabel {
+        name: IN_PROGRESS,
+        color: "fbca04",
+        description: "A worker session is on it",
     },
     NewLabel {
         name: SUMMON,
@@ -76,6 +81,13 @@ effort = "low"
 [models.relay]
 model = "claude-haiku-4-5-20251001"
 effort = "low"
+
+[models.planner]
+model = "claude-opus-5-5"
+effort = "medium"
+
+[planning]
+enabled = false
 
 [review]
 loop_guard = 8

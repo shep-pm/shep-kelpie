@@ -16,7 +16,7 @@ _Avoid_: shift
 
 **Project manager (PM)**:
 The role that owns a project's merge queue, git state and gates. It never
-decides how a work item is split.
+decides how a work item is split. It does plan, which is a level above.
 _Avoid_: lead, control room, control center
 
 **Worker**:
@@ -65,6 +65,14 @@ A stage of a work item: plan, implement, review, fix, merge.
 **Work split**:
 A worker's choice of how to carry out its work item: inline, phased with
 handoffs, or delegated to a crew.
+
+**Planning**:
+Splitting an issue into sub-issues before any work item exists, one pull
+request each, linked by what blocks what. A one-shot call the project
+manager makes when the board picks an issue; most issues stay whole. It
+decides how many work items an issue becomes. The work split inside each
+one stays the worker's.
+_Avoid_: breakdown, decomposition, work split (the worker's choice inside one work item)
 
 **Reset**:
 Ending a session's context at a phase boundary, by compact (same session) or

@@ -350,6 +350,7 @@ impl Runner {
             spend: item.spend(),
             qwen: item.qwen,
         };
+        let issue = item.issue;
         let mut next = self.state.clone();
         next.work_items.retain(|open| open.issue != item.issue);
         // Rulings about this work item go with it, a question asked before
@@ -359,6 +360,7 @@ impl Runner {
             next.finished.push(item.issue);
         }
         self.save(next)?;
+        self.mark_held(issue, false);
         Ok(Begin::Report(report))
     }
 }

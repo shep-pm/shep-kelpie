@@ -152,7 +152,8 @@ mod tests {
             .replace("# [app.dogs.kelpie.agents]", "[app.dogs.kelpie.agents]")
             .replace("# worker = \"opus-high\"", "worker = \"opus-high\"")
             .replace("# reviewer = \"opus-high\"", "reviewer = \"opus-high\"")
-            .replace("# judge = \"opus-high\"", "judge = \"opus-high\"");
+            .replace("# judge = \"opus-high\"", "judge = \"opus-high\"")
+            .replace("# planner = \"opus-high\"", "planner = \"opus-high\"");
         assert!(
             text.contains("reviewers = [\"qwen\"]"),
             "the example's list moved"

@@ -28,6 +28,7 @@ mod adopt;
 #[cfg(test)]
 mod agents_tests;
 mod alert;
+mod claim;
 mod claude_files;
 #[cfg(test)]
 mod coderabbit;
@@ -39,6 +40,7 @@ mod instructions;
 mod merge;
 mod pace;
 mod paths;
+mod plan;
 mod question;
 mod replies;
 mod report;
@@ -56,6 +58,7 @@ mod words;
 
 pub use crate::coderabbit::LABEL as SUMMON_LABEL;
 pub use adopt::AdoptError;
+pub use claim::IN_PROGRESS;
 pub use merge::DropError;
 pub use pace::PacerStatus;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
@@ -199,6 +202,9 @@ pub struct Runner {
     // What last did something in a step, kept in memory only, so the next
     // step starts with the one after it
     last_acted: Option<turn::Slot>,
+    // What the runner carried on without, kept in memory only until
+    // `take_notes` hands it out
+    notes: Vec<String>,
 }
 
 impl Runner {
@@ -272,7 +278,7 @@ impl Runner {
             state.leases.clear();
             store.save(&state)?;
         }
-        Ok(Self {
+        let mut runner = Self {
             project,
             settings,
             extra_instructions,
@@ -299,7 +305,10 @@ impl Runner {
             viewer: None,
             focus: None,
             last_acted: None,
-        })
+            notes: Vec::new(),
+        };
+        runner.settle_labels();
+        Ok(runner)
     }
 
     /// The project's settings, as read when the runner started
@@ -398,9 +407,11 @@ impl Runner {
             .unwrap_or_else(|| WorkerModel::from(&self.agents.worker));
         let session = new_session_id().map_err(|e| AddError::Session(e.to_string()))?;
         let mut next = self.state.clone();
+        next.plans.retain(|p| p.issue != issue);
         next.work_items
             .push(self.fresh(issue, found.title, worker.clone(), session));
         self.save(next).map_err(AddError::State)?;
+        self.mark_held(issue, true);
         Ok(worker)
     }
 

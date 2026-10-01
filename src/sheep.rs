@@ -271,6 +271,12 @@ impl Worker {
 // there. A turn cut short by a restart is resumed on the first pass.
 fn work(runner: &Mutex<Runner>, on_wake: &mut OnWake, woken: &Receiver<()>, stopping: &AtomicBool) {
     while !stopping.load(Ordering::SeqCst) {
+        let notes = (runner.lock())
+            .unwrap_or_else(PoisonError::into_inner)
+            .take_notes();
+        for note in notes {
+            eprintln!("{note}");
+        }
         match step(runner) {
             Ok(Some(report)) => {
                 let line = serde_json::to_string(&report).expect("a report serializes to JSON");

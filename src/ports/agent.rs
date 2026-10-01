@@ -24,6 +24,8 @@ pub enum Role {
     Reviewer,
     /// A one-shot that judges findings
     Judge,
+    /// A one-shot that plans a ready issue before any work item opens
+    Planner,
 }
 
 impl Role {
@@ -33,6 +35,7 @@ impl Role {
             Self::Worker => "worker",
             Self::Reviewer => "reviewer",
             Self::Judge => "judge",
+            Self::Planner => "planner",
         }
     }
 }

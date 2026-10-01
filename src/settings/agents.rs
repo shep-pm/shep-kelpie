@@ -96,6 +96,9 @@ pub struct RoleAgentNames {
     /// The one-shot that judges every finding
     #[serde(default)]
     pub judge: Option<AgentName>,
+    /// The one-shot that plans a ready issue before it opens a work item
+    #[serde(default)]
+    pub planner: Option<AgentName>,
 }
 
 /// The model and effort each role runs on, from the agent it names
@@ -107,6 +110,8 @@ pub struct RoleAgents {
     pub reviewer: RoleModel,
     /// The judge's one-shots
     pub judge: RoleModel,
+    /// The planning call's one-shots
+    pub planner: RoleModel,
 }
 
 impl Settings {
@@ -127,6 +132,7 @@ impl Settings {
             worker: pick("worker", &self.agents.worker, &self.models.worker)?,
             reviewer: pick("reviewer", &self.agents.reviewer, &self.models.reviewer)?,
             judge: pick("judge", &self.agents.judge, &self.models.judge)?,
+            planner: pick("planner", &self.agents.planner, &self.models.planner)?,
         })
     }
 }

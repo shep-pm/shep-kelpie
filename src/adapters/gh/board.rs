@@ -4,7 +4,7 @@
 use serde::Deserialize;
 
 use super::{Label, gh, unreadable};
-use crate::board::{Blocker, OpenPullRequest, READY, ReadyIssue};
+use crate::board::{Blocker, OpenPullRequest, READY, ReadyIssue, SubIssues};
 use crate::ports::ForgeError;
 use crate::settings::ForgeSlug;
 
@@ -31,7 +31,7 @@ fn ready_args(repo: &ForgeSlug) -> [&str; 12] {
         "--limit",
         LIST_LIMIT,
         "--json",
-        "number,assignees,labels,blockedBy",
+        "number,assignees,labels,blockedBy,parent,subIssuesSummary",
     ]
 }
 
@@ -62,6 +62,20 @@ fn parse_ready_issues(stdout: &[u8]) -> Result<Vec<ReadyIssue>, ForgeError> {
         assignees: Vec<serde::de::IgnoredAny>,
         labels: Vec<Label>,
         blocked_by: BlockedBy,
+        parent: Option<Parent>,
+        // Absent only from a listing made without asking for it.
+        #[serde(default)]
+        sub_issues_summary: Summary,
+    }
+    #[derive(Deserialize)]
+    struct Parent {
+        number: u64,
+    }
+    // `completed` counts the closed sub-issues, whatever they closed as.
+    #[derive(Default, Deserialize)]
+    struct Summary {
+        total: u64,
+        completed: u64,
     }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -87,6 +101,11 @@ fn parse_ready_issues(stdout: &[u8]) -> Result<Vec<ReadyIssue>, ForgeError> {
             number: i.number,
             assigned: !i.assignees.is_empty(),
             labels: i.labels.into_iter().map(|l| l.name).collect(),
+            parent: i.parent.map(|p| p.number),
+            sub_issues: SubIssues {
+                total: i.sub_issues_summary.total,
+                closed: i.sub_issues_summary.completed,
+            },
             unlisted_blockers: i
                 .blocked_by
                 .total_count
@@ -212,6 +231,37 @@ mod tests {
                 blocker(19, true),
             ]
         );
+    }
+
+    // Recorded from gh 2.96 on cli/cli with the `ready_issues` fields, since
+    // no repo of the maintainer's has sub-issues yet.
+    const SUB_ISSUES: &str = include_str!("../../../fixtures/gh-issue-list-sub-issues.json");
+
+    #[test]
+    fn each_ready_issue_carries_its_parent_and_its_sub_issues() {
+        let issues = parse_ready_issues(SUB_ISSUES.as_bytes()).unwrap();
+        let read: Vec<(u64, Option<u64>, SubIssues)> = issues
+            .iter()
+            .map(|i| (i.number, i.parent, i.sub_issues))
+            .collect();
+        let count = |total, closed| SubIssues { total, closed };
+        assert_eq!(
+            read,
+            [
+                (14529, None, count(6, 0)),
+                (14528, Some(14529), count(0, 0)),
+                (12438, None, count(3, 2)),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_board_asks_for_each_issues_parent_and_sub_issues() {
+        let repo = ForgeSlug::try_from("shep-pm/shep".to_owned()).unwrap();
+        let args = ready_args(&repo);
+        let json = args.iter().position(|&a| a == "--json").unwrap() + 1;
+        let fields = args[json].split(',').collect::<Vec<_>>();
+        assert!(fields.contains(&"parent") && fields.contains(&"subIssuesSummary"));
     }
 
     #[test]

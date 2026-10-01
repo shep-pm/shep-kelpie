@@ -24,6 +24,7 @@ pub mod guard;
 pub mod lease;
 pub mod local_paths;
 pub mod pacer;
+pub mod plan;
 pub mod ports;
 pub mod preview;
 pub mod profile;
