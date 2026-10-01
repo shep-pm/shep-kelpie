@@ -871,3 +871,12 @@ mod agents;
 mod killing;
 mod manager;
 mod reach;
+
+// The worker's instructions name kelpie by its path, since a program from a variable is refused.
+#[test]
+fn a_test_run_under_the_lease_is_let_through_with_kelpie_named_outright() {
+    let run = "/home/me/.kelpie/bin/kelpie lease run cargo-test -- cargo test";
+    assert_eq!(bash(run), Verdict::Allow);
+    let why = refusal(bash("\"$KELPIE\" lease run cargo-test -- cargo test"));
+    assert!(why.contains("write the program's name out"), "{why}");
+}

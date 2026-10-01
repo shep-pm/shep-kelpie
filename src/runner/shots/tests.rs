@@ -1,7 +1,9 @@
+use std::path::Path;
+
 use serde_json::{Value, json};
 
 use crate::ports::{Checks, Finding, Role, Severity};
-use crate::profile::INSTRUCTIONS;
+use crate::profile;
 use crate::runner::{Runner, StepReport, step};
 use crate::shots::publish::MARKER;
 use crate::test::{Rig, Scripted, ScriptedShots};
@@ -51,7 +53,10 @@ fn a_project_without_a_launch_file_behaves_as_before() {
     assert_eq!(worker.mcp_config, None);
     let instructions = std::fs::read_to_string(rig.paths().worker.join("instructions.md"));
     let instructions = instructions.unwrap();
-    assert!(instructions.starts_with(INSTRUCTIONS), "{instructions}");
+    assert!(
+        instructions.starts_with(&profile::instructions(Path::new(Rig::KELPIE))),
+        "{instructions}"
+    );
     assert!(!instructions.contains(crate::preview::WORKER_INSTRUCTIONS));
     assert_eq!(shots_comments(&rig), Vec::<String>::new());
     assert!(!rig.paths().worker.join("mcp.json").exists());
@@ -292,7 +297,7 @@ fn a_worker_with_a_launch_file_gets_playwright_and_the_shots_tool() {
         assert!(!written.starts_with(&worktree), "{written:?}");
     }
     let instructions = std::fs::read_to_string(worker.join("instructions.md")).unwrap();
-    assert!(instructions.starts_with(INSTRUCTIONS));
+    assert!(instructions.starts_with(&profile::instructions(Path::new(Rig::KELPIE))));
     assert!(
         instructions.contains("# Seeing what you build"),
         "{instructions}"

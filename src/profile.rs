@@ -11,12 +11,19 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::fence;
+use crate::lease::door;
 use crate::ports::{Fence, Guard, Reach};
 use crate::settings::{BuildDir, EnvName, GuardHook, NonBlank};
 use crate::worktree::BASE;
 
 /// Kelpie's instructions to every worker, appended to its system prompt
 pub const INSTRUCTIONS: &str = include_str!("worker-instructions.md");
+
+/// Kelpie's own worker instructions, naming `kelpie`, the binary a worker
+/// runs its tests under the machine's test lease with
+pub fn instructions(kelpie: &Path) -> String {
+    INSTRUCTIONS.replace("{kelpie}", &kelpie.display().to_string())
+}
 
 // Claude Code opens a worktree's whole common git dir to sandboxed writes.
 // These are the parts a commit and a push do not need, and whose change
@@ -177,6 +184,7 @@ impl WorkerProfile<'_> {
             hosts,
             no_commands,
             env: self.env(),
+            sockets: vec![door::socket_in(self.kelpie_home)],
             preview,
             guard: Guard {
                 kelpie: self.kelpie.to_owned(),
@@ -455,6 +463,7 @@ mod tests {
                 "strictAllowlist": true,
                 "allowLocalBinding": true,
                 "allowMachLookup": ["com.apple.FSEvents"],
+                "allowUnixSockets": ["/k/dog/lease.sock"],
             })
         );
         assert_eq!(s["env"]["NODE_USE_ENV_PROXY"], "1");
@@ -637,13 +646,13 @@ mod tests {
         assert!(!allow.iter().any(|p| p.ends_with("/main")), "{allow:?}");
     }
 
-    // Unset, the sandbox blocks every Unix socket, kelpie's shepherd socket
+    // Every other Unix socket stays blocked, kelpie's shepherd socket
     // included, so a worker cannot `shep trigger` its own ruling's answer.
     #[test]
-    fn a_worker_reaches_no_unix_socket() {
+    fn a_worker_reaches_the_dogs_door_and_no_other_unix_socket() {
         let s = settings(&[]);
         let network = s["sandbox"]["network"].as_object().unwrap();
-        assert!(!network.contains_key("allowUnixSockets"), "{network:?}");
+        assert_eq!(network["allowUnixSockets"], json!(["/k/dog/lease.sock"]));
         assert!(!network.contains_key("allowAllUnixSockets"), "{network:?}");
     }
 

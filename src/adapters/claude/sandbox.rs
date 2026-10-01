@@ -118,7 +118,7 @@ pub(crate) fn fence_policy(fence: &Fence) -> Policy {
         no_read: fence.no_read.clone(),
         read: Vec::new(),
         hosts: fence.hosts.clone(),
-        sockets: Vec::new(),
+        sockets: fence.sockets.clone(),
         listen: fence.preview.is_some(),
         services: match fence.preview {
             Some(_) => DEV_SERVER_SERVICES.map(str::to_owned).into(),
@@ -387,11 +387,13 @@ mod tests {
         let at = args.iter().position(|a| a == "--mcp-config").unwrap();
         assert_eq!(args[at + 1], bridged_config(&call));
         let [(policy, _)] = sandbox.wrapped().try_into().unwrap();
-        assert_eq!(policy.sockets, bridges.sockets);
-        assert_eq!(policy.sockets.len(), 2);
+        let (door, bridged) = policy.sockets.split_first().unwrap();
+        assert_eq!(door, Path::new("/k/dog/lease.sock"));
+        assert_eq!(bridged, bridges.sockets);
+        assert_eq!(bridged.len(), 2);
         assert!(policy.read.contains(&bridged_config(&call)));
         assert!(!policy.read.contains(&config), "the servers' own commands");
-        for socket in &policy.sockets {
+        for socket in bridged {
             assert_eq!(socket.parent(), Some(w.path("worker").as_path()));
         }
         let written: serde_json::Value =

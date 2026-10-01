@@ -102,6 +102,8 @@ pub struct Fence {
     pub no_commands: Vec<String>,
     /// Variables set for every command it runs
     pub env: BTreeMap<String, PathBuf>,
+    /// Unix sockets it may connect to: the dog's door, for `cargo-test`
+    pub sockets: Vec<PathBuf>,
     /// The domains its browser may open, when it runs the preview's dev
     /// server and browser. `None` without a preview.
     pub preview: Option<Vec<String>>,

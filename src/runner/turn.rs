@@ -334,6 +334,7 @@ impl Runner {
             self.extra_instructions.as_deref(),
             &item.worktree,
             &self.skills,
+            &self.kelpie,
         );
         let mcp_config = if previewed {
             text.push_str(WORKER_INSTRUCTIONS);
