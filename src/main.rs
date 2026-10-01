@@ -54,6 +54,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -83,14 +84,26 @@ fn main() -> ExitCode {
                 git_common_dir: Path::new(git_common_dir),
                 worktree: Path::new(worktree),
             };
-            match guard::local_paths(home.as_deref(), local) {
-                Ok(local) => hook(guard::judge(
-                    std::io::stdin().lock(),
-                    home.as_deref(),
-                    local,
-                    checkout,
-                )),
-                Err(why) => hook(Verdict::Refuse(why)),
+            let (pin, local) = guard::pin_flag(local);
+            let local = match guard::local_paths(home.as_deref(), &local) {
+                Ok(local) => local,
+                Err(why) => return hook(Verdict::Refuse(why)),
+            };
+            let mut input = Vec::new();
+            if let Err(e) = std::io::stdin().lock().read_to_end(&mut input) {
+                return hook(Verdict::Refuse(format!(
+                    "kelpie cannot read this tool call: {e}"
+                )));
+            }
+            match guard::judge(&input[..], home.as_deref(), local, checkout) {
+                Verdict::Allow if pin => match guard::pinned(&input) {
+                    Ok(answer) => {
+                        println!("{answer}");
+                        ExitCode::SUCCESS
+                    }
+                    Err(why) => hook(Verdict::Refuse(why)),
+                },
+                verdict => hook(verdict),
             }
         }
         [command, rest @ ..] if shep_kelpie::flock::VERBS.contains(&command.as_str()) => {

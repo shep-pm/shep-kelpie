@@ -60,6 +60,53 @@ pub const FOLDER_FLAG: &str = "--folder=";
 /// How the hook's command line names one private word
 pub const NAME_FLAG: &str = "--name=";
 
+/// How the hook's command line asks for an allowed command to be handed
+/// back pinned to the folder it was judged in
+///
+/// Codex runs a command in a `workdir` of the model's choosing and never
+/// tells the hook which, so the hook judges the command in the turn's own
+/// folder and answers with it prefixed by a `cd` there.
+pub const PIN_FLAG: &str = "--pin-folder";
+
+/// Whether `args` asks for [`PIN_FLAG`], and the rest of them
+pub fn pin_flag(args: &[String]) -> (bool, Vec<String>) {
+    let pin = args.iter().any(|a| a == PIN_FLAG);
+    (
+        pin,
+        args.iter().filter(|a| *a != PIN_FLAG).cloned().collect(),
+    )
+}
+
+/// Codex's hook answer that lets the command in `input` run, in the folder
+/// the hook judged it in
+///
+/// # Errors
+///
+/// What to tell the worker, when `input` names no folder or command.
+pub fn pinned(input: &[u8]) -> Result<String, String> {
+    #[derive(Deserialize)]
+    struct Call {
+        cwd: PathBuf,
+        tool_input: Command,
+    }
+    #[derive(Deserialize)]
+    struct Command {
+        command: String,
+    }
+    let call: Call = serde_json::from_slice(input)
+        .map_err(|e| format!("kelpie cannot read this tool call: {e}"))?;
+    let folder = call.cwd.to_string_lossy().replace('\'', r"'\''");
+    let command = format!("cd '{folder}' || exit 1\n{}", call.tool_input.command);
+    let answer = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "updatedInput": { "command": command },
+        }
+    });
+    Ok(answer.to_string())
+}
+
 /// What the hook keeps off the forge: `home`, then the folders and names `args` give
 ///
 /// # Errors
