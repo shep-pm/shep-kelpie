@@ -68,6 +68,11 @@ pub struct Settings {
     pub max_items: NonZeroU32,
     /// Globs for files left out of a pull request's changed-line count
     pub generated: Vec<String>,
+    /// Words that stay off the forge: kelpie refuses a post naming one, and
+    /// a worker's guard refuses a commit or `gh` text that does. Whole
+    /// words, whatever their case. None when absent.
+    #[serde(default)]
+    pub private_names: Vec<NonBlank>,
     /// The model and effort for each role
     pub models: Models,
     /// The agent each role runs on, from those kelpie's own settings

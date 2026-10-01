@@ -11,10 +11,11 @@ use std::process::{Command, Stdio};
 
 use crate::board::{LabelError, Skip, WorkerModel, worker_override};
 use crate::channels::{Channel, Channels};
+use crate::local_paths::LocalPaths;
 use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Guarded, Ports, SessionId, Timestamp, Visibility};
 use crate::review_bot::{Bot, Profile, Reviewers};
-use crate::settings::{LoopReviewer, RoleAgents, Runs, Settings, SettingsError};
+use crate::settings::{LoopReviewer, NonBlank, RoleAgents, Runs, Settings, SettingsError};
 use crate::skills::Skills;
 use crate::state::ids::RulingIds;
 use crate::state::{ProjectState, RunState, StateError, StateStore};
@@ -162,6 +163,8 @@ pub struct Runner {
     store: StateStore,
     state: ProjectState,
     ports: Ports,
+    // What no forge post may name, which `ports.forge` refuses too
+    local: LocalPaths,
     // The pacer's last reading of usage and when it was read, kept in memory only
     pacing: Option<(Timestamp, Assessment)>,
     // What the board passed over on its last poll, kept in memory only
@@ -218,8 +221,10 @@ impl Runner {
         kelpie: &Path,
         mut ports: Ports,
     ) -> Result<Self, OpenError> {
-        let local = [home, paths.kelpie_home.as_path(), settings.repo.as_path()];
-        ports.forge = Box::new(Guarded::new(ports.forge, local));
+        let folders = [home, paths.kelpie_home.as_path(), settings.repo.as_path()];
+        let names = settings.private_names.iter().map(NonBlank::as_str);
+        let local = LocalPaths::new(folders, names);
+        ports.forge = Box::new(Guarded::new(ports.forge, local.clone()));
         let reviewers = kelpie_settings.reviewers;
         let agents = settings.role_agents(&kelpie_settings.agents)?;
         let lineup = settings.lineup(&kelpie_settings, home)?;
@@ -278,6 +283,7 @@ impl Runner {
             store,
             state,
             ports,
+            local,
             pacing: None,
             skipped: Vec::new(),
             reviewers,

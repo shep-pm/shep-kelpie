@@ -1,7 +1,7 @@
 //! `gh` in a worker's Bash call
 //!
 //! A pull request's title must be a conventional commit, and no title, body
-//! or notes may carry the home folder's path. What only the project manager
+//! or notes may carry what [`LocalPaths`](crate::local_paths::LocalPaths) finds of this machine's. What only the project manager
 //! does is refused whatever the command's shape: merging, marking ready and
 //! summoning a review, with `gh api` and `gh auth`, which reach around them.
 //! An alias or an extension could stand for any of those, so only gh's own
@@ -62,7 +62,7 @@ pub(super) fn judge(
     words: &[String],
     heredocs: &[String],
     cwd: Option<&Path>,
-    home: Option<&Home>,
+    home: &Home,
 ) -> Vec<String> {
     // The group and verb are the first two words that are not flags, which
     // may come before them: `gh pr -R owner/repo create`.
@@ -147,7 +147,7 @@ pub(super) fn judge(
                 .to_owned(),
         );
     }
-    // Not echoed: a title can carry the home folder's path too.
+    // Not echoed: a title can carry a path too.
     if group == "pr" && !titles.iter().all(|t| conventional(t)) {
         out.push(format!(
             "this pull request's title is not a conventional commit. Write it as \
@@ -156,15 +156,13 @@ pub(super) fn judge(
             TYPES.join(", ")
         ));
     }
-    if let Some(home) = home {
-        let texts = titles
-            .into_iter()
-            .chain(values(args, &["--body", "--notes"], &['b', 'n']))
-            .chain(files(args, &["--body-file", "--notes-file"], &['F'], cwd))
-            .chain(heredocs.iter().cloned());
-        if texts.into_iter().any(|t| home.is_in(&t)) {
-            out.push(home.refusal(&format!("this `gh {group} {verb}`"), WRITE));
-        }
+    let texts = titles
+        .into_iter()
+        .chain(values(args, &["--body", "--notes"], &['b', 'n']))
+        .chain(files(args, &["--body-file", "--notes-file"], &['F'], cwd))
+        .chain(heredocs.iter().cloned());
+    if let Some(leak) = home.find_in_prose(texts) {
+        out.push(home.refusal(&format!("this `gh {group} {verb}`"), leak, WRITE));
     }
     out
 }
@@ -233,10 +231,20 @@ mod tests {
         "help",
     ];
 
+    // A hook that was given no folders and no names.
+    fn nobody() -> Home {
+        Home::new(None, crate::local_paths::LocalPaths::default())
+    }
+
     #[test]
     fn every_command_gh_lists_is_known_by_name() {
         for name in GH_HELP {
-            let found = judge(&["gh", name, "list"].map(str::to_owned), &[], None, None);
+            let found = judge(
+                &["gh", name, "list"].map(str::to_owned),
+                &[],
+                None,
+                &nobody(),
+            );
             assert!(
                 found.iter().all(|f| !f.contains("not one")),
                 "{name}: {found:?}"
@@ -246,7 +254,7 @@ mod tests {
             &["gh", "workflow", "view", "ci"].map(str::to_owned),
             &[],
             None,
-            None,
+            &nobody(),
         );
         assert!(found.is_empty(), "{found:?}");
     }

@@ -122,6 +122,11 @@ pub struct Guard {
     pub build: PathBuf,
     /// The project repo's common git dir
     pub git_common_dir: PathBuf,
+    /// Folders besides the home folder whose paths stay off the forge: kelpie's
+    /// home and the project's checkout
+    pub folders: Vec<PathBuf>,
+    /// Words that stay off the forge
+    pub private_names: Vec<String>,
 }
 
 /// One session call to an agent

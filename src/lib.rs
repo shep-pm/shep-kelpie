@@ -21,6 +21,7 @@ pub mod fence;
 pub mod flock;
 pub mod guard;
 pub mod lease;
+pub mod local_paths;
 pub mod pacer;
 pub mod plan;
 pub mod ports;

@@ -15,6 +15,7 @@ use crate::board::READY;
 use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
+use crate::local_paths::Leak;
 use crate::review_bot::{Activity, Login, Profile};
 use crate::settings::ForgeSlug;
 use crate::shots::{ShotsJob, ShotsRun};
@@ -399,8 +400,13 @@ pub enum ForgeError {
     Failed(String),
     /// The tool succeeded but its output was not what was asked for
     Unreadable(String),
-    /// The text to post names a folder on this machine, so kelpie never sent it
-    LocalPath,
+    /// A field of the post names something private to this machine, so kelpie never sent it
+    LocalPath {
+        /// The field, such as "the comment"
+        what: &'static str,
+        /// What it names
+        leak: Leak,
+    },
 }
 
 impl fmt::Display for ForgeError {
@@ -409,7 +415,7 @@ impl fmt::Display for ForgeError {
             Self::Spawn(error) => write!(f, "cannot run gh: {error}"),
             Self::Failed(stderr) => write!(f, "gh failed: {}", stderr.trim()),
             Self::Unreadable(output) => write!(f, "unreadable gh output: {}", output.trim()),
-            Self::LocalPath => f.write_str("not posted: the text names a folder on this machine"),
+            Self::LocalPath { what, leak } => write!(f, "not posted: {what} names {leak}"),
         }
     }
 }
