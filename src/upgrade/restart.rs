@@ -50,7 +50,18 @@ impl Default for Patience {
 struct Member {
     name: String,
     program: String,
-    online: bool,
+    status: ProcStatus,
+}
+
+impl Member {
+    // Running, or about to be: it has exec'd the file the upgrade replaces.
+    fn online(&self) -> bool {
+        running(self.status)
+    }
+}
+
+fn running(status: ProcStatus) -> bool {
+    matches!(status, ProcStatus::Online | ProcStatus::Starting)
 }
 
 /// The installed kelpie and the sheep that run it
@@ -81,7 +92,7 @@ impl Plan {
                 DogSource::Adopted { path, .. } => Some(Member {
                     name: row.name.clone(),
                     program: path.clone(),
-                    online: row.status == ProcStatus::Online,
+                    status: row.status,
                 }),
                 _ => None,
             })
@@ -97,7 +108,7 @@ impl Plan {
             match kelpie_sheep(client, &rows, &name, &["runner", &name]).await {
                 Ok(Some(row)) => runners.push(Member {
                     program: script(client, &name).await?,
-                    online: row.status == ProcStatus::Online,
+                    status: row.status,
                     name,
                 }),
                 Ok(None) => {}
@@ -118,7 +129,7 @@ impl Plan {
         let strays: Vec<String> = self
             .runners
             .iter()
-            .filter(|m| m.online && Path::new(&m.program) != self.program)
+            .filter(|m| m.online() && Path::new(&m.program) != self.program)
             .map(|m| format!("`{}` runs {}", m.name, m.program))
             .collect();
         if strays.is_empty() {
@@ -149,35 +160,67 @@ pub async fn restart_all(
     patience: Patience,
     say: &mut dyn FnMut(String),
 ) -> Result<(), String> {
-    for member in plan.runners.iter().chain([&plan.dog]).filter(|m| !m.online) {
-        say(if Path::new(&member.program) == plan.program {
-            format!(
-                "`{}` is not running, so it starts on the new build",
+    for member in plan
+        .runners
+        .iter()
+        .chain([&plan.dog])
+        .filter(|m| !m.online())
+    {
+        say(match member.status {
+            ProcStatus::Stopped if Path::new(&member.program) == plan.program => format!(
+                "`{}` is stopped, so it stays stopped and starts on the new build",
                 member.name
-            )
-        } else {
-            format!(
-                "`{}` is not running, and runs {}, so it does not start on the new build",
+            ),
+            ProcStatus::Stopped => format!(
+                "`{}` is stopped, and runs {}, so it does not start on the new build",
                 member.name, member.program
-            )
+            ),
+            status => format!(
+                "`{}` is {status}, not running, so it is left alone: `shep restart {}` runs it \
+                 on the new build",
+                member.name, member.name
+            ),
         });
     }
     let names: Vec<&str> = plan
         .runners
         .iter()
-        .filter(|m| m.online)
+        .filter(|m| m.online())
         .map(|m| m.name.as_str())
         .collect();
     // The dog goes down only when no runner is merging.
-    if plan.dog.online {
+    if plan.dog.online() {
         wait_out_merges(client, &names, patience, say).await?;
-        bounce(client, &plan.dog.name, patience, say).await?;
+        bounce_if_running(client, &plan.dog.name, patience, say).await?;
     }
     for name in names {
         wait_out_merges(client, &[name], patience, say).await?;
-        bounce(client, name, patience, say).await?;
+        bounce_if_running(client, name, patience, say).await?;
     }
     Ok(())
+}
+
+// Restarts `name` unless it is not running now. The plan is a look from
+// before the wait, which can be long, and a sheep the maintainer stopped since
+// stays stopped.
+async fn bounce_if_running(
+    client: &Client,
+    name: &str,
+    patience: Patience,
+    say: &mut dyn FnMut(String),
+) -> Result<(), String> {
+    let now = flock(client)
+        .await?
+        .into_iter()
+        .find(|row| row.name == name)
+        .map(|row| row.status);
+    if !now.is_some_and(running) {
+        say(format!(
+            "`{name}` was stopped meanwhile, so it stays stopped"
+        ));
+        return Ok(());
+    }
+    bounce(client, name, patience, say).await
 }
 
 async fn bounce(

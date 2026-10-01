@@ -20,6 +20,44 @@ const BUSY: Duration = Duration::from_secs(5);
 // How long output left in a pipe is waited for once the build has exited.
 const DRAINED: Duration = Duration::from_secs(2);
 
+/// Why a build did not say what it is
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildError {
+    message: String,
+    // It ran and exited 2 with kelpie's usage: it predates the verb
+    predates_version: bool,
+}
+
+impl BuildError {
+    fn broken(message: String) -> Self {
+        Self {
+            message,
+            predates_version: false,
+        }
+    }
+
+    /// Whether the build ran and refused `version` as a verb it does not have
+    ///
+    /// The only way a working build fails to answer: one made before the
+    /// verb existed. A build that could not start, hung, died on a signal or
+    /// exited any other way is broken.
+    pub fn predates_version(&self) -> bool {
+        self.predates_version
+    }
+}
+
+impl std::fmt::Display for BuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl From<BuildError> for String {
+    fn from(error: BuildError) -> Self {
+        error.message
+    }
+}
+
 /// What `version --json` prints: the build's version and the shep version it was made with
 ///
 /// Other keys in the answer are ignored, so a later build may add some.
@@ -46,7 +84,7 @@ impl Build {
     ///
     /// A message when `binary` does not run, does not answer within [`TIMEOUT`],
     /// exits non-zero, or does not answer with a JSON object naming both versions.
-    pub fn of(binary: &Path) -> Result<Self, String> {
+    pub fn of(binary: &Path) -> Result<Self, BuildError> {
         Self::within(binary, TIMEOUT)
     }
 
@@ -55,7 +93,7 @@ impl Build {
     /// # Errors
     ///
     /// As [`Build::of`].
-    pub fn within(binary: &Path, limit: Duration) -> Result<Self, String> {
+    pub fn within(binary: &Path, limit: Duration) -> Result<Self, BuildError> {
         let started = Instant::now();
         let mut child = loop {
             let spawned = Command::new(binary)
@@ -71,7 +109,12 @@ impl Build {
                 Err(e) if e.raw_os_error() == Some(ETXTBSY) && started.elapsed() < BUSY => {
                     std::thread::sleep(Duration::from_millis(10));
                 }
-                Err(e) => return Err(format!("cannot run {}: {e}", binary.display())),
+                Err(e) => {
+                    return Err(BuildError::broken(format!(
+                        "cannot run {}: {e}",
+                        binary.display()
+                    )));
+                }
             }
         };
         let stdout = drain(child.stdout.take());
@@ -83,31 +126,39 @@ impl Build {
                 Ok(None) if started.elapsed() >= limit => {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(format!(
+                    return Err(BuildError::broken(format!(
                         "{} did not answer `version --json` in {}s",
                         binary.display(),
                         limit.as_secs_f32()
-                    ));
+                    )));
                 }
                 Ok(None) => std::thread::sleep(Duration::from_millis(10)),
-                Err(e) => return Err(format!("cannot wait for {}: {e}", binary.display())),
+                Err(e) => {
+                    return Err(BuildError::broken(format!(
+                        "cannot wait for {}: {e}",
+                        binary.display()
+                    )));
+                }
             }
         };
         // A child of the build may hold the pipes open past its exit.
         let heard = |from: &Receiver<Vec<u8>>| from.recv_timeout(DRAINED).unwrap_or_default();
         let (stdout, stderr) = (heard(&stdout), heard(&stderr));
         if !status.success() {
-            return Err(format!(
-                "{} exited {status} on `version --json`: {}",
-                binary.display(),
-                String::from_utf8_lossy(&stderr).trim()
-            ));
+            return Err(BuildError {
+                message: format!(
+                    "{} exited {status} on `version --json`: {}",
+                    binary.display(),
+                    String::from_utf8_lossy(&stderr).trim()
+                ),
+                predates_version: status.code() == Some(2),
+            });
         }
         serde_json::from_slice(&stdout).map_err(|e| {
-            format!(
+            BuildError::broken(format!(
                 "{} did not answer `version --json` with its kelpie and shep versions: {e}",
                 binary.display()
-            )
+            ))
         })
     }
 }
@@ -142,7 +193,9 @@ mod tests {
         let hang = dir.path().join("hang");
         crate::test::write_script(&hang, "#!/bin/sh\nexec sleep 30\n");
         let started = Instant::now();
-        let err = Build::within(&hang, Duration::from_millis(200)).unwrap_err();
+        let err = Build::within(&hang, Duration::from_millis(200))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("did not answer `version --json`"), "{err}");
         assert!(started.elapsed() < Duration::from_secs(10));
     }
@@ -153,7 +206,7 @@ mod tests {
         let sick = dir.path().join("sick");
         let said = r#"{"kelpie":"0.3.0","shep":"0.11.0"}"#;
         crate::test::write_script(&sick, &format!("#!/bin/sh\necho '{said}'\nexit 3\n"));
-        let err = Build::of(&sick).unwrap_err();
+        let err = Build::of(&sick).unwrap_err().to_string();
         assert!(err.contains("exited"), "{err}");
     }
 

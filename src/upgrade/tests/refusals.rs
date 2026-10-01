@@ -20,8 +20,9 @@ async fn a_build_for_another_shep_minor_stops_before_anything_changes() {
     );
     assert!(
         err.contains(&format!(
-            "2. run the new build's own upgrade: `{0} upgrade --binary {0}`",
-            new.display()
+            "2. run the new build's own upgrade: `SHEP_HOME={1} {0} upgrade --binary {0}`",
+            new.display(),
+            rig.shepherd.home().display()
         )),
         "{err}"
     );
@@ -185,4 +186,51 @@ async fn a_second_upgrade_at_once_is_refused_and_the_first_finishes() {
     assert_eq!(rig.restarts(), ["kelpie", "koji"]);
     // The lock goes with the upgrade that held it.
     rig.install(&other).await.0.unwrap();
+}
+
+#[tokio::test]
+async fn a_rollback_to_a_build_that_cannot_run_is_refused() {
+    let mut rig = Rig::new().await;
+    let new = rig.build("new", "0.3.0", "0.12.0");
+    rig.install(&new).await.0.unwrap();
+    rig.restarts();
+    // The kept copy dies on a signal: a badly signed or truncated file, say.
+    std::fs::remove_file(rig.previous()).unwrap();
+    write_script(&rig.previous(), "#!/bin/sh\nkill -9 $$\n");
+
+    let err = rig.upgrade(Action::Rollback).await.0.unwrap_err();
+    assert!(err.contains("exited"), "{err}");
+    assert_eq!(rig.installed_says(), "0.3.0 for shep 0.12.0");
+    assert_eq!(rig.restarts(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn a_rollback_to_a_build_from_before_the_verb_goes_ahead_and_says_so() {
+    let mut rig = Rig::new().await;
+    let new = rig.build("new", "0.3.0", "0.12.0");
+    rig.install(&new).await.0.unwrap();
+    rig.restarts();
+    // What a kelpie without `version` does: usage, and exit 2.
+    std::fs::remove_file(rig.previous()).unwrap();
+    write_script(
+        &rig.previous(),
+        "#!/bin/sh\necho usage: shep-kelpie >&2\nexit 2\n",
+    );
+
+    let (ran, said) = rig.upgrade(Action::Rollback).await;
+    ran.unwrap();
+    assert!(said[0].contains("minor is unchecked"), "{said:?}");
+    assert_eq!(rig.restarts(), ["kelpie", "koji"]);
+}
+
+#[test]
+fn a_release_must_hold_the_kelpie_it_names() {
+    let build = Build {
+        kelpie: "0.3.0".into(),
+        shep: "0.12.0".into(),
+    };
+    check_release("0.3.0", &build).unwrap();
+    check_release("v0.3.0", &build).unwrap();
+    let err = check_release("0.4.0", &build).unwrap_err();
+    assert!(err.contains("says it is 0.3.0"), "{err}");
 }

@@ -307,6 +307,14 @@ async fn a_minor_mismatch_fails_with_the_steps_before_anything_restarts() {
     assert!(stderr.contains("shep 0.12.0"), "{stderr}");
     assert!(stderr.contains("To go on:"), "{stderr}");
     assert!(stderr.contains("reload its shepherd"), "{stderr}");
+    assert!(
+        stderr.contains(&format!(
+            "`SHEP_HOME={0} {1} upgrade --binary {1}`",
+            scene.shep_home().display(),
+            new.display()
+        )),
+        "{stderr}"
+    );
     assert!(stderr.contains("the new build's own upgrade"), "{stderr}");
     assert_eq!(restarts(&sent(&mut seen)), Vec::<&str>::new());
     assert_eq!(scene.installed_says().await, "0.1.0 for shep 0.12.0");

@@ -55,7 +55,8 @@ impl Layout {
             || "shep-kelpie".into(),
             |name| name.to_string_lossy().into_owned(),
         );
-        target.with_file_name(format!(".{name}.staged"))
+        // One per upgrade process, so two upgrades of one file never share it.
+        target.with_file_name(format!(".{name}.staged.{}", std::process::id()))
     }
 
     fn held(&self) -> PathBuf {
@@ -115,6 +116,11 @@ pub fn stage(layout: &Layout, source: &Path) -> Result<Staged, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(failed("clear", &e)),
     }
+    // The guard first, so a copy that fails half way leaves nothing behind.
+    let staged = Staged {
+        path: path.clone(),
+        live: true,
+    };
     fs::copy(source, &path).map_err(|e| {
         format!(
             "cannot copy {} to {}: {e}",
@@ -122,13 +128,10 @@ pub fn stage(layout: &Layout, source: &Path) -> Result<Staged, String> {
             path.display()
         )
     })?;
-    let staged = Staged {
-        path: path.clone(),
-        live: true,
-    };
     fs::set_permissions(&staged.path, fs::Permissions::from_mode(0o755))
         .map_err(|e| failed("make executable", &e))?;
     sign(&staged.path)?;
+    flush(&staged.path)?;
     Ok(staged)
 }
 
@@ -181,19 +184,35 @@ fn keep(layout: &Layout, target: &Path) -> Result<(), String> {
     if let Some(folder) = held.parent() {
         fs::create_dir_all(folder).map_err(|e| format!("cannot make {}: {e}", folder.display()))?;
     }
-    fs::copy(target, &held).map_err(|e| {
-        format!(
-            "cannot keep {} as {}: {e}",
-            target.display(),
-            held.display()
-        )
-    })?;
-    fs::rename(&held, &previous).map_err(|e| {
-        format!(
-            "cannot keep the previous build at {}: {e}",
-            previous.display()
-        )
-    })
+    let kept = fs::copy(target, &held)
+        .map_err(|e| {
+            format!(
+                "cannot keep {} as {}: {e}",
+                target.display(),
+                held.display()
+            )
+        })
+        .and_then(|_| flush(&held))
+        .and_then(|()| {
+            fs::rename(&held, &previous).map_err(|e| {
+                format!(
+                    "cannot keep the previous build at {}: {e}",
+                    previous.display()
+                )
+            })
+        });
+    if kept.is_err() {
+        let _ = fs::remove_file(&held);
+    }
+    kept
+}
+
+// Writes the file to disk before a rename makes it the installed build, so a
+// power loss soon after cannot leave an empty file under the name.
+fn flush(path: &Path) -> Result<(), String> {
+    fs::File::open(path)
+        .and_then(|file| file.sync_all())
+        .map_err(|e| format!("cannot flush {}: {e}", path.display()))
 }
 
 fn same_bytes(a: &Path, b: &Path) -> Result<bool, String> {

@@ -159,7 +159,7 @@ async fn a_sheep_that_is_stopped_stays_stopped() {
     assert_eq!(rig.restarts(), ["kelpie", "koji"]);
     assert!(!rig.shepherd.sheep("paused").unwrap().1);
     assert!(
-        said.iter().any(|l| l.contains("`paused` is not running")),
+        said.iter().any(|l| l.contains("`paused` is stopped")),
         "{said:?}"
     );
 }
@@ -173,7 +173,75 @@ async fn a_stopped_sheep_on_another_program_is_said_to_stay_behind() {
     ran.unwrap();
     assert!(
         said.iter()
-            .any(|l| l.contains("`old` is not running, and runs /opt/kelpie/bin/kelpie")),
+            .any(|l| l.contains("`old` is stopped, and runs /opt/kelpie/bin/kelpie")),
         "{said:?}"
     );
+}
+
+#[tokio::test]
+async fn a_runner_stopped_while_the_upgrade_waits_stays_stopped() {
+    let mut rig = Rig::new().await;
+    // The upgrade waits on a merge, and the maintainer stops the runner meanwhile.
+    let mut looks = vec![MERGING; 30];
+    looks.push(IDLE);
+    rig.shepherd.says("koji", &looks);
+    let new = rig.build("new", "0.3.0", "0.12.0");
+    let stopping = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        rig.shepherd.stops("koji");
+    };
+    let ((ran, said), ()) = tokio::join!(rig.install(&new), stopping);
+    ran.unwrap();
+    assert_eq!(rig.restarts(), ["kelpie"]);
+    assert!(!rig.shepherd.sheep("koji").unwrap().1);
+    assert!(
+        said.iter()
+            .any(|l| l.contains("`koji` was stopped meanwhile")),
+        "{said:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_runner_still_opening_its_channel_is_waited_on() {
+    let rig = Rig::new().await;
+    // Plain text is what a runner answers before it takes its actions.
+    rig.shepherd
+        .replies("koji", &[Some("unknown action: status"), Some(IDLE)]);
+    let new = rig.build("new", "0.3.0", "0.12.0");
+    let (ran, said) = rig.install(&new).await;
+    ran.unwrap();
+    assert!(
+        said.iter().any(|l| l == "waiting: `koji` is starting"),
+        "{said:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_failure_after_the_swap_names_what_is_installed_and_the_command_that_finishes() {
+    let mut rig = Rig::new().await;
+    rig.shepherd.says("koji", &[MERGING]);
+    let new = rig.build("new", "0.3.0", "0.12.0");
+    let patience = Patience {
+        merge: Duration::from_millis(100),
+        ..FAST
+    };
+    let action = Action::Install(Source::Binary(new));
+    let err = rig.upgrade_within(action, patience).await.0.unwrap_err();
+    let installed = rig.installed.display();
+    assert!(err.contains(&format!("installed at {installed}")), "{err}");
+    assert!(
+        err.contains(&format!("`shep kelpie upgrade --binary {installed}`")),
+        "{err}"
+    );
+    assert_eq!(rig.installed_says(), "0.3.0 for shep 0.12.0");
+    assert_eq!(rig.restarts(), Vec::<String>::new());
+
+    // That command restarts without touching a file: the build is the one installed.
+    rig.shepherd.says("koji", &[IDLE]);
+    let finish = Action::Install(Source::Binary(rig.installed.clone()));
+    let (ran, said) = rig.upgrade(finish).await;
+    ran.unwrap();
+    assert!(said[0].contains("installed already"), "{said:?}");
+    assert_eq!(rig.restarts(), ["kelpie", "koji"]);
+    assert_eq!(says(&rig.previous()), "0.1.0 for shep 0.12.0");
 }

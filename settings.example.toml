@@ -11,7 +11,7 @@
 
 [[app]]
 name = "shep"
-script = "/path/to/kelpie"
+script = "/path/to/kelpie" # the dog's path (`shep dogs`), e.g. ~/.cargo/bin/shep-kelpie, which `upgrade` replaces
 args = ["runner", "shep"]
 env = { SHEP_HOME = "/path/to/home/.kelpie/shep" }
 channel = true
