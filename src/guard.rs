@@ -9,8 +9,10 @@
 //! summons, and a push to the base branch. It reads the command's own text,
 //! the shell scripts it runs and, for a commit or a push in the worker's
 //! worktree, the lines it adds or sends. It never echoes what it matched. It
-//! refuses the ways of running a command it knows it cannot read; it is not
-//! a shell, and does not find them all.
+//! reads git and gh wherever the call's text runs them: behind a wrapper, in
+//! a shell's `-c`, `<<<`, heredoc or script file, or in text git runs as a
+//! command. It refuses a shell reading a pipe, and a program named by a
+//! variable. It does not read `python -c` or a file a config names.
 //!
 //! The hook runs outside the sandbox, so it runs git the way kelpie's own
 //! worktree steps do, with the worktree's git dirs named and checked. A
@@ -18,6 +20,7 @@
 
 mod gh;
 mod git;
+mod judging;
 mod script;
 mod shell;
 mod wrap;
@@ -30,7 +33,7 @@ use serde::Deserialize;
 
 use crate::confine::Verdict;
 use crate::local_paths::{Leak, LocalPaths, Surface};
-use wrap::{SHELLS, program, script};
+use judging::{CallState, Judging};
 
 /// Where the worker's own git lives
 #[derive(Debug, Clone, Copy)]
@@ -131,169 +134,6 @@ pub fn judge(
         return Verdict::Allow;
     }
     Verdict::Refuse(call_state.refusals.join("\n\n"))
-}
-
-/// One Bash call being judged
-struct Judging<'a> {
-    home: Home,
-    checkout: Checkout<'a>,
-}
-
-/// What judging one call has found and done so far
-#[derive(Debug, Default)]
-struct CallState {
-    refusals: Vec<String>,
-    commands: usize,
-    reads: git::Reads,
-    // Whether an earlier command exported a variable that redirects git.
-    git_redirected: bool,
-    // The text of each line being read, the call's own first.
-    texts: Vec<String>,
-}
-
-impl CallState {
-    // Each refusal once, however many commands earn it.
-    fn refuse(&mut self, refusal: String) {
-        if !self.refusals.contains(&refusal) {
-            self.refusals.push(refusal);
-        }
-    }
-}
-
-impl Judging<'_> {
-    fn line(&self, line: &str, cwd: Option<PathBuf>, shells: usize, state: &mut CallState) {
-        state.texts.push(line.to_owned());
-        self.commands(line, cwd, shells, state);
-        state.texts.pop();
-    }
-
-    // A script file a command runs, read as one more shell's commands.
-    fn script(&self, name: &str, cwd: Option<&Path>, shells: usize, state: &mut CallState) {
-        match script::read(name, cwd, self.home.path(), &state.texts) {
-            Ok(text) => self.line(&text, cwd.map(Path::to_owned), shells + 1, state),
-            Err(refusal) => state.refuse(refusal),
-        }
-    }
-
-    // `cwd` is `None` once a `cd` goes somewhere the guard cannot follow.
-    fn commands(&self, line: &str, mut cwd: Option<PathBuf>, shells: usize, state: &mut CallState) {
-        let commands = match shell::commands(line) {
-            Ok(commands) if shells <= MAX_SHELLS => commands,
-            Ok(_) => {
-                return state.refuse(
-                    "kelpie cannot check this command: it runs a shell inside a shell too \
-                     many times over. Run it as plain commands."
-                        .into(),
-                );
-            }
-            Err(e) => {
-                return state.refuse(format!(
-                    "kelpie cannot check this command: {e}. Split it into plain commands."
-                ));
-            }
-        };
-        let home = &self.home;
-        for command in &commands {
-            state.commands += 1;
-            if state.commands > MAX_COMMANDS {
-                return state.refuse(
-                    "kelpie cannot check this command: it runs too many commands at once. \
-                     Split it into plain commands."
-                        .into(),
-                );
-            }
-            if command.defines_function {
-                state.refuse(wrap::FUNCTION.into());
-                continue;
-            }
-            state.git_redirected |= wrap::sets_git_redirect(&command.words);
-            let run = match wrap::unwrap(&command.words) {
-                Ok(Some(run)) => run,
-                Ok(None) => continue,
-                Err(refusal) => {
-                    state.refuse(refusal);
-                    continue;
-                }
-            };
-            // `builtin export`, `command export` and `A=1 export` export too.
-            state.git_redirected |= wrap::sets_git_redirect(run.words);
-            if run.moved {
-                cwd = None;
-            }
-            let name = &run.words[0];
-            if name.contains(['$', '`']) {
-                state.refuse(
-                    "kelpie cannot check a command whose program the shell works out when it \
-                     runs: name the program."
-                        .into(),
-                );
-                continue;
-            }
-            if name.contains('/') {
-                match script::interpreted(name, cwd.as_deref(), home.path()) {
-                    Ok(true) => self.script(name, cwd.as_deref(), shells, state),
-                    Ok(false) => {}
-                    Err(refusal) => state.refuse(refusal),
-                }
-            }
-            let found = match program(name) {
-                "cd" | "pushd" => {
-                    cwd = match run.words.get(1) {
-                        Some(to) => moved(cwd.as_deref(), to, home.path()),
-                        None => home.path().map(Path::to_owned),
-                    };
-                    Vec::new()
-                }
-                // Where `popd` returns to is not in the command.
-                "popd" => {
-                    cwd = None;
-                    Vec::new()
-                }
-                "git" => {
-                    let git = git::Git {
-                        words: run.words,
-                        heredocs: &command.heredocs,
-                        redirected: run.git_redirected || state.git_redirected,
-                    };
-                    git::judge(git, cwd.as_deref(), home, self.checkout, &mut state.reads)
-                }
-                "gh" => gh::judge(run.words, &command.heredocs, cwd.as_deref(), home),
-                name if SHELLS.contains(&name) => {
-                    let runs = match script(run.words) {
-                        Some(script) => {
-                            self.line(script, cwd.clone(), shells + 1, state);
-                            script::Runs::Nothing
-                        }
-                        None => script::shell(run.words),
-                    };
-                    let heredoc = !command.heredocs.is_empty();
-                    match runs {
-                        script::Runs::File(file) => {
-                            self.script(file, cwd.as_deref(), shells, state)
-                        }
-                        script::Runs::Stdin if !heredoc => state.refuse(script::STDIN.into()),
-                        script::Runs::Unreadable => state.refuse(script::STDIN.into()),
-                        script::Runs::Stdin | script::Runs::Nothing => {}
-                    }
-                    // A shell reading its commands from a heredoc.
-                    for body in &command.heredocs {
-                        self.line(body, cwd.clone(), shells + 1, state);
-                    }
-                    Vec::new()
-                }
-                "source" | "." => {
-                    if let script::Runs::File(file) = script::sourced(run.words) {
-                        self.script(file, cwd.as_deref(), shells, state);
-                    }
-                    Vec::new()
-                }
-                _ => wrap::hidden(run.words).into_iter().collect(),
-            };
-            for refusal in found {
-                state.refuse(refusal);
-            }
-        }
-    }
 }
 
 // The `isolation` a project subagent's definition in the worktree sets.
