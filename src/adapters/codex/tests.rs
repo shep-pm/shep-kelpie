@@ -287,6 +287,40 @@ fn a_call_reads_the_login_and_writes_only_its_own_codex_home() {
     assert!(!unfenced.write.contains(&w.path("wt")));
 }
 
+// A call's files sit in kelpie's home inside the shepherd's, which a fenced
+// call may not read. Codex still reads its own home and scratch there.
+#[test]
+fn a_fenced_call_reads_its_codex_home_inside_the_shepherds() {
+    let w = World::new();
+    let mut call = w.fenced(Path::new("/k/kelpie"), Session::New(id(WORKER_ID)));
+    call.settings = w.path("shep/kelpie/koji/worker/settings.json");
+    let files = Files::of(&call);
+    let policy = policy(&call, &w.path("login"), &files);
+    let unread = |path: &Path| {
+        policy
+            .no_read
+            .iter()
+            .filter_map(|glob| glob.strip_suffix("/**"))
+            .any(|folder| path.starts_with(folder))
+    };
+    for path in [
+        files.home.join("config.toml"),
+        files.home.join("sessions/rollout.jsonl"),
+        files.scratch.join("x"),
+    ] {
+        assert!(
+            unread(&path),
+            "{} is in the shepherd's home",
+            path.display()
+        );
+        assert!(
+            policy.read.iter().any(|r| path.starts_with(r)),
+            "{}",
+            path.display()
+        );
+    }
+}
+
 #[test]
 fn every_call_runs_on_a_codex_home_of_its_own_with_the_login_linked_in() {
     let w = World::new();
