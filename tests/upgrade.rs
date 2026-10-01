@@ -330,6 +330,35 @@ async fn a_sheep_on_another_program_is_named_before_anything_changes() {
 }
 
 #[tokio::test]
+async fn a_second_upgrade_is_refused_while_another_holds_the_lock() {
+    let scene = Scene::new();
+    let mut seen = scene.shepherd("0.12.0", &scene.installed()).await;
+    // A live process stands in for the upgrade that holds the lock.
+    let mut holder = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    std::fs::create_dir_all(scene.kelpie_home()).unwrap();
+    std::fs::write(
+        scene.kelpie_home().join("upgrade.lock"),
+        holder.id().to_string(),
+    )
+    .unwrap();
+    let new = scene.build("new", "0.3.0", "0.12.0");
+    let output = scene.upgrade_to(&new).await;
+    holder.kill().unwrap();
+    holder.wait().unwrap();
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("another upgrade is running"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(restarts(&sent(&mut seen)), Vec::<&str>::new());
+    assert_eq!(scene.installed_says().await, "0.1.0 for shep 0.12.0");
+}
+
+#[tokio::test]
 async fn upgrade_without_a_form_prints_usage_and_exits_2() {
     let scene = Scene::new();
     for args in [

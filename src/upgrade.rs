@@ -12,11 +12,12 @@
 //! shepherd for its version before any file or sheep changes. A shepherd on
 //! another minor stops the upgrade there, with the steps to take, because a
 //! kelpie built for one shep minor refuses a shepherd on another and would
-//! come up into that refusal.
+//! come up into that refusal. One upgrade runs at a time.
 
 pub mod build;
 pub mod fetch;
 pub mod install;
+pub mod lock;
 pub mod restart;
 
 use std::path::{Path, PathBuf};
@@ -24,6 +25,7 @@ use std::process::ExitCode;
 
 use build::Build;
 use install::{Change, Layout};
+use lock::Lock;
 use restart::{Patience, Plan};
 
 use crate::shep_home;
@@ -136,6 +138,7 @@ pub async fn run(
     action: &Action,
     say: &mut dyn FnMut(String),
 ) -> Result<(), String> {
+    let _lock = Lock::take(scene.kelpie_home)?;
     // Before a build is fetched: no shepherd, no upgrade.
     let client = shepherd::connect_any(scene.shep_home)
         .await

@@ -144,3 +144,28 @@ async fn no_shepherd_means_no_upgrade() {
         .unwrap_err();
     assert!(err.contains("cannot reach kelpie's shepherd"), "{err}");
 }
+
+#[tokio::test]
+async fn a_second_upgrade_at_once_is_refused_and_the_first_finishes() {
+    let mut rig = Rig::new().await;
+    // The first upgrade waits out a merge long enough for the second to start.
+    let mut looks = vec![MERGING; 40];
+    looks.push(IDLE);
+    rig.shepherd.says("koji", &looks);
+    let new = rig.build("new", "0.3.0", "0.12.0");
+    let other = rig.build("other", "0.4.0", "0.12.0");
+
+    let first = rig.install(&new);
+    let second = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        rig.install(&other).await
+    };
+    let ((first, _), (second, _)) = tokio::join!(first, second);
+    first.unwrap();
+    let err = second.unwrap_err();
+    assert!(err.contains("another upgrade is running"), "{err}");
+    assert_eq!(rig.installed_says(), "0.3.0 for shep 0.12.0");
+    assert_eq!(rig.restarts(), ["kelpie", "koji"]);
+    // The lock goes with the upgrade that held it.
+    rig.install(&other).await.0.unwrap();
+}
