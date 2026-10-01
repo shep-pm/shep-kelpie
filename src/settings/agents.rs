@@ -60,6 +60,22 @@ impl fmt::Display for AgentName {
 pub enum Harness {
     /// Claude Code, headless as `claude -p`
     ClaudeCode,
+    /// The test rig's stand-in, which takes any `usage`, so the runner's
+    /// pacing can be tested before a second harness exists
+    #[cfg(test)]
+    #[schemars(skip)]
+    StandIn,
+}
+
+impl Harness {
+    /// The harness's name, as settings write it
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude-code",
+            #[cfg(test)]
+            Self::StandIn => "stand-in",
+        }
+    }
 }
 
 /// How an agent's usage is read
@@ -72,6 +88,17 @@ pub enum UsageReader {
     Codex,
     /// None: a local model, whose limit is its lease
     None,
+}
+
+impl UsageReader {
+    /// The reader's name, as settings write it
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::None => "none",
+        }
+    }
 }
 
 /// The account whose usage windows an agent spends
@@ -130,7 +157,8 @@ pub struct Agent {
     pub model: NonBlank,
     /// How hard the model thinks
     pub effort: Effort,
-    /// How its usage is read. Its harness's own reader when absent.
+    /// How its usage is read, which must be its harness's own reader.
+    /// That reader when absent.
     #[serde(default)]
     pub usage: Option<UsageReader>,
     /// The lease it holds for each whole call, with `usage = "none"` only.
@@ -142,24 +170,39 @@ pub struct Agent {
 impl Agent {
     /// Its model and effort, as a call on its harness takes them
     pub fn model(&self) -> RoleModel {
-        match self.harness {
-            Harness::ClaudeCode => RoleModel {
-                model: self.model.clone(),
-                effort: self.effort,
-            },
+        RoleModel {
+            model: self.model.clone(),
+            effort: self.effort,
         }
     }
 
     /// What holds its calls back, or why its settings do not say
-    fn limit(&self) -> Result<Limit, &'static str> {
-        let usage = self.usage.unwrap_or(match self.harness {
+    ///
+    /// The reader must be the harness's own: an agent on Claude Code spends
+    /// the Claude account whatever its `usage` says.
+    fn limit(&self) -> Result<Limit, String> {
+        let own = match self.harness {
             Harness::ClaudeCode => UsageReader::Claude,
-        });
+            #[cfg(test)]
+            Harness::StandIn => self.usage.unwrap_or(UsageReader::Claude),
+        };
+        let usage = self.usage.unwrap_or(own);
+        if usage != own {
+            return Err(format!(
+                "runs on {}, whose usage is read with `{}`, so it cannot set \
+                 `usage = \"{}\"`: leave `usage` out",
+                self.harness.as_str(),
+                own.as_str(),
+                usage.as_str()
+            ));
+        }
         match (usage, &self.lease) {
             (UsageReader::None, lease) => {
                 Ok(Limit::Lease(lease.clone().unwrap_or_else(LeaseName::gpu)))
             }
-            (_, Some(_)) => Err("sets `lease`, which only an agent with `usage = \"none\"` takes"),
+            (_, Some(_)) => {
+                Err("sets `lease`, which only an agent with `usage = \"none\"` takes".into())
+            }
             (UsageReader::Claude, None) => Ok(Limit::Account(Account::Claude)),
             (UsageReader::Codex, None) => Ok(Limit::Account(Account::Codex)),
         }

@@ -9,9 +9,9 @@ use crate::ports::{Cost, Role, Timestamp, Usage};
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{Hold, Rig, Scripted};
 
-const AGENTS: &str = "[agents.codex]\nharness = \"claude-code\"\n\
+const AGENTS: &str = "[agents.codex]\nharness = \"stand-in\"\n\
                       model = \"gpt-5-codex\"\neffort = \"medium\"\nusage = \"codex\"\n\
-                      [agents.qwen]\nharness = \"claude-code\"\n\
+                      [agents.qwen]\nharness = \"stand-in\"\n\
                       model = \"qwen3-coder\"\neffort = \"low\"\nusage = \"none\"\n";
 
 // A running project whose roles name kelpie's agents as `names` says.

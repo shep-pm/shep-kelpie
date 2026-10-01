@@ -122,11 +122,11 @@ fn a_session_reviewer_names_an_agent_from_the_same_list() {
     );
 }
 
-const LIMITED: &str = "[agents.codex]\nharness = \"claude-code\"\nmodel = \"gpt-5-codex\"\n\
+const LIMITED: &str = "[agents.codex]\nharness = \"stand-in\"\nmodel = \"gpt-5-codex\"\n\
                        effort = \"medium\"\nusage = \"codex\"\n\
-                       [agents.qwen]\nharness = \"claude-code\"\nmodel = \"qwen3-coder\"\n\
+                       [agents.qwen]\nharness = \"stand-in\"\nmodel = \"qwen3-coder\"\n\
                        effort = \"low\"\nusage = \"none\"\n\
-                       [agents.box]\nharness = \"claude-code\"\nmodel = \"qwen3-coder\"\n\
+                       [agents.box]\nharness = \"stand-in\"\nmodel = \"qwen3-coder\"\n\
                        effort = \"low\"\nusage = \"none\"\nlease = \"gpu-box\"\n";
 
 #[test]
@@ -152,7 +152,7 @@ fn each_role_is_held_back_by_its_agents_account_or_lease() {
 
 #[test]
 fn a_lease_on_an_agent_whose_usage_is_read_is_refused() {
-    let both = "[agents.x]\nharness = \"claude-code\"\nmodel = \"m\"\neffort = \"low\"\n\
+    let both = "[agents.x]\nharness = \"stand-in\"\nmodel = \"m\"\neffort = \"low\"\n\
                 usage = \"codex\"\nlease = \"gpu\"\n";
     let err = project("worker = \"x\"\n")
         .role_agents(&kelpie(both).agents)
@@ -165,6 +165,34 @@ fn a_lease_on_an_agent_whose_usage_is_read_is_refused() {
     let unknown = "[agents.x]\nharness = \"claude-code\"\nmodel = \"m\"\neffort = \"low\"\n\
                    usage = \"gemini\"\n";
     assert!(KelpieSettings::from_section(unknown).is_err());
+}
+
+#[test]
+fn claude_code_takes_no_usage_reader_but_its_own() {
+    for usage in ["codex", "none"] {
+        let section = format!(
+            "[agents.x]\nharness = \"claude-code\"\nmodel = \"claude-opus-5-5\"\n\
+             effort = \"low\"\nusage = \"{usage}\"\n"
+        );
+        let err = project("worker = \"x\"\n")
+            .role_agents(&kelpie(&section).agents)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains(&format!(
+                "`agents.x` runs on claude-code, whose usage is read with `claude`, \
+                 so it cannot set `usage = \"{usage}\"`: leave `usage` out"
+            )),
+            "{err}"
+        );
+    }
+    let own = "[agents.x]\nharness = \"claude-code\"\nmodel = \"m\"\neffort = \"low\"\n\
+               usage = \"claude\"\n";
+    let limits = project("worker = \"x\"\n").role_agents(&kelpie(own).agents);
+    assert_eq!(
+        limits.unwrap().limits.worker,
+        Limit::Account(Account::Claude)
+    );
 }
 
 #[test]
