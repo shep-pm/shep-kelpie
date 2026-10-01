@@ -18,6 +18,7 @@ You need these on your machine:
 - `node` and `npm`: `tools install` runs them, and so does every agent's sandbox
 - on Linux, `bwrap` and `socat`, which the sandbox needs
 - `git`, and `gh` signed in to the account that opens the pull requests
+- `pi` or `codex`, only to run an agent on that harness (see Agents)
 - a GitHub repo whose default branch is `main`, and a checkout of it
 
 A runner is a sheep, so it gets the `PATH` your shepherd was started with, and it needs `claude`, `node`, `gh` and `git` on it. `shep kelpie doctor` runs in your shell, not the shepherd's, so it can pass while a runner fails to find one. Start the shepherd from a shell where `command -v claude node gh git` finds all four.
@@ -366,6 +367,25 @@ A project that lists none runs `review.local` and then `claude`, and a table wit
 
 A missing command or an endpoint that doesn't answer stops the runner at start.
 
+An endpoint takes `url` (the base, up to and including `/v1`), `model`, and `context`, the context size in tokens the server gives that model. Kelpie diffs the pull request, cuts the diff to fit that context, and sends each piece with its own review prompt. Set `context` to what the server really uses: Ollama gives its OpenAI-compatible endpoint a small default context unless `OLLAMA_CONTEXT_LENGTH` says more, and drops whatever doesn't fit without saying so.
+
+A command is run as `<command> --dir <worktree> --round <n> --diff <base>`, with:
+
+- `QWEN_REVIEW_OUT`: the folder to write in
+- `KELPIE_REVIEW_HEAD`: the commit under review
+- `TMPDIR`: the folder the GPU lock lives under
+- `KELPIE_REVIEW_CRITERIA`: a file holding the issue's acceptance criteria
+
+It writes `round-<n>.txt` in that folder, one finding per line as `SEVERITY|path:line|what|why` with `HIGH`, `MEDIUM` or `LOW`, and then an empty `round-<n>.txt.done`. Kelpie reads nothing without the marker, and nothing from stdout. A nonzero exit fails the round. A command that writes `LOW|<path>:0|not reviewed: <n> lines exceeds the chunk limit|...` is run again with `--files <hunk file>` in place of `--diff`, on that file alone. If that run fails, the placeholder stays as the finding.
+
+`lease` names the lock kelpie holds around each round of a command or an endpoint. `gpu` is this machine's GPU lock, the one the qwen scripts take. Any other name is a lock of its own, so a reviewer on another machine's GPU never waits on this one's. Leave it off for a command that takes the lock itself, as `qwen-review.sh` does. `gpu_lease = true` is the older spelling of `lease = "gpu"`.
+
+With a lease, before a round against Ollama, kelpie reads the host's `/api/ps`. An endpoint's host is its `url` without the `/v1`. A command names its host with `ollama = "http://localhost:11434"`, which needs a lease, and its model with `ollama_model`, else every model the host has loaded is checked. A model partly or wholly on the CPU fails the round and raises a ruling, and a yes runs the round again once the model is back on the GPU. A host with no `/api/ps` is not checked, and `status` shows the model's name, its share on the GPU, its context length and when it unloads.
+
+### The board
+
+Issues labelled `ready-for-agent` are the board. On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep kelpie rework <pr>`. On any other open pull request of kelpie's account, `ready-for-agent` adopts it, the same as `shep kelpie adopt <pr>`. Kelpie puts `ready-for-human` on each pull request it hands back.
+
 ## Agents
 
 An agent is a harness plus the model and effort it runs on. The harnesses are Claude Code, `claude-code`, pi, `pi`, which runs a model on an OpenAI-compatible server such as Ollama, and Codex, `codex`, on a ChatGPT plan. Kelpie's own settings define agents by name, and a project names one per role, over its `models` entry:
@@ -401,7 +421,16 @@ Kelpie runs pi with a home of its own, so your `~/.pi` is never read. pi starts 
 
 A pi call's sandbox allows no host of the model's, since the sandbox opens every port of an allowed host and Ollama's admin calls (pull, delete, create) answer beside chat. Kelpie runs a forwarder outside the sandbox for each call, and the sandbox allows only that. It passes `POST` to the server's `/v1/chat/completions` and refuses every other path and method, naming what was asked. The worker never sees the model's address. The forwarder dials `http://`, so `url` is the server's `http://` address: an `https://` one is refused when settings load.
 
-A Codex agent runs on kelpie's own ChatGPT login, in `codex_home` (`$SHEP_HOME/kelpie/codex` by default), never your `~/.codex`. Sign it in once:
+A Codex agent needs the `codex` command on the shepherd's `PATH` and a ChatGPT plan, and takes only `model` and `effort`:
+
+```toml
+[kelpie.agents.gpt]
+harness = "codex"
+model = "gpt-6.1-sol"
+effort = "medium"
+```
+
+`codex debug models` lists the plan's models. A project names the agent for a role in its `[app.dogs.kelpie.agents]` table, as above. It runs on shep-kelpie's own ChatGPT login, in `codex_home` (`$SHEP_HOME/kelpie/codex` by default, or the path `codex_home` in the `[kelpie]` section names), never your `~/.codex`. Sign it in once:
 
 ```sh
 CODEX_HOME=$SHEP_HOME/kelpie/codex codex login --device-auth
@@ -413,22 +442,9 @@ A local worker gets only the issues labelled `worker:local`. The rest run on `mo
 
 `status` shows each role's tokens in `by_role`, with `cost_usd` only for calls whose harness reports dollars. `unpriced_calls` counts the rest.
 
-An endpoint takes `url` (the base, up to and including `/v1`), `model`, and `context`, the context size in tokens the server gives that model. Kelpie diffs the pull request, cuts the diff to fit that context, and sends each piece with its own review prompt, `src/adapters/local/review-prompt.md`. Set `context` to what the server really uses: Ollama gives its OpenAI-compatible endpoint a small default context unless `OLLAMA_CONTEXT_LENGTH` says more, and drops whatever doesn't fit without saying so.
+## Design
 
-A command is run as `<command> --dir <worktree> --round <n> --diff <base>`, with:
-
-- `QWEN_REVIEW_OUT`: the folder to write in
-- `KELPIE_REVIEW_HEAD`: the commit under review
-- `TMPDIR`: the folder the GPU lock lives under
-- `KELPIE_REVIEW_CRITERIA`: a file holding the issue's acceptance criteria
-
-It writes `round-<n>.txt` in that folder, one finding per line as `SEVERITY|path:line|what|why` with `HIGH`, `MEDIUM` or `LOW`, and then an empty `round-<n>.txt.done`. Kelpie reads nothing without the marker, and nothing from stdout. A nonzero exit fails the round. A command that writes `LOW|<path>:0|not reviewed: <n> lines exceeds the chunk limit|...` is run again with `--files <hunk file>` in place of `--diff`, on that file alone. If that run fails, the placeholder stays as the finding.
-
-`lease` names the lock kelpie holds around each round of a command or an endpoint. `gpu` is this machine's GPU lock, the one the qwen scripts take. Any other name is a lock of its own, so a reviewer on another machine's GPU never waits on this one's. Leave it off for a command that takes the lock itself, as `qwen-review.sh` does. `gpu_lease = true` is the older spelling of `lease = "gpu"`.
-
-With a lease, before a round against Ollama, kelpie reads the host's `/api/ps`. An endpoint's host is its `url` without the `/v1`. A command names its host with `ollama = "http://localhost:11434"`, which needs a lease, and its model with `ollama_model`, else every model the host has loaded is checked. A model partly or wholly on the CPU fails the round and raises a ruling, and a yes runs the round again once the model is back on the GPU. A host with no `/api/ps` is not checked, and `status` shows the model's name, its share on the GPU, its context length and when it unloads.
-
-Issues labelled `ready-for-agent` are the board. On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep kelpie rework <pr>`. On any other open pull request of kelpie's account, `ready-for-agent` adopts it, the same as `shep kelpie adopt <pr>`. Kelpie puts `ready-for-human` on each pull request it hands back.
+For how it works and why:
 
 - `CONTEXT.md`: the vocabulary
 - `docs/adr/`: decisions that are hard to reverse
