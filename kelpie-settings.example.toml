@@ -59,7 +59,7 @@ url = "https://ntfy.sh/your-private-topic"
 # harness = "pi"
 # model = "qwen3.8:27b"
 # effort = "medium"
-# url = "http://localhost:11434/v1"
+# url = "http://<host>:11434/v1"
 # context = 65536
 
 # The review loop's reviewers a project may list in `review.reviewers`, by
