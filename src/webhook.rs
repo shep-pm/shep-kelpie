@@ -166,7 +166,9 @@ impl KelpieSettings {
     ///
     /// # Errors
     ///
-    /// [`SettingsError::Invalid`] when `codex_home` is a relative path.
+    /// [`SettingsError::Invalid`] when `codex_home` is a relative path, the
+    /// home folder or a folder above it, which every call would then be
+    /// denied, or the maintainer's own `~/.codex` or a folder in it.
     pub fn codex_home(&self, home: &Path, kelpie_home: &Path) -> Result<PathBuf, SettingsError> {
         let Some(set) = &self.codex_home else {
             return Ok(kelpie_home.join("codex"));
@@ -175,11 +177,22 @@ impl KelpieSettings {
             Ok(rest) => home.join(rest),
             Err(_) => set.clone(),
         };
+        let invalid = |reason: &str| SettingsError::Invalid {
+            setting: "codex_home",
+            reason: reason.into(),
+        };
         if path.is_relative() {
-            return Err(SettingsError::Invalid {
-                setting: "codex_home",
-                reason: "must be an absolute path or start with `~/`".into(),
-            });
+            return Err(invalid("must be an absolute path or start with `~/`"));
+        }
+        if home.starts_with(&path) {
+            return Err(invalid(
+                "must be a folder of its own, not the home folder or one above it",
+            ));
+        }
+        if path.starts_with(home.join(".codex")) {
+            return Err(invalid(
+                "must not be your own `~/.codex`: kelpie signs in to Codex apart from you",
+            ));
         }
         Ok(path)
     }
@@ -410,9 +423,11 @@ mod tests {
             codex_home("codex_home = \"/srv/codex\"").unwrap(),
             Path::new("/srv/codex")
         );
-        let err = codex_home("codex_home = \"codex\"")
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("`codex_home`"), "{err}");
+        for refused in ["codex", "~", "/Users", "~/.codex", "~/.codex/kelpie", "/"] {
+            let err = codex_home(&format!("codex_home = {refused:?}"))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("`codex_home`"), "{refused}: {err}");
+        }
     }
 }
