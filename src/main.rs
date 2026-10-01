@@ -25,6 +25,8 @@
 //! `kelpie guard <git common dir> <worktree>`: the hook on every worker's
 //! Bash calls that keeps the home folder's path and freeform pull request
 //! titles out of what it publishes. Claude Code runs it, like `confine`.
+//! On Codex it takes `--pin-folder`, and the command it answers with runs
+//! it again with `--judge-here` when Codex runs the command in another folder.
 //!
 //! `shep kelpie settings move <project> [<sheep>]`: moves a project's settings
 //! file, and kelpie's own, into their tables on kelpie's shepherd.
@@ -54,6 +56,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -83,14 +86,51 @@ fn main() -> ExitCode {
                 git_common_dir: Path::new(git_common_dir),
                 worktree: Path::new(worktree),
             };
-            match guard::local_paths(home.as_deref(), local) {
-                Ok(local) => hook(guard::judge(
-                    std::io::stdin().lock(),
-                    home.as_deref(),
-                    local,
-                    checkout,
-                )),
-                Err(why) => hook(Verdict::Refuse(why)),
+            let (pin, local) = guard::pin_flag(local);
+            let (here, local) = guard::here_flag(&local);
+            let paths = match guard::local_paths(home.as_deref(), &local) {
+                Ok(paths) => paths,
+                Err(why) => return hook(Verdict::Refuse(why)),
+            };
+            let mut input = Vec::new();
+            if let Err(e) = std::io::stdin().lock().read_to_end(&mut input) {
+                return hook(Verdict::Refuse(format!(
+                    "kelpie cannot read this tool call: {e}"
+                )));
+            }
+            if here {
+                let folder = std::env::current_dir()
+                    .map_err(|e| format!("kelpie cannot tell which folder this runs in: {e}"));
+                match folder.and_then(|f| guard::here(&input, &f)) {
+                    Ok(moved) => input = moved,
+                    Err(why) => return hook(Verdict::Refuse(why)),
+                }
+            }
+            // The pinned command judges again by this program's full path,
+            // never by a name the worker's PATH could answer.
+            let again = || -> Result<Vec<String>, String> {
+                let me = std::env::current_exe()
+                    .ok()
+                    .filter(|p| p.is_absolute())
+                    .ok_or("kelpie cannot tell where its own program is")?;
+                Ok([me.to_string_lossy().into_owned(), role.clone()]
+                    .into_iter()
+                    .chain([git_common_dir.clone(), worktree.clone()])
+                    .chain(local.iter().cloned())
+                    .chain([guard::HERE_FLAG.to_owned()])
+                    .collect())
+            };
+            match guard::judge(&input[..], home.as_deref(), paths, checkout) {
+                Verdict::Allow if pin => match again()
+                    .and_then(|again| guard::pinned(&input, Path::new(worktree), &again))
+                {
+                    Ok(answer) => {
+                        println!("{answer}");
+                        ExitCode::SUCCESS
+                    }
+                    Err(why) => hook(Verdict::Refuse(why)),
+                },
+                verdict => hook(verdict),
             }
         }
         [command, rest @ ..] if shep_kelpie::flock::VERBS.contains(&command.as_str()) => {

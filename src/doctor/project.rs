@@ -103,13 +103,15 @@ pub(super) fn checks(
     if settings.preview.enabled {
         lines.push(preview(at("preview tools"), here));
     }
-    if kelpie.is_some_and(|kelpie| spends_codex(&settings, kelpie, here)) {
-        let meter = probes.codex_meter;
-        lines.push(super::machine::codex(
-            at("codex usage"),
-            meter,
-            probes.clock,
-        ));
+    if let Some(kelpie) = kelpie.filter(|kelpie| spends_codex(&settings, kelpie, here)) {
+        lines.push(match kelpie.codex_home(here.home, here.kelpie_home) {
+            Ok(codex_home) => super::machine::codex(
+                at("codex usage"),
+                &*(probes.codex_meter)(&codex_home),
+                probes.clock,
+            ),
+            Err(e) => Line::missing(at("codex usage"), e.to_string(), "set `codex_home` in kelpie's settings to a folder of kelpie's own, absolute or under `~/`"),
+        });
     }
     if let Some(kelpie) = kelpie {
         let project = settings.ruling_channels.as_ref();

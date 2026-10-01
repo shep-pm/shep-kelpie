@@ -1,6 +1,6 @@
 //! Kelpie's own settings: the webhook, the channels rulings go to, the
-//! pull request reviewers, the local reviewers, the agents and the
-//! counted leases' capacities
+//! pull request reviewers, the local reviewers, the agents, the counted
+//! leases' capacities and kelpie's own Codex login
 //!
 //! Kelpie's `[kelpie]` section of `dogs.toml`, or the file under kelpie's
 //! home it had before one, shared by every project. Every part is
@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::num::NonZeroU32;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -53,6 +53,10 @@ pub struct KelpieSettings {
     /// `/metrics`, which `status` reads. No GPU figures when absent.
     #[serde(default)]
     pub gpu_metrics_url: Option<EndpointUrl>,
+    /// The folder holding kelpie's own Codex login, `<kelpie home>/codex`
+    /// when absent. A leading `~/` is the home folder.
+    #[serde(default)]
+    pub codex_home: Option<PathBuf>,
 }
 
 /// The counted leases' capacities
@@ -158,9 +162,45 @@ const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntf
                      `endpoint`, `command`, `claude` or `session` and that \
                      kind's keys, `[agents.<name>]` tables with `harness`, \
                      `model` and `effort`, a `[leases]` table with a \
-                     `cargo-test` count, a `gpu_metrics_url`, and nothing else";
+                     `cargo-test` count, a `gpu_metrics_url`, a `codex_home` path, and nothing else";
 
 impl KelpieSettings {
+    /// The folder holding kelpie's own Codex login, which every Codex call
+    /// signs in from and no call reads otherwise
+    ///
+    /// # Errors
+    ///
+    /// [`SettingsError::Invalid`] when `codex_home` is a relative path, the
+    /// home folder or a folder above it, which every call would then be
+    /// denied, or the maintainer's own `~/.codex` or a folder in it.
+    pub fn codex_home(&self, home: &Path, kelpie_home: &Path) -> Result<PathBuf, SettingsError> {
+        let Some(set) = &self.codex_home else {
+            return Ok(kelpie_home.join("codex"));
+        };
+        let path = match set.strip_prefix("~") {
+            Ok(rest) => home.join(rest),
+            Err(_) => set.clone(),
+        };
+        let invalid = |reason: &str| SettingsError::Invalid {
+            setting: "codex_home",
+            reason: reason.into(),
+        };
+        if path.is_relative() {
+            return Err(invalid("must be an absolute path or start with `~/`"));
+        }
+        if home.starts_with(&path) {
+            return Err(invalid(
+                "must be a folder of its own, not the home folder or one above it",
+            ));
+        }
+        if path.starts_with(home.join(".codex")) {
+            return Err(invalid(
+                "must not be your own `~/.codex`: kelpie signs in to Codex apart from you",
+            ));
+        }
+        Ok(path)
+    }
+
     /// Reads and checks kelpie's settings file
     ///
     /// # Errors
@@ -368,5 +408,30 @@ mod tests {
             err.to_string(),
             "cannot read settings file /nonexistent/settings.toml: entity not found"
         );
+    }
+
+    #[test]
+    fn kelpies_codex_login_is_its_own_folder_unless_set() {
+        let (home, kelpie) = (Path::new("/Users/me"), Path::new("/Users/me/.kelpie"));
+        let codex_home = |text: &str| {
+            KelpieSettings::parse(text)
+                .unwrap()
+                .codex_home(home, kelpie)
+        };
+        assert_eq!(codex_home("").unwrap(), kelpie.join("codex"));
+        assert_eq!(
+            codex_home("codex_home = \"~/logins/codex\"").unwrap(),
+            home.join("logins/codex")
+        );
+        assert_eq!(
+            codex_home("codex_home = \"/srv/codex\"").unwrap(),
+            Path::new("/srv/codex")
+        );
+        for refused in ["codex", "~", "/Users", "~/.codex", "~/.codex/kelpie", "/"] {
+            let err = codex_home(&format!("codex_home = {refused:?}"))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("`codex_home`"), "{refused}: {err}");
+        }
     }
 }

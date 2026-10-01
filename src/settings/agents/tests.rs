@@ -78,8 +78,8 @@ fn a_role_naming_an_agent_kelpie_lacks_is_refused_naming_both() {
 
 #[test]
 fn an_agent_takes_a_known_harness_and_nothing_else() {
-    let codex = "[agents.x]\nharness = \"codex\"\nmodel = \"m\"\neffort = \"low\"\n";
-    assert!(KelpieSettings::from_section(codex).is_err());
+    let gemini = "[agents.x]\nharness = \"gemini\"\nmodel = \"m\"\neffort = \"low\"\n";
+    assert!(KelpieSettings::from_section(gemini).is_err());
     let extra = format!("{AGENTS}sandbox = \"none\"\n");
     assert!(KelpieSettings::from_section(&extra).is_err());
     assert!(AgentName::try_from("Opus".to_owned()).is_err());
@@ -300,6 +300,66 @@ fn a_session_reviewer_on_pi_runs_on_pi() {
     };
     assert_eq!(local.model().harness.harness(), Harness::Pi);
     assert_eq!(local.limit, Limit::Lease(LeaseName::gpu()));
+}
+
+const CODEX: &str =
+    "[agents.gpt]\nharness = \"codex\"\nmodel = \"gpt-6-sol\"\neffort = \"medium\"\n";
+
+#[test]
+fn a_codex_agent_runs_every_role_but_the_relay_on_the_codex_account() {
+    let names = "worker = \"gpt\"\nreviewer = \"gpt\"\njudge = \"gpt\"\nplanner = \"gpt\"\n";
+    let agents = project(names).role_agents(&kelpie(CODEX).agents).unwrap();
+    for role in [
+        &agents.worker,
+        &agents.reviewer,
+        &agents.judge,
+        &agents.planner,
+    ] {
+        assert_eq!(role.harness, AgentHarness::Codex);
+        assert_eq!(pair(role), ("gpt-6-sol", Effort::Medium));
+    }
+    let limits = agents.limits;
+    for limit in [limits.worker, limits.reviewer, limits.judge, limits.planner] {
+        assert_eq!(limit, Limit::Account(Account::Codex));
+    }
+}
+
+#[test]
+fn a_codex_agent_takes_no_server_and_no_reader_but_codexs_own() {
+    let cases = [
+        (
+            format!("{CODEX}url = \"http://box:11434/v1\"\ncontext = 65536\n"),
+            "`agents.gpt` runs on codex, which takes no `url` or `context`",
+        ),
+        (
+            format!("{CODEX}usage = \"claude\"\n"),
+            "`agents.gpt` runs on codex, whose usage is read with `codex`",
+        ),
+        (
+            format!("{CODEX}lease = \"gpu\"\n"),
+            "`agents.gpt` sets `lease`",
+        ),
+    ];
+    for (section, why) in cases {
+        let err = project("worker = \"gpt\"\n")
+            .role_agents(&kelpie(&section).agents)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(why), "{err}");
+    }
+}
+
+#[test]
+fn a_codex_worker_beside_the_preview_is_refused_at_load() {
+    let mut settings = project("worker = \"gpt\"\n");
+    let defined = kelpie(CODEX).agents;
+    settings.preview.enabled = true;
+    let err = settings.role_agents(&defined).unwrap_err().to_string();
+    assert!(
+        err.contains("names gpt, on codex, which cannot run `preview.enabled`"),
+        "{err}"
+    );
+    assert!(project("judge = \"gpt\"\n").role_agents(&defined).is_ok());
 }
 
 #[test]

@@ -34,7 +34,7 @@ as Claude uses it.
 _Avoid_: shift
 
 **Agent**:
-A harness that runs sessions (Claude Code, or pi on a local model) with the
+A harness that runs sessions (Claude Code, Codex, or pi on a local model) with the
 model and effort it runs them on. Kelpie's settings define agents by name,
 and the worker, the Claude round and the judge each run on one a project
 names.

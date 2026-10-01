@@ -431,6 +431,8 @@ mod tests {
                 "/k/wt/shep/7/.mcp.json",
                 "/k/wt/shep/7/.codex",
                 "/k/wt/shep/7/**/.codex",
+                "/k/wt/shep/7/.agents",
+                "/k/wt/shep/7/**/.agents",
                 "/k/wt/shep/7/.pi",
                 "/k/wt/shep/7/**/.pi",
             ]

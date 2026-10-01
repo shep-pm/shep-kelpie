@@ -64,6 +64,8 @@ pub enum Harness {
     ClaudeCode,
     /// pi, headless as `pi -p`, on a model an OpenAI-compatible server runs
     Pi,
+    /// Codex, headless as `codex exec`, on the ChatGPT account it is logged in to
+    Codex,
     /// The test rig's stand-in, which takes any `usage`, so the runner's
     /// pacing can be tested before a second harness exists
     #[cfg(test)]
@@ -77,6 +79,7 @@ impl Harness {
         match self {
             Self::ClaudeCode => "claude-code",
             Self::Pi => "pi",
+            Self::Codex => "codex",
             #[cfg(test)]
             Self::StandIn => "stand-in",
         }
@@ -87,6 +90,7 @@ impl Harness {
         match self {
             Self::ClaudeCode => "claude",
             Self::Pi => "pi",
+            Self::Codex => "codex",
             #[cfg(test)]
             Self::StandIn => "stand-in",
         }
@@ -101,6 +105,8 @@ pub enum AgentHarness {
     ClaudeCode,
     /// pi, on the model a server runs
     Pi(ModelServer),
+    /// Codex, on the ChatGPT account
+    Codex,
     /// The test rig's stand-in
     #[cfg(test)]
     StandIn,
@@ -112,6 +118,7 @@ impl AgentHarness {
         match self {
             Self::ClaudeCode => Harness::ClaudeCode,
             Self::Pi(_) => Harness::Pi,
+            Self::Codex => Harness::Codex,
             #[cfg(test)]
             Self::StandIn => Harness::StandIn,
         }
@@ -215,7 +222,7 @@ pub struct Agent {
     #[serde(default)]
     pub lease: Option<LeaseName>,
     /// The OpenAI-compatible server its model runs on, up to and including
-    /// its `/v1`. pi needs one, and Claude Code takes none.
+    /// its `/v1`. pi needs one, and Claude Code and Codex take none.
     #[serde(default)]
     pub url: Option<EndpointUrl>,
     /// The context size that server gives the model, in tokens, with `url`
@@ -248,6 +255,10 @@ impl Agent {
                             and its context size as `context`"
                     .into());
             }
+            (Harness::Codex, None, None) => AgentHarness::Codex,
+            (Harness::Codex, ..) => {
+                return Err("runs on codex, which takes no `url` or `context`".into());
+            }
             #[cfg(test)]
             (Harness::StandIn, ..) => AgentHarness::StandIn,
         };
@@ -266,6 +277,7 @@ impl Agent {
         let own = match self.harness {
             Harness::ClaudeCode => UsageReader::Claude,
             Harness::Pi => UsageReader::None,
+            Harness::Codex => UsageReader::Codex,
             #[cfg(test)]
             Harness::StandIn => self.usage.unwrap_or(UsageReader::Claude),
         };
@@ -354,17 +366,25 @@ impl Settings {
             Some(name) => find(defined, name, &format!("agents.{role}"), "agents"),
         };
         let (worker, worker_limit) = pick("worker", &self.agents.worker, &self.models.worker)?;
-        if let (AgentHarness::Pi(_), Some(name)) = (&worker.harness, &self.agents.worker) {
+        // Only Claude Code runs the preview's MCP servers and the project's hooks.
+        let other = match &worker.harness {
+            AgentHarness::Pi(_) => Some(("pi", "pi runs no MCP servers")),
+            AgentHarness::Codex => {
+                Some(("codex", "kelpie bridges MCP servers to Claude Code only"))
+            }
+            _ => None,
+        };
+        if let (Some((harness, why)), Some(name)) = (other, &self.agents.worker) {
             let what = match (self.preview.enabled, self.worker.guard_hooks.is_empty()) {
-                (true, _) => Some("`preview.enabled`, since pi runs no MCP servers"),
-                (false, false) => Some("`worker.guard_hooks`, which are Claude Code hooks"),
+                (true, _) => Some(format!("`preview.enabled`, since {why}")),
+                (false, false) => Some("`worker.guard_hooks`, which are Claude Code hooks".into()),
                 (false, true) => None,
             };
             if let Some(what) = what {
                 return Err(SettingsError::Invalid {
                     setting: "agents",
                     reason: format!(
-                        "`agents.worker` names {name}, on pi, which cannot run {what}: \
+                        "`agents.worker` names {name}, on {harness}, which cannot run {what}: \
                          turn that off or put the worker on Claude Code"
                     ),
                 });

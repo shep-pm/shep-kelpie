@@ -290,7 +290,8 @@ fn rules(step: Step) -> String {
              request once you push.\n"
         }
         Step::Review => {
-            "- Run no commands. Review the diff below, and check it with Read, Grep and Glob.\n"
+            "- Run no commands. Review the diff below, and check it with Read, Grep and \
+             Glob where you have them.\n"
         }
         Step::Planning => {
             return format!(

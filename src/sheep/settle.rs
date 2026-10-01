@@ -17,9 +17,10 @@ use crate::shepherd;
 /// What could not move, so the runner never opens on half its files.
 pub fn moved(old: &Path, kelpie_home: &Path, project: &ProjectName) -> Result<(), String> {
     let shared = migrate::shared(old, kelpie_home);
+    let codex = migrate::codex(old, kelpie_home)?;
     let own = migrate::project(old, kelpie_home, project)?;
     let mut lines = migrate::run(&shared)?;
-    for line in migrate::run(&own)? {
+    for line in migrate::run(&codex)?.into_iter().chain(migrate::run(&own)?) {
         if !lines.contains(&line) {
             lines.push(line);
         }
@@ -63,4 +64,38 @@ pub fn sweep_when_restarted(old: &Path, kelpie_home: &Path, shep_home: &Path) {
 fn made_by(kelpie_home: &Path) -> Option<u32> {
     let text = std::fs::read_to_string(kelpie_home.join(migrate::LINKED_BY)).ok()?;
     text.trim().parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(path: &Path, text: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+
+    // A runner's start moves kelpie's Codex login with the rest of its home,
+    // and on its own when an earlier start moved the rest without it.
+    #[test]
+    fn a_runners_start_moves_the_codex_login() {
+        let root = tempfile::tempdir().unwrap();
+        let koji = ProjectName::try_from("koji").unwrap();
+        let (old, new) = (root.path().join("a/.kelpie"), root.path().join("a/new"));
+        write(&old.join("settings.toml"), "[webhook]\n");
+        write(&old.join("codex/auth.json"), "{}");
+        moved(&old, &new, &koji).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(new.join("codex/auth.json")).unwrap(),
+            "{}"
+        );
+        assert!(!old.join("codex").exists());
+
+        let (old, new) = (root.path().join("b/.kelpie"), root.path().join("b/new"));
+        write(&old.join("settings.toml"), "[webhook]\n");
+        moved(&old, &new, &koji).unwrap();
+        write(&old.join("codex/auth.json"), "{}");
+        moved(&old, &new, &koji).unwrap();
+        assert!(new.join("codex/auth.json").is_file());
+    }
 }

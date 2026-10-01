@@ -1,0 +1,8 @@
+{"type":"thread.started","thread_id":"01a0f7fd-4ed5-7773-80ea-165edc292d8d"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_2","type":"file_change","changes":[{"path":"/tmp/kelpie-codex/wt/hello.txt","kind":"add"}],"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"/tmp/kelpie-codex/wt/hello.txt","kind":"add"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"done"}}
+{"type":"turn.completed","usage":{"input_tokens":17711,"cached_input_tokens":10752,"cache_write_input_tokens":0,"output_tokens":44,"reasoning_output_tokens":0}}

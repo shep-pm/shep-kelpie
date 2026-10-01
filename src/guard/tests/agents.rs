@@ -2,7 +2,7 @@
 // model's endpoint, would run a session with none of kelpie's hooks.
 
 use super::*;
-use crate::guard::judging::NO_AGENTS;
+use crate::guard::judging::{NO_AGENTS, NO_SHELL_PATCHES};
 
 #[test]
 fn an_agent_of_the_workers_own_is_refused_however_it_is_started() {
@@ -25,6 +25,43 @@ fn an_agent_of_the_workers_own_is_refused_however_it_is_started() {
     ] {
         let verdict = bash(command);
         assert_eq!(verdict, Verdict::Refuse(NO_AGENTS.into()), "{command}");
+    }
+}
+
+#[test]
+fn every_harness_kelpie_runs_is_refused_from_a_workers_commands() {
+    use crate::settings::Harness;
+    // A harness added to settings stops compiling here until it is listed.
+    let runs = |harness: Harness| match harness {
+        Harness::ClaudeCode | Harness::Pi | Harness::Codex => true,
+        Harness::StandIn => false,
+    };
+    let harnesses = [Harness::ClaudeCode, Harness::Pi, Harness::Codex];
+    assert!(harnesses.into_iter().all(runs));
+    for program in harnesses.map(Harness::command) {
+        for command in [
+            format!("{program} exec hi"),
+            format!("/opt/homebrew/bin/{program} -p hi"),
+            format!("bash -c '{program} hi'"),
+            format!("git status && {program}"),
+        ] {
+            assert_eq!(
+                bash(&command),
+                Verdict::Refuse(NO_AGENTS.into()),
+                "{command}"
+            );
+        }
+    }
+    for command in [
+        "codex exec resume --last hi",
+        "codex app-server",
+        "pi --mode rpc",
+    ] {
+        assert_eq!(
+            bash(command),
+            Verdict::Refuse(NO_AGENTS.into()),
+            "{command}"
+        );
     }
 }
 
@@ -69,4 +106,24 @@ fn naming_an_agent_without_running_it_goes_through() {
     ] {
         assert_eq!(bash(command), Verdict::Allow, "{command}");
     }
+}
+
+// Codex applies a patch typed as a command itself, where `kelpie confine`,
+// which judges its apply_patch tool, never sees it.
+#[test]
+fn a_patch_from_the_shell_is_refused_however_it_is_started() {
+    for command in [
+        "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: .codex/config.toml\n+x\n*** End Patch\nEOF",
+        "applypatch '*** Begin Patch'",
+        "cd src && apply_patch < fix.patch",
+        "bash -lc \"apply_patch <<'EOF'\n*** Begin Patch\n*** End Patch\nEOF\"",
+    ] {
+        assert_eq!(
+            bash(command),
+            Verdict::Refuse(NO_SHELL_PATCHES.into()),
+            "{command}"
+        );
+    }
+    assert_eq!(bash("git apply fix.patch"), Verdict::Allow);
+    assert_eq!(bash("grep -rn apply_patch src"), Verdict::Allow);
 }

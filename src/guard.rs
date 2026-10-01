@@ -60,6 +60,112 @@ pub const FOLDER_FLAG: &str = "--folder=";
 /// How the hook's command line names one private word
 pub const NAME_FLAG: &str = "--name=";
 
+/// How the hook's command line asks for an allowed command to be handed
+/// back to run only where it has been judged
+///
+/// Codex runs a command in a `workdir` of the model's choosing and never
+/// tells the hook which, so the hook judges the command in the turn's own
+/// folder and answers with it prefixed by a check of where it runs.
+pub const PIN_FLAG: &str = "--pin-folder";
+
+/// How the pinned command asks `kelpie guard` to judge the call on its
+/// stdin again in the folder it runs in, when that is not the one the hook
+/// judged it in
+pub const HERE_FLAG: &str = "--judge-here";
+
+/// Whether `args` asks for [`PIN_FLAG`], and the rest of them
+pub fn pin_flag(args: &[String]) -> (bool, Vec<String>) {
+    take_flag(args, PIN_FLAG)
+}
+
+/// Whether `args` asks for [`HERE_FLAG`], and the rest of them
+pub fn here_flag(args: &[String]) -> (bool, Vec<String>) {
+    take_flag(args, HERE_FLAG)
+}
+
+fn take_flag(args: &[String], flag: &str) -> (bool, Vec<String>) {
+    (
+        args.iter().any(|a| a == flag),
+        args.iter().filter(|a| *a != flag).cloned().collect(),
+    )
+}
+
+/// The tool call in `input`, as though it ran in `folder`
+///
+/// # Errors
+///
+/// What to tell the worker, when `input` is not a tool call.
+pub fn here(input: &[u8], folder: &Path) -> Result<Vec<u8>, String> {
+    let unreadable = |e: serde_json::Error| format!("kelpie cannot read this tool call: {e}");
+    let mut call: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_slice(input).map_err(unreadable)?;
+    call.insert("cwd".into(), folder.to_string_lossy().into());
+    serde_json::to_vec(&call).map_err(unreadable)
+}
+
+/// Codex's hook answer that lets the command in `input` run where Codex
+/// runs it, once that folder has been judged
+///
+/// The command runs as it is in the folder the hook judged it in. In
+/// another folder of `worktree`, the model's `workdir`, it runs once
+/// `again`, `kelpie guard` with [`HERE_FLAG`], allows it there too.
+/// Anywhere else it is refused with what to do instead.
+///
+/// # Errors
+///
+/// What to tell the worker, when `input` names no folder or command.
+pub fn pinned(input: &[u8], worktree: &Path, again: &[String]) -> Result<String, String> {
+    #[derive(Deserialize)]
+    struct Call {
+        cwd: PathBuf,
+        tool_input: Command,
+    }
+    #[derive(Deserialize)]
+    struct Command {
+        command: String,
+    }
+    let call: Call = serde_json::from_slice(input)
+        .map_err(|e| format!("kelpie cannot read this tool call: {e}"))?;
+    let quote = |text: &str| format!("'{}'", text.replace('\'', r"'\''"));
+    // `pwd -P` prints the folder with every link resolved.
+    let folder = |path: &Path| {
+        let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+        quote(&path.to_string_lossy())
+    };
+    let (judged, tree) = (folder(&call.cwd), folder(worktree));
+    // One line of JSON, printed by a builtin: a heredoc would need a
+    // temporary file, which zsh makes where the sandbox refuses it.
+    let tool_call = serde_json::json!({
+        "tool_name": "Bash",
+        "cwd": call.cwd,
+        "tool_input": { "command": call.tool_input.command },
+    });
+    let again: Vec<String> = again.iter().map(|a| quote(a)).collect();
+    let elsewhere = quote(&format!(
+        "kelpie runs a command only inside the worktree {}: leave `workdir` out, \
+         and start the command with `cd <folder> &&` to run it in another folder.",
+        worktree.display()
+    ));
+    let command = format!(
+        "case \"$(pwd -P)\" in\n\
+         {judged}) ;;\n\
+         {tree} | {tree}/*) printf '%s\\n' {tool_call} | {again} >/dev/null || exit 1 ;;\n\
+         *) echo {elsewhere} >&2; exit 1 ;;\n\
+         esac\n{}",
+        call.tool_input.command,
+        tool_call = quote(&tool_call.to_string()),
+        again = again.join(" "),
+    );
+    let answer = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "updatedInput": { "command": command },
+        }
+    });
+    Ok(answer.to_string())
+}
+
 /// What the hook keeps off the forge: `home`, then the folders and names `args` give
 ///
 /// # Errors
