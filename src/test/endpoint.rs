@@ -2,8 +2,9 @@
 //!
 //! It answers `GET …/models` with an empty list, `GET /api/ps` with what the
 //! test gave it (a 404, as a server that is not Ollama answers, until then), and each
-//! `POST …/chat/completions` with the next scripted reply, or `CLEAN` once
-//! the script runs out. It keeps every chat request's body.
+//! `POST …/chat/completions` with the next scripted reply (as server-sent events
+//! when the request streams), or `CLEAN` once the script runs out. It keeps
+//! every chat request's body, and the request line of every request it got.
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -26,6 +27,7 @@ pub(crate) enum Answer {
 struct Shared {
     answers: VecDeque<Answer>,
     requests: Vec<Value>,
+    lines: Vec<String>,
     ps: Option<String>,
 }
 
@@ -44,6 +46,7 @@ impl StandInEndpoint {
         let shared = Arc::new(Mutex::new(Shared {
             answers: answers.into_iter().collect(),
             requests: Vec::new(),
+            lines: Vec::new(),
             ps: None,
         }));
         let serving = Arc::clone(&shared);
@@ -72,6 +75,11 @@ impl StandInEndpoint {
         &self.url
     }
 
+    /// The request line of every request it got, such as `POST /v1/chat/completions HTTP/1.1`
+    pub(crate) fn seen(&self) -> Vec<String> {
+        self.shared.lock().unwrap().lines.clone()
+    }
+
     /// Every chat request's body, in order
     pub(crate) fn requests(&self) -> Vec<Value> {
         self.shared.lock().unwrap().requests.clone()
@@ -89,6 +97,11 @@ fn serve(stream: TcpStream, shared: &Mutex<Shared>) {
     if reader.read_line(&mut request_line).is_err() {
         return;
     }
+    shared
+        .lock()
+        .unwrap()
+        .lines
+        .push(request_line.trim().to_owned());
     let mut length = 0;
     loop {
         let mut header = String::new();
@@ -117,7 +130,9 @@ fn serve(stream: TcpStream, shared: &Mutex<Shared>) {
         shared
             .requests
             .push(serde_json::from_slice(&body).unwrap_or(Value::Null));
+        let streams = shared.requests.last().is_some_and(|b| b["stream"] == true);
         match shared.answers.pop_front().unwrap_or(Answer::Says("CLEAN")) {
+            Answer::Says(content) if streams => (200, events(content)),
             Answer::Says(content) => (
                 200,
                 json!({
@@ -133,11 +148,41 @@ fn serve(stream: TcpStream, shared: &Mutex<Shared>) {
             Answer::Status(status, body) => (status, body.to_owned()),
         }
     };
+    let kind = if reply.starts_with("data: ") {
+        "text/event-stream"
+    } else {
+        "application/json"
+    };
     let mut stream = reader.into_inner();
     let _ = write!(
         stream,
-        "HTTP/1.1 {status} Stand-in\r\nContent-Type: application/json\r\n\
+        "HTTP/1.1 {status} Stand-in\r\nContent-Type: {kind}\r\n\
          Content-Length: {}\r\nConnection: close\r\n\r\n{reply}",
         reply.len()
     );
+}
+
+// What a streaming chat request is answered with: the words in one chunk, the
+// stop, the usage and the end marker, as server-sent events.
+fn events(content: &str) -> String {
+    let chunk = |delta: Value, finish: Value, usage: Value| {
+        let chunk = json!({
+            "id": "stand-in",
+            "object": "chat.completion.chunk",
+            "model": "stand-in",
+            "choices": [{ "index": 0, "delta": delta, "finish_reason": finish }],
+            "usage": usage,
+        });
+        format!("data: {chunk}\n\n")
+    };
+    let usage = json!({ "prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5 });
+    format!(
+        "{}{}data: [DONE]\n\n",
+        chunk(
+            json!({ "role": "assistant", "content": content }),
+            Value::Null,
+            Value::Null
+        ),
+        chunk(json!({}), json!("stop"), usage),
+    )
 }

@@ -40,7 +40,7 @@ pub use model_seat::ModelSeat;
 pub use relay::{Cleared, Relay, RelayError};
 pub use reviewer::{Reviewer, ReviewerError};
 pub use routed::Routed;
-pub use sandbox::{Policy, Sandbox, SandboxError};
+pub use sandbox::{Forward, Policy, Sandbox, SandboxError};
 
 /// Seconds since the Unix epoch
 // wire format: changing this is a breaking change to the state file

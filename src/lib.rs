@@ -21,6 +21,7 @@ pub mod doctor;
 pub mod dog;
 pub mod fence;
 pub mod flock;
+pub mod forwarder;
 pub mod guard;
 pub mod lease;
 pub mod local_paths;

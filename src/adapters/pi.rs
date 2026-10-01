@@ -6,9 +6,12 @@
 //! its own beside the call's settings, holding the one model the call runs
 //! and its sessions, so the maintainer's own pi setup never loads. A fenced
 //! call also loads an extension that runs kelpie's checks before each
-//! command and file write. pi starts no MCP servers.
+//! command and file write. pi starts no MCP servers. The sandbox allows no
+//! model host: pi's calls go to a forwarder outside it, which passes the
+//! server only the chat completions call.
 
 use std::ffi::OsString;
+use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Arc;
@@ -18,12 +21,14 @@ use serde_json::json;
 
 use super::claude::sandbox::fence_policy;
 use super::claude::{ClaudeCli, LambLabels};
+use super::forwarder::Forwarder;
 use super::process::{Processes, RunError};
 use crate::fence;
+use crate::forwarder::{Upstream, WORKER_HOST};
 use crate::guard::{FOLDER_FLAG, NAME_FLAG};
 use crate::ports::{
-    AgentCall, AgentError, AgentReply, Agents, Fence, Policy, Sandbox, Session, SessionId, Tools,
-    Usage,
+    AgentCall, AgentError, AgentReply, Agents, Fence, Forward, Policy, Sandbox, Session, SessionId,
+    Tools, Usage,
 };
 use crate::profile::CREDENTIALS;
 use crate::settings::{AgentHarness, Harness, ModelServer};
@@ -31,6 +36,9 @@ use crate::skills::split_command;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod escapes;
 
 /// This adapter's harness, as its errors and the fence name it
 const PI: Harness = Harness::Pi;
@@ -40,10 +48,6 @@ const PROVIDER: &str = "kelpie";
 
 /// The extension that runs kelpie's checks, with `__CHECKS__` to fill in
 const GUARD: &str = include_str!("pi/guard.ts");
-
-// The proxy carries everything else. The sandbox sets `no_proxy` to every
-// private range itself, and a model server on the LAN is then refused.
-const NO_PROXY: &str = "localhost,127.0.0.1,::1";
 
 /// pi's tools for each kind, by its own names
 fn tool_names(tools: Tools, reads: bool) -> Option<&'static str> {
@@ -93,6 +97,7 @@ impl PiCli {
 impl Agents for PiCli {
     fn prepare(&self, call: &AgentCall) -> Result<(), AgentError> {
         let server = server(call)?;
+        let upstream = upstream(server)?;
         refuse_unsupported(call)?;
         let files = Files::of(call);
         let setup = |what: &Path, e: std::io::Error| {
@@ -100,7 +105,7 @@ impl Agents for PiCli {
         };
         std::fs::create_dir_all(files.sessions()).map_err(|e| setup(&files.sessions(), e))?;
         let models = json!({ "providers": { PROVIDER: {
-            "baseUrl": server.url.as_str(),
+            "baseUrl": upstream.worker_url(),
             "api": "openai-completions",
             // The server ignores it, and pi lists no model without one.
             "apiKey": PROVIDER,
@@ -128,7 +133,8 @@ impl Agents for PiCli {
     }
 
     fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
-        let mut command = self.sandboxed_command(call)?;
+        // The forwarder stays open until the call has ended.
+        let (mut command, _forwarder) = self.sandboxed_command(call)?;
         let label = format!("#{} {}", call.issue, call.role.as_str());
         let spawned = |pid| {
             if let Some(lambs) = &self.lambs {
@@ -148,8 +154,8 @@ impl Agents for PiCli {
 }
 
 impl PiCli {
-    fn sandboxed_command(&self, call: &AgentCall) -> Result<Command, AgentError> {
-        let server = server(call)?;
+    fn sandboxed_command(&self, call: &AgentCall) -> Result<(Command, Forwarder), AgentError> {
+        let upstream = upstream(server(call)?)?;
         let files = Files::of(call);
         if let Session::Resume(id) = &call.session
             && session_file(&files.sessions(), id).is_none()
@@ -173,20 +179,21 @@ impl PiCli {
                 e.kind()
             ))
         })?;
-        // `env` inside the sandbox, since the sandbox sets its own `no_proxy`.
+        let folder = call.settings.parent().unwrap_or(Path::new("/"));
+        let forwarder = Forwarder::open(folder, upstream).map_err(AgentError::Setup)?;
+        // `env` runs inside the sandbox, after the sandbox has set its own variables.
         let mut command = Command::new("env");
         command
             .args(env_args(call, &files))
             .arg(&self.program)
             .args(argv(call, &files))
             .current_dir(&call.cwd);
-        self.sandbox
-            .wrap(
-                &policy(call, server, &files),
-                &files.sandbox_settings,
-                &command,
-            )
-            .map_err(|e| AgentError::Setup(e.to_string()))
+        let policy = policy(call, &files, &forwarder.socket);
+        let wrapped = self
+            .sandbox
+            .wrap(&policy, &files.sandbox_settings, &command)
+            .map_err(|e| AgentError::Setup(e.to_string()))?;
+        Ok((wrapped, forwarder))
     }
 }
 
@@ -198,6 +205,11 @@ fn server(call: &AgentCall) -> Result<&ModelServer, AgentError> {
             "kelpie routed a call to pi that names no model server".into(),
         )),
     }
+}
+
+/// What the forwarder passes chat calls to, for the call's model server
+fn upstream(server: &ModelServer) -> Result<Upstream, AgentError> {
+    Upstream::new(&server.url).map_err(|e| AgentError::Setup(e.to_string()))
 }
 
 // What a worker on Claude Code has and pi cannot give it.
@@ -277,8 +289,6 @@ fn session_file(sessions: &Path, id: &SessionId) -> Option<PathBuf> {
 
 fn env_args(call: &AgentCall, files: &Files) -> Vec<OsString> {
     let mut vars: Vec<(String, OsString)> = vec![
-        ("no_proxy".into(), NO_PROXY.into()),
-        ("NO_PROXY".into(), NO_PROXY.into()),
         // pi is Node, whose fetch ignores the sandbox's proxy without it.
         ("NODE_USE_ENV_PROXY".into(), "1".into()),
         ("PI_CODING_AGENT_DIR".into(), files.home.clone().into()),
@@ -404,7 +414,9 @@ fn guard_extension(fence: &Fence) -> String {
 }
 
 /// The whole call's policy: its fence, or none, and what pi itself needs
-fn policy(call: &AgentCall, server: &ModelServer, files: &Files) -> Policy {
+///
+/// The model's host is not in it. The one host pi may dial is the forwarder's.
+fn policy(call: &AgentCall, files: &Files, forwarder: &Path) -> Policy {
     let mut policy = match &call.reach.fence {
         Some(fence) => fence_policy(fence),
         None => Policy {
@@ -427,18 +439,41 @@ fn policy(call: &AgentCall, server: &ModelServer, files: &Files) -> Policy {
             .chain(call.plugin_dirs.iter().cloned())
             .chain(call.reach.read.iter().cloned()),
     );
-    policy.hosts.push(host(server.url.as_str()).to_owned());
+    if let AgentHarness::Pi(server) = &call.harness
+        && let Ok(upstream) = Upstream::new(&server.url)
+    {
+        deny_the_server(&mut policy, &upstream);
+    }
+    policy.forward = Some(Forward {
+        host: WORKER_HOST.to_owned(),
+        socket: forwarder.to_owned(),
+    });
     policy
 }
 
-/// The host in `url`, without its scheme, port or path
-fn host(url: &str) -> &str {
-    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    let authority = rest.split('/').next().unwrap_or(rest);
-    let authority = authority.rsplit_once('@').map_or(authority, |(_, a)| a);
-    match authority.strip_prefix('[') {
-        Some(v6) => v6.split(']').next().unwrap_or(v6),
-        None => authority.split(':').next().unwrap_or(authority),
+// Whatever `allowed_domains` says, the sandbox never reaches the model server
+// or this machine's loopback by name or by the address the server resolves to.
+fn deny_the_server(policy: &mut Policy, upstream: &Upstream) {
+    let bracketed = |host: &str| match host.contains(':') {
+        true => format!("[{host}]"),
+        false => host.to_owned(),
+    };
+    for host in [upstream.host(), "localhost", "127.0.0.1", "::1"] {
+        let host = bracketed(host);
+        if !policy.denied_hosts.contains(&host) {
+            policy.denied_hosts.push(host);
+        }
+    }
+    let resolved = upstream.address().to_socket_addrs().into_iter().flatten();
+    for address in resolved {
+        let address = match address.ip() {
+            IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(address.ip(), IpAddr::V4),
+            v4 => v4,
+        };
+        let address = address.to_string();
+        if !policy.denied_addresses.contains(&address) {
+            policy.denied_addresses.push(address);
+        }
     }
 }
 
