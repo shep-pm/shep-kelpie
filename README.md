@@ -323,7 +323,7 @@ A missing command or an endpoint that doesn't answer stops the runner at start.
 
 ## Agents
 
-An agent is a harness plus the model and effort it runs on. The harnesses are Claude Code, `claude-code`, and pi, `pi`, which runs a model on an OpenAI-compatible server such as Ollama. Kelpie's own settings define agents by name, and a project names one per role, over its `models` entry:
+An agent is a harness plus the model and effort it runs on. The harnesses are Claude Code, `claude-code`, pi, `pi`, which runs a model on an OpenAI-compatible server such as Ollama, and Codex, `codex`, on a ChatGPT plan. Kelpie's own settings define agents by name, and a project names one per role, over its `models` entry:
 
 ```toml
 # kelpie's [kelpie] section
@@ -339,7 +339,7 @@ judge = "opus-high"
 
 A role left out keeps its `models` entry, so a project that names none runs as before. A local reviewer of kind `session` names an agent from the same list. An agent nobody defines stops the runner at start, naming it.
 
-`usage` says how an agent's usage is read, and so which account paces it: `claude` (the default on Claude Code) reads `/usage`, `codex` reads Codex's own 5-hour and weekly windows, and `none` is a local model that is never paced. It must be the harness's own reader, so leave it out: Claude Code reads `claude` and pi reads `none`. `codex` waits on a Codex harness (#126).
+`usage` says how an agent's usage is read, and so which account paces it: `claude` (the default on Claude Code) reads `/usage`, `codex` reads Codex's own 5-hour and weekly windows, and `none` is a local model that is never paced. It must be the harness's own reader, so leave it out: Claude Code reads `claude`, pi reads `none` and Codex reads `codex`.
 
 A pi agent also needs the model's server and the context size it gives the model:
 
@@ -355,6 +355,14 @@ context = 65536
 Kelpie runs pi with a home of its own, so your `~/.pi` is never read. pi starts no MCP servers and runs no Claude Code hooks, so a worker on pi can't have the preview or `worker.guard_hooks`, and the runner refuses to start with either. Kelpie's own checks still run on every command and file write.
 
 A pi call's sandbox allows no host of the model's, since the sandbox opens every port of an allowed host and Ollama's admin calls (pull, delete, create) answer beside chat. Kelpie runs a forwarder outside the sandbox for each call, and the sandbox allows only that. It passes `POST` to the server's `/v1/chat/completions` and refuses every other path and method, naming what was asked. The worker never sees the model's address. The forwarder dials `http://`, so `url` is the server's `http://` address: an `https://` one is refused when settings load.
+
+A Codex agent runs on kelpie's own ChatGPT login, in `codex_home` (`~/.kelpie/codex` by default), never your `~/.codex`. Sign it in once:
+
+```sh
+CODEX_HOME=~/.kelpie/codex codex login --device-auth
+```
+
+Each Codex call gets a home of its own with that login linked in, so no call sees another's sessions. A worker on Codex can't have the preview or `worker.guard_hooks`, the same as pi. Kelpie's checks run as Codex's own hooks: `confine` on every `apply_patch`, `guard` on every command.
 
 A local worker gets only the issues labelled `worker:local`. The rest run on `models.worker`, so you pick which issues it takes. Each account keeps its own daily allowance and 5-hour stop, shown under its name in `status.pacer`, and a new work item waits on every account its roles spend. `shep kelpie doctor` checks Codex answers for a project that spends it. A `none` agent holds `lease` (the GPU lock, `gpu`, by default) for the whole of each call instead, so a qwen round waits behind its turn, and `status.local_leases` shows who holds it.
 

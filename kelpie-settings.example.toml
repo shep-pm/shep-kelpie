@@ -8,6 +8,13 @@
 # neither says. At least one is required.
 # ruling_channels = ["webhook", "relay"]
 
+# The folder holding kelpie's own Codex login, apart from your `~/.codex`,
+# which no call reads. Sign it in once with
+# `CODEX_HOME=~/.kelpie/codex codex login --device-auth`. Every Codex call
+# runs on a home of its own with the login linked in. `<kelpie home>/codex`
+# when absent; a leading `~/` is the home folder.
+# codex_home = "~/.kelpie/codex"
+
 # Where the webhook posts a ruling, so the maintainer hears of it away from
 # the terminal. Needed only by a project whose rulings go to the webhook.
 # `kind` is `discord` (a channel's webhook URL) or `ntfy` (a topic's URL); both
@@ -87,12 +94,14 @@ url = "https://ntfy.sh/your-private-topic"
 # url = "http://<host>:11434/v1"
 # context = 65536
 #
-# Codex runs on the ChatGPT account `codex login` signed in to, paced by
-# that plan's 5-hour and weekly windows. Its worker runs no preview.
+# Codex runs on kelpie's own ChatGPT login, in `codex_home` below, paced by
+# that plan's 5-hour and weekly windows. Its worker runs no preview and no
+# `worker.guard_hooks`. `codex debug models` lists the plan's models.
 # [kelpie.agents.gpt]
 # harness = "codex"
-# model = "gpt-6-sol"
+# model = "gpt-6.1-sol"
 # effort = "medium"
+
 
 # The review loop's reviewers a project may list in `review.reviewers`, by
 # name. `claude` is always the project's own Claude round, so it is not
