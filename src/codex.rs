@@ -8,7 +8,10 @@
 //! Each finding is a thread that opens with a priority badge, `P0` to `P3`,
 //! and a bold title. Its refusal is a comment saying the plan's usage limits
 //! for code reviews are reached, which parks it until the weekly allowance
-//! resets. Only the first two were recorded, on shep-pm/shep-kelpie#234.
+//! resets. A thumbs up it leaves on the pull request reads as a review that
+//! found nothing. Recorded on shep-pm/shep-kelpie#234 are its notice, its
+//! clean review comment and its thumbs up; a review with findings and its
+//! refusal are written from its documentation.
 
 use crate::ports::{Finding, Severity, Timestamp};
 use crate::review_bot::{Activity, Bot, CLOCK_SLACK, Login, Profile, Reading, Thread, one_line};
@@ -28,9 +31,10 @@ const REVIEW: &str = "codex review";
 // Where its comment on a review that found nothing names the commit, which
 // it cuts to ten characters.
 const READ: &str = "**Reviewed commit:** `";
+const TEN: usize = 10;
 
-// Its refusal names the plan's limit for code reviews.
-const REFUSAL: &str = "usage limits for code reviews";
+// The reaction it leaves on the pull request when it has nothing to say.
+const THUMBS_UP: &str = "THUMBS_UP";
 
 /// Codex, the third review bot
 #[derive(Debug, Clone, Copy, Default)]
@@ -60,12 +64,19 @@ impl Profile for Codex {
         let from = since.0.saturating_sub(CLOCK_SLACK);
         let mut since_summon = activity.comments.iter().filter(|c| c.at.0 >= from);
         // A refusal stands, whatever it posted after.
-        match since_summon.clone().next() {
-            Some(_) if since_summon.any(|c| says(&c.body, REFUSAL)) => {
-                Reading::Refused { opens: None }
-            }
-            Some(_) => Reading::Processing,
-            None => Reading::Silent,
+        if since_summon.clone().any(|c| refused(&c.body)) {
+            return Reading::Refused { opens: None };
+        }
+        // A thumbs up is its review with nothing in it, and it may leave no
+        // comment, only the notice it answers every summon with.
+        let thumbs = activity
+            .reactions
+            .iter()
+            .find(|r| r.at.0 >= from && r.content == THUMBS_UP);
+        match (thumbs, since_summon.next()) {
+            (Some(thumbs), _) => Reading::Completed { at: thumbs.at },
+            (None, Some(_)) => Reading::Processing,
+            (None, None) => Reading::Silent,
         }
     }
 
@@ -73,6 +84,7 @@ impl Profile for Codex {
         let from = since.0.saturating_sub(CLOCK_SLACK);
         activity.comments.iter().any(|c| c.at.0 >= from)
             || activity.reviews.iter().any(|r| r.at.0 >= from)
+            || activity.reactions.iter().any(|r| r.at.0 >= from)
     }
 
     fn covers(&self, activity: &Activity, head: &str) -> bool {
@@ -80,7 +92,11 @@ impl Profile for Codex {
     }
 
     fn reviewed_besides(&self, activity: &Activity, head: &str) -> u32 {
-        let mut commits: Vec<&str> = reviewed(activity).filter(|c| !names(head, c)).collect();
+        // A comment gives ten characters of a commit and a review all of it.
+        let mut commits: Vec<&str> = reviewed(activity)
+            .filter(|c| !names(head, c))
+            .map(|c| c.get(..TEN).unwrap_or(c))
+            .collect();
         commits.sort_unstable();
         commits.dedup();
         u32::try_from(commits.len()).unwrap_or(u32::MAX)
@@ -114,6 +130,15 @@ fn names(head: &str, commit: &str) -> bool {
 
 fn says(body: &str, phrase: &str) -> bool {
     body.to_lowercase().contains(phrase)
+}
+
+// Its refusal is meant to name the plan's usage limits for code reviews, but
+// was never recorded, so any comment naming a limit reached or exceeded is
+// read as one, as cubic's is. Its review footer names none.
+fn refused(body: &str) -> bool {
+    let body = body.to_lowercase();
+    body.contains("usage limit")
+        || (body.contains("limit") && (body.contains("reached") || body.contains("exceeded")))
 }
 
 /// A thread as a finding the judge can rule on
@@ -166,13 +191,14 @@ fn title(head: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::gh::review_bot::parse_comments;
-    use crate::review_bot::{Comment, Review};
+    use crate::adapters::gh::review_bot::{parse_comments, parse_reactions};
+    use crate::review_bot::{Comment, Reaction, Review};
 
     // Recorded from shep-pm/shep-kelpie#234 with the gh adapter's own call:
     // the maintainer's summon at 04:39:19Z drew "create an environment" at
     // 04:39:27Z, and its review of 8eecd21 at 04:43:07Z found nothing.
     const COMMENTS_234: &str = include_str!("../fixtures/codex-comments-234.jsonl");
+    const REACTIONS_234: &str = include_str!("../fixtures/codex-reactions-234.json");
     const HEAD_234: &str = "8eecd218357d9d3a017baeff71c374f6865466e1";
 
     fn iso(text: &str) -> Timestamp {
@@ -322,5 +348,76 @@ mod tests {
             (bare.what.as_str(), bare.why.as_str()),
             ("It drops the error.", "")
         );
+    }
+
+    #[test]
+    fn its_thumbs_up_recorded_on_the_pull_request_is_a_review_with_nothing_in_it() {
+        let seen = Activity {
+            reactions: parse_reactions(REACTIONS_234.as_bytes(), LOGIN.graphql).unwrap(),
+            ..Activity::default()
+        };
+        let summoned = iso("2026-10-01T04:39:19Z");
+        assert!(Codex.heard(&seen, HEAD_234, summoned));
+        assert_eq!(
+            Codex.read(&seen, HEAD_234, summoned),
+            Reading::Completed {
+                at: iso("2026-10-01T04:43:06Z")
+            }
+        );
+        let later = iso("2026-10-01T05:00:00Z");
+        assert_eq!(Codex.read(&seen, HEAD_234, later), Reading::Silent);
+    }
+
+    #[test]
+    fn a_thumbs_up_does_not_hide_a_refusal_and_another_reaction_is_no_review() {
+        let eyes = Reaction {
+            content: "EYES".into(),
+            at: Timestamp(120),
+        };
+        let seen = Activity {
+            reactions: vec![eyes.clone()],
+            ..Activity::default()
+        };
+        assert!(Codex.heard(&seen, "abc123", Timestamp(100)));
+        assert_eq!(Codex.read(&seen, "abc123", Timestamp(100)), Reading::Silent);
+        let refused = Activity {
+            comments: vec![comment("You've hit your usage limit for reviews.", 130)],
+            reactions: vec![Reaction {
+                content: "THUMBS_UP".into(),
+                at: Timestamp(140),
+            }],
+            ..Activity::default()
+        };
+        assert_eq!(
+            Codex.read(&refused, "abc123", Timestamp(100)),
+            Reading::Refused { opens: None }
+        );
+    }
+
+    #[test]
+    fn a_refusal_in_other_words_is_still_one_and_the_review_footer_is_not() {
+        assert!(refused("Usage limit reached for code reviews."));
+        assert!(refused("You have exceeded your limit this week."));
+        assert!(!refused(
+            "Codex Review: Didn't find any major issues.\n\nCodex can also answer questions."
+        ));
+        assert!(!refused(
+            "To use Codex here, create an environment for this repo."
+        ));
+    }
+
+    #[test]
+    fn one_commit_read_by_a_review_and_by_a_comment_counts_once() {
+        let seen = Activity {
+            reviews: vec![Review {
+                commit: "8eecd218357d9d3a017baeff71c374f6865466e1".into(),
+                body: "### 💡 Codex Review".into(),
+                at: Timestamp(100),
+            }],
+            comments: vec![comment("**Reviewed commit:** `8eecd21835`", 200)],
+            ..Activity::default()
+        };
+        assert_eq!(Codex.reviewed_besides(&seen, "0ther"), 1);
+        assert_eq!(Codex.reviewed_besides(&seen, HEAD_234), 0);
     }
 }

@@ -101,7 +101,7 @@ pub struct Reviewers {
     pub cubic: Option<ReviewWindow>,
     /// Codex's window: the weekly allowance its plan gives code reviews
     #[serde(default)]
-    pub codex: Option<ReviewWindow>,
+    pub codex: Option<CodexReviewer>,
 }
 
 impl Reviewers {
@@ -110,7 +110,16 @@ impl Reviewers {
         match bot {
             Bot::Coderabbit => Some(self.coderabbit.unwrap_or(ReviewWindow::HOURLY)),
             Bot::Cubic => self.cubic,
-            Bot::Codex => self.codex,
+            Bot::Codex => self.codex.map(CodexReviewer::window),
+        }
+    }
+
+    /// Whether marking a draft ready is `bot`'s summon, because it reviews a
+    /// pull request when it leaves draft
+    pub fn ready_summons(&self, bot: Bot) -> bool {
+        match bot {
+            Bot::Codex => self.codex.is_some_and(|codex| codex.reviews_on_ready),
+            Bot::Coderabbit | Bot::Cubic => false,
         }
     }
 
@@ -119,6 +128,35 @@ impl Reviewers {
         Bot::ALL
             .into_iter()
             .filter_map(|bot| Some((bot, self.window(bot)?)))
+    }
+}
+
+/// Codex's definition: its window, and whether it reviews on its own
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CodexReviewer {
+    /// Reviews it allows at once
+    pub reviews: NonZeroU32,
+    /// Hours each accepted summon holds its place
+    pub hours: NonZeroU32,
+    /// Whether Codex reviews a pull request when it leaves draft, as the
+    /// repo's Codex settings may say. Then marking ready is its summon, taken
+    /// under its lease, and kelpie posts no comment for it. On when absent.
+    #[serde(default = "yes")]
+    pub reviews_on_ready: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl CodexReviewer {
+    /// Its window
+    pub fn window(self) -> ReviewWindow {
+        ReviewWindow {
+            reviews: self.reviews,
+            hours: self.hours,
+        }
     }
 }
 
@@ -156,6 +194,18 @@ pub struct Activity {
     pub threads: Vec<Thread>,
     /// The commit statuses it set on the pull request's head, newest first
     pub statuses: Vec<Status>,
+    /// The reactions it left on the pull request's comments, oldest first
+    pub reactions: Vec<Reaction>,
+}
+
+/// A reaction a bot left on a comment, such as the thumbs up Codex gives
+/// a pull request it has nothing to say about
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reaction {
+    /// Which, as the forge names it: `THUMBS_UP`, `EYES`
+    pub content: String,
+    /// When it was left
+    pub at: Timestamp,
 }
 
 /// One of a bot's conversation comments, as last edited
@@ -309,6 +359,12 @@ impl Activity {
                 .statuses
                 .iter()
                 .filter(|s| s.at.0 >= from)
+                .cloned()
+                .collect(),
+            reactions: self
+                .reactions
+                .iter()
+                .filter(|r| r.at.0 >= from)
                 .cloned()
                 .collect(),
         }

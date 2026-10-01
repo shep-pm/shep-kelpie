@@ -318,6 +318,12 @@ impl FakeForge {
         prs.get_mut(&number).expect("an opened pull request").state = state;
     }
 
+    /// Whether pull request `number` is a draft
+    pub(crate) fn draft(&self, number: u64) -> bool {
+        let prs = self.pull_requests.lock().unwrap();
+        prs.get(&number).expect("an opened pull request").draft
+    }
+
     /// Marks pull request `number` ready, as someone other than kelpie would
     pub(crate) fn ready_pull_request(&self, number: u64) {
         let mut prs = self.pull_requests.lock().unwrap();

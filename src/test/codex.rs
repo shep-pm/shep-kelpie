@@ -4,7 +4,7 @@
 use super::coderabbit::FakeCodeRabbit;
 use crate::codex::LOGIN;
 use crate::ports::Timestamp;
-use crate::review_bot::{Comment, Review, Thread};
+use crate::review_bot::{Comment, Reaction, Review, Thread};
 
 impl FakeCodeRabbit {
     /// Codex reviews `head` of pull request `number` at `at`, opening a
@@ -61,8 +61,19 @@ impl FakeCodeRabbit {
                 body: format!(
                     "Codex Review: Didn't find any major issues. Keep them coming!\n\n\
                      **Reviewed commit:** `{}`",
-                    &head[..10]
+                    head.get(..10).unwrap_or(head)
                 ),
+                at: Timestamp(at),
+            });
+        });
+    }
+
+    /// Codex leaves its thumbs up on pull request `number` at `at`, as it did
+    /// beside its clean review on shep-pm/shep-kelpie#234
+    pub(crate) fn codex_thumbs_up(&self, number: u64, at: u64) {
+        self.post_as(number, LOGIN.rest, |seen| {
+            seen.reactions.push(Reaction {
+                content: "THUMBS_UP".into(),
                 at: Timestamp(at),
             });
         });

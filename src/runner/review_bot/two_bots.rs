@@ -17,7 +17,8 @@ use crate::test::{Rig, Scripted, Told};
 
 pub(super) const HOLDS: &str = r#"{"holds": true, "severity": "medium", "reason": "real"}"#;
 const CUBIC_WINDOW: &str = "\n[reviewers.cubic]\nreviews = 20\nhours = 720\n";
-pub(super) const CODEX_WINDOW: &str = "\n[reviewers.codex]\nreviews = 10\nhours = 168\n";
+pub(super) const CODEX_WINDOW: &str =
+    "\n[reviewers.codex]\nreviews = 10\nhours = 168\nreviews_on_ready = false\n";
 const MONTH: u64 = 720 * 3600;
 
 pub(super) fn cr() -> LeaseKind {
@@ -41,6 +42,15 @@ pub(super) fn listing(project: &str, list: &str) -> Rig {
     rig
 }
 
+// Pull request 71 with the qwen-review loop settled, green CI, and the draft
+// still a draft.
+pub(super) fn green(rig: &Rig) -> (Mutex<Runner>, String) {
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    let head = item_green(rig, &runner, 7);
+    (runner, head)
+}
+
 // Pull request 71 with the qwen-review loop settled, green CI, and the
 // draft marked ready: the next step summons.
 pub(super) fn ready(rig: &Rig) -> (Mutex<Runner>, String) {
@@ -53,6 +63,17 @@ pub(super) fn ready(rig: &Rig) -> (Mutex<Runner>, String) {
 // Issue `issue`'s pull request, numbered ten times it plus one, brought to
 // the same point.
 fn item_ready(rig: &Rig, runner: &Mutex<Runner>, issue: u64) -> String {
+    let head = item_green(rig, runner, issue);
+    assert!(matches!(
+        rig.verdict(runner),
+        Some(StepReport::MarkedReady { .. })
+    ));
+    head
+}
+
+// Issue `issue`'s pull request with its review rounds done and CI green on
+// its head: the next step is the review bot's round, which `verdict` takes.
+pub(super) fn item_green(rig: &Rig, runner: &Mutex<Runner>, issue: u64) -> String {
     let branch = format!("kelpie/{issue}");
     rig.ask(runner, "add", Some(&issue.to_string()));
     rig.forge
@@ -66,10 +87,6 @@ fn item_ready(rig: &Rig, runner: &Mutex<Runner>, issue: u64) -> String {
     step(runner).unwrap(); // review round 2, claude: scripted clean above
     let head = rig.forge.head_of(&branch).unwrap();
     rig.forge.set_checks(&head, Checks::Passed);
-    assert!(matches!(
-        rig.verdict(runner),
-        Some(StepReport::MarkedReady { .. })
-    ));
     head
 }
 

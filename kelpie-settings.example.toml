@@ -31,7 +31,14 @@ url = "https://ntfy.sh/your-private-topic"
 # reviewed lines it does not publish. Codex is listed only once defined here
 # too, with the weekly allowance its plan gives code reviews, which is the
 # window its "usage limits for code reviews" reply parks it for; its
-# reviews run on the ChatGPT plan, not the repo's. The dog reads these when it starts.
+# reviews run on the ChatGPT plan, not the repo's. `reviews_on_ready` says
+# Codex reviews a pull request when it leaves draft, as the repo's Codex
+# settings may have it: then marking ready is the summon, taken under the
+# lease with no comment, since a comment on top would spend a second review
+# the window does not count. On when absent. Set it to false where Codex's
+# automatic reviews are off, and kelpie summons by comment. A round that goes
+# to another reviewer still marks the draft ready, so turn Codex's automatic
+# reviews off to keep it out of those. The dog reads these when it starts.
 # [kelpie.reviewers.coderabbit]
 # reviews = 1
 # hours = 1
@@ -43,6 +50,7 @@ url = "https://ntfy.sh/your-private-topic"
 # [kelpie.reviewers.codex]
 # reviews = 10
 # hours = 168
+# reviews_on_ready = true
 
 # The agents a project may name for its worker, reviewer and judge, and its
 # session reviewers: a harness, and the model and effort it runs on. The one
