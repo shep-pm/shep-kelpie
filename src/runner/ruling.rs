@@ -664,8 +664,8 @@ fn question(
         }
         RulingKind::ClaudeFiles { head, files, .. } => {
             return format!(
-                "{} at {} changes agents' own files, which run outside the \
-                 worker's sandbox: {}. {yes} accepts them at that head and kelpie \
+                "{} at {} changes agents' own files, which decide what \
+                 an agent runs in the worktree: {}. {yes} accepts them at that head and kelpie \
                  carries on, and {no} stops the work item, keeping its branch and \
                  pull request on the forge.",
                 capitalized(&about),

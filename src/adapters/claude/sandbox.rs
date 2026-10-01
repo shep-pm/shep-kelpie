@@ -12,6 +12,7 @@ use super::settings::PLAYWRIGHT_DENY;
 use super::{ClaudeCli, argv};
 use crate::adapters::bridge::Bridges;
 use crate::bridge::Filter;
+use crate::fence;
 use crate::ports::{AgentCall, AgentError, Fence, Policy};
 use crate::profile::CREDENTIALS;
 
@@ -91,10 +92,15 @@ pub(crate) fn bridged_config(call: &AgentCall) -> PathBuf {
     call.settings.with_extension("mcp.json")
 }
 
+/// This harness, as the fence names it
+const HARNESS: &str = "Claude Code";
+
 /// The model's endpoint, the one host every call reaches
 ///
-/// Not `platform.claude.com`, where a login is refreshed: the sandbox
-/// cannot write the keychain, so a refresh there would be lost.
+/// The worker's commands reach it too, since they share the sandbox, so
+/// `kelpie guard` refuses an agent started from them. Not
+/// `platform.claude.com`, where a login is refreshed: the sandbox cannot
+/// write the keychain, so a refresh there would be lost.
 const MODEL_HOST: &str = "api.anthropic.com";
 
 /// The macOS service a dev server's file watcher looks up
@@ -136,6 +142,7 @@ pub(crate) fn policy(call: &AgentCall, home: &Path) -> Result<Policy, AgentError
             ..Policy::default()
         },
     };
+    policy.no_read.extend(fence::others_credentials(HARNESS));
     let transcripts = transcripts(home, &call.cwd)?;
     // Auto memory there loads into every session in the folder, a review's too.
     policy.no_write.push(transcripts.join("memory"));
@@ -329,6 +336,9 @@ mod tests {
         assert_eq!(policy.hosts, ["github.com", "api.github.com", MODEL_HOST]);
         assert!(policy.read.contains(&w.path("worker/settings.json")));
         assert!(policy.no_read.iter().any(|p| p == "~/.ssh/**"));
+        // Another harness's login, and none of Claude Code's own, which it reads to run.
+        assert!(policy.no_read.iter().any(|p| p == "~/.codex/**"));
+        assert!(!policy.no_read.iter().any(|p| p.starts_with("~/.claude")));
         assert!(policy.verify_tls);
         assert!(!policy.listen);
     }
@@ -348,7 +358,9 @@ mod tests {
             ]
         );
         assert_eq!(policy.hosts, [MODEL_HOST]);
-        assert_eq!(policy.no_read, CREDENTIALS.map(str::to_owned));
+        let mut denied: Vec<String> = CREDENTIALS.map(str::to_owned).into();
+        denied.push("~/.codex/**".into());
+        assert_eq!(policy.no_read, denied);
         assert!(policy.read.contains(&w.path("shots")));
         assert!(!policy.verify_tls);
     }
@@ -421,8 +433,8 @@ mod tests {
     fn the_transcript_folder_is_named_as_claude_code_names_it() {
         let home = Path::new("/Users/me");
         assert_eq!(
-            transcripts(home, Path::new("/Users/me/.kelpie/wt/hazels-lab/37")).unwrap(),
-            Path::new("/Users/me/.claude/projects/-Users-me--kelpie-wt-hazels-lab-37")
+            transcripts(home, Path::new("/Users/me/.kelpie/wt/koji/37")).unwrap(),
+            Path::new("/Users/me/.claude/projects/-Users-me--kelpie-wt-koji-37")
         );
         // An emoji is two UTF-16 units, so two dashes.
         assert_eq!(

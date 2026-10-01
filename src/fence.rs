@@ -15,7 +15,8 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::worktree::{self, BASE, WorktreeError, git};
 
-/// The files in a worktree that one harness loads and may run code from
+/// The files in a worktree that one harness loads and may run code from, and
+/// the files in the home folder that hold its login
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OwnFiles {
     /// The harness, as a refusal names it
@@ -24,6 +25,8 @@ pub struct OwnFiles {
     pub folders: &'static [&'static str],
     /// Files it loads at the root only
     pub root_files: &'static [&'static str],
+    /// Its login and secrets, under `~/`, which no other harness's call reads
+    pub credentials: &'static [&'static str],
 }
 
 /// Every harness's own files, each fenced whichever harness a call runs on
@@ -35,13 +38,25 @@ pub const HARNESSES: [OwnFiles; 2] = [
         harness: "Claude Code",
         folders: &[".claude"],
         root_files: &[".mcp.json"],
+        // Linux keeps the login in the file; `.claude.json` holds MCP servers' secrets.
+        credentials: &["~/.claude/.credentials.json", "~/.claude.json"],
     },
     OwnFiles {
         harness: "Codex",
         folders: &[".codex"],
         root_files: &[],
+        credentials: &["~/.codex/**"],
     },
 ];
+
+/// Every other harness's credentials, which a call on `harness` may not read
+pub fn others_credentials(harness: &str) -> Vec<String> {
+    HARNESSES
+        .iter()
+        .filter(|own| own.harness != harness)
+        .flat_map(|own| own.credentials.iter().map(|&path| path.to_owned()))
+        .collect()
+}
 
 // Every name a harness loads from the worktree's root.
 fn root_names() -> impl Iterator<Item = &'static str> {
@@ -457,6 +472,15 @@ mod tests {
             assert!(!fenced(Path::new(path)), "{path}");
         }
         assert_eq!(owner(Path::new(".mcp.json")), Some("Claude Code"));
+    }
+
+    #[test]
+    fn a_call_reads_no_other_harnesss_login() {
+        assert_eq!(others_credentials("Claude Code"), ["~/.codex/**"]);
+        assert_eq!(
+            others_credentials("Codex"),
+            ["~/.claude/.credentials.json", "~/.claude.json"]
+        );
     }
 
     #[test]

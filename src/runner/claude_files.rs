@@ -133,8 +133,8 @@ mod tests {
         assert_eq!(
             question,
             format!(
-                "Pull request #71 at {} changes agents' own files, which run outside \
-                 the worker's sandbox: .claude/settings.json. `shep kelpie rule 1 yes` \
+                "Pull request #71 at {} changes agents' own files, which decide what \
+                 an agent runs in the worktree: .claude/settings.json. `shep kelpie rule 1 yes` \
                  accepts them at that head and kelpie carries on, and \
                  `shep kelpie rule 1 no <note>` stops the work item, keeping its \
                  branch and pull request on the forge.",
@@ -217,7 +217,7 @@ mod tests {
         rig.ask(&runner, "start", None);
         rig.ask(&runner, "rework", Some("71"));
         let (id, question) = ruling(step(&runner).unwrap());
-        assert!(question.contains("sandbox: .mcp.json."), "{question}");
+        assert!(question.contains("worktree: .mcp.json."), "{question}");
         assert!(rig.claude.all_calls().is_empty());
 
         step(&runner).unwrap(); // the alert
@@ -244,7 +244,7 @@ mod tests {
             Some(StepReport::Adopted { .. })
         ));
         let (_, question) = ruling(step(&runner).unwrap());
-        assert!(question.contains("sandbox: .mcp.json."), "{question}");
+        assert!(question.contains("worktree: .mcp.json."), "{question}");
         assert_eq!(rig.claude.all_calls().len(), 0);
     }
 
@@ -282,7 +282,7 @@ mod tests {
     fn a_no_on_a_change_to_claudes_settings_stops_the_work_item() {
         let (rig, runner) = pushed(".mcp.json");
         let (_, question) = ruling(step(&runner).unwrap());
-        assert!(question.contains("sandbox: .mcp.json."), "{question}");
+        assert!(question.contains("worktree: .mcp.json."), "{question}");
         step(&runner).unwrap(); // the alert
         rig.ask(&runner, "rule", Some("1 no revert it"));
         assert!(matches!(
