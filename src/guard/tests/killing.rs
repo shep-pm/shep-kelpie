@@ -40,6 +40,11 @@ fn stopping_a_process_by_its_pid_goes_through() {
         "kill -SIGINT 1234",
         "kill %1",
         "kill -l",
+        "kill $!",
+        "kill $pid",
+        "kill \"$pid\"",
+        "kill ${PID}",
+        "kill -9 \"${pid}\"",
     ] {
         assert_eq!(bash(command), Verdict::Allow, "{command}");
     }

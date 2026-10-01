@@ -70,6 +70,22 @@ pub(super) const NO_KILLING_BY_NAME: &str = "a worker does not stop a process by
     Stop only a process you started, by the pid you got when you started it, \
     or with the Bash tool's own task stop";
 
+// A plain variable reference (`$!`, `$pid`, `"$pid"`, `${pid}`), which is how a
+// worker names the process it started; command substitution is not one.
+fn is_variable(arg: &str) -> bool {
+    let arg = arg.trim_matches('"');
+    let Some(name) = arg.strip_prefix('$') else {
+        return false;
+    };
+    let name = name
+        .strip_prefix('{')
+        .and_then(|name| name.strip_suffix('}'))
+        .unwrap_or(name);
+    name == "!"
+        || name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+            && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
 // Whether `kill`'s arguments name something other than numeric pids, as
 // `$(pgrep x)` or no pid at all (`xargs kill` reads its pids from a pattern).
 fn kills_by_name(args: &[String]) -> bool {
@@ -83,11 +99,12 @@ fn kills_by_name(args: &[String]) -> bool {
             }
             "--" => {}
             _ if pids == 0 && arg.len() > 1 && arg.starts_with('-') => {}
-            _ if arg
-                .strip_prefix('%')
-                .unwrap_or(arg)
-                .bytes()
-                .all(|b| b.is_ascii_digit()) =>
+            _ if is_variable(arg)
+                || arg
+                    .strip_prefix('%')
+                    .unwrap_or(arg)
+                    .bytes()
+                    .all(|b| b.is_ascii_digit()) =>
             {
                 pids += 1;
             }
