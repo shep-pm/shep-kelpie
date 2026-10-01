@@ -59,8 +59,10 @@ url = "https://ntfy.sh/your-private-topic"
 # model = "claude-opus-5-5"
 # effort = "high"
 #
-# pi runs a model on an OpenAI-compatible server: `url` up to and including
-# its `/v1`, and `context`, the context size in tokens it gives the model. A
+# pi runs a model on an OpenAI-compatible server: `url`, its `http://`
+# address up to and including its `/v1`, and `context`, the context size in
+# tokens it gives the model. Its calls reach the server through a forwarder
+# that passes only the chat completions call. A
 # project's local worker takes only issues labelled `worker:local`.
 # [kelpie.agents.qwen]
 # harness = "pi"

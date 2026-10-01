@@ -246,6 +246,11 @@ fn an_agent_must_say_where_its_model_runs_exactly_when_its_harness_needs_it() {
             "`agents.qwen` runs on claude-code, which takes no `url` or `context`",
         ),
         (
+            QWEN.replace("http://box", "https://box"),
+            "`agents.qwen` runs on pi, with a `url` kelpie cannot forward to: \
+             kelpie's forwarder reaches a model server over plain `http://`",
+        ),
+        (
             format!("{QWEN}usage = \"claude\"\n"),
             "`agents.qwen` runs on pi, whose usage is read with `none`",
         ),

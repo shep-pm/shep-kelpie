@@ -71,6 +71,12 @@ pub(crate) fn srt_settings(policy: &Policy) -> Value {
         "deniedDomains": [],
         "strictAllowlist": true,
     });
+    if let Some(forward) = &policy.forward {
+        let mut hosts = policy.hosts.clone();
+        hosts.push(forward.host.clone());
+        network["allowedDomains"] = json!(hosts);
+        network["mitmProxy"] = json!({ "socketPath": forward.socket, "domains": [&forward.host] });
+    }
     if policy.listen {
         network["allowLocalBinding"] = true.into();
     }
@@ -112,6 +118,26 @@ mod tests {
             "{err}"
         );
         assert!(!settings.exists());
+    }
+
+    #[test]
+    fn a_forwarded_host_is_the_only_one_allowed_and_its_traffic_goes_to_the_socket() {
+        let policy = Policy {
+            forward: Some(crate::ports::Forward {
+                host: "model.kelpie.test".into(),
+                socket: PathBuf::from("/k/worker/model.sock"),
+            }),
+            ..Policy::default()
+        };
+        let network = &srt_settings(&policy)["network"];
+        assert_eq!(network["allowedDomains"], json!(["model.kelpie.test"]));
+        assert_eq!(
+            network["mitmProxy"],
+            json!({ "socketPath": "/k/worker/model.sock", "domains": ["model.kelpie.test"] })
+        );
+        assert!(network.get("allowUnixSockets").is_none());
+        let plain = &srt_settings(&Policy::default())["network"];
+        assert!(plain.get("mitmProxy").is_none());
     }
 
     #[test]

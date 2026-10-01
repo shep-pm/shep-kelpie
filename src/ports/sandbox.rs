@@ -24,12 +24,25 @@ pub struct Policy {
     pub hosts: Vec<String>,
     /// The Unix sockets it may connect to
     pub sockets: Vec<PathBuf>,
+    /// A host it may reach only through a process outside, and no other way
+    pub forward: Option<Forward>,
     /// Whether it may listen on a local port, as a dev server does
     pub listen: bool,
     /// The macOS services it may look up, beyond the sandbox's own
     pub services: Vec<String>,
     /// Whether it may ask macOS to verify a certificate, which Go's TLS needs
     pub verify_tls: bool,
+}
+
+/// A host whose traffic the sandbox's proxy hands to a Unix socket, not the network
+///
+/// The sandbox needs neither the host nor the socket: the proxy runs outside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Forward {
+    /// The host the sandboxed process dials
+    pub host: String,
+    /// The socket a process outside serves, which only the proxy dials
+    pub socket: PathBuf,
 }
 
 /// Runs a process inside a [`Policy`]

@@ -11,6 +11,7 @@ mod bridge;
 mod claude;
 mod codex_usage;
 mod curl;
+mod forwarder;
 pub(crate) mod gh;
 mod host;
 mod leases;

@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use super::local::{ContextSize, EndpointUrl};
 use super::reviewers::{LeaseName, lowercase_name};
 use super::{Effort, NonBlank, RoleModel, Settings, SettingsError};
+use crate::forwarder::Upstream;
 
 /// An agent's name: lowercase letters, digits and `-`
 #[derive(
@@ -231,10 +232,17 @@ impl Agent {
             (Harness::ClaudeCode, ..) => {
                 return Err("runs on claude-code, which takes no `url` or `context`".into());
             }
-            (Harness::Pi, Some(url), Some(context)) => AgentHarness::Pi(ModelServer {
-                url: url.clone(),
-                context,
-            }),
+            (Harness::Pi, Some(url), Some(context)) => {
+                if let Err(e) = Upstream::new(url) {
+                    return Err(format!(
+                        "runs on pi, with a `url` kelpie cannot forward to: {e}"
+                    ));
+                }
+                AgentHarness::Pi(ModelServer {
+                    url: url.clone(),
+                    context,
+                })
+            }
             (Harness::Pi, ..) => {
                 return Err("runs on pi, which needs the model's server as `url` \
                             and its context size as `context`"
