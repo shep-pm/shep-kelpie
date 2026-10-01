@@ -4,7 +4,7 @@ use serde_json::json;
 
 use super::*;
 use crate::ports::{Cost, Usage};
-use crate::profile::INSTRUCTIONS;
+use crate::profile;
 use crate::settings::Effort;
 use crate::test::{LEFT_BEHIND, Rig, Scripted, git};
 
@@ -58,7 +58,10 @@ fn the_first_turn_starts_the_workers_session_in_its_own_worktree() {
     assert_eq!(call.settings, worker.join("settings.json"));
     assert_eq!(call.instructions, Some(worker.join("instructions.md")));
     let instructions = fs::read_to_string(worker.join("instructions.md")).unwrap();
-    assert!(instructions.starts_with(INSTRUCTIONS), "{instructions}");
+    assert!(
+        instructions.starts_with(&profile::instructions(std::path::Path::new(Rig::KELPIE))),
+        "{instructions}"
+    );
     assert!(seen.build_existed, "the build folder came after the worker");
 
     assert_eq!(git(&worktree, &["branch", "--show-current"]), "kelpie/7");

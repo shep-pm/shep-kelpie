@@ -18,6 +18,9 @@ exclude = ["/docs/"]
 hmac = { version = "0.13", default-features = false }
 # Zone-aware dates, for the reset times `/usage` prints in the maintainer's zone
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-zoneinfo"] }
+# Clears close-on-exec on a lease's connection, so a command run under the
+# lease holds it too; shep-core already builds this version with `fs`
+nix = { version = "0.29", default-features = false, features = ["fs"] }
 # The terminal QR code `shep kelpie totp` prints for an authenticator app to scan
 qrcode = { version = "0.14", default-features = false }
 # The settings' JSON Schema, in the version shep-client builds it with
@@ -28,7 +31,7 @@ sha1 = { version = "0.11", default-features = false }
 shep-channel = { version = "=0.12.0", default-features = false, features = ["client"] }
 # `schema` answers shep's `--schema` probe, which lookout edits kelpie's settings from
 shep-client = { version = "=0.12.0", default-features = false, features = ["schema"] }
-tokio = { version = "1", default-features = false, features = ["macros", "process", "rt", "signal", "sync", "time"] }
+tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "process", "rt", "signal", "sync", "time"] }
 toml = { version = "1.1", default-features = false, features = ["std", "parse", "display", "serde"] }
 
 [dev-dependencies]
