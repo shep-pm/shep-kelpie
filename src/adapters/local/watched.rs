@@ -12,9 +12,13 @@ use crate::settings::{LeaseName, LocalCommand, LocalRound};
 use crate::test::{git, write_script};
 
 fn command(path: &Path, gpu_lease: bool) -> LocalRound {
+    leased(path, gpu_lease.then(LeaseName::gpu))
+}
+
+fn leased(path: &Path, lease: Option<LeaseName>) -> LocalRound {
     LocalRound::Command(LocalCommand {
         command: path.to_owned(),
-        lease: gpu_lease.then(LeaseName::gpu),
+        lease,
         gpu_lease: false,
         ollama: None,
         ollama_model: None,
@@ -43,6 +47,16 @@ struct Release<'a>(&'a GpuLock, u32);
 impl Drop for Release<'_> {
     fn drop(&mut self) {
         let _ = self.0.release(self.1);
+    }
+}
+
+// Lets the stand-in script go however the test ends, so a failed assertion
+// never leaves it holding the lock for the scope to join.
+struct Go<'a>(&'a Path);
+
+impl Drop for Go<'_> {
+    fn drop(&mut self) {
+        let _ = std::fs::write(self.0.join("go"), "");
     }
 }
 
@@ -119,6 +133,8 @@ fn a_command_queued_on_someone_elses_lock_reports_queued_then_running() {
     let temp = dir.path().join("tmp");
     let (lock, other) = someone_elses_lock(&temp);
     let script = dir.path().join("review");
+    // It keeps the lock until the test says go, which it does only once the
+    // round has been told it runs.
     write_script(
         &script,
         &format!(
@@ -126,13 +142,13 @@ fn a_command_queued_on_someone_elses_lock_reports_queued_then_running() {
              held=\"$TMPDIR/qwen-review/gpu.lock\"\n\
              until mkdir \"$held\" 2>/dev/null; do sleep 0.05; done\n\
              echo $$ > \"$held/pid\"\n\
-             sleep 0.6\n\
+             until [ -e \"$TMPDIR/go\" ]; do sleep 0.05; done\n\
              {ONE_FINDING}\
              rm -rf \"$held\"\n"
         ),
     );
     let worktree = a_worktree(dir.path());
-    let reviewer = LocalReviewer::default().with_temp_dir(temp);
+    let reviewer = LocalReviewer::default().with_temp_dir(temp.clone());
     let (seen, watch) = stages();
     let local = command(&script, false);
     let out = dir.path().join("out");
@@ -140,8 +156,15 @@ fn a_command_queued_on_someone_elses_lock_reports_queued_then_running() {
         let _release = Release(&lock, other);
         let round =
             scope.spawn(|| reviewer.round_watched(&local, &worktree, "main", &out, 1, "", &watch));
+        let _go = Go(&temp);
         wait_for(&seen, RoundStage::Queued);
         lock.release(other).unwrap();
+        wait_for(&seen, RoundStage::Running);
+        assert!(
+            lock.holder().is_some_and(|h| h.live),
+            "the script still holds the lock when the round is told it runs"
+        );
+        std::fs::write(temp.join("go"), "").unwrap();
         round.join().unwrap().unwrap()
     });
     assert_eq!(findings.len(), 1);
@@ -150,6 +173,28 @@ fn a_command_queued_on_someone_elses_lock_reports_queued_then_running() {
         [RoundStage::Queued, RoundStage::Running]
     );
     assert!(lock.holder().is_none(), "the script let the lock go");
+}
+
+// The command takes no lock at all and runs under a lease of kelpie's own,
+// while someone else holds the gpu lock the watcher would read.
+#[test]
+fn a_command_under_a_named_lease_is_not_queued_behind_the_gpu_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let temp = dir.path().join("tmp");
+    let (lock, other) = someone_elses_lock(&temp);
+    let script = dir.path().join("review");
+    write_script(&script, &format!("#!/bin/sh\nsleep 0.6\n{ONE_FINDING}"));
+    let worktree = a_worktree(dir.path());
+    let reviewer = LocalReviewer::default().with_temp_dir(temp);
+    let (seen, watch) = stages();
+    let remote = LeaseName::try_from("remote".to_owned()).unwrap();
+    let local = leased(&script, Some(remote));
+    let out = dir.path().join("out");
+    let _release = Release(&lock, other);
+    reviewer
+        .round_watched(&local, &worktree, "main", &out, 1, "", &watch)
+        .unwrap();
+    assert_eq!(*seen.lock().unwrap(), []);
 }
 
 #[test]

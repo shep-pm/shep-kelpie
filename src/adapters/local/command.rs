@@ -25,7 +25,7 @@ struct Round<'a> {
     head: &'a str,
     round: u32,
     criteria: Option<&'a Path>,
-    watch: &'a (dyn Fn(RoundStage) + Sync),
+    watch: Option<&'a (dyn Fn(RoundStage) + Sync)>,
 }
 
 impl LocalReviewer {
@@ -41,7 +41,7 @@ impl LocalReviewer {
         out: &Path,
         round: u32,
         criteria: &str,
-        watch: &(dyn Fn(RoundStage) + Sync),
+        watch: Option<&(dyn Fn(RoundStage) + Sync)>,
     ) -> Result<Vec<Finding>, ReviewerError> {
         let head = super::head(worktree)?;
         let criteria = write_criteria(out, criteria)?;
@@ -106,8 +106,10 @@ impl LocalReviewer {
         let lock = GpuLock::under(&self.temp_dir);
         let output = std::thread::scope(|scope| {
             let (spawned, pid) = std::sync::mpsc::channel();
-            let (lock, watch) = (&lock, at.watch);
-            scope.spawn(move || queue::watch_queue(lock, &pid, watch));
+            if let Some(watch) = at.watch {
+                let lock = &lock;
+                scope.spawn(move || queue::watch_queue(lock, &pid, watch));
+            }
             self.processes.output_telling(&mut command, None, &|pid| {
                 let _ = spawned.send(pid);
             })

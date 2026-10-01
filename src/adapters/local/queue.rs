@@ -20,8 +20,9 @@ const QUEUE_POLL: Duration = Duration::from_millis(250);
 /// The command's pid arrives on `spawned` once it runs, and the sender
 /// dropping ends the watch. A free lock changes nothing: the round is still
 /// in line until it holds the lock, and another process may take it first.
-/// A watch that ends while queued reports `Running`, so the next run starts
-/// from a known stage.
+/// The watch stops polling once the command's own group holds the lock. One
+/// that ends while queued reports `Running`, so the next run starts from a
+/// known stage.
 pub(super) fn watch_queue(
     lock: &GpuLock,
     spawned: &Receiver<u32>,
@@ -32,9 +33,15 @@ pub(super) fn watch_queue(
     let mut groups = HashMap::new();
     loop {
         let holder = holder_of(lock.holder(), group, &mut groups, process_group);
-        if let Some(stage) = change(queued, holder) {
+        let (stage, held) = poll(queued, holder);
+        if let Some(stage) = stage {
             watch(stage);
             queued = stage == RoundStage::Queued;
+        }
+        if held {
+            // Once the command holds the lock it is past any queue.
+            let _ = spawned.recv();
+            return;
         }
         match spawned.recv_timeout(QUEUE_POLL) {
             Err(RecvTimeoutError::Timeout) => {}
@@ -57,12 +64,14 @@ enum Holder {
     Neither,
 }
 
-// The stage to report, if the holder moves the round to another one.
-fn change(queued: bool, holder: Holder) -> Option<RoundStage> {
+// The stage to report, if the holder moves the round to another one, and
+// whether the round now holds the lock itself, which ends the watch.
+fn poll(queued: bool, holder: Holder) -> (Option<RoundStage>, bool) {
     match holder {
-        Holder::Foreign if !queued => Some(RoundStage::Queued),
-        Holder::Ours if queued => Some(RoundStage::Running),
-        _ => None,
+        Holder::Foreign if !queued => (Some(RoundStage::Queued), false),
+        Holder::Ours if queued => (Some(RoundStage::Running), true),
+        Holder::Ours => (None, true),
+        _ => (None, false),
     }
 }
 
@@ -71,7 +80,7 @@ fn change(queued: bool, holder: Holder) -> Option<RoundStage> {
 fn holder_of(
     holder: Option<LockHolder>,
     group: u32,
-    groups: &mut HashMap<u32, Option<u32>>,
+    groups: &mut HashMap<u32, u32>,
     read: impl FnOnce(u32) -> Option<u32>,
 ) -> Holder {
     holder
@@ -89,12 +98,18 @@ fn holder_of(
 }
 
 // A holder's group is read once, since a wait polls for as long as it lasts.
+// A read that failed is tried again, so one failed `ps` costs nothing later.
 fn group_of(
-    groups: &mut HashMap<u32, Option<u32>>,
+    groups: &mut HashMap<u32, u32>,
     pid: u32,
     read: impl FnOnce(u32) -> Option<u32>,
 ) -> Option<u32> {
-    *groups.entry(pid).or_insert_with(|| read(pid))
+    if let Some(group) = groups.get(&pid) {
+        return Some(*group);
+    }
+    let group = read(pid)?;
+    groups.insert(pid, group);
+    Some(group)
 }
 
 fn process_group(pid: u32) -> Option<u32> {
@@ -130,8 +145,24 @@ mod tests {
         assert_eq!(group_of(&mut groups, 5, read(Some(9))), Some(9));
         assert_eq!(group_of(&mut groups, 5, read(Some(1))), Some(9));
         assert_eq!(group_of(&mut groups, 6, read(None)), None);
-        assert_eq!(group_of(&mut groups, 6, read(Some(1))), None);
-        assert_eq!(reads.get(), 2);
+        assert_eq!(group_of(&mut groups, 6, read(Some(1))), Some(1));
+        assert_eq!(reads.get(), 3, "a failed read is not remembered");
+    }
+
+    // The real `ps`, against a child that leads its own group as a round's
+    // command does.
+    #[test]
+    fn a_command_leads_its_own_process_group() {
+        use std::os::unix::process::CommandExt;
+        let mut child = Command::new("sleep")
+            .arg("5")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let group = process_group(child.id());
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_eq!(group, Some(child.id()));
     }
 
     fn held_by(pid: u32, live: bool) -> Option<LockHolder> {
@@ -156,14 +187,19 @@ mod tests {
         assert_eq!(holder(held_by(me, true), Some(9)), Holder::Neither);
     }
 
-    // Every report a watch makes over the holders it sees, one poll each.
+    // Every report a watch makes over the holders it sees, one poll each,
+    // until the round holds the lock.
     fn reports(holders: &[Holder]) -> Vec<RoundStage> {
         let mut queued = false;
         let mut told = Vec::new();
         for holder in holders {
-            if let Some(stage) = change(queued, *holder) {
+            let (stage, held) = poll(queued, *holder);
+            if let Some(stage) = stage {
                 told.push(stage);
                 queued = stage == RoundStage::Queued;
+            }
+            if held {
+                break;
             }
         }
         told
@@ -180,6 +216,11 @@ mod tests {
         );
         assert_eq!(reports(&[Neither, Neither, Ours]), []);
         assert_eq!(reports(&[Foreign, Neither]), [RoundStage::Queued]);
+        assert_eq!(
+            reports(&[Foreign, Ours, Foreign]),
+            [RoundStage::Queued, RoundStage::Running],
+            "a round that held the lock is never queued again"
+        );
     }
 
     // A watch that ends while queued leaves no round stuck in the queue,

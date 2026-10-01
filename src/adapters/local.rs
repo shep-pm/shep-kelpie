@@ -175,7 +175,8 @@ impl Reviewer for LocalReviewer {
         criteria: &str,
         watch: &(dyn Fn(RoundStage) + Sync),
     ) -> Result<Vec<Finding>, ReviewerError> {
-        let _hold = match local.lease() {
+        let lease = local.lease();
+        let _hold = match &lease {
             Some(lease) => {
                 let what = format!("kelpie local round {round} in {}", worktree.display());
                 let held = self.hold(lease.as_str(), what, watch).map_err(|e| match e {
@@ -190,7 +191,11 @@ impl Reviewer for LocalReviewer {
         match local {
             LocalRound::Off {} => Ok(Vec::new()),
             LocalRound::Command(command) => {
-                self.command_round(command, worktree, base, out, round, criteria, watch)
+                // A command under a lease of kelpie's is not queued on the gpu
+                // lock the watcher reads. One with none is assumed to queue
+                // on it, as the qwen script does.
+                let queue_watch = lease.is_none().then_some(watch);
+                self.command_round(command, worktree, base, out, round, criteria, queue_watch)
             }
             LocalRound::Endpoint(endpoint) => {
                 self.endpoint_round(endpoint, worktree, base, out, round, criteria)
