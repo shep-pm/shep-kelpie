@@ -121,3 +121,70 @@ fn a_session_reviewer_names_an_agent_from_the_same_list() {
         "{err}"
     );
 }
+
+const LIMITED: &str = "[agents.codex]\nharness = \"claude-code\"\nmodel = \"gpt-5-codex\"\n\
+                       effort = \"medium\"\nusage = \"codex\"\n\
+                       [agents.qwen]\nharness = \"claude-code\"\nmodel = \"qwen3-coder\"\n\
+                       effort = \"low\"\nusage = \"none\"\n\
+                       [agents.box]\nharness = \"claude-code\"\nmodel = \"qwen3-coder\"\n\
+                       effort = \"low\"\nusage = \"none\"\nlease = \"gpu-box\"\n";
+
+#[test]
+fn each_role_is_held_back_by_its_agents_account_or_lease() {
+    let defined = kelpie(&format!("{AGENTS}{LIMITED}")).agents;
+    let none = project("").role_agents(&defined).unwrap();
+    assert_eq!(none.limits, RoleLimits::default());
+    assert_eq!(none.limits.worker, Limit::Account(Account::Claude));
+
+    let named = project("worker = \"codex\"\nreviewer = \"qwen\"\njudge = \"box\"\n");
+    let limits = named.role_agents(&defined).unwrap().limits;
+    assert_eq!(limits.worker, Limit::Account(Account::Codex));
+    assert_eq!(limits.reviewer, Limit::Lease(LeaseName::gpu()));
+    let Limit::Lease(lease) = limits.judge else {
+        panic!("{:?}", limits.judge);
+    };
+    assert_eq!(lease.as_str(), "gpu-box");
+
+    let claude = project("worker = \"opus-high\"\n");
+    let limits = claude.role_agents(&defined).unwrap().limits;
+    assert_eq!(limits.worker, Limit::Account(Account::Claude));
+}
+
+#[test]
+fn a_lease_on_an_agent_whose_usage_is_read_is_refused() {
+    let both = "[agents.x]\nharness = \"claude-code\"\nmodel = \"m\"\neffort = \"low\"\n\
+                usage = \"codex\"\nlease = \"gpu\"\n";
+    let err = project("worker = \"x\"\n")
+        .role_agents(&kelpie(both).agents)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("`agents.x` sets `lease`, which only an agent with `usage = \"none\"` takes"),
+        "{err}"
+    );
+    let unknown = "[agents.x]\nharness = \"claude-code\"\nmodel = \"m\"\neffort = \"low\"\n\
+                   usage = \"gemini\"\n";
+    assert!(KelpieSettings::from_section(unknown).is_err());
+}
+
+#[test]
+fn a_session_reviewer_carries_its_agents_limit() {
+    let guard = "loop_guard = 8\n";
+    let entry = EXAMPLE.replace(
+        guard,
+        &format!("{guard}reviewers = [\"local\", \"claude\"]\n"),
+    );
+    let table = project_table(&entry);
+    let settings = Settings::from_table(&table, "shep", Path::new("/h"), Path::new("/p")).unwrap();
+    let section =
+        format!("{LIMITED}[local_reviewers.local]\nkind = \"session\"\nagent = \"qwen\"\n");
+    let lineup = settings.lineup(&kelpie(&section), Path::new("/h")).unwrap();
+    let Runs::Claude(local) = &lineup[0].runs else {
+        panic!("{:?}", lineup[0]);
+    };
+    assert_eq!(local.limit, Limit::Lease(LeaseName::gpu()));
+    let Runs::Claude(claude) = &lineup[1].runs else {
+        panic!("{:?}", lineup[1]);
+    };
+    assert_eq!(claude.limit, Limit::Account(Account::Claude));
+}
