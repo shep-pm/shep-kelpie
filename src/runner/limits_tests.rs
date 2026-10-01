@@ -5,7 +5,7 @@ use serde_json::json;
 
 use crate::lease::gpu::{Attempt, Claim, GpuLock};
 use crate::pacer::{HoldKind, RECHECK_SECS};
-use crate::ports::Role;
+use crate::ports::{Cost, Role, Timestamp, Usage};
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{Hold, Rig, Scripted};
 
@@ -226,4 +226,59 @@ fn a_project_with_no_local_agent_shows_no_leases() {
     let (rig, runner) = named("chelone", "");
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status.get("local_leases"), None);
+}
+
+#[test]
+fn spend_without_dollars_shows_tokens_and_says_it_has_none() {
+    let (rig, runner) = named("reactmap", "worker = \"qwen\"\n");
+    rig.ask(&runner, "add", Some("7"));
+    let used = Usage {
+        input: 120,
+        cache_write: 0,
+        cache_read: 2_400,
+        output: 35,
+    };
+    rig.claude.script([Scripted::Tokens(used)]);
+    let Some(StepReport::Ended {
+        usage, cost_usd, ..
+    }) = step(&runner).unwrap()
+    else {
+        panic!("the turn did not end");
+    };
+    assert_eq!((usage, cost_usd), (used, None));
+
+    let item = &rig.ask(&runner, "status", None)["work_item"];
+    let tokens = json!({ "input": 120, "cache_write": 0, "cache_read": 2400, "output": 35 });
+    assert_eq!(
+        item["by_role"]["worker"],
+        json!({ "calls": 1, "tokens": tokens, "cost_usd": null, "unpriced_calls": 1 })
+    );
+    let none = json!({ "input": 0, "cache_write": 0, "cache_read": 0, "output": 0 });
+    assert_eq!(
+        item["by_role"]["judge"],
+        json!({ "calls": 0, "tokens": none, "cost_usd": null })
+    );
+}
+
+#[test]
+fn a_role_with_priced_and_unpriced_calls_counts_both() {
+    let mut item = crate::test::a_work_item();
+    let session = item.session.clone();
+    let tokens = |n| Usage {
+        input: n,
+        ..Usage::default()
+    };
+    let priced = item.record_call(
+        Role::Worker,
+        Timestamp(20),
+        session.clone(),
+        tokens(10),
+        Some(Cost(9)),
+    );
+    let unpriced = item.record_call(Role::Worker, Timestamp(30), session, tokens(5), None);
+    assert_eq!((priced, unpriced), (Some(Cost(3)), None));
+    let worker = item.spend().worker;
+    assert_eq!((worker.calls, worker.unpriced_calls), (3, 1));
+    assert_eq!(worker.tokens.input, 1 + 10 + 5);
+    assert_eq!(worker.cost_usd, Some(Cost(5 + 3).usd()));
 }

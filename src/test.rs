@@ -146,6 +146,7 @@ pub(crate) fn a_work_item() -> WorkItem {
             },
             cost: Cost(5),
             session_cost: Cost(6),
+            unpriced: false,
         }],
     }
 }

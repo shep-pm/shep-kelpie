@@ -132,7 +132,7 @@ fn status_shows_the_session_and_what_the_work_item_has_cost() {
             issue: 7,
             session: session.clone(),
             usage: usage(2),
-            cost_usd: 0.0200853,
+            cost_usd: Some(0.0200853),
             work_item_cost_usd: 0.0200853,
             pull_request: None,
         }

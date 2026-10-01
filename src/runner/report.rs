@@ -105,8 +105,9 @@ pub enum StepReport {
         session: SessionId,
         /// What the call used
         usage: Usage,
-        /// What the call cost, in US dollars
-        cost_usd: f64,
+        /// What the call cost, in US dollars, or null when its harness
+        /// reports no cost
+        cost_usd: Option<f64>,
         /// What the work item has cost so far, in US dollars
         work_item_cost_usd: f64,
         /// The worker's draft pull request, once it has opened one
@@ -120,8 +121,9 @@ pub enum StepReport {
         session: SessionId,
         /// What the call used
         usage: Usage,
-        /// What the call cost, in US dollars
-        cost_usd: f64,
+        /// What the call cost, in US dollars, or null when its harness
+        /// reports no cost
+        cost_usd: Option<f64>,
         /// What the work item has cost so far, in US dollars
         work_item_cost_usd: f64,
         /// The worker's draft pull request, once it has opened one
