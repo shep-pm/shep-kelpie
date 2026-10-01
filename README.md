@@ -362,7 +362,7 @@ A Codex agent runs on kelpie's own ChatGPT login, in `codex_home` (`~/.kelpie/co
 CODEX_HOME=~/.kelpie/codex codex login --device-auth
 ```
 
-Each Codex call gets a home of its own with that login linked in, so no call sees another's sessions. A worker on Codex can't have the preview or `worker.guard_hooks`, the same as pi. Kelpie's checks run as Codex's own hooks: `confine` on every `apply_patch`, `guard` on every command.
+Each Codex call gets a home of its own with that login linked in, so no call sees another's sessions. A runner reads `codex_home` when it starts. A worker on Codex can't have the preview or `worker.guard_hooks`, the same as pi. Kelpie's checks run as Codex's own hooks: `confine` on every `apply_patch`, `guard` on every command.
 
 A local worker gets only the issues labelled `worker:local`. The rest run on `models.worker`, so you pick which issues it takes. Each account keeps its own daily allowance and 5-hour stop, shown under its name in `status.pacer`, and a new work item waits on every account its roles spend. `shep kelpie doctor` checks Codex answers for a project that spends it. A `none` agent holds `lease` (the GPU lock, `gpu`, by default) for the whole of each call instead, so a qwen round waits behind its turn, and `status.local_leases` shows who holds it.
 

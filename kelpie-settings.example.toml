@@ -12,7 +12,8 @@
 # which no call reads. Sign it in once with
 # `CODEX_HOME=~/.kelpie/codex codex login --device-auth`. Every Codex call
 # runs on a home of its own with the login linked in. `<kelpie home>/codex`
-# when absent; a leading `~/` is the home folder.
+# when absent; a leading `~/` is the home folder. A runner reads it when it
+# starts.
 # codex_home = "~/.kelpie/codex"
 
 # Where the webhook posts a ruling, so the maintainer hears of it away from
