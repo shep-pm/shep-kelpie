@@ -1,10 +1,9 @@
-//! Claude Code's settings file, built from a call's tools and sandbox
+//! Claude Code's settings file, built from a call's tools and reach
 //!
-//! A fenced session runs in Claude Code's sandbox, which confines Bash and
-//! its children and fails closed. The sandbox does not cover Claude's own
-//! file tools, so a hook that runs `kelpie confine` holds those to the same
-//! folders, and `kelpie guard` judges every command before any hook the
-//! project adds. A session without a fence is held by its deny rules alone.
+//! Every call runs inside kelpie's sandbox, which holds the whole process.
+//! These settings are the second layer: deny rules, and for a fenced session
+//! a hook that runs `kelpie confine` on the file tools, `kelpie guard` on
+//! every command, then any hook the project adds.
 
 use std::path::Path;
 
@@ -61,9 +60,6 @@ const PLAYWRIGHT_DENY: [&str; 4] = [
     "mcp__playwright__browser_set_storage_state",
 ];
 
-// The mach service a dev server's file watcher looks up on macOS
-const DEV_SERVER_MACH: [&str; 1] = ["com.apple.FSEvents"];
-
 /// The settings file's contents for a call with these tools and sandbox
 pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
     let mut deny: Vec<String> = Vec::new();
@@ -80,12 +76,7 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
         }
         return json!({ "permissions": permissions });
     };
-    // Without `strictAllowlist`, `bypassPermissions` lets a host outside the list through.
-    let mut network = json!({ "allowedDomains": fence.hosts, "strictAllowlist": true });
     if fence.preview.is_some() {
-        // A dev server binds a local port, and its file watcher needs FSEvents.
-        network["allowLocalBinding"] = true.into();
-        network["allowMachLookup"] = json!(DEV_SERVER_MACH);
         deny.extend(PLAYWRIGHT_DENY.iter().map(|&r| r.to_owned()));
     }
     let mut permissions = json!({ "deny": deny });
@@ -93,15 +84,9 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
         permissions["additionalDirectories"] = json!(reach.read);
     }
     json!({
-        "sandbox": {
-            "enabled": true,
-            "failIfUnavailable": true,
-            "allowUnsandboxedCommands": false,
-            // Without it, `gh` fails TLS verification on macOS: x509 OSStatus -26276.
-            "enableWeakerNetworkIsolation": true,
-            "filesystem": { "allowWrite": fence.write, "denyWrite": fence.no_write },
-            "network": network,
-        },
+        // Kelpie's sandbox holds the whole process, and on macOS Claude Code's
+        // own cannot start inside it: every command would be refused.
+        "sandbox": { "enabled": false },
         "permissions": permissions,
         // A project's own settings could otherwise switch every hook off,
         // `confine` and the guard with them. This file outranks them.

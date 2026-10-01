@@ -220,9 +220,15 @@ mod tests {
     use crate::settings::{HookEvent, NonBlank};
 
     impl WorkerProfile<'_> {
-        // The profile as Claude Code's settings file carries it
+        // The profile as Claude Code's settings file carries it, with the
+        // sandbox kelpie runs the call in under `sandbox`, as srt reads it
         fn settings(&self) -> Value {
-            crate::adapters::claude_settings(Tools::Work, &self.reach())
+            let reach = self.reach();
+            let mut s = crate::adapters::claude_settings(Tools::Work, &reach);
+            assert_eq!(s["sandbox"], json!({ "enabled": false }));
+            let fence = reach.fence.as_deref().expect("a worker is fenced");
+            s["sandbox"] = crate::adapters::srt_settings(&crate::adapters::fence_policy(fence));
+            s
         }
     }
 
@@ -263,13 +269,19 @@ mod tests {
             .collect()
     }
 
+    // The whole process runs in kelpie's sandbox, which has no exceptions to
+    // ask for: no command runs outside it, and a missing one runs nothing.
     #[test]
-    fn the_sandbox_is_on_and_fails_closed_with_no_way_out() {
+    fn the_sandbox_has_no_way_out() {
         let s = settings(&[]);
-        assert_eq!(s["sandbox"]["enabled"], true);
-        assert_eq!(s["sandbox"]["failIfUnavailable"], true);
-        assert_eq!(s["sandbox"]["allowUnsandboxedCommands"], false);
-        assert_eq!(s["sandbox"]["excludedCommands"], Value::Null);
+        for key in [
+            "excludedCommands",
+            "allowUnsandboxedCommands",
+            "allowAllUnixSockets",
+        ] {
+            assert_eq!(s["sandbox"][key], Value::Null, "{key}");
+            assert_eq!(s["sandbox"]["network"][key], Value::Null, "{key}");
+        }
     }
 
     #[test]
@@ -421,15 +433,17 @@ mod tests {
             })
         );
         assert_eq!(s["env"]["NODE_USE_ENV_PROXY"], "1");
-        assert_eq!(
-            s["sandbox"]["filesystem"],
-            settings(&[])["sandbox"]["filesystem"]
-                .to_string()
-                .replace("/shep/", "/lab/")
-                .parse::<Value>()
-                .unwrap(),
-            "the write fence does not move"
-        );
+        for key in ["allowWrite", "denyWrite"] {
+            assert_eq!(
+                s["sandbox"]["filesystem"][key],
+                settings(&[])["sandbox"]["filesystem"][key]
+                    .to_string()
+                    .replace("/shep/", "/lab/")
+                    .parse::<Value>()
+                    .unwrap(),
+                "the write fence does not move"
+            );
+        }
     }
 
     #[test]

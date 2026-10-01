@@ -2,16 +2,20 @@
 
 use std::ffi::OsString;
 use std::fmt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Arc;
 
 use serde::Deserialize;
 
 use super::process::{Processes, RunError};
+use super::srt::SandboxRuntime;
 use crate::ports::{
-    AgentCall, AgentError, AgentReply, Agents, Cost, Role, Session, SessionId, Usage,
+    AgentCall, AgentError, AgentReply, Agents, Cost, Role, Sandbox, Session, SessionId, Usage,
 };
+use crate::preview::Tools;
 
+pub(crate) mod sandbox;
 pub(crate) mod settings;
 
 /// What `claude -p --resume` prints when the session has no transcript
@@ -33,7 +37,7 @@ impl LambLabels for shep_channel::Shepherd {
     }
 }
 
-/// Headless Claude Code, one `claude -p` process per call
+/// Headless Claude Code, one `claude -p` process per call, each inside the sandbox
 ///
 /// Clones share their calls in flight, so one clone can stop them all.
 #[derive(Debug, Clone)]
@@ -41,14 +45,22 @@ pub struct ClaudeCli {
     pub(super) processes: Processes,
     program: OsString,
     lambs: Option<Arc<dyn LambLabels>>,
+    sandbox: Arc<dyn Sandbox>,
+    home: PathBuf,
 }
 
+// The default home and tools are the maintainer's: `$HOME` and `~/.kelpie/tools`.
 impl Default for ClaudeCli {
     fn default() -> Self {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_default();
         Self {
             processes: Processes::default(),
             program: "claude".into(),
             lambs: None,
+            sandbox: Arc::new(SandboxRuntime::new(Tools::under(&home.join(".kelpie")))),
+            home,
         }
     }
 }
@@ -62,6 +74,24 @@ impl ClaudeCli {
         }
     }
 
+    /// Runs `program` in place of `claude`, as a stand-in script does
+    #[cfg(test)]
+    pub(crate) fn with_program(program: PathBuf) -> Self {
+        Self {
+            program: program.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Runs each call inside `sandbox`, as Claude Code with its home at `home`
+    pub fn sandboxed(self, sandbox: Arc<dyn Sandbox>, home: PathBuf) -> Self {
+        Self {
+            sandbox,
+            home,
+            ..self
+        }
+    }
+
     /// Ends every call in flight, and refuses new ones, as the runner stops
     ///
     /// A call ended this way returns [`AgentError::Stopped`].
@@ -72,13 +102,12 @@ impl ClaudeCli {
 
 impl Agents for ClaudeCli {
     fn prepare(&self, call: &AgentCall) -> Result<(), AgentError> {
-        write_settings(call)
+        write_settings(call)?;
+        sandbox::policy(call, &self.home).map(drop)
     }
 
     fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
-        // Stdin is closed: a `claude -p` with an open stdin waits on it.
-        let mut command = Command::new(&self.program);
-        command.args(argv(call)).current_dir(&call.cwd);
+        let mut command = self.sandboxed_command(call)?;
         let label = format!("#{} {}", call.issue, call.role.as_str());
         let spawned = |pid| {
             if let Some(lambs) = &self.lambs {
@@ -94,6 +123,35 @@ impl Agents for ClaudeCli {
             RunError::TimedOut => AgentError::TimedOut,
         })?;
         parse_result(&output, &call.session)
+    }
+}
+
+impl ClaudeCli {
+    // The call's command inside its sandbox, with its scratch folder emptied
+    // and its transcript folder made. A scratch folder swapped for a link is
+    // removed, not followed.
+    fn sandboxed_command(&self, call: &AgentCall) -> Result<Command, AgentError> {
+        let policy = sandbox::policy(call, &self.home)?;
+        let scratch = sandbox::scratch(call);
+        let setup = |what: &Path, e: std::io::Error| {
+            AgentError::Setup(format!("cannot make {}: {}", what.display(), e.kind()))
+        };
+        match std::fs::remove_dir_all(&scratch) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(setup(&scratch, e)),
+            _ => {}
+        }
+        for folder in [&scratch, &sandbox::transcripts(&self.home, &call.cwd)?] {
+            std::fs::create_dir_all(folder).map_err(|e| setup(folder, e))?;
+        }
+        let mut command = Command::new(&self.program);
+        command
+            .args(argv(call))
+            .current_dir(&call.cwd)
+            .env("CLAUDE_CODE_TMPDIR", &scratch)
+            .env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1");
+        self.sandbox
+            .wrap(&policy, &sandbox::sandbox_settings(call), &command)
+            .map_err(|e| AgentError::Setup(e.to_string()))
     }
 }
 
@@ -215,6 +273,7 @@ mod tests {
     use super::*;
     use crate::ports::{Reach, Tools};
     use crate::settings::Effort;
+    use crate::test::OpenSandbox;
 
     // Recorded from Claude Code 2.1.283 on Haiku: a call asked to say ok.
     const RESULT: &str = include_str!("../../fixtures/claude-p-result.json");
@@ -482,7 +541,8 @@ mod tests {
         let cli = ClaudeCli {
             program: claude.into(),
             ..ClaudeCli::labelling(Arc::clone(&lambs) as Arc<dyn LambLabels>)
-        };
+        }
+        .sandboxed(Arc::new(OpenSandbox::default()), dir.path().join("home"));
         for role in [Role::Worker, Role::Reviewer, Role::Judge] {
             let mut call = call(role, fresh());
             call.cwd = dir.path().to_owned();

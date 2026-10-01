@@ -16,7 +16,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::adapters::{
-    ClaudeCli, Curl, Gh, LocalReviewer, RelayCli, ShepLeases, ShotsCli, SystemClock,
+    ClaudeCli, Curl, Gh, LocalReviewer, RelayCli, SandboxRuntime, ShepLeases, ShotsCli, SystemClock,
 };
 use crate::coderabbit::CodeRabbit;
 use crate::cubic::Cubic;
@@ -71,7 +71,10 @@ fn serve(project: &str) -> Result<(), String> {
     let mut paths = ProjectPaths::under(&kelpie_home, &project);
     paths.shep_home.clone_from(&shep_home);
     let shepherd = shep_channel::serve();
-    let claude = ClaudeCli::labelling(Arc::new(shepherd.clone()));
+    let claude = ClaudeCli::labelling(Arc::new(shepherd.clone())).sandboxed(
+        Arc::new(SandboxRuntime::new(paths.tools.clone())),
+        home.clone(),
+    );
     let reviewer = LocalReviewer::default();
     let shots = ShotsCli::new(paths.tools.clone());
     let epoch = Epoch(u64::from(std::process::id()));

@@ -65,16 +65,19 @@ impl Sandbox for SandboxRuntime {
 
 /// `srt`'s settings file for `policy`
 pub(crate) fn srt_settings(policy: &Policy) -> Value {
+    // Without `strictAllowlist`, a host off the list is asked about rather than refused.
+    let mut network = json!({ "allowedDomains": policy.hosts, "strictAllowlist": true });
+    if policy.listen {
+        network["allowLocalBinding"] = true.into();
+    }
+    if !policy.services.is_empty() {
+        network["allowMachLookup"] = json!(policy.services);
+    }
+    if !policy.sockets.is_empty() {
+        network["allowUnixSockets"] = json!(policy.sockets);
+    }
     json!({
-        "network": {
-            "allowedDomains": policy.hosts,
-            "deniedDomains": [],
-            // Without it, a host off the list is asked about rather than refused.
-            "strictAllowlist": true,
-            "allowLocalBinding": policy.listen,
-            "allowMachLookup": policy.services,
-            "allowUnixSockets": policy.sockets,
-        },
+        "network": network,
         "filesystem": {
             "denyRead": policy.no_read,
             "allowRead": policy.read,

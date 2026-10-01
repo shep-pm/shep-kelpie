@@ -33,6 +33,7 @@ mod forge;
 mod leases;
 mod relay;
 mod reviewer;
+mod sandbox;
 mod shepherd;
 mod shots;
 
@@ -43,6 +44,7 @@ pub(crate) use forge::FakeForge;
 pub(crate) use leases::{FakeLeases, Told};
 pub(crate) use relay::FakeRelay;
 pub(crate) use reviewer::{FakeReviewer, ScriptedRound};
+pub(crate) use sandbox::OpenSandbox;
 pub(crate) use shepherd::FakeShepherd;
 pub(crate) use shots::{FakeShots, ScriptedShots};
 

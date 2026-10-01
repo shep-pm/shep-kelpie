@@ -271,7 +271,7 @@ fn a_worker_with_a_launch_file_gets_playwright_and_the_shots_tool() {
         json!(rig.home.path().join("kelpie/shots/lab/7"))
     );
 
-    let network = &seen.settings["sandbox"]["network"];
+    let network = &seen.sandbox["network"];
     assert_eq!(network["allowLocalBinding"], true);
     assert!(
         network["allowedDomains"]

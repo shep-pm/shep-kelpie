@@ -22,6 +22,8 @@ mod srt;
 mod usage;
 
 #[cfg(test)]
+pub(crate) use claude::sandbox::fence_policy;
+#[cfg(test)]
 pub(crate) use claude::settings::{NO_TOOLS, settings as claude_settings};
 #[cfg(test)]
 pub(crate) use claude::write_settings as write_claude_settings;
@@ -34,6 +36,8 @@ pub use local::LocalReviewer;
 pub use relay::RelayCli;
 pub use shots::ShotsCli;
 pub use srt::SandboxRuntime;
+#[cfg(test)]
+pub(crate) use srt::srt_settings;
 pub use usage::UsageMeter;
 
 /// The machine's wall clock
