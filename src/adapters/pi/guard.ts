@@ -8,12 +8,14 @@ import { resolve } from "node:path";
 
 const CHECKS: { kelpie: string; confine: string[]; guard: string[] } = __CHECKS__;
 
-// pi strips a leading `@`, expands `~` and folds odd spaces before it resolves a path.
-function resolved(path: string, cwd: string): string {
+// The path pi's write and edit resolve: it folds odd spaces, strips a
+// leading `@` and expands `~`. It also opens a `file:` URL, which is refused.
+function resolved(path: string, cwd: string): string | undefined {
 	let p = path.replace(/[  -   　]/g, " ");
 	if (p.startsWith("@")) p = p.slice(1);
 	if (p === "~") p = homedir();
 	else if (p.startsWith("~/")) p = homedir() + p.slice(1);
+	if (/^file:/i.test(p)) return undefined;
 	return resolve(cwd, p);
 }
 
@@ -39,11 +41,15 @@ export default function (pi: any) {
 				tool_input: { command: String(input.command ?? "") },
 			});
 		} else if (event.toolName === "write" || event.toolName === "edit") {
-			why = judged(CHECKS.confine, {
-				cwd,
-				tool_name: event.toolName === "write" ? "Write" : "Edit",
-				tool_input: { file_path: resolved(String(input.path ?? ""), cwd) },
-			});
+			const file = resolved(String(input.path ?? ""), cwd);
+			why =
+				file === undefined
+					? "kelpie takes a file's path, not a file: URL"
+					: judged(CHECKS.confine, {
+							cwd,
+							tool_name: event.toolName === "write" ? "Write" : "Edit",
+							tool_input: { file_path: file },
+						});
 		} else if (!["read", "grep", "find", "ls"].includes(event.toolName)) {
 			why = `kelpie runs no ${event.toolName} tool for a worker`;
 		}

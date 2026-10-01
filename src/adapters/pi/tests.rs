@@ -23,7 +23,7 @@ const REFUSED: &str = include_str!("../../../fixtures/pi-p-refused.jsonl");
 
 const FRESH_ID: &str = "0b6f3c1e-7d2a-4f4e-9a51-3c8d2e6f1a07";
 const WORKER_ID: &str = "5a2e9d40-1c7b-4b38-8e6f-2d4a9c1b7e53";
-const URL: &str = "http://10.0.0.9:11434/v1";
+const URL: &str = "http://192.0.2.9:11434/v1";
 
 fn output(code: i32, stdout: &str, stderr: &str) -> Output {
     Output {
@@ -197,6 +197,119 @@ fn a_fenced_call_gets_a_guard_that_runs_kelpies_checks() {
     assert_eq!(checks["guard"][2], json!(wt));
 }
 
+// Loads the guard extension the way pi does, into a stand-in `pi`, and hands
+// its `tool_call` handler each of `events` in turn.
+const GUARD_RUNNER: &str = r#"
+import guard from "./guard.mts";
+let handler;
+guard({ on: (name, fn) => { if (name === "tool_call") handler = fn; } });
+const out = [];
+for (const event of JSON.parse(process.argv[2])) {
+  out.push((await handler(event, { cwd: process.argv[3] })) ?? null);
+}
+console.log(JSON.stringify(out));
+"#;
+
+// What the guard extension decides for each of `events`, with `kelpie` as its checks.
+fn guarded(w: &World, kelpie: &Path, events: serde_json::Value) -> Vec<serde_json::Value> {
+    let call = w.fenced(URL, kelpie, Session::New(id(WORKER_ID)));
+    let fence = call.reach.fence.as_deref().unwrap();
+    std::fs::write(w.path("guard.mts"), guard_extension(fence)).unwrap();
+    std::fs::write(w.path("run.mjs"), GUARD_RUNNER).unwrap();
+    let out = std::process::Command::new("node")
+        .arg(w.path("run.mjs"))
+        .arg(events.to_string())
+        .arg(w.path("wt"))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+fn has_node() -> bool {
+    std::process::Command::new("node")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+#[test]
+fn the_guard_sends_commands_to_guard_and_writes_to_confine_and_refuses_the_rest() {
+    if !has_node() {
+        eprintln!("skipped: needs node, which loads pi's extensions");
+        return;
+    }
+    let w = World::new();
+    // A stand-in for kelpie's checks: it logs each call and refuses `refuse-me`.
+    let log = w.path("checks.log");
+    let script = format!(
+        "#!/bin/sh\necho \"$*\" >> {log}\nin=$(cat)\necho \"$in\" >> {log}\n\
+         case \"$in\" in *refuse-me*) echo 'no, says kelpie' >&2; exit 2;; esac\n",
+        log = log.display()
+    );
+    crate::test::write_script(&w.path("kelpie"), &script);
+    let events = json!([
+        { "toolName": "bash", "input": { "command": "ls" } },
+        { "toolName": "bash", "input": { "command": "refuse-me" } },
+        { "toolName": "write", "input": { "path": "src/a.txt", "content": "" } },
+        { "toolName": "edit", "input": { "path": "@b.txt", "edits": [] } },
+        { "toolName": "write", "input": { "path": "file:///etc/hosts", "content": "" } },
+        { "toolName": "read", "input": { "path": "c.txt" } },
+        { "toolName": "webfetch", "input": { "url": "https://example.com" } },
+    ]);
+    let verdicts = guarded(&w, &w.path("kelpie"), events);
+    let refused = |v: &serde_json::Value| v["block"] == true;
+    let reasons: Vec<&str> = verdicts
+        .iter()
+        .map(|v| v["reason"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(
+        verdicts.iter().map(refused).collect::<Vec<_>>(),
+        [false, true, false, false, true, false, true]
+    );
+    assert_eq!(reasons[1], "no, says kelpie");
+    assert!(reasons[4].contains("file: URL"), "{}", reasons[4]);
+    assert!(reasons[6].contains("webfetch"), "{}", reasons[6]);
+
+    let calls = std::fs::read_to_string(&log).unwrap();
+    let lines: Vec<&str> = calls.lines().collect();
+    let (wt, build) = (w.path("wt"), w.path("build"));
+    let confine = format!("confine {} {}", wt.display(), build.display());
+    // Each check's arguments, then the call it was handed: four checks in all.
+    assert_eq!(lines.len(), 8, "{calls}");
+    assert!(lines[0].starts_with("guard "), "{}", lines[0]);
+    let first: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
+    assert_eq!(
+        first,
+        json!({ "cwd": wt, "tool_name": "Bash", "tool_input": { "command": "ls" } })
+    );
+    assert_eq!(lines[4], confine);
+    let write: serde_json::Value = serde_json::from_str(lines[5]).unwrap();
+    assert_eq!(write["tool_name"], "Write");
+    assert_eq!(
+        write["tool_input"]["file_path"],
+        json!(wt.join("src/a.txt"))
+    );
+    let edit: serde_json::Value = serde_json::from_str(lines[7]).unwrap();
+    assert_eq!(edit["tool_name"], "Edit");
+    assert_eq!(edit["tool_input"]["file_path"], json!(wt.join("b.txt")));
+}
+
+#[test]
+fn a_guard_whose_checks_cannot_run_refuses() {
+    if !has_node() {
+        eprintln!("skipped: needs node, which loads pi's extensions");
+        return;
+    }
+    let w = World::new();
+    let events = json!([
+        { "toolName": "bash", "input": { "command": "ls" } },
+        { "toolName": "write", "input": { "path": "a.txt", "content": "" } },
+    ]);
+    let verdicts = guarded(&w, &w.path("no-such-kelpie"), events);
+    assert!(verdicts.iter().all(|v| v["block"] == true), "{verdicts:?}");
+}
+
 #[test]
 fn what_pi_cannot_give_a_worker_fails_before_the_call() {
     let w = World::new();
@@ -237,9 +350,12 @@ fn the_sandbox_lets_pi_write_only_its_sessions_and_reach_only_its_server() {
     assert!(policy.write.contains(&w.path("wt")));
     assert!(policy.read.contains(&home));
     assert!(policy.read.contains(&w.path("worker/settings.guard.ts")));
-    assert!(policy.hosts.contains(&"10.0.0.9".to_owned()));
-    for login in ["~/.pi/**", "~/.codex/**", "~/.claude.json"] {
-        assert!(policy.no_read.iter().any(|p| p == login), "{login}");
+    assert!(policy.hosts.contains(&"192.0.2.9".to_owned()));
+    for credentials in ["~/.pi/**", "~/.codex/**", "~/.claude.json"] {
+        assert!(
+            policy.no_read.iter().any(|p| p == credentials),
+            "{credentials}"
+        );
     }
     let open = w.call(URL, Role::Judge, Session::New(id(FRESH_ID)));
     let policy = super::policy(&open, server, &Files::of(&open));
@@ -252,15 +368,15 @@ fn the_sandbox_lets_pi_write_only_its_sessions_and_reach_only_its_server() {
             home.join("models-store.json.lock"),
         ]
     );
-    assert_eq!(policy.hosts, ["10.0.0.9"]);
+    assert_eq!(policy.hosts, ["192.0.2.9"]);
 }
 
 #[test]
 fn a_servers_host_is_its_url_without_scheme_port_or_path() {
-    assert_eq!(host("http://10.0.0.9:11434/v1"), "10.0.0.9");
+    assert_eq!(host("http://192.0.2.9:11434/v1"), "192.0.2.9");
     assert_eq!(host("https://models.example/v1"), "models.example");
     assert_eq!(host("http://[::1]:8080/v1"), "::1");
-    assert_eq!(host("http://user@box.local:1234/v1"), "box.local");
+    assert_eq!(host("http://user@host.example:1234/v1"), "host.example");
 }
 
 #[test]
@@ -319,6 +435,72 @@ fn a_refused_tool_call_reaches_the_model_and_the_call_still_answers() {
     assert!(said("is Claude Code's own configuration"), "kelpie confine");
     assert!(said("Operation not permitted"), "the sandbox");
     assert!(said("only the project manager merges"), "kelpie guard");
+}
+
+#[test]
+fn only_an_answer_the_model_ended_itself_is_a_success() {
+    let ended = |reason: &str| {
+        let text = FRESH.replace(
+            r#""stopReason":"stop""#,
+            &format!(r#""stopReason":"{reason}""#),
+        );
+        parse_result(&output(0, &text, ""), &id(FRESH_ID))
+    };
+    assert!(ended("stop").is_ok());
+    assert_eq!(
+        ended("length"),
+        Err(AgentError::Failed(
+            Harness::Pi,
+            "the model ran out of output tokens".into()
+        ))
+    );
+    assert_eq!(
+        ended("toolUse"),
+        Err(AgentError::Failed(
+            Harness::Pi,
+            "the model stopped for the reason `toolUse`".into()
+        ))
+    );
+}
+
+#[test]
+fn an_answer_missing_a_token_count_still_counts_the_rest() {
+    let text = FRESH.replace(r#","cacheWrite":0"#, "");
+    assert_ne!(text, FRESH);
+    let reply = parse_result(&output(0, &text, ""), &id(FRESH_ID)).unwrap();
+    let whole = parse_result(&output(0, FRESH, ""), &id(FRESH_ID)).unwrap();
+    assert_eq!(reply.usage, whole.usage);
+}
+
+#[test]
+fn a_last_answer_that_cannot_be_read_is_not_mistaken_for_an_earlier_one() {
+    let broken = r#"{"type":"message_end","message":{"role":"assistant","content":7}}"#;
+    let text = format!("{RESUMED}{broken}\n");
+    let err = parse_result(&output(0, &text, ""), &id(FRESH_ID)).unwrap_err();
+    assert!(
+        matches!(err, AgentError::Unreadable(Harness::Pi, _)),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn an_error_carries_only_the_end_of_a_long_output() {
+    let long = format!("{}é tail", "x".repeat(10_000));
+    let err = parse_result(&output(0, &long, ""), &id(FRESH_ID)).unwrap_err();
+    let AgentError::Unreadable(_, text) = &err else {
+        panic!("{err:?}");
+    };
+    assert!(
+        text.len() <= ERROR_TAIL && text.ends_with("é tail"),
+        "{}",
+        text.len()
+    );
+    let err = parse_result(&output(1, "", &long), &id(FRESH_ID)).unwrap_err();
+    assert!(
+        err.to_string().len() < ERROR_TAIL + 20,
+        "{}",
+        err.to_string().len()
+    );
 }
 
 #[test]
@@ -461,29 +643,29 @@ fn record_a_turn_a_resumed_turn_and_two_refusals() {
         )
         .pi();
     let world = World::new();
-    let id = SessionId("0b6f3c1e-7d2a-4f4e-9a51-3c8d2e6f1a07".into());
+    let fresh_id = id(FRESH_ID);
     let save = |name: &str, out: &Output| {
         let text = String::from_utf8_lossy(&out.stdout)
             .replace(world.root.to_str().unwrap(), "/tmp/kelpie-pi");
         std::fs::write(record.join(name), text).unwrap();
     };
 
-    let mut fresh = world.call(&url, Role::Judge, Session::New(id.clone()));
+    let mut fresh = world.call(&url, Role::Judge, Session::New(fresh_id.clone()));
     fresh.prompt = "Reply with the single word ok.".into();
     pi.prepare(&fresh).unwrap();
     let out = run_raw(&pi, &fresh);
     save("pi-p-fresh.jsonl", &out);
-    let first = parse_result(&out, &id).unwrap();
+    let first = parse_result(&out, &fresh_id).unwrap();
 
-    let mut again = world.call(&url, Role::Judge, Session::Resume(id.clone()));
+    let mut again = world.call(&url, Role::Judge, Session::Resume(fresh_id.clone()));
     again.prompt = "Which word did you reply with? Answer in one word.".into();
     let out = run_raw(&pi, &again);
     save("pi-p-resumed.jsonl", &out);
-    let second = parse_result(&out, &id).unwrap();
+    let second = parse_result(&out, &fresh_id).unwrap();
     assert!(second.text.to_lowercase().contains("ok"), "{second:?}");
     assert!(second.usage.input + second.usage.cache_read > first.usage.input);
 
-    let worker_id = SessionId("5a2e9d40-1c7b-4b38-8e6f-2d4a9c1b7e53".into());
+    let worker_id = id(WORKER_ID);
     let mut worker = world.fenced(&url, &kelpie, Session::New(worker_id.clone()));
     worker.prompt = format!(
         "Do these three steps, then stop. First, use the write tool to create \

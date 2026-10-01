@@ -442,6 +442,19 @@ fn host(url: &str) -> &str {
     }
 }
 
+/// How much of pi's output an error carries: its end, where the reason is
+const ERROR_TAIL: usize = 2048;
+
+// The last `ERROR_TAIL` bytes of `text`, since a worker's output runs to
+// megabytes and an error reaches a ruling, the state file and the webhook.
+fn tail(text: &str) -> &str {
+    let mut start = text.len().saturating_sub(ERROR_TAIL);
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    &text[start..]
+}
+
 // `pi -p --mode json` prints one event per line: a session header, then
 // every message as it ends. The call's usage is the sum of its assistant
 // messages, and its answer the last one's text. A local model has no price.
@@ -475,8 +488,8 @@ fn parse_result(output: &Output, asked: &SessionId) -> Result<AgentReply, AgentE
         #[serde(default)]
         text: Option<String>,
     }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
+    #[derive(Default, Deserialize)]
+    #[serde(default, rename_all = "camelCase")]
     struct MessageUsage {
         input: u64,
         output: u64,
@@ -488,10 +501,16 @@ fn parse_result(output: &Output, asked: &SessionId) -> Result<AgentReply, AgentE
     let mut session = None;
     let mut usage = Usage::default();
     let mut last: Option<Message> = None;
-    for line in stdout.lines().filter(|l| l.starts_with('{')) {
-        let Ok(line) = serde_json::from_str::<Line>(line) else {
+    // Whether the latest message to end could not be read, so `last` is stale.
+    let mut unread = false;
+    for text in stdout.lines().filter(|l| l.starts_with('{')) {
+        let Ok(line) = serde_json::from_str::<Line>(text) else {
+            unread |= text.contains(r#""type":"message_end""#);
             continue;
         };
+        if line.kind == "message_end" {
+            unread = false;
+        }
         match (line.kind.as_str(), line.message) {
             ("session", _) => session = line.id,
             ("message_end", Some(message)) if message.role == "assistant" => {
@@ -511,15 +530,22 @@ fn parse_result(output: &Output, asked: &SessionId) -> Result<AgentReply, AgentE
     let failed = |detail: &str| AgentError::Failed(PI, detail.to_owned());
     if !output.status.success() {
         let why = last.as_ref().and_then(|m| m.error_message.clone());
-        return Err(failed(why.as_deref().unwrap_or(&stderr)));
+        return Err(failed(why.as_deref().unwrap_or(tail(&stderr))));
     }
-    let (Some(session), Some(last)) = (session, last) else {
-        return Err(AgentError::Unreadable(PI, stdout.into_owned()));
+    let (Some(session), Some(last), false) = (session, last, unread) else {
+        return Err(AgentError::Unreadable(PI, tail(&stdout).to_owned()));
     };
-    if matches!(last.stop_reason.as_deref(), Some("error" | "aborted")) {
-        return Err(failed(
-            last.error_message.as_deref().unwrap_or("no reason given"),
-        ));
+    match last.stop_reason.as_deref() {
+        Some("stop") => {}
+        Some("length") => return Err(failed("the model ran out of output tokens")),
+        Some("error" | "aborted") => {
+            let why = last.error_message.as_deref();
+            return Err(failed(why.unwrap_or("no reason given")));
+        }
+        other => {
+            let why = other.unwrap_or("none");
+            return Err(failed(&format!("the model stopped for the reason `{why}`")));
+        }
     }
     if session != asked.0 {
         return Err(AgentError::Unreadable(
