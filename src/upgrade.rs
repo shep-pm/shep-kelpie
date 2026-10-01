@@ -20,6 +20,7 @@ pub mod install;
 pub mod lock;
 pub mod restart;
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -211,8 +212,16 @@ fn fetch_source(scene: &Scene<'_>, source: &Source) -> Result<PathBuf, String> {
     let work = scene.kelpie_home.join("upgrade");
     match source {
         Source::Binary(path) => {
-            if !path.is_file() {
-                return Err(format!("{} is not a file", path.display()));
+            let meta = std::fs::metadata(path)
+                .ok()
+                .filter(std::fs::Metadata::is_file)
+                .ok_or_else(|| format!("{} is not a file", path.display()))?;
+            if meta.permissions().mode() & 0o111 == 0 {
+                return Err(format!(
+                    "{} is not executable: `chmod +x {}` makes it so",
+                    path.display(),
+                    path.display()
+                ));
             }
             Ok(path.clone())
         }

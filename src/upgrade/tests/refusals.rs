@@ -1,5 +1,7 @@
 //! What an upgrade refuses, and that it refuses before it changes anything
 
+use std::os::unix::fs::PermissionsExt;
+
 use super::*;
 
 #[tokio::test]
@@ -91,6 +93,21 @@ async fn a_binary_that_exits_non_zero_is_refused_and_not_installed() {
     write_script(&sick, &format!("{}exit 3\n", answering("0.3.0", "0.12.0")));
     let err = rig.install(&sick).await.0.unwrap_err();
     assert!(err.contains("exited"), "{err}");
+    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.12.0");
+}
+
+#[tokio::test]
+async fn a_binary_without_its_executable_bits_is_refused_naming_chmod() {
+    let mut rig = Rig::new().await;
+    let flat = rig.build("flat", "0.3.0", "0.12.0");
+    std::fs::set_permissions(&flat, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let err = rig.install(&flat).await.0.unwrap_err();
+    assert!(err.contains("not executable"), "{err}");
+    assert!(
+        err.contains(&format!("chmod +x {}", flat.display())),
+        "{err}"
+    );
+    assert_eq!(rig.restarts(), Vec::<String>::new());
     assert_eq!(rig.installed_says(), "0.1.0 for shep 0.12.0");
 }
 

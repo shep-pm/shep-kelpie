@@ -5,6 +5,7 @@
 //! Kelpie's home, the shepherd and the installed kelpie are all folders under
 //! one scratch root, so nothing here touches a real install.
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
 use std::sync::{Arc, Mutex};
@@ -309,6 +310,22 @@ async fn a_minor_mismatch_fails_with_the_steps_before_anything_restarts() {
     assert!(stderr.contains("the new build's own upgrade"), "{stderr}");
     assert_eq!(restarts(&sent(&mut seen)), Vec::<&str>::new());
     assert_eq!(scene.installed_says().await, "0.1.0 for shep 0.12.0");
+}
+
+#[tokio::test]
+async fn a_binary_without_its_executable_bits_is_refused_naming_chmod() {
+    let scene = Scene::new();
+    let mut seen = scene.shepherd("0.12.0", &scene.installed()).await;
+    let flat = scene.build("flat", "0.3.0", "0.12.0");
+    std::fs::set_permissions(&flat, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let output = scene.upgrade_to(&flat).await;
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains(&format!("chmod +x {}", flat.display())),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(restarts(&sent(&mut seen)), Vec::<&str>::new());
 }
 
 #[tokio::test]
