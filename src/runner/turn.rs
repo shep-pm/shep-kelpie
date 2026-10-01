@@ -69,7 +69,8 @@ const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
 ///
 /// [`StateError`] when the turn's start or end, or a post, cannot be saved.
 pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
-    let (claude, reviewer, relay, alerts, shots) = {
+    lock(runner).beat();
+    let (claude, reviewer, relay, alerts, shots, turns) = {
         let runner = lock(runner);
         (
             Arc::clone(&runner.ports.agents),
@@ -77,6 +78,7 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
             Arc::clone(&runner.ports.relay),
             Arc::clone(&runner.ports.alerts),
             Arc::clone(&runner.ports.shots),
+            runner.live_turns.clone(),
         )
     };
     see_clears(runner, relay.as_ref())?;
@@ -89,6 +91,8 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
     }
     // The work item whose session died unborn, which starts over
     let mut start_over = None;
+    // Held until the step returns, past the save that ends the turn
+    let mut _live = None;
     loop {
         // The call runs outside the lock, and a trigger may work on another
         // item meanwhile, so its end names the item it began on.
@@ -101,15 +105,28 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
             Begin::Idle => return Ok(None),
             Begin::Report(report) => return Ok(Some(report)),
             Begin::Call(call) => {
+                if _live.is_none() {
+                    _live = issue.map(|issue| turns.enter(issue));
+                }
                 let result = claude.run(&call);
                 if start_over.is_none() && matches!(result, Err(AgentError::NoSession(..))) {
+                    // The dead call's time is the worker's, so it is saved
+                    // before a pause can outrun the new turn.
+                    lock(runner).save_time()?;
                     start_over = issue;
                     continue;
                 }
                 return lock(runner).on(issue).end_turn(result);
             }
             Begin::Review(action) => {
-                let reviewed = run_review_call(claude.as_ref(), reviewer.as_ref(), action);
+                // A failed save is told and let go. A GPU wait may then count as
+                // `local_round`, but the phases still sum to the wall time.
+                let watch = |stage| {
+                    if let Err(e) = lock(runner).on(issue).round_stage(stage) {
+                        eprintln!("cannot save the local round's stage: {e}");
+                    }
+                };
+                let reviewed = run_review_call(claude.as_ref(), reviewer.as_ref(), action, &watch);
                 return lock(runner).on(issue).end_review(reviewed);
             }
             Begin::Shots(job, head) => {
@@ -499,8 +516,9 @@ impl Runner {
                 .stop_left(&self.paths.shots(item.issue).join(crate::shots::SERVER_PID));
         }
         // A turn stopped with the runner stays running, to resume on restart.
+        // Its time so far is saved to the worker, which still runs it.
         if matches!(result, Err(AgentError::Stopped)) {
-            return Ok(None);
+            return self.save_time().map(|()| None);
         }
         let now = self.ports.clock.now();
         // Whatever the turn left on `origin` is the worker's own. A head

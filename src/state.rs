@@ -19,7 +19,7 @@ use crate::plan::{Piece, Plan};
 use crate::ports::{Finding, Timestamp};
 use crate::review_bot::Bot;
 use crate::settings::Account;
-use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
+use crate::work_item::{Known, Phase, Review, Seconds, Turn, WorkItem};
 
 /// The state file's format version
 const VERSION: u32 = 2;
@@ -27,6 +27,12 @@ const VERSION: u32 = 2;
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
 const ONE_ITEM: u32 = 1;
+
+/// How many finished work items the state file keeps a record of
+///
+/// The file is written whole at every save, a heartbeat included, and a
+/// record is about half a kilobyte, so the records stay under about 50 KB.
+pub const HISTORY_CAP: usize = 100;
 
 /// Everything a project's runner keeps across a restart
 // wire format: changing this is a breaking change to the state file
@@ -52,6 +58,9 @@ pub struct ProjectState {
     /// Issues whose work items kelpie finished, which the board never takes again
     #[serde(default)]
     pub finished: Vec<u64>,
+    /// The last [`HISTORY_CAP`] work items kelpie finished, oldest first
+    #[serde(default)]
+    pub history: Vec<Finished>,
     /// The forge's ids of the reviews that started a rework or were refused
     /// one. None of them starts another.
     #[serde(default)]
@@ -100,6 +109,7 @@ impl ProjectState {
             rulings: Vec::new(),
             last_ruling: 0,
             finished: Vec::new(),
+            history: Vec::new(),
             reworked: Vec::new(),
             adopted: Vec::new(),
             plans: Vec::new(),
@@ -143,6 +153,13 @@ impl ProjectState {
         self.work_items.iter_mut().find(|item| item.issue == issue)
     }
 
+    /// Adds `record` to the history, dropping the oldest past [`HISTORY_CAP`]
+    pub fn record_finished(&mut self, record: Finished) {
+        self.history.push(record);
+        let excess = self.history.len().saturating_sub(HISTORY_CAP);
+        self.history.drain(..excess);
+    }
+
     // A version 1 file held one work item, and every ruling in it was that
     // item's.
     fn one_item_moved(mut self) -> Self {
@@ -155,6 +172,27 @@ impl ProjectState {
         self.work_items = vec![item];
         self
     }
+}
+
+/// A work item kelpie finished, merged or dropped, and where its time went
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Finished {
+    /// The issue it resolved
+    pub issue: u64,
+    /// The issue's title when it was added
+    pub title: String,
+    /// Its pull request, if it had one
+    pub pull_request: Option<u64>,
+    /// Whether the pull request merged
+    pub merged: bool,
+    /// When it finished
+    pub at: Timestamp,
+    /// Seconds from its creation to `at`
+    pub wall: u64,
+    /// Every phase, summing to `wall`
+    pub seconds: Seconds,
 }
 
 /// A pull request adopted and waiting its turn

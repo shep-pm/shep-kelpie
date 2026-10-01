@@ -189,7 +189,12 @@ fn serve(project: &str) -> Result<(), String> {
         reviewer.stop();
         shots.stop();
     });
-    if !let_go {
+    if let_go {
+        if let Err(e) = crate::runner::settle(&runner) {
+            eprintln!("cannot save the work items' time: {e}");
+        }
+    } else {
+        // A step still in flight holds the runner's lock, and shutdown must not wait for it.
         eprintln!(
             "the worker was still in a step {}s after the stop; its calls are ended under it",
             JOIN_BOUND.as_secs()

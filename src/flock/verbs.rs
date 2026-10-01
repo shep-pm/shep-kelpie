@@ -12,8 +12,8 @@ use crate::state::ids::RulingIds;
 
 /// The verbs [`main`] runs: every trigger a runner takes but the relay's,
 /// and `add` also registers a checkout
-pub const VERBS: [&str; 9] = [
-    "add", "start", "pause", "status", "rule", "rework", "adopt", "gate", "drop",
+pub const VERBS: [&str; 10] = [
+    "add", "start", "pause", "status", "rule", "rework", "adopt", "gate", "drop", "timings",
 ];
 
 /// What the verbs take, as their help says
@@ -25,6 +25,7 @@ usage: shep kelpie add [<project>]       registers this checkout as a project
        shep kelpie rule [<id> <answer>]
        shep kelpie rework <pr> | adopt <pr>
        shep kelpie gate [<issue>] | drop [<issue>]
+       shep kelpie timings [<n>]         where the last n finished items' time went
 
 `-p <project>` or `--project <project>` goes anywhere in the line, before a
 ruling's answer. Without it, the project is the one whose repo holds this
@@ -121,6 +122,8 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
         ("rework" | "adopt", [number]) => send(command, Some(number)).await,
         ("gate" | "drop", []) => send(command, None).await,
         ("gate" | "drop", [issue]) => send(command, Some(issue)).await,
+        ("timings", []) => send("timings", None).await,
+        ("timings", [count]) => send("timings", Some(count)).await,
         _ => Err(USAGE.to_owned()),
     }
 }
@@ -263,6 +266,7 @@ mod tests {
         let moved = |line| verb_first(words(line));
         assert_eq!(moved("-p koji rule 14 yes"), words("rule -p koji 14 yes"));
         assert_eq!(moved("--project=koji gate"), words("gate --project=koji"));
+        assert_eq!(moved("-p koji timings 5"), words("timings -p koji 5"));
         assert_eq!(moved("rule -p koji 14 yes"), words("rule -p koji 14 yes"));
         assert_eq!(moved("-p koji runner x"), words("-p koji runner x"));
         assert_eq!(moved("-p"), words("-p"));

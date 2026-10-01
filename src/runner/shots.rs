@@ -18,7 +18,7 @@ use crate::preview;
 use crate::settings::NonBlank;
 use crate::shots::{SERVER_PID, ShotsJob, ShotsRecord, ShotsRun, named_routes, publish, routes};
 use crate::state::StateError;
-use crate::work_item::{ReviewCallState, WorkItem};
+use crate::work_item::{CallKind, WorkItem};
 use crate::worktree;
 
 #[cfg(test)]
@@ -107,7 +107,7 @@ impl Runner {
         }
         let out = self.paths.shots(item.issue).join(short(head));
         let job = self.shots_job(item, out);
-        self.mark_review_call_running()?;
+        self.mark_review_call_running(CallKind::Shots)?;
         Ok(Some(Begin::Shots(Box::new(job), head.to_owned())))
     }
 
@@ -157,7 +157,7 @@ impl Runner {
         let Some(item) = self.current_in(&mut next) else {
             return Ok(None);
         };
-        item.review_call = ReviewCallState::Idle;
+        item.call_ended();
         let report = StepReport::Shots {
             issue: item.issue,
             head: head.clone(),

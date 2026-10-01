@@ -39,7 +39,7 @@ use crate::lease::wire::WindowFact;
 use crate::ports::{Finding, PullRequestState, Timestamp, Verdict};
 use crate::review_bot::{Activity, Bot, Profile, Reading};
 use crate::state::{Fix, RulingKind, StateError};
-use crate::work_item::{CodeRabbitStage, OpenThread, Phase, Turn, WorkItem};
+use crate::work_item::{CallKind, CodeRabbitStage, OpenThread, Phase, Turn, WorkItem};
 
 // A summon the bot gave no sign of in fifteen minutes may never have
 // reached it, and is sent once more. What counts as a sign is its profile's.
@@ -567,7 +567,7 @@ impl Runner {
         .and_then(|call| self.prepared(call))
         {
             Ok(call) => {
-                self.mark_review_call_running()?;
+                self.mark_review_call_running(CallKind::Judge)?;
                 Ok(Begin::Review(ReviewCall::Judge(call)))
             }
             Err(reason) => Ok(self.gate_failed(reason)),

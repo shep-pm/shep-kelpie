@@ -15,7 +15,7 @@ use crate::ports::{
 };
 use crate::settings::{LocalRound, ReviewerName};
 use crate::shots::ShotsJob;
-use crate::work_item::{QwenTally, Spend};
+use crate::work_item::{QwenTally, Spend, Split};
 
 /// What asked for a rework on the pull request itself
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -307,6 +307,8 @@ pub enum StepReport {
         spend: Spend,
         /// Its qwen rounds
         qwen: QwenTally,
+        /// Where its time went
+        timings: Split,
     },
     /// Findings a merged pull request left unfixed were filed
     FollowUpsFiled {

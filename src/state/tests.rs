@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use super::*;
 use crate::test::a_work_item;
+use crate::work_item::TimingPhase;
 
 const WRITER_DIR: &str = "KELPIE_TEST_WRITER_DIR";
 
@@ -276,6 +277,7 @@ fn the_file_format_is_pinned() {
             ],
             "last_ruling": 8,
             "finished": [22, 30],
+            "history": [],
             "reworked": ["PRR_1"],
             "adopted": [
                 { "pull_request": 614, "by_label": false },
@@ -285,6 +287,67 @@ fn the_file_format_is_pinned() {
             "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
             "notices": [{ "issue": 22, "pull_request": 30, "head": "c0ffee", "shots_failed": true }],
             "replies": { "last": { "id": "W3EqiUm5rsNq", "time": 5 } },
+        })
+    );
+}
+
+#[test]
+fn the_history_keeps_the_last_hundred_finished_work_items() {
+    let mut state = ProjectState::new(Timestamp(1));
+    let finished = |issue: u64| Finished {
+        issue,
+        title: format!("Issue {issue}"),
+        pull_request: None,
+        merged: true,
+        at: Timestamp(issue),
+        wall: 0,
+        seconds: Seconds::default(),
+    };
+    let last = HISTORY_CAP as u64 + 5;
+    for issue in 1..=last {
+        state.record_finished(finished(issue));
+    }
+    let issues: Vec<_> = state.history.iter().map(|f| f.issue).collect();
+    assert_eq!(issues, (6..=last).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_finished_work_item_is_pinned() {
+    let finished = Finished {
+        issue: 7,
+        title: "Seven".into(),
+        pull_request: Some(71),
+        merged: true,
+        at: Timestamp(1_790_000_100),
+        wall: 100,
+        seconds: Seconds::of(&[(TimingPhase::Worker, 60), (TimingPhase::Ci, 40)]),
+    };
+    let saved = serde_json::to_value(&finished).unwrap();
+    assert_eq!(serde_json::from_value::<Finished>(saved).unwrap(), finished);
+    assert_eq!(
+        serde_json::to_value(&finished).unwrap(),
+        serde_json::json!({
+            "issue": 7,
+            "title": "Seven",
+            "pull_request": 71,
+            "merged": true,
+            "at": 1_790_000_100,
+            "wall": 100,
+            "seconds": {
+                "worker": 60,
+                "gpu_wait": 0,
+                "local_round": 0,
+                "claude_round": 0,
+                "judging": 0,
+                "ci": 40,
+                "coderabbit_window": 0,
+                "coderabbit_review": 0,
+                "ruling": 0,
+                "merge": 0,
+                "shots": 0,
+                "paused": 0,
+                "other": 0,
+            },
         })
     );
 }

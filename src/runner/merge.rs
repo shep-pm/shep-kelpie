@@ -16,7 +16,7 @@ use super::trigger::WhichItem;
 use crate::ports::{Checks, PullRequestState};
 use crate::settings::MergeAuthority;
 use crate::shots::publish;
-use crate::state::{Notice, RulingKind, StateError};
+use crate::state::{Finished, Notice, RulingKind, StateError};
 use crate::work_item::{Phase, Review, ReviewCallState, Turn};
 use crate::worktree::{self, Base};
 
@@ -374,12 +374,24 @@ impl Runner {
                 )));
             }
         }
+        let now = self.ports.clock.now();
+        let timings = item.split(now, self.timing_phase(item));
+        let record = Finished {
+            issue: item.issue,
+            title: item.title.clone(),
+            pull_request: item.pull_request,
+            merged,
+            at: now,
+            wall: timings.wall,
+            seconds: timings.seconds.clone(),
+        };
         let report = StepReport::Finished {
             issue: item.issue,
             pull_request: item.pull_request,
             merged,
             spend: item.spend(),
             qwen: item.qwen,
+            timings,
         };
         let issue = item.issue;
         let mut next = self.state.clone();
@@ -390,6 +402,7 @@ impl Runner {
         if !next.finished.contains(&item.issue) {
             next.finished.push(item.issue);
         }
+        next.record_finished(record);
         self.save(next)?;
         self.mark_held(issue, false);
         Ok(Begin::Report(report))

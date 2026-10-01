@@ -45,6 +45,8 @@ pub(crate) enum Scripted {
     Say(&'static str),
     /// Blocks until the test releases it, then answers
     Hold(Hold),
+    /// Blocks until the test releases it, then fails with this error
+    HoldThenFail(Hold, AgentError),
 }
 
 /// A call in flight that a test lets go of when it chooses
@@ -91,7 +93,7 @@ impl Hold {
         held.returned
     }
 
-    fn block(&self) {
+    pub(crate) fn block(&self) {
         let (held, changed) = &*self.0;
         let mut held = held.lock().unwrap();
         held.entered = true;
@@ -245,6 +247,10 @@ impl Agents for FakeClaude {
                     usage: Usage::default(),
                     session_cost: Some(Cost(0)),
                 })
+            }
+            Some(Scripted::HoldThenFail(hold, error)) => {
+                hold.block();
+                Err(error)
             }
             Some(Scripted::Plant(file, text)) => {
                 write_in(&call.cwd, file, text);

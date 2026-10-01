@@ -4,8 +4,9 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use super::Hold;
 use crate::adapters::LocalReviewer;
-use crate::ports::{Finding, ModelSeat, Reviewer, ReviewerError};
+use crate::ports::{Finding, ModelSeat, Reviewer, ReviewerError, RoundStage};
 use crate::settings::LocalRound;
 
 /// What the stand-in reviewer answers for its next round
@@ -15,6 +16,9 @@ pub(crate) enum ScriptedRound {
     Findings(Vec<Finding>),
     /// Fails with this error
     Fail(ReviewerError),
+    /// Queues for the GPU until `queued` is released, then runs until
+    /// `running` is released, then answers clean
+    Queued { queued: Hold, running: Hold },
 }
 
 /// One round as the stand-in reviewer saw it
@@ -76,6 +80,19 @@ impl Reviewer for FakeReviewer {
         round: u32,
         criteria: &str,
     ) -> Result<Vec<Finding>, ReviewerError> {
+        self.round_watched(local, worktree, base, out, round, criteria, &|_| {})
+    }
+
+    fn round_watched(
+        &self,
+        local: &LocalRound,
+        worktree: &Path,
+        base: &str,
+        out: &Path,
+        round: u32,
+        criteria: &str,
+        watch: &(dyn Fn(RoundStage) + Sync),
+    ) -> Result<Vec<Finding>, ReviewerError> {
         self.seen.lock().unwrap().push(SeenRound {
             local: local.clone(),
             worktree: worktree.to_owned(),
@@ -85,11 +102,18 @@ impl Reviewer for FakeReviewer {
             criteria: criteria.to_owned(),
         });
         if let Some(real) = &*self.real.lock().unwrap() {
-            return real.round(local, worktree, base, out, round, criteria);
+            return real.round_watched(local, worktree, base, out, round, criteria, watch);
         }
         match self.script.lock().unwrap().pop_front() {
             Some(ScriptedRound::Findings(findings)) => Ok(findings),
             Some(ScriptedRound::Fail(e)) => Err(e),
+            Some(ScriptedRound::Queued { queued, running }) => {
+                watch(RoundStage::Queued);
+                queued.block();
+                watch(RoundStage::Running);
+                running.block();
+                Ok(Vec::new())
+            }
             None => Ok(Vec::new()),
         }
     }
