@@ -62,6 +62,9 @@ fn a_small_issue_is_planned_whole_and_then_worked() {
         })
     );
     assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
+    let [(on, comment)] = rig.forge.comments().try_into().unwrap();
+    assert_eq!(on, 5);
+    assert!(comment.contains("the plan named no worker"), "{comment}");
 
     assert!(matches!(
         step(&runner).unwrap(),

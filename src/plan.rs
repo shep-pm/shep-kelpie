@@ -256,14 +256,12 @@ pub fn comment(why: &str, pieces: &[Piece], opened: &[u64]) -> String {
             [] => String::new(),
             by => format!(", after {}", by.join(", ")),
         };
-        // Leaving the worker out is the plan's ordinary default, left
-        // quiet; naming one kelpie does not run is worth a note.
-        let defaulted = match (&piece.worker, resolved_label(piece.worker.as_deref())) {
-            (Some(_), None) => format!(
+        let defaulted = match resolved_label(piece.worker.as_deref()) {
+            Some(_) => String::new(),
+            None => format!(
                 ", worker defaulted to the project's: {}",
                 fallback_reason(piece.worker.as_deref())
             ),
-            _ => String::new(),
         };
         format!("- #{number}: {}{after}{defaulted}", piece.title.trim())
     });

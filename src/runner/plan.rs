@@ -169,7 +169,8 @@ impl Runner {
     // unless the issue already carries one: that wins over the pick. A
     // reply that named nothing kelpie runs, or a label the forge refuses,
     // leaves the issue to the project's own worker, with a comment saying
-    // why, best effort.
+    // why, best effort, whether the reply left the worker out or named one
+    // kelpie does not run.
     fn apply_whole_worker(&self, issue: u64, named: Option<&str>) -> WholeWorker {
         let (forge, repo) = (&self.ports.forge, &self.settings.forge);
         let found = match forge.issue(repo, issue) {
@@ -194,21 +195,17 @@ impl Runner {
             };
         }
         let reason = plan::fallback_reason(named);
-        // Leaving the worker out is the plan's ordinary default, left quiet;
-        // naming one kelpie does not run is worth a comment.
-        let comment_failed = named.is_some().then(|| {
-            let body = format!(
-                "Kelpie kept this issue whole. {reason}, so it runs on the project's \
-                 default worker."
-            );
-            forge
-                .post_comment(repo, issue, &body)
-                .err()
-                .map(|e| e.to_string())
-        });
+        let body = format!(
+            "Kelpie kept this issue whole. {reason}, so it runs on the project's default \
+             worker."
+        );
+        let comment_failed = forge
+            .post_comment(repo, issue, &body)
+            .err()
+            .map(|e| e.to_string());
         WholeWorker::Defaulted {
             reason,
-            comment_failed: comment_failed.flatten(),
+            comment_failed,
         }
     }
 
