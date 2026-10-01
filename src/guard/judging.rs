@@ -51,9 +51,20 @@ const READERS: [&str; 16] = [
     "sort", "uniq", "man", "which",
 ];
 
-// Agent harnesses. The sandbox lets a worker reach the model's endpoint, so
-// one started from Bash would run a session with none of kelpie's hooks.
-const AGENTS: [&str; 2] = ["claude", "codex"];
+// Programs that take an agent's name only as a file or a word, never a program
+// to run: `git add src/adapters/pi` and `cargo test pi` start nothing.
+const NAMES_ONLY: [&str; 13] = [
+    "cd", "pushd", "ls", "mkdir", "rmdir", "rm", "cp", "mv", "touch", "echo", "printf", "git",
+    "cargo",
+];
+
+// Whether `name` starts an agent harness. The sandbox lets a worker reach the
+// model's endpoint, so one started from Bash would run with none of kelpie's hooks.
+fn starts_agent(name: &str) -> bool {
+    crate::fence::HARNESSES
+        .iter()
+        .any(|own| own.program == name)
+}
 
 /// Why a worker may not start an agent of its own
 pub(super) const NO_AGENTS: &str = "a worker does not start an agent of its own: \
@@ -251,10 +262,11 @@ impl Judging<'_> {
     ) {
         // `ps | grep bash` searches for a shell, it does not run one.
         let reader = READERS.contains(&program(&run.words[0]));
+        let names_only = NAMES_ONLY.contains(&program(&run.words[0]));
         for at in 1..run.words.len() {
             let name = program(&run.words[at]);
             let shell = SHELLS.contains(&name) || OTHER_SHELLS.contains(&name);
-            let agent = AGENTS.contains(&name);
+            let agent = starts_agent(name) && !names_only;
             // `kill` is a common word, so only a program that feeds it pids names it.
             let kill = name == "kill" && matches!(program(&run.words[0]), "xargs" | "find");
             let killer = KILLERS.contains(&name) || kill;
@@ -318,7 +330,7 @@ impl Judging<'_> {
                 found
             }
             "gh" => gh::judge(run.words, input.heredocs, cwd.as_deref(), home),
-            name if AGENTS.contains(&name) => vec![NO_AGENTS.into()],
+            name if starts_agent(name) => vec![NO_AGENTS.into()],
             name if KILLERS.contains(&name) => vec![NO_KILLING_BY_NAME.into()],
             "kill" if kills_by_name(&run.words[1..]) => vec![NO_KILLING_BY_NAME.into()],
             name if SHELLS.contains(&name) => {

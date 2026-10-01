@@ -15,7 +15,7 @@ use super::Runner;
 use super::report::{Begin, ReworkBy, StepReport};
 use super::trigger::{self, issue_list};
 use super::turn;
-use crate::board::{LabelError, OpenPullRequest, READY, Skip, WorkerModel, worker_override};
+use crate::board::{LabelError, OpenPullRequest, READY, Skip, WorkerModel};
 use crate::ports::{ForgeError, MaintainerReview, PullRequestState, Reviewed};
 use crate::state::StateError;
 use crate::work_item::{CodeRabbitTally, Known, Phase, Review, WorkItem, new_session_id};
@@ -318,9 +318,9 @@ impl Runner {
             .forge
             .issue(repo, issue)
             .map_err(|e| ReworkError::Issue(issue, e))?;
-        let worker = worker_override(&found.labels)
-            .map_err(ReworkError::Label)?
-            .unwrap_or_else(|| WorkerModel::from(&self.agents.worker));
+        let worker = self
+            .labelled_worker(&found.labels)
+            .map_err(ReworkError::Label)?;
         let session = new_session_id().map_err(|e| ReworkError::Session(e.to_string()))?;
         let fresh = self.fresh(issue, found.title, worker.clone(), session);
         // A rework stays on its pull request, so a fixed number of rounds

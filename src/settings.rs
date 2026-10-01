@@ -37,7 +37,8 @@ mod reviewers;
 mod skills;
 
 pub use agents::{
-    Account, Agent, AgentName, Harness, Limit, RoleAgentNames, RoleAgents, RoleLimits, UsageReader,
+    Account, Agent, AgentHarness, AgentName, Harness, Limit, ModelServer, RoleAgentNames,
+    RoleAgents, RoleLimits, UsageReader,
 };
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use reviewers::{
@@ -145,6 +146,7 @@ fn default_planner() -> RoleModel {
     RoleModel {
         model: NonBlank("claude-opus-5-5".to_owned()),
         effort: Effort::Medium,
+        harness: AgentHarness::ClaudeCode,
     }
 }
 
@@ -166,6 +168,10 @@ pub struct RoleModel {
     pub model: NonBlank,
     /// Passed to `claude --effort`
     pub effort: Effort,
+    /// The harness it runs on: Claude Code, unless an agent names another
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub harness: AgentHarness,
 }
 
 /// A Claude effort level

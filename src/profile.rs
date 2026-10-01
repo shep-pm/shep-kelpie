@@ -354,6 +354,8 @@ mod tests {
                 "/k/wt/shep/7/.mcp.json",
                 "/k/wt/shep/7/.codex",
                 "/k/wt/shep/7/**/.codex",
+                "/k/wt/shep/7/.pi",
+                "/k/wt/shep/7/**/.pi",
             ]
         );
         assert_eq!(s["env"]["CARGO_TARGET_DIR"], "/k/targets/shep/7");

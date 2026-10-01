@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 
-use crate::board::{LabelError, Skip, WorkerModel, worker_override};
+use crate::board::{LabelError, Skip, WorkerModel, worker_for, worker_override};
 use crate::channels::{Channel, Channels};
 use crate::local_paths::LocalPaths;
 use crate::pacer::Assessment;
@@ -409,9 +409,9 @@ impl Runner {
             .forge
             .issue(&self.settings.forge, issue)
             .map_err(AddError::Forge)?;
-        let worker = worker_override(&found.labels)
-            .map_err(AddError::Label)?
-            .unwrap_or_else(|| WorkerModel::from(&self.agents.worker));
+        let worker = self
+            .labelled_worker(&found.labels)
+            .map_err(AddError::Label)?;
         let session = new_session_id().map_err(|e| AddError::Session(e.to_string()))?;
         let mut next = self.state.clone();
         next.plans.retain(|p| p.issue != issue);
@@ -420,6 +420,12 @@ impl Runner {
         self.save(next).map_err(AddError::State)?;
         self.mark_held(issue, true);
         Ok(worker)
+    }
+
+    // The worker an issue with `labels` runs on.
+    fn labelled_worker(&self, labels: &[String]) -> Result<WorkerModel, LabelError> {
+        let label = worker_override(labels)?;
+        worker_for(label, &self.agents, &self.settings.models.worker)
     }
 
     // A work item on `kelpie/<issue>` whose first turn is due, with nothing

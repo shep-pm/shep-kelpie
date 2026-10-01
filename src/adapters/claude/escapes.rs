@@ -55,6 +55,7 @@ impl World {
             door: &self.path("dog/lease.sock"),
         };
         AgentCall {
+            harness: crate::settings::AgentHarness::ClaudeCode,
             role: Role::Worker,
             issue: 7,
             model: "claude-sonnet-5".into(),
@@ -311,6 +312,7 @@ fn a_live_worker_turn_runs_inside_the_sandbox_and_resumes() {
     let cli = ClaudeCli::default().sandboxed(Arc::new(SandboxRuntime::new(tools)), home.clone());
     let id = crate::work_item::new_session_id().unwrap();
     let mut call = AgentCall {
+        harness: crate::settings::AgentHarness::ClaudeCode,
         role: Role::Worker,
         issue: 7,
         model: "haiku".into(),

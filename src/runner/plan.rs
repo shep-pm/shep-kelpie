@@ -98,6 +98,7 @@ impl Runner {
         // It reads and searches the repo, and runs no commands and no crew.
         let call = AgentCall {
             role: Role::Planner,
+            harness: model.harness.clone(),
             issue: number,
             model: model.model.as_str().to_owned(),
             effort: model.effort,
@@ -275,7 +276,7 @@ pub(super) fn run_planning(
     call: &AgentCall,
 ) -> Result<AgentReply, AgentError> {
     let first = agents.run(call);
-    if !matches!(first, Err(AgentError::TimedOut | AgentError::Failed(_))) {
+    if !matches!(first, Err(AgentError::TimedOut(_) | AgentError::Failed(..))) {
         return first;
     }
     let Ok(session) = new_session_id() else {

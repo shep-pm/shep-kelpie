@@ -131,7 +131,9 @@ fn a_rework_turn_past_its_ceiling_still_owes_the_review_loop_after_a_yes() {
     let runner = running(&rig);
     rig.ask(&runner, "rework", Some("71"));
     rig.claude
-        .script([Scripted::Fail(crate::ports::AgentError::TimedOut)]);
+        .script([Scripted::Fail(crate::ports::AgentError::TimedOut(
+            crate::settings::Harness::ClaudeCode,
+        ))]);
     let Some(StepReport::TimedOut { id, .. }) = step(&runner).unwrap() else {
         panic!("the timed-out turn raised no ruling");
     };

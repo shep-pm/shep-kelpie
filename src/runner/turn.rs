@@ -24,11 +24,12 @@ use super::review::run_review_call;
 use super::rework;
 use super::ruling::park;
 use super::trigger::lock;
+use crate::board::WorkerModel;
 use crate::pacer::Scope;
 use crate::ports::{AgentCall, AgentError, AgentReply, Cost, Issue, Role, Session, Tools};
 use crate::preview::{self, McpFiles, WORKER_INSTRUCTIONS};
 use crate::profile::WorkerProfile;
-use crate::settings::NonBlank;
+use crate::settings::{AgentHarness, Effort, Limit, NonBlank};
 use crate::skills::{Step, split_command};
 use crate::state::{Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
@@ -37,6 +38,18 @@ pub(super) use unfinished::failed;
 use unfinished::{awaits_a_push, timed_out};
 
 mod unfinished;
+
+/// What a work item's worker runs on this turn
+pub(super) struct WorkerAgent {
+    /// Its harness
+    pub(super) harness: AgentHarness,
+    /// What holds its turns back
+    pub(super) limit: Limit,
+    /// The model, as the harness takes it
+    pub(super) model: String,
+    /// How hard the model thinks
+    pub(super) effort: Effort,
+}
 
 /// The prompt for a turn resumed after the runner restarted
 const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
@@ -89,7 +102,7 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
             Begin::Report(report) => return Ok(Some(report)),
             Begin::Call(call) => {
                 let result = claude.run(&call);
-                if start_over.is_none() && matches!(result, Err(AgentError::NoSession(_))) {
+                if start_over.is_none() && matches!(result, Err(AgentError::NoSession(..))) {
                     start_over = issue;
                     continue;
                 }
@@ -364,11 +377,18 @@ impl Runner {
                     .invoke(Step::Implement, &first_prompt(item.issue, &issue))
             }
         };
+        let WorkerAgent {
+            harness,
+            limit,
+            model,
+            effort,
+        } = self.worker_agent(item)?;
         self.prepared(AgentCall {
             role: Role::Worker,
+            harness,
             issue: item.issue,
-            model: item.worker.model.clone(),
-            effort: item.worker.effort,
+            model,
+            effort,
             session,
             cwd: item.worktree.clone(),
             settings,
@@ -379,8 +399,50 @@ impl Runner {
             plugin_dirs: self.skills.plugin_dirs().to_vec(),
             tools: Tools::Work,
             reach: profile.reach(),
-            lease: self.agents.limits.worker.lease().cloned(),
+            lease: limit.lease().cloned(),
         })
+    }
+
+    /// The harness `item`'s worker runs on, and what holds its turns back
+    ///
+    /// An item given to the local worker runs on the project's local agent.
+    /// Any other runs on the worker's agent if it is that agent's model, and
+    /// otherwise on Claude Code: a `worker:` label names a Claude model.
+    ///
+    /// # Errors
+    ///
+    /// Why not, when an item given to the local worker has none to run on.
+    pub(super) fn worker_agent(&self, item: &WorkItem) -> Result<WorkerAgent, String> {
+        let (agent, limit) = (&self.agents.worker, &self.agents.limits.worker);
+        let local = limit.lease().is_some();
+        let own = WorkerModel {
+            local: item.worker.local,
+            ..WorkerModel::from(agent)
+        };
+        let on = |harness, limit, model: WorkerModel| WorkerAgent {
+            harness,
+            limit,
+            model: model.model,
+            effort: model.effort,
+        };
+        match (item.worker.local, local) {
+            (true, false) => Err(format!(
+                "issue #{} is labelled for the local worker, and `agents.worker` names \
+                 no local agent now: name one again, or take the label off and drop \
+                 and add the issue",
+                item.issue
+            )),
+            // The label asks for the local worker, not a model, so it runs today's.
+            (true, true) => Ok(on(agent.harness.clone(), limit.clone(), own)),
+            (false, false) if item.worker == own => {
+                Ok(on(agent.harness.clone(), limit.clone(), own))
+            }
+            (false, _) => Ok(on(
+                AgentHarness::ClaudeCode,
+                Limit::default(),
+                item.worker.clone(),
+            )),
+        }
     }
 
     /// `call`, once its harness has what it needs on disk
@@ -536,7 +598,7 @@ impl Runner {
                     }
                 }
             }
-            Err(AgentError::TimedOut) => {
+            Err(AgentError::TimedOut(_)) => {
                 item.turn = Turn::Ended { at: now };
                 timed_out(self.names(), &mut next, issue)
             }

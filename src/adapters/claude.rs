@@ -14,6 +14,10 @@ use crate::ports::{
     AgentCall, AgentError, AgentReply, Agents, Cost, Role, Sandbox, Session, SessionId, Usage,
 };
 use crate::preview::Tools;
+use crate::settings::Harness;
+
+/// This adapter's harness, as its errors name it
+const CLAUDE: Harness = Harness::ClaudeCode;
 
 #[cfg(test)]
 mod escapes;
@@ -46,8 +50,8 @@ impl LambLabels for shep_channel::Shepherd {
 pub struct ClaudeCli {
     pub(super) processes: Processes,
     program: OsString,
-    lambs: Option<Arc<dyn LambLabels>>,
-    sandbox: Arc<dyn Sandbox>,
+    pub(super) lambs: Option<Arc<dyn LambLabels>>,
+    pub(super) sandbox: Arc<dyn Sandbox>,
     home: PathBuf,
 }
 
@@ -121,9 +125,9 @@ impl Agents for ClaudeCli {
             .processes
             .output_telling(&mut command, call.timeout, &spawned);
         let output = run.map_err(|e| match e {
-            RunError::Io(e) => AgentError::Spawn(e.to_string()),
+            RunError::Io(e) => AgentError::Spawn(CLAUDE, e.to_string()),
             RunError::Stopped => AgentError::Stopped,
-            RunError::TimedOut => AgentError::TimedOut,
+            RunError::TimedOut => AgentError::TimedOut(CLAUDE),
         })?;
         parse_result(&output, &call.session)
     }
@@ -211,19 +215,19 @@ fn parse_result(output: &Output, session: &Session) -> Result<AgentReply, AgentE
     let stderr = String::from_utf8_lossy(&output.stderr);
     let r = match serde_json::from_slice::<ResultMessage>(&output.stdout) {
         Ok(r) if !r.is_error && output.status.success() => r,
-        Ok(r) => return Err(AgentError::Failed(r.result)),
-        Err(_) if output.status.success() => return Err(AgentError::Unreadable(stdout())),
+        Ok(r) => return Err(AgentError::Failed(CLAUDE, r.result)),
+        Err(_) if output.status.success() => return Err(AgentError::Unreadable(CLAUDE, stdout())),
         Err(_) => {
             return Err(match session {
                 Session::Resume(id) if stderr.contains(NO_SESSION) => {
-                    AgentError::NoSession(id.clone())
+                    AgentError::NoSession(CLAUDE, id.clone())
                 }
-                _ => AgentError::Failed(stderr.into_owned()),
+                _ => AgentError::Failed(CLAUDE, stderr.into_owned()),
             });
         }
     };
     let (Some(u), Some(cost)) = (r.usage, r.total_cost_usd.and_then(Cost::from_usd)) else {
-        return Err(AgentError::Unreadable(stdout()));
+        return Err(AgentError::Unreadable(CLAUDE, stdout()));
     };
     Ok(AgentReply {
         session_id: SessionId(r.session_id),
@@ -276,6 +280,7 @@ mod tests {
 
     fn call(role: Role, session: Session) -> AgentCall {
         AgentCall {
+            harness: crate::settings::AgentHarness::ClaudeCode,
             role,
             issue: 6,
             model: "claude-sonnet-5".into(),
@@ -450,39 +455,39 @@ mod tests {
     #[test]
     fn resuming_a_session_that_never_started_is_named() {
         let err = parse_result(&output(1, "", NO_SESSION_STDERR), &resume("0e2c")).unwrap_err();
-        assert_eq!(err, AgentError::NoSession(SessionId("0e2c".into())));
+        assert_eq!(err, AgentError::NoSession(CLAUDE, SessionId("0e2c".into())));
     }
 
     #[test]
     fn the_same_stderr_for_a_new_session_is_a_plain_failure() {
         let err = parse_result(&output(1, "", NO_SESSION_STDERR), &fresh()).unwrap_err();
-        assert!(matches!(err, AgentError::Failed(_)), "{err:?}");
+        assert!(matches!(err, AgentError::Failed(CLAUDE, _)), "{err:?}");
     }
 
     #[test]
     fn an_error_result_is_a_failure_carrying_its_text() {
         let text = RESULT.replace("\"is_error\":false", "\"is_error\":true");
         let err = parse_result(&output(1, &text, ""), &fresh()).unwrap_err();
-        assert_eq!(err, AgentError::Failed("ok".into()));
+        assert_eq!(err, AgentError::Failed(CLAUDE, "ok".into()));
     }
 
     #[test]
     fn a_result_without_its_cost_is_unreadable() {
         let text = RESULT.replace("\"total_cost_usd\":0.0176483,", "");
         let err = parse_result(&output(0, &text, ""), &fresh()).unwrap_err();
-        assert!(matches!(err, AgentError::Unreadable(_)), "{err:?}");
+        assert!(matches!(err, AgentError::Unreadable(CLAUDE, _)), "{err:?}");
     }
 
     #[test]
     fn no_json_and_a_failed_exit_reports_stderr() {
         let err = parse_result(&output(1, "", "not logged in"), &fresh()).unwrap_err();
-        assert_eq!(err, AgentError::Failed("not logged in".into()));
+        assert_eq!(err, AgentError::Failed(CLAUDE, "not logged in".into()));
     }
 
     #[test]
     fn no_json_and_a_clean_exit_is_unreadable() {
         let err = parse_result(&output(0, "hello", ""), &fresh()).unwrap_err();
-        assert_eq!(err, AgentError::Unreadable("hello".into()));
+        assert_eq!(err, AgentError::Unreadable(CLAUDE, "hello".into()));
     }
 
     #[test]

@@ -24,6 +24,14 @@ fn project(names: &str) -> Settings {
     .unwrap()
 }
 
+// The example's project, its review loop running the local reviewer `first`, then `claude`.
+fn reviewing(first: &str) -> Settings {
+    let guard = "loop_guard = 8\n";
+    let reviewers = format!("{guard}reviewers = [\"{first}\", \"claude\"]\n");
+    let table = project_table(&EXAMPLE.replace(guard, &reviewers));
+    Settings::from_table(&table, "shep", Path::new("/h"), Path::new("/p")).unwrap()
+}
+
 fn kelpie(section: &str) -> KelpieSettings {
     KelpieSettings::from_section(section).unwrap()
 }
@@ -90,13 +98,7 @@ fn the_projects_claude_round_runs_on_its_reviewer_agent() {
 
 #[test]
 fn a_session_reviewer_names_an_agent_from_the_same_list() {
-    let guard = "loop_guard = 8\n";
-    let entry = EXAMPLE.replace(
-        guard,
-        &format!("{guard}reviewers = [\"deep\", \"claude\"]\n"),
-    );
-    let table = project_table(&entry);
-    let settings = Settings::from_table(&table, "shep", Path::new("/h"), Path::new("/p")).unwrap();
+    let settings = reviewing("deep");
     let section = format!(
         "{AGENTS}[local_reviewers.deep]\nkind = \"session\"\nagent = \"opus-high\"\n\
          paths = [\"src/**\"]\n"
@@ -197,13 +199,7 @@ fn claude_code_takes_no_usage_reader_but_its_own() {
 
 #[test]
 fn a_session_reviewer_carries_its_agents_limit() {
-    let guard = "loop_guard = 8\n";
-    let entry = EXAMPLE.replace(
-        guard,
-        &format!("{guard}reviewers = [\"local\", \"claude\"]\n"),
-    );
-    let table = project_table(&entry);
-    let settings = Settings::from_table(&table, "shep", Path::new("/h"), Path::new("/p")).unwrap();
+    let settings = reviewing("local");
     let section =
         format!("{LIMITED}[local_reviewers.local]\nkind = \"session\"\nagent = \"qwen\"\n");
     let lineup = settings.lineup(&kelpie(&section), Path::new("/h")).unwrap();
@@ -215,4 +211,88 @@ fn a_session_reviewer_carries_its_agents_limit() {
         panic!("{:?}", lineup[1]);
     };
     assert_eq!(claude.limit, Limit::Account(Account::Claude));
+}
+
+const QWEN: &str = "[agents.qwen]\nharness = \"pi\"\nmodel = \"qwen3.8:27b\"\n\
+                    effort = \"low\"\nurl = \"http://box:11434/v1\"\ncontext = 65536\n";
+
+#[test]
+fn a_pi_agent_runs_on_its_server_and_holds_the_gpu() {
+    let agents = project("worker = \"qwen\"\njudge = \"qwen\"\n")
+        .role_agents(&kelpie(QWEN).agents)
+        .unwrap();
+    let AgentHarness::Pi(server) = &agents.worker.harness else {
+        panic!("{:?}", agents.worker);
+    };
+    assert_eq!(server.url.as_str(), "http://box:11434/v1");
+    assert_eq!(server.context.get(), 65536);
+    assert_eq!(pair(&agents.worker), ("qwen3.8:27b", Effort::Low));
+    assert_eq!(agents.limits.worker, Limit::Lease(LeaseName::gpu()));
+    assert_eq!(agents.limits.judge, Limit::Lease(LeaseName::gpu()));
+    assert_eq!(agents.reviewer.harness, AgentHarness::ClaudeCode);
+    assert_eq!(agents.limits.reviewer, Limit::Account(Account::Claude));
+}
+
+#[test]
+fn an_agent_must_say_where_its_model_runs_exactly_when_its_harness_needs_it() {
+    let cases = [
+        (
+            QWEN.replace("url = \"http://box:11434/v1\"\n", ""),
+            "`agents.qwen` runs on pi, which needs the model's server as `url` \
+             and its context size as `context`",
+        ),
+        (
+            QWEN.replace("harness = \"pi\"", "harness = \"claude-code\""),
+            "`agents.qwen` runs on claude-code, which takes no `url` or `context`",
+        ),
+        (
+            format!("{QWEN}usage = \"claude\"\n"),
+            "`agents.qwen` runs on pi, whose usage is read with `none`",
+        ),
+    ];
+    for (section, why) in cases {
+        let err = project("worker = \"qwen\"\n")
+            .role_agents(&kelpie(&section).agents)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(why), "{err}");
+    }
+}
+
+#[test]
+fn a_pi_worker_beside_the_preview_or_guard_hooks_is_refused_at_load() {
+    let mut settings = project("worker = \"qwen\"\n");
+    let defined = kelpie(QWEN).agents;
+    assert!(settings.role_agents(&defined).is_ok());
+    settings.preview.enabled = true;
+    let err = settings.role_agents(&defined).unwrap_err().to_string();
+    assert!(err.contains("which cannot run `preview.enabled`"), "{err}");
+    settings.preview.enabled = false;
+    settings.worker.guard_hooks = vec![crate::settings::GuardHook {
+        event: crate::settings::HookEvent::PreToolUse,
+        matcher: None,
+        command: "true".to_owned().try_into().unwrap(),
+    }];
+    let err = settings.role_agents(&defined).unwrap_err().to_string();
+    assert!(
+        err.contains("which cannot run `worker.guard_hooks`"),
+        "{err}"
+    );
+    let reviewer = project("reviewer = \"qwen\"\n");
+    assert!(
+        reviewer.role_agents(&defined).is_ok(),
+        "a pi reviewer runs no preview"
+    );
+}
+
+#[test]
+fn a_session_reviewer_on_pi_runs_on_pi() {
+    let settings = reviewing("local");
+    let section = format!("{QWEN}[local_reviewers.local]\nkind = \"session\"\nagent = \"qwen\"\n");
+    let lineup = settings.lineup(&kelpie(&section), Path::new("/h")).unwrap();
+    let Runs::Claude(local) = &lineup[0].runs else {
+        panic!("{:?}", lineup[0]);
+    };
+    assert_eq!(local.model().harness.harness(), Harness::Pi);
+    assert_eq!(local.limit, Limit::Lease(LeaseName::gpu()));
 }

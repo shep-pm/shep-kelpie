@@ -18,7 +18,7 @@ use super::report::{Begin, StepReport};
 use super::rework::{HUMAN, review_text};
 use super::trigger;
 use super::turn;
-use crate::board::{LabelError, OpenPullRequest, READY, Skip, WorkerModel, worker_override};
+use crate::board::{LabelError, OpenPullRequest, READY, Skip, WorkerModel};
 use crate::ports::{ForgeError, Issue, MaintainerReview, PullRequestState, Reviewed, Role};
 use crate::state::{StateError, Waiting};
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem, new_session_id};
@@ -329,9 +329,9 @@ impl Runner {
             .forge
             .issue(&repo, issue)
             .map_err(|e| AdoptError::Issue(issue, e))?;
-        let worker = worker_override(&found.labels)
-            .map_err(AdoptError::Label)?
-            .unwrap_or_else(|| WorkerModel::from(&self.agents.worker));
+        let worker = self
+            .labelled_worker(&found.labels)
+            .map_err(AdoptError::Label)?;
         let session = new_session_id().map_err(|e| AdoptError::Session(e.to_string()))?;
         let fresh = self.fresh(issue, found.title.clone(), worker.clone(), session);
         // A start that failed part way leaves a worktree on a head `origin`
