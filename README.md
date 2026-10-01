@@ -140,7 +140,14 @@ nothing a project needs is missing
 
 ### 6. Open the sandbox to your registries
 
-A worker's sandbox reaches `github.com`, `api.github.com` and the model's API, and nothing else. `add` leaves `allowed_domains` empty, so a first issue on a repo with a cold cache can't fetch crates or npm packages. In the project's table, add the registries it builds from:
+A worker's sandbox reaches `github.com`, `api.github.com` and the model's API, and nothing else. `add` leaves `allowed_domains` empty, so a first issue on a repo with a cold cache can't fetch crates or npm packages. The project's table is stored on its runner sheep, so edit it in `shep lookout`:
+
+1. Open the runner's pane: the sheep named for the project, `scratch` here
+2. Put the cursor on the `dogs` row and press `Enter` or `e`
+3. Open the `kelpie` row, then `worker.allowed_domains`, and add the registries the project builds from
+4. Press `Esc` to write the table
+
+It ends up holding:
 
 ```toml
 [app.dogs.kelpie.worker]
@@ -363,7 +370,7 @@ paths = ["src/auth/**", "migrations/**"]
 
 `paths` limits a reviewer to pull requests that change a file under one of its globs, and the loop skips it elsewhere. Every round's prompt carries the issue's acceptance criteria: the section under an "Acceptance criteria" heading, or the whole body without one.
 
-A project that lists none runs `review.local` and then `claude`, and a table with neither runs `~/.claude/scripts/qwen-review.sh`, the maintainer's own command, then Claude. `review.local` is the older form: it takes the same keys as a definition, or `kind = "off"`, and the runner says so at start. `review.local_rounds` caps the rounds from local reviewers per work item. Once they are spent, only Claude reviewers run.
+A project that lists none runs `review.local` and then `claude`, and a table with neither runs `~/.claude/scripts/qwen-review.sh`, an optional local review script, when it exists, then Claude. `review.local` is the older form: it takes the same keys as a definition, or `kind = "off"`, and the runner says so at start. `review.local_rounds` caps the rounds from local reviewers per work item. Once they are spent, only Claude reviewers run.
 
 A missing command or an endpoint that doesn't answer stops the runner at start.
 
@@ -433,7 +440,7 @@ effort = "medium"
 `codex debug models` lists the plan's models. A project names the agent for a role in its `[app.dogs.kelpie.agents]` table, as above. It runs on shep-kelpie's own ChatGPT login, in `codex_home` (`$SHEP_HOME/kelpie/codex` by default, or the path `codex_home` in the `[kelpie]` section names), never your `~/.codex`. Sign it in once:
 
 ```sh
-CODEX_HOME=$SHEP_HOME/kelpie/codex codex login --device-auth
+CODEX_HOME="${SHEP_HOME:-$HOME/.shep}/kelpie/codex" codex login --device-auth
 ```
 
 Each Codex call gets a home of its own with that login linked in, so no call sees another's sessions. A runner reads `codex_home` when it starts. A worker on Codex can't have the preview or `worker.guard_hooks`, the same as pi. Kelpie's checks run as Codex's own hooks: `confine` on every `apply_patch`, `guard` on every command.
