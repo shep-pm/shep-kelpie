@@ -8,6 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 use crate::lease::book::{Asked, Grant, LeaseBook};
+use crate::lease::counted::{CARGO_TEST_CAPACITY, CountedLease, Taken, Taker, Ticket};
 use crate::lease::gpu::GpuLock;
 use crate::lease::saved::{SavedBook, SavedRun, SavedRunId, SavedTotals};
 use crate::lease::wire::{MetricName, Total, Totals, WindowFact, WindowMetric};
@@ -70,6 +71,7 @@ impl Retired {
 pub struct Desk {
     pub(super) book: LeaseBook,
     pub(super) gpu: GpuLock,
+    pub(super) tests: CountedLease,
     runs: HashMap<String, Run>,
     retired: Retired,
 }
@@ -124,9 +126,28 @@ impl Desk {
         Self {
             book,
             gpu,
+            tests: CountedLease::cargo_test(CARGO_TEST_CAPACITY),
             runs,
             retired,
         }
+    }
+
+    /// Lets up to `capacity` commands hold the `cargo-test` lease at once
+    ///
+    /// Set once, as the dog opens, before anyone asks.
+    pub fn set_test_capacity(&mut self, capacity: std::num::NonZeroU32) {
+        self.tests = CountedLease::cargo_test(capacity);
+    }
+
+    /// Asks for the `cargo-test` lease on behalf of `taker`
+    pub fn take_test(&mut self, taker: Taker) -> Taken {
+        self.tests.ask(taker, self.book.now())
+    }
+
+    /// Gives the `cargo-test` lease back, or leaves its queue, for the
+    /// connection `ticket`, and returns the waiters granted after it
+    pub fn leave_test(&mut self, ticket: Ticket) -> Vec<Ticket> {
+        self.tests.leave(ticket, self.book.now())
     }
 
     /// Everything the dog keeps across a restart, in a stable order
@@ -553,8 +574,8 @@ pub(super) mod tests {
         let leases = &w.ask("status", None).0["leases"];
         assert_eq!(
             leases.as_array().unwrap().len(),
-            2,
-            "the GPU and the CodeRabbit window alone: {leases}"
+            3,
+            "the GPU, cargo-test and the CodeRabbit window alone: {leases}"
         );
     }
 

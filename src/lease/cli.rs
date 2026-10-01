@@ -4,7 +4,8 @@
 //! command exits, however it exits. `take` and `return` hold one for
 //! longer. The GPU lease is the qwen scripts' lock, taken here directly;
 //! a `take` leaves a holder process behind, since a lock whose pid is
-//! gone gets cleared. Every other kind is the dog's, reached through shep.
+//! gone gets cleared. `cargo-test` is held for one `run` at the dog's door.
+//! Every other kind is the dog's, reached through shep.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{ExitCode, ExitStatus, Stdio};
@@ -16,6 +17,8 @@ use shep_client::shep_core::protocol::Request;
 use shep_client::shep_core::protocol::request::{ActionOutcome, Response, SelectorSpec};
 use tokio::signal::unix::{Signal, SignalKind, signal};
 
+use super::counted::CARGO_TEST;
+use super::door::{self, Answer, Ask, Visit};
 use super::gpu::{self, Claim, GpuLock, Waiting};
 use super::{GPU, LeaseKind};
 use crate::{dog, shepherd};
@@ -26,7 +29,8 @@ pub const USAGE: &str = "\
        shep-kelpie lease take <kind>
        shep-kelpie lease return <kind>
        shep-kelpie lease status
-       <kind> is gpu, the qwen scripts' lock, or a lease the dog holds";
+       <kind> is gpu, the qwen scripts' lock, cargo-test, which a few
+       commands hold at once and only for a run, or a lease the dog holds";
 
 /// What a `take` holder writes as the lock's `what`, and `return` looks for
 const TAKE_WHAT: &str =
@@ -58,6 +62,9 @@ async fn dispatch(args: &[String]) -> Result<ExitCode, String> {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
         ["run", GPU, "--", command @ ..] if !command.is_empty() => run_gpu(command).await,
+        ["run", CARGO_TEST, "--", command @ ..] if !command.is_empty() => {
+            run_counted(&door::socket()?, command).await
+        }
         ["run", kind, "--", command @ ..] if !command.is_empty() => {
             run_book(&kind_of(kind)?, command).await
         }
@@ -146,6 +153,48 @@ async fn run_book(kind: &LeaseKind, command: &[&str]) -> Result<ExitCode, String
         .await
         .map_err(|e| format!("{e}: run `shep kelpie lease return {kind}`"));
     both(ran, returned)
+}
+
+/// Runs `command` once the dog's door at `socket` grants `cargo-test`,
+/// holding it until the command ends, and returns the command's exit code
+///
+/// # Errors
+///
+/// A message when the dog cannot be reached, refuses, or closes the door
+/// before granting, or when the command cannot be started.
+pub(crate) async fn run_counted(
+    socket: &std::path::Path,
+    command: &[&str],
+) -> Result<ExitCode, String> {
+    let mut signals = Signals::new()?;
+    let ask = Ask {
+        take: CARGO_TEST.into(),
+        pid: std::process::id(),
+        what: command.join(" "),
+    };
+    let mut visit = Visit::knock(socket, &ask).await?;
+    loop {
+        // Ending here closes the connection, which withdraws the ask.
+        let answer = tokio::select! {
+            answer = visit.answer() => answer?,
+            caught = signals.recv() => return Ok(caught.exit_code()),
+        };
+        match answer {
+            Some(Answer::Granted) => break,
+            Some(Answer::Queued(ahead)) => {
+                eprintln!("shep kelpie lease: waiting for {CARGO_TEST}, {ahead} ahead");
+            }
+            Some(Answer::Error(why)) => return Err(format!("the dog refused: {why}")),
+            None => {
+                return Err(format!(
+                    "the dog closed the door before granting {CARGO_TEST}"
+                ));
+            }
+        }
+    }
+    let ran = run_command(command, &mut signals).await;
+    drop(visit);
+    ran
 }
 
 // The command's outcome and its lease's return, with both errors if both failed.

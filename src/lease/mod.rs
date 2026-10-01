@@ -1,13 +1,16 @@
 //! Leases on the shared resources every project uses
 //!
-//! Two kinds of lease with two homes. The GPU lease is the lock the
-//! maintainer's qwen scripts already take, which [`gpu`] reads and takes
-//! in their format, and the dog stays out of it. Every other lease lives
-//! in the dog's [`book`], asked for and granted through shep as [`wire`]
-//! lays out.
+//! Three kinds of lease. The GPU lease is the lock the maintainer's qwen
+//! scripts already take, which [`gpu`] reads and takes in their format,
+//! and the dog stays out of it. A [`counted`] lease, `cargo-test`, is held
+//! by a few commands at once, each asking at the dog's [`door`]. Every
+//! other lease lives in the dog's [`book`], asked for and granted through
+//! shep as [`wire`] lays out.
 
 pub mod book;
 pub mod cli;
+pub mod counted;
+pub mod door;
 pub mod gpu;
 pub mod saved;
 pub mod window;
@@ -52,6 +55,9 @@ impl TryFrom<&str> for LeaseKind {
         if value == GPU {
             return Err(LeaseKindError::Gpu);
         }
+        if value == counted::CARGO_TEST {
+            return Err(LeaseKindError::Counted);
+        }
         if value.is_empty() || !value.chars().all(allowed) {
             return Err(LeaseKindError::Name(value.to_owned()));
         }
@@ -80,6 +86,8 @@ pub enum LeaseKindError {
     Name(String),
     /// `gpu`, which is the qwen scripts' lock and never the dog's
     Gpu,
+    /// `cargo-test`, which is held for one command at the dog's door
+    Counted,
 }
 
 impl fmt::Display for LeaseKindError {
@@ -90,6 +98,9 @@ impl fmt::Display for LeaseKindError {
                 "{name:?} is not a lease kind: use lowercase letters, digits and -"
             ),
             Self::Gpu => f.write_str("the GPU lease is the qwen scripts' lock, not the dog's"),
+            Self::Counted => f.write_str(
+                "cargo-test is held for one command: run `shep kelpie lease run cargo-test -- <command>`",
+            ),
         }
     }
 }
@@ -166,6 +177,14 @@ mod tests {
     #[test]
     fn gpu_is_never_a_book_lease() {
         assert_eq!(LeaseKind::try_from("gpu"), Err(LeaseKindError::Gpu));
+    }
+
+    #[test]
+    fn cargo_test_is_never_a_book_lease() {
+        assert_eq!(
+            LeaseKind::try_from("cargo-test"),
+            Err(LeaseKindError::Counted)
+        );
     }
 
     #[test]

@@ -286,6 +286,11 @@ impl LeaseBook {
             .collect()
     }
 
+    /// The time on the book's clock
+    pub fn now(&self) -> Timestamp {
+        self.clock.now()
+    }
+
     /// Who holds `kind`, if anyone
     pub fn holder(&self, kind: &LeaseKind) -> Option<&Holder> {
         self.leases.get(kind)?.held.as_ref().map(|(h, _)| h)

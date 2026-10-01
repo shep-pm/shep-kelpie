@@ -88,8 +88,9 @@ _Avoid_: summary (Claude's compaction output)
 The checks a pull request must pass before it merges.
 
 **Lease**:
-Kelpie-granted use of a shared resource: the GPU, or a pull request
-reviewer's window, such as CodeRabbit's.
+Kelpie-granted use of a shared resource: the GPU, a pull request
+reviewer's window, such as CodeRabbit's, or a share of the machine for
+running tests (`cargo-test`), which a few commands hold at once.
 _Avoid_: lock (the file the lease is built on)
 
 **Summon**:
