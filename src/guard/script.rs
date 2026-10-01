@@ -9,8 +9,8 @@ use std::fs::{self, File};
 use std::io::Read as _;
 use std::path::Path;
 
+use super::moved;
 use super::wrap::{OTHER_SHELLS, SHELLS, program};
-use super::{Home, moved};
 
 // A script larger than this is not a worker's own.
 const SCRIPT_MAX: u64 = 1 << 20;
@@ -85,7 +85,7 @@ pub(super) fn sourced(words: &[String]) -> Runs<'_> {
 pub(super) fn read(
     name: &str,
     cwd: Option<&Path>,
-    home: Option<&Home>,
+    home: Option<&Path>,
     texts: &[String],
 ) -> Result<String, String> {
     let base = program(name);
@@ -119,7 +119,7 @@ pub(super) fn read(
 pub(super) fn interpreted(
     word: &str,
     cwd: Option<&Path>,
-    home: Option<&Home>,
+    home: Option<&Path>,
 ) -> Result<bool, String> {
     let Some(path) = moved(cwd, word, home) else {
         return Err(
