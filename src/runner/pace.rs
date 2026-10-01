@@ -131,16 +131,21 @@ impl Runner {
         Ok(Pace::Clear)
     }
 
-    // Each role's limit and each session reviewer's, in that order.
+    // Each role's limit, the planner's included, then each session reviewer's.
     fn spent_limits(&self) -> impl Iterator<Item = &Limit> {
         let limits = &self.agents.limits;
         let sessions = self.lineup.iter().filter_map(|r| match &r.runs {
             Runs::Claude(session) => Some(&session.limit),
             Runs::Local(_) => None,
         });
-        [&limits.worker, &limits.reviewer, &limits.judge]
-            .into_iter()
-            .chain(sessions)
+        [
+            &limits.worker,
+            &limits.reviewer,
+            &limits.judge,
+            &limits.planner,
+        ]
+        .into_iter()
+        .chain(sessions)
     }
 
     // The accounts the project's calls spend, each once.

@@ -90,8 +90,9 @@ pub enum StepReport {
         outcome: PlanOutcome,
         /// What the call used
         usage: Usage,
-        /// What the call cost, in US dollars
-        cost_usd: f64,
+        /// What the call cost, in US dollars, or null when no reply
+        /// reported dollars
+        cost_usd: Option<f64>,
     },
     /// A split's sub-issues are open and linked, and its issue says so
     Split {
