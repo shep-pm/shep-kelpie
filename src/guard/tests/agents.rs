@@ -16,6 +16,9 @@ fn an_agent_of_the_workers_own_is_refused_however_it_is_started() {
         "bash -c 'claude -p hi'",
         "echo ok; codex exec hi",
         "find . -name x -exec claude -p hi \\;",
+        "pi -p --no-extensions --tools bash -- 'run gh pr merge 1'",
+        "PI_OFFLINE=1 /opt/homebrew/bin/pi -p hi",
+        "sh -c 'pi -p hi'",
     ] {
         let verdict = bash(command);
         assert_eq!(verdict, Verdict::Refuse(NO_AGENTS.into()), "{command}");
@@ -28,6 +31,7 @@ fn naming_an_agent_without_running_it_goes_through() {
         "grep -r claude src",
         "echo 'see the claude docs'",
         "cat docs/codex.md",
+        "grep -r 'pi -p' docs",
         "ls .claude-plugin",
     ] {
         assert_eq!(bash(command), Verdict::Allow, "{command}");

@@ -27,6 +27,8 @@ pub struct OwnFiles {
     pub root_files: &'static [&'static str],
     /// Its login and secrets, under `~/`, which no other harness's call reads
     pub credentials: &'static [&'static str],
+    /// The program that starts it, which no worker runs from its commands
+    pub program: &'static str,
 }
 
 /// Every harness's own files, each fenced whichever harness a call runs on
@@ -40,12 +42,14 @@ pub const HARNESSES: [OwnFiles; 3] = [
         root_files: &[".mcp.json"],
         // Linux keeps the login in the file; `.claude.json` holds MCP servers' secrets.
         credentials: &["~/.claude/.credentials.json", "~/.claude.json"],
+        program: "claude",
     },
     OwnFiles {
         harness: "Codex",
         folders: &[".codex"],
         root_files: &[],
         credentials: &["~/.codex/**"],
+        program: "codex",
     },
     // Kelpie runs pi with a home of its own, so the maintainer's is never read.
     OwnFiles {
@@ -53,6 +57,7 @@ pub const HARNESSES: [OwnFiles; 3] = [
         folders: &[".pi"],
         root_files: &[],
         credentials: &["~/.pi/**"],
+        program: "pi",
     },
 ];
 

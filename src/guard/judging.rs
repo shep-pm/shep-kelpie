@@ -51,9 +51,13 @@ const READERS: [&str; 16] = [
     "sort", "uniq", "man", "which",
 ];
 
-// Agent harnesses. The sandbox lets a worker reach the model's endpoint, so
-// one started from Bash would run a session with none of kelpie's hooks.
-const AGENTS: [&str; 2] = ["claude", "codex"];
+// Whether `name` starts an agent harness. The sandbox lets a worker reach the
+// model's endpoint, so one started from Bash would run with none of kelpie's hooks.
+fn starts_agent(name: &str) -> bool {
+    crate::fence::HARNESSES
+        .iter()
+        .any(|own| own.program == name)
+}
 
 /// Why a worker may not start an agent of its own
 pub(super) const NO_AGENTS: &str = "a worker does not start an agent of its own: \
@@ -200,7 +204,7 @@ impl Judging<'_> {
         for at in 1..run.words.len() {
             let name = program(&run.words[at]);
             let shell = SHELLS.contains(&name) || OTHER_SHELLS.contains(&name);
-            let agent = AGENTS.contains(&name);
+            let agent = starts_agent(name);
             let judged = matches!(name, "git" | "gh") || (shell || agent) && !reader;
             if !judged {
                 continue;
@@ -261,7 +265,7 @@ impl Judging<'_> {
                 found
             }
             "gh" => gh::judge(run.words, input.heredocs, cwd.as_deref(), home),
-            name if AGENTS.contains(&name) => vec![NO_AGENTS.into()],
+            name if starts_agent(name) => vec![NO_AGENTS.into()],
             name if SHELLS.contains(&name) => {
                 // A variable set in front of a shell reaches its script.
                 state.git_redirected |= run.git_redirected;
