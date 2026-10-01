@@ -97,7 +97,15 @@ impl Runner {
             };
             let (forge, repo) = (&self.ports.forge, &self.settings.forge);
             let Some(piece) = pieces.get(linked) else {
-                let comment = plan::comment(&why, &pieces, &opened);
+                let labelled: Vec<bool> = opened
+                    .iter()
+                    .map(|&n| {
+                        forge
+                            .issue(repo, n)
+                            .is_ok_and(|shown| plan::already_has_worker(&shown.labels))
+                    })
+                    .collect();
+                let comment = plan::comment(&why, &pieces, &opened, &labelled);
                 // `post_comment` takes an issue as well as a pull request.
                 let comment_failed = forge.post_comment(repo, issue, &comment).err();
                 let mut next = self.state.clone();

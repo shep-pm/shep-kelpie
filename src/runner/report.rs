@@ -609,7 +609,7 @@ pub enum PlanOutcome {
 
 /// What became of the worker a kept-whole issue's plan named
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "worker", rename_all = "kebab-case")]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum WholeWorker {
     /// The issue already carried a `worker:` label, which wins over the pick
     Already,

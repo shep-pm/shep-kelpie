@@ -75,8 +75,11 @@ pub fn resolved_label(named: Option<&str>) -> Option<String> {
 
 /// Why [`resolved_label`] is `None` for what the reply named, in one phrase
 pub fn fallback_reason(named: Option<&str>) -> String {
-    match named {
-        Some(named) => format!(
+    match named.map(|named| (named, parse_worker_value(named))) {
+        Some((_, Ok(WorkerLabel::Local))) => {
+            "the plan named `local`, which only the maintainer picks by hand".to_owned()
+        }
+        Some((named, _)) => format!(
             "`{named}` is not a model and effort kelpie runs (from {})",
             worker_model_names().join(", ")
         ),
@@ -244,27 +247,38 @@ pub fn list(pieces: &[Piece]) -> String {
 }
 
 /// The one comment a split leaves on its issue, naming each sub-issue
-pub fn comment(why: &str, pieces: &[Piece], opened: &[u64]) -> String {
-    let lines = pieces.iter().zip(opened).map(|(piece, number)| {
-        let after: Vec<String> = piece
-            .blocked_by
-            .iter()
-            .filter_map(|&by| by.checked_sub(1).and_then(|at| opened.get(at)))
-            .map(|n| format!("#{n}"))
-            .collect();
-        let after = match after.as_slice() {
-            [] => String::new(),
-            by => format!(", after {}", by.join(", ")),
-        };
-        let defaulted = match resolved_label(piece.worker.as_deref()) {
-            Some(_) => String::new(),
-            None => format!(
-                ", worker defaulted to the project's: {}",
-                fallback_reason(piece.worker.as_deref())
-            ),
-        };
-        format!("- #{number}: {}{after}{defaulted}", piece.title.trim())
-    });
+///
+/// `labelled` says, for each piece in order, whether its sub-issue actually
+/// carries a `worker:` label once the split finishes: from the piece's own
+/// pick, or one it inherited from the parent's labels at its creation,
+/// either of which leaves nothing to say. Only a sub-issue with no `worker:`
+/// label at all, left to the project's own, is worth a note.
+pub fn comment(why: &str, pieces: &[Piece], opened: &[u64], labelled: &[bool]) -> String {
+    let lines = pieces
+        .iter()
+        .zip(opened)
+        .zip(labelled)
+        .map(|((piece, number), &labelled)| {
+            let after: Vec<String> = piece
+                .blocked_by
+                .iter()
+                .filter_map(|&by| by.checked_sub(1).and_then(|at| opened.get(at)))
+                .map(|n| format!("#{n}"))
+                .collect();
+            let after = match after.as_slice() {
+                [] => String::new(),
+                by => format!(", after {}", by.join(", ")),
+            };
+            let defaulted = if labelled {
+                String::new()
+            } else {
+                format!(
+                    ", worker defaulted to the project's: {}",
+                    fallback_reason(piece.worker.as_deref())
+                )
+            };
+            format!("- #{number}: {}{after}{defaulted}", piece.title.trim())
+        });
     format!(
         "Kelpie planned this issue as {} pull requests. {}\n\n{}\n\n\
          Each is worked on its own, and this issue closes when the last one does.",
@@ -406,7 +420,7 @@ mod tests {
     fn the_comment_names_each_sub_issue_and_what_it_waits_on() {
         let pieces = [piece("Schema", &[]), piece("Screen", &[1])];
         assert_eq!(
-            comment("Two slices.", &pieces, &[901, 902]),
+            comment("Two slices.", &pieces, &[901, 902], &[true, true]),
             "Kelpie planned this issue as 2 pull requests. Two slices.\n\n\
              - #901: Schema\n- #902: Screen, after #901\n\n\
              Each is worked on its own, and this issue closes when the last one does."
@@ -421,12 +435,22 @@ mod tests {
         let mut unknown = piece("Screen", &[]);
         unknown.worker = Some("nope".into());
         let pieces = [named, unknown];
-        let text = comment("Two slices.", &pieces, &[901, 902]);
+        let text = comment("Two slices.", &pieces, &[901, 902], &[true, false]);
         assert!(!text.contains("- #901: Schema,"), "{text}");
         assert!(
             text.contains("- #902: Screen, worker defaulted to the project's: `nope`"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn a_sub_issue_labelled_by_inheritance_gets_no_defaulted_note() {
+        // The piece itself named nothing kelpie runs, but its sub-issue
+        // still ended up carrying a `worker:` label, inherited from the
+        // parent's own at creation: there is nothing to default to.
+        let pieces = [piece("Schema", &[])];
+        let text = comment("One slice.", &pieces, &[901], &[true]);
+        assert!(!text.contains("defaulted"), "{text}");
     }
 
     #[test]
