@@ -255,7 +255,7 @@ mod tests {
             err.starts_with("setting `worker.instructions_file`: cannot read "),
             "{err}"
         );
-        assert!(err.contains("projects/koji/gone.md"), "{err}");
+        assert!(err.contains("kelpie/koji/gone.md"), "{err}");
     }
 
     #[test]

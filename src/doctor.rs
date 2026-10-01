@@ -261,9 +261,7 @@ pub fn main(args: &[String]) -> ExitCode {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .ok_or("HOME is not set")?;
-        let kelpie_home = std::env::var_os("KELPIE_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".kelpie"));
+        let kelpie_home = crate::home::kelpie_home_of(&shep_home);
         let here = Here {
             home: &home,
             kelpie_home: &kelpie_home,

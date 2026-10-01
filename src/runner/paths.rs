@@ -34,6 +34,10 @@ impl TryFrom<&str> for ProjectName {
         if value.is_empty() || value.starts_with('.') || !value.chars().all(allowed) {
             return Err(ProjectNameError(value.to_owned()));
         }
+        // A project's folder sits beside kelpie's own in kelpie's home.
+        if crate::home::OWN.contains(&value) {
+            return Err(ProjectNameError(value.to_owned()));
+        }
         Ok(Self(value.to_owned()))
     }
 }
@@ -54,8 +58,9 @@ impl fmt::Display for ProjectNameError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{:?} is not a project name: use letters, digits, - _ .",
-            self.0
+            "{:?} is not a project name: use letters, digits, - _ ., and none of {}",
+            self.0,
+            crate::home::OWN.join(" ")
         )
     }
 }
@@ -81,8 +86,9 @@ pub struct ProjectPaths {
     pub tools: Tools,
     /// Kelpie's home, which holds every folder here
     pub kelpie_home: PathBuf,
-    /// The shepherd's home, which a worker may not read. Kelpie's own shepherd,
-    /// `<kelpie home>/shep`, unless the runner's `SHEP_HOME` names another.
+    /// The shepherd's home, which a worker may not read outside its own
+    /// folders. The folder kelpie's home is in, unless the runner's `SHEP_HOME`
+    /// names another.
     pub shep_home: PathBuf,
     /// The dog's door, the one socket a worker may connect to. Under
     /// kelpie's home unless the runner sets it from its own environment.
@@ -94,14 +100,11 @@ pub struct ProjectPaths {
 }
 
 impl ProjectPaths {
-    /// `<kelpie home>/projects/<project>/`, beside kelpie's own
-    /// `<kelpie home>/settings.toml`, with worktrees under
-    /// `<kelpie home>/wt/<project>/`, build folders under
-    /// `<kelpie home>/targets/<project>/`, shots under
-    /// `<kelpie home>/shots/<project>/`, the Playwright server's files under
-    /// `<kelpie home>/playwright/<project>/`, and the shared `<kelpie home>/tools/`
+    /// `<kelpie home>/<project>/`, holding the project's state, settings and
+    /// worker files, and its `worktrees`, `builds`, `shots` and `playwright`
+    /// folders, beside kelpie's own `settings.toml`, `totp` and `tools`
     pub fn under(kelpie_home: &Path, project: &ProjectName) -> Self {
-        let folder = kelpie_home.join("projects").join(project.as_str());
+        let folder = kelpie_home.join(project.as_str());
         Self {
             kelpie_settings: kelpie_home.join("settings.toml"),
             totp: kelpie_home.join("totp"),
@@ -111,13 +114,19 @@ impl ProjectPaths {
             skills: folder.join("skills"),
             tools: Tools::under(kelpie_home),
             kelpie_home: kelpie_home.to_owned(),
-            shep_home: kelpie_home.join("shep"),
+            shep_home: kelpie_home.parent().unwrap_or(kelpie_home).to_owned(),
             door: kelpie_home.join("dog/lease.sock"),
-            worktrees: kelpie_home.join("wt").join(project.as_str()),
-            builds: kelpie_home.join("targets").join(project.as_str()),
-            shots: kelpie_home.join("shots").join(project.as_str()),
-            playwright: kelpie_home.join("playwright").join(project.as_str()),
+            worktrees: folder.join("worktrees"),
+            builds: folder.join("builds"),
+            shots: folder.join("shots"),
+            playwright: folder.join("playwright"),
         }
+    }
+
+    /// The longest socket a call of this project's opens, one the worker
+    /// folder holds under a 128-bit random name
+    pub fn longest_socket(&self) -> PathBuf {
+        self.worker.join(format!("{}.sock", "0".repeat(32)))
     }
 
     /// The folders a dev server of this project's can work in: every
@@ -161,7 +170,7 @@ mod tests {
 
     #[test]
     fn a_project_name_is_one_path_component() {
-        for bad in ["", "a/b", "..", ".hidden", "sp ace"] {
+        for bad in ["", "a/b", "..", ".hidden", "sp ace", "dog", "tools"] {
             assert!(ProjectName::try_from(bad).is_err(), "{bad:?}");
         }
         assert!(ProjectName::try_from("shep-kelpie_2.0").is_ok());

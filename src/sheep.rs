@@ -21,6 +21,7 @@ use crate::adapters::{
 use crate::coderabbit::CodeRabbit;
 use crate::codex::Codex;
 use crate::cubic::Cubic;
+use crate::home::migrate;
 use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
 use crate::ports::{Leases, Ports, Routed, SandboxError};
@@ -65,17 +66,28 @@ fn serve(project: &str) -> Result<(), String> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or("HOME is not set")?;
-    let kelpie_home = std::env::var_os("KELPIE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".kelpie"));
+    let kelpie_home = crate::home::kelpie_home_of(&shep_home);
+    if let Some(old) = crate::home::old_home() {
+        let mut moves = migrate::shared(&old, &kelpie_home);
+        moves.extend(migrate::project(&old, &kelpie_home, &project));
+        for line in migrate::run(&kelpie_home, &moves)? {
+            println!("{line}");
+        }
+        if let Some(line) = migrate::repoint(&old, &kelpie_home, &project)? {
+            println!("{line}");
+        }
+    }
     let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
     let mut paths = ProjectPaths::under(&kelpie_home, &project);
     paths.shep_home.clone_from(&shep_home);
-    let (door, why) = crate::lease::door::worker_socket(&shep_home)?;
+    let (door, why) = crate::lease::door::worker_socket(&shep_home);
     if let Some(why) = why {
         println!("{why}");
     }
     paths.door = door;
+    // A socket kelpie cannot bind would otherwise fail a call deep in a work item.
+    crate::home::socket_fits(&paths.door)?;
+    crate::home::socket_fits(&paths.longest_socket())?;
     // Every agent call runs inside the sandbox runtime, so a runner without one stops here.
     if !paths.tools.sandbox().is_file() {
         return Err(SandboxError::Missing(paths.tools.sandbox()).to_string());

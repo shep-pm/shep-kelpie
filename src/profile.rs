@@ -52,11 +52,11 @@ pub(crate) const CREDENTIALS: [&str; 12] = [
     "~/.npmrc",
     "~/.cargo/credentials",
     "~/.cargo/credentials.toml",
+    // Kelpie's old home, should a migration leave a project's state, the
+    // webhook URL's old file or the authenticator secret behind. Kelpie's
+    // home and the shepherd's are the profile's own.
     "~/.kelpie/projects/**",
-    // The webhook URL's old file. Not all of `~/.kelpie`: worktrees and build
-    // folders live there. The shepherd's home, with `dogs.toml`, is the profile's own.
     "~/.kelpie/settings.toml",
-    // The authenticator secret, which answers a ruling from ntfy
     "~/.kelpie/totp/**",
 ];
 
@@ -122,8 +122,12 @@ pub struct WorkerProfile<'a> {
     pub build_env: &'a BTreeMap<EnvName, BuildDir>,
     /// The preview's domains, for a project with the preview on; `None` with it off
     pub preview: Option<&'a [NonBlank]>,
-    /// The shepherd's home, whose `dogs.toml` holds the webhook's URL
+    /// The shepherd's home, whose `dogs.toml` holds the webhook's URL. The
+    /// worker reads none of it but its own folders in kelpie's.
     pub shep_home: &'a Path,
+    /// Kelpie's folders for this work item that the worker reads and does
+    /// not write: its shots and its browser's output
+    pub reads: &'a [PathBuf],
     /// The dog's door, the one Unix socket the worker may connect to
     pub door: &'a Path,
 }
@@ -153,10 +157,21 @@ impl WorkerProfile<'_> {
             .chain([git("refs/heads").join(BASE)])
             .chain(fence::deny_write(self.worktree))
             .collect();
+        // Kelpie's home is the shepherd's too unless `KELPIE_HOME` puts it elsewhere.
+        let homes = [self.shep_home, self.kelpie_home]
+            .into_iter()
+            .enumerate()
+            .filter(|&(i, home)| i == 0 || !home.starts_with(self.shep_home))
+            .map(|(_, home)| format!("{}/**", home.display()));
         let no_read = CREDENTIALS
             .iter()
             .map(|&p| p.to_owned())
-            .chain([format!("{}/**", self.shep_home.display())])
+            .chain(homes)
+            .collect();
+        let read = [self.worktree, self.build, self.kelpie]
+            .into_iter()
+            .map(Path::to_owned)
+            .chain(self.reads.iter().cloned())
             .collect();
         let no_commands = PM_ONLY
             .iter()
@@ -183,6 +198,7 @@ impl WorkerProfile<'_> {
             write,
             no_write,
             no_read,
+            read,
             hosts,
             no_commands,
             env: self.env(),
@@ -283,6 +299,7 @@ mod tests {
             build_env: &BTreeMap::new(),
             preview: None,
             shep_home: Path::new("/srv/shep"),
+            reads: &[],
             door: Path::new("/k/dog/lease.sock"),
         }
         .settings()
@@ -382,6 +399,7 @@ mod tests {
             build_env: &build_env,
             preview: None,
             shep_home: Path::new("/srv/shep"),
+            reads: &[],
             door: Path::new("/k/dog/lease.sock"),
         }
         .settings();
@@ -416,6 +434,7 @@ mod tests {
             build_env: &build_env,
             preview: Some(&[]),
             shep_home: Path::new("/srv/shep"),
+            reads: &[],
             door: Path::new("/k/dog/lease.sock"),
         }
         .settings();
@@ -456,6 +475,7 @@ mod tests {
             build_env: &BTreeMap::new(),
             preview: Some(domains),
             shep_home: Path::new("/srv/shep"),
+            reads: &[],
             door: Path::new("/k/dog/lease.sock"),
         }
         .settings()
@@ -753,6 +773,7 @@ mod tests {
             build_env: &BTreeMap::new(),
             preview: None,
             shep_home: Path::new("/srv/shep"),
+            reads: &[],
             door: Path::new("/k/dog/lease.sock"),
         };
         let s = profile.settings();

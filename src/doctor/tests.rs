@@ -482,12 +482,12 @@ async fn a_relative_local_command_is_read_from_the_project_s_folder_as_the_runne
     scene.runs("golbat", |t| {
         t["review"]["local"] = json!({ "kind": "command", "command": "review.sh" });
     });
-    let folder = scene.kelpie_home.join("projects/golbat");
+    let folder = scene.kelpie_home.join("golbat");
     std::fs::create_dir_all(&folder).unwrap();
 
     write_script(&scene.home.join("review.sh"), "#!/bin/sh\nexit 0\n");
     let (what, _) = missing(&scene.report().await, "golbat: local review");
-    assert!(what.contains("projects/golbat/review.sh"), "{what}");
+    assert!(what.contains("kelpie/golbat/review.sh"), "{what}");
 
     write_script(&folder.join("review.sh"), "#!/bin/sh\nexit 0\n");
     assert_eq!(ok(&scene.report().await, "golbat: local review"), "ready");

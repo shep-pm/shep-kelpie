@@ -36,7 +36,7 @@ fn waiting(home: &Path, name: &str, rulings: Vec<Ruling>) {
     let mut state = ProjectState::new(Timestamp(0));
     state.last_ruling = rulings.iter().map(|r| r.id).max().unwrap_or(0);
     state.rulings = rulings;
-    let path = home.join("projects").join(name).join("state.json");
+    let path = home.join(name).join("state.json");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     StateStore::new(path).save(&state).unwrap();
 }
@@ -224,7 +224,7 @@ fn the_picker_sends_nothing_on_an_empty_answer_or_the_input_s_end() {
 #[test]
 fn an_unclaimed_id_with_a_state_file_unread_needs_the_project() {
     let (home, ids) = two_projects();
-    let broken = home.path().join("projects/lab/state.json");
+    let broken = home.path().join("lab/state.json");
     std::fs::create_dir_all(broken.parent().unwrap()).unwrap();
     std::fs::write(&broken, "{").unwrap();
     let err = prepare(&ids, None, &["14", "yes"], None).unwrap_err();

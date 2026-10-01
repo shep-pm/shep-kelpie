@@ -5,7 +5,7 @@
 //! a hook that runs `kelpie confine` on the file tools, `kelpie guard` on
 //! every command, then any hook the project adds.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
@@ -67,7 +67,11 @@ pub(crate) const PLAYWRIGHT_DENY: [&str; 4] = [
 pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
     let mut deny: Vec<String> = Vec::new();
     if let Some(fence) = &reach.fence {
-        deny.extend(fence.no_read.iter().map(|p| read_rule(p)));
+        deny.extend(
+            read_denials(&fence.no_read, &fence.read)
+                .iter()
+                .map(|p| read_rule(p)),
+        );
         deny.extend(fence.no_commands.iter().map(|c| format!("Bash({c})")));
     }
     deny.extend(tool_denies(tools, reach).map(str::to_owned));
@@ -114,6 +118,43 @@ fn tool_denies(tools: Tools, reach: &Reach) -> impl Iterator<Item = &'static str
 }
 
 // `//` roots a rule at `/`: a single `/` is taken from the settings file.
+// Claude Code's deny rules take no exceptions, so a folder holding one the
+// session may read is denied entry by entry around it. The sandbox still
+// denies the whole folder, entries made later included.
+fn read_denials(no_read: &[String], read: &[PathBuf]) -> Vec<String> {
+    let holds_one = |dir: &Path| read.iter().any(|r| r.starts_with(dir));
+    no_read
+        .iter()
+        .flat_map(|rule| match rule.strip_suffix("/**").map(Path::new) {
+            Some(dir) if holds_one(dir) => around(dir, read),
+            _ => vec![rule.clone()],
+        })
+        .collect()
+}
+
+// A rule for each entry of `dir` that is not, and holds none of, `read`.
+fn around(dir: &Path, read: &[PathBuf]) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+    paths.sort();
+    let mut rules = Vec::new();
+    for path in paths {
+        if read.iter().any(|r| path.starts_with(r)) {
+            continue;
+        }
+        if read.iter().any(|r| r.starts_with(&path)) {
+            rules.extend(around(&path, read));
+        } else if path.is_dir() {
+            rules.push(format!("{}/**", path.display()));
+        } else {
+            rules.push(path.display().to_string());
+        }
+    }
+    rules
+}
+
 fn read_rule(path: &str) -> String {
     match path.starts_with('/') {
         true => format!("Read(/{path})"),
@@ -205,6 +246,31 @@ mod tests {
 
     use super::*;
     use crate::trim::deny_with_trim;
+
+    #[test]
+    fn a_denied_folder_holding_a_readable_one_is_denied_around_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let shep = dir.path();
+        let own = shep.join("kelpie/koji/worktrees/7");
+        for folder in ["run", "kelpie/rotom", "kelpie/koji/worktrees/8"] {
+            std::fs::create_dir_all(shep.join(folder)).unwrap();
+        }
+        std::fs::create_dir_all(&own).unwrap();
+        std::fs::write(shep.join("dogs.toml"), "").unwrap();
+        let no_read = [format!("{}/**", shep.display()), "~/.ssh/**".to_owned()];
+
+        let rules = read_denials(&no_read, &[own]);
+
+        let at = |p: &str| shep.join(p).display().to_string();
+        let expected = [
+            at("dogs.toml"),
+            format!("{}/**", at("kelpie/koji/worktrees/8")),
+            format!("{}/**", at("kelpie/rotom")),
+            format!("{}/**", at("run")),
+            "~/.ssh/**".to_owned(),
+        ];
+        assert_eq!(rules, expected);
+    }
 
     #[test]
     fn a_review_round_keeps_its_read_tools_and_reads_its_folders() {

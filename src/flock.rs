@@ -94,7 +94,7 @@ pub struct Launch {
     pub kelpie: PathBuf,
     /// The shepherd's home, which a sheep is not given unless its entry says
     pub shep_home: PathBuf,
-    /// Kelpie's home, when it is not `~/.kelpie`
+    /// Kelpie's home, when `KELPIE_HOME` names one in place of `$SHEP_HOME/kelpie`
     pub kelpie_home: Option<PathBuf>,
 }
 

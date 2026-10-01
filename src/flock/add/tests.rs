@@ -4,6 +4,7 @@ use std::time::Duration;
 use shep_client::shep_core::config::AppConfig;
 
 use super::*;
+use crate::runner::ProjectPaths;
 use crate::settings::{ForgeSlug, ReviewerName};
 use crate::shepherd;
 use crate::test::{FakeForge, FakeShepherd};
@@ -111,6 +112,23 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
     );
     let (_, running) = scene.shepherd.sheep("koji").unwrap();
     assert!(!running, "add starts nothing");
+}
+
+// The runner works its home out from the `SHEP_HOME` its entry carries.
+#[tokio::test]
+async fn add_from_a_checkout_puts_its_worktrees_under_the_project_s_folder() {
+    let scene = Scene::new().await;
+    scene.add().await.unwrap();
+
+    let (runner, _) = scene.shepherd.sheep("koji").unwrap();
+    let shep_home = scene.shepherd.home();
+    assert_eq!(runner.env["SHEP_HOME"], shep_home.display().to_string());
+    assert!(!runner.env.contains_key("KELPIE_HOME"), "{:?}", runner.env);
+    assert_eq!(scene.settings().repo, scene.checkout.root);
+    let paths = ProjectPaths::under(&crate::home::under(shep_home), &scene.name);
+    assert_eq!(paths.worktree(7), shep_home.join("kelpie/koji/worktrees/7"));
+    assert_eq!(paths.build(7), shep_home.join("kelpie/koji/builds/7"));
+    assert_eq!(paths.state, shep_home.join("kelpie/koji/state.json"));
 }
 
 #[tokio::test]

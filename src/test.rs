@@ -147,7 +147,7 @@ pub(crate) fn with_tables(entry: &str, tables: &str) -> String {
 }
 
 /// The `repo` in `settings.example.toml`, which the rig points at its own
-const EXAMPLE_REPO: &str = "~/.kelpie/repos/shep";
+const EXAMPLE_REPO: &str = "~/GitHub/shep";
 
 /// The CodeRabbit gate as `settings.example.toml` sets it, and turned off
 pub(crate) const CODERABBIT_ON: &str = "[app.dogs.kelpie.coderabbit]\nenabled = true\n";
@@ -442,8 +442,8 @@ impl Rig {
             !path.starts_with(&seen.call.cwd),
             "a commit would carry {path:?}"
         );
-        // The worker's rules name kelpie's home as `~/.kelpie`.
-        let home = self.home.path().join("kelpie");
+        // The worker's rules name the old home as `~/.kelpie`.
+        let home = self.home.path().join("shep/kelpie");
         let as_written = format!("~/.kelpie/{}", path.strip_prefix(&home).unwrap().display());
         let as_is = path.to_str().unwrap();
         let deny = seen.settings["permissions"]["deny"].as_array().unwrap();
@@ -461,10 +461,8 @@ impl Rig {
     }
 
     pub(crate) fn paths(&self) -> ProjectPaths {
-        let mut paths = ProjectPaths::under(&self.home.path().join("kelpie"), &self.project);
-        // A shepherd outside kelpie's home, as the user's own would be.
-        paths.shep_home = self.home.path().join("shep");
-        paths
+        // Kelpie's home under the shepherd's, as the runner works it out.
+        ProjectPaths::under(&self.home.path().join("shep/kelpie"), &self.project)
     }
 
     /// Turns the CodeRabbit gate on, as the example settings have it for shep
@@ -640,7 +638,7 @@ fn denies(rule: &str, path: &str) -> bool {
     }
 }
 
-fn write_in(folder: &Path, file: &str, text: &str) {
+pub(crate) fn write_in(folder: &Path, file: &str, text: &str) {
     let path = folder.join(file);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, text).unwrap();

@@ -133,7 +133,7 @@ mod tests {
             .replace("# pull_request_reviewers =", "pull_request_reviewers =")
             .replace("build_env = {}", "build_env = { BUN = \"bun\" }")
             .replace(
-                "# instructions_file = \"~/.kelpie/projects/shep/worker-instructions.md\"",
+                "# instructions_file = \"~/.shep/kelpie/shep/worker-instructions.md\"",
                 "instructions_file = \"worker.md\"",
             )
             .replace(

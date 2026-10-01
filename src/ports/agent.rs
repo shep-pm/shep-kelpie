@@ -96,6 +96,9 @@ pub struct Fence {
     pub no_write: Vec<PathBuf>,
     /// Paths it may not read, absolute or under `~/`, with `**` globs
     pub no_read: Vec<String>,
+    /// Folders inside `no_read` it may read after all: its own, inside the
+    /// shepherd's home
+    pub read: Vec<PathBuf>,
     /// The hosts it may reach, and no others
     pub hosts: Vec<String>,
     /// Commands it may not run, as prefixes where `*` matches any text

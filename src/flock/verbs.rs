@@ -53,10 +53,10 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or("HOME is not set")?;
-    let kelpie_home_set = std::env::var_os("KELPIE_HOME").map(PathBuf::from);
-    let kelpie_home = kelpie_home_set
-        .clone()
-        .unwrap_or_else(|| home.join(".kelpie"));
+    let kelpie_home_set = std::env::var_os(crate::home::KELPIE_VAR)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from);
+    let kelpie_home = crate::home::kelpie_home_of(shep_home);
     // A ruling's answer starts after its id and first word.
     let (named, args) = split_project(args, (command == "rule").then_some(2))?;
     let args: Vec<&str> = args.iter().map(String::as_str).collect();

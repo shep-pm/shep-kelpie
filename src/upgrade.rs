@@ -84,7 +84,7 @@ pub fn main(args: &[String]) -> ExitCode {
     };
     let ran = shep_home::required(shep_home::FLOCK_FIX).and_then(|shep_home| {
         let scene = Scene {
-            kelpie_home: &kelpie_home()?,
+            kelpie_home: &crate::home::kelpie_home_of(&shep_home),
             shep_home: &shep_home,
             repo: &std::env::var("KELPIE_SOURCE").unwrap_or_else(|_| fetch::REPO.to_owned()),
             patience: Patience::default(),
@@ -99,14 +99,6 @@ pub fn main(args: &[String]) -> ExitCode {
             ExitCode::FAILURE
         }
     }
-}
-
-// Kelpie's home is `KELPIE_HOME`, or `~/.kelpie`, as the runner reads it.
-fn kelpie_home() -> Result<PathBuf, String> {
-    std::env::var_os("KELPIE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".kelpie")))
-        .ok_or_else(|| "HOME is not set".to_owned())
 }
 
 /// Where an upgrade happens

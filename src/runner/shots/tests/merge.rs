@@ -493,15 +493,20 @@ fn a_finished_work_item_takes_its_shots_with_it() {
     let (rig, runner, _) = green("lab");
     rig.verdict(&runner); // the shots comment
     step(&runner).unwrap(); // merge ruling 1
-    assert!(rig.home.path().join("kelpie/shots/lab/7").is_dir());
+    assert!(rig.home.path().join("shep/kelpie/lab/shots/7").is_dir());
     rig.ask(&runner, "rule", Some("1 yes"));
     for _ in 0..4 {
         rig.clock.advance(crate::runner::CHECKS_SETTLE);
         step(&runner).unwrap();
     }
     assert_eq!(rig.forge.merges().len(), 1);
-    assert!(!rig.home.path().join("kelpie/shots/lab/7").exists());
-    assert!(!rig.home.path().join("kelpie/playwright/lab/7").exists());
+    assert!(!rig.home.path().join("shep/kelpie/lab/shots/7").exists());
+    assert!(
+        !rig.home
+            .path()
+            .join("shep/kelpie/lab/playwright/7")
+            .exists()
+    );
     assert_eq!(rig.forge.head_of("kelpie-shots/71"), None, "its branch too");
 }
 

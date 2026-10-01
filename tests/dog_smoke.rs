@@ -163,9 +163,9 @@ impl Shepherd {
         format!("{}{}", runner("koji"), runner("reactmap"))
     }
 
-    // The book the adopted dog keeps, under the `HOME` the shepherd gives it.
+    // The book the adopted dog keeps, under the shepherd's home.
     fn book(&self) -> PathBuf {
-        self.home.path().join(".kelpie/dog/book.json")
+        self.home.path().join("kelpie/dog/book.json")
     }
 
     fn command(&self, args: &[&str]) -> Command {

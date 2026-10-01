@@ -1,12 +1,11 @@
 //! The dog's door: the socket a command asks for a counted lease at
 //!
-//! A command connects to `~/.kelpie/dog/lease.sock`, or the socket
+//! A command connects to `$SHEP_HOME/kelpie/dog/lease.sock`, or the socket
 //! `KELPIE_LEASE_SOCKET` names, and sends one [`Ask`] line. The dog answers with [`Answer`] lines: queued, then
 //! granted. The command holds the lease for as long as it keeps the
 //! connection open, so one that ends or dies gives its place back. A
 //! worker's sandbox may connect to this socket and to no shep socket.
 
-use std::ffi::OsString;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
@@ -16,63 +15,58 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 
+use crate::home;
+
 /// The variable naming the door, which a runner sets for its workers
 pub const SOCKET_VAR: &str = "KELPIE_LEASE_SOCKET";
 
-/// The door's path under the home folder
-const SOCKET: &str = ".kelpie/dog/lease.sock";
+/// The door's name in the dog's folder
+const SOCKET: &str = "lease.sock";
 
-/// The door: `KELPIE_LEASE_SOCKET`, or `~/.kelpie/dog/lease.sock`
+/// The door: `KELPIE_LEASE_SOCKET`, or `lease.sock` in the dog's folder
+/// under the shepherd's home
 ///
 /// Never under `KELPIE_HOME`: shep starts the adopted dog without it, so
 /// a runner and its workers would look somewhere the dog is not.
 ///
 /// # Errors
 ///
-/// A message when neither `KELPIE_LEASE_SOCKET` nor `HOME` is set.
+/// A message when the shepherd's home cannot be worked out.
 pub fn socket() -> Result<PathBuf, String> {
-    socket_from(std::env::var_os(SOCKET_VAR), std::env::var_os("HOME"))
+    let named = std::env::var_os(SOCKET_VAR).filter(|n| !n.is_empty());
+    named.map_or_else(|| Ok(default(&home::shep_home()?)), |n| Ok(n.into()))
 }
 
-/// The door a runner lets its workers reach: [`socket`], unless that is
-/// relative or under the shepherd's home `shep_home`, when it is the
-/// default and the message says why
+/// The door a runner of the shepherd at `shep_home` lets its workers reach:
+/// [`socket`], unless that is relative or under the shepherd's home outside
+/// kelpie's, when it is the default and the message says why
 ///
 /// The path goes into the worker's sandbox, so it must never be shep's
 /// own socket.
-///
-/// # Errors
-///
-/// A message when `HOME` is not set.
-pub fn worker_socket(shep_home: &Path) -> Result<(PathBuf, Option<String>), String> {
-    let home = std::env::var_os("HOME");
-    let named = socket_from(std::env::var_os(SOCKET_VAR), home.clone())?;
-    checked(named, home, shep_home)
+pub fn worker_socket(shep_home: &Path) -> (PathBuf, Option<String>) {
+    let named = std::env::var_os(SOCKET_VAR).filter(|n| !n.is_empty());
+    checked(named.map(PathBuf::from), shep_home)
 }
 
-fn checked(
-    named: PathBuf,
-    home: Option<OsString>,
-    shep_home: &Path,
-) -> Result<(PathBuf, Option<String>), String> {
-    if named.is_absolute() && !named.starts_with(shep_home) {
-        return Ok((named, None));
+fn default(shep_home: &Path) -> PathBuf {
+    home::dog_folder(shep_home).join(SOCKET)
+}
+
+fn checked(named: Option<PathBuf>, shep_home: &Path) -> (PathBuf, Option<String>) {
+    let default = default(shep_home);
+    let Some(named) = named else {
+        return (default, None);
+    };
+    let shepherds = named.starts_with(shep_home) && !named.starts_with(home::under(shep_home));
+    if named.is_absolute() && !shepherds {
+        return (named, None);
     }
-    let default = socket_from(None, home)?;
     let why = format!(
-        "{SOCKET_VAR} names {}, which is relative or under the shepherd's home: workers get {}",
+        "{SOCKET_VAR} names {}, which is relative or the shepherd's own: workers get {}",
         named.display(),
         default.display()
     );
-    Ok((default, Some(why)))
-}
-
-fn socket_from(named: Option<OsString>, home: Option<OsString>) -> Result<PathBuf, String> {
-    match (named.filter(|n| !n.is_empty()), home) {
-        (Some(named), _) => Ok(PathBuf::from(named)),
-        (None, Some(home)) => Ok(Path::new(&home).join(SOCKET)),
-        (None, None) => Err(format!("neither {SOCKET_VAR} nor HOME is set")),
-    }
+    (default, Some(why))
 }
 
 /// What a command asks for, its first and only line
@@ -190,30 +184,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_door_is_the_named_socket_or_under_the_home_folder() {
-        let socket = |named: Option<&str>, home: Option<&str>| {
-            socket_from(named.map(Into::into), home.map(Into::into))
-        };
-        assert_eq!(
-            socket(Some("/k/door.sock"), Some("/home/me")),
-            Ok(PathBuf::from("/k/door.sock"))
-        );
-        assert_eq!(
-            socket(Some(""), Some("/home/me")),
-            Ok(PathBuf::from("/home/me/.kelpie/dog/lease.sock"))
-        );
-        assert!(socket(None, None).is_err());
-    }
-
-    #[test]
     fn a_worker_never_gets_shep_s_socket_or_a_relative_one() {
-        let home = || Some("/home/me".into());
-        let shep = Path::new("/home/me/.kelpie/shep");
-        let fine = PathBuf::from("/k/door.sock");
-        assert_eq!(checked(fine.clone(), home(), shep), Ok((fine, None)));
-        let default = PathBuf::from("/home/me/.kelpie/dog/lease.sock");
-        for bad in ["/home/me/.kelpie/shep/run/shep.sock", "door.sock"] {
-            let (door, why) = checked(PathBuf::from(bad), home(), shep).unwrap();
+        let shep = Path::new("/home/me/.shep");
+        let default = PathBuf::from("/home/me/.shep/kelpie/dog/lease.sock");
+        assert_eq!(checked(None, shep), (default.clone(), None));
+        for fine in ["/k/door.sock", "/home/me/.shep/kelpie/dog/other.sock"] {
+            let fine = PathBuf::from(fine);
+            assert_eq!(checked(Some(fine.clone()), shep), (fine, None));
+        }
+        for bad in ["/home/me/.shep/run/shep.sock", "door.sock"] {
+            let (door, why) = checked(Some(PathBuf::from(bad)), shep);
             assert_eq!(door, default, "{bad}");
             assert!(why.unwrap().contains(bad));
         }
