@@ -51,7 +51,11 @@ fn a_small_issue_is_planned_whole_and_then_worked() {
         Some(StepReport::Planned {
             issue: 5,
             outcome: PlanOutcome::Whole {
-                why: "One small change.".into()
+                why: "One small change.".into(),
+                worker: WholeWorker::Defaulted {
+                    reason: "the plan named no worker".into(),
+                    comment_failed: None,
+                },
             },
             usage: Usage::default(),
             cost_usd: Some(2.0),
@@ -72,6 +76,82 @@ fn a_small_issue_is_planned_whole_and_then_worked() {
     assert!(plan.prompt.contains("Plan issue #5: "));
     assert_eq!(plan.model, "claude-opus-5-5");
     assert!(rig.forge.created().is_empty());
+}
+
+#[test]
+fn a_whole_issue_s_pick_is_applied_as_a_worker_label() {
+    let (rig, runner) = planning("meowth");
+    rig.forge.list_ready(5, false);
+    rig.claude.script([Scripted::Text(
+        r#"{"split": false, "why": "x", "worker": "opus-max"}"#,
+    )]);
+    let Some(StepReport::Planned {
+        outcome: PlanOutcome::Whole { worker, .. },
+        ..
+    }) = step(&runner).unwrap()
+    else {
+        panic!("expected a whole plan")
+    };
+    assert_eq!(
+        worker,
+        WholeWorker::Picked {
+            label: "worker:opus-max".into()
+        }
+    );
+    assert_eq!(
+        rig.forge.issue_labels(5),
+        ["ready-for-agent", "worker:opus-max"]
+    );
+    assert!(rig.forge.comments().is_empty());
+}
+
+#[test]
+fn a_worker_label_already_on_a_whole_issue_wins_over_the_pick() {
+    let (rig, runner) = planning("psyduck");
+    rig.forge.list_ready(5, false);
+    rig.forge.label(5, "worker:haiku-low");
+    rig.claude.script([Scripted::Text(
+        r#"{"split": false, "why": "x", "worker": "opus-max"}"#,
+    )]);
+    let Some(StepReport::Planned {
+        outcome: PlanOutcome::Whole { worker, .. },
+        ..
+    }) = step(&runner).unwrap()
+    else {
+        panic!("expected a whole plan")
+    };
+    assert_eq!(worker, WholeWorker::Already);
+    assert_eq!(
+        rig.forge.issue_labels(5),
+        ["ready-for-agent", "worker:haiku-low"]
+    );
+}
+
+#[test]
+fn a_whole_issue_s_unknown_pick_defaults_and_leaves_a_comment() {
+    let (rig, runner) = planning("slowpoke");
+    rig.forge.list_ready(5, false);
+    rig.claude.script([Scripted::Text(
+        r#"{"split": false, "why": "x", "worker": "gpt-max"}"#,
+    )]);
+    let Some(StepReport::Planned {
+        outcome: PlanOutcome::Whole { worker, .. },
+        ..
+    }) = step(&runner).unwrap()
+    else {
+        panic!("expected a whole plan")
+    };
+    assert!(matches!(
+        worker,
+        WholeWorker::Defaulted {
+            comment_failed: None,
+            ..
+        }
+    ));
+    assert_eq!(rig.forge.issue_labels(5), ["ready-for-agent"]);
+    let [(on, comment)] = rig.forge.comments().try_into().unwrap();
+    assert_eq!(on, 5);
+    assert!(comment.contains("`gpt-max`"), "{comment}");
 }
 
 #[test]
@@ -149,6 +229,34 @@ fn a_big_issue_under_auto_becomes_sub_issues_with_blockers_and_one_comment() {
     assert_eq!(issue, 900);
     assert_eq!(skipped, [Skip::Split { issue: 5, open: 2 }]);
     assert_eq!(planner_calls(&rig).len(), 1);
+}
+
+#[test]
+fn each_piece_of_a_split_gets_its_own_worker_pick() {
+    let rig = Rig::new("bellsprout");
+    rig.planning_on();
+    rig.merge_auto();
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.forge.list_ready(5, false);
+    rig.claude.script([Scripted::Text(
+        r#"{"split": true, "why": "Two slices.", "pieces": [
+            {"title": "Store the thing", "body": "Build the store.", "worker": "sonnet-high"},
+            {"title": "Show the thing", "body": "Build the screen.", "blocked_by": [1]}]}"#,
+    )]);
+    step(&runner).unwrap();
+    step(&runner).unwrap();
+    assert_eq!(
+        rig.forge.issue_labels(900),
+        ["ready-for-agent", "worker:sonnet-high"]
+    );
+    assert_eq!(rig.forge.issue_labels(901), ["ready-for-agent"]);
+    let [(_, comment)] = rig.forge.comments().try_into().unwrap();
+    assert!(
+        comment.contains("- #901: Show the thing, after #900, worker defaulted"),
+        "{comment}"
+    );
+    assert!(!comment.contains("- #900: Store the thing,"), "{comment}");
 }
 
 #[test]

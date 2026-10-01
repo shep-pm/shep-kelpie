@@ -210,12 +210,14 @@ A project on `merge_authority = "auto"` merges its pull requests without asking 
 
 ### Planning
 
-When the board picks an issue, a planning call on Opus reads the repo at `main` and decides whether it is one pull request or several. Most stay one. Several become sub-issues of the issue, each with its labels and blocked by the pieces it needs first, and the issue gets one comment with the plan.
+When the board picks an issue, a planning call on Opus reads the repo at `main` and decides whether it is one pull request or several, and picks the worker it runs on from a `worker:<model>-<effort>` label's names. Most stay one. Several become sub-issues of the issue, each with its labels and blocked by the pieces it needs first, and the issue gets one comment with the plan.
 
 - Under `auto` the split happens on its own. Under `ask` it's a ruling: `yes` opens the sub-issues, and `no <note>` works the issue whole
+- A planned issue kept whole gets the pick as a `worker:` label, and each sub-issue of a split gets its own; an issue that already carries a `worker:` label keeps it over the pick
+- A reply that names no worker, or one shep-kelpie does not run, falls back to the project's own worker, and a comment says so when it named one shep-kelpie does not run
 - An issue with sub-issues is never worked itself, and shep-kelpie closes it once every sub-issue is closed
 - A sub-issue is never planned again, and neither is an issue added with `add`
-- Off by default until the sub-issue and blocked-by calls have run against a real repo: `[planning] enabled = true` turns it on, and `[models.planner]` picks the model
+- Off by default until the sub-issue and blocked-by calls have run against a real repo: `[planning] enabled = true` turns it on, and `[models.planner]` picks the model the planning call itself runs on
 - A split or a parent close the forge refuses three times in a row waits on a ruling, and the board goes on
 
 ### Running a project
