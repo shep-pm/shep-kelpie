@@ -63,17 +63,32 @@ const SKILLS: &str = "~/.agents/**";
 /// The login's file in a Codex home
 const AUTH: &str = "auth.json";
 
-/// What Codex loads from its home as its login, config, hooks, rules,
-/// skills or instructions, which a call may not write there: a worker
-/// could otherwise plant what its next turn loads
-const LOADED: [&str; 6] = [
-    AUTH,
-    "config.toml",
-    "hooks.json",
-    "AGENTS.md",
-    "rules",
-    "skills",
+/// Where Codex keeps its databases in a call's home, by `sqlite_home`
+const DATABASES: &str = "db";
+
+/// Where Codex keeps its logs in a call's home, by `log_dir`
+const LOGS: &str = "log";
+
+/// The only folders in a call's Codex home the call may write: its
+/// sessions, databases, logs, helpers and locks
+///
+/// Everything else there is Codex's to load, not to write: its login, its
+/// config, `hooks.json`, `.env` (whose variables reach every hook's shell),
+/// `AGENTS.md` and `AGENTS.override.md`, rules, skills and the model catalog.
+/// A list of those would miss the next one Codex adds, so the call writes
+/// only these.
+const WRITTEN: [&str; 6] = [
+    "sessions",
+    "archived_sessions",
+    DATABASES,
+    LOGS,
+    "tmp",
+    "thread-writer-locks",
 ];
+
+/// The one file in a call's Codex home the call may write: an id Codex
+/// opens to read and write at start, and will not start without
+const INSTALLATION_ID: &str = "installation_id";
 
 /// Codex's features no call runs, each one a way past the call's tools,
 /// its hooks or its sandbox
@@ -142,7 +157,8 @@ impl Agents for CodexCli {
         is_codex(call)?;
         refuse_unsupported(call)?;
         let files = Files::of(call);
-        for folder in [&files.threads, &files.home] {
+        let written = WRITTEN.map(|name| files.home.join(name));
+        for folder in [&files.threads, &files.home].into_iter().chain(&written) {
             std::fs::create_dir_all(folder).map_err(|e| {
                 AgentError::Setup(format!("cannot make {}: {}", folder.display(), e.kind()))
             })?;
@@ -227,7 +243,12 @@ impl CodexCli {
         };
         let mut command = Command::new(&self.program);
         command
-            .args(argv(call, resumed.as_ref(), instructions.as_deref()))
+            .args(argv(
+                call,
+                &files.home,
+                resumed.as_ref(),
+                instructions.as_deref(),
+            ))
             .current_dir(&call.cwd)
             .env("CODEX_HOME", &files.home)
             .env("TMPDIR", &files.scratch);
@@ -413,9 +434,14 @@ fn config(key: &str, value: impl Into<toml::Value>) -> OsString {
     format!("{key}={}", value.into()).into()
 }
 
-// Codex loads no config or rules from its home, which holds none anyway.
-// It does read the repo's AGENTS.md.
-fn argv(call: &AgentCall, resumed: Option<&Thread>, instructions: Option<&str>) -> Vec<OsString> {
+// Codex ignores the user config and rules, and keeps its databases and
+// logs in folders of `home` the call may write. It reads the repo's AGENTS.md.
+fn argv(
+    call: &AgentCall,
+    home: &Path,
+    resumed: Option<&Thread>,
+    instructions: Option<&str>,
+) -> Vec<OsString> {
     let mut argv: Vec<OsString> = vec!["exec".into()];
     if resumed.is_some() {
         argv.push("resume".into());
@@ -439,6 +465,11 @@ fn argv(call: &AgentCall, resumed: Option<&Thread>, instructions: Option<&str>) 
             config("model_reasoning_effort", call.effort.as_str()),
             config("web_search", "disabled"),
             config("check_for_update_on_startup", false),
+            config(
+                "sqlite_home",
+                home.join(DATABASES).to_string_lossy().as_ref(),
+            ),
+            config("log_dir", home.join(LOGS).to_string_lossy().as_ref()),
         ]
         .into_iter()
         .flat_map(|c| [OsString::from("-c"), c]),
@@ -543,12 +574,12 @@ fn policy(call: &AgentCall, login: &Path, files: &Files) -> Policy {
     policy
         .no_read
         .extend([MAINTAINERS_HOME, SKILLS].map(str::to_owned));
-    policy
-        .write
-        .extend([files.home.clone(), files.scratch.clone()]);
-    policy
-        .no_write
-        .extend(LOADED.map(|name| files.home.join(name)));
+    policy.write.extend(
+        WRITTEN
+            .map(|name| files.home.join(name))
+            .into_iter()
+            .chain([files.home.join(INSTALLATION_ID), files.scratch.clone()]),
+    );
     // Codex reads the login through its link to run; kelpie never does.
     policy.read.extend(
         [login.join(AUTH), files.home.clone(), files.scratch.clone()]

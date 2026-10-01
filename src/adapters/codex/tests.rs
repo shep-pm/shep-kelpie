@@ -40,7 +40,7 @@ fn id(id: &str) -> SessionId {
 }
 
 fn strings(call: &AgentCall, resumed: Option<&Thread>, instructions: Option<&str>) -> Vec<String> {
-    argv(call, resumed, instructions)
+    argv(call, &Files::of(call).home, resumed, instructions)
         .into_iter()
         .map(|a| a.into_string().unwrap())
         .collect()
@@ -196,16 +196,43 @@ fn a_call_reads_the_login_and_writes_only_its_own_codex_home() {
         [&login.join("auth.json")]
     );
     assert!(!policy.write.iter().any(|p| p.starts_with(&login)));
+    // The call writes only the folders Codex keeps its sessions, databases,
+    // logs, helpers and locks in, so nothing Codex loads from its home.
     let home = w.path("worker/settings.codex");
-    assert!(policy.write.contains(&home));
+    let written: Vec<_> = policy
+        .write
+        .iter()
+        .filter_map(|p| p.strip_prefix(&home).ok())
+        .collect();
+    assert_eq!(
+        written,
+        [
+            "sessions",
+            "archived_sessions",
+            "db",
+            "log",
+            "tmp",
+            "thread-writer-locks",
+            "installation_id"
+        ]
+        .map(Path::new)
+    );
     for loaded in [
         "auth.json",
         "config.toml",
         "hooks.json",
+        ".env",
         "AGENTS.md",
+        "AGENTS.override.md",
+        "rules",
         "skills",
+        "models_cache.json",
     ] {
-        assert!(policy.no_write.contains(&home.join(loaded)), "{loaded}");
+        let path = home.join(loaded);
+        assert!(
+            !policy.write.iter().any(|w| path.starts_with(w)),
+            "{loaded}"
+        );
     }
     assert!(!policy.write.contains(&w.path("worker/settings.threads")));
     assert!(policy.no_write.contains(&w.path("wt/**/.codex")));
@@ -243,6 +270,33 @@ fn every_call_runs_on_a_codex_home_of_its_own_with_the_login_linked_in() {
         std::fs::read_link(&link).unwrap(),
         w.path("login/auth.json")
     );
+
+    // A link to a login `codex_home` no longer names is pointed at this one.
+    std::fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink(w.path("old-login/auth.json"), &link).unwrap();
+    cli.prepare(&call).unwrap();
+    assert_eq!(
+        std::fs::read_link(&link).unwrap(),
+        w.path("login/auth.json")
+    );
+
+    // The folders the call writes are made before it runs, since it cannot
+    // make them in a home it may not write.
+    for folder in ["sessions", "db", "log", "tmp"] {
+        assert!(home.join(folder).is_dir(), "{folder}");
+    }
+}
+
+#[test]
+fn codexs_databases_and_logs_go_in_folders_the_call_may_write() {
+    let w = World::new();
+    let call = w.call(Role::Judge, Session::New(id(WORKER_ID)));
+    let argv = strings(&call, None, None);
+    let home = w.path("worker/settings.codex");
+    for (key, folder) in [("sqlite_home", "db"), ("log_dir", "log")] {
+        let set = format!("{key}={:?}", home.join(folder));
+        assert!(argv.contains(&set), "{set} in {argv:?}");
+    }
 }
 
 #[test]
