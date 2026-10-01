@@ -7,6 +7,11 @@ rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/shep-pm/shep-kelpie"
 publish = false
+readme = "README.md"
+keywords = ["shep"]
+# docs/ holds planning and design notes. They belong in the repository, not in
+# a published .crate, which is permanent.
+exclude = ["/docs/"]
 
 [dependencies]
 # The authenticator codes that answer a ruling from ntfy (RFC 6238 TOTP)
