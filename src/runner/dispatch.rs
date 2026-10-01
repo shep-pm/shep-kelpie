@@ -203,14 +203,16 @@ mod tests {
                 skipped: vec![],
             })
         );
-        rig.claude
-            .script([Scripted::Reply(Usage::default(), Cost(1))]);
+        rig.claude.script([Scripted::Say(
+            "<kelpie-question>\nWhich flag?\n</kelpie-question>\n",
+        )]);
         step(&runner).unwrap();
         let [call] = rig.claude.calls().try_into().unwrap();
         assert!(call.prompt.starts_with("/mattpocock:implement "));
         assert!(call.prompt.contains("\nYour work item is issue #9: "));
 
-        // The turn ended, and #9 is still in flight, so #12 waits.
+        // #9 waits on its question, still in flight, so #12 waits too.
+        assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
         assert_eq!(step(&runner).unwrap(), None);
         assert_eq!(rig.ask(&runner, "status", None)["work_item"]["issue"], 9);
         assert_eq!(rig.claude.calls().len(), 1);

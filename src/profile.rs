@@ -588,6 +588,29 @@ mod tests {
     }
 
     #[test]
+    fn a_worker_drops_the_features_it_never_uses() {
+        let s = settings(&[]);
+        for key in [
+            "disableBundledSkills",
+            "disableWorkflows",
+            "disableClaudeAiConnectors",
+            "disableArtifact",
+        ] {
+            assert_eq!(s[key], true, "{key}");
+        }
+        assert!(s.get("disableRemoteControl").is_none());
+        let deny = strings(&s["permissions"]["deny"]).join(" ");
+        for tool in [
+            "EnterPlanMode",
+            "CronCreate",
+            "DesignSync",
+            "ScheduleWakeup",
+        ] {
+            assert!(deny.contains(tool), "{tool}");
+        }
+    }
+
+    #[test]
     fn gh_api_and_gh_auth_are_denied() {
         let deny = settings(&[])["permissions"]["deny"].clone();
         let deny = strings(&deny);

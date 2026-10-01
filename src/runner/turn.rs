@@ -35,7 +35,7 @@ use crate::state::{Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree::{self, Start};
 pub(super) use unfinished::failed;
-use unfinished::timed_out;
+use unfinished::{awaits_a_push, timed_out};
 
 mod unfinished;
 
@@ -247,6 +247,11 @@ impl Runner {
             // before its session existed starts it over, as a killed one does.
             Turn::Next { .. } if start_over => (Session::New(id), None, now),
             Turn::Next { prompt } => (Session::Resume(id), Some(prompt.clone()), now),
+            // A first turn that ended with no pull request and no question
+            // stopped short, maybe on a tool that failed.
+            Turn::Ended { .. } if item.pull_request.is_none() || awaits_a_push(item) => {
+                return self.stopped_short();
+            }
             Turn::Ended { .. } | Turn::Failed { .. } => return Ok(Begin::Idle),
         };
         let ceiling = self.turn_ceiling();
@@ -474,6 +479,10 @@ impl Runner {
             return Ok(None);
         };
         let issue = item.issue;
+        // A rework or adoption turn that moved nothing on `origin` pushed no fix.
+        let before = item.known.head.clone();
+        let pushed_nothing =
+            before.is_some() && pushed.as_ref().is_none_or(|p| Some(p) == before.as_ref());
         if pushed.is_some() {
             item.known.head = pushed;
         }
@@ -497,7 +506,8 @@ impl Runner {
                 // whatever was running, before that turn could be said to
                 // have ended normally, and the answer resumes exactly this,
                 // captured below before `park` parks it on a ruling.
-                if question.is_none() {
+                let stopped_short = pushed_nothing && awaits_a_push(item);
+                if question.is_none() && !stopped_short {
                     if let Some(resume) = item.resume.take() {
                         item.phase = resume;
                     } else {

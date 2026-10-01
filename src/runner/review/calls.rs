@@ -258,12 +258,12 @@ pub(in crate::runner) fn parse_verdict(text: &str) -> Option<Verdict> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
 
     use super::*;
     use crate::adapters::NO_TOOLS;
     use crate::runner::step;
     use crate::test::{Rig, Scripted, ScriptedRound};
+    use crate::trim::deny_with_trim;
 
     #[test]
     fn only_a_png_really_inside_the_shots_folder_is_a_shot() {
@@ -342,13 +342,11 @@ mod tests {
             .iter()
             .find(|s| s.call.role == Role::Judge)
             .expect("the judge ran");
-        let denied: Vec<&str> = judge.settings["permissions"]["deny"]
-            .as_array()
-            .expect("a deny list")
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(denied, NO_TOOLS, "every tool denied, nothing more or less");
+        assert_eq!(
+            judge.settings["permissions"]["deny"],
+            deny_with_trim(&NO_TOOLS),
+            "every tool denied, then the trimmed features"
+        );
     }
 
     #[test]
@@ -372,10 +370,11 @@ mod tests {
             .find(|s| s.call.role == Role::Reviewer)
             .expect("a reviewer round ran");
         assert_eq!(
-            reviewer.settings,
-            json!({ "permissions": { "deny": ["Agent", "Task", "Bash"] } }),
+            reviewer.settings["permissions"]["deny"],
+            deny_with_trim(&["Agent", "Task", "Bash"]),
             "Read, Grep and Glob stay, unlike the judge's"
         );
+        assert!(!reviewer.settings.to_string().contains("\"Read\""));
     }
 
     // The review skill answers under its own headings and spawns sub-agents

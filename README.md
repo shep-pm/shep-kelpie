@@ -124,7 +124,7 @@ nothing a project needs is missing
 shep kelpie start
 ```
 
-Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria. The runner gives it to a worker, which opens a draft pull request. Kelpie then runs the review loop and CI, and asks you for a ruling before it merges. `shep kelpie status` shows every project, and `shep kelpie add <issue>` puts an issue on the board without the label.
+Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria. The runner gives it to a worker, which opens a draft pull request. Kelpie then runs the review loop and CI, and asks you for a ruling before it merges. `shep kelpie status` shows every project, and `shep kelpie add <issue>` puts an issue on the board without the label. A worker whose first turn ends with no pull request and no question is sent back once, and asks you for a ruling if it stops short again.
 
 ### 7. Answer a ruling
 

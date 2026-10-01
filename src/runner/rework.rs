@@ -328,9 +328,10 @@ impl Runner {
         // does, it leaves out a review of the current head, which the gate
         // counts once when it finds it.
         let mut rounds = 0u32;
+        // The head the turn starts from, so a turn that pushes nothing is told apart.
+        let head = worktree::origin_head(&self.settings.repo, &pr.branch)
+            .map_err(|e| ReworkError::Head(pr.branch.clone(), e.to_string()))?;
         if self.settings.coderabbit.rounds.is_some() && self.settings.coderabbit.enabled {
-            let head = worktree::origin_head(&self.settings.repo, &pr.branch)
-                .map_err(|e| ReworkError::Head(pr.branch.clone(), e.to_string()))?;
             for bot in self.settings.reviewers() {
                 let bot = self.profile(bot);
                 let activity = self
@@ -371,7 +372,7 @@ impl Runner {
             known: Known {
                 labels,
                 ready: !pr.draft,
-                head: None,
+                head: Some(head),
             },
             ..fresh
         });

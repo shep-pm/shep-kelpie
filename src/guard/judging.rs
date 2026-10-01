@@ -64,6 +64,60 @@ pub(super) const NO_AGENTS: &str = "a worker does not start an agent of its own:
     its session already has kelpie's checks, and a new one would run without them. \
     Use your own tools, or a sub-agent, instead";
 
+// Programs that stop a process by name or pattern, which hits every match on
+// the machine, other sessions' processes among them.
+const KILLERS: [&str; 2] = ["pkill", "killall"];
+
+/// Why a worker may not stop a process by name or pattern
+pub(super) const NO_KILLING_BY_NAME: &str = "a worker does not stop a process by name or \
+    pattern: that hits every match on the machine, other sessions' processes too. \
+    Stop only a process you started, by the pid you got when you started it, \
+    or with the Bash tool's own task stop";
+
+// A plain variable reference (`$!`, `$pid`, `"$pid"`, `${pid}`), which is how a
+// worker names the process it started; command substitution is not one.
+fn is_variable(arg: &str) -> bool {
+    let arg = arg.trim_matches('"');
+    let Some(name) = arg.strip_prefix('$') else {
+        return false;
+    };
+    let name = name
+        .strip_prefix('{')
+        .and_then(|name| name.strip_suffix('}'))
+        .unwrap_or(name);
+    name == "!"
+        || name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+            && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+// Whether `kill`'s arguments name something other than numeric pids, as
+// `$(pgrep x)` or no pid at all (`xargs kill` reads its pids from a pattern).
+fn kills_by_name(args: &[String]) -> bool {
+    let mut pids = 0;
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "-l" | "-L" | "--list" | "--table" => return false,
+            "-s" | "-n" | "--signal" => {
+                args.next();
+            }
+            "--" => {}
+            _ if pids == 0 && arg.len() > 1 && arg.starts_with('-') => {}
+            _ if is_variable(arg)
+                || arg
+                    .strip_prefix('%')
+                    .unwrap_or(arg)
+                    .bytes()
+                    .all(|b| b.is_ascii_digit()) =>
+            {
+                pids += 1;
+            }
+            _ => return true,
+        }
+    }
+    pids == 0
+}
+
 impl CallState {
     // Each refusal once, however many commands earn it.
     fn refuse(&mut self, refusal: String) {
@@ -205,7 +259,10 @@ impl Judging<'_> {
             let name = program(&run.words[at]);
             let shell = SHELLS.contains(&name) || OTHER_SHELLS.contains(&name);
             let agent = starts_agent(name);
-            let judged = matches!(name, "git" | "gh") || (shell || agent) && !reader;
+            // `kill` is a common word, so only a program that feeds it pids names it.
+            let kill = name == "kill" && matches!(program(&run.words[0]), "xargs" | "find");
+            let killer = KILLERS.contains(&name) || kill;
+            let judged = matches!(name, "git" | "gh") || (shell || agent || killer) && !reader;
             if !judged {
                 continue;
             }
@@ -266,6 +323,8 @@ impl Judging<'_> {
             }
             "gh" => gh::judge(run.words, input.heredocs, cwd.as_deref(), home),
             name if starts_agent(name) => vec![NO_AGENTS.into()],
+            name if KILLERS.contains(&name) => vec![NO_KILLING_BY_NAME.into()],
+            "kill" if kills_by_name(&run.words[1..]) => vec![NO_KILLING_BY_NAME.into()],
             name if SHELLS.contains(&name) => {
                 // A variable set in front of a shell reaches its script.
                 state.git_redirected |= run.git_redirected;

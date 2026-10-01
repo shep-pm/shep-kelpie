@@ -70,7 +70,7 @@ impl fmt::Display for BarePath<'_> {
 /// Claude Code blocks a call only on a hook's exit 2, so any other failure
 /// of the gate, such as kelpie gone from its path, is turned into one.
 pub fn settings(shep_home: &Path, kelpie: BarePath<'_>) -> Value {
-    json!({
+    crate::trim::trimmed(json!({
         "env": { "SHEP_HOME": shep_home.to_string_lossy() },
         "crossSessionInbound": "accept",
         "agentPushNotifEnabled": true,
@@ -85,7 +85,7 @@ pub fn settings(shep_home: &Path, kelpie: BarePath<'_>) -> Value {
                 "hooks": [{ "type": "command", "command": format!("{kelpie} relay-gate {kelpie} || exit 2") }],
             }],
         },
-    })
+    }))
 }
 
 /// Which answer a ruling takes, so the relay picks its command from the
@@ -252,6 +252,19 @@ mod tests {
             assert_eq!(judge(passed), Verdict::Allow, "{passed}");
         }
         assert!(s["permissions"].get("defaultMode").is_none(), "{s}");
+    }
+
+    #[test]
+    fn the_relay_drops_the_features_it_never_uses_and_keeps_remote_control() {
+        let s = settings();
+        assert_eq!(s["disableBundledSkills"], true);
+        assert_eq!(s["disableClaudeAiConnectors"], true);
+        assert!(s.get("disableRemoteControl").is_none());
+        let deny = s["permissions"]["deny"].to_string();
+        assert!(deny.contains("\"EnterPlanMode\""), "{deny}");
+        for kept in ["ToolSearch", "PushNotification", "AskUserQuestion"] {
+            assert!(!deny.contains(kept), "{kept}");
+        }
     }
 
     #[test]
