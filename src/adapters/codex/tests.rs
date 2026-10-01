@@ -14,6 +14,7 @@ use crate::settings::Effort;
 use crate::test::OpenSandbox;
 
 const WORKER_ID: &str = "5a2e9d40-1c7b-4b38-8e6f-2d4a9c1b7e53";
+const REVIEW_ID: &str = "7c41b2e8-0d3a-4f6e-9b15-3e8a2c6d4f90";
 
 /// A worker's turn on gpt-6-luna that added one file through apply_patch
 const FRESH: &str = include_str!("../../../fixtures/codex-exec-fresh.jsonl");
@@ -116,6 +117,7 @@ fn a_new_worker_session_loads_nothing_of_the_maintainers_and_runs_kelpies_checks
     assert_eq!(hooks[1]["matcher"].as_str(), Some("^Bash$"));
     let guard = hooks[1]["hooks"][0]["command"].as_str().unwrap();
     assert!(guard.starts_with("'/k/kelpie' 'guard' "), "{guard}");
+    assert!(guard.contains(" '--pin-folder'"), "{guard}");
     assert_eq!(&argv[argv.len() - 2..], ["--", "implement #7"]);
 }
 
@@ -138,18 +140,35 @@ fn a_resumed_session_names_codexs_own_id_after_the_options() {
 }
 
 #[test]
-fn a_review_runs_no_checks_and_the_judge_no_shell() {
+fn only_a_worker_runs_commands_and_a_call_with_no_fence_writes_no_file() {
     let w = World::new();
     let mut review = w.call(Role::Reviewer, Session::New(id(WORKER_ID)));
     review.tools = Tools::Review;
-    let argv = strings(&review, None, None);
-    assert!(!argv.iter().any(|a| a == "--dangerously-bypass-hook-trust"));
-    assert!(!argv.iter().any(|a| a.starts_with("hooks.")));
-    assert!(!argv.windows(2).any(|w| w == ["--disable", "shell_tool"]));
-
     let judge = w.call(Role::Judge, Session::New(id(WORKER_ID)));
-    let argv = strings(&judge, None, None);
-    assert!(argv.windows(2).any(|w| w == ["--disable", "shell_tool"]));
+    for call in [&review, &judge] {
+        let argv = strings(call, None, None);
+        assert!(argv.windows(2).any(|w| w == ["--disable", "shell_tool"]));
+        assert!(argv.iter().any(|a| a == "--dangerously-bypass-hook-trust"));
+        let hooks = argv
+            .iter()
+            .find_map(|a| a.strip_prefix("hooks.PreToolUse="))
+            .unwrap();
+        let hooks: toml::Value = toml::from_str(&format!("h = {hooks}")).unwrap();
+        let hooks = hooks["h"].as_array().unwrap();
+        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks[0]["matcher"].as_str(), Some("^apply_patch$"));
+        // The hook refuses as Codex reads a refusal: exit 2, the reason on stderr.
+        let refuse = hooks[0]["hooks"][0]["command"].as_str().unwrap();
+        let ran = std::process::Command::new("sh")
+            .args(["-c", refuse])
+            .output()
+            .unwrap();
+        assert_eq!(ran.status.code(), Some(2));
+        assert_eq!(ran.stderr, b"kelpie: this call writes no files\n");
+    }
+    let worker = w.fenced(Path::new("/k/kelpie"), Session::New(id(WORKER_ID)));
+    let argv = strings(&worker, None, None);
+    assert!(!argv.windows(2).any(|w| w == ["--disable", "shell_tool"]));
 }
 
 #[test]
@@ -241,6 +260,10 @@ fn a_call_reads_the_login_and_writes_only_its_own_codex_home() {
     let judge = w.call(Role::Judge, Session::New(id(WORKER_ID)));
     let unfenced = super::policy(&judge, &login, &Files::of(&judge));
     assert_eq!(unfenced.hosts, [MODEL_HOST]);
+    assert!(
+        unfenced.verify_tls,
+        "Codex cannot reach its model without it"
+    );
     assert!(!unfenced.write.contains(&w.path("wt")));
 }
 
@@ -610,6 +633,20 @@ fn record_a_turn_a_resumed_turn_and_three_refusals() {
     assert!(again.text.contains("hello.txt"), "{again:?}");
     assert!(!world.path("wt/.codex/config.toml").exists());
     assert!(!world.path("outside/x").exists());
+
+    // A review round: no fence, no shell, and a hook that refuses any patch.
+    let mut review = world.call(Role::Reviewer, Session::New(id(REVIEW_ID)));
+    review.model = env("KELPIE_CODEX_MODEL").as_str().into();
+    review.effort = Effort::Low;
+    review.tools = Tools::Review;
+    review.settings = world.path("worker/review.json");
+    review.prompt = "Reply with the single word ok.".into();
+    codex.prepare(&review).unwrap();
+    let started = Instant::now();
+    let out = run_raw(&codex, &review);
+    save("codex-exec-review.jsonl", &out, started.elapsed());
+    let answer = parse_result(&out, None).unwrap();
+    assert!(answer.text.to_lowercase().contains("ok"), "{answer:?}");
     eprintln!("kept: {}", world.root.display());
     std::mem::forget(world);
 }

@@ -28,7 +28,7 @@ use super::claude::{ClaudeCli, LambLabels};
 use super::pi::step_skill;
 use super::process::{Processes, RunError};
 use crate::fence;
-use crate::guard::{FOLDER_FLAG, NAME_FLAG};
+use crate::guard::{FOLDER_FLAG, NAME_FLAG, PIN_FLAG};
 use crate::ports::{
     AgentCall, AgentError, AgentReply, Agents, Fence, Policy, Sandbox, Session, SessionId, Tools,
     Usage,
@@ -478,17 +478,21 @@ fn argv(
         argv.extend(["-c".into(), config("developer_instructions", text)]);
     }
     let mut off: Vec<&str> = FEATURES_OFF.into();
-    if call.tools == Tools::Answer {
+    // Only a worker runs commands. A review round or planner reads what
+    // its prompt holds, as Claude Code's do, with no command to run.
+    if call.tools != Tools::Work {
         off.push("shell_tool");
     }
     for feature in off {
         argv.extend(["--disable".into(), feature.into()]);
     }
-    if let Some(fence) = &call.reach.fence {
-        // Codex runs a hook only once it is trusted; kelpie wrote these itself.
-        argv.push("--dangerously-bypass-hook-trust".into());
-        argv.extend(["-c".into(), config("hooks.PreToolUse", hooks(fence))]);
-    }
+    let hooks = match &call.reach.fence {
+        Some(fence) => hooks(fence),
+        None => no_writes(),
+    };
+    // Codex runs a hook only once it is trusted; kelpie wrote these itself.
+    argv.push("--dangerously-bypass-hook-trust".into());
+    argv.extend(["-c".into(), config("hooks.PreToolUse", hooks)]);
     argv.push("--".into());
     if let Some(thread) = resumed {
         argv.push(thread.id.as_str().into());
@@ -531,6 +535,7 @@ fn hooks(fence: &Fence) -> toml::Value {
         shell_quote("guard"),
         quoted(&guard.git_common_dir),
         quoted(&guard.worktree),
+        shell_quote(PIN_FLAG),
     ]
     .into_iter()
     .chain(
@@ -546,19 +551,30 @@ fn hooks(fence: &Fence) -> toml::Value {
             .map(|n| shell_quote(&format!("{NAME_FLAG}{n}"))),
     )
     .collect();
-    let entry = |matcher: &str, command: String| {
-        let mut hook = toml::Table::new();
-        hook.insert("type".into(), "command".into());
-        hook.insert("command".into(), command.into());
-        let mut entry = toml::Table::new();
-        entry.insert("matcher".into(), matcher.into());
-        entry.insert("hooks".into(), toml::Value::Array(vec![hook.into()]));
-        toml::Value::Table(entry)
-    };
     toml::Value::Array(vec![
-        entry("^apply_patch$", confine),
-        entry("^Bash$", commands.join(" ")),
+        hook_entry("^apply_patch$", confine),
+        hook_entry("^Bash$", commands.join(" ")),
     ])
+}
+
+/// The `PreToolUse` hook of a call with no fence, which writes no file
+///
+/// Its model's `apply_patch` cannot be turned off from a call, so the hook
+/// refuses every one.
+fn no_writes() -> toml::Value {
+    let refuse = "echo 'kelpie: this call writes no files' >&2; exit 2";
+    toml::Value::Array(vec![hook_entry("^apply_patch$", refuse.into())])
+}
+
+/// One `PreToolUse` entry: a command hook for the tools `matcher` names
+fn hook_entry(matcher: &str, command: String) -> toml::Value {
+    let mut hook = toml::Table::new();
+    hook.insert("type".into(), "command".into());
+    hook.insert("command".into(), command.into());
+    let mut entry = toml::Table::new();
+    entry.insert("matcher".into(), matcher.into());
+    entry.insert("hooks".into(), toml::Value::Array(vec![hook.into()]));
+    toml::Value::Table(entry)
 }
 
 /// The whole call's policy: its fence, or none, and what Codex itself needs
@@ -589,6 +605,8 @@ fn policy(call: &AgentCall, login: &Path, files: &Files) -> Policy {
             .chain(call.reach.read.iter().cloned()),
     );
     policy.hosts.push(MODEL_HOST.to_owned());
+    // Codex verifies the model's certificate through macOS, as `gh` does (Facts).
+    policy.verify_tls = true;
     policy
 }
 
