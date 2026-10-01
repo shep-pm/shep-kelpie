@@ -10,9 +10,10 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use super::LocalReviewer;
+use super::{LocalReviewer, queue};
 use crate::adapters::process::RunError;
-use crate::ports::{Finding, ReviewerError, Severity, parse_findings};
+use crate::lease::gpu::GpuLock;
+use crate::ports::{Finding, ReviewerError, RoundStage, Severity, parse_findings};
 use crate::settings::LocalCommand;
 
 /// What every call of one round shares
@@ -24,12 +25,14 @@ struct Round<'a> {
     head: &'a str,
     round: u32,
     criteria: Option<&'a Path>,
+    watch: &'a (dyn Fn(RoundStage) + Sync),
 }
 
 impl LocalReviewer {
     /// Runs `local`'s command for round `round`, then again on a hunk of
     /// each file it skipped as too large, folding those findings back in
     /// against the original file
+    #[expect(clippy::too_many_arguments, reason = "`round`'s own, and the watch")]
     pub(super) fn command_round(
         &self,
         local: &LocalCommand,
@@ -38,6 +41,7 @@ impl LocalReviewer {
         out: &Path,
         round: u32,
         criteria: &str,
+        watch: &(dyn Fn(RoundStage) + Sync),
     ) -> Result<Vec<Finding>, ReviewerError> {
         let head = super::head(worktree)?;
         let criteria = write_criteria(out, criteria)?;
@@ -48,6 +52,7 @@ impl LocalReviewer {
             head: &head,
             round,
             criteria: criteria.as_deref(),
+            watch,
         };
         let findings = self.run(&at, out, None)?;
         let mut combined = Vec::with_capacity(findings.len());
@@ -98,10 +103,19 @@ impl LocalReviewer {
                 command.arg("--diff").arg(at.base);
             }
         }
-        let output = self.processes.output(&mut command).map_err(|e| match e {
+        let lock = GpuLock::under(&self.temp_dir);
+        let output = std::thread::scope(|scope| {
+            let (spawned, pid) = std::sync::mpsc::channel();
+            let (lock, watch) = (&lock, at.watch);
+            scope.spawn(move || queue::watch_queue(lock, &pid, watch));
+            self.processes.output_telling(&mut command, None, &|pid| {
+                let _ = spawned.send(pid);
+            })
+        })
+        .map_err(|e| match e {
             RunError::Io(e) => ReviewerError::Spawn(e.to_string()),
             RunError::Stopped => ReviewerError::Stopped,
-            // `output` never sets a deadline, so this never fires.
+            // No deadline is set, so this never fires.
             RunError::TimedOut => ReviewerError::Failed("timed out".into()),
         })?;
         if !output.status.success() {

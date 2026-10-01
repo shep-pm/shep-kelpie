@@ -9,6 +9,9 @@
 mod command;
 mod endpoint;
 mod ollama;
+mod queue;
+#[cfg(test)]
+mod watched;
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -19,7 +22,9 @@ use std::time::Duration;
 
 use super::process::Processes;
 use crate::lease::gpu::{self, Attempt, Claim, GpuHold, GpuLock, LockHolder};
-use crate::ports::{AgentError, Finding, LocalLeases, ModelSeat, Reviewer, ReviewerError};
+use crate::ports::{
+    AgentError, Finding, LocalLeases, ModelSeat, Reviewer, ReviewerError, RoundStage,
+};
 use crate::settings::{LeaseName, LocalRound};
 
 /// How often a round waiting on the GPU lock looks for a stop
@@ -34,6 +39,8 @@ pub struct LocalReviewer {
     processes: Processes,
     // Where the model sat when a round last looked, for `status`.
     seat: Arc<Mutex<Option<ModelSeat>>>,
+    // How long a round waiting on the lock naps, given the seconds it has waited
+    naps: fn(u64) -> Duration,
 }
 
 impl Default for LocalReviewer {
@@ -42,6 +49,7 @@ impl Default for LocalReviewer {
             temp_dir: gpu::temp_dir(),
             processes: Processes::default(),
             seat: Arc::default(),
+            naps: gpu::scripts_naps,
         }
     }
 }
@@ -59,13 +67,24 @@ impl LocalReviewer {
         self
     }
 
+    #[cfg(test)]
+    fn with_naps(mut self, naps: fn(u64) -> Duration) -> Self {
+        self.naps = naps;
+        self
+    }
+
     /// Ends every round in flight, and refuses new ones, as the runner stops
     pub fn stop(&self) {
         self.processes.stop();
     }
 
     // Waits on the scripts' own schedule, so kelpie keeps its place in line.
-    fn hold(&self, lease: &str, what: String) -> Result<GpuHold, Unheld> {
+    fn hold(
+        &self,
+        lease: &str,
+        what: String,
+        watch: &(dyn Fn(RoundStage) + Sync),
+    ) -> Result<GpuHold, Unheld> {
         let lock = GpuLock::named(&self.temp_dir, lease);
         let claim = Claim {
             pid: std::process::id(),
@@ -75,13 +94,24 @@ impl LocalReviewer {
             Unheld::Failed(format!("cannot take {}: {e}", lock.path().display()))
         };
         let mut waited = 0;
+        let mut queued = false;
         loop {
             match lock.try_take(&claim).map_err(cannot)? {
-                Attempt::Taken => return Ok(GpuHold::new(lock, claim.pid)),
+                Attempt::Taken => {
+                    if queued {
+                        watch(RoundStage::Running);
+                    }
+                    return Ok(GpuHold::new(lock, claim.pid));
+                }
                 Attempt::Cleared(_) => continue,
-                Attempt::Held(_) => {}
+                Attempt::Held(_) => {
+                    if !queued {
+                        watch(RoundStage::Queued);
+                        queued = true;
+                    }
+                }
             }
-            let nap = gpu::scripts_naps(waited);
+            let nap = (self.naps)(waited);
             let mut slept = Duration::ZERO;
             while slept < nap {
                 if self.processes.stopping() {
@@ -103,7 +133,7 @@ enum Unheld {
 
 impl LocalLeases for LocalReviewer {
     fn hold(&self, lease: &LeaseName, what: &str) -> Result<GpuHold, AgentError> {
-        LocalReviewer::hold(self, lease.as_str(), what.to_owned()).map_err(|e| match e {
+        LocalReviewer::hold(self, lease.as_str(), what.to_owned(), &|_| {}).map_err(|e| match e {
             Unheld::Stopped => AgentError::Stopped,
             Unheld::Failed(reason) => AgentError::Setup(reason),
         })
@@ -132,10 +162,23 @@ impl Reviewer for LocalReviewer {
         round: u32,
         criteria: &str,
     ) -> Result<Vec<Finding>, ReviewerError> {
+        self.round_watched(local, worktree, base, out, round, criteria, &|_| {})
+    }
+
+    fn round_watched(
+        &self,
+        local: &LocalRound,
+        worktree: &Path,
+        base: &str,
+        out: &Path,
+        round: u32,
+        criteria: &str,
+        watch: &(dyn Fn(RoundStage) + Sync),
+    ) -> Result<Vec<Finding>, ReviewerError> {
         let _hold = match local.lease() {
             Some(lease) => {
                 let what = format!("kelpie local round {round} in {}", worktree.display());
-                let held = self.hold(lease.as_str(), what).map_err(|e| match e {
+                let held = self.hold(lease.as_str(), what, watch).map_err(|e| match e {
                     Unheld::Stopped => ReviewerError::Stopped,
                     Unheld::Failed(reason) => ReviewerError::Failed(reason),
                 });
@@ -147,7 +190,7 @@ impl Reviewer for LocalReviewer {
         match local {
             LocalRound::Off {} => Ok(Vec::new()),
             LocalRound::Command(command) => {
-                self.command_round(command, worktree, base, out, round, criteria)
+                self.command_round(command, worktree, base, out, round, criteria, watch)
             }
             LocalRound::Endpoint(endpoint) => {
                 self.endpoint_round(endpoint, worktree, base, out, round, criteria)

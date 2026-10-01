@@ -45,11 +45,12 @@ struct Running {
 
 impl Processes {
     /// Runs `command` to its end with stdin closed, collecting its output
+    #[cfg(test)]
     pub(super) fn output(&self, command: &mut Command) -> Result<Output, RunError> {
         self.run(command, None, &|_| {})
     }
 
-    /// Like [`Self::output`], killing the child after `limit` if one is
+    /// Like `output`, killing the child after `limit` if one is
     /// given, and telling `spawned` its pid as soon as it runs
     pub(super) fn output_telling(
         &self,
@@ -60,7 +61,7 @@ impl Processes {
         self.run(command, limit.map(|l| Instant::now() + l), spawned)
     }
 
-    /// Like [`Self::output`], and kills the child once `limit` has passed
+    /// Like `output`, and kills the child once `limit` has passed
     pub(super) fn output_within(
         &self,
         command: &mut Command,

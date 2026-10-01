@@ -5,6 +5,15 @@ use std::fmt;
 use super::{Finding, ModelSeat};
 use crate::settings::LocalRound;
 
+/// Whether a local round waits for the GPU or runs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoundStage {
+    /// The round queues for the GPU
+    Queued,
+    /// The round runs, or no longer queues
+    Running,
+}
+
 /// Runs one local round, of the kind the project's settings choose
 pub trait Reviewer: Send + Sync {
     /// Checks, as the runner starts, that `local` can run: its command is
@@ -33,6 +42,29 @@ pub trait Reviewer: Send + Sync {
         round: u32,
         criteria: &str,
     ) -> Result<Vec<Finding>, ReviewerError>;
+
+    /// Runs `local` as [`Reviewer::round`] does, telling `watch` when the
+    /// round starts or stops queueing for the GPU
+    ///
+    /// A round that never queues never calls `watch`, which is what this
+    /// default does.
+    ///
+    /// # Errors
+    ///
+    /// As [`Reviewer::round`].
+    #[expect(clippy::too_many_arguments, reason = "`round`'s own, and the watch")]
+    fn round_watched(
+        &self,
+        local: &LocalRound,
+        worktree: &std::path::Path,
+        base: &str,
+        out: &std::path::Path,
+        round: u32,
+        criteria: &str,
+        _watch: &(dyn Fn(RoundStage) + Sync),
+    ) -> Result<Vec<Finding>, ReviewerError> {
+        self.round(local, worktree, base, out, round, criteria)
+    }
 
     /// Where the local model sat when a round last looked, for `status`
     ///
