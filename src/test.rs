@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use tempfile::TempDir;
 
-use crate::adapters::LocalReviewer;
+use crate::adapters::{GpuCurl, LocalReviewer};
 use crate::board::WorkerModel;
 use crate::coderabbit::CodeRabbit;
 use crate::codex::Codex;
@@ -522,6 +522,7 @@ impl Rig {
             meter: Box::new(self.meter.clone()),
             codex_meter: Box::new(self.codex_meter.clone()),
             reviewer: Arc::new(self.reviewer.clone()),
+            gpu: Arc::new(GpuCurl),
             local_leases: Arc::new(self.local_leases.clone()),
             review_bots,
             relay: Arc::clone(&self.relay) as Arc<dyn Relay>,

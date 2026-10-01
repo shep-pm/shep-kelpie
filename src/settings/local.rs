@@ -188,11 +188,17 @@ pub struct LocalCommand {
 }
 
 /// An `http://` or `https://` URL, kept without a trailing `/`
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
+#[derive(Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(try_from = "String")]
 // schemars describes a `try_from` type by its source, so the bound goes here.
 #[schemars(extend("pattern" = "^https?://[^\\s/]"))]
 pub struct EndpointUrl(String);
+
+impl std::fmt::Debug for EndpointUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("EndpointUrl(..)")
+    }
+}
 
 impl EndpointUrl {
     /// The URL, without a trailing `/`
@@ -255,6 +261,12 @@ mod tests {
     use crate::settings::{LoopReviewer, Runs, Settings};
 
     const EXAMPLE: &str = include_str!("../../settings.example.toml");
+
+    #[test]
+    fn an_endpoint_url_does_not_print_itself() {
+        let url = EndpointUrl::try_from("http://gpu-box:9835/metrics".to_owned()).unwrap();
+        assert_eq!(format!("{url:?}"), "EndpointUrl(..)");
+    }
 
     const TABLE: &str = "[app.dogs.kelpie.review.local]\n\
                          kind = \"command\"\n\

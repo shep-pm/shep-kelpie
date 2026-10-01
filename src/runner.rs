@@ -38,6 +38,9 @@ mod coderabbit;
 mod dispatch;
 mod follow_up;
 mod gate;
+mod gpu;
+#[cfg(test)]
+mod gpu_tests;
 mod guard_hooks;
 mod instructions;
 #[cfg(test)]
@@ -65,6 +68,7 @@ mod words;
 pub use crate::coderabbit::LABEL as SUMMON_LABEL;
 pub use adopt::AdoptError;
 pub use claim::IN_PROGRESS;
+pub use gpu::GpuStatus;
 pub use merge::DropError;
 pub use pace::PacerStatus;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
@@ -186,6 +190,8 @@ pub struct Runner {
     agents: RoleAgents,
     // The maintainer's home folder, for `~/` in kelpie's own settings
     home: PathBuf,
+    // The GPU's last reading, from the page kelpie's settings name
+    gpu: gpu::GpuWatch,
     // None when rulings do not go to the webhook
     webhook: Option<Webhook>,
     channels: Channels,
@@ -242,6 +248,10 @@ impl Runner {
         let leases = Arc::clone(&ports.local_leases);
         ports.agents = Arc::new(Leased::new(Arc::clone(&ports.agents), leases));
         let reviewers = kelpie_settings.reviewers;
+        let gpu = gpu::GpuWatch::start(
+            Arc::clone(&ports.gpu),
+            kelpie_settings.gpu_metrics_url.clone(),
+        );
         let agents = settings.role_agents(&kelpie_settings.agents)?;
         let lineup = settings.lineup(&kelpie_settings, home)?;
         let (channels, webhook) = ruling_channels(&settings, kelpie_settings)?;
@@ -309,6 +319,7 @@ impl Runner {
             lineup,
             agents,
             home: home.to_owned(),
+            gpu,
             webhook,
             channels,
             retry: None,
@@ -386,6 +397,7 @@ impl Runner {
             pacer: self.pacer_status(now),
             skills: self.skills.status(),
             local_model: self.ports.reviewer.seat().map(Into::into),
+            gpu: self.gpu.status(),
             local_leases: self.local_leases(),
         }
     }
