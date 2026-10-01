@@ -29,6 +29,31 @@ fn an_agent_of_the_workers_own_is_refused_however_it_is_started() {
 }
 
 #[test]
+fn every_harness_kelpie_runs_is_refused_from_a_workers_commands() {
+    use crate::settings::Harness;
+    // A harness added to settings stops compiling here until it is listed.
+    let runs = |harness: Harness| match harness {
+        Harness::ClaudeCode | Harness::Pi | Harness::Codex => true,
+        Harness::StandIn => false,
+    };
+    let harnesses = [Harness::ClaudeCode, Harness::Pi, Harness::Codex];
+    assert!(harnesses.into_iter().all(runs));
+    for program in harnesses.map(Harness::command) {
+        for command in [
+            format!("{program} exec hi"),
+            format!("/opt/homebrew/bin/{program} -p hi"),
+            format!("bash -c '{program} hi'"),
+            format!("git status && {program}"),
+        ] {
+            assert_eq!(bash(&command), Verdict::Refuse(NO_AGENTS.into()), "{command}");
+        }
+    }
+    for command in ["codex exec resume --last hi", "codex app-server", "pi --mode rpc"] {
+        assert_eq!(bash(command), Verdict::Refuse(NO_AGENTS.into()), "{command}");
+    }
+}
+
+#[test]
 fn an_agent_git_runs_for_the_worker_is_refused() {
     for command in [
         "git rebase --exec pi main",

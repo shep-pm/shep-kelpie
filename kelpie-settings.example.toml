@@ -46,14 +46,14 @@ url = "https://ntfy.sh/your-private-topic"
 
 # The agents a project may name for its worker, reviewer and judge, and its
 # session reviewers: a harness, and the model and effort it runs on. The
-# harnesses are Claude Code, `claude-code`, and pi, `pi`.
+# harnesses are Claude Code, `claude-code`, pi, `pi`, and Codex, `codex`.
 #
 # `usage` is how its usage is read, and so which account paces it: `claude`
 # (`/usage`, the default on Claude Code), `codex` (Codex's own windows), or
 # `none` for a local model, which is never paced and holds `lease` for each
 # whole call instead. `lease` defaults to `gpu`, the qwen scripts' lock.
-# It must be the harness's own reader: Claude Code takes only `claude`, and
-# pi only `none`.
+# It must be the harness's own reader: Claude Code takes only `claude`, pi
+# only `none` and Codex only `codex`.
 # [kelpie.agents.opus-high]
 # harness = "claude-code"
 # model = "claude-opus-5-5"
@@ -68,6 +68,13 @@ url = "https://ntfy.sh/your-private-topic"
 # effort = "medium"
 # url = "http://<host>:11434/v1"
 # context = 65536
+#
+# Codex runs on the ChatGPT account `codex login` signed in to, paced by
+# that plan's 5-hour and weekly windows. Its worker runs no preview.
+# [kelpie.agents.gpt]
+# harness = "codex"
+# model = "gpt-6-sol"
+# effort = "medium"
 
 # The review loop's reviewers a project may list in `review.reviewers`, by
 # name. `claude` is always the project's own Claude round, so it is not

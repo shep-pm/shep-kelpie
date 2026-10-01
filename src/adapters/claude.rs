@@ -52,7 +52,7 @@ pub struct ClaudeCli {
     program: OsString,
     pub(super) lambs: Option<Arc<dyn LambLabels>>,
     pub(super) sandbox: Arc<dyn Sandbox>,
-    home: PathBuf,
+    pub(super) home: PathBuf,
 }
 
 // The default home and tools are the maintainer's: `$HOME` and `~/.kelpie/tools`.

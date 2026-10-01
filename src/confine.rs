@@ -1,8 +1,9 @@
-//! `kelpie confine <folder>...`: a PreToolUse hook that holds Claude's file
-//! tools to the folders named
+//! `kelpie confine <folder>...`: a PreToolUse hook that holds a worker's
+//! file tools to the folders named
 //!
 //! Claude Code's sandbox covers Bash only, and `bypassPermissions` lets the
-//! file tools write anywhere. The hook reads the tool call on stdin and
+//! file tools write anywhere. Codex writes files with `apply_patch`, and
+//! runs the same hook on it. The hook reads the tool call on stdin and
 //! refuses a write outside the folders, following symlinks, so a worker's
 //! Edit and Write stop where its Bash does. Every harness's own files inside
 //! the folders are refused too. Anything unreadable is refused.
@@ -23,12 +24,28 @@ pub enum Verdict {
     Refuse(String),
 }
 
+/// Codex's file tool, whose one call can add, change, move and delete files
+const APPLY_PATCH: &str = "apply_patch";
+
+/// The lines of an `apply_patch` patch that name a file it writes
+const PATCH_PATHS: [&str; 4] = [
+    "*** Add File:",
+    "*** Update File:",
+    "*** Delete File:",
+    "*** Move to:",
+];
+
 /// Judges the tool call in `input` against `folders`
+///
+/// Claude Code's file tools name one path. Codex's `apply_patch` names
+/// each file in its patch, and every one must pass.
 pub fn judge(input: impl Read, folders: &[PathBuf]) -> Verdict {
     #[derive(Deserialize)]
     struct Call {
         cwd: PathBuf,
-        tool_input: ToolInput,
+        #[serde(default)]
+        tool_name: String,
+        tool_input: serde_json::Value,
     }
     #[derive(Deserialize)]
     struct ToolInput {
@@ -39,10 +56,57 @@ pub fn judge(input: impl Read, folders: &[PathBuf]) -> Verdict {
         Ok(call) => call,
         Err(e) => return Verdict::Refuse(format!("kelpie cannot read this tool call: {e}")),
     };
-    let Some(target) = call.tool_input.file_path.or(call.tool_input.notebook_path) else {
+    if call.tool_name == APPLY_PATCH {
+        let targets = patch_paths(&call.tool_input);
+        if targets.is_empty() {
+            return Verdict::Refuse("kelpie cannot find the files this patch writes".into());
+        }
+        return targets
+            .iter()
+            .map(|target| judge_path(&call.cwd.join(target), folders))
+            .find(|verdict| *verdict != Verdict::Allow)
+            .unwrap_or(Verdict::Allow);
+    }
+    let input: ToolInput = match serde_json::from_value(call.tool_input) {
+        Ok(input) => input,
+        Err(e) => return Verdict::Refuse(format!("kelpie cannot read this tool call: {e}")),
+    };
+    let Some(target) = input.file_path.or(input.notebook_path) else {
         return Verdict::Allow;
     };
-    let target = call.cwd.join(target);
+    judge_path(&call.cwd.join(target), folders)
+}
+
+// Every file a patch anywhere in `input` names, however its lines are
+// indented, since Codex reads them trimmed.
+fn patch_paths(input: &serde_json::Value) -> Vec<PathBuf> {
+    let mut texts = Vec::new();
+    strings(input, &mut texts);
+    texts
+        .iter()
+        .flat_map(|text| text.lines())
+        .filter_map(|line| {
+            let line = line.trim();
+            PATCH_PATHS
+                .iter()
+                .find_map(|mark| line.strip_prefix(mark))
+                .map(|path| PathBuf::from(path.trim()))
+        })
+        .collect()
+}
+
+// Every string in `value`, at any depth.
+fn strings<'a>(value: &'a serde_json::Value, out: &mut Vec<&'a str>) {
+    match value {
+        serde_json::Value::String(s) => out.push(s),
+        serde_json::Value::Array(items) => items.iter().for_each(|v| strings(v, out)),
+        serde_json::Value::Object(fields) => fields.values().for_each(|v| strings(v, out)),
+        _ => {}
+    }
+}
+
+// Whether a write to `target` stays in `folders` and off every harness's own files.
+fn judge_path(target: &Path, folders: &[PathBuf]) -> Verdict {
     let canonical: Vec<PathBuf> = folders
         .iter()
         .map(|f| f.canonicalize().unwrap_or_else(|_| f.clone()))
@@ -54,7 +118,7 @@ pub fn judge(input: impl Read, folders: &[PathBuf]) -> Verdict {
             .filter_map(|f| path.strip_prefix(f).ok().map(Path::to_owned))
             .collect()
     };
-    let Some(resolved) = resolve(&target).filter(|r| canonical.iter().any(|f| r.starts_with(f)))
+    let Some(resolved) = resolve(target).filter(|r| canonical.iter().any(|f| r.starts_with(f)))
     else {
         let allowed: Vec<_> = folders.iter().map(|f| f.display().to_string()).collect();
         return Verdict::Refuse(format!(
@@ -64,7 +128,7 @@ pub fn judge(input: impl Read, folders: &[PathBuf]) -> Verdict {
         ));
     };
     // As written and as resolved, so a link to or from `.claude` changes nothing.
-    if let Some(harness) = within(&target)
+    if let Some(harness) = within(target)
         .iter()
         .chain(&within(&resolved))
         .find_map(|p| fence::owner(p))
@@ -279,6 +343,56 @@ mod tests {
     #[test]
     fn a_call_without_a_path_goes_ahead() {
         assert_eq!(world().judge(json!({ "command": "ls" })), Verdict::Allow);
+    }
+
+    fn patch(body: &str) -> serde_json::Value {
+        json!({ "command": format!("*** Begin Patch\n{body}\n*** End Patch\n") })
+    }
+
+    #[test]
+    fn a_codex_patch_inside_the_folders_goes_ahead() {
+        let w = world();
+        let body = format!(
+            "*** Add File: src/new.rs\n+fn main() {{}}\n*** Update File: {}\n@@\n-a\n+b\n\
+             *** Delete File: old.rs",
+            w.path("target/x")
+        );
+        assert_eq!(w.judge_tool("apply_patch", patch(&body)), Verdict::Allow);
+    }
+
+    #[test]
+    fn a_codex_patch_with_any_file_outside_or_fenced_is_refused() {
+        let w = world();
+        for body in [
+            format!("*** Add File: src/ok.rs\n+x\n*** Add File: {}\n+x", w.path("home/.zshrc")),
+            "*** Update File: src/lib.rs\n*** Move to: ../home/lib.rs\n@@\n-a\n+b".into(),
+            "*** Delete File: ../home/.zshrc".into(),
+            "*** Add File: .codex/config.toml\n+x".into(),
+            "  *** Add File: .claude/settings.json\n+{}".into(),
+            "*** Update File: .mcp.json\n@@\n-a\n+b".into(),
+        ] {
+            let verdict = w.judge_tool("apply_patch", patch(&body));
+            assert!(matches!(verdict, Verdict::Refuse(_)), "{body}: {verdict:?}");
+        }
+    }
+
+    #[test]
+    fn a_codex_patch_is_read_wherever_its_call_carries_it() {
+        let w = world();
+        let text = "*** Begin Patch\n*** Add File: ../home/x\n+x\n*** End Patch";
+        for input in [json!({ "input": text }), json!({ "command": ["apply_patch", text] })] {
+            let verdict = w.judge_tool("apply_patch", input.clone());
+            assert!(matches!(verdict, Verdict::Refuse(_)), "{input}");
+        }
+    }
+
+    #[test]
+    fn a_codex_patch_naming_no_file_is_refused() {
+        let w = world();
+        for input in [json!({}), json!({ "command": "rm -rf ~" }), patch("")] {
+            let verdict = w.judge_tool("apply_patch", input.clone());
+            assert!(matches!(verdict, Verdict::Refuse(_)), "{input}");
+        }
     }
 
     #[test]

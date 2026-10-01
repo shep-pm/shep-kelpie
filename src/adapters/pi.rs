@@ -349,22 +349,39 @@ fn argv(call: &AgentCall, files: &Files) -> Vec<OsString> {
 /// pi runs a skill it is given as `/skill:<name>`. A skill none of the
 /// call's plugins holds leaves the prompt as it is.
 fn skill_prompt(call: &AgentCall) -> (String, Option<PathBuf>) {
+    match step_skill(call) {
+        Some(step) => (format!("/skill:{} {}", step.name, step.rest), Some(step.dir)),
+        None => (call.prompt.clone(), None),
+    }
+}
+
+/// The skill a step's prompt starts with, as Claude Code's `/<plugin>:<skill>`
+pub(super) struct StepSkill {
+    /// The skill's name
+    pub(super) name: String,
+    /// Its folder, which holds its `SKILL.md`
+    pub(super) dir: PathBuf,
+    /// The prompt after the command
+    pub(super) rest: String,
+}
+
+/// The skill `call`'s prompt runs, from one of its plugins, if any
+pub(super) fn step_skill(call: &AgentCall) -> Option<StepSkill> {
     let (Some(command), rest) = split_command(&call.prompt) else {
-        return (call.prompt.clone(), None);
+        return None;
     };
-    let Some((plugin, skill)) = command.trim_start_matches('/').split_once(':') else {
-        return (call.prompt.clone(), None);
-    };
-    let found = call
+    let (plugin, skill) = command.trim_start_matches('/').split_once(':')?;
+    let dir = call
         .plugin_dirs
         .iter()
         .filter(|dir| plugin_name(dir).as_deref() == Some(plugin))
         .map(|dir| dir.join("skills").join(skill))
-        .find(|dir| dir.join("SKILL.md").is_file());
-    match found {
-        Some(dir) => (format!("/skill:{skill} {rest}"), Some(dir)),
-        None => (call.prompt.clone(), None),
-    }
+        .find(|dir| dir.join("SKILL.md").is_file())?;
+    Some(StepSkill {
+        name: skill.to_owned(),
+        dir,
+        rest: rest.to_owned(),
+    })
 }
 
 // A plugin's name, from its manifest
