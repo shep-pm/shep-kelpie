@@ -249,7 +249,7 @@ impl CodexCli {
                 &files.home,
                 resumed.as_ref(),
                 instructions.as_deref(),
-            ))
+            )?)
             .current_dir(&call.cwd)
             .env("CODEX_HOME", &files.home)
             .env("TMPDIR", &files.scratch);
@@ -442,7 +442,7 @@ fn argv(
     home: &Path,
     resumed: Option<&Thread>,
     instructions: Option<&str>,
-) -> Vec<OsString> {
+) -> Result<Vec<OsString>, AgentError> {
     let mut argv: Vec<OsString> = vec!["exec".into()];
     if resumed.is_some() {
         argv.push("resume".into());
@@ -498,24 +498,39 @@ fn argv(
     if let Some(thread) = resumed {
         argv.push(thread.id.as_str().into());
     }
-    argv.push(prompt(call).into());
-    argv
+    argv.push(prompt(call)?.into());
+    Ok(argv)
 }
 
 /// The prompt as Codex takes it
 ///
 /// Kelpie starts a step's prompt with Claude Code's `/<plugin>:<skill>`.
-/// Codex is told to follow that skill's file, which its sandbox reads.
-fn prompt(call: &AgentCall) -> String {
-    match step_skill(call) {
-        Some(step) => format!(
+/// A worker is told to follow that skill's file, which its shell reads. A
+/// call with no shell has no tool that reads a file, so kelpie reads the
+/// skill's `SKILL.md` itself and puts it in the prompt.
+fn prompt(call: &AgentCall) -> Result<String, AgentError> {
+    let Some(step) = step_skill(call) else {
+        return Ok(call.prompt.clone());
+    };
+    let file = step.dir.join("SKILL.md");
+    if call.tools == Tools::Work {
+        return Ok(format!(
             "Follow the skill `{}` in {}: read it first, then do what it says for this.\n\n{}",
             step.name,
-            step.dir.join("SKILL.md").display(),
+            file.display(),
             step.rest
-        ),
-        None => call.prompt.clone(),
+        ));
     }
+    let skill = std::fs::read_to_string(&file)
+        .map_err(|e| AgentError::Setup(format!("cannot read {}: {}", file.display(), e.kind())))?;
+    Ok(format!(
+        "Follow the skill `{}`, whose SKILL.md is below, and do what it says for this.\n\n\
+         <skill name=\"{}\">\n{}\n</skill>\n\n{}",
+        step.name,
+        step.name,
+        skill.trim_end(),
+        step.rest
+    ))
 }
 
 /// The `PreToolUse` hooks that run kelpie's checks, as Codex's config takes them

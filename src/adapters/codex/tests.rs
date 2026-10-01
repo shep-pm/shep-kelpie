@@ -42,6 +42,7 @@ fn id(id: &str) -> SessionId {
 
 fn strings(call: &AgentCall, resumed: Option<&Thread>, instructions: Option<&str>) -> Vec<String> {
     argv(call, &Files::of(call).home, resumed, instructions)
+        .unwrap()
         .into_iter()
         .map(|a| a.into_string().unwrap())
         .collect()
@@ -172,28 +173,46 @@ fn only_a_worker_runs_commands_and_a_call_with_no_fence_writes_no_file() {
 }
 
 #[test]
-fn a_steps_skill_is_a_file_codex_is_told_to_follow() {
+fn a_steps_skill_is_a_file_a_worker_reads_and_text_a_call_with_no_shell_is_given() {
     let w = World::new();
     let plugin = w.path("skills/mattpocock");
     std::fs::create_dir_all(plugin.join(".claude-plugin")).unwrap();
-    std::fs::create_dir_all(plugin.join("skills/implement")).unwrap();
+    for skill in ["implement", "review"] {
+        std::fs::create_dir_all(plugin.join("skills").join(skill)).unwrap();
+        std::fs::write(
+            plugin.join("skills").join(skill).join("SKILL.md"),
+            format!("---\nname: {skill}\n---\nThe {skill} steps.\n"),
+        )
+        .unwrap();
+    }
     std::fs::write(
         plugin.join(".claude-plugin/plugin.json"),
         r#"{"name":"mattpocock"}"#,
     )
     .unwrap();
-    std::fs::write(plugin.join("skills/implement/SKILL.md"), "---\n").unwrap();
     let mut call = w.call(Role::Worker, Session::New(id(WORKER_ID)));
+    call.tools = Tools::Work;
     call.plugin_dirs = vec![plugin.clone()];
     call.prompt = "/mattpocock:implement Implement issue #7".into();
     let prompt = strings(&call, None, None).pop().unwrap();
     let skill = plugin.join("skills/implement/SKILL.md");
     assert!(prompt.contains(skill.to_str().unwrap()), "{prompt}");
+    assert!(!prompt.contains("The implement steps."), "{prompt}");
     assert!(prompt.ends_with("\n\nImplement issue #7"), "{prompt}");
 
     call.prompt = "/mattpocock:tdd Implement issue #7".into();
     let prompt = strings(&call, None, None).pop().unwrap();
     assert_eq!(prompt, "/mattpocock:tdd Implement issue #7");
+
+    // A review round, a planner or a judge has no tool that reads a file.
+    let mut review = w.call(Role::Reviewer, Session::New(id(REVIEW_ID)));
+    review.tools = Tools::Review;
+    review.plugin_dirs = vec![plugin.clone()];
+    review.prompt = "/mattpocock:review Review pull request #8".into();
+    let prompt = strings(&review, None, None).pop().unwrap();
+    assert!(prompt.contains("The review steps."), "{prompt}");
+    assert!(!prompt.contains(plugin.to_str().unwrap()), "{prompt}");
+    assert!(prompt.ends_with("\n\nReview pull request #8"), "{prompt}");
 }
 
 #[test]
