@@ -17,9 +17,10 @@ use crate::shepherd;
 /// What could not move, so the runner never opens on half its files.
 pub fn moved(old: &Path, kelpie_home: &Path, project: &ProjectName) -> Result<(), String> {
     let shared = migrate::shared(old, kelpie_home);
+    let codex = migrate::codex(old, kelpie_home)?;
     let own = migrate::project(old, kelpie_home, project)?;
     let mut lines = migrate::run(&shared)?;
-    for line in migrate::run(&own)? {
+    for line in migrate::run(&codex)?.into_iter().chain(migrate::run(&own)?) {
         if !lines.contains(&line) {
             lines.push(line);
         }
