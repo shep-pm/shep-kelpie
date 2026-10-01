@@ -212,6 +212,21 @@ Lookout edits a project's table in the runner's pane, and kelpie's own settings 
 
 Kelpie refuses a shepherd on another shep minor or major than the pinned one, naming both versions. The relay's `kelpie relay-*` commands talk to the shepherd's socket with the shep client kelpie is built with, never a `shep` on `PATH`.
 
+### Upgrading
+
+Adopt and add kelpie through one link, `~/.kelpie/bin/kelpie`, which points at a file in `~/.kelpie/builds`. `shep kelpie upgrade` keeps that layout:
+
+```sh
+shep kelpie upgrade --release v0.2.0   # builds the tag
+shep kelpie upgrade --ref my-branch    # builds a branch, tag or commit
+shep kelpie upgrade --binary ./kelpie  # installs a build made elsewhere
+shep kelpie upgrade --rollback         # the previous build, back
+```
+
+It builds in its own target folder under `~/.kelpie/upgrade`, keeps the build as a new file in `builds` (signing it on macOS), and relinks. Then it restarts the dog, and each runner after it, waiting for each to answer before the next. A runner with a merge in flight is waited for, up to 30 minutes. The link it replaced stays as `bin/kelpie.previous`, which `--rollback` swaps back.
+
+Before anything changes it refuses a sheep that does not run through the link, a second upgrade running at once (the lock is `~/.kelpie/upgrade.lock`), and a `--binary` that is not executable. It also stops when the new build is for another shep minor than the shepherd runs, since the restart would end in a refusal. Nothing is relinked or restarted then, and the message gives the steps: upgrade shep and restart its shepherd, then run the new build's own `upgrade --binary`. Kelpie never saves, kills or musters the shepherd itself.
+
 ### Moving an install from `~/.kelpie/shep`
 
 An install from before `shep kelpie` runs its runners and dog from a Flockfile under `SHEP_HOME=~/.kelpie/shep`. It keeps working as it is. To move it into your own shepherd:

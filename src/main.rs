@@ -8,6 +8,12 @@
 //! `gate` and `drop`: a project in the maintainer's own flock, the one
 //! `-p` names or whose repo holds the folder it runs in.
 //!
+//! `shep kelpie upgrade --release <tag> | --ref <ref> | --binary <path> | --rollback`:
+//! installs a new build and restarts kelpie onto it, or puts the previous one back.
+//!
+//! `kelpie shep-version`: the shep version this build is for, which an
+//! upgrade reads from the new build before it restarts anything.
+//!
 //! `shep kelpie doctor [<project>] [--test-alert]`: checks what the projects need
 //! on this machine, and changes nothing. Run as `shep kelpie doctor`.
 //!
@@ -88,6 +94,11 @@ fn main() -> ExitCode {
         [command, rest @ ..] if shep_kelpie::flock::VERBS.contains(&command.as_str()) => {
             shep_kelpie::flock::main(command, rest)
         }
+        [command, rest @ ..] if command == "upgrade" => shep_kelpie::flock::upgrade::main(rest),
+        [command] if command == "shep-version" => {
+            println!("{}", shepherd::SHEP_VERSION);
+            ExitCode::SUCCESS
+        }
         [command, rest @ ..] if command == "doctor" => shep_kelpie::doctor::main(rest),
         [role, domains @ ..] if role == "browse-guard" => {
             hook(shep_kelpie::browse::judge(std::io::stdin().lock(), domains))
@@ -149,7 +160,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: shep-kelpie add [<project>] | add <issue>\n       shep-kelpie start | pause | status\n       shep-kelpie rule [<id> <answer>]\n       shep-kelpie rework <pr> | adopt <pr>\n       shep-kelpie gate [<issue>] | drop [<issue>]\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie browse-guard <domain>...\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n       shep-kelpie shots-mcp <tools> <job>\n       shep-kelpie mcp-connect <socket>\n       shep-kelpie relay-yes <project> <id>\n       shep-kelpie relay-answer <project> <params>\n       shep-kelpie relay-gate <kelpie>\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.\n\n{}\n\n{}",
+                "usage: shep-kelpie add [<project>] | add <issue>\n       shep-kelpie start | pause | status\n       shep-kelpie rule [<id> <answer>]\n       shep-kelpie rework <pr> | adopt <pr>\n       shep-kelpie gate [<issue>] | drop [<issue>]\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie upgrade --release <tag> | --ref <ref> | --binary <path> | --rollback\n       shep-kelpie shep-version\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie browse-guard <domain>...\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n       shep-kelpie shots-mcp <tools> <job>\n       shep-kelpie mcp-connect <socket>\n       shep-kelpie relay-yes <project> <id>\n       shep-kelpie relay-answer <project> <params>\n       shep-kelpie relay-gate <kelpie>\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.\n\n{}\n\n{}",
                 shep_kelpie::lease::cli::USAGE,
                 shep_kelpie::flock::USAGE,
                 shep_kelpie::flock::rule::HELP

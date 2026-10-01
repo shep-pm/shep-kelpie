@@ -88,6 +88,22 @@ pub async fn connect(shep_home: &Path) -> Result<Client, ConnectRefused> {
     Ok(client)
 }
 
+/// The shep version the shepherd at `shep_home` runs, whichever line it is on
+///
+/// # Errors
+///
+/// A message when nothing answers on the socket, or the shepherd names no version.
+pub async fn running_version(shep_home: &Path) -> Result<String, String> {
+    match Client::connect(&shep_home.join("run/shep.sock")).await {
+        Ok(client) => Ok(client.daemon().daemon_version.as_str().to_owned()),
+        Err(ConnectError::ProtocolMismatch {
+            daemon_version: Some(version),
+            ..
+        }) => Ok(version),
+        Err(e) => Err(ConnectRefused::Unreachable(e.to_string()).describe(shep_home)),
+    }
+}
+
 /// Whether `error` is shep's answer to a request naming no sheep it has
 ///
 /// A trigger on an unknown name is refused with `NotFound`, never answered
@@ -96,8 +112,8 @@ pub fn names_no_sheep(error: &RequestError) -> bool {
     matches!(error, RequestError::Rpc(e) if e.code == RpcErrorCode::NotFound)
 }
 
-// A version's major and minor.
-fn release_line(version: &str) -> (Option<&str>, Option<&str>) {
+/// A version's major and minor
+pub(crate) fn release_line(version: &str) -> (Option<&str>, Option<&str>) {
     let mut parts = version.split('.');
     (parts.next(), parts.next())
 }

@@ -10,6 +10,7 @@
 pub mod add;
 pub mod control;
 pub mod rule;
+pub mod upgrade;
 mod verbs;
 
 pub use verbs::{USAGE, VERBS, main, split_project, verb_first};

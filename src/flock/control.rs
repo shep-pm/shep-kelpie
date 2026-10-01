@@ -140,6 +140,18 @@ pub async fn start(client: &Client, project: &ProjectName) -> Result<Vec<String>
     }
 }
 
+/// What `sheep`'s runner answers `status`, or `None` while it is starting or down
+///
+/// # Errors
+///
+/// A message when the shepherd cannot be asked.
+pub(super) async fn status_body(client: &Client, sheep: &str) -> Result<Option<String>, String> {
+    Ok(match trigger(client, sheep, "status", None).await? {
+        Answered::Runner(body) => Some(body),
+        Answered::Starting | Answered::Down => None,
+    })
+}
+
 /// Sends `project`'s runner `pause`
 ///
 /// # Errors
