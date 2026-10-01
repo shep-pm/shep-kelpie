@@ -293,6 +293,11 @@ fn spend_without_dollars_shows_tokens_and_says_it_has_none() {
     assert_eq!((usage, cost_usd), (used, None));
 
     let item = &rig.ask(&runner, "status", None)["work_item"];
+    assert_eq!(
+        (&item["cost_usd"], &item["unpriced_calls"]),
+        (&json!(0.0), &json!(1)),
+        "the total says it leaves the unpriced call out"
+    );
     let tokens = json!({ "input": 120, "cache_write": 0, "cache_read": 2400, "output": 35 });
     assert_eq!(
         item["by_role"]["worker"],

@@ -124,8 +124,11 @@ pub struct WorkItemStatus<'a> {
     pub coderabbit: CodeRabbitTally,
     /// Claude calls made for it so far
     pub calls: usize,
-    /// What they have cost, in US dollars
+    /// What the calls whose harness reports dollars have cost, in US dollars
     pub cost_usd: f64,
+    /// Calls whose harness reported no dollars, which `cost_usd` leaves out
+    #[serde(skip_serializing_if = "is_zero")]
+    pub unpriced_calls: usize,
     /// Calls and cost by role
     pub by_role: Spend,
     /// Its qwen rounds, which cost no money
@@ -133,6 +136,10 @@ pub struct WorkItemStatus<'a> {
     /// Why kelpie's last shots run failed, when it did
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shots_failed: Option<&'a str>,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
@@ -151,6 +158,7 @@ impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
             coderabbit: item.coderabbit,
             calls: item.calls.len(),
             cost_usd: item.cost().usd(),
+            unpriced_calls: item.calls.iter().filter(|c| c.unpriced).count(),
             by_role: item.spend(),
             qwen: item.qwen,
             shots_failed: item.shots.as_ref().and_then(|r| r.run.failed.as_deref()),
