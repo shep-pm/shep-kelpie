@@ -1,41 +1,44 @@
 //! The dog's door: the socket a command asks for a counted lease at
 //!
-//! A command connects to `<kelpie home>/dog/lease.sock` and sends one
-//! [`Ask`] line. The dog answers with [`Answer`] lines: queued, then
+//! A command connects to `~/.kelpie/dog/lease.sock`, or the socket
+//! `KELPIE_LEASE_SOCKET` names, and sends one [`Ask`] line. The dog answers with [`Answer`] lines: queued, then
 //! granted. The command holds the lease for as long as it keeps the
 //! connection open, so one that ends or dies gives its place back. A
 //! worker's sandbox may connect to this socket and to no shep socket.
 
 use std::ffi::OsString;
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
+use nix::fcntl::{FcntlArg, FdFlag, fcntl};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 
-/// The socket's path under kelpie's home, beside the dog's book
-pub const SOCKET: &str = "dog/lease.sock";
+/// The variable naming the door, which a runner sets for its workers
+pub const SOCKET_VAR: &str = "KELPIE_LEASE_SOCKET";
 
-/// The door under kelpie's home `kelpie_home`
-pub fn socket_in(kelpie_home: &Path) -> PathBuf {
-    kelpie_home.join(SOCKET)
-}
+/// The door's path under the home folder
+const SOCKET: &str = ".kelpie/dog/lease.sock";
 
-/// The door: under `KELPIE_HOME`, or `~/.kelpie` when that is unset
+/// The door: `KELPIE_LEASE_SOCKET`, or `~/.kelpie/dog/lease.sock`
+///
+/// Never under `KELPIE_HOME`: shep starts the adopted dog without it, so
+/// a runner and its workers would look somewhere the dog is not.
 ///
 /// # Errors
 ///
-/// A message when neither `KELPIE_HOME` nor `HOME` is set.
+/// A message when neither `KELPIE_LEASE_SOCKET` nor `HOME` is set.
 pub fn socket() -> Result<PathBuf, String> {
-    socket_from(std::env::var_os("KELPIE_HOME"), std::env::var_os("HOME"))
+    socket_from(std::env::var_os(SOCKET_VAR), std::env::var_os("HOME"))
 }
 
-fn socket_from(kelpie_home: Option<OsString>, home: Option<OsString>) -> Result<PathBuf, String> {
-    match (kelpie_home, home) {
-        (Some(kelpie_home), _) => Ok(socket_in(Path::new(&kelpie_home))),
-        (None, Some(home)) => Ok(socket_in(&Path::new(&home).join(".kelpie"))),
-        (None, None) => Err("neither KELPIE_HOME nor HOME is set".into()),
+fn socket_from(named: Option<OsString>, home: Option<OsString>) -> Result<PathBuf, String> {
+    match (named.filter(|n| !n.is_empty()), home) {
+        (Some(named), _) => Ok(PathBuf::from(named)),
+        (None, Some(home)) => Ok(Path::new(&home).join(SOCKET)),
+        (None, None) => Err(format!("neither {SOCKET_VAR} nor HOME is set")),
     }
 }
 
@@ -50,6 +53,10 @@ pub struct Ask {
     pub pid: u32,
     /// What it runs, for `status`
     pub what: String,
+    /// Whether its command already runs under a grant from a dog that went
+    /// away, so the dog seats it at once rather than counting it twice
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub running: bool,
 }
 
 /// What the dog answers, one line each
@@ -59,18 +66,22 @@ pub struct Ask {
 pub enum Answer {
     /// Waiting, with this many ahead
     Queued(usize),
-    /// Held until the connection closes
+    /// Held until the connection closes or the holder sends [`RETURN`]
     Granted,
     /// Refused, saying why, and the dog closes the connection
     Error(String),
 }
 
+/// The line a holder sends to give the lease back while its connection
+/// stays open, as it may in a process its command left behind
+pub const RETURN: &str = "return";
+
 /// One command's connection to the door, holding its place while open
 #[derive(Debug)]
 pub struct Visit {
     answers: Lines<BufReader<OwnedReadHalf>>,
-    // Kept open: dropping it is how the dog hears the lease given back.
-    _ask: OwnedWriteHalf,
+    // Kept open: closing it is how the dog hears the lease given back.
+    ask: OwnedWriteHalf,
 }
 
 impl Visit {
@@ -80,12 +91,9 @@ impl Visit {
     ///
     /// A message naming the socket when the dog cannot be reached.
     pub async fn knock(socket: &Path, ask: &Ask) -> Result<Self, String> {
-        let stream = UnixStream::connect(socket).await.map_err(|e| {
-            format!(
-                "cannot reach the dog at {}: {e}. Is the adopted kelpie running? `shep enable kelpie` runs it",
-                socket.display()
-            )
-        })?;
+        let stream = UnixStream::connect(socket)
+            .await
+            .map_err(|e| format!("cannot reach the dog at {}: {e}", socket.display()))?;
         let (read, mut write) = stream.into_split();
         let mut line = serde_json::to_vec(ask).expect("an ask serializes to JSON");
         line.push(b'\n');
@@ -95,7 +103,7 @@ impl Visit {
             .map_err(|e| format!("cannot ask the dog: {e}"))?;
         Ok(Self {
             answers: BufReader::new(read).lines(),
-            _ask: write,
+            ask: write,
         })
     }
 
@@ -115,6 +123,31 @@ impl Visit {
         })
         .transpose()
     }
+
+    /// Lets processes started from now on inherit the connection, or not
+    ///
+    /// A command started while it is inheritable holds the lease with its
+    /// whole process tree, however the process that asked ends.
+    ///
+    /// # Errors
+    ///
+    /// A message when the connection's flags cannot be changed.
+    pub fn inheritable(&self, inherit: bool) -> Result<(), String> {
+        let flags = if inherit {
+            FdFlag::empty()
+        } else {
+            FdFlag::FD_CLOEXEC
+        };
+        let fd = self.ask.as_ref().as_raw_fd();
+        fcntl(fd, FcntlArg::F_SETFD(flags))
+            .map(drop)
+            .map_err(|e| format!("cannot pass the lease to the command: {e}"))
+    }
+
+    /// Gives the lease back, whatever else still holds the connection
+    pub async fn give_back(mut self) {
+        let _ = self.ask.write_all(format!("{RETURN}\n").as_bytes()).await;
+    }
 }
 
 #[cfg(test)]
@@ -124,16 +157,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_door_is_beside_the_book() {
-        let socket = |kelpie_home: Option<&str>, home: Option<&str>| {
-            socket_from(kelpie_home.map(Into::into), home.map(Into::into))
+    fn the_door_is_the_named_socket_or_under_the_home_folder() {
+        let socket = |named: Option<&str>, home: Option<&str>| {
+            socket_from(named.map(Into::into), home.map(Into::into))
         };
         assert_eq!(
-            socket(Some("/k"), Some("/home/me")),
-            Ok(PathBuf::from("/k/dog/lease.sock"))
+            socket(Some("/k/door.sock"), Some("/home/me")),
+            Ok(PathBuf::from("/k/door.sock"))
         );
         assert_eq!(
-            socket(None, Some("/home/me")),
+            socket(Some(""), Some("/home/me")),
             Ok(PathBuf::from("/home/me/.kelpie/dog/lease.sock"))
         );
         assert!(socket(None, None).is_err());
@@ -145,10 +178,21 @@ mod tests {
             take: "cargo-test".into(),
             pid: 42,
             what: "cargo test".into(),
+            running: false,
         };
         assert_eq!(
             serde_json::to_value(&ask).unwrap(),
             json!({ "take": "cargo-test", "pid": 42, "what": "cargo test" })
+        );
+        let rejoining = Ask {
+            running: true,
+            ..ask.clone()
+        };
+        let wire = r#"{"take":"cargo-test","pid":42,"what":"cargo test"}"#;
+        assert_eq!(serde_json::from_str::<Ask>(wire).unwrap(), ask);
+        assert_eq!(
+            serde_json::to_value(&rejoining).unwrap()["running"],
+            json!(true)
         );
         assert_eq!(
             serde_json::to_value([
@@ -158,6 +202,16 @@ mod tests {
             ])
             .unwrap(),
             json!([{ "queued": 2 }, "granted", { "error": "no" }])
+        );
+        let read: Vec<Answer> =
+            serde_json::from_str(r#"[{"queued":2},"granted",{"error":"no"}]"#).unwrap();
+        assert_eq!(
+            read,
+            [
+                Answer::Queued(2),
+                Answer::Granted,
+                Answer::Error("no".into())
+            ]
         );
     }
 }

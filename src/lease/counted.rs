@@ -4,7 +4,8 @@
 //! from a worker or a shell, known by the connection it asked on. Waiters
 //! queue in arrival order and nobody is preempted. A holder or waiter whose
 //! connection closes, because it ended or died, gives its place back.
-//! Holders are never saved: a dog restart closes every connection.
+//! Holders are never saved: a dog restart closes every connection, and
+//! each run still going asks the next dog to [`CountedLease::seat`] it.
 
 use std::collections::VecDeque;
 use std::num::NonZeroU32;
@@ -69,6 +70,9 @@ pub struct CountedStatus {
     pub holders: Vec<Held>,
     /// Who waits, next first
     pub queue: Vec<Taker>,
+    /// Whether the dog's door failed to open, so nobody can take it
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub closed: bool,
 }
 
 /// A lease several commands hold at once
@@ -78,6 +82,7 @@ pub struct CountedLease {
     capacity: NonZeroU32,
     holders: Vec<Held>,
     queue: VecDeque<Taker>,
+    closed: bool,
 }
 
 impl CountedLease {
@@ -88,6 +93,7 @@ impl CountedLease {
             capacity,
             holders: Vec::new(),
             queue: VecDeque::new(),
+            closed: false,
         }
     }
 
@@ -101,6 +107,16 @@ impl CountedLease {
         Taken::Queued {
             ahead: self.queue.len() - 1,
         }
+    }
+
+    /// Seats `taker` at `now` whatever the room, for a command already
+    /// running under a grant from a dog that went away
+    ///
+    /// Counting it keeps the next grants honest: the lease fills back to
+    /// its capacity only as such runs end.
+    pub fn seat(&mut self, taker: Taker, now: Timestamp) -> Taken {
+        self.holders.push(Held { taker, since: now });
+        Taken::Granted
     }
 
     /// Gives the lease back, or leaves its queue, for the connection
@@ -126,7 +142,18 @@ impl CountedLease {
             capacity: self.capacity,
             holders: self.holders.clone(),
             queue: self.queue.iter().cloned().collect(),
+            closed: self.closed,
         }
+    }
+
+    /// Lets up to `capacity` hold it, keeping who holds and waits
+    pub fn set_capacity(&mut self, capacity: NonZeroU32) {
+        self.capacity = capacity;
+    }
+
+    /// Marks it as out of reach, for `status`, when the door cannot open
+    pub fn close(&mut self) {
+        self.closed = true;
     }
 
     fn has_room(&self) -> bool {
@@ -223,6 +250,17 @@ mod tests {
             line["queue"],
             json!([{ "pid": 1004, "what": "cargo test 4" }])
         );
+    }
+
+    #[test]
+    fn a_run_seated_over_capacity_holds_off_the_next_grant_until_it_ends() {
+        let mut lease = lease(1);
+        lease.ask(1);
+        let now = lease.clock.now();
+        assert_eq!(lease.lease.seat(taker(2), now), Taken::Granted);
+        lease.ask(3);
+        assert_eq!(lease.leave(1), [], "two holders on one place");
+        assert_eq!(lease.leave(2), [Ticket(3)]);
     }
 
     #[test]

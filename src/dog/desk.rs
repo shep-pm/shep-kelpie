@@ -134,14 +134,20 @@ impl Desk {
 
     /// Lets up to `capacity` commands hold the `cargo-test` lease at once
     ///
-    /// Set once, as the dog opens, before anyone asks.
+    /// Those holding it keep it: a lower capacity only slows new grants.
     pub fn set_test_capacity(&mut self, capacity: std::num::NonZeroU32) {
-        self.tests = CountedLease::cargo_test(capacity);
+        self.tests.set_capacity(capacity);
     }
 
     /// Asks for the `cargo-test` lease on behalf of `taker`
     pub fn take_test(&mut self, taker: Taker) -> Taken {
         self.tests.ask(taker, self.book.now())
+    }
+
+    /// Seats `taker` in the `cargo-test` lease at once, for a command
+    /// already running under a grant from a dog that went away
+    pub fn seat_test(&mut self, taker: Taker) -> Taken {
+        self.tests.seat(taker, self.book.now())
     }
 
     /// Gives the `cargo-test` lease back, or leaves its queue, for the

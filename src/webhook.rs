@@ -55,14 +55,15 @@ pub struct KelpieSettings {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Leases {
-    /// How many commands may hold `cargo-test` at once, 3 when absent
+    /// How many commands may hold `cargo-test` at once, as set: `None`
+    /// when absent, which [`Leases::cargo_test_capacity`] reads as 3
     #[serde(default, rename = "cargo-test")]
     pub cargo_test: Option<NonZeroU32>,
 }
 
 impl Leases {
     /// How many commands may hold `cargo-test` at once
-    pub fn cargo_test(&self) -> NonZeroU32 {
+    pub fn cargo_test_capacity(&self) -> NonZeroU32 {
         self.cargo_test.unwrap_or(CARGO_TEST_CAPACITY)
     }
 }
@@ -347,10 +348,13 @@ mod tests {
     #[test]
     fn cargo_test_holds_three_unless_the_section_says() {
         let absent = KelpieSettings::from_section("").unwrap();
-        assert_eq!(absent.leases.cargo_test().get(), 3);
+        assert_eq!(absent.leases.cargo_test_capacity().get(), 3);
         let set = KelpieSettings::from_section("[leases]\ncargo-test = 5\n").unwrap();
-        assert_eq!(set.leases.cargo_test().get(), 5);
-        assert!(KelpieSettings::from_section("[leases]\ncargo-test = 0\n").is_err());
+        assert_eq!(set.leases.cargo_test_capacity().get(), 5);
+        for bad in ["0", "-1", "4294967296", "\"3\""] {
+            let text = format!("[leases]\ncargo-test = {bad}\n");
+            assert!(KelpieSettings::from_section(&text).is_err(), "{bad}");
+        }
     }
 
     #[test]

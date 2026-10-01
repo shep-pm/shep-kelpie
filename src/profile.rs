@@ -124,6 +124,8 @@ pub struct WorkerProfile<'a> {
     pub preview: Option<&'a [NonBlank]>,
     /// The shepherd's home, whose `dogs.toml` holds the webhook's URL
     pub shep_home: &'a Path,
+    /// The dog's door, the one Unix socket the worker may connect to
+    pub door: &'a Path,
 }
 
 impl WorkerProfile<'_> {
@@ -184,7 +186,7 @@ impl WorkerProfile<'_> {
             hosts,
             no_commands,
             env: self.env(),
-            sockets: vec![door::socket_in(self.kelpie_home)],
+            sockets: vec![self.door.to_owned()],
             preview,
             guard: Guard {
                 kelpie: self.kelpie.to_owned(),
@@ -208,11 +210,12 @@ impl WorkerProfile<'_> {
 
     fn env(&self) -> BTreeMap<String, PathBuf> {
         let cargo = ("CARGO_TARGET_DIR".to_owned(), self.build.to_owned());
+        let door = (door::SOCKET_VAR.to_owned(), self.door.to_owned());
         let project = self
             .build_env
             .iter()
             .map(|(name, dir)| (name.as_str().to_owned(), self.build.join(dir.as_path())));
-        [cargo].into_iter().chain(project).collect()
+        [cargo, door].into_iter().chain(project).collect()
     }
 }
 
@@ -280,6 +283,7 @@ mod tests {
             build_env: &BTreeMap::new(),
             preview: None,
             shep_home: Path::new("/srv/shep"),
+            door: Path::new("/k/dog/lease.sock"),
         }
         .settings()
     }
@@ -376,6 +380,7 @@ mod tests {
             build_env: &build_env,
             preview: None,
             shep_home: Path::new("/srv/shep"),
+            door: Path::new("/k/dog/lease.sock"),
         }
         .settings();
         assert_eq!(
@@ -383,6 +388,7 @@ mod tests {
             json!({
                 "CARGO_TARGET_DIR": "/k/targets/lab/7",
                 "BUN_INSTALL_CACHE_DIR": "/k/targets/lab/7/bun",
+                "KELPIE_LEASE_SOCKET": "/k/dog/lease.sock",
             })
         );
     }
@@ -408,6 +414,7 @@ mod tests {
             build_env: &build_env,
             preview: Some(&[]),
             shep_home: Path::new("/srv/shep"),
+            door: Path::new("/k/dog/lease.sock"),
         }
         .settings();
         assert_eq!(s["env"]["NODE_USE_ENV_PROXY"], "/k/targets/lab/7/node");
@@ -447,6 +454,7 @@ mod tests {
             build_env: &BTreeMap::new(),
             preview: Some(domains),
             shep_home: Path::new("/srv/shep"),
+            door: Path::new("/k/dog/lease.sock"),
         }
         .settings()
     }
@@ -653,6 +661,10 @@ mod tests {
         let s = settings(&[]);
         let network = s["sandbox"]["network"].as_object().unwrap();
         assert_eq!(network["allowUnixSockets"], json!(["/k/dog/lease.sock"]));
+        assert_eq!(
+            s["env"]["KELPIE_LEASE_SOCKET"], network["allowUnixSockets"][0],
+            "the worker asks at the one socket its sandbox lets it reach"
+        );
         assert!(!network.contains_key("allowAllUnixSockets"), "{network:?}");
     }
 
@@ -716,6 +728,7 @@ mod tests {
             build_env: &BTreeMap::new(),
             preview: None,
             shep_home: Path::new("/srv/shep"),
+            door: Path::new("/k/dog/lease.sock"),
         };
         let s = profile.settings();
         assert_eq!(

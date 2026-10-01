@@ -18,10 +18,12 @@ use shep_client::shep_core::protocol::request::{ActionOutcome, Response, Selecto
 use tokio::signal::unix::{Signal, SignalKind, signal};
 
 use super::counted::CARGO_TEST;
-use super::door::{self, Answer, Ask, Visit};
+use super::door;
 use super::gpu::{self, Claim, GpuLock, Waiting};
 use super::{GPU, LeaseKind};
 use crate::{dog, shepherd};
+
+pub(crate) mod counted_run;
 
 /// The usage lines for `shep-kelpie lease`
 pub const USAGE: &str = "\
@@ -62,9 +64,9 @@ async fn dispatch(args: &[String]) -> Result<ExitCode, String> {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
         ["run", GPU, "--", command @ ..] if !command.is_empty() => run_gpu(command).await,
-        ["run", CARGO_TEST, "--", command @ ..] if !command.is_empty() => {
-            run_counted(&door::socket()?, command).await
-        }
+        ["run", CARGO_TEST, "--", command @ ..] if !command.is_empty() => Ok(ExitCode::from(
+            counted_run::run(&door::socket()?, command).await,
+        )),
         ["run", kind, "--", command @ ..] if !command.is_empty() => {
             run_book(&kind_of(kind)?, command).await
         }
@@ -153,48 +155,6 @@ async fn run_book(kind: &LeaseKind, command: &[&str]) -> Result<ExitCode, String
         .await
         .map_err(|e| format!("{e}: run `shep kelpie lease return {kind}`"));
     both(ran, returned)
-}
-
-/// Runs `command` once the dog's door at `socket` grants `cargo-test`,
-/// holding it until the command ends, and returns the command's exit code
-///
-/// # Errors
-///
-/// A message when the dog cannot be reached, refuses, or closes the door
-/// before granting, or when the command cannot be started.
-pub(crate) async fn run_counted(
-    socket: &std::path::Path,
-    command: &[&str],
-) -> Result<ExitCode, String> {
-    let mut signals = Signals::new()?;
-    let ask = Ask {
-        take: CARGO_TEST.into(),
-        pid: std::process::id(),
-        what: command.join(" "),
-    };
-    let mut visit = Visit::knock(socket, &ask).await?;
-    loop {
-        // Ending here closes the connection, which withdraws the ask.
-        let answer = tokio::select! {
-            answer = visit.answer() => answer?,
-            caught = signals.recv() => return Ok(caught.exit_code()),
-        };
-        match answer {
-            Some(Answer::Granted) => break,
-            Some(Answer::Queued(ahead)) => {
-                eprintln!("shep kelpie lease: waiting for {CARGO_TEST}, {ahead} ahead");
-            }
-            Some(Answer::Error(why)) => return Err(format!("the dog refused: {why}")),
-            None => {
-                return Err(format!(
-                    "the dog closed the door before granting {CARGO_TEST}"
-                ));
-            }
-        }
-    }
-    let ran = run_command(command, &mut signals).await;
-    drop(visit);
-    ran
 }
 
 // The command's outcome and its lease's return, with both errors if both failed.
@@ -441,12 +401,17 @@ fn signal_process(pid: u32, name: &str) {
 }
 
 fn exit_code(status: ExitStatus) -> ExitCode {
+    ExitCode::from(exit_number(status))
+}
+
+// The shell's number for how a command ended: its code, or 128 plus its signal.
+fn exit_number(status: ExitStatus) -> u8 {
     use std::os::unix::process::ExitStatusExt;
     let code = status
         .code()
         .or_else(|| status.signal().map(|s| 128 + s))
         .unwrap_or(1);
-    ExitCode::from(u8::try_from(code).unwrap_or(1))
+    u8::try_from(code).unwrap_or(1)
 }
 
 /// A signal kelpie caught while holding or waiting for a lease
@@ -460,11 +425,15 @@ enum Caught {
 impl Caught {
     // The shell's convention: 128 plus the signal's number.
     fn exit_code(self) -> ExitCode {
-        ExitCode::from(match self {
+        ExitCode::from(self.number())
+    }
+
+    fn number(self) -> u8 {
+        match self {
             Self::Hangup => 129,
             Self::Interrupt => 130,
             Self::Terminate => 143,
-        })
+        }
     }
 
     fn forward(self) -> Option<&'static str> {

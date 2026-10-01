@@ -328,6 +328,7 @@ impl Runner {
             build_env: &self.settings.worker.build_env,
             preview: previewed.then_some(self.settings.preview.domains.as_slice()),
             shep_home: &self.paths.shep_home,
+            door: &self.paths.door,
         };
         let folder = &self.paths.worker;
         let settings = folder.join("settings.json");
