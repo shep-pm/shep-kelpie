@@ -216,7 +216,7 @@ fn a_call_reads_the_login_and_writes_only_its_own_codex_home() {
     );
     assert!(!policy.write.iter().any(|p| p.starts_with(&login)));
     // The call writes only the folders Codex keeps its sessions, databases,
-    // logs, helpers and locks in, so nothing Codex loads from its home.
+    // logs and locks in, so nothing Codex loads from its home.
     let home = w.path("worker/settings.codex");
     let written: Vec<_> = policy
         .write
@@ -230,7 +230,6 @@ fn a_call_reads_the_login_and_writes_only_its_own_codex_home() {
             "archived_sessions",
             "db",
             "log",
-            "tmp",
             "thread-writer-locks",
             "installation_id"
         ]
@@ -246,6 +245,8 @@ fn a_call_reads_the_login_and_writes_only_its_own_codex_home() {
         "rules",
         "skills",
         "models_cache.json",
+        // Codex puts a folder here first on every hook's PATH.
+        "tmp/arg0/codex-arg0AbCdEf/git",
     ] {
         let path = home.join(loaded);
         assert!(
@@ -305,9 +306,10 @@ fn every_call_runs_on_a_codex_home_of_its_own_with_the_login_linked_in() {
 
     // The folders the call writes are made before it runs, since it cannot
     // make them in a home it may not write.
-    for folder in ["sessions", "db", "log", "tmp"] {
+    for folder in ["sessions", "db", "log"] {
         assert!(home.join(folder).is_dir(), "{folder}");
     }
+    assert!(!home.join("tmp").exists());
 }
 
 #[test]

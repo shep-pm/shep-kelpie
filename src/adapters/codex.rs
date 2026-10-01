@@ -70,19 +70,20 @@ const DATABASES: &str = "db";
 const LOGS: &str = "log";
 
 /// The only folders in a call's Codex home the call may write: its
-/// sessions, databases, logs, helpers and locks
+/// sessions, databases, logs and locks
 ///
 /// Everything else there is Codex's to load, not to write: its login, its
 /// config, `hooks.json`, `.env` (whose variables reach every hook's shell),
 /// `AGENTS.md` and `AGENTS.override.md`, rules, skills and the model catalog.
 /// A list of those would miss the next one Codex adds, so the call writes
-/// only these.
-const WRITTEN: [&str; 6] = [
+/// only these. Not `tmp`: Codex puts a folder in it first on every hook's
+/// PATH, so a `git` planted there would run inside `kelpie guard`. Codex
+/// runs on without it (Facts).
+const WRITTEN: [&str; 5] = [
     "sessions",
     "archived_sessions",
     DATABASES,
     LOGS,
-    "tmp",
     "thread-writer-locks",
 ];
 
