@@ -16,9 +16,9 @@ use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use super::bridge::{LONGEST_SOCKET, unguessable};
 use crate::confine::Verdict;
@@ -110,7 +110,7 @@ impl Forwarder {
         }
         std::fs::create_dir_all(folder)
             .map_err(|e| format!("cannot make {}: {e}", folder.display()))?;
-        sweep(folder);
+        sweep(folder, *STARTED);
         let listener = UnixListener::bind(&socket)
             .map_err(|e| format!("cannot open {}: {e}", socket.display()))?;
         let stopping = Arc::new(AtomicBool::new(false));
@@ -129,9 +129,13 @@ impl Forwarder {
     }
 }
 
+// When this process first opened a forwarder: a socket older than that is an
+// earlier kelpie's. One this process made may be bound and not yet listening.
+static STARTED: LazyLock<SystemTime> = LazyLock::new(SystemTime::now);
+
 // Removes the sockets an earlier kelpie left in `folder` when it was killed
-// before it could. One that still answers belongs to a call in flight.
-fn sweep(folder: &Path) {
+// before it could, those last changed before `before` that nothing answers on.
+fn sweep(folder: &Path, before: SystemTime) {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return;
     };
@@ -141,7 +145,12 @@ fn sweep(folder: &Path) {
             .and_then(|n| n.to_str())
             .and_then(|n| n.strip_suffix(".sock"))
             .is_some_and(|n| n.len() == 32 && n.bytes().all(|b| b.is_ascii_hexdigit()));
+        let old = path
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|changed| changed < before);
         if ours
+            && old
             && UnixStream::connect(&path)
                 .is_err_and(|e| e.kind() == io::ErrorKind::ConnectionRefused)
         {

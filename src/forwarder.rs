@@ -6,6 +6,8 @@
 //! outside the sandbox, which passes one request, the chat completions call,
 //! and refuses every other path and method by name.
 
+use std::net::{IpAddr, Ipv4Addr};
+
 use crate::confine::Verdict;
 use crate::settings::EndpointUrl;
 
@@ -70,7 +72,7 @@ impl Upstream {
         };
         Ok(Self {
             address,
-            host: host.trim_matches(['[', ']']).to_ascii_lowercase(),
+            host: canonical(host),
             base: base.to_owned(),
         })
     }
@@ -83,18 +85,16 @@ impl Upstream {
 
     /// Whether an allowed domain such as `*.example.com` would let a sandbox reach the server
     ///
-    /// Loopback names count: the sandbox opens every local port to them.
+    /// Loopback names count in any spelling, since the sandbox opens every
+    /// local port to them. A different name or address for the same machine
+    /// cannot be told without resolving it.
     pub fn is_reached_by(&self, domain: &str) -> bool {
-        let domain = domain.trim().trim_matches(['[', ']']).to_ascii_lowercase();
-        let loopback = ["localhost", "127.0.0.1", "::1", "0.0.0.0"];
-        let covers = |host: &str| match domain.strip_prefix("*.") {
-            Some(suffix) => host.ends_with(&format!(".{suffix}")),
-            None => host == domain,
-        };
-        covers(&self.host)
-            || loopback
-                .iter()
-                .any(|n| covers(n) || domain == format!("*.{n}"))
+        let domain = canonical(domain);
+        if let Some(suffix) = domain.strip_prefix("*.") {
+            return self.host.ends_with(&format!(".{suffix}")) || loops_back(suffix);
+        }
+        let same_address = address(&domain).is_some() && address(&domain) == address(&self.host);
+        domain == self.host || same_address || loops_back(&domain)
     }
 
     /// The path the one passed request asks for
@@ -139,6 +139,50 @@ impl Upstream {
             quote(method, path),
         ))
     }
+}
+
+// A host as `srt` compares it: no brackets or trailing dot, in lower case.
+fn canonical(name: &str) -> String {
+    let name = name.trim().trim_matches(['[', ']']);
+    name.trim_end_matches('.').to_ascii_lowercase()
+}
+
+// An IP address in any spelling an `inet_aton` takes, `127.1` and `0x7f.1` included.
+fn address(name: &str) -> Option<IpAddr> {
+    if let Ok(ip) = name.parse() {
+        return Some(ip);
+    }
+    let number = |part: &str| match part.strip_prefix("0x") {
+        Some(hex) => u64::from_str_radix(hex, 16).ok(),
+        None if part.len() > 1 && part.starts_with('0') => u64::from_str_radix(part, 8).ok(),
+        None => part.parse().ok(),
+    };
+    let parts: Vec<u64> = name.split('.').map(number).collect::<Option<_>>()?;
+    let (last, leading) = parts.split_last()?;
+    if leading.len() > 3 {
+        return None;
+    }
+    let free = 8 * (4 - leading.len() as u32);
+    if leading.iter().any(|p| *p > 255) || *last >= 1 << free {
+        return None;
+    }
+    let high = leading.iter().fold(0u64, |all, p| all << 8 | p) << free;
+    Some(Ipv4Addr::from(u32::try_from(high | last).ok()?).into())
+}
+
+// Whether `name` is this machine however it is written.
+fn loops_back(name: &str) -> bool {
+    let local =
+        name == "localhost" || name.ends_with(".localhost") || name == "localhost.localdomain";
+    let ours = |ip: Ipv4Addr| ip.is_loopback() || ip.is_unspecified();
+    local
+        || match address(name) {
+            Some(IpAddr::V4(ip)) => ours(ip),
+            Some(IpAddr::V6(ip)) => {
+                ip.is_loopback() || ip.is_unspecified() || ip.to_ipv4_mapped().is_some_and(ours)
+            }
+            None => false,
+        }
 }
 
 // What was asked, cut short and with control characters dropped, since a
@@ -188,10 +232,28 @@ mod tests {
             "127.0.0.1",
             "[::1]",
             "*.localhost",
+            "127.0.0.2",
+            "127.1",
+            "0x7f.1",
+            "2130706433",
+            "localhost.",
+            "::ffff:127.0.0.1",
+            "0:0:0:0:0:0:0:1",
+            "localhost.localdomain",
+            "models.example.test.",
+            "0.0.0.0",
+            "::",
         ] {
             assert!(u.is_reached_by(domain), "{domain}");
         }
-        for domain in ["github.com", "example.test", "*.other.test", "notlocalhost"] {
+        for domain in [
+            "github.com",
+            "example.test",
+            "*.other.test",
+            "notlocalhost",
+            "128.0.0.1",
+            "10.0.0.1",
+        ] {
             assert!(!u.is_reached_by(domain), "{domain}");
         }
         assert!(upstream("http://[2001:db8::9]:80/v1").is_reached_by("2001:db8::9"));

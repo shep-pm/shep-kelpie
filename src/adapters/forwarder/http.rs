@@ -246,3 +246,33 @@ pub(super) fn chunked(reader: &mut impl BufRead) -> io::Result<Vec<u8>> {
         left = left.checked_sub(line.len() + 2).ok_or_else(invalid)?;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::BufReader;
+
+    use super::*;
+
+    // Gives 'a' for ever, and fails the test once more than a megabyte is taken.
+    struct Endless(usize);
+
+    impl Read for Endless {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.0 += buf.len();
+            assert!(self.0 < 1 << 20, "read past any limit");
+            buf.fill(b'a');
+            Ok(buf.len())
+        }
+    }
+
+    #[test]
+    fn a_line_with_no_end_stops_at_its_limit() {
+        let mut reader = BufReader::new(Endless(0));
+        let err = read_line(&mut reader, 100).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        let err = Head::read(&mut BufReader::new(Endless(0))).unwrap_err();
+        assert_eq!(err.status, 400);
+        let err = chunked(&mut BufReader::new(Endless(0))).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+}

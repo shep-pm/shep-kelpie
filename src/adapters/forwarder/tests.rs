@@ -47,6 +47,15 @@ fn chat(body: &str) -> Vec<u8> {
     .into_bytes()
 }
 
+// Closing a Unix socket with unread data ends the peer's read with EOF on macOS
+// and with a reset on Linux.
+fn ended_or_reset<T>(read: &io::Result<T>) -> bool {
+    match read {
+        Ok(_) => true,
+        Err(e) => e.kind() == io::ErrorKind::ConnectionReset,
+    }
+}
+
 fn status(reply: &str) -> &str {
     reply.lines().next().unwrap_or("")
 }
@@ -190,7 +199,7 @@ fn dropping_the_forwarder_ends_a_call_in_flight_and_removes_the_socket() {
     assert!(UnixStream::connect(&socket).is_err());
     let mut rest = Vec::new();
     let ended = idle.read_to_end(&mut rest);
-    assert!(ended.is_ok(), "{ended:?}");
+    assert!(ended_or_reset(&ended), "{ended:?}");
 }
 
 #[test]
@@ -213,7 +222,7 @@ fn a_chunk_size_that_would_wrap_the_body_cap_is_refused() {
 }
 
 #[test]
-fn a_line_with_no_end_is_refused_before_it_is_buffered() {
+fn a_line_with_no_end_is_refused_with_a_400() {
     let server = StandInEndpoint::start([]);
     let (_dir, forwarder) = forwarder(server.url());
     let endless = vec![b'a'; super::http::HEAD_MAX * 4];
@@ -349,11 +358,12 @@ fn dropping_the_forwarder_ends_a_call_the_model_server_never_answers() {
     drop(forwarder);
     assert!(started.elapsed() < Duration::from_secs(5));
     let mut rest = Vec::new();
-    assert!(stream.read_to_end(&mut rest).is_ok());
+    let ended = stream.read_to_end(&mut rest);
+    assert!(ended_or_reset(&ended), "{ended:?}");
 }
 
 #[test]
-fn a_new_forwarder_clears_the_sockets_a_killed_one_left_and_nothing_else() {
+fn a_sweep_clears_only_old_sockets_nothing_answers_on() {
     let dir = tempfile::tempdir_in("/tmp").unwrap();
     let folder = dir.path().canonicalize().unwrap();
     let name = |c: char| format!("{}.sock", c.to_string().repeat(32));
@@ -363,8 +373,10 @@ fn a_new_forwarder_clears_the_sockets_a_killed_one_left_and_nothing_else() {
     let _live = UnixListener::bind(&live).unwrap();
     let other = folder.join("kept.sock");
     drop(UnixListener::bind(&other).unwrap());
-    let server = StandInEndpoint::start([]);
-    let _forwarder = Forwarder::open(&folder, upstream(server.url())).unwrap();
+    // Made after the process started, as a socket bound but not yet listening is.
+    sweep(&folder, SystemTime::UNIX_EPOCH);
+    assert!(stale.exists());
+    sweep(&folder, SystemTime::now() + Duration::from_secs(5));
     assert!(!stale.exists());
     assert!(live.exists());
     assert!(other.exists());
