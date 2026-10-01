@@ -95,7 +95,7 @@ url = "https://ntfy.sh/your-private-topic"
 # url = "http://<host>:11434/v1"
 # context = 65536
 #
-# Codex runs on kelpie's own ChatGPT login, in `codex_home` below, paced by
+# Codex runs on kelpie's own ChatGPT login, in `codex_home` above, paced by
 # that plan's 5-hour and weekly windows. Its worker runs no preview and no
 # `worker.guard_hooks`. `codex debug models` lists the plan's models.
 # [kelpie.agents.gpt]

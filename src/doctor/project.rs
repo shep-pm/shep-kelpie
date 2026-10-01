@@ -111,7 +111,7 @@ pub(super) fn checks(
                 &*(probes.codex_meter)(&codex_home),
                 probes.clock,
             ),
-            Err(e) => Line::missing(at("codex usage"), e.to_string(), "fix `codex_home`"),
+            Err(e) => Line::missing(at("codex usage"), e.to_string(), "set `codex_home` in kelpie's settings to a folder of kelpie's own, absolute or under `~/`"),
         });
     }
     if let Some(kelpie) = kelpie {

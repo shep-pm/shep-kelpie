@@ -5,8 +5,8 @@
 //! when its stdin closes first, so the requests go in and the pipe stays
 //! open until the answer comes back.
 //!
-//! The shape is the app server's generated JSON schema: a successful
-//! answer has not been read from a live account yet.
+//! The shape is the app server's generated JSON schema, and a live Plus
+//! account's answer matched it.
 //!
 //! It reads kelpie's own login, in `codex_home`, never the maintainer's
 //! `~/.codex`. It runs outside the sandbox, so a login near its expiry is
