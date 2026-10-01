@@ -368,8 +368,8 @@ mod tests {
                 "*** Add File: src/ok.rs\n+x\n*** Add File: {}\n+x",
                 w.path("home/.zshrc")
             ),
-            "*** Update File: src/lib.rs\n*** Move to: ../home/lib.rs\n@@\n-a\n+b".into(),
-            "*** Delete File: ../home/.zshrc".into(),
+            "*** Update File: src/lib.rs\n*** Move to: ../outside/lib.rs\n@@\n-a\n+b".into(),
+            "*** Delete File: ../outside/.zshrc".into(),
             "*** Add File: .codex/config.toml\n+x".into(),
             "  *** Add File: .claude/settings.json\n+{}".into(),
             "*** Update File: .mcp.json\n@@\n-a\n+b".into(),
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn a_codex_patch_is_read_wherever_its_call_carries_it() {
         let w = world();
-        let text = "*** Begin Patch\n*** Add File: ../home/x\n+x\n*** End Patch";
+        let text = "*** Begin Patch\n*** Add File: ../outside/x\n+x\n*** End Patch";
         for input in [
             json!({ "input": text }),
             json!({ "command": ["apply_patch", text] }),
