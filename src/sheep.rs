@@ -16,13 +16,14 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::adapters::{
-    ClaudeCli, Curl, Gh, LocalReviewer, RelayCli, ShepLeases, ShotsCli, SystemClock,
+    ClaudeCli, Curl, Gh, LocalReviewer, RelayCli, SandboxRuntime, ShepLeases, ShotsCli, SystemClock,
 };
 use crate::coderabbit::CodeRabbit;
+use crate::codex::Codex;
 use crate::cubic::Cubic;
 use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
-use crate::ports::{Leases, Ports};
+use crate::ports::{Leases, Ports, Routed, SandboxError};
 use crate::runner::{ACTIONS, ProjectName, ProjectPaths, READ_EVERY, Runner, answer, step};
 use crate::shep_home;
 
@@ -70,18 +71,32 @@ fn serve(project: &str) -> Result<(), String> {
     let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
     let mut paths = ProjectPaths::under(&kelpie_home, &project);
     paths.shep_home.clone_from(&shep_home);
+    let (door, why) = crate::lease::door::worker_socket(&shep_home)?;
+    if let Some(why) = why {
+        println!("{why}");
+    }
+    paths.door = door;
+    // Every agent call runs inside the sandbox runtime, so a runner without one stops here.
+    if !paths.tools.sandbox().is_file() {
+        return Err(SandboxError::Missing(paths.tools.sandbox()).to_string());
+    }
     let shepherd = shep_channel::serve();
-    let claude = ClaudeCli::labelling(Arc::new(shepherd.clone()));
+    let claude = ClaudeCli::labelling(Arc::new(shepherd.clone())).sandboxed(
+        Arc::new(SandboxRuntime::new(paths.tools.clone())),
+        home.clone(),
+    );
     let reviewer = LocalReviewer::default();
     let shots = ShotsCli::new(paths.tools.clone());
     let epoch = Epoch(u64::from(std::process::id()));
     let leases = Arc::new(ShepLeases::new(shepherd.clone(), Asker::new(epoch)));
     let ports = Ports {
-        claude: Arc::new(claude.clone()),
+        agents: Arc::new(Routed::new(Arc::new(claude.clone()), Arc::new(claude.pi()))),
         forge: Box::new(Gh),
         meter: Box::new(claude.meter()),
+        codex_meter: Box::new(claude.codex_meter()),
         reviewer: Arc::new(reviewer.clone()),
-        review_bots: vec![Arc::new(CodeRabbit), Arc::new(Cubic)],
+        local_leases: Arc::new(reviewer.clone()),
+        review_bots: vec![Arc::new(CodeRabbit), Arc::new(Cubic), Arc::new(Codex)],
         shots: Arc::new(shots.clone()),
         relay: Arc::new(RelayCli::new(
             home.clone(),
@@ -264,6 +279,12 @@ impl Worker {
 // there. A turn cut short by a restart is resumed on the first pass.
 fn work(runner: &Mutex<Runner>, on_wake: &mut OnWake, woken: &Receiver<()>, stopping: &AtomicBool) {
     while !stopping.load(Ordering::SeqCst) {
+        let notes = (runner.lock())
+            .unwrap_or_else(PoisonError::into_inner)
+            .take_notes();
+        for note in notes {
+            eprintln!("{note}");
+        }
         match step(runner) {
             Ok(Some(report)) => {
                 let line = serde_json::to_string(&report).expect("a report serializes to JSON");

@@ -1,6 +1,6 @@
 # shep-kelpie
 
-Kelpie is a shep dog that runs Claude Code workers from a planned work item to a merged pull request, holding gates, leases and pacing in code. MIT OR Apache-2.0, private until it is ready.
+Kelpie is a shep dog that runs Claude Code workers from a planned work item to a merged pull request, holding gates, leases and pacing in code. MIT OR Apache-2.0.
 
 ## Where things stand
 
@@ -28,13 +28,26 @@ Gotchas:
 
 Invoke the `rust-house-style` skill before writing or reviewing Rust. The rules are shep-pm/rust-house-style, IR-1 to IR-48.
 
-CI (`.github/workflows/test.yml`) runs `cargo fmt --all --check`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`, rustdoc with `-D warnings`, and `cargo +1.88 check` for the MSRV. Run the same before handing a branch over. `.github/workflows/file-size.yml` also fails any `.rs` file over 1000 lines (IR-48).
+CI (`.github/workflows/test.yml`) runs `cargo fmt --all --check`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`, rustdoc with `-D warnings`, and `cargo +1.88 check` for the MSRV. Run the same before handing a branch over, except the MSRV check: CI and the merge gate run it, and it builds a second copy of every dependency. `.github/workflows/file-size.yml` also fails any `.rs` file over 1000 lines (IR-48).
+
+## Working an issue
+
+Kelpie works this repo too, so these hold for a kelpie worker as for anyone:
+
+- Read the issue, its parent spec #5, `CONTEXT.md`, `docs/adr/` and `docs/design-log.md` first. The design is settled there; ask only for a decision they leave open.
+- Tests follow #5's testing decisions: the runner's work-item loop through its stand-ins, the dog's lease book with a fake clock, and adapter parsing against real recorded output. Tests assert only what the outside world sees.
+- One cargo command shape for the session, and one cargo command at a time.
+- New measured facts go in the design log's Facts section in the same pull request.
+- Done when every acceptance criterion in the issue is met, with the evidence in the pull request's body, which ends `Resolves #<n>`.
 
 ## Writing and git
 
-- Committed text calls the maintainer "the maintainer" and uses repo-relative paths, because the repo goes public one day.
-- Commit subjects are conventional: `type(scope): summary`, with types `feat` `fix` `perf` `refactor` `docs` `test` `ci` `chore` `style`, and `!` on the commit that breaks something. Bodies carry the full reasoning.
+- Committed text calls the maintainer "the maintainer" and uses repo-relative paths, because the repo is public.
+- Commit subjects are conventional: `type(scope): summary`, with types `feat` `fix` `perf` `refactor` `docs` `test` `ci` `chore` `style`, and `!` on the commit that breaks something. Bodies carry the full reasoning. `.githooks/commit-msg` checks locally (run `git config core.hooksPath .githooks` once per clone) and `.github/workflows/commits.yml` checks every pull request.
+- Pull request titles are conventional too. `merge_commit_title` is set to the PR title, so a merge commit's subject is the title.
+- Merge with a merge commit, never a squash. Release pull requests are the exception, and their workflow squashes them itself.
 - One commit per item. Work reaches `main` through pull requests.
+- release-plz writes `CHANGELOG.md` from commit subjects, so never hand-write an entry. Its workflows stay off until the maintainer sets `RELEASES` to `on`.
 
 ## Agent skills
 

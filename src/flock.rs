@@ -1,107 +1,34 @@
-//! Kelpie in the maintainer's own flock: `shep kelpie add`, `start`,
-//! `pause` and `status`
+//! Kelpie in the maintainer's own flock: `shep kelpie <verb>`
 //!
 //! shep runs an adopted dog as `shep kelpie <args>`, in the caller's folder,
 //! with `SHEP_HOME` naming the shepherd. `add` registers a checkout's runner
-//! as a sheep of that shepherd, beside the `kelpie-dog` sheep that holds the
-//! leases, and the others drive it with the triggers `shep trigger` sends.
-//! An adopted dog gets no shepherd channel, so the dog runs as that sheep
-//! and the adopted kelpie stays disabled (ADR 0003).
+//! as a sheep of that shepherd, and every other verb sends it the trigger
+//! `shep trigger` would, to the project `-p` names or whose repo holds the
+//! folder. The adopted kelpie, enabled, is the dog that holds the leases
+//! (ADR 0004).
 
 pub mod add;
 pub mod control;
+pub mod rule;
+mod verbs;
+
+pub use verbs::{USAGE, VERBS, main, split_project, verb_first};
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{Command, Stdio};
 
 use serde_json::{Map, Value};
 use shep_client::Client;
 use shep_client::shep_core::config::{AppConfig, DogTable};
-use shep_client::shep_core::protocol::request::{ProcessInfo, Response};
+use shep_client::shep_core::protocol::request::{DogSource, ProcessInfo, Response};
 use shep_client::shep_core::protocol::{Request, SelectorSpec};
+use shep_client::shep_core::status::ProcStatus;
 use shep_client::shep_core::values::UpDuration;
 
-use crate::adapters::Gh;
-use crate::runner::{ProjectName, ProjectPaths};
+use crate::runner::ProjectName;
 use crate::settings::ForgeSlug;
-use crate::shepherd::{self, DOG};
-use crate::upgrade::install::Layout;
-
-/// Runs `kelpie <command> <args>` for `add`, `start`, `pause` or `status`
-pub fn main(command: &str, args: &[String]) -> ExitCode {
-    let ran = crate::shep_home::required(crate::shep_home::FLOCK_FIX)
-        .and_then(|shep_home| shepherd::block_on(run(&shep_home, command, args)));
-    match ran {
-        Ok(lines) => {
-            for line in lines {
-                println!("{line}");
-            }
-            ExitCode::SUCCESS
-        }
-        Err(message) => {
-            eprintln!("kelpie {command}: {message}");
-            ExitCode::FAILURE
-        }
-    }
-}
-
-async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<String>, String> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or("HOME is not set")?;
-    let here = std::env::current_dir().map_err(|e| format!("cannot read this folder: {e}"))?;
-    let client = shepherd::connect(shep_home)
-        .await
-        .map_err(|e| e.describe(shep_home))?;
-    let named = match args {
-        [] => None,
-        [name] => Some(ProjectName::try_from(name.as_str()).map_err(|e| e.to_string())?),
-        _ => return Err(format!("usage: kelpie {command} [<project>]")),
-    };
-    // Named, or the one this checkout runs.
-    let project = async || match &named {
-        Some(name) => Ok(name.clone()),
-        None => control::project_here(&client, &Checkout::of(&here)?.root, &home).await,
-    };
-    match (command, args) {
-        ("add", _) => {
-            let checkout = Checkout::of(&here)?;
-            let name = match named {
-                Some(name) => name,
-                None => ProjectName::try_from(checkout.forge.name()).map_err(|e| e.to_string())?,
-            };
-            let set_home = std::env::var_os("KELPIE_HOME").map(PathBuf::from);
-            let kelpie_home = set_home.clone().unwrap_or_else(|| home.join(".kelpie"));
-            let launch = Launch {
-                kelpie: program(&kelpie_home)?,
-                shep_home: shep_home.to_owned(),
-                kelpie_home: set_home,
-            };
-            let old = ProjectPaths::under(&kelpie_home, &name).settings;
-            let place = add::Place {
-                checkout: &checkout,
-                home: &home,
-                old_settings: &old,
-            };
-            add::add(&client, &Gh, &launch, &name, place).await
-        }
-        ("start", _) => control::start(&client, &project().await?).await,
-        ("pause", _) => control::pause(&client, &project().await?).await,
-        ("status", []) => control::status(&client).await,
-        _ => Err(format!("usage: kelpie {command}")),
-    }
-}
-
-// The binary kelpie's sheep run: the installed build when there is one, so
-// `upgrade` moves them, else the kelpie that is running.
-fn program(kelpie_home: &Path) -> Result<PathBuf, String> {
-    let installed = Layout::under(kelpie_home).installed();
-    match installed.is_file() {
-        true => Ok(installed),
-        false => std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}")),
-    }
-}
+use crate::shepherd::DOG;
 
 /// A git checkout, and the forge repo its `origin` remote names
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,11 +106,6 @@ impl Launch {
         app
     }
 
-    /// The dog, which holds the leases every runner asks for
-    pub fn dog(&self) -> AppConfig {
-        self.app(crate::dog::NAME, &["dog"])
-    }
-
     // A runner needs about 7s to stop cleanly, so shep's 1.6s default kill
     // timeout is raised, and it stops on the channel's shutdown message.
     fn app(&self, name: &str, args: &[&str]) -> AppConfig {
@@ -203,15 +125,53 @@ impl Launch {
     }
 }
 
-/// One of kelpie's sheep, as the flock holds it
-#[derive(Debug, Clone)]
-pub(crate) struct Found {
-    /// Its row in the flock
-    pub row: ProcessInfo,
-    /// The names of the variables its entry sets, whose values shep withholds
-    pub env_keys: Vec<String>,
-    /// The program its entry runs
-    pub script: String,
+/// What stops the adopted kelpie holding the leases, with the fix, or
+/// `None` when it runs with its shepherd channel
+pub(crate) fn dog_down(rows: &[ProcessInfo]) -> Option<String> {
+    dog_problem(rows).map(|(what, fix)| format!("{what}: {fix}"))
+}
+
+/// What stops the adopted kelpie holding the leases, and the fix, apart
+///
+/// A dog that runs but never named itself to the shepherd is `silent` in
+/// shep's listing, and holds nothing: shep restarts it once and then gives
+/// up, so it reads as down with a fix of its own.
+pub(crate) fn dog_problem(rows: &[ProcessInfo]) -> Option<(String, String)> {
+    let name = crate::dog::NAME;
+    let row = rows.iter().find(|r| r.name == name);
+    let problem = |what: &str, fix: String| Some((what.to_owned(), fix));
+    match row.and_then(|r| Some((r.dog.as_ref()?, r.status, r.handshook, r.dog_stale))) {
+        Some((
+            DogSource::Adopted {
+                channel: false,
+                path,
+            },
+            ..,
+        )) => problem(
+            "kelpie's dog has no shepherd channel, since kelpie was adopted before it asked for one",
+            format!(
+                "run `shep adopt {path} --name {name}`, then `shep disable {name}` and \
+                 `shep enable {name}`"
+            ),
+        ),
+        Some((DogSource::Adopted { .. }, ProcStatus::Online, _, Some(true))) => problem(
+            "kelpie's dog is silent and shep has given up on it",
+            format!("`shep bleats {name}` says why, and `shep restart {name}` runs it again"),
+        ),
+        Some((DogSource::Adopted { .. }, ProcStatus::Online, Some(false), _)) => problem(
+            "kelpie's dog is silent, since it has not named itself to the shepherd",
+            format!("give it a few seconds after a start, then `shep bleats {name}` says why"),
+        ),
+        Some((DogSource::Adopted { .. }, ProcStatus::Online, ..)) => None,
+        Some((DogSource::Adopted { .. }, ..)) => problem(
+            "kelpie's dog is not running",
+            format!("`shep bleats {name}` says why"),
+        ),
+        _ => problem(
+            "kelpie's dog is not enabled",
+            format!("`shep enable {name}` runs it"),
+        ),
+    }
 }
 
 /// The sheep named `name`, if the flock has one, refusing one that is not
@@ -221,7 +181,7 @@ pub(crate) async fn kelpie_sheep(
     rows: &[ProcessInfo],
     name: &str,
     args: &[&str],
-) -> Result<Option<Found>, String> {
+) -> Result<Option<ProcessInfo>, String> {
     let Some(row) = rows.iter().find(|r| r.name == name) else {
         return Ok(None);
     };
@@ -233,12 +193,20 @@ pub(crate) async fn kelpie_sheep(
         name: name.to_owned(),
     };
     match client.request(request).await {
-        Ok(Response::SheepConfig(view)) if view.config.args == args => Ok(Some(Found {
-            row: row.clone(),
-            env_keys: view.env_keys,
-            script: view.config.script,
-        })),
+        Ok(Response::SheepConfig(view)) if view.config.args == args => Ok(Some(row.clone())),
         Ok(Response::SheepConfig(_)) => Err(taken()),
+        Ok(other) => Err(format!("the shepherd answered {other:?} for `{name}`")),
+        Err(e) => Err(format!("cannot read `{name}`'s config: {e}")),
+    }
+}
+
+/// The program `name`'s entry runs
+pub(crate) async fn script(client: &Client, name: &str) -> Result<String, String> {
+    let request = Request::SheepConfig {
+        name: name.to_owned(),
+    };
+    match client.request(request).await {
+        Ok(Response::SheepConfig(view)) => Ok(view.config.script),
         Ok(other) => Err(format!("the shepherd answered {other:?} for `{name}`")),
         Err(e) => Err(format!("cannot read `{name}`'s config: {e}")),
     }
@@ -297,16 +265,6 @@ pub(crate) async fn resume(client: &Client, name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn sheep_run_the_installed_build_once_there_is_one() {
-        let home = tempfile::tempdir().unwrap();
-        assert_eq!(program(home.path()), Ok(std::env::current_exe().unwrap()));
-        let installed = Layout::under(home.path()).installed();
-        std::fs::create_dir_all(installed.parent().unwrap()).unwrap();
-        std::fs::write(&installed, "").unwrap();
-        assert_eq!(program(home.path()), Ok(installed));
-    }
 
     #[test]
     fn a_github_remote_names_its_repo_over_https_or_ssh() {
@@ -389,11 +347,5 @@ mod tests {
         assert!(app.channel && app.shutdown_with_message && app.autorestart);
         assert_eq!(app.kill_timeout.as_millis(), 10_000);
         assert_eq!(app.dogs.get(DOG).map(DogTable::as_map), Some(&table));
-        let dog = launch.dog();
-        assert_eq!(
-            (dog.name.as_str(), dog.args.as_slice()),
-            ("kelpie-dog", &["dog".to_owned()][..])
-        );
-        assert!(dog.dogs.is_empty());
     }
 }

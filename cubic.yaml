@@ -9,3 +9,7 @@ reviews:
     head_branches:
       - "*"
       - "**"
+# The worker writes the pull request's description; cubic's summary would
+# repeat it in the same body.
+pr_descriptions:
+  generate: false

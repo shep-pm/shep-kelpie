@@ -7,15 +7,19 @@
 //! waits for it to end.
 
 use super::Runner;
+use super::plan::Planning;
 use super::report::{Begin, StepReport};
-use crate::board::{self, Skip};
-use crate::pacer::Scope;
+use crate::board::{self, ReadyIssue, Skip};
 use crate::state::StateError;
 
 impl Runner {
     // The step runs this only while a slot is free, and it opens at most one
     // work item, so nothing here checks `max_items` again.
     pub(super) fn dispatch(&mut self) -> Result<Begin, StateError> {
+        // A split under way finishes before the board is read again.
+        if let Some(begin) = self.split_under_way()? {
+            return Ok(begin);
+        }
         let forge = &self.ports.forge;
         let repo = &self.settings.forge;
         let listed = forge
@@ -29,9 +33,13 @@ impl Runner {
                 }));
             }
         };
+        self.trim_finished(&ready)?;
         // An issue in flight is left out, and not listed in `skipped`: it is
         // being worked on, not passed over.
         ready.retain(|issue| self.state.item(issue.number).is_none());
+        if let Some(begin) = self.close_split_done(&ready)? {
+            return Ok(begin);
+        }
         // An adopted pull request, then one asking for a rework, goes before
         // any ready issue, and one that cannot start is passed over like one.
         let (begin, mut failed) = self.adopt_waiting(&open)?;
@@ -46,10 +54,14 @@ impl Runner {
             return Ok(begin);
         }
         let mut paced = false;
+        // Picks that wait on a ruling on their plan
+        let mut waiting = Vec::new();
         loop {
-            let pick = board::pick(&ready, &open, &self.state.finished);
+            let local = self.agents.limits.worker.lease().is_some();
+            let pick = board::pick(&ready, &open, &self.state.finished, local);
             let mut skipped = pick.skipped;
             skipped.extend(failed.iter().cloned());
+            skipped.extend(waiting.iter().cloned());
             skipped.sort_by_key(Skip::issue);
             let Some(issue) = pick.issue else {
                 let reason = failed
@@ -79,11 +91,24 @@ impl Runner {
                 });
             };
             if !paced {
-                if let Some(held) = self.pace(Scope::Dispatch)?.holds() {
+                if let Some(held) = self.pace_dispatch()?.holds() {
                     self.skipped = skipped;
                     return Ok(held);
                 }
                 paced = true;
+            }
+            let picked = ready.iter().find(|i| i.number == issue);
+            match picked.map(|i| self.plan_pick(i)).transpose()?.flatten() {
+                None => {}
+                Some(Planning::Skip(skip)) => {
+                    waiting.push(skip);
+                    ready.retain(|i| i.number != issue);
+                    continue;
+                }
+                Some(Planning::Begin(begin)) => {
+                    self.skipped = skipped;
+                    return Ok(*begin);
+                }
             }
             match self.add(issue) {
                 Ok(worker) => {
@@ -113,6 +138,29 @@ impl Runner {
     }
 }
 
+impl Runner {
+    // The board skips a finished issue until the forge closes it, so an entry
+    // goes only once its issue reads as closed. One the forge lists ready is
+    // open, and one it cannot answer for stays.
+    fn trim_finished(&mut self, ready: &[ReadyIssue]) -> Result<(), StateError> {
+        let repo = &self.settings.forge;
+        let closed: Vec<u64> = self
+            .state
+            .finished
+            .iter()
+            .copied()
+            .filter(|&n| !ready.iter().any(|r| r.number == n))
+            .filter(|&n| self.ports.forge.issue(repo, n).is_ok_and(|i| !i.open))
+            .collect();
+        if closed.is_empty() {
+            return Ok(());
+        }
+        let mut next = self.state.clone();
+        next.finished.retain(|n| !closed.contains(n));
+        self.save(next)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -121,7 +169,7 @@ mod tests {
 
     use super::*;
     use crate::board::{Skip, WorkerModel};
-    use crate::ports::{ClaudeError, Cost, PullRequestState, Usage};
+    use crate::ports::{AgentError, Cost, PullRequestState, Usage};
     use crate::runner::{StepReport, step};
     use crate::settings::Effort;
     use crate::test::{Rig, Scripted};
@@ -137,6 +185,7 @@ mod tests {
         WorkerModel {
             model: "claude-sonnet-5".into(),
             effort: Effort::Medium,
+            local: false,
         }
     }
 
@@ -154,14 +203,16 @@ mod tests {
                 skipped: vec![],
             })
         );
-        rig.claude
-            .script([Scripted::Reply(Usage::default(), Cost(1))]);
+        rig.claude.script([Scripted::Say(
+            "<kelpie-question>\nWhich flag?\n</kelpie-question>\n",
+        )]);
         step(&runner).unwrap();
         let [call] = rig.claude.calls().try_into().unwrap();
         assert!(call.prompt.starts_with("/mattpocock:implement "));
         assert!(call.prompt.contains("\nYour work item is issue #9: "));
 
-        // The turn ended, and #9 is still in flight, so #12 waits.
+        // #9 waits on its question, still in flight, so #12 waits too.
+        assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
         assert_eq!(step(&runner).unwrap(), None);
         assert_eq!(rig.ask(&runner, "status", None)["work_item"]["issue"], 9);
         assert_eq!(rig.claude.calls().len(), 1);
@@ -238,8 +289,9 @@ mod tests {
         rig.forge.label(8, "worker:gpt-high");
         assert_eq!(
             rig.ask(&runner, "add", Some("8")),
-            json!({ "error": "label `worker:gpt-high` is not `worker:<model>-<effort>` \
-                              with a model from opus, sonnet, haiku, fable" })
+            json!({ "error": "label `worker:gpt-high` is not `worker:local`, nor \
+                              `worker:<model>-<effort>` with a model from opus, sonnet, \
+                              haiku, fable" })
         );
         rig.forge.label(9, "worker:haiku-low");
         let item = &rig.ask(&runner, "add", Some("9"))["work_item"];
@@ -426,8 +478,10 @@ mod tests {
         let (rig, runner) = running("koji");
         rig.forge.list_ready(7, false);
         step(&runner).unwrap();
-        rig.claude
-            .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
+        rig.claude.script([Scripted::Fail(AgentError::Failed(
+            crate::settings::Harness::ClaudeCode,
+            "overloaded".into(),
+        ))]);
         step(&runner).unwrap();
         assert_eq!(
             rig.ask(&runner, "status", None)["work_item"]["pull_request"],

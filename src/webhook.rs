@@ -1,5 +1,6 @@
-//! Kelpie's own settings: the webhook, the channels rulings go to, and the
-//! pull request reviewers
+//! Kelpie's own settings: the webhook, the channels rulings go to, the
+//! pull request reviewers, the local reviewers, the agents and the
+//! counted leases' capacities
 //!
 //! Kelpie's `[kelpie]` section of `dogs.toml`, or the file under kelpie's
 //! home it had before one, shared by every project. Every part is
@@ -8,7 +9,9 @@
 //! credential, so no error, log line or status carries it.
 //! `kelpie-settings.example.toml` beside this crate shows the section.
 
+use std::collections::BTreeMap;
 use std::fmt;
+use std::num::NonZeroU32;
 use std::path::Path;
 
 use schemars::JsonSchema;
@@ -16,8 +19,9 @@ use serde::Deserialize;
 use shep_client::dogs::dog_config;
 
 use crate::channels::Channels;
+use crate::lease::counted::CARGO_TEST_CAPACITY;
 use crate::review_bot::Reviewers;
-use crate::settings::SettingsError;
+use crate::settings::{Agent, AgentName, Definition, ReviewerName, SettingsError};
 
 /// What every project shares
 #[dog_config]
@@ -35,6 +39,33 @@ pub struct KelpieSettings {
     /// The pull request reviewers a project may list, each by its window
     #[serde(default)]
     pub reviewers: Reviewers,
+    /// The review loop's reviewers a project may list in `review.reviewers`,
+    /// by name. `claude` is always the project's own Claude round.
+    #[serde(default)]
+    pub local_reviewers: BTreeMap<ReviewerName, Definition>,
+    /// The agents a project's roles and session reviewers may name
+    #[serde(default)]
+    pub agents: BTreeMap<AgentName, Agent>,
+    /// How many commands may hold each counted lease at once
+    #[serde(default)]
+    pub leases: Leases,
+}
+
+/// The counted leases' capacities
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Leases {
+    /// How many commands may hold `cargo-test` at once, as set: `None`
+    /// when absent, which [`Leases::cargo_test_capacity`] reads as 3
+    #[serde(default, rename = "cargo-test")]
+    pub cargo_test: Option<NonZeroU32>,
+}
+
+impl Leases {
+    /// How many commands may hold `cargo-test` at once
+    pub fn cargo_test_capacity(&self) -> NonZeroU32 {
+        self.cargo_test.unwrap_or(CARGO_TEST_CAPACITY)
+    }
 }
 
 /// The maintainer's webhook
@@ -118,8 +149,12 @@ fn authority(rest: &str) -> &str {
 const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntfy`) \
                      and an `https://` `url`, `ruling_channels`, a list of \
                      `webhook` and `relay`, and `[reviewers.coderabbit]` and \
-                     `[reviewers.cubic]` tables with `reviews` and `hours`, \
-                     and nothing else";
+                     `[reviewers.cubic]` and `[reviewers.codex]` tables with `reviews` and `hours`, \
+                     `[local_reviewers.<name>]` tables with a `kind` of \
+                     `endpoint`, `command`, `claude` or `session` and that \
+                     kind's keys, `[agents.<name>]` tables with `harness`, \
+                     `model` and `effort`, a `[leases]` table with a \
+                     `cargo-test` count, and nothing else";
 
 impl KelpieSettings {
     /// Reads and checks kelpie's settings file
@@ -187,6 +222,23 @@ mod tests {
         assert_eq!(webhook.kind, WebhookKind::Ntfy);
         assert!(webhook.url.expose().starts_with("https://ntfy.sh/"));
         assert_eq!(s.ruling_channels, None);
+    }
+
+    #[test]
+    fn the_example_s_local_reviewers_read_once_uncommented() {
+        let start = "# [kelpie.local_reviewers.qwen]";
+        let text = example();
+        let at = text
+            .find(start)
+            .expect("the example defines local reviewers");
+        let defined: String = text[at..]
+            .lines()
+            .map(|line| line.trim_start_matches('#').trim_start())
+            .map(|line| format!("{}\n", line.replace("[kelpie.", "[")))
+            .collect();
+        let s = KelpieSettings::parse(&defined).unwrap();
+        let names: Vec<&str> = s.local_reviewers.keys().map(|n| n.as_str()).collect();
+        assert_eq!(names, ["gpu-box", "opus", "qwen"]);
     }
 
     #[test]
@@ -290,6 +342,18 @@ mod tests {
             "",
         ] {
             assert!(url(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn cargo_test_holds_three_unless_the_section_says() {
+        let absent = KelpieSettings::from_section("").unwrap();
+        assert_eq!(absent.leases.cargo_test_capacity().get(), 3);
+        let set = KelpieSettings::from_section("[leases]\ncargo-test = 5\n").unwrap();
+        assert_eq!(set.leases.cargo_test_capacity().get(), 5);
+        for bad in ["0", "-1", "4294967296", "\"3\""] {
+            let text = format!("[leases]\ncargo-test = {bad}\n");
+            assert!(KelpieSettings::from_section(&text).is_err(), "{bad}");
         }
     }
 

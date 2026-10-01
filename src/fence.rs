@@ -1,11 +1,11 @@
-//! Claude Code's own files in a worktree, which no worker writes
+//! Each harness's own files in a worktree, which no worker writes
 //!
-//! Every Claude call in a worktree loads its `.claude` folder and `.mcp.json`:
-//! settings and their hooks, agents, skills and MCP servers. A hook there runs
-//! outside the sandbox, so the sandbox and `kelpie confine` refuse writes to
-//! them, each call checks them against `main`'s, and a pull request that
-//! changes them waits on the maintainer. Names match in any case, since macOS
-//! reads `.CLAUDE` as `.claude`.
+//! A harness loads its own files from the worktree: Claude Code its `.claude`
+//! folder and `.mcp.json`, Codex its `.codex` folder. Settings, hooks and MCP
+//! servers there run code, so the sandbox and `kelpie confine` refuse writes
+//! to every harness's files, each call checks them against `main`'s, and a
+//! pull request that changes them waits on the maintainer. Names match in any
+//! case, since macOS reads `.CLAUDE` as `.claude`.
 
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -15,20 +15,92 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::worktree::{self, BASE, WorktreeError, git};
 
-const CLAUDE: &str = ".claude";
-const MCP: &str = ".mcp.json";
-
-/// The sandbox's `denyWrite` paths that fence these files in `worktree`
-pub fn deny_write(worktree: &Path) -> [PathBuf; 3] {
-    [
-        worktree.join(CLAUDE),
-        worktree.join("**").join(CLAUDE),
-        worktree.join(MCP),
-    ]
+/// The files in a worktree that one harness loads and may run code from, and
+/// the files in the home folder that hold its login
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OwnFiles {
+    /// The harness, as a refusal names it
+    pub harness: &'static str,
+    /// Folders it loads, at the root or at any depth below
+    pub folders: &'static [&'static str],
+    /// Files it loads at the root only
+    pub root_files: &'static [&'static str],
+    /// Its login and secrets, under `~/`, which no other harness's call reads
+    pub credentials: &'static [&'static str],
+    /// The program that starts it, which no worker runs from its commands
+    pub program: &'static str,
 }
 
-/// Whether `path`, relative to a worktree, is one of Claude Code's own files
+/// Every harness's own files, each fenced whichever harness a call runs on
+///
+/// A worker on one harness could otherwise plant files that the next call,
+/// on another, runs.
+pub const HARNESSES: [OwnFiles; 3] = [
+    OwnFiles {
+        harness: "Claude Code",
+        folders: &[".claude"],
+        root_files: &[".mcp.json"],
+        // Linux keeps the login in the file; `.claude.json` holds MCP servers' secrets.
+        credentials: &["~/.claude/.credentials.json", "~/.claude.json"],
+        program: "claude",
+    },
+    OwnFiles {
+        harness: "Codex",
+        folders: &[".codex"],
+        root_files: &[],
+        credentials: &["~/.codex/**"],
+        program: "codex",
+    },
+    // Kelpie runs pi with a home of its own, so the maintainer's is never read.
+    OwnFiles {
+        harness: PI,
+        folders: &[".pi"],
+        root_files: &[],
+        credentials: &["~/.pi/**"],
+        program: "pi",
+    },
+];
+
+/// pi, as the fence names it
+pub const PI: &str = "pi";
+
+/// Every other harness's credentials, which a call on `harness` may not read
+pub fn others_credentials(harness: &str) -> Vec<String> {
+    HARNESSES
+        .iter()
+        .filter(|own| own.harness != harness)
+        .flat_map(|own| own.credentials.iter().map(|&path| path.to_owned()))
+        .collect()
+}
+
+// Every name a harness loads from the worktree's root.
+fn root_names() -> impl Iterator<Item = &'static str> {
+    HARNESSES
+        .iter()
+        .flat_map(|own| own.folders.iter().chain(own.root_files))
+        .copied()
+}
+
+/// The sandbox's `denyWrite` paths that fence these files in `worktree`
+pub fn deny_write(worktree: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for own in &HARNESSES {
+        for folder in own.folders {
+            paths.push(worktree.join(folder));
+            paths.push(worktree.join("**").join(folder));
+        }
+        paths.extend(own.root_files.iter().map(|file| worktree.join(file)));
+    }
+    paths
+}
+
+/// Whether `path`, relative to a worktree, is one of a harness's own files
 pub fn fenced(path: &Path) -> bool {
+    owner(path).is_some()
+}
+
+/// The harness whose own file `path`, relative to a worktree, is
+pub fn owner(path: &Path) -> Option<&'static str> {
     let parts: Vec<&OsStr> = path
         .components()
         .filter_map(|c| match c {
@@ -36,8 +108,14 @@ pub fn fenced(path: &Path) -> bool {
             _ => None,
         })
         .collect();
-    matches!(parts.as_slice(), [only] if folds_to(only, MCP))
-        || parts.iter().any(|p| folds_to(p, CLAUDE))
+    let any = |names: &[&str], part: &OsStr| names.iter().any(|name| folds_to(part, name));
+    HARNESSES
+        .iter()
+        .find(|own| {
+            matches!(parts.as_slice(), [only] if any(own.root_files, only))
+                || parts.iter().any(|part| any(own.folders, part))
+        })
+        .map(|own| own.harness)
 }
 
 // Whether a case-insensitive file system could read `part` as `name`. Case
@@ -54,7 +132,7 @@ fn folds_to(part: &OsStr, name: &str) -> bool {
     folded == name
 }
 
-/// Fetches `branch`, and names Claude Code's own files its head changes
+/// Fetches `branch`, and names the harnesses' own files its head changes
 ///
 /// A file counts when the branch changes it from `main`, and from `accepted`,
 /// a head whose change to them the maintainer accepted, if there is one.
@@ -91,7 +169,7 @@ pub fn changed(
     Ok((head, from_main))
 }
 
-/// Names Claude Code's own files in `worktree` that differ from `main`'s
+/// Names the harnesses' own files in `worktree` that differ from `main`'s
 ///
 /// The worktree passes when all of them match one commit: `origin/main`,
 /// the commit its branch left `main` at, or `accepted`. A file missing on
@@ -150,14 +228,14 @@ enum Disk {
     Other,
 }
 
-// Every file Claude Code would load from the worktree's root, by its path
-// from the root. The names are opened as Claude Code opens them, so the
+// Every file a harness would load from the worktree's root, by its path
+// from the root. The names are opened as a harness opens them, so the
 // file system folds case and Unicode its own way. Folders count only for
 // what they hold, as in git.
 fn on_disk(worktree: &Path) -> Result<BTreeMap<String, Disk>, WorktreeError> {
     let mut found = BTreeMap::new();
     let mut pending: Vec<PathBuf> = Vec::new();
-    for name in [CLAUDE, MCP] {
+    for name in root_names() {
         let path = worktree.join(name);
         match fs::symlink_metadata(&path) {
             Ok(_) => pending.push(path),
@@ -212,10 +290,7 @@ fn in_commit(
     };
     let mut found = BTreeMap::new();
     for (root, ..) in entries(git(repo, ["ls-tree", "-z", commit])?) {
-        let Some(name) = [CLAUDE, MCP]
-            .into_iter()
-            .find(|name| folds_to(OsStr::new(&root), name))
-        else {
+        let Some(name) = root_names().find(|name| folds_to(OsStr::new(&root), name)) else {
             continue;
         };
         let args = [
@@ -394,6 +469,76 @@ mod tests {
         ] {
             assert!(!fenced(Path::new(path)), "{path}");
         }
+    }
+
+    #[test]
+    fn codexs_own_files_are_named_in_any_case_and_anywhere() {
+        for path in [
+            ".codex",
+            ".codex/config.toml",
+            ".CODEX/config.toml",
+            "src/.Codex/config.toml",
+            // A combining accent, which is refused rather than read
+            ".co\u{301}dex/config.toml",
+        ] {
+            assert_eq!(owner(Path::new(path)), Some("Codex"), "{path}");
+        }
+        for path in ["codex/notes.md", ".codex.toml", "src/codex.rs"] {
+            assert!(!fenced(Path::new(path)), "{path}");
+        }
+        assert_eq!(owner(Path::new(".mcp.json")), Some("Claude Code"));
+    }
+
+    #[test]
+    fn a_call_reads_no_other_harnesss_login() {
+        assert_eq!(
+            others_credentials("Claude Code"),
+            ["~/.codex/**", "~/.pi/**"]
+        );
+        assert_eq!(
+            others_credentials("Codex"),
+            ["~/.claude/.credentials.json", "~/.claude.json", "~/.pi/**"]
+        );
+    }
+
+    #[test]
+    fn the_sandbox_denies_every_harnesss_files_in_the_worktree() {
+        let wt = Path::new("/k/wt/7");
+        let deny: Vec<String> = deny_write(wt)
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+        assert_eq!(
+            deny,
+            [
+                "/k/wt/7/.claude",
+                "/k/wt/7/**/.claude",
+                "/k/wt/7/.mcp.json",
+                "/k/wt/7/.codex",
+                "/k/wt/7/**/.codex",
+                "/k/wt/7/.pi",
+                "/k/wt/7/**/.pi",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_pi_extension_added_to_a_branch_is_named() {
+        let w = World::new();
+        w.push_branch(".pi/extensions/run.ts", "export default () => {};\n");
+        assert_eq!(w.changed(None).len(), 1);
+        assert_eq!(owner(Path::new("src/.pi/x.ts")), Some("pi"));
+    }
+
+    #[test]
+    fn a_codex_file_added_to_the_worktree_or_a_branch_is_named() {
+        let w = World::new();
+        w.write(".codex/config.toml", "[mcp_servers]\n");
+        assert_eq!(w.differ(None), [".codex/config.toml"]);
+
+        let w = World::new();
+        w.push_branch(".Codex/config.toml", "[mcp_servers]\n");
+        assert_eq!(w.changed(None).len(), 1);
     }
 
     #[test]

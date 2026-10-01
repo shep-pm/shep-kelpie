@@ -4,21 +4,26 @@
 //! command exits, however it exits. `take` and `return` hold one for
 //! longer. The GPU lease is the qwen scripts' lock, taken here directly;
 //! a `take` leaves a holder process behind, since a lock whose pid is
-//! gone gets cleared. Every other kind is the dog's, reached through shep.
+//! gone gets cleared. `cargo-test` is held for one `run` at the dog's door.
+//! Every other kind is the dog's, reached through shep.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{ExitCode, ExitStatus, Stdio};
 use std::time::Duration;
 
 use serde_json::Value;
+use shep_client::Client;
 use shep_client::shep_core::protocol::Request;
 use shep_client::shep_core::protocol::request::{ActionOutcome, Response, SelectorSpec};
-use shep_client::{Client, RequestError};
 use tokio::signal::unix::{Signal, SignalKind, signal};
 
+use super::counted::CARGO_TEST;
+use super::door;
 use super::gpu::{self, Claim, GpuLock, Waiting};
 use super::{GPU, LeaseKind};
 use crate::{dog, shepherd};
+
+pub(crate) mod counted_run;
 
 /// The usage lines for `shep-kelpie lease`
 pub const USAGE: &str = "\
@@ -26,7 +31,8 @@ pub const USAGE: &str = "\
        shep-kelpie lease take <kind>
        shep-kelpie lease return <kind>
        shep-kelpie lease status
-       <kind> is gpu, the qwen scripts' lock, or a lease the dog holds";
+       <kind> is gpu, the qwen scripts' lock, cargo-test, which a few
+       commands hold at once and only for a run, or a lease the dog holds";
 
 /// What a `take` holder writes as the lock's `what`, and `return` looks for
 const TAKE_WHAT: &str =
@@ -58,6 +64,16 @@ async fn dispatch(args: &[String]) -> Result<ExitCode, String> {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
         ["run", GPU, "--", command @ ..] if !command.is_empty() => run_gpu(command).await,
+        ["run", CARGO_TEST, "--", command @ ..] if !command.is_empty() => {
+            let code = match door::socket() {
+                Ok(socket) => counted_run::run(&socket, command).await,
+                Err(e) => {
+                    eprintln!("shep kelpie lease: {e}");
+                    counted_run::NO_LEASE
+                }
+            };
+            Ok(ExitCode::from(code))
+        }
         ["run", kind, "--", command @ ..] if !command.is_empty() => {
             run_book(&kind_of(kind)?, command).await
         }
@@ -326,32 +342,25 @@ async fn ask_dog(action: &str, params: &str) -> Result<Value, String> {
     let client = Client::connect(&socket)
         .await
         .map_err(|e| format!("cannot reach the shepherd at {}: {e}", socket.display()))?;
-    let ask = |name: &str| {
-        client.request(Request::Trigger {
-            selector: SelectorSpec::Name(name.into()),
-            action: action.into(),
-            params: Some(params.to_owned()).filter(|p| !p.is_empty()),
-        })
+    let asked = client.request(Request::Trigger {
+        selector: SelectorSpec::Name(dog::NAME.into()),
+        action: action.into(),
+        params: Some(params.to_owned()).filter(|p| !p.is_empty()),
+    });
+    let rows = match asked.await {
+        Ok(Response::Triggered(rows)) => rows,
+        Err(e) if shepherd::names_no_sheep(&e) => Vec::new(),
+        Ok(other) => return Err(format!("the shepherd answered {other:?}")),
+        Err(e) => return Err(format!("cannot ask the dog: {e}")),
     };
-    let triggered = |reply: Result<Response, RequestError>| match reply {
-        Ok(Response::Triggered(rows)) => Ok(rows),
-        Err(e) if shepherd::names_no_sheep(&e) => Ok(Vec::new()),
-        Ok(other) => Err(format!("the shepherd answered {other:?}")),
-        Err(e) => Err(format!("cannot ask the dog: {e}")),
-    };
-    // A dog set up from a Flockfile before `shep kelpie add` has its old name.
-    let mut found = triggered(ask(dog::NAME).await)?;
-    if found.is_empty() {
-        found = triggered(ask(dog::OLD_NAME).await)?;
-    }
-    let body = match found.into_iter().next().map(|row| row.outcome) {
+    let body = match rows.into_iter().next().map(|row| row.outcome) {
         Some(ActionOutcome::Replied { body }) => body,
+        Some(ActionOutcome::DogNoChannel) => return Err(dog::no_channel()),
         Some(other) => return Err(format!("the dog did not answer: {other:?}")),
         None => {
             return Err(format!(
-                "no sheep named {} or {} is running",
-                dog::NAME,
-                dog::OLD_NAME
+                "kelpie's dog is not enabled: `shep enable {}` runs it",
+                dog::NAME
             ));
         }
     };
@@ -399,12 +408,17 @@ fn signal_process(pid: u32, name: &str) {
 }
 
 fn exit_code(status: ExitStatus) -> ExitCode {
+    ExitCode::from(exit_number(status))
+}
+
+// The shell's number for how a command ended: its code, or 128 plus its signal.
+fn exit_number(status: ExitStatus) -> u8 {
     use std::os::unix::process::ExitStatusExt;
     let code = status
         .code()
         .or_else(|| status.signal().map(|s| 128 + s))
         .unwrap_or(1);
-    ExitCode::from(u8::try_from(code).unwrap_or(1))
+    u8::try_from(code).unwrap_or(1)
 }
 
 /// A signal kelpie caught while holding or waiting for a lease
@@ -418,11 +432,15 @@ enum Caught {
 impl Caught {
     // The shell's convention: 128 plus the signal's number.
     fn exit_code(self) -> ExitCode {
-        ExitCode::from(match self {
+        ExitCode::from(self.number())
+    }
+
+    fn number(self) -> u8 {
+        match self {
             Self::Hangup => 129,
             Self::Interrupt => 130,
             Self::Terminate => 143,
-        })
+        }
     }
 
     fn forward(self) -> Option<&'static str> {

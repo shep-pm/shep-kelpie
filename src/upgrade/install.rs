@@ -1,10 +1,15 @@
-//! The installed kelpie under kelpie's home, and the build kept beside it
+//! Putting a build over the installed kelpie, the way shep upgrades itself
 //!
-//! Every file is put in place by a rename, so a runner that restarts on its
-//! own, or the maintainer's `shep kelpie`, finds the old build or the new
-//! one and never half of either. The previous build is a hard link to the
-//! inode it had, not a copy: a copy made while the build runs is a new file
-//! macOS has not vetted.
+//! The installed kelpie is the file the adopted dog runs, wherever that is.
+//! The new build is written beside it and renamed over it, so the running
+//! file's bytes are never edited in place, and a runner that restarts on its
+//! own finds the old build or the new one and never half of either. A fresh
+//! inode needs no re-signing by the system, so the copy is signed once, before
+//! the rename.
+//!
+//! Before the swap the file it replaces is copied into kelpie's `builds`
+//! folder, resolved if the installed path is a symlink, and `--rollback`
+//! puts that copy back the same way.
 
 use std::fs;
 use std::io::Read;
@@ -12,36 +17,49 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// Where the installed build and its predecessor live
+/// Where the installed build lives, and where its predecessor is kept
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layout {
-    bin: PathBuf,
+    installed: PathBuf,
+    builds: PathBuf,
 }
 
 impl Layout {
-    /// The layout under kelpie's home
-    pub fn under(kelpie_home: &Path) -> Self {
+    /// The layout for the kelpie at `installed`, keeping builds under `kelpie_home`
+    pub fn new(kelpie_home: &Path, installed: &Path) -> Self {
         Self {
-            bin: kelpie_home.join("bin"),
+            installed: installed.to_owned(),
+            builds: kelpie_home.join("builds"),
         }
     }
 
-    /// The binary every kelpie sheep runs
-    pub fn installed(&self) -> PathBuf {
-        self.bin.join("shep-kelpie")
+    /// The path every kelpie sheep runs, as the shepherd names it
+    pub fn installed(&self) -> &Path {
+        &self.installed
     }
 
     /// The build the last upgrade replaced
     pub fn previous(&self) -> PathBuf {
-        self.bin.join("shep-kelpie.previous")
+        self.builds.join("shep-kelpie.previous")
+    }
+
+    // The file the installed path leads to: what an upgrade replaces, so a
+    // link stays a link.
+    fn target(&self) -> PathBuf {
+        fs::canonicalize(&self.installed).unwrap_or_else(|_| self.installed.clone())
     }
 
     fn staged(&self) -> PathBuf {
-        self.bin.join(".shep-kelpie.staged")
+        let target = self.target();
+        let name = target.file_name().map_or_else(
+            || "shep-kelpie".into(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        target.with_file_name(format!(".{name}.staged"))
     }
 
     fn held(&self) -> PathBuf {
-        self.bin.join(".shep-kelpie.held")
+        self.builds.join(".shep-kelpie.held")
     }
 }
 
@@ -80,17 +98,18 @@ pub enum Change {
     Unchanged,
 }
 
-/// Copies the build at `source` into kelpie's `bin` folder, executable and signed
+/// Copies the build at `source` beside the installed kelpie, executable and signed
 ///
 /// # Errors
 ///
 /// A message when the copy, its mode or its signature fails.
 pub fn stage(layout: &Layout, source: &Path) -> Result<Staged, String> {
     let path = layout.staged();
-    let failed = |what: &str, e: &dyn core::fmt::Display| {
-        format!("cannot {what} {}: {e}", layout.staged().display())
-    };
-    fs::create_dir_all(&layout.bin).map_err(|e| failed("make the folder of", &e))?;
+    let failed =
+        |what: &str, e: &dyn core::fmt::Display| format!("cannot {what} {}: {e}", path.display());
+    if let Some(folder) = path.parent() {
+        fs::create_dir_all(folder).map_err(|e| failed("make the folder of", &e))?;
+    }
     match fs::remove_file(&path) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -103,7 +122,10 @@ pub fn stage(layout: &Layout, source: &Path) -> Result<Staged, String> {
             path.display()
         )
     })?;
-    let staged = Staged { path, live: true };
+    let staged = Staged {
+        path: path.clone(),
+        live: true,
+    };
     fs::set_permissions(&staged.path, fs::Permissions::from_mode(0o755))
         .map_err(|e| failed("make executable", &e))?;
     sign(&staged.path)?;
@@ -118,64 +140,60 @@ pub fn stage(layout: &Layout, source: &Path) -> Result<Staged, String> {
 ///
 /// # Errors
 ///
-/// A message when a file cannot be read, linked or renamed.
+/// A message when a file cannot be read, copied or renamed.
 pub fn install(layout: &Layout, mut staged: Staged) -> Result<Change, String> {
-    let installed = layout.installed();
-    let change = if installed.exists() {
-        if same_bytes(&installed, &staged.path)? {
+    let target = layout.target();
+    let change = if target.is_file() {
+        if same_bytes(&target, &staged.path)? {
             return Ok(Change::Unchanged);
         }
-        link_as(&installed, &layout.held(), &layout.previous())?;
+        keep(layout, &target)?;
         Change::Replaced
     } else {
         Change::First
     };
-    fs::rename(&staged.path, &installed)
-        .map_err(|e| format!("cannot install {}: {e}", installed.display()))?;
+    fs::rename(&staged.path, &target)
+        .map_err(|e| format!("cannot install {}: {e}", target.display()))?;
     staged.live = false;
     Ok(change)
 }
 
-/// Puts the previous build back as the installed one, and the installed one
-/// in its place, so a second rollback undoes the first
+/// Stages the previous build, ready for [`install`], which keeps the installed
+/// one in its place, so a second rollback undoes the first
 ///
 /// # Errors
 ///
-/// A message when there is no previous build, or a file cannot be moved.
-pub fn swap_with_previous(layout: &Layout) -> Result<(), String> {
-    let (installed, previous) = (layout.installed(), layout.previous());
+/// A message when there is no previous build, or it cannot be copied.
+pub fn stage_previous(layout: &Layout) -> Result<Staged, String> {
+    let previous = layout.previous();
     if !previous.is_file() {
         return Err(format!(
             "there is no previous build to put back: {} is missing",
             previous.display()
         ));
     }
-    let held = layout.held();
-    if installed.exists() {
-        link_as(&installed, &held, &held)?;
-    }
-    fs::rename(&previous, &installed)
-        .map_err(|e| format!("cannot put back {}: {e}", installed.display()))?;
-    if held.exists() {
-        fs::rename(&held, &previous)
-            .map_err(|e| format!("cannot keep the build this replaced: {e}"))?;
-    }
-    Ok(())
+    stage(layout, &previous)
 }
 
-// Makes `to` another name for `from`'s file, through `via` so `to` is never absent.
-fn link_as(from: &Path, via: &Path, to: &Path) -> Result<(), String> {
-    match fs::remove_file(via) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(format!("cannot clear {}: {e}", via.display())),
+// Copies the file at `target` into the builds folder as the previous build.
+fn keep(layout: &Layout, target: &Path) -> Result<(), String> {
+    let (held, previous) = (layout.held(), layout.previous());
+    if let Some(folder) = held.parent() {
+        fs::create_dir_all(folder).map_err(|e| format!("cannot make {}: {e}", folder.display()))?;
     }
-    fs::hard_link(from, via)
-        .map_err(|e| format!("cannot keep {} as {}: {e}", from.display(), via.display()))?;
-    if via != to {
-        fs::rename(via, to).map_err(|e| format!("cannot keep the previous build: {e}"))?;
-    }
-    Ok(())
+    fs::copy(target, &held).map_err(|e| {
+        format!(
+            "cannot keep {} as {}: {e}",
+            target.display(),
+            held.display()
+        )
+    })?;
+    fs::rename(&held, &previous).map_err(|e| {
+        format!(
+            "cannot keep the previous build at {}: {e}",
+            previous.display()
+        )
+    })
 }
 
 fn same_bytes(a: &Path, b: &Path) -> Result<bool, String> {
@@ -217,12 +235,19 @@ fn is_mach_o(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::MetadataExt;
+
     use super::*;
 
     fn file(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
         let path = dir.join(name);
         fs::write(&path, bytes).unwrap();
         path
+    }
+
+    fn layout(dir: &Path) -> Layout {
+        fs::create_dir_all(dir.join("bin")).unwrap();
+        Layout::new(&dir.join("home"), &dir.join("bin/shep-kelpie"))
     }
 
     #[test]
@@ -237,12 +262,13 @@ mod tests {
     }
 
     #[test]
-    fn a_staged_copy_is_executable_and_a_dropped_one_goes() {
+    fn a_staged_copy_sits_beside_the_installed_file_and_a_dropped_one_goes() {
         let dir = tempfile::tempdir().unwrap();
-        let layout = Layout::under(dir.path());
+        let layout = layout(dir.path());
         let source = file(dir.path(), "src", b"#!/bin/sh\n");
         let staged = stage(&layout, &source).unwrap();
         let path = staged.path().to_owned();
+        assert_eq!(path.parent(), layout.installed().parent());
         let mode = fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o111, 0o111);
         drop(staged);
@@ -253,7 +279,7 @@ mod tests {
     #[test]
     fn a_real_executable_is_staged_and_still_runs() {
         let dir = tempfile::tempdir().unwrap();
-        let layout = Layout::under(dir.path());
+        let layout = layout(dir.path());
         let me = std::env::current_exe().unwrap();
         let staged = stage(&layout, &me).unwrap();
         let ran = Command::new(staged.path()).arg("--list").output().unwrap();
@@ -261,31 +287,61 @@ mod tests {
     }
 
     #[test]
-    fn installing_keeps_the_replaced_build_and_swapping_trades_places() {
+    fn installing_renames_a_fresh_file_over_the_old_one_and_keeps_it_in_builds() {
         let dir = tempfile::tempdir().unwrap();
-        let layout = Layout::under(dir.path());
+        let layout = layout(dir.path());
         let build = |bytes: &[u8]| {
             let source = file(dir.path(), "src", bytes);
             stage(&layout, &source).unwrap()
         };
-        let read = |p: PathBuf| fs::read_to_string(p).unwrap();
+        let read = |p: &Path| fs::read_to_string(p).unwrap();
 
         assert_eq!(install(&layout, build(b"one")), Ok(Change::First));
+        let first = fs::metadata(layout.installed()).unwrap().ino();
         assert_eq!(install(&layout, build(b"two")), Ok(Change::Replaced));
+        assert_ne!(
+            fs::metadata(layout.installed()).unwrap().ino(),
+            first,
+            "the running file's bytes are not edited in place"
+        );
         assert_eq!(install(&layout, build(b"two")), Ok(Change::Unchanged));
         assert_eq!(read(layout.installed()), "two");
-        assert_eq!(read(layout.previous()), "one");
+        assert_eq!(read(&layout.previous()), "one");
+        assert!(
+            layout
+                .previous()
+                .starts_with(dir.path().join("home/builds"))
+        );
 
-        swap_with_previous(&layout).unwrap();
+        let staged = stage_previous(&layout).unwrap();
+        assert_eq!(install(&layout, staged), Ok(Change::Replaced));
         assert_eq!(read(layout.installed()), "one");
-        assert_eq!(read(layout.previous()), "two");
-        assert!(!layout.staged().exists() && !layout.held().exists());
+        assert_eq!(read(&layout.previous()), "two");
+        let left: Vec<_> = fs::read_dir(dir.path().join("bin")).unwrap().collect();
+        assert_eq!(left.len(), 1, "no staged copy is left: {left:?}");
+        assert!(!layout.held().exists());
     }
 
     #[test]
-    fn a_swap_with_no_previous_build_says_so() {
+    fn an_installed_symlink_stays_a_link_and_its_target_is_what_is_kept() {
         let dir = tempfile::tempdir().unwrap();
-        let err = swap_with_previous(&Layout::under(dir.path())).unwrap_err();
+        let real = file(dir.path(), "real", b"old");
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let layout = Layout::new(&dir.path().join("home"), &link);
+        let staged = stage(&layout, &file(dir.path(), "src", b"new")).unwrap();
+        assert_eq!(install(&layout, staged), Ok(Change::Replaced));
+        assert!(fs::symlink_metadata(&link).unwrap().is_symlink());
+        assert_eq!(fs::read_to_string(&real).unwrap(), "new");
+        let previous = layout.previous();
+        assert!(!fs::symlink_metadata(&previous).unwrap().is_symlink());
+        assert_eq!(fs::read_to_string(previous).unwrap(), "old");
+    }
+
+    #[test]
+    fn putting_back_with_no_previous_build_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = stage_previous(&layout(dir.path())).unwrap_err();
         assert!(err.contains("no previous build"), "{err}");
     }
 }

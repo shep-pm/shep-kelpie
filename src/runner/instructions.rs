@@ -7,7 +7,7 @@
 use std::fs;
 use std::path::Path;
 
-use crate::profile::INSTRUCTIONS;
+use crate::profile;
 use crate::settings::{Settings, SettingsError};
 use crate::skills::{Skills, Step};
 
@@ -31,11 +31,16 @@ pub(super) fn read_extra(settings: &Settings) -> Result<Option<String>, Settings
 
 /// The instructions file for one worker turn
 ///
-/// Kelpie's own, then the skills the worker writes tests and its pull
+/// Kelpie's own, naming the `kelpie` binary, then the skills the worker writes tests and its pull
 /// request's body with, then the project's extra instructions. A pull
 /// request template in the worktree stands in for the body's skill.
-pub(super) fn compose(extra: Option<&str>, worktree: &Path, skills: &Skills) -> String {
-    let mut text = INSTRUCTIONS.to_owned();
+pub(super) fn compose(
+    extra: Option<&str>,
+    worktree: &Path,
+    skills: &Skills,
+    kelpie: &Path,
+) -> String {
+    let mut text = profile::instructions(kelpie);
     let mut lines = Vec::new();
     if let Some(tdd) = skills.command(Step::Tests) {
         lines.push(format!(
@@ -138,6 +143,11 @@ mod tests {
 
     const EXTRA: &str = "Never use an em dash in public writing.\n";
 
+    // Kelpie's own instructions, naming the binary the rig says kelpie is
+    fn kelpies() -> String {
+        profile::instructions(Path::new(Rig::KELPIE))
+    }
+
     // The instructions file the worker's first turn was started with
     fn first_instructions(rig: &Rig, runner: &Mutex<Runner>) -> String {
         rig.ask(runner, "start", None);
@@ -160,7 +170,7 @@ mod tests {
         let rig = Rig::new("koji");
         let runner = rig.open().unwrap();
         let text = first_instructions(&rig, &runner);
-        let lines = text.strip_prefix(INSTRUCTIONS).expect(&text);
+        let lines = text.strip_prefix(&kelpies()).expect(&text);
         let (named, rules) = lines.split_once("\n\n").expect(lines);
         assert_eq!(
             named,
@@ -176,12 +186,24 @@ mod tests {
     }
 
     #[test]
+    fn the_worker_is_told_to_run_its_tests_under_the_lease_with_kelpie_itself() {
+        let rig = Rig::new("koji");
+        let runner = rig.open().unwrap();
+        let text = first_instructions(&rig, &runner);
+        assert!(
+            text.contains("`/opt/kelpie/bin/kelpie lease run cargo-test -- cargo test`"),
+            "{text}"
+        );
+        assert!(!text.contains("{kelpie}"), "{text}");
+    }
+
+    #[test]
     fn a_repo_with_a_template_tells_the_worker_to_fill_it() {
         let rig = Rig::new("koji");
         rig.land_on_origin("PULL_REQUEST_TEMPLATE.md");
         let runner = rig.open().unwrap();
         let text = first_instructions(&rig, &runner);
-        assert!(text.starts_with(INSTRUCTIONS), "{text}");
+        assert!(text.starts_with(&kelpies()), "{text}");
         assert!(
             text.contains("pull request template, `PULL_REQUEST_TEMPLATE.md`"),
             "{text}"
@@ -202,7 +224,7 @@ mod tests {
         rig.edit_settings(|s| s.replace("build_env = {}\n", &line));
         let runner = rig.open().unwrap();
         let text = first_instructions(&rig, &runner);
-        assert!(text.starts_with(INSTRUCTIONS), "{text}");
+        assert!(text.starts_with(&kelpies()), "{text}");
         assert!(text.ends_with(EXTRA), "{text}");
     }
 
@@ -211,14 +233,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("pull_request_template.md"), "## Summary\n").unwrap();
         let skills = Skills::load(&StepSkills::default(), &dir.path().join("skills"));
-        let text = compose(Some(EXTRA), dir.path(), &skills);
+        let text = compose(Some(EXTRA), dir.path(), &skills, Path::new(Rig::KELPIE));
         let at = |needle: &str| text.find(needle).expect(needle);
         assert!(at("/mattpocock:tdd") < at("pull request template"));
         assert!(at("pull request template") < at("# This project's instructions"));
         assert!(text.ends_with(EXTRA), "{text}");
         let (blank, none) = (
-            compose(Some(" \n"), dir.path(), &skills),
-            compose(None, dir.path(), &skills),
+            compose(Some(" \n"), dir.path(), &skills, Path::new(Rig::KELPIE)),
+            compose(None, dir.path(), &skills, Path::new(Rig::KELPIE)),
         );
         assert_eq!(blank, none);
     }

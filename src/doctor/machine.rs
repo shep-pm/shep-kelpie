@@ -3,10 +3,12 @@
 use std::path::Path;
 
 use shep_client::Client;
+use shep_client::shep_core::protocol::request::ProcessInfo;
 
 use super::Line;
 use super::host::Host;
 use crate::ports::{Clock, Forge, ForgeError, Meter, MeterError};
+use crate::preview::Tools;
 use crate::shepherd::ConnectRefused;
 
 // A tool's own message can run to a page, and the first line says what went wrong.
@@ -47,11 +49,47 @@ pub(super) fn claude(meter: &dyn Meter, clock: &dyn Clock) -> Line {
             ),
             "run `claude -p /usage` to see what it says",
         ),
-        Err(e @ (MeterError::TimedOut | MeterError::Stopped)) => Line::unsure(
-            "claude",
-            e.to_string(),
-            "run `claude -p /usage` to see what it says",
-        ),
+        Err(e @ (MeterError::TimedOut | MeterError::Stopped | MeterError::Codex(_))) => {
+            Line::unsure(
+                "claude",
+                e.to_string(),
+                "run `claude -p /usage` to see what it says",
+            )
+        }
+    }
+}
+
+/// `codex` installed and logged in to an account that answers its usage,
+/// for `subject`, a project that spends the Codex account
+pub(super) fn codex(subject: String, meter: &dyn Meter, clock: &dyn Clock) -> Line {
+    let reason = match meter.read(clock.now()) {
+        Ok(usage) => {
+            let (session, week) = (usage.session.used_pct, usage.week.used_pct);
+            return Line::ok(
+                subject,
+                format!("reads Codex usage: 5-hour window {session}%, week {week}%"),
+            );
+        }
+        Err(e) => e.to_string(),
+    };
+    if reason.starts_with("cannot run codex") {
+        Line::missing(
+            subject,
+            reason,
+            "install the Codex CLI and put `codex` on your PATH",
+        )
+    } else if reason.starts_with("codex refused") {
+        Line::missing(
+            subject,
+            reason,
+            "run `codex login` as an account whose plan includes Codex",
+        )
+    } else {
+        Line::unsure(
+            subject,
+            reason,
+            "run `codex` and its `/status` to see what it says",
+        )
     }
 }
 
@@ -80,22 +118,33 @@ pub(super) fn gh(forge: &dyn Forge) -> Line {
     }
 }
 
-/// Claude Code's sandbox available, which every worker runs in
-pub(super) fn sandbox(host: &dyn Host) -> Line {
+/// The sandbox runtime installed under `kelpie_home`, with what it needs, which every agent runs in
+pub(super) fn sandbox(host: &dyn Host, kelpie_home: &Path) -> Line {
     let gaps = host.sandbox_gaps();
-    if gaps.is_empty() {
-        return Line::ok("sandbox", "Claude Code's sandbox can run");
+    if !gaps.is_empty() {
+        let list = gaps.join(" and ");
+        return Line::missing(
+            "sandbox",
+            format!(
+                "the sandbox runtime needs {list}, which this machine lacks, so no agent can run"
+            ),
+            format!(
+                "install {list} with your package manager, such as `sudo apt-get install bubblewrap socat` on Debian"
+            ),
+        );
     }
-    let list = gaps.join(" and ");
-    Line::missing(
-        "sandbox",
-        format!(
-            "Claude Code's sandbox needs {list}, which this machine lacks, so no worker can start"
-        ),
-        format!(
-            "install {list} with your package manager, such as `sudo apt-get install bubblewrap socat` on Debian"
-        ),
-    )
+    let srt = Tools::under(kelpie_home).sandbox();
+    if !srt.is_file() {
+        return Line::missing(
+            "sandbox",
+            format!(
+                "the sandbox runtime is not at {}, so no runner starts",
+                srt.display()
+            ),
+            "run `shep kelpie tools install`",
+        );
+    }
+    Line::ok("sandbox", "the sandbox runtime can run")
 }
 
 /// The shepherd, on the pinned shep line
@@ -105,6 +154,14 @@ pub(super) fn shepherd(client: &Client, shep_home: &Path) -> Line {
         "shepherd",
         format!("shep {version} at {}", shep_home.display()),
     )
+}
+
+/// kelpie's dog, which holds the leases and is `online` only once it has named itself
+pub(super) fn dog(rows: &[ProcessInfo]) -> Line {
+    match crate::flock::dog_problem(rows) {
+        None => Line::ok("dog", "kelpie's dog is running and has named itself"),
+        Some((what, fix)) => Line::missing("dog", what, fix),
+    }
 }
 
 /// The shepherd kelpie could not use, and why

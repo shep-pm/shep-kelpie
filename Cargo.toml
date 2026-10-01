@@ -7,12 +7,20 @@ rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/shep-pm/shep-kelpie"
 publish = false
+readme = "README.md"
+keywords = ["shep"]
+# docs/ holds planning and design notes. They belong in the repository, not in
+# a published .crate, which is permanent.
+exclude = ["/docs/"]
 
 [dependencies]
 # The authenticator codes that answer a ruling from ntfy (RFC 6238 TOTP)
 hmac = { version = "0.13", default-features = false }
 # Zone-aware dates, for the reset times `/usage` prints in the maintainer's zone
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-zoneinfo"] }
+# Clears close-on-exec on a lease's connection, so a command run under the
+# lease holds it too; shep-core already builds this version with `fs`
+nix = { version = "0.29", default-features = false, features = ["fs"] }
 # The terminal QR code `shep kelpie totp` prints for an authenticator app to scan
 qrcode = { version = "0.14", default-features = false }
 # The settings' JSON Schema, in the version shep-client builds it with
@@ -20,15 +28,15 @@ schemars = { version = "1.2.2", default-features = false, features = ["derive", 
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 sha1 = { version = "0.11", default-features = false }
-shep-channel = { version = "=0.11.0", default-features = false, features = ["client"] }
+shep-channel = { version = "=0.12.0", default-features = false, features = ["client"] }
 # `schema` answers shep's `--schema` probe, which lookout edits kelpie's settings from
-shep-client = { version = "=0.11.0", default-features = false, features = ["schema"] }
-tokio = { version = "1", default-features = false, features = ["macros", "process", "rt", "signal", "sync", "time"] }
-toml = { version = "0.9", default-features = false, features = ["std", "parse", "display", "serde"] }
+shep-client = { version = "=0.12.0", default-features = false, features = ["schema"] }
+tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "process", "rt", "signal", "sync", "time"] }
+toml = { version = "1.1", default-features = false, features = ["std", "parse", "display", "serde"] }
 
 [dev-dependencies]
 # Only for the fake shepherds the relay's commands are tested against
-shep-client = { version = "=0.11.0", default-features = false, features = ["schema", "test-support"] }
+shep-client = { version = "=0.12.0", default-features = false, features = ["schema", "test-support"] }
 # Only for throwaway homes and repos in tests
 tempfile = { version = "3", default-features = false }
 

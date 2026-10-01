@@ -1,30 +1,30 @@
 //! `shep kelpie add`: a checkout becomes a project in the maintainer's flock
 //!
 //! Everything is read first, so a refusal changes nothing. Then the repo
-//! gets the labels kelpie uses, the flock gets the project's runner holding
-//! its settings as its `[app.dogs.kelpie]` table, and the dog's sheep. Each
-//! is made only when it is missing, so a second `add` changes nothing.
-//! Both sheep are registered stopped: `shep kelpie start` starts them.
+//! gets the labels kelpie uses, and the flock gets the project's runner
+//! holding its settings as its `[app.dogs.kelpie]` table. Each is made only
+//! when it is missing, so a second `add` changes nothing. The runner is
+//! registered stopped: `shep kelpie start` starts it. The dog is the
+//! adopted kelpie, and `add` says when it is not running.
 
 use std::path::Path;
 
 use serde_json::{Map, Value};
 use shep_client::Client;
-use shep_client::shep_core::config::{AppConfig, DogTable};
+use shep_client::shep_core::config::DogTable;
+use shep_client::shep_core::protocol::Request;
 use shep_client::shep_core::protocol::request::Response;
-use shep_client::shep_core::protocol::{Request, SelectorSpec};
-use shep_client::shep_core::status::ProcStatus;
 
-use super::{Checkout, Found, Launch, flock, kelpie_sheep, send, tables};
+use super::{Checkout, Launch, flock, kelpie_sheep, send, tables};
 use crate::board::READY;
 use crate::dog;
 use crate::ports::{Forge, NewLabel, Visibility};
-use crate::runner::{HUMAN, ProjectName, SUMMON_LABEL as SUMMON};
+use crate::runner::{HUMAN, IN_PROGRESS, ProjectName, SUMMON_LABEL as SUMMON};
 use crate::settings::{Settings, table_of};
 use crate::shepherd::DOG;
 
 /// The labels kelpie reads and sets on a project's issues and pull requests
-pub const LABELS: [NewLabel; 3] = [
+pub const LABELS: [NewLabel; 4] = [
     NewLabel {
         name: READY,
         color: "0e8a16",
@@ -34,6 +34,11 @@ pub const LABELS: [NewLabel; 3] = [
         name: HUMAN,
         color: "fbca04",
         description: "Kelpie handed this back and waits on the maintainer",
+    },
+    NewLabel {
+        name: IN_PROGRESS,
+        color: "fbca04",
+        description: "A worker session is on it",
     },
     NewLabel {
         name: SUMMON,
@@ -77,6 +82,13 @@ effort = "low"
 model = "claude-haiku-4-5-20251001"
 effort = "low"
 
+[models.planner]
+model = "claude-opus-5-5"
+effort = "medium"
+
+[planning]
+enabled = false
+
 [review]
 loop_guard = 8
 
@@ -94,7 +106,7 @@ guard_hooks = []
 turn_timeout = 60
 "#;
 
-/// The maintainer's own local-round command, run when it is installed
+/// The maintainer's own local-round command, which the default loop runs
 const QWEN_REVIEW: &str = "~/.claude/scripts/qwen-review.sh";
 
 /// Registers `place.checkout` as project `name`, and says what it did
@@ -114,7 +126,7 @@ pub async fn add(
 ) -> Result<Vec<String>, String> {
     let Place { checkout, .. } = place;
     // `shep disable kelpie` deletes a sheep named `kelpie`, the adopted dog's name.
-    if [dog::NAME, dog::OLD_NAME].contains(&name.as_str()) {
+    if name.as_str() == dog::NAME {
         return Err(format!(
             "`{name}` is kelpie's own name, so name the project: `shep kelpie add <project>`"
         ));
@@ -138,30 +150,7 @@ pub async fn add(
         == Visibility::Public;
     let rows = flock(client).await?;
     let mut done = Vec::new();
-    // Kelpie adopted and left enabled holds the name `kelpie` as a dog, and
-    // only restarts: its dog runs as a sheep of its own.
-    let adopted = rows
-        .iter()
-        .any(|r| r.name == dog::OLD_NAME && r.dog.is_some());
-    if adopted {
-        done.push(format!(
-            "kelpie is adopted and enabled, which only restarts it: run `shep disable {}`",
-            dog::OLD_NAME
-        ));
-    }
     let runner = kelpie_sheep(client, &rows, name.as_str(), &["runner", name.as_str()]).await?;
-    let old_dog = match adopted {
-        true => None,
-        false => kelpie_sheep(client, &rows, dog::OLD_NAME, &["dog"]).await?,
-    };
-    let dog = kelpie_sheep(client, &rows, dog::NAME, &["dog"]).await?;
-    if old_dog.is_some() && dog.is_some() {
-        return Err(format!(
-            "both `{}` and `{}` run kelpie's dog, and one book needs one dog",
-            dog::OLD_NAME,
-            dog::NAME
-        ));
-    }
     let mut tables = tables(client).await?;
     // One runner per checkout and per repo: two would take the same issues.
     // Read from each table, or a Flockfile runner's file, by its raw keys,
@@ -206,7 +195,6 @@ pub async fn add(
             ));
         }
     }
-    let (new_dog, carried) = dog_app(launch, old_dog.as_ref())?;
 
     // A failure part way says what had changed by then.
     let wrote = async {
@@ -249,12 +237,7 @@ pub async fn add(
             _ => done.push(format!("runner `{name}`: already there with its settings")),
         }
 
-        match (dog, new_dog) {
-            (Some(_), _) => done.push(format!("dog `{}`: already there", dog::NAME)),
-            (None, new_dog) => {
-                replace_dog(client, new_dog, &carried, old_dog, &mut done).await?;
-            }
-        }
+        done.extend(super::dog_down(&rows));
         Ok::<(), String>(())
     }
     .await;
@@ -263,114 +246,6 @@ pub async fn add(
         Err(e) if done.is_empty() => Err(e),
         Err(e) => Err(format!("{e}, after this much: {}", done.join("; "))),
     }
-}
-
-/// The dog's half of [`add`] alone: `kelpie-dog` in place of a Flockfile
-/// dog under the old name `kelpie`, keeping its variables and its book
-///
-/// # Errors
-///
-/// A message when the flock runs the dog under both names, a variable the
-/// old entry sets is missing here, or a step fails, naming what changed.
-pub async fn move_dog(client: &Client, launch: &Launch) -> Result<Vec<String>, String> {
-    let rows = flock(client).await?;
-    let old = kelpie_sheep(client, &rows, dog::OLD_NAME, &["dog"]).await?;
-    if kelpie_sheep(client, &rows, dog::NAME, &["dog"])
-        .await?
-        .is_some()
-    {
-        return match old {
-            Some(_) => Err("both `kelpie` and `kelpie-dog` run kelpie's dog".into()),
-            None => Ok(vec![format!("dog `{}`: already there", dog::NAME)]),
-        };
-    }
-    let (new_dog, carried) = dog_app(launch, old.as_ref())?;
-    let mut done = Vec::new();
-    match replace_dog(client, new_dog, &carried, old, &mut done).await {
-        Ok(()) => Ok(done),
-        Err(e) => Err(format!("{e}, after this much: {}", done.join("; "))),
-    }
-}
-
-// The dog's sheep as `add` makes it, and the variables it took from this
-// shell. One replacing a Flockfile dog keeps every variable that entry set:
-// shep withholds their values, so each is taken from this command's own
-// environment, and one missing there stops `add` before anything changes.
-// `TMPDIR` and `PATH` are refused instead: a shell always has both, and a
-// `TMPDIR` other than the runners' puts the GPU lock somewhere else.
-fn dog_app(launch: &Launch, old: Option<&Found>) -> Result<(AppConfig, Vec<String>), String> {
-    let mut app = launch.dog();
-    let mut carried = Vec::new();
-    for key in old.map_or(&[][..], |old| old.env_keys.as_slice()) {
-        if app.env.contains_key(key) {
-            continue;
-        }
-        if ["TMPDIR", "PATH"].contains(&key.as_str()) {
-            return Err(format!(
-                "`{}`'s entry sets {key}, which shep does not hand back and this shell's may \
-                 not match: take {key} out of that entry, restart it, and run this again",
-                dog::OLD_NAME
-            ));
-        }
-        let value = std::env::var(key).map_err(|_| {
-            format!(
-                "`{}`'s entry sets {key}, which shep does not hand back: run this with {key} \
-                 set as that entry sets it",
-                dog::OLD_NAME
-            )
-        })?;
-        app.env.insert(key.clone(), value);
-        carried.push(key.clone());
-    }
-    Ok((app, carried))
-}
-
-// Adds the dog's sheep. A dog set up from a Flockfile under its old name
-// holds the name `shep adopt` needs, so it goes first, which leaves at most
-// one dog if anything after it fails, and the new one starts at once when
-// the old one ran: its book is on disk.
-async fn replace_dog(
-    client: &Client,
-    new_dog: AppConfig,
-    carried: &[String],
-    old: Option<Found>,
-    done: &mut Vec<String>,
-) -> Result<(), String> {
-    if old.is_some() {
-        let delete = Request::Delete {
-            selector: SelectorSpec::Name(dog::OLD_NAME.to_owned()),
-        };
-        send(client, delete, |r| matches!(r, Response::Deleted(_))).await?;
-        done.push(format!(
-            "dog `{}`: deleted, since it held the name kelpie is adopted under. If what \
-             follows failed, `shep kelpie add` again adds `{}`, which reads the same book",
-            dog::OLD_NAME,
-            dog::NAME
-        ));
-    }
-    let request = Request::Add {
-        apps: vec![new_dog],
-    };
-    send(client, request, |r| matches!(r, Response::Added(_))).await?;
-    if !carried.is_empty() {
-        done.push(format!(
-            "dog `{}`: {} taken from this shell, as `{}`'s entry set them",
-            dog::NAME,
-            carried.join(", "),
-            dog::OLD_NAME
-        ));
-    }
-    match old {
-        Some(old) if old.row.status == ProcStatus::Online => {
-            super::resume(client, dog::NAME).await?;
-            done.push(format!("dog `{}`: added and started", dog::NAME));
-        }
-        _ => done.push(format!(
-            "dog `{}`: added, stopped until `shep kelpie start`",
-            dog::NAME
-        )),
-    }
-    Ok(())
 }
 
 // The project's settings: its file from before the tables when it has one,
@@ -398,17 +273,11 @@ fn settings(
             let installed = QWEN_REVIEW
                 .strip_prefix("~/")
                 .is_some_and(|script| place.home.join(script).is_file());
-            let local = if installed {
-                [("kind", "command"), ("command", QWEN_REVIEW)].as_slice()
-            } else {
-                [("kind", "off")].as_slice()
-            };
-            let local = local
-                .iter()
-                .map(|&(k, v)| (k.to_owned(), text(v)))
-                .collect();
-            if let Some(Value::Object(review)) = table.get_mut("review") {
-                review.insert("local".into(), Value::Object(local));
+            // With the script, the default loop runs it and then Claude.
+            let review = table.get_mut("review");
+            if let (false, Some(Value::Object(review))) = (installed, review) {
+                let claude = Value::Array(vec![text(crate::settings::CLAUDE)]);
+                review.insert("reviewers".into(), claude);
             }
             table
         }

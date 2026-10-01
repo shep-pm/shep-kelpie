@@ -131,7 +131,9 @@ fn a_rework_turn_past_its_ceiling_still_owes_the_review_loop_after_a_yes() {
     let runner = running(&rig);
     rig.ask(&runner, "rework", Some("71"));
     rig.claude
-        .script([Scripted::Fail(crate::ports::ClaudeError::TimedOut)]);
+        .script([Scripted::Fail(crate::ports::AgentError::TimedOut(
+            crate::settings::Harness::ClaudeCode,
+        ))]);
     let Some(StepReport::TimedOut { id, .. }) = step(&runner).unwrap() else {
         panic!("the timed-out turn raised no ruling");
     };
@@ -376,8 +378,8 @@ fn a_rework_of_a_pull_request_coderabbit_reviewed_spends_no_second_round() {
     let rig = Rig::new("shep");
     rig.coderabbit_on();
     rig.edit_settings(|s| s.replace("divisor = 1000\n", "divisor = 1000\nrounds = 1\n"));
-    reviewed_71(&rig);
-    let reviewed = rig.forge.head_of("kelpie/7").unwrap();
+    let reviewed = reviewed_71(&rig);
+    rig.push_by_hand("kelpie/7", "later.txt");
     rig.forge.coderabbit.review(
         71,
         &reviewed,
@@ -406,6 +408,107 @@ fn a_rework_of_a_pull_request_coderabbit_reviewed_spends_no_second_round() {
     let summons = rig.forge.coderabbit.label_log().into_iter();
     let summon = crate::runner::coderabbit::LABEL;
     assert_eq!(summons.filter(|(_, l, _)| l == summon).count(), 0);
+}
+
+#[test]
+fn a_review_of_the_current_head_is_left_out_of_a_reworks_count_as_an_adoptions_is() {
+    let rig = Rig::new("shep");
+    rig.coderabbit_on();
+    rig.edit_settings(|s| s.replace("divisor = 1000\n", "divisor = 1000\nrounds = 2\n"));
+    let head = reviewed_71(&rig);
+    rig.forge
+        .coderabbit
+        .review(71, &head, crate::runner::coderabbit::tests::now(&rig), &[]);
+    let runner = running(&rig);
+    rig.ask(&runner, "rework", Some("71"));
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["coderabbit"]["rounds"], json!(0));
+}
+
+#[test]
+fn a_rework_is_refused_while_the_forge_cannot_show_coderabbits_reviews() {
+    let rig = Rig::new("shep");
+    rig.coderabbit_on();
+    rig.edit_settings(|s| s.replace("divisor = 1000\n", "divisor = 1000\nrounds = 2\n"));
+    reviewed_71(&rig);
+    let runner = running(&rig);
+    rig.forge.coderabbit.set_down(true);
+    let answer = rig.ask(&runner, "rework", Some("71"));
+    let error = answer["error"].as_str().unwrap();
+    assert!(
+        error.starts_with("cannot read CodeRabbit's reviews of #71"),
+        "{error}"
+    );
+    assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
+    rig.forge.coderabbit.set_down(false);
+    assert!(
+        rig.ask(&runner, "rework", Some("71"))
+            .get("error")
+            .is_none()
+    );
+}
+
+#[test]
+fn a_rework_turn_that_pushes_nothing_is_sent_back_once_then_parks_on_a_ruling() {
+    let rig = Rig::new("zeus");
+    reviewed_71(&rig);
+    let runner = running(&rig);
+    rig.ask(&runner, "rework", Some("71"));
+    rig.claude.script([
+        Scripted::Reply(Default::default(), Default::default()),
+        Scripted::Reply(Default::default(), Default::default()),
+    ]);
+    step(&runner).unwrap();
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Ended { issue: 7, .. })
+    ));
+    let [first, again] = rig.claude.calls().try_into().unwrap();
+    assert_eq!(again.session, Session::Resume(first.session.id().clone()));
+    assert!(
+        again
+            .prompt
+            .starts_with("Your last turn ended without a new push"),
+        "{}",
+        again.prompt
+    );
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+        "implement",
+        "no fix was pushed, so there is nothing to review yet"
+    );
+
+    let Some(StepReport::Failed {
+        issue: 7,
+        pull_request: Some(71),
+        question,
+        ..
+    }) = step(&runner).unwrap()
+    else {
+        panic!("the rework was not parked");
+    };
+    assert!(
+        question.contains("it ended twice with no new push and no question"),
+        "{question}"
+    );
+}
+
+#[test]
+fn a_rework_turn_sent_back_that_then_pushes_goes_on_to_the_review_loop() {
+    let rig = Rig::new("zeus");
+    reviewed_71(&rig);
+    let runner = running(&rig);
+    rig.ask(&runner, "rework", Some("71"));
+    rig.claude.script([
+        Scripted::Reply(Default::default(), Default::default()),
+        Scripted::Push("fix.txt", "fixed\n"),
+    ]);
+    step(&runner).unwrap();
+    step(&runner).unwrap();
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+        "review"
+    );
 }
 
 mod asked;

@@ -4,7 +4,7 @@ use serde_json::json;
 
 use super::*;
 use crate::ports::{Cost, Usage};
-use crate::profile::INSTRUCTIONS;
+use crate::profile;
 use crate::settings::Effort;
 use crate::test::{LEFT_BEHIND, Rig, Scripted, git};
 
@@ -58,7 +58,10 @@ fn the_first_turn_starts_the_workers_session_in_its_own_worktree() {
     assert_eq!(call.settings, worker.join("settings.json"));
     assert_eq!(call.instructions, Some(worker.join("instructions.md")));
     let instructions = fs::read_to_string(worker.join("instructions.md")).unwrap();
-    assert!(instructions.starts_with(INSTRUCTIONS), "{instructions}");
+    assert!(
+        instructions.starts_with(&profile::instructions(std::path::Path::new(Rig::KELPIE))),
+        "{instructions}"
+    );
     assert!(seen.build_existed, "the build folder came after the worker");
 
     assert_eq!(git(&worktree, &["branch", "--show-current"]), "kelpie/7");
@@ -87,21 +90,23 @@ fn the_settings_file_fences_writes_to_this_worktree_and_its_git_paths() {
     let [seen] = rig.claude.seen().try_into().unwrap();
     let kelpie = rig.home.path().join("kelpie");
     let git_dir = fs::canonicalize(rig.repo().join(".git")).unwrap();
-    let allow = &seen.settings["sandbox"]["filesystem"]["allowWrite"];
+    let allow = &seen.sandbox["filesystem"]["allowWrite"];
     assert_eq!(allow[0], json!(kelpie.join("wt/koji/7")));
     assert_eq!(allow[1], json!(kelpie.join("targets/koji/7")));
     assert_eq!(allow[2], json!(git_dir.join("objects")));
     assert_eq!(allow[3], json!(git_dir.join("worktrees/7")));
     assert_eq!(
-        seen.settings["sandbox"]["filesystem"]["denyWrite"][0],
+        seen.sandbox["filesystem"]["denyWrite"][0],
         json!(git_dir.join("config"))
     );
     assert_eq!(
         seen.settings["hooks"]["PreToolUse"][1]["hooks"][0]["command"],
         format!(
-            "'/opt/kelpie/bin/kelpie' 'guard' '{}' '{}'",
+            "'/opt/kelpie/bin/kelpie' 'guard' '{}' '{}' '--folder={}' '--folder={}'",
             git_dir.display(),
-            kelpie.join("wt/koji/7").display()
+            kelpie.join("wt/koji/7").display(),
+            kelpie.display(),
+            rig.repo().display()
         ),
         "kelpie's own guard, with no project hooks in the settings"
     );
@@ -132,7 +137,7 @@ fn status_shows_the_session_and_what_the_work_item_has_cost() {
             issue: 7,
             session: session.clone(),
             usage: usage(2),
-            cost_usd: 0.0200853,
+            cost_usd: Some(0.0200853),
             work_item_cost_usd: 0.0200853,
             pull_request: None,
         }
@@ -206,7 +211,7 @@ fn a_worker_that_repoints_its_git_file_cannot_move_its_fence() {
     step(&runner).unwrap();
     let [_, seen] = rig.claude.seen().try_into().unwrap();
     let git_dir = fs::canonicalize(rig.repo().join(".git")).unwrap();
-    let allow = &seen.settings["sandbox"]["filesystem"]["allowWrite"];
+    let allow = &seen.sandbox["filesystem"]["allowWrite"];
     assert_eq!(allow[2], json!(git_dir.join("objects")));
     assert_eq!(allow[3], json!(git_dir.join("worktrees/7")));
     assert!(!allow.to_string().contains("wanted"), "{allow}");
@@ -215,7 +220,7 @@ fn a_worker_that_repoints_its_git_file_cannot_move_its_fence() {
 #[test]
 fn a_turn_stopped_with_the_runner_resumes_when_it_starts_again() {
     let (rig, runner) = with_issue_7("reactmap");
-    rig.claude.script([Scripted::Fail(ClaudeError::Stopped)]);
+    rig.claude.script([Scripted::Fail(AgentError::Stopped)]);
     assert_eq!(step(&runner).unwrap(), None);
     drop(runner);
 
@@ -237,7 +242,10 @@ fn a_session_killed_before_it_began_starts_over_with_the_same_id() {
     let runner = rig.open().unwrap();
     let first = rig.claude.calls()[0].session.id().clone();
     rig.claude.script([
-        Scripted::Fail(ClaudeError::NoSession(first.clone())),
+        Scripted::Fail(AgentError::NoSession(
+            crate::settings::Harness::ClaudeCode,
+            first.clone(),
+        )),
         Scripted::Reply(usage(1), Cost(5)),
     ]);
     step(&runner).unwrap();
@@ -265,8 +273,10 @@ fn a_paused_project_runs_no_turn_until_it_starts() {
 #[test]
 fn a_failed_turn_raises_a_ruling_carrying_why_and_alerts_like_the_rest() {
     let (rig, runner) = with_issue_7("zeus");
-    rig.claude
-        .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
+    rig.claude.script([Scripted::Fail(AgentError::Failed(
+        crate::settings::Harness::ClaudeCode,
+        "overloaded".into(),
+    ))]);
     let Some(StepReport::Failed {
         issue,
         pull_request,
@@ -299,8 +309,10 @@ fn a_failed_turn_raises_a_ruling_carrying_why_and_alerts_like_the_rest() {
 #[test]
 fn a_yes_on_a_failed_turn_resumes_its_session() {
     let (rig, runner) = with_issue_7("zeus");
-    rig.claude
-        .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
+    rig.claude.script([Scripted::Fail(AgentError::Failed(
+        crate::settings::Harness::ClaudeCode,
+        "overloaded".into(),
+    ))]);
     step(&runner).unwrap();
     rig.ask(&runner, "rule", Some("1 yes"));
     rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
@@ -323,13 +335,18 @@ fn a_yes_on_a_failed_turn_resumes_its_session() {
 #[test]
 fn a_retry_whose_session_never_began_starts_it_over_from_the_issue() {
     let (rig, runner) = with_issue_7("zeus");
-    rig.claude
-        .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
+    rig.claude.script([Scripted::Fail(AgentError::Failed(
+        crate::settings::Harness::ClaudeCode,
+        "overloaded".into(),
+    ))]);
     step(&runner).unwrap();
     let first = rig.claude.calls()[0].session.id().clone();
     rig.ask(&runner, "rule", Some("1 yes"));
     rig.claude.script([
-        Scripted::Fail(ClaudeError::NoSession(first.clone())),
+        Scripted::Fail(AgentError::NoSession(
+            crate::settings::Harness::ClaudeCode,
+            first.clone(),
+        )),
         Scripted::Reply(usage(1), Cost(1)),
     ]);
     assert!(matches!(
@@ -344,8 +361,10 @@ fn a_retry_whose_session_never_began_starts_it_over_from_the_issue() {
 #[test]
 fn a_retried_turn_gets_a_whole_ceiling_however_long_the_ruling_waited() {
     let (rig, runner) = with_issue_7("zeus");
-    rig.claude
-        .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
+    rig.claude.script([Scripted::Fail(AgentError::Failed(
+        crate::settings::Harness::ClaudeCode,
+        "overloaded".into(),
+    ))]);
     step(&runner).unwrap();
     rig.clock.advance(2000);
     rig.ask(&runner, "rule", Some("1 yes"));
@@ -358,8 +377,10 @@ fn a_retried_turn_gets_a_whole_ceiling_however_long_the_ruling_waited() {
 #[test]
 fn a_no_on_a_failed_turn_stops_the_work_item_the_way_a_timed_out_one_does() {
     let (rig, runner) = with_issue_7("rotom");
-    rig.claude
-        .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
+    rig.claude.script([Scripted::Fail(AgentError::Failed(
+        crate::settings::Harness::ClaudeCode,
+        "overloaded".into(),
+    ))]);
     step(&runner).unwrap();
     rig.ask(&runner, "rule", Some("1 no not worth another go"));
     assert!(matches!(
@@ -378,7 +399,9 @@ fn a_no_on_a_failed_turn_stops_the_work_item_the_way_a_timed_out_one_does() {
 #[test]
 fn a_turn_past_its_ceiling_is_stopped_and_a_yes_resumes_its_session() {
     let (rig, runner) = with_issue_7("zeus");
-    rig.claude.script([Scripted::Fail(ClaudeError::TimedOut)]);
+    rig.claude.script([Scripted::Fail(AgentError::TimedOut(
+        crate::settings::Harness::ClaudeCode,
+    ))]);
     let Some(StepReport::TimedOut {
         issue,
         session,
@@ -421,7 +444,9 @@ fn a_turn_past_its_ceiling_is_stopped_and_a_yes_resumes_its_session() {
 #[test]
 fn a_no_on_a_timed_out_turn_stops_the_work_item_keeping_nothing_of_its_own() {
     let (rig, runner) = with_issue_7("rotom");
-    rig.claude.script([Scripted::Fail(ClaudeError::TimedOut)]);
+    rig.claude.script([Scripted::Fail(AgentError::TimedOut(
+        crate::settings::Harness::ClaudeCode,
+    ))]);
     step(&runner).unwrap();
     rig.ask(&runner, "rule", Some("1 no not worth waiting for"));
     assert!(matches!(
@@ -536,4 +561,109 @@ fn a_branch_left_behind_stays_a_refusal_for_a_new_work_item_even_when_it_matches
         "{question}"
     );
     assert_eq!(rig.claude.calls(), []);
+}
+
+const SENT_BACK: &str = "Your last turn ended with no pull request for this work item \
+                         and no question. If a tool failed, try it again or find another \
+                         way, and open the draft pull request once the work is done. If \
+                         only the maintainer can unblock you, end your reply with a \
+                         <kelpie-question> block.";
+
+#[test]
+fn a_turn_that_ends_with_no_pull_request_and_no_question_sends_the_worker_back_once() {
+    let (rig, runner) = with_issue_7("zeus");
+    rig.claude.script([
+        Scripted::Say("cargo test failed in the sandbox, so I stopped."),
+        Scripted::Reply(usage(1), Cost(1)),
+    ]);
+    step(&runner).unwrap();
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Ended { issue: 7, .. })
+    ));
+    let [first, again] = rig.claude.calls().try_into().unwrap();
+    assert_eq!(again.session, Session::Resume(first.session.id().clone()));
+    assert_eq!(again.prompt, SENT_BACK);
+}
+
+#[test]
+fn a_second_turn_that_stops_short_parks_the_worker_on_a_ruling() {
+    let (rig, runner) = with_issue_7("zeus");
+    rig.claude.script([
+        Scripted::Reply(usage(1), Cost(1)),
+        Scripted::Reply(usage(1), Cost(1)),
+    ]);
+    step(&runner).unwrap();
+    step(&runner).unwrap();
+    let Some(StepReport::Failed {
+        issue: 7,
+        pull_request: None,
+        id: 1,
+        question,
+        ..
+    }) = step(&runner).unwrap()
+    else {
+        panic!("the worker was not parked");
+    };
+    assert!(
+        question.starts_with(
+            "The worker's turn on issue #7 failed: \
+             it ended twice with no pull request and no question."
+        ),
+        "{question}"
+    );
+    assert!(question.ends_with("stops the work item."), "{question}");
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(rig.claude.calls().len(), 2);
+
+    // A yes sends it back again, into the same session.
+    rig.ask(&runner, "rule", Some("1 yes"));
+    rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
+    step(&runner).unwrap();
+    let [first, _, third] = rig.claude.calls().try_into().unwrap();
+    assert_eq!(third.session, Session::Resume(first.session.id().clone()));
+    assert_eq!(third.prompt, SENT_BACK);
+}
+
+#[test]
+fn a_no_on_a_worker_that_stopped_short_stops_the_work_item() {
+    let (rig, runner) = with_issue_7("rotom");
+    rig.claude.script([
+        Scripted::Reply(usage(1), Cost(1)),
+        Scripted::Reply(usage(1), Cost(1)),
+    ]);
+    for _ in 0..3 {
+        step(&runner).unwrap();
+    }
+    rig.ask(&runner, "rule", Some("1 no the issue is already fixed"));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Finished {
+            issue: 7,
+            merged: false,
+            ..
+        })
+    ));
+    assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
+}
+
+#[test]
+fn a_pull_request_the_turns_end_missed_goes_to_review_instead() {
+    let (rig, runner) = with_issue_7("zeus");
+    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+    rig.forge.set_board_down(true);
+    step(&runner).unwrap();
+    // The forge cannot be asked, so nothing is sent back yet.
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::GateFailed { issue: 7, .. })
+    ));
+    rig.forge.set_board_down(false);
+    rig.forge.open_pull_request(70, "kelpie/7", &[7]);
+    step(&runner).unwrap();
+    let item = &rig.ask(&runner, "status", None)["work_item"];
+    assert_eq!(item["pull_request"], 70);
+    assert_eq!(item["phase"]["state"], "review");
+    assert_eq!(rig.claude.calls().len(), 1, "the worker was not sent back");
 }

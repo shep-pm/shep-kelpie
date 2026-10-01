@@ -1,5 +1,6 @@
-//! A runner, the dog and the relay's commands without `SHEP_HOME`, against
-//! the real binary: each refuses, and says what sets it.
+//! A runner and the relay's commands without `SHEP_HOME`, and the adopted
+//! dog without its channel, against the real binary: each refuses, and says
+//! what fixes it.
 
 use std::process::{Command, Output, Stdio};
 
@@ -7,11 +8,16 @@ const KELPIE: &str = env!("CARGO_BIN_EXE_shep-kelpie");
 
 // A scratch home, and no `SHEP_HOME` however the test is run.
 fn kelpie(args: &[&str]) -> Output {
+    kelpie_with(args, &[])
+}
+
+fn kelpie_with(args: &[&str], env: &[(&str, &str)]) -> Output {
     let home = tempfile::tempdir().unwrap();
     Command::new(KELPIE)
         .args(args)
         .env_clear()
         .env("HOME", home.path())
+        .envs(env.iter().copied())
         .stdin(Stdio::null())
         .output()
         .unwrap()
@@ -30,13 +36,30 @@ fn a_runner_without_shep_home_names_the_flockfile_line() {
     assert!(stderr.contains("env = { SHEP_HOME ="), "{stderr}");
 }
 
+// Adopted before kelpie asked for the channel, shep starts it with none.
 #[test]
-fn the_dog_without_shep_home_names_the_flockfile_line() {
-    let output = kelpie(&["dog"]);
+fn the_adopted_dog_without_its_channel_names_the_adopt_again() {
+    let dog = [
+        ("SHEP_DOG_NAME", "kelpie"),
+        ("SHEP_NAME", "kelpie"),
+        ("SHEP_HOME", "/s"),
+    ];
+    let output = kelpie_with(&[], &dog);
     assert!(!output.status.success());
     let stderr = stderr(&output);
-    assert!(stderr.contains("SHEP_HOME is not set"), "{stderr}");
-    assert!(stderr.contains("env = { SHEP_HOME ="), "{stderr}");
+    assert!(stderr.contains("no shepherd channel"), "{stderr}");
+    let adopt = format!("`shep adopt {KELPIE} --name kelpie`");
+    assert!(stderr.contains(&adopt), "{stderr}");
+}
+
+// `shep kelpie` with no verb sets SHEP_DOG_NAME and no SHEP_NAME.
+#[test]
+fn a_bare_shep_kelpie_prints_the_usage_and_runs_no_dog() {
+    let output = kelpie_with(&[], &[("SHEP_DOG_NAME", "kelpie"), ("SHEP_HOME", "/s")]);
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = stderr(&output);
+    assert!(stderr.starts_with("usage: "), "{stderr}");
+    assert!(!stderr.contains("shepherd channel"), "{stderr}");
 }
 
 #[test]

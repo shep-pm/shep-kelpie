@@ -32,6 +32,7 @@ fn adopted_80() -> StepReport {
         worker: WorkerModel {
             model: "claude-sonnet-5".into(),
             effort: Effort::Medium,
+            local: false,
         },
     }
 }
@@ -335,6 +336,52 @@ fn a_review_asking_for_changes_is_the_first_turn_and_the_loop_reviews_only_the_f
 }
 
 #[test]
+fn an_adopted_turn_that_pushes_nothing_is_sent_back_once_then_parks_on_a_ruling() {
+    let rig = Rig::new("reactmap");
+    opened_80(&rig);
+    rig.forge.review(
+        80,
+        MaintainerReview {
+            id: "PRR_80".into(),
+            changes_requested: true,
+            body: "Keep the dates.".into(),
+            comments: vec![],
+        },
+    );
+    let runner = running(&rig);
+    rig.ask(&runner, "adopt", Some("80"));
+    step(&runner).unwrap();
+    rig.claude.script([
+        Scripted::Reply(Default::default(), Default::default()),
+        Scripted::Reply(Default::default(), Default::default()),
+    ]);
+    step(&runner).unwrap();
+    step(&runner).unwrap();
+    let [first, again] = rig.claude.calls().try_into().unwrap();
+    assert_eq!(again.session, Session::Resume(first.session.id().clone()));
+    assert!(
+        again
+            .prompt
+            .starts_with("Your last turn ended without a new push"),
+        "{}",
+        again.prompt
+    );
+    let Some(StepReport::Failed {
+        issue: 5,
+        pull_request: Some(80),
+        question,
+        ..
+    }) = step(&runner).unwrap()
+    else {
+        panic!("the adopted work item was not parked");
+    };
+    assert!(
+        question.contains("it ended twice with no new push and no question"),
+        "{question}"
+    );
+}
+
+#[test]
 fn a_push_by_anyone_else_after_adoption_parks_it() {
     let rig = Rig::new("golbat");
     opened_80(&rig);
@@ -407,6 +454,7 @@ fn adopted_pull_requests_wait_for_the_work_item_in_flight_across_a_restart() {
             worker: WorkerModel {
                 model: "claude-sonnet-5".into(),
                 effort: Effort::Medium,
+                local: false,
             },
         })
     );
@@ -524,6 +572,7 @@ fn a_start_retried_after_a_failure_begins_at_the_head_origin_holds_now() {
             worker: WorkerModel {
                 model: "claude-sonnet-5".into(),
                 effort: Effort::Medium,
+                local: false,
             },
         })
     );

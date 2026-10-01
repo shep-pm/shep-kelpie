@@ -78,7 +78,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::ports::{ClaudeError, Severity};
+    use crate::ports::{AgentError, Severity};
     use crate::runner::{Runner, StepReport, step};
     use crate::test::{Rig, Scripted, ScriptedRound};
 
@@ -249,6 +249,7 @@ mod tests {
                     "round": 1,
                     "consecutive_clean": 0,
                     "guard_cleared": false,
+                    "reviewer": "qwen",
                     "stage": {
                         "stage": "fixing",
                         "clean": false,
@@ -295,6 +296,7 @@ mod tests {
                 "consecutive_clean": 0,
                 "guard_cleared": false,
                 "stage": { "stage": "round" },
+                "last": "qwen",
             }),
             "a MEDIUM finding, fixed, still resets the streak"
         );
@@ -303,7 +305,9 @@ mod tests {
     #[test]
     fn a_timed_out_fix_turn_resumes_that_round() {
         let (rig, runner) = findings_sent();
-        rig.claude.script([Scripted::Fail(ClaudeError::TimedOut)]);
+        rig.claude.script([Scripted::Fail(AgentError::TimedOut(
+            crate::settings::Harness::ClaudeCode,
+        ))]);
         let Some(StepReport::TimedOut { id, .. }) = step(&runner).unwrap() else {
             panic!("the fix turn did not time out");
         };

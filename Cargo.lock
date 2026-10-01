@@ -939,9 +939,9 @@ dependencies = [
 
 [[package]]
 name = "shep-channel"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5e73596f55f5e17012910c34af82145a15436e26a8da657cba40858f0da4265"
+checksum = "b3c8e45314fb922072ba59543d5675e60a0f4fcff9038b555fc0b7b65377e7cf"
 dependencies = [
  "serde",
  "serde_json",
@@ -950,9 +950,9 @@ dependencies = [
 
 [[package]]
 name = "shep-client"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d7c0bf096cfedab0ff488c5c71e28c07c9fccc9efcdf3fe76fabde190ed4f7f"
+checksum = "ef9c0f299e8525845f87ffe060b2f7122f3fff4e45607152d54725a06c802604"
 dependencies = [
  "futures-util",
  "schemars",
@@ -968,9 +968,9 @@ dependencies = [
 
 [[package]]
 name = "shep-core"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d64e940b65751f28046a3ef6a156aa5afa9928fa999ff91fd5e8ae5bb13332b"
+checksum = "74c1f78d22fc76b08f074089987ab0391c8e6262febc986582ac84dffb80d5d8"
 dependencies = [
  "annotate-snippets",
  "anstyle",
@@ -1004,6 +1004,7 @@ version = "0.0.0"
 dependencies = [
  "hmac",
  "jiff",
+ "nix",
  "qrcode",
  "schemars",
  "serde",
@@ -1013,14 +1014,14 @@ dependencies = [
  "shep-client",
  "tempfile",
  "tokio",
- "toml 0.9.12+spec-1.1.0",
+ "toml 1.1.6+spec-1.1.0",
 ]
 
 [[package]]
 name = "shep-macros"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "465ec2513c79fea7d4efe100c53606cbb2863cf34cc58d246d72d58c9ba02577"
+checksum = "805024ab27ca82b5fdb1f3f2929660bce750eade29c4b8f047cc1ecd747fb955"
 dependencies = [
  "proc-macro2",
  "quote 1.0.47",
@@ -1235,17 +1236,17 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.9.12+spec-1.1.0"
+version = "1.1.6+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf92845e79fc2e2def6a5d828f0801e29a2f8acc037becc5ab08595c7d5e9863"
+checksum = "920602543f0911ab71da12c50d59701da54c196d1a2bf5cb4b75667f137a406a"
 dependencies = [
  "indexmap",
  "serde_core",
  "serde_spanned 1.1.1",
- "toml_datetime 0.7.5+spec-1.1.0",
+ "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
  "toml_writer",
- "winnow 0.7.15",
+ "winnow 1.0.4",
 ]
 
 [[package]]
@@ -1259,9 +1260,9 @@ dependencies = [
 
 [[package]]
 name = "toml_datetime"
-version = "0.7.5+spec-1.1.0"
+version = "1.1.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92e1cfed4a3038bc5a127e35a2d360f145e1f4b971b551a2ba5fd7aedf7e1347"
+checksum = "3165f65f62e28e0115a00b2ebdd37eb6f3b641855f9d636d3cd4103767159ad7"
 dependencies = [
  "serde_core",
 ]

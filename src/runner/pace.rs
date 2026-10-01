@@ -1,4 +1,8 @@
-//! Pacing: usage is read before a new work item and before each new turn
+//! Pacing: each account's usage is read before a call on it starts
+//!
+//! A new work item is paced on every account its roles spend, its turns on
+//! the worker's, and a review round on its reviewer's. Each account keeps
+//! its own day and its own holds. An agent limited by a lease is never paced.
 //!
 //! A reading that finds a hold is trusted for [`RECHECK_SECS`] or until the
 //! hold ends, whichever comes first, so a project held for hours reads
@@ -8,12 +12,16 @@
 //! With `pacing.enabled` off the reading still runs, so `status` shows the
 //! numbers, but neither limit holds anything.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use serde::Serialize;
 
 use super::Runner;
 use super::report::{Begin, StepReport};
-use crate::pacer::{Assessment, Hold, RECHECK_SECS, Reading, Scope, assess};
+use crate::lease::gpu::LockHolder;
+use crate::pacer::{Assessment, Hold, RECHECK_SECS, Reading, Scope, assess, named};
 use crate::ports::Timestamp;
+use crate::settings::{Account, Limit, Runs};
 use crate::state::StateError;
 
 /// What `status` shows of the pacer
@@ -21,9 +29,17 @@ use crate::state::StateError;
 pub struct PacerStatus<'a> {
     /// Whether the limits hold anything, from `pacing.enabled`
     pub enabled: bool,
-    /// The last time usage was read, and what it makes of it
+    /// Each account the worker spends or a reading was taken of
+    #[serde(flatten)]
+    pub accounts: BTreeMap<Account, AccountStatus<'a>>,
+}
+
+/// What `status` shows of one account's usage
+#[derive(Debug, Serialize)]
+pub struct AccountStatus<'a> {
+    /// The last time its usage was read, and what it makes of it
     pub reading: Option<&'a Reading>,
-    /// Why nothing new is starting, while a hold lasts
+    /// Why nothing new is starting on it, while a hold lasts
     pub holding: Option<&'a Hold>,
 }
 
@@ -55,26 +71,48 @@ impl Pace {
 }
 
 impl Runner {
-    pub(super) fn pace(&mut self, scope: Scope) -> Result<Pace, StateError> {
+    /// Paces `scope` on the limit of the work item's worker
+    pub(super) fn pace_worker(&mut self, scope: Scope) -> Result<Pace, StateError> {
+        let limit = match self.current() {
+            Some(item) => match self.worker_agent(item) {
+                Ok(agent) => agent.limit,
+                // Its turn fails at once, saying why, so nothing waits on a window.
+                Err(_) => return Ok(Pace::Clear),
+            },
+            None => self.agents.limits.worker.clone(),
+        };
+        self.pace(scope, &limit)
+    }
+
+    /// Paces `scope` on `limit`: an account's windows, or nothing for a lease
+    pub(super) fn pace(&mut self, scope: Scope, limit: &Limit) -> Result<Pace, StateError> {
+        let Limit::Account(account) = *limit else {
+            return Ok(Pace::Clear);
+        };
         let now = self.ports.clock.now();
-        if let Some((read_at, last)) = &self.pacing {
+        if let Some((read_at, last)) = self.pacing.get(&account) {
             let trusted = now.0 < read_at.0 + RECHECK_SECS;
             if trusted && last.hold(scope).is_some_and(|hold| now < hold.until) {
                 return Ok(Pace::StillHeld);
             }
         }
-        let mut assessment = match self.ports.meter.read(now) {
+        let prior = self.state.day_start(account);
+        let mut assessment = match self.ports.meter_of(account).read(now) {
             Ok(usage) => assess(
+                account,
                 now,
                 &usage,
-                self.state.pacing,
+                prior,
                 self.settings.pacing.kickoff_hours,
             ),
-            Err(e) => Assessment::unreadable(now, format!("cannot read usage: {e}")),
+            Err(e) => {
+                let whose = named(account, "", "Codex ");
+                Assessment::unreadable(now, format!("cannot read {whose}usage: {e}"))
+            }
         };
-        if assessment.day_start.is_some() && assessment.day_start != self.state.pacing {
+        if assessment.day_start.is_some() && assessment.day_start != prior {
             let mut next = self.state.clone();
-            next.pacing = assessment.day_start;
+            *next.day_start_mut(account) = assessment.day_start;
             self.save(next)?;
         }
         if !self.settings.pacing.enabled {
@@ -82,19 +120,83 @@ impl Runner {
             assessment.window = None;
         }
         let hold = assessment.hold(scope).cloned();
-        self.pacing = Some((now, assessment));
+        self.pacing.insert(account, (now, assessment));
         Ok(hold.map_or(Pace::Clear, Pace::Held))
     }
 
-    /// What the pacer shows in `status`
+    /// Paces a new work item on every account the project's calls spend
+    ///
+    /// A work item spends each role's account, so any one over its allowance
+    /// or past its 5-hour mark holds it, the first such account in order.
+    pub(super) fn pace_dispatch(&mut self) -> Result<Pace, StateError> {
+        for account in self.spent_accounts() {
+            match self.pace(Scope::Dispatch, &Limit::Account(account))? {
+                Pace::Clear => {}
+                held => return Ok(held),
+            }
+        }
+        Ok(Pace::Clear)
+    }
+
+    // Each role's limit, the planner's included, then each session reviewer's.
+    fn spent_limits(&self) -> impl Iterator<Item = &Limit> {
+        let limits = &self.agents.limits;
+        let sessions = self.lineup.iter().filter_map(|r| match &r.runs {
+            Runs::Claude(session) => Some(&session.limit),
+            Runs::Local(_) => None,
+        });
+        // Beside a local worker, every issue it is not given runs on Claude.
+        const CLAUDE: Limit = Limit::Account(Account::Claude);
+        let claude_worker = limits.worker.lease().map(|_| &CLAUDE);
+        [
+            &limits.worker,
+            &limits.reviewer,
+            &limits.judge,
+            &limits.planner,
+        ]
+        .into_iter()
+        .chain(claude_worker)
+        .chain(sessions)
+    }
+
+    // The accounts the project's calls spend, each once.
+    fn spent_accounts(&self) -> BTreeSet<Account> {
+        let account = |limit: &Limit| match limit {
+            Limit::Account(account) => Some(*account),
+            Limit::Lease(_) => None,
+        };
+        self.spent_limits().filter_map(account).collect()
+    }
+
+    /// Who holds each lease the project's local agents take, for `status`
+    pub(super) fn local_leases(&self) -> BTreeMap<String, Option<LockHolder>> {
+        self.spent_limits()
+            .filter_map(Limit::lease)
+            .map(|lease| {
+                let holder = self.ports.local_leases.holder(lease);
+                (lease.as_str().to_owned(), holder)
+            })
+            .collect()
+    }
+
+    /// What the pacer shows in `status`: each account the project spends,
+    /// and any other read this run, with what holds a new work item on it
     pub(super) fn pacer_status(&self, now: Timestamp) -> PacerStatus<'_> {
-        let last = self.pacing.as_ref().map(|(_, last)| last);
+        let mut listed = self.spent_accounts();
+        listed.extend(self.pacing.keys().copied());
+        let accounts = listed.into_iter().map(|account| {
+            let last = self.pacing.get(&account).map(|(_, last)| last);
+            let status = AccountStatus {
+                reading: last.and_then(|last| last.reading.as_ref()),
+                holding: last
+                    .and_then(|last| last.hold(Scope::Dispatch))
+                    .filter(|hold| now < hold.until),
+            };
+            (account, status)
+        });
         PacerStatus {
             enabled: self.settings.pacing.enabled,
-            reading: last.and_then(|last| last.reading.as_ref()),
-            holding: last
-                .and_then(|last| last.hold(Scope::Dispatch))
-                .filter(|hold| now < hold.until),
+            accounts: accounts.collect(),
         }
     }
 }
@@ -207,18 +309,20 @@ mod tests {
             status["pacer"],
             json!({
                 "enabled": true,
-                "reading": {
-                    "at": Rig::EPOCH,
-                    "session": { "used_pct": 3, "resets_at": Rig::EPOCH + 5 * 3600 },
-                    "week": { "used_pct": 15, "resets_at": Rig::EPOCH + 7 * DAY },
-                    "allowance_pct": 14.3,
-                    "spent_today_pct": 15,
-                    "per_hour_pct": 1.8,
-                },
-                "holding": {
-                    "kind": "allowance",
-                    "reason": reason,
-                    "until": Rig::EPOCH + DAY,
+                "claude": {
+                    "reading": {
+                        "at": Rig::EPOCH,
+                        "session": { "used_pct": 3, "resets_at": Rig::EPOCH + 5 * 3600 },
+                        "week": { "used_pct": 15, "resets_at": Rig::EPOCH + 7 * DAY },
+                        "allowance_pct": 14.3,
+                        "spent_today_pct": 15,
+                        "per_hour_pct": 1.8,
+                    },
+                    "holding": {
+                        "kind": "allowance",
+                        "reason": reason,
+                        "until": Rig::EPOCH + DAY,
+                    },
                 },
             })
         );
@@ -252,7 +356,7 @@ mod tests {
         // The 15% spent is now what the day began with: 85% over 6 days.
         rig.clock.advance(DAY);
         assert!(dispatched(&step(&runner).unwrap()));
-        let reading = &rig.ask(&runner, "status", None)["pacer"]["reading"];
+        let reading = &rig.ask(&runner, "status", None)["pacer"]["claude"]["reading"];
         assert_eq!(
             (&reading["allowance_pct"], &reading["spent_today_pct"]),
             (&json!(14.2), &json!(0))
@@ -272,7 +376,7 @@ mod tests {
         rig.meter.set(next_week);
         assert!(dispatched(&step(&runner).unwrap()));
         assert_eq!(
-            rig.ask(&runner, "status", None)["pacer"]["reading"]["allowance_pct"],
+            rig.ask(&runner, "status", None)["pacer"]["claude"]["reading"]["allowance_pct"],
             13.9
         );
     }
@@ -291,7 +395,7 @@ mod tests {
         let runner = rig.open().unwrap();
         rig.claude.script([reply()]);
         step(&runner).unwrap();
-        let reading = &rig.ask(&runner, "status", None)["pacer"]["reading"];
+        let reading = &rig.ask(&runner, "status", None)["pacer"]["claude"]["reading"];
         assert_eq!(reading["spent_today_pct"], 40);
     }
 
@@ -305,7 +409,7 @@ mod tests {
         assert!(ended(&step(&runner).unwrap()));
         assert_eq!(rig.claude.calls().len(), 1);
         let status = rig.ask(&runner, "status", None);
-        assert_eq!(status["pacer"]["holding"]["kind"], "allowance");
+        assert_eq!(status["pacer"]["claude"]["holding"]["kind"], "allowance");
     }
 
     #[test]
@@ -334,7 +438,7 @@ mod tests {
             "the 5-hour window is at 55%, past the 50% mark, so no turn starts until it resets"
         );
         assert_eq!(rig.claude.calls(), []);
-        let holding = &rig.ask(&runner, "status", None)["pacer"]["holding"];
+        let holding = &rig.ask(&runner, "status", None)["pacer"]["claude"]["holding"];
         assert_eq!(holding["kind"], "window");
 
         // Still parked well before the reset, without another read
@@ -350,7 +454,7 @@ mod tests {
         rig.claude.script([reply()]);
         assert!(ended(&step(&runner).unwrap()));
         let status = rig.ask(&runner, "status", None);
-        assert_eq!(status["pacer"]["holding"], json!(null));
+        assert_eq!(status["pacer"]["claude"]["holding"], json!(null));
     }
 
     #[test]
@@ -410,7 +514,7 @@ mod tests {
         );
         assert_eq!(reason, "cannot read usage: cannot run claude: no such file");
         let status = rig.ask(&runner, "status", None);
-        assert_eq!(status["pacer"]["reading"], json!(null));
+        assert_eq!(status["pacer"]["claude"]["reading"], json!(null));
         assert_eq!(step(&runner).unwrap(), None);
 
         rig.clock.advance(RECHECK_SECS);
@@ -446,8 +550,8 @@ mod tests {
         assert!(dispatched(&step(&runner).unwrap()));
         let status = rig.ask(&runner, "status", None);
         assert_eq!(status["pacer"]["enabled"], false);
-        assert_eq!(status["pacer"]["holding"], json!(null));
-        let reading = &status["pacer"]["reading"];
+        assert_eq!(status["pacer"]["claude"]["holding"], json!(null));
+        let reading = &status["pacer"]["claude"]["reading"];
         assert_eq!(
             (&reading["spent_today_pct"], &reading["allowance_pct"]),
             (&json!(60), &json!(14.3))
@@ -464,7 +568,10 @@ mod tests {
         assert!(ended(&step(&runner).unwrap()));
         assert_eq!(rig.claude.calls().len(), 1);
         let status = rig.ask(&runner, "status", None);
-        assert_eq!(status["pacer"]["reading"]["session"]["used_pct"], 80);
+        assert_eq!(
+            status["pacer"]["claude"]["reading"]["session"]["used_pct"],
+            80
+        );
     }
 
     #[test]
@@ -475,6 +582,6 @@ mod tests {
 
         assert!(dispatched(&step(&runner).unwrap()));
         let status = rig.ask(&runner, "status", None);
-        assert_eq!(status["pacer"]["holding"], json!(null));
+        assert_eq!(status["pacer"]["claude"]["holding"], json!(null));
     }
 }

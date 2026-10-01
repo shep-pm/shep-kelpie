@@ -4,7 +4,7 @@
 //! Claude Code's sandbox covers Bash only, and `bypassPermissions` lets the
 //! file tools write anywhere. The hook reads the tool call on stdin and
 //! refuses a write outside the folders, following symlinks, so a worker's
-//! Edit and Write stop where its Bash does. Claude Code's own files inside
+//! Edit and Write stop where its Bash does. Every harness's own files inside
 //! the folders are refused too. Anything unreadable is refused.
 
 use std::io::Read;
@@ -64,13 +64,13 @@ pub fn judge(input: impl Read, folders: &[PathBuf]) -> Verdict {
         ));
     };
     // As written and as resolved, so a link to or from `.claude` changes nothing.
-    if within(&target)
+    if let Some(harness) = within(&target)
         .iter()
         .chain(&within(&resolved))
-        .any(|p| fence::fenced(p))
+        .find_map(|p| fence::owner(p))
     {
         return Verdict::Refuse(format!(
-            "{} is Claude Code's own configuration, which only the maintainer changes",
+            "{} is {harness}'s own configuration, which only the maintainer changes",
             target.display()
         ));
     }
@@ -230,6 +230,29 @@ mod tests {
                 "{p}"
             );
         }
+    }
+
+    #[test]
+    fn codexs_own_files_are_refused_to_write_and_edit() {
+        let w = world();
+        for p in [
+            "wt/.codex/config.toml",
+            "wt/.CODEX/config.toml",
+            "wt/src/.Codex/config.toml",
+            "wt/.co\u{301}dex/config.toml",
+        ] {
+            for tool in ["Write", "Edit"] {
+                let Verdict::Refuse(why) = w.judge_tool(tool, json!({ "file_path": w.path(p) }))
+                else {
+                    panic!("{tool} of {p} went ahead");
+                };
+                assert!(why.contains("Codex's own configuration"), "{why}");
+            }
+        }
+        assert_eq!(
+            w.judge(json!({ "file_path": w.path("wt/src/codex.rs") })),
+            Verdict::Allow
+        );
     }
 
     #[test]

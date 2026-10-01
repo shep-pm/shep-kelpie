@@ -45,16 +45,15 @@ fn project(name: &str) -> ProjectName {
 // Real sockets under a real clock: a paused one would time out the
 // handshake while the fake's socket is merely waiting.
 #[tokio::test]
-async fn start_brings_up_the_dog_and_the_runner_then_reaches_the_runner() {
+async fn start_brings_up_the_runner_then_reaches_it() {
     let mut shepherd = FakeShepherd::new().await;
     runner(&shepherd, "koji", Path::new("/src/koji"), false);
-    shepherd.holds(launch(&shepherd).dog(), false);
+    shepherd.holds_dog("kelpie", true);
 
     let client = client(&shepherd).await;
     let started = in_time(start(&client, &project("koji"))).await.unwrap();
     assert_eq!(started, [r#"{"action":"start","sheep":"koji"}"#]);
     assert!(shepherd.sheep("koji").unwrap().1);
-    assert!(shepherd.sheep("kelpie-dog").unwrap().1);
     let restarts: Vec<_> = shepherd
         .writes()
         .into_iter()
@@ -65,13 +64,14 @@ async fn start_brings_up_the_dog_and_the_runner_then_reaches_the_runner() {
             _ => None,
         })
         .collect();
-    assert_eq!(restarts, ["kelpie-dog", "koji"]);
+    assert_eq!(restarts, ["koji"]);
 }
 
 #[tokio::test]
 async fn start_leaves_a_running_runner_running() {
     let mut shepherd = FakeShepherd::new().await;
     runner(&shepherd, "koji", Path::new("/src/koji"), true);
+    shepherd.holds_dog("kelpie", true);
     let client = client(&shepherd).await;
     in_time(start(&client, &project("koji"))).await.unwrap();
     let writes = shepherd.writes();
@@ -113,30 +113,173 @@ async fn start_and_pause_leave_a_sheep_that_is_not_kelpie_s_alone() {
     );
 }
 
+// A runner with no dog is never granted a lease, so it is left stopped.
 #[tokio::test]
-async fn start_with_kelpie_adopted_and_enabled_and_no_dog_says_to_disable_it() {
+async fn start_with_kelpie_s_dog_down_says_how_to_bring_it_up() {
     let mut shepherd = FakeShepherd::new().await;
     runner(&shepherd, "koji", Path::new("/src/koji"), false);
-    shepherd.holds_dog("kelpie");
     let client = client(&shepherd).await;
     let err = in_time(start(&client, &project("koji"))).await.unwrap_err();
-    assert!(err.contains("run `shep disable kelpie`"), "{err}");
+    assert_eq!(
+        err,
+        "kelpie's dog is not enabled: `shep enable kelpie` runs it"
+    );
+
+    shepherd.holds_dog("kelpie", false);
+    let err = in_time(start(&client, &project("koji"))).await.unwrap_err();
+    assert!(
+        err.contains("run `shep adopt /opt/kelpie --name kelpie`"),
+        "{err}"
+    );
+    assert_eq!(shepherd.writes(), []);
+    assert!(!shepherd.sheep("koji").unwrap().1);
+}
+
+// A dog that crash-looped to a stop grants nothing, whatever its channel.
+#[tokio::test]
+async fn start_with_kelpie_s_dog_stopped_says_to_read_its_bleats() {
+    let mut shepherd = FakeShepherd::new().await;
+    runner(&shepherd, "koji", Path::new("/src/koji"), false);
+    shepherd.holds_dog("kelpie", true);
+    shepherd.stops("kelpie");
+    let client = client(&shepherd).await;
+    let err = in_time(start(&client, &project("koji"))).await.unwrap_err();
+    assert_eq!(
+        err,
+        "kelpie's dog is not running: `shep bleats kelpie` says why"
+    );
     assert_eq!(shepherd.writes(), []);
 }
 
+// Shep lists a dog that is up and never named itself as silent, and it
+// holds nothing.
 #[tokio::test]
-async fn the_project_here_is_the_one_whose_settings_name_this_checkout() {
+async fn start_with_kelpie_s_dog_silent_says_so_and_how_to_bring_it_back() {
+    let mut shepherd = FakeShepherd::new().await;
+    runner(&shepherd, "koji", Path::new("/src/koji"), false);
+    shepherd.holds_dog("kelpie", true);
+    shepherd.never_names("kelpie");
+    let client = client(&shepherd).await;
+    let err = in_time(start(&client, &project("koji"))).await.unwrap_err();
+    assert!(err.starts_with("kelpie's dog is silent"), "{err}");
+    assert!(err.contains("`shep bleats kelpie`"), "{err}");
+
+    shepherd.gives_up_on("kelpie");
+    let err = in_time(start(&client, &project("koji"))).await.unwrap_err();
+    assert!(err.contains("shep has given up on it"), "{err}");
+    assert!(err.contains("`shep restart kelpie`"), "{err}");
+    assert_eq!(shepherd.writes(), []);
+    assert!(!shepherd.sheep("koji").unwrap().1);
+}
+
+// Git in `folder`, with an identity so a commit needs no global config.
+fn git(folder: &Path, args: &[&str]) {
+    let ran = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=kelpie",
+            "-c",
+            "user.email=kelpie@example.invalid",
+        ])
+        .arg("-C")
+        .arg(folder)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(ran.status.success(), "git {args:?}: {ran:?}");
+}
+
+#[tokio::test]
+async fn a_command_reaches_the_project_whose_repo_holds_the_folder() {
     let shepherd = FakeShepherd::new().await;
     let home = PathBuf::from("/home/me");
-    runner(&shepherd, "koji", Path::new("/src/koji"), false);
-    runner(&shepherd, "reactmap", Path::new("/src/reactmap"), false);
+    let repo = shepherd.scratch("repos/reactmap");
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["commit", "-q", "--allow-empty", "-m", "first"]);
+    let deep = shepherd.scratch("repos/reactmap/src/deep");
+    let worktree = shepherd.home().join("wt/reactmap/7");
+    let at = worktree.to_str().unwrap();
+    git(&repo, &["worktree", "add", "-q", "-b", "kelpie/7", at]);
+    runner(&shepherd, "koji", &shepherd.scratch("repos/koji"), false);
+    runner(&shepherd, "reactmap", &repo, false);
     let client = client(&shepherd).await;
-    let found = in_time(project_here(&client, Path::new("/src/reactmap"), &home)).await;
-    assert_eq!(found, Ok(project("reactmap")));
-    let err = in_time(project_here(&client, Path::new("/src/other"), &home))
+
+    for folder in [&repo, &deep, &worktree.join(".")] {
+        let found = in_time(project_here(&client, folder, &home)).await;
+        assert_eq!(found, Ok(project("reactmap")), "{}", folder.display());
+    }
+    let elsewhere = shepherd.scratch("elsewhere");
+    let err = in_time(project_here(&client, &elsewhere, &home))
         .await
         .unwrap_err();
-    assert!(err.starts_with("no project runs from /src/other"), "{err}");
+    assert_eq!(
+        err,
+        format!(
+            "no project's repo holds {}, so name one with `-p <project>`: koji, reactmap",
+            elsewhere.display()
+        )
+    );
+}
+
+#[tokio::test]
+async fn with_no_projects_the_folder_names_none() {
+    let shepherd = FakeShepherd::new().await;
+    let client = client(&shepherd).await;
+    let folder = shepherd.scratch("elsewhere");
+    let err = in_time(project_here(&client, &folder, Path::new("/home/me")))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err,
+        "no projects: `shep kelpie add` in a checkout sets one up"
+    );
+}
+
+#[tokio::test]
+async fn a_trigger_goes_to_its_project_with_its_params() {
+    let mut shepherd = FakeShepherd::new().await;
+    runner(&shepherd, "koji", Path::new("/src/koji"), true);
+    runner(&shepherd, "reactmap", Path::new("/src/reactmap"), false);
+    let client = client(&shepherd).await;
+    let sent = in_time(send(
+        &client,
+        &project("koji"),
+        "rule",
+        Some("14 no fix it"),
+    ))
+    .await;
+    assert_eq!(
+        sent,
+        Ok(vec![
+            r#"{"action":"rule","params":"14 no fix it","sheep":"koji"}"#.to_owned()
+        ])
+    );
+    let triggers: Vec<Request> = shepherd.writes();
+    assert_eq!(
+        triggers,
+        [Request::Trigger {
+            selector: SelectorSpec::Name("koji".into()),
+            action: "rule".into(),
+            params: Some("14 no fix it".into()),
+        }]
+    );
+    let err = in_time(send(&client, &project("reactmap"), "gate", None)).await;
+    assert_eq!(err, Err("reactmap's runner is not running".into()));
+    let err = in_time(send(&client, &project("nope"), "drop", None)).await;
+    assert_eq!(
+        err,
+        Err("no kelpie runner named nope in this flock: `shep kelpie add` sets one up".into())
+    );
+}
+
+#[test]
+fn a_runner_s_refusal_is_its_error() {
+    assert_eq!(
+        refusal(r#"{"error":"no ruling 3 is pending"}"#),
+        Some("no ruling 3 is pending".into())
+    );
+    assert_eq!(refusal(r#"{"project":"koji","rulings":[]}"#), None);
+    assert_eq!(refusal("unknown action: rule"), None);
 }
 
 #[tokio::test]
@@ -158,7 +301,7 @@ async fn status_reports_every_project() {
     let shepherd = FakeShepherd::new().await;
     runner(&shepherd, "koji", Path::new("/src/koji"), true);
     runner(&shepherd, "reactmap", Path::new("/src/reactmap"), false);
-    shepherd.holds(launch(&shepherd).dog(), true);
+    shepherd.holds_dog("kelpie", true);
     let client = client(&shepherd).await;
     let lines = in_time(status(&client)).await.unwrap();
     assert_eq!(

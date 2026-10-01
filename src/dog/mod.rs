@@ -1,15 +1,18 @@
-//! The kelpie dog: the lease book, run as a sheep under kelpie's shepherd
+//! The kelpie dog: the lease book, run by the adopted `kelpie`
 //!
-//! It listens on the shepherd's bus for runners' lease metrics and their
-//! process events, keeps the book on its [`desk`], and grants with a
-//! `grant` trigger on the runner. The maintainer reaches it with
-//! `shep trigger kelpie <status|take|return>`. Its flock entry needs
-//! `channel = true`, and `shutdown_with_message = true` for a clean stop.
-//! The book is saved to `<kelpie home>/dog/book.json` after every change
-//! and loaded on start, with a review window for each reviewer kelpie's
-//! `[kelpie]` section defines.
+//! Shep starts the adopted kelpie with no arguments, and that start is the
+//! dog. It asks for the shepherd channel in its `--version` answer, so
+//! `shep trigger kelpie <status|take|return>` reaches it. It listens on the
+//! shepherd's bus for runners' lease metrics and their process events,
+//! keeps the book on its [`desk`], and grants with a `grant` trigger on the
+//! runner. The book is saved to `<kelpie home>/dog/book.json` after every
+//! change and loaded on start, with a review window for each reviewer
+//! kelpie's `[kelpie]` section defines.
 
 pub mod desk;
+mod door;
+pub mod left_over;
+mod link;
 pub mod triggers;
 
 use std::collections::HashMap;
@@ -19,12 +22,12 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use shep_client::Client;
 use shep_client::shep_core::protocol::request::{ActionOutcome, Response};
 use shep_client::shep_core::protocol::{
     BusEvent, ChildMessage, ProcessEventKind, Request, SelectorSpec,
 };
 use shep_client::shep_core::status::ProcStatus;
+use shep_client::{EventStream, Lagged, ReconnectingClient};
 use tokio::sync::mpsc;
 
 use crate::adapters::SystemClock;
@@ -38,14 +41,8 @@ use crate::webhook::KelpieSettings;
 use desk::{Delivery, Desk};
 use triggers::ACTIONS;
 
-/// The dog's sheep name, which `shep kelpie lease` triggers
-///
-/// Not `kelpie`, which is the adopted dog's: `shep disable kelpie` deletes a
-/// sheep of that name, and `shep adopt` refuses one.
-pub const NAME: &str = "kelpie-dog";
-
-/// The dog's sheep name in a Flockfile written before `shep kelpie add`
-pub const OLD_NAME: &str = "kelpie";
+/// The dog's name, which kelpie is adopted under and `shep kelpie lease` triggers
+pub const NAME: &str = crate::shepherd::DOG;
 
 /// How long queued replies get to reach the shepherd before the dog exits
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
@@ -54,7 +51,7 @@ const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 /// quotes waits to the minute, so a few seconds late costs nothing.
 const WINDOW_TICK: Duration = Duration::from_secs(10);
 
-/// Runs the dog until the shepherd stops it
+/// Runs the dog until the shepherd stops it, as the adopted kelpie's start
 pub fn run() -> ExitCode {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -160,9 +157,9 @@ fn open(file: BookFile, clock: Box<dyn Clock>, gpu: GpuLock, reviewers: Reviewer
     Kept { desk, file, last }
 }
 
-// The review windows kelpie's section defines. A section that cannot be
-// read books CodeRabbit's alone, as a dog did before definitions.
-async fn reviewers(client: &Client) -> Reviewers {
+// Kelpie's section, for its review windows and leases. One that cannot be
+// read books CodeRabbit's window alone, at the default capacities.
+async fn settings(client: &ReconnectingClient) -> KelpieSettings {
     let section = client.request(Request::DogConfig {
         name: crate::shepherd::DOG.into(),
     });
@@ -170,63 +167,97 @@ async fn reviewers(client: &Client) -> Reviewers {
         Ok(Response::DogSection { toml }) => toml.as_str().to_owned(),
         Ok(other) => {
             println!("no [kelpie] section in the shepherd's answer: {other:?}");
-            return Reviewers::default();
+            return KelpieSettings::default();
         }
         Err(e) => {
             println!("cannot read the [kelpie] section: {e}");
-            return Reviewers::default();
+            return KelpieSettings::default();
         }
     };
     if text.trim().is_empty() {
-        return Reviewers::default();
+        return KelpieSettings::default();
     }
-    match KelpieSettings::from_section(&text) {
-        Ok(kelpie) => kelpie.reviewers,
-        Err(e) => {
-            println!("{e}: booking CodeRabbit's window alone");
-            Reviewers::default()
-        }
+    KelpieSettings::from_section(&text).unwrap_or_else(|e| {
+        println!("{e}");
+        salvage(&text)
+    })
+}
+
+// A section that does not parse whole: the `[leases]` table and the rest
+// are read apart, so a mistake in one leaves the other standing.
+fn salvage(text: &str) -> KelpieSettings {
+    let Ok(mut table) = text.parse::<toml::Table>() else {
+        println!("booking CodeRabbit's window alone, and cargo-test for 3 at a time");
+        return KelpieSettings::default();
+    };
+    let leases = table.remove("leases");
+    let rest = toml::to_string(&table).unwrap_or_default();
+    let mut settings = KelpieSettings::from_section(&rest).unwrap_or_else(|_| {
+        println!("booking CodeRabbit's window alone");
+        KelpieSettings::default()
+    });
+    match leases.map(toml::Value::try_into).transpose() {
+        Ok(leases) => settings.leases = leases.unwrap_or_default(),
+        Err(e) => println!("[leases] is not right ({e}): cargo-test is held by 3 at a time"),
     }
+    settings
+}
+
+/// Why the dog has no shepherd channel, and the fix
+///
+/// Kelpie asks for it at `shep adopt`, which records the ask, so an
+/// adoption from before the ask has none until kelpie is adopted again.
+pub fn no_channel() -> String {
+    let path = std::env::current_exe()
+        .map_or_else(|_| "<path to kelpie>".into(), |p| p.display().to_string());
+    format!(
+        "no shepherd channel, since kelpie was adopted before it asked for one: run \
+         `shep adopt {path} --name {NAME}`, then `shep disable {NAME}` and `shep enable {NAME}`"
+    )
 }
 
 async fn serve() -> Result<(), String> {
-    let socket = shep_home::required(shep_home::FLOCKFILE_FIX)?.join("run/shep.sock");
     let shepherd = shep_channel::serve();
     if !shepherd.is_active() {
-        return Err("no shepherd channel: run it under shep with `channel = true`".into());
+        return Err(no_channel());
     }
-    let connect = |what: &'static str| {
-        let socket = socket.clone();
-        async move {
-            Client::connect(&socket).await.map_err(|e| {
-                format!(
-                    "cannot reach the shepherd at {} {what}: {e}",
-                    socket.display()
-                )
-            })
-        }
-    };
-    let (listener, client) = (connect("for events").await?, connect("for requests").await?);
-    let mut events = listener
-        .subscribe(vec!["channel.metric".into(), "process.*".into()])
-        .await
-        .map_err(|e| format!("cannot subscribe to the shepherd's bus: {e}"))?;
+    let socket = shep_home::required(shep_home::DOG_FIX)?.join("run/shep.sock");
+    let identity = link::identity();
+    let listener = link::connect(&socket, &identity, "for events").await?;
+    let client = link::connect(&socket, &identity, "for requests").await?;
+    let mut events = link::subscribe(&listener, link::BUDGET).await?;
 
     let lock = GpuLock::under(&gpu::temp_dir());
     println!("the GPU lock is {}", lock.path().display());
     let file = BookFile::new(book_path()?);
+    if let Some(removed) = left_over::remove(&client, file.path()).await? {
+        println!("{removed}");
+    }
     if let Some(folder) = file.path().parent() {
         std::fs::create_dir_all(folder)
             .map_err(|e| format!("cannot make {}: {e}", folder.display()))?;
     }
     println!("the book is {}", file.path().display());
-    let reviewers = reviewers(&client).await;
-    let desk = Arc::new(Mutex::new(open(
-        file,
-        Box::new(SystemClock),
-        lock,
-        reviewers,
-    )));
+    let settings = settings(&client).await;
+    let mut kept = open(file, Box::new(SystemClock), lock, settings.reviewers);
+    let capacity = settings.leases.cargo_test_capacity();
+    kept.desk.set_test_capacity(capacity);
+    let desk = Arc::new(Mutex::new(kept));
+    // The other leases do not need the door, so the dog runs on without it.
+    // It is bound before any handler can start a process that inherits it.
+    let opened = crate::lease::door::socket()
+        .and_then(|socket| door::open(&socket).map(|listener| (socket, listener)));
+    match opened {
+        Ok((socket, listener)) => {
+            println!("the door is {}, {capacity} at a time", socket.display());
+            let grace = door::REJOIN_GRACE;
+            tokio::spawn(door::serve(listener, Arc::clone(&desk), grace));
+        }
+        Err(e) => {
+            println!("{e}: cargo-test cannot be taken until the dog restarts");
+            lock_desk(&desk).desk.tests.close();
+        }
+    }
     let (deliver, mut to_deliver) = mpsc::unbounded_channel::<Vec<Delivery>>();
     for action in ACTIONS {
         let (desk, deliver) = (Arc::clone(&desk), deliver.clone());
@@ -254,9 +285,21 @@ async fn serve() -> Result<(), String> {
     let mut ticks = tokio::time::interval(WINDOW_TICK);
     let ended = loop {
         let grants = tokio::select! {
-            event = events.next() => match on_event(event, &desk, &client, &mut names).await {
-                Ok(grants) => grants,
-                Err(e) => break Err(e),
+            event = events.next() => {
+                let read = match event {
+                    Some(event) => on_event(event, &desk, &client, &mut names).await,
+                    None => match rejoin(&listener, &client, &desk, &mut names).await {
+                        Ok((stream, grants)) => {
+                            events = stream;
+                            Ok(grants)
+                        }
+                        Err(e) => Err(e),
+                    },
+                };
+                match read {
+                    Ok(grants) => grants,
+                    Err(e) => break Err(e),
+                }
             },
             Some(grants) = to_deliver.recv() => grants,
             _ = ticks.tick() => lock_desk(&desk).change(Desk::tick),
@@ -277,21 +320,43 @@ fn lock_desk(desk: &Mutex<Kept>) -> std::sync::MutexGuard<'_, Kept> {
     desk.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-type Event = Option<Result<BusEvent, shep_client::Lagged>>;
+// The shepherd restarted: the bus stream ended with its connection, which
+// the reconnecting clients have since re-made under the dog's name. The
+// dog subscribes again and reads the flock, since what happened while it
+// was cut off is gone.
+async fn rejoin(
+    listener: &ReconnectingClient,
+    client: &ReconnectingClient,
+    desk: &Mutex<Kept>,
+    names: &mut HashMap<u32, String>,
+) -> Result<(EventStream, Vec<Delivery>), String> {
+    println!("the shepherd's bus closed: waiting for it to come back");
+    let events = link::subscribe(listener, link::BUDGET).await?;
+    let deadline = tokio::time::Instant::now() + link::BUDGET;
+    let grants = loop {
+        link::wait_for(client, link::BUDGET).await?;
+        match resync(desk, client, names).await {
+            Ok(grants) => break grants,
+            Err(e) if tokio::time::Instant::now() >= deadline => return Err(e),
+            Err(_) => link::pause().await,
+        }
+    };
+    println!("the shepherd is back: subscribed again");
+    Ok((events, grants))
+}
 
 async fn on_event(
-    event: Event,
+    event: Result<BusEvent, Lagged>,
     desk: &Mutex<Kept>,
-    client: &Client,
+    client: &ReconnectingClient,
     names: &mut HashMap<u32, String>,
 ) -> Result<Vec<Delivery>, String> {
     let event = match event {
-        None => return Err("the shepherd closed its bus".into()),
-        Some(Err(lagged)) => {
+        Err(lagged) => {
             println!("missed bus events ({lagged:?}): checking every runner");
             return resync(desk, client, names).await;
         }
-        Some(Ok(event)) => event,
+        Ok(event) => event,
     };
     match event {
         BusEvent::Channel {
@@ -328,7 +393,7 @@ async fn on_event(
 
 async fn resync(
     desk: &Mutex<Kept>,
-    client: &Client,
+    client: &ReconnectingClient,
     names: &mut HashMap<u32, String>,
 ) -> Result<Vec<Delivery>, String> {
     let listed = flock(client).await?;
@@ -341,7 +406,7 @@ struct Flock {
     live: HashMap<String, u32>,
 }
 
-async fn flock(client: &Client) -> Result<Flock, String> {
+async fn flock(client: &ReconnectingClient) -> Result<Flock, String> {
     let reply = client
         .request(Request::ListFlock)
         .await
@@ -360,7 +425,7 @@ async fn flock(client: &Client) -> Result<Flock, String> {
 
 // A grant that does not arrive is not retried: the runner raises its
 // totals again while it waits, and a runner that is gone is reclaimed.
-async fn deliver_grant(client: &Client, grant: &Delivery) {
+async fn deliver_grant(client: &ReconnectingClient, grant: &Delivery) {
     let Delivery {
         project,
         kind,
@@ -508,6 +573,21 @@ mod tests {
             kept.desk.saved(),
             "the first change replaces the broken file"
         );
+    }
+
+    #[test]
+    fn a_bad_leases_table_leaves_the_review_windows_standing() {
+        let text = "[reviewers.cubic]\nreviews = 20\nhours = 720\n[leases]\ncargo-test = 0\n";
+        let settings = salvage(text);
+        assert!(settings.reviewers.cubic.is_some());
+        assert_eq!(settings.leases.cargo_test_capacity().get(), 3);
+    }
+
+    #[test]
+    fn bad_review_windows_leave_the_leases_standing() {
+        let settings = salvage("[reviewers.cubic]\nreviews = 0\n[leases]\ncargo-test = 5\n");
+        assert_eq!(settings.reviewers.cubic, None);
+        assert_eq!(settings.leases.cargo_test_capacity().get(), 5);
     }
 
     #[test]

@@ -5,12 +5,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use tempfile::TempDir;
 
+use crate::adapters::LocalReviewer;
 use crate::board::WorkerModel;
 use crate::coderabbit::CodeRabbit;
+use crate::codex::Codex;
 use crate::cubic::Cubic;
 use crate::ports::{
     Checks, Clock, Cost, Meter, MeterError, Ports, Relay, Role, SessionId, Timestamp, Usage,
@@ -27,12 +28,15 @@ use crate::work_item::{CallRecord, Known, Phase, Turn, WorkItem};
 mod alerts;
 mod claude;
 mod coderabbit;
+mod codex;
 mod cubic;
 mod endpoint;
 mod forge;
 mod leases;
 mod relay;
 mod reviewer;
+mod sandbox;
+mod script;
 mod shepherd;
 mod shots;
 
@@ -43,46 +47,10 @@ pub(crate) use forge::FakeForge;
 pub(crate) use leases::{FakeLeases, Told};
 pub(crate) use relay::FakeRelay;
 pub(crate) use reviewer::{FakeReviewer, ScriptedRound};
+pub(crate) use sandbox::OpenSandbox;
+pub(crate) use script::write_script;
 pub(crate) use shepherd::FakeShepherd;
 pub(crate) use shots::{FakeShots, ScriptedShots};
-
-/// Writes an executable stand-in script that is safe to run at once.
-///
-/// On Linux a child forked while the file is still open for writing holds
-/// it, and `exec` of it fails with ETXTBSY. Other tests fork all the time,
-/// so this waits until the script has been executed once, with the probe
-/// variable set, before handing it over. The script's first line after the
-/// shebang exits on the probe, so the probe run does nothing.
-pub(crate) fn write_script(path: &Path, contents: &str) {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let (shebang, rest) = contents.split_once('\n').expect("a script has a shebang");
-    assert!(shebang.starts_with("#!"), "{shebang:?}");
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o755)
-        .open(path)
-        .unwrap();
-    write!(
-        file,
-        "{shebang}\n[ -n \"$KELPIE_TEST_PROBE\" ] && exit 0\n{rest}"
-    )
-    .unwrap();
-    drop(file);
-
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        match Command::new(path).env("KELPIE_TEST_PROBE", "1").status() {
-            Ok(_) => return,
-            Err(e) if e.raw_os_error() == Some(26) && std::time::Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            Err(e) => panic!("cannot run the stand-in script {}: {e}", path.display()),
-        }
-    }
-}
 
 /// A work item with one call, so every field of its format shows
 pub(crate) fn a_work_item() -> WorkItem {
@@ -98,6 +66,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         worker: WorkerModel {
             model: "claude-opus-5-5".into(),
             effort: Effort::Medium,
+            local: false,
         },
         session: SessionId("5e55".into()),
         turn: Turn::Running {
@@ -125,7 +94,9 @@ pub(crate) fn a_work_item() -> WorkItem {
         claude_files_accepted: None,
         qwen: crate::work_item::QwenTally::default(),
         merge_refused: false,
+        sent_back: false,
         merge_tried: None,
+        merge_queued: None,
         summon_owed: false,
         local_rounds: 0,
         rebased: false,
@@ -145,6 +116,7 @@ pub(crate) fn a_work_item() -> WorkItem {
             },
             cost: Cost(5),
             session_cost: Cost(6),
+            unpriced: false,
         }],
     }
 }
@@ -159,12 +131,23 @@ pub(crate) fn project_table(entry: &str) -> serde_json::Map<String, serde_json::
     }
 }
 
+/// A runner entry like `settings.example.toml` with `tables` added to its
+/// kelpie table, such as an older `[app.dogs.kelpie.review.local]`
+pub(crate) fn with_tables(entry: &str, tables: &str) -> String {
+    const GATE: &str = "\n[app.dogs.kelpie.coderabbit]\n";
+    assert!(entry.contains(GATE), "the example's CodeRabbit table moved");
+    entry.replace(GATE, &format!("\n{tables}{GATE}"))
+}
+
 /// The `repo` in `settings.example.toml`, which the rig points at its own
 const EXAMPLE_REPO: &str = "~/.kelpie/repos/shep";
 
 /// The CodeRabbit gate as `settings.example.toml` sets it, and turned off
 pub(crate) const CODERABBIT_ON: &str = "[app.dogs.kelpie.coderabbit]\nenabled = true\n";
 pub(crate) const CODERABBIT_OFF: &str = "[app.dogs.kelpie.coderabbit]\nenabled = false\n";
+/// Planning turned on, and off as `settings.example.toml` sets it
+pub(crate) const PLANNING_ON: &str = "[app.dogs.kelpie.planning]\nenabled = true\n";
+pub(crate) const PLANNING_OFF: &str = "[app.dogs.kelpie.planning]\nenabled = false\n";
 
 /// A launch file like the playground's
 const LAUNCH: &str = r#"{"version": "0.0.1", "configurations": [{"name": "dev", "runtimeExecutable": "bun", "runtimeArgs": ["run", "dev"], "port": 3000}]}"#;
@@ -239,7 +222,9 @@ pub(crate) struct Rig {
     pub(crate) claude: FakeClaude,
     pub(crate) forge: FakeForge,
     pub(crate) meter: FakeMeter,
+    pub(crate) codex_meter: FakeMeter,
     pub(crate) reviewer: FakeReviewer,
+    pub(crate) local_leases: LocalReviewer,
     pub(crate) relay: Arc<FakeRelay>,
     pub(crate) alerts: FakeAlerts,
     pub(crate) leases: FakeLeases,
@@ -288,7 +273,9 @@ impl Rig {
             claude: FakeClaude::metered(meter.clone()),
             forge: FakeForge::new(home.path().join("origin.git")),
             meter,
+            codex_meter: FakeMeter::idle(),
             reviewer: FakeReviewer::default(),
+            local_leases: LocalReviewer::default().with_temp_dir(home.path().join("tmp")),
             relay: Arc::new(FakeRelay::default()),
             alerts: FakeAlerts::on(clock.clone()),
             leases: FakeLeases::default(),
@@ -298,11 +285,15 @@ impl Rig {
         };
         rig.make_repo();
 
-        // CodeRabbit is off unless a test turns it on: most tests are about
-        // what comes before it or does not involve it.
+        // CodeRabbit is off unless a test turns it on, and planning is off as
+        // the example has it: most tests are about what comes before them.
         let example = include_str!("../settings.example.toml");
         assert!(example.contains(EXAMPLE_REPO), "the example's repo moved");
         assert!(example.contains(CODERABBIT_ON), "the example's gate moved");
+        assert!(
+            example.contains(PLANNING_OFF),
+            "the example's planning moved"
+        );
         let settings = example
             .replace(EXAMPLE_REPO, &rig.repo().display().to_string())
             .replace(CODERABBIT_ON, CODERABBIT_OFF);
@@ -474,6 +465,11 @@ impl Rig {
         self.edit_settings(|s| s.replace(CODERABBIT_OFF, CODERABBIT_ON));
     }
 
+    /// Turns planning on, which the example settings leave off
+    pub(crate) fn planning_on(&self) {
+        self.edit_settings(|s| s.replace(PLANNING_OFF, PLANNING_ON));
+    }
+
     /// Makes the project's merge authority `auto`, read when a runner next opens
     pub(crate) fn merge_auto(&self) {
         let (ask, auto) = ("merge_authority = \"ask\"", "merge_authority = \"auto\"");
@@ -505,7 +501,7 @@ impl Rig {
 
     /// Starts a runner, as a restarted sheep would, on the rig's stand-ins
     pub(crate) fn open(&self) -> Result<Mutex<Runner>, OpenError> {
-        self.open_with(vec![Arc::new(CodeRabbit), Arc::new(Cubic)])
+        self.open_with(vec![Arc::new(CodeRabbit), Arc::new(Cubic), Arc::new(Codex)])
     }
 
     /// Starts a runner whose review bot rounds summon the bots of `review_bots`
@@ -514,10 +510,12 @@ impl Rig {
         review_bots: Vec<Arc<dyn Profile>>,
     ) -> Result<Mutex<Runner>, OpenError> {
         let ports = Ports {
-            claude: Arc::new(self.claude.clone()),
+            agents: Arc::new(self.claude.clone()),
             forge: Box::new(self.forge.clone()),
             meter: Box::new(self.meter.clone()),
+            codex_meter: Box::new(self.codex_meter.clone()),
             reviewer: Arc::new(self.reviewer.clone()),
+            local_leases: Arc::new(self.local_leases.clone()),
             review_bots,
             relay: Arc::clone(&self.relay) as Arc<dyn Relay>,
             alerts: Arc::new(self.alerts.clone()),

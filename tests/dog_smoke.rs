@@ -1,9 +1,11 @@
 //! The lease round trip through a real pinned shepherd
 //!
-//! Starts its own shepherd under a scratch `SHEP_HOME`, with the dog and
-//! two stand-in runners as sheep, the way the experiments repo's lease
-//! dog was tested. A stand-in runner is this test binary run as a sheep:
-//! see `stand_in_runner`.
+//! Starts its own shepherd under a scratch `SHEP_HOME`, with two stand-in
+//! runners as sheep and kelpie adopted as its dog, the way the experiments
+//! repo's lease dog was tested. A stand-in runner is this test binary run
+//! as a sheep: see `stand_in_runner`. The shepherd runs with `HOME` set to
+//! its scratch home, which is all an adopted dog inherits, so the dog's
+//! book is never the maintainer's.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -12,18 +14,26 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 use shep_client::Client;
+use shep_client::shep_core::config::AppConfig;
 use shep_client::shep_core::protocol::Request;
-use shep_client::shep_core::protocol::request::{ActionOutcome, Response, SelectorSpec};
+use shep_client::shep_core::protocol::request::{
+    ActionOutcome, DogSource, ProcessInfo, Response, SelectorSpec,
+};
 use shep_client::shep_core::status::ProcStatus;
-use shep_kelpie::flock::Launch;
 use shep_kelpie::lease::wire::Asker;
 use shep_kelpie::lease::{Epoch, LeaseKind};
 
 const KELPIE: &str = env!("CARGO_BIN_EXE_shep-kelpie");
 const STAND_IN: &str = "KELPIE_TEST_STAND_IN";
 
+const DOG: &str = "kelpie";
+
+// `KELPIE_TEST_SHEP`, or the pinned shepherd kelpie runs under.
 fn shep_binary() -> PathBuf {
-    Path::new(&std::env::var_os("HOME").unwrap()).join(".kelpie/bin/shep")
+    std::env::var_os("KELPIE_TEST_SHEP").map_or_else(
+        || Path::new(&std::env::var_os("HOME").unwrap()).join(".kelpie/bin/shep"),
+        PathBuf::from,
+    )
 }
 
 fn now_ms() -> u64 {
@@ -115,47 +125,33 @@ struct Shepherd {
 impl Drop for Shepherd {
     fn drop(&mut self) {
         // No unwrap: a panic here while a failed test unwinds would abort.
-        let _ = Command::new(shep_binary())
-            .arg("kill")
-            .env("SHEP_HOME", self.home.path())
-            .stdin(Stdio::null())
-            .output();
+        let _ = self.command(&["kill"]).output();
     }
 }
 
 impl Shepherd {
+    // Two stand-in runners, with kelpie adopted and running as the dog.
     fn start() -> Self {
-        Self::with_dog("kelpie-dog")
+        let shepherd = Self::runners();
+        shepherd.shep_ok(&["adopt", KELPIE, "--name", DOG]);
+        shepherd
     }
 
-    // The dog's sheep under `dog`: `kelpie-dog`, or `kelpie` as a Flockfile
-    // written before `shep kelpie add` names it.
+    // The two stand-in runners alone.
     // Under /tmp: a socket path longer than 104 bytes is refused on macOS.
-    fn with_dog(dog: &str) -> Self {
+    fn runners() -> Self {
         let home = tempfile::Builder::new()
             .prefix("kd")
             .tempdir_in("/tmp")
             .unwrap();
         let shepherd = Self { home };
         let flockfile = shepherd.home.path().join("flock.toml");
-        std::fs::write(&flockfile, shepherd.flockfile(dog)).unwrap();
-        let out = shepherd.shep(&["start", flockfile.to_str().unwrap()]);
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        std::fs::write(&flockfile, shepherd.flockfile()).unwrap();
+        shepherd.shep_ok(&["start", flockfile.to_str().unwrap()]);
         shepherd
     }
 
-    // A dog under the old name leaves `TMPDIR` out, as the maintainer's own
-    // entry does: `shep kelpie add` refuses to carry it into `kelpie-dog`.
-    fn flockfile(&self, dog: &str) -> String {
-        let home = self.home.path().display();
-        let tmpdir = match dog {
-            "kelpie-dog" => format!("TMPDIR = \"{home}\", "),
-            _ => String::new(),
-        };
+    fn flockfile(&self) -> String {
         let me = std::env::current_exe().unwrap();
         let runner = |name: &str| {
             format!(
@@ -164,31 +160,28 @@ impl Shepherd {
                  channel = true\nautorestart = false\nenv = {{ {STAND_IN} = \"1\" }}\n\n"
             )
         };
-        format!(
-            "[[app]]\nname = {dog:?}\nscript = {KELPIE:?}\nargs = [\"dog\"]\n\
-             channel = true\nshutdown_with_message = true\nautorestart = false\n\
-             env = {{ SHEP_HOME = \"{home}\", {tmpdir}KELPIE_HOME = \"{home}\" }}\n\n{}{}",
-            runner("koji"),
-            runner("reactmap")
-        )
+        format!("{}{}", runner("koji"), runner("reactmap"))
+    }
+
+    // The book the adopted dog keeps, under the `HOME` the shepherd gives it.
+    fn book(&self) -> PathBuf {
+        self.home.path().join(".kelpie/dog/book.json")
+    }
+
+    fn command(&self, args: &[&str]) -> Command {
+        let mut cmd = Command::new(shep_binary());
+        cmd.args(args)
+            .env("SHEP_HOME", self.home.path())
+            .env("HOME", self.home.path())
+            .stdin(Stdio::null());
+        cmd
     }
 
     fn shep_ok(&self, args: &[&str]) {
-        let out = self.shep(args);
-        assert!(
-            out.status.success(),
-            "shep {args:?}: {}",
-            String::from_utf8_lossy(&out.stderr)
+        ran(
+            &format!("shep {args:?}"),
+            &self.command(args).output().unwrap(),
         );
-    }
-
-    fn shep(&self, args: &[&str]) -> Output {
-        Command::new(shep_binary())
-            .args(args)
-            .env("SHEP_HOME", self.home.path())
-            .stdin(Stdio::null())
-            .output()
-            .unwrap()
     }
 
     fn kelpie(&self, args: &[&str]) -> Command {
@@ -234,12 +227,20 @@ async fn until(what: &str, mut probe: impl AsyncFnMut() -> bool) {
     }
 }
 
+async fn dog_row(client: &Client) -> ProcessInfo {
+    match client.request(Request::ListFlock).await.unwrap() {
+        Response::Flock(rows) => rows.into_iter().find(|r| r.name == DOG),
+        other => panic!("{other:?}"),
+    }
+    .expect("the dog's row")
+}
+
 async fn holds(client: &Client, runner: &str) -> bool {
     trigger(client, runner, "status", None).await["holds"] == true
 }
 
 async fn book(client: &Client) -> Value {
-    stand_in(&trigger(client, "kelpie-dog", "status", None).await)
+    stand_in(&trigger(client, DOG, "status", None).await)
 }
 
 fn stand_in(status: &Value) -> Value {
@@ -250,12 +251,12 @@ fn stand_in(status: &Value) -> Value {
 }
 
 #[tokio::test]
-#[ignore = "needs the pinned shepherd at ~/.kelpie/bin/shep"]
+#[ignore = "needs a shepherd at KELPIE_TEST_SHEP or ~/.kelpie/bin/shep"]
 async fn the_lease_round_trip_runs_through_a_real_shepherd() {
     let shepherd = Shepherd::start();
     let client = shepherd.client().await;
     until("the dog and both runners", async || {
-        trigger(&client, "kelpie-dog", "status", None).await["leases"].is_array()
+        trigger(&client, DOG, "status", None).await["leases"].is_array()
             && trigger(&client, "koji", "status", None).await.is_object()
             && trigger(&client, "reactmap", "status", None)
                 .await
@@ -352,13 +353,15 @@ async fn the_lease_round_trip_runs_through_a_real_shepherd() {
         String::from_utf8_lossy(&status.stderr)
     );
     let status: Value = serde_json::from_slice(&status.stdout).unwrap();
-    let lock = shepherd.home.path().join("qwen-review/gpu.lock");
+    // shep hands an adopted dog no TMPDIR, so its lock is under the
+    // user's own temp folder, never the scratch home.
     let leases = status["leases"].as_array().unwrap();
     let gpu = leases
         .iter()
         .find(|l| l["kind"] == "gpu")
         .expect("a GPU line");
-    assert_eq!(gpu["lock"], lock.display().to_string());
+    let lock = gpu["lock"].as_str().unwrap();
+    assert!(lock.ends_with("/qwen-review/gpu.lock"), "{lock}");
     assert_eq!(stand_in(&status)["holder"], json!({ "runner": "koji" }));
     assert!(stand_in(&status)["since"].as_u64().is_some());
 
@@ -369,11 +372,11 @@ async fn the_lease_round_trip_runs_through_a_real_shepherd() {
 // holder keeps the lease, the waiter keeps its place, and a holder whose
 // sheep restarted while the dog was down is reclaimed on start.
 #[tokio::test]
-#[ignore = "needs the pinned shepherd at ~/.kelpie/bin/shep"]
+#[ignore = "needs a shepherd at KELPIE_TEST_SHEP or ~/.kelpie/bin/shep"]
 async fn a_restarted_dog_keeps_its_book() {
     let shepherd = Shepherd::start();
     let client = shepherd.client().await;
-    let dog_up = async || trigger(&client, "kelpie-dog", "status", None).await["leases"].is_array();
+    let dog_up = async || trigger(&client, DOG, "status", None).await["leases"].is_array();
     until("the dog and both runners", async || {
         dog_up().await
             && trigger(&client, "koji", "status", None).await.is_object()
@@ -391,16 +394,16 @@ async fn a_restarted_dog_keeps_its_book() {
     .await;
     let before = book(&client).await;
 
-    shepherd.shep_ok(&["restart", "kelpie-dog"]);
+    shepherd.shep_ok(&["restart", DOG]);
     until("the dog back", dog_up).await;
     assert_eq!(book(&client).await, before, "the book came back whole");
     assert!(holds(&client, "koji").await);
     assert!(!holds(&client, "reactmap").await, "no second grant");
 
     // koji restarts while the dog is down: its lease goes to reactmap.
-    shepherd.shep_ok(&["stop", "kelpie-dog"]);
+    shepherd.shep_ok(&["disable", DOG]);
     shepherd.shep_ok(&["restart", "koji"]);
-    shepherd.shep_ok(&["restart", "kelpie-dog"]);
+    shepherd.shep_ok(&["enable", DOG]);
     until("reactmap's grant", async || {
         holds(&client, "reactmap").await
     })
@@ -430,83 +433,133 @@ fn ran(what: &str, out: &Output) {
     );
 }
 
-// An install whose Flockfile still names its dog `kelpie`: shep refuses a
-// trigger on `kelpie-dog` with NotFound, and the lease commands ask the old
-// name instead.
+// A flock set up before the adopted kelpie was the dog: a `kelpie-dog`
+// sheep, and the book it kept. The adopted start removes the sheep and
+// takes the book as it stands.
 #[tokio::test]
-#[ignore = "needs the pinned shepherd at ~/.kelpie/bin/shep"]
-async fn a_dog_still_named_kelpie_answers_the_lease_commands() {
-    let shepherd = Shepherd::with_dog("kelpie");
+#[ignore = "needs a shepherd at KELPIE_TEST_SHEP or ~/.kelpie/bin/shep"]
+async fn an_adopted_start_removes_a_left_over_kelpie_dog_and_keeps_its_book() {
+    let shepherd = Shepherd::start();
     let client = shepherd.client().await;
     until("the dog", async || {
-        trigger(&client, "kelpie", "status", None).await["leases"].is_array()
+        trigger(&client, DOG, "status", None).await["leases"].is_array()
     })
     .await;
+    ran(
+        "lease take",
+        &shepherd
+            .kelpie(&["lease", "take", "stand-in"])
+            .output()
+            .unwrap(),
+    );
+    shepherd.shep_ok(&["disable", DOG]);
+    let kept = std::fs::read(shepherd.book()).unwrap();
 
-    let status = shepherd.kelpie(&["lease", "status"]).output().unwrap();
-    ran("lease status", &status);
-    let status: Value = serde_json::from_slice(&status.stdout).unwrap();
-    assert!(status["leases"].is_array(), "{status}");
+    let mut left_over = AppConfig::minimal("kelpie-dog", KELPIE);
+    left_over.args = vec!["dog".into()];
+    left_over.channel = true;
+    left_over.autorestart = false;
+    let added = client.request(Request::Add {
+        apps: vec![left_over],
+    });
+    assert!(matches!(added.await, Ok(Response::Added(_))));
+    assert!(
+        flock(&client)
+            .await
+            .iter()
+            .any(|(name, _)| name == "kelpie-dog")
+    );
+
+    shepherd.shep_ok(&["enable", DOG]);
+    until("the dog", async || {
+        trigger(&client, DOG, "status", None).await["leases"].is_array()
+    })
+    .await;
+    let names = flock(&client).await;
+    assert!(
+        !names.iter().any(|(name, _)| name == "kelpie-dog"),
+        "{names:?}"
+    );
+    assert_eq!(
+        std::fs::read(shepherd.book()).unwrap(),
+        kept,
+        "the book changed"
+    );
+    assert_eq!(book(&client).await["holder"], "maintainer");
+}
+
+// A dog adopted and running: `shep kelpie lease` reaches it by its name.
+#[tokio::test]
+#[ignore = "needs a shepherd at KELPIE_TEST_SHEP or ~/.kelpie/bin/shep"]
+async fn shep_kelpie_lease_take_reaches_the_adopted_dog() {
+    let shepherd = Shepherd::start();
+    let client = shepherd.client().await;
+    until("the dog", async || {
+        trigger(&client, DOG, "status", None).await["leases"].is_array()
+    })
+    .await;
     let take = shepherd
         .kelpie(&["lease", "take", "stand-in"])
         .output()
         .unwrap();
     ran("lease take", &take);
-    let book = trigger(&client, "kelpie", "status", None).await;
-    assert_eq!(stand_in(&book)["holder"], json!("maintainer"));
-    let back = shepherd
-        .kelpie(&["lease", "return", "stand-in"])
-        .output()
-        .unwrap();
-    ran("lease return", &back);
+    assert!(String::from_utf8_lossy(&take.stdout).contains("stand-in is yours"));
+    assert_eq!(book(&client).await["holder"], "maintainer");
+    let names = flock(&client).await;
+    assert!(names.contains(&(DOG.to_owned(), true)), "{names:?}");
 }
 
-// The move `shep kelpie add` makes on such an install: `kelpie-dog` takes
-// over the book with the runner's lease in it, and `shep adopt --name
-// kelpie`, refused while the old dog held the name, then goes through.
+// A shepherd with no dog named `kelpie`, as one still running the dog as
+// `kelpie-dog` is: shep refuses the trigger with `NotFound`, and the lease
+// commands say the dog is not enabled. A fake shepherd cannot send that.
 #[tokio::test]
-#[ignore = "needs the pinned shepherd at ~/.kelpie/bin/shep"]
-async fn the_dog_moves_to_kelpie_dog_with_its_book_and_frees_the_name() {
-    let shepherd = Shepherd::with_dog("kelpie");
-    let client = shepherd.client().await;
-    until("the dog and koji", async || {
-        trigger(&client, "kelpie", "status", None).await["leases"].is_array()
-            && trigger(&client, "koji", "status", None).await.is_object()
-    })
-    .await;
-    trigger(&client, "koji", "want", Some("stand-in")).await;
-    until("koji's grant", async || holds(&client, "koji").await).await;
-    let refused = shepherd.shep(&["adopt", KELPIE, "--name", "kelpie"]);
-    assert!(!refused.status.success(), "adopt took a name a sheep holds");
-
-    let home = shepherd.home.path().to_owned();
-    let launch = Launch {
-        kelpie: KELPIE.into(),
-        shep_home: home.clone(),
-        kelpie_home: Some(home),
-    };
-    let lines = shep_kelpie::flock::add::move_dog(&client, &launch)
-        .await
+#[ignore = "needs a shepherd at KELPIE_TEST_SHEP or ~/.kelpie/bin/shep"]
+async fn shep_kelpie_lease_take_names_a_dog_that_is_not_enabled() {
+    let shepherd = Shepherd::runners();
+    let take = shepherd
+        .kelpie(&["lease", "take", "stand-in"])
+        .output()
         .unwrap();
-    assert!(lines[0].starts_with("dog `kelpie`: deleted"), "{lines:?}");
-    until("kelpie-dog with koji's lease", async || {
-        let status = trigger(&client, "kelpie-dog", "status", None).await;
-        status["leases"].is_array() && stand_in(&status)["holder"] == json!({ "runner": "koji" })
+    assert!(!take.status.success());
+    let said = String::from_utf8_lossy(&take.stderr);
+    assert!(said.contains("kelpie's dog is not enabled"), "{said}");
+}
+
+// Adopted with no arguments, kelpie runs the dog; before it held the
+// leases it exited 2 on every start.
+#[tokio::test]
+#[ignore = "needs a shepherd at KELPIE_TEST_SHEP or ~/.kelpie/bin/shep"]
+async fn an_adopted_start_runs_the_dog_instead_of_exiting() {
+    let shepherd = Shepherd::start();
+    let client = shepherd.client().await;
+    until("the dog", async || {
+        trigger(&client, DOG, "status", None).await["leases"].is_array()
     })
     .await;
-    let names = flock(&client).await;
-    assert!(!names.iter().any(|(name, _)| name == "kelpie"), "{names:?}");
+    // A dog that connects without naming itself is listed `silent`, which
+    // is no handshake; the wait is for the shepherd to record the name.
+    until("the dog to name itself", async || {
+        dog_row(&client).await.handshook == Some(true)
+    })
+    .await;
+    let dog = dog_row(&client).await;
+    assert_eq!(dog.status, ProcStatus::Online);
+    assert_eq!(dog.dog_stale, Some(false), "shep gave up on the dog");
+    assert_eq!(dog.restarts, 0, "the dog restarted");
     assert!(
-        names.contains(&("kelpie-dog".to_owned(), true)),
-        "{names:?}"
+        matches!(dog.dog, Some(DogSource::Adopted { channel: true, .. })),
+        "{:?}",
+        dog.dog
     );
+}
 
-    shepherd.shep_ok(&["adopt", KELPIE, "--name", "kelpie"]);
-    shepherd.shep_ok(&["disable", "kelpie"]);
-    let names = flock(&client).await;
-    assert!(
-        names.contains(&("kelpie-dog".to_owned(), true)),
-        "{names:?}"
-    );
-    assert!(holds(&client, "koji").await, "koji lost its lease");
+// The `--version` answer shep reads at `shep adopt` asks for the channel.
+#[test]
+fn kelpie_s_version_answer_asks_for_the_shepherd_channel() {
+    let out = Command::new(KELPIE).arg("--version").output().unwrap();
+    ran("--version", &out);
+    let answer = String::from_utf8(out.stdout).unwrap();
+    let parsed = shep_client::shep_core::dogs::parse_version_answer(&answer).unwrap();
+    assert!(parsed.channel, "{answer}");
+    assert_eq!(parsed.version, env!("CARGO_PKG_VERSION"));
 }

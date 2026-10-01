@@ -1,9 +1,10 @@
 //! `shep-kelpie upgrade`, against the real binary, a stand-in shepherd and
 //! stand-in builds: each exits 0 when it finished and non-zero with a
 //! message on stderr when it did not.
+//!
+//! Kelpie's home, the shepherd and the installed kelpie are all folders under
+//! one scratch root, so nothing here touches a real install.
 
-use std::collections::BTreeMap;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
 use std::sync::{Arc, Mutex};
@@ -11,7 +12,7 @@ use std::time::Duration;
 
 use shep_client::shep_core::config::{AppConfig, DogTable};
 use shep_client::shep_core::protocol::request::{
-    ActionOutcome, ActionReply, ProcessInfo, SheepConfigView,
+    ActionOutcome, ActionReply, DogSource, ProcessInfo, SheepConfigView,
 };
 use shep_client::shep_core::protocol::{Envelope, Request, Response, SelectorSpec};
 use shep_client::shep_core::status::ProcStatus;
@@ -19,6 +20,10 @@ use shep_client::testing::{fake_daemon_answering_with_ack, sample_ack};
 use tempfile::TempDir;
 use tokio::process::Command;
 use tokio::sync::mpsc::UnboundedReceiver;
+
+// The repo's own ETXTBSY-safe way to write a stand-in script.
+#[path = "../src/test/script.rs"]
+mod script;
 
 const KELPIE: &str = env!("CARGO_BIN_EXE_shep-kelpie");
 
@@ -37,12 +42,15 @@ struct Scene {
 impl Scene {
     fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(root.path().join("shep/run")).unwrap();
-        std::fs::create_dir_all(root.path().join("builds")).unwrap();
-        Self {
+        for folder in ["shep/run", "builds", "bin"] {
+            std::fs::create_dir_all(root.path().join(folder)).unwrap();
+        }
+        let scene = Self {
             root,
             koji_says: Arc::new(Mutex::new(vec![IDLE])),
-        }
+        };
+        script::write_script(&scene.installed(), &answering("0.1.0", "0.12.0"));
+        scene
     }
 
     fn shep_home(&self) -> PathBuf {
@@ -53,18 +61,19 @@ impl Scene {
         self.root.path().join("kelpie")
     }
 
-    // A shepherd running `version`, whose flock is the dog and one runner.
-    async fn shepherd(&self, version: &str) -> UnboundedReceiver<Envelope> {
+    // The program the dog and `koji` run, where `~/.cargo/bin/shep-kelpie` would be.
+    fn installed(&self) -> PathBuf {
+        self.root.path().join("bin/shep-kelpie")
+    }
+
+    // A shepherd running `version`, whose flock is the adopted dog and one
+    // runner that runs `koji_runs`.
+    async fn shepherd(&self, version: &str, koji_runs: &Path) -> UnboundedReceiver<Envelope> {
         let mut ack = sample_ack();
         ack.daemon_version = version.into();
-        let installed = self.kelpie_home().join("bin/shep-kelpie");
-        let script = installed.display().to_string();
-        let sheep = BTreeMap::from([
-            ("kelpie-dog", AppConfig::minimal("kelpie-dog", &script)),
-            ("koji", AppConfig::minimal("koji", &script)),
-        ]);
-        let (mut dog, mut koji) = (sheep["kelpie-dog"].clone(), sheep["koji"].clone());
-        dog.args = vec!["dog".into()];
+        let mut dog = AppConfig::minimal("kelpie", &self.installed().display().to_string());
+        dog.args = Vec::new();
+        let mut koji = AppConfig::minimal("koji", &koji_runs.display().to_string());
         koji.args = vec!["runner".into(), "koji".into()];
         koji.dogs
             .insert("kelpie".into(), DogTable::from(serde_json::Map::new()));
@@ -79,9 +88,7 @@ impl Scene {
     // A stand-in build: a script that answers `version --json`.
     fn build(&self, file: &str, kelpie: &str, shep: &str) -> PathBuf {
         let path = self.root.path().join("builds").join(file);
-        let json = format!(r#"{{"kelpie":"{kelpie}","shep":"{shep}"}}"#);
-        std::fs::write(&path, format!("#!/bin/sh\necho '{json}'\n")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        script::write_script(&path, &answering(kelpie, shep));
         path
     }
 
@@ -107,8 +114,7 @@ impl Scene {
 
     // What the installed kelpie says it is.
     async fn installed_says(&self) -> String {
-        let installed = self.kelpie_home().join("bin/shep-kelpie");
-        let out = Command::new(installed)
+        let out = Command::new(self.installed())
             .args(["version", "--json"])
             .output()
             .await
@@ -118,8 +124,21 @@ impl Scene {
     }
 }
 
+fn answering(kelpie: &str, shep: &str) -> String {
+    let json = format!(r#"{{"kelpie":"{kelpie}","shep":"{shep}"}}"#);
+    format!("#!/bin/sh\necho '{json}'\n")
+}
+
 fn row(id: u32, config: &AppConfig) -> ProcessInfo {
-    ProcessInfo::builder(id, &config.name, ProcStatus::Online).build()
+    let info = ProcessInfo::builder(id, &config.name, ProcStatus::Online);
+    match config.name.as_str() {
+        "kelpie" => info.dog(Some(DogSource::Adopted {
+            path: config.script.clone(),
+            channel: true,
+        })),
+        _ => info,
+    }
+    .build()
 }
 
 fn answer(flock: &[AppConfig], says: &Mutex<Vec<&'static str>>, request: &Request) -> Response {
@@ -185,12 +204,20 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-fn restarts(sent: &mut UnboundedReceiver<Envelope>) -> Vec<String> {
+// Every request since the last look, in the order kelpie sent them.
+fn sent(sent: &mut UnboundedReceiver<Envelope>) -> Vec<Request> {
     std::iter::from_fn(|| sent.try_recv().ok())
-        .filter_map(|e| match e.body {
+        .map(|e| e.body)
+        .collect()
+}
+
+fn restarts(requests: &[Request]) -> Vec<&str> {
+    requests
+        .iter()
+        .filter_map(|r| match r {
             Request::Restart {
                 selector: SelectorSpec::Name(name),
-            } => Some(name),
+            } => Some(name.as_str()),
             _ => None,
         })
         .collect()
@@ -210,54 +237,96 @@ async fn a_build_answers_version_json_with_its_kelpie_and_its_shep() {
 #[tokio::test]
 async fn an_upgrade_installs_and_restarts_and_a_rollback_puts_the_build_back() {
     let scene = Scene::new();
-    let mut sent = scene.shepherd("0.11.0").await;
-    let (old, new) = (
-        scene.build("old", "0.2.0", "0.11.0"),
-        scene.build("new", "0.3.0", "0.11.0"),
+    let mut seen = scene.shepherd("0.12.0", &scene.installed()).await;
+    let (middle, new) = (
+        scene.build("middle", "0.2.0", "0.12.0"),
+        scene.build("new", "0.3.0", "0.12.0"),
     );
 
-    let output = scene.upgrade_to(&old).await;
+    let output = scene.upgrade_to(&middle).await;
     assert!(output.status.success(), "{}", stderr(&output));
     let output = scene.upgrade_to(&new).await;
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(scene.installed_says().await, "0.3.0 for shep 0.11.0");
+    assert_eq!(scene.installed_says().await, "0.3.0 for shep 0.12.0");
     assert_eq!(
-        restarts(&mut sent),
-        ["kelpie-dog", "koji", "kelpie-dog", "koji"]
+        restarts(&sent(&mut seen)),
+        ["kelpie", "koji", "kelpie", "koji"]
     );
 
     let output = scene.kelpie(&["upgrade", "--rollback"]).await;
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(scene.installed_says().await, "0.2.0 for shep 0.11.0");
-    assert_eq!(restarts(&mut sent), ["kelpie-dog", "koji"]);
+    assert_eq!(scene.installed_says().await, "0.2.0 for shep 0.12.0");
+    assert_eq!(restarts(&sent(&mut seen)), ["kelpie", "koji"]);
+    assert!(
+        scene.kelpie_home().join("builds").is_dir(),
+        "the replaced build is kept in kelpie's home"
+    );
 }
 
 #[tokio::test]
-async fn an_upgrade_waits_out_a_merge_and_then_finishes() {
+async fn an_upgrade_waits_out_a_merge_and_asks_before_it_restarts() {
     let scene = Scene::new();
-    let mut sent = scene.shepherd("0.11.0").await;
+    let mut seen = scene.shepherd("0.12.0", &scene.installed()).await;
     *scene.koji_says.lock().unwrap() = vec![MERGING, MERGING, IDLE];
-    let new = scene.build("new", "0.3.0", "0.11.0");
+    let new = scene.build("new", "0.3.0", "0.12.0");
     let output = scene.upgrade_to(&new).await;
     assert!(output.status.success(), "{}", stderr(&output));
     let said = String::from_utf8_lossy(&output.stdout);
     assert!(said.contains("waiting: `koji` is merging #7"), "{said}");
-    assert_eq!(restarts(&mut sent), ["kelpie-dog", "koji"]);
+
+    let requests = sent(&mut seen);
+    assert_eq!(restarts(&requests), ["kelpie", "koji"]);
+    let first_restart = requests
+        .iter()
+        .position(|r| matches!(r, Request::Restart { .. }))
+        .unwrap();
+    let looked_at_koji = |r: &&Request| {
+        matches!(r, Request::Trigger { selector: SelectorSpec::Name(n), action, .. }
+            if n == "koji" && action == "status")
+    };
+    assert_eq!(
+        requests[..first_restart]
+            .iter()
+            .filter(looked_at_koji)
+            .count(),
+        3,
+        "`status` was asked until the merge ended, and before the first restart: {requests:?}"
+    );
 }
 
 #[tokio::test]
-async fn a_minor_mismatch_fails_with_what_to_do_before_anything_restarts() {
+async fn a_minor_mismatch_fails_with_the_steps_before_anything_restarts() {
     let scene = Scene::new();
-    let mut sent = scene.shepherd("0.11.0").await;
-    let new = scene.build("new", "0.4.0", "0.12.0");
+    let mut seen = scene.shepherd("0.12.0", &scene.installed()).await;
+    let new = scene.build("new", "0.4.0", "0.13.0");
     let output = scene.upgrade_to(&new).await;
     assert!(!output.status.success());
     let stderr = stderr(&output);
+    assert!(stderr.contains("shep 0.13.0"), "{stderr}");
     assert!(stderr.contains("shep 0.12.0"), "{stderr}");
-    assert!(stderr.contains("shep 0.11.0"), "{stderr}");
     assert!(stderr.contains("To go on:"), "{stderr}");
-    assert_eq!(restarts(&mut sent), Vec::<String>::new());
-    assert!(!scene.kelpie_home().join("bin/shep-kelpie").exists());
+    assert!(stderr.contains("reload its shepherd"), "{stderr}");
+    assert!(stderr.contains("the new build's own upgrade"), "{stderr}");
+    assert_eq!(restarts(&sent(&mut seen)), Vec::<&str>::new());
+    assert_eq!(scene.installed_says().await, "0.1.0 for shep 0.12.0");
+}
+
+#[tokio::test]
+async fn a_sheep_on_another_program_is_named_before_anything_changes() {
+    let scene = Scene::new();
+    let mut seen = scene
+        .shepherd("0.12.0", Path::new("/opt/kelpie/bin/kelpie"))
+        .await;
+    let new = scene.build("new", "0.3.0", "0.12.0");
+    let output = scene.upgrade_to(&new).await;
+    assert!(!output.status.success());
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("`koji` runs /opt/kelpie/bin/kelpie"),
+        "{stderr}"
+    );
+    assert_eq!(restarts(&sent(&mut seen)), Vec::<&str>::new());
+    assert_eq!(scene.installed_says().await, "0.1.0 for shep 0.12.0");
 }
 
 #[tokio::test]

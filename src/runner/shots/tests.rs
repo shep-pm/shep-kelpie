@@ -1,10 +1,13 @@
+use std::path::Path;
+
 use serde_json::{Value, json};
 
 use crate::ports::{Checks, Finding, Role, Severity};
-use crate::profile::INSTRUCTIONS;
+use crate::profile;
 use crate::runner::{Runner, StepReport, step};
 use crate::shots::publish::MARKER;
 use crate::test::{Rig, Scripted, ScriptedShots};
+use crate::trim::deny_with_trim;
 
 mod merge;
 
@@ -51,7 +54,10 @@ fn a_project_without_a_launch_file_behaves_as_before() {
     assert_eq!(worker.mcp_config, None);
     let instructions = std::fs::read_to_string(rig.paths().worker.join("instructions.md"));
     let instructions = instructions.unwrap();
-    assert!(instructions.starts_with(INSTRUCTIONS), "{instructions}");
+    assert!(
+        instructions.starts_with(&profile::instructions(Path::new(Rig::KELPIE))),
+        "{instructions}"
+    );
     assert!(!instructions.contains(crate::preview::WORKER_INSTRUCTIONS));
     assert_eq!(shots_comments(&rig), Vec::<String>::new());
     assert!(!rig.paths().worker.join("mcp.json").exists());
@@ -84,11 +90,29 @@ fn a_launch_file_on_main_without_the_setting_takes_no_shots() {
     assert_eq!(shots_comments(&rig), Vec::<String>::new());
 }
 
+const WEB_LAUNCH: &str = r#"{"configurations": [{"name": "web", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 5173, "cwd": "web"}]}"#;
+
+#[test]
+fn the_worker_is_told_the_folder_kelpie_starts_the_dev_server_in() {
+    let rig = Rig::new("shep");
+    rig.land("web/package.json", "{}\n");
+    rig.land(crate::preview::LAUNCH_FILE, WEB_LAUNCH);
+    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.preview]\nenabled = true\n"));
+    let runner = started(&rig);
+    rig.claude.script([Scripted::Text("CLEAN")]);
+    step(&runner).unwrap();
+    let [worker] = rig.claude.calls().try_into().unwrap();
+    let web = worker.cwd.canonicalize().unwrap().join("web");
+    let instructions = std::fs::read_to_string(rig.paths().worker.join("instructions.md"));
+    let instructions = instructions.unwrap();
+    let told = format!("`npm run dev` on port 5173, in `{}`", web.display());
+    assert!(instructions.contains(&told), "{instructions}");
+}
+
 // shep's dev server lives in `web/`, so only a change there is worth shots.
 fn with_web_preview(project: &str, change: &'static str) -> (Rig, std::sync::Mutex<Runner>) {
     let rig = Rig::new(project);
-    let launch = r#"{"configurations": [{"name": "web", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 5173, "cwd": "web"}]}"#;
-    rig.land(crate::preview::LAUNCH_FILE, launch);
+    rig.land(crate::preview::LAUNCH_FILE, WEB_LAUNCH);
     rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.preview]\nenabled = true\n"));
     let runner = started(&rig);
     rig.claude
@@ -191,7 +215,9 @@ fn a_dev_server_the_worker_left_is_stopped_when_its_turn_ends_and_on_restart() {
     let rig = with_preview("lab");
     let runner = started(&rig);
     rig.claude
-        .script([Scripted::Fail(crate::ports::ClaudeError::TimedOut)]);
+        .script([Scripted::Fail(crate::ports::AgentError::TimedOut(
+            crate::settings::Harness::ClaudeCode,
+        ))]);
     step(&runner).unwrap(); // a turn killed at its ceiling
     // The one file kelpie records its server in, never a folder to list
     let recorded = rig.home.path().join("kelpie/shots/lab/7/dev-server.pid");
@@ -199,6 +225,16 @@ fn a_dev_server_the_worker_left_is_stopped_when_its_turn_ends_and_on_restart() {
     drop(runner);
     rig.open().unwrap();
     assert_eq!(rig.shots.stopped(), [recorded.clone(), recorded]);
+}
+
+#[test]
+fn a_starting_runner_sweeps_its_own_worktrees_and_build_folders_for_orphaned_servers() {
+    let rig = with_preview("lab");
+    assert!(rig.shots.swept().is_empty());
+    drop(started(&rig));
+    let home = rig.home.path().join("kelpie");
+    let own = [home.join("wt/lab"), home.join("targets/lab")];
+    assert_eq!(rig.shots.swept(), [own.to_vec()]);
 }
 
 #[test]
@@ -243,7 +279,7 @@ fn a_worker_with_a_launch_file_gets_playwright_and_the_shots_tool() {
         json!(rig.home.path().join("kelpie/shots/lab/7"))
     );
 
-    let network = &seen.settings["sandbox"]["network"];
+    let network = &seen.sandbox["network"];
     assert_eq!(network["allowLocalBinding"], true);
     assert!(
         network["allowedDomains"]
@@ -264,7 +300,7 @@ fn a_worker_with_a_launch_file_gets_playwright_and_the_shots_tool() {
         assert!(!written.starts_with(&worktree), "{written:?}");
     }
     let instructions = std::fs::read_to_string(worker.join("instructions.md")).unwrap();
-    assert!(instructions.starts_with(INSTRUCTIONS));
+    assert!(instructions.starts_with(&profile::instructions(Path::new(Rig::KELPIE))));
     assert!(
         instructions.contains("# Seeing what you build"),
         "{instructions}"
@@ -379,11 +415,12 @@ fn the_claude_round_gets_the_latest_shots_and_may_open_them() {
             .contains("gives its location as the PNG's full path and `:0`")
     );
     assert_eq!(
-        round.settings,
-        json!({ "permissions": {
-            "deny": ["Agent", "Task", "Bash"],
-            "additionalDirectories": [dir],
-        } })
+        round.settings["permissions"]["deny"],
+        deny_with_trim(&["Agent", "Task", "Bash"])
+    );
+    assert_eq!(
+        round.settings["permissions"]["additionalDirectories"],
+        json!([dir])
     );
     assert_eq!(rig.shots.jobs().len(), 1, "one run of one head");
 }

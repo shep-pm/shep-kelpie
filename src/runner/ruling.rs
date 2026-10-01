@@ -30,8 +30,9 @@ const FAILED_CONTINUE: &str = "Your last turn failed before it finished. \
 
 /// What the merge ruling and the notice say of a failed shots run: no path,
 /// and none of the run's own words
-pub(super) const SHOTS_FAILED: &str = " Kelpie's shots of it failed, so none are on the \
-                                        pull request; the runner's log says why.";
+pub(super) const SHOTS_FAILED: &str = " Kelpie's shots of it failed, so none of this head's are \
+                                        on the pull request (an earlier head's may be); \
+                                        the runner's log says why.";
 
 /// The maintainer's answer to a ruling
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +127,15 @@ impl Runner {
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
         let ruling = next.rulings.remove(at);
+        if let (
+            Some(issue),
+            RulingKind::Split { .. }
+            | RulingKind::SplitStuck { .. }
+            | RulingKind::CloseStuck { .. },
+        ) = (ruling.issue, &ruling.kind)
+        {
+            return self.rule_plan(next, id, issue, ruling.kind, answer);
+        }
         let lifts_cap = matches!(
             (&answer, &ruling.kind),
             (Answer::Yes, RulingKind::CodeRabbitCap { .. })
@@ -363,7 +373,7 @@ pub(super) fn park(
     pull_request: Option<u64>,
     kind: RulingKind,
 ) -> (u64, String) {
-    let id = next.last_ruling + 1;
+    let id = names.ids.claim(names.project, next.last_ruling);
     let item = next
         .item_mut(issue)
         .expect("a ruling is about an open work item");
@@ -430,7 +440,7 @@ fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
             "The work on this pull request hit an error and stopped.".to_owned()
         }
         RulingKind::ClaudeFiles { files, .. } => format!(
-            "This pull request changes Claude Code's own files: {}.",
+            "This pull request changes agents' own files: {}.",
             files.join(", ")
         ),
         RulingKind::ForeignChange { description, .. } => {
@@ -438,6 +448,10 @@ fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
         }
         // Merged and done: nothing on the pull request waits on the maintainer.
         RulingKind::FollowUp { .. } => return None,
+        // No pull request is open yet.
+        RulingKind::Split { .. }
+        | RulingKind::SplitStuck { .. }
+        | RulingKind::CloseStuck { .. } => return None,
     };
     Some(format!("{said}\n\nWaiting on the maintainer."))
 }
@@ -499,7 +513,7 @@ fn decide(
             };
             return Ok(Move::Retry { turn, phase });
         }
-        // A worker cannot write Claude Code's own files, so a note would not help it.
+        // A worker cannot write agents' own files, so a note would not help it.
         (
             Answer::No(_),
             RulingKind::TurnTimeout { .. }
@@ -562,24 +576,36 @@ fn decide(
             head: None,
             since: now,
         },
+        (
+            _,
+            RulingKind::Split { .. }
+            | RulingKind::SplitStuck { .. }
+            | RulingKind::CloseStuck { .. },
+        ) => unreachable!("`rule` answers a ruling on a plan before deciding"),
     };
     Ok(Move::Phase(phase))
 }
 
-fn question(
+pub(super) fn question(
     names: Names<'_>,
     id: u64,
     issue: u64,
     number: Option<u64>,
     kind: &RulingKind,
 ) -> String {
-    let Names { project, bot } = names;
-    let trigger = |answer: &str| format!("`shep trigger {project} rule '{id} {answer}'`");
+    let Names { bot, .. } = names;
+    let trigger = |answer: &str| format!("`shep kelpie rule {id} {answer}`");
     let (yes, no) = (trigger("yes"), trigger("no <note>"));
     let about = number.map_or_else(
         || format!("issue #{issue}"),
         |n| format!("pull request #{n}"),
     );
+    // A work item stopped before its pull request opened leaves none on the forge.
+    let kept = if number.is_some() {
+        ", keeping its branch and pull request on the forge"
+    } else {
+        ""
+    };
     let ask = match kind {
         RulingKind::Merge { head, shots_failed } => {
             let shots = if *shots_failed { SHOTS_FAILED } else { "" };
@@ -642,29 +668,27 @@ fn question(
         RulingKind::Question { asked, .. } => {
             return format!(
                 "The worker on {about} asks:\n\n{asked}\n\n{} sends the worker your answer.",
-                trigger("answer <text>")
+                trigger("<text>")
             );
         }
         RulingKind::TurnTimeout { .. } => {
             return format!(
                 "The worker on {about} has been running past its turn's ceiling, \
                  and kelpie stopped it. {yes} resumes its session for another turn, \
-                 and {no} stops the work item, keeping its branch and pull request \
-                 on the forge."
+                 and {no} stops the work item{kept}."
             );
         }
         RulingKind::TurnFailed { reason, .. } => {
             return format!(
                 "The worker's turn on {about} failed: {}. {yes} tries that step again, \
-                 and {no} stops the work item, keeping its branch and pull request \
-                 on the forge.",
+                 and {no} stops the work item{kept}.",
                 reason.trim()
             );
         }
         RulingKind::ClaudeFiles { head, files, .. } => {
             return format!(
-                "{} at {} changes Claude Code's own files, which run outside the \
-                 worker's sandbox: {}. {yes} accepts them at that head and kelpie \
+                "{} at {} changes agents' own files, which decide what \
+                 an agent runs in the worktree: {}. {yes} accepts them at that head and kelpie \
                  carries on, and {no} stops the work item, keeping its branch and \
                  pull request on the forge.",
                 capitalized(&about),
@@ -677,6 +701,38 @@ fn question(
                 "{} changed outside kelpie: {description}. {yes} accepts it and kelpie \
                  carries on, and {no} sends the worker your note.",
                 capitalized(&about)
+            );
+        }
+        RulingKind::Split { why, pieces } => {
+            return format!(
+                "Planning would split {about} into {} pull requests. {}\n\n{}\n\n\
+                 {yes} opens them as sub-issues, {no} works it whole, and {} \
+                 plans it again with your note.",
+                pieces.len(),
+                why.trim(),
+                crate::plan::list(pieces),
+                trigger("answer <note>")
+            );
+        }
+        RulingKind::SplitStuck { reason, opened } => {
+            let opened: Vec<String> = opened.iter().map(|n| format!("#{n}")).collect();
+            let opened = match opened.as_slice() {
+                [] => "It opened no sub-issue yet".to_owned(),
+                some => format!("It opened {} so far", some.join(", ")),
+            };
+            return format!(
+                "Splitting {about} keeps failing: {}. {opened}. {yes} tries again, and \
+                 {} gives the split up and works it whole.",
+                reason.trim(),
+                trigger("no <note>")
+            );
+        }
+        RulingKind::CloseStuck { reason } => {
+            return format!(
+                "Every sub-issue of {about} is closed, but closing it keeps failing: {}. \
+                 {yes} tries again, and {} leaves it open.",
+                reason.trim(),
+                trigger("no <note>")
             );
         }
         RulingKind::FollowUp { findings, refused } => {

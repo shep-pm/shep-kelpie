@@ -11,11 +11,11 @@ use serde::Serialize;
 use crate::board::{Skip, WorkerModel};
 use crate::pacer::HoldKind;
 use crate::ports::{
-    ClaudeCall, Cost, Finding, Role, SessionId, Severity, Timestamp, Usage, Verdict,
+    AgentCall, Cost, Finding, Role, SessionId, Severity, Timestamp, Usage, Verdict,
 };
-use crate::settings::LocalRound;
+use crate::settings::{LocalRound, ReviewerName};
 use crate::shots::ShotsJob;
-use crate::work_item::{QwenTally, ReviewerKind, Spend};
+use crate::work_item::{QwenTally, Spend};
 
 /// What asked for a rework on the pull request itself
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -82,6 +82,58 @@ pub enum StepReport {
         /// Why the comment could not be posted, if it could not
         comment_failed: Option<String>,
     },
+    /// The planning call on the board's pick answered
+    Planned {
+        /// The issue planned
+        issue: u64,
+        /// What it decided, and what kelpie does next
+        outcome: PlanOutcome,
+        /// What the call used
+        usage: Usage,
+        /// What the call cost, in US dollars, or null when no reply
+        /// reported dollars
+        cost_usd: Option<f64>,
+    },
+    /// A split's sub-issues are open and linked, and its issue says so
+    Split {
+        /// The issue split
+        issue: u64,
+        /// Its sub-issues, one per piece in order
+        sub_issues: Vec<u64>,
+        /// Why the plan's comment could not be posted, if it could not
+        comment_failed: Option<String>,
+    },
+    /// A split could not finish this step, and carries on at the next
+    /// unless it was parked on a ruling
+    SplitFailed {
+        /// The issue being split
+        issue: u64,
+        /// Why
+        reason: String,
+        /// The ruling it is parked on, once the forge refused too often
+        ruling: Option<u64>,
+    },
+    /// A split was given up: its issue was closed or left the board
+    SplitDropped {
+        /// The issue
+        issue: u64,
+        /// Why
+        reason: String,
+    },
+    /// An issue whose sub-issues are all closed was closed too
+    ParentClosed {
+        /// The issue
+        issue: u64,
+    },
+    /// An issue whose sub-issues are all closed could not be closed this step
+    ParentCloseFailed {
+        /// The issue
+        issue: u64,
+        /// Why
+        reason: String,
+        /// The ruling it is parked on, once the forge refused too often
+        ruling: Option<u64>,
+    },
     /// Nothing was dispatched: the board could not be read, or the issue it
     /// picked could not be taken
     BoardFailed {
@@ -105,8 +157,9 @@ pub enum StepReport {
         session: SessionId,
         /// What the call used
         usage: Usage,
-        /// What the call cost, in US dollars
-        cost_usd: f64,
+        /// What the call cost, in US dollars, or null when its harness
+        /// reports no cost
+        cost_usd: Option<f64>,
         /// What the work item has cost so far, in US dollars
         work_item_cost_usd: f64,
         /// The worker's draft pull request, once it has opened one
@@ -120,8 +173,9 @@ pub enum StepReport {
         session: SessionId,
         /// What the call used
         usage: Usage,
-        /// What the call cost, in US dollars
-        cost_usd: f64,
+        /// What the call cost, in US dollars, or null when its harness
+        /// reports no cost
+        cost_usd: Option<f64>,
         /// What the work item has cost so far, in US dollars
         work_item_cost_usd: f64,
         /// The worker's draft pull request, once it has opened one
@@ -370,7 +424,7 @@ pub enum StepReport {
         /// The round
         round: u32,
         /// Which reviewer ran it
-        reviewer: ReviewerKind,
+        reviewer: ReviewerName,
         /// How many findings it reported
         findings: usize,
     },
@@ -511,6 +565,8 @@ impl StepReport {
         matches!(
             self,
             Self::BoardFailed { .. }
+                | Self::SplitFailed { .. }
+                | Self::ParentCloseFailed { .. }
                 | Self::GateFailed { .. }
                 | Self::Held { .. }
                 | Self::RepliesFailed { .. }
@@ -518,14 +574,44 @@ impl StepReport {
     }
 }
 
+/// What a planning call decided
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "plan", rename_all = "kebab-case")]
+pub enum PlanOutcome {
+    /// One pull request: the issue opens a work item
+    Whole {
+        /// Why, as the call said
+        why: String,
+    },
+    /// Several, under `auto`: the sub-issues open next
+    Split {
+        /// How many
+        pieces: usize,
+    },
+    /// Several, under `ask`: a ruling waits on the maintainer
+    Asked {
+        /// The ruling
+        ruling: u64,
+        /// The question, with the triggers that answer it
+        question: String,
+    },
+    /// The call failed or its reply was not a plan, so the issue is worked whole
+    Failed {
+        /// Why
+        reason: String,
+    },
+}
+
 /// What a step found there was to do, before the outer loop runs it
 pub(super) enum Begin {
     Idle,
     Report(StepReport),
-    Call(ClaudeCall),
+    Call(AgentCall),
     Review(ReviewCall),
     /// A shots run of this head
     Shots(Box<ShotsJob>, String),
+    /// A planning call, and the detached worktree it reads
+    Plan(Box<AgentCall>, PathBuf),
 }
 
 /// Something the review loop needs run outside the runner's lock
@@ -537,11 +623,12 @@ pub(super) enum ReviewCall {
         base: String,
         out: PathBuf,
         round: u32,
+        criteria: String,
     },
     /// A fresh Claude review round
-    ClaudeRound(ClaudeCall),
+    ClaudeRound(AgentCall),
     /// The judge's one-shot on a single finding
-    Judge(ClaudeCall),
+    Judge(AgentCall),
 }
 
 /// What a [`ReviewCall`] cost, for the work item's record
@@ -551,7 +638,7 @@ pub(super) enum Spent {
         role: Role,
         session: SessionId,
         usage: Usage,
-        session_cost: Cost,
+        session_cost: Option<Cost>,
     },
     /// A local round that ran, however it ended
     Local,

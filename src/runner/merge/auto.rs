@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use serde_json::json;
 
-use crate::ports::{Checks, ClaudeError, PullRequestState};
+use crate::ports::{AgentError, Checks, PullRequestState};
 use crate::runner::coderabbit::tests::{fixed, hold_a_finding, now, reviewed_by_qwen};
 use crate::runner::coderabbit::{ANSWER_WAIT, REVIEW_WAIT};
 use crate::runner::rework::HUMAN;
@@ -241,8 +241,8 @@ fn a_merge_the_forge_refuses_is_caught_up_once_then_parks_and_a_yes_looks_again(
         status["rulings"][0]["question"],
         format!(
             "Kelpie could not merge pull request #71 at {} after catching it up: {refused}. \
-             `shep trigger reactmap rule '{id} yes'` has kelpie look again and merge once \
-             every gate passes, and `shep trigger reactmap rule '{id} no <note>'` sends \
+             `shep kelpie rule {id} yes` has kelpie look again and merge once \
+             every gate passes, and `shep kelpie rule {id} no <note>` sends \
              the worker your note.",
             &head[..7]
         )
@@ -385,8 +385,10 @@ fn a_workers_question_still_parks_on_a_ruling() {
 #[test]
 fn a_failed_turn_still_parks_on_a_ruling() {
     let (rig, runner) = auto_with_issue_7("golbat");
-    rig.claude
-        .script([Scripted::Fail(ClaudeError::Failed("overloaded".into()))]);
+    rig.claude.script([Scripted::Fail(AgentError::Failed(
+        crate::settings::Harness::ClaudeCode,
+        "overloaded".into(),
+    ))]);
     let id = raised(step(&runner).unwrap());
     still_asks(&rig, &runner, id, "turn-failed");
 }
@@ -394,7 +396,9 @@ fn a_failed_turn_still_parks_on_a_ruling() {
 #[test]
 fn a_turn_past_its_ceiling_still_parks_on_a_ruling() {
     let (rig, runner) = auto_with_issue_7("rotom");
-    rig.claude.script([Scripted::Fail(ClaudeError::TimedOut)]);
+    rig.claude.script([Scripted::Fail(AgentError::TimedOut(
+        crate::settings::Harness::ClaudeCode,
+    ))]);
     let id = raised(step(&runner).unwrap());
     still_asks(&rig, &runner, id, "turn-timeout");
 }

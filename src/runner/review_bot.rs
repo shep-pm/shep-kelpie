@@ -20,8 +20,11 @@
 //! A project may list several bots. Each round goes to the first listed
 //! whose window is free, and the round cap counts rounds from all of them.
 
-mod cap;
+pub(super) mod cap;
+#[cfg(test)]
+mod codex_bot;
 mod lease;
+mod on_ready;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -125,7 +128,8 @@ impl Runner {
     // a draft is marked ready first and the summon waits for the next pass:
     // the forge can show the old state for a few seconds after. `full` asks
     // for a full review whatever the bot read before. The first listed bot
-    // is read while the round waits, as its footer states its quota.
+    // is read while the round waits, as its footer states its quota. A bot that
+    // reviews a draft when it is marked ready is summoned by marking it.
     fn summon(
         &mut self,
         head: String,
@@ -140,6 +144,9 @@ impl Runner {
             && self.lands_unsummoned(first, &head, activity)
         {
             return self.review_landed(number, first, activity);
+        }
+        if let Some(begin) = self.summon_by_ready(&head, readied, full)? {
+            return Ok(begin);
         }
         if let Some(begin) = self.ready_for_review(number, &head, readied, full)? {
             return Ok(begin);
@@ -545,7 +552,7 @@ impl Runner {
         let item = self.item();
         let (issue, worktree, folder) =
             (item.issue, item.worktree.clone(), self.paths.worker.clone());
-        let model = self.settings.models.judge.clone();
+        let model = self.agents.judge.clone();
         // A review bot reviews the whole pull request, so its judge diffs from `main`.
         let main = format!("origin/{}", crate::worktree::BASE);
         match calls::judge_call(
@@ -553,10 +560,12 @@ impl Runner {
             &worktree,
             &main,
             &folder,
-            &model,
+            (&model, &self.agents.limits.judge),
             &next.finding,
             None,
-        ) {
+        )
+        .and_then(|call| self.prepared(call))
+        {
             Ok(call) => {
                 self.mark_review_call_running()?;
                 Ok(Begin::Review(ReviewCall::Judge(call)))

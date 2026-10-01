@@ -24,17 +24,32 @@ fn end_review_tolerates_a_work_item_that_is_gone() {
     assert_eq!(report, None);
 }
 
+fn named(name: &str) -> Option<ReviewerName> {
+    Some(ReviewerName::try_from(name.to_owned()).unwrap())
+}
+
 #[test]
-fn advancing_a_clean_round_extends_the_streak_and_settles_at_two() {
+fn two_clean_rounds_from_different_reviewers_end_the_loop() {
     let now = crate::ports::Timestamp(100);
-    let after_first = advance(Review::first(), true, now, u32::MAX, &mut 0);
-    let Phase::Review(review) = after_first else {
+    let first = Review {
+        reviewer: named("qwen"),
+        ..Review::first()
+    };
+    let Phase::Review(review) = advance(first, true, now, true, &mut 0) else {
         panic!("stays reviewing after one clean round");
     };
     assert_eq!((review.round, review.consecutive_clean), (2, 1));
+    assert_eq!(
+        (review.reviewer, review.last.clone()),
+        (None, named("qwen"))
+    );
     assert_eq!(review.stage, ReviewStage::Round);
 
-    let phase = advance(review, true, now, u32::MAX, &mut 0);
+    let second = Review {
+        reviewer: named("claude"),
+        ..review
+    };
+    let phase = advance(second, true, now, false, &mut 0);
     assert_eq!(
         phase,
         Phase::Ci {
@@ -45,15 +60,70 @@ fn advancing_a_clean_round_extends_the_streak_and_settles_at_two() {
 }
 
 #[test]
+fn two_clean_rounds_from_the_same_reviewer_do_not() {
+    let now = crate::ports::Timestamp(1);
+    let again = Review {
+        round: 2,
+        consecutive_clean: 1,
+        reviewer: named("qwen"),
+        last: named("qwen"),
+        ..Review::first()
+    };
+    let Phase::Review(next) = advance(again, true, now, true, &mut 0) else {
+        panic!("a second clean round from qwen does not end the loop");
+    };
+    assert_eq!((next.round, next.consecutive_clean), (3, 2));
+}
+
+#[test]
+fn a_clean_round_from_the_only_reviewer_that_could_run_ends_the_loop() {
+    let now = crate::ports::Timestamp(1);
+    let alone = Review {
+        reviewer: named("claude"),
+        alone: true,
+        ..Review::first()
+    };
+    assert!(matches!(
+        advance(alone, true, now, false, &mut 0),
+        Phase::Ci { .. }
+    ));
+}
+
+#[test]
+fn an_older_state_file_s_clean_pair_still_ends_the_loop() {
+    let now = crate::ports::Timestamp(1);
+    let older = Review {
+        round: 2,
+        consecutive_clean: 1,
+        ..Review::first()
+    };
+    assert!(matches!(
+        advance(older, true, now, false, &mut 0),
+        Phase::Ci { .. }
+    ));
+}
+
+#[test]
+fn a_local_round_counts_toward_the_work_item_s_local_rounds() {
+    let now = crate::ports::Timestamp(1);
+    let mut ran = 2;
+    advance(Review::first(), false, now, true, &mut ran);
+    assert_eq!(ran, 3);
+    advance(Review::first(), false, now, false, &mut ran);
+    assert_eq!(ran, 3);
+}
+
+#[test]
 fn a_dirty_round_resets_the_streak_but_keeps_the_guard_cleared_flag() {
     let now = crate::ports::Timestamp(1);
     let review = Review {
         round: 4,
         consecutive_clean: 1,
         guard_cleared: true,
-        stage: ReviewStage::Round,
+        reviewer: named("claude"),
+        ..Review::first()
     };
-    let Phase::Review(next) = advance(review, false, now, u32::MAX, &mut 0) else {
+    let Phase::Review(next) = advance(review, false, now, false, &mut 0) else {
         panic!("stays reviewing");
     };
     assert_eq!(
@@ -62,7 +132,8 @@ fn a_dirty_round_resets_the_streak_but_keeps_the_guard_cleared_flag() {
             round: 5,
             consecutive_clean: 0,
             guard_cleared: true,
-            stage: ReviewStage::Round,
+            last: named("claude"),
+            ..Review::first()
         }
     );
 }
@@ -155,6 +226,7 @@ fn a_round_the_script_could_not_finish_is_reported_and_retried() {
             "consecutive_clean": 0,
             "guard_cleared": false,
             "stage": { "stage": "round" },
+            "reviewer": "qwen",
         }),
         "the round stays due, and the next step tries it again"
     );
@@ -284,6 +356,7 @@ fn the_round_guard_parks_for_a_ruling_and_a_yes_clears_it_for_the_rest_of_the_it
             "consecutive_clean": 1,
             "guard_cleared": true,
             "stage": { "stage": "round" },
+            "last": "qwen",
         }),
     );
 }
@@ -326,6 +399,7 @@ fn a_spilled_model_parks_the_round_on_a_ruling_that_alerts_and_a_yes_runs_it_aga
             "consecutive_clean": 0,
             "guard_cleared": false,
             "stage": { "stage": "round" },
+            "reviewer": "qwen",
         }),
         "the same round is due again"
     );
@@ -407,15 +481,15 @@ fn a_claude_round_with_a_finding_records_a_reviewer_call_and_a_judge_call() {
     );
     assert_eq!(
         item["by_role"]["reviewer"],
-        json!({ "calls": 1, "cost_usd": 0.05 })
+        json!({ "calls": 1, "tokens": { "input": 0, "cache_write": 0, "cache_read": 0, "output": 0 }, "cost_usd": 0.05 })
     );
     assert_eq!(
         item["by_role"]["judge"],
-        json!({ "calls": 1, "cost_usd": 0.007 })
+        json!({ "calls": 1, "tokens": { "input": 0, "cache_write": 0, "cache_read": 0, "output": 0 }, "cost_usd": 0.007 })
     );
     assert_eq!(
         item["by_role"]["worker"],
-        json!({ "calls": 1, "cost_usd": 0.0 }),
+        json!({ "calls": 1, "tokens": { "input": 0, "cache_write": 0, "cache_read": 0, "output": 0 }, "cost_usd": 0.0 }),
         "the worker's turn cost nothing here, and is not the reviewer's"
     );
     assert_eq!(item["qwen"]["rounds"], 1);
@@ -522,7 +596,7 @@ fn a_claude_round_that_only_mentions_clean_fails_the_gate() {
 fn a_claude_round_stopped_with_the_runner_runs_again_on_restart() {
     let (rig, runner) = at_round_1("shep");
     step(&runner).unwrap(); // round 1, qwen: clean by default
-    rig.claude.script([Scripted::Fail(ClaudeError::Stopped)]);
+    rig.claude.script([Scripted::Fail(AgentError::Stopped)]);
     assert_eq!(step(&runner).unwrap(), None, "no failed gate is reported");
     drop(runner);
 
@@ -535,6 +609,8 @@ fn a_claude_round_stopped_with_the_runner_runs_again_on_restart() {
             "consecutive_clean": 1,
             "guard_cleared": false,
             "stage": { "stage": "round" },
+            "reviewer": "claude",
+            "last": "qwen",
         }),
         "round 2 is still due, and round 1's clean still counts"
     );
@@ -560,7 +636,7 @@ fn a_judge_call_stopped_with_the_runner_runs_again_on_restart() {
         why: "two threads write the same field".into(),
     }])]);
     step(&runner).unwrap(); // round 1's qwen call
-    rig.claude.script([Scripted::Fail(ClaudeError::Stopped)]);
+    rig.claude.script([Scripted::Fail(AgentError::Stopped)]);
     assert_eq!(step(&runner).unwrap(), None, "no failed gate is reported");
     drop(runner);
 

@@ -38,6 +38,7 @@ struct Scene {
     shepherd: FakeShepherd,
     forge: FakeForge,
     meter: FakeMeter,
+    codex_meter: FakeMeter,
     reviewer: FakeReviewer,
     alerts: FakeAlerts,
     host: FakeHost,
@@ -50,20 +51,31 @@ impl Scene {
     async fn new() -> Self {
         let shepherd = FakeShepherd::new().await;
         let forge = FakeForge::new(PathBuf::from("/nowhere"));
-        forge.set_repo_labels(&["bug", "ready-for-agent", "ready-for-human", "review please"]);
+        forge.set_repo_labels(&[
+            "bug",
+            "ready-for-agent",
+            "ready-for-human",
+            "in-progress",
+            "review please",
+        ]);
         shepherd.holds_section(WEBHOOK);
+        shepherd.holds_dog("kelpie", true);
         let clock = FakeClock::at(1_000);
         let scene = Self {
             home: shepherd.scratch("home"),
             kelpie_home: shepherd.scratch("kelpie"),
             forge,
             meter: FakeMeter::idle(),
+            codex_meter: FakeMeter::idle(),
             reviewer: FakeReviewer::default(),
             alerts: FakeAlerts::on(clock.clone()),
             host: FakeHost(Vec::new()),
             clock,
             shepherd,
         };
+        let srt = Tools::under(&scene.kelpie_home).sandbox();
+        std::fs::create_dir_all(srt.parent().unwrap()).unwrap();
+        std::fs::write(srt, "").unwrap();
         scene.runs("koji", |_| {});
         scene
     }
@@ -95,6 +107,7 @@ impl Scene {
     async fn check(&self, ask: Ask<'_>) -> Report {
         let probes = Probes {
             meter: &self.meter,
+            codex_meter: &self.codex_meter,
             forge: &self.forge,
             reviewer: &self.reviewer,
             review_bot: &CodeRabbit,
@@ -134,6 +147,43 @@ fn ok(report: &Report, subject: &str) -> String {
     }
 }
 
+#[tokio::test]
+async fn a_project_that_spends_codex_checks_codex_answers_its_usage() {
+    let scene = Scene::new().await;
+    let codex = "[agents.codex]\nharness = \"stand-in\"\nmodel = \"gpt-5-codex\"\n\
+                 effort = \"medium\"\nusage = \"codex\"\n";
+    scene.shepherd.holds_section(&format!("{WEBHOOK}{codex}"));
+    scene.runs("golbat", |t| {
+        t.insert("agents".into(), json!({ "worker": "codex" }));
+    });
+    let report = scene.report().await;
+    let found = ok(&report, "golbat: codex usage");
+    assert_eq!(found, "reads Codex usage: 5-hour window 0%, week 0%");
+    assert!(!subjects(&report).contains(&"koji: codex usage"));
+
+    let fixes = [
+        (
+            "cannot run codex: No such file or directory",
+            "install the Codex CLI",
+        ),
+        ("codex refused: 402 Payment Required", "codex login"),
+    ];
+    for (reason, fix) in fixes {
+        scene.codex_meter.fail(MeterError::Codex(reason.into()));
+        let (what, said) = missing(&scene.report().await, "golbat: codex usage");
+        assert_eq!(what, reason);
+        assert!(said.contains(fix), "{said}");
+    }
+    scene
+        .codex_meter
+        .fail(MeterError::Codex("codex did not answer in time".into()));
+    let report = scene.report().await;
+    assert!(matches!(
+        verdict(&report, "golbat: codex usage"),
+        Verdict::Unsure { .. }
+    ));
+}
+
 /// What is wrong and the fix, for a line that is missing
 fn missing(report: &Report, subject: &str) -> (String, String) {
     match verdict(report, subject) {
@@ -171,6 +221,7 @@ async fn a_machine_with_everything_in_place_passes_and_changes_nothing() {
             "gh",
             "sandbox",
             "shepherd",
+            "dog",
             "golbat: checkout",
             "golbat: push access",
             "golbat: labels",
@@ -191,6 +242,34 @@ async fn a_machine_with_everything_in_place_passes_and_changes_nothing() {
         report.render().last().unwrap(),
         "nothing a project needs is missing"
     );
+}
+
+// Shep lists a dog that is up and never named itself as silent, then gives
+// up on it, and a dog in either state holds no lease.
+#[tokio::test]
+async fn a_dog_that_never_named_itself_is_missing_and_told_its_fix() {
+    let scene = Scene::new().await;
+    scene.shepherd.never_names("kelpie");
+    let report = scene.report().await;
+    let (what, fix) = missing(&report, "dog");
+    assert!(what.contains("silent"), "{what}");
+    assert!(fix.contains("`shep bleats kelpie`"), "{fix}");
+    assert!(!report.passed());
+
+    scene.shepherd.gives_up_on("kelpie");
+    let report = scene.report().await;
+    let (what, fix) = missing(&report, "dog");
+    assert!(what.contains("given up"), "{what}");
+    assert!(fix.contains("`shep restart kelpie`"), "{fix}");
+}
+
+#[tokio::test]
+async fn a_flock_with_no_dog_is_told_to_enable_it() {
+    let scene = Scene::new().await;
+    scene.shepherd.stops("kelpie");
+    let report = scene.report().await;
+    let (what, _) = missing(&report, "dog");
+    assert_eq!(what, "kelpie's dog is not running");
 }
 
 #[tokio::test]
@@ -271,8 +350,19 @@ async fn a_sandbox_the_machine_lacks_names_what_it_lacks() {
 }
 
 #[tokio::test]
+async fn a_machine_without_the_sandbox_runtime_is_told_to_install_it() {
+    let scene = Scene::new().await;
+    std::fs::remove_file(Tools::under(&scene.kelpie_home).sandbox()).unwrap();
+    let report = scene.report().await;
+    let (what, fix) = missing(&report, "sandbox");
+    assert!(what.contains("no runner starts"), "{what}");
+    assert_eq!(fix, "run `shep kelpie tools install`");
+    assert!(!report.passed());
+}
+
+#[tokio::test]
 async fn a_shepherd_on_another_minor_names_both_versions_and_no_project_is_checked() {
-    let shepherd = FakeShepherd::on("0.12.0").await;
+    let shepherd = FakeShepherd::on("0.13.0").await;
     let mut scene = Scene::new().await;
     scene.shepherd = shepherd;
 
@@ -280,7 +370,7 @@ async fn a_shepherd_on_another_minor_names_both_versions_and_no_project_is_check
 
     let (what, _) = missing(&report, "shepherd");
     assert!(
-        what.contains("shep 0.12.0") && what.contains(SHEP_VERSION),
+        what.contains("shep 0.13.0") && what.contains(SHEP_VERSION),
         "{what}"
     );
     assert!(matches!(
@@ -297,6 +387,7 @@ async fn no_shepherd_is_a_missing_shepherd_naming_its_home() {
     let elsewhere = tempfile::tempdir().unwrap();
     let probes = Probes {
         meter: &scene.meter,
+        codex_meter: &scene.codex_meter,
         forge: &scene.forge,
         reviewer: &scene.reviewer,
         review_bot: &CodeRabbit,
@@ -326,12 +417,15 @@ async fn labels_a_repo_lacks_are_named_with_the_command_that_makes_them() {
     let scene = Scene::new().await;
     scene.forge.set_repo_labels(&["bug", "ready-for-agent"]);
     let (what, fix) = missing(&scene.report().await, "koji: labels");
-    assert_eq!(what, "shep-pm/koji has no ready-for-human");
+    assert_eq!(what, "shep-pm/koji has no ready-for-human, in-progress");
     assert!(fix.starts_with("`shep kelpie add` in "), "{fix}");
 
     scene.runs("golbat", |t| t["coderabbit"]["enabled"] = json!(true));
     let (what, _) = missing(&scene.report().await, "golbat: labels");
-    assert_eq!(what, "shep-pm/golbat has no ready-for-human, review please");
+    assert_eq!(
+        what,
+        "shep-pm/golbat has no ready-for-human, in-progress, review please"
+    );
 }
 
 #[tokio::test]

@@ -5,6 +5,8 @@
 //! to a temporary file that is synced and then renamed over the old one, so
 //! a runner killed mid-write leaves the previous state whole.
 
+pub mod ids;
+
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -13,8 +15,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
+use crate::plan::{Piece, Plan};
 use crate::ports::{Finding, Timestamp};
 use crate::review_bot::Bot;
+use crate::settings::Account;
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem};
 
 /// The state file's format version
@@ -55,17 +59,33 @@ pub struct ProjectState {
     /// Pull requests adopted and waiting for a free slot, oldest first
     #[serde(default)]
     pub adopted: Vec<Waiting>,
+    /// Issues planned, or being planned, before their work items open
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plans: Vec<Plan>,
     /// Leases this project holds
     pub leases: Vec<LeaseHeld>,
-    /// What the week had spent when today began, once usage has been read
+    /// What the Claude account's week had spent when today began, once
+    /// usage has been read
     #[serde(default)]
     pub pacing: Option<DayStart>,
+    /// The same for the Codex account, once a Codex agent's usage has been read
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_pacing: Option<DayStart>,
     /// Automatic merges not yet sent, oldest first
     #[serde(default)]
     pub notices: Vec<Notice>,
     /// Where reading the webhook's replies has got to
     #[serde(default)]
     pub replies: Replies,
+    /// The relay's count of clears, by any project's runner, when this
+    /// runner last read it. Every ruling marked relayed was sent after that
+    /// many clears, so a higher count means the relay no longer holds it.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub relay_clears: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 impl ProjectState {
@@ -82,10 +102,29 @@ impl ProjectState {
             finished: Vec::new(),
             reworked: Vec::new(),
             adopted: Vec::new(),
+            plans: Vec::new(),
             leases: Vec::new(),
             pacing: None,
+            codex_pacing: None,
             notices: Vec::new(),
             replies: Replies::default(),
+            relay_clears: 0,
+        }
+    }
+
+    /// What `account`'s week had spent when today began
+    pub fn day_start(&self, account: Account) -> Option<DayStart> {
+        match account {
+            Account::Claude => self.pacing,
+            Account::Codex => self.codex_pacing,
+        }
+    }
+
+    /// Where `account`'s day start is kept
+    pub fn day_start_mut(&mut self, account: Account) -> &mut Option<DayStart> {
+        match account {
+            Account::Claude => &mut self.pacing,
+            Account::Codex => &mut self.codex_pacing,
         }
     }
 
@@ -219,7 +258,7 @@ pub enum RulingKind {
     Merge {
         /// The head the question is about
         head: String,
-        /// Whether kelpie's shots of that head failed, so none are on the pull request
+        /// Whether kelpie's shots of that head failed, so none of that head's are on the pull request
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         shots_failed: bool,
     },
@@ -333,8 +372,8 @@ pub enum RulingKind {
         /// The turn as it stood before it failed, which a yes puts back
         retry: Turn,
     },
-    /// The pull request changes Claude Code's own files, which run outside
-    /// the sandbox. A yes accepts them at this head; a no stops the work item.
+    /// The pull request changes agents' own files, which decide what an
+    /// agent runs in the worktree. A yes accepts them at this head; a no stops the work item.
     ClaudeFiles {
         /// The head that changes them
         head: String,
@@ -342,6 +381,29 @@ pub enum RulingKind {
         files: Vec<String>,
         /// The phase the gate was in, which a yes goes back to
         phase: Phase,
+    },
+    /// The planning call would split the issue into these pieces, before any
+    /// work item opens. A yes opens them as sub-issues, a no works the issue
+    /// whole, and an answer plans it again with the maintainer's note.
+    Split {
+        /// Why, for the issue's comment
+        why: String,
+        /// The pieces, blockers first
+        pieces: Vec<Piece>,
+    },
+    /// The forge refused a split step several times in a row. A yes tries
+    /// again, and a no gives the split up and works the issue whole.
+    SplitStuck {
+        /// The forge's last refusal
+        reason: String,
+        /// The sub-issues opened before it stopped
+        opened: Vec<u64>,
+    },
+    /// The forge refused several times to close an issue whose sub-issues
+    /// are all closed. A yes tries again, and a no leaves it open.
+    CloseStuck {
+        /// The forge's last refusal
+        reason: String,
     },
     /// The pull request's labels or ready state changed outside kelpie. A
     /// yes accepts the change and kelpie carries on watching it.
@@ -418,6 +480,8 @@ pub enum Resource {
     Coderabbit,
     /// cubic's review window
     Cubic,
+    /// Codex's review allowance
+    Codex,
 }
 
 /// Why the state file cannot be read or written

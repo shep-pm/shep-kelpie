@@ -4,18 +4,22 @@
 //! is back before any runner goes down. A runner is restarted only when its
 //! `status` shows no merge in flight, and the dog only when no runner has
 //! one. A sheep that is stopped stays stopped: it starts on the new build.
+//!
+//! The installed kelpie is the program the adopted dog runs, and every sheep
+//! restarted must run that same path, or the restart would not move it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::Value;
 use shep_client::Client;
+use shep_client::shep_core::protocol::request::DogSource;
 use shep_client::shep_core::status::ProcStatus;
 use tokio::time::Instant;
 
 use crate::dog;
 use crate::flock::control::{Answered, trigger};
-use crate::flock::{Found, flock, kelpie_sheep, resume, tables};
+use crate::flock::{flock, kelpie_sheep, resume, script, tables};
 
 /// How long the upgrade waits, and how often it asks
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,70 +43,138 @@ impl Default for Patience {
     }
 }
 
+/// One of kelpie's sheep, and the program its entry runs
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Member {
+    name: String,
+    program: String,
+    online: bool,
+}
+
+/// The installed kelpie and the sheep that run it
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Plan {
+    /// The program the adopted dog runs, which is the installed kelpie
+    pub program: PathBuf,
+    dog: Member,
+    runners: Vec<Member>,
+}
+
+impl Plan {
+    /// Reads the flock: the adopted dog's program, and the runners
+    ///
+    /// Sheep kelpie did not start are left alone, and said so through `say`.
+    ///
+    /// # Errors
+    ///
+    /// A message when the flock has no adopted kelpie, or when a sheep that
+    /// would be restarted runs another program than the dog does: a restart
+    /// cannot move it onto the installed build.
+    pub async fn read(client: &Client, say: &mut dyn FnMut(String)) -> Result<Self, String> {
+        let rows = flock(client).await?;
+        let dog = rows
+            .iter()
+            .find(|row| row.name == dog::NAME)
+            .and_then(|row| match row.dog.as_ref()? {
+                DogSource::Adopted { path, .. } => Some(Member {
+                    name: row.name.clone(),
+                    program: path.clone(),
+                    online: row.status == ProcStatus::Online,
+                }),
+                _ => None,
+            })
+            .ok_or_else(|| {
+                format!(
+                    "the flock has no adopted kelpie, so there is no installed kelpie to \
+                     upgrade: `shep adopt <path to kelpie> --name {}` adopts one",
+                    dog::NAME
+                )
+            })?;
+        let mut runners = Vec::new();
+        for name in tables(client).await?.into_keys() {
+            match kelpie_sheep(client, &rows, &name, &["runner", &name]).await {
+                Ok(Some(row)) => runners.push(Member {
+                    program: script(client, &name).await?,
+                    online: row.status == ProcStatus::Online,
+                    name,
+                }),
+                Ok(None) => {}
+                Err(e) => say(format!("`{name}` left alone: {e}")),
+            }
+        }
+        let plan = Self {
+            program: PathBuf::from(&dog.program),
+            dog,
+            runners,
+        };
+        plan.agrees()?;
+        Ok(plan)
+    }
+
+    // Every sheep to be restarted runs the dog's program, else none is touched.
+    fn agrees(&self) -> Result<(), String> {
+        let strays: Vec<String> = self
+            .runners
+            .iter()
+            .filter(|m| m.online && Path::new(&m.program) != self.program)
+            .map(|m| format!("`{}` runs {}", m.name, m.program))
+            .collect();
+        if strays.is_empty() {
+            return Ok(());
+        }
+        Err(format!(
+            "the dog runs {}, and {}: a restart cannot move a sheep onto the installed build. \
+             Nothing was installed or restarted. Point those sheep at {}, then run the \
+             upgrade again",
+            self.program.display(),
+            strays.join(" and "),
+            self.program.display()
+        ))
+    }
+}
+
 /// Restarts the dog and each running runner, saying what it does through `say`
 ///
 /// # Errors
 ///
 /// A message naming the sheep that could not be restarted, did not come back,
-/// or kept a merge in flight for longer than `patience.merge`. The sheep
-/// restarted before it are on the new build, and running the upgrade again
-/// finishes the rest.
+/// or kept a merge in flight for longer than `patience.merge`. The sheep restarted before it are on the new build,
+/// and running the upgrade again finishes the rest.
 pub async fn restart_all(
     client: &Client,
-    installed: &Path,
+    plan: &Plan,
     patience: Patience,
     say: &mut dyn FnMut(String),
 ) -> Result<(), String> {
-    let rows = flock(client).await?;
-    let mut runners = Vec::new();
-    for name in tables(client).await?.into_keys() {
-        match kelpie_sheep(client, &rows, &name, &["runner", &name]).await {
-            Ok(Some(found)) => runners.push(found),
-            Ok(None) => {}
-            Err(e) => say(format!("`{name}` left alone: {e}")),
-        }
+    for member in plan.runners.iter().chain([&plan.dog]).filter(|m| !m.online) {
+        say(if Path::new(&member.program) == plan.program {
+            format!(
+                "`{}` is not running, so it starts on the new build",
+                member.name
+            )
+        } else {
+            format!(
+                "`{}` is not running, and runs {}, so it does not start on the new build",
+                member.name, member.program
+            )
+        });
     }
-    let dog = match kelpie_sheep(client, &rows, dog::NAME, &["dog"]).await {
-        Ok(Some(dog)) => Some(dog),
-        _ => kelpie_sheep(client, &rows, dog::OLD_NAME, &["dog"])
-            .await
-            .ok()
-            .flatten(),
-    };
-    let (runners, stopped): (Vec<_>, Vec<_>) = runners.into_iter().partition(online);
-    let (dog, stopped_dog): (Vec<_>, Vec<_>) = dog.into_iter().partition(online);
-    for found in stopped_dog.iter().chain(&stopped) {
-        say(format!(
-            "`{}` is not running, so it starts on the new build",
-            found.row.name
-        ));
-    }
-    let names: Vec<&str> = runners.iter().map(|f| f.row.name.as_str()).collect();
-    for found in dog.iter().chain(&runners) {
-        if Path::new(&found.script) != installed {
-            say(format!(
-                "`{}` runs {}, not {}, so it stays on that build",
-                found.row.name,
-                found.script,
-                installed.display()
-            ));
-        }
-    }
+    let names: Vec<&str> = plan
+        .runners
+        .iter()
+        .filter(|m| m.online)
+        .map(|m| m.name.as_str())
+        .collect();
     // The dog goes down only when no runner is merging.
-    for found in &dog {
+    if plan.dog.online {
         wait_out_merges(client, &names, patience, say).await?;
-        bounce(client, &found.row.name, patience, say).await?;
+        bounce(client, &plan.dog.name, patience, say).await?;
     }
-    for found in &runners {
-        let name = found.row.name.as_str();
+    for name in names {
         wait_out_merges(client, &[name], patience, say).await?;
         bounce(client, name, patience, say).await?;
     }
     Ok(())
-}
-
-fn online(found: &Found) -> bool {
-    found.row.status == ProcStatus::Online
 }
 
 async fn bounce(
@@ -114,7 +186,7 @@ async fn bounce(
     resume(client, name).await?;
     let waited = Instant::now();
     loop {
-        if let Answered::Runner(_) = trigger(client, name, "status").await? {
+        if let Answered::Runner(_) = trigger(client, name, "status", None).await? {
             say(format!("restarted `{name}`"));
             return Ok(());
         }
@@ -140,7 +212,7 @@ async fn wait_out_merges(
     loop {
         let mut busy = Vec::new();
         for &name in names {
-            match trigger(client, name, "status").await? {
+            match trigger(client, name, "status", None).await? {
                 Answered::Runner(body) => busy.extend(
                     merging(&body)
                         .into_iter()

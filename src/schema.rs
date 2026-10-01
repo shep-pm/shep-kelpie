@@ -5,17 +5,19 @@
 //! `[app.dogs.kelpie]` table. The webhook's URL is marked a secret, so
 //! lookout draws it `<set>`.
 
+use shep_client::dogs::Probe;
+
 use crate::settings::Settings;
 use crate::webhook::KelpieSettings;
 
 /// Answers `--version` or `--schema` and exits, or returns when neither was asked
 ///
-/// The first line of `main`, before anything opens a socket.
+/// The first line of `main`, before anything opens a socket. The version
+/// answer asks for the shepherd channel, which the lease dog serves.
 pub fn probe() {
-    shep_client::dogs::probe_with_sheep::<KelpieSettings, Settings>(
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION"),
-    );
+    Probe::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
+        .ask_for_channel()
+        .answer_with_sheep::<KelpieSettings, Settings>();
 }
 
 #[cfg(test)]
@@ -143,26 +145,36 @@ mod tests {
             .replace("# configuration =", "configuration =")
             .replace("# routes =", "routes =")
             .replace("# domains =", "domains =")
+            .replace("# private_names =", "private_names =")
             .replace("# local_rounds =", "local_rounds =")
             .replace("# rounds =", "rounds =")
-            .replace("# ollama =", "ollama =")
-            .replace("# ollama_model =", "ollama_model =");
-        let command = "kind = \"command\"\ncommand = \"~/.claude/scripts/qwen-review.sh\"\n";
-        assert!(text.contains(command), "the example's local round moved");
+            .replace("# reviewers = [\"qwen\", \"claude\", \"opus\"]", "reviewers = [\"qwen\"]")
+            .replace("# [app.dogs.kelpie.agents]", "[app.dogs.kelpie.agents]")
+            .replace("# worker = \"opus-high\"", "worker = \"opus-high\"")
+            .replace("# reviewer = \"opus-high\"", "reviewer = \"opus-high\"")
+            .replace("# judge = \"opus-high\"", "judge = \"opus-high\"")
+            .replace("# planner = \"opus-high\"", "planner = \"opus-high\"");
+        assert!(
+            text.contains("reviewers = [\"qwen\"]"),
+            "the example's list moved"
+        );
+        let command = "kind = \"command\"\ncommand = \"~/.claude/scripts/qwen-review.sh\"\n\
+                       gpu_lease = true\nollama = \"http://localhost:11434\"\n\
+                       ollama_model = \"m\"\npaths = [\"src/**\"]\n";
         let endpoint = "kind = \"endpoint\"\nurl = \"http://localhost:11434/v1\"\n\
-                        model = \"m\"\ncontext = 32768\ngpu_lease = true\n";
-        let command_with_lease = format!("{command}gpu_lease = true\n");
+                        model = \"m\"\ncontext = 32768\nlease = \"gpu\"\n";
         // Each kind of skill once, every step naming it.
         let kinds = [
             "{ kind = \"path\", path = \"skills/mine\" }",
             "{ kind = \"plugin\", plugin = \"plugins/house\", skill = \"mine\" }",
             "{ kind = \"none\" }",
         ];
-        [command_with_lease.as_str(), endpoint, "kind = \"off\"\n"]
+        [command, endpoint, "kind = \"off\"\n"]
             .into_iter()
             .zip(kinds)
             .map(|(local, kind)| {
-                let mut text = text.replace(command, local);
+                let table = format!("[app.dogs.kelpie.review.local]\n{local}");
+                let mut text = crate::test::with_tables(&text, &table);
                 text.push_str("\n[app.dogs.kelpie.skills]\n");
                 for step in crate::skills::Step::ALL {
                     text.push_str(&format!("{step} = {kind}\n"));
@@ -203,7 +215,26 @@ mod tests {
             .replace("# ruling_channels =", "ruling_channels =")
             .replace("# [kelpie.reviewers.", "[kelpie.reviewers.")
             .replace("# reviews =", "reviews =")
-            .replace("# hours =", "hours =");
+            .replace("# hours =", "hours =")
+            .replace("# reviews_on_ready =", "reviews_on_ready =")
+            .replace(
+                "# [kelpie.leases]\n# cargo-test",
+                "[kelpie.leases]\ncargo-test",
+            )
+            .replace(
+                "# [kelpie.local_reviewers.qwen]\n# kind = \"command\"\n# command =",
+                "[kelpie.local_reviewers.qwen]\nkind = \"command\"\ncommand =",
+            )
+            .replace(
+                "# [kelpie.agents.opus-high]\n# harness = \"claude-code\"\n\
+                 # model = \"claude-opus-5-5\"\n# effort = \"high\"",
+                "[kelpie.agents.opus-high]\nharness = \"claude-code\"\n\
+                 model = \"claude-opus-5-5\"\neffort = \"high\"",
+            );
+        assert!(
+            example.contains("\n[kelpie.local_reviewers.qwen]"),
+            "the example moved"
+        );
         let example: toml::Table = toml::from_str(&example).unwrap();
         let section = toml::to_string(&example["kelpie"]).unwrap();
         assert_eq!(keys_of_schema(&root), keys_of_table(&root, &root, &section));

@@ -4,12 +4,12 @@ use std::fmt;
 
 /// The machine kelpie runs on
 pub trait Host: Send + Sync + fmt::Debug {
-    /// The programs Claude Code's sandbox needs that are not on this machine,
+    /// The programs the sandbox runtime needs that are not on this machine,
     /// none when it can run
     fn sandbox_gaps(&self) -> Vec<&'static str>;
 }
 
-/// The programs Claude Code's sandbox needs on `os`, as `std::env::consts::OS` names it
+/// The programs the sandbox runtime needs on `os`, as `std::env::consts::OS` names it
 pub const fn sandbox_needs(os: &str) -> &'static [&'static str] {
     match os.as_bytes() {
         b"macos" => &["sandbox-exec"],

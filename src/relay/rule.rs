@@ -287,9 +287,22 @@ mod tests {
         }
     }
 
+    // `shep kelpie rule` reads plain words by the ruling's kind; the relay's
+    // pre-allowed command keeps `rule`'s strict grammar, so none of them pass.
+    #[tokio::test]
+    async fn relay_answer_refuses_the_terminal_s_plain_words() {
+        let home = scratch_home();
+        for plain in ["3 yes", "3 merge it", "3 looks good", "3 no", "3 answer"] {
+            let refused = deliver_in_time(home.path(), Ruling::NoOrAnswer(plain))
+                .await
+                .unwrap_err();
+            assert!(refused.starts_with("relay-answer refuses"), "{refused}");
+        }
+    }
+
     #[tokio::test]
     async fn a_shepherd_on_another_minor_or_major_gets_no_ruling() {
-        for version in ["0.9.4", "0.10.1", "0.12.0", "1.11.0", "0.110.1"] {
+        for version in ["0.9.4", "0.11.0", "0.13.0", "1.12.0", "0.120.1"] {
             let home = scratch_home();
             let mut sent = shepherd(home.path(), version, replied(STATUS)).await;
             let refused = deliver_in_time(home.path(), Ruling::Yes("3"))
@@ -300,7 +313,7 @@ mod tests {
                 "{refused}"
             );
             assert!(
-                refused.contains("takes only a 0.11.x shepherd"),
+                refused.contains("takes only a 0.12.x shepherd"),
                 "{refused}"
             );
             assert!(!refused.contains("reload"), "{refused}");
@@ -310,7 +323,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_patch_release_of_the_pinned_line_gets_the_ruling() {
-        for version in ["0.11.0", "0.11.3"] {
+        for version in ["0.12.0", "0.12.3"] {
             let home = scratch_home();
             let mut sent = shepherd(home.path(), version, replied(STATUS)).await;
             let reply = deliver_in_time(home.path(), Ruling::Yes("3")).await;
@@ -325,13 +338,13 @@ mod tests {
         let refusal = RpcError {
             code: RpcErrorCode::ProtocolMismatch,
             message: "client protocol 9 is below this shepherd's floor of 10".into(),
-            daemon_version: Some("0.12.0".into()),
+            daemon_version: Some("0.13.0".into()),
         };
         let _shepherd = fake_daemon(&home.path().join("run/shep.sock"), Err(refusal)).await;
         let refused = deliver_in_time(home.path(), Ruling::Yes("3"))
             .await
             .unwrap_err();
-        assert!(refused.contains("runs shep 0.12.0"), "{refused}");
+        assert!(refused.contains("runs shep 0.13.0"), "{refused}");
         assert!(!refused.contains("reload"), "{refused}");
     }
 

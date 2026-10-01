@@ -20,6 +20,9 @@ use crate::ports::Timestamp;
 /// The lock folder under the temporary folder, as the scripts name it
 const LOCK: &str = "qwen-review/gpu.lock";
 
+/// The folder under the temporary folder holding every other named lease's lock
+const LEASES: &str = "kelpie-leases";
+
 /// The temporary folder the maintainer's qwen scripts use
 ///
 /// The scripts use `${TMPDIR:-/tmp}`. A sheep runs without `TMPDIR`, while
@@ -108,6 +111,19 @@ impl GpuLock {
     pub fn under(temp_dir: &Path) -> Self {
         Self {
             dir: temp_dir.join(LOCK),
+        }
+    }
+
+    /// The lock a local reviewer's lease names under `temp_dir`
+    ///
+    /// `gpu` is the scripts' own lock. Any other name is a lock of the same
+    /// format beside it, such as one for another machine's GPU.
+    pub fn named(temp_dir: &Path, lease: &str) -> Self {
+        if lease == super::GPU {
+            return Self::under(temp_dir);
+        }
+        Self {
+            dir: temp_dir.join(LEASES).join(format!("{lease}.lock")),
         }
     }
 
@@ -229,6 +245,26 @@ impl GpuLock {
             }
             _ => Ok(false),
         }
+    }
+}
+
+/// A lock taken for one call or round, let go when dropped
+#[derive(Debug)]
+pub struct GpuHold {
+    lock: GpuLock,
+    pid: u32,
+}
+
+impl GpuHold {
+    /// The hold `pid` has on `lock`, which it took
+    pub fn new(lock: GpuLock, pid: u32) -> Self {
+        Self { lock, pid }
+    }
+}
+
+impl Drop for GpuHold {
+    fn drop(&mut self) {
+        let _ = self.lock.release(self.pid);
     }
 }
 

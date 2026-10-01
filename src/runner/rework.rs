@@ -15,11 +15,11 @@ use super::Runner;
 use super::report::{Begin, ReworkBy, StepReport};
 use super::trigger::{self, issue_list};
 use super::turn;
-use crate::board::{LabelError, OpenPullRequest, READY, Skip, WorkerModel, worker_override};
-use crate::pacer::Scope;
+use crate::board::{LabelError, OpenPullRequest, READY, Skip, WorkerModel};
 use crate::ports::{ForgeError, MaintainerReview, PullRequestState, Reviewed};
 use crate::state::StateError;
 use crate::work_item::{CodeRabbitTally, Known, Phase, Review, WorkItem, new_session_id};
+use crate::worktree;
 
 /// The label on a pull request kelpie handed back to the maintainer
 ///
@@ -58,6 +58,8 @@ pub enum ReworkError {
     Unlabel(u64, &'static str, ForgeError),
     /// The forge could not show CodeRabbit's reviews of the pull request
     CodeRabbit(u64, ForgeError),
+    /// The branch's head on `origin` could not be read, with the reason
+    Head(String, String),
     /// The work item could not be saved
     State(StateError),
 }
@@ -92,6 +94,7 @@ impl fmt::Display for ReworkError {
             Self::CodeRabbit(number, e) => {
                 write!(f, "cannot read CodeRabbit's reviews of #{number}: {e}")
             }
+            Self::Head(branch, e) => write!(f, "cannot read the head of `{branch}`: {e}"),
             Self::State(e) => e.fmt(f),
         }
     }
@@ -189,7 +192,7 @@ impl Runner {
                     continue;
                 }
             }
-            if let Some(held) = self.pace(Scope::Dispatch)?.holds() {
+            if let Some(held) = self.pace_dispatch()?.holds() {
                 return Ok((Some(held), skipped));
             }
             let review = pr.review.as_ref().map(|r| r.id.clone());
@@ -315,14 +318,19 @@ impl Runner {
             .forge
             .issue(repo, issue)
             .map_err(|e| ReworkError::Issue(issue, e))?;
-        let worker = worker_override(&found.labels)
-            .map_err(ReworkError::Label)?
-            .unwrap_or_else(|| WorkerModel::from(&self.settings.models.worker));
+        let worker = self
+            .labelled_worker(&found.labels)
+            .map_err(ReworkError::Label)?;
         let session = new_session_id().map_err(|e| ReworkError::Session(e.to_string()))?;
         let fresh = self.fresh(issue, found.title, worker.clone(), session);
         // A rework stays on its pull request, so a fixed number of rounds
-        // counts the reviews every listed bot gave it before.
+        // counts the reviews every listed bot gave it before. As an adoption
+        // does, it leaves out a review of the current head, which the gate
+        // counts once when it finds it.
         let mut rounds = 0u32;
+        // The head the turn starts from, so a turn that pushes nothing is told apart.
+        let head = worktree::origin_head(&self.settings.repo, &pr.branch)
+            .map_err(|e| ReworkError::Head(pr.branch.clone(), e.to_string()))?;
         if self.settings.coderabbit.rounds.is_some() && self.settings.coderabbit.enabled {
             for bot in self.settings.reviewers() {
                 let bot = self.profile(bot);
@@ -331,7 +339,7 @@ impl Runner {
                     .forge
                     .review_bot(repo, number, bot.login())
                     .map_err(|e| ReworkError::CodeRabbit(number, e))?;
-                rounds = rounds.saturating_add(bot.reviewed_besides(&activity, ""));
+                rounds = rounds.saturating_add(bot.reviewed_besides(&activity, &head));
             }
         }
         let text = review_text(number, &review);
@@ -364,11 +372,12 @@ impl Runner {
             known: Known {
                 labels,
                 ready: !pr.draft,
-                head: None,
+                head: Some(head),
             },
             ..fresh
         });
         self.save(next).map_err(ReworkError::State)?;
+        self.mark_held(issue, true);
         Ok(worker)
     }
 }

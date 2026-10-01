@@ -226,6 +226,10 @@ impl Shots for ShotsCli {
             stop_group(pgid);
         }
     }
+
+    fn stop_orphans(&self, folders: &[std::path::PathBuf]) {
+        super::orphans::stop_under(folders, &self.tools.sandbox());
+    }
 }
 
 // Whether process `pid` runs the sandbox runtime at `srt`, as every dev
@@ -369,6 +373,9 @@ fn last_lines(text: &str, n: usize) -> String {
     let lines: Vec<&str> = text.trim().lines().collect();
     lines[lines.len().saturating_sub(n)..].join(" / ")
 }
+
+#[cfg(test)]
+mod left;
 
 #[cfg(test)]
 mod tests {

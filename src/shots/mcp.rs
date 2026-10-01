@@ -1,7 +1,7 @@
 //! `kelpie shots-mcp <tools> <job>`: the worker's shots tool, as an MCP server
 //!
-//! Claude Code starts it from the worker's `--mcp-config`, outside the
-//! sandbox, which Chromium cannot start inside. It speaks MCP's stdio
+//! Kelpie starts it outside the worker's sandbox, which Chromium cannot
+//! start inside, and bridges it to the worker's session. It speaks MCP's stdio
 //! transport: one JSON-RPC message a line. Its one tool takes the routes the
 //! worker touched, keeps them for kelpie's own runs, and runs the job on them.
 
@@ -148,6 +148,8 @@ mod tests {
 
     impl Shots for Recorder {
         fn stop_left(&self, _server_pid: &Path) {}
+
+        fn stop_orphans(&self, _folders: &[std::path::PathBuf]) {}
 
         fn take(&self, job: &ShotsJob) -> ShotsRun {
             self.0.lock().unwrap().push(job.clone());

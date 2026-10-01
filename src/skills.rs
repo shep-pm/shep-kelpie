@@ -272,6 +272,9 @@ const HEADLESS: &str = "Kelpie runs this skill headless. Where the skill and the
     decide yourself and go on.\n\
     - Spawn no sub-agents, and use no Agent or Task tool.\n";
 
+// What a step that answers kelpie directly does with its decisions.
+const IN_REPLY: &str = "- Record each decision you made in the skill's place in your reply.\n";
+
 // Every invoked step replies to kelpie, which reads only its own format.
 const FORMAT_RULE: &str = "- Reply in the format kelpie asks for below. Where the skill \
     names another format, kelpie's wins.\n";
@@ -289,9 +292,14 @@ fn rules(step: Step) -> String {
         Step::Review => {
             "- Run no commands. Review the diff below, and check it with Read, Grep and Glob.\n"
         }
-        Step::Triage | Step::Planning | Step::Spec | Step::Reset | Step::Retro => {
-            "- Record each decision you made in the skill's place in your reply.\n"
+        Step::Planning => {
+            return format!(
+                "{HEADLESS}- Run no commands and publish nothing: open no issue, write no \
+                 file, set no label. Kelpie opens the tickets your reply describes, and \
+                 links them itself.\n{IN_REPLY}"
+            );
         }
+        Step::Triage | Step::Spec | Step::Reset | Step::Retro => IN_REPLY,
     };
     format!("{HEADLESS}{own}")
 }

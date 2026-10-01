@@ -121,6 +121,8 @@ fn local(url: &str, context: u32) -> LocalRound {
         model: NonBlank::try_from("coder".to_owned()).unwrap(),
         context: ContextSize::try_from(i64::from(context)).unwrap(),
         gpu_lease: false,
+        lease: None,
+        paths: Vec::new(),
     })
 }
 
@@ -140,6 +142,7 @@ fn a_round_sends_the_diff_with_the_prompt_and_reads_the_findings() {
             "origin/main",
             &out,
             3,
+            "",
         )
         .unwrap();
     assert_eq!(
@@ -180,6 +183,7 @@ fn a_diff_bigger_than_the_context_goes_in_several_requests() {
             "origin/main",
             &out,
             1,
+            "",
         )
         .unwrap();
     assert!(findings.is_empty(), "CLEAN from every chunk");
@@ -202,7 +206,7 @@ fn an_empty_diff_asks_nothing() {
     let server = StandInEndpoint::start([]);
     let out = dir.path().join("out");
     let findings = LocalReviewer::default()
-        .round(&local(server.url(), 8192), &worktree, "HEAD", &out, 1)
+        .round(&local(server.url(), 8192), &worktree, "HEAD", &out, 1, "")
         .unwrap();
     assert!(findings.is_empty());
     assert!(server.requests().is_empty());
@@ -221,7 +225,7 @@ fn a_refused_or_unreadable_reply_fails_the_round() {
     let local = local(server.url(), 8192);
     let out = dir.path().join("out");
     let err = reviewer
-        .round(&local, &worktree, "origin/main", &out, 1)
+        .round(&local, &worktree, "origin/main", &out, 1, "")
         .unwrap_err();
     let url = format!("{}/chat/completions", server.url());
     assert_eq!(
@@ -231,7 +235,7 @@ fn a_refused_or_unreadable_reply_fails_the_round() {
         ))
     );
     let err = reviewer
-        .round(&local, &worktree, "origin/main", &out, 2)
+        .round(&local, &worktree, "origin/main", &out, 2, "")
         .unwrap_err();
     assert_eq!(err, ReviewerError::Unreadable("not json".into()));
 }
@@ -251,6 +255,7 @@ fn a_reply_cut_off_while_thinking_fails_the_round() {
             "origin/main",
             &out,
             1,
+            "",
         )
         .unwrap_err();
     let url = format!("{}/chat/completions", server.url());
@@ -278,7 +283,7 @@ fn a_reply_with_no_findings_that_is_not_clean_fails_the_round() {
     let url = server.url();
     for said in ["", "", "The code looks fine."] {
         assert_eq!(
-            reviewer.round(&local, &worktree, "origin/main", &out, 1),
+            reviewer.round(&local, &worktree, "origin/main", &out, 1, ""),
             Err(ReviewerError::Failed(format!(
                 "{url}'s reply is neither findings nor CLEAN: {said}"
             )))
@@ -286,7 +291,7 @@ fn a_reply_with_no_findings_that_is_not_clean_fails_the_round() {
         assert!(!out.join("round-1.txt.done").exists());
     }
     assert_eq!(
-        reviewer.round(&local, &worktree, "origin/main", &out, 1),
+        reviewer.round(&local, &worktree, "origin/main", &out, 1, ""),
         Ok(vec![])
     );
 }
@@ -302,9 +307,9 @@ fn a_retried_round_never_reads_the_last_tries_reply() {
     let reviewer = LocalReviewer::default();
     let local = local(server.url(), 8192);
     let out = dir.path().join("out");
-    let first = reviewer.round(&local, &worktree, "origin/main", &out, 1);
+    let first = reviewer.round(&local, &worktree, "origin/main", &out, 1, "");
     assert_eq!(first.unwrap().len(), 1);
-    let again = reviewer.round(&local, &worktree, "origin/main", &out, 1);
+    let again = reviewer.round(&local, &worktree, "origin/main", &out, 1, "");
     assert_eq!(again, Err(ReviewerError::Unreadable(String::new())));
 }
 
@@ -348,7 +353,7 @@ fn round(
     local: &LocalRound,
 ) -> Result<Vec<Finding>, ReviewerError> {
     let worktree = repo(dir, "fn a() {}\nfn b() {}\n");
-    reviewer.round(local, &worktree, "origin/main", &dir.join("out"), 1)
+    reviewer.round(local, &worktree, "origin/main", &dir.join("out"), 1, "")
 }
 
 fn reviewer(dir: &Path) -> LocalReviewer {
@@ -439,6 +444,8 @@ fn command(script: &Path, host: &str, model: Option<&str>) -> LocalRound {
         gpu_lease: true,
         ollama: Some(EndpointUrl::try_from(host.to_owned()).unwrap()),
         ollama_model: model.map(|m| NonBlank::try_from(m.to_owned()).unwrap()),
+        lease: None,
+        paths: Vec::new(),
     })
 }
 

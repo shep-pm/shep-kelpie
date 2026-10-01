@@ -8,10 +8,10 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::coderabbit::FakeCodeRabbit;
-use crate::board::{Blocker, OpenPullRequest, READY, ReadyIssue};
+use crate::board::{Blocker, OpenPullRequest, READY, ReadyIssue, SubIssues};
 use crate::ports::{
     Checks, Forge, ForgeError, Issue, MaintainerReview, NewLabel, OpenIssue, PullRequest,
-    PullRequestState, Reviewed, Visibility,
+    PullRequestState, QueueStanding, Reviewed, Visibility,
 };
 use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
@@ -26,6 +26,16 @@ pub(crate) struct FakeForge {
     ready: Arc<Mutex<Vec<ReadyIssue>>>,
     blockers: Arc<Mutex<HashMap<u64, Vec<u64>>>>,
     closed: Arc<Mutex<HashSet<u64>>>,
+    // Each parent's sub-issues, in the order they were linked
+    sub_issues: Arc<Mutex<HashMap<u64, Vec<u64>>>>,
+    // The issues kelpie closed, with the comment each got
+    closings: Arc<Mutex<Vec<(u64, String)>>>,
+    // Whether linking a sub-issue is refused, as on a repo without them
+    links_down: Arc<AtomicBool>,
+    // Whether the next link lands but its answer is lost
+    link_answers_lost: Arc<AtomicBool>,
+    // Whether closing an issue is refused
+    closes_down: Arc<AtomicBool>,
     open: Arc<Mutex<Vec<OpenPullRequest>>>,
     board_down: Arc<AtomicBool>,
     calls: Arc<AtomicUsize>,
@@ -39,6 +49,10 @@ pub(crate) struct FakeForge {
     edits: Arc<Mutex<Vec<u64>>>,
     merges_down: Arc<AtomicBool>,
     merge_answers_lost: Arc<AtomicBool>,
+    // Whether the repo has a merge queue, and where each pull request stands in it
+    queue_on: Arc<AtomicBool>,
+    disarmed: Arc<Mutex<Vec<u64>>>,
+    queue: Arc<Mutex<HashMap<u64, QueueStanding>>>,
     labels_down: Arc<AtomicBool>,
     unreadable: Arc<Mutex<HashSet<u64>>>,
     viewer_reads: Arc<AtomicUsize>,
@@ -100,6 +114,11 @@ impl FakeForge {
             ready: Arc::default(),
             blockers: Arc::default(),
             closed: Arc::default(),
+            sub_issues: Arc::default(),
+            closings: Arc::default(),
+            links_down: Arc::default(),
+            link_answers_lost: Arc::default(),
+            closes_down: Arc::default(),
             open: Arc::default(),
             board_down: Arc::default(),
             calls: Arc::default(),
@@ -112,6 +131,9 @@ impl FakeForge {
             edits: Arc::default(),
             merges_down: Arc::default(),
             merge_answers_lost: Arc::default(),
+            queue_on: Arc::default(),
+            disarmed: Arc::default(),
+            queue: Arc::default(),
             labels_down: Arc::default(),
             unreadable: Arc::default(),
             viewer_reads: Arc::default(),
@@ -202,7 +224,46 @@ impl FakeForge {
             labels: Vec::new(),
             blocked_by: Vec::new(),
             unlisted_blockers: 0,
+            parent: None,
+            sub_issues: SubIssues::default(),
         });
+    }
+
+    /// Makes issue `child` a sub-issue of issue `parent`, as someone else would
+    pub(crate) fn link_sub_issue(&self, parent: u64, child: u64) {
+        let mut links = self.sub_issues.lock().unwrap();
+        links.entry(parent).or_default().push(child);
+    }
+
+    /// Issue `parent`'s sub-issues, in the order they were linked
+    pub(crate) fn sub_issues_of(&self, parent: u64) -> Vec<u64> {
+        let links = self.sub_issues.lock().unwrap();
+        links.get(&parent).cloned().unwrap_or_default()
+    }
+
+    /// The issues issue `number` is blocked by, open or closed
+    pub(crate) fn blockers(&self, number: u64) -> Vec<u64> {
+        self.blockers_of(number).iter().map(|b| b.number).collect()
+    }
+
+    /// Makes linking a sub-issue fail, or work again
+    pub(crate) fn set_links_down(&self, down: bool) {
+        self.links_down.store(down, Ordering::SeqCst);
+    }
+
+    /// Makes the next link land on the forge but answer with an error
+    pub(crate) fn lose_next_link_answer(&self) {
+        self.link_answers_lost.store(true, Ordering::SeqCst);
+    }
+
+    /// Makes closing an issue fail, or work again
+    pub(crate) fn set_closes_down(&self, down: bool) {
+        self.closes_down.store(down, Ordering::SeqCst);
+    }
+
+    /// The issues kelpie closed, with the comment each got
+    pub(crate) fn closings(&self) -> Vec<(u64, String)> {
+        self.closings.lock().unwrap().clone()
     }
 
     /// Marks issue `number` blocked by issue `by`, which is open until closed
@@ -255,6 +316,12 @@ impl FakeForge {
     pub(crate) fn set_state(&self, number: u64, state: PullRequestState) {
         let mut prs = self.pull_requests.lock().unwrap();
         prs.get_mut(&number).expect("an opened pull request").state = state;
+    }
+
+    /// Whether pull request `number` is a draft
+    pub(crate) fn draft(&self, number: u64) -> bool {
+        let prs = self.pull_requests.lock().unwrap();
+        prs.get(&number).expect("an opened pull request").draft
     }
 
     /// Marks pull request `number` ready, as someone other than kelpie would
@@ -325,7 +392,12 @@ impl FakeForge {
         self.merge_answers_lost.store(lost, Ordering::SeqCst);
     }
 
-    /// Makes changing a pull request's labels fail, or work again
+    /// Issue `number`'s labels, in the order they went on
+    pub(crate) fn issue_labels(&self, number: u64) -> Vec<String> {
+        self.labels_of(number)
+    }
+
+    /// Makes changing a pull request's or an issue's labels fail, or work again
     pub(crate) fn set_labels_down(&self, down: bool) {
         self.labels_down.store(down, Ordering::SeqCst);
     }
@@ -449,6 +521,30 @@ impl FakeForge {
             .collect()
     }
 
+    fn parent_of(&self, number: u64) -> Option<u64> {
+        let links = self.sub_issues.lock().unwrap();
+        links
+            .iter()
+            .find(|(_, children)| children.contains(&number))
+            .map(|(&parent, _)| parent)
+    }
+
+    fn count_sub_issues(&self, parent: u64) -> SubIssues {
+        let children = self.sub_issues_of(parent);
+        let closed = self.closed.lock().unwrap();
+        SubIssues {
+            total: children.len() as u64,
+            closed: children.iter().filter(|c| closed.contains(c)).count() as u64,
+        }
+    }
+
+    fn issues_up(&self) -> Result<(), ForgeError> {
+        match &*self.issues_down.lock().unwrap() {
+            Some(why) => Err(ForgeError::Failed(why.clone())),
+            None => Ok(()),
+        }
+    }
+
     fn board(&self) -> Result<(), ForgeError> {
         if self.board_down.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("the board is down".into()));
@@ -495,21 +591,30 @@ impl Forge for FakeForge {
         if self.missing.lock().unwrap().contains(&number) {
             return Err(ForgeError::Failed(format!("no issue #{number}")));
         }
+        // Each read takes its own lock, so none may be held across another.
+        let open = !self.closed.lock().unwrap().contains(&number);
         Ok(Issue {
             title: format!("Title of #{number}"),
             body: format!("Body of #{number}.\n"),
             labels: self.labels_of(number),
+            open,
+            parent: self.parent_of(number),
+            blocked_by: self.blockers(number),
         })
     }
 
     fn ready_issues(&self, _repo: &ForgeSlug) -> Result<Vec<ReadyIssue>, ForgeError> {
         self.board()?;
         let ready = self.ready.lock().unwrap().clone();
+        let closed = self.closed.lock().unwrap().clone();
         Ok(ready
             .into_iter()
+            .filter(|i| !closed.contains(&i.number))
             .map(|i| ReadyIssue {
                 labels: self.labels_of(i.number),
                 blocked_by: self.blockers_of(i.number),
+                parent: self.parent_of(i.number),
+                sub_issues: self.count_sub_issues(i.number),
                 ..i
             })
             .collect())
@@ -591,7 +696,13 @@ impl Forge for FakeForge {
             .lock()
             .unwrap()
             .iter()
-            .any(|i| i.number == number);
+            .any(|i| i.number == number)
+            || self
+                .ready
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|i| i.number == number);
         if !is_issue {
             self.opened(number)?;
         }
@@ -644,9 +755,7 @@ impl Forge for FakeForge {
         body: &str,
         labels: &[&str],
     ) -> Result<u64, ForgeError> {
-        if let Some(why) = &*self.issues_down.lock().unwrap() {
-            return Err(ForgeError::Failed(why.clone()));
-        }
+        self.issues_up()?;
         if let Some(left) = self.creates_left.lock().unwrap().as_mut() {
             if *left == 0 {
                 return Err(ForgeError::Failed("issues are down".into()));
@@ -666,7 +775,53 @@ impl Forge for FakeForge {
             title: title.to_owned(),
             body: body.to_owned(),
         });
+        drop(created);
+        if labels.contains(&READY) {
+            self.list_ready(number, false);
+        }
+        for label in labels.iter().filter(|&&l| l != READY) {
+            self.label(number, label);
+        }
         Ok(number)
+    }
+
+    fn add_sub_issue(&self, _repo: &ForgeSlug, parent: u64, child: u64) -> Result<(), ForgeError> {
+        self.issues_up()?;
+        if self.links_down.load(Ordering::SeqCst) {
+            return Err(ForgeError::Failed("sub-issues are not enabled".into()));
+        }
+        if self.parent_of(child).is_some() {
+            return Err(ForgeError::Failed(format!("#{child} already has a parent")));
+        }
+        self.link_sub_issue(parent, child);
+        if self.link_answers_lost.swap(false, Ordering::SeqCst) {
+            return Err(ForgeError::Failed("the connection dropped".into()));
+        }
+        Ok(())
+    }
+
+    fn add_blocker(&self, _repo: &ForgeSlug, number: u64, blocker: u64) -> Result<(), ForgeError> {
+        self.issues_up()?;
+        if self.blockers(number).contains(&blocker) {
+            return Err(ForgeError::Failed(format!(
+                "#{number} is already blocked by #{blocker}"
+            )));
+        }
+        self.block(number, blocker);
+        Ok(())
+    }
+
+    fn close_issue(&self, _repo: &ForgeSlug, number: u64, comment: &str) -> Result<(), ForgeError> {
+        self.issues_up()?;
+        if self.closes_down.load(Ordering::SeqCst) {
+            return Err(ForgeError::Failed("closing is refused".into()));
+        }
+        self.closed.lock().unwrap().insert(number);
+        self.closings
+            .lock()
+            .unwrap()
+            .push((number, comment.to_owned()));
+        Ok(())
     }
 
     fn mark_ready(&self, _repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
@@ -693,6 +848,25 @@ impl Forge for FakeForge {
             self.skipped.lock().unwrap().push(number);
         }
         self.coderabbit.set_label(number, label, on);
+        Ok(())
+    }
+
+    fn set_issue_label(
+        &self,
+        _repo: &ForgeSlug,
+        number: u64,
+        label: &str,
+        on: bool,
+    ) -> Result<(), ForgeError> {
+        if self.labels_down.load(Ordering::SeqCst) {
+            return Err(ForgeError::Failed("labels are down".into()));
+        }
+        let mut labels = self.labels.lock().unwrap();
+        let on_issue = labels.entry(number).or_default();
+        on_issue.retain(|l| l != label);
+        if on {
+            on_issue.push(label.to_owned());
+        }
         Ok(())
     }
 
@@ -731,10 +905,27 @@ impl Forge for FakeForge {
             return Err(ForgeError::Failed(format!("cannot merge #{number}: {why}")));
         }
         self.merges.lock().unwrap().push((number, head.to_owned()));
+        if self.queue_on.load(Ordering::SeqCst) {
+            self.enters_queue(number);
+            return Ok(());
+        }
         self.set_state(number, PullRequestState::Merged);
         if self.merge_answers_lost.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("the answer was lost".into()));
         }
         Ok(())
     }
+
+    fn merge_queue(&self, _repo: &ForgeSlug, number: u64) -> Result<QueueStanding, ForgeError> {
+        self.opened(number)?;
+        Ok(self.standing(number))
+    }
+
+    fn disable_auto_merge(&self, _repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
+        self.opened(number)?;
+        self.disarm(number);
+        Ok(())
+    }
 }
+
+mod queue;

@@ -141,6 +141,8 @@ impl Report {
 pub struct Probes<'a> {
     /// The account's usage, which only a logged-in `claude` answers
     pub meter: &'a dyn Meter,
+    /// The Codex account.s usage, read for a project that spends it
+    pub codex_meter: &'a dyn Meter,
     /// The forge
     pub forge: &'a dyn Forge,
     /// The local round's reviewer
@@ -186,11 +188,15 @@ pub async fn check(shep_home: &Path, probes: Probes<'_>, here: Here<'_>, ask: As
     let mut lines = vec![
         machine::claude(probes.meter, probes.clock),
         machine::gh(probes.forge),
-        machine::sandbox(probes.host),
+        machine::sandbox(probes.host, here.kelpie_home),
     ];
     match shepherd::connect(shep_home).await {
         Ok(client) => {
             lines.push(machine::shepherd(&client, shep_home));
+            lines.push(match flock::flock(&client).await {
+                Ok(rows) => machine::dog(&rows),
+                Err(e) => Line::missing("dog", e, "put the shepherd right"),
+            });
             lines.extend(projects(&client, probes, here, ask).await);
         }
         Err(refused) => {
@@ -267,9 +273,12 @@ pub fn main(args: &[String]) -> ExitCode {
             project: project.as_ref(),
             test_alert,
         };
-        let meter = ClaudeCli::default().meter();
+        let claude = ClaudeCli::default();
+        let meter = claude.meter();
+        let codex_meter = claude.codex_meter();
         let probes = Probes {
             meter: &meter,
+            codex_meter: &codex_meter,
             forge: &Gh,
             reviewer: &LocalReviewer::default(),
             review_bot: &CodeRabbit,

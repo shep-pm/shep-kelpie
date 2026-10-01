@@ -2,7 +2,7 @@
 //!
 //! Each step looks once at the pull request's head. A label, ready or head
 //! change kelpie did not make parks the worker before anything else. A
-//! branch that changes Claude Code's own files parks it next. A
+//! branch that changes agents' own files parks it next. A
 //! branch without the latest `main` is rebased and pushed, or merged when
 //! it is adopted or holds a merge already, and a conflict is
 //! the worker's next turn, naming the files. A conflict the worker left
@@ -149,10 +149,22 @@ impl Runner {
         if item.red_head.as_deref() == Some(head.as_str()) {
             return self.raise(number, RulingKind::StillRed { head, checks });
         }
-        let issue = item.issue;
         let prompt = self
             .skills
             .invoke(Step::Ci, &red_prompt(number, &head, &checks));
+        self.back_to_worker(number, head, checks, prompt)
+    }
+
+    // The failure becomes the worker's next turn, and this head is marked red
+    // so a second failure at it goes to the maintainer instead.
+    pub(super) fn back_to_worker(
+        &mut self,
+        number: u64,
+        head: String,
+        checks: Vec<String>,
+        prompt: String,
+    ) -> Result<Begin, StateError> {
+        let issue = self.current().expect("CI runs on a work item").issue;
         let red = head.clone();
         self.update(|item| {
             item.red_head = Some(red);
@@ -246,8 +258,8 @@ pub(super) mod tests {
         assert_eq!(
             question,
             format!(
-                "Merge pull request #71 at {} into main? `shep trigger shep rule '1 yes'` \
-                 merges it, and `shep trigger shep rule '1 no <note>'` sends the worker your note.",
+                "Merge pull request #71 at {} into main? `shep kelpie rule 1 yes` \
+                 merges it, and `shep kelpie rule 1 no <note>` sends the worker your note.",
                 &head[..7]
             )
         );
@@ -525,8 +537,8 @@ pub(super) mod tests {
         assert_eq!(
             question,
             "Pull request #71 changed outside kelpie: the `bug` label was added. \
-             `shep trigger shep rule '1 yes'` accepts it and kelpie carries on, and \
-             `shep trigger shep rule '1 no <note>'` sends the worker your note."
+             `shep kelpie rule 1 yes` accepts it and kelpie carries on, and \
+             `shep kelpie rule 1 no <note>` sends the worker your note."
         );
         assert_eq!(
             rig.ask(&runner, "status", None)["rulings"][0]["kind"],

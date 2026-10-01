@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use super::Runner;
 use super::adopt;
-use super::alert::{post_due, tell_settled};
+use super::alert::{post_due, see_clears, tell_settled};
 use super::claude_files::Unchecked;
 use super::instructions;
 use super::question::asked;
@@ -24,18 +24,32 @@ use super::review::run_review_call;
 use super::rework;
 use super::ruling::park;
 use super::trigger::lock;
+use crate::board::WorkerModel;
 use crate::pacer::Scope;
-use crate::ports::{ClaudeCall, ClaudeError, ClaudeReply, Issue, Role, Session};
+use crate::ports::{AgentCall, AgentError, AgentReply, Cost, Issue, Role, Session, Tools};
 use crate::preview::{self, McpFiles, WORKER_INSTRUCTIONS};
 use crate::profile::WorkerProfile;
+use crate::settings::{AgentHarness, Effort, Limit, NonBlank};
 use crate::skills::{Step, split_command};
 use crate::state::{Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree::{self, Start};
 pub(super) use unfinished::failed;
-use unfinished::timed_out;
+use unfinished::{awaits_a_push, timed_out};
 
 mod unfinished;
+
+/// What a work item's worker runs on this turn
+pub(super) struct WorkerAgent {
+    /// Its harness
+    pub(super) harness: AgentHarness,
+    /// What holds its turns back
+    pub(super) limit: Limit,
+    /// The model, as the harness takes it
+    pub(super) model: String,
+    /// How hard the model thinks
+    pub(super) effort: Effort,
+}
 
 /// The prompt for a turn resumed after the runner restarted
 const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
@@ -58,13 +72,14 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
     let (claude, reviewer, relay, alerts, shots) = {
         let runner = lock(runner);
         (
-            Arc::clone(&runner.ports.claude),
+            Arc::clone(&runner.ports.agents),
             Arc::clone(&runner.ports.reviewer),
             Arc::clone(&runner.ports.relay),
             Arc::clone(&runner.ports.alerts),
             Arc::clone(&runner.ports.shots),
         )
     };
+    see_clears(runner, relay.as_ref())?;
     tell_settled(runner, relay.as_ref());
     if let Some(posted) = post_due(runner, relay.as_ref(), alerts.as_ref()) {
         return posted.map(Some);
@@ -87,7 +102,7 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
             Begin::Report(report) => return Ok(Some(report)),
             Begin::Call(call) => {
                 let result = claude.run(&call);
-                if start_over.is_none() && matches!(result, Err(ClaudeError::NoSession(_))) {
+                if start_over.is_none() && matches!(result, Err(AgentError::NoSession(..))) {
                     start_over = issue;
                     continue;
                 }
@@ -100,6 +115,10 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
             Begin::Shots(job, head) => {
                 let run = shots.take(&job);
                 return lock(runner).on(issue).end_shots(head, run);
+            }
+            Begin::Plan(call, view) => {
+                let result = super::plan::run_planning(claude.as_ref(), &call);
+                return lock(runner).end_plan(&call, &view, result);
             }
         }
     }
@@ -213,7 +232,7 @@ impl Runner {
         if due && let Some(parked) = self.claude_files_changed(Unchecked::CarryOn)? {
             return Ok(parked);
         }
-        if due && let Some(held) = self.pace(Scope::Turn)?.holds() {
+        if due && let Some(held) = self.pace_worker(Scope::Turn)?.holds() {
             return Ok(held);
         }
         let item = self.current().expect("checked above");
@@ -240,6 +259,11 @@ impl Runner {
             // before its session existed starts it over, as a killed one does.
             Turn::Next { .. } if start_over => (Session::New(id), None, now),
             Turn::Next { prompt } => (Session::Resume(id), Some(prompt.clone()), now),
+            // A first turn that ended with no pull request and no question
+            // stopped short, maybe on a tool that failed.
+            Turn::Ended { .. } if item.pull_request.is_none() || awaits_a_push(item) => {
+                return self.stopped_short();
+            }
             Turn::Ended { .. } | Turn::Failed { .. } => return Ok(Begin::Idle),
         };
         let ceiling = self.turn_ceiling();
@@ -248,7 +272,7 @@ impl Runner {
         if remaining.is_zero() {
             // The ceiling passed while kelpie was down, before a new call
             // could even be tried: park it as a call that hit
-            // `ClaudeError::TimedOut` would, with no call spent.
+            // `AgentError::TimedOut` would, with no call spent.
             return self.park_ceiling_passed(now);
         }
         let issue = item.issue;
@@ -284,7 +308,7 @@ impl Runner {
         session: Session,
         prompt: Option<String>,
         timeout: Duration,
-    ) -> Result<ClaudeCall, String> {
+    ) -> Result<AgentCall, String> {
         let start = if item.rework || item.adopted {
             Start::Pushed
         } else {
@@ -310,23 +334,30 @@ impl Runner {
             branch: &item.branch,
             kelpie: &self.kelpie,
             guard_hooks: &self.settings.worker.guard_hooks,
+            kelpie_home: &self.paths.kelpie_home,
+            repo: &self.settings.repo,
+            private_names: &self.settings.private_names,
             allowed_domains: &self.settings.worker.allowed_domains,
             build_env: &self.settings.worker.build_env,
             preview: previewed.then_some(self.settings.preview.domains.as_slice()),
             shep_home: &self.paths.shep_home,
+            door: &self.paths.door,
         };
         let folder = &self.paths.worker;
         let settings = folder.join("settings.json");
         let instructions = folder.join("instructions.md");
-        let text = serde_json::to_string_pretty(&profile.settings()).expect("settings are JSON");
-        write(folder, &settings, &text)?;
         let mut text = instructions::compose(
             self.extra_instructions.as_deref(),
             &item.worktree,
             &self.skills,
+            &self.kelpie,
         );
         let mcp_config = if previewed {
             text.push_str(WORKER_INSTRUCTIONS);
+            let config = self.settings.preview.configuration.as_ref();
+            if let Ok(launch) = preview::launch(&self.settings.repo, config.map(NonBlank::as_str)) {
+                text.push_str(&preview::worker_server(&launch, &item.worktree));
+            }
             Some(self.write_mcp_config(item)?)
         } else {
             None
@@ -346,11 +377,18 @@ impl Runner {
                     .invoke(Step::Implement, &first_prompt(item.issue, &issue))
             }
         };
-        Ok(ClaudeCall {
+        let WorkerAgent {
+            harness,
+            limit,
+            model,
+            effort,
+        } = self.worker_agent(item)?;
+        self.prepared(AgentCall {
             role: Role::Worker,
+            harness,
             issue: item.issue,
-            model: item.worker.model.clone(),
-            effort: item.worker.effort,
+            model,
+            effort,
             session,
             cwd: item.worktree.clone(),
             settings,
@@ -359,7 +397,64 @@ impl Runner {
             timeout: Some(timeout),
             mcp_config,
             plugin_dirs: self.skills.plugin_dirs().to_vec(),
+            tools: Tools::Work,
+            reach: profile.reach(),
+            lease: limit.lease().cloned(),
         })
+    }
+
+    /// The harness `item`'s worker runs on, and what holds its turns back
+    ///
+    /// An item given to the local worker runs on the project's local agent.
+    /// Any other runs on the worker's agent if it is that agent's model, and
+    /// otherwise on Claude Code: a `worker:` label names a Claude model.
+    ///
+    /// # Errors
+    ///
+    /// Why not, when an item given to the local worker has none to run on.
+    pub(super) fn worker_agent(&self, item: &WorkItem) -> Result<WorkerAgent, String> {
+        let (agent, limit) = (&self.agents.worker, &self.agents.limits.worker);
+        let local = limit.lease().is_some();
+        let own = WorkerModel {
+            local: item.worker.local,
+            ..WorkerModel::from(agent)
+        };
+        let on = |harness, limit, model: WorkerModel| WorkerAgent {
+            harness,
+            limit,
+            model: model.model,
+            effort: model.effort,
+        };
+        match (item.worker.local, local) {
+            (true, false) => Err(format!(
+                "issue #{} is labelled for the local worker, and `agents.worker` names \
+                 no local agent now: name one again, or take the label off and drop \
+                 and add the issue",
+                item.issue
+            )),
+            // The label asks for the local worker, not a model, so it runs today's.
+            (true, true) => Ok(on(agent.harness.clone(), limit.clone(), own)),
+            (false, false) if item.worker == own => {
+                Ok(on(agent.harness.clone(), limit.clone(), own))
+            }
+            (false, _) => Ok(on(
+                AgentHarness::ClaudeCode,
+                Limit::default(),
+                item.worker.clone(),
+            )),
+        }
+    }
+
+    /// `call`, once its harness has what it needs on disk
+    ///
+    /// Done before the call is marked running, so a failure keeps the turn
+    /// it would have run for a retry.
+    pub(super) fn prepared(&self, call: AgentCall) -> Result<AgentCall, String> {
+        self.ports
+            .agents
+            .prepare(&call)
+            .map_err(|e| e.to_string())?;
+        Ok(call)
     }
 
     // The worker's MCP servers: Playwright's, fenced to the preview's
@@ -395,7 +490,7 @@ impl Runner {
 
     fn end_turn(
         &mut self,
-        result: Result<ClaudeReply, ClaudeError>,
+        result: Result<AgentReply, AgentError>,
     ) -> Result<Option<StepReport>, StateError> {
         // However the turn ended, a dev server its shots tool started is done.
         if let Some(item) = self.current() {
@@ -404,7 +499,7 @@ impl Runner {
                 .stop_left(&self.paths.shots(item.issue).join(crate::shots::SERVER_PID));
         }
         // A turn stopped with the runner stays running, to resume on restart.
-        if matches!(result, Err(ClaudeError::Stopped)) {
+        if matches!(result, Err(AgentError::Stopped)) {
             return Ok(None);
         }
         let now = self.ports.clock.now();
@@ -416,6 +511,10 @@ impl Runner {
             return Ok(None);
         };
         let issue = item.issue;
+        // A rework or adoption turn that moved nothing on `origin` pushed no fix.
+        let before = item.known.head.clone();
+        let pushed_nothing =
+            before.is_some() && pushed.as_ref().is_none_or(|p| Some(p) == before.as_ref());
         if pushed.is_some() {
             item.known.head = pushed;
         }
@@ -439,7 +538,8 @@ impl Runner {
                 // whatever was running, before that turn could be said to
                 // have ended normally, and the answer resumes exactly this,
                 // captured below before `park` parks it on a ruling.
-                if question.is_none() {
+                let stopped_short = pushed_nothing && awaits_a_push(item);
+                if question.is_none() && !stopped_short {
                     if let Some(resume) = item.resume.take() {
                         item.phase = resume;
                     } else {
@@ -465,7 +565,7 @@ impl Runner {
                         issue,
                         session,
                         usage: reply.usage,
-                        cost_usd: cost.usd(),
+                        cost_usd: cost.map(Cost::usd),
                         work_item_cost_usd,
                         pull_request,
                     },
@@ -488,7 +588,7 @@ impl Runner {
                             issue,
                             session,
                             usage: reply.usage,
-                            cost_usd: cost.usd(),
+                            cost_usd: cost.map(Cost::usd),
                             work_item_cost_usd,
                             pull_request,
                             id,
@@ -498,7 +598,7 @@ impl Runner {
                     }
                 }
             }
-            Err(ClaudeError::TimedOut) => {
+            Err(AgentError::TimedOut(_)) => {
                 item.turn = Turn::Ended { at: now };
                 timed_out(self.names(), &mut next, issue)
             }

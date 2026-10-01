@@ -4,10 +4,12 @@
 //! project had before one. Unknown keys are refused, so a misspelt or
 //! malformed setting stops the runner with a message naming it. Every
 //! setting is required except the ones added after the first build
-//! (`max_items`, `review.local`, `review.local_rounds`, `coderabbit.rounds`,
+//! (`max_items`, `review.local`, `review.reviewers`, `review.local_rounds`,
+//! `coderabbit.rounds`,
 //! `pacing.enabled`, `worker.allowed_domains`, `worker.build_env`,
 //! `worker.instructions_file`, `worker.turn_timeout`, `worker.guard_hooks`,
-//! `ruling_channels`, `pull_request_reviewers`, `[preview]` and `[skills]`).
+//! `ruling_channels`, `pull_request_reviewers`, `[preview]`, `[skills]` and
+//! `[agents]`).
 //! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
@@ -29,10 +31,20 @@ pub mod source;
 mod table;
 
 pub use table::table_of;
+mod agents;
 mod local;
+mod reviewers;
 mod skills;
 
+pub use agents::{
+    Account, Agent, AgentHarness, AgentName, Harness, Limit, ModelServer, RoleAgentNames,
+    RoleAgents, RoleLimits, UsageReader,
+};
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
+pub use reviewers::{
+    AgentSession, CLAUDE, ClaudeSession, Definition, LeaseName, LoopReviewer, QWEN, ReviewerName,
+    Runs,
+};
 pub use skills::{SkillChoice, SkillName, StepSkills};
 
 /// Everything kelpie reads about one project
@@ -59,8 +71,18 @@ pub struct Settings {
     pub max_items: NonZeroU32,
     /// Globs for files left out of a pull request's changed-line count
     pub generated: Vec<String>,
+    /// Words that stay off the forge: kelpie refuses a post naming one, and
+    /// a worker's guard refuses a commit or `gh` text that does. Whole
+    /// words, whatever their case. None when absent.
+    #[serde(default)]
+    pub private_names: Vec<NonBlank>,
     /// The model and effort for each role
     pub models: Models,
+    /// The agent each role runs on, from those kelpie's own settings
+    /// define, over `models`. A role left out keeps its `models` entry on
+    /// Claude Code.
+    #[serde(default)]
+    pub agents: RoleAgentNames,
     /// The review loop
     pub review: Review,
     /// The CodeRabbit gate, which holds every pull request reviewer's rounds
@@ -70,6 +92,9 @@ pub struct Settings {
     /// first whose window is free. CodeRabbit alone when absent or empty.
     #[serde(default)]
     pub pull_request_reviewers: Vec<Bot>,
+    /// Planning, which decides whether a ready issue is one pull request or several
+    #[serde(default)]
+    pub planning: Planning,
     /// Usage pacing
     pub pacing: Pacing,
     /// What every worker is started with
@@ -111,6 +136,28 @@ pub struct Models {
     pub judge: RoleModel,
     /// The session that carries rulings to the maintainer
     pub relay: RoleModel,
+    /// The one-shot that plans a ready issue before it opens a work item.
+    /// Opus 5.5 at medium effort when absent.
+    #[serde(default = "default_planner")]
+    pub planner: RoleModel,
+}
+
+fn default_planner() -> RoleModel {
+    RoleModel {
+        model: NonBlank("claude-opus-5-5".to_owned()),
+        effort: Effort::Medium,
+        harness: AgentHarness::ClaudeCode,
+    }
+}
+
+/// Planning settings
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Planning {
+    /// Whether a ready issue the board picks is planned first, and may
+    /// become sub-issues. Off when absent, until splits have run on a real repo.
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 /// One role's model and effort
@@ -121,6 +168,10 @@ pub struct RoleModel {
     pub model: NonBlank,
     /// Passed to `claude --effort`
     pub effort: Effort,
+    /// The harness it runs on: Claude Code, unless an agent names another
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub harness: AgentHarness,
 }
 
 /// A Claude effort level
@@ -166,13 +217,17 @@ impl Effort {
 pub struct Review {
     /// Rounds after which the worker is parked for a ruling
     pub loop_guard: NonZeroU32,
-    /// The local round, `[review.local]`. The maintainer's qwen-review
-    /// script when absent, as every file before this table ran it.
+    /// The reviewers the loop runs, in order, from `claude` and those
+    /// kelpie's `[local_reviewers]` define. When absent or empty, the local
+    /// round in `review.local` and then `claude`.
     #[serde(default)]
-    pub local: LocalRound,
-    /// At most this many local rounds per work item. Once they are spent,
-    /// every round is Claude's and one clean Claude round ends the loop.
-    /// No limit when absent.
+    pub reviewers: Vec<ReviewerName>,
+    /// The older form of a local round, `[review.local]`, which alternates
+    /// with `claude`. The maintainer's qwen-review script when absent.
+    #[serde(default)]
+    pub local: Option<LocalRound>,
+    /// At most this many rounds from local reviewers per work item. Once
+    /// they are spent, only Claude reviewers run. No limit when absent.
     #[serde(default)]
     pub local_rounds: Option<NonZeroU32>,
 }
@@ -188,7 +243,7 @@ pub struct CodeRabbit {
     pub enabled: bool,
     /// Changed lines per extra round: the cap is `ceil(changed / divisor) + 1`
     pub divisor: NonZeroU32,
-    /// A fixed number of rounds per work item, in place of the divisor's cap
+    /// A fixed number of rounds per pull request, in place of the divisor's cap
     ///
     /// The last round's held findings go to the worker, and its fix push
     /// summons no further round. The divisor's cap when absent.
@@ -525,8 +580,16 @@ impl Settings {
     pub(crate) fn parse(text: &str, home: &Path) -> Result<Self, String> {
         let mut settings: Self = toml::from_str(text).map_err(|e| e.to_string())?;
         settings.expand(home);
-        settings.review.local.check()?;
+        settings.check_local()?;
         Ok(settings)
+    }
+
+    // The older local round can work as written.
+    pub(crate) fn check_local(&self) -> Result<(), String> {
+        match &self.review.local {
+            Some(local) => local.check("review.local"),
+            None => Ok(()),
+        }
     }
 
     // `~/` in a path setting is the home folder.
@@ -551,8 +614,8 @@ impl Settings {
     // The paths that expand `~/` and are taken from the project's folder.
     fn files_mut(&mut self) -> impl Iterator<Item = &mut PathBuf> {
         let local = match &mut self.review.local {
-            LocalRound::Command(local) => Some(&mut local.command),
-            LocalRound::Off {} | LocalRound::Endpoint(_) => None,
+            Some(LocalRound::Command(local)) => Some(&mut local.command),
+            _ => None,
         };
         [self.worker.instructions_file.as_mut(), local]
             .into_iter()

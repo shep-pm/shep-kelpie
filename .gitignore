@@ -1,2 +1,10 @@
 .claude/settings.local.json
 /target
+**/*.rs.bk
+# Claude Code: per-session worktrees
+.claude/worktrees/
+
+# what a review round leaves in the worktree it runs from
+/.round-*.pid
+/.cut-at
+/.hunks-digest

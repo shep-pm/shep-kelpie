@@ -8,15 +8,28 @@ use super::{CallRecord, WorkItem};
 use crate::ports::{Cost, Role, SessionId, Timestamp, Usage};
 
 /// What one role's calls have cost
+///
+/// Every harness reports tokens. Only some report dollars, so `cost_usd`
+/// covers the calls that did and `unpriced_calls` counts those that did not.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
 pub struct RoleSpend {
     /// How many calls it made
     pub calls: usize,
-    /// What they cost, in US dollars
-    pub cost_usd: f64,
+    /// The tokens they used, all together
+    pub tokens: Usage,
+    /// What the calls that reported dollars cost, in US dollars, or null
+    /// when none did
+    pub cost_usd: Option<f64>,
+    /// Calls whose harness reported no dollars
+    #[serde(skip_serializing_if = "is_zero")]
+    pub unpriced_calls: usize,
 }
 
-/// What a work item's Claude calls have cost, by role
+fn is_zero(n: &usize) -> bool {
+    *n == 0
+}
+
+/// What a work item's agent calls have cost, by role
 ///
 /// The relay's calls are not here: the relay is one session for every
 /// ruling, and kelpie only delivers to it, so no cost comes back.
@@ -51,27 +64,37 @@ impl WorkItem {
                 Role::Worker => &mut spend.worker,
                 Role::Reviewer => &mut spend.reviewer,
                 Role::Judge => &mut spend.judge,
+                // A planning call runs before any work item opens.
+                Role::Planner => continue,
             };
             role.calls += 1;
-            role.cost_usd += call.cost.usd();
+            role.tokens += call.usage;
+            match call.unpriced {
+                true => role.unpriced_calls += 1,
+                false => *role.cost_usd.get_or_insert(0.0) += call.cost.usd(),
+            }
         }
         spend
     }
 
     /// Records a call that ended at `at`, whose session had cost
-    /// `session_cost` by then, and returns what the call itself cost
+    /// `session_cost` by then, and returns what the call itself cost, or
+    /// `None` when its harness reports no cost
     ///
     /// A session's calls each cost the change in it, so a fresh session's
-    /// only call costs all of it.
+    /// only call costs all of it. A harness that reports no cost leaves the
+    /// session's as it was.
     pub fn record_call(
         &mut self,
         role: Role,
         at: Timestamp,
         session: SessionId,
         usage: Usage,
-        session_cost: Cost,
-    ) -> Cost {
+        session_cost: Option<Cost>,
+    ) -> Option<Cost> {
         let before = self.session_cost(&session);
+        let unpriced = session_cost.is_none();
+        let session_cost = session_cost.unwrap_or(before);
         let cost = Cost(session_cost.0.saturating_sub(before.0));
         self.calls.push(CallRecord {
             role,
@@ -80,7 +103,8 @@ impl WorkItem {
             usage,
             cost,
             session_cost,
+            unpriced,
         });
-        cost
+        (!unpriced).then_some(cost)
     }
 }

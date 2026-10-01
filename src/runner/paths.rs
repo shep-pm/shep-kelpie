@@ -84,6 +84,9 @@ pub struct ProjectPaths {
     /// The shepherd's home, which a worker may not read. Kelpie's own shepherd,
     /// `<kelpie home>/shep`, unless the runner's `SHEP_HOME` names another.
     pub shep_home: PathBuf,
+    /// The dog's door, the one socket a worker may connect to. Under
+    /// kelpie's home unless the runner sets it from its own environment.
+    pub door: PathBuf,
     worktrees: PathBuf,
     builds: PathBuf,
     shots: PathBuf,
@@ -109,6 +112,7 @@ impl ProjectPaths {
             tools: Tools::under(kelpie_home),
             kelpie_home: kelpie_home.to_owned(),
             shep_home: kelpie_home.join("shep"),
+            door: kelpie_home.join("dog/lease.sock"),
             worktrees: kelpie_home.join("wt").join(project.as_str()),
             builds: kelpie_home.join("targets").join(project.as_str()),
             shots: kelpie_home.join("shots").join(project.as_str()),
@@ -116,9 +120,21 @@ impl ProjectPaths {
         }
     }
 
+    /// The folders a dev server of this project's can work in: every
+    /// worktree and every build folder
+    pub fn owned(&self) -> [PathBuf; 2] {
+        [self.worktrees.clone(), self.builds.clone()]
+    }
+
     /// The worktree for the work item that resolves `issue`
     pub fn worktree(&self, issue: u64) -> PathBuf {
         self.worktrees.join(issue.to_string())
+    }
+
+    /// The detached worktree at `origin/main` a planning call reads, beside
+    /// the work items' own, under a name no issue number takes
+    pub fn plan(&self) -> PathBuf {
+        self.worktrees.join("plan")
     }
 
     /// The build folder for the work item that resolves `issue`

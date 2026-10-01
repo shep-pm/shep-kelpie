@@ -3,15 +3,16 @@
 //!
 //! `upgrade --ref <git ref>` builds kelpie at that ref, `--release <version>`
 //! downloads a release, and `--binary <path>` takes a build made by hand as it
-//! is. The installed kelpie is `<kelpie home>/bin/shep-kelpie`, the binary
-//! every kelpie sheep runs, and the build it replaces stays beside it as
-//! `shep-kelpie.previous`.
+//! is. The installed kelpie is whatever program the adopted dog runs, read
+//! from the shepherd, and every kelpie sheep runs that same path. The new
+//! build is written beside it and renamed over it, as shep upgrades itself,
+//! and the build it replaces is first copied into `<kelpie home>/builds`.
 //!
 //! The new build is asked for its shep line (`version --json`) and the
 //! shepherd for its version before any file or sheep changes. A shepherd on
-//! another minor stops the upgrade there, with what to do, because a kelpie
-//! built for one shep minor refuses a shepherd on another and would come up
-//! into that refusal.
+//! another minor stops the upgrade there, with the steps to take, because a
+//! kelpie built for one shep minor refuses a shepherd on another and would
+//! come up into that refusal.
 
 pub mod build;
 pub mod fetch;
@@ -23,7 +24,7 @@ use std::process::ExitCode;
 
 use build::Build;
 use install::{Change, Layout};
-use restart::Patience;
+use restart::{Patience, Plan};
 
 use crate::shep_home;
 use crate::shepherd::{self, release_line};
@@ -108,7 +109,7 @@ fn kelpie_home() -> Result<PathBuf, String> {
 /// Where an upgrade happens
 #[derive(Debug, Clone, Copy)]
 pub struct Scene<'a> {
-    /// Kelpie's home, whose `bin` holds the installed build
+    /// Kelpie's home, whose `builds` folder holds the previous build
     pub kelpie_home: &'a Path,
     /// The shepherd the sheep are restarted in
     pub shep_home: &'a Path,
@@ -135,12 +136,14 @@ pub async fn run(
     action: &Action,
     say: &mut dyn FnMut(String),
 ) -> Result<(), String> {
-    let layout = Layout::under(scene.kelpie_home);
     // Before a build is fetched: no shepherd, no upgrade.
     let client = shepherd::connect_any(scene.shep_home)
         .await
         .map_err(|e| e.describe(scene.shep_home))?;
     let running = client.daemon().daemon_version.clone();
+    // Before a build is fetched: every sheep to restart runs the installed path.
+    let plan = Plan::read(&client, say).await?;
+    let layout = Layout::new(scene.kelpie_home, &plan.program);
     match action {
         Action::Install(source) => {
             let binary = fetch_source(scene, source)?;
@@ -154,7 +157,7 @@ pub async fn run(
                     build.kelpie
                 ));
             }
-            fits(&build, &running, scene.shep_home)?;
+            fits(&build, &running, scene.shep_home, &binary)?;
             let change = install::install(&layout, staged)?;
             say(match change {
                 Change::First => format!(
@@ -178,19 +181,18 @@ pub async fn run(
             });
         }
         Action::Rollback => {
-            let previous = layout.previous();
-            match Build::of(&previous) {
-                Ok(build) => fits(&build, &running, scene.shep_home)?,
+            let staged = install::stage_previous(&layout)?;
+            match Build::of(staged.path()) {
+                Ok(build) => fits(&build, &running, scene.shep_home, &layout.previous())?,
                 // A build from before `version --json` cannot say; the
                 // maintainer asked for it by name.
-                Err(_) if previous.is_file() => say(format!(
+                Err(_) => say(format!(
                     "{} does not say which shep it is made for, so the shepherd's minor is unchecked",
-                    previous.display()
+                    layout.previous().display()
                 )),
-                Err(_) => {}
             }
-            install::swap_with_previous(&layout)?;
-            let back = match Build::of(&layout.installed()) {
+            install::install(&layout, staged)?;
+            let back = match Build::of(layout.installed()) {
                 Ok(b) => format!("kelpie {} (shep {})", b.kelpie, b.shep),
                 Err(_) => layout.installed().display().to_string(),
             };
@@ -199,21 +201,26 @@ pub async fn run(
             ));
         }
     }
-    restart::restart_all(&client, &layout.installed(), scene.patience, say).await
+    restart::restart_all(&client, &plan, scene.patience, say).await
 }
 
 fn fetch_source(scene: &Scene<'_>, source: &Source) -> Result<PathBuf, String> {
     let work = scene.kelpie_home.join("upgrade");
     match source {
-        Source::Binary(path) if path.is_file() => Ok(path.clone()),
-        Source::Binary(path) => Err(format!("{} is not a file", path.display())),
+        Source::Binary(path) => {
+            if !path.is_file() {
+                return Err(format!("{} is not a file", path.display()));
+            }
+            Ok(path.clone())
+        }
         Source::Ref(reference) => fetch::build_ref(&work, scene.repo, reference),
         Source::Release(version) => fetch::download_release(&work, version),
     }
 }
 
 // Whether `build` takes the shepherd at `running`, else what to do about it.
-fn fits(build: &Build, running: &str, shep_home: &Path) -> Result<(), String> {
+// `binary` is the build, which runs its own upgrade once the shepherd is moved.
+fn fits(build: &Build, running: &str, shep_home: &Path, binary: &Path) -> Result<(), String> {
     let (theirs, ours) = (release_line(running), release_line(&build.shep));
     if theirs == ours {
         return Ok(());
@@ -222,13 +229,16 @@ fn fits(build: &Build, running: &str, shep_home: &Path) -> Result<(), String> {
         let part = |p: Option<&str>| p.and_then(|p| p.parse::<u64>().ok());
         part(line.0).zip(part(line.1))
     };
-    let shepherd_first = "save the flock, stop the shepherd, install the shep this build is made \
-                          for, muster the flock again, then run this upgrade again";
-    let build_first = "install a kelpie built for the shepherd's shep line instead";
+    let shepherd_first = format!(
+        "\n  1. upgrade shep and reload its shepherd\n  2. run the new build's own upgrade: \
+         `{0} upgrade --binary {0}`",
+        binary.display()
+    );
+    let build_first = "install a kelpie built for the shepherd's shep line instead".to_owned();
     let what_to_do = match (number(theirs), number(ours)) {
-        (Some(running), Some(built)) if built > running => shepherd_first.to_owned(),
-        (Some(_), Some(_)) => build_first.to_owned(),
-        _ => format!("either {shepherd_first}, or {build_first}"),
+        (Some(running), Some(built)) if built > running => shepherd_first,
+        (Some(_), Some(_)) => build_first,
+        _ => format!("either:{shepherd_first}\n  or {build_first}"),
     };
     Err(format!(
         "kelpie {} is made for shep {}, and the shepherd at {} runs shep {running}, which it \

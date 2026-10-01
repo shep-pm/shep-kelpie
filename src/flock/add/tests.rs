@@ -4,7 +4,7 @@ use std::time::Duration;
 use shep_client::shep_core::config::AppConfig;
 
 use super::*;
-use crate::settings::{ForgeSlug, LocalRound};
+use crate::settings::{ForgeSlug, ReviewerName};
 use crate::shepherd;
 use crate::test::{FakeForge, FakeShepherd};
 
@@ -13,7 +13,8 @@ const PATIENCE: Duration = Duration::from_secs(10);
 const EXAMPLE: &str = include_str!("../../../settings.example.toml");
 
 /// A scratch checkout of a private repo with CI, a home with no qwen
-/// script, a forge with one label of its own, and an empty flock
+/// script, a forge with one label of its own, and a flock holding only the
+/// adopted kelpie, running with its channel
 struct Scene {
     shepherd: FakeShepherd,
     forge: FakeForge,
@@ -26,6 +27,7 @@ struct Scene {
 impl Scene {
     async fn new() -> Self {
         let shepherd = FakeShepherd::new().await;
+        shepherd.holds_dog("kelpie", true);
         let root = shepherd.scratch("koji");
         std::fs::create_dir_all(root.join(".github/workflows")).unwrap();
         let forge = FakeForge::new(PathBuf::from("/nowhere"));
@@ -86,20 +88,26 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
     scene.add().await.unwrap();
 
     let writes = scene.shepherd.writes();
-    let [Request::Add { apps: runner }, Request::Add { apps: dog }] = writes.as_slice() else {
+    let [Request::Add { apps: runner }] = writes.as_slice() else {
         panic!("{writes:?}");
     };
     assert_eq!(runner[0].args, ["runner", "koji"]);
-    assert_eq!(dog[0].name, "kelpie-dog");
     let settings = scene.settings();
     assert_eq!(settings.repo, scene.checkout.root);
     assert_eq!(settings.forge.as_str(), "shep-pm/koji-website");
     assert!(settings.ci, "the checkout has workflows");
     assert!(!settings.coderabbit.enabled, "the repo is private");
-    assert_eq!(settings.review.local, LocalRound::Off {});
+    assert_eq!(settings.review.local, None);
+    assert_eq!(settings.review.reviewers, [ReviewerName::claude()]);
     assert_eq!(
         scene.forge.repo_labels_now(),
-        ["bug", "ready-for-agent", "ready-for-human", "review please"]
+        [
+            "bug",
+            "ready-for-agent",
+            "ready-for-human",
+            "in-progress",
+            "review please"
+        ]
     );
     let (_, running) = scene.shepherd.sheep("koji").unwrap();
     assert!(!running, "add starts nothing");
@@ -117,10 +125,16 @@ async fn add_twice_changes_nothing() {
     assert_eq!(scene.shepherd.writes(), []);
     assert_eq!(
         scene.forge.repo_labels_now(),
-        ["bug", "ready-for-agent", "ready-for-human", "review please"]
+        [
+            "bug",
+            "ready-for-agent",
+            "ready-for-human",
+            "in-progress",
+            "review please"
+        ]
     );
     assert_eq!(scene.shepherd.sheep("koji"), before);
-    // Three labels, the runner and the dog, each already there.
+    // Four labels and the runner, each already there.
     assert_eq!(lines.len(), 5, "{lines:?}");
     assert!(lines.iter().all(|l| l.contains("already")), "{lines:?}");
 }
@@ -161,84 +175,9 @@ async fn a_sheep_that_is_not_kelpie_s_keeps_its_name() {
 #[tokio::test]
 async fn an_enabled_dog_that_holds_the_project_s_name_is_not_kelpie_s() {
     let scene = Scene::new().await;
-    scene.shepherd.holds_dog("koji");
+    scene.shepherd.holds_dog("koji", false);
     let err = scene.add().await.unwrap_err();
     assert!(err.contains("is not kelpie's"), "{err}");
-}
-
-#[tokio::test]
-async fn a_dog_under_its_old_name_is_replaced_and_kept_running() {
-    let mut scene = Scene::new().await;
-    let mut old = scene.launch.dog();
-    old.name = "kelpie".into();
-    scene.shepherd.holds(old, true);
-
-    let lines = scene.add().await.unwrap();
-    assert!(scene.shepherd.sheep("kelpie").is_none());
-    let (dog, running) = scene.shepherd.sheep("kelpie-dog").unwrap();
-    assert_eq!(dog.args, ["dog"]);
-    assert!(running, "the book's dog stays up");
-    let [.., deleted, added] = lines.as_slice() else {
-        panic!("{lines:?}");
-    };
-    assert!(deleted.starts_with("dog `kelpie`: deleted"), "{deleted}");
-    assert_eq!(added, "dog `kelpie-dog`: added and started");
-    // The old dog goes first, so a failure never leaves two.
-    let writes = scene.shepherd.writes();
-    let at = |dog: fn(&Request) -> bool| writes.iter().position(dog).unwrap();
-    assert!(
-        at(|w| matches!(w, Request::Delete { .. }))
-            < at(|w| matches!(w, Request::Add { apps } if apps[0].name == "kelpie-dog")),
-        "{writes:?}"
-    );
-}
-
-#[tokio::test]
-async fn an_old_dog_s_variables_come_along_or_nothing_changes() {
-    let mut scene = Scene::new().await;
-    let mut old = scene.launch.dog();
-    old.name = "kelpie".into();
-    old.env.insert("KELPIE_TEST_NEVER_SET".into(), "x".into());
-    scene.shepherd.holds(old, true);
-    let err = scene.add().await.unwrap_err();
-    assert!(err.contains("sets KELPIE_TEST_NEVER_SET"), "{err}");
-    assert_eq!(scene.shepherd.writes(), []);
-    assert_eq!(scene.forge.repo_labels_now(), ["bug"]);
-
-    let scene = Scene::new().await;
-    let mut old = scene.launch.dog();
-    old.name = "kelpie".into();
-    old.env.insert("HOME".into(), "withheld".into());
-    scene.shepherd.holds(old, true);
-    let lines = scene.add().await.unwrap();
-    let (dog, _) = scene.shepherd.sheep("kelpie-dog").unwrap();
-    assert_eq!(dog.env.get("HOME"), std::env::var("HOME").ok().as_ref());
-    assert!(
-        lines.contains(
-            &"dog `kelpie-dog`: HOME taken from this shell, as `kelpie`'s entry set them"
-                .to_owned()
-        ),
-        "{lines:?}"
-    );
-}
-
-// A shell always has both, and a TMPDIR other than the runners' would put
-// the GPU lock somewhere else.
-#[tokio::test]
-async fn an_old_dog_s_tmpdir_or_path_is_never_taken_from_the_shell() {
-    for key in ["TMPDIR", "PATH"] {
-        let mut scene = Scene::new().await;
-        let mut old = scene.launch.dog();
-        old.name = "kelpie".into();
-        old.env.insert(key.into(), "withheld".into());
-        scene.shepherd.holds(old, true);
-        let err = scene.add().await.unwrap_err();
-        assert!(
-            err.contains(&format!("take {key} out of that entry")),
-            "{err}"
-        );
-        assert_eq!(scene.shepherd.writes(), []);
-    }
 }
 
 #[tokio::test]
@@ -274,15 +213,6 @@ async fn a_flockfile_runner_or_a_broken_table_for_this_checkout_is_refused() {
     let err = scene.add().await.unwrap_err();
     assert!(err.starts_with("project `broken` already runs"), "{err}");
     assert_eq!(scene.shepherd.writes(), []);
-}
-
-#[tokio::test]
-async fn kelpie_adopted_and_enabled_is_told_to_disable() {
-    let scene = Scene::new().await;
-    scene.shepherd.holds_dog("kelpie");
-    let lines = scene.add().await.unwrap();
-    assert!(lines[0].ends_with("run `shep disable kelpie`"), "{lines:?}");
-    assert!(scene.shepherd.sheep("kelpie-dog").is_some());
 }
 
 #[tokio::test]
@@ -332,27 +262,45 @@ async fn a_file_for_another_checkout_is_refused() {
 }
 
 #[tokio::test]
-async fn a_project_cannot_take_kelpie_s_own_names() {
-    for taken in ["kelpie", "kelpie-dog"] {
-        let mut scene = Scene::new().await;
-        scene.name = ProjectName::try_from(taken).unwrap();
-        let err = scene.add().await.unwrap_err();
-        assert!(err.contains("kelpie's own name"), "{taken}: {err}");
-        assert_eq!(scene.shepherd.writes(), []);
-    }
+async fn a_project_cannot_take_kelpie_s_own_name() {
+    let mut scene = Scene::new().await;
+    scene.name = ProjectName::try_from("kelpie").unwrap();
+    let err = scene.add().await.unwrap_err();
+    assert!(err.contains("kelpie's own name"), "{err}");
+    assert_eq!(scene.shepherd.writes(), []);
+}
+
+// Its runner would never be granted a lease, so `add` says how to start it.
+#[tokio::test]
+async fn add_says_when_kelpie_s_dog_is_not_enabled() {
+    let mut scene = Scene::new().await;
+    scene.shepherd = FakeShepherd::new().await;
+    let lines = scene.add().await.unwrap();
+    assert_eq!(
+        lines.last().unwrap(),
+        "kelpie's dog is not enabled: `shep enable kelpie` runs it"
+    );
+    let writes = scene.shepherd.writes();
+    assert!(
+        matches!(writes.as_slice(), [Request::Add { apps }] if apps[0].name == "koji"),
+        "{writes:?}"
+    );
 }
 
 #[tokio::test]
-async fn a_dog_under_both_names_is_refused_before_anything_changes() {
+async fn add_says_how_to_give_an_old_adoption_the_channel() {
     let mut scene = Scene::new().await;
-    let mut old = scene.launch.dog();
-    old.name = "kelpie".into();
-    scene.shepherd.holds(old, true);
-    scene.shepherd.holds(scene.launch.dog(), true);
-    let err = scene.add().await.unwrap_err();
-    assert!(err.contains("one book needs one dog"), "{err}");
-    assert_eq!(scene.shepherd.writes(), []);
-    assert_eq!(scene.forge.repo_labels_now(), ["bug"]);
+    scene.shepherd = FakeShepherd::new().await;
+    scene.shepherd.holds_dog("kelpie", false);
+    let lines = scene.add().await.unwrap();
+    let last = lines.last().unwrap();
+    assert!(
+        last.ends_with(
+            "run `shep adopt /opt/kelpie --name kelpie`, then `shep disable kelpie` and \
+             `shep enable kelpie`"
+        ),
+        "{last}"
+    );
 }
 
 #[tokio::test]

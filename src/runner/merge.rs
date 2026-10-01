@@ -129,7 +129,15 @@ impl Runner {
                 let notice = (auto && pr.head == head) || tried == Some(pr.head.clone());
                 return self.merged(issue, number, pr.head, notice);
             }
-            PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
+            PullRequestState::Closed => {
+                self.update(|item| item.merge_queued = None)?;
+                return self.raise(number, RulingKind::Closed);
+            }
+        }
+        // Queued, the pull request is tested on top of the ones ahead of it
+        // while `main` moves under it, so none of the gates below apply.
+        if let Some(queued) = item.merge_queued {
+            return self.queued(number, head, queued);
         }
         // The gate asks again once the project is no longer `auto`.
         if auto && self.settings.merge_authority != MergeAuthority::Auto {
@@ -196,10 +204,28 @@ impl Runner {
         if settling || !green {
             return Ok(Begin::Idle);
         }
+        // A queued pull request is not merged yet and a second merge call
+        // would refuse it, so a restart that lost the mark finds it here.
+        let removals = match self.ports.forge.merge_queue(&repo, number) {
+            Ok(standing) if standing.queued || standing.armed => {
+                return self.queue_marked(standing.removals);
+            }
+            Ok(standing) => standing.removals,
+            Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}'s queue: {e}"))),
+        };
         if let Err(e) = self.ports.forge.merge(&repo, number, &head) {
             let reason = format!("cannot merge #{number}: {e}");
             if !auto {
                 return Ok(self.gate_failed(reason));
+            }
+            // A lost answer may have queued it rather than merged it.
+            let waiting = self
+                .ports
+                .forge
+                .merge_queue(&repo, number)
+                .is_ok_and(|standing| standing.queued || standing.armed);
+            if waiting {
+                return self.queue_marked(removals);
             }
             match self.ports.forge.pull_request(&repo, number) {
                 Ok(pr) if pr.state == PullRequestState::Merged && pr.head == head => {}
@@ -207,7 +233,12 @@ impl Runner {
                 Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}: {e}"))),
             }
         }
-        self.merged(issue, number, head, auto)
+        // With a merge queue on, the call only queued the pull request.
+        match self.ports.forge.pull_request(&repo, number) {
+            Ok(pr) if pr.state == PullRequestState::Open => self.queue_marked(removals),
+            Ok(_) => self.merged(issue, number, head, auto),
+            Err(e) => Ok(self.gate_failed(format!("cannot read #{number}: {e}"))),
+        }
     }
 
     // Nobody is asked before a merge under `auto`, so a head the gates never
@@ -350,6 +381,7 @@ impl Runner {
             spend: item.spend(),
             qwen: item.qwen,
         };
+        let issue = item.issue;
         let mut next = self.state.clone();
         next.work_items.retain(|open| open.issue != item.issue);
         // Rulings about this work item go with it, a question asked before
@@ -359,9 +391,12 @@ impl Runner {
             next.finished.push(item.issue);
         }
         self.save(next)?;
+        self.mark_held(issue, false);
         Ok(Begin::Report(report))
     }
 }
+
+mod queue;
 
 #[cfg(test)]
 mod auto;
@@ -758,5 +793,38 @@ mod tests {
         let status = rig.ask(&runner, "status", None);
         assert_eq!(status["work_item"], json!(null));
         assert_eq!(rig.claude.calls().len(), calls);
+    }
+
+    fn finished_on_disk(rig: &Rig) -> serde_json::Value {
+        let text = std::fs::read_to_string(rig.paths().state).unwrap();
+        serde_json::from_str::<serde_json::Value>(&text).unwrap()["finished"].clone()
+    }
+
+    #[test]
+    fn a_finished_issue_leaves_the_state_file_once_its_issue_is_closed() {
+        let (rig, runner, _) = Rig::parked("webapp");
+        rig.forge.list_ready(7, false);
+        rig.ask(&runner, "rule", Some("1 yes"));
+        assert!(finished(ready_then_merge(&rig, &runner)));
+        assert_eq!(finished_on_disk(&rig), json!([7]));
+
+        assert_eq!(step(&runner).unwrap(), None);
+        assert_eq!(finished_on_disk(&rig), json!([7]), "the issue is open");
+
+        rig.forge.close_issue(7);
+        assert_eq!(step(&runner).unwrap(), None);
+        assert_eq!(finished_on_disk(&rig), json!([]));
+    }
+
+    #[test]
+    fn a_finished_issue_the_forge_cannot_answer_for_stays() {
+        let (rig, runner, _) = Rig::parked("webapp");
+        rig.forge.list_ready(7, false);
+        rig.ask(&runner, "rule", Some("1 yes"));
+        assert!(finished(ready_then_merge(&rig, &runner)));
+
+        rig.forge.remove_issue(7);
+        assert_eq!(step(&runner).unwrap(), None);
+        assert_eq!(finished_on_disk(&rig), json!([7]));
     }
 }

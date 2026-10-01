@@ -174,6 +174,7 @@ mod tests {
             reviews: parse_reviews(reviews.as_bytes()).unwrap(),
             threads: parse_threads(THREADS_637.as_bytes(), LOGIN.graphql).unwrap(),
             statuses: Vec::new(),
+            reactions: Vec::new(),
         }
     }
 
