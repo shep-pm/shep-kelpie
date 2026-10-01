@@ -18,9 +18,9 @@ use std::thread;
 use std::time::Duration;
 
 use super::process::Processes;
-use crate::lease::gpu::{self, Attempt, Claim, GpuLock};
-use crate::ports::{Finding, ModelSeat, Reviewer, ReviewerError};
-use crate::settings::LocalRound;
+use crate::lease::gpu::{self, Attempt, Claim, GpuHold, GpuLock, LockHolder};
+use crate::ports::{AgentError, Finding, LocalLeases, ModelSeat, Reviewer, ReviewerError};
+use crate::settings::{LeaseName, LocalRound};
 
 /// How often a round waiting on the GPU lock looks for a stop
 const STOP_POLL: Duration = Duration::from_millis(100);
@@ -65,24 +65,19 @@ impl LocalReviewer {
     }
 
     // Waits on the scripts' own schedule, so kelpie keeps its place in line.
-    fn hold(&self, lease: &str, round: u32, worktree: &Path) -> Result<GpuHold, ReviewerError> {
+    fn hold(&self, lease: &str, what: String) -> Result<GpuHold, Unheld> {
         let lock = GpuLock::named(&self.temp_dir, lease);
         let claim = Claim {
             pid: std::process::id(),
-            what: format!("kelpie local round {round} in {}", worktree.display()),
+            what,
         };
         let cannot = |e: std::io::Error| {
-            ReviewerError::Failed(format!("cannot take {}: {e}", lock.path().display()))
+            Unheld::Failed(format!("cannot take {}: {e}", lock.path().display()))
         };
         let mut waited = 0;
         loop {
             match lock.try_take(&claim).map_err(cannot)? {
-                Attempt::Taken => {
-                    return Ok(GpuHold {
-                        lock,
-                        pid: claim.pid,
-                    });
-                }
+                Attempt::Taken => return Ok(GpuHold::new(lock, claim.pid)),
                 Attempt::Cleared(_) => continue,
                 Attempt::Held(_) => {}
             }
@@ -90,7 +85,7 @@ impl LocalReviewer {
             let mut slept = Duration::ZERO;
             while slept < nap {
                 if self.processes.stopping() {
-                    return Err(ReviewerError::Stopped);
+                    return Err(Unheld::Stopped);
                 }
                 thread::sleep(STOP_POLL);
                 slept += STOP_POLL;
@@ -100,15 +95,22 @@ impl LocalReviewer {
     }
 }
 
-/// A lease's lock, held for one round and let go when dropped
-struct GpuHold {
-    lock: GpuLock,
-    pid: u32,
+// Why a lease was not taken
+enum Unheld {
+    Stopped,
+    Failed(String),
 }
 
-impl Drop for GpuHold {
-    fn drop(&mut self) {
-        let _ = self.lock.release(self.pid);
+impl LocalLeases for LocalReviewer {
+    fn hold(&self, lease: &LeaseName, what: &str) -> Result<GpuHold, AgentError> {
+        LocalReviewer::hold(self, lease.as_str(), what.to_owned()).map_err(|e| match e {
+            Unheld::Stopped => AgentError::Stopped,
+            Unheld::Failed(reason) => AgentError::Setup(reason),
+        })
+    }
+
+    fn holder(&self, lease: &LeaseName) -> Option<LockHolder> {
+        GpuLock::named(&self.temp_dir, lease.as_str()).holder()
     }
 }
 
@@ -131,7 +133,14 @@ impl Reviewer for LocalReviewer {
         criteria: &str,
     ) -> Result<Vec<Finding>, ReviewerError> {
         let _hold = match local.lease() {
-            Some(lease) => Some(self.hold(lease.as_str(), round, worktree)?),
+            Some(lease) => {
+                let what = format!("kelpie local round {round} in {}", worktree.display());
+                let held = self.hold(lease.as_str(), what).map_err(|e| match e {
+                    Unheld::Stopped => ReviewerError::Stopped,
+                    Unheld::Failed(reason) => ReviewerError::Failed(reason),
+                });
+                Some(held?)
+            }
             None => None,
         };
         self.check_seat(local)?;

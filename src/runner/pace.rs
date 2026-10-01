@@ -18,9 +18,10 @@ use serde::Serialize;
 
 use super::Runner;
 use super::report::{Begin, StepReport};
+use crate::lease::gpu::LockHolder;
 use crate::pacer::{Assessment, Hold, RECHECK_SECS, Reading, Scope, assess, named};
 use crate::ports::Timestamp;
-use crate::settings::{Account, Limit};
+use crate::settings::{Account, Limit, Runs};
 use crate::state::StateError;
 
 /// What `status` shows of the pacer
@@ -114,6 +115,24 @@ impl Runner {
         let hold = assessment.hold(scope).cloned();
         self.pacing.insert(account, (now, assessment));
         Ok(hold.map_or(Pace::Clear, Pace::Held))
+    }
+
+    /// Who holds each lease the project's local agents take, for `status`
+    pub(super) fn local_leases(&self) -> BTreeMap<String, Option<LockHolder>> {
+        let limits = &self.agents.limits;
+        let sessions = self.lineup.iter().filter_map(|r| match &r.runs {
+            Runs::Claude(session) => Some(&session.limit),
+            Runs::Local(_) => None,
+        });
+        [&limits.worker, &limits.reviewer, &limits.judge]
+            .into_iter()
+            .chain(sessions)
+            .filter_map(Limit::lease)
+            .map(|lease| {
+                let holder = self.ports.local_leases.holder(lease);
+                (lease.as_str().to_owned(), holder)
+            })
+            .collect()
     }
 
     /// What the pacer shows in `status`

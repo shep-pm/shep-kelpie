@@ -104,6 +104,16 @@ pub enum Limit {
     Lease(LeaseName),
 }
 
+impl Limit {
+    /// The lease a call holds, for an agent limited by one
+    pub fn lease(&self) -> Option<&LeaseName> {
+        match self {
+            Self::Account(_) => None,
+            Self::Lease(lease) => Some(lease),
+        }
+    }
+}
+
 impl Default for Limit {
     fn default() -> Self {
         Self::Account(Account::Claude)

@@ -1,5 +1,6 @@
 //! The maintainer's triggers and what `status` shows
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -9,6 +10,7 @@ use serde::Serialize;
 use super::pace::PacerStatus;
 use super::{Answer, Runner};
 use crate::board::{Skip, WorkerModel};
+use crate::lease::gpu::LockHolder;
 use crate::ports::{ModelSeat, SessionId, Timestamp};
 use crate::relay::Settled;
 use crate::settings::MergeAuthority;
@@ -62,6 +64,10 @@ pub struct Status<'a> {
     /// an Ollama host to ask
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_model: Option<LocalModelStatus>,
+    /// Who holds each lease a local agent's calls take, by its name, or
+    /// null while it is free
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub local_leases: BTreeMap<String, Option<LockHolder>>,
 }
 
 /// The local model's placement, as Ollama's `/api/ps` last said

@@ -9,11 +9,12 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 use crate::board::{LabelError, Skip, WorkerModel, worker_override};
 use crate::channels::{Channel, Channels};
 use crate::pacer::Assessment;
-use crate::ports::{ForgeError, Guarded, Ports, SessionId, Timestamp, Visibility};
+use crate::ports::{ForgeError, Guarded, Leased, Ports, SessionId, Timestamp, Visibility};
 use crate::review_bot::{Bot, Profile, Reviewers};
 use crate::settings::{Account, LoopReviewer, RoleAgents, Runs, Settings, SettingsError};
 use crate::skills::Skills;
@@ -222,6 +223,8 @@ impl Runner {
     ) -> Result<Self, OpenError> {
         let local = [home, paths.kelpie_home.as_path(), settings.repo.as_path()];
         ports.forge = Box::new(Guarded::new(ports.forge, local));
+        let leases = Arc::clone(&ports.local_leases);
+        ports.agents = Arc::new(Leased::new(Arc::clone(&ports.agents), leases));
         let reviewers = kelpie_settings.reviewers;
         let agents = settings.role_agents(&kelpie_settings.agents)?;
         let lineup = settings.lineup(&kelpie_settings, home)?;
@@ -349,6 +352,7 @@ impl Runner {
             pacer: self.pacer_status(self.ports.clock.now()),
             skills: self.skills.status(),
             local_model: self.ports.reviewer.seat().map(Into::into),
+            local_leases: self.local_leases(),
         }
     }
 

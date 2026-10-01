@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use tempfile::TempDir;
 
+use crate::adapters::LocalReviewer;
 use crate::board::WorkerModel;
 use crate::coderabbit::CodeRabbit;
 use crate::cubic::Cubic;
@@ -249,6 +250,7 @@ pub(crate) struct Rig {
     pub(crate) meter: FakeMeter,
     pub(crate) codex_meter: FakeMeter,
     pub(crate) reviewer: FakeReviewer,
+    pub(crate) local_leases: LocalReviewer,
     pub(crate) relay: Arc<FakeRelay>,
     pub(crate) alerts: FakeAlerts,
     pub(crate) leases: FakeLeases,
@@ -299,6 +301,7 @@ impl Rig {
             meter,
             codex_meter: FakeMeter::idle(),
             reviewer: FakeReviewer::default(),
+            local_leases: LocalReviewer::default().with_temp_dir(home.path().join("tmp")),
             relay: Arc::new(FakeRelay::default()),
             alerts: FakeAlerts::on(clock.clone()),
             leases: FakeLeases::default(),
@@ -529,6 +532,7 @@ impl Rig {
             meter: Box::new(self.meter.clone()),
             codex_meter: Box::new(self.codex_meter.clone()),
             reviewer: Arc::new(self.reviewer.clone()),
+            local_leases: Arc::new(self.local_leases.clone()),
             review_bots,
             relay: Arc::clone(&self.relay) as Arc<dyn Relay>,
             alerts: Arc::new(self.alerts.clone()),

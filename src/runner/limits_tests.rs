@@ -1,11 +1,13 @@
 use std::sync::Mutex;
+use std::time::Duration;
 
 use serde_json::json;
 
+use crate::lease::gpu::{Attempt, Claim, GpuLock};
 use crate::pacer::{HoldKind, RECHECK_SECS};
 use crate::ports::Role;
 use crate::runner::{Runner, StepReport, step};
-use crate::test::{Rig, Scripted};
+use crate::test::{Hold, Rig, Scripted};
 
 const AGENTS: &str = "[agents.codex]\nharness = \"claude-code\"\n\
                       model = \"gpt-5-codex\"\neffort = \"medium\"\nusage = \"codex\"\n\
@@ -157,4 +159,71 @@ fn a_review_round_waits_on_its_reviewers_account_while_the_worker_works_on() {
     }
     let roles: Vec<Role> = rig.claude.all_calls().iter().map(|c| c.role).collect();
     assert_eq!(roles, [Role::Worker, Role::Reviewer]);
+}
+
+#[test]
+fn a_local_worker_is_never_paced_and_holds_the_gpu_for_its_whole_turn() {
+    let (rig, runner) = named("rotom", "worker = \"qwen\"\n");
+    // Both accounts past half their windows: neither is the local model's limit.
+    rig.meter.set(Rig::utilization(90, 90));
+    rig.codex_meter.set(Rig::utilization(90, 90));
+    let lock = GpuLock::under(&rig.home.path().join("tmp"));
+    rig.forge.list_ready(7, false);
+    assert!(dispatched(&step(&runner).unwrap()));
+
+    let hold = Hold::default();
+    rig.claude.script([Scripted::Hold(hold.clone())]);
+    std::thread::scope(|s| {
+        let turn = s.spawn(|| step(&runner).unwrap());
+        assert!(
+            hold.entered(Duration::from_secs(10)),
+            "the turn never began"
+        );
+        let holder = lock.holder().expect("the GPU is held during the turn");
+        assert_eq!(holder.pid, Some(std::process::id()));
+        assert!(
+            holder.what.starts_with("kelpie worker call for #7 in "),
+            "{}",
+            holder.what
+        );
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["local_leases"]["gpu"]["what"], json!(holder.what));
+        assert_eq!(status["pacer"].get("claude"), None);
+        hold.release();
+        turn.join().unwrap();
+    });
+    assert_eq!(lock.holder(), None, "let go when the turn ends");
+    assert_eq!((rig.meter.reads(), rig.codex_meter.reads()), (0, 0));
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["local_leases"], json!({ "gpu": null }));
+}
+
+#[test]
+fn a_local_turn_waits_while_a_review_round_holds_the_gpu() {
+    let (rig, runner) = named("xilriws", "worker = \"qwen\"\n");
+    rig.ask(&runner, "add", Some("7"));
+    let lock = GpuLock::under(&rig.home.path().join("tmp"));
+    let round = Claim {
+        pid: std::process::id(),
+        what: "qwen-review round 1".into(),
+    };
+    assert_eq!(lock.try_take(&round).unwrap(), Attempt::Taken);
+    rig.claude.script([Scripted::Say("done")]);
+    std::thread::scope(|s| {
+        let turn = s.spawn(|| step(&runner).unwrap());
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(rig.claude.calls(), [], "the turn waits on the lock");
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["local_leases"]["gpu"]["what"], "qwen-review round 1");
+        lock.release(round.pid).unwrap();
+        turn.join().unwrap();
+    });
+    assert_eq!(rig.claude.calls().len(), 1);
+}
+
+#[test]
+fn a_project_with_no_local_agent_shows_no_leases() {
+    let (rig, runner) = named("chelone", "");
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status.get("local_leases"), None);
 }

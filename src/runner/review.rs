@@ -79,7 +79,7 @@ impl Runner {
                             return Ok(held);
                         }
                         let shots = match self.round_shots()? {
-                            RoundShots::Take(begin) => return Ok(begin),
+                            RoundShots::Take(begin) => return Ok(*begin),
                             RoundShots::Ready(shots) => shots,
                         };
                         let dir = self.paths.shots(issue);
@@ -92,7 +92,7 @@ impl Runner {
                                 worker_folder: &worker_folder,
                                 criteria: &criteria,
                             },
-                            &session.model(),
+                            (&session.model(), &session.limit),
                             shots,
                             &self.skills,
                         );
@@ -118,7 +118,7 @@ impl Runner {
                     &worktree,
                     &base,
                     &worker_folder,
-                    &model,
+                    (&model, &self.agents.limits.judge),
                     &finding,
                     shots.as_deref(),
                 )

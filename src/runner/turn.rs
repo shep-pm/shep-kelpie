@@ -365,6 +365,7 @@ impl Runner {
             plugin_dirs: self.skills.plugin_dirs().to_vec(),
             tools: Tools::Work,
             sandbox: profile.sandbox(),
+            lease: self.agents.limits.worker.lease().cloned(),
         })
     }
 

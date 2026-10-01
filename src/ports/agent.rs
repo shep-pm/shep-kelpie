@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::settings::{Effort, GuardHook};
+use crate::settings::{Effort, GuardHook, LeaseName};
 
 /// Which role an agent call is made for
 // wire format: changing this is a breaking change to the state file
@@ -155,6 +155,8 @@ pub struct AgentCall {
     pub timeout: Option<Duration>,
     /// The kinds of tool it may use
     pub tools: Tools,
+    /// The lease the call holds from start to end, for a local agent
+    pub lease: Option<LeaseName>,
     /// What it may reach
     pub sandbox: Sandbox,
 }

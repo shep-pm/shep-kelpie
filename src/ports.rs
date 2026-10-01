@@ -21,6 +21,7 @@ use crate::shots::{ShotsJob, ShotsRun};
 use crate::webhook::Webhook;
 
 mod agent;
+mod leased;
 mod local_paths;
 mod model_seat;
 mod relay;
@@ -30,6 +31,7 @@ pub use agent::{
     AgentCall, AgentError, AgentReply, Agents, Cost, Fence, Guard, Role, Sandbox, Session,
     SessionId, Tools, Usage,
 };
+pub use leased::{Leased, LocalLeases};
 pub use local_paths::Guarded;
 pub use model_seat::ModelSeat;
 pub use relay::{Cleared, Relay, RelayError};
@@ -712,6 +714,8 @@ pub struct Ports {
     pub codex_meter: Box<dyn Meter>,
     /// The local round's runner, shared so a round runs without holding the runner
     pub reviewer: Arc<dyn Reviewer>,
+    /// The locks a local agent's calls hold
+    pub local_leases: Arc<dyn LocalLeases>,
     /// A profile for each review bot a round may summon
     pub review_bots: Vec<Arc<dyn Profile>>,
     /// The maintainer's relay session, sent every ruling alongside the webhook

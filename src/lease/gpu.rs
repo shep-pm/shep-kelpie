@@ -248,6 +248,26 @@ impl GpuLock {
     }
 }
 
+/// A lock taken for one call or round, let go when dropped
+#[derive(Debug)]
+pub struct GpuHold {
+    lock: GpuLock,
+    pid: u32,
+}
+
+impl GpuHold {
+    /// The hold `pid` has on `lock`, which it took
+    pub fn new(lock: GpuLock, pid: u32) -> Self {
+        Self { lock, pid }
+    }
+}
+
+impl Drop for GpuHold {
+    fn drop(&mut self) {
+        let _ = self.lock.release(self.pid);
+    }
+}
+
 fn ignore_not_found(e: io::Error) -> io::Result<()> {
     match e.kind() {
         io::ErrorKind::NotFound => Ok(()),
