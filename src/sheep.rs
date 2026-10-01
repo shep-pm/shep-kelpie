@@ -16,14 +16,14 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::adapters::{
-    ClaudeCli, Curl, Gh, LocalReviewer, RelayCli, SandboxRuntime, ShepLeases, ShotsCli, SystemClock,
+    ClaudeCli, Curl, Gh, LocalReviewer, RelayCli, ShepLeases, ShotsCli, SystemClock,
 };
 use crate::coderabbit::CodeRabbit;
 use crate::codex::Codex;
 use crate::cubic::Cubic;
 use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
-use crate::ports::{Leases, Ports, Routed, SandboxError, Unreadable};
+use crate::ports::{Leases, Ports, Routed, SandboxError};
 use crate::runner::{ACTIONS, ProjectName, ProjectPaths, READ_EVERY, Runner, answer, step};
 use crate::shep_home;
 
@@ -101,13 +101,11 @@ fn serve(project: &str) -> Result<(), String> {
     let codex_home = kelpie_settings
         .codex_home(&home, &kelpie_home)
         .map_err(|e| e.to_string())?;
-    // Kelpie's Codex login is read by Codex alone, from its link in a call's own home.
-    let sandbox = Unreadable::new(
-        Arc::new(SandboxRuntime::new(paths.tools.clone())),
-        vec![format!("{}/**", codex_home.display())],
+    let claude = ClaudeCli::labelling(Arc::new(shepherd.clone())).in_runtime(
+        paths.tools.clone(),
+        home.clone(),
+        &codex_home,
     );
-    let claude =
-        ClaudeCli::labelling(Arc::new(shepherd.clone())).sandboxed(Arc::new(sandbox), home.clone());
     let reviewer = LocalReviewer::default();
     let shots = ShotsCli::new(paths.tools.clone());
     let epoch = Epoch(u64::from(std::process::id()));
