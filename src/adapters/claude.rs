@@ -99,7 +99,7 @@ impl Agents for ClaudeCli {
 
 /// Writes the call's settings file whole, from the call alone
 pub(crate) fn write_settings(call: &AgentCall) -> Result<(), AgentError> {
-    let text = serde_json::to_string_pretty(&settings::settings(call.tools, &call.sandbox))
+    let text = serde_json::to_string_pretty(&settings::settings(call.tools, &call.reach))
         .expect("settings are JSON");
     let folder = call.settings.parent().unwrap_or(std::path::Path::new("/"));
     std::fs::create_dir_all(folder)
@@ -213,7 +213,7 @@ mod tests {
     use std::process::ExitStatus;
 
     use super::*;
-    use crate::ports::{Sandbox, Tools};
+    use crate::ports::{Reach, Tools};
     use crate::settings::Effort;
 
     // Recorded from Claude Code 2.1.283 on Haiku: a call asked to say ok.
@@ -256,7 +256,7 @@ mod tests {
             mcp_config: None,
             plugin_dirs: Vec::new(),
             tools: Tools::Work,
-            sandbox: Sandbox::default(),
+            reach: Reach::default(),
         }
     }
 
@@ -342,7 +342,7 @@ mod tests {
         let mut review = call(Role::Reviewer, fresh());
         review.settings = dir.path().join("worker/review-settings.json");
         review.tools = Tools::Review;
-        review.sandbox.read = vec![dir.path().join("shots")];
+        review.reach.read = vec![dir.path().join("shots")];
         ClaudeCli::default().prepare(&review).unwrap();
         let written: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&review.settings).unwrap()).unwrap();

@@ -10,7 +10,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use crate::ports::{Fence, Sandbox, Tools};
+use crate::ports::{Fence, Reach, Tools};
 use crate::settings::HookEvent;
 
 /// The tools that write files without going through Bash
@@ -65,18 +65,18 @@ const PLAYWRIGHT_DENY: [&str; 4] = [
 const DEV_SERVER_MACH: [&str; 1] = ["com.apple.FSEvents"];
 
 /// The settings file's contents for a call with these tools and sandbox
-pub(crate) fn settings(tools: Tools, sandbox: &Sandbox) -> Value {
+pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
     let mut deny: Vec<String> = Vec::new();
-    if let Some(fence) = &sandbox.fence {
+    if let Some(fence) = &reach.fence {
         deny.extend(fence.no_read.iter().map(|p| read_rule(p)));
         deny.extend(fence.no_commands.iter().map(|c| format!("Bash({c})")));
     }
-    deny.extend(tool_denies(tools, sandbox).map(str::to_owned));
-    let Some(fence) = &sandbox.fence else {
+    deny.extend(tool_denies(tools, reach).map(str::to_owned));
+    let Some(fence) = &reach.fence else {
         let mut permissions = json!({ "deny": deny });
-        if !sandbox.read.is_empty() {
+        if !reach.read.is_empty() {
             // Read outside the working folder is refused under `-p` unless the folder is added.
-            permissions["additionalDirectories"] = json!(sandbox.read);
+            permissions["additionalDirectories"] = json!(reach.read);
         }
         return json!({ "permissions": permissions });
     };
@@ -89,8 +89,8 @@ pub(crate) fn settings(tools: Tools, sandbox: &Sandbox) -> Value {
         deny.extend(PLAYWRIGHT_DENY.iter().map(|&r| r.to_owned()));
     }
     let mut permissions = json!({ "deny": deny });
-    if !sandbox.read.is_empty() {
-        permissions["additionalDirectories"] = json!(sandbox.read);
+    if !reach.read.is_empty() {
+        permissions["additionalDirectories"] = json!(reach.read);
     }
     json!({
         "sandbox": {
@@ -111,14 +111,14 @@ pub(crate) fn settings(tools: Tools, sandbox: &Sandbox) -> Value {
     })
 }
 
-fn tool_denies(tools: Tools, sandbox: &Sandbox) -> impl Iterator<Item = &'static str> {
+fn tool_denies(tools: Tools, reach: &Reach) -> impl Iterator<Item = &'static str> {
     let denied: &'static [&'static str] = match tools {
         Tools::Work => &WORK_DENY,
         Tools::Review => &REVIEW_DENY,
         Tools::Answer => &NO_TOOLS,
     };
     // An answer that may read a folder keeps Read and nothing else.
-    let reads = tools == Tools::Answer && !sandbox.read.is_empty();
+    let reads = tools == Tools::Answer && !reach.read.is_empty();
     denied
         .iter()
         .copied()
@@ -209,12 +209,12 @@ mod tests {
 
     #[test]
     fn a_review_round_keeps_its_read_tools_and_reads_its_folders() {
-        let bare = settings(Tools::Review, &Sandbox::default());
+        let bare = settings(Tools::Review, &Reach::default());
         assert_eq!(
             bare,
             json!({ "permissions": { "deny": ["Agent", "Task", "Bash"] } })
         );
-        let shots = Sandbox {
+        let shots = Reach {
             read: vec![PathBuf::from("/k/shots/7")],
             fence: None,
         };
@@ -226,9 +226,9 @@ mod tests {
 
     #[test]
     fn an_answer_reads_nothing_unless_its_sandbox_lists_a_folder() {
-        let none = settings(Tools::Answer, &Sandbox::default());
+        let none = settings(Tools::Answer, &Reach::default());
         assert_eq!(none, json!({ "permissions": { "deny": NO_TOOLS } }));
-        let shot = Sandbox {
+        let shot = Reach {
             read: vec![PathBuf::from("/k/shots/7")],
             fence: None,
         };

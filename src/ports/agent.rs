@@ -74,7 +74,7 @@ pub enum Tools {
 
 /// What a session may reach, named for no harness
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Sandbox {
+pub struct Reach {
     /// Folders outside its working folder that it may read
     pub read: Vec<PathBuf>,
     /// The fence on its writes, reads, hosts and commands. Without one,
@@ -156,7 +156,7 @@ pub struct AgentCall {
     /// The kinds of tool it may use
     pub tools: Tools,
     /// What it may reach
-    pub sandbox: Sandbox,
+    pub reach: Reach,
 }
 
 /// Tokens one call used, as the harness reports them

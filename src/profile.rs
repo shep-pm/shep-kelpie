@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::fence;
-use crate::ports::{Fence, Guard, Sandbox};
+use crate::ports::{Fence, Guard, Reach};
 use crate::settings::{BuildDir, EnvName, GuardHook, NonBlank};
 use crate::worktree::BASE;
 
@@ -115,7 +115,7 @@ pub struct WorkerProfile<'a> {
 
 impl WorkerProfile<'_> {
     /// The worker's sandbox
-    pub fn sandbox(&self) -> Sandbox {
+    pub fn reach(&self) -> Reach {
         let git = |p: &str| self.git_common_dir.join(p);
         let branch_ref = git("refs/heads").join(self.branch);
         let tracking_ref = git("refs/remotes/origin").join(self.branch);
@@ -180,7 +180,7 @@ impl WorkerProfile<'_> {
             },
             hooks: self.guard_hooks.to_vec(),
         };
-        Sandbox {
+        Reach {
             read: Vec::new(),
             fence: Some(Box::new(fence)),
         }
@@ -222,7 +222,7 @@ mod tests {
     impl WorkerProfile<'_> {
         // The profile as Claude Code's settings file carries it
         fn settings(&self) -> Value {
-            crate::adapters::claude_settings(Tools::Work, &self.sandbox())
+            crate::adapters::claude_settings(Tools::Work, &self.reach())
         }
     }
 

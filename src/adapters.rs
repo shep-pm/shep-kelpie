@@ -18,6 +18,7 @@ mod orphans;
 mod process;
 mod relay;
 mod shots;
+mod srt;
 mod usage;
 
 #[cfg(test)]
@@ -32,6 +33,7 @@ pub use leases::ShepLeases;
 pub use local::LocalReviewer;
 pub use relay::RelayCli;
 pub use shots::ShotsCli;
+pub use srt::SandboxRuntime;
 pub use usage::UsageMeter;
 
 /// The machine's wall clock

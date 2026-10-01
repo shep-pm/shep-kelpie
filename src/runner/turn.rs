@@ -364,7 +364,7 @@ impl Runner {
             mcp_config,
             plugin_dirs: self.skills.plugin_dirs().to_vec(),
             tools: Tools::Work,
-            sandbox: profile.sandbox(),
+            reach: profile.reach(),
         })
     }
 
