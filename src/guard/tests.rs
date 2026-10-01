@@ -867,5 +867,6 @@ fn an_unreadable_call_is_refused() {
     ));
 }
 
+mod agents;
 mod manager;
 mod reach;
