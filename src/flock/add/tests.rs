@@ -101,7 +101,13 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
     assert_eq!(settings.review.reviewers, [ReviewerName::claude()]);
     assert_eq!(
         scene.forge.repo_labels_now(),
-        ["bug", "ready-for-agent", "ready-for-human", "review please"]
+        [
+            "bug",
+            "ready-for-agent",
+            "ready-for-human",
+            "in-progress",
+            "review please"
+        ]
     );
     let (_, running) = scene.shepherd.sheep("koji").unwrap();
     assert!(!running, "add starts nothing");
@@ -119,11 +125,17 @@ async fn add_twice_changes_nothing() {
     assert_eq!(scene.shepherd.writes(), []);
     assert_eq!(
         scene.forge.repo_labels_now(),
-        ["bug", "ready-for-agent", "ready-for-human", "review please"]
+        [
+            "bug",
+            "ready-for-agent",
+            "ready-for-human",
+            "in-progress",
+            "review please"
+        ]
     );
     assert_eq!(scene.shepherd.sheep("koji"), before);
-    // Three labels and the runner, each already there.
-    assert_eq!(lines.len(), 4, "{lines:?}");
+    // Four labels and the runner, each already there.
+    assert_eq!(lines.len(), 5, "{lines:?}");
     assert!(lines.iter().all(|l| l.contains("already")), "{lines:?}");
 }
 

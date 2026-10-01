@@ -197,6 +197,16 @@ impl Forge for Gh {
         review_bot::label(repo, number, label, on)
     }
 
+    fn set_issue_label(
+        &self,
+        repo: &ForgeSlug,
+        number: u64,
+        label: &str,
+        on: bool,
+    ) -> Result<(), ForgeError> {
+        issues::set_label(repo, number, label, on)
+    }
+
     fn review_bot(
         &self,
         repo: &ForgeSlug,

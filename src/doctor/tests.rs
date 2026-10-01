@@ -50,7 +50,13 @@ impl Scene {
     async fn new() -> Self {
         let shepherd = FakeShepherd::new().await;
         let forge = FakeForge::new(PathBuf::from("/nowhere"));
-        forge.set_repo_labels(&["bug", "ready-for-agent", "ready-for-human", "review please"]);
+        forge.set_repo_labels(&[
+            "bug",
+            "ready-for-agent",
+            "ready-for-human",
+            "in-progress",
+            "review please",
+        ]);
         shepherd.holds_section(WEBHOOK);
         shepherd.holds_dog("kelpie", true);
         let clock = FakeClock::at(1_000);
@@ -356,12 +362,15 @@ async fn labels_a_repo_lacks_are_named_with_the_command_that_makes_them() {
     let scene = Scene::new().await;
     scene.forge.set_repo_labels(&["bug", "ready-for-agent"]);
     let (what, fix) = missing(&scene.report().await, "koji: labels");
-    assert_eq!(what, "shep-pm/koji has no ready-for-human");
+    assert_eq!(what, "shep-pm/koji has no ready-for-human, in-progress");
     assert!(fix.starts_with("`shep kelpie add` in "), "{fix}");
 
     scene.runs("golbat", |t| t["coderabbit"]["enabled"] = json!(true));
     let (what, _) = missing(&scene.report().await, "golbat: labels");
-    assert_eq!(what, "shep-pm/golbat has no ready-for-human, review please");
+    assert_eq!(
+        what,
+        "shep-pm/golbat has no ready-for-human, in-progress, review please"
+    );
 }
 
 #[tokio::test]

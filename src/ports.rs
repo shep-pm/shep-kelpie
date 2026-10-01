@@ -231,6 +231,19 @@ pub trait Forge: Send {
         on: bool,
     ) -> Result<(), ForgeError>;
 
+    /// Adds `label` to issue `number`, or takes it off
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses or cannot be asked.
+    fn set_issue_label(
+        &self,
+        repo: &ForgeSlug,
+        number: u64,
+        label: &str,
+        on: bool,
+    ) -> Result<(), ForgeError>;
+
     /// What the review bot `login` has posted on pull request `number`
     ///
     /// # Errors
