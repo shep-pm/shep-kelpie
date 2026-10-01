@@ -1,0 +1,1 @@
+{"error":{"code":-32603,"message":"failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed: 402 Payment Required; content-type=text/plain; body={\n  \"error\": {\n    \"message\": \"Payment Required\",\n    \"type\": null,\n    \"code\": \"deactivated_workspace\",\n    \"param\": null\n  },\n  \"status\": 402\n}"},"id":2}

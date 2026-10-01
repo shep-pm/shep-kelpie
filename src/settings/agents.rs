@@ -1,8 +1,11 @@
-//! Agents by name: a harness, and the model and effort it runs on
+//! Agents by name: a harness, the model and effort it runs on, and its limit
 //!
 //! Kelpie's `[agents]` define each one. A project names one per role in its
 //! `[agents]` table, and a local reviewer of kind `session` names one too.
 //! A role that names none runs on Claude Code with its `models` entry.
+//!
+//! An agent's limit is its account's usage windows, read the way its
+//! `usage` says, or for a local model a lease held for each whole call.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -10,7 +13,7 @@ use std::fmt;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::reviewers::lowercase_name;
+use super::reviewers::{LeaseName, lowercase_name};
 use super::{Effort, NonBlank, RoleModel, Settings, SettingsError};
 
 /// An agent's name: lowercase letters, digits and `-`
@@ -57,6 +60,91 @@ impl fmt::Display for AgentName {
 pub enum Harness {
     /// Claude Code, headless as `claude -p`
     ClaudeCode,
+    /// The test rig's stand-in, which takes any `usage`, so the runner's
+    /// pacing can be tested before a second harness exists
+    #[cfg(test)]
+    #[schemars(skip)]
+    StandIn,
+}
+
+impl Harness {
+    /// The harness's name, as settings write it
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude-code",
+            #[cfg(test)]
+            Self::StandIn => "stand-in",
+        }
+    }
+}
+
+/// How an agent's usage is read
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum UsageReader {
+    /// Claude's `/usage`: the Claude account's 5-hour and weekly windows
+    Claude,
+    /// Codex's own 5-hour and weekly windows
+    Codex,
+    /// None: a local model, whose limit is its lease
+    None,
+}
+
+impl UsageReader {
+    /// The reader's name, as settings write it
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::None => "none",
+        }
+    }
+}
+
+/// The account whose usage windows an agent spends
+// wire format: changing this is a breaking change to the pacer's status
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Account {
+    /// The account `claude` is logged in to
+    Claude,
+    /// The account `codex` is logged in to
+    Codex,
+}
+
+impl Account {
+    /// The account's name, as `status` shows it
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+        }
+    }
+}
+
+/// What holds an agent's calls back
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Limit {
+    /// Its account's windows, which the pacer reads
+    Account(Account),
+    /// A lease it holds for the whole of each call. It is never paced.
+    Lease(LeaseName),
+}
+
+impl Limit {
+    /// The lease a call holds, for an agent limited by one
+    pub fn lease(&self) -> Option<&LeaseName> {
+        match self {
+            Self::Account(_) => None,
+            Self::Lease(lease) => Some(lease),
+        }
+    }
+}
+
+impl Default for Limit {
+    fn default() -> Self {
+        Self::Account(Account::Claude)
+    }
 }
 
 /// One agent kelpie's own settings define
@@ -69,16 +157,54 @@ pub struct Agent {
     pub model: NonBlank,
     /// How hard the model thinks
     pub effort: Effort,
+    /// How its usage is read, which must be its harness's own reader.
+    /// That reader when absent.
+    #[serde(default)]
+    pub usage: Option<UsageReader>,
+    /// The lease it holds for each whole call, with `usage = "none"` only.
+    /// This machine's GPU lock, `gpu`, when absent.
+    #[serde(default)]
+    pub lease: Option<LeaseName>,
 }
 
 impl Agent {
     /// Its model and effort, as a call on its harness takes them
     pub fn model(&self) -> RoleModel {
-        match self.harness {
-            Harness::ClaudeCode => RoleModel {
-                model: self.model.clone(),
-                effort: self.effort,
-            },
+        RoleModel {
+            model: self.model.clone(),
+            effort: self.effort,
+        }
+    }
+
+    /// What holds its calls back, or why its settings do not say
+    ///
+    /// The reader must be the harness's own: an agent on Claude Code spends
+    /// the Claude account whatever its `usage` says.
+    fn limit(&self) -> Result<Limit, String> {
+        let own = match self.harness {
+            Harness::ClaudeCode => UsageReader::Claude,
+            #[cfg(test)]
+            Harness::StandIn => self.usage.unwrap_or(UsageReader::Claude),
+        };
+        let usage = self.usage.unwrap_or(own);
+        if usage != own {
+            return Err(format!(
+                "runs on {}, whose usage is read with `{}`, so it cannot set \
+                 `usage = \"{}\"`: leave `usage` out",
+                self.harness.as_str(),
+                own.as_str(),
+                usage.as_str()
+            ));
+        }
+        match (usage, &self.lease) {
+            (UsageReader::None, lease) => {
+                Ok(Limit::Lease(lease.clone().unwrap_or_else(LeaseName::gpu)))
+            }
+            (_, Some(_)) => {
+                Err("sets `lease`, which only an agent with `usage = \"none\"` takes".into())
+            }
+            (UsageReader::Claude, None) => Ok(Limit::Account(Account::Claude)),
+            (UsageReader::Codex, None) => Ok(Limit::Account(Account::Codex)),
         }
     }
 }
@@ -112,6 +238,21 @@ pub struct RoleAgents {
     pub judge: RoleModel,
     /// The planning call's one-shots
     pub planner: RoleModel,
+    /// What holds each role's calls back
+    pub limits: RoleLimits,
+}
+
+/// What holds each role's calls back, from the agent it names
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RoleLimits {
+    /// The worker's turns
+    pub worker: Limit,
+    /// The project's own Claude round
+    pub reviewer: Limit,
+    /// The judge's one-shots
+    pub judge: Limit,
+    /// The planning call's one-shots
+    pub planner: Limit,
 }
 
 impl Settings {
@@ -119,43 +260,63 @@ impl Settings {
     ///
     /// # Errors
     ///
-    /// [`SettingsError::Invalid`] naming a role whose agent `defined` lacks.
+    /// [`SettingsError::Invalid`] naming a role whose agent `defined` lacks,
+    /// or an agent whose limit is unclear.
     pub fn role_agents(
         &self,
         defined: &BTreeMap<AgentName, Agent>,
     ) -> Result<RoleAgents, SettingsError> {
         let pick = |role: &str, named: &Option<AgentName>, model: &RoleModel| match named {
-            None => Ok(model.clone()),
+            None => Ok((model.clone(), Limit::default())),
             Some(name) => find(defined, name, &format!("agents.{role}"), "agents"),
         };
+        let (worker, worker_limit) = pick("worker", &self.agents.worker, &self.models.worker)?;
+        let (reviewer, reviewer_limit) =
+            pick("reviewer", &self.agents.reviewer, &self.models.reviewer)?;
+        let (judge, judge_limit) = pick("judge", &self.agents.judge, &self.models.judge)?;
+        let (planner, planner_limit) = pick("planner", &self.agents.planner, &self.models.planner)?;
         Ok(RoleAgents {
-            worker: pick("worker", &self.agents.worker, &self.models.worker)?,
-            reviewer: pick("reviewer", &self.agents.reviewer, &self.models.reviewer)?,
-            judge: pick("judge", &self.agents.judge, &self.models.judge)?,
-            planner: pick("planner", &self.agents.planner, &self.models.planner)?,
+            worker,
+            reviewer,
+            judge,
+            planner,
+            limits: RoleLimits {
+                worker: worker_limit,
+                reviewer: reviewer_limit,
+                judge: judge_limit,
+                planner: planner_limit,
+            },
         })
     }
 }
 
-/// The agent `name`, which the setting `at` names, as a call takes it
+/// The agent `name`, which the setting `at` names, as a call takes it, and
+/// what holds its calls back
 ///
 /// # Errors
 ///
-/// [`SettingsError::Invalid`] on `setting` when `defined` lacks it.
+/// [`SettingsError::Invalid`] on `setting` when `defined` lacks it, and on
+/// `agents` when its limit is unclear.
 pub(super) fn find(
     defined: &BTreeMap<AgentName, Agent>,
     name: &AgentName,
     at: &str,
     setting: &'static str,
-) -> Result<RoleModel, SettingsError> {
-    match defined.get(name) {
-        Some(agent) => Ok(agent.model()),
-        None => Err(SettingsError::Invalid {
+) -> Result<(RoleModel, Limit), SettingsError> {
+    let Some(agent) = defined.get(name) else {
+        return Err(SettingsError::Invalid {
             setting,
             reason: format!(
                 "`{at}` names {name}, which is not defined: kelpie's own settings \
                  need an [agents.{name}] table"
             ),
+        });
+    };
+    match agent.limit() {
+        Ok(limit) => Ok((agent.model(), limit)),
+        Err(reason) => Err(SettingsError::Invalid {
+            setting: "agents",
+            reason: format!("`agents.{name}` {reason}"),
         }),
     }
 }

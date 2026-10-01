@@ -48,11 +48,47 @@ pub(super) fn claude(meter: &dyn Meter, clock: &dyn Clock) -> Line {
             ),
             "run `claude -p /usage` to see what it says",
         ),
-        Err(e @ (MeterError::TimedOut | MeterError::Stopped)) => Line::unsure(
-            "claude",
-            e.to_string(),
-            "run `claude -p /usage` to see what it says",
-        ),
+        Err(e @ (MeterError::TimedOut | MeterError::Stopped | MeterError::Codex(_))) => {
+            Line::unsure(
+                "claude",
+                e.to_string(),
+                "run `claude -p /usage` to see what it says",
+            )
+        }
+    }
+}
+
+/// `codex` installed and logged in to an account that answers its usage,
+/// for `subject`, a project that spends the Codex account
+pub(super) fn codex(subject: String, meter: &dyn Meter, clock: &dyn Clock) -> Line {
+    let reason = match meter.read(clock.now()) {
+        Ok(usage) => {
+            let (session, week) = (usage.session.used_pct, usage.week.used_pct);
+            return Line::ok(
+                subject,
+                format!("reads Codex usage: 5-hour window {session}%, week {week}%"),
+            );
+        }
+        Err(e) => e.to_string(),
+    };
+    if reason.starts_with("cannot run codex") {
+        Line::missing(
+            subject,
+            reason,
+            "install the Codex CLI and put `codex` on your PATH",
+        )
+    } else if reason.starts_with("codex refused") {
+        Line::missing(
+            subject,
+            reason,
+            "run `codex login` as an account whose plan includes Codex",
+        )
+    } else {
+        Line::unsure(
+            subject,
+            reason,
+            "run `codex` and its `/status` to see what it says",
+        )
     }
 }
 

@@ -36,7 +36,9 @@ mod local;
 mod reviewers;
 mod skills;
 
-pub use agents::{Agent, AgentName, Harness, RoleAgentNames, RoleAgents};
+pub use agents::{
+    Account, Agent, AgentName, Harness, Limit, RoleAgentNames, RoleAgents, RoleLimits, UsageReader,
+};
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use reviewers::{
     AgentSession, CLAUDE, ClaudeSession, Definition, LeaseName, LoopReviewer, QWEN, ReviewerName,

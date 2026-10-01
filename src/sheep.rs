@@ -80,7 +80,9 @@ fn serve(project: &str) -> Result<(), String> {
         agents: Arc::new(claude.clone()),
         forge: Box::new(Gh),
         meter: Box::new(claude.meter()),
+        codex_meter: Box::new(claude.codex_meter()),
         reviewer: Arc::new(reviewer.clone()),
+        local_leases: Arc::new(reviewer.clone()),
         review_bots: vec![Arc::new(CodeRabbit), Arc::new(Cubic)],
         shots: Arc::new(shots.clone()),
         relay: Arc::new(RelayCli::new(

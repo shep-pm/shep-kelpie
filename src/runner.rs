@@ -5,17 +5,19 @@
 //! file, answers the maintainer's triggers, and runs the worker's turns.
 //! Every change is saved before it takes effect in memory.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 use crate::board::{LabelError, Skip, WorkerModel, worker_override};
 use crate::channels::{Channel, Channels};
 use crate::local_paths::LocalPaths;
 use crate::pacer::Assessment;
-use crate::ports::{ForgeError, Guarded, Ports, SessionId, Timestamp, Visibility};
+use crate::ports::{ForgeError, Guarded, Leased, Ports, SessionId, Timestamp, Visibility};
 use crate::review_bot::{Bot, Profile, Reviewers};
-use crate::settings::{LoopReviewer, NonBlank, RoleAgents, Runs, Settings, SettingsError};
+use crate::settings::{Account, LoopReviewer, NonBlank, RoleAgents, Runs, Settings, SettingsError};
 use crate::skills::Skills;
 use crate::state::ids::RulingIds;
 use crate::state::{ProjectState, RunState, StateError, StateStore};
@@ -37,6 +39,8 @@ mod follow_up;
 mod gate;
 mod guard_hooks;
 mod instructions;
+#[cfg(test)]
+mod limits_tests;
 mod merge;
 mod pace;
 mod paths;
@@ -167,8 +171,8 @@ pub struct Runner {
     ports: Ports,
     // What no forge post may name, which `ports.forge` refuses too
     local: LocalPaths,
-    // The pacer's last reading of usage and when it was read, kept in memory only
-    pacing: Option<(Timestamp, Assessment)>,
+    // The pacer's last reading of each account's usage and when, kept in memory only
+    pacing: BTreeMap<Account, (Timestamp, Assessment)>,
     // What the board passed over on its last poll, kept in memory only
     skipped: Vec<Skip>,
     // The pull request reviewers kelpie's own settings define
@@ -230,6 +234,8 @@ impl Runner {
         let names = settings.private_names.iter().map(NonBlank::as_str);
         let local = LocalPaths::new(folders, names);
         ports.forge = Box::new(Guarded::new(ports.forge, local.clone()));
+        let leases = Arc::clone(&ports.local_leases);
+        ports.agents = Arc::new(Leased::new(Arc::clone(&ports.agents), leases));
         let reviewers = kelpie_settings.reviewers;
         let agents = settings.role_agents(&kelpie_settings.agents)?;
         let lineup = settings.lineup(&kelpie_settings, home)?;
@@ -289,7 +295,7 @@ impl Runner {
             state,
             ports,
             local,
-            pacing: None,
+            pacing: BTreeMap::new(),
             skipped: Vec::new(),
             reviewers,
             lineup,
@@ -361,6 +367,7 @@ impl Runner {
             pacer: self.pacer_status(self.ports.clock.now()),
             skills: self.skills.status(),
             local_model: self.ports.reviewer.seat().map(Into::into),
+            local_leases: self.local_leases(),
         }
     }
 

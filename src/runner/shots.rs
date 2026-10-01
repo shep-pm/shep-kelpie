@@ -42,7 +42,7 @@ const GONE: &str = "HTTP 404";
 /// What a Claude review round has to go on
 pub(super) enum RoundShots {
     /// A run of the head is due first
-    Take(Begin),
+    Take(Box<Begin>),
     /// Kelpie's run of the head, or none with the preview off or nothing to see
     Ready(Option<ShotsRun>),
 }
@@ -128,7 +128,7 @@ impl Runner {
             return Ok(RoundShots::Ready(None));
         }
         if let Some(begin) = self.shots_due(&head)? {
-            return Ok(RoundShots::Take(begin));
+            return Ok(RoundShots::Take(Box::new(begin)));
         }
         let item = self.current().expect("checked above");
         Ok(RoundShots::Ready(

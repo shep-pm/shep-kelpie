@@ -466,6 +466,13 @@ pub struct CallRecord {
     pub cost: Cost,
     /// What its session had cost when it ended
     pub session_cost: Cost,
+    /// Whether its harness reported no cost, so `cost` is no measure of it
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unpriced: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !b
 }
 
 #[cfg(test)]

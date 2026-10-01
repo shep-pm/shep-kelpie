@@ -17,11 +17,12 @@ use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
 use crate::local_paths::Leak;
 use crate::review_bot::{Activity, Login, Profile};
-use crate::settings::ForgeSlug;
+use crate::settings::{Account, ForgeSlug};
 use crate::shots::{ShotsJob, ShotsRun};
 use crate::webhook::Webhook;
 
 mod agent;
+mod leased;
 mod local_paths;
 mod model_seat;
 mod relay;
@@ -31,6 +32,7 @@ pub use agent::{
     AgentCall, AgentError, AgentReply, Agents, Cost, Fence, Guard, Role, Sandbox, Session,
     SessionId, Tools, Usage,
 };
+pub use leased::{Leased, LocalLeases};
 pub use local_paths::Guarded;
 pub use model_seat::ModelSeat;
 pub use relay::{Cleared, Relay, RelayError};
@@ -477,11 +479,15 @@ pub enum MeterError {
     Stopped,
     /// `claude` answered, but not with usage kelpie can read
     Unreadable(String),
+    /// `codex` could not be run, did not answer, or answered with no
+    /// usage kelpie can read, with which
+    Codex(String),
 }
 
 impl fmt::Display for MeterError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Codex(reason) => f.write_str(reason.trim()),
             Self::Spawn(error) => write!(f, "cannot run claude: {error}"),
             Self::TimedOut => f.write_str("claude did not answer /usage in time"),
             Self::Stopped => f.write_str("claude was stopped with the runner"),
@@ -746,10 +752,14 @@ pub struct Ports {
     pub agents: Arc<dyn Agents>,
     /// The forge
     pub forge: Box<dyn Forge>,
-    /// The account's usage
+    /// The Claude account's usage, from `/usage`
     pub meter: Box<dyn Meter>,
+    /// The Codex account's usage
+    pub codex_meter: Box<dyn Meter>,
     /// The local round's runner, shared so a round runs without holding the runner
     pub reviewer: Arc<dyn Reviewer>,
+    /// The locks a local agent's calls hold
+    pub local_leases: Arc<dyn LocalLeases>,
     /// A profile for each review bot a round may summon
     pub review_bots: Vec<Arc<dyn Profile>>,
     /// The maintainer's relay session, sent every ruling alongside the webhook
@@ -762,6 +772,16 @@ pub struct Ports {
     pub shots: Arc<dyn Shots>,
     /// The clock
     pub clock: Box<dyn Clock>,
+}
+
+impl Ports {
+    /// The meter that reads `account`'s usage
+    pub fn meter_of(&self, account: Account) -> &dyn Meter {
+        match account {
+            Account::Claude => self.meter.as_ref(),
+            Account::Codex => self.codex_meter.as_ref(),
+        }
+    }
 }
 
 impl fmt::Debug for Ports {

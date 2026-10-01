@@ -10,7 +10,6 @@ use super::Runner;
 use super::plan::Planning;
 use super::report::{Begin, StepReport};
 use crate::board::{self, ReadyIssue, Skip};
-use crate::pacer::Scope;
 use crate::state::StateError;
 
 impl Runner {
@@ -91,7 +90,7 @@ impl Runner {
                 });
             };
             if !paced {
-                if let Some(held) = self.pace(Scope::Dispatch)?.holds() {
+                if let Some(held) = self.pace_dispatch()?.holds() {
                     self.skipped = skipped;
                     return Ok(held);
                 }
