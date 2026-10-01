@@ -25,6 +25,8 @@
 //! `kelpie guard <git common dir> <worktree>`: the hook on every worker's
 //! Bash calls that keeps the home folder's path and freeform pull request
 //! titles out of what it publishes. Claude Code runs it, like `confine`.
+//! On Codex it takes `--pin-folder`, and the command it answers with runs
+//! it again with `--judge-here` when Codex runs the command in another folder.
 //!
 //! `shep kelpie settings move <project> [<sheep>]`: moves a project's settings
 //! file, and kelpie's own, into their tables on kelpie's shepherd.
@@ -85,8 +87,9 @@ fn main() -> ExitCode {
                 worktree: Path::new(worktree),
             };
             let (pin, local) = guard::pin_flag(local);
-            let local = match guard::local_paths(home.as_deref(), &local) {
-                Ok(local) => local,
+            let (here, local) = guard::here_flag(&local);
+            let paths = match guard::local_paths(home.as_deref(), &local) {
+                Ok(paths) => paths,
                 Err(why) => return hook(Verdict::Refuse(why)),
             };
             let mut input = Vec::new();
@@ -95,8 +98,32 @@ fn main() -> ExitCode {
                     "kelpie cannot read this tool call: {e}"
                 )));
             }
-            match guard::judge(&input[..], home.as_deref(), local, checkout) {
-                Verdict::Allow if pin => match guard::pinned(&input) {
+            if here {
+                let folder = std::env::current_dir()
+                    .map_err(|e| format!("kelpie cannot tell which folder this runs in: {e}"));
+                match folder.and_then(|f| guard::here(&input, &f)) {
+                    Ok(moved) => input = moved,
+                    Err(why) => return hook(Verdict::Refuse(why)),
+                }
+            }
+            // The pinned command judges again by this program's full path,
+            // never by a name the worker's PATH could answer.
+            let again = || -> Result<Vec<String>, String> {
+                let me = std::env::current_exe()
+                    .ok()
+                    .filter(|p| p.is_absolute())
+                    .ok_or("kelpie cannot tell where its own program is")?;
+                Ok([me.to_string_lossy().into_owned(), role.clone()]
+                    .into_iter()
+                    .chain([git_common_dir.clone(), worktree.clone()])
+                    .chain(local.iter().cloned())
+                    .chain([guard::HERE_FLAG.to_owned()])
+                    .collect())
+            };
+            match guard::judge(&input[..], home.as_deref(), paths, checkout) {
+                Verdict::Allow if pin => match again()
+                    .and_then(|again| guard::pinned(&input, Path::new(worktree), &again))
+                {
                     Ok(answer) => {
                         println!("{answer}");
                         ExitCode::SUCCESS
