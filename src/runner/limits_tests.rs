@@ -314,12 +314,21 @@ fn an_issue_given_to_the_local_worker_stays_on_its_agent_when_the_agent_changes(
     let (rig, runner) = named("rotom", "worker = \"qwen\"\n");
     rig.forge.label(7, "worker:local");
     rig.ask(&runner, "add", Some("7"));
-    let runner = reopened(&rig, runner, ("effort = \"low\"", "effort = \"high\""));
+    let swap = (
+        "model = \"qwen3-coder\"\neffort = \"low\"",
+        "model = \"qwen3-coder-next\"\neffort = \"high\"",
+    );
+    let runner = reopened(&rig, runner, swap);
     rig.claude.script([Scripted::Say("done")]);
     step(&runner).unwrap();
     let call = &rig.claude.calls()[0];
     assert_eq!(call.harness, AgentHarness::StandIn);
     assert_eq!(call.lease.as_ref().map(|l| l.as_str()), Some("gpu"));
+    assert_eq!(
+        (call.model.as_str(), call.effort),
+        ("qwen3-coder-next", crate::settings::Effort::High),
+        "the label asks for the local worker, so the turn runs the agent's model today"
+    );
 }
 
 #[test]

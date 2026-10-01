@@ -29,7 +29,7 @@ use crate::pacer::Scope;
 use crate::ports::{AgentCall, AgentError, AgentReply, Cost, Issue, Role, Session, Tools};
 use crate::preview::{self, McpFiles, WORKER_INSTRUCTIONS};
 use crate::profile::WorkerProfile;
-use crate::settings::{AgentHarness, Limit, NonBlank};
+use crate::settings::{AgentHarness, Effort, Limit, NonBlank};
 use crate::skills::{Step, split_command};
 use crate::state::{Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
@@ -38,6 +38,18 @@ pub(super) use unfinished::failed;
 use unfinished::{awaits_a_push, timed_out};
 
 mod unfinished;
+
+/// What a work item's worker runs on this turn
+pub(super) struct WorkerAgent {
+    /// Its harness
+    pub(super) harness: AgentHarness,
+    /// What holds its turns back
+    pub(super) limit: Limit,
+    /// The model, as the harness takes it
+    pub(super) model: String,
+    /// How hard the model thinks
+    pub(super) effort: Effort,
+}
 
 /// The prompt for a turn resumed after the runner restarted
 const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
@@ -363,13 +375,18 @@ impl Runner {
                     .invoke(Step::Implement, &first_prompt(item.issue, &issue))
             }
         };
-        let (harness, limit) = self.worker_agent(item)?;
+        let WorkerAgent {
+            harness,
+            limit,
+            model,
+            effort,
+        } = self.worker_agent(item)?;
         self.prepared(AgentCall {
             role: Role::Worker,
             harness,
             issue: item.issue,
-            model: item.worker.model.clone(),
-            effort: item.worker.effort,
+            model,
+            effort,
             session,
             cwd: item.worktree.clone(),
             settings,
@@ -393,12 +410,18 @@ impl Runner {
     /// # Errors
     ///
     /// Why not, when an item given to the local worker has none to run on.
-    pub(super) fn worker_agent(&self, item: &WorkItem) -> Result<(AgentHarness, Limit), String> {
+    pub(super) fn worker_agent(&self, item: &WorkItem) -> Result<WorkerAgent, String> {
         let (agent, limit) = (&self.agents.worker, &self.agents.limits.worker);
         let local = limit.lease().is_some();
         let own = WorkerModel {
             local: item.worker.local,
             ..WorkerModel::from(agent)
+        };
+        let on = |harness, limit, model: WorkerModel| WorkerAgent {
+            harness,
+            limit,
+            model: model.model,
+            effort: model.effort,
         };
         match (item.worker.local, local) {
             (true, false) => Err(format!(
@@ -407,9 +430,16 @@ impl Runner {
                  and add the issue",
                 item.issue
             )),
-            (true, true) => Ok((agent.harness.clone(), limit.clone())),
-            (false, false) if item.worker == own => Ok((agent.harness.clone(), limit.clone())),
-            (false, _) => Ok((AgentHarness::ClaudeCode, Limit::default())),
+            // The label asks for the local worker, not a model, so it runs today's.
+            (true, true) => Ok(on(agent.harness.clone(), limit.clone(), own)),
+            (false, false) if item.worker == own => {
+                Ok(on(agent.harness.clone(), limit.clone(), own))
+            }
+            (false, _) => Ok(on(
+                AgentHarness::ClaudeCode,
+                Limit::default(),
+                item.worker.clone(),
+            )),
         }
     }
 
