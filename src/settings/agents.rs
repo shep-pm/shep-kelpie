@@ -13,6 +13,7 @@ use std::fmt;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::local::{ContextSize, EndpointUrl};
 use super::reviewers::{LeaseName, lowercase_name};
 use super::{Effort, NonBlank, RoleModel, Settings, SettingsError};
 
@@ -60,6 +61,8 @@ impl fmt::Display for AgentName {
 pub enum Harness {
     /// Claude Code, headless as `claude -p`
     ClaudeCode,
+    /// pi, headless as `pi -p`, on a model an OpenAI-compatible server runs
+    Pi,
     /// The test rig's stand-in, which takes any `usage`, so the runner's
     /// pacing can be tested before a second harness exists
     #[cfg(test)]
@@ -72,10 +75,55 @@ impl Harness {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ClaudeCode => "claude-code",
+            Self::Pi => "pi",
             #[cfg(test)]
             Self::StandIn => "stand-in",
         }
     }
+
+    /// The program that runs it, as an error names it
+    pub fn command(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude",
+            Self::Pi => "pi",
+            #[cfg(test)]
+            Self::StandIn => "stand-in",
+        }
+    }
+}
+
+/// The harness a call runs on, with the server its model is on where it needs one
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum AgentHarness {
+    /// Claude Code, on Anthropic's API
+    #[default]
+    ClaudeCode,
+    /// pi, on the model a server runs
+    Pi(ModelServer),
+    /// The test rig's stand-in
+    #[cfg(test)]
+    StandIn,
+}
+
+impl AgentHarness {
+    /// The harness, as settings name it
+    pub fn harness(&self) -> Harness {
+        match self {
+            Self::ClaudeCode => Harness::ClaudeCode,
+            Self::Pi(_) => Harness::Pi,
+            #[cfg(test)]
+            Self::StandIn => Harness::StandIn,
+        }
+    }
+}
+
+/// An OpenAI-compatible server a local model runs on
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelServer {
+    /// Its base URL, up to and including its `/v1`
+    pub url: EndpointUrl,
+    /// The context size it gives the model, in tokens
+    pub context: ContextSize,
 }
 
 /// How an agent's usage is read
@@ -165,15 +213,41 @@ pub struct Agent {
     /// This machine's GPU lock, `gpu`, when absent.
     #[serde(default)]
     pub lease: Option<LeaseName>,
+    /// The OpenAI-compatible server its model runs on, up to and including
+    /// its `/v1`. pi needs one, and Claude Code takes none.
+    #[serde(default)]
+    pub url: Option<EndpointUrl>,
+    /// The context size that server gives the model, in tokens, with `url`
+    #[serde(default)]
+    pub context: Option<ContextSize>,
 }
 
 impl Agent {
-    /// Its model and effort, as a call on its harness takes them
-    pub fn model(&self) -> RoleModel {
-        RoleModel {
+    /// Its model and effort, as a call on its harness takes them, or why
+    /// its settings cannot reach that model
+    fn model(&self) -> Result<RoleModel, String> {
+        let harness = match (self.harness, &self.url, self.context) {
+            (Harness::ClaudeCode, None, None) => AgentHarness::ClaudeCode,
+            (Harness::ClaudeCode, ..) => {
+                return Err("runs on claude-code, which takes no `url` or `context`".into());
+            }
+            (Harness::Pi, Some(url), Some(context)) => AgentHarness::Pi(ModelServer {
+                url: url.clone(),
+                context,
+            }),
+            (Harness::Pi, ..) => {
+                return Err("runs on pi, which needs the model's server as `url` \
+                            and its context size as `context`"
+                    .into());
+            }
+            #[cfg(test)]
+            (Harness::StandIn, ..) => AgentHarness::StandIn,
+        };
+        Ok(RoleModel {
             model: self.model.clone(),
             effort: self.effort,
-        }
+            harness,
+        })
     }
 
     /// What holds its calls back, or why its settings do not say
@@ -183,6 +257,7 @@ impl Agent {
     fn limit(&self) -> Result<Limit, String> {
         let own = match self.harness {
             Harness::ClaudeCode => UsageReader::Claude,
+            Harness::Pi => UsageReader::None,
             #[cfg(test)]
             Harness::StandIn => self.usage.unwrap_or(UsageReader::Claude),
         };
@@ -312,8 +387,8 @@ pub(super) fn find(
             ),
         });
     };
-    match agent.limit() {
-        Ok(limit) => Ok((agent.model(), limit)),
+    match agent.model().and_then(|model| Ok((model, agent.limit()?))) {
+        Ok(found) => Ok(found),
         Err(reason) => Err(SettingsError::Invalid {
             setting: "agents",
             reason: format!("`agents.{name}` {reason}"),

@@ -17,13 +17,16 @@ use std::fmt;
 
 use serde::Serialize;
 
-use crate::settings::{Effort, RoleModel};
+use crate::settings::{Effort, RoleAgents, RoleModel};
 
 /// The label that puts an issue on the board
 pub const READY: &str = "ready-for-agent";
 
 /// The prefix of the label that overrides the worker's model and effort
 const WORKER_LABEL: &str = "worker:";
+
+/// What follows [`WORKER_LABEL`] to ask for the project's local worker
+const LOCAL: &str = "local";
 
 // The priority labels, highest first. An issue with none ranks after them all.
 const PRIORITIES: [&str; 4] = [
@@ -276,19 +279,31 @@ fn priority_rank(labels: &[String]) -> usize {
         .unwrap_or(PRIORITIES.len())
 }
 
-/// The worker's model and effort from a `worker:<model>-<effort>` label, if the issue has one
+/// What an issue's `worker:` label asks for
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkerLabel {
+    /// `worker:<model>-<effort>`: a Claude model and effort
+    Model(WorkerModel),
+    /// `worker:local`: the project's local worker agent
+    Local,
+}
+
+/// What an issue's `worker:` label asks for, if it has one
 ///
 /// # Errors
 ///
 /// [`LabelError`] when a `worker:` label names no known model or effort, or
 /// the issue has more than one.
-pub fn worker_override(labels: &[String]) -> Result<Option<WorkerModel>, LabelError> {
+pub fn worker_override(labels: &[String]) -> Result<Option<WorkerLabel>, LabelError> {
     let mut found = labels.iter().filter_map(|l| l.strip_prefix(WORKER_LABEL));
     let Some(value) = found.next() else {
         return Ok(None);
     };
     if found.next().is_some() {
         return Err(LabelError::Several);
+    }
+    if value == LOCAL {
+        return Ok(Some(WorkerLabel::Local));
     }
     let unreadable = || LabelError::Unreadable(format!("{WORKER_LABEL}{value}"));
     let (name, effort) = value.split_once('-').ok_or_else(unreadable)?;
@@ -298,10 +313,35 @@ pub fn worker_override(labels: &[String]) -> Result<Option<WorkerModel>, LabelEr
         .ok_or_else(unreadable)?
         .1;
     let effort = Effort::parse(effort).ok_or_else(unreadable)?;
-    Ok(Some(WorkerModel {
+    Ok(Some(WorkerLabel::Model(WorkerModel {
         model: model.to_owned(),
         effort,
-    }))
+    })))
+}
+
+/// The model and effort an issue's worker runs on, from its label and the
+/// project's agents
+///
+/// A local worker agent takes only the issues labelled `worker:local`, which
+/// the maintainer chooses. The rest run on `models`' worker.
+///
+/// # Errors
+///
+/// [`LabelError::NoLocal`] when the label asks for a local worker the
+/// project does not name.
+pub fn worker_for(
+    label: Option<WorkerLabel>,
+    agents: &RoleAgents,
+    models: &RoleModel,
+) -> Result<WorkerModel, LabelError> {
+    let local = agents.limits.worker.lease().is_some();
+    match (label, local) {
+        (Some(WorkerLabel::Model(model)), _) => Ok(model),
+        (Some(WorkerLabel::Local), true) => Ok(WorkerModel::from(&agents.worker)),
+        (Some(WorkerLabel::Local), false) => Err(LabelError::NoLocal),
+        (None, true) => Ok(WorkerModel::from(models)),
+        (None, false) => Ok(WorkerModel::from(&agents.worker)),
+    }
 }
 
 /// Why a `worker:` label cannot be used
@@ -310,8 +350,11 @@ pub fn worker_override(labels: &[String]) -> Result<Option<WorkerModel>, LabelEr
 pub enum LabelError {
     /// The issue has more than one `worker:` label
     Several,
-    /// This label is not `worker:<model>-<effort>` with a known model and effort
+    /// This label is not `worker:<model>-<effort>` with a known model and
+    /// effort, nor `worker:local`
     Unreadable(String),
+    /// The issue is labelled `worker:local`, and the project's worker agent is not local
+    NoLocal,
 }
 
 impl fmt::Display for LabelError {
@@ -322,10 +365,15 @@ impl fmt::Display for LabelError {
                 let names: Vec<&str> = MODELS.iter().map(|(name, _)| *name).collect();
                 write!(
                     f,
-                    "label `{label}` is not `worker:<model>-<effort>` with a model from {}",
+                    "label `{label}` is not `worker:local`, nor `worker:<model>-<effort>` \
+                     with a model from {}",
                     names.join(", ")
                 )
             }
+            Self::NoLocal => f.write_str(
+                "the issue is labelled `worker:local`, and the project's `agents.worker` \
+                 names no local agent",
+            ),
         }
     }
 }
@@ -583,19 +631,58 @@ mod tests {
     fn a_worker_label_names_the_model_and_effort() {
         assert_eq!(
             worker_override(&labels(&[READY, "worker:opus-medium"])),
-            Ok(Some(WorkerModel {
+            Ok(Some(WorkerLabel::Model(WorkerModel {
                 model: "claude-opus-5-5".into(),
                 effort: Effort::Medium
-            }))
+            })))
         );
         assert_eq!(
             worker_override(&labels(&["worker:haiku-max"])),
-            Ok(Some(WorkerModel {
+            Ok(Some(WorkerLabel::Model(WorkerModel {
                 model: "claude-haiku-4-5-20251001".into(),
                 effort: Effort::Max
-            }))
+            })))
+        );
+        assert_eq!(
+            worker_override(&labels(&[READY, "worker:local"])),
+            Ok(Some(WorkerLabel::Local))
         );
         assert_eq!(worker_override(&labels(&[READY, "bug"])), Ok(None));
+    }
+
+    #[test]
+    fn a_local_worker_takes_only_the_issues_labelled_for_it() {
+        use crate::settings::{LeaseName, Limit, NonBlank, RoleLimits};
+        let model = |name: &str| RoleModel {
+            model: NonBlank::try_from(name.to_owned()).unwrap(),
+            effort: Effort::Low,
+            harness: Default::default(),
+        };
+        let mut agents = RoleAgents {
+            worker: model("qwen3.8:27b"),
+            reviewer: model("claude-sonnet-5"),
+            judge: model("claude-opus-5-5"),
+            planner: model("claude-opus-5-5"),
+            limits: RoleLimits {
+                worker: Limit::Lease(LeaseName::gpu()),
+                ..RoleLimits::default()
+            },
+        };
+        let models = model("claude-sonnet-5");
+        let worker = |label, agents: &RoleAgents| worker_for(label, agents, &models);
+        let ran = |m: Result<WorkerModel, LabelError>| m.map(|m| m.model);
+        assert_eq!(ran(worker(None, &agents)), Ok("claude-sonnet-5".into()));
+        let local = Some(WorkerLabel::Local);
+        assert_eq!(
+            ran(worker(local.clone(), &agents)),
+            Ok("qwen3.8:27b".into())
+        );
+        let opus = worker_override(&labels(&["worker:opus-low"])).unwrap();
+        assert_eq!(ran(worker(opus, &agents)), Ok("claude-opus-5-5".into()));
+
+        agents.limits.worker = Limit::default();
+        assert_eq!(ran(worker(None, &agents)), Ok("qwen3.8:27b".into()));
+        assert_eq!(worker(local, &agents), Err(LabelError::NoLocal));
     }
 
     #[test]
@@ -607,6 +694,8 @@ mod tests {
             "worker:gpt-low",
             "worker:opus-huge",
             "worker:Opus-low",
+            "worker:Local",
+            "worker:local-low",
         ] {
             assert_eq!(
                 worker_override(&labels(&[bad])),

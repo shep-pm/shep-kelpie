@@ -302,7 +302,7 @@ A missing command or an endpoint that doesn't answer stops the runner at start.
 
 ## Agents
 
-An agent is a harness plus the model and effort it runs on. Claude Code is the one harness for now. Kelpie's own settings define agents by name, and a project names one per role, over its `models` entry:
+An agent is a harness plus the model and effort it runs on. The harnesses are Claude Code, `claude-code`, and pi, `pi`, which runs a model on an OpenAI-compatible server such as Ollama. Kelpie's own settings define agents by name, and a project names one per role, over its `models` entry:
 
 ```toml
 # kelpie's [kelpie] section
@@ -318,7 +318,22 @@ judge = "opus-high"
 
 A role left out keeps its `models` entry, so a project that names none runs as before. A local reviewer of kind `session` names an agent from the same list. An agent nobody defines stops the runner at start, naming it.
 
-`usage` says how an agent's usage is read, and so which account paces it: `claude` (the default on Claude Code) reads `/usage`, `codex` reads Codex's own 5-hour and weekly windows, and `none` is a local model that is never paced. It must be the harness's own reader, so on Claude Code leave it out: `codex` and `none` arrive with their harnesses (#130). Each account keeps its own daily allowance and 5-hour stop, shown under its name in `status.pacer`, and a new work item waits on every account its roles spend. `shep kelpie doctor` checks Codex answers for a project that spends it. A `none` agent holds `lease` (the GPU lock, `gpu`, by default) for the whole of each call instead, so a qwen round waits behind its turn, and `status.local_leases` shows who holds it.
+`usage` says how an agent's usage is read, and so which account paces it: `claude` (the default on Claude Code) reads `/usage`, `codex` reads Codex's own 5-hour and weekly windows, and `none` is a local model that is never paced. It must be the harness's own reader, so leave it out: Claude Code reads `claude` and pi reads `none`. `codex` waits on a Codex harness (#126).
+
+A pi agent also needs the model's server and the context size it gives the model:
+
+```toml
+[kelpie.agents.qwen]
+harness = "pi"
+model = "qwen3.8:27b"
+effort = "medium"
+url = "http://<host>:11434/v1"
+context = 65536
+```
+
+Kelpie runs pi with a home of its own, so your `~/.pi` is never read. pi starts no MCP servers and runs no Claude Code hooks, so a worker on pi can't have the preview or `worker.guard_hooks`, and the turn fails saying so. Kelpie's own checks still run on every command and file write.
+
+A local worker gets only the issues labelled `worker:local`. The rest run on `models.worker`, so you pick which issues it takes. Each account keeps its own daily allowance and 5-hour stop, shown under its name in `status.pacer`, and a new work item waits on every account its roles spend. `shep kelpie doctor` checks Codex answers for a project that spends it. A `none` agent holds `lease` (the GPU lock, `gpu`, by default) for the whole of each call instead, so a qwen round waits behind its turn, and `status.local_leases` shows who holds it.
 
 `status` shows each role's tokens in `by_role`, with `cost_usd` only for calls whose harness reports dollars. `unpriced_calls` counts the rest.
 

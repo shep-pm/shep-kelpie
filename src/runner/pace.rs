@@ -71,9 +71,12 @@ impl Pace {
 }
 
 impl Runner {
-    /// Paces `scope` on the worker's own limit
+    /// Paces `scope` on the limit of the work item's worker
     pub(super) fn pace_worker(&mut self, scope: Scope) -> Result<Pace, StateError> {
-        let limit = self.agents.limits.worker.clone();
+        let limit = match self.current() {
+            Some(item) => self.worker_agent(item).1,
+            None => self.agents.limits.worker.clone(),
+        };
         self.pace(scope, &limit)
     }
 
@@ -138,6 +141,9 @@ impl Runner {
             Runs::Claude(session) => Some(&session.limit),
             Runs::Local(_) => None,
         });
+        // Beside a local worker, every issue it is not given runs on Claude.
+        const CLAUDE: Limit = Limit::Account(Account::Claude);
+        let claude_worker = limits.worker.lease().map(|_| &CLAUDE);
         [
             &limits.worker,
             &limits.reviewer,
@@ -145,6 +151,7 @@ impl Runner {
             &limits.planner,
         ]
         .into_iter()
+        .chain(claude_worker)
         .chain(sessions)
     }
 

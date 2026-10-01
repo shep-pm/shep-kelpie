@@ -241,6 +241,7 @@ mod tests {
 
         fn call(&self, role: Role) -> AgentCall {
             AgentCall {
+                harness: crate::settings::AgentHarness::ClaudeCode,
                 role,
                 issue: 7,
                 model: "claude-sonnet-5".into(),
@@ -360,7 +361,7 @@ mod tests {
         );
         assert_eq!(policy.hosts, [MODEL_HOST]);
         let mut denied: Vec<String> = CREDENTIALS.map(str::to_owned).into();
-        denied.push("~/.codex/**".into());
+        denied.extend(["~/.codex/**".into(), "~/.pi/**".into()]);
         assert_eq!(policy.no_read, denied);
         assert!(policy.read.contains(&w.path("shots")));
         assert!(!policy.verify_tls);

@@ -239,7 +239,10 @@ fn a_session_killed_before_it_began_starts_over_with_the_same_id() {
     let runner = rig.open().unwrap();
     let first = rig.claude.calls()[0].session.id().clone();
     rig.claude.script([
-        Scripted::Fail(AgentError::NoSession(first.clone())),
+        Scripted::Fail(AgentError::NoSession(
+            crate::settings::Harness::ClaudeCode,
+            first.clone(),
+        )),
         Scripted::Reply(usage(1), Cost(5)),
     ]);
     step(&runner).unwrap();
@@ -267,8 +270,10 @@ fn a_paused_project_runs_no_turn_until_it_starts() {
 #[test]
 fn a_failed_turn_raises_a_ruling_carrying_why_and_alerts_like_the_rest() {
     let (rig, runner) = with_issue_7("zeus");
-    rig.claude
-        .script([Scripted::Fail(AgentError::Failed("overloaded".into()))]);
+    rig.claude.script([Scripted::Fail(AgentError::Failed(
+        crate::settings::Harness::ClaudeCode,
+        "overloaded".into(),
+    ))]);
     let Some(StepReport::Failed {
         issue,
         pull_request,
@@ -301,8 +306,10 @@ fn a_failed_turn_raises_a_ruling_carrying_why_and_alerts_like_the_rest() {
 #[test]
 fn a_yes_on_a_failed_turn_resumes_its_session() {
     let (rig, runner) = with_issue_7("zeus");
-    rig.claude
-        .script([Scripted::Fail(AgentError::Failed("overloaded".into()))]);
+    rig.claude.script([Scripted::Fail(AgentError::Failed(
+        crate::settings::Harness::ClaudeCode,
+        "overloaded".into(),
+    ))]);
     step(&runner).unwrap();
     rig.ask(&runner, "rule", Some("1 yes"));
     rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
@@ -325,13 +332,18 @@ fn a_yes_on_a_failed_turn_resumes_its_session() {
 #[test]
 fn a_retry_whose_session_never_began_starts_it_over_from_the_issue() {
     let (rig, runner) = with_issue_7("zeus");
-    rig.claude
-        .script([Scripted::Fail(AgentError::Failed("overloaded".into()))]);
+    rig.claude.script([Scripted::Fail(AgentError::Failed(
+        crate::settings::Harness::ClaudeCode,
+        "overloaded".into(),
+    ))]);
     step(&runner).unwrap();
     let first = rig.claude.calls()[0].session.id().clone();
     rig.ask(&runner, "rule", Some("1 yes"));
     rig.claude.script([
-        Scripted::Fail(AgentError::NoSession(first.clone())),
+        Scripted::Fail(AgentError::NoSession(
+            crate::settings::Harness::ClaudeCode,
+            first.clone(),
+        )),
         Scripted::Reply(usage(1), Cost(1)),
     ]);
     assert!(matches!(
@@ -346,8 +358,10 @@ fn a_retry_whose_session_never_began_starts_it_over_from_the_issue() {
 #[test]
 fn a_retried_turn_gets_a_whole_ceiling_however_long_the_ruling_waited() {
     let (rig, runner) = with_issue_7("zeus");
-    rig.claude
-        .script([Scripted::Fail(AgentError::Failed("overloaded".into()))]);
+    rig.claude.script([Scripted::Fail(AgentError::Failed(
+        crate::settings::Harness::ClaudeCode,
+        "overloaded".into(),
+    ))]);
     step(&runner).unwrap();
     rig.clock.advance(2000);
     rig.ask(&runner, "rule", Some("1 yes"));
@@ -360,8 +374,10 @@ fn a_retried_turn_gets_a_whole_ceiling_however_long_the_ruling_waited() {
 #[test]
 fn a_no_on_a_failed_turn_stops_the_work_item_the_way_a_timed_out_one_does() {
     let (rig, runner) = with_issue_7("rotom");
-    rig.claude
-        .script([Scripted::Fail(AgentError::Failed("overloaded".into()))]);
+    rig.claude.script([Scripted::Fail(AgentError::Failed(
+        crate::settings::Harness::ClaudeCode,
+        "overloaded".into(),
+    ))]);
     step(&runner).unwrap();
     rig.ask(&runner, "rule", Some("1 no not worth another go"));
     assert!(matches!(
@@ -380,7 +396,9 @@ fn a_no_on_a_failed_turn_stops_the_work_item_the_way_a_timed_out_one_does() {
 #[test]
 fn a_turn_past_its_ceiling_is_stopped_and_a_yes_resumes_its_session() {
     let (rig, runner) = with_issue_7("zeus");
-    rig.claude.script([Scripted::Fail(AgentError::TimedOut)]);
+    rig.claude.script([Scripted::Fail(AgentError::TimedOut(
+        crate::settings::Harness::ClaudeCode,
+    ))]);
     let Some(StepReport::TimedOut {
         issue,
         session,
@@ -423,7 +441,9 @@ fn a_turn_past_its_ceiling_is_stopped_and_a_yes_resumes_its_session() {
 #[test]
 fn a_no_on_a_timed_out_turn_stops_the_work_item_keeping_nothing_of_its_own() {
     let (rig, runner) = with_issue_7("rotom");
-    rig.claude.script([Scripted::Fail(AgentError::TimedOut)]);
+    rig.claude.script([Scripted::Fail(AgentError::TimedOut(
+        crate::settings::Harness::ClaudeCode,
+    ))]);
     step(&runner).unwrap();
     rig.ask(&runner, "rule", Some("1 no not worth waiting for"));
     assert!(matches!(

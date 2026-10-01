@@ -27,6 +27,7 @@ mod local_paths;
 mod model_seat;
 mod relay;
 mod reviewer;
+mod routed;
 mod sandbox;
 
 pub use agent::{
@@ -38,6 +39,7 @@ pub use local_paths::Guarded;
 pub use model_seat::ModelSeat;
 pub use relay::{Cleared, Relay, RelayError};
 pub use reviewer::{Reviewer, ReviewerError};
+pub use routed::Routed;
 pub use sandbox::{Policy, Sandbox, SandboxError};
 
 /// Seconds since the Unix epoch

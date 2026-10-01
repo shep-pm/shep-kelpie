@@ -24,11 +24,12 @@ use super::review::run_review_call;
 use super::rework;
 use super::ruling::park;
 use super::trigger::lock;
+use crate::board::WorkerModel;
 use crate::pacer::Scope;
 use crate::ports::{AgentCall, AgentError, AgentReply, Cost, Issue, Role, Session, Tools};
 use crate::preview::{self, McpFiles, WORKER_INSTRUCTIONS};
 use crate::profile::WorkerProfile;
-use crate::settings::NonBlank;
+use crate::settings::{AgentHarness, Limit, NonBlank};
 use crate::skills::{Step, split_command};
 use crate::state::{Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
@@ -89,7 +90,7 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
             Begin::Report(report) => return Ok(Some(report)),
             Begin::Call(call) => {
                 let result = claude.run(&call);
-                if start_over.is_none() && matches!(result, Err(AgentError::NoSession(_))) {
+                if start_over.is_none() && matches!(result, Err(AgentError::NoSession(..))) {
                     start_over = issue;
                     continue;
                 }
@@ -357,8 +358,10 @@ impl Runner {
                     .invoke(Step::Implement, &first_prompt(item.issue, &issue))
             }
         };
+        let (harness, limit) = self.worker_agent(item);
         self.prepared(AgentCall {
             role: Role::Worker,
+            harness,
             issue: item.issue,
             model: item.worker.model.clone(),
             effort: item.worker.effort,
@@ -372,8 +375,23 @@ impl Runner {
             plugin_dirs: self.skills.plugin_dirs().to_vec(),
             tools: Tools::Work,
             reach: profile.reach(),
-            lease: self.agents.limits.worker.lease().cloned(),
+            lease: limit.lease().cloned(),
         })
+    }
+
+    /// The harness `item`'s worker runs on, and what holds its turns back
+    ///
+    /// The worker's agent runs the item, unless it runs another model: a
+    /// `worker:` label's, or `models`' beside a local agent. Those are
+    /// Claude models, on Claude Code and its account.
+    pub(super) fn worker_agent(&self, item: &WorkItem) -> (AgentHarness, Limit) {
+        match item.worker == WorkerModel::from(&self.agents.worker) {
+            true => (
+                self.agents.worker.harness.clone(),
+                self.agents.limits.worker.clone(),
+            ),
+            false => (AgentHarness::ClaudeCode, Limit::default()),
+        }
     }
 
     /// `call`, once its harness has what it needs on disk
@@ -524,7 +542,7 @@ impl Runner {
                     }
                 }
             }
-            Err(AgentError::TimedOut) => {
+            Err(AgentError::TimedOut(_)) => {
                 item.turn = Turn::Ended { at: now };
                 timed_out(self.names(), &mut next, issue)
             }

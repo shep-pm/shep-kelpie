@@ -285,8 +285,9 @@ mod tests {
         rig.forge.label(8, "worker:gpt-high");
         assert_eq!(
             rig.ask(&runner, "add", Some("8")),
-            json!({ "error": "label `worker:gpt-high` is not `worker:<model>-<effort>` \
-                              with a model from opus, sonnet, haiku, fable" })
+            json!({ "error": "label `worker:gpt-high` is not `worker:local`, nor \
+                              `worker:<model>-<effort>` with a model from opus, sonnet, \
+                              haiku, fable" })
         );
         rig.forge.label(9, "worker:haiku-low");
         let item = &rig.ask(&runner, "add", Some("9"))["work_item"];
@@ -473,8 +474,10 @@ mod tests {
         let (rig, runner) = running("koji");
         rig.forge.list_ready(7, false);
         step(&runner).unwrap();
-        rig.claude
-            .script([Scripted::Fail(AgentError::Failed("overloaded".into()))]);
+        rig.claude.script([Scripted::Fail(AgentError::Failed(
+            crate::settings::Harness::ClaudeCode,
+            "overloaded".into(),
+        ))]);
         step(&runner).unwrap();
         assert_eq!(
             rig.ask(&runner, "status", None)["work_item"]["pull_request"],

@@ -231,12 +231,16 @@ fn a_review_round_waits_on_its_reviewers_account_while_the_worker_works_on() {
 #[test]
 fn a_local_worker_is_never_paced_and_holds_the_gpu_for_its_whole_turn() {
     let (rig, runner) = named("rotom", ALL_QWEN);
-    // Both accounts past half their windows: neither is the local model's limit.
-    rig.meter.set(Rig::utilization(90, 90));
+    // A new item may run on Claude, unlabelled, so its window is read once.
+    rig.meter.set(Rig::utilization(0, 1));
     rig.codex_meter.set(Rig::utilization(90, 90));
     let lock = GpuLock::under(&rig.home.path().join("tmp"));
     rig.forge.list_ready(7, false);
+    rig.forge.label(7, "worker:local");
     assert!(dispatched(&step(&runner).unwrap()));
+    // Both accounts past half their windows: neither is the local model's limit.
+    rig.clock.advance(RECHECK_SECS);
+    rig.meter.set(Rig::utilization(90, 90));
 
     let hold = Hold::default();
     rig.claude.script([Scripted::Hold(hold.clone())]);
@@ -255,12 +259,12 @@ fn a_local_worker_is_never_paced_and_holds_the_gpu_for_its_whole_turn() {
         );
         let status = rig.ask(&runner, "status", None);
         assert_eq!(status["local_leases"]["gpu"]["what"], json!(holder.what));
-        assert_eq!(status["pacer"].get("claude"), None);
+        assert_eq!(status["pacer"]["claude"]["holding"], json!(null));
         hold.release();
         turn.join().unwrap();
     });
     assert_eq!(lock.holder(), None, "let go when the turn ends");
-    assert_eq!((rig.meter.reads(), rig.codex_meter.reads()), (0, 0));
+    assert_eq!((rig.meter.reads(), rig.codex_meter.reads()), (1, 0));
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["local_leases"], json!({ "gpu": null }));
 }
@@ -268,6 +272,7 @@ fn a_local_worker_is_never_paced_and_holds_the_gpu_for_its_whole_turn() {
 #[test]
 fn a_local_turn_waits_while_a_review_round_holds_the_gpu() {
     let (rig, runner) = named("xilriws", "worker = \"qwen\"\n");
+    rig.forge.label(7, "worker:local");
     rig.ask(&runner, "add", Some("7"));
     let lock = GpuLock::under(&rig.home.path().join("tmp"));
     let round = Claim {
@@ -289,6 +294,30 @@ fn a_local_turn_waits_while_a_review_round_holds_the_gpu() {
 }
 
 #[test]
+fn beside_a_local_worker_an_unlabelled_issue_runs_on_claude_and_its_window() {
+    let (rig, runner) = named("rotom", "worker = \"qwen\"\n");
+    rig.forge.list_ready(7, false);
+    rig.meter.set(Rig::utilization(0, 1));
+    assert!(dispatched(&step(&runner).unwrap()));
+
+    rig.clock.advance(RECHECK_SECS);
+    rig.meter.set(Rig::utilization(0, 55));
+    let (kind, _) = held(step(&runner).unwrap());
+    assert_eq!(kind, HoldKind::Window);
+
+    rig.clock.advance(RECHECK_SECS);
+    rig.meter.set(Rig::utilization(0, 1));
+    rig.claude.script([Scripted::Say("done")]);
+    step(&runner).unwrap();
+    let call = &rig.claude.calls()[0];
+    assert_eq!(
+        (call.model.as_str(), call.lease.as_ref()),
+        ("claude-sonnet-5", None)
+    );
+    assert_eq!(call.harness, crate::settings::AgentHarness::ClaudeCode);
+}
+
+#[test]
 fn a_project_with_no_local_agent_shows_no_leases() {
     let (rig, runner) = named("chelone", "");
     let status = rig.ask(&runner, "status", None);
@@ -298,6 +327,7 @@ fn a_project_with_no_local_agent_shows_no_leases() {
 #[test]
 fn spend_without_dollars_shows_tokens_and_says_it_has_none() {
     let (rig, runner) = named("reactmap", "worker = \"qwen\"\n");
+    rig.forge.label(7, "worker:local");
     rig.ask(&runner, "add", Some("7"));
     let used = Usage {
         input: 120,

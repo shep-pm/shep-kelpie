@@ -460,8 +460,10 @@ fn a_parent_the_forge_will_not_close_waits_on_a_ruling_and_the_board_goes_on() {
 fn a_planning_call_that_times_out_is_tried_once_more_in_a_fresh_session() {
     let (rig, runner) = planning("zeus");
     rig.forge.list_ready(5, false);
-    rig.claude
-        .script([Scripted::Fail(AgentError::TimedOut), Scripted::Text(WHOLE)]);
+    rig.claude.script([
+        Scripted::Fail(AgentError::TimedOut(crate::settings::Harness::ClaudeCode)),
+        Scripted::Text(WHOLE),
+    ]);
     assert!(matches!(
         step(&runner).unwrap(),
         Some(StepReport::Planned {

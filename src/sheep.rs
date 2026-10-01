@@ -22,7 +22,7 @@ use crate::coderabbit::CodeRabbit;
 use crate::cubic::Cubic;
 use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
-use crate::ports::{Leases, Ports, SandboxError};
+use crate::ports::{Leases, Ports, Routed, SandboxError};
 use crate::runner::{ACTIONS, ProjectName, ProjectPaths, READ_EVERY, Runner, answer, step};
 use crate::shep_home;
 
@@ -84,7 +84,7 @@ fn serve(project: &str) -> Result<(), String> {
     let epoch = Epoch(u64::from(std::process::id()));
     let leases = Arc::new(ShepLeases::new(shepherd.clone(), Asker::new(epoch)));
     let ports = Ports {
-        agents: Arc::new(claude.clone()),
+        agents: Arc::new(Routed::new(Arc::new(claude.clone()), Arc::new(claude.pi()))),
         forge: Box::new(Gh),
         meter: Box::new(claude.meter()),
         codex_meter: Box::new(claude.codex_meter()),

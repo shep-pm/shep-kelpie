@@ -288,7 +288,10 @@ impl Agents for FakeClaude {
                     session_cost: Some(Cost(0)),
                 })
             }
-            None => Err(AgentError::Failed("the rig scripts no reply".into())),
+            None => Err(AgentError::Failed(
+                crate::settings::Harness::ClaudeCode,
+                "the rig scripts no reply".into(),
+            )),
         }
     }
 }

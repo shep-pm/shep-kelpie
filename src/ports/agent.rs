@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::settings::{Effort, GuardHook, LeaseName};
+use crate::settings::{AgentHarness, Effort, GuardHook, Harness, LeaseName};
 
 /// Which role an agent call is made for
 // wire format: changing this is a breaking change to the state file
@@ -134,6 +134,8 @@ pub struct Guard {
 pub struct AgentCall {
     /// The role it is made for
     pub role: Role,
+    /// The harness it runs on
+    pub harness: AgentHarness,
     /// The issue of the work item it is made for, which its lamb is labelled with
     pub issue: u64,
     /// The model, as the agent names it
@@ -245,36 +247,37 @@ pub trait Agents: Send + Sync {
     fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError>;
 }
 
-/// Why an agent call failed
-// Every agent runs on Claude Code, which a ruling names as `claude`.
+/// Why an agent call failed, naming the harness where it was the harness's doing
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentError {
     /// The harness's settings for the call could not be written, with why
     Setup(String),
     /// The harness could not be started, with the OS's reason
-    Spawn(String),
+    Spawn(Harness, String),
     /// The session to resume has no transcript, so it never started
-    NoSession(SessionId),
+    NoSession(Harness, SessionId),
     /// The call was ended because the runner is stopping
     Stopped,
     /// The call ran past its turn's ceiling and was stopped
-    TimedOut,
+    TimedOut(Harness),
     /// The harness exited without a result it reports as a success
-    Failed(String),
+    Failed(Harness, String),
     /// The harness's output was not the result asked for
-    Unreadable(String),
+    Unreadable(Harness, String),
 }
 
 impl fmt::Display for AgentError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Setup(reason) => f.write_str(reason),
-            Self::Spawn(error) => write!(f, "cannot run claude: {error}"),
-            Self::NoSession(id) => write!(f, "claude has no session {}", id.0),
-            Self::Stopped => f.write_str("claude was stopped with the runner"),
-            Self::TimedOut => f.write_str("claude ran past its turn's ceiling"),
-            Self::Failed(detail) => write!(f, "claude failed: {}", detail.trim()),
-            Self::Unreadable(output) => write!(f, "unreadable claude output: {}", output.trim()),
+            Self::Spawn(h, error) => write!(f, "cannot run {}: {error}", h.command()),
+            Self::NoSession(h, id) => write!(f, "{} has no session {}", h.command(), id.0),
+            Self::Stopped => f.write_str("the agent was stopped with the runner"),
+            Self::TimedOut(h) => write!(f, "{} ran past its turn's ceiling", h.command()),
+            Self::Failed(h, detail) => write!(f, "{} failed: {}", h.command(), detail.trim()),
+            Self::Unreadable(h, output) => {
+                write!(f, "unreadable {} output: {}", h.command(), output.trim())
+            }
         }
     }
 }

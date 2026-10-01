@@ -625,7 +625,9 @@ fn a_fix_turn_that_pushes_nothing_parks_instead_of_opening_round_two() {
 fn a_timed_out_fix_turn_resumes_that_round() {
     let (rig, runner, head) = summoned("mew");
     hold_a_finding(&rig, &runner, &head, "Name the flag.");
-    rig.claude.script([Scripted::Fail(AgentError::TimedOut)]);
+    rig.claude.script([Scripted::Fail(AgentError::TimedOut(
+        crate::settings::Harness::ClaudeCode,
+    ))]);
     let Some(StepReport::TimedOut { id, .. }) = step(&runner).unwrap() else {
         panic!("the fix turn did not time out");
     };

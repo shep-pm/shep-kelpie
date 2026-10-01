@@ -13,7 +13,7 @@ use std::path::Path;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::agents::{Limit, find};
+use super::agents::{AgentHarness, Limit, find};
 use super::{
     AgentName, Effort, Endpoint, LocalCommand, LocalRound, NonBlank, RoleModel, Settings,
     SettingsError,
@@ -159,6 +159,10 @@ pub struct ClaudeSession {
     #[serde(skip)]
     #[schemars(skip)]
     pub limit: Limit,
+    /// The harness it runs on: Claude Code, or a session agent's own
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub harness: AgentHarness,
 }
 
 impl ClaudeSession {
@@ -167,6 +171,7 @@ impl ClaudeSession {
         RoleModel {
             model: self.model.clone(),
             effort: self.effort,
+            harness: self.harness.clone(),
         }
     }
 }
@@ -199,6 +204,7 @@ impl LoopReviewer {
                 effort: model.effort,
                 paths: Vec::new(),
                 limit: limit.clone(),
+                harness: model.harness.clone(),
             }),
         }
     }
@@ -297,6 +303,7 @@ impl Settings {
                         effort: model.effort,
                         paths,
                         limit,
+                        harness: model.harness,
                     })
                 }
             };

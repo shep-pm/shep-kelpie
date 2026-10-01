@@ -385,8 +385,10 @@ fn a_workers_question_still_parks_on_a_ruling() {
 #[test]
 fn a_failed_turn_still_parks_on_a_ruling() {
     let (rig, runner) = auto_with_issue_7("golbat");
-    rig.claude
-        .script([Scripted::Fail(AgentError::Failed("overloaded".into()))]);
+    rig.claude.script([Scripted::Fail(AgentError::Failed(
+        crate::settings::Harness::ClaudeCode,
+        "overloaded".into(),
+    ))]);
     let id = raised(step(&runner).unwrap());
     still_asks(&rig, &runner, id, "turn-failed");
 }
@@ -394,7 +396,9 @@ fn a_failed_turn_still_parks_on_a_ruling() {
 #[test]
 fn a_turn_past_its_ceiling_still_parks_on_a_ruling() {
     let (rig, runner) = auto_with_issue_7("rotom");
-    rig.claude.script([Scripted::Fail(AgentError::TimedOut)]);
+    rig.claude.script([Scripted::Fail(AgentError::TimedOut(
+        crate::settings::Harness::ClaudeCode,
+    ))]);
     let id = raised(step(&runner).unwrap());
     still_asks(&rig, &runner, id, "turn-timeout");
 }

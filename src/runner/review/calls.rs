@@ -129,6 +129,7 @@ fn build_call(
     let session = new_session_id().map_err(|e| format!("cannot draw a session id: {e}"))?;
     Ok(AgentCall {
         role,
+        harness: model.harness.clone(),
         issue,
         model: model.model.as_str().to_owned(),
         effort: model.effort,
@@ -418,6 +419,7 @@ mod tests {
         let model = RoleModel {
             model: "claude-sonnet-5".to_owned().try_into().unwrap(),
             effort: Effort::Medium,
+            harness: crate::settings::AgentHarness::ClaudeCode,
         };
         let worker = home.path().join("worker");
         let round = Round {
