@@ -87,13 +87,13 @@ fn the_settings_file_fences_writes_to_this_worktree_and_its_git_paths() {
     let [seen] = rig.claude.seen().try_into().unwrap();
     let kelpie = rig.home.path().join("kelpie");
     let git_dir = fs::canonicalize(rig.repo().join(".git")).unwrap();
-    let allow = &seen.settings["sandbox"]["filesystem"]["allowWrite"];
+    let allow = &seen.sandbox["filesystem"]["allowWrite"];
     assert_eq!(allow[0], json!(kelpie.join("wt/koji/7")));
     assert_eq!(allow[1], json!(kelpie.join("targets/koji/7")));
     assert_eq!(allow[2], json!(git_dir.join("objects")));
     assert_eq!(allow[3], json!(git_dir.join("worktrees/7")));
     assert_eq!(
-        seen.settings["sandbox"]["filesystem"]["denyWrite"][0],
+        seen.sandbox["filesystem"]["denyWrite"][0],
         json!(git_dir.join("config"))
     );
     assert_eq!(
@@ -208,7 +208,7 @@ fn a_worker_that_repoints_its_git_file_cannot_move_its_fence() {
     step(&runner).unwrap();
     let [_, seen] = rig.claude.seen().try_into().unwrap();
     let git_dir = fs::canonicalize(rig.repo().join(".git")).unwrap();
-    let allow = &seen.settings["sandbox"]["filesystem"]["allowWrite"];
+    let allow = &seen.sandbox["filesystem"]["allowWrite"];
     assert_eq!(allow[2], json!(git_dir.join("objects")));
     assert_eq!(allow[3], json!(git_dir.join("worktrees/7")));
     assert!(!allow.to_string().contains("wanted"), "{allow}");

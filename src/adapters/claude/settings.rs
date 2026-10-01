@@ -1,17 +1,16 @@
-//! Claude Code's settings file, built from a call's tools and sandbox
+//! Claude Code's settings file, built from a call's tools and reach
 //!
-//! A fenced session runs in Claude Code's sandbox, which confines Bash and
-//! its children and fails closed. The sandbox does not cover Claude's own
-//! file tools, so a hook that runs `kelpie confine` holds those to the same
-//! folders, and `kelpie guard` judges every command before any hook the
-//! project adds. A session without a fence is held by its deny rules alone.
+//! Every call runs inside kelpie's sandbox, which holds the whole process.
+//! These settings are the second layer: deny rules, and for a fenced session
+//! a hook that runs `kelpie confine` on the file tools, `kelpie guard` on
+//! every command, then any hook the project adds.
 
 use std::path::Path;
 
 use serde_json::{Value, json};
 
 use crate::guard::{FOLDER_FLAG, NAME_FLAG};
-use crate::ports::{Fence, Sandbox, Tools};
+use crate::ports::{Fence, Reach, Tools};
 use crate::settings::HookEvent;
 
 /// The tools that write files without going through Bash
@@ -55,54 +54,40 @@ const PLAYWRIGHT_TOOLS: &str = "mcp__playwright__.*";
 
 // The Playwright MCP server runs outside the sandbox. These tools read a local
 // file (or run code that could), so none is the worker's.
-const PLAYWRIGHT_DENY: [&str; 4] = [
+pub(crate) const PLAYWRIGHT_DENY: [&str; 4] = [
     "mcp__playwright__browser_run_code_unsafe",
     "mcp__playwright__browser_file_upload",
     "mcp__playwright__browser_drop",
     "mcp__playwright__browser_set_storage_state",
 ];
 
-// The mach service a dev server's file watcher looks up on macOS
-const DEV_SERVER_MACH: [&str; 1] = ["com.apple.FSEvents"];
-
 /// The settings file's contents for a call with these tools and sandbox
-pub(crate) fn settings(tools: Tools, sandbox: &Sandbox) -> Value {
+pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
     let mut deny: Vec<String> = Vec::new();
-    if let Some(fence) = &sandbox.fence {
+    if let Some(fence) = &reach.fence {
         deny.extend(fence.no_read.iter().map(|p| read_rule(p)));
         deny.extend(fence.no_commands.iter().map(|c| format!("Bash({c})")));
     }
-    deny.extend(tool_denies(tools, sandbox).map(str::to_owned));
-    let Some(fence) = &sandbox.fence else {
+    deny.extend(tool_denies(tools, reach).map(str::to_owned));
+    let Some(fence) = &reach.fence else {
         let mut permissions = json!({ "deny": deny });
-        if !sandbox.read.is_empty() {
+        if !reach.read.is_empty() {
             // Read outside the working folder is refused under `-p` unless the folder is added.
-            permissions["additionalDirectories"] = json!(sandbox.read);
+            permissions["additionalDirectories"] = json!(reach.read);
         }
         return json!({ "permissions": permissions });
     };
-    // Without `strictAllowlist`, `bypassPermissions` lets a host outside the list through.
-    let mut network = json!({ "allowedDomains": fence.hosts, "strictAllowlist": true });
     if fence.preview.is_some() {
-        // A dev server binds a local port, and its file watcher needs FSEvents.
-        network["allowLocalBinding"] = true.into();
-        network["allowMachLookup"] = json!(DEV_SERVER_MACH);
         deny.extend(PLAYWRIGHT_DENY.iter().map(|&r| r.to_owned()));
     }
     let mut permissions = json!({ "deny": deny });
-    if !sandbox.read.is_empty() {
-        permissions["additionalDirectories"] = json!(sandbox.read);
+    if !reach.read.is_empty() {
+        permissions["additionalDirectories"] = json!(reach.read);
     }
     json!({
-        "sandbox": {
-            "enabled": true,
-            "failIfUnavailable": true,
-            "allowUnsandboxedCommands": false,
-            // Without it, `gh` fails TLS verification on macOS: x509 OSStatus -26276.
-            "enableWeakerNetworkIsolation": true,
-            "filesystem": { "allowWrite": fence.write, "denyWrite": fence.no_write },
-            "network": network,
-        },
+        // Kelpie's sandbox holds the whole process, and on macOS Claude Code's
+        // own cannot start inside it: every command would be refused.
+        "sandbox": { "enabled": false },
         "permissions": permissions,
         // A project's own settings could otherwise switch every hook off,
         // `confine` and the guard with them. This file outranks them.
@@ -112,14 +97,14 @@ pub(crate) fn settings(tools: Tools, sandbox: &Sandbox) -> Value {
     })
 }
 
-fn tool_denies(tools: Tools, sandbox: &Sandbox) -> impl Iterator<Item = &'static str> {
+fn tool_denies(tools: Tools, reach: &Reach) -> impl Iterator<Item = &'static str> {
     let denied: &'static [&'static str] = match tools {
         Tools::Work => &WORK_DENY,
         Tools::Review => &REVIEW_DENY,
         Tools::Answer => &NO_TOOLS,
     };
     // An answer that may read a folder keeps Read and nothing else.
-    let reads = tools == Tools::Answer && !sandbox.read.is_empty();
+    let reads = tools == Tools::Answer && !reach.read.is_empty();
     denied
         .iter()
         .copied()
@@ -220,12 +205,12 @@ mod tests {
 
     #[test]
     fn a_review_round_keeps_its_read_tools_and_reads_its_folders() {
-        let bare = settings(Tools::Review, &Sandbox::default());
+        let bare = settings(Tools::Review, &Reach::default());
         assert_eq!(
             bare,
             json!({ "permissions": { "deny": ["Agent", "Task", "Bash"] } })
         );
-        let shots = Sandbox {
+        let shots = Reach {
             read: vec![PathBuf::from("/k/shots/7")],
             fence: None,
         };
@@ -237,9 +222,9 @@ mod tests {
 
     #[test]
     fn an_answer_reads_nothing_unless_its_sandbox_lists_a_folder() {
-        let none = settings(Tools::Answer, &Sandbox::default());
+        let none = settings(Tools::Answer, &Reach::default());
         assert_eq!(none, json!({ "permissions": { "deny": NO_TOOLS } }));
-        let shot = Sandbox {
+        let shot = Reach {
             read: vec![PathBuf::from("/k/shots/7")],
             fence: None,
         };

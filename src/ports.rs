@@ -27,16 +27,18 @@ mod local_paths;
 mod model_seat;
 mod relay;
 mod reviewer;
+mod sandbox;
 
 pub use agent::{
-    AgentCall, AgentError, AgentReply, Agents, Cost, Fence, Guard, Role, Sandbox, Session,
-    SessionId, Tools, Usage,
+    AgentCall, AgentError, AgentReply, Agents, Cost, Fence, Guard, Reach, Role, Session, SessionId,
+    Tools, Usage,
 };
 pub use leased::{Leased, LocalLeases};
 pub use local_paths::Guarded;
 pub use model_seat::ModelSeat;
 pub use relay::{Cleared, Relay, RelayError};
 pub use reviewer::{Reviewer, ReviewerError};
+pub use sandbox::{Policy, Sandbox, SandboxError};
 
 /// Seconds since the Unix epoch
 // wire format: changing this is a breaking change to the state file

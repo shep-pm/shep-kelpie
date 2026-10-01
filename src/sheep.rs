@@ -16,13 +16,13 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::adapters::{
-    ClaudeCli, Curl, Gh, LocalReviewer, RelayCli, ShepLeases, ShotsCli, SystemClock,
+    ClaudeCli, Curl, Gh, LocalReviewer, RelayCli, SandboxRuntime, ShepLeases, ShotsCli, SystemClock,
 };
 use crate::coderabbit::CodeRabbit;
 use crate::cubic::Cubic;
 use crate::lease::Epoch;
 use crate::lease::wire::{Asker, GRANT};
-use crate::ports::{Leases, Ports};
+use crate::ports::{Leases, Ports, SandboxError};
 use crate::runner::{ACTIONS, ProjectName, ProjectPaths, READ_EVERY, Runner, answer, step};
 use crate::shep_home;
 
@@ -70,8 +70,15 @@ fn serve(project: &str) -> Result<(), String> {
     let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
     let mut paths = ProjectPaths::under(&kelpie_home, &project);
     paths.shep_home.clone_from(&shep_home);
+    // Every agent call runs inside the sandbox runtime, so a runner without one stops here.
+    if !paths.tools.sandbox().is_file() {
+        return Err(SandboxError::Missing(paths.tools.sandbox()).to_string());
+    }
     let shepherd = shep_channel::serve();
-    let claude = ClaudeCli::labelling(Arc::new(shepherd.clone()));
+    let claude = ClaudeCli::labelling(Arc::new(shepherd.clone())).sandboxed(
+        Arc::new(SandboxRuntime::new(paths.tools.clone())),
+        home.clone(),
+    );
     let reviewer = LocalReviewer::default();
     let shots = ShotsCli::new(paths.tools.clone());
     let epoch = Epoch(u64::from(std::process::id()));

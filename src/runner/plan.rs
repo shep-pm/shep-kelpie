@@ -13,7 +13,7 @@ use super::{Answer, RuleError, Runner};
 use crate::board::{ReadyIssue, Skip};
 use crate::plan::{self, Piece, Plan, Planned, Stage};
 use crate::ports::{
-    AgentCall, AgentError, AgentReply, Agents, Cost, Role, Sandbox, Session, Tools, Usage,
+    AgentCall, AgentError, AgentReply, Agents, Cost, Reach, Role, Session, Tools, Usage,
 };
 use crate::settings::MergeAuthority;
 use crate::skills::Step;
@@ -110,7 +110,7 @@ impl Runner {
             plugin_dirs: self.skills.plugin_dirs().to_vec(),
             timeout: Some(Duration::from_secs(minutes * 60)),
             tools: Tools::Review,
-            sandbox: Sandbox::default(),
+            reach: Reach::default(),
             lease: self.agents.limits.planner.lease().cloned(),
         };
         Ok((self.prepared(call)?, view))

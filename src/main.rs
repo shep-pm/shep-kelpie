@@ -21,8 +21,8 @@
 //! `shep kelpie settings move <project> [<sheep>]`: moves a project's settings
 //! file, and kelpie's own, into their tables on kelpie's shepherd.
 //!
-//! `shep kelpie tools install`: installs the tools kelpie shows a work item's UI
-//! with, under kelpie's home.
+//! `shep kelpie tools install`: installs the sandbox runtime every agent runs
+//! in, and the tools kelpie shows a work item's UI with, under kelpie's home.
 //!
 //! `shep kelpie totp [--rotate]`, run as `shep kelpie totp [--rotate]` where kelpie
 //! is not on the PATH: prints the authenticator secret that answers a ruling
@@ -31,7 +31,10 @@
 //! ntfy back on after too many wrong codes.
 //!
 //! `kelpie shots-mcp <tools> <job>`: a worker's shots tool, an MCP server
-//! Claude Code starts from the worker's MCP config.
+//! kelpie starts outside the worker's sandbox.
+//!
+//! `kelpie mcp-connect <socket>`: what an agent starts in place of such a
+//! server, inside its sandbox, which carries its stdio to the server's socket.
 //!
 //! `kelpie relay-yes <project> <id>`, `kelpie relay-answer <project>
 //! <params>`: what the relay's own settings gate on. Both send
@@ -105,6 +108,15 @@ fn main() -> ExitCode {
         {
             move_settings(project, sheep.first().unwrap_or(project))
         }
+        [role, socket] if role == "mcp-connect" => {
+            match shep_kelpie::bridge::connect(Path::new(socket)) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("{e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         [role, tools, job] if role == "shots-mcp" => {
             let shots = ShotsCli::new(Tools::at(PathBuf::from(tools)));
             stop_on_signal(shots.clone());
@@ -137,7 +149,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: shep-kelpie add [<project>] | add <issue>\n       shep-kelpie start | pause | status\n       shep-kelpie rule [<id> <answer>]\n       shep-kelpie rework <pr> | adopt <pr>\n       shep-kelpie gate [<issue>] | drop [<issue>]\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie browse-guard <domain>...\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n       shep-kelpie shots-mcp <tools> <job>\n       shep-kelpie relay-yes <project> <id>\n       shep-kelpie relay-answer <project> <params>\n       shep-kelpie relay-gate <kelpie>\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.\n\n{}\n\n{}",
+                "usage: shep-kelpie add [<project>] | add <issue>\n       shep-kelpie start | pause | status\n       shep-kelpie rule [<id> <answer>]\n       shep-kelpie rework <pr> | adopt <pr>\n       shep-kelpie gate [<issue>] | drop [<issue>]\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie browse-guard <domain>...\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n       shep-kelpie shots-mcp <tools> <job>\n       shep-kelpie mcp-connect <socket>\n       shep-kelpie relay-yes <project> <id>\n       shep-kelpie relay-answer <project> <params>\n       shep-kelpie relay-gate <kelpie>\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.\n\n{}\n\n{}",
                 shep_kelpie::lease::cli::USAGE,
                 shep_kelpie::flock::USAGE,
                 shep_kelpie::flock::rule::HELP

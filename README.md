@@ -54,9 +54,9 @@ ID  NAME    STATUS  PID    RESTARTS  EXIT  CPU  MEM   UPTIME  SOURCE
 
 Adopt it once and leave it enabled. It is the dog that holds the leases every project's runner asks before a summon.
 
-### 3. Install the UI tools, if a project shows a UI
+### 3. Install kelpie's tools
 
-Skip this for a project with no UI to show.
+Every project needs them. Each agent runs inside the sandbox runtime they bring, and a runner won't start without it.
 
 ```sh
 shep kelpie tools install
@@ -94,7 +94,7 @@ shep kelpie doctor
 ```
 ok       claude: installed and logged in
 ok       gh: logged in as <you>
-ok       sandbox: Claude Code's sandbox can run
+ok       sandbox: the sandbox runtime can run
 ok       shepherd: shep 0.12.0 at /path/to/.shep
 ok       dog: kelpie's dog is running and has named itself
 ok       scratch: checkout: /path/to/checkout is a git checkout with an origin
@@ -204,7 +204,7 @@ Quotes are optional, but zsh still needs them around a note with `?`, `*`, `!` o
 
 `add` names the project after the repo, or `shep kelpie add <name>`. It makes `ready-for-agent`, `ready-for-human` and `review please` where the repo lacks them, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. `add` and `start` say how to bring the dog up when the adopted kelpie is not running with its channel. Worktrees, build folders and state go under `~/.kelpie`, never inside the checkout. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name.
 
-`doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, Claude Code's sandbox, the shepherd's version, each project's labels, CodeRabbit where a project turns it on, the local review command or endpoint where one is set, the preview tools for a project that shows its UI, and that rulings have a webhook where they go to one. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
+`doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's labels, CodeRabbit where a project turns it on, the local review command or endpoint where one is set, the preview tools for a project that shows its UI, and that rulings have a webhook where they go to one. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
 
 Lookout edits a project's table in the runner's pane, and kelpie's own settings in its `[kelpie]` section of `dogs.toml`. Start that section from `kelpie-settings.example.toml`, and keep `dogs.toml` private: the webhook's URL is a credential. `ruling_channels` there, or in a project's table, picks the webhook, the relay or both. Both is the default, and only a project that posts to the webhook needs a `webhook` table. Its `[kelpie.reviewers]` defines the pull request reviewers, CodeRabbit and cubic, by their review windows, and a project's `pull_request_reviewers` lists the ones it uses in preference order: each round goes to the first whose window is free. On an ntfy webhook, a ruling can be answered from the topic: run `shep kelpie totp` once and scan the QR code into an authenticator app, then reply with the line the alert ends on, such as `14 yes <code>`, with the app's code last. A reply takes the same answers as `shep kelpie rule`. Anyone who can read the topic can read rulings, but only a reply with the code of the moment answers one, and each code answers once. Five wrong codes turn answers off until `shep kelpie totp --unlock`, and `shep kelpie totp --rotate` replaces a secret that may have leaked. A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start.
 

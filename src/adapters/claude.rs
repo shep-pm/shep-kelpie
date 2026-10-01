@@ -2,16 +2,22 @@
 
 use std::ffi::OsString;
 use std::fmt;
-use std::process::{Command, Output};
+use std::path::{Path, PathBuf};
+use std::process::Output;
 use std::sync::Arc;
 
 use serde::Deserialize;
 
 use super::process::{Processes, RunError};
+use super::srt::SandboxRuntime;
 use crate::ports::{
-    AgentCall, AgentError, AgentReply, Agents, Cost, Role, Session, SessionId, Usage,
+    AgentCall, AgentError, AgentReply, Agents, Cost, Role, Sandbox, Session, SessionId, Usage,
 };
+use crate::preview::Tools;
 
+#[cfg(test)]
+mod escapes;
+pub(crate) mod sandbox;
 pub(crate) mod settings;
 
 /// What `claude -p --resume` prints when the session has no transcript
@@ -33,7 +39,7 @@ impl LambLabels for shep_channel::Shepherd {
     }
 }
 
-/// Headless Claude Code, one `claude -p` process per call
+/// Headless Claude Code, one `claude -p` process per call, each inside the sandbox
 ///
 /// Clones share their calls in flight, so one clone can stop them all.
 #[derive(Debug, Clone)]
@@ -41,14 +47,22 @@ pub struct ClaudeCli {
     pub(super) processes: Processes,
     program: OsString,
     lambs: Option<Arc<dyn LambLabels>>,
+    sandbox: Arc<dyn Sandbox>,
+    home: PathBuf,
 }
 
+// The default home and tools are the maintainer's: `$HOME` and `~/.kelpie/tools`.
 impl Default for ClaudeCli {
     fn default() -> Self {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_default();
         Self {
             processes: Processes::default(),
             program: "claude".into(),
             lambs: None,
+            sandbox: Arc::new(SandboxRuntime::new(Tools::under(&home.join(".kelpie")))),
+            home,
         }
     }
 }
@@ -62,6 +76,24 @@ impl ClaudeCli {
         }
     }
 
+    /// Runs `program` in place of `claude`, as a stand-in script does
+    #[cfg(test)]
+    pub(crate) fn with_program(program: PathBuf) -> Self {
+        Self {
+            program: program.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Runs each call inside `sandbox`, as Claude Code with its home at `home`
+    pub fn sandboxed(self, sandbox: Arc<dyn Sandbox>, home: PathBuf) -> Self {
+        Self {
+            sandbox,
+            home,
+            ..self
+        }
+    }
+
     /// Ends every call in flight, and refuses new ones, as the runner stops
     ///
     /// A call ended this way returns [`AgentError::Stopped`].
@@ -72,13 +104,13 @@ impl ClaudeCli {
 
 impl Agents for ClaudeCli {
     fn prepare(&self, call: &AgentCall) -> Result<(), AgentError> {
-        write_settings(call)
+        write_settings(call)?;
+        sandbox::policy(call, &self.home).map(drop)
     }
 
     fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
-        // Stdin is closed: a `claude -p` with an open stdin waits on it.
-        let mut command = Command::new(&self.program);
-        command.args(argv(call)).current_dir(&call.cwd);
+        // The bridges stay open until the call has ended.
+        let (mut command, _bridges) = self.sandboxed_command(call)?;
         let label = format!("#{} {}", call.issue, call.role.as_str());
         let spawned = |pid| {
             if let Some(lambs) = &self.lambs {
@@ -99,7 +131,7 @@ impl Agents for ClaudeCli {
 
 /// Writes the call's settings file whole, from the call alone
 pub(crate) fn write_settings(call: &AgentCall) -> Result<(), AgentError> {
-    let text = serde_json::to_string_pretty(&settings::settings(call.tools, &call.sandbox))
+    let text = serde_json::to_string_pretty(&settings::settings(call.tools, &call.reach))
         .expect("settings are JSON");
     let folder = call.settings.parent().unwrap_or(std::path::Path::new("/"));
     std::fs::create_dir_all(folder)
@@ -116,7 +148,7 @@ pub(crate) fn write_settings(call: &AgentCall) -> Result<(), AgentError> {
 // `--setting-sources project` keeps the project's CLAUDE.md and skills and
 // drops the maintainer's own hooks, plugins and skills. It also drops the
 // worktree's `settings.local.json`, which nothing kelpie runs needs.
-fn argv(call: &AgentCall) -> Vec<OsString> {
+fn argv(call: &AgentCall, mcp_config: Option<&Path>) -> Vec<OsString> {
     let mut argv: Vec<OsString> = vec![
         "-p".into(),
         call.prompt.as_str().into(),
@@ -134,7 +166,7 @@ fn argv(call: &AgentCall) -> Vec<OsString> {
     if call.role == Role::Worker {
         argv.extend(["--permission-mode".into(), "bypassPermissions".into()]);
     }
-    if let Some(config) = &call.mcp_config {
+    if let Some(config) = mcp_config {
         argv.extend(["--mcp-config".into(), config.into()]);
     }
     for plugin in &call.plugin_dirs {
@@ -213,8 +245,9 @@ mod tests {
     use std::process::ExitStatus;
 
     use super::*;
-    use crate::ports::{Sandbox, Tools};
+    use crate::ports::{Reach, Tools};
     use crate::settings::Effort;
+    use crate::test::OpenSandbox;
 
     // Recorded from Claude Code 2.1.283 on Haiku: a call asked to say ok.
     const RESULT: &str = include_str!("../../fixtures/claude-p-result.json");
@@ -256,13 +289,13 @@ mod tests {
             mcp_config: None,
             plugin_dirs: Vec::new(),
             tools: Tools::Work,
-            sandbox: Sandbox::default(),
+            reach: Reach::default(),
             lease: None,
         }
     }
 
     fn strings(call: &AgentCall) -> Vec<String> {
-        argv(call)
+        argv(call, call.mcp_config.as_deref())
             .into_iter()
             .map(|a| a.into_string().unwrap())
             .collect()
@@ -343,7 +376,7 @@ mod tests {
         let mut review = call(Role::Reviewer, fresh());
         review.settings = dir.path().join("worker/review-settings.json");
         review.tools = Tools::Review;
-        review.sandbox.read = vec![dir.path().join("shots")];
+        review.reach.read = vec![dir.path().join("shots")];
         ClaudeCli::default().prepare(&review).unwrap();
         let written: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&review.settings).unwrap()).unwrap();
@@ -483,7 +516,8 @@ mod tests {
         let cli = ClaudeCli {
             program: claude.into(),
             ..ClaudeCli::labelling(Arc::clone(&lambs) as Arc<dyn LambLabels>)
-        };
+        }
+        .sandboxed(Arc::new(OpenSandbox::default()), dir.path().join("home"));
         for role in [Role::Worker, Role::Reviewer, Role::Judge] {
             let mut call = call(role, fresh());
             call.cwd = dir.path().to_owned();

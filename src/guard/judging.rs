@@ -51,6 +51,15 @@ const READERS: [&str; 16] = [
     "sort", "uniq", "man", "which",
 ];
 
+// Agent harnesses. The sandbox lets a worker reach the model's endpoint, so
+// one started from Bash would run a session with none of kelpie's hooks.
+const AGENTS: [&str; 2] = ["claude", "codex"];
+
+/// Why a worker may not start an agent of its own
+pub(super) const NO_AGENTS: &str = "a worker does not start an agent of its own: \
+    its session already has kelpie's checks, and a new one would run without them. \
+    Use your own tools, or a sub-agent, instead";
+
 impl CallState {
     // Each refusal once, however many commands earn it.
     fn refuse(&mut self, refusal: String) {
@@ -177,7 +186,7 @@ impl Judging<'_> {
         self.named(&run, input, cwd, shells, state);
     }
 
-    // Each git, gh or shell among the words after `run`'s program.
+    // Each git, gh, shell or agent among the words after `run`'s program.
     fn named(
         &self,
         run: &Unwrapped<'_>,
@@ -191,7 +200,8 @@ impl Judging<'_> {
         for at in 1..run.words.len() {
             let name = program(&run.words[at]);
             let shell = SHELLS.contains(&name) || OTHER_SHELLS.contains(&name);
-            let judged = matches!(name, "git" | "gh") || shell && !reader;
+            let agent = AGENTS.contains(&name);
+            let judged = matches!(name, "git" | "gh") || (shell || agent) && !reader;
             if !judged {
                 continue;
             }
@@ -251,6 +261,7 @@ impl Judging<'_> {
                 found
             }
             "gh" => gh::judge(run.words, input.heredocs, cwd.as_deref(), home),
+            name if AGENTS.contains(&name) => vec![NO_AGENTS.into()],
             name if SHELLS.contains(&name) => {
                 // A variable set in front of a shell reaches its script.
                 state.git_redirected |= run.git_redirected;

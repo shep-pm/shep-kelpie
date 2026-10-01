@@ -2,7 +2,7 @@
 //!
 //! The worker runs with no one to ask, so its sandbox is its whole fence.
 //! Writes go to its worktree, its build folder and what a commit and a push
-//! need, and never to Claude Code's own files in the worktree. Credential
+//! need, and never to agents' own files in the worktree. Credential
 //! paths are unreadable, hosts are GitHub's and the project's, and what only
 //! the project manager does is a command it may not run. Each harness's
 //! adapter enforces the fence its own way.
@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::fence;
-use crate::ports::{Fence, Guard, Sandbox};
+use crate::ports::{Fence, Guard, Reach};
 use crate::settings::{BuildDir, EnvName, GuardHook, NonBlank};
 use crate::worktree::BASE;
 
@@ -121,7 +121,7 @@ pub struct WorkerProfile<'a> {
 
 impl WorkerProfile<'_> {
     /// The worker's sandbox
-    pub fn sandbox(&self) -> Sandbox {
+    pub fn reach(&self) -> Reach {
         let git = |p: &str| self.git_common_dir.join(p);
         let branch_ref = git("refs/heads").join(self.branch);
         let tracking_ref = git("refs/remotes/origin").join(self.branch);
@@ -192,7 +192,7 @@ impl WorkerProfile<'_> {
             },
             hooks: self.guard_hooks.to_vec(),
         };
-        Sandbox {
+        Reach {
             read: Vec::new(),
             fence: Some(Box::new(fence)),
         }
@@ -232,9 +232,15 @@ mod tests {
     use crate::settings::{HookEvent, NonBlank};
 
     impl WorkerProfile<'_> {
-        // The profile as Claude Code's settings file carries it
+        // The profile as Claude Code's settings file carries it, with the
+        // sandbox kelpie runs the call in under `sandbox`, as srt reads it
         fn settings(&self) -> Value {
-            crate::adapters::claude_settings(Tools::Work, &self.sandbox())
+            let reach = self.reach();
+            let mut s = crate::adapters::claude_settings(Tools::Work, &reach);
+            assert_eq!(s["sandbox"], json!({ "enabled": false }));
+            let fence = reach.fence.as_deref().expect("a worker is fenced");
+            s["sandbox"] = crate::adapters::srt_settings(&crate::adapters::fence_policy(fence));
+            s
         }
     }
 
@@ -278,13 +284,19 @@ mod tests {
             .collect()
     }
 
+    // The whole process runs in kelpie's sandbox, which has no exceptions to
+    // ask for: no command runs outside it, and a missing one runs nothing.
     #[test]
-    fn the_sandbox_is_on_and_fails_closed_with_no_way_out() {
+    fn the_sandbox_has_no_way_out() {
         let s = settings(&[]);
-        assert_eq!(s["sandbox"]["enabled"], true);
-        assert_eq!(s["sandbox"]["failIfUnavailable"], true);
-        assert_eq!(s["sandbox"]["allowUnsandboxedCommands"], false);
-        assert_eq!(s["sandbox"]["excludedCommands"], Value::Null);
+        for key in [
+            "excludedCommands",
+            "allowUnsandboxedCommands",
+            "allowAllUnixSockets",
+        ] {
+            assert_eq!(s["sandbox"][key], Value::Null, "{key}");
+            assert_eq!(s["sandbox"]["network"][key], Value::Null, "{key}");
+        }
     }
 
     #[test]
@@ -328,6 +340,8 @@ mod tests {
                 "/k/wt/shep/7/.claude",
                 "/k/wt/shep/7/**/.claude",
                 "/k/wt/shep/7/.mcp.json",
+                "/k/wt/shep/7/.codex",
+                "/k/wt/shep/7/**/.codex",
             ]
         );
         assert_eq!(s["env"]["CARGO_TARGET_DIR"], "/k/targets/shep/7");
@@ -437,21 +451,24 @@ mod tests {
             s["sandbox"]["network"],
             json!({
                 "allowedDomains": ["github.com", "api.github.com", "pokemon-go-api.github.io"],
+                "deniedDomains": [],
                 "strictAllowlist": true,
                 "allowLocalBinding": true,
                 "allowMachLookup": ["com.apple.FSEvents"],
             })
         );
         assert_eq!(s["env"]["NODE_USE_ENV_PROXY"], "1");
-        assert_eq!(
-            s["sandbox"]["filesystem"],
-            settings(&[])["sandbox"]["filesystem"]
-                .to_string()
-                .replace("/shep/", "/lab/")
-                .parse::<Value>()
-                .unwrap(),
-            "the write fence does not move"
-        );
+        for key in ["allowWrite", "denyWrite"] {
+            assert_eq!(
+                s["sandbox"]["filesystem"][key],
+                settings(&[])["sandbox"]["filesystem"][key]
+                    .to_string()
+                    .replace("/shep/", "/lab/")
+                    .parse::<Value>()
+                    .unwrap(),
+                "the write fence does not move"
+            );
+        }
     }
 
     #[test]
@@ -469,7 +486,7 @@ mod tests {
         }
     }
 
-    // The preview widens nothing the fence on Claude Code's own files holds.
+    // The preview widens nothing the fence on agents' own files holds.
     #[test]
     fn a_preview_keeps_the_fence_on_claude_files_beside_its_own() {
         let s = with_preview(&[]);

@@ -10,7 +10,7 @@
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::ports::{AgentCall, Finding, Role, Sandbox, Session, Severity, Tools, Verdict};
+use crate::ports::{AgentCall, Finding, Reach, Role, Session, Severity, Tools, Verdict};
 use crate::settings::{Limit, RoleModel};
 use crate::shots::ShotsRun;
 use crate::skills::{Skills, Step};
@@ -70,7 +70,7 @@ pub(super) fn reviewer_call(
     call.settings = worker_folder.join(REVIEW_SETTINGS_FILE);
     // A review skill may spawn sub-agents or run commands; the round does neither.
     call.tools = Tools::Review;
-    call.sandbox.read = shots.map(|s| s.dir.to_owned()).into_iter().collect();
+    call.reach.read = shots.map(|s| s.dir.to_owned()).into_iter().collect();
     call.plugin_dirs = skills.plugin_dirs().to_vec();
     Ok(call)
 }
@@ -97,7 +97,7 @@ pub(in crate::runner) fn judge_call(
     }
     let mut call = build_call(Role::Judge, issue, worktree, (model, limit), prompt)?;
     call.settings = worker_folder.join(JUDGE_SETTINGS_FILE);
-    call.sandbox.read = shot.map(Path::to_owned).into_iter().collect();
+    call.reach.read = shot.map(Path::to_owned).into_iter().collect();
     Ok(call)
 }
 
@@ -141,7 +141,7 @@ fn build_call(
         mcp_config: None,
         plugin_dirs: Vec::new(),
         tools: Tools::Answer,
-        sandbox: Sandbox::default(),
+        reach: Reach::default(),
         lease: limit.lease().cloned(),
     })
 }

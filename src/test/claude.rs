@@ -109,6 +109,8 @@ pub(crate) struct Seen {
     pub(crate) call: AgentCall,
     /// The settings file it named, as it stood during the call
     pub(crate) settings: serde_json::Value,
+    /// The sandbox runtime's settings for its fence, as the real adapter writes them
+    pub(crate) sandbox: serde_json::Value,
     /// Whether its build folder existed when the call started
     pub(crate) build_existed: bool,
 }
@@ -175,9 +177,17 @@ impl Agents for FakeClaude {
             .unwrap_or_default();
         let build = settings["env"]["CARGO_TARGET_DIR"].as_str().map(Path::new);
         let build_existed = build.is_some_and(Path::is_dir);
+        let sandbox = call
+            .reach
+            .fence
+            .as_deref()
+            .map_or(serde_json::Value::Null, |fence| {
+                crate::adapters::srt_settings(&crate::adapters::fence_policy(fence))
+            });
         self.seen.lock().unwrap().push(Seen {
             call: call.clone(),
             settings,
+            sandbox,
             build_existed,
         });
         let next = self.script.lock().unwrap().pop_front();
