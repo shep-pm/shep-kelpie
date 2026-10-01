@@ -200,7 +200,7 @@ impl Runner {
         }
         let waiting: Vec<u64> = self.state.adopted.iter().map(|w| w.pull_request).collect();
         for number in waiting {
-            if let Some(held) = self.pace_worker(Scope::Dispatch)?.holds() {
+            if let Some(held) = self.pace_dispatch()?.holds() {
                 return Ok((Some(held), skipped));
             }
             let begin = match self.start_adoption(number) {

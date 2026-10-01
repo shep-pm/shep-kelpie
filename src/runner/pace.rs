@@ -1,8 +1,8 @@
 //! Pacing: each account's usage is read before a call on it starts
 //!
-//! A new work item is paced on the worker's account, its turns on the
-//! same, and a review round on its reviewer's. Each account keeps its own
-//! day and its own holds. An agent limited by a lease is never paced.
+//! A new work item is paced on every account its roles spend, its turns on
+//! the worker's, and a review round on its reviewer's. Each account keeps
+//! its own day and its own holds. An agent limited by a lease is never paced.
 //!
 //! A reading that finds a hold is trusted for [`RECHECK_SECS`] or until the
 //! hold ends, whichever comes first, so a project held for hours reads
@@ -12,7 +12,7 @@
 //! With `pacing.enabled` off the reading still runs, so `status` shows the
 //! numbers, but neither limit holds anything.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
@@ -117,8 +117,22 @@ impl Runner {
         Ok(hold.map_or(Pace::Clear, Pace::Held))
     }
 
-    /// Who holds each lease the project's local agents take, for `status`
-    pub(super) fn local_leases(&self) -> BTreeMap<String, Option<LockHolder>> {
+    /// Paces a new work item on every account the project's calls spend
+    ///
+    /// A work item spends each role's account, so any one over its allowance
+    /// or past its 5-hour mark holds it, the first such account in order.
+    pub(super) fn pace_dispatch(&mut self) -> Result<Pace, StateError> {
+        for account in self.spent_accounts() {
+            match self.pace(Scope::Dispatch, &Limit::Account(account))? {
+                Pace::Clear => {}
+                held => return Ok(held),
+            }
+        }
+        Ok(Pace::Clear)
+    }
+
+    // Each role's limit and each session reviewer's, in that order.
+    fn spent_limits(&self) -> impl Iterator<Item = &Limit> {
         let limits = &self.agents.limits;
         let sessions = self.lineup.iter().filter_map(|r| match &r.runs {
             Runs::Claude(session) => Some(&session.limit),
@@ -127,6 +141,20 @@ impl Runner {
         [&limits.worker, &limits.reviewer, &limits.judge]
             .into_iter()
             .chain(sessions)
+    }
+
+    // The accounts the project's calls spend, each once.
+    fn spent_accounts(&self) -> BTreeSet<Account> {
+        let account = |limit: &Limit| match limit {
+            Limit::Account(account) => Some(*account),
+            Limit::Lease(_) => None,
+        };
+        self.spent_limits().filter_map(account).collect()
+    }
+
+    /// Who holds each lease the project's local agents take, for `status`
+    pub(super) fn local_leases(&self) -> BTreeMap<String, Option<LockHolder>> {
+        self.spent_limits()
             .filter_map(Limit::lease)
             .map(|lease| {
                 let holder = self.ports.local_leases.holder(lease);
@@ -135,26 +163,17 @@ impl Runner {
             .collect()
     }
 
-    /// What the pacer shows in `status`
-    ///
-    /// The worker's account shows what holds a new work item; any other
-    /// shows what holds a call on it.
+    /// What the pacer shows in `status`: each account the project spends,
+    /// and any other read this run, with what holds a new work item on it
     pub(super) fn pacer_status(&self, now: Timestamp) -> PacerStatus<'_> {
-        let worker = match self.agents.limits.worker {
-            Limit::Account(account) => Some(account),
-            Limit::Lease(_) => None,
-        };
-        let read = self.pacing.keys().copied();
-        let accounts = worker.into_iter().chain(read).map(|account| {
+        let mut listed = self.spent_accounts();
+        listed.extend(self.pacing.keys().copied());
+        let accounts = listed.into_iter().map(|account| {
             let last = self.pacing.get(&account).map(|(_, last)| last);
-            let scope = match Some(account) == worker {
-                true => Scope::Dispatch,
-                false => Scope::Turn,
-            };
             let status = AccountStatus {
                 reading: last.and_then(|last| last.reading.as_ref()),
                 holding: last
-                    .and_then(|last| last.hold(scope))
+                    .and_then(|last| last.hold(Scope::Dispatch))
                     .filter(|hold| now < hold.until),
             };
             (account, status)

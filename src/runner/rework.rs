@@ -193,7 +193,7 @@ impl Runner {
                     continue;
                 }
             }
-            if let Some(held) = self.pace_worker(Scope::Dispatch)?.holds() {
+            if let Some(held) = self.pace_dispatch()?.holds() {
                 return Ok((Some(held), skipped));
             }
             let review = pr.review.as_ref().map(|r| r.id.clone());

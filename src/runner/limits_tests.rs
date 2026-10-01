@@ -5,7 +5,7 @@ use serde_json::json;
 
 use crate::lease::gpu::{Attempt, Claim, GpuLock};
 use crate::pacer::{HoldKind, RECHECK_SECS};
-use crate::ports::{Cost, Role, Timestamp, Usage};
+use crate::ports::{Cost, MeterError, Role, Timestamp, Usage};
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{Hold, Rig, Scripted};
 
@@ -13,6 +13,9 @@ const AGENTS: &str = "[agents.codex]\nharness = \"stand-in\"\n\
                       model = \"gpt-5-codex\"\neffort = \"medium\"\nusage = \"codex\"\n\
                       [agents.qwen]\nharness = \"stand-in\"\n\
                       model = \"qwen3-coder\"\neffort = \"low\"\nusage = \"none\"\n";
+
+const ALL_CODEX: &str = "worker = \"codex\"\nreviewer = \"codex\"\njudge = \"codex\"\n";
+const ALL_QWEN: &str = "worker = \"qwen\"\nreviewer = \"qwen\"\njudge = \"qwen\"\n";
 
 // A running project whose roles name kelpie's agents as `names` says.
 fn named(project: &str, names: &str) -> (Rig, Mutex<Runner>) {
@@ -57,10 +60,10 @@ fn a_claude_worker_waits_on_claudes_window_and_never_reads_codexs() {
 }
 
 #[test]
-fn a_codex_worker_paces_on_codexs_own_windows() {
-    let (rig, runner) = named("koji", "worker = \"codex\"\n");
+fn a_project_all_on_codex_paces_on_codexs_own_windows() {
+    let (rig, runner) = named("koji", ALL_CODEX);
     rig.forge.list_ready(7, false);
-    // Claude's account is past half its window: nothing of Codex's.
+    // Claude's account is past half its window: no role of this project spends it.
     rig.meter.set(Rig::utilization(30, 90));
     assert!(dispatched(&step(&runner).unwrap()));
     assert_eq!((rig.meter.reads(), rig.codex_meter.reads()), (0, 1));
@@ -92,7 +95,7 @@ fn a_codex_worker_paces_on_codexs_own_windows() {
 
 #[test]
 fn each_account_keeps_its_own_day() {
-    let (rig, runner) = named("golbat", "worker = \"codex\"\n");
+    let (rig, runner) = named("golbat", ALL_CODEX);
     rig.forge.list_ready(7, false);
     rig.codex_meter.set(Rig::utilization(20, 0));
     assert!(dispatched(&step(&runner).unwrap()));
@@ -119,6 +122,48 @@ fn each_account_keeps_its_own_day() {
         reason.starts_with("today's Codex allowance of 11.4% of the week is spent (15%"),
         "{reason}"
     );
+}
+
+#[test]
+fn a_new_work_item_waits_on_any_account_its_roles_spend() {
+    // A local worker, with the Claude reviewer and judge every project has by default.
+    let (rig, runner) = named("shep", "worker = \"qwen\"\n");
+    rig.forge.list_ready(7, false);
+    assert!(dispatched(&step(&runner).unwrap()));
+    assert_eq!(rig.meter.reads(), 1);
+
+    // 20% of Claude's week since the day began, past its allowance of 100 / 7.
+    rig.meter.set(Rig::utilization(20, 0));
+    rig.ask(&runner, "drop", Some("7"));
+    rig.forge.list_ready(8, false);
+    let (kind, reason) = held(step(&runner).unwrap());
+    assert_eq!(kind, HoldKind::Allowance);
+    assert!(
+        reason.starts_with("today's allowance of 14.3% of the week is spent (20%"),
+        "{reason}"
+    );
+    let pacer = &rig.ask(&runner, "status", None)["pacer"];
+    assert_eq!(pacer["claude"]["holding"]["kind"], "allowance");
+}
+
+#[test]
+fn codex_usage_that_cannot_be_read_holds_until_it_can() {
+    let (rig, runner) = named("rotom", ALL_CODEX);
+    rig.forge.list_ready(7, false);
+    rig.codex_meter.fail(MeterError::Codex(
+        "codex refused: 402 Payment Required".into(),
+    ));
+    let (kind, reason) = held(step(&runner).unwrap());
+    assert_eq!(kind, HoldKind::Unreadable);
+    assert_eq!(
+        reason,
+        "cannot read Codex usage: codex refused: 402 Payment Required"
+    );
+    assert_eq!(rig.meter.reads(), 0);
+
+    rig.clock.advance(RECHECK_SECS);
+    rig.codex_meter.set(Rig::utilization(0, 0));
+    assert!(dispatched(&step(&runner).unwrap()));
 }
 
 #[test]
@@ -163,7 +208,7 @@ fn a_review_round_waits_on_its_reviewers_account_while_the_worker_works_on() {
 
 #[test]
 fn a_local_worker_is_never_paced_and_holds_the_gpu_for_its_whole_turn() {
-    let (rig, runner) = named("rotom", "worker = \"qwen\"\n");
+    let (rig, runner) = named("rotom", ALL_QWEN);
     // Both accounts past half their windows: neither is the local model's limit.
     rig.meter.set(Rig::utilization(90, 90));
     rig.codex_meter.set(Rig::utilization(90, 90));
