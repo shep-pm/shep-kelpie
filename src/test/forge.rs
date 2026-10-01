@@ -325,7 +325,12 @@ impl FakeForge {
         self.merge_answers_lost.store(lost, Ordering::SeqCst);
     }
 
-    /// Makes changing a pull request's labels fail, or work again
+    /// Issue `number`'s labels, in the order they went on
+    pub(crate) fn issue_labels(&self, number: u64) -> Vec<String> {
+        self.labels_of(number)
+    }
+
+    /// Makes changing a pull request's or an issue's labels fail, or work again
     pub(crate) fn set_labels_down(&self, down: bool) {
         self.labels_down.store(down, Ordering::SeqCst);
     }
@@ -696,6 +701,25 @@ impl Forge for FakeForge {
             self.skipped.lock().unwrap().push(number);
         }
         self.coderabbit.set_label(number, label, on);
+        Ok(())
+    }
+
+    fn set_issue_label(
+        &self,
+        _repo: &ForgeSlug,
+        number: u64,
+        label: &str,
+        on: bool,
+    ) -> Result<(), ForgeError> {
+        if self.labels_down.load(Ordering::SeqCst) {
+            return Err(ForgeError::Failed("labels are down".into()));
+        }
+        let mut labels = self.labels.lock().unwrap();
+        let on_issue = labels.entry(number).or_default();
+        on_issue.retain(|l| l != label);
+        if on {
+            on_issue.push(label.to_owned());
+        }
         Ok(())
     }
 

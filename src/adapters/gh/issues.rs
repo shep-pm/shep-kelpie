@@ -48,6 +48,26 @@ pub(super) fn create_issue(
     parse_created(&gh(&args)?)
 }
 
+pub(super) fn set_label(
+    repo: &ForgeSlug,
+    number: u64,
+    label: &str,
+    add: bool,
+) -> Result<(), ForgeError> {
+    let flag = if add { "--add-label" } else { "--remove-label" };
+    let number = number.to_string();
+    gh(&[
+        "issue",
+        "edit",
+        &number,
+        "--repo",
+        repo.as_str(),
+        flag,
+        label,
+    ])
+    .map(drop)
+}
+
 fn parse_open_issues(stdout: &[u8]) -> Result<Vec<OpenIssue>, ForgeError> {
     #[derive(Deserialize)]
     struct Listed {

@@ -432,6 +432,7 @@ impl Runner {
         item.summon_owed = self.settings.coderabbit.enabled;
         next.work_items.push(item);
         self.save(next).map_err(AdoptError::State)?;
+        self.mark_held(issue, true);
         Ok((issue, worker))
     }
 }

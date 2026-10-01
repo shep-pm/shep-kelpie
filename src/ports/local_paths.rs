@@ -135,6 +135,16 @@ impl Forge for Guarded {
         self.forge.set_label(repo, number, label, on)
     }
 
+    fn set_issue_label(
+        &self,
+        repo: &ForgeSlug,
+        number: u64,
+        label: &str,
+        on: bool,
+    ) -> Result<(), ForgeError> {
+        self.forge.set_issue_label(repo, number, label, on)
+    }
+
     fn review_bot(
         &self,
         repo: &ForgeSlug,
