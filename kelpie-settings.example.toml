@@ -14,7 +14,7 @@
 # call runs on a home of its own with the login linked in. Kelpie's home's
 # `codex` when absent; a leading `~/` is the home folder. A runner reads it
 # when it starts.
-# codex_home = "~/.kelpie/shep/kelpie/codex"
+# codex_home = "~/.shep/kelpie/codex"
 
 # The GPU's Prometheus metrics page, such as `nvidia_gpu_exporter`'s
 # `/metrics`. `status` shows the GPU's load, memory, power and temperature
