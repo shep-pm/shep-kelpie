@@ -117,7 +117,10 @@ impl Wants {
             | RulingKind::TurnFailed { .. }
             | RulingKind::ClaudeFiles { .. }
             | RulingKind::ForeignChange { .. }
-            | RulingKind::FollowUp { .. } => Self::YesOrNo,
+            | RulingKind::FollowUp { .. }
+            | RulingKind::Split { .. }
+            | RulingKind::SplitStuck { .. }
+            | RulingKind::CloseStuck { .. } => Self::YesOrNo,
         }
     }
 

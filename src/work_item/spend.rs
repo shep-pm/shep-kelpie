@@ -51,6 +51,8 @@ impl WorkItem {
                 Role::Worker => &mut spend.worker,
                 Role::Reviewer => &mut spend.reviewer,
                 Role::Judge => &mut spend.judge,
+                // A planning call runs before any work item opens.
+                Role::Planner => continue,
             };
             role.calls += 1;
             role.cost_usd += call.cost.usd();

@@ -89,7 +89,7 @@ impl Forge for Gh {
             "--repo",
             repo.as_str(),
             "--json",
-            "title,body,labels,state",
+            "title,body,labels,state,parent,blockedBy",
         ])?)
     }
 
@@ -168,6 +168,18 @@ impl Forge for Gh {
         labels: &[&str],
     ) -> Result<u64, ForgeError> {
         issues::create_issue(repo, title, body, labels)
+    }
+
+    fn add_sub_issue(&self, repo: &ForgeSlug, parent: u64, child: u64) -> Result<(), ForgeError> {
+        issues::add_sub_issue(repo, parent, child)
+    }
+
+    fn add_blocker(&self, repo: &ForgeSlug, number: u64, blocker: u64) -> Result<(), ForgeError> {
+        issues::add_blocker(repo, number, blocker)
+    }
+
+    fn close_issue(&self, repo: &ForgeSlug, number: u64, comment: &str) -> Result<(), ForgeError> {
+        issues::close_issue(repo, number, comment)
     }
 
     fn mark_ready(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
@@ -277,13 +289,29 @@ fn parse_issue(stdout: &[u8]) -> Result<Issue, ForgeError> {
         body: Option<String>,
         labels: Vec<Label>,
         state: String,
+        // Absent only from a view made without asking for them.
+        #[serde(default)]
+        parent: Option<Numbered>,
+        #[serde(default, rename = "blockedBy")]
+        blocked_by: Option<Nodes>,
+    }
+    #[derive(Deserialize)]
+    struct Numbered {
+        number: u64,
+    }
+    #[derive(Deserialize)]
+    struct Nodes {
+        nodes: Vec<Numbered>,
     }
     let view: View = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
+    let blocked_by = view.blocked_by.map_or_else(Vec::new, |b| b.nodes);
     Ok(Issue {
         title: view.title,
         body: view.body.unwrap_or_default(),
         labels: view.labels.into_iter().map(|l| l.name).collect(),
         open: view.state != "CLOSED",
+        parent: view.parent.map(|p| p.number),
+        blocked_by: blocked_by.into_iter().map(|b| b.number).collect(),
     })
 }
 
@@ -397,6 +425,20 @@ mod tests {
 
     // Recorded from gh 2.96 on this repo: `gh issue view 6 --json title,body,labels,state`.
     const ISSUE: &str = include_str!("../../fixtures/gh-issue-view.json");
+
+    // Recorded from gh 2.96 on cli/cli:
+    // `gh issue view 14528 --json title,body,labels,state,parent,blockedBy`.
+    const SUB_ISSUE: &str = include_str!("../../fixtures/gh-issue-view-sub-issue.json");
+
+    #[test]
+    fn an_issue_is_read_with_its_parent_and_blockers() {
+        let issue = parse_issue(SUB_ISSUE.as_bytes()).unwrap();
+        assert_eq!((issue.parent, issue.blocked_by), (Some(14529), vec![]));
+        let blocked = br#"{"title":"t","body":"","labels":[],"state":"OPEN","parent":null,
+            "blockedBy":{"nodes":[{"number":3,"state":"OPEN"}],"totalCount":1}}"#;
+        let issue = parse_issue(blocked).unwrap();
+        assert_eq!((issue.parent, issue.blocked_by), (None, vec![3]));
+    }
 
     #[test]
     fn visibility_is_read() {

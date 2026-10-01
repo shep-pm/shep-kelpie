@@ -1,4 +1,5 @@
-//! Issues kelpie files: the open ones it checks first, and a new one
+//! Issues kelpie files: the open ones it checks first, a new one, the
+//! sub-issues and blockers a split links, and a parent it closes
 
 use serde::Deserialize;
 
@@ -66,6 +67,47 @@ fn parse_open_issues(stdout: &[u8]) -> Result<Vec<OpenIssue>, ForgeError> {
         .collect())
 }
 
+pub(super) fn add_sub_issue(repo: &ForgeSlug, parent: u64, child: u64) -> Result<(), ForgeError> {
+    let id = format!("sub_issue_id={}", database_id(repo, child)?);
+    let path = format!("repos/{}/issues/{parent}/sub_issues", repo.as_str());
+    gh(&["api", "--method", "POST", &path, "-F", &id]).map(drop)
+}
+
+pub(super) fn add_blocker(repo: &ForgeSlug, number: u64, blocker: u64) -> Result<(), ForgeError> {
+    let id = format!("issue_id={}", database_id(repo, blocker)?);
+    let path = format!(
+        "repos/{}/issues/{number}/dependencies/blocked_by",
+        repo.as_str()
+    );
+    gh(&["api", "--method", "POST", &path, "-F", &id]).map(drop)
+}
+
+pub(super) fn close_issue(repo: &ForgeSlug, number: u64, comment: &str) -> Result<(), ForgeError> {
+    let number = number.to_string();
+    let args = [
+        "issue",
+        "close",
+        &number,
+        "--repo",
+        repo.as_str(),
+        "--comment",
+        comment,
+    ];
+    gh(&args).map(drop)
+}
+
+// The REST calls that link issues name the other issue by its database id,
+// not its number.
+fn database_id(repo: &ForgeSlug, number: u64) -> Result<u64, ForgeError> {
+    let path = format!("repos/{}/issues/{number}", repo.as_str());
+    parse_database_id(&gh(&["api", &path, "--jq", ".id"])?)
+}
+
+fn parse_database_id(stdout: &[u8]) -> Result<u64, ForgeError> {
+    let text = String::from_utf8_lossy(stdout);
+    text.trim().parse().map_err(|_| unreadable(stdout))
+}
+
 // `gh issue create` prints the new issue's URL, which ends in its number.
 fn parse_created(stdout: &[u8]) -> Result<u64, ForgeError> {
     let text = String::from_utf8_lossy(stdout);
@@ -79,6 +121,16 @@ fn parse_created(stdout: &[u8]) -> Result<u64, ForgeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Recorded from gh 2.96: `gh api repos/shep-pm/shep-kelpie/issues/139 --jq .id`.
+    #[test]
+    fn an_issues_database_id_is_read_from_the_api() {
+        assert_eq!(parse_database_id(b"5634695475\n"), Ok(5_634_695_475));
+        assert!(matches!(
+            parse_database_id(b"null\n"),
+            Err(ForgeError::Unreadable(_))
+        ));
+    }
 
     #[test]
     fn open_issues_are_read_with_a_body_that_may_be_null() {
