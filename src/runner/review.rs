@@ -26,12 +26,12 @@ use super::ruling::park;
 use super::shots::RoundShots;
 use crate::pacer::Scope;
 use crate::ports::{
-    AgentCall, AgentError, AgentReply, Agents, Finding, Reviewer, ReviewerError, Severity,
-    Timestamp, Verdict, read_review,
+    AgentCall, AgentError, AgentReply, Agents, Finding, Reviewer, ReviewerError, RoundStage,
+    Severity, Timestamp, Verdict, read_review,
 };
 use crate::settings::{ReviewerName, Runs};
 use crate::state::{Fix, RulingKind, StateError};
-use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, Turn, WorkItem};
+use crate::work_item::{CallKind, Phase, Review, ReviewCallState, ReviewStage, Turn, WorkItem};
 use crate::worktree;
 use lineup::Chosen;
 
@@ -64,7 +64,7 @@ impl Runner {
                 };
                 match chosen.reviewer.runs.clone() {
                     Runs::Local(local) => {
-                        self.round_started(&chosen)?;
+                        self.round_started(&chosen, CallKind::Local)?;
                         Ok(Begin::Review(ReviewCall::Local {
                             local,
                             worktree,
@@ -98,7 +98,7 @@ impl Runner {
                         );
                         match call.and_then(|call| self.prepared(call)) {
                             Ok(call) => {
-                                self.round_started(&chosen)?;
+                                self.round_started(&chosen, CallKind::Claude)?;
                                 Ok(Begin::Review(ReviewCall::ClaudeRound(call)))
                             }
                             Err(reason) => Ok(self.gate_failed(reason)),
@@ -125,7 +125,7 @@ impl Runner {
                 .and_then(|call| self.prepared(call))
                 {
                     Ok(call) => {
-                        self.mark_review_call_running()?;
+                        self.mark_review_call_running(CallKind::Judge)?;
                         Ok(Begin::Review(ReviewCall::Judge(call)))
                     }
                     Err(reason) => Ok(self.gate_failed(reason)),
@@ -186,19 +186,19 @@ impl Runner {
     // itself, the same as a worker's turn marks `Turn::Running`: `drop`
     // refuses while this is set, so a call in flight always has a work
     // item to land its result on.
-    pub(super) fn mark_review_call_running(&mut self) -> Result<(), StateError> {
+    pub(super) fn mark_review_call_running(&mut self, kind: CallKind) -> Result<(), StateError> {
         let since = self.ports.clock.now();
-        self.update(|item| item.review_call = ReviewCallState::Running { since })
+        self.update(|item| item.call_started(kind, since))
     }
 
     // Marks the call running and keeps who reviews the round, so a round
     // cut short resumes with the same reviewer.
-    fn round_started(&mut self, chosen: &Chosen) -> Result<(), StateError> {
+    fn round_started(&mut self, chosen: &Chosen, kind: CallKind) -> Result<(), StateError> {
         let since = self.ports.clock.now();
         let name = chosen.reviewer.name.clone();
         let alone = chosen.alone;
         self.update(|item| {
-            item.review_call = ReviewCallState::Running { since };
+            item.call_started(kind, since);
             if let Phase::Review(review) = &mut item.phase {
                 review.reviewer = Some(name);
                 review.alone = alone;
@@ -453,6 +453,7 @@ pub(super) fn run_review_call(
     claude: &dyn Agents,
     reviewer: &dyn Reviewer,
     action: ReviewCall,
+    watch: &(dyn Fn(RoundStage) + Sync),
 ) -> Reviewed {
     match action {
         ReviewCall::Local {
@@ -462,17 +463,19 @@ pub(super) fn run_review_call(
             out,
             round,
             criteria,
-        } => match reviewer.round(&local, &worktree, &base, &out, round, &criteria) {
-            Err(ReviewerError::Stopped) => stopped(),
-            Err(ReviewerError::Spilled(reason)) => Reviewed {
-                result: ReviewResult::Spilled(reason),
-                spent: None,
-            },
-            result => Reviewed {
-                result: ReviewResult::Findings(result.map_err(|e| e.to_string())),
-                spent: Some(Spent::Local),
-            },
-        },
+        } => {
+            match reviewer.round_watched(&local, &worktree, &base, &out, round, &criteria, watch) {
+                Err(ReviewerError::Stopped) => stopped(),
+                Err(ReviewerError::Spilled(reason)) => Reviewed {
+                    result: ReviewResult::Spilled(reason),
+                    spent: None,
+                },
+                result => Reviewed {
+                    result: ReviewResult::Findings(result.map_err(|e| e.to_string())),
+                    spent: Some(Spent::Local),
+                },
+            }
+        }
         ReviewCall::ClaudeRound(call) => {
             let (reply, spent) = run_claude(claude, &call);
             match reply {
@@ -532,7 +535,7 @@ pub(super) fn record_spent(item: &mut WorkItem, spent: Option<Spent>, now: Times
         }
         None => {}
     }
-    item.review_call = ReviewCallState::Idle;
+    item.call_ended();
 }
 
 fn stopped() -> Reviewed {

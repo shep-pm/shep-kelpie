@@ -23,7 +23,7 @@ use crate::runner::{
 };
 use crate::settings::{Effort, Settings, SettingsError};
 use crate::webhook::{KelpieSettings, Webhook};
-use crate::work_item::{CallRecord, Known, Phase, Turn, WorkItem};
+use crate::work_item::{CallRecord, Known, Phase, Seconds, TimingPhase, Timings, Turn, WorkItem};
 
 mod alerts;
 mod claude;
@@ -104,6 +104,13 @@ pub(crate) fn a_work_item() -> WorkItem {
         shots_comment: None,
         held: Vec::new(),
         follow_ups: None,
+        timings: Some(Timings {
+            created: Timestamp(5),
+            since: Timestamp(12),
+            seconds: Seconds::of(&[(TimingPhase::Worker, 4), (TimingPhase::Ci, 3)]),
+            call: None,
+            queued: false,
+        }),
         calls: vec![CallRecord {
             role: Role::Worker,
             at: Timestamp(10),

@@ -6,6 +6,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+use super::Hold;
 use crate::ports::Shots;
 use crate::shots::{ShotsJob, ShotsRun, plan};
 
@@ -18,6 +19,8 @@ pub(crate) enum ScriptedShots {
     Status(u16),
     /// Nothing captured, for this reason
     Fail(&'static str),
+    /// Blocks until the test releases it, then takes every shot cleanly
+    Hold(Hold),
 }
 
 /// Takes every shot cleanly once its script runs out
@@ -66,6 +69,10 @@ impl Shots for FakeShots {
             Some(ScriptedShots::Fail(reason)) => return ShotsRun::failed(reason),
             Some(ScriptedShots::Problems(problems)) => (200, problems),
             Some(ScriptedShots::Status(status)) => (status, Vec::new()),
+            Some(ScriptedShots::Hold(hold)) => {
+                hold.block();
+                (200, Vec::new())
+            }
             None => (200, Vec::new()),
         };
         std::fs::create_dir_all(&job.out).unwrap();

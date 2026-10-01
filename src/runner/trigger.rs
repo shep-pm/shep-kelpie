@@ -15,13 +15,20 @@ use crate::ports::{ModelSeat, SessionId, Timestamp};
 use crate::relay::Settled;
 use crate::settings::MergeAuthority;
 use crate::skills::StepSkill;
-use crate::state::{LeaseHeld, Ruling, RunState, StateError, Waiting};
-use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Turn, WorkItem};
+use crate::state::{Finished, LeaseHeld, Ruling, RunState, StateError, Waiting};
+use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Split, Turn, WorkItem};
 
 /// The triggers a runner answers
-pub const ACTIONS: [&str; 10] = [
+pub const ACTIONS: [&str; 11] = [
     "status", "start", "pause", "add", "rework", "adopt", "rule", RELAY_RULE, "gate", "drop",
+    "timings",
 ];
+
+/// How many finished work items `timings` totals when given no count
+const TIMINGS_DEFAULT: usize = 10;
+
+/// How many finished work items `status` lists
+pub(super) const STATUS_HISTORY: usize = 10;
 
 /// `rule`, sent by the relay: the same answer, but the relay is not told
 /// of it, since it already knows
@@ -56,6 +63,8 @@ pub struct Status<'a> {
     pub rulings: &'a [Ruling],
     /// Leases held
     pub leases: &'a [LeaseHeld],
+    /// The most recent finished work items, oldest first
+    pub history: &'a [Finished],
     /// What usage was when last read, and why nothing new is starting
     pub pacer: PacerStatus<'a>,
     /// The skill each step runs, and why any chosen one could not load
@@ -136,14 +145,17 @@ pub struct WorkItemStatus<'a> {
     /// Why kelpie's last shots run failed, when it did
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shots_failed: Option<&'a str>,
+    /// Where its wall time went, and the phase it is in now
+    pub timings: Split,
 }
 
 fn is_zero(n: &usize) -> bool {
     *n == 0
 }
 
-impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
-    fn from(item: &'a WorkItem) -> Self {
+impl<'a> WorkItemStatus<'a> {
+    /// `item` as `status` shows it, with its time read as `timings`
+    pub(super) fn new(item: &'a WorkItem, timings: Split) -> Self {
         Self {
             issue: item.issue,
             title: &item.title,
@@ -162,6 +174,7 @@ impl<'a> From<&'a WorkItem> for WorkItemStatus<'a> {
             by_role: item.spend(),
             qwen: item.qwen,
             shots_failed: item.shots.as_ref().and_then(|r| r.run.failed.as_deref()),
+            timings,
         }
     }
 }
@@ -178,6 +191,7 @@ enum Request {
     RelayRule(u64, Answer),
     Gate(Option<u64>),
     Drop(Option<u64>),
+    Timings(usize),
 }
 
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
@@ -185,8 +199,10 @@ enum Request {
 /// Blank params count as none. `add` takes an issue number, `rework` and
 /// `adopt` a pull request number, `rule` and `relay-rule` take `<id> yes`,
 /// `<id> no <note>` or `<id> answer <text>`, `gate` and `drop` take the
-/// issue of the work item they are about when more than one is open, and
-/// every other action takes nothing.
+/// issue of the work item they are about when more than one is open,
+/// `timings` takes how many finished work items to total (ten when left
+/// out) and answers the totals, not the status, and every other action takes
+/// nothing.
 ///
 /// A ruling the relay was sent, settled by anything but `relay-rule`, is
 /// told to it.
@@ -199,8 +215,12 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
     // Memory changes only after a save succeeds, so a panicked holder
     // cannot have left the runner half changed.
     let mut runner = lock(runner);
+    let totals_of = match &request {
+        Request::Timings(last) => Some(*last),
+        _ => None,
+    };
     let changed = match request {
-        Request::Status => Ok(()),
+        Request::Status | Request::Timings(_) => Ok(()),
         Request::Start => runner.start().map_err(|e| e.to_string()),
         Request::Pause => runner.pause().map_err(|e| e.to_string()),
         Request::Add(issue) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
@@ -218,9 +238,14 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
             dropped
         }
     };
-    match changed {
-        Ok(()) => serde_json::to_string(&runner.status()).expect("status serializes to JSON"),
-        Err(e) => error(e),
+    match (changed, totals_of) {
+        (Ok(()), Some(last)) => {
+            serde_json::to_string(&runner.totals(last)).expect("totals serialize to JSON")
+        }
+        (Ok(()), None) => {
+            serde_json::to_string(&runner.status()).expect("status serializes to JSON")
+        }
+        (Err(e), _) => error(e),
     }
 }
 
@@ -250,6 +275,11 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
         (RELAY_RULE, Some(p)) => read_rule(p)
             .map(|(id, answer)| Request::RelayRule(id, answer))
             .ok_or_else(|| format!("`{action}` {RULE_USAGE}, not {p:?}")),
+        ("timings", Some(p)) => number(p)
+            .and_then(|n| usize::try_from(n).ok())
+            .map(Request::Timings)
+            .ok_or_else(|| format!("`timings` takes a count of finished work items, not {p:?}")),
+        ("timings", None) => Ok(Request::Timings(TIMINGS_DEFAULT)),
         ("rule" | RELAY_RULE, None) => Err(format!("`{action}` {RULE_USAGE}")),
         (_, _) if !ACTIONS.contains(&action) => Err(format!("unknown action `{action}`")),
         (_, Some(_)) => Err(format!("`{action}` takes no params")),
@@ -485,6 +515,7 @@ mod tests {
                 "skipped": [],
                 "rulings": [],
                 "leases": [],
+                "history": [],
                 "pacer": { "enabled": true, "claude": { "reading": null, "holding": null } },
                 "skills": Step::ALL.map(|step| json!({
                     "step": step.as_str(),
