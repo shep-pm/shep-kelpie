@@ -600,6 +600,12 @@ pub(super) fn question(
         || format!("issue #{issue}"),
         |n| format!("pull request #{n}"),
     );
+    // A work item stopped before its pull request opened leaves none on the forge.
+    let kept = if number.is_some() {
+        ", keeping its branch and pull request on the forge"
+    } else {
+        ""
+    };
     let ask = match kind {
         RulingKind::Merge { head, shots_failed } => {
             let shots = if *shots_failed { SHOTS_FAILED } else { "" };
@@ -669,15 +675,13 @@ pub(super) fn question(
             return format!(
                 "The worker on {about} has been running past its turn's ceiling, \
                  and kelpie stopped it. {yes} resumes its session for another turn, \
-                 and {no} stops the work item, keeping its branch and pull request \
-                 on the forge."
+                 and {no} stops the work item{kept}."
             );
         }
         RulingKind::TurnFailed { reason, .. } => {
             return format!(
                 "The worker's turn on {about} failed: {}. {yes} tries that step again, \
-                 and {no} stops the work item, keeping its branch and pull request \
-                 on the forge.",
+                 and {no} stops the work item{kept}.",
                 reason.trim()
             );
         }

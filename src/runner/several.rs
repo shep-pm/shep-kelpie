@@ -76,11 +76,11 @@ fn both_parked(project: &str) -> (Rig, Mutex<Runner>) {
     (rig, runner)
 }
 
-// The issue of the work item a step's report is about, as the runner logs it
 // A worker's reply that ends on a question, which keeps its work item open
 // and waiting on the maintainer
 const ASKS: &str = "<kelpie-question>\nWhich flag?\n</kelpie-question>\n";
 
+// The issue of the work item a step's report is about, as the runner logs it
 fn issue_of(report: Option<StepReport>) -> u64 {
     let logged = serde_json::to_value(&report).unwrap();
     logged["issue"]

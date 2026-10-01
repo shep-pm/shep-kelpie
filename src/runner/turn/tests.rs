@@ -589,6 +589,7 @@ fn a_second_turn_that_stops_short_parks_the_worker_on_a_ruling() {
         ),
         "{question}"
     );
+    assert!(question.ends_with("stops the work item."), "{question}");
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(rig.claude.calls().len(), 2);
