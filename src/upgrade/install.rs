@@ -49,6 +49,15 @@ impl Layout {
         fs::canonicalize(&self.installed).unwrap_or_else(|_| self.installed.clone())
     }
 
+    // What a signature calls the build: the installed file's name, not the
+    // staged copy's, so the same build signs to the same bytes every time.
+    fn identifier(&self) -> String {
+        self.target().file_name().map_or_else(
+            || "shep-kelpie".into(),
+            |n| n.to_string_lossy().into_owned(),
+        )
+    }
+
     fn staged(&self) -> PathBuf {
         let target = self.target();
         let name = target.file_name().map_or_else(
@@ -130,7 +139,7 @@ pub fn stage(layout: &Layout, source: &Path) -> Result<Staged, String> {
     })?;
     fs::set_permissions(&staged.path, fs::Permissions::from_mode(0o755))
         .map_err(|e| failed("make executable", &e))?;
-    sign(&staged.path)?;
+    sign(&staged.path, &layout.identifier())?;
     flush(&staged.path)?;
     Ok(staged)
 }
@@ -222,12 +231,12 @@ fn same_bytes(a: &Path, b: &Path) -> Result<bool, String> {
 
 // A build that has moved on macOS must be signed again, or the system kills it
 // on launch. Only a Mach-O binary takes a signature: a script stands in fine.
-fn sign(path: &Path) -> Result<(), String> {
+fn sign(path: &Path, identifier: &str) -> Result<(), String> {
     if !cfg!(target_os = "macos") || !is_mach_o(path) {
         return Ok(());
     }
     let output = Command::new("codesign")
-        .args(["--force", "--sign", "-"])
+        .args(["--force", "--sign", "-", "--identifier", identifier])
         .arg(path)
         .stdin(Stdio::null())
         .output()
@@ -303,6 +312,35 @@ mod tests {
         let staged = stage(&layout, &me).unwrap();
         let ran = Command::new(staged.path()).arg("--list").output().unwrap();
         assert!(ran.status.success(), "{ran:?}");
+    }
+
+    // A signature names the file it signs unless told otherwise, and a staged
+    // copy's name changes with the process: the same build must still sign to
+    // the same bytes, or installing it again counts as a new build.
+    #[test]
+    fn the_same_build_signs_to_the_same_bytes_whatever_the_copy_is_called() {
+        let dir = tempfile::tempdir().unwrap();
+        let me = std::env::current_exe().unwrap();
+        let (one, two) = (
+            dir.path().join(".x.staged.1"),
+            dir.path().join(".x.staged.22"),
+        );
+        for copy in [&one, &two] {
+            fs::copy(&me, copy).unwrap();
+            sign(copy, "shep-kelpie").unwrap();
+        }
+        assert!(fs::read(&one).unwrap() == fs::read(&two).unwrap());
+    }
+
+    #[test]
+    fn a_real_executable_installed_twice_is_unchanged_the_second_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = layout(dir.path());
+        let me = std::env::current_exe().unwrap();
+        let first = stage(&layout, &me).unwrap();
+        assert_eq!(install(&layout, first), Ok(Change::First));
+        let again = stage(&layout, &me).unwrap();
+        assert_eq!(install(&layout, again), Ok(Change::Unchanged));
     }
 
     #[test]

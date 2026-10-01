@@ -52,6 +52,16 @@ async fn running_the_same_build_again_keeps_the_real_previous_build() {
 }
 
 #[tokio::test]
+async fn installing_the_same_build_again_leaves_a_rollback_going_back_to_the_first() {
+    let rig = Rig::new().await;
+    let new = rig.build("new", "0.3.0", "0.12.0");
+    rig.install(&new).await.0.unwrap();
+    rig.install(&new).await.0.unwrap();
+    rig.upgrade(Action::Rollback).await.0.unwrap();
+    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.12.0");
+}
+
+#[tokio::test]
 async fn an_installed_symlink_stays_a_link_and_the_copy_kept_is_its_target() {
     let rig = Rig::on(crate::shepherd::SHEP_VERSION, true).await;
     let new = rig.build("new", "0.3.0", "0.12.0");
