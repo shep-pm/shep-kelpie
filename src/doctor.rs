@@ -141,6 +141,8 @@ impl Report {
 pub struct Probes<'a> {
     /// The account's usage, which only a logged-in `claude` answers
     pub meter: &'a dyn Meter,
+    /// The Codex account.s usage, read for a project that spends it
+    pub codex_meter: &'a dyn Meter,
     /// The forge
     pub forge: &'a dyn Forge,
     /// The local round's reviewer
@@ -271,9 +273,12 @@ pub fn main(args: &[String]) -> ExitCode {
             project: project.as_ref(),
             test_alert,
         };
-        let meter = ClaudeCli::default().meter();
+        let claude = ClaudeCli::default();
+        let meter = claude.meter();
+        let codex_meter = claude.codex_meter();
         let probes = Probes {
             meter: &meter,
+            codex_meter: &codex_meter,
             forge: &Gh,
             reviewer: &LocalReviewer::default(),
             review_bot: &CodeRabbit,
