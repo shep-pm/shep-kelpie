@@ -29,6 +29,27 @@ fn an_agent_of_the_workers_own_is_refused_however_it_is_started() {
 }
 
 #[test]
+fn an_agent_git_runs_for_the_worker_is_refused() {
+    for command in [
+        "git rebase --exec pi main",
+        "git rebase --exec=pi main",
+        "git rebase -x pi main",
+        "git rebase -xpi main",
+        "git bisect run pi",
+        "git difftool -x pi",
+        "git difftool --extcmd=pi",
+        "git difftool --extcmd pi",
+        "git submodule foreach pi",
+        "git submodule foreach --recursive 'pi -p hi'",
+        "git filter-branch --tree-filter pi",
+        "git filter-branch --tree-filter='pi -p hi' HEAD",
+        "git rebase --exec 'claude -p hi' main",
+    ] {
+        assert!(matches!(bash(command), Verdict::Refuse(_)), "{command}");
+    }
+}
+
+#[test]
 fn naming_an_agent_without_running_it_goes_through() {
     for command in [
         "grep -r claude src",
