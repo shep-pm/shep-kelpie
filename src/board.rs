@@ -341,8 +341,8 @@ pub fn parse_worker_value(value: &str) -> Result<WorkerLabel, LabelError> {
 }
 
 /// The model names a `worker:<model>-<effort>` label may use
-pub fn worker_model_names() -> [&'static str; 4] {
-    [MODELS[0].0, MODELS[1].0, MODELS[2].0, MODELS[3].0]
+pub fn worker_model_names() -> [&'static str; MODELS.len()] {
+    MODELS.map(|(name, _)| name)
 }
 
 /// The model and effort an issue's worker runs on, from its label and the

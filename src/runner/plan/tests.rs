@@ -260,6 +260,34 @@ fn each_piece_of_a_split_gets_its_own_worker_pick() {
 }
 
 #[test]
+fn a_piece_s_sub_issue_that_inherits_a_worker_label_from_its_parent_keeps_it() {
+    let rig = Rig::new("tentacool");
+    rig.planning_on();
+    rig.merge_auto();
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.forge.list_ready(5, false);
+    rig.forge.label(5, "worker:haiku-low");
+    rig.claude.script([Scripted::Text(
+        r#"{"split": true, "why": "Two slices.", "pieces": [
+            {"title": "Store the thing", "body": "Build the store.", "worker": "sonnet-high"},
+            {"title": "Show the thing", "body": "Build the screen.", "blocked_by": [1]}]}"#,
+    )]);
+    step(&runner).unwrap();
+    step(&runner).unwrap();
+    // Both sub-issues copied the parent's `worker:` label at creation, which
+    // wins over each piece's own pick.
+    assert_eq!(
+        rig.forge.issue_labels(900),
+        ["ready-for-agent", "worker:haiku-low"]
+    );
+    assert_eq!(
+        rig.forge.issue_labels(901),
+        ["ready-for-agent", "worker:haiku-low"]
+    );
+}
+
+#[test]
 fn a_big_issue_under_ask_waits_on_a_ruling_and_a_yes_splits_it() {
     let (rig, runner) = planning("zeus");
     let id = asked(&rig, &runner);

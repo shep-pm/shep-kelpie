@@ -10,7 +10,7 @@ use std::time::Duration;
 use super::report::{Begin, PlanOutcome, StepReport, WholeWorker};
 use super::ruling::question;
 use super::{Answer, RuleError, Runner};
-use crate::board::{ReadyIssue, Skip, worker_override};
+use crate::board::{ReadyIssue, Skip};
 use crate::plan::{self, Piece, Plan, Planned, Stage};
 use crate::ports::{
     AgentCall, AgentError, AgentReply, Agents, Cost, Reach, Role, Session, Tools, Usage,
@@ -181,7 +181,7 @@ impl Runner {
                 };
             }
         };
-        if worker_override(&found.labels).is_ok_and(|label| label.is_some()) {
+        if plan::already_has_worker(&found.labels) {
             return WholeWorker::Already;
         }
         if let Some(label) = plan::resolved_label(named) {

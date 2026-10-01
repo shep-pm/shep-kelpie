@@ -6,7 +6,7 @@
 //! the forge keeps refusing waits on a ruling, so the board goes on.
 
 use super::{PARENT_CLOSED, TRIES, put_plan};
-use crate::board::{READY, ReadyIssue, worker_override};
+use crate::board::{READY, ReadyIssue};
 use crate::plan::{self, Plan, Stage};
 use crate::runner::Runner;
 use crate::runner::report::{Begin, StepReport};
@@ -137,7 +137,7 @@ impl Runner {
             }
             // The copied parent labels may already carry one, which wins
             // over the piece's own pick.
-            if worker_override(&shown.labels).is_ok_and(|label| label.is_none())
+            if !plan::already_has_worker(&shown.labels)
                 && let Some(label) = plan::resolved_label(piece.worker.as_deref())
                 && let Err(e) = forge.set_issue_label(repo, number, &label, true)
             {

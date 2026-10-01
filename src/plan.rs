@@ -13,7 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::board::{WorkerLabel, parse_worker_value, worker_model_names};
+use crate::board::{WorkerLabel, parse_worker_value, worker_model_names, worker_override};
 
 /// What the planning call decided
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +50,13 @@ pub struct Piece {
     /// The worker it named, `<model>-<effort>` as written, if any
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker: Option<String>,
+}
+
+/// Whether `labels` already carries a `worker:` label, which wins over a
+/// plan's pick: even one kelpie cannot read (unknown, or more than one) is
+/// still an existing choice, never the pick's to overwrite.
+pub fn already_has_worker(labels: &[String]) -> bool {
+    !matches!(worker_override(labels), Ok(None))
 }
 
 /// The `worker:` label value this piece or kept-whole issue names, once
