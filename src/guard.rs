@@ -61,7 +61,7 @@ pub const FOLDER_FLAG: &str = "--folder=";
 pub const NAME_FLAG: &str = "--name=";
 
 /// How the hook's command line asks for an allowed command to be handed
-/// back pinned to the folder it was judged in
+/// back to run only where it has been judged
 ///
 /// Codex runs a command in a `workdir` of the model's choosing and never
 /// tells the hook which, so the hook judges the command in the turn's own
