@@ -225,7 +225,7 @@ pub struct Agent {
 impl Agent {
     /// Its model and effort, as a call on its harness takes them, or why
     /// its settings cannot reach that model
-    fn model(&self) -> Result<RoleModel, String> {
+    fn role_model(&self) -> Result<RoleModel, String> {
         let harness = match (self.harness, &self.url, self.context) {
             (Harness::ClaudeCode, None, None) => AgentHarness::ClaudeCode,
             (Harness::ClaudeCode, ..) => {
@@ -346,6 +346,22 @@ impl Settings {
             Some(name) => find(defined, name, &format!("agents.{role}"), "agents"),
         };
         let (worker, worker_limit) = pick("worker", &self.agents.worker, &self.models.worker)?;
+        if let (AgentHarness::Pi(_), Some(name)) = (&worker.harness, &self.agents.worker) {
+            let what = match (self.preview.enabled, self.worker.guard_hooks.is_empty()) {
+                (true, _) => Some("`preview.enabled`, since pi runs no MCP servers"),
+                (false, false) => Some("`worker.guard_hooks`, which are Claude Code hooks"),
+                (false, true) => None,
+            };
+            if let Some(what) = what {
+                return Err(SettingsError::Invalid {
+                    setting: "agents",
+                    reason: format!(
+                        "`agents.worker` names {name}, on pi, which cannot run {what}: \
+                         turn that off or put the worker on Claude Code"
+                    ),
+                });
+            }
+        }
         let (reviewer, reviewer_limit) =
             pick("reviewer", &self.agents.reviewer, &self.models.reviewer)?;
         let (judge, judge_limit) = pick("judge", &self.agents.judge, &self.models.judge)?;
@@ -387,7 +403,10 @@ pub(super) fn find(
             ),
         });
     };
-    match agent.model().and_then(|model| Ok((model, agent.limit()?))) {
+    match agent
+        .role_model()
+        .and_then(|model| Ok((model, agent.limit()?)))
+    {
         Ok(found) => Ok(found),
         Err(reason) => Err(SettingsError::Invalid {
             setting: "agents",
