@@ -63,10 +63,10 @@ shep kelpie tools install
 ```
 
 ```
-installed kelpie's tools in /path/to/.kelpie/tools
+installed kelpie's tools in /path/to/.shep/kelpie/tools
 ```
 
-It downloads a headless Chrome of about 95 MiB, and puts it under kelpie's home.
+It downloads a headless Chrome of about 95 MiB, and puts it under kelpie's home, `$SHEP_HOME/kelpie`.
 
 ### 4. Add your project
 
@@ -179,7 +179,7 @@ Kelpie needs shep 0.12 and runs in your own shepherd, beside your other sheep. A
 shep adopt /path/to/shep-kelpie --name kelpie
 ```
 
-A kelpie adopted before it asked for the channel has none until it is adopted again: run the same `shep adopt`, then `shep disable kelpie` and `shep enable kelpie`. A `kelpie-dog` sheep left from before is removed when the adopted kelpie starts, and its book at `~/.kelpie/dog/book.json` is kept as it is. The adopted kelpie gets no `KELPIE_HOME` from shep, so its book is always under `~/.kelpie`.
+A kelpie adopted before it asked for the channel has none until it is adopted again: run the same `shep adopt`, then `shep disable kelpie` and `shep enable kelpie`. A `kelpie-dog` sheep left from before is removed when the adopted kelpie starts, and its book is kept as it is. The adopted kelpie gets `SHEP_HOME` and no `KELPIE_HOME` from shep, so its book and its door are always under `$SHEP_HOME/kelpie/dog`.
 
 The dog also holds `cargo-test`, a share of this machine for running tests. Workers run their test suites under it, and so can anything else on the machine: `shep kelpie lease run cargo-test -- cargo test` waits for a turn, runs the command and exits with its code, or 75 when it cannot reach the dog. Three hold it at once unless `[kelpie.leases]` says otherwise, the rest queue, and `shep kelpie lease status` shows who holds it and who waits. A command that ends or dies gives its turn back. One whose `lease run` was killed outright keeps it until the command, and anything it left running, exits: `status` shows how long each has held it.
 
@@ -206,7 +206,7 @@ A ruling's id is unique across projects, so `rule` needs no project:
 
 Quotes are optional, but zsh still needs them around a note with `?`, `*`, `!` or an apostrophe. `-p` goes before the answer: after its first word, and after a `--`, a `-p` is part of the answer. `shep kelpie rule` alone lists the rulings waiting and asks which to answer and how.
 
-`add` names the project after the repo, or `shep kelpie add <name>`. It makes `ready-for-agent`, `ready-for-human` and `review please` where the repo lacks them, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. `add` and `start` say how to bring the dog up when the adopted kelpie is not running with its channel. Worktrees, build folders and state go under `~/.kelpie`, never inside the checkout. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name.
+`add` names the project after the repo, or `shep kelpie add <name>`. It makes `ready-for-agent`, `ready-for-human` and `review please` where the repo lacks them, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. `add` and `start` say how to bring the dog up when the adopted kelpie is not running with its channel. The checkout `add` runs in is the project's repo. Its worktrees go to `$SHEP_HOME/kelpie/<project>/worktrees`, with build folders, state and settings beside them, never inside the checkout. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name.
 
 `doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's labels, CodeRabbit where a project turns it on, the local review command or endpoint where one is set, the preview tools for a project that shows its UI, and that rulings have a webhook where they go to one. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
 
@@ -216,13 +216,25 @@ Lookout edits a project's table in the runner's pane, and kelpie's own settings 
 
 Kelpie refuses a shepherd on another shep minor or major than the pinned one, naming both versions. The relay's `kelpie relay-*` commands talk to the shepherd's socket with the shep client kelpie is built with, never a `shep` on `PATH`.
 
+### Kelpie's home
+
+Kelpie keeps everything under `$SHEP_HOME/kelpie`, or the folder `KELPIE_HOME` names:
+
+- `settings.toml`, `totp`, `tools`, `codex`, `relay` and `rulings`, shared by every project
+- `dog`, with the dog's book and its door, `lease.sock`. Always under `$SHEP_HOME/kelpie`, even with `KELPIE_HOME` set
+- `<project>`, with the project's `state.json`, worker files, `worktrees`, `builds`, `shots` and `playwright`
+
+So a project can't be named for one of kelpie's own folders. Socket paths must stay under 104 bytes, so a runner with a long `SHEP_HOME` refuses to start and names the path that is too long.
+
+An install from before kept all of this in `~/.kelpie`. The first start on the new build moves what kelpie owns, by name, and says what it moved: the dog moves its book, and each runner moves the shared files and its own project's. Everything else in `~/.kelpie` stays put. Each shared file leaves a link at its old place, so a runner still on the old build keeps working until it restarts. A worker in flight may start its next turn in a new session, since Claude Code finds a session by its folder and the worktree moved.
+
 ### Moving an install from `~/.kelpie/shep`
 
 An install from before `shep kelpie` runs its runners and dog from a Flockfile under `SHEP_HOME=~/.kelpie/shep`. It keeps working as it is. To move it into your own shepherd:
 
-1. Take the runners and the dog out of the old shepherd by name, so no project runs twice, and stop it: `SHEP_HOME=~/.kelpie/shep shep delete <project>... kelpie`, then `SHEP_HOME=~/.kelpie/shep shep kill`. Name only kelpie's sheep, since that shepherd may run others. A `kill` alone leaves them in its saved roll, and a later `shep muster` there would start them beside the new ones. Their state files stay under `~/.kelpie/projects`
+1. Take the runners and the dog out of the old shepherd by name, so no project runs twice, and stop it: `SHEP_HOME=~/.kelpie/shep shep delete <project>... kelpie`, then `SHEP_HOME=~/.kelpie/shep shep kill`. Name only kelpie's sheep, since that shepherd may run others. A `kill` alone leaves them in its saved roll, and a later `shep muster` there would start them beside the new ones. Their state files stay where they are
 2. Adopt kelpie in your own shepherd, as above
-3. For each project: `cd ~/.kelpie/repos/<project> && shep kelpie add <project> && shep kelpie start`. `add` makes the project's table from `~/.kelpie/projects/<project>/settings.toml`, and the runner keeps its state file
+3. For each project: `cd ~/.kelpie/repos/<project> && shep kelpie add <project> && shep kelpie start`. `add` makes the project's table from `~/.kelpie/projects/<project>/settings.toml`, and the runner's first start moves its state file into kelpie's home
 4. Once: `shep kelpie settings move <project>`, which moves `~/.kelpie/settings.toml` into the `[kelpie]` section
 
 To adopt kelpie in `~/.kelpie/shep` itself instead, drop the dog's `kelpie` entry from the Flockfile and `SHEP_HOME=~/.kelpie/shep shep delete kelpie` first, since `shep adopt` refuses a name a sheep holds. The adopted dog reads the same book.
@@ -238,11 +250,11 @@ shep kelpie upgrade --binary ./kelpie   # install a build made by hand, as it is
 shep kelpie upgrade --rollback          # put back the build the last upgrade replaced
 ```
 
-The installed kelpie is whatever program the adopted dog runs, which the shepherd knows (`~/.cargo/bin/shep-kelpie` for the install above), and `shep kelpie add` registers runners that run the same path. An upgrade writes the new build beside that file and renames it over, as shep upgrades itself, so the running file's bytes are never edited in place. Before the swap it copies the file it replaces into `~/.kelpie/builds` (resolved first if the path is a symlink), and `--rollback` puts that copy back the same way. Then it restarts the dog and each running runner one at a time, never while a work item is merging: it waits, and says what it waits on. A runner that does not answer `status` is waited on too, and named if it never does. A runner you stop while the upgrade waits stays stopped, and so does one stopped before it. A stopped runner starts on the new build when you start it.
+The installed kelpie is whatever program the adopted dog runs, which the shepherd knows (`~/.cargo/bin/shep-kelpie` for the install above), and `shep kelpie add` registers runners that run the same path. An upgrade writes the new build beside that file and renames it over, as shep upgrades itself, so the running file's bytes are never edited in place. Before the swap it copies the file it replaces into `$SHEP_HOME/kelpie/builds` (resolved first if the path is a symlink), and `--rollback` puts that copy back the same way. Then it restarts the dog and each running runner one at a time, never while a work item is merging: it waits, and says what it waits on. A runner that does not answer `status` is waited on too, and named if it never does. A runner you stop while the upgrade waits stays stopped, and so does one stopped before it. A stopped runner starts on the new build when you start it.
 
 If an upgrade stops after the swap (a merge that outlasts the wait, a sheep that does not come back, Ctrl-C), the new build is already installed and the message says so. `shep kelpie upgrade --binary <installed path>` finishes the restarts and touches no file. `--rollback` does not: it swaps the two builds again.
 
-Every sheep it restarts must run the dog's path. If one does not, the upgrade stops before it changes anything and names the sheep and its path. A `--binary` without its executable bits is refused with the `chmod +x` that fixes it, and only one upgrade runs at a time: a second refuses while the first holds `~/.kelpie/upgrade.lock`. The swap changes the file for every shepherd that adopts the same path, with no check against their shep.
+Every sheep it restarts must run the dog's path. If one does not, the upgrade stops before it changes anything and names the sheep and its path. A `--binary` without its executable bits is refused with the `chmod +x` that fixes it, and only one upgrade runs at a time: a second refuses while the first holds `$SHEP_HOME/kelpie/upgrade.lock`. The swap changes the file for every shepherd that adopts the same path, with no check against their shep.
 
 Before it changes anything it asks the new build which shep it is made with (`shep-kelpie version --json`) and compares the minor with your shepherd's. If they differ it stops before restarting anything and prints the steps: upgrade shep and reload its shepherd, then run the new build's own `upgrade` with `SHEP_HOME` set to your shepherd, since the old kelpie that `shep kelpie` runs refuses the new shepherd. The upgrade prints the exact line. `--rollback` checks the previous build the same way.
 
