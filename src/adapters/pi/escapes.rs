@@ -20,8 +20,20 @@ const NEEDS: &str = "needs kelpie's tools: KELPIE_TOOLS=<dir> from `shep kelpie 
 // `curl`'s arguments, run whole inside the sandbox with the proxy settings
 // the sandbox gives it. `env` first, since the sandbox sets its own `no_proxy`.
 fn curl(world: &World, call: &AgentCall, forwarder: &Forwarder, args: &[&str]) -> Output {
+    curl_allowing(world, call, forwarder, &[], args)
+}
+
+// The same, with `allowed` listed as hosts the project allows the worker.
+fn curl_allowing(
+    world: &World,
+    call: &AgentCall,
+    forwarder: &Forwarder,
+    allowed: &[String],
+    args: &[&str],
+) -> Output {
     let tools = KelpieTools::at(std::env::var("KELPIE_TOOLS").expect(NEEDS).into());
-    let policy = policy(call, &Files::of(call), &forwarder.socket);
+    let mut policy = policy(call, &Files::of(call), &forwarder.socket);
+    policy.hosts.extend(allowed.iter().cloned());
     let mut command = Command::new("env");
     command
         .args([
@@ -125,6 +137,20 @@ fn a_worker_reaches_the_model_only_through_a_forwarder_that_passes_chat() {
             "{reply}"
         );
     }
+    // The project allowing the model's host, by name or with a port, does not open it.
+    let listed = [
+        "127.0.0.1".to_owned(),
+        other_url
+            .trim_start_matches("http://")
+            .trim_end_matches('/')
+            .to_owned(),
+        "localhost".to_owned(),
+    ];
+    for url in [&model, &other_url] {
+        let proxied = ["--noproxy", "", "-X", "DELETE", url];
+        let reply = said(&curl_allowing(&world, &call, &forwarder, &listed, &proxied));
+        assert!(!reply.contains("[200]"), "{reply}");
+    }
     assert_eq!(reached.load(Ordering::SeqCst), 0);
     assert_eq!(server.seen(), ["POST /v1/chat/completions HTTP/1.1"]);
 }
@@ -151,7 +177,15 @@ fn pi_answers_through_the_forwarder_with_no_model_host_in_its_sandbox() {
     assert_eq!(reply.text, "ok");
     assert_eq!(reply.session_id, session);
     assert_eq!(server.seen(), ["POST /v1/chat/completions HTTP/1.1"]);
-    let settings = std::fs::read_to_string(world.path("worker/settings.sandbox.json")).unwrap();
-    assert!(!settings.contains("127.0.0.1"), "{settings}");
-    assert!(settings.contains("model.kelpie.test"), "{settings}");
+    let text = std::fs::read_to_string(world.path("worker/settings.sandbox.json")).unwrap();
+    let settings: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let network = &settings["network"];
+    assert_eq!(
+        network["allowedDomains"],
+        serde_json::json!(["model.kelpie.test"])
+    );
+    assert!(
+        network["deniedDomains"].to_string().contains("127.0.0.1"),
+        "{text}"
+    );
 }

@@ -11,6 +11,7 @@
 //! server only the chat completions call.
 
 use std::ffi::OsString;
+use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Arc;
@@ -438,11 +439,42 @@ fn policy(call: &AgentCall, files: &Files, forwarder: &Path) -> Policy {
             .chain(call.plugin_dirs.iter().cloned())
             .chain(call.reach.read.iter().cloned()),
     );
+    if let AgentHarness::Pi(server) = &call.harness
+        && let Ok(upstream) = Upstream::new(&server.url)
+    {
+        deny_the_server(&mut policy, &upstream);
+    }
     policy.forward = Some(Forward {
         host: WORKER_HOST.to_owned(),
         socket: forwarder.to_owned(),
     });
     policy
+}
+
+// Whatever `allowed_domains` says, the sandbox never reaches the model server
+// or this machine's loopback by name or by the address the server resolves to.
+fn deny_the_server(policy: &mut Policy, upstream: &Upstream) {
+    let bracketed = |host: &str| match host.contains(':') {
+        true => format!("[{host}]"),
+        false => host.to_owned(),
+    };
+    for host in [upstream.host(), "localhost", "127.0.0.1", "::1"] {
+        let host = bracketed(host);
+        if !policy.denied_hosts.contains(&host) {
+            policy.denied_hosts.push(host);
+        }
+    }
+    let resolved = upstream.address().to_socket_addrs().into_iter().flatten();
+    for address in resolved {
+        let address = match address.ip() {
+            IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(address.ip(), IpAddr::V4),
+            v4 => v4,
+        };
+        let address = address.to_string();
+        if !policy.denied_addresses.contains(&address) {
+            policy.denied_addresses.push(address);
+        }
+    }
 }
 
 /// How much of pi's output an error carries: its end, where the reason is

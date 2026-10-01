@@ -77,6 +77,12 @@ impl Upstream {
         })
     }
 
+    /// The server's host, without port or brackets, in lower case
+    #[inline]
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
     /// The `host:port` the forwarder dials
     #[inline]
     pub fn address(&self) -> &str {
@@ -89,7 +95,7 @@ impl Upstream {
     /// local port to them. A different name or address for the same machine
     /// cannot be told without resolving it.
     pub fn is_reached_by(&self, domain: &str) -> bool {
-        let domain = canonical(domain);
+        let domain = canonical(without_port(domain.trim()));
         if let Some(suffix) = domain.strip_prefix("*.") {
             return self.host.ends_with(&format!(".{suffix}")) || loops_back(suffix);
         }
@@ -147,10 +153,29 @@ fn canonical(name: &str) -> String {
     name.trim_end_matches('.').to_ascii_lowercase()
 }
 
-// An IP address in any spelling an `inet_aton` takes, `127.1` and `0x7f.1` included.
+// A domain entry as `srt` reads it: an optional port after the host, which
+// is bracketed when it is an IPv6 address.
+fn without_port(entry: &str) -> &str {
+    if let Some(rest) = entry.strip_prefix('[') {
+        return rest.split_once(']').map_or(entry, |(host, _)| host);
+    }
+    match entry.split_once(':') {
+        Some((host, port)) if !port.contains(':') => {
+            let valid = port.parse::<u16>().is_ok_and(|n| n > 0) && !port.starts_with('0');
+            if valid { host } else { entry }
+        }
+        _ => entry,
+    }
+}
+
+// An IP address in any spelling an `inet_aton` takes, `127.1` and `0x7f.1`
+// included, with an IPv4-mapped IPv6 address as the IPv4 address.
 fn address(name: &str) -> Option<IpAddr> {
-    if let Ok(ip) = name.parse() {
-        return Some(ip);
+    if let Ok(ip) = name.parse::<IpAddr>() {
+        return Some(match ip {
+            IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(ip, IpAddr::V4),
+            v4 => v4,
+        });
     }
     let number = |part: &str| match part.strip_prefix("0x") {
         Some(hex) => u64::from_str_radix(hex, 16).ok(),
@@ -241,6 +266,13 @@ mod tests {
             "0:0:0:0:0:0:0:1",
             "localhost.localdomain",
             "models.example.test.",
+            "models.example.test:11434",
+            "models.example.test:22",
+            "*.example.test:443",
+            "localhost:22",
+            "[::1]:22",
+            "127.0.0.1:11434",
+            "[::ffff:127.0.0.1]",
             "0.0.0.0",
             "::",
         ] {
@@ -257,6 +289,21 @@ mod tests {
             assert!(!u.is_reached_by(domain), "{domain}");
         }
         assert!(upstream("http://[2001:db8::9]:80/v1").is_reached_by("2001:db8::9"));
+        let by_address = upstream("http://192.0.2.9:11434/v1");
+        for domain in [
+            "192.0.2.9:11434",
+            "192.0.2.9:22",
+            "[::ffff:192.0.2.9]",
+            "[::ffff:c000:209]",
+            "[::ffff:192.0.2.9]:80",
+            "0xc0.0.2.9",
+            "3221225993",
+        ] {
+            assert!(by_address.is_reached_by(domain), "{domain}");
+        }
+        assert!(!by_address.is_reached_by("192.0.2.10:11434"));
+        assert!(!by_address.is_reached_by("box.lan:11434"));
+        assert!(upstream("http://box.lan:11434/v1").is_reached_by("box.lan:11434"));
     }
 
     #[test]

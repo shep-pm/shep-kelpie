@@ -110,7 +110,11 @@ impl Forwarder {
         }
         std::fs::create_dir_all(folder)
             .map_err(|e| format!("cannot make {}: {e}", folder.display()))?;
-        sweep(folder, *STARTED);
+        let settled = SystemTime::now().checked_sub(SWEEP_AGE);
+        sweep(
+            folder,
+            (*STARTED).min(settled.unwrap_or(SystemTime::UNIX_EPOCH)),
+        );
         let listener = UnixListener::bind(&socket)
             .map_err(|e| format!("cannot open {}: {e}", socket.display()))?;
         let stopping = Arc::new(AtomicBool::new(false));
@@ -128,6 +132,9 @@ impl Forwarder {
         })
     }
 }
+
+/// How old a socket must be before a sweep may remove it
+const SWEEP_AGE: Duration = Duration::from_secs(60);
 
 // When this process first opened a forwarder: a socket older than that is an
 // earlier kelpie's. One this process made may be bound and not yet listening.

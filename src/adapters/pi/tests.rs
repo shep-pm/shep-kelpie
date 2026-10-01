@@ -416,6 +416,11 @@ fn the_sandbox_lets_pi_write_only_its_sessions_and_reach_only_the_forwarder() {
     );
     assert!(policy.hosts.is_empty(), "{:?}", policy.hosts);
     assert_eq!(
+        policy.denied_hosts,
+        ["192.0.2.9", "localhost", "127.0.0.1", "[::1]"]
+    );
+    assert_eq!(policy.denied_addresses, ["192.0.2.9"]);
+    assert_eq!(
         policy.forward.map(|f| f.host),
         Some("model.kelpie.test".into())
     );

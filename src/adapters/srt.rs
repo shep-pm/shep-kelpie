@@ -68,9 +68,12 @@ pub(crate) fn srt_settings(policy: &Policy) -> Value {
     // Without `strictAllowlist`, a host off the list is asked about rather than refused.
     let mut network = json!({
         "allowedDomains": policy.hosts,
-        "deniedDomains": [],
+        "deniedDomains": policy.denied_hosts,
         "strictAllowlist": true,
     });
+    if !policy.denied_addresses.is_empty() {
+        network["deniedResolvedAddresses"] = json!(policy.denied_addresses);
+    }
     if let Some(forward) = &policy.forward {
         let mut hosts = policy.hosts.clone();
         hosts.push(forward.host.clone());
@@ -131,11 +134,21 @@ mod tests {
         };
         let network = &srt_settings(&policy)["network"];
         assert_eq!(network["allowedDomains"], json!(["model.kelpie.test"]));
+        assert_eq!(network["deniedDomains"], json!([]));
+        assert!(network.get("deniedResolvedAddresses").is_none());
         assert_eq!(
             network["mitmProxy"],
             json!({ "socketPath": "/k/worker/model.sock", "domains": ["model.kelpie.test"] })
         );
         assert!(network.get("allowUnixSockets").is_none());
+        let denying = Policy {
+            denied_hosts: vec!["192.0.2.9".into(), "localhost".into()],
+            denied_addresses: vec!["192.0.2.9".into()],
+            ..policy.clone()
+        };
+        let network = &srt_settings(&denying)["network"];
+        assert_eq!(network["deniedDomains"], json!(["192.0.2.9", "localhost"]));
+        assert_eq!(network["deniedResolvedAddresses"], json!(["192.0.2.9"]));
         let plain = &srt_settings(&Policy::default())["network"];
         assert!(plain.get("mitmProxy").is_none());
     }

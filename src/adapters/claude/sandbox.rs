@@ -120,6 +120,8 @@ pub(crate) fn fence_policy(fence: &Fence) -> Policy {
         hosts: fence.hosts.clone(),
         sockets: fence.sockets.clone(),
         forward: None,
+        denied_hosts: Vec::new(),
+        denied_addresses: Vec::new(),
         listen: fence.preview.is_some(),
         services: match fence.preview {
             Some(_) => DEV_SERVER_SERVICES.map(str::to_owned).into(),

@@ -24,6 +24,10 @@ pub struct Policy {
     pub hosts: Vec<String>,
     /// The Unix sockets it may connect to
     pub sockets: Vec<PathBuf>,
+    /// Hosts it may never reach, whatever the allowed hosts say, on any port
+    pub denied_hosts: Vec<String>,
+    /// Addresses an allowed host name may not resolve to
+    pub denied_addresses: Vec<String>,
     /// A host it may reach only through a process outside, and no other way
     pub forward: Option<Forward>,
     /// Whether it may listen on a local port, as a dev server does
