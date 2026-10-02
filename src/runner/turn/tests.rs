@@ -716,6 +716,39 @@ fn a_pull_request_found_on_a_turn_sent_back_to_commit_still_goes_to_review_first
     assert_eq!(status["work_item"]["phase"]["state"], "review");
 }
 
+// A worktree whose git kelpie will not trust cannot be listed, and the turn
+// ends as it did before, with no follow-up and no hold-up.
+#[test]
+fn a_worktree_git_cannot_be_read_in_ends_the_turn_without_a_follow_up() {
+    let (rig, runner) = with_issue_7("zeus");
+    let hold = Hold::default();
+    rig.claude.script([
+        Scripted::Hold(hold.clone()),
+        Scripted::Reply(usage(1), Cost(1)),
+    ]);
+    let worktree = rig.worktree_7();
+    let ended = std::thread::scope(|scope| {
+        let turn = scope.spawn(|| step(&runner));
+        assert!(hold.entered(Duration::from_secs(30)), "the turn never ran");
+        write_in(&worktree, "left.txt", "left\n");
+        // The repo no longer says this worktree is its own.
+        fs::remove_file(rig.repo().join(".git/worktrees/7/gitdir")).unwrap();
+        hold.release();
+        turn.join().unwrap().unwrap()
+    });
+    assert!(matches!(ended, Some(StepReport::Ended { issue: 7, .. })));
+    let _ = step(&runner);
+    for call in rig.claude.calls() {
+        assert!(
+            !call
+                .prompt
+                .starts_with("Your last turn ended with uncommitted"),
+            "{}",
+            call.prompt
+        );
+    }
+}
+
 #[test]
 fn a_change_only_staged_counts_as_uncommitted() {
     let (rig, runner) = with_issue_7("zeus");

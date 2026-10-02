@@ -4,7 +4,9 @@
 //!
 //! Each parks the work item on a ruling whose yes puts the turn back, and
 //! whose no stops the work item. A turn that stopped short is sent back to
-//! the worker once before it parks.
+//! the worker once before it parks. The prompt for a turn that left files
+//! uncommitted lives here too, but it is a separate send-back: it parks
+//! nothing, and the work item's `asked_to_commit` makes it once per turn.
 
 use std::time::Duration;
 
