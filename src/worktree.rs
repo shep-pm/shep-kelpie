@@ -414,18 +414,45 @@ pub fn uncommitted(repo: &Path, worktree: &Path) -> Result<Vec<String>, Worktree
     Ok(files)
 }
 
-/// The tracked files `worktree` holds changed or staged, with a new file left out
+/// The new files `worktree` holds, which no commit has and git does not ignore
 ///
 /// # Errors
 ///
 /// [`WorktreeError`] naming the git command that failed.
-pub fn modified(repo: &Path, worktree: &Path) -> Result<Vec<String>, WorktreeError> {
-    let status =
-        trusted(repo, worktree)?(&["status", "--porcelain=v2", "-z", "--untracked-files=no"])?;
-    let mut files = status_names(&status);
+pub fn untracked(repo: &Path, worktree: &Path) -> Result<Vec<String>, WorktreeError> {
+    let listed = trusted(repo, worktree)?(&["ls-files", "--others", "--exclude-standard", "-z"])?;
+    let mut files: Vec<String> = listed
+        .split('\0')
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect();
     files.sort();
-    files.dedup();
     Ok(files)
+}
+
+/// The git blob id of the file `path` of `worktree` as it is on disk now
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed, as it does for a
+/// file that is not there.
+pub fn blob_of(repo: &Path, worktree: &Path, path: &str) -> Result<String, WorktreeError> {
+    trusted(repo, worktree)?(&["hash-object", "--", path])
+}
+
+/// The git blob id of `path` in the commit `worktree` has checked out, or
+/// `None` when that commit has no such file
+///
+/// # Errors
+///
+/// [`WorktreeError`] when git cannot be run for the worktree at all.
+pub fn blob_at_head(
+    repo: &Path,
+    worktree: &Path,
+    path: &str,
+) -> Result<Option<String>, WorktreeError> {
+    let at = format!("HEAD:{path}");
+    Ok(trusted(repo, worktree)?(&["rev-parse", "--verify", "--quiet", &at]).ok())
 }
 
 // The paths in `git status --porcelain=v2 -z`, where an entry is a kind, its

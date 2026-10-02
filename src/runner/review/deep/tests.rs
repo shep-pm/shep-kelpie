@@ -64,6 +64,8 @@ fn deep_calls(rig: &Rig) -> Vec<Seen> {
 const MEDIUM: &str =
     "MEDIUM|work.txt:1|the flag is read before it is set|a caller sees the old value";
 const OTHER: &str = "MEDIUM|src/other.rs:9|an empty list panics|the reviewer sees a crash";
+// What the confirming session writes, and what a worker commits with its fix.
+const FAILING_TEST: &str = "#[test]\nfn fails() { panic!() }\n";
 const HIGH: &str = "HIGH|work.txt:1|the value is read before it is set|a caller gets nothing back";
 
 #[test]
@@ -209,10 +211,10 @@ fn a_high_is_confirmed_with_a_failing_test_that_the_fix_is_rechecked_by_running(
         Scripted::Text("CLEAN"),
         Scripted::Write(
             "tests/high.rs",
-            "#[test]\nfn fails() { panic!() }\n",
+            FAILING_TEST,
             "CONFIRMED|tests/high.rs|cargo test --test high",
         ),
-        Scripted::Push("fixed.txt", "fixed\n"),
+        Scripted::PushMany(&[("fixed.txt", "fixed\n"), ("tests/high.rs", FAILING_TEST)]),
         Scripted::Text("FIXED|1|`cargo test --test high` passes: 1 passed"),
     ]);
     until_it_leaves_review(&rig, &runner);
@@ -268,6 +270,114 @@ fn a_high_is_confirmed_with_a_failing_test_that_the_fix_is_rechecked_by_running(
     );
 }
 
+// The worker's fix turn of a HIGH the confirming session wrote `FAILING_TEST` for,
+// scripted as `fix`, parks on the ruling that says why, and nothing re-checks it.
+fn parks_with(fix: Scripted, says: &str) {
+    let (rig, runner) = at_the_deep_round();
+    rig.claude.script([
+        Scripted::Text(HIGH),
+        Scripted::Text("CLEAN"),
+        Scripted::Write(
+            "tests/high.rs",
+            FAILING_TEST,
+            "CONFIRMED|tests/high.rs|cargo test --test high",
+        ),
+        fix,
+    ]);
+    let reports = until_it_leaves_review(&rig, &runner);
+    let Some(StepReport::Ruling { question, .. }) = reports.last() else {
+        panic!("a fix that left the review's test behind raised no ruling: {reports:#?}");
+    };
+    assert!(
+        question.contains("ended its fix for the deep review"),
+        "{question}"
+    );
+    assert_eq!(
+        roles(&rig).last(),
+        Some(&Role::Worker),
+        "what is not pushed is not verified"
+    );
+    let status = rig.ask(&runner, "status", None);
+    let prompt = status["rulings"][0]["kind"]["prompt"].as_str().unwrap();
+    assert!(prompt.contains(says), "{prompt}");
+}
+
+#[test]
+fn a_test_the_review_wrote_and_the_worker_left_uncommitted_counts_as_a_fix_not_pushed() {
+    parks_with(
+        Scripted::Push("fixed.txt", "fixed\n"),
+        "tests/high.rs are changed or new and not committed",
+    );
+}
+
+#[test]
+fn a_test_the_worker_edited_before_committing_it_counts_as_a_fix_not_pushed() {
+    parks_with(
+        Scripted::PushMany(&[
+            ("fixed.txt", "fixed\n"),
+            ("tests/high.rs", "#[test]\nfn fails() {}\n"),
+        ]),
+        "the review's test tests/high.rs was edited after the review wrote it",
+    );
+}
+
+#[test]
+fn any_other_new_file_left_in_the_worktree_counts_as_a_fix_not_pushed() {
+    let (rig, runner) = at_the_deep_round();
+    rig.claude.script([
+        Scripted::Text(MEDIUM),
+        Scripted::Text("CLEAN"),
+        Scripted::PushAndPlant("fixed.txt", "fixed\n", "notes.txt"),
+    ]);
+    let reports = until_it_leaves_review(&rig, &runner);
+    assert!(
+        matches!(reports.last(), Some(StepReport::Ruling { .. })),
+        "{reports:#?}"
+    );
+    assert_eq!(roles(&rig).last(), Some(&Role::Worker));
+    let status = rig.ask(&runner, "status", None);
+    let prompt = status["rulings"][0]["kind"]["prompt"].as_str().unwrap();
+    assert!(
+        prompt.contains("notes.txt are changed or new and not committed"),
+        "{prompt}"
+    );
+}
+
+#[test]
+fn a_finding_the_worker_deferred_is_resolved_at_the_recheck_not_unfixed() {
+    let (rig, runner) = at_the_deep_round();
+    rig.claude.script([
+        Scripted::Text(MEDIUM),
+        Scripted::Text(OTHER),
+        Scripted::Push("fixed.txt", "fixed\n"),
+        Scripted::Text("FIXED|1|it sets the flag first\nUNFIXED|2|the empty list still panics"),
+    ]);
+    // The worker copied the second finding's line to the file kelpie files issues from.
+    std::fs::create_dir_all(rig.build_7()).unwrap();
+    std::fs::write(
+        rig.build_7().join("deferred-findings.md"),
+        format!("{OTHER}\n"),
+    )
+    .unwrap();
+    let reports = until_it_leaves_review(&rig, &runner);
+    assert_eq!(
+        state(&rig, &runner),
+        "ci",
+        "the deferred finding is not sent back"
+    );
+    assert!(
+        reports.iter().any(|r| matches!(
+            r,
+            StepReport::DeepRechecked {
+                fixed: 2,
+                unfixed: 0,
+                ..
+            }
+        )),
+        "{reports:#?}"
+    );
+}
+
 #[test]
 fn a_fix_pushed_in_part_is_not_rechecked_but_parks_like_one_that_pushed_nothing() {
     let (rig, runner) = at_the_deep_round();
@@ -289,7 +399,7 @@ fn a_fix_pushed_in_part_is_not_rechecked_but_parks_like_one_that_pushed_nothing(
     let status = rig.ask(&runner, "status", None);
     let prompt = status["rulings"][0]["kind"]["prompt"].as_str().unwrap();
     assert!(
-        prompt.contains("not all of your fix: work.txt are changed and not committed"),
+        prompt.contains("not all of your fix: work.txt are changed or new and not committed"),
         "{prompt}"
     );
 }
@@ -302,10 +412,10 @@ fn a_fix_the_failing_test_still_fails_for_goes_back_to_the_worker_once_and_then_
         Scripted::Text("CLEAN"),
         Scripted::Write(
             "tests/high.rs",
-            "#[test]\nfn fails() { panic!() }\n",
+            FAILING_TEST,
             "CONFIRMED|tests/high.rs|cargo test --test high",
         ),
-        Scripted::Push("one.txt", "1\n"),
+        Scripted::PushMany(&[("one.txt", "1\n"), ("tests/high.rs", FAILING_TEST)]),
         Scripted::Text("UNFIXED|1|`cargo test --test high` still fails: the value is read first"),
         Scripted::Push("two.txt", "2\n"),
         Scripted::Text("UNFIXED|1|it still fails the same way"),
@@ -435,7 +545,7 @@ fn a_fix_turn_that_pushes_nothing_parks_instead_of_being_rechecked() {
         panic!("a fix with nothing pushed raised no ruling: {reports:#?}");
     };
     assert!(
-        question.contains("ended its fix for round 2 of the qwen-review loop without pushing"),
+        question.contains("ended its fix for the deep review (round 2) without pushing"),
         "{question}"
     );
     assert_eq!(

@@ -331,6 +331,36 @@ fn a_pi_worker_beside_the_preview_or_guard_hooks_is_refused_at_load() {
 }
 
 #[test]
+fn a_deep_reviewer_on_pi_or_codex_beside_guard_hooks_is_refused_at_load() {
+    let hooks = vec![crate::settings::GuardHook {
+        event: crate::settings::HookEvent::PreToolUse,
+        matcher: None,
+        command: "true".to_owned().try_into().unwrap(),
+    }];
+    let defined = format!("{}{CODEX}", QWEN);
+    let defined = kelpie(&defined).agents;
+    for (agent, harness) in [("qwen", "pi"), ("gpt", "codex")] {
+        let mut settings = project(&format!("deep_reviewer = \"{agent}\"\n"));
+        assert!(
+            settings.role_agents(&defined).is_ok(),
+            "no hooks, no refusal"
+        );
+        settings.worker.guard_hooks = hooks.clone();
+        let err = settings.role_agents(&defined).unwrap_err().to_string();
+        assert!(
+            err.contains(&format!(
+                "`agents.deep_reviewer` names {agent}, on {harness}, which cannot run `worker.guard_hooks`"
+            )),
+            "{err}"
+        );
+    }
+    // The hooks are the worker's own, and a worker on Claude Code runs them.
+    let mut claude = project("deep_reviewer = \"opus-high\"\n");
+    claude.worker.guard_hooks = hooks;
+    assert!(claude.role_agents(&kelpie(AGENTS).agents).is_ok());
+}
+
+#[test]
 fn a_session_reviewer_on_pi_runs_on_pi() {
     let settings = reviewing("local");
     let section = format!("{QWEN}[local_reviewers.local]\nkind = \"session\"\nagent = \"qwen\"\n");

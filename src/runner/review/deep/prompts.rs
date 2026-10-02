@@ -71,7 +71,7 @@ pub(super) fn reader_prompt(
 }
 
 // One finding as the readers write it, and the fix turn reads it.
-fn line(f: &Finding) -> String {
+pub(super) fn line(f: &Finding) -> String {
     format!(
         "{}|{}:{}|{}|{}\n",
         severity_tag(f.severity),
@@ -111,7 +111,7 @@ pub(super) fn recheck_prompt(number: u64, held: &[Held], head: &str, fix: &str) 
     let mut list = String::new();
     for (i, h) in held.iter().enumerate() {
         list.push_str(&format!("{}. {}", i + 1, line(&h.finding)));
-        if let Backing::Test { file, command } = &h.backing {
+        if let Backing::Test { file, command, .. } = &h.backing {
             list.push_str(&format!("   failing test, in {file}: `{command}`\n"));
         }
         if let Some(still) = &h.still {
@@ -256,7 +256,8 @@ pub(super) fn fix_file(held: &[Held], deferred: &Path, again: bool) -> String {
         "{lead}\n\n\
          A finding with a failing test has a test the review wrote, which fails because of \
          it: it is in your worktree, not committed. Make it pass, and commit it with the \
-         fix. A HIGH marked unconfirmed is one the review could not make a test fail for: \
+         fix, as the review wrote it: a test left uncommitted or edited since, and any \
+         other file left new in your worktree, counts as a fix not pushed. A HIGH marked unconfirmed is one the review could not make a test fail for: \
          check it yourself before you fix it or leave it, and say which in your commit. \
          A finding that is out of scope for this pull request may be left: copy its line, \
          as it stands here, onto a line of its own in {}. Kelpie files what is there as \
@@ -266,7 +267,7 @@ pub(super) fn fix_file(held: &[Held], deferred: &Path, again: bool) -> String {
     for h in held {
         text.push_str(&line(&h.finding));
         match &h.backing {
-            Backing::Test { file, command } => {
+            Backing::Test { file, command, .. } => {
                 text.push_str(&format!("  failing test, in {file}: `{command}`\n"));
             }
             Backing::Unconfirmed { why } if h.finding.severity == crate::ports::Severity::High => {
@@ -469,6 +470,7 @@ SEVERITY|file:line|what is wrong, and its trigger|what goes wrong, and who sees 
         high.backing = Backing::Test {
             file: "tests/a.rs".into(),
             command: "cargo test --test a".into(),
+            written: Vec::new(),
         };
         let mut unconfirmed = Held::new(finding(Severity::High, 2));
         unconfirmed.backing = Backing::Unconfirmed {
@@ -530,6 +532,7 @@ SEVERITY|file:line|what is wrong, and its trigger|what goes wrong, and who sees 
         backed.backing = Backing::Test {
             file: "tests/a.rs".into(),
             command: "cargo test --test a".into(),
+            written: Vec::new(),
         };
         let prompt = recheck_prompt(
             71,

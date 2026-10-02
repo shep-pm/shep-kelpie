@@ -15,7 +15,9 @@ use super::{Names, Runner};
 use crate::ports::Timestamp;
 use crate::settings::MergeAuthority;
 use crate::state::{Fix, ProjectState, Resume, Ruling, RulingKind, StateError};
-use crate::work_item::{CodeRabbitStage, Known, Phase, Review, Turn, WorkItem, foreign_change};
+use crate::work_item::{
+    CodeRabbitStage, Known, Phase, Review, ReviewStage, Turn, WorkItem, foreign_change,
+};
 use crate::worktree;
 
 /// The prompt for a turn resumed after the maintainer accepts a timed-out
@@ -672,6 +674,9 @@ pub(super) fn question(
         ),
         RulingKind::FixNotPushed { fix, .. } => {
             let round = match fix {
+                Fix::Review(review) if matches!(review.stage, ReviewStage::Deep(_)) => {
+                    format!("the deep review (round {})", review.round)
+                }
                 Fix::Review(review) => format!("round {} of the qwen-review loop", review.round),
                 Fix::CodeRabbit { round, .. } => format!("{bot} round {round}"),
             };

@@ -21,7 +21,7 @@ mod spend;
 mod timings;
 
 pub use audit::{Audit, Passed, SENDS_BACK};
-pub use deep::{Backing, Deep, Held};
+pub use deep::{Backing, Deep, Held, Written};
 pub use follow_ups::FollowUps;
 pub use local::LOCAL_FAILURES_DOWN;
 pub use round::{CodeRabbitStage, CodeRabbitTally, OpenThread};

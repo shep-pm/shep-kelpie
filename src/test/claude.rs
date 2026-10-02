@@ -35,6 +35,11 @@ pub(crate) enum Scripted {
     /// Commits and pushes the first file as `Push` does, then changes the
     /// second, tracked file and leaves it uncommitted
     PushLeaving(&'static str, &'static str, &'static str),
+    /// Commits and pushes each of these files with this text in one commit
+    PushMany(&'static [(&'static str, &'static str)]),
+    /// Commits and pushes the first file as `Push` does, then leaves a new
+    /// file with the third name uncommitted
+    PushAndPlant(&'static str, &'static str, &'static str),
     /// Writes this file with this text in the worktree, commits nothing, and
     /// answers with this exact text: a session that confirms a finding with a
     /// failing test
@@ -329,6 +334,33 @@ impl Agents for FakeClaude {
                 Ok(AgentReply {
                     session_id: call.session.id().clone(),
                     text: "done".into(),
+                    usage: Usage::default(),
+                    session_cost: Some(Cost(0)),
+                })
+            }
+            Some(Scripted::PushMany(files)) => {
+                for (file, text) in files {
+                    write_in(&call.cwd, file, text);
+                    git(&call.cwd, &["add", file]);
+                }
+                git(&call.cwd, &["commit", "--quiet", "-m", "fix"]);
+                git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);
+                Ok(AgentReply {
+                    session_id: call.session.id().clone(),
+                    text: "pushed".into(),
+                    usage: Usage::default(),
+                    session_cost: Some(Cost(0)),
+                })
+            }
+            Some(Scripted::PushAndPlant(file, text, junk)) => {
+                write_in(&call.cwd, file, text);
+                git(&call.cwd, &["add", file]);
+                git(&call.cwd, &["commit", "--quiet", "-m", file]);
+                git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);
+                write_in(&call.cwd, junk, "left behind\n");
+                Ok(AgentReply {
+                    session_id: call.session.id().clone(),
+                    text: "pushed".into(),
                     usage: Usage::default(),
                     session_cost: Some(Cost(0)),
                 })

@@ -26,7 +26,7 @@ use crate::runner::ruling::park;
 use crate::runner::shots::RoundShots;
 use crate::runner::turn;
 use crate::state::{Fix, RulingKind, StateError};
-use crate::work_item::{Backing, CallKind, Deep, Held, Phase, Review, ReviewStage, Turn};
+use crate::work_item::{Backing, CallKind, Deep, Held, Phase, Review, ReviewStage, Turn, Written};
 use crate::worktree::{self, Start};
 
 use super::lineup::Chosen;
@@ -268,24 +268,13 @@ impl Runner {
         };
         // What the re-check reads and runs is the worktree, so it must be what
         // was pushed: a fix left uncommitted, or committed and not pushed,
-        // would be verified here and never reach the branch.
+        // would be verified here and never reach the branch. The review's
+        // own tests must be in it as they were written, and nothing else may
+        // be left new.
         let path = findings::findings_path(&item.build);
-        let (repo, tree) = (&self.settings.repo, &item.worktree);
-        let left = match worktree::head(repo, tree).and_then(|at| {
-            let modified = worktree::modified(repo, tree)?;
-            Ok((at, modified))
-        }) {
-            Ok((at, _)) if at != now => Some(format!(
-                "its worktree is at {}, not at the pushed head {}",
-                short(&at),
-                short(&now)
-            )),
-            Ok((_, modified)) if !modified.is_empty() => Some(format!(
-                "{} are changed and not committed",
-                modified.join(", ")
-            )),
-            Ok(_) => None,
-            Err(e) => return Ok(self.gate_failed(e.to_string())),
+        let left = match self.left_behind(&held, &now) {
+            Ok(left) => left,
+            Err(reason) => return Ok(self.gate_failed(reason)),
         };
         if now == head || left.is_some() {
             let prompt = match left {
@@ -304,6 +293,78 @@ impl Runner {
             round,
             head: Some(now),
         }))
+    }
+
+    // Why the worktree is not what was pushed, if it is not: it is not at the
+    // pushed head, a file is changed or new and uncommitted, or a test the
+    // review wrote for one of `held` is not in that head as it was written.
+    fn left_behind(&self, held: &[Held], pushed: &str) -> Result<Option<String>, String> {
+        let item = self.current().expect("the deep round is a work item's");
+        let (repo, tree) = (&self.settings.repo, &item.worktree);
+        let wrong = |e: crate::worktree::WorktreeError| e.to_string();
+        let at = worktree::head(repo, tree).map_err(wrong)?;
+        if at != pushed {
+            return Ok(Some(format!(
+                "its worktree is at {}, not at the pushed head {}",
+                short(&at),
+                short(pushed)
+            )));
+        }
+        let uncommitted = worktree::uncommitted(repo, tree).map_err(wrong)?;
+        if !uncommitted.is_empty() {
+            return Ok(Some(format!(
+                "{} are changed or new and not committed",
+                uncommitted.join(", ")
+            )));
+        }
+        for written in held.iter().flat_map(|h| match &h.backing {
+            Backing::Test { written, .. } => written.as_slice(),
+            _ => &[],
+        }) {
+            match worktree::blob_at_head(repo, tree, &written.path).map_err(wrong)? {
+                Some(blob) if blob == written.blob => {}
+                Some(_) => {
+                    return Ok(Some(format!(
+                        "the review's test {} was edited after the review wrote it",
+                        written.path
+                    )));
+                }
+                None => {
+                    return Ok(Some(format!(
+                        "the review's test {} is not in the pushed head",
+                        written.path
+                    )));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    // What a confirming session left in the worktree: the test it named and
+    // the files that are new since the sessions before it, as they are now.
+    fn left_by_session(&self, file: &str, held: &[Held]) -> Vec<Written> {
+        let item = self.current().expect("the deep round is a work item's");
+        let (repo, tree) = (&self.settings.repo, &item.worktree);
+        let known: Vec<&str> = held
+            .iter()
+            .flat_map(|h| match &h.backing {
+                Backing::Test { written, .. } => written.as_slice(),
+                _ => &[],
+            })
+            .map(|w| w.path.as_str())
+            .collect();
+        let mut paths = worktree::untracked(repo, tree).unwrap_or_default();
+        paths.retain(|p| !known.contains(&p.as_str()));
+        if !paths.iter().any(|p| p == file) {
+            paths.push(file.to_owned());
+        }
+        paths
+            .into_iter()
+            .filter_map(|path| {
+                let blob = worktree::blob_of(repo, tree, &path).ok()?;
+                Some(Written { path, blob })
+            })
+            .collect()
     }
 
     /// Records what a session of the deep round said, and goes on to the next step
@@ -415,7 +476,14 @@ impl Runner {
                 };
                 let backed = matches!(confirmed, Confirmation::Test { .. });
                 held[at].backing = match confirmed {
-                    Confirmation::Test { file, command } => Backing::Test { file, command },
+                    Confirmation::Test { file, command } => {
+                        let written = self.left_by_session(&file, &held);
+                        Backing::Test {
+                            file,
+                            command,
+                            written,
+                        }
+                    }
                     Confirmation::Unconfirmed(why) => Backing::Unconfirmed { why },
                 };
                 let finding = format!("{}:{}", held[at].finding.file, held[at].finding.line);
@@ -431,7 +499,15 @@ impl Runner {
             Deep::Rechecking { held, again, .. } => {
                 match reply.and_then(|text| prompts::read_unfixed(&text, &held)) {
                     Err(reason) => failed("re-check", reason),
-                    Ok(unfixed) => {
+                    Ok(mut unfixed) => {
+                        // A finding the worker left for an issue of its own is
+                        // filed once the pull request merges, so it is resolved.
+                        let deferred = std::fs::read_to_string(findings::deferred_path(&build))
+                            .unwrap_or_default();
+                        unfixed.retain(|h| {
+                            let line = prompts::line(&h.finding);
+                            !deferred.lines().any(|l| l.trim() == line.trim())
+                        });
                         let (fixed, left) = (held.len() - unfixed.len(), unfixed.len());
                         let report = StepReport::DeepRechecked {
                             issue,

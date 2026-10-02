@@ -428,6 +428,27 @@ impl Settings {
             &self.agents.deep_reviewer,
             &self.models.deep_reviewer,
         )?;
+        // Its sessions that run commands run under the worker's fence, hooks
+        // included, and only Claude Code runs the project's hooks.
+        let other = match &deep_reviewer.harness {
+            AgentHarness::Pi(_) => Some("pi"),
+            AgentHarness::Codex => Some("codex"),
+            _ => None,
+        };
+        if let (Some(harness), Some(name), false) = (
+            other,
+            &self.agents.deep_reviewer,
+            self.worker.guard_hooks.is_empty(),
+        ) {
+            return Err(SettingsError::Invalid {
+                setting: "agents",
+                reason: format!(
+                    "`agents.deep_reviewer` names {name}, on {harness}, which cannot run \
+                     `worker.guard_hooks`, which are Claude Code hooks: put the deep \
+                     reviewer on Claude Code, or take the hooks off"
+                ),
+            });
+        }
         Ok(RoleAgents {
             worker,
             reviewer,

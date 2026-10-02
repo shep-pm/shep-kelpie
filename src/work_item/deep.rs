@@ -101,12 +101,27 @@ pub enum Backing {
         file: String,
         /// The command that runs it
         command: String,
+        /// What the session left in the worktree, which the fix must push as
+        /// it is: the test file and any other file it made
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        written: Vec<Written>,
     },
     /// A session could not make a test fail for it
     Unconfirmed {
         /// Why, as the session said
         why: String,
     },
+}
+
+/// A file a confirming session left in the worktree, as it was when it ended
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Written {
+    /// Its path, from the repo's root
+    pub path: String,
+    /// Its git blob id, which says what it held
+    pub blob: String,
 }
 
 impl Backing {
@@ -140,6 +155,10 @@ mod tests {
                 backing: Backing::Test {
                     file: "tests/a.rs".into(),
                     command: "cargo test a".into(),
+                    written: vec![Written {
+                        path: "tests/a.rs".into(),
+                        blob: "e69de29".into(),
+                    }],
                 },
                 still: None,
             },
@@ -165,7 +184,10 @@ mod tests {
                     { "finding": { "severity": "low", "file": "src/lib.rs", "line": 3, "what": "w", "why": "y" } },
                     {
                         "finding": { "severity": "high", "file": "src/lib.rs", "line": 3, "what": "w", "why": "y" },
-                        "backing": { "backing": "test", "file": "tests/a.rs", "command": "cargo test a" },
+                        "backing": {
+                            "backing": "test", "file": "tests/a.rs", "command": "cargo test a",
+                            "written": [{ "path": "tests/a.rs", "blob": "e69de29" }],
+                        },
                     },
                     {
                         "finding": { "severity": "high", "file": "src/lib.rs", "line": 3, "what": "w", "why": "y" },
