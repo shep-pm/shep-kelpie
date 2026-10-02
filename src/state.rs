@@ -192,6 +192,7 @@ pub struct Finished {
     /// Seconds from its creation to `at`
     pub wall: u64,
     /// Every phase, summing to `wall`
+    #[serde(serialize_with = "crate::work_item::saved_seconds")]
     pub seconds: Seconds,
 }
 

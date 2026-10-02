@@ -61,6 +61,21 @@ pub(super) fn fix_prompt(number: u64, round: u32, count: usize, path: &Path) -> 
     )
 }
 
+/// The fix turn that follows a fix left unpushed in part: `left` says how
+pub(in crate::runner) fn unpushed_prompt(
+    number: u64,
+    round: u32,
+    path: &Path,
+    left: &str,
+) -> String {
+    format!(
+        "Your last turn on pull request #{number} pushed, but not all of your fix: {left}. \
+         Round {round}'s findings in {} still hold until the whole fix is on the branch. \
+         Commit what is left and push with `git push origin HEAD`.",
+        path.display()
+    )
+}
+
 pub(in crate::runner) fn again_prompt(number: u64, round: u32, path: &Path) -> String {
     format!(
         "Your last turn on pull request #{number} pushed nothing, so round {round}'s \

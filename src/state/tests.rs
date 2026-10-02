@@ -338,7 +338,6 @@ fn a_finished_work_item_is_pinned() {
                 "gpu_wait": 0,
                 "local_round": 0,
                 "claude_round": 0,
-                "deep_round": 0,
                 "judging": 0,
                 "audit": 0,
                 "ci": 40,

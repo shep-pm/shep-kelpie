@@ -414,6 +414,20 @@ pub fn uncommitted(repo: &Path, worktree: &Path) -> Result<Vec<String>, Worktree
     Ok(files)
 }
 
+/// The tracked files `worktree` holds changed or staged, with a new file left out
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn modified(repo: &Path, worktree: &Path) -> Result<Vec<String>, WorktreeError> {
+    let status =
+        trusted(repo, worktree)?(&["status", "--porcelain=v2", "-z", "--untracked-files=no"])?;
+    let mut files = status_names(&status);
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
 // The paths in `git status --porcelain=v2 -z`, where an entry is a kind, its
 // fields and then the path, and a rename or copy adds the old path as an
 // entry of its own.

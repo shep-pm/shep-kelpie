@@ -260,6 +260,38 @@ fn a_high_is_confirmed_with_a_failing_test_that_the_fix_is_rechecked_by_running(
         recheck.prompt
     );
     assert!(recheck.prompt.contains("run that test now"));
+    let fence = recheck.reach.fence.as_ref().expect("it is fenced");
+    assert_eq!(
+        fence.write,
+        [rig.build_7()],
+        "it writes its builds and not the source it verifies"
+    );
+}
+
+#[test]
+fn a_fix_pushed_in_part_is_not_rechecked_but_parks_like_one_that_pushed_nothing() {
+    let (rig, runner) = at_the_deep_round();
+    rig.claude.script([
+        Scripted::Text(MEDIUM),
+        Scripted::Text("CLEAN"),
+        // work.txt is the worker's own, tracked file: its edit stays uncommitted.
+        Scripted::PushLeaving("fix.txt", "fix\n", "work.txt"),
+    ]);
+    let reports = until_it_leaves_review(&rig, &runner);
+    let Some(StepReport::Ruling { .. }) = reports.last() else {
+        panic!("a fix left in part raised no ruling: {reports:#?}");
+    };
+    assert_eq!(
+        roles(&rig).last(),
+        Some(&Role::Worker),
+        "the worktree is not what was pushed, so nothing verifies it"
+    );
+    let status = rig.ask(&runner, "status", None);
+    let prompt = status["rulings"][0]["kind"]["prompt"].as_str().unwrap();
+    assert!(
+        prompt.contains("not all of your fix: work.txt are changed and not committed"),
+        "{prompt}"
+    );
 }
 
 #[test]

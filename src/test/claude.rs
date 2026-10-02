@@ -32,6 +32,9 @@ pub(crate) enum Scripted {
     /// Writes this file with this text in the worktree, commits nothing,
     /// and answers: a write that got past the fence
     Plant(&'static str, &'static str),
+    /// Commits and pushes the first file as `Push` does, then changes the
+    /// second, tracked file and leaves it uncommitted
+    PushLeaving(&'static str, &'static str, &'static str),
     /// Writes this file with this text in the worktree, commits nothing, and
     /// answers with this exact text: a session that confirms a finding with a
     /// failing test
@@ -326,6 +329,19 @@ impl Agents for FakeClaude {
                 Ok(AgentReply {
                     session_id: call.session.id().clone(),
                     text: "done".into(),
+                    usage: Usage::default(),
+                    session_cost: Some(Cost(0)),
+                })
+            }
+            Some(Scripted::PushLeaving(file, text, tracked)) => {
+                write_in(&call.cwd, file, text);
+                git(&call.cwd, &["add", file]);
+                git(&call.cwd, &["commit", "--quiet", "-m", file]);
+                git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);
+                write_in(&call.cwd, tracked, "an edit the worker left uncommitted\n");
+                Ok(AgentReply {
+                    session_id: call.session.id().clone(),
+                    text: "pushed".into(),
                     usage: Usage::default(),
                     session_cost: Some(Cost(0)),
                 })

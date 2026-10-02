@@ -20,13 +20,14 @@ use crate::pacer::Scope;
 use crate::ports::{AgentCall, Finding, Role, Tools, read_review};
 use crate::profile;
 use crate::runner::Runner;
+use crate::runner::gate::short;
 use crate::runner::report::{Begin, ReviewCall, ReviewResult, Spent, StepReport};
 use crate::runner::ruling::park;
 use crate::runner::shots::RoundShots;
 use crate::runner::turn;
 use crate::state::{Fix, RulingKind, StateError};
 use crate::work_item::{Backing, CallKind, Deep, Held, Phase, Review, ReviewStage, Turn};
-use crate::worktree::Start;
+use crate::worktree::{self, Start};
 
 use super::lineup::Chosen;
 use prompts::Confirmation;
@@ -134,7 +135,7 @@ impl Runner {
             return Ok(held);
         }
         let base = self.current().expect("a work item's").review_base();
-        let call = self.working_call(prompts::confirm_prompt(&base, finding));
+        let call = self.working_call(prompts::confirm_prompt(&base, finding), true);
         self.start_call(call)
     }
 
@@ -152,14 +153,15 @@ impl Runner {
             Ok(fix) => fix,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
-        let call = self.working_call(prompts::recheck_prompt(number, held, head, &fix));
+        let call = self.working_call(prompts::recheck_prompt(number, held, head, &fix), false);
         self.start_call(call)
     }
 
     // A session on the deep reviewer's agent with the worker's fence over this
-    // work item's worktree, writing nowhere else than that and its build
-    // folder, so it can run tests but commit and push nothing.
-    fn working_call(&self, prompt: String) -> Result<AgentCall, String> {
+    // work item's worktree, so it can run tests but commit and push nothing.
+    // It writes its build folder, and the worktree only when it is to write
+    // a test there: the re-check must not change what it verifies.
+    fn working_call(&self, prompt: String, writes_tests: bool) -> Result<AgentCall, String> {
         let item = self.current().expect("the deep round is a work item's");
         let start = match item.rework || item.adopted {
             true => Start::Pushed,
@@ -169,7 +171,7 @@ impl Runner {
         if let Some(fence) = reach.fence.as_mut() {
             fence
                 .write
-                .retain(|p| *p == item.worktree || *p == item.build);
+                .retain(|p| *p == item.build || (writes_tests && *p == item.worktree));
         }
         let (model, limit) = (
             &self.agents.deep_reviewer,
@@ -264,9 +266,32 @@ impl Runner {
             Ok(now) => now,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
-        if now == head {
-            let path = findings::findings_path(&item.build);
-            let prompt = findings::again_prompt(number, round, &path);
+        // What the re-check reads and runs is the worktree, so it must be what
+        // was pushed: a fix left uncommitted, or committed and not pushed,
+        // would be verified here and never reach the branch.
+        let path = findings::findings_path(&item.build);
+        let (repo, tree) = (&self.settings.repo, &item.worktree);
+        let left = match worktree::head(repo, tree).and_then(|at| {
+            let modified = worktree::modified(repo, tree)?;
+            Ok((at, modified))
+        }) {
+            Ok((at, _)) if at != now => Some(format!(
+                "its worktree is at {}, not at the pushed head {}",
+                short(&at),
+                short(&now)
+            )),
+            Ok((_, modified)) if !modified.is_empty() => Some(format!(
+                "{} are changed and not committed",
+                modified.join(", ")
+            )),
+            Ok(_) => None,
+            Err(e) => return Ok(self.gate_failed(e.to_string())),
+        };
+        if now == head || left.is_some() {
+            let prompt = match left {
+                Some(left) if now != head => findings::unpushed_prompt(number, round, &path, &left),
+                _ => findings::again_prompt(number, round, &path),
+            };
             let stage = ReviewStage::Deep(Deep::Fixing { held, head, again });
             let fix = Fix::Review(Review { stage, ..review });
             return self.raise(number, RulingKind::FixNotPushed { fix, prompt });
