@@ -557,11 +557,17 @@ impl Runner {
                 // A turn that left its work uncommitted and pushed nothing is
                 // sent back once, before the gate can park it on a ruling.
                 let asked = std::mem::take(&mut item.asked_to_commit);
+                // A worktree git cannot be read in is told and let go: the
+                // turn ends as it did before, which errs toward the ruling.
                 let uncommitted = match (question.is_none() && no_push && !asked)
                     .then(|| worktree::uncommitted(&self.settings.repo, &item.worktree))
                 {
                     Some(Ok(files)) => files,
-                    _ => Vec::new(),
+                    Some(Err(e)) => {
+                        eprintln!("cannot list issue #{issue}'s uncommitted files: {e}");
+                        Vec::new()
+                    }
+                    None => Vec::new(),
                 };
                 let commit_first = !uncommitted.is_empty();
                 item.turn = if commit_first {
