@@ -329,6 +329,25 @@ fn a_head_pushed_while_the_check_ran_drops_its_answer() {
 }
 
 #[test]
+fn a_long_issue_is_read_whole_so_no_criterion_goes_unseen() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    let long = format!(
+        "## Acceptance criteria\n\n{}- [ ] the very last criterion\n",
+        "- [ ] a criterion, one of very many\n".repeat(2_000)
+    );
+    assert!(long.len() > 60_000);
+    rig.forge.set_issue_body(7, &long);
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::Ruling { .. })
+    ));
+    let [call] = audits(&rig).try_into().unwrap();
+    assert!(call.prompt.contains("the very last criterion"));
+    assert!(!call.prompt.contains("left out"));
+}
+
+#[test]
 fn an_issue_edited_after_a_pass_is_checked_again_on_the_same_head() {
     let (rig, runner, head) = Rig::with_pull_request("shep");
     rig.forge.set_checks(&head, Checks::Passed);

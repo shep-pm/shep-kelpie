@@ -20,6 +20,7 @@ use super::Runner;
 use super::gate::short;
 use super::report::{Begin, StepReport};
 use super::review::calls::{build_call, diff_against};
+use super::ruling::park;
 use crate::pacer::Scope;
 use crate::ports::{AgentCall, AgentError, AgentReply, PullRequestState, Role, Tools};
 use crate::state::{RulingKind, StateError};
@@ -31,10 +32,6 @@ mod tests;
 
 /// Where the check's throwaway settings go
 const SETTINGS_FILE: &str = "audit-settings.json";
-
-/// The most of the issue, or of one item it points to, the check's prompt
-/// carries, in bytes
-const MOST: usize = 20_000;
 
 /// The most items an issue's body may point to that are pulled in
 const POINTED_AT: usize = 8;
@@ -142,12 +139,11 @@ impl Runner {
                     comment.body.trim()
                 ));
             }
-            return cut(&said, MOST);
+            return said;
         }
         match forge.issue(repo, n) {
             Ok(found) => {
-                let said = format!("#{n} {}\n\n{}", found.title.trim(), found.body.trim());
-                cut(&said, MOST)
+                format!("#{n} {}\n\n{}", found.title.trim(), found.body.trim())
             }
             Err(e) => format!("#{n} could not be read: {e}"),
         }
@@ -233,18 +229,28 @@ impl Runner {
         let prompt = gap_prompt(number, head, &gaps);
         let sent = item_sent_back(self);
         if sent >= SENDS_BACK {
-            self.update(|item| {
-                item.audit.get_or_insert_with(Audit::default).sent_back = 0;
-            })?;
+            // The counter's reset and the ruling are one save, so a restart
+            // between them cannot send the same gap to the worker twice more.
             let kind = RulingKind::Audit {
                 head: head.to_owned(),
                 gaps,
                 prompt,
             };
-            return match self.raise(number, kind)? {
-                Begin::Report(report) => Ok(Some(report)),
-                _ => unreachable!("a ruling is raised as a report"),
-            };
+            let mut next = self.state.clone();
+            let item = self
+                .current_in(&mut next)
+                .expect("the check is of a work item");
+            item.audit.get_or_insert_with(Audit::default).sent_back = 0;
+            let (id, question) = park(self.names(), &mut next, issue, Some(number), kind);
+            self.save(next)?;
+            let comment_failed = self.post_ruling(Some(number), id);
+            return Ok(Some(StepReport::Ruling {
+                issue,
+                pull_request: number,
+                id,
+                question,
+                comment_failed,
+            }));
         }
         self.update(|item| {
             item.audit.get_or_insert_with(Audit::default).sent_back = sent + 1;
@@ -351,8 +357,8 @@ fn prompt(r: &Reading<'_>) -> String {
          --- issue #{issue}: {title} ---\n{}\n--- end ---{pointed}\n\n\
          --- pull request #{number}: {pull_title} ---\n{}\n--- end ---\n\n\
          --- final diff against {base} ---\n{diff}\n--- end ---",
-        cut(body.trim(), MOST),
-        cut(pull_body.trim(), MOST),
+        body.trim(),
+        pull_body.trim(),
     )
 }
 
@@ -460,16 +466,4 @@ fn pointed_at(body: &str, own: &[u64]) -> Vec<u64> {
     }
     found.truncate(POINTED_AT);
     found
-}
-
-// Cut at a character boundary, saying so.
-fn cut(text: &str, most: usize) -> String {
-    if text.len() <= most {
-        return text.to_owned();
-    }
-    let end = (0..=most)
-        .rev()
-        .find(|i| text.is_char_boundary(*i))
-        .unwrap_or(0);
-    format!("{}\n[the rest is left out]", &text[..end])
 }
