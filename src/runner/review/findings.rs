@@ -76,6 +76,22 @@ pub(in crate::runner) fn unpushed_prompt(
     )
 }
 
+/// The fix turn after one that deferred every finding, so had nothing to
+/// push, left its worktree as `left` says
+pub(in crate::runner) fn deferred_prompt(
+    number: u64,
+    round: u32,
+    path: &Path,
+    left: &str,
+) -> String {
+    format!(
+        "Your last turn on pull request #{number} deferred every finding of round {round}, \
+         in {}, so there is nothing to push, but {left}. Remove what is left from your \
+         worktree, and do not commit a test for a finding you deferred.",
+        path.display()
+    )
+}
+
 pub(in crate::runner) fn again_prompt(number: u64, round: u32, path: &Path) -> String {
     format!(
         "Your last turn on pull request #{number} pushed nothing, so round {round}'s \

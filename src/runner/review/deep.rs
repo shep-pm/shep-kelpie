@@ -309,11 +309,15 @@ impl Runner {
             Ok(left) => left,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
-        if now == head || left.is_some() {
-            let why = left.filter(|_| now != head);
-            let prompt = match &why {
-                Some(why) => findings::unpushed_prompt(number, round, &path, why),
-                None => findings::again_prompt(number, round, &path),
+        // When the worker deferred every finding there is nothing to push, so
+        // an unmoved head is no failure: the worktree need only be clean.
+        let nothing_to_push = pinned.is_empty();
+        if (now == head && !nothing_to_push) || left.is_some() {
+            let why = left.filter(|_| now != head || nothing_to_push);
+            let prompt = match (&why, nothing_to_push && now == head) {
+                (Some(why), true) => findings::deferred_prompt(number, round, &path, why),
+                (Some(why), false) => findings::unpushed_prompt(number, round, &path, why),
+                (None, _) => findings::again_prompt(number, round, &path),
             };
             let stage = ReviewStage::Deep(Deep::Fixing { held, head, again });
             let fix = Fix::Review(Review { stage, ..review });

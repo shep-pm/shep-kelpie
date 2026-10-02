@@ -588,6 +588,86 @@ fn a_high_backed_by_a_failing_test_can_be_deferred_by_taking_its_test_out() {
 }
 
 #[test]
+fn a_worker_that_defers_every_finding_has_nothing_to_push_and_the_review_goes_on() {
+    let (rig, runner) = at_the_deep_round();
+    rig.claude.script([
+        Scripted::Text(MEDIUM),
+        Scripted::Text(OTHER),
+        // It defers both and pushes nothing, which is all it has to do.
+        Scripted::Say("Both are out of scope."),
+    ]);
+    std::fs::create_dir_all(rig.build_7()).unwrap();
+    std::fs::write(
+        rig.build_7().join("deferred-findings.md"),
+        format!("{MEDIUM}\n{OTHER}\n"),
+    )
+    .unwrap();
+    let reports = until_it_leaves_review(&rig, &runner);
+    assert_eq!(state(&rig, &runner), "ci", "{reports:#?}");
+    assert!(
+        !reports
+            .iter()
+            .any(|r| matches!(r, StepReport::Ruling { .. })),
+        "an unmoved head is no failure when nothing was to be pushed: {reports:#?}"
+    );
+    assert!(
+        reports.iter().any(|r| matches!(
+            r,
+            StepReport::DeepRechecked {
+                fixed: 0,
+                deferred: 2,
+                unfixed: 0,
+                ..
+            }
+        )),
+        "{reports:#?}"
+    );
+    assert_eq!(
+        roles(&rig).last(),
+        Some(&Role::Worker),
+        "there is nothing left to re-check"
+    );
+}
+
+#[test]
+fn deferring_every_finding_still_leaves_no_test_in_the_worktree() {
+    let (rig, runner) = at_the_deep_round();
+    rig.claude.script([
+        Scripted::Text(HIGH),
+        Scripted::Text("CLEAN"),
+        Scripted::Write(
+            "tests/high.rs",
+            FAILING_TEST,
+            "CONFIRMED|tests/high.rs|cargo test --test high",
+        ),
+        // It defers the finding but leaves the test it was told to remove.
+        Scripted::Say("Out of scope."),
+        // Kelpie sends a turn that ends with uncommitted files back once.
+        Scripted::Say("Still out of scope."),
+    ]);
+    std::fs::create_dir_all(rig.build_7()).unwrap();
+    std::fs::write(
+        rig.build_7().join("deferred-findings.md"),
+        format!("{HIGH}\n"),
+    )
+    .unwrap();
+    let reports = until_it_leaves_review(&rig, &runner);
+    let Some(StepReport::Ruling { question, .. }) = reports.last() else {
+        panic!("a test left behind raised no ruling: {reports:#?}");
+    };
+    assert!(
+        question.contains("but tests/high.rs are changed or new and not committed"),
+        "{question}"
+    );
+    let status = rig.ask(&runner, "status", None);
+    let prompt = status["rulings"][0]["kind"]["prompt"].as_str().unwrap();
+    assert!(
+        prompt.contains("deferred every finding") && prompt.contains("there is nothing to push"),
+        "{prompt}"
+    );
+}
+
+#[test]
 fn a_fix_pushed_in_part_is_not_rechecked_but_parks_like_one_that_pushed_nothing() {
     let (rig, runner) = at_the_deep_round();
     rig.claude.script([
