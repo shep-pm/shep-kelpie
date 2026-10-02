@@ -31,6 +31,8 @@ pub enum CallKind {
     Judge,
     /// A shots run
     Shots,
+    /// The whole-issue check before the merge
+    Audit,
 }
 
 /// A work item's time so far

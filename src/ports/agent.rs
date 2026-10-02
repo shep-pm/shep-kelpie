@@ -26,6 +26,8 @@ pub enum Role {
     Judge,
     /// A one-shot that plans a ready issue before any work item opens
     Planner,
+    /// A one-shot that checks a whole work item against its issue before the merge
+    Auditor,
 }
 
 impl Role {
@@ -36,6 +38,7 @@ impl Role {
             Self::Reviewer => "reviewer",
             Self::Judge => "judge",
             Self::Planner => "planner",
+            Self::Auditor => "auditor",
         }
     }
 }

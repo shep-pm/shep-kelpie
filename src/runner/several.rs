@@ -65,7 +65,7 @@ fn both_parked(project: &str) -> (Rig, Mutex<Runner>) {
     ));
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
     assert!(matches!(
-        step(&runner).unwrap(),
+        rig.step_past_audits(&runner),
         Some(StepReport::Ruling {
             issue: 8,
             id: 2,

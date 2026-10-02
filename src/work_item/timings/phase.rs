@@ -17,6 +17,8 @@ pub enum TimingPhase {
     ClaudeRound,
     /// The judge runs
     Judging,
+    /// The whole-issue check runs
+    Audit,
     /// Waiting for CI
     Ci,
     /// Waiting for the CodeRabbit lease and hourly window
@@ -39,12 +41,13 @@ pub enum TimingPhase {
 
 impl TimingPhase {
     /// Every phase, in the order `status` and the table list them
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Worker,
         Self::GpuWait,
         Self::LocalRound,
         Self::ClaudeRound,
         Self::Judging,
+        Self::Audit,
         Self::Ci,
         Self::CodeRabbitWindow,
         Self::CodeRabbitReview,
@@ -63,6 +66,7 @@ impl TimingPhase {
             Self::LocalRound => "local_round",
             Self::ClaudeRound => "claude_round",
             Self::Judging => "judging",
+            Self::Audit => "audit",
             Self::Ci => "ci",
             Self::CodeRabbitWindow => "coderabbit_window",
             Self::CodeRabbitReview => "coderabbit_review",
@@ -92,6 +96,7 @@ mod tests {
                 "local_round",
                 "claude_round",
                 "judging",
+                "audit",
                 "ci",
                 "coderabbit_window",
                 "coderabbit_review",

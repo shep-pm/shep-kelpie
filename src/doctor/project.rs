@@ -131,7 +131,12 @@ fn spends_codex(settings: &Settings, kelpie: &KelpieSettings, here: Here<'_>) ->
         Runs::Claude(session) => codex(&session.limit),
         Runs::Local(_) => false,
     });
-    sessions || roles.is_some_and(|l| [l.worker, l.reviewer, l.judge, l.planner].iter().any(codex))
+    sessions
+        || roles.is_some_and(|l| {
+            [l.worker, l.reviewer, l.judge, l.planner, l.auditor]
+                .iter()
+                .any(codex)
+        })
 }
 
 fn checkout(subject: String, settings: &Settings) -> Line {

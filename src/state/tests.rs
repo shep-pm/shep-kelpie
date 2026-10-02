@@ -339,6 +339,7 @@ fn a_finished_work_item_is_pinned() {
                 "local_round": 0,
                 "claude_round": 0,
                 "judging": 0,
+                "audit": 0,
                 "ci": 40,
                 "coderabbit_window": 0,
                 "coderabbit_review": 0,

@@ -138,7 +138,7 @@ impl Runner {
         Ok(Pace::Clear)
     }
 
-    // Each role's limit, the planner's included, then each session reviewer's.
+    // Each role's limit, the planner's and auditor's included, then each session reviewer's.
     fn spent_limits(&self) -> impl Iterator<Item = &Limit> {
         let limits = &self.agents.limits;
         let sessions = self.lineup.iter().filter_map(|r| match &r.runs {
@@ -153,6 +153,7 @@ impl Runner {
             &limits.reviewer,
             &limits.judge,
             &limits.planner,
+            &limits.auditor,
         ]
         .into_iter()
         .chain(claude_worker)

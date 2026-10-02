@@ -22,6 +22,7 @@ use crate::settings::ForgeSlug;
 pub(crate) struct FakeForge {
     visibility: Arc<Mutex<Visibility>>,
     missing: Arc<Mutex<HashSet<u64>>>,
+    bodies: Arc<Mutex<HashMap<u64, String>>>,
     labels: Arc<Mutex<HashMap<u64, Vec<String>>>>,
     ready: Arc<Mutex<Vec<ReadyIssue>>>,
     blockers: Arc<Mutex<HashMap<u64, Vec<u64>>>>,
@@ -116,6 +117,7 @@ impl FakeForge {
         Self {
             visibility: Arc::new(Mutex::new(Visibility::Public)),
             missing: Arc::default(),
+            bodies: Arc::default(),
             labels: Arc::default(),
             ready: Arc::default(),
             blockers: Arc::default(),
@@ -208,6 +210,11 @@ impl FakeForge {
 
     pub(crate) fn remove_issue(&self, number: u64) {
         self.missing.lock().unwrap().insert(number);
+    }
+
+    /// Gives issue `number` this body, which it keeps once it is read
+    pub(crate) fn set_issue_body(&self, number: u64, body: &str) {
+        self.bodies.lock().unwrap().insert(number, body.to_owned());
     }
 
     /// Labels issue `number` with `label`, on the board and when viewed
@@ -587,9 +594,10 @@ impl Forge for FakeForge {
         }
         // Each read takes its own lock, so none may be held across another.
         let open = !self.closed.lock().unwrap().contains(&number);
+        let body = self.bodies.lock().unwrap().get(&number).cloned();
         Ok(Issue {
             title: format!("Title of #{number}"),
-            body: format!("Body of #{number}.\n"),
+            body: body.unwrap_or_else(|| format!("Body of #{number}.\n")),
             labels: self.labels_of(number),
             open,
             parent: self.parent_of(number),

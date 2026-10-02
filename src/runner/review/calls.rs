@@ -119,7 +119,7 @@ fn is_shot(file: &str, dir: &Path) -> bool {
 // The shape every call the review loop makes itself shares: a fresh
 // session, the worktree as its folder, no instructions file, no tools, no
 // fence and no plugins unless the caller adds them, and the role and prompt.
-fn build_call(
+pub(in crate::runner) fn build_call(
     role: Role,
     issue: u64,
     worktree: &Path,
@@ -158,7 +158,7 @@ fn shots_prompt(run: &ShotsRun) -> String {
     )
 }
 
-fn diff_against(worktree: &Path, base: &str) -> Result<String, String> {
+pub(in crate::runner) fn diff_against(worktree: &Path, base: &str) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(worktree)

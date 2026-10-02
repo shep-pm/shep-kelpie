@@ -5,8 +5,8 @@
 # `review.local_rounds`, `pacing.enabled`,
 # `worker.allowed_domains`, `worker.build_env`, `worker.instructions_file`,
 # `worker.turn_timeout`, `ruling_channels`, `pull_request_reviewers`,
-# `preview`, `skills`, `agents`, `models.planner` and `planning`, which a table
-# written before them may leave out. This entry holds the first build's
+# `preview`, `skills`, `agents`, `models.planner`, `models.auditor` and
+# `planning`, which a table written before them may leave out. This entry holds the first build's
 # defaults, for shep.
 
 [[app]]
@@ -80,6 +80,13 @@ effort = "low"
 model = "claude-opus-5-5"
 effort = "medium"
 
+# The whole-issue check, one fresh session before every merge ruling or `auto`
+# merge: is each acceptance criterion met, and is each assumption about the
+# world outside the repo checked against the real thing?
+[app.dogs.kelpie.models.auditor]
+model = "claude-opus-5-5"
+effort = "high"
+
 # The model id each `worker:<model>-<effort>` label's name runs. Each name
 # keeps the id shown here when left out.
 # [app.dogs.kelpie.models.labels]
@@ -104,6 +111,7 @@ enabled = false
 # reviewer = "opus-high"
 # judge = "opus-high"
 # planner = "opus-high"
+# auditor = "opus-high"
 
 [app.dogs.kelpie.review]
 loop_guard = 8

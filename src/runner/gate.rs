@@ -113,6 +113,9 @@ impl Runner {
         if self.review_bot_due() {
             return self.start_round(head);
         }
+        if let Some(begin) = self.audit_before_merge(number, &head)? {
+            return Ok(begin);
+        }
         if let Some(begin) = self.shots_before_merge(number, &head)? {
             return Ok(begin);
         }
@@ -457,7 +460,7 @@ pub(super) mod tests {
         rig.clock.advance(CHECKS_SETTLE - 1);
         assert_eq!(step(&runner).unwrap(), None);
         rig.clock.advance(1);
-        ruling_report(step(&runner).unwrap());
+        ruling_report(rig.step_past_audits(&runner));
     }
 
     #[test]
@@ -479,7 +482,7 @@ pub(super) mod tests {
         rig.forge
             .set_checks(&head, Checks::Failed(vec!["lint".into()]));
 
-        let (id, question) = ruling_report(step(&runner).unwrap());
+        let (id, question) = ruling_report(rig.step_past_audits(&runner));
         assert!(question.starts_with("Merge pull request #71"), "{question}");
         rig.ask(&runner, "rule", Some(&format!("{id} yes")));
         assert!(matches!(
