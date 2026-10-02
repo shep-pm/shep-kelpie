@@ -285,6 +285,17 @@ pub(super) mod tests {
         assert_eq!(step(&runner).unwrap(), None, "a parked worker waits");
     }
 
+    // The worker pushed a head past the red one, and green CI on it raises
+    // the first merge ruling, which names it.
+    fn assert_fix_landed(rig: &Rig, runner: &std::sync::Mutex<Runner>, red: &str) {
+        let fixed = rig.forge.head_of("kelpie/7").unwrap();
+        assert_ne!(fixed, red);
+        rig.forge.set_checks(&fixed, Checks::Passed);
+        let (id, question) = ruling_report(rig.verdict(runner));
+        assert_eq!(id, 1);
+        assert!(question.contains(&fixed[..7]), "{question}");
+    }
+
     #[test]
     fn a_red_run_is_the_workers_next_turn_naming_the_failed_checks() {
         let (rig, runner, head) = Rig::with_pull_request("koji");
@@ -311,12 +322,7 @@ pub(super) mod tests {
         assert!(fix.prompt.starts_with("/mattpocock:diagnosing-bugs "));
         assert!(fix.prompt.contains(&named), "{}", fix.prompt);
 
-        let fixed = rig.forge.head_of("kelpie/7").unwrap();
-        assert_ne!(fixed, head);
-        rig.forge.set_checks(&fixed, Checks::Passed);
-        let (id, question) = ruling_report(rig.verdict(&runner));
-        assert_eq!(id, 1);
-        assert!(question.contains(&fixed[..7]), "{question}");
+        assert_fix_landed(&rig, &runner, &head);
     }
 
     #[test]
@@ -345,12 +351,7 @@ pub(super) mod tests {
         );
         assert!(again.prompt.contains("fix.txt"), "{}", again.prompt);
         assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
-
-        let fixed = rig.forge.head_of("kelpie/7").unwrap();
-        assert_ne!(fixed, head);
-        rig.forge.set_checks(&fixed, Checks::Passed);
-        let (_, question) = ruling_report(rig.verdict(&runner));
-        assert!(question.contains(&fixed[..7]), "{question}");
+        assert_fix_landed(&rig, &runner, &head);
     }
 
     #[test]
