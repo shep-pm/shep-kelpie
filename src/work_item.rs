@@ -58,6 +58,11 @@ pub struct WorkItem {
     /// `review.local_rounds` caps
     #[serde(default, skip_serializing_if = "is_zero")]
     pub local_rounds: u32,
+    /// Local rounds in a row that reviewed nothing, because the model could
+    /// not be reached. The first is retried; the second leaves the loop to
+    /// its other reviewers for the rest of the work item.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub local_failures: u32,
     /// Its worktree
     pub worktree: PathBuf,
     /// Its worker's build folder
@@ -396,6 +401,12 @@ pub enum ReviewStage {
 }
 
 impl WorkItem {
+    /// Whether its local reviewer reviewed nothing twice in a row, which
+    /// leaves the loop to its other reviewers
+    pub fn local_reviewer_down(&self) -> bool {
+        self.local_failures >= 2
+    }
+
     /// Remembers findings sent to the worker, once each
     pub fn record_held(&mut self, held: &[Finding]) {
         let same =

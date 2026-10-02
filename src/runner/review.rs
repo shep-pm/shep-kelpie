@@ -301,6 +301,9 @@ impl Runner {
                 _ => None,
             })
             .unwrap_or(false);
+        let local_round = self.current().is_some_and(
+            |item| matches!(&item.phase, Phase::Review(review) if self.is_local_round(review)),
+        );
         let mut next = self.state.clone();
         // Tolerated the same way `end_turn` tolerates a turn's result
         // arriving with nothing (or something else) to apply it to: the
@@ -337,12 +340,50 @@ impl Runner {
             }));
         }
 
+        // The script writes a line for a file it could not review, and still
+        // finishes the round: those lines are not findings.
+        let (result, unreviewed) = match result {
+            ReviewResult::Findings(Ok(findings)) if local_round => {
+                let (unreviewed, findings) = findings.into_iter().partition(Finding::is_unreviewed);
+                (ReviewResult::Findings(Ok(findings)), unreviewed)
+            }
+            result => (result, Vec::new()),
+        };
+        let unreviewed: Vec<String> = unreviewed.into_iter().map(|f: Finding| f.file).collect();
+
         let report = match result {
             ReviewResult::Findings(Err(reason)) => StepReport::GateFailed { issue, reason },
+            // Every file went unreviewed, so the round looked at nothing: it
+            // is neither clean nor counted, and its reviewer gets one more try.
+            ReviewResult::Findings(Ok(findings))
+                if findings.is_empty() && !unreviewed.is_empty() =>
+            {
+                if !matches!(review.stage, ReviewStage::Round) {
+                    unreachable!("a round's findings only arrive while awaiting that round");
+                }
+                item.local_failures += 1;
+                let retrying = !item.local_reviewer_down();
+                if !retrying && let Phase::Review(kept) = &mut item.phase {
+                    // The next round chooses its reviewer afresh.
+                    kept.reviewer = None;
+                    kept.alone = false;
+                }
+                StepReport::LocalRoundFailed {
+                    issue,
+                    pull_request: number,
+                    round,
+                    reviewer: review.reviewer.clone().unwrap_or_else(ReviewerName::claude),
+                    unreviewed,
+                    retrying,
+                }
+            }
             // Nothing to judge: the round is clean at once.
             ReviewResult::Findings(Ok(findings)) if findings.is_empty() => {
                 if !matches!(review.stage, ReviewStage::Round) {
                     unreachable!("a round's findings only arrive while awaiting that round");
+                }
+                if local_round {
+                    item.local_failures = 0;
                 }
                 item.phase = advance(review, true, now, local, &mut item.local_rounds);
                 StepReport::ReviewFindingsSent {
@@ -359,6 +400,9 @@ impl Runner {
                 }
                 let reviewer = review.reviewer.clone().unwrap_or_else(ReviewerName::claude);
                 let count = findings.len();
+                if local_round {
+                    item.local_failures = 0;
+                }
                 item.phase = Phase::Review(Review {
                     stage: ReviewStage::Judging {
                         findings,
@@ -372,6 +416,7 @@ impl Runner {
                     round,
                     reviewer,
                     findings: count,
+                    unreviewed,
                 }
             }
             ReviewResult::Verdict(Err(reason)) => StepReport::GateFailed { issue, reason },

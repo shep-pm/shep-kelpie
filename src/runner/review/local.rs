@@ -326,3 +326,121 @@ fn a_local_round_with_no_limit_set_leaves_the_state_file_as_it_was() {
     let saved = std::fs::read_to_string(rig.paths().state).unwrap();
     assert!(!saved.contains("local_rounds"), "{saved}");
 }
+
+// What qwen-review.sh itself writes, one line per file, when the GPU box
+// cannot be reached, and when it answers with nothing.
+const UNREACHABLE: &str = "\
+LOW|src/a.rs:0|not reviewed: curl: (7) Failed to connect to gpu.box port 8080|raw response kept at /tmp/qwen-review/raw/src_a.rs.txt
+LOW|src/b.rs:0|not reviewed: empty response|raw response kept at /tmp/qwen-review/raw/src_b.rs.txt
+";
+
+fn found(lines: &str) -> ScriptedRound {
+    ScriptedRound::Findings(crate::ports::parse_findings(lines))
+}
+
+fn qwen() -> ReviewerName {
+    ReviewerName::try_from("qwen".to_owned()).unwrap()
+}
+
+fn at_round_one(rig: &Rig) -> std::sync::Mutex<crate::runner::Runner> {
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+    step(&runner).unwrap(); // the worker's first turn
+    runner
+}
+
+fn judge_calls(rig: &Rig) -> usize {
+    let calls = rig.claude.all_calls();
+    calls.iter().filter(|c| c.role == Role::Judge).count()
+}
+
+#[test]
+fn a_local_round_that_reviewed_nothing_is_retried_once_and_not_judged() {
+    let rig = Rig::new("koji");
+    let runner = at_round_one(&rig);
+    rig.reviewer
+        .script([found(UNREACHABLE), ScriptedRound::Findings(Vec::new())]);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::LocalRoundFailed {
+            issue: 7,
+            pull_request: 71,
+            round: 1,
+            reviewer: qwen(),
+            unreviewed: vec!["src/a.rs".into(), "src/b.rs".into()],
+            retrying: true,
+        })
+    );
+    let phase = &rig.ask(&runner, "status", None)["work_item"]["phase"];
+    assert_eq!(phase["round"], 1, "{phase}");
+    assert_eq!(phase["consecutive_clean"], 0, "{phase}");
+    assert_eq!(phase["stage"]["stage"], "round", "{phase}");
+    assert_eq!(judge_calls(&rig), 0);
+
+    // The retry reviewed everything and found nothing: that round is clean.
+    step(&runner).unwrap();
+    assert_eq!(rig.reviewer.seen().len(), 2, "the same reviewer again");
+    let phase = &rig.ask(&runner, "status", None)["work_item"]["phase"];
+    assert_eq!(phase["round"], 2, "{phase}");
+    assert_eq!(phase["consecutive_clean"], 1, "{phase}");
+}
+
+#[test]
+fn a_local_round_that_fails_twice_leaves_the_loop_to_claude_and_status_says_so() {
+    let rig = Rig::new("koji");
+    let runner = at_round_one(&rig);
+    rig.reviewer
+        .script([found(UNREACHABLE), found(UNREACHABLE)]);
+    rig.claude.script([Scripted::Text("CLEAN")]);
+    step(&runner).unwrap(); // fails, retried
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"].get("local_reviewer_down"), None);
+    assert_eq!(
+        step(&runner).unwrap(), // fails again
+        Some(StepReport::LocalRoundFailed {
+            issue: 7,
+            pull_request: 71,
+            round: 1,
+            reviewer: qwen(),
+            unreviewed: vec!["src/a.rs".into(), "src/b.rs".into()],
+            retrying: false,
+        })
+    );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["local_reviewer_down"], true);
+    assert_eq!(status["work_item"]["phase"]["state"], "review");
+
+    // Claude is the only reviewer left, so its one clean round ends the loop.
+    step(&runner).unwrap();
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["phase"]["state"], "ci");
+    assert_eq!(rig.reviewer.seen().len(), 2, "no third local round");
+    assert_eq!(judge_calls(&rig), 0);
+}
+
+#[test]
+fn a_round_with_some_files_unreviewed_keeps_its_real_findings() {
+    let rig = Rig::new("koji");
+    let runner = at_round_one(&rig);
+    let lines = format!("MEDIUM|src/c.rs:4|leftover debug print|noisy logs\n{UNREACHABLE}");
+    rig.reviewer.script([found(&lines)]);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewRound {
+            issue: 7,
+            pull_request: 71,
+            round: 1,
+            reviewer: qwen(),
+            findings: 1,
+            unreviewed: vec!["src/a.rs".into(), "src/b.rs".into()],
+        })
+    );
+    let status = rig.ask(&runner, "status", None);
+    let findings = &status["work_item"]["phase"]["stage"]["findings"];
+    assert_eq!(findings.as_array().unwrap().len(), 1, "{findings}");
+    assert_eq!(findings[0]["file"], "src/c.rs");
+    assert_eq!(status["work_item"].get("local_reviewer_down"), None);
+}

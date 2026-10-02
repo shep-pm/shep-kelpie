@@ -147,6 +147,10 @@ pub struct WorkItemStatus<'a> {
     pub by_role: Spend,
     /// Its qwen rounds, which cost no money
     pub qwen: QwenTally,
+    /// Whether its local reviewer reviewed nothing twice, so the loop goes
+    /// on without it
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub local_reviewer_down: bool,
     /// Why kelpie's last shots run failed, when it did
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shots_failed: Option<&'a str>,
@@ -178,6 +182,7 @@ impl<'a> WorkItemStatus<'a> {
             unpriced_calls: item.calls.iter().filter(|c| c.unpriced).count(),
             by_role: item.spend(),
             qwen: item.qwen,
+            local_reviewer_down: item.local_reviewer_down(),
             shots_failed: item.shots.as_ref().and_then(|r| r.run.failed.as_deref()),
             timings,
         }

@@ -3,9 +3,9 @@
 //! Rounds go down the project's reviewers in order, from the one after the
 //! last round's, skipping any that cannot run: one limited to paths the pull
 //! request does not change, or a local one once `review.local_rounds` are
-//! spent. With none left, the project's own Claude round runs. A round's
-//! reviewer is kept in its state once it starts, so a round cut short
-//! resumes with the same one.
+//! spent or has reviewed nothing twice running. With none left, the
+//! project's own Claude round runs. A round's reviewer is kept in its state
+//! once it starts, so a round cut short resumes with the same one.
 
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -46,13 +46,16 @@ impl Runner {
             false => Vec::new(),
         };
         let local_left = self.local_left();
+        let local_down = self
+            .current()
+            .is_some_and(|item| item.local_reviewer_down());
         let runs = |r: &LoopReviewer| {
             let paths = r.paths();
             let touched = paths.is_empty()
                 || changed
                     .iter()
                     .any(|file| paths.iter().any(|glob| matches(glob.as_str(), file)));
-            touched && (!r.is_local() || local_left > 0)
+            touched && (!r.is_local() || (local_left > 0 && !local_down))
         };
         let eligible = self.lineup.iter().filter(|r| runs(r)).count();
         let len = self.lineup.len();
@@ -83,9 +86,11 @@ impl Runner {
     ///
     /// With no limit nothing is counted, so an older binary reads the state file.
     pub(super) fn counts_local(&self, review: &Review) -> bool {
-        if self.settings.review.local_rounds.is_none() {
-            return false;
-        }
+        self.settings.review.local_rounds.is_some() && self.is_local_round(review)
+    }
+
+    /// Whether `review`'s round is a local reviewer's
+    pub(super) fn is_local_round(&self, review: &Review) -> bool {
         match &review.reviewer {
             Some(name) => self.listed(name).is_some_and(|r| r.is_local()),
             // An older state file ran the local round on odd rounds.

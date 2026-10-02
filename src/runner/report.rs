@@ -429,6 +429,25 @@ pub enum StepReport {
         reviewer: ReviewerName,
         /// How many findings it reported
         findings: usize,
+        /// The files it could not review, which are no findings
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        unreviewed: Vec<String>,
+    },
+    /// A local round reviewed no file at all, so it counts for nothing
+    LocalRoundFailed {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The round
+        round: u32,
+        /// Which reviewer ran it
+        reviewer: ReviewerName,
+        /// The files it could not review
+        unreviewed: Vec<String>,
+        /// Whether the round runs again; if not, the loop goes on without
+        /// this reviewer
+        retrying: bool,
     },
     /// The judge ruled on one finding
     FindingJudged {

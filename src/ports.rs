@@ -673,6 +673,20 @@ pub struct Finding {
     pub why: String,
 }
 
+impl Finding {
+    /// Whether this is a line the script writes for a file it could not
+    /// review, such as when the model cannot be reached
+    ///
+    /// A file skipped as over the chunk limit is not one: the model is up,
+    /// and the line is a finding that the file needs reviewing by hand.
+    pub fn is_unreviewed(&self) -> bool {
+        self.severity == Severity::Low
+            && self.line == 0
+            && self.what.starts_with("not reviewed: ")
+            && !self.what.contains("exceeds the chunk limit")
+    }
+}
+
 /// Parses reviewer output in qwen's `SEVERITY|file:line|what|why` format
 ///
 /// A line that does not fit the shape is skipped rather than failing the
