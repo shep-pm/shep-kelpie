@@ -7,10 +7,12 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use pick::RepoLabels;
+
 use super::report::{Begin, PlanOutcome, StepReport, WholeWorker};
 use super::ruling::question;
 use super::{Answer, RuleError, Runner};
-use crate::board::{ReadyIssue, Skip};
+use crate::board::{ReadyIssue, Skip, WORKER_LABEL};
 use crate::plan::{self, Piece, Plan, Planned, Stage};
 use crate::ports::{
     AgentCall, AgentError, AgentReply, Agents, Cost, Reach, Role, Session, Tools, Usage,
@@ -92,7 +94,8 @@ impl Runner {
         let session = new_session_id().map_err(|e| format!("cannot draw a session id: {e}"))?;
         let view = self.paths.plan();
         worktree::view(&self.settings.repo, &view).map_err(|e| e.to_string())?;
-        let asked = plan::prompt(number, &found.title, &found.body, note);
+        let default = self.default_worker();
+        let asked = plan::prompt(number, &found.title, &found.body, note, &default);
         let model = &self.agents.planner;
         let minutes = u64::from(self.settings.worker.turn_timeout.get());
         // It reads and searches the repo, and runs no commands and no crew.
@@ -167,13 +170,11 @@ impl Runner {
 
     // Applies the plan's pick for an issue kept whole as a `worker:` label,
     // unless the issue already carries one: that wins over the pick. A
-    // reply that named nothing kelpie runs, or a label the forge refuses,
+    // reply that named none of the picks, or a label that did not land,
     // leaves the issue to the project's own worker, with a comment saying
-    // why, best effort, whether the reply left the worker out or named one
-    // kelpie does not run.
+    // why, best effort.
     fn apply_whole_worker(&self, issue: u64, named: Option<&str>) -> WholeWorker {
-        let (forge, repo) = (&self.ports.forge, &self.settings.forge);
-        let found = match forge.issue(repo, issue) {
+        let found = match self.ports.forge.issue(&self.settings.forge, issue) {
             Ok(found) => found,
             Err(e) => {
                 return self
@@ -183,14 +184,15 @@ impl Runner {
         if plan::already_has_worker(&found.labels) {
             return WholeWorker::Already;
         }
-        if let Some(label) = plan::resolved_label(named) {
-            return match forge.set_issue_label(repo, issue, &label, true) {
-                Ok(()) => WholeWorker::Picked { label },
-                Err(e) => self
-                    .default_whole_worker(issue, format!("cannot add `{label}` to #{issue}: {e}")),
-            };
+        let Some(label) = plan::resolved_label(named) else {
+            return self.default_whole_worker(issue, plan::fallback_reason(named));
+        };
+        match self.put_pick(&mut RepoLabels::default(), issue, &label) {
+            Ok(()) => WholeWorker::Picked {
+                label: label.name.to_owned(),
+            },
+            Err(reason) => self.default_whole_worker(issue, reason),
         }
-        self.default_whole_worker(issue, plan::fallback_reason(named))
     }
 
     // Leaves `issue` to the project's own worker for `reason`, and always
@@ -199,8 +201,8 @@ impl Runner {
     fn default_whole_worker(&self, issue: u64, reason: String) -> WholeWorker {
         let (forge, repo) = (&self.ports.forge, &self.settings.forge);
         let body = format!(
-            "Kelpie kept this issue whole. {reason}, so it runs on the project's default \
-             worker."
+            "Kelpie kept this issue whole, and it runs on {}: {reason}.",
+            self.default_worker()
         );
         let comment_failed = forge
             .post_comment(repo, issue, &body)
@@ -261,6 +263,8 @@ impl Runner {
         kind: RulingKind,
         answer: Answer,
     ) -> Result<(), RuleError> {
+        let declined = matches!((&kind, &answer), (RulingKind::Split { .. }, Answer::No(_)))
+            && next.item(issue).is_none();
         let stage = match (kind, answer) {
             (RulingKind::Split { why, pieces }, Answer::Yes) => Some(splitting(why, pieces)),
             (RulingKind::Split { .. }, Answer::No(_)) => Some(Stage::Whole),
@@ -280,7 +284,27 @@ impl Runner {
             put_plan(&mut next, issue, stage);
         }
         self.focus = None;
-        self.save(next).map_err(RuleError::State)
+        self.save(next).map_err(RuleError::State)?;
+        if declined {
+            self.say_whole_after_no(issue);
+        }
+        Ok(())
+    }
+
+    // Says on `issue`, best effort, that it is worked whole after a no on
+    // its split, and on which worker: no piece's pick carries over.
+    fn say_whole_after_no(&self, issue: u64) {
+        let (forge, repo) = (&self.ports.forge, &self.settings.forge);
+        let default = self.default_worker();
+        let on = match forge.issue(repo, issue) {
+            Ok(found) => match found.labels.iter().find(|l| l.starts_with(WORKER_LABEL)) {
+                Some(label) => format!("its `{label}` label"),
+                None => default,
+            },
+            Err(_) => format!("its `{WORKER_LABEL}` label if it has one, else {default}"),
+        };
+        let body = format!("Kelpie works this issue whole, as the maintainer answered, on {on}.");
+        let _ = forge.post_comment(repo, issue, &body);
     }
 
     fn split_ruling(&self, issue: u64) -> Option<u64> {
@@ -338,6 +362,7 @@ pub(super) fn run_planning(
     agents.run(&again)
 }
 
+mod pick;
 mod split;
 #[cfg(test)]
 mod tests;

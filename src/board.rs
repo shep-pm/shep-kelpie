@@ -23,7 +23,7 @@ use crate::settings::{Effort, LabelModels, LabelName, RoleAgents, RoleModel};
 pub const READY: &str = "ready-for-agent";
 
 /// The prefix of the label that overrides the worker's model and effort
-const WORKER_LABEL: &str = "worker:";
+pub const WORKER_LABEL: &str = "worker:";
 
 /// What follows [`WORKER_LABEL`] to ask for the project's local worker
 const LOCAL: &str = "local";

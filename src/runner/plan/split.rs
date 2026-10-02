@@ -5,9 +5,10 @@
 //! forge change so a restart carries on where it stopped. A split or close
 //! the forge keeps refusing waits on a ruling, so the board goes on.
 
+use super::pick::RepoLabels;
 use super::{PARENT_CLOSED, TRIES, put_plan};
 use crate::board::{READY, ReadyIssue};
-use crate::plan::{self, Plan, Stage};
+use crate::plan::{self, Piece, PieceWorker, Plan, Stage};
 use crate::runner::Runner;
 use crate::runner::report::{Begin, StepReport};
 use crate::state::{ProjectState, RulingKind, StateError};
@@ -84,6 +85,9 @@ impl Runner {
             return Ok(Ok(StepReport::SplitDropped { issue, reason }));
         }
         let labels: Vec<&str> = parent.labels.iter().map(String::as_str).collect();
+        let mut known = RepoLabels::default();
+        // Why a sub-issue's pick did not land, by its number, for the comment.
+        let mut missed = Vec::new();
         loop {
             let Some(Stage::Splitting {
                 why,
@@ -97,26 +101,9 @@ impl Runner {
             };
             let (forge, repo) = (&self.ports.forge, &self.settings.forge);
             let Some(piece) = pieces.get(linked) else {
-                let labelled: Vec<Option<bool>> = opened
-                    .iter()
-                    .map(|&n| {
-                        forge
-                            .issue(repo, n)
-                            .map(|shown| plan::already_has_worker(&shown.labels))
-                            .ok()
-                    })
-                    .collect();
-                let comment = plan::comment(&why, &pieces, &opened, &labelled);
-                // `post_comment` takes an issue as well as a pull request.
-                let comment_failed = forge.post_comment(repo, issue, &comment).err();
-                let mut next = self.state.clone();
-                next.plans.retain(|p| p.issue != issue);
-                self.save(next)?;
-                return Ok(Ok(StepReport::Split {
-                    issue,
-                    sub_issues: opened,
-                    comment_failed: comment_failed.map(|e| e.to_string()),
-                }));
+                return self
+                    .finish_split(issue, &why, &pieces, opened, &missed)
+                    .map(Ok);
             };
             let Some(&number) = opened.get(linked) else {
                 let made = forge.create_issue(repo, &piece.title, &piece.body, &labels);
@@ -145,18 +132,56 @@ impl Runner {
                 }
             }
             // The copied parent labels may already carry one, which wins
-            // over the piece's own pick. Writing the pick is best effort:
-            // `shep kelpie add` never creates a `worker:<model>-<effort>`
-            // label, so the forge may refuse one it does not have yet. A
-            // sub-issue the write misses just falls back to the project's
-            // own worker, and the comment says so once the split finishes.
+            // over the piece's own pick. A pick that does not land leaves
+            // the sub-issue to the project's own worker, and the comment
+            // says why.
             if !plan::already_has_worker(&shown.labels)
                 && let Some(label) = plan::resolved_label(piece.worker.as_deref())
+                && let Err(reason) = self.put_pick(&mut known, number, &label)
             {
-                let _ = forge.set_issue_label(repo, number, &label, true);
+                missed.push((number, reason));
             }
             self.change_split(issue, |_, linked| *linked += 1)?;
         }
+    }
+
+    // Leaves the split's one comment on `issue`, with what each sub-issue's
+    // worker came to, and drops its plan: the split is done.
+    pub(super) fn finish_split(
+        &mut self,
+        issue: u64,
+        why: &str,
+        pieces: &[Piece],
+        opened: Vec<u64>,
+        missed: &[(u64, String)],
+    ) -> Result<StepReport, StateError> {
+        let (forge, repo) = (&self.ports.forge, &self.settings.forge);
+        let workers = pieces.iter().zip(&opened).map(|(piece, &number)| {
+            let shown = match forge.issue(repo, number) {
+                Ok(shown) => shown,
+                Err(e) => return PieceWorker::Unread(e.to_string()),
+            };
+            if plan::already_has_worker(&shown.labels) {
+                return PieceWorker::Labelled;
+            }
+            let missed = missed.iter().find(|(n, _)| *n == number);
+            PieceWorker::Defaulted(missed.map_or_else(
+                || plan::fallback_reason(piece.worker.as_deref()),
+                |(_, reason)| reason.clone(),
+            ))
+        });
+        let workers: Vec<PieceWorker> = workers.collect();
+        let comment = plan::comment(why, pieces, &opened, &workers);
+        // `post_comment` takes an issue as well as a pull request.
+        let comment_failed = forge.post_comment(repo, issue, &comment).err();
+        let mut next = self.state.clone();
+        next.plans.retain(|p| p.issue != issue);
+        self.save(next)?;
+        Ok(StepReport::Split {
+            issue,
+            sub_issues: opened,
+            comment_failed: comment_failed.map(|e| e.to_string()),
+        })
     }
 
     // A step that lands also clears the count of refusals in a row.

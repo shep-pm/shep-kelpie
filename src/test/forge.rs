@@ -73,6 +73,12 @@ pub(crate) struct FakeForge {
     saved_at_comment: Arc<Mutex<Vec<serde_json::Value>>>,
     default_branch: Arc<Mutex<String>>,
     repo_labels: Arc<Mutex<Vec<String>>>,
+    // Whether an issue may take only a label the repo has, as on GitHub
+    strict_labels: Arc<AtomicBool>,
+    label_creates_down: Arc<AtomicBool>,
+    // Every label kelpie asked to make, and how often it read the repo's
+    label_creates: Arc<Mutex<Vec<String>>>,
+    label_reads: Arc<AtomicUsize>,
     pushes: Arc<AtomicBool>,
     bot_seen: Arc<AtomicBool>,
     viewer_down: Arc<Mutex<Option<ForgeError>>>,
@@ -151,6 +157,10 @@ impl FakeForge {
             saved_at_comment: Arc::default(),
             default_branch: Arc::new(Mutex::new("main".to_owned())),
             repo_labels: Arc::default(),
+            strict_labels: Arc::default(),
+            label_creates_down: Arc::default(),
+            label_creates: Arc::default(),
+            label_reads: Arc::default(),
             pushes: Arc::new(AtomicBool::new(true)),
             bot_seen: Arc::new(AtomicBool::new(true)),
             viewer_down: Arc::default(),
@@ -194,15 +204,6 @@ impl FakeForge {
 
     pub(crate) fn set_default_branch(&self, branch: &str) {
         *self.default_branch.lock().unwrap() = branch.to_owned();
-    }
-
-    /// The repo's labels, those it started with and those made since
-    pub(crate) fn repo_labels_now(&self) -> Vec<String> {
-        self.repo_labels.lock().unwrap().clone()
-    }
-
-    pub(crate) fn set_repo_labels(&self, labels: &[&str]) {
-        *self.repo_labels.lock().unwrap() = labels.iter().map(|&l| l.to_owned()).collect();
     }
 
     pub(crate) fn remove_issue(&self, number: u64) {
@@ -564,19 +565,12 @@ impl Forge for FakeForge {
     }
 
     fn repo_labels(&self, _repo: &ForgeSlug) -> Result<Vec<String>, ForgeError> {
-        Ok(self.repo_labels.lock().unwrap().clone())
+        self.label_reads.fetch_add(1, Ordering::SeqCst);
+        Ok(self.repo_labels_now())
     }
 
     fn create_label(&self, _repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError> {
-        let mut labels = self.repo_labels.lock().unwrap();
-        if labels.iter().any(|l| l == label.name) {
-            return Err(ForgeError::Failed(format!(
-                "label with name \"{}\" already exists",
-                label.name
-            )));
-        }
-        labels.push(label.name.to_owned());
-        Ok(())
+        self.make_label(label.name)
     }
 
     fn can_push(&self, _repo: &ForgeSlug) -> Result<bool, ForgeError> {
@@ -756,6 +750,7 @@ impl Forge for FakeForge {
         labels: &[&str],
     ) -> Result<u64, ForgeError> {
         self.issues_up()?;
+        self.refuse_missing(labels)?;
         if let Some(left) = self.creates_left.lock().unwrap().as_mut() {
             if *left == 0 {
                 return Err(ForgeError::Failed("issues are down".into()));
@@ -861,6 +856,9 @@ impl Forge for FakeForge {
         if self.labels_down.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("labels are down".into()));
         }
+        if on {
+            self.refuse_missing(&[label])?;
+        }
         let mut labels = self.labels.lock().unwrap();
         let on_issue = labels.entry(number).or_default();
         on_issue.retain(|l| l != label);
@@ -928,4 +926,5 @@ impl Forge for FakeForge {
     }
 }
 
+mod labels;
 mod queue;

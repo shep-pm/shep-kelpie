@@ -7,13 +7,64 @@
 //! level above the work split, which stays the worker's inside one work item.
 //!
 //! The call also picks a worker for the issue kept whole, or for each piece,
-//! from the names a `worker:` label takes. The runner applies it as that
-//! label, unless the issue already carries one. A reply that names none, or
-//! one kelpie does not run, falls back to the project's own worker.
+//! from the three in [`PICKS`]. The runner applies it as that `worker:`
+//! label, made on the repo when missing, unless the issue already carries
+//! one. A reply that names none, or any other, falls back to the project's
+//! own worker.
 
 use serde::{Deserialize, Serialize};
 
-use crate::board::{WorkerLabel, parse_worker_value, worker_model_names, worker_override};
+use crate::board::{WORKER_LABEL, WorkerLabel, parse_worker_value, worker_override};
+use crate::ports::NewLabel;
+
+/// A worker the planning call may pick, and when it fits
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pick {
+    /// The `worker:` label it applies
+    pub label: NewLabel,
+    /// When it fits, as the planning prompt says
+    pub when: &'static str,
+}
+
+impl Pick {
+    /// The label's value, `<model>-<effort>`, as a reply names it
+    #[must_use]
+    pub fn value(&self) -> &'static str {
+        let name = self.label.name;
+        name.strip_prefix(WORKER_LABEL).unwrap_or(name)
+    }
+}
+
+/// The only workers the planning call may pick, the default first
+pub const PICKS: [Pick; 3] = [
+    Pick {
+        label: NewLabel {
+            name: "worker:sonnet-high",
+            color: "c5def5",
+            description: "Worker on Sonnet at high effort, the planner's default pick",
+        },
+        when: "The default: any feature, new behaviour across modules, state, persistence, \
+               timing, process lifecycle",
+    },
+    Pick {
+        label: NewLabel {
+            name: "worker:sonnet-medium",
+            color: "d4c5f9",
+            description: "Worker on Sonnet at medium effort, for small or mechanical work",
+        },
+        when: "Small or mechanical: docs, config, a rename, test-only, one module, no state \
+               or concurrency",
+    },
+    Pick {
+        label: NewLabel {
+            name: "worker:opus-high",
+            color: "5319e7",
+            description: "Worker on Opus at high effort, where a bad first build is hard to undo",
+        },
+        when: "Only where a bad first build is hard to undo: migrations, credentials, \
+               irreversible operations",
+    },
+];
 
 /// What the planning call decided
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,46 +110,50 @@ pub fn already_has_worker(labels: &[String]) -> bool {
     !matches!(worker_override(labels), Ok(None))
 }
 
-/// The `worker:` label value this piece or kept-whole issue names, once
-/// kelpie confirms it runs on a known model and effort
+/// The label this piece or kept-whole issue's pick applies, when it named
+/// one of [`PICKS`]
 ///
-/// `None` when it named nothing kelpie runs, model or effort missing or
-/// unknown, and the issue or sub-issue then falls back to the project's own
-/// worker.
-pub fn resolved_label(named: Option<&str>) -> Option<String> {
+/// `None` when it named nothing, or any other worker, even one a `worker:`
+/// label the maintainer adds could run, and the issue or sub-issue then
+/// falls back to the project's own worker.
+pub fn resolved_label(named: Option<&str>) -> Option<NewLabel> {
     let named = named?;
-    match parse_worker_value(named) {
-        Ok(WorkerLabel::Model(_)) => Some(format!("worker:{named}")),
-        Ok(WorkerLabel::Local) | Err(_) => None,
-    }
+    PICKS.iter().find(|p| p.value() == named).map(|p| p.label)
 }
 
 /// Why a worker the plan named, or a label it resolved to, is not the one
 /// that ended up running the issue or sub-issue, in one phrase
 ///
-/// Also fits a name [`resolved_label`] reads as `Some`, since writing that
-/// label is best effort too: the forge may refuse it, a `worker:` label
-/// `shep kelpie add` never created among them. A caller passing `named` by
-/// itself, with no write to blame, still reads sensibly rather than
-/// calling a valid pick unsupported.
+/// A name [`resolved_label`] reads as `Some` gets a phrase that does not
+/// call it unsupported, for a caller whose write left no error to name.
 pub fn fallback_reason(named: Option<&str>) -> String {
     let Some(named) = named else {
         return "the plan named no worker".to_owned();
     };
     if resolved_label(Some(named)).is_some() {
         return format!(
-            "`{named}` names a worker kelpie runs, but its label could not be confirmed"
+            "`{named}` is one of the planner's picks, but its label could not be confirmed"
         );
     }
-    match parse_worker_value(named) {
-        Ok(WorkerLabel::Local) => {
-            "the plan named `local`, which only the maintainer picks by hand".to_owned()
-        }
-        _ => format!(
-            "`{named}` is not a model and effort kelpie runs (from {})",
-            worker_model_names().join(", ")
-        ),
+    if matches!(parse_worker_value(named), Ok(WorkerLabel::Local)) {
+        return "the plan named `local`, which only the maintainer picks by hand".to_owned();
     }
+    let picks: Vec<&str> = PICKS.iter().map(Pick::value).collect();
+    format!(
+        "`{named}` is not one of the planner's picks ({})",
+        picks.join(", ")
+    )
+}
+
+/// What a split's comment says of one sub-issue's worker
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PieceWorker {
+    /// It carries a `worker:` label, from its pick or its parent's labels
+    Labelled,
+    /// It carries none, so the project's own worker runs it, for this reason
+    Defaulted(String),
+    /// Reading its labels back failed, with the forge's error
+    Unread(String),
 }
 
 /// Where planning an issue stands, kept in the project's state
@@ -210,38 +265,53 @@ fn named(value: Option<String>) -> Option<String> {
 
 /// Kelpie's prompt for planning issue `number`, with the maintainer's note
 /// on the last plan when it was sent back
-pub fn prompt(number: u64, title: &str, body: &str, note: Option<&str>) -> String {
+///
+/// `default` names the worker that runs an issue whose reply picks none,
+/// such as "the project's default worker, `<model>` at high effort".
+pub fn prompt(number: u64, title: &str, body: &str, note: Option<&str>, default: &str) -> String {
     let note = note.map_or_else(String::new, |note| {
         format!(
             "The maintainer sent back the last plan for this issue with this note:\n\n{note}\n\n"
         )
     });
-    let models = worker_model_names().join(", ");
     format!(
         "Plan issue #{number}: decide whether it is one pull request or several, and pick \
-         the model and effort its worker, or each piece's, runs on.\n\n\
+         the worker for it, or for each piece.\n\n\
          The maintainer's rule: split only where each piece works, tests and ships on \
          its own, as a pull request that merges to main by itself. Never cut a piece \
          short to keep it small. Most issues stay whole.\n\n\
-         Pick a worker that fits the size and risk of the work: a model from {models}, \
-         and an effort from low, medium, high, xhigh, max. Leave it out to run the \
-         project's own default worker.\n\n\
+         {}\n\n\
          Read the repo with Read, Grep and Glob, where you have them, to judge the work. \
          Change nothing, and \
          publish nothing: kelpie opens the sub-issues from your reply.\n\n\
          Reply with one JSON object and nothing else, either\n\
-         {{\"split\": false, \"why\": \"<one sentence>\", \"worker\": \"<model>-<effort>\"}}\n\
+         {{\"split\": false, \"why\": \"<one sentence>\", \"worker\": \"<worker>\"}}\n\
          or\n\
          {{\"split\": true, \"why\": \"<one or two sentences>\", \"pieces\": \
          [{{\"title\": \"<title>\", \"body\": \"<what to build, and its acceptance \
          criteria>\", \"blocked_by\": [<earlier piece numbers>], \
-         \"worker\": \"<model>-<effort>\"}}]}}\n\
+         \"worker\": \"<worker>\"}}]}}\n\
          Number the pieces from 1 in the order listed, blockers first, at least two. \
          A piece waits only on earlier pieces. Leave parent and blocked-by sections \
          out of each body: kelpie links those on the forge. `worker` is optional on \
          either reply.\n\n\
          {note}--- issue #{number}: {title} ---\n{}\n--- end ---",
+        picks(default),
         body.trim_end()
+    )
+}
+
+// The prompt's worker section: the only picks, when each fits, and what
+// runs when the reply names none.
+fn picks(default: &str) -> String {
+    let rows = PICKS
+        .iter()
+        .map(|p| format!("| `{}` | {} |", p.value(), p.when));
+    format!(
+        "Pick the worker from these three, and no other:\n\n\
+         | worker | when |\n| --- | --- |\n{}\n\n\
+         Leave `worker` out to run {default}.",
+        rows.collect::<Vec<_>>().join("\n")
     )
 }
 
@@ -262,19 +332,14 @@ pub fn list(pieces: &[Piece]) -> String {
 
 /// The one comment a split leaves on its issue, naming each sub-issue
 ///
-/// `labelled` says, for each piece in order, whether its sub-issue actually
-/// carries a `worker:` label once the split finishes: from the piece's own
-/// pick, or one it inherited from the parent's labels at its creation,
-/// either of which leaves nothing to say. `Some(false)`, with no `worker:`
-/// label at all, left to the project's own, is worth a note; `None`, where
-/// the forge could not be asked to say, is worth a different one, since it
-/// is not the same as confirming the project's own default runs it.
-pub fn comment(why: &str, pieces: &[Piece], opened: &[u64], labelled: &[Option<bool>]) -> String {
+/// `workers` says, for each piece in order, what its sub-issue's worker
+/// came to once the split finished. A labelled one leaves nothing to say.
+pub fn comment(why: &str, pieces: &[Piece], opened: &[u64], workers: &[PieceWorker]) -> String {
     let lines = pieces
         .iter()
         .zip(opened)
-        .zip(labelled)
-        .map(|((piece, number), labelled)| {
+        .zip(workers)
+        .map(|((piece, number), worker)| {
             let after: Vec<String> = piece
                 .blocked_by
                 .iter()
@@ -285,13 +350,14 @@ pub fn comment(why: &str, pieces: &[Piece], opened: &[u64], labelled: &[Option<b
                 [] => String::new(),
                 by => format!(", after {}", by.join(", ")),
             };
-            let defaulted = match labelled {
-                Some(true) => String::new(),
-                Some(false) => format!(
-                    ", worker defaulted to the project's: {}",
-                    fallback_reason(piece.worker.as_deref())
-                ),
-                None => ", worker not confirmed: kelpie could not read its sub-issue back".into(),
+            let defaulted = match worker {
+                PieceWorker::Labelled => String::new(),
+                PieceWorker::Defaulted(reason) => {
+                    format!(", worker defaulted to the project's: {reason}")
+                }
+                PieceWorker::Unread(error) => {
+                    format!(", worker not confirmed: could not read #{number}'s labels: {error}")
+                }
             };
             format!("- #{number}: {}{after}{defaulted}", piece.title.trim())
         });
@@ -375,20 +441,49 @@ mod tests {
     }
 
     #[test]
-    fn a_worker_the_reply_names_is_resolved_only_when_kelpie_runs_it() {
+    fn a_worker_the_reply_names_is_resolved_only_when_it_is_one_of_the_picks() {
         assert_eq!(resolved_label(None), None);
         assert_eq!(resolved_label(Some("nope")), None);
         assert_eq!(resolved_label(Some("local")), None);
+        // Workers a label the maintainer adds could run, but never a pick.
+        for other in ["opus-max", "sonnet-xhigh", "sonnet-low", "haiku-high"] {
+            assert_eq!(resolved_label(Some(other)), None, "{other}");
+        }
+        let names: Vec<_> = ["sonnet-high", "sonnet-medium", "opus-high"]
+            .map(|v| resolved_label(Some(v)).map(|l| l.name))
+            .into();
         assert_eq!(
-            resolved_label(Some("sonnet-medium")),
-            Some("worker:sonnet-medium".into())
+            names,
+            [
+                Some("worker:sonnet-high"),
+                Some("worker:sonnet-medium"),
+                Some("worker:opus-high")
+            ]
         );
+    }
+
+    #[test]
+    fn every_pick_is_a_worker_label_the_board_reads_as_a_model() {
+        for pick in PICKS {
+            let labels = [pick.label.name.to_owned()];
+            assert!(
+                matches!(worker_override(&labels), Ok(Some(WorkerLabel::Model(_)))),
+                "{}",
+                pick.label.name
+            );
+            assert_eq!(pick.label.color.len(), 6, "{}", pick.label.name);
+            assert!(pick.label.description.len() <= 100, "{}", pick.label.name);
+        }
     }
 
     #[test]
     fn why_a_worker_falls_back_names_what_the_reply_gave() {
         assert_eq!(fallback_reason(None), "the plan named no worker");
         assert!(fallback_reason(Some("nope-medium")).contains("`nope-medium`"));
+        assert_eq!(
+            fallback_reason(Some("opus-max")),
+            "`opus-max` is not one of the planner's picks (sonnet-high, sonnet-medium, opus-high)"
+        );
     }
 
     #[test]
@@ -397,10 +492,7 @@ mod tests {
         // its label could not be confirmed on the sub-issue (the write is
         // best effort): it must not then claim that name is unsupported.
         let text = fallback_reason(Some("sonnet-medium"));
-        assert!(
-            !text.contains("is not a model and effort kelpie runs"),
-            "{text}"
-        );
+        assert!(!text.contains("is not one of"), "{text}");
         assert!(text.contains("`sonnet-medium`"), "{text}");
     }
 
@@ -440,19 +532,47 @@ mod tests {
         assert_eq!(read("I would split it."), Err("no JSON object".into()));
     }
 
+    const DEFAULT: &str = "the project's default worker, `claude-sonnet-5-5` at high effort";
+
     #[test]
     fn the_prompt_carries_the_issue_and_a_note_sent_back() {
-        let first = prompt(7, "Add a thing", "Body.\n", None);
+        let first = prompt(7, "Add a thing", "Body.\n", None, DEFAULT);
         assert!(first.starts_with("Plan issue #7: "));
         assert!(first.ends_with("--- issue #7: Add a thing ---\nBody.\n--- end ---"));
         assert!(!first.contains("sent back"));
-        let again = prompt(7, "Add a thing", "Body.", Some("Keep the API whole."));
+        let again = prompt(
+            7,
+            "Add a thing",
+            "Body.",
+            Some("Keep the API whole."),
+            DEFAULT,
+        );
         assert!(again.contains("with this note:\n\nKeep the API whole.\n\n--- issue #7"));
     }
 
     #[test]
+    fn the_prompt_names_only_the_three_picks_when_each_fits_and_the_default() {
+        let text = prompt(7, "t", "b", None, DEFAULT);
+        let section = "Pick the worker from these three, and no other:\n\n\
+            | worker | when |\n\
+            | --- | --- |\n\
+            | `sonnet-high` | The default: any feature, new behaviour across modules, state, \
+            persistence, timing, process lifecycle |\n\
+            | `sonnet-medium` | Small or mechanical: docs, config, a rename, test-only, one \
+            module, no state or concurrency |\n\
+            | `opus-high` | Only where a bad first build is hard to undo: migrations, \
+            credentials, irreversible operations |\n\n\
+            Leave `worker` out to run the project's default worker, `claude-sonnet-5-5` at \
+            high effort.\n\n";
+        assert!(text.contains(section), "{text}");
+        for other in ["xhigh", "haiku", "fable", "-max", "-low", ", low"] {
+            assert!(!text.contains(other), "{other}");
+        }
+    }
+
+    #[test]
     fn the_prompt_never_mentions_cost_or_budget() {
-        let text = prompt(7, "t", "b", Some("n")).to_lowercase();
+        let text = prompt(7, "t", "b", Some("n"), DEFAULT).to_lowercase();
         for word in ["cost", "budget", "token", "spend", "usd", "$"] {
             assert!(!text.contains(word), "{word}");
         }
@@ -466,7 +586,7 @@ mod tests {
                 "Two slices.",
                 &pieces,
                 &[901, 902],
-                &[Some(true), Some(true)]
+                &[PieceWorker::Labelled, PieceWorker::Labelled]
             ),
             "Kelpie planned this issue as 2 pull requests. Two slices.\n\n\
              - #901: Schema\n- #902: Screen, after #901\n\n\
@@ -477,16 +597,13 @@ mod tests {
 
     #[test]
     fn the_comment_says_when_a_piece_s_worker_defaulted() {
-        let mut named = piece("Schema", &[]);
-        named.worker = Some("sonnet-medium".into());
-        let mut unknown = piece("Screen", &[]);
-        unknown.worker = Some("nope".into());
-        let pieces = [named, unknown];
+        let pieces = [piece("Schema", &[]), piece("Screen", &[])];
+        let defaulted = PieceWorker::Defaulted("`nope` is not one of the planner's picks".into());
         let text = comment(
             "Two slices.",
             &pieces,
             &[901, 902],
-            &[Some(true), Some(false)],
+            &[PieceWorker::Labelled, defaulted],
         );
         assert!(!text.contains("- #901: Schema,"), "{text}");
         assert!(
@@ -496,24 +613,18 @@ mod tests {
     }
 
     #[test]
-    fn a_sub_issue_labelled_by_inheritance_gets_no_defaulted_note() {
-        // The piece itself named nothing kelpie runs, but its sub-issue
-        // still ended up carrying a `worker:` label, inherited from the
-        // parent's own at creation: there is nothing to default to.
-        let pieces = [piece("Schema", &[])];
-        let text = comment("One slice.", &pieces, &[901], &[Some(true)]);
-        assert!(!text.contains("defaulted"), "{text}");
-    }
-
-    #[test]
     fn a_sub_issue_the_forge_could_not_read_back_is_not_called_defaulted() {
         // A forge error at comment time is not the same as confirming no
         // `worker:` label landed: the comment must not claim one.
         let pieces = [piece("Schema", &[])];
-        let text = comment("One slice.", &pieces, &[901], &[None]);
+        let unread = PieceWorker::Unread("gh failed: no issue #901".into());
+        let text = comment("One slice.", &pieces, &[901], &[unread]);
         assert!(!text.contains("defaulted"), "{text}");
         assert!(
-            text.contains("- #901: Schema, worker not confirmed"),
+            text.contains(
+                "- #901: Schema, worker not confirmed: could not read #901's labels: gh failed: \
+                 no issue #901"
+            ),
             "{text}"
         );
     }

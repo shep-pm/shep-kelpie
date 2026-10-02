@@ -64,7 +64,11 @@ fn a_small_issue_is_planned_whole_and_then_worked() {
     assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
     let [(on, comment)] = rig.forge.comments().try_into().unwrap();
     assert_eq!(on, 5);
-    assert!(comment.contains("the plan named no worker"), "{comment}");
+    assert_eq!(
+        comment,
+        "Kelpie kept this issue whole, and it runs on the project's default worker, \
+         `claude-sonnet-5-5` at high effort: the plan named no worker."
+    );
 
     assert!(matches!(
         step(&runner).unwrap(),
@@ -77,6 +81,10 @@ fn a_small_issue_is_planned_whole_and_then_worked() {
         plan.prompt
     );
     assert!(plan.prompt.contains("Plan issue #5: "));
+    assert!(plan.prompt.contains(
+        "Leave `worker` out to run the project's default worker, `claude-sonnet-5-5` at high \
+         effort."
+    ));
     assert_eq!(plan.model, "claude-opus-5-5");
     assert!(rig.forge.created().is_empty());
 }
@@ -86,7 +94,7 @@ fn a_whole_issue_s_pick_is_applied_as_a_worker_label() {
     let (rig, runner) = planning("meowth");
     rig.forge.list_ready(5, false);
     rig.claude.script([Scripted::Text(
-        r#"{"split": false, "why": "x", "worker": "opus-max"}"#,
+        r#"{"split": false, "why": "x", "worker": "opus-high"}"#,
     )]);
     let Some(StepReport::Planned {
         outcome: PlanOutcome::Whole { worker, .. },
@@ -98,12 +106,12 @@ fn a_whole_issue_s_pick_is_applied_as_a_worker_label() {
     assert_eq!(
         worker,
         WholeWorker::Picked {
-            label: "worker:opus-max".into()
+            label: "worker:opus-high".into()
         }
     );
     assert_eq!(
         rig.forge.issue_labels(5),
-        ["ready-for-agent", "worker:opus-max"]
+        ["ready-for-agent", "worker:opus-high"]
     );
     assert!(rig.forge.comments().is_empty());
 }
@@ -114,7 +122,7 @@ fn a_worker_label_already_on_a_whole_issue_wins_over_the_pick() {
     rig.forge.list_ready(5, false);
     rig.forge.label(5, "worker:haiku-low");
     rig.claude.script([Scripted::Text(
-        r#"{"split": false, "why": "x", "worker": "opus-max"}"#,
+        r#"{"split": false, "why": "x", "worker": "opus-high"}"#,
     )]);
     let Some(StepReport::Planned {
         outcome: PlanOutcome::Whole { worker, .. },
@@ -327,9 +335,6 @@ fn each_piece_of_a_split_gets_its_own_worker_pick() {
 
 #[test]
 fn a_forge_refusing_a_piece_s_worker_label_does_not_fail_the_split() {
-    // `shep kelpie add` never creates a `worker:<model>-<effort>` label, so
-    // the forge may well refuse one kelpie has not made yet: that is never
-    // reason to fail the whole split, only to fall back quietly.
     let rig = Rig::new("koffing");
     rig.planning_on();
     rig.merge_auto();
@@ -355,8 +360,8 @@ fn a_forge_refusing_a_piece_s_worker_label_does_not_fail_the_split() {
     let [(_, comment)] = rig.forge.comments().try_into().unwrap();
     assert!(
         comment.contains(
-            "- #900: Store the thing, worker defaulted to the project's: `sonnet-high` names a \
-             worker kelpie runs, but its label could not be confirmed"
+            "- #900: Store the thing, worker defaulted to the project's: cannot add \
+             `worker:sonnet-high` to #900: gh failed: labels are down"
         ),
         "{comment}"
     );
@@ -713,3 +718,5 @@ fn a_planning_call_that_times_out_is_tried_once_more_in_a_fresh_session() {
     let [first, again] = planner_calls(&rig).try_into().unwrap();
     assert_ne!(first.session, again.session);
 }
+
+mod picks;
