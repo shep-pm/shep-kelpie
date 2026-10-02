@@ -157,6 +157,7 @@ mod tests {
             CallKind::Claude,
             CallKind::Judge,
             CallKind::Shots,
+            CallKind::Audit,
         ];
         let names = kinds.map(|k| serde_json::to_value(k).unwrap());
         assert_eq!(
@@ -165,7 +166,8 @@ mod tests {
                 json!("local"),
                 json!("claude"),
                 json!("judge"),
-                json!("shots")
+                json!("shots"),
+                json!("audit")
             ]
         );
     }

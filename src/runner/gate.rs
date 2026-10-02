@@ -106,9 +106,11 @@ impl Runner {
         }
     }
 
-    // Green CI goes to a review bot round while one is owed. Then `auto`
-    // merges by the path a yes takes, and `ask` raises the merge ruling
-    // with the pull request handed back `ready-for-human`.
+    // Green CI goes to a review bot round while one is owed. Then the
+    // whole-issue check looks at the head, and sends the worker back when it
+    // finds a gap. Then `auto` merges by the path a yes takes, and `ask`
+    // raises the merge ruling with the pull request handed back
+    // `ready-for-human`.
     fn passed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
         if self.review_bot_due() {
             return self.start_round(head);

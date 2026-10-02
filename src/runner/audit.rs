@@ -199,9 +199,7 @@ impl Runner {
         }
         self.update(|item| {
             item.audit.get_or_insert_with(Audit::default).sent_back = sent + 1;
-            item.turn = Turn::Next {
-                prompt: prompt.clone(),
-            };
+            item.turn = Turn::Next { prompt };
             item.phase = Phase::Implement;
         })?;
         Ok(Some(StepReport::AuditSentBack {
@@ -320,15 +318,17 @@ impl Findings {
     }
 }
 
-// The check's JSON object, which may be wrapped in prose or a code fence.
+// The check's JSON object, which may be wrapped in prose or a code fence:
+// the first `{` that starts the object through the last `}`.
 fn read_findings(text: &str) -> Result<Findings, String> {
-    let object = text
-        .find('{')
-        .zip(text.rfind('}'))
-        .filter(|(start, end)| start < end)
-        .map(|(start, end)| &text[start..=end]);
-    let unreadable = || format!("unreadable whole-issue check output: {}", text.trim());
-    serde_json::from_str(object.ok_or_else(unreadable)?).map_err(|_| unreadable())
+    let end = text.rfind('}');
+    let found = end.and_then(|end| {
+        let starts = text.match_indices('{').map(|(start, _)| start);
+        starts
+            .filter(|start| *start < end)
+            .find_map(|start| serde_json::from_str(&text[start..=end]).ok())
+    });
+    found.ok_or_else(|| format!("unreadable whole-issue check output: {}", text.trim()))
 }
 
 fn gap_prompt(number: u64, head: &str, gaps: &[String]) -> String {
@@ -363,6 +363,11 @@ fn pointed_at(body: &str, own: &[u64]) -> Vec<u64> {
             .iter()
             .take_while(|b| b.is_ascii_digit())
             .count();
+        // `#123abc` is no reference to issue 123.
+        let after = bytes.get(at + 1 + digits);
+        if after.is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_') {
+            continue;
+        }
         let Ok(n) = body[at + 1..at + 1 + digits].parse::<u64>() else {
             continue;
         };

@@ -629,12 +629,14 @@ impl Rig {
     /// Steps once, and again while the step was a whole-issue check that
     /// found nothing
     pub(crate) fn step_past_audits(&self, runner: &Mutex<Runner>) -> Option<StepReport> {
-        loop {
+        // A check passes a head once, so more than a few in a row is a bug.
+        for _ in 0..10 {
             let report = step(runner).unwrap();
             if !matches!(report, Some(StepReport::AuditPassed { .. })) {
                 return report;
             }
         }
+        panic!("the whole-issue check passed ten steps in a row");
     }
 
     /// The worktree kelpie makes for issue 7

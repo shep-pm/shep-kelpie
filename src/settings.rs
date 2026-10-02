@@ -152,20 +152,21 @@ pub struct Models {
     pub labels: LabelModels,
 }
 
-fn default_planner() -> RoleModel {
+// Opus 5.5 on Claude Code, for a role whose default is Opus
+fn opus(effort: Effort) -> RoleModel {
     RoleModel {
         model: NonBlank("claude-opus-5-5".to_owned()),
-        effort: Effort::Medium,
+        effort,
         harness: AgentHarness::ClaudeCode,
     }
 }
 
+fn default_planner() -> RoleModel {
+    opus(Effort::Medium)
+}
+
 fn default_auditor() -> RoleModel {
-    RoleModel {
-        model: NonBlank("claude-opus-5-5".to_owned()),
-        effort: Effort::High,
-        harness: AgentHarness::ClaudeCode,
-    }
+    opus(Effort::High)
 }
 
 /// Planning settings

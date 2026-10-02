@@ -249,3 +249,17 @@ fn an_unmet_criterion_sends_the_worker_back_with_the_gap_named() {
     assert!(question.contains(&fixed[..7]), "{question}");
     assert_eq!(audits(&rig).len(), 2, "once for each head");
 }
+
+#[test]
+fn an_issue_number_with_letters_stuck_to_it_is_no_reference() {
+    let body = "Fix #9, then #12. See C#4, #123abc, #7_x, #9 again, #8) and own #7 and #71.";
+    assert_eq!(super::pointed_at(body, &[7, 71]), [9, 12, 8]);
+}
+
+#[test]
+fn the_check_is_read_past_a_brace_in_the_prose_before_it() {
+    let text = "Every {met} criterion is listed.\n{\"criteria\": [], \"assumptions\": []}";
+    let read = super::read_findings(text).unwrap();
+    assert!(read.gaps().is_empty());
+    assert!(super::read_findings("no {json} here").is_err());
+}
