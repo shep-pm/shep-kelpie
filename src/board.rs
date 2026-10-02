@@ -17,7 +17,7 @@ use std::fmt;
 
 use serde::Serialize;
 
-use crate::settings::{Effort, RoleAgents, RoleModel};
+use crate::settings::{Effort, LabelModels, LabelName, RoleAgents, RoleModel};
 
 /// The label that puts an issue on the board
 pub const READY: &str = "ready-for-agent";
@@ -34,14 +34,6 @@ const PRIORITIES: [&str; 4] = [
     "priority: P1",
     "priority: P2",
     "priority: P3",
-];
-
-// The names a `worker:` label may use, and the model each one runs.
-const MODELS: [(&str, &str); 4] = [
-    ("opus", "claude-opus-5-5"),
-    ("sonnet", "claude-sonnet-5"),
-    ("haiku", "claude-haiku-4-5-20251001"),
-    ("fable", "claude-fable-5-1"),
 ];
 
 /// An open issue labelled [`READY`], as the forge lists it
@@ -293,7 +285,7 @@ fn label_error(labels: &[String], local: bool) -> Option<LabelError> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkerLabel {
     /// `worker:<model>-<effort>`: a Claude model and effort
-    Model(WorkerModel),
+    Model(LabelModel),
     /// `worker:local`: the project's local worker agent
     Local,
 }
@@ -327,29 +319,31 @@ pub fn parse_worker_value(value: &str) -> Result<WorkerLabel, LabelError> {
     }
     let unreadable = || LabelError::Unreadable(format!("{WORKER_LABEL}{value}"));
     let (name, effort) = value.split_once('-').ok_or_else(unreadable)?;
-    let model = MODELS
-        .iter()
-        .find(|(n, _)| *n == name)
-        .ok_or_else(unreadable)?
-        .1;
+    let name = LabelName::parse(name).ok_or_else(unreadable)?;
     let effort = Effort::parse(effort).ok_or_else(unreadable)?;
-    Ok(WorkerLabel::Model(WorkerModel {
-        model: model.to_owned(),
-        effort,
-        local: false,
-    }))
+    Ok(WorkerLabel::Model(LabelModel { name, effort }))
 }
 
 /// The model names a `worker:<model>-<effort>` label may use
-pub fn worker_model_names() -> [&'static str; MODELS.len()] {
-    MODELS.map(|(name, _)| name)
+pub fn worker_model_names() -> [&'static str; LabelName::ALL.len()] {
+    LabelName::ALL.map(LabelName::as_str)
+}
+
+/// The model name and effort a `worker:<model>-<effort>` label asks for
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LabelModel {
+    /// The model's name, which the project's `models.labels` maps to an id
+    pub name: LabelName,
+    /// Passed to `claude --effort`
+    pub effort: Effort,
 }
 
 /// The model and effort an issue's worker runs on, from its label and the
 /// project's agents
 ///
 /// A local worker agent takes only the issues labelled `worker:local`, which
-/// the maintainer chooses. The rest run on `models`' worker.
+/// the maintainer chooses. The rest run on `models`' worker, and a model
+/// label runs the id `labels` gives its name.
 ///
 /// # Errors
 ///
@@ -359,10 +353,15 @@ pub fn worker_for(
     label: Option<WorkerLabel>,
     agents: &RoleAgents,
     models: &RoleModel,
+    labels: &LabelModels,
 ) -> Result<WorkerModel, LabelError> {
     let local = agents.limits.worker.lease().is_some();
     match (label, local) {
-        (Some(WorkerLabel::Model(model)), _) => Ok(model),
+        (Some(WorkerLabel::Model(model)), _) => Ok(WorkerModel {
+            model: labels.id(model.name).to_owned(),
+            effort: model.effort,
+            local: false,
+        }),
         (Some(WorkerLabel::Local), true) => Ok(WorkerModel {
             local: true,
             ..WorkerModel::from(&agents.worker)
@@ -391,7 +390,7 @@ impl fmt::Display for LabelError {
         match self {
             Self::Several => f.write_str("the issue has more than one `worker:` label"),
             Self::Unreadable(label) => {
-                let names: Vec<&str> = MODELS.iter().map(|(name, _)| *name).collect();
+                let names = worker_model_names();
                 write!(
                     f,
                     "label `{label}` is not `worker:local`, nor `worker:<model>-<effort>` \
@@ -680,18 +679,16 @@ mod tests {
     fn a_worker_label_names_the_model_and_effort() {
         assert_eq!(
             worker_override(&labels(&[READY, "worker:opus-medium"])),
-            Ok(Some(WorkerLabel::Model(WorkerModel {
-                model: "claude-opus-5-5".into(),
+            Ok(Some(WorkerLabel::Model(LabelModel {
+                name: LabelName::Opus,
                 effort: Effort::Medium,
-                local: false,
             })))
         );
         assert_eq!(
             worker_override(&labels(&["worker:haiku-max"])),
-            Ok(Some(WorkerLabel::Model(WorkerModel {
-                model: "claude-haiku-4-5-20251001".into(),
+            Ok(Some(WorkerLabel::Model(LabelModel {
+                name: LabelName::Haiku,
                 effort: Effort::Max,
-                local: false,
             })))
         );
         assert_eq!(
@@ -720,7 +717,8 @@ mod tests {
             },
         };
         let models = model("claude-sonnet-5");
-        let worker = |label, agents: &RoleAgents| worker_for(label, agents, &models);
+        let ids = LabelModels::default();
+        let worker = |label, agents: &RoleAgents| worker_for(label, agents, &models, &ids);
         let ran = |m: Result<WorkerModel, LabelError>| m.map(|m| m.model);
         assert_eq!(ran(worker(None, &agents)), Ok("claude-sonnet-5".into()));
         let local = Some(WorkerLabel::Local);
@@ -730,6 +728,16 @@ mod tests {
         );
         let opus = worker_override(&labels(&["worker:opus-low"])).unwrap();
         assert_eq!(ran(worker(opus, &agents)), Ok("claude-opus-5-5".into()));
+        let sonnet = worker_override(&labels(&["worker:sonnet-high"])).unwrap();
+        assert_eq!(
+            ran(worker(sonnet.clone(), &agents)),
+            Ok("claude-sonnet-5-5".into())
+        );
+        let mapped: LabelModels = toml::from_str("sonnet = \"claude-sonnet-6\"").unwrap();
+        assert_eq!(
+            ran(worker_for(sonnet, &agents, &models, &mapped)),
+            Ok("claude-sonnet-6".into())
+        );
 
         agents.limits.worker = Limit::default();
         assert_eq!(ran(worker(None, &agents)), Ok("qwen3.8:27b".into()));

@@ -37,7 +37,7 @@ fn the_example_holds_the_first_build_defaults() {
     let role = |r: &RoleModel| (r.model.as_str().to_owned(), r.effort);
     assert_eq!(
         role(&s.models.worker),
-        ("claude-sonnet-5".into(), Effort::Medium)
+        ("claude-sonnet-5-5".into(), Effort::High)
     );
     assert_eq!(
         role(&s.models.reviewer),

@@ -30,8 +30,8 @@ fn adopted_80() -> StepReport {
         issue: 5,
         pull_request: 80,
         worker: WorkerModel {
-            model: "claude-sonnet-5".into(),
-            effort: Effort::Medium,
+            model: "claude-sonnet-5-5".into(),
+            effort: Effort::High,
             local: false,
         },
     }
@@ -452,8 +452,8 @@ fn adopted_pull_requests_wait_for_the_work_item_in_flight_across_a_restart() {
             issue: 6,
             pull_request: 81,
             worker: WorkerModel {
-                model: "claude-sonnet-5".into(),
-                effort: Effort::Medium,
+                model: "claude-sonnet-5-5".into(),
+                effort: Effort::High,
                 local: false,
             },
         })
@@ -570,8 +570,8 @@ fn a_start_retried_after_a_failure_begins_at_the_head_origin_holds_now() {
             issue: 5,
             pull_request: 80,
             worker: WorkerModel {
-                model: "claude-sonnet-5".into(),
-                effort: Effort::Medium,
+                model: "claude-sonnet-5-5".into(),
+                effort: Effort::High,
                 local: false,
             },
         })

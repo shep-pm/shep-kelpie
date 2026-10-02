@@ -468,7 +468,8 @@ impl Runner {
     // The worker an issue with `labels` runs on.
     fn labelled_worker(&self, labels: &[String]) -> Result<WorkerModel, LabelError> {
         let label = worker_override(labels)?;
-        worker_for(label, &self.agents, &self.settings.models.worker)
+        let models = &self.settings.models;
+        worker_for(label, &self.agents, &models.worker, &models.labels)
     }
 
     // A work item on `kelpie/<issue>` whose first turn is due, with nothing

@@ -153,7 +153,12 @@ mod tests {
             .replace("# worker = \"opus-high\"", "worker = \"opus-high\"")
             .replace("# reviewer = \"opus-high\"", "reviewer = \"opus-high\"")
             .replace("# judge = \"opus-high\"", "judge = \"opus-high\"")
-            .replace("# planner = \"opus-high\"", "planner = \"opus-high\"");
+            .replace("# planner = \"opus-high\"", "planner = \"opus-high\"")
+            .replace("# [app.dogs.kelpie.models.labels]", "[app.dogs.kelpie.models.labels]")
+            .replace("# opus = \"claude-opus-5-5\"", "opus = \"claude-opus-5-5\"")
+            .replace("# sonnet = \"claude-sonnet-5-5\"", "sonnet = \"claude-sonnet-5-5\"")
+            .replace("# haiku = \"claude-haiku", "haiku = \"claude-haiku")
+            .replace("# fable = \"claude-fable-5-1\"", "fable = \"claude-fable-5-1\"");
         assert!(
             text.contains("reviewers = [\"qwen\"]"),
             "the example's list moved"

@@ -393,7 +393,7 @@ fn beside_a_local_worker_an_unlabelled_issue_runs_on_claude_and_its_window() {
     let call = &rig.claude.calls()[0];
     assert_eq!(
         (call.model.as_str(), call.lease.as_ref()),
-        ("claude-sonnet-5", None)
+        ("claude-sonnet-5-5", None)
     );
     assert_eq!(call.harness, AgentHarness::ClaudeCode);
 }

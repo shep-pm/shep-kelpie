@@ -181,10 +181,10 @@ mod tests {
         (rig, runner)
     }
 
-    fn sonnet_medium() -> WorkerModel {
+    fn sonnet_high() -> WorkerModel {
         WorkerModel {
-            model: "claude-sonnet-5".into(),
-            effort: Effort::Medium,
+            model: "claude-sonnet-5-5".into(),
+            effort: Effort::High,
             local: false,
         }
     }
@@ -199,7 +199,7 @@ mod tests {
             step(&runner).unwrap(),
             Some(StepReport::Dispatched {
                 issue: 9,
-                worker: sonnet_medium(),
+                worker: sonnet_high(),
                 skipped: vec![],
             })
         );
@@ -230,7 +230,7 @@ mod tests {
             step(&runner).unwrap(),
             Some(StepReport::Dispatched {
                 issue: 5,
-                worker: sonnet_medium(),
+                worker: sonnet_high(),
                 skipped: vec![
                     Skip::PullRequest {
                         issue: 3,
@@ -280,7 +280,7 @@ mod tests {
         rig.claude
             .script([Scripted::Reply(Usage::default(), Cost(1))]);
         step(&runner).unwrap();
-        assert_eq!(rig.claude.calls()[0].model, "claude-sonnet-5");
+        assert_eq!(rig.claude.calls()[0].model, "claude-sonnet-5-5");
     }
 
     #[test]
@@ -367,7 +367,7 @@ mod tests {
             step(&runner).unwrap(),
             Some(StepReport::Dispatched {
                 issue: 6,
-                worker: sonnet_medium(),
+                worker: sonnet_high(),
                 skipped: vec![skip],
             })
         );
@@ -418,7 +418,7 @@ mod tests {
             step(&runner).unwrap(),
             Some(StepReport::Dispatched {
                 issue: 9,
-                worker: sonnet_medium(),
+                worker: sonnet_high(),
                 skipped: vec![Skip::Blocked {
                     issue: 8,
                     by: vec![32],
