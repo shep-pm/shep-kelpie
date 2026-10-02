@@ -434,6 +434,80 @@ fn a_later_session_that_rewrites_an_earlier_sessions_test_takes_its_pin_along() 
 }
 
 #[test]
+fn a_session_that_does_not_confirm_leaves_nothing_for_the_worker_to_commit() {
+    let (rig, runner) = at_the_deep_round();
+    rig.claude.script([
+        Scripted::Text(HIGH),
+        Scripted::Text("CLEAN"),
+        // It half writes a test and edits a tracked file, then gives up.
+        Scripted::WriteMany(
+            &[
+                ("tests/half.rs", "#[test]\nfn half() {"),
+                ("work.txt", "edited by the session\n"),
+            ],
+            "UNCONFIRMED|it could not be made to fail",
+        ),
+        Scripted::Push("fixed.txt", "fixed\n"),
+        Scripted::Text("FIXED|1|it sets the value first"),
+    ]);
+    step(&runner).unwrap(); // the first reader
+    step(&runner).unwrap(); // the second reader
+    step(&runner).unwrap(); // the confirmation, which fails
+    let tree = rig.worktree_7();
+    assert_eq!(
+        crate::test::git(&tree, &["status", "--porcelain"]),
+        "",
+        "its new file is gone and its edit reverted"
+    );
+    assert_eq!(
+        std::fs::read_to_string(tree.join("work.txt")).unwrap(),
+        "work\n"
+    );
+
+    // So the worker's fix is not parked for a file it was never meant to commit.
+    let reports = until_it_leaves_review(&rig, &runner);
+    assert_eq!(state(&rig, &runner), "ci", "{reports:#?}");
+    assert!(
+        !reports
+            .iter()
+            .any(|r| matches!(r, StepReport::Ruling { .. })),
+        "{reports:#?}"
+    );
+}
+
+#[test]
+fn a_session_whose_reply_cannot_be_read_puts_back_what_it_found_not_the_head() {
+    let (rig, runner) = at_the_deep_round();
+    let tree = rig.worktree_7();
+    // The worker's own file, not committed, before the session ran.
+    std::fs::write(tree.join("notes.txt"), "mine\n").unwrap();
+    rig.claude.script([
+        Scripted::Text(HIGH),
+        Scripted::Text("CLEAN"),
+        Scripted::WriteMany(
+            &[("tests/half.rs", "#[test]"), ("notes.txt", "theirs\n")],
+            "I think it is real.",
+        ),
+    ]);
+    step(&runner).unwrap(); // the first reader
+    step(&runner).unwrap(); // the second reader
+    let report = step(&runner).unwrap(); // the confirmation, whose reply says nothing
+    assert!(
+        matches!(
+            report,
+            Some(StepReport::DeepConfirmed { backed: false, .. })
+        ),
+        "{report:#?}"
+    );
+    assert!(!tree.join("tests/half.rs").exists());
+    assert_eq!(
+        std::fs::read_to_string(tree.join("notes.txt")).unwrap(),
+        "mine\n",
+        "what was there before the session stays"
+    );
+}
+
+#[test]
 fn a_pin_that_cannot_be_read_leaves_the_high_unconfirmed() {
     let (rig, runner) = at_the_deep_round();
     rig.claude.script([

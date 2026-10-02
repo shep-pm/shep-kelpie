@@ -32,6 +32,18 @@ impl Runner {
             .collect())
     }
 
+    // Puts the worktree back as it was before the session that found `before`,
+    // so what a session that did not confirm left is not for the worker to
+    // commit, nor counted for the next session.
+    pub(super) fn restore_before(&self, before: &[Found]) -> Result<(), String> {
+        let item = self.current().expect("the deep round is a work item's");
+        let before: Vec<(String, String)> = before
+            .iter()
+            .map(|f| (f.path.clone(), f.blob.clone()))
+            .collect();
+        worktree::restore(&self.settings.repo, &item.worktree, &before).map_err(wrong)
+    }
+
     // What the session that confirmed with `file` added: the lines it added to
     // each file, against `before`. A line it took out of what an earlier
     // session added leaves that session's pin, since the head cannot hold it.

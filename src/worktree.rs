@@ -489,6 +489,73 @@ pub fn blob_of(repo: &Path, worktree: &Path, path: &str) -> Result<String, Workt
     trusted(repo, worktree)?(&["hash-object", "-w", "--", path])
 }
 
+/// Puts `worktree` back as it was when `before` was taken: what differed
+/// from its head then, with the blob each file held
+///
+/// A file made since is removed, a file edited since is written back as it
+/// was, and a file that was not there is restored. One that was at its
+/// head's version then is put back at it.
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command or the file that failed.
+pub fn restore(
+    repo: &Path,
+    worktree: &Path,
+    before: &[(String, String)],
+) -> Result<(), WorktreeError> {
+    let git = trusted(repo, worktree)?;
+    let mut paths = uncommitted(repo, worktree)?;
+    paths.extend(before.iter().map(|(path, _)| path.clone()));
+    paths.sort();
+    paths.dedup();
+    let io = |path: &str, e: io::Error| WorktreeError::Spawn(format!("{path}: {e}"));
+    for path in paths {
+        let file = worktree.join(&path);
+        match before.iter().find(|(p, _)| *p == path) {
+            Some((_, blob)) => {
+                let held = file
+                    .is_file()
+                    .then(|| blob_of(repo, worktree, &path))
+                    .transpose()?;
+                if held.as_deref() != Some(blob.as_str()) {
+                    let bytes = blob_bytes(repo, worktree, blob)?;
+                    if let Some(parent) = file.parent() {
+                        std::fs::create_dir_all(parent).map_err(|e| io(&path, e))?;
+                    }
+                    std::fs::write(&file, bytes).map_err(|e| io(&path, e))?;
+                }
+            }
+            None if blob_at_head(repo, worktree, &path)?.is_some() => {
+                git(&["restore", "--source=HEAD", "--worktree", "--", &path])?;
+            }
+            None => match std::fs::remove_file(&file) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(io(&path, e)),
+            },
+        }
+    }
+    Ok(())
+}
+
+// What the blob `blob` holds, byte for byte, which `git` through [`git`] would trim.
+fn blob_bytes(repo: &Path, worktree: &Path, blob: &str) -> Result<Vec<u8>, WorktreeError> {
+    let output = Command::new("git")
+        .args(trusted_prefix(repo, worktree)?)
+        .args(["cat-file", "blob", blob])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| WorktreeError::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        return Err(WorktreeError::Git {
+            args: format!("cat-file blob {blob}"),
+            stderr: String::from_utf8_lossy(&output.stderr).into(),
+        });
+    }
+    Ok(output.stdout)
+}
+
 /// The git blob id of `path` in the commit `worktree` has checked out, or
 /// `None` when that commit has no such file
 ///
@@ -707,6 +774,15 @@ pub(crate) fn trusted<'a>(
     repo: &Path,
     worktree: &'a Path,
 ) -> Result<impl Fn(&[&str]) -> Result<String, WorktreeError> + 'a, WorktreeError> {
+    let prefix = trusted_prefix(repo, worktree)?;
+    Ok(move |args: &[&str]| {
+        let args = prefix.iter().cloned().chain(args.iter().map(Into::into));
+        git(worktree, args.collect::<Vec<std::ffi::OsString>>())
+    })
+}
+
+// The options that make `git` about `worktree` the trusted one.
+fn trusted_prefix(repo: &Path, worktree: &Path) -> Result<Vec<std::ffi::OsString>, WorktreeError> {
     let foreign = || WorktreeError::Foreign(worktree.to_owned());
     let common = git(
         repo,
@@ -718,7 +794,7 @@ pub(crate) fn trusted<'a>(
     if canonical(&own.join(named.trim())) != common {
         return Err(foreign());
     }
-    let prefix = [
+    Ok(vec![
         "--git-dir".into(),
         own.into_os_string(),
         "--work-tree".into(),
@@ -726,11 +802,7 @@ pub(crate) fn trusted<'a>(
         "-c".into(),
         "core.hooksPath=/dev/null".into(),
         "--no-replace-objects".into(),
-    ];
-    Ok(move |args: &[&str]| {
-        let args = prefix.iter().cloned().chain(args.iter().map(Into::into));
-        git(worktree, args.collect::<Vec<std::ffi::OsString>>())
-    })
+    ])
 }
 
 // Everything about the worktree is read from the project's repo, never from

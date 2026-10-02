@@ -462,6 +462,15 @@ impl Runner {
                     }
                     Confirmation::Unconfirmed(why) => Backing::Unconfirmed { why },
                 };
+                // A session that did not confirm leaves nothing behind: what it
+                // wrote is no test for the worker to commit.
+                if let Backing::Unconfirmed { why } = &mut held[at].backing
+                    && let Err(e) = self.restore_before(&before)
+                {
+                    why.push_str(&format!(
+                        ", and kelpie could not clean up what it left in the worktree: {e}"
+                    ));
+                }
                 let backed = matches!(held[at].backing, Backing::Test { .. });
                 let finding = format!("{}:{}", held[at].finding.file, held[at].finding.line);
                 item.phase = in_stage(Deep::Confirming {
