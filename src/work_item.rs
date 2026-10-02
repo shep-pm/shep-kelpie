@@ -13,17 +13,16 @@ use crate::settings::ReviewerName;
 use crate::shots::ShotsRecord;
 
 mod follow_ups;
+mod local;
 mod round;
 mod spend;
 mod timings;
 
 pub use follow_ups::FollowUps;
+pub use local::LOCAL_FAILURES_DOWN;
 pub use round::{CodeRabbitStage, CodeRabbitTally, OpenThread};
 pub use spend::{QwenTally, RoleSpend, Spend};
 pub use timings::{CallKind, Seconds, Split, TimingPhase, Timings};
-
-/// How many failed rounds in a row take a local reviewer out of a work item
-pub const LOCAL_FAILURES_DOWN: u32 = 2;
 
 /// The work item in flight
 // wire format: changing this is a breaking change to the state file
@@ -420,50 +419,6 @@ pub enum ReviewStage {
 }
 
 impl WorkItem {
-    /// Whether local reviewer `name` reviewed nothing twice in a row, which
-    /// leaves the loop to the other reviewers
-    pub fn local_reviewer_down(&self, name: &ReviewerName) -> bool {
-        self.local_failures
-            .get(name)
-            .is_some_and(|n| *n >= LOCAL_FAILURES_DOWN)
-    }
-
-    /// Records a local round by `reviewer` that reviewed something, leaving
-    /// `unreviewed` unreviewed
-    ///
-    /// A file the same reviewer left unreviewed last time and leaves again
-    /// counts against it; a round that left none, or only new ones, or
-    /// whose files another reviewer left, clears its count.
-    pub fn note_local_round(&mut self, reviewer: &ReviewerName, unreviewed: &[String]) {
-        let mine = self.local_unreviewed_by.as_ref() == Some(reviewer);
-        let again = mine
-            && unreviewed
-                .iter()
-                .any(|file| self.local_unreviewed.contains(file));
-        if again {
-            *self.local_failures.entry(reviewer.clone()).or_default() += 1;
-        } else {
-            self.local_failures.remove(reviewer);
-        }
-        self.local_unreviewed = unreviewed.to_vec();
-        self.local_unreviewed_by = Some(reviewer.clone());
-    }
-
-    /// The local reviewers that reviewed nothing twice in a row
-    pub fn local_reviewers_down(&self) -> Vec<&ReviewerName> {
-        let down = self
-            .local_failures
-            .iter()
-            .filter(|(name, _)| self.local_reviewer_down(name));
-        down.map(|(name, _)| name).collect()
-    }
-
-    /// Whether a round that would be clean on its own counts as clean: not
-    /// while a local round's unreviewed files are still owed a review
-    pub fn counts_as_clean(&self, clean: bool) -> bool {
-        clean && self.local_unreviewed.is_empty()
-    }
-
     /// Remembers findings sent to the worker, once each
     pub fn record_held(&mut self, held: &[Finding]) {
         let same =
