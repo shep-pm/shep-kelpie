@@ -97,7 +97,16 @@ impl Runner {
             };
             let (forge, repo) = (&self.ports.forge, &self.settings.forge);
             let Some(piece) = pieces.get(linked) else {
-                let comment = plan::comment(&why, &pieces, &opened);
+                let labelled: Vec<Option<bool>> = opened
+                    .iter()
+                    .map(|&n| {
+                        forge
+                            .issue(repo, n)
+                            .map(|shown| plan::already_has_worker(&shown.labels))
+                            .ok()
+                    })
+                    .collect();
+                let comment = plan::comment(&why, &pieces, &opened, &labelled);
                 // `post_comment` takes an issue as well as a pull request.
                 let comment_failed = forge.post_comment(repo, issue, &comment).err();
                 let mut next = self.state.clone();
@@ -134,6 +143,17 @@ impl Runner {
                 if let Err(e) = forge.add_blocker(repo, number, *by) {
                     return Ok(Err(format!("cannot mark #{number} blocked by #{by}: {e}")));
                 }
+            }
+            // The copied parent labels may already carry one, which wins
+            // over the piece's own pick. Writing the pick is best effort:
+            // `shep kelpie add` never creates a `worker:<model>-<effort>`
+            // label, so the forge may refuse one it does not have yet. A
+            // sub-issue the write misses just falls back to the project's
+            // own worker, and the comment says so once the split finishes.
+            if !plan::already_has_worker(&shown.labels)
+                && let Some(label) = plan::resolved_label(piece.worker.as_deref())
+            {
+                let _ = forge.set_issue_label(repo, number, &label, true);
             }
             self.change_split(issue, |_, linked| *linked += 1)?;
         }

@@ -312,8 +312,18 @@ pub fn worker_override(labels: &[String]) -> Result<Option<WorkerLabel>, LabelEr
     if found.next().is_some() {
         return Err(LabelError::Several);
     }
+    parse_worker_value(value).map(Some)
+}
+
+/// What a `worker:` label's value asks for, the part after `worker:`
+///
+/// # Errors
+///
+/// [`LabelError::Unreadable`] when it is not `local`, nor `<model>-<effort>`
+/// with a known model and effort.
+pub fn parse_worker_value(value: &str) -> Result<WorkerLabel, LabelError> {
     if value == LOCAL {
-        return Ok(Some(WorkerLabel::Local));
+        return Ok(WorkerLabel::Local);
     }
     let unreadable = || LabelError::Unreadable(format!("{WORKER_LABEL}{value}"));
     let (name, effort) = value.split_once('-').ok_or_else(unreadable)?;
@@ -323,11 +333,16 @@ pub fn worker_override(labels: &[String]) -> Result<Option<WorkerLabel>, LabelEr
         .ok_or_else(unreadable)?
         .1;
     let effort = Effort::parse(effort).ok_or_else(unreadable)?;
-    Ok(Some(WorkerLabel::Model(WorkerModel {
+    Ok(WorkerLabel::Model(WorkerModel {
         model: model.to_owned(),
         effort,
         local: false,
-    })))
+    }))
+}
+
+/// The model names a `worker:<model>-<effort>` label may use
+pub fn worker_model_names() -> [&'static str; MODELS.len()] {
+    MODELS.map(|(name, _)| name)
 }
 
 /// The model and effort an issue's worker runs on, from its label and the

@@ -51,13 +51,20 @@ fn a_small_issue_is_planned_whole_and_then_worked() {
         Some(StepReport::Planned {
             issue: 5,
             outcome: PlanOutcome::Whole {
-                why: "One small change.".into()
+                why: "One small change.".into(),
+                worker: WholeWorker::Defaulted {
+                    reason: "the plan named no worker".into(),
+                    comment_failed: None,
+                },
             },
             usage: Usage::default(),
             cost_usd: Some(2.0),
         })
     );
     assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
+    let [(on, comment)] = rig.forge.comments().try_into().unwrap();
+    assert_eq!(on, 5);
+    assert!(comment.contains("the plan named no worker"), "{comment}");
 
     assert!(matches!(
         step(&runner).unwrap(),
@@ -72,6 +79,139 @@ fn a_small_issue_is_planned_whole_and_then_worked() {
     assert!(plan.prompt.contains("Plan issue #5: "));
     assert_eq!(plan.model, "claude-opus-5-5");
     assert!(rig.forge.created().is_empty());
+}
+
+#[test]
+fn a_whole_issue_s_pick_is_applied_as_a_worker_label() {
+    let (rig, runner) = planning("meowth");
+    rig.forge.list_ready(5, false);
+    rig.claude.script([Scripted::Text(
+        r#"{"split": false, "why": "x", "worker": "opus-max"}"#,
+    )]);
+    let Some(StepReport::Planned {
+        outcome: PlanOutcome::Whole { worker, .. },
+        ..
+    }) = step(&runner).unwrap()
+    else {
+        panic!("expected a whole plan")
+    };
+    assert_eq!(
+        worker,
+        WholeWorker::Picked {
+            label: "worker:opus-max".into()
+        }
+    );
+    assert_eq!(
+        rig.forge.issue_labels(5),
+        ["ready-for-agent", "worker:opus-max"]
+    );
+    assert!(rig.forge.comments().is_empty());
+}
+
+#[test]
+fn a_worker_label_already_on_a_whole_issue_wins_over_the_pick() {
+    let (rig, runner) = planning("psyduck");
+    rig.forge.list_ready(5, false);
+    rig.forge.label(5, "worker:haiku-low");
+    rig.claude.script([Scripted::Text(
+        r#"{"split": false, "why": "x", "worker": "opus-max"}"#,
+    )]);
+    let Some(StepReport::Planned {
+        outcome: PlanOutcome::Whole { worker, .. },
+        ..
+    }) = step(&runner).unwrap()
+    else {
+        panic!("expected a whole plan")
+    };
+    assert_eq!(worker, WholeWorker::Already);
+    assert_eq!(
+        rig.forge.issue_labels(5),
+        ["ready-for-agent", "worker:haiku-low"]
+    );
+}
+
+#[test]
+fn a_whole_issue_s_unknown_pick_defaults_and_leaves_a_comment() {
+    let (rig, runner) = planning("slowpoke");
+    rig.forge.list_ready(5, false);
+    rig.claude.script([Scripted::Text(
+        r#"{"split": false, "why": "x", "worker": "gpt-max"}"#,
+    )]);
+    let Some(StepReport::Planned {
+        outcome: PlanOutcome::Whole { worker, .. },
+        ..
+    }) = step(&runner).unwrap()
+    else {
+        panic!("expected a whole plan")
+    };
+    assert!(matches!(
+        worker,
+        WholeWorker::Defaulted {
+            comment_failed: None,
+            ..
+        }
+    ));
+    assert_eq!(rig.forge.issue_labels(5), ["ready-for-agent"]);
+    let [(on, comment)] = rig.forge.comments().try_into().unwrap();
+    assert_eq!(on, 5);
+    assert!(comment.contains("`gpt-max`"), "{comment}");
+}
+
+#[test]
+fn a_whole_issue_the_forge_cannot_read_still_gets_a_fallback_comment() {
+    let rig = Rig::new("ekans");
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.forge.list_ready(5, false);
+    rig.forge.remove_issue(5);
+
+    let outcome = runner.lock().unwrap().apply_whole_worker(5, None);
+    let WholeWorker::Defaulted {
+        reason,
+        comment_failed,
+    } = outcome
+    else {
+        panic!("expected a defaulted worker, got {outcome:?}")
+    };
+    assert!(reason.contains("cannot read #5"), "{reason}");
+    // A read failure still tries the comment, and this one lands: `None`
+    // here means the attempt succeeded, not that none was made.
+    assert_eq!(comment_failed, None);
+    let [(on, comment)] = rig.forge.comments().try_into().unwrap();
+    assert_eq!(on, 5);
+    assert!(comment.contains("cannot read #5"), "{comment}");
+}
+
+#[test]
+fn a_whole_issue_s_label_write_failure_still_gets_a_fallback_comment() {
+    let rig = Rig::new("arbok");
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.forge.list_ready(5, false);
+    rig.forge.set_labels_down(true);
+
+    let outcome = runner
+        .lock()
+        .unwrap()
+        .apply_whole_worker(5, Some("sonnet-medium"));
+    let WholeWorker::Defaulted {
+        reason,
+        comment_failed,
+    } = outcome
+    else {
+        panic!("expected a defaulted worker, got {outcome:?}")
+    };
+    assert!(
+        reason.contains("cannot add `worker:sonnet-medium`"),
+        "{reason}"
+    );
+    assert_eq!(comment_failed, None);
+    let [(on, comment)] = rig.forge.comments().try_into().unwrap();
+    assert_eq!(on, 5);
+    assert!(
+        comment.contains("cannot add `worker:sonnet-medium`"),
+        "{comment}"
+    );
 }
 
 #[test]
@@ -140,7 +280,13 @@ fn a_big_issue_under_auto_becomes_sub_issues_with_blockers_and_one_comment() {
     assert_eq!(rig.forge.blockers(901), [900]);
     let [(on, comment)] = rig.forge.comments().try_into().unwrap();
     assert_eq!(on, 5);
-    assert!(comment.contains("- #900: Store the thing\n- #901: Show the thing, after #900"));
+    // Neither piece named a worker, and the parent carried none to inherit,
+    // so both sub-issues default to the project's own.
+    assert!(comment.contains(
+        "- #900: Store the thing, worker defaulted to the project's: the plan named no worker\n\
+         - #901: Show the thing, after #900, worker defaulted to the project's: the plan named \
+         no worker"
+    ));
 
     // The frontier is worked first, and the split issue never is.
     let Some(StepReport::Dispatched { issue, skipped, .. }) = step(&runner).unwrap() else {
@@ -149,6 +295,99 @@ fn a_big_issue_under_auto_becomes_sub_issues_with_blockers_and_one_comment() {
     assert_eq!(issue, 900);
     assert_eq!(skipped, [Skip::Split { issue: 5, open: 2 }]);
     assert_eq!(planner_calls(&rig).len(), 1);
+}
+
+#[test]
+fn each_piece_of_a_split_gets_its_own_worker_pick() {
+    let rig = Rig::new("bellsprout");
+    rig.planning_on();
+    rig.merge_auto();
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.forge.list_ready(5, false);
+    rig.claude.script([Scripted::Text(
+        r#"{"split": true, "why": "Two slices.", "pieces": [
+            {"title": "Store the thing", "body": "Build the store.", "worker": "sonnet-high"},
+            {"title": "Show the thing", "body": "Build the screen.", "blocked_by": [1]}]}"#,
+    )]);
+    step(&runner).unwrap();
+    step(&runner).unwrap();
+    assert_eq!(
+        rig.forge.issue_labels(900),
+        ["ready-for-agent", "worker:sonnet-high"]
+    );
+    assert_eq!(rig.forge.issue_labels(901), ["ready-for-agent"]);
+    let [(_, comment)] = rig.forge.comments().try_into().unwrap();
+    assert!(
+        comment.contains("- #901: Show the thing, after #900, worker defaulted"),
+        "{comment}"
+    );
+    assert!(!comment.contains("- #900: Store the thing,"), "{comment}");
+}
+
+#[test]
+fn a_forge_refusing_a_piece_s_worker_label_does_not_fail_the_split() {
+    // `shep kelpie add` never creates a `worker:<model>-<effort>` label, so
+    // the forge may well refuse one kelpie has not made yet: that is never
+    // reason to fail the whole split, only to fall back quietly.
+    let rig = Rig::new("koffing");
+    rig.planning_on();
+    rig.merge_auto();
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.forge.list_ready(5, false);
+    rig.claude.script([Scripted::Text(
+        r#"{"split": true, "why": "Two slices.", "pieces": [
+            {"title": "Store the thing", "body": "Build the store.", "worker": "sonnet-high"},
+            {"title": "Show the thing", "body": "Build the screen.", "blocked_by": [1]}]}"#,
+    )]);
+    step(&runner).unwrap();
+    rig.forge.set_labels_down(true);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Split {
+            issue: 5,
+            sub_issues: vec![900, 901],
+            comment_failed: None,
+        })
+    );
+    assert_eq!(rig.forge.issue_labels(900), ["ready-for-agent"]);
+    let [(_, comment)] = rig.forge.comments().try_into().unwrap();
+    assert!(
+        comment.contains(
+            "- #900: Store the thing, worker defaulted to the project's: `sonnet-high` names a \
+             worker kelpie runs, but its label could not be confirmed"
+        ),
+        "{comment}"
+    );
+}
+
+#[test]
+fn a_piece_s_sub_issue_that_inherits_a_worker_label_from_its_parent_keeps_it() {
+    let rig = Rig::new("tentacool");
+    rig.planning_on();
+    rig.merge_auto();
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.forge.list_ready(5, false);
+    rig.forge.label(5, "worker:haiku-low");
+    rig.claude.script([Scripted::Text(
+        r#"{"split": true, "why": "Two slices.", "pieces": [
+            {"title": "Store the thing", "body": "Build the store.", "worker": "sonnet-high"},
+            {"title": "Show the thing", "body": "Build the screen.", "blocked_by": [1]}]}"#,
+    )]);
+    step(&runner).unwrap();
+    step(&runner).unwrap();
+    // Both sub-issues copied the parent's `worker:` label at creation, which
+    // wins over each piece's own pick.
+    assert_eq!(
+        rig.forge.issue_labels(900),
+        ["ready-for-agent", "worker:haiku-low"]
+    );
+    assert_eq!(
+        rig.forge.issue_labels(901),
+        ["ready-for-agent", "worker:haiku-low"]
+    );
 }
 
 #[test]

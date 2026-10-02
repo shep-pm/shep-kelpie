@@ -5,8 +5,15 @@
 //! each a complete vertical slice with the earlier pieces it waits on. A
 //! split becomes sub-issues of the issue, worked in its place. This is a
 //! level above the work split, which stays the worker's inside one work item.
+//!
+//! The call also picks a worker for the issue kept whole, or for each piece,
+//! from the names a `worker:` label takes. The runner applies it as that
+//! label, unless the issue already carries one. A reply that names none, or
+//! one kelpie does not run, falls back to the project's own worker.
 
 use serde::{Deserialize, Serialize};
+
+use crate::board::{WorkerLabel, parse_worker_value, worker_model_names, worker_override};
 
 /// What the planning call decided
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +22,8 @@ pub enum Planned {
     Whole {
         /// Why, in a sentence
         why: String,
+        /// The worker it named, `<model>-<effort>` as written, if any
+        worker: Option<String>,
     },
     /// Several pull requests, one per piece
     Split {
@@ -38,6 +47,58 @@ pub struct Piece {
     /// The earlier pieces it waits on, numbered from 1
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blocked_by: Vec<usize>,
+    /// The worker it named, `<model>-<effort>` as written, if any
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker: Option<String>,
+}
+
+/// Whether `labels` already carries a `worker:` label, which wins over a
+/// plan's pick: even one kelpie cannot read (unknown, or more than one) is
+/// still an existing choice, never the pick's to overwrite.
+pub fn already_has_worker(labels: &[String]) -> bool {
+    !matches!(worker_override(labels), Ok(None))
+}
+
+/// The `worker:` label value this piece or kept-whole issue names, once
+/// kelpie confirms it runs on a known model and effort
+///
+/// `None` when it named nothing kelpie runs, model or effort missing or
+/// unknown, and the issue or sub-issue then falls back to the project's own
+/// worker.
+pub fn resolved_label(named: Option<&str>) -> Option<String> {
+    let named = named?;
+    match parse_worker_value(named) {
+        Ok(WorkerLabel::Model(_)) => Some(format!("worker:{named}")),
+        Ok(WorkerLabel::Local) | Err(_) => None,
+    }
+}
+
+/// Why a worker the plan named, or a label it resolved to, is not the one
+/// that ended up running the issue or sub-issue, in one phrase
+///
+/// Also fits a name [`resolved_label`] reads as `Some`, since writing that
+/// label is best effort too: the forge may refuse it, a `worker:` label
+/// `shep kelpie add` never created among them. A caller passing `named` by
+/// itself, with no write to blame, still reads sensibly rather than
+/// calling a valid pick unsupported.
+pub fn fallback_reason(named: Option<&str>) -> String {
+    let Some(named) = named else {
+        return "the plan named no worker".to_owned();
+    };
+    if resolved_label(Some(named)).is_some() {
+        return format!(
+            "`{named}` names a worker kelpie runs, but its label could not be confirmed"
+        );
+    }
+    match parse_worker_value(named) {
+        Ok(WorkerLabel::Local) => {
+            "the plan named `local`, which only the maintainer picks by hand".to_owned()
+        }
+        _ => format!(
+            "`{named}` is not a model and effort kelpie runs (from {})",
+            worker_model_names().join(", ")
+        ),
+    }
 }
 
 /// Where planning an issue stands, kept in the project's state
@@ -105,14 +166,19 @@ pub fn read(text: &str) -> Result<Planned, String> {
         why: String,
         #[serde(default)]
         pieces: Vec<Piece>,
+        #[serde(default)]
+        worker: Option<String>,
     }
     let start = text.find('{').ok_or("no JSON object")?;
     let end = text.rfind('}').filter(|&end| end > start);
-    let raw: Raw = serde_json::from_str(&text[start..=end.ok_or("no JSON object")?])
+    let mut raw: Raw = serde_json::from_str(&text[start..=end.ok_or("no JSON object")?])
         .map_err(|e| format!("not a plan: {e}"))?;
     let why = raw.why.trim().to_owned();
     if !raw.split {
-        return Ok(Planned::Whole { why });
+        return Ok(Planned::Whole {
+            why,
+            worker: named(raw.worker),
+        });
     }
     if raw.pieces.len() < 2 {
         return Err("a split with fewer than two pieces".into());
@@ -128,10 +194,18 @@ pub fn read(text: &str) -> Result<Planned, String> {
             ));
         }
     }
+    for piece in &mut raw.pieces {
+        piece.worker = named(piece.worker.take());
+    }
     Ok(Planned::Split {
         why,
         pieces: raw.pieces,
     })
+}
+
+// A named value, trimmed and with a blank one taken as absent.
+fn named(value: Option<String>) -> Option<String> {
+    value.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
 }
 
 /// Kelpie's prompt for planning issue `number`, with the maintainer's note
@@ -142,23 +216,30 @@ pub fn prompt(number: u64, title: &str, body: &str, note: Option<&str>) -> Strin
             "The maintainer sent back the last plan for this issue with this note:\n\n{note}\n\n"
         )
     });
+    let models = worker_model_names().join(", ");
     format!(
-        "Plan issue #{number}: decide whether it is one pull request or several.\n\n\
+        "Plan issue #{number}: decide whether it is one pull request or several, and pick \
+         the model and effort its worker, or each piece's, runs on.\n\n\
          The maintainer's rule: split only where each piece works, tests and ships on \
          its own, as a pull request that merges to main by itself. Never cut a piece \
          short to keep it small. Most issues stay whole.\n\n\
+         Pick a worker that fits the size and risk of the work: a model from {models}, \
+         and an effort from low, medium, high, xhigh, max. Leave it out to run the \
+         project's own default worker.\n\n\
          Read the repo with Read, Grep and Glob, where you have them, to judge the work. \
          Change nothing, and \
          publish nothing: kelpie opens the sub-issues from your reply.\n\n\
          Reply with one JSON object and nothing else, either\n\
-         {{\"split\": false, \"why\": \"<one sentence>\"}}\n\
+         {{\"split\": false, \"why\": \"<one sentence>\", \"worker\": \"<model>-<effort>\"}}\n\
          or\n\
          {{\"split\": true, \"why\": \"<one or two sentences>\", \"pieces\": \
          [{{\"title\": \"<title>\", \"body\": \"<what to build, and its acceptance \
-         criteria>\", \"blocked_by\": [<earlier piece numbers>]}}]}}\n\
+         criteria>\", \"blocked_by\": [<earlier piece numbers>], \
+         \"worker\": \"<model>-<effort>\"}}]}}\n\
          Number the pieces from 1 in the order listed, blockers first, at least two. \
          A piece waits only on earlier pieces. Leave parent and blocked-by sections \
-         out of each body: kelpie links those on the forge.\n\n\
+         out of each body: kelpie links those on the forge. `worker` is optional on \
+         either reply.\n\n\
          {note}--- issue #{number}: {title} ---\n{}\n--- end ---",
         body.trim_end()
     )
@@ -180,20 +261,40 @@ pub fn list(pieces: &[Piece]) -> String {
 }
 
 /// The one comment a split leaves on its issue, naming each sub-issue
-pub fn comment(why: &str, pieces: &[Piece], opened: &[u64]) -> String {
-    let lines = pieces.iter().zip(opened).map(|(piece, number)| {
-        let after: Vec<String> = piece
-            .blocked_by
-            .iter()
-            .filter_map(|&by| by.checked_sub(1).and_then(|at| opened.get(at)))
-            .map(|n| format!("#{n}"))
-            .collect();
-        let after = match after.as_slice() {
-            [] => String::new(),
-            by => format!(", after {}", by.join(", ")),
-        };
-        format!("- #{number}: {}{after}", piece.title.trim())
-    });
+///
+/// `labelled` says, for each piece in order, whether its sub-issue actually
+/// carries a `worker:` label once the split finishes: from the piece's own
+/// pick, or one it inherited from the parent's labels at its creation,
+/// either of which leaves nothing to say. `Some(false)`, with no `worker:`
+/// label at all, left to the project's own, is worth a note; `None`, where
+/// the forge could not be asked to say, is worth a different one, since it
+/// is not the same as confirming the project's own default runs it.
+pub fn comment(why: &str, pieces: &[Piece], opened: &[u64], labelled: &[Option<bool>]) -> String {
+    let lines = pieces
+        .iter()
+        .zip(opened)
+        .zip(labelled)
+        .map(|((piece, number), labelled)| {
+            let after: Vec<String> = piece
+                .blocked_by
+                .iter()
+                .filter_map(|&by| by.checked_sub(1).and_then(|at| opened.get(at)))
+                .map(|n| format!("#{n}"))
+                .collect();
+            let after = match after.as_slice() {
+                [] => String::new(),
+                by => format!(", after {}", by.join(", ")),
+            };
+            let defaulted = match labelled {
+                Some(true) => String::new(),
+                Some(false) => format!(
+                    ", worker defaulted to the project's: {}",
+                    fallback_reason(piece.worker.as_deref())
+                ),
+                None => ", worker not confirmed: kelpie could not read its sub-issue back".into(),
+            };
+            format!("- #{number}: {}{after}{defaulted}", piece.title.trim())
+        });
     format!(
         "Kelpie planned this issue as {} pull requests. {}\n\n{}\n\n\
          Each is worked on its own, and this issue closes when the last one does.",
@@ -212,6 +313,7 @@ mod tests {
             title: title.into(),
             body: format!("Build {title}."),
             blocked_by: blocked_by.to_vec(),
+            worker: None,
         }
     }
 
@@ -221,9 +323,85 @@ mod tests {
         assert_eq!(
             read(text),
             Ok(Planned::Whole {
-                why: "One small change.".into()
+                why: "One small change.".into(),
+                worker: None,
             })
         );
+    }
+
+    #[test]
+    fn a_whole_plan_s_worker_is_read_and_trimmed() {
+        let text = r#"{"split": false, "why": "x", "worker": " sonnet-high "}"#;
+        assert_eq!(
+            read(text),
+            Ok(Planned::Whole {
+                why: "x".into(),
+                worker: Some("sonnet-high".into()),
+            })
+        );
+        let blank = r#"{"split": false, "why": "x", "worker": "  "}"#;
+        assert_eq!(
+            read(blank),
+            Ok(Planned::Whole {
+                why: "x".into(),
+                worker: None,
+            })
+        );
+    }
+
+    #[test]
+    fn a_piece_s_worker_is_read() {
+        let text = r#"{"split": true, "why": "x", "pieces": [
+            {"title": "a", "body": "b", "worker": "opus-max"},
+            {"title": "c", "body": "d"}]}"#;
+        let Ok(Planned::Split { pieces, .. }) = read(text) else {
+            panic!("expected a split")
+        };
+        assert_eq!(pieces[0].worker, Some("opus-max".into()));
+        assert_eq!(pieces[1].worker, None);
+    }
+
+    #[test]
+    fn an_unreadable_worker_label_still_wins_over_a_plan_s_pick() {
+        assert!(!already_has_worker(&["ready-for-agent".to_owned()]));
+        assert!(already_has_worker(&["worker:sonnet-medium".to_owned()]));
+        // Neither a label `worker_override` cannot parse, nor more than
+        // one, is "no label": both still win over the plan's pick.
+        assert!(already_has_worker(&["worker:nope".to_owned()]));
+        assert!(already_has_worker(&[
+            "worker:sonnet-medium".to_owned(),
+            "worker:opus-low".to_owned()
+        ]));
+    }
+
+    #[test]
+    fn a_worker_the_reply_names_is_resolved_only_when_kelpie_runs_it() {
+        assert_eq!(resolved_label(None), None);
+        assert_eq!(resolved_label(Some("nope")), None);
+        assert_eq!(resolved_label(Some("local")), None);
+        assert_eq!(
+            resolved_label(Some("sonnet-medium")),
+            Some("worker:sonnet-medium".into())
+        );
+    }
+
+    #[test]
+    fn why_a_worker_falls_back_names_what_the_reply_gave() {
+        assert_eq!(fallback_reason(None), "the plan named no worker");
+        assert!(fallback_reason(Some("nope-medium")).contains("`nope-medium`"));
+    }
+
+    #[test]
+    fn why_a_worker_falls_back_never_calls_a_resolved_one_unsupported() {
+        // A name that does resolve still reaches `fallback_reason` when
+        // its label could not be confirmed on the sub-issue (the write is
+        // best effort): it must not then claim that name is unsupported.
+        let text = fallback_reason(Some("sonnet-medium"));
+        assert!(
+            !text.contains("is not a model and effort kelpie runs"),
+            "{text}"
+        );
+        assert!(text.contains("`sonnet-medium`"), "{text}");
     }
 
     #[test]
@@ -284,12 +462,60 @@ mod tests {
     fn the_comment_names_each_sub_issue_and_what_it_waits_on() {
         let pieces = [piece("Schema", &[]), piece("Screen", &[1])];
         assert_eq!(
-            comment("Two slices.", &pieces, &[901, 902]),
+            comment(
+                "Two slices.",
+                &pieces,
+                &[901, 902],
+                &[Some(true), Some(true)]
+            ),
             "Kelpie planned this issue as 2 pull requests. Two slices.\n\n\
              - #901: Schema\n- #902: Screen, after #901\n\n\
              Each is worked on its own, and this issue closes when the last one does."
         );
         assert_eq!(list(&pieces), "1. Schema\n2. Screen (after 1)");
+    }
+
+    #[test]
+    fn the_comment_says_when_a_piece_s_worker_defaulted() {
+        let mut named = piece("Schema", &[]);
+        named.worker = Some("sonnet-medium".into());
+        let mut unknown = piece("Screen", &[]);
+        unknown.worker = Some("nope".into());
+        let pieces = [named, unknown];
+        let text = comment(
+            "Two slices.",
+            &pieces,
+            &[901, 902],
+            &[Some(true), Some(false)],
+        );
+        assert!(!text.contains("- #901: Schema,"), "{text}");
+        assert!(
+            text.contains("- #902: Screen, worker defaulted to the project's: `nope`"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_sub_issue_labelled_by_inheritance_gets_no_defaulted_note() {
+        // The piece itself named nothing kelpie runs, but its sub-issue
+        // still ended up carrying a `worker:` label, inherited from the
+        // parent's own at creation: there is nothing to default to.
+        let pieces = [piece("Schema", &[])];
+        let text = comment("One slice.", &pieces, &[901], &[Some(true)]);
+        assert!(!text.contains("defaulted"), "{text}");
+    }
+
+    #[test]
+    fn a_sub_issue_the_forge_could_not_read_back_is_not_called_defaulted() {
+        // A forge error at comment time is not the same as confirming no
+        // `worker:` label landed: the comment must not claim one.
+        let pieces = [piece("Schema", &[])];
+        let text = comment("One slice.", &pieces, &[901], &[None]);
+        assert!(!text.contains("defaulted"), "{text}");
+        assert!(
+            text.contains("- #901: Schema, worker not confirmed"),
+            "{text}"
+        );
     }
 
     #[test]

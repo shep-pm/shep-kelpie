@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use super::report::{Begin, PlanOutcome, StepReport};
+use super::report::{Begin, PlanOutcome, StepReport, WholeWorker};
 use super::ruling::question;
 use super::{Answer, RuleError, Runner};
 use crate::board::{ReadyIssue, Skip};
@@ -143,9 +143,10 @@ impl Runner {
                 self.set_plan(issue, Stage::Whole)?;
                 PlanOutcome::Failed { reason }
             }
-            Ok(Planned::Whole { why }) => {
+            Ok(Planned::Whole { why, worker }) => {
                 self.set_plan(issue, Stage::Whole)?;
-                PlanOutcome::Whole { why }
+                let worker = self.apply_whole_worker(issue, worker.as_deref());
+                PlanOutcome::Whole { why, worker }
             }
             Ok(Planned::Split { why, pieces }) => match self.settings.merge_authority {
                 MergeAuthority::Auto => {
@@ -162,6 +163,53 @@ impl Runner {
             usage,
             cost_usd,
         }))
+    }
+
+    // Applies the plan's pick for an issue kept whole as a `worker:` label,
+    // unless the issue already carries one: that wins over the pick. A
+    // reply that named nothing kelpie runs, or a label the forge refuses,
+    // leaves the issue to the project's own worker, with a comment saying
+    // why, best effort, whether the reply left the worker out or named one
+    // kelpie does not run.
+    fn apply_whole_worker(&self, issue: u64, named: Option<&str>) -> WholeWorker {
+        let (forge, repo) = (&self.ports.forge, &self.settings.forge);
+        let found = match forge.issue(repo, issue) {
+            Ok(found) => found,
+            Err(e) => {
+                return self
+                    .default_whole_worker(issue, format!("cannot read #{issue} to label it: {e}"));
+            }
+        };
+        if plan::already_has_worker(&found.labels) {
+            return WholeWorker::Already;
+        }
+        if let Some(label) = plan::resolved_label(named) {
+            return match forge.set_issue_label(repo, issue, &label, true) {
+                Ok(()) => WholeWorker::Picked { label },
+                Err(e) => self
+                    .default_whole_worker(issue, format!("cannot add `{label}` to #{issue}: {e}")),
+            };
+        }
+        self.default_whole_worker(issue, plan::fallback_reason(named))
+    }
+
+    // Leaves `issue` to the project's own worker for `reason`, and always
+    // tries the comment saying so: `comment_failed` then tells a failed
+    // attempt apart from one never made.
+    fn default_whole_worker(&self, issue: u64, reason: String) -> WholeWorker {
+        let (forge, repo) = (&self.ports.forge, &self.settings.forge);
+        let body = format!(
+            "Kelpie kept this issue whole. {reason}, so it runs on the project's default \
+             worker."
+        );
+        let comment_failed = forge
+            .post_comment(repo, issue, &body)
+            .err()
+            .map(|e| e.to_string());
+        WholeWorker::Defaulted {
+            reason,
+            comment_failed,
+        }
     }
 
     // A ruling on a split parks no work item: none is open yet.

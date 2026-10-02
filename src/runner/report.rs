@@ -584,6 +584,9 @@ pub enum PlanOutcome {
     Whole {
         /// Why, as the call said
         why: String,
+        /// What the issue's worker runs on, once the pick is applied or
+        /// found to fall back
+        worker: WholeWorker,
     },
     /// Several, under `auto`: the sub-issues open next
     Split {
@@ -601,6 +604,27 @@ pub enum PlanOutcome {
     Failed {
         /// Why
         reason: String,
+    },
+}
+
+/// What became of the worker a kept-whole issue's plan named
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum WholeWorker {
+    /// The issue already carried a `worker:` label, which wins over the pick
+    Already,
+    /// The plan's pick, applied as this label
+    Picked {
+        /// `worker:<model>-<effort>`
+        label: String,
+    },
+    /// The plan named no worker kelpie runs, or the label could not be
+    /// applied, so the issue falls back to the project's own worker
+    Defaulted {
+        /// Why
+        reason: String,
+        /// Why the comment saying so could not be posted, if it could not
+        comment_failed: Option<String>,
     },
 }
 
