@@ -13,7 +13,7 @@ use std::process::{Command, Stdio};
 use super::{LocalReviewer, queue};
 use crate::adapters::process::RunError;
 use crate::lease::gpu::GpuLock;
-use crate::ports::{Finding, ReviewerError, RoundStage, Severity, parse_findings};
+use crate::ports::{Finding, ReviewerError, RoundStage, parse_findings};
 use crate::settings::LocalCommand;
 
 /// What every call of one round shares
@@ -58,7 +58,7 @@ impl LocalReviewer {
         let mut combined = Vec::with_capacity(findings.len());
         let mut skipped_index = 0u32;
         for finding in findings {
-            if is_skipped_for_size(&finding) {
+            if finding.is_skipped_for_size() {
                 // A hunk kelpie could not run leaves its file unreviewed, in
                 // the script's own words, and one file's trouble never costs
                 // the round every other finding it already has. A hunk whose
@@ -216,19 +216,12 @@ fn first_line(text: &str) -> &str {
     text.lines().next().unwrap_or_default().trim()
 }
 
-fn is_skipped_for_size(finding: &Finding) -> bool {
-    finding.severity == Severity::Low
-        && finding.line == 0
-        && finding.what.starts_with("not reviewed: ")
-        && finding.what.contains("exceeds the chunk limit")
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::ports::Reviewer;
+    use crate::ports::{Reviewer, Severity};
     use crate::settings::LocalRound;
     use crate::test::write_script;
 
@@ -616,21 +609,21 @@ esac
             what: "not reviewed: 900 lines exceeds the chunk limit".into(),
             why: "split the file or review it by hand".into(),
         };
-        assert!(is_skipped_for_size(&skip));
+        assert!(skip.is_skipped_for_size());
 
         let real_low = Finding {
             what: "unused import".into(),
             ..skip.clone()
         };
-        assert!(!is_skipped_for_size(&real_low));
+        assert!(!real_low.is_skipped_for_size());
 
         let wrong_severity = Finding {
             severity: Severity::High,
             ..skip.clone()
         };
-        assert!(!is_skipped_for_size(&wrong_severity));
+        assert!(!wrong_severity.is_skipped_for_size());
 
         let has_a_line = Finding { line: 4, ..skip };
-        assert!(!is_skipped_for_size(&has_a_line));
+        assert!(!has_a_line.is_skipped_for_size());
     }
 }

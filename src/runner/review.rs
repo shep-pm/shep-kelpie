@@ -167,7 +167,7 @@ impl Runner {
         let local = self.counts_local(&review);
         self.update(|item| {
             // Files a local round left unreviewed keep the round from counting.
-            let clean = clean && item.local_unreviewed.is_empty();
+            let clean = item.counts_as_clean(clean);
             item.phase = advance(review, clean, now, local, &mut item.local_rounds)
         })?;
         Ok(Begin::Report(StepReport::FixPushed {
@@ -242,20 +242,20 @@ impl Runner {
         let local = self.counts_local(&review);
         // Files a local round left unreviewed keep the round from counting,
         // however the judge ruled on the rest.
-        let reviewed_all = item.local_unreviewed.is_empty();
         if held.is_empty() {
+            let clean = item.counts_as_clean(true);
             self.update(|item| {
-                item.phase = advance(review, reviewed_all, now, local, &mut item.local_rounds);
+                item.phase = advance(review, clean, now, local, &mut item.local_rounds);
             })?;
             return Ok(Begin::Report(StepReport::ReviewFindingsSent {
                 issue,
                 pull_request: number,
                 round,
                 held: 0,
-                clean: reviewed_all,
+                clean,
             }));
         }
-        let clean = reviewed_all && held.iter().all(|f| f.severity <= Severity::Low);
+        let clean = item.counts_as_clean(held.iter().all(|f| f.severity <= Severity::Low));
         let head = match self.origin_head() {
             Ok(head) => head,
             Err(reason) => return Ok(self.gate_failed(reason)),
@@ -402,7 +402,7 @@ impl Runner {
                 }
                 // A Claude round after a local one that left files unreviewed
                 // gets no credit either.
-                let clean = item.local_unreviewed.is_empty();
+                let clean = item.counts_as_clean(true);
                 item.phase = advance(review, clean, now, local, &mut item.local_rounds);
                 StepReport::ReviewFindingsSent {
                     issue,
@@ -416,7 +416,12 @@ impl Runner {
                 if !matches!(review.stage, ReviewStage::Round) {
                     unreachable!("a round's findings only arrive while awaiting that round");
                 }
-                let reviewer = review.reviewer.clone().unwrap_or_else(ReviewerName::claude);
+                // The same name `note_local_round` keeps the failures under.
+                let reviewer = if local_round {
+                    local_name.clone()
+                } else {
+                    review.reviewer.clone().unwrap_or_else(ReviewerName::claude)
+                };
                 let count = findings.len();
                 if local_round {
                     // Kept through judging and fixing: until a later local

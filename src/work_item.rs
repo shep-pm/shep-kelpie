@@ -22,6 +22,9 @@ pub use round::{CodeRabbitStage, CodeRabbitTally, OpenThread};
 pub use spend::{QwenTally, RoleSpend, Spend};
 pub use timings::{CallKind, Seconds, Split, TimingPhase, Timings};
 
+/// How many failed rounds in a row take a local reviewer out of a work item
+pub const LOCAL_FAILURES_DOWN: u32 = 2;
+
 /// The work item in flight
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,10 +62,14 @@ pub struct WorkItem {
     /// `review.local_rounds` caps
     #[serde(default, skip_serializing_if = "is_zero")]
     pub local_rounds: u32,
-    /// Rounds in a row that reviewed nothing, by the local reviewer that ran
-    /// them, because its model could not be reached. The first is retried;
-    /// the second leaves the loop to the other reviewers for the rest of the
-    /// work item. A round that reviewed clears its reviewer's count.
+    /// Rounds in a row that left files unreviewed, by the local reviewer that
+    /// ran them: ones that reviewed nothing, and ones that left the same
+    /// files unreviewed again. Whatever the cause, the script's own
+    /// `not reviewed:` lines are all kelpie sees. The first failure of a
+    /// round that reviewed nothing is retried; at [`LOCAL_FAILURES_DOWN`] the
+    /// loop goes on without the reviewer for the rest of the work item. A
+    /// round that left no file, or only new ones, unreviewed clears its
+    /// reviewer's count.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub local_failures: BTreeMap<ReviewerName, u32>,
     /// The files the last local round that reviewed anything left
@@ -411,7 +418,9 @@ impl WorkItem {
     /// Whether local reviewer `name` reviewed nothing twice in a row, which
     /// leaves the loop to the other reviewers
     pub fn local_reviewer_down(&self, name: &ReviewerName) -> bool {
-        self.local_failures.get(name).is_some_and(|n| *n >= 2)
+        self.local_failures
+            .get(name)
+            .is_some_and(|n| *n >= LOCAL_FAILURES_DOWN)
     }
 
     /// Records a local round by `reviewer` that reviewed something, leaving
@@ -433,8 +442,17 @@ impl WorkItem {
 
     /// The local reviewers that reviewed nothing twice in a row
     pub fn local_reviewers_down(&self) -> Vec<&ReviewerName> {
-        let down = self.local_failures.iter().filter(|(_, n)| **n >= 2);
+        let down = self
+            .local_failures
+            .iter()
+            .filter(|(name, _)| self.local_reviewer_down(name));
         down.map(|(name, _)| name).collect()
+    }
+
+    /// Whether a round that would be clean on its own counts as clean: not
+    /// while a local round's unreviewed files are still owed a review
+    pub fn counts_as_clean(&self, clean: bool) -> bool {
+        clean && self.local_unreviewed.is_empty()
     }
 
     /// Remembers findings sent to the worker, once each
