@@ -11,6 +11,8 @@
 //! [`SENDS_BACK`] such trips the next gap goes to the maintainer.
 
 use std::collections::BTreeSet;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use serde::Deserialize;
 
@@ -21,7 +23,7 @@ use super::review::calls::{build_call, diff_against};
 use crate::pacer::Scope;
 use crate::ports::{AgentCall, AgentError, AgentReply, PullRequestState, Role, Tools};
 use crate::state::{RulingKind, StateError};
-use crate::work_item::{Audit, CallKind, Phase, SENDS_BACK, Turn};
+use crate::work_item::{Audit, CallKind, Passed, Phase, SENDS_BACK, Turn};
 use crate::worktree;
 
 #[cfg(test)]
@@ -39,32 +41,44 @@ const POINTED_AT: usize = 8;
 
 impl Runner {
     // Whether `head`, which CI passed, goes on to the merge ruling: the
-    // check's call when it has not looked at this head yet.
+    // check's call when it has not passed this head on what the issue and the
+    // pull request say now. An edit to either is as new to it as a push.
     pub(super) fn audit_before_merge(
         &mut self,
         number: u64,
         head: &str,
     ) -> Result<Option<Begin>, StateError> {
         let item = self.current().expect("the check is of a work item");
-        if item.audit.as_ref().and_then(|a| a.passed.as_deref()) == Some(head) {
+        let issue = item.issue;
+        let inputs = match self.read_inputs(issue, number) {
+            Ok(inputs) => inputs,
+            Err(reason) => return Ok(Some(self.gate_failed(reason))),
+        };
+        let fingerprint = inputs.fingerprint();
+        let passed = item.audit.as_ref().and_then(|a| a.passed.as_ref());
+        if passed.is_some_and(|p| p.head == head && p.inputs == fingerprint) {
             return Ok(None);
         }
-        let issue = item.issue;
         let limit = self.agents.limits.auditor.clone();
         if let Some(held) = self.pace(Scope::Turn, &limit)?.holds() {
             return Ok(Some(held));
         }
-        let call = match self.audit_call(issue, number) {
+        let call = match self.audit_call(issue, number, &inputs) {
             Ok(call) => call,
             Err(reason) => return Ok(Some(self.gate_failed(reason))),
         };
         let since = self.ports.clock.now();
         self.update(|item| item.call_started(CallKind::Audit, since))?;
-        Ok(Some(Begin::Audit(Box::new(call), head.to_owned())))
+        let audited = Audited {
+            head: head.to_owned(),
+            inputs: fingerprint,
+        };
+        Ok(Some(Begin::Audit(Box::new(call), audited)))
     }
 
-    fn audit_call(&self, issue: u64, number: u64) -> Result<AgentCall, String> {
-        let item = self.current().expect("the check is of a work item");
+    // What the check reads of the issue, what its body points to and the pull
+    // request, which is everything it reads but the diff.
+    fn read_inputs(&self, issue: u64, number: u64) -> Result<Inputs, String> {
         let forge = &self.ports.forge;
         let repo = &self.settings.forge;
         let found = forge
@@ -78,16 +92,23 @@ impl Runner {
             .map(|n| self.pulled_in(n))
             .collect::<Vec<_>>()
             .join("\n\n");
+        Ok(Inputs {
+            title: found.title,
+            body: found.body,
+            pointed,
+            pull_title: pull.title,
+            pull_body: pull.body,
+        })
+    }
+
+    fn audit_call(&self, issue: u64, number: u64, inputs: &Inputs) -> Result<AgentCall, String> {
+        let item = self.current().expect("the check is of a work item");
         let base = format!("origin/{}", worktree::BASE);
         let diff = diff_against(&item.worktree, &base)?;
         let prompt = prompt(&Reading {
             issue,
-            title: &found.title,
-            body: &found.body,
-            pointed: &pointed,
             number,
-            pull_title: &pull.title,
-            pull_body: &pull.body,
+            inputs,
             base: &base,
             diff: &diff,
         });
@@ -129,12 +150,13 @@ impl Runner {
         }
     }
 
-    /// Records what the check found of `head`, once its call ends
+    /// Records what the check found of `audited`, once its call ends
     pub(super) fn end_audit(
         &mut self,
-        head: &str,
+        audited: &Audited,
         result: Result<AgentReply, AgentError>,
     ) -> Result<Option<StepReport>, StateError> {
+        let head = audited.head.as_str();
         let spent = result
             .as_ref()
             .ok()
@@ -157,16 +179,23 @@ impl Runner {
         };
         self.update(|item| super::review::record_spent(item, spent, now))?;
         // The call ran outside the lock, so the pull request may have been
-        // merged, closed or pushed to meanwhile. What it found is then about a
-        // head that no longer stands, and the next step's CI gate takes it
-        // from there.
-        match self.ports.forge.pull_request(&self.settings.forge, number) {
-            Ok(pr) if pr.state == PullRequestState::Open && pr.head == head => {}
-            Ok(_) => return Ok(None),
+        // merged, closed or pushed to meanwhile, and the issue or the pull
+        // request's description edited. What it found is then about a head or
+        // a text that no longer stands, and the next step takes it from there.
+        let still = match self.ports.forge.pull_request(&self.settings.forge, number) {
+            Ok(pr) => pr.state == PullRequestState::Open && pr.head == head,
             Err(e) => {
                 let reason = format!("cannot read #{number} after the whole-issue check: {e}");
                 return Ok(Some(StepReport::GateFailed { issue, reason }));
             }
+        };
+        if !still {
+            return Ok(None);
+        }
+        match self.read_inputs(issue, number) {
+            Ok(inputs) if inputs.fingerprint() == audited.inputs => {}
+            Ok(_) => return Ok(None),
+            Err(reason) => return Ok(Some(StepReport::GateFailed { issue, reason })),
         }
         let read = result
             .map_err(|e| e.to_string())
@@ -179,11 +208,14 @@ impl Runner {
             }
         };
         let gaps = findings.gaps();
-        let head_now = head.to_owned();
+        let passed = Passed {
+            head: head.to_owned(),
+            inputs: audited.inputs,
+        };
         if gaps.is_empty() {
             self.update(|item| {
                 let audit = item.audit.get_or_insert_with(Audit::default);
-                audit.passed = Some(head_now);
+                audit.passed = Some(passed);
                 // A later head's gaps get the worker's trips afresh.
                 audit.sent_back = 0;
             })?;
@@ -230,15 +262,46 @@ fn item_sent_back(runner: &Runner) -> u32 {
     item.audit.as_ref().map_or(0, |a| a.sent_back)
 }
 
+/// What a check call was made on: the head, and what the issue and the pull
+/// request said then
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Audited {
+    pub(super) head: String,
+    pub(super) inputs: u64,
+}
+
+/// What the check reads but the diff
+struct Inputs {
+    title: String,
+    body: String,
+    pointed: String,
+    pull_title: String,
+    pull_body: String,
+}
+
+impl Inputs {
+    // Stands for the text read. A different one only makes the check run
+    // again, so it need not outlive the build that wrote it.
+    fn fingerprint(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        for text in [
+            &self.title,
+            &self.body,
+            &self.pointed,
+            &self.pull_title,
+            &self.pull_body,
+        ] {
+            text.hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+}
+
 /// What the check read, for its prompt
 struct Reading<'a> {
     issue: u64,
-    title: &'a str,
-    body: &'a str,
-    pointed: &'a str,
     number: u64,
-    pull_title: &'a str,
-    pull_body: &'a str,
+    inputs: &'a Inputs,
     base: &'a str,
     diff: &'a str,
 }
@@ -246,15 +309,18 @@ struct Reading<'a> {
 fn prompt(r: &Reading<'_>) -> String {
     let Reading {
         issue,
-        title,
-        body,
-        pointed,
         number,
-        pull_title,
-        pull_body,
+        inputs,
         base,
         diff,
     } = r;
+    let Inputs {
+        title,
+        body,
+        pointed,
+        pull_title,
+        pull_body,
+    } = inputs;
     let pointed = match pointed.is_empty() {
         true => String::new(),
         false => format!("\n\n--- what the issue points to ---\n{pointed}\n--- end ---"),

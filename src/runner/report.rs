@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
+use super::audit::Audited;
 use crate::board::{Skip, WorkerModel};
 use crate::pacer::HoldKind;
 use crate::ports::{
@@ -683,7 +684,7 @@ pub(super) enum Begin {
     /// A planning call, and the detached worktree it reads
     Plan(Box<AgentCall>, PathBuf),
     /// The whole-issue check of this head
-    Audit(Box<AgentCall>, String),
+    Audit(Box<AgentCall>, Audited),
 }
 
 /// Something the review loop needs run outside the runner's lock

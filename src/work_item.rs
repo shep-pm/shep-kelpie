@@ -19,7 +19,7 @@ mod round;
 mod spend;
 mod timings;
 
-pub use audit::{Audit, SENDS_BACK};
+pub use audit::{Audit, Passed, SENDS_BACK};
 pub use follow_ups::FollowUps;
 pub use local::LOCAL_FAILURES_DOWN;
 pub use round::{CodeRabbitStage, CodeRabbitTally, OpenThread};

@@ -283,6 +283,82 @@ fn a_pull_request_merged_while_the_check_ran_is_left_to_the_gate() {
 }
 
 #[test]
+fn an_issue_edited_after_a_pass_is_checked_again_on_the_same_head() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert_eq!(
+        step(&runner).unwrap(),
+        None,
+        "CI waits for its checks to settle"
+    );
+    rig.clock.advance(crate::runner::CHECKS_SETTLE);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::AuditPassed { .. })
+    ));
+
+    // The issue gains a criterion before the ruling is raised.
+    rig.forge
+        .set_issue_body(7, "## Acceptance criteria\n\n- [ ] a new one\n");
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::AuditPassed { .. })
+    ));
+    let [first, second] = audits(&rig).try_into().unwrap();
+    assert!(second.prompt.contains("a new one"));
+    assert!(!first.prompt.contains("a new one"));
+
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Ruling { .. })
+    ));
+    assert_eq!(
+        audits(&rig).len(),
+        2,
+        "unchanged since, so not checked again"
+    );
+}
+
+#[test]
+fn an_issue_edited_while_the_check_ran_drops_its_answer() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert_eq!(
+        step(&runner).unwrap(),
+        None,
+        "CI waits for its checks to settle"
+    );
+    rig.clock.advance(crate::runner::CHECKS_SETTLE);
+    let hold = Hold::default();
+    rig.claude
+        .script([Scripted::HoldAudit(hold.clone(), crate::test::AUDIT_PASSES)]);
+
+    std::thread::scope(|scope| {
+        let call = scope.spawn(|| step(&runner));
+        assert!(
+            hold.entered(Duration::from_secs(10)),
+            "the check never began"
+        );
+        rig.forge
+            .set_issue_body(7, "## Acceptance criteria\n\n- [ ] added meanwhile\n");
+        hold.release();
+        assert_eq!(
+            call.join().unwrap().unwrap(),
+            None,
+            "a stale answer is dropped"
+        );
+    });
+
+    // Nothing passed, so the next step checks what the issue says now.
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::AuditPassed { .. })
+    ));
+    let [_, second] = audits(&rig).try_into().unwrap();
+    assert!(second.prompt.contains("added meanwhile"));
+}
+
+#[test]
 fn an_unmet_criterion_sends_the_worker_back_with_the_gap_named() {
     let (rig, runner, head) = Rig::with_pull_request("shep");
     rig.claude.script([

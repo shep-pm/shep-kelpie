@@ -133,9 +133,9 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
                 let run = shots.take(&job);
                 return lock(runner).on(issue).end_shots(head, run);
             }
-            Begin::Audit(call, head) => {
+            Begin::Audit(call, audited) => {
                 let result = claude.run(&call);
-                return lock(runner).on(issue).end_audit(&head, result);
+                return lock(runner).on(issue).end_audit(&audited, result);
             }
             Begin::Plan(call, view) => {
                 let result = super::plan::run_planning(claude.as_ref(), &call);
