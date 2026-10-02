@@ -114,7 +114,7 @@ fn the_check_reads_the_issue_what_it_points_to_the_pull_request_and_the_diff() {
         MaintainerReview {
             id: "r".into(),
             changes_requested: true,
-            body: String::new(),
+            body: "Every item must also work with no network.".into(),
             comments: vec![ReviewComment {
                 file: "src/gate.rs".into(),
                 line: Some(40),
@@ -142,6 +142,10 @@ fn the_check_reads_the_issue_what_it_points_to_the_pull_request_and_the_diff() {
     assert!(
         prompt.contains("this label does not exist on the repo"),
         "a pull request it points to, with its review comments"
+    );
+    assert!(
+        prompt.contains("Every item must also work with no network."),
+        "and the review's own body"
     );
     assert!(
         prompt.contains("Body of pull request #71."),
@@ -345,6 +349,24 @@ fn a_long_issue_is_read_whole_so_no_criterion_goes_unseen() {
     let [call] = audits(&rig).try_into().unwrap();
     assert!(call.prompt.contains("the very last criterion"));
     assert!(!call.prompt.contains("left out"));
+}
+
+const NO_EVIDENCE: &str = r#"{"criteria": [
+    {"criterion": "Runs on Opus by default", "met": true},
+    {"criterion": "Has a test", "met": true, "where": "  "}],
+  "assumptions": [
+    {"assumption": "The label exists", "checked": true, "where": ""}]}"#;
+
+#[test]
+fn a_success_that_names_no_evidence_is_a_gap_like_a_failure() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.claude.script([Scripted::Audit(NO_EVIDENCE)]);
+    rig.forge.set_checks(&head, Checks::Passed);
+
+    let gaps = the_item_is_sent_back(rig.verdict(&runner));
+    assert_eq!(gaps.len(), 3, "{gaps:?}");
+    assert!(gaps[0].contains("Runs on Opus by default"), "{gaps:?}");
+    assert!(gaps[2].contains("The label exists"), "{gaps:?}");
 }
 
 #[test]

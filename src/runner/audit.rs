@@ -130,6 +130,11 @@ impl Runner {
         let repo = &self.settings.forge;
         if let Ok(pull) = forge.reviewed(repo, n) {
             let mut said = format!("#{n} {}\n\n{}", pull.title.trim(), pull.body.trim());
+            // The review's own body can hold the request, with no comment on a line.
+            let review_body = pull.review.iter().map(|r| r.body.trim());
+            for body in review_body.filter(|body| !body.is_empty()) {
+                said.push_str(&format!("\n\nreview: {body}"));
+            }
             let comments = pull.review.iter().flat_map(|r| &r.comments);
             for comment in comments {
                 let line = comment.line.map(|l| format!(":{l}")).unwrap_or_default();
@@ -389,20 +394,36 @@ impl Findings {
     // Each criterion not met and each assumption not checked, as the worker
     // is told of it.
     fn gaps(&self) -> Vec<String> {
-        let unmet = self.criteria.iter().filter(|c| !c.met).map(|c| {
-            format!(
-                "Criterion not met: {} ({})",
-                c.criterion.trim(),
-                c.place.trim()
-            )
-        });
-        let unchecked = self.assumptions.iter().filter(|a| !a.checked).map(|a| {
-            format!(
-                "Assumption not checked against the real thing: {} ({})",
-                a.assumption.trim(),
-                a.place.trim()
-            )
-        });
+        // An entry that says it holds but names no file, line or test shows
+        // nothing, so it is as much a gap as one that says it does not.
+        let unmet = self
+            .criteria
+            .iter()
+            .filter_map(|c| match (c.met, c.place.trim()) {
+                (true, "") => Some(format!(
+                    "Criterion with no evidence of where it is met: {}",
+                    c.criterion.trim()
+                )),
+                (true, _) => None,
+                (false, place) => Some(format!(
+                    "Criterion not met: {} ({place})",
+                    c.criterion.trim()
+                )),
+            });
+        let unchecked = self
+            .assumptions
+            .iter()
+            .filter_map(|a| match (a.checked, a.place.trim()) {
+                (true, "") => Some(format!(
+                    "Assumption with no evidence of what checks it: {}",
+                    a.assumption.trim()
+                )),
+                (true, _) => None,
+                (false, place) => Some(format!(
+                    "Assumption not checked against the real thing: {} ({place})",
+                    a.assumption.trim()
+                )),
+            });
         unmet.chain(unchecked).collect()
     }
 }
