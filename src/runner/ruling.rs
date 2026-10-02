@@ -575,7 +575,7 @@ fn decide(
             return Ok(Move::Turn {
                 prompt,
                 phase: Phase::Implement,
-                force: None,
+                force: Some(Phase::Review(Review::first())),
             });
         }
         (Answer::Yes, RulingKind::CodeRabbitCap { prompt, head, .. }) => {

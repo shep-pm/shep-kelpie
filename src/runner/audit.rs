@@ -26,7 +26,7 @@ use super::ruling::park;
 use crate::pacer::Scope;
 use crate::ports::{AgentCall, AgentError, AgentReply, PullRequestState, Role, Tools};
 use crate::state::{RulingKind, StateError};
-use crate::work_item::{Audit, CallKind, Passed, Phase, SENDS_BACK, Turn};
+use crate::work_item::{Audit, CallKind, Passed, Phase, Review, SENDS_BACK, Turn};
 use crate::worktree;
 
 #[cfg(test)]
@@ -55,17 +55,31 @@ impl Runner {
     ) -> Result<Option<Begin>, StateError> {
         let item = self.current().expect("the check is of a work item");
         let issue = item.issue;
+        let passed_here = item
+            .audit
+            .as_ref()
+            .and_then(|a| a.passed.as_ref())
+            .filter(|p| p.head == head)
+            .map(|p| p.inputs);
+        let limit = self.agents.limits.auditor.clone();
+        // A head with no pass needs a call whatever the issue says, so a
+        // pacing hold is checked before the forge is read for it.
+        if passed_here.is_none()
+            && let Some(held) = self.pace(Scope::Turn, &limit)?.holds()
+        {
+            return Ok(Some(held));
+        }
         let inputs = match self.read_inputs(issue, number) {
             Ok(inputs) => inputs,
             Err(reason) => return Ok(Some(self.gate_failed(reason))),
         };
         let fingerprint = inputs.fingerprint();
-        let passed = item.audit.as_ref().and_then(|a| a.passed.as_ref());
-        if passed.is_some_and(|p| p.head == head && p.inputs == fingerprint) {
+        if passed_here == Some(fingerprint) {
             return Ok(None);
         }
-        let limit = self.agents.limits.auditor.clone();
-        if let Some(held) = self.pace(Scope::Turn, &limit)?.holds() {
+        if passed_here.is_some()
+            && let Some(held) = self.pace(Scope::Turn, &limit)?.holds()
+        {
             return Ok(Some(held));
         }
         let call = match self.audit_call(issue, number, &inputs) {
@@ -285,6 +299,8 @@ impl Runner {
             item.audit.get_or_insert_with(Audit::default).sent_back = sent + 1;
             item.turn = Turn::Next { prompt };
             item.phase = Phase::Implement;
+            // The fix is reviewed like any other before CI and the check again.
+            item.resume = Some(Phase::Review(Review::first()));
         })?;
         Ok(Some(StepReport::AuditSentBack {
             issue,

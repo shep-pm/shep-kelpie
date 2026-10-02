@@ -53,6 +53,18 @@ fn the_item_is_sent_back(report: Option<StepReport>) -> Vec<String> {
     }
 }
 
+// A gap's fix is reviewed like any other before CI: qwen's round, clean by
+// default, then Claude's, which the caller scripts clean.
+fn the_fix_is_reviewed(runner: &std::sync::Mutex<crate::runner::Runner>) {
+    for round in ["qwen", "claude"] {
+        let report = step(runner).unwrap();
+        assert!(
+            matches!(report, Some(StepReport::ReviewFindingsSent { held: 0, .. })),
+            "the fix went to CI before {round}'s review round: {report:?}"
+        );
+    }
+}
+
 #[test]
 fn an_assumption_only_a_fake_checks_sends_the_worker_back_naming_it() {
     let (rig, runner, head) = Rig::with_pull_request("shep");
@@ -95,6 +107,7 @@ fn under_auto_a_gap_stops_the_merge_until_the_worker_closes_it() {
     rig.claude.script([
         Scripted::Audit(UNMET),
         Scripted::Push("test.txt", "a test\n"),
+        Scripted::Text("CLEAN"),
     ]);
     rig.forge.set_checks(&head, Checks::Passed);
 
@@ -106,6 +119,7 @@ fn under_auto_a_gap_stops_the_merge_until_the_worker_closes_it() {
     );
 
     step(&runner).unwrap(); // the worker closes the gap
+    the_fix_is_reviewed(&runner);
     let fixed = rig.forge.head_of("kelpie/7").unwrap();
     rig.forge.set_checks(&fixed, Checks::Passed);
     assert!(matches!(
@@ -204,8 +218,10 @@ fn a_third_trip_to_the_worker_goes_to_the_maintainer_whose_yes_sends_it_once_mor
     rig.claude.script([
         Scripted::Audit(UNMET),
         Scripted::Push("one.txt", "1\n"),
+        Scripted::Text("CLEAN"),
         Scripted::Audit(UNMET),
         Scripted::Push("two.txt", "2\n"),
+        Scripted::Text("CLEAN"),
         Scripted::Audit(UNMET),
     ]);
     let mut head = head;
@@ -213,8 +229,11 @@ fn a_third_trip_to_the_worker_goes_to_the_maintainer_whose_yes_sends_it_once_mor
         rig.forge.set_checks(&head, Checks::Passed);
         the_item_is_sent_back(rig.verdict(&runner));
         step(&runner).unwrap(); // the worker's turn
+        the_fix_is_reviewed(&runner);
         head = rig.forge.head_of("kelpie/7").unwrap();
-        assert_eq!(rig.claude.calls().len(), 2 + round, "one turn each");
+        let turns = rig.claude.calls();
+        let worker = turns.iter().filter(|c| c.role == Role::Worker).count();
+        assert_eq!(worker, 2 + round, "one turn each");
     }
     rig.forge.set_checks(&head, Checks::Passed);
     let Some(StepReport::Ruling { id, question, .. }) = rig.verdict(&runner) else {
@@ -223,12 +242,15 @@ fn a_third_trip_to_the_worker_goes_to_the_maintainer_whose_yes_sends_it_once_mor
     assert!(question.contains("no test does"), "{question}");
     assert!(question.contains("by hand"), "{question}");
 
-    rig.claude.script([Scripted::Push("three.txt", "3\n")]);
+    rig.claude
+        .script([Scripted::Push("three.txt", "3\n"), Scripted::Text("CLEAN")]);
     rig.ask(&runner, "rule", Some(&format!("{id} yes")));
     step(&runner).unwrap();
     let turns = rig.claude.calls();
     let again = turns.last().unwrap();
     assert!(again.prompt.contains("no test does"), "{}", again.prompt);
+    // The yes's fix is reviewed too.
+    the_fix_is_reviewed(&runner);
 }
 
 #[test]
@@ -237,13 +259,16 @@ fn a_head_that_passes_gives_a_later_head_its_trips_to_the_worker_again() {
     rig.claude.script([
         Scripted::Audit(UNMET),
         Scripted::Push("one.txt", "1\n"),
+        Scripted::Text("CLEAN"),
         Scripted::Audit(UNMET),
         Scripted::Push("two.txt", "2\n"),
+        Scripted::Text("CLEAN"),
     ]);
     for _ in 0..2 {
         rig.forge.set_checks(&head, Checks::Passed);
         the_item_is_sent_back(rig.verdict(&runner));
         step(&runner).unwrap(); // the worker's turn
+        the_fix_is_reviewed(&runner);
         head = rig.forge.head_of("kelpie/7").unwrap();
     }
     rig.forge.set_checks(&head, Checks::Passed);
@@ -512,6 +537,7 @@ fn an_unmet_criterion_sends_the_worker_back_with_the_gap_named() {
     rig.claude.script([
         Scripted::Audit(UNMET),
         Scripted::Push("test.txt", "a test\n"),
+        Scripted::Text("CLEAN"),
     ]);
     rig.forge.set_checks(&head, Checks::Passed);
 
@@ -543,7 +569,9 @@ fn an_unmet_criterion_sends_the_worker_back_with_the_gap_named() {
         "a criterion that is met is not a gap"
     );
 
-    // The fix goes through CI, and the check looks at the head it left.
+    // The fix goes through the review loop and CI, and the check looks at
+    // the head it left.
+    the_fix_is_reviewed(&runner);
     let fixed = rig.forge.head_of("kelpie/7").unwrap();
     assert_ne!(fixed, head);
     rig.forge.set_checks(&fixed, Checks::Passed);
@@ -566,4 +594,20 @@ fn the_check_is_read_past_a_brace_in_the_prose_before_it() {
     let read = super::read_findings(text).unwrap();
     assert!(read.gaps().is_empty());
     assert!(super::read_findings("no {json} here").is_err());
+}
+
+// Under a pacing hold, a head the check never passed asks the forge for
+// nothing: the hold is known before any of the check's reading. An issue the
+// forge cannot find stands in for that reading, which would fail the gate.
+#[test]
+fn a_held_check_reads_nothing_from_the_forge_first() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge.set_checks(&head, Checks::Passed);
+    rig.forge.remove_issue(7);
+    rig.meter.set(Rig::utilization(0, 55));
+    let report = rig.verdict(&runner);
+    assert!(
+        matches!(report, Some(StepReport::Held { .. })),
+        "the check read the forge before the hold: {report:?}"
+    );
 }
