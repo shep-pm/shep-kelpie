@@ -10,6 +10,7 @@
 
 use std::path::Path;
 
+use crate::ports::{Finding, parse_findings};
 use crate::runner::Runner;
 use crate::runner::gate::short;
 use crate::work_item::{Backing, Found, Held, Written};
@@ -100,11 +101,11 @@ impl Runner {
                 uncommitted.join(", ")
             )));
         }
-        for held in held {
-            let Backing::Test { written, .. } = &held.backing else {
+        for pinned in held {
+            let Backing::Test { written, .. } = &pinned.backing else {
                 continue;
             };
-            let finding = format!("{}:{}", held.finding.file, held.finding.line);
+            let finding = format!("{}:{}", pinned.finding.file, pinned.finding.line);
             for entry in written {
                 let Some(blob) = worktree::blob_at_head(repo, tree, &entry.path).map_err(wrong)?
                 else {
@@ -159,11 +160,12 @@ fn drop_from_pins(held: &mut [Held], path: &str, line: &str) {
     }
 }
 
-/// The finding lines of the deferred-findings file in `build`, as the worker copied them
-pub(super) fn deferred_lines(build: &Path) -> Vec<String> {
+/// The findings in the deferred-findings file in `build`
+///
+/// Read as follow-up filing reads them, so a finding is deferred where that
+/// would file it: by its file, line and what, whatever else the worker's copy of
+/// the line says or however it wraps it.
+pub(super) fn deferred_findings(build: &Path) -> Vec<Finding> {
     let text = std::fs::read_to_string(crate::runner::review::findings::deferred_path(build));
-    text.unwrap_or_default()
-        .lines()
-        .map(|l| l.trim().to_owned())
-        .collect()
+    parse_findings(&text.unwrap_or_default())
 }

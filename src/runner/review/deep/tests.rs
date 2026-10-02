@@ -513,9 +513,10 @@ fn a_finding_the_worker_deferred_is_resolved_at_the_recheck_not_unfixed() {
     ]);
     // The worker copied the second finding's line to the file kelpie files issues from.
     std::fs::create_dir_all(rig.build_7()).unwrap();
+    // The worker's copy is not byte for byte: a different why, and spaces after it.
     std::fs::write(
         rig.build_7().join("deferred-findings.md"),
-        format!("{OTHER}\n"),
+        "MEDIUM|src/other.rs:9|an empty list panics|reworded by the worker  \n",
     )
     .unwrap();
     let reports = until_it_leaves_review(&rig, &runner);

@@ -414,22 +414,6 @@ pub fn uncommitted(repo: &Path, worktree: &Path) -> Result<Vec<String>, Worktree
     Ok(files)
 }
 
-/// The new files `worktree` holds, which no commit has and git does not ignore
-///
-/// # Errors
-///
-/// [`WorktreeError`] naming the git command that failed.
-pub fn untracked(repo: &Path, worktree: &Path) -> Result<Vec<String>, WorktreeError> {
-    let listed = trusted(repo, worktree)?(&["ls-files", "--others", "--exclude-standard", "-z"])?;
-    let mut files: Vec<String> = listed
-        .split('\0')
-        .filter(|name| !name.is_empty())
-        .map(str::to_owned)
-        .collect();
-    files.sort();
-    Ok(files)
-}
-
 /// The files `worktree` holds that its last commit does not, with the git
 /// blob id of each as it is on disk, a file that is gone left out
 ///
