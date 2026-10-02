@@ -41,7 +41,7 @@ mod shepherd;
 mod shots;
 
 pub(crate) use alerts::FakeAlerts;
-pub(crate) use claude::{FakeClaude, Hold, LEFT_BEHIND, Scripted, Seen};
+pub(crate) use claude::{AUDIT_PASSES, FakeClaude, Hold, LEFT_BEHIND, Scripted, Seen};
 pub(crate) use endpoint::{Answer, StandInEndpoint, unreachable_url};
 pub(crate) use forge::FakeForge;
 pub(crate) use leases::{FakeLeases, Told};

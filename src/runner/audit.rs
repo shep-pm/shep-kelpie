@@ -19,7 +19,7 @@ use super::gate::short;
 use super::report::{Begin, StepReport};
 use super::review::calls::{build_call, diff_against};
 use crate::pacer::Scope;
-use crate::ports::{AgentCall, AgentError, AgentReply, Role, Tools};
+use crate::ports::{AgentCall, AgentError, AgentReply, PullRequestState, Role, Tools};
 use crate::state::{RulingKind, StateError};
 use crate::work_item::{Audit, CallKind, Phase, SENDS_BACK, Turn};
 use crate::worktree;
@@ -156,6 +156,18 @@ impl Runner {
             return Ok(None);
         };
         self.update(|item| super::review::record_spent(item, spent, now))?;
+        // The call ran outside the lock, so the pull request may have been
+        // merged, closed or pushed to meanwhile. What it found is then about a
+        // head that no longer stands, and the next step's CI gate takes it
+        // from there.
+        match self.ports.forge.pull_request(&self.settings.forge, number) {
+            Ok(pr) if pr.state == PullRequestState::Open && pr.head == head => {}
+            Ok(_) => return Ok(None),
+            Err(e) => {
+                let reason = format!("cannot read #{number} after the whole-issue check: {e}");
+                return Ok(Some(StepReport::GateFailed { issue, reason }));
+            }
+        }
         let read = result
             .map_err(|e| e.to_string())
             .and_then(|reply| read_findings(&reply.text));

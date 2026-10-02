@@ -47,8 +47,9 @@ pub(crate) enum Scripted {
     /// Answers the whole-issue check with this exact text. The check takes
     /// only this: the worker's and a review round's items stay for them.
     Audit(&'static str),
-    /// Holds the whole-issue check until the test releases it, then passes it
-    HoldAudit(Hold),
+    /// Holds the whole-issue check until the test releases it, then answers
+    /// it with this exact text
+    HoldAudit(Hold, &'static str),
     /// Answers with this final message
     Say(&'static str),
     /// Blocks until the test releases it, then answers
@@ -209,7 +210,7 @@ impl Agents for FakeClaude {
             // The whole-issue check comes between the worker's turns, so it
             // takes only what is scripted for it and passes otherwise.
             match (call.role, script.front()) {
-                (Role::Auditor, Some(Scripted::Audit(_) | Scripted::HoldAudit(_))) => {
+                (Role::Auditor, Some(Scripted::Audit(_) | Scripted::HoldAudit(..))) => {
                     script.pop_front()
                 }
                 (Role::Auditor, _) => Some(Scripted::Audit(AUDIT_PASSES)),
@@ -262,16 +263,16 @@ impl Agents for FakeClaude {
                 usage: Usage::default(),
                 session_cost: Some(Cost(0)),
             }),
-            Some(Scripted::HoldAudit(hold)) if call.role == Role::Auditor => {
+            Some(Scripted::HoldAudit(hold, text)) if call.role == Role::Auditor => {
                 hold.block();
                 Ok(AgentReply {
                     session_id: call.session.id().clone(),
-                    text: AUDIT_PASSES.to_owned(),
+                    text: text.to_owned(),
                     usage: Usage::default(),
                     session_cost: Some(Cost(0)),
                 })
             }
-            Some(Scripted::Audit(_) | Scripted::HoldAudit(_)) => Err(AgentError::Failed(
+            Some(Scripted::Audit(_) | Scripted::HoldAudit(..)) => Err(AgentError::Failed(
                 crate::settings::Harness::ClaudeCode,
                 "the rig scripts a whole-issue check's answer for another call".into(),
             )),

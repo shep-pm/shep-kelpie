@@ -215,7 +215,8 @@ fn the_whole_issue_check_in_flight_is_audit() {
     );
     rig.clock.advance(crate::runner::CHECKS_SETTLE);
     let hold = Hold::default();
-    rig.claude.script([Scripted::HoldAudit(hold.clone())]);
+    rig.claude
+        .script([Scripted::HoldAudit(hold.clone(), crate::test::AUDIT_PASSES)]);
     let t = read_while_held(&rig, &runner, &hold, 70);
     assert_eq!(t["phase"], "audit");
     assert_eq!(

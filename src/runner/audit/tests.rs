@@ -1,8 +1,12 @@
 use serde_json::json;
 
-use crate::ports::{AgentCall, Checks, MaintainerReview, ReviewComment, Role, Tools};
+use std::time::Duration;
+
+use crate::ports::{
+    AgentCall, Checks, MaintainerReview, PullRequestState, ReviewComment, Role, Tools,
+};
 use crate::runner::{StepReport, step};
-use crate::test::{Rig, Scripted};
+use crate::test::{Hold, Rig, Scripted};
 
 const UNMET: &str = r#"{"criteria": [
     {"criterion": "A test where an unmet criterion sends the item back",
@@ -235,6 +239,47 @@ fn a_head_that_passes_gives_a_later_head_its_trips_to_the_worker_again() {
     head = rig.forge.head_of("kelpie/7").unwrap();
     rig.forge.set_checks(&head, Checks::Passed);
     the_item_is_sent_back(rig.verdict(&runner));
+}
+
+#[test]
+fn a_pull_request_merged_while_the_check_ran_is_left_to_the_gate() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert_eq!(
+        step(&runner).unwrap(),
+        None,
+        "CI waits for its checks to settle"
+    );
+    rig.clock.advance(crate::runner::CHECKS_SETTLE);
+    let hold = Hold::default();
+    rig.claude
+        .script([Scripted::HoldAudit(hold.clone(), UNMET)]);
+
+    std::thread::scope(|scope| {
+        let call = scope.spawn(|| step(&runner));
+        assert!(
+            hold.entered(Duration::from_secs(10)),
+            "the check never began"
+        );
+        // The maintainer merges it by hand while the check reads.
+        rig.forge.set_state(71, PullRequestState::Merged);
+        hold.release();
+        assert_eq!(
+            call.join().unwrap().unwrap(),
+            None,
+            "a stale answer is dropped"
+        );
+    });
+    assert_eq!(
+        rig.claude.calls().len(),
+        1,
+        "no worker turn on a merged pull request"
+    );
+
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Finished { merged: true, .. })
+    ));
 }
 
 #[test]
