@@ -273,11 +273,11 @@ fn settings(
             let installed = QWEN_REVIEW
                 .strip_prefix("~/")
                 .is_some_and(|script| place.home.join(script).is_file());
-            // With the script, the default loop runs it and then Claude.
+            // With the script, the default runs it and then the deep round.
             let review = table.get_mut("review");
             if let (false, Some(Value::Object(review))) = (installed, review) {
-                let claude = Value::Array(vec![text(crate::settings::CLAUDE)]);
-                review.insert("reviewers".into(), claude);
+                let deep = Value::Array(vec![text(crate::settings::DEEP)]);
+                review.insert("reviewers".into(), deep);
             }
             table
         }

@@ -112,6 +112,7 @@ impl Wants {
             | RulingKind::LocalModelSpilled { .. }
             | RulingKind::FixNotPushed { .. }
             | RulingKind::Audit { .. }
+            | RulingKind::DeepReview { .. }
             | RulingKind::CodeRabbitCap { .. }
             | RulingKind::CodeRabbitSilent { .. }
             | RulingKind::TurnTimeout { .. }

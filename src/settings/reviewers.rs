@@ -23,6 +23,9 @@ use crate::webhook::KelpieSettings;
 /// The name of the project's own Claude round, which kelpie always defines
 pub const CLAUDE: &str = "claude";
 
+/// The name of the project's deep round, which kelpie always defines
+pub const DEEP: &str = "deep";
+
 /// The name a project's `review.local` runs under
 pub const QWEN: &str = "qwen";
 
@@ -41,6 +44,11 @@ impl ReviewerName {
     /// The project's own Claude round
     pub fn claude() -> Self {
         Self(CLAUDE.to_owned())
+    }
+
+    /// The project's deep round
+    pub fn deep() -> Self {
+        Self(DEEP.to_owned())
     }
 
     /// The name as written
@@ -192,6 +200,9 @@ pub enum Runs {
     Local(LocalRound),
     /// A fresh Claude session
     Claude(ClaudeSession),
+    /// The deep round: two readers, the confirmation of each HIGH, one fix
+    /// turn and a re-check of it, on the `deep_reviewer` role
+    Deep,
 }
 
 impl LoopReviewer {
@@ -209,11 +220,20 @@ impl LoopReviewer {
         }
     }
 
+    /// The project's deep round, which a pull request of any files gets
+    pub fn deep() -> Self {
+        Self {
+            name: ReviewerName::deep(),
+            runs: Runs::Deep,
+        }
+    }
+
     /// The globs a pull request must change a file under for it to run
     pub fn paths(&self) -> &[NonBlank] {
         match &self.runs {
             Runs::Local(local) => local.paths(),
             Runs::Claude(session) => &session.paths,
+            Runs::Deep => &[],
         }
     }
 
@@ -243,6 +263,12 @@ impl Settings {
             setting: SETTING,
             reason,
         };
+        if defined.contains_key(&ReviewerName::deep()) {
+            return Err(invalid(format!(
+                "kelpie's `[local_reviewers.{DEEP}]` is taken: `{DEEP}` is each \
+                 project's own deep round on its `deep_reviewer` role, so name yours otherwise"
+            )));
+        }
         if defined.contains_key(&ReviewerName::claude()) {
             return Err(invalid(format!(
                 "kelpie's `[local_reviewers.{CLAUDE}]` is taken: `{CLAUDE}` is each \
@@ -252,16 +278,20 @@ impl Settings {
         let agents = self.role_agents(&kelpie.agents)?;
         let claude = LoopReviewer::claude(&agents.reviewer, &agents.limits.reviewer);
         if self.review.reviewers.is_empty() {
+            // The older form of the local round is the older loop: a project
+            // that sets it keeps its rounds alternating with Claude's.
+            let older = self.review.local.is_some();
+            let last = if older { claude } else { LoopReviewer::deep() };
             let local = (self.review.local.clone()).unwrap_or_else(|| LocalRound::default_at(home));
             if !local.is_on() {
-                return Ok(vec![claude]);
+                return Ok(vec![last]);
             }
             let name = ReviewerName(QWEN.to_owned());
             let qwen = LoopReviewer {
                 name,
                 runs: Runs::Local(local),
             };
-            return Ok(vec![qwen, claude]);
+            return Ok(vec![qwen, last]);
         }
         if self.review.local.is_some() {
             return Err(invalid(
@@ -277,6 +307,10 @@ impl Settings {
             }
             if name.as_str() == CLAUDE {
                 lineup.push(claude.clone());
+                continue;
+            }
+            if name.as_str() == DEEP {
+                lineup.push(LoopReviewer::deep());
                 continue;
             }
             let Some(definition) = defined.get(name) else {

@@ -11,6 +11,7 @@
 
 pub(super) mod calls;
 pub(super) mod criteria;
+mod deep;
 pub(super) mod findings;
 mod lineup;
 #[cfg(test)]
@@ -58,6 +59,9 @@ impl Runner {
                     Ok(chosen) => chosen,
                     Err(reason) => return Ok(self.gate_failed(reason)),
                 };
+                if matches!(chosen.reviewer.runs, Runs::Deep) {
+                    return self.deep_started(&chosen, review);
+                }
                 let criteria = match self.criteria(issue) {
                     Ok(criteria) => criteria,
                     Err(reason) => return Ok(self.gate_failed(reason)),
@@ -74,6 +78,7 @@ impl Runner {
                             criteria,
                         }))
                     }
+                    Runs::Deep => unreachable!("the deep round returned above"),
                     Runs::Claude(session) => {
                         if let Some(held) = self.pace(Scope::Turn, &session.limit)?.holds() {
                             return Ok(held);
@@ -135,6 +140,7 @@ impl Runner {
             ReviewStage::Fixing { clean, head } => {
                 self.fix_ended(number, &build, review, clean, head)
             }
+            ReviewStage::Deep(deep) => self.deep_step(review, deep),
         }
     }
 
@@ -304,6 +310,12 @@ impl Runner {
         if in_review_bot_round {
             return self.review_bot_verdict(result, spent);
         }
+        let in_deep_round = self.current().is_some_and(
+            |item| matches!(&item.phase, Phase::Review(r) if matches!(r.stage, ReviewStage::Deep(_))),
+        );
+        if in_deep_round {
+            return self.end_deep(result, spent);
+        }
         let now = self.ports.clock.now();
         let local = self
             .current()
@@ -447,6 +459,7 @@ impl Runner {
                     unreviewed,
                 }
             }
+            ReviewResult::Deep(_) => unreachable!("a deep session's reply comes in the deep round"),
             ReviewResult::Verdict(Err(reason)) => StepReport::GateFailed { issue, reason },
             ReviewResult::Stopped => unreachable!("a stopped call returns above"),
             ReviewResult::Spilled(_) => unreachable!("a spilled model returns above"),
@@ -563,6 +576,18 @@ pub(super) fn run_review_call(
                             })
                         },
                     )),
+                    spent,
+                },
+            }
+        }
+        ReviewCall::Deep(call) => {
+            let (reply, spent) = run_claude(claude, &call);
+            match reply {
+                Err(AgentError::Stopped) => stopped(),
+                reply => Reviewed {
+                    result: ReviewResult::Deep(
+                        reply.map(|reply| reply.text).map_err(|e| e.to_string()),
+                    ),
                     spent,
                 },
             }

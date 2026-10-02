@@ -192,7 +192,10 @@ fn a_review_round_waits_on_its_reviewers_account_while_the_worker_works_on() {
     let (rig, first) = named("chelone", "worker = \"codex\"\n");
     drop(first);
     let only_claude = "loop_guard = 8\nreviewers = [\"claude\"]\n";
-    rig.edit_settings(|s| s.replace("loop_guard = 8\n", only_claude));
+    rig.edit_settings(|s| {
+        s.replace(crate::test::OLD_LOCAL, "")
+            .replace("loop_guard = 8\n", only_claude)
+    });
     let runner = rig.open().unwrap();
     rig.meter.set(Rig::utilization(0, 60));
     rig.ask(&runner, "add", Some("7"));
@@ -350,7 +353,10 @@ fn a_review_round_on_a_local_agent_runs_on_that_agent_under_its_lease() {
     let (rig, first) = named("chelone", "reviewer = \"qwen\"\n");
     drop(first);
     let only_claude = "loop_guard = 8\nreviewers = [\"claude\"]\n";
-    rig.edit_settings(|s| s.replace("loop_guard = 8\n", only_claude));
+    rig.edit_settings(|s| {
+        s.replace(crate::test::OLD_LOCAL, "")
+            .replace("loop_guard = 8\n", only_claude)
+    });
     let runner = rig.open().unwrap();
     rig.meter.set(Rig::utilization(0, 1));
     rig.ask(&runner, "add", Some("7"));

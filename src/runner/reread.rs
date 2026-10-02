@@ -246,7 +246,7 @@ mod tests {
     fn a_changed_local_reviewer_definition_is_checked_and_named() {
         let rig = Rig::new("shep");
         rig.edit_settings(|s| {
-            s.replace(
+            s.replace(crate::test::OLD_LOCAL, "").replace(
                 "loop_guard = 8\n",
                 "loop_guard = 8\nreviewers = [\"mine\", \"claude\"]\n",
             )

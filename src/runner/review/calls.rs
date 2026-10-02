@@ -147,7 +147,7 @@ pub(in crate::runner) fn build_call(
     })
 }
 
-fn shots_prompt(run: &ShotsRun) -> String {
+pub(super) fn shots_prompt(run: &ShotsRun) -> String {
     format!(
         "\n\nKelpie took screenshots of this branch's UI from its dev server, at a \
          phone and a desktop width, light and dark. Open the ones the diff touches \

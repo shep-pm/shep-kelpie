@@ -323,6 +323,9 @@ pub struct RoleAgentNames {
     /// The one-shot that checks a whole work item against its issue before the merge
     #[serde(default)]
     pub auditor: Option<AgentName>,
+    /// The sessions of the deep review round
+    #[serde(default)]
+    pub deep_reviewer: Option<AgentName>,
 }
 
 /// The model and effort each role runs on, from the agent it names
@@ -338,6 +341,8 @@ pub struct RoleAgents {
     pub planner: RoleModel,
     /// The whole-issue check's one-shots
     pub auditor: RoleModel,
+    /// The deep review round's sessions
+    pub deep_reviewer: RoleModel,
     /// What holds each role's calls back
     pub limits: RoleLimits,
 }
@@ -355,6 +360,8 @@ pub struct RoleLimits {
     pub planner: Limit,
     /// The whole-issue check's one-shots
     pub auditor: Limit,
+    /// The deep review round's sessions
+    pub deep_reviewer: Limit,
 }
 
 impl Settings {
@@ -416,18 +423,25 @@ impl Settings {
         let (judge, judge_limit) = pick("judge", &self.agents.judge, &self.models.judge)?;
         let (planner, planner_limit) = pick("planner", &self.agents.planner, &self.models.planner)?;
         let (auditor, auditor_limit) = pick("auditor", &self.agents.auditor, &self.models.auditor)?;
+        let (deep_reviewer, deep_reviewer_limit) = pick(
+            "deep_reviewer",
+            &self.agents.deep_reviewer,
+            &self.models.deep_reviewer,
+        )?;
         Ok(RoleAgents {
             worker,
             reviewer,
             judge,
             planner,
             auditor,
+            deep_reviewer,
             limits: RoleLimits {
                 worker: worker_limit,
                 reviewer: reviewer_limit,
                 judge: judge_limit,
                 planner: planner_limit,
                 auditor: auditor_limit,
+                deep_reviewer: deep_reviewer_limit,
             },
         })
     }

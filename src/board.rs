@@ -712,6 +712,7 @@ mod tests {
             judge: model("claude-opus-5-5"),
             planner: model("claude-opus-5-5"),
             auditor: model("claude-opus-5-5"),
+            deep_reviewer: model("claude-opus-5-5"),
             limits: RoleLimits {
                 worker: Limit::Lease(LeaseName::gpu()),
                 ..RoleLimits::default()

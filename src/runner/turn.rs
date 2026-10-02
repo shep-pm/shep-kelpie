@@ -26,13 +26,13 @@ use super::ruling::park;
 use super::trigger::lock;
 use crate::board::WorkerModel;
 use crate::pacer::Scope;
-use crate::ports::{AgentCall, AgentError, AgentReply, Cost, Issue, Role, Session, Tools};
+use crate::ports::{AgentCall, AgentError, AgentReply, Cost, Issue, Reach, Role, Session, Tools};
 use crate::preview::{self, McpFiles, WORKER_INSTRUCTIONS};
 use crate::profile::WorkerProfile;
 use crate::settings::{AgentHarness, Effort, Limit, NonBlank};
 use crate::skills::{Step, split_command};
 use crate::state::{Resume, RulingKind, RunState, StateError};
-use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
+use crate::work_item::{CodeRabbitStage, Deep, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree::{self, Start};
 pub(super) use unfinished::failed;
 use unfinished::{awaits_a_push, timed_out, uncommitted_prompt};
@@ -221,8 +221,10 @@ impl Runner {
             Phase::Implement => {}
             // A fix turn that ended goes back to its round, to check it pushed.
             Phase::Review(review)
-                if matches!(review.stage, ReviewStage::Fixing { .. })
-                    && !matches!(item.turn, Turn::Ended { .. }) => {}
+                if matches!(
+                    review.stage,
+                    ReviewStage::Fixing { .. } | ReviewStage::Deep(Deep::Fixing { .. })
+                ) && !matches!(item.turn, Turn::Ended { .. }) => {}
             Phase::Review(_) => {
                 if let Some(parked) = self.fence_gate()? {
                     return Ok(parked);
@@ -335,40 +337,8 @@ impl Runner {
         } else {
             Start::Main
         };
-        let dirs = worktree::prepare(
-            &self.settings.repo,
-            &item.worktree,
-            &item.branch,
-            start,
-            &item.build,
-        )
-        .map_err(|e| e.to_string())?;
-        if let Some(reason) = self.claude_files_refusal() {
-            return Err(reason);
-        }
+        let reach = self.worker_reach(item, start)?;
         let previewed = self.previewed();
-        let reads = [
-            self.paths.shots(item.issue),
-            self.paths.playwright(item.issue),
-        ];
-        let profile = WorkerProfile {
-            worktree: &item.worktree,
-            build: &item.build,
-            git_common_dir: &dirs.git_common_dir,
-            git_dir: &dirs.git_dir,
-            branch: &item.branch,
-            kelpie: &self.kelpie,
-            guard_hooks: &self.settings.worker.guard_hooks,
-            kelpie_home: &self.paths.kelpie_home,
-            repo: &self.settings.repo,
-            private_names: &self.settings.private_names,
-            allowed_domains: &self.settings.worker.allowed_domains,
-            build_env: &self.settings.worker.build_env,
-            preview: previewed.then_some(self.settings.preview.domains.as_slice()),
-            shep_home: &self.paths.shep_home,
-            reads: &reads,
-            door: &self.paths.door,
-        };
         let folder = &self.paths.worker;
         let settings = folder.join("settings.json");
         let instructions = folder.join("instructions.md");
@@ -424,9 +394,55 @@ impl Runner {
             mcp_config,
             plugin_dirs: self.skills.plugin_dirs().to_vec(),
             tools: Tools::Work,
-            reach: profile.reach(),
+            reach,
             lease: limit.lease().cloned(),
         })
+    }
+
+    /// What a session working in `item`'s worktree reaches: the worker's own
+    /// fence, with its worktree and build folder made ready
+    ///
+    /// # Errors
+    ///
+    /// Why the worktree cannot be made ready, or why agents' own files in it
+    /// are refused.
+    pub(super) fn worker_reach(&self, item: &WorkItem, start: Start) -> Result<Reach, String> {
+        let dirs = worktree::prepare(
+            &self.settings.repo,
+            &item.worktree,
+            &item.branch,
+            start,
+            &item.build,
+        )
+        .map_err(|e| e.to_string())?;
+        if let Some(reason) = self.claude_files_refusal() {
+            return Err(reason);
+        }
+        let reads = [
+            self.paths.shots(item.issue),
+            self.paths.playwright(item.issue),
+        ];
+        let profile = WorkerProfile {
+            worktree: &item.worktree,
+            build: &item.build,
+            git_common_dir: &dirs.git_common_dir,
+            git_dir: &dirs.git_dir,
+            branch: &item.branch,
+            kelpie: &self.kelpie,
+            guard_hooks: &self.settings.worker.guard_hooks,
+            kelpie_home: &self.paths.kelpie_home,
+            repo: &self.settings.repo,
+            private_names: &self.settings.private_names,
+            allowed_domains: &self.settings.worker.allowed_domains,
+            build_env: &self.settings.worker.build_env,
+            preview: self
+                .previewed()
+                .then_some(self.settings.preview.domains.as_slice()),
+            shep_home: &self.paths.shep_home,
+            reads: &reads,
+            door: &self.paths.door,
+        };
+        Ok(profile.reach())
     }
 
     /// The harness `item`'s worker runs on, and what holds its turns back

@@ -33,6 +33,8 @@ pub enum CallKind {
     Shots,
     /// The whole-issue check before the merge
     Audit,
+    /// A session of a deep review round
+    Deep,
 }
 
 /// A work item's time so far
@@ -158,6 +160,7 @@ mod tests {
             CallKind::Judge,
             CallKind::Shots,
             CallKind::Audit,
+            CallKind::Deep,
         ];
         let names = kinds.map(|k| serde_json::to_value(k).unwrap());
         assert_eq!(
@@ -167,7 +170,8 @@ mod tests {
                 json!("claude"),
                 json!("judge"),
                 json!("shots"),
-                json!("audit")
+                json!("audit"),
+                json!("deep")
             ]
         );
     }

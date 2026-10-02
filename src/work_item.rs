@@ -13,6 +13,7 @@ use crate::settings::ReviewerName;
 use crate::shots::ShotsRecord;
 
 mod audit;
+mod deep;
 mod follow_ups;
 mod local;
 mod round;
@@ -20,6 +21,7 @@ mod spend;
 mod timings;
 
 pub use audit::{Audit, Passed, SENDS_BACK};
+pub use deep::{Backing, Deep, Held};
 pub use follow_ups::FollowUps;
 pub use local::LOCAL_FAILURES_DOWN;
 pub use round::{CodeRabbitStage, CodeRabbitTally, OpenThread};
@@ -421,6 +423,8 @@ pub enum ReviewStage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         head: Option<String>,
     },
+    /// The deep round, which ends the loop once its fix is re-checked
+    Deep(Deep),
 }
 
 impl WorkItem {
@@ -569,7 +573,7 @@ mod tests {
                     "created": 5,
                     "since": 12,
                     "seconds": {
-                        "worker": 4, "gpu_wait": 0, "local_round": 0, "claude_round": 0,
+                        "worker": 4, "gpu_wait": 0, "local_round": 0, "claude_round": 0, "deep_round": 0,
                         "judging": 0, "audit": 0, "ci": 3, "coderabbit_window": 0, "coderabbit_review": 0,
                         "ruling": 0, "merge": 0, "shots": 0, "paused": 0, "other": 0,
                     },

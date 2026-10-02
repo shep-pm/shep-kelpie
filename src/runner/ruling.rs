@@ -431,6 +431,11 @@ fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
             short(head),
             gaps.len()
         ),
+        RulingKind::DeepReview { unfixed, .. } => format!(
+            "Kelpie's deep review of this pull request still finds {} findings unfixed \
+             after the worker was sent back twice.",
+            unfixed.len()
+        ),
         RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
             "{bot} has run {rounds} rounds here, its cap, \
              and {held} of its findings still hold."
@@ -578,6 +583,14 @@ fn decide(
                 force: Some(Phase::Review(Review::first())),
             });
         }
+        // The fix ends under the same review, which re-checks it again.
+        (Answer::Yes, RulingKind::DeepReview { review, prompt, .. }) => {
+            return Ok(Move::Turn {
+                prompt,
+                phase: Phase::Review(review),
+                force: None,
+            });
+        }
         (Answer::Yes, RulingKind::CodeRabbitCap { prompt, head, .. }) => {
             return Ok(Move::Turn {
                 prompt,
@@ -673,6 +686,16 @@ pub(super) fn question(
              more. Merging {about} by hand overrules the check",
             short(head),
             gaps.iter()
+                .map(|g| format!("- {g}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ),
+        RulingKind::DeepReview { unfixed, .. } => format!(
+            "The deep review of {about} re-checked the worker's fix twice and still \
+             finds these unfixed:\n\n{}\n\n{yes} sends the worker them once more. \
+             Merging {about} by hand overrules the review",
+            unfixed
+                .iter()
                 .map(|g| format!("- {g}"))
                 .collect::<Vec<_>>()
                 .join("\n")

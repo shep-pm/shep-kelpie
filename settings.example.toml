@@ -87,6 +87,14 @@ effort = "medium"
 model = "claude-opus-5-5"
 effort = "high"
 
+# The deep review round, a new project's review: two fresh sessions that read
+# the whole pull request for defects, a session that writes a failing test for
+# each HIGH they hold, and one that re-checks the worker's fix by running those
+# tests. Every one of them runs on this role.
+[app.dogs.kelpie.models.deep_reviewer]
+model = "claude-opus-5-5"
+effort = "high"
+
 # The model id each `worker:<model>-<effort>` label's name runs. Each name
 # keeps the id shown here when left out.
 # [app.dogs.kelpie.models.labels]
@@ -112,25 +120,34 @@ enabled = false
 # judge = "opus-high"
 # planner = "opus-high"
 # auditor = "opus-high"
+# deep_reviewer = "opus-high"
 
 [app.dogs.kelpie.review]
 loop_guard = 8
-# The reviewers the loop runs, in order: `claude`, the project's own Claude
-# round on `models.reviewer`, and the ones kelpie's `[kelpie.local_reviewers]`
-# define. The loop ends once two rounds in a row, from two different
-# reviewers, find nothing above a nit, and the nits are fixed with no
-# further round. Where only one reviewer can run, one clean round ends it.
-# A reviewer limited to `paths` runs only on a pull request that changes
-# one of them. Absent or empty, the loop is the older `review.local` below
-# and then `claude`: for a table with neither, the maintainer's qwen-review
-# script and then Claude.
+# The reviewers the loop runs, in order: `deep`, the project's own deep round
+# on `models.deep_reviewer`, `claude`, its own Claude round on
+# `models.reviewer`, and the ones kelpie's `[kelpie.local_reviewers]` define.
+# Absent or empty, a new project's review is the maintainer's qwen-review
+# script when it is there, and then the deep round. The deep round is one pass:
+# two fresh sessions read the whole pull request for defects, each HIGH they
+# hold gets a failing test from a session that may run commands, one worker
+# turn fixes everything held, and one re-check reads only the fix and runs
+# those tests. A finding it finds unfixed goes back to the worker once, then
+# to a ruling. The loop of `claude` and the others ends once two rounds in a
+# row, from two different reviewers, find nothing above a nit, and the nits
+# are fixed with no further round. Where only one reviewer can run, one clean
+# round ends it. A reviewer limited to `paths` runs only on a pull request
+# that changes one of them. `review.local` below, set, keeps the older loop of
+# that round and then `claude`.
 #
 # A local model alone:
 # reviewers = ["qwen"]
-# Claude alone:
+# The older loop of Claude rounds alone:
 # reviewers = ["claude"]
 # Both, and a deeper Claude round on the paths `opus` lists:
 # reviewers = ["qwen", "claude", "opus"]
+# The local model and then the deep round, which is the default:
+# reviewers = ["qwen", "deep"]
 
 # At most this many rounds from local reviewers per work item. Once they are
 # spent, only Claude reviewers run. No limit when absent.

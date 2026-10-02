@@ -148,11 +148,24 @@ pub(crate) fn project_table(entry: &str) -> serde_json::Map<String, serde_json::
 pub(crate) fn with_tables(entry: &str, tables: &str) -> String {
     const GATE: &str = "\n[app.dogs.kelpie.coderabbit]\n";
     assert!(entry.contains(GATE), "the example's CodeRabbit table moved");
+    // The rig's own `review.local` gives way to the one `tables` sets.
+    let entry = match tables.contains("[app.dogs.kelpie.review.local]") {
+        true => entry.replace(OLD_LOCAL, ""),
+        false => entry.to_owned(),
+    };
     entry.replace(GATE, &format!("\n{tables}{GATE}"))
 }
 
 /// The `repo` in `settings.example.toml`, which the rig points at its own
 const EXAMPLE_REPO: &str = "~/GitHub/shep";
+
+/// The older form of the local round, as `settings.example.toml` has it
+/// commented out, and on: a project that sets it runs the older loop, the
+/// local round and then Claude's, and is not the default
+const OLD_LOCAL_OFF: &str = "# [app.dogs.kelpie.review.local]\n# kind = \"command\"\n\
+# command = \"~/.claude/scripts/qwen-review.sh\"\n";
+pub(crate) const OLD_LOCAL: &str = "[app.dogs.kelpie.review.local]\nkind = \"command\"\n\
+command = \"~/.claude/scripts/qwen-review.sh\"\n";
 
 /// The CodeRabbit gate as `settings.example.toml` sets it, and turned off
 pub(crate) const CODERABBIT_ON: &str = "[app.dogs.kelpie.coderabbit]\nenabled = true\n";
@@ -306,9 +319,17 @@ impl Rig {
             example.contains(PLANNING_OFF),
             "the example's planning moved"
         );
+        // Most tests are about what comes after the review, or about the older
+        // loop of a local round and Claude's, so the rig's project runs it. A
+        // test of a new project's review takes that out with [`Rig::deep_review`].
+        assert!(
+            example.contains(OLD_LOCAL_OFF),
+            "the example's local round moved"
+        );
         let settings = example
             .replace(EXAMPLE_REPO, &rig.repo().display().to_string())
-            .replace(CODERABBIT_ON, CODERABBIT_OFF);
+            .replace(CODERABBIT_ON, CODERABBIT_OFF)
+            .replace(OLD_LOCAL_OFF, OLD_LOCAL);
         let paths = rig.paths();
         std::fs::create_dir_all(paths.settings.parent().unwrap()).unwrap();
         std::fs::write(&paths.settings, settings).unwrap();
@@ -488,6 +509,11 @@ impl Rig {
             assert!(s.contains(ask), "the example's merge authority moved");
             s.replace(ask, auto)
         });
+    }
+
+    /// Makes the project a new one, whose review is the deep round: no reviewers listed
+    pub(crate) fn deep_review(&self) {
+        self.edit_settings(|s| s.replace(OLD_LOCAL, ""));
     }
 
     pub(crate) fn edit_settings(&self, edit: impl FnOnce(String) -> String) {

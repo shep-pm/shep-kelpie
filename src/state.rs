@@ -358,6 +358,16 @@ pub enum RulingKind {
         /// The turn a yes starts
         prompt: String,
     },
+    /// The deep round's re-check still finds findings unfixed after the worker
+    /// was sent back once. A yes sends the worker them once more.
+    DeepReview {
+        /// The review, at the fix the yes starts again
+        review: Review,
+        /// Each finding still unfixed, with what is still wrong
+        unfixed: Vec<String>,
+        /// The fix turn a yes starts
+        prompt: String,
+    },
     /// CodeRabbit's rounds reached their cap with findings the judge held.
     /// A yes sends the worker those findings and lifts the cap for the rest
     /// of this work item.

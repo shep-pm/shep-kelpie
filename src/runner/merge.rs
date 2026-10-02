@@ -389,7 +389,7 @@ impl Runner {
             issue: item.issue,
             pull_request: item.pull_request,
             merged,
-            spend: item.spend(),
+            spend: Box::new(item.spend()),
             qwen: item.qwen,
             timings,
         };

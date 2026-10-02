@@ -32,6 +32,10 @@ pub(crate) enum Scripted {
     /// Writes this file with this text in the worktree, commits nothing,
     /// and answers: a write that got past the fence
     Plant(&'static str, &'static str),
+    /// Writes this file with this text in the worktree, commits nothing, and
+    /// answers with this exact text: a session that confirms a finding with a
+    /// failing test
+    Write(&'static str, &'static str, &'static str),
     /// Stages this file with this text, commits nothing, and deletes the
     /// working copy, so only the index holds it, and answers
     Stage(&'static str, &'static str),
@@ -302,6 +306,15 @@ impl Agents for FakeClaude {
                 Ok(AgentReply {
                     session_id: call.session.id().clone(),
                     text: "done".into(),
+                    usage: Usage::default(),
+                    session_cost: Some(Cost(0)),
+                })
+            }
+            Some(Scripted::Write(file, text, say)) => {
+                write_in(&call.cwd, file, text);
+                Ok(AgentReply {
+                    session_id: call.session.id().clone(),
+                    text: say.into(),
                     usage: Usage::default(),
                     session_cost: Some(Cost(0)),
                 })

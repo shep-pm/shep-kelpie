@@ -98,7 +98,7 @@ On a repo without those four labels, `add` makes them. The runner puts `in-progr
 - `max_items = 1`: one work item at a time
 - `ci` is on when the checkout has `.github/workflows`
 - `coderabbit.enabled` is on for a public repo, off for a private one
-- `review.reviewers = ["claude"]`, unless `~/.claude/scripts/qwen-review.sh` exists
+- `review.reviewers = ["deep"]`, unless `~/.claude/scripts/qwen-review.sh` exists, which then runs first
 - `pacing.enabled = true`
 - `worker.allowed_domains = []`
 - `worker.turn_timeout = 60`, in minutes
@@ -347,6 +347,8 @@ Each pull request goes through a review loop before CI. A project lists its revi
 
 `claude` is always defined: the project's own Claude round on its reviewer's agent, `models.reviewer` unless the project names one. The loop ends once two rounds in a row, from two different reviewers, find nothing above a nit, and those nits get fixed with no further round. Where only one reviewer can run, one clean round ends it.
 
+`deep` is always defined too, and it is a new project's review: one deep round instead of a loop of shallow ones. A fresh session on `models.deep_reviewer` (Opus 5.5 at high effort unless the project says otherwise) reads the whole pull request for defects, meaning a trigger and an effect that a failing test could be written from, and not for style or naming. A second fresh session on the same model is shown what the first found and asked only for what it missed. Each HIGH they hold is then confirmed by a session that may run commands in the worktree, which writes a failing test for it, and a HIGH it cannot confirm goes on marked unconfirmed. One worker turn fixes everything held, both readers' lists with the tests. One re-check then reads only the fix commits against the findings and runs each failing test, since a fixer's word that it fixed something is not evidence. A finding it finds unfixed goes back to the worker once, and after that to a ruling, whose yes sends the worker it once more. A fix that passes ends the loop. The local reviewers' rounds and CodeRabbit's stay as they are, and `deep` ends the loop whenever it is listed, so `reviewers = ["qwen", "claude", "opus"]` is still the loop of alternating rounds for a project that wants it. Its time is the `deep_round` timing phase.
+
 A local model alone:
 
 ```toml
@@ -382,7 +384,7 @@ paths = ["src/auth/**", "migrations/**"]
 
 `paths` limits a reviewer to pull requests that change a file under one of its globs, and the loop skips it elsewhere. Every round's prompt carries the issue's acceptance criteria: the section under an "Acceptance criteria" heading, or the whole body without one.
 
-A project that lists none runs `review.local` and then `claude`, and a table with neither runs `~/.claude/scripts/qwen-review.sh`, an optional local review script, when it exists, then Claude. `review.local` is the older form: it takes the same keys as a definition, or `kind = "off"`, and the runner says so at start. `review.local_rounds` caps the rounds from local reviewers per work item. Once they are spent, only Claude reviewers run.
+A project that lists none and sets no `review.local` runs `~/.claude/scripts/qwen-review.sh`, an optional local review script, when it exists, and then the deep round. One that sets `review.local` keeps the older loop of that round and `claude`. `review.local` is the older form: it takes the same keys as a definition, or `kind = "off"`, and the runner says so at start. `review.local_rounds` caps the rounds from local reviewers per work item. Once they are spent, only Claude reviewers run.
 
 A missing command or an endpoint that doesn't answer stops the runner at start.
 

@@ -99,7 +99,7 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
     assert!(settings.ci, "the checkout has workflows");
     assert!(!settings.coderabbit.enabled, "the repo is private");
     assert_eq!(settings.review.local, None);
-    assert_eq!(settings.review.reviewers, [ReviewerName::claude()]);
+    assert_eq!(settings.review.reviewers, [ReviewerName::deep()]);
     assert_eq!(
         scene.forge.repo_labels_now(),
         [

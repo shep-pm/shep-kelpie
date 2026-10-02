@@ -28,6 +28,10 @@ pub enum Role {
     Planner,
     /// A one-shot that checks a whole work item against its issue before the merge
     Auditor,
+    /// A session of the deep review round: a reader, the confirmation of a
+    /// HIGH, or the re-check of the fix
+    #[serde(rename = "deep_reviewer")]
+    DeepReviewer,
 }
 
 impl Role {
@@ -39,6 +43,7 @@ impl Role {
             Self::Judge => "judge",
             Self::Planner => "planner",
             Self::Auditor => "auditor",
+            Self::DeepReviewer => "deep_reviewer",
         }
     }
 }

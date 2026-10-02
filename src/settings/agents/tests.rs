@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::*;
-use crate::settings::{LoopReviewer, NonBlank, Runs};
+use crate::settings::{LoopReviewer, NonBlank, ReviewerName, Runs};
 use crate::test::{project_table, with_tables};
 use crate::webhook::KelpieSettings;
 
@@ -49,6 +49,32 @@ fn a_project_that_names_no_agent_keeps_its_models_on_claude_code() {
     assert_eq!(pair(&agents.reviewer), ("claude-sonnet-5", Effort::Medium));
     assert_eq!(pair(&agents.judge), ("claude-opus-5-5", Effort::Low));
     assert_eq!(pair(&agents.auditor), ("claude-opus-5-5", Effort::High));
+    assert_eq!(
+        pair(&agents.deep_reviewer),
+        ("claude-opus-5-5", Effort::High)
+    );
+}
+
+#[test]
+fn the_deep_round_runs_on_the_agent_or_model_its_role_names() {
+    let mut settings = project("");
+    settings.models.deep_reviewer = RoleModel {
+        model: NonBlank::try_from("claude-sonnet-5-5".to_owned()).unwrap(),
+        effort: Effort::Medium,
+        harness: AgentHarness::ClaudeCode,
+    };
+    let agents = settings.role_agents(&kelpie(AGENTS).agents).unwrap();
+    assert_eq!(
+        pair(&agents.deep_reviewer),
+        ("claude-sonnet-5-5", Effort::Medium)
+    );
+
+    let settings = project("deep_reviewer = \"haiku\"\n");
+    let agents = settings.role_agents(&kelpie(AGENTS).agents).unwrap();
+    assert_eq!(
+        pair(&agents.deep_reviewer),
+        ("claude-haiku-4-5-20251001", Effort::Low)
+    );
 }
 
 #[test]
@@ -100,7 +126,8 @@ fn an_agent_takes_a_known_harness_and_nothing_else() {
 
 #[test]
 fn the_projects_claude_round_runs_on_its_reviewer_agent() {
-    let settings = project("reviewer = \"opus-high\"\n");
+    let mut settings = project("reviewer = \"opus-high\"\n");
+    settings.review.reviewers = vec![ReviewerName::claude()];
     let lineup = settings.lineup(&kelpie(AGENTS), Path::new("/h")).unwrap();
     let claude = lineup.iter().find(|r| r.name.as_str() == "claude").unwrap();
     let Runs::Claude(session) = &claude.runs else {
@@ -111,28 +138,28 @@ fn the_projects_claude_round_runs_on_its_reviewer_agent() {
 
 #[test]
 fn a_session_reviewer_names_an_agent_from_the_same_list() {
-    let settings = reviewing("deep");
+    let settings = reviewing("thorough");
     let section = format!(
-        "{AGENTS}[local_reviewers.deep]\nkind = \"session\"\nagent = \"opus-high\"\n\
+        "{AGENTS}[local_reviewers.thorough]\nkind = \"session\"\nagent = \"opus-high\"\n\
          paths = [\"src/**\"]\n"
     );
     let lineup = settings.lineup(&kelpie(&section), Path::new("/h")).unwrap();
     let names: Vec<&str> = lineup.iter().map(|r| r.name.as_str()).collect();
-    assert_eq!(names, ["deep", "claude"]);
-    let Runs::Claude(deep) = &lineup[0].runs else {
+    assert_eq!(names, ["thorough", "claude"]);
+    let Runs::Claude(thorough) = &lineup[0].runs else {
         panic!("{:?}", lineup[0]);
     };
-    assert_eq!(pair(&deep.model()), ("claude-opus-5-5", Effort::High));
+    assert_eq!(pair(&thorough.model()), ("claude-opus-5-5", Effort::High));
     assert_eq!(lineup[0].paths()[0].as_str(), "src/**");
     assert!(!LoopReviewer::is_local(&lineup[0]));
 
-    let missing = "[local_reviewers.deep]\nkind = \"session\"\nagent = \"opus-high\"\n";
+    let missing = "[local_reviewers.thorough]\nkind = \"session\"\nagent = \"opus-high\"\n";
     let err = settings
         .lineup(&kelpie(missing), Path::new("/h"))
         .unwrap_err()
         .to_string();
     assert!(
-        err.contains("`local_reviewers.deep.agent` names opus-high, which is not defined"),
+        err.contains("`local_reviewers.thorough.agent` names opus-high, which is not defined"),
         "{err}"
     );
 }
