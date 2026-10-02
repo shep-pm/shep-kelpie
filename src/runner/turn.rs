@@ -35,7 +35,7 @@ use crate::state::{Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree::{self, Start};
 pub(super) use unfinished::failed;
-use unfinished::{awaits_a_push, timed_out};
+use unfinished::{awaits_a_push, timed_out, uncommitted_prompt};
 
 mod unfinished;
 
@@ -536,8 +536,8 @@ impl Runner {
         let issue = item.issue;
         // A rework or adoption turn that moved nothing on `origin` pushed no fix.
         let before = item.known.head.clone();
-        let pushed_nothing =
-            before.is_some() && pushed.as_ref().is_none_or(|p| Some(p) == before.as_ref());
+        let no_push = pushed.as_ref().is_none_or(|p| Some(p) == before.as_ref());
+        let pushed_nothing = before.is_some() && no_push;
         if pushed.is_some() {
             item.known.head = pushed;
         }
@@ -554,7 +554,40 @@ impl Runner {
                 let session = item.session.clone();
                 let cost =
                     item.record_call(Role::Worker, now, session, reply.usage, reply.session_cost);
-                item.turn = Turn::Ended { at: now };
+                // A turn that left its work uncommitted and pushed nothing is
+                // sent back once, before the gate can park it on a ruling.
+                let asked = std::mem::take(&mut item.asked_to_commit);
+                // A worktree git cannot be read in is told and let go: the
+                // turn ends as it did before, which errs toward the ruling.
+                let uncommitted = match (question.is_none() && no_push && !asked)
+                    .then(|| worktree::uncommitted(&self.settings.repo, &item.worktree))
+                {
+                    Some(Ok(files)) => files,
+                    Some(Err(e)) => {
+                        eprintln!("cannot list issue #{issue}'s uncommitted files: {e}");
+                        Vec::new()
+                    }
+                    None => Vec::new(),
+                };
+                let commit_first = !uncommitted.is_empty();
+                item.turn = if commit_first {
+                    item.asked_to_commit = true;
+                    // The pull request this turn opened still owes its first
+                    // review, which the follow-up's end is too late to see as
+                    // a discovery.
+                    if discovering
+                        && item.pull_request.is_some()
+                        && item.resume.is_none()
+                        && matches!(item.phase, Phase::Implement)
+                    {
+                        item.resume = Some(Phase::Review(Review::first()));
+                    }
+                    Turn::Next {
+                        prompt: uncommitted_prompt(&uncommitted),
+                    }
+                } else {
+                    Turn::Ended { at: now }
+                };
                 // The turn may have changed the code CodeRabbit was satisfied with.
                 item.coderabbit.satisfied = false;
                 // A question leaves the phase untouched: it interrupted
@@ -562,7 +595,7 @@ impl Runner {
                 // have ended normally, and the answer resumes exactly this,
                 // captured below before `park` parks it on a ruling.
                 let stopped_short = pushed_nothing && awaits_a_push(item);
-                if question.is_none() && !stopped_short {
+                if question.is_none() && !stopped_short && !commit_first {
                     if let Some(resume) = item.resume.take() {
                         item.phase = resume;
                     } else {

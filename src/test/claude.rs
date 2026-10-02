@@ -32,6 +32,9 @@ pub(crate) enum Scripted {
     /// Writes this file with this text in the worktree, commits nothing,
     /// and answers: a write that got past the fence
     Plant(&'static str, &'static str),
+    /// Stages this file with this text, commits nothing, and deletes the
+    /// working copy, so only the index holds it, and answers
+    Stage(&'static str, &'static str),
     /// Merges `origin/main` into the worktree's branch, keeping main's
     /// side of any conflict, and pushes it without force, as a worker
     /// resolving a conflict does
@@ -254,6 +257,17 @@ impl Agents for FakeClaude {
             }
             Some(Scripted::Plant(file, text)) => {
                 write_in(&call.cwd, file, text);
+                Ok(AgentReply {
+                    session_id: call.session.id().clone(),
+                    text: "done".into(),
+                    usage: Usage::default(),
+                    session_cost: Some(Cost(0)),
+                })
+            }
+            Some(Scripted::Stage(file, text)) => {
+                write_in(&call.cwd, file, text);
+                git(&call.cwd, &["add", file]);
+                std::fs::remove_file(call.cwd.join(file)).unwrap();
                 Ok(AgentReply {
                     session_id: call.session.id().clone(),
                     text: "done".into(),

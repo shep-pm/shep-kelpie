@@ -396,6 +396,71 @@ pub fn head(repo: &Path, worktree: &Path) -> Result<String, WorktreeError> {
     trusted(repo, worktree)?(&["rev-parse", "HEAD"])
 }
 
+/// The files `worktree` holds that its last commit does not: changed, staged
+/// or new and not ignored
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn uncommitted(repo: &Path, worktree: &Path) -> Result<Vec<String>, WorktreeError> {
+    // One `status` sees the index, the working tree and the new files. Its
+    // second format, since the first starts an entry with a space that `git`
+    // trims off the first one.
+    let status =
+        trusted(repo, worktree)?(&["status", "--porcelain=v2", "-z", "--untracked-files=all"])?;
+    let mut files = status_names(&status);
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+// The paths in `git status --porcelain=v2 -z`, where an entry is a kind, its
+// fields and then the path, and a rename or copy adds the old path as an
+// entry of its own.
+fn status_names(status: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut entries = status.split('\0').filter(|entry| !entry.is_empty());
+    while let Some(entry) = entries.next() {
+        let fields = match entry.chars().next() {
+            Some('?') => 2,
+            Some('1') => 9,
+            Some('u') => 11,
+            Some('2') => {
+                names.extend(entries.next().map(str::to_owned));
+                10
+            }
+            _ => continue,
+        };
+        names.extend(entry.splitn(fields, ' ').last().map(str::to_owned));
+    }
+    names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::status_names;
+
+    #[test]
+    fn a_status_names_every_changed_staged_renamed_and_new_path() {
+        let status = "1 .M N... 100644 100644 100644 aaaa bbbb src/a b.rs\0\
+                      1 AD N... 000000 100644 000000 0000 cccc staged.txt\0\
+                      2 R. N... 100644 100644 100644 dddd eeee R100 new.rs\0old.rs\0\
+                      u UU N... 100644 100644 100644 100644 ffff gggg hhhh clash.rs\0\
+                      ? left.txt\0";
+        assert_eq!(
+            status_names(status),
+            [
+                "src/a b.rs",
+                "staged.txt",
+                "old.rs",
+                "new.rs",
+                "clash.rs",
+                "left.txt"
+            ]
+        );
+    }
+}
+
 /// Moves the worktree's branch from `from`, the head kelpie knew, to `to`
 ///
 /// `to` is a head on `origin` the maintainer accepted. A worktree at neither,

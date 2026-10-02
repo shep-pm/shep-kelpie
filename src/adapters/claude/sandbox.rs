@@ -53,7 +53,10 @@ impl ClaudeCli {
             .args(argv(call, bridged.as_deref()))
             .current_dir(&call.cwd)
             .env("CLAUDE_CODE_TMPDIR", &scratch)
-            .env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1");
+            .env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1")
+            // A headless turn that ends is over, so nothing it waits on in
+            // the background can ever wake it.
+            .env("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "1");
         let command = self
             .sandbox
             .wrap(&policy, &sandbox_settings(call), &command)
@@ -406,6 +409,24 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(bridged_config(&call)).unwrap()).unwrap();
         assert_eq!(written, bridges.config);
         assert_eq!(written["mcpServers"]["kelpie"]["command"], "/k/kelpie");
+    }
+
+    #[test]
+    fn no_role_can_start_a_background_command_or_agent() {
+        let w = World::new();
+        let cli = w.cli(Arc::new(OpenSandbox::default()));
+        for call in [w.worker(), w.call(Role::Reviewer), w.call(Role::Judge)] {
+            let (command, _) = cli.sandboxed_command(&call).unwrap();
+            let set = command
+                .get_envs()
+                .find(|(name, _)| *name == "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS");
+            assert_eq!(
+                set.and_then(|(_, value)| value),
+                Some(std::ffi::OsStr::new("1")),
+                "{:?} can still run a task in the background",
+                call.role
+            );
+        }
     }
 
     #[test]

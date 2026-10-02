@@ -95,6 +95,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         qwen: crate::work_item::QwenTally::default(),
         merge_refused: false,
         sent_back: false,
+        asked_to_commit: false,
         merge_tried: None,
         merge_queued: None,
         summon_owed: false,
