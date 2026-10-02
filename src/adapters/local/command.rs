@@ -59,13 +59,18 @@ impl LocalReviewer {
         let mut skipped_index = 0u32;
         for finding in findings {
             if is_skipped_for_size(&finding) {
-                // A hunk kelpie could not run keeps its placeholder, the
-                // same as a hunk whose own `git diff` failed: one file's
-                // trouble never costs the round every other finding it
-                // already has.
+                // A hunk kelpie could not run leaves its file unreviewed, in
+                // the script's own words, and one file's trouble never costs
+                // the round every other finding it already has. A hunk whose
+                // `git diff` failed keeps its placeholder.
                 match self.hunk_round(&at, out, skipped_index, &finding) {
                     Ok(found) => combined.extend(found),
-                    Err(_) => combined.push(finding),
+                    Err(ReviewerError::Stopped) => return Err(ReviewerError::Stopped),
+                    Err(e) => combined.push(Finding {
+                        what: format!("not reviewed: {}", first_line(&e.to_string())),
+                        why: "the hunk's review failed".into(),
+                        ..finding
+                    }),
                 }
                 skipped_index += 1;
             } else {
@@ -204,6 +209,11 @@ fn write_criteria(out: &Path, criteria: &str) -> Result<Option<PathBuf>, Reviewe
     std::fs::create_dir_all(out).map_err(cannot)?;
     std::fs::write(&path, criteria).map_err(cannot)?;
     Ok(Some(path))
+}
+
+// The line a `|`-separated report can carry.
+fn first_line(text: &str) -> &str {
+    text.lines().next().unwrap_or_default().trim()
 }
 
 fn is_skipped_for_size(finding: &Finding) -> bool {
@@ -468,10 +478,11 @@ esac
     }
 
     // The hunk's own script invocation fails outright (not the `git diff`
-    // step): the placeholder survives, and so does everything else the
-    // round already found.
+    // step): the file is left unreviewed, as a script that could not reach
+    // its model would say, and everything else the round already found
+    // survives.
     #[test]
-    fn a_hunk_script_failure_keeps_the_skip_placeholder_and_the_rounds_other_findings() {
+    fn a_hunk_script_failure_leaves_the_file_unreviewed_and_keeps_the_rounds_other_findings() {
         let home = tempfile::tempdir().unwrap();
         let script_dir = home.path().join(".claude/scripts");
         std::fs::create_dir_all(&script_dir).unwrap();
@@ -480,6 +491,7 @@ esac
 mkdir -p \"$QWEN_REVIEW_OUT\"
 case \"$*\" in
   *--files*)
+    echo 'curl: (7) Failed to connect to gpu.box port 8080' >&2
     exit 1
     ;;
   *)
@@ -525,11 +537,14 @@ esac
                     severity: Severity::Low,
                     file: "sub/big.rs".into(),
                     line: 0,
-                    what: "not reviewed: 900 lines exceeds the chunk limit".into(),
-                    why: "split the file or review it by hand".into(),
+                    what: "not reviewed: the local round failed: curl: (7) Failed to connect to \
+                            gpu.box port 8080"
+                        .into(),
+                    why: "the hunk's review failed".into(),
                 },
             ]
         );
+        assert!(findings[1].is_unreviewed());
     }
 
     // Two files skipped in the same round, sharing a basename in different

@@ -511,6 +511,7 @@ impl Runner {
             summon_owed: false,
             local_rounds: 0,
             local_failures: Default::default(),
+            local_unreviewed: Vec::new(),
             rebased: false,
             shots: None,
             shots_comment: None,

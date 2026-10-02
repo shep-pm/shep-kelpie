@@ -21,6 +21,9 @@ pub(super) struct Chosen {
     pub(super) reviewer: LoopReviewer,
     /// Whether it was the only one that could run
     pub(super) alone: bool,
+    /// Whether a local reviewer can still run a round, which is the only way
+    /// files a local round left unreviewed get reviewed
+    pub(super) local_possible: bool,
 }
 
 impl Runner {
@@ -39,6 +42,7 @@ impl Runner {
             return Ok(Chosen {
                 reviewer,
                 alone: review.alone,
+                local_possible: true,
             });
         }
         let changed = match self.lineup.iter().any(|r| !r.paths().is_empty()) {
@@ -79,6 +83,7 @@ impl Runner {
         Ok(Chosen {
             reviewer,
             alone: eligible <= 1,
+            local_possible: self.lineup.iter().any(|r| r.is_local() && runs(r)),
         })
     }
 

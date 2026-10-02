@@ -444,3 +444,205 @@ fn a_round_with_some_files_unreviewed_keeps_its_real_findings() {
     assert_eq!(findings[0]["file"], "src/c.rs");
     assert_eq!(status["work_item"].get("local_reviewers_down"), None);
 }
+
+// A round that found something real and left two files unreviewed.
+const MIXED: &str = "\
+MEDIUM|src/c.rs:4|leftover debug print|noisy logs
+LOW|src/a.rs:0|not reviewed: curl: (7) Failed to connect to gpu.box port 8080|raw response kept at /tmp/qwen-review/raw/src_a.rs.txt
+LOW|src/b.rs:0|not reviewed: empty response|raw response kept at /tmp/qwen-review/raw/src_b.rs.txt
+";
+
+const REJECTS: &str = r#"{"holds": false, "severity": "low", "reason": "it is a test file"}"#;
+
+fn phase(rig: &Rig, runner: &std::sync::Mutex<crate::runner::Runner>) -> serde_json::Value {
+    rig.ask(runner, "status", None)["work_item"]["phase"].clone()
+}
+
+#[test]
+fn a_mixed_round_whose_findings_the_judge_rejects_is_not_clean_and_no_round_after_it_is() {
+    let rig = Rig::new("koji");
+    let runner = at_round_one(&rig);
+    rig.reviewer.script([found(MIXED)]);
+    rig.claude
+        .script([Scripted::Text(REJECTS), Scripted::Text("CLEAN")]);
+    step(&runner).unwrap(); // round 1, local: one finding, two files unreviewed
+    step(&runner).unwrap(); // the judge rejects it
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewFindingsSent {
+            issue: 7,
+            pull_request: 71,
+            round: 1,
+            held: 0,
+            clean: false,
+        })
+    );
+    assert_eq!(phase(&rig, &runner)["round"], 2);
+    assert_eq!(phase(&rig, &runner)["consecutive_clean"], 0);
+
+    // Claude's round is clean, but two files still wait on a local review.
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewFindingsSent {
+            issue: 7,
+            pull_request: 71,
+            round: 2,
+            held: 0,
+            clean: false,
+        })
+    );
+    let phase = phase(&rig, &runner);
+    assert_eq!(phase["state"], "review", "{phase}");
+    assert_eq!(phase["consecutive_clean"], 0, "{phase}");
+}
+
+#[test]
+fn a_later_local_round_that_reviews_the_files_brings_clean_credit_back() {
+    let rig = Rig::new("koji");
+    let runner = at_round_one(&rig);
+    rig.reviewer
+        .script([found(MIXED), ScriptedRound::Findings(Vec::new())]);
+    rig.claude.script([
+        Scripted::Text(REJECTS),
+        Scripted::Text("CLEAN"),
+        Scripted::Text("CLEAN"),
+    ]);
+    step(&runner).unwrap(); // round 1, local: one finding, two files unreviewed
+    step(&runner).unwrap(); // the judge rejects it
+    step(&runner).unwrap(); // round 1 is not clean
+    step(&runner).unwrap(); // round 2, claude: clean, but earns nothing
+    assert_eq!(phase(&rig, &runner)["consecutive_clean"], 0);
+
+    // Round 3 reviews everything and finds nothing.
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewFindingsSent {
+            issue: 7,
+            pull_request: 71,
+            round: 3,
+            held: 0,
+            clean: true,
+        })
+    );
+    let phase = phase(&rig, &runner);
+    assert_eq!(
+        phase["state"], "review",
+        "claude's round before it earned nothing"
+    );
+    assert_eq!(phase["consecutive_clean"], 1, "{phase}");
+
+    // Claude's next clean round is the second, from a different reviewer.
+    step(&runner).unwrap();
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+        "ci"
+    );
+}
+
+#[test]
+fn files_left_unreviewed_again_count_against_the_reviewer_until_the_loop_goes_on_without_it() {
+    let rig = Rig::new("koji");
+    let runner = at_round_one(&rig);
+    rig.reviewer
+        .script([found(MIXED), found(MIXED), found(MIXED)]);
+    rig.claude.script([
+        Scripted::Text(REJECTS),
+        Scripted::Text("CLEAN"), // round 2
+        Scripted::Text(REJECTS),
+        Scripted::Text("CLEAN"), // round 4
+        Scripted::Text(REJECTS),
+        Scripted::Text("CLEAN"), // round 6, once the local reviewer is down
+    ]);
+    let local_round = |down: bool| {
+        step(&runner).unwrap(); // the local round
+        step(&runner).unwrap(); // the judge rejects its finding
+        step(&runner).unwrap(); // the round is not clean
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(
+            status["work_item"].get("local_reviewers_down").is_some(),
+            down,
+            "{status}"
+        );
+    };
+    local_round(false); // round 1: first time, nothing yet counts
+    step(&runner).unwrap(); // round 2, claude
+    local_round(false); // round 3: the same files again, one failure
+    step(&runner).unwrap(); // round 4, claude
+    local_round(true); // round 5: again, a second in a row
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["local_reviewers_down"],
+        json!(["qwen"])
+    );
+
+    // Claude is all that is left: its round owes no local review, and as the
+    // only reviewer one clean round ends the loop.
+    step(&runner).unwrap();
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+        "ci"
+    );
+    assert_eq!(rig.reviewer.seen().len(), 3, "no fourth local round");
+}
+
+#[test]
+fn a_clean_local_round_clears_that_reviewers_failures() {
+    let rig = Rig::new("koji");
+    let runner = at_round_one(&rig);
+    rig.reviewer.script([
+        found(UNREACHABLE),
+        ScriptedRound::Findings(Vec::new()),
+        found(UNREACHABLE),
+    ]);
+    let holds = r#"{"holds": true, "severity": "high", "reason": "it is"}"#;
+    rig.claude.script([
+        Scripted::Text("HIGH|work.txt:1|wrong|it is"),
+        Scripted::Text(holds),
+        Scripted::Push("fixed.txt", "fixed\n"),
+    ]);
+    step(&runner).unwrap(); // round 1, local: nothing reviewed, retried
+    step(&runner).unwrap(); // the retry reviews everything: clean
+    step(&runner).unwrap(); // round 2, claude: one finding
+    step(&runner).unwrap(); // the judge holds it
+    step(&runner).unwrap(); // it goes to the worker
+    step(&runner).unwrap(); // the worker's fix turn
+    step(&runner).unwrap(); // the fix is pushed
+
+    // The earlier failure was cleared, so this is a first failure, retried,
+    // and not a second that would leave the reviewer down.
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::LocalRoundFailed {
+            issue: 7,
+            pull_request: 71,
+            round: 3,
+            reviewer: qwen(),
+            unreviewed: vec!["src/a.rs".into(), "src/b.rs".into()],
+            retrying: true,
+        })
+    );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"].get("local_reviewers_down"), None);
+}
+
+#[test]
+fn a_file_skipped_for_its_size_stays_a_finding_and_is_not_unreviewed() {
+    let rig = Rig::new("koji");
+    let runner = at_round_one(&rig);
+    rig.reviewer.script([found(
+        "LOW|src/big.rs:0|not reviewed: 900 lines exceeds the chunk limit|split the file or review it by hand\n",
+    )]);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewRound {
+            issue: 7,
+            pull_request: 71,
+            round: 1,
+            reviewer: qwen(),
+            findings: 1,
+            unreviewed: Vec::new(),
+        })
+    );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["phase"]["stage"]["stage"], "judging");
+    assert_eq!(status["work_item"].get("local_reviewers_down"), None);
+}

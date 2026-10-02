@@ -65,6 +65,11 @@ pub struct WorkItem {
     /// work item. A round that reviewed clears its reviewer's count.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub local_failures: BTreeMap<ReviewerName, u32>,
+    /// The files the last local round that reviewed anything left
+    /// unreviewed. No round counts as clean while any are left, and the next
+    /// local round replaces the list with what it leaves.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub local_unreviewed: Vec<String>,
     /// Its worktree
     pub worktree: PathBuf,
     /// Its worker's build folder
@@ -407,6 +412,23 @@ impl WorkItem {
     /// leaves the loop to the other reviewers
     pub fn local_reviewer_down(&self, name: &ReviewerName) -> bool {
         self.local_failures.get(name).is_some_and(|n| *n >= 2)
+    }
+
+    /// Records a local round by `reviewer` that reviewed something, leaving
+    /// `unreviewed` unreviewed
+    ///
+    /// A file left unreviewed again counts against the reviewer; a round
+    /// that left none, or only new ones, clears its count.
+    pub fn note_local_round(&mut self, reviewer: &ReviewerName, unreviewed: &[String]) {
+        let again = unreviewed
+            .iter()
+            .any(|file| self.local_unreviewed.contains(file));
+        if again {
+            *self.local_failures.entry(reviewer.clone()).or_default() += 1;
+        } else {
+            self.local_failures.remove(reviewer);
+        }
+        self.local_unreviewed = unreviewed.to_vec();
     }
 
     /// The local reviewers that reviewed nothing twice in a row
