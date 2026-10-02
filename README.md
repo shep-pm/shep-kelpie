@@ -210,11 +210,19 @@ A project on `merge_authority = "auto"` merges its pull requests without asking 
 
 ### Planning
 
-When the board picks an issue, a planning call on Opus reads the repo at `main` and decides whether it is one pull request or several, and picks the worker it runs on from a `worker:<model>-<effort>` label's names. Most stay one. Several become sub-issues of the issue, each with its labels and blocked by the pieces it needs first, and the issue gets one comment with the plan.
+When the board picks an issue, a planning call on Opus reads the repo at `main` and decides whether it is one pull request or several, and picks the worker each runs on. Most stay one. Several become sub-issues of the issue, each with its labels and blocked by the pieces it needs first, and the issue gets one comment with the plan.
 
-- Under `auto` the split happens on its own. Under `ask` it's a ruling: `yes` opens the sub-issues, and `no <note>` works the issue whole
-- A planned issue kept whole gets the pick as a `worker:` label, and each sub-issue of a split gets its own; an issue that already carries a `worker:` label keeps it over the pick
-- A reply that names no worker, or one shep-kelpie does not run, falls back to the project's own worker, and a comment says so either way
+The planning call picks one of three workers, and no other:
+
+| Pick | When |
+| --- | --- |
+| `sonnet-high` | The default: any feature, new behaviour across modules, state, persistence, timing, process lifecycle |
+| `sonnet-medium` | Small or mechanical: docs, config, a rename, test-only, one module, no state or concurrency |
+| `opus-high` | Only where a bad first build is hard to undo: migrations, credentials, irreversible operations |
+
+- Under `auto` the split happens on its own. Under `ask` it's a ruling: `yes` opens the sub-issues, and `no <note>` works the issue whole, on its own `worker:` label or the project's worker, and a comment says which
+- A planned issue kept whole gets the pick as a `worker:` label, and each sub-issue of a split gets its own. shep-kelpie makes the label on the repo the first time it needs it. An issue that already carries a `worker:` label keeps it over the pick
+- A reply that names no worker or any other, or a label that can't be made or added, falls back to the project's own worker, and a comment says why
 - An issue with sub-issues is never worked itself, and shep-kelpie closes it once every sub-issue is closed
 - A sub-issue is never planned again, and neither is an issue added with `add`
 - Off by default until the sub-issue and blocked-by calls have run against a real repo: `[planning] enabled = true` turns it on, and `[models.planner]` picks the model the planning call itself runs on
