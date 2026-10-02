@@ -566,14 +566,15 @@ fn unfixed_line(held: &Held) -> String {
 
 // What the worker was sent less what it deferred, and how many it deferred: a
 // finding it copied to the deferred-findings file, which follow-up filing
-// matches by file, line and what, is filed as an issue once the pull request merges, so neither its fix nor its test is checked.
+// matches by file, line and what, is filed as an issue once the pull request
+// merges, so neither its fix nor its test is checked.
 fn apart_deferred(build: &std::path::Path, held: &[Held]) -> (Vec<Held>, usize) {
     let deferred = pin::deferred_findings(build);
-    let (left, kept): (Vec<&Held>, Vec<&Held>) = held.iter().partition(|h| {
+    let (deferred_held, checked): (Vec<&Held>, Vec<&Held>) = held.iter().partition(|h| {
         let f = &h.finding;
         deferred
             .iter()
             .any(|d| (&d.file, d.line, &d.what) == (&f.file, f.line, &f.what))
     });
-    (kept.into_iter().cloned().collect(), left.len())
+    (checked.into_iter().cloned().collect(), deferred_held.len())
 }
