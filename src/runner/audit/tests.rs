@@ -412,6 +412,27 @@ fn every_item_the_issue_points_to_is_pulled_in_however_many() {
 }
 
 #[test]
+fn an_answer_with_no_criterion_for_an_issue_that_has_some_checked_nothing() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.claude
+        .script([Scripted::Audit(r#"{"criteria": [], "assumptions": []}"#)]);
+    rig.forge.set_checks(&head, Checks::Passed);
+
+    let Some(StepReport::GateFailed { reason, .. }) = rig.verdict(&runner) else {
+        panic!("an empty list of criteria is no pass");
+    };
+    assert!(reason.contains("no criterion"), "{reason}");
+    assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
+
+    // The next step asks again, and a real answer passes.
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::AuditPassed { .. })
+    ));
+    assert_eq!(audits(&rig).len(), 2);
+}
+
+#[test]
 fn an_issue_edited_after_a_pass_is_checked_again_on_the_same_head() {
     let (rig, runner, head) = Rig::with_pull_request("shep");
     rig.forge.set_checks(&head, Checks::Passed);

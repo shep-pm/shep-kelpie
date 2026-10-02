@@ -21,6 +21,7 @@ use super::Runner;
 use super::gate::short;
 use super::report::{Begin, StepReport};
 use super::review::calls::{build_call, diff_against};
+use super::review::criteria::acceptance;
 use super::ruling::park;
 use crate::pacer::Scope;
 use crate::ports::{AgentCall, AgentError, AgentReply, PullRequestState, Role, Tools};
@@ -211,14 +212,22 @@ impl Runner {
         if !still {
             return Ok(None);
         }
-        match self.read_inputs(issue, number) {
-            Ok(inputs) if inputs.fingerprint() == audited.inputs => {}
+        let asks = match self.read_inputs(issue, number) {
+            Ok(inputs) if inputs.fingerprint() == audited.inputs => {
+                !acceptance(&inputs.body).trim().is_empty()
+            }
             Ok(_) => return Ok(None),
             Err(reason) => return Ok(Some(StepReport::GateFailed { issue, reason })),
-        }
+        };
         let read = result
             .map_err(|e| e.to_string())
-            .and_then(|reply| read_findings(&reply.text));
+            .and_then(|reply| read_findings(&reply.text))
+            // An answer with no criterion for an issue that asks for some
+            // checked nothing, which is not the same as nothing being wrong.
+            .and_then(|findings| match asks && findings.criteria.is_empty() {
+                true => Err("it listed no criterion though the issue asks for some".to_owned()),
+                false => Ok(findings),
+            });
         let findings = match read {
             Ok(findings) => findings,
             Err(reason) => {

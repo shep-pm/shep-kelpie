@@ -128,7 +128,9 @@ pub(crate) struct Seen {
 
 /// What the stand-in answers the whole-issue check once its script has none for it:
 /// every criterion met and every assumption checked
-pub(crate) const AUDIT_PASSES: &str = r#"{"criteria": [], "assumptions": []}"#;
+pub(crate) const AUDIT_PASSES: &str = r#"{"criteria": [
+    {"criterion": "what the issue asks", "met": true, "where": "src/lib.rs:1"}],
+  "assumptions": []}"#;
 
 /// Records every call and answers from a script, failing once it runs out
 #[derive(Debug, Clone, Default)]
