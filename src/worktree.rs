@@ -404,10 +404,14 @@ pub fn head(repo: &Path, worktree: &Path) -> Result<String, WorktreeError> {
 /// [`WorktreeError`] naming the git command that failed.
 pub fn uncommitted(repo: &Path, worktree: &Path) -> Result<Vec<String>, WorktreeError> {
     let git = trusted(repo, worktree)?;
+    // The working tree against the commit misses a change only staged, whose
+    // working copy went back to the commit's, so the index is read too.
     let changed = git(&["diff", "--name-only", "-z", "HEAD"])?;
+    let staged = git(&["diff", "--name-only", "-z", "--cached", "HEAD"])?;
     let new = git(&["ls-files", "--others", "--exclude-standard", "-z"])?;
     let mut files: Vec<String> = changed
         .split('\0')
+        .chain(staged.split('\0'))
         .chain(new.split('\0'))
         .filter(|name| !name.is_empty())
         .map(str::to_owned)

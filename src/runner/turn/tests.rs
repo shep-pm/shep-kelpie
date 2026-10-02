@@ -688,6 +688,19 @@ fn a_worker_sent_back_for_uncommitted_files_is_not_sent_back_for_them_again() {
 }
 
 #[test]
+fn a_change_only_staged_counts_as_uncommitted() {
+    let (rig, runner) = with_issue_7("zeus");
+    rig.claude.script([
+        Scripted::Stage("staged.txt", "staged\n"),
+        Scripted::Reply(usage(1), Cost(1)),
+    ]);
+    step(&runner).unwrap();
+    step(&runner).unwrap();
+    let [_, again] = rig.claude.calls().try_into().unwrap();
+    assert!(again.prompt.contains("staged.txt"), "{}", again.prompt);
+}
+
+#[test]
 fn a_turn_that_ends_with_a_clean_worktree_is_not_sent_back_for_uncommitted_files() {
     let (rig, runner) = with_issue_7("zeus");
     rig.claude.script([
