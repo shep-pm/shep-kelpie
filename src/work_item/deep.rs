@@ -24,6 +24,10 @@ pub enum Deep {
     Confirming {
         /// Every finding both readers held, HIGHs first
         held: Vec<Held>,
+        /// The worktree's files that differ from its head, as the session
+        /// now confirming found them, so what it adds can be told
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        before: Vec<Found>,
     },
     /// What the worker is to be sent is about to be written and sent
     Sending {
@@ -101,8 +105,8 @@ pub enum Backing {
         file: String,
         /// The command that runs it
         command: String,
-        /// What the session left in the worktree, which the fix must push as
-        /// it is: the test file and any other file it made
+        /// What the session added to the worktree, which the pushed head
+        /// must still hold: the test, and any other file it wrote to
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         written: Vec<Written>,
     },
@@ -113,14 +117,28 @@ pub enum Backing {
     },
 }
 
-/// A file a confirming session left in the worktree, as it was when it ended
+/// The lines a confirming session added to one file, in order
+///
+/// What it added and not the whole file, since two sessions' tests may go in
+/// the same file and a fix may change the file elsewhere.
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Written {
-    /// Its path, from the repo's root
+    /// The file, from the repo's root
     pub path: String,
-    /// Its git blob id, which says what it held
+    /// The lines the session added to it, trimmed, with no blank one
+    pub added: Vec<String>,
+}
+
+/// A file as a confirming session found it, when it differed from the head
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Found {
+    /// The file, from the repo's root
+    pub path: String,
+    /// Its git blob id
     pub blob: String,
 }
 
@@ -157,7 +175,7 @@ mod tests {
                     command: "cargo test a".into(),
                     written: vec![Written {
                         path: "tests/a.rs".into(),
-                        blob: "e69de29".into(),
+                        added: vec!["fn a() {}".into()],
                     }],
                 },
                 still: None,
@@ -186,7 +204,7 @@ mod tests {
                         "finding": { "severity": "high", "file": "src/lib.rs", "line": 3, "what": "w", "why": "y" },
                         "backing": {
                             "backing": "test", "file": "tests/a.rs", "command": "cargo test a",
-                            "written": [{ "path": "tests/a.rs", "blob": "e69de29" }],
+                            "written": [{ "path": "tests/a.rs", "added": ["fn a() {}"] }],
                         },
                     },
                     {

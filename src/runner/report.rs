@@ -628,7 +628,9 @@ pub enum StepReport {
         round: u32,
         /// How many findings the fix fixed
         fixed: usize,
-        /// How many it did not
+        /// How many the worker left for an issue of their own, which are not re-checked
+        deferred: usize,
+        /// How many it did not fix
         unfixed: usize,
     },
     /// The worker's fix turn for a round's held findings ended, and the

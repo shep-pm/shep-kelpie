@@ -289,13 +289,21 @@ fn parks_with(fix: Scripted, says: &str) {
         panic!("a fix that left the review's test behind raised no ruling: {reports:#?}");
     };
     assert!(
-        question.contains("ended its fix for the deep review"),
+        question.contains("ended its fix for the deep review (round 2), but "),
         "{question}"
+    );
+    assert!(
+        !question.contains("without pushing"),
+        "a fix that pushed is not one that pushed nothing: {question}"
     );
     assert_eq!(
         roles(&rig).last(),
         Some(&Role::Worker),
         "what is not pushed is not verified"
+    );
+    assert!(
+        question.contains(says),
+        "the question names its cause: {question}"
     );
     let status = rig.ask(&runner, "status", None);
     let prompt = status["rulings"][0]["kind"]["prompt"].as_str().unwrap();
@@ -311,13 +319,163 @@ fn a_test_the_review_wrote_and_the_worker_left_uncommitted_counts_as_a_fix_not_p
 }
 
 #[test]
+fn a_test_the_worker_removed_is_not_in_the_pushed_head() {
+    parks_with(
+        Scripted::PushAndRemove("fixed.txt", "fixed\n", "tests/high.rs"),
+        "the review's test for work.txt:1, in tests/high.rs, is not in the pushed head",
+    );
+}
+
+#[test]
+fn a_file_a_session_wrote_beside_its_test_is_pinned_too() {
+    let (rig, runner) = at_the_deep_round();
+    rig.claude.script([
+        Scripted::Text(HIGH),
+        Scripted::Text("CLEAN"),
+        Scripted::WriteMany(
+            &[
+                ("tests/high.rs", FAILING_TEST),
+                ("tests/fixture.txt", "the input\nthat fails\n"),
+            ],
+            "CONFIRMED|tests/high.rs|cargo test --test high",
+        ),
+        // The worker commits both, and changes what the fixture holds.
+        Scripted::PushMany(&[
+            ("fixed.txt", "fixed\n"),
+            ("tests/high.rs", FAILING_TEST),
+            ("tests/fixture.txt", "another input\n"),
+        ]),
+    ]);
+    let reports = until_it_leaves_review(&rig, &runner);
+    let Some(StepReport::Ruling { question, .. }) = reports.last() else {
+        panic!("a fixture changed after the review wrote it raised no ruling: {reports:#?}");
+    };
+    assert!(
+        question.contains("in tests/fixture.txt, is not in the pushed head as it was written"),
+        "{question}"
+    );
+}
+
+const ONE: &str = "#[test]\nfn one() { panic!() }\n";
+
+// Two HIGHs, one confirming session each, whose tests go in the same file.
+fn two_highs_in_one_file(second: Scripted, committed: Scripted) -> (Rig, Mutex<Runner>) {
+    let (rig, runner) = at_the_deep_round();
+    rig.claude.script([
+        Scripted::Text(
+            "HIGH|work.txt:1|the value is read before it is set|a caller gets nothing back\n\
+             HIGH|src/other.rs:9|an empty list panics|the reviewer sees a crash",
+        ),
+        Scripted::Text("CLEAN"),
+        Scripted::Write(
+            "tests/shared.rs",
+            ONE,
+            "CONFIRMED|tests/shared.rs|cargo test one",
+        ),
+        second,
+        committed,
+        Scripted::Text("FIXED|1|passes\nFIXED|2|passes"),
+    ]);
+    (rig, runner)
+}
+
+#[test]
+fn two_highs_whose_tests_go_in_the_same_file_are_rechecked_once_the_worker_commits_them() {
+    let both = "#[test]\nfn one() { panic!() }\n#[test]\nfn two() { panic!() }\n";
+    let (rig, runner) = two_highs_in_one_file(
+        Scripted::Write(
+            "tests/shared.rs",
+            both,
+            "CONFIRMED|tests/shared.rs|cargo test two",
+        ),
+        // The worker commits the file with its own line above, which is fine.
+        Scripted::PushMany(&[
+            ("fixed.txt", "fixed\n"),
+            (
+                "tests/shared.rs",
+                "// the worker's note\n#[test]\nfn one() { panic!() }\n#[test]\nfn two() { panic!() }\n",
+            ),
+        ]),
+    );
+    let reports = until_it_leaves_review(&rig, &runner);
+    assert_eq!(state(&rig, &runner), "ci", "{reports:#?}");
+    assert!(
+        !reports
+            .iter()
+            .any(|r| matches!(r, StepReport::Ruling { .. })),
+        "{reports:#?}"
+    );
+    assert_eq!(
+        roles(&rig).last(),
+        Some(&Role::DeepReviewer),
+        "the re-check ran"
+    );
+}
+
+#[test]
+fn a_later_session_that_rewrites_an_earlier_sessions_test_takes_its_pin_along() {
+    const REWRITTEN: &str =
+        "#[test]\nfn one() { assert!(false) }\n#[test]\nfn two() { panic!() }\n";
+    let (rig, runner) = two_highs_in_one_file(
+        Scripted::Write(
+            "tests/shared.rs",
+            REWRITTEN,
+            "CONFIRMED|tests/shared.rs|cargo test two",
+        ),
+        Scripted::PushMany(&[("fixed.txt", "fixed\n"), ("tests/shared.rs", REWRITTEN)]),
+    );
+    let reports = until_it_leaves_review(&rig, &runner);
+    assert_eq!(state(&rig, &runner), "ci", "{reports:#?}");
+    assert_eq!(
+        roles(&rig).last(),
+        Some(&Role::DeepReviewer),
+        "the re-check ran"
+    );
+}
+
+#[test]
+fn a_pin_that_cannot_be_read_leaves_the_high_unconfirmed() {
+    let (rig, runner) = at_the_deep_round();
+    rig.claude.script([
+        Scripted::Text(HIGH),
+        Scripted::Text("CLEAN"),
+        // The session breaks the worktree's link to its repo, so git cannot say what it added.
+        Scripted::WriteAndBreakGit(
+            "tests/high.rs",
+            FAILING_TEST,
+            "CONFIRMED|tests/high.rs|cargo test --test high",
+        ),
+    ]);
+    step(&runner).unwrap(); // the first reader
+    step(&runner).unwrap(); // the second reader
+    let report = step(&runner).unwrap(); // the confirmation
+    assert!(
+        matches!(
+            report,
+            Some(StepReport::DeepConfirmed { backed: false, .. })
+        ),
+        "{report:#?}"
+    );
+    let status = rig.ask(&runner, "status", None);
+    let backing = &status["work_item"]["phase"]["stage"]["held"][0]["backing"];
+    assert_eq!(backing["backing"], "unconfirmed", "{status}");
+    assert!(
+        backing["why"]
+            .as_str()
+            .unwrap()
+            .contains("kelpie could not read what the session wrote"),
+        "{backing}"
+    );
+}
+
+#[test]
 fn a_test_the_worker_edited_before_committing_it_counts_as_a_fix_not_pushed() {
     parks_with(
         Scripted::PushMany(&[
             ("fixed.txt", "fixed\n"),
             ("tests/high.rs", "#[test]\nfn fails() {}\n"),
         ]),
-        "the review's test tests/high.rs was edited after the review wrote it",
+        "the review's test for work.txt:1, in tests/high.rs, is not in the pushed head as it was written: `fn fails() { panic!() }` is gone",
     );
 }
 
@@ -350,7 +508,8 @@ fn a_finding_the_worker_deferred_is_resolved_at_the_recheck_not_unfixed() {
         Scripted::Text(MEDIUM),
         Scripted::Text(OTHER),
         Scripted::Push("fixed.txt", "fixed\n"),
-        Scripted::Text("FIXED|1|it sets the flag first\nUNFIXED|2|the empty list still panics"),
+        // Only the finding the worker did not defer is asked about.
+        Scripted::Text("FIXED|1|it sets the flag first"),
     ]);
     // The worker copied the second finding's line to the file kelpie files issues from.
     std::fs::create_dir_all(rig.build_7()).unwrap();
@@ -369,12 +528,61 @@ fn a_finding_the_worker_deferred_is_resolved_at_the_recheck_not_unfixed() {
         reports.iter().any(|r| matches!(
             r,
             StepReport::DeepRechecked {
-                fixed: 2,
+                fixed: 1,
+                deferred: 1,
                 unfixed: 0,
                 ..
             }
         )),
         "{reports:#?}"
+    );
+    let recheck = &deep_calls(&rig)[2].call.prompt;
+    assert!(!recheck.contains("src/other.rs"), "{recheck}");
+}
+
+#[test]
+fn a_high_backed_by_a_failing_test_can_be_deferred_by_taking_its_test_out() {
+    let (rig, runner) = at_the_deep_round();
+    rig.claude.script([
+        Scripted::Text(HIGH),
+        Scripted::Text("CLEAN"),
+        Scripted::Write(
+            "tests/high.rs",
+            FAILING_TEST,
+            "CONFIRMED|tests/high.rs|cargo test --test high",
+        ),
+        // The worker leaves the finding, and the failing test with it, out of its commit.
+        Scripted::PushAndRemove("fixed.txt", "fixed\n", "tests/high.rs"),
+    ]);
+    std::fs::create_dir_all(rig.build_7()).unwrap();
+    std::fs::write(
+        rig.build_7().join("deferred-findings.md"),
+        format!("{HIGH}\n"),
+    )
+    .unwrap();
+    let reports = until_it_leaves_review(&rig, &runner);
+    assert_eq!(state(&rig, &runner), "ci", "{reports:#?}");
+    assert!(
+        reports.iter().any(|r| matches!(
+            r,
+            StepReport::DeepRechecked {
+                fixed: 0,
+                deferred: 1,
+                unfixed: 0,
+                ..
+            }
+        )),
+        "{reports:#?}"
+    );
+    assert_eq!(
+        roles(&rig).last(),
+        Some(&Role::Worker),
+        "nothing is left to re-check"
+    );
+    let held = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
+    assert!(
+        held.contains("remove that test from your worktree and do not commit it"),
+        "the findings file says what to do with a deferred test: {held}"
     );
 }
 

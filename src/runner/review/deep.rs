@@ -10,6 +10,7 @@
 //! something is not evidence. A finding it finds unfixed goes back to the
 //! worker once, and after that to a ruling. A fix that passes ends the loop.
 
+mod pin;
 mod prompts;
 #[cfg(test)]
 mod tests;
@@ -20,14 +21,13 @@ use crate::pacer::Scope;
 use crate::ports::{AgentCall, Finding, Role, Tools, read_review};
 use crate::profile;
 use crate::runner::Runner;
-use crate::runner::gate::short;
 use crate::runner::report::{Begin, ReviewCall, ReviewResult, Spent, StepReport};
 use crate::runner::ruling::park;
 use crate::runner::shots::RoundShots;
 use crate::runner::turn;
 use crate::state::{Fix, RulingKind, StateError};
-use crate::work_item::{Backing, CallKind, Deep, Held, Phase, Review, ReviewStage, Turn, Written};
-use crate::worktree::{self, Start};
+use crate::work_item::{Backing, CallKind, Deep, Held, Phase, Review, ReviewStage, Turn};
+use crate::worktree::Start;
 
 use super::lineup::Chosen;
 use prompts::Confirmation;
@@ -71,7 +71,7 @@ impl Runner {
         match deep {
             Deep::Read => self.read_call(None),
             Deep::Missed { first } => self.read_call(Some(first)),
-            Deep::Confirming { held } => match held.iter().position(Held::to_confirm) {
+            Deep::Confirming { held, .. } => match held.iter().position(Held::to_confirm) {
                 Some(at) => self.confirm_call(&held[at].finding),
                 None => self.send_to_worker(review, held, false),
             },
@@ -134,6 +134,20 @@ impl Runner {
         if let Some(held) = self.deep_held()? {
             return Ok(held);
         }
+        // What the session adds is told against the worktree as it finds it.
+        let before = match self.found_before() {
+            Ok(before) => before,
+            Err(reason) => return Ok(self.gate_failed(reason)),
+        };
+        self.update(|item| {
+            if let Phase::Review(Review {
+                stage: ReviewStage::Deep(Deep::Confirming { before: kept, .. }),
+                ..
+            }) = &mut item.phase
+            {
+                *kept = before;
+            }
+        })?;
         let base = self.current().expect("a work item's").review_base();
         let call = self.working_call(prompts::confirm_prompt(&base, finding), true);
         self.start_call(call)
@@ -146,14 +160,31 @@ impl Runner {
             return Ok(held);
         }
         let item = self.current().expect("the deep round is a work item's");
-        let number = item
-            .pull_request
-            .expect("review starts once a pull request is known");
+        let (issue, number) = (item.issue, item.pull_request);
+        let number = number.expect("review starts once a pull request is known");
+        let (checked, deferred) = apart_deferred(&item.build, held);
+        if checked.is_empty() {
+            // Everything was deferred: there is nothing left to check.
+            let round = match &item.phase {
+                Phase::Review(review) => review.round,
+                _ => 0,
+            };
+            let since = self.ports.clock.now();
+            self.update(|item| item.phase = Phase::Ci { head: None, since })?;
+            return Ok(Begin::Report(StepReport::DeepRechecked {
+                issue,
+                pull_request: number,
+                round,
+                fixed: 0,
+                deferred,
+                unfixed: 0,
+            }));
+        }
         let fix = match diff_against(&item.worktree, head) {
             Ok(fix) => fix,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
-        let call = self.working_call(prompts::recheck_prompt(number, held, head, &fix), false);
+        let call = self.working_call(prompts::recheck_prompt(number, &checked, head, &fix), false);
         self.start_call(call)
     }
 
@@ -272,18 +303,21 @@ impl Runner {
         // own tests must be in it as they were written, and nothing else may
         // be left new.
         let path = findings::findings_path(&item.build);
-        let left = match self.left_behind(&held, &now) {
+        // A finding the worker deferred has its test taken out, so it is not pinned.
+        let (pinned, _) = apart_deferred(&item.build, &held);
+        let left = match self.left_behind(&pinned, &now) {
             Ok(left) => left,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
         if now == head || left.is_some() {
-            let prompt = match left {
-                Some(left) if now != head => findings::unpushed_prompt(number, round, &path, &left),
-                _ => findings::again_prompt(number, round, &path),
+            let why = left.filter(|_| now != head);
+            let prompt = match &why {
+                Some(why) => findings::unpushed_prompt(number, round, &path, why),
+                None => findings::again_prompt(number, round, &path),
             };
             let stage = ReviewStage::Deep(Deep::Fixing { held, head, again });
             let fix = Fix::Review(Review { stage, ..review });
-            return self.raise(number, RulingKind::FixNotPushed { fix, prompt });
+            return self.raise(number, RulingKind::FixNotPushed { fix, prompt, why });
         }
         let stage = ReviewStage::Deep(Deep::Rechecking { held, head, again });
         self.update(|item| item.phase = Phase::Review(Review { stage, ..review }))?;
@@ -293,78 +327,6 @@ impl Runner {
             round,
             head: Some(now),
         }))
-    }
-
-    // Why the worktree is not what was pushed, if it is not: it is not at the
-    // pushed head, a file is changed or new and uncommitted, or a test the
-    // review wrote for one of `held` is not in that head as it was written.
-    fn left_behind(&self, held: &[Held], pushed: &str) -> Result<Option<String>, String> {
-        let item = self.current().expect("the deep round is a work item's");
-        let (repo, tree) = (&self.settings.repo, &item.worktree);
-        let wrong = |e: crate::worktree::WorktreeError| e.to_string();
-        let at = worktree::head(repo, tree).map_err(wrong)?;
-        if at != pushed {
-            return Ok(Some(format!(
-                "its worktree is at {}, not at the pushed head {}",
-                short(&at),
-                short(pushed)
-            )));
-        }
-        let uncommitted = worktree::uncommitted(repo, tree).map_err(wrong)?;
-        if !uncommitted.is_empty() {
-            return Ok(Some(format!(
-                "{} are changed or new and not committed",
-                uncommitted.join(", ")
-            )));
-        }
-        for written in held.iter().flat_map(|h| match &h.backing {
-            Backing::Test { written, .. } => written.as_slice(),
-            _ => &[],
-        }) {
-            match worktree::blob_at_head(repo, tree, &written.path).map_err(wrong)? {
-                Some(blob) if blob == written.blob => {}
-                Some(_) => {
-                    return Ok(Some(format!(
-                        "the review's test {} was edited after the review wrote it",
-                        written.path
-                    )));
-                }
-                None => {
-                    return Ok(Some(format!(
-                        "the review's test {} is not in the pushed head",
-                        written.path
-                    )));
-                }
-            }
-        }
-        Ok(None)
-    }
-
-    // What a confirming session left in the worktree: the test it named and
-    // the files that are new since the sessions before it, as they are now.
-    fn left_by_session(&self, file: &str, held: &[Held]) -> Vec<Written> {
-        let item = self.current().expect("the deep round is a work item's");
-        let (repo, tree) = (&self.settings.repo, &item.worktree);
-        let known: Vec<&str> = held
-            .iter()
-            .flat_map(|h| match &h.backing {
-                Backing::Test { written, .. } => written.as_slice(),
-                _ => &[],
-            })
-            .map(|w| w.path.as_str())
-            .collect();
-        let mut paths = worktree::untracked(repo, tree).unwrap_or_default();
-        paths.retain(|p| !known.contains(&p.as_str()));
-        if !paths.iter().any(|p| p == file) {
-            paths.push(file.to_owned());
-        }
-        paths
-            .into_iter()
-            .filter_map(|path| {
-                let blob = worktree::blob_of(repo, tree, &path).ok()?;
-                Some(Written { path, blob })
-            })
-            .collect()
     }
 
     /// Records what a session of the deep round said, and goes on to the next step
@@ -449,7 +411,10 @@ impl Runner {
                         }
                     } else {
                         let held = all.into_iter().map(Held::new).collect();
-                        item.phase = in_stage(Deep::Confirming { held });
+                        item.phase = in_stage(Deep::Confirming {
+                            held,
+                            before: Vec::new(),
+                        });
                         StepReport::DeepRead {
                             issue,
                             pull_request: number,
@@ -461,33 +426,44 @@ impl Runner {
                 }
                 Err(reason) => failed("second reader", reason),
             },
-            Deep::Confirming { mut held } => {
+            Deep::Confirming { mut held, before } => {
                 let at = held.iter().position(Held::to_confirm);
                 let Some(at) = at else {
                     return Ok(None);
                 };
                 // A session that cannot say whether it confirmed leaves the
-                // HIGH unconfirmed, which still reaches the worker.
+                // HIGH unconfirmed, which still reaches the worker. So does one
+                // whose tests kelpie cannot pin, since a pin read badly would
+                // fail the fix, or pass one that is not there.
                 let confirmed = match reply {
                     Ok(text) => prompts::read_confirmation(&text, &worktree),
                     Err(reason) => {
                         Confirmation::Unconfirmed(format!("the session failed: {reason}"))
                     }
                 };
-                let backed = matches!(confirmed, Confirmation::Test { .. });
                 held[at].backing = match confirmed {
                     Confirmation::Test { file, command } => {
-                        let written = self.left_by_session(&file, &held);
-                        Backing::Test {
-                            file,
-                            command,
-                            written,
+                        match self.added_by_session(&file, &before, &mut held) {
+                            Ok(written) => Backing::Test {
+                                file,
+                                command,
+                                written,
+                            },
+                            Err(reason) => Backing::Unconfirmed {
+                                why: format!(
+                                    "kelpie could not read what the session wrote: {reason}"
+                                ),
+                            },
                         }
                     }
                     Confirmation::Unconfirmed(why) => Backing::Unconfirmed { why },
                 };
+                let backed = matches!(held[at].backing, Backing::Test { .. });
                 let finding = format!("{}:{}", held[at].finding.file, held[at].finding.line);
-                item.phase = in_stage(Deep::Confirming { held });
+                item.phase = in_stage(Deep::Confirming {
+                    held,
+                    before: Vec::new(),
+                });
                 StepReport::DeepConfirmed {
                     issue,
                     pull_request: number,
@@ -497,23 +473,18 @@ impl Runner {
                 }
             }
             Deep::Rechecking { held, again, .. } => {
-                match reply.and_then(|text| prompts::read_unfixed(&text, &held)) {
+                // The call was about what the worker did not defer, in this order.
+                let (checked, deferred) = apart_deferred(&build, &held);
+                match reply.and_then(|text| prompts::read_unfixed(&text, &checked)) {
                     Err(reason) => failed("re-check", reason),
-                    Ok(mut unfixed) => {
-                        // A finding the worker left for an issue of its own is
-                        // filed once the pull request merges, so it is resolved.
-                        let deferred = std::fs::read_to_string(findings::deferred_path(&build))
-                            .unwrap_or_default();
-                        unfixed.retain(|h| {
-                            let line = prompts::line(&h.finding);
-                            !deferred.lines().any(|l| l.trim() == line.trim())
-                        });
-                        let (fixed, left) = (held.len() - unfixed.len(), unfixed.len());
+                    Ok(unfixed) => {
+                        let (fixed, left) = (checked.len() - unfixed.len(), unfixed.len());
                         let report = StepReport::DeepRechecked {
                             issue,
                             pull_request: number,
                             round,
                             fixed,
+                            deferred,
                             unfixed: left,
                         };
                         match (unfixed.is_empty(), again) {
@@ -587,4 +558,16 @@ fn unfixed_line(held: &Held) -> String {
         Some(still) => format!("{file}:{line} {what} (still: {still})"),
         None => format!("{file}:{line} {what}"),
     }
+}
+
+// What the worker was sent less what it deferred, and how many it deferred: a
+// finding whose line it copied to the deferred-findings file is filed as an
+// issue once the pull request merges, so neither its fix nor its test is checked.
+fn apart_deferred(build: &std::path::Path, held: &[Held]) -> (Vec<Held>, usize) {
+    let deferred = pin::deferred_lines(build);
+    let (left, kept): (Vec<&Held>, Vec<&Held>) = held.iter().partition(|h| {
+        let line = prompts::line(&h.finding);
+        deferred.iter().any(|l| l == line.trim())
+    });
+    (kept.into_iter().cloned().collect(), left.len())
 }

@@ -430,14 +430,79 @@ pub fn untracked(repo: &Path, worktree: &Path) -> Result<Vec<String>, WorktreeEr
     Ok(files)
 }
 
-/// The git blob id of the file `path` of `worktree` as it is on disk now
+/// The files `worktree` holds that its last commit does not, with the git
+/// blob id of each as it is on disk, a file that is gone left out
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed, which a file that
+/// is there and cannot be read also does.
+pub fn differing(repo: &Path, worktree: &Path) -> Result<Vec<(String, String)>, WorktreeError> {
+    let mut found = Vec::new();
+    for path in uncommitted(repo, worktree)? {
+        if worktree.join(&path).is_file() {
+            found.push((path.clone(), blob_of(repo, worktree, &path)?));
+        }
+    }
+    Ok(found)
+}
+
+/// The lines that went in and out turning the blob `before` into the blob
+/// `after`, each trimmed, with the blank ones left out
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn lines_changed(
+    repo: &Path,
+    worktree: &Path,
+    before: &str,
+    after: &str,
+) -> Result<(Vec<String>, Vec<String>), WorktreeError> {
+    let diff =
+        trusted(repo, worktree)?(&["diff", "--no-color", "--no-ext-diff", "-U0", before, after])?;
+    let (mut added, mut removed) = (Vec::new(), Vec::new());
+    // Everything before the first hunk is the header, which `+++` and `---` are part of.
+    let mut in_hunk = false;
+    for line in diff.lines() {
+        if line.starts_with("@@") {
+            in_hunk = true;
+        } else if in_hunk {
+            let kept = |rest: &str| (!rest.trim().is_empty()).then(|| rest.trim().to_owned());
+            match line.split_at_checked(1) {
+                Some(("+", rest)) => added.extend(kept(rest)),
+                Some(("-", rest)) => removed.extend(kept(rest)),
+                _ => {}
+            }
+        }
+    }
+    Ok((added, removed))
+}
+
+/// Every line of the git blob `blob`, trimmed, with the blank ones left out
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn lines_of(repo: &Path, worktree: &Path, blob: &str) -> Result<Vec<String>, WorktreeError> {
+    let text = trusted(repo, worktree)?(&["cat-file", "-p", blob])?;
+    Ok(text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+/// The git blob id of the file `path` of `worktree` as it is on disk now, the
+/// blob written to the repo so what it held can be read back
 ///
 /// # Errors
 ///
 /// [`WorktreeError`] naming the git command that failed, as it does for a
 /// file that is not there.
 pub fn blob_of(repo: &Path, worktree: &Path, path: &str) -> Result<String, WorktreeError> {
-    trusted(repo, worktree)?(&["hash-object", "--", path])
+    trusted(repo, worktree)?(&["hash-object", "-w", "--", path])
 }
 
 /// The git blob id of `path` in the commit `worktree` has checked out, or

@@ -33,6 +33,7 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
         RulingKind::FixNotPushed {
             fix: Fix::Review(review),
             prompt: "fix it".into(),
+            why: None,
         },
         RulingKind::CodeRabbitCap {
             rounds: 3,

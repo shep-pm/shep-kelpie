@@ -37,6 +37,16 @@ pub(crate) enum Scripted {
     PushLeaving(&'static str, &'static str, &'static str),
     /// Commits and pushes each of these files with this text in one commit
     PushMany(&'static [(&'static str, &'static str)]),
+    /// Commits and pushes the first file as `Push` does, after deleting the
+    /// third, which was in the worktree and is not committed
+    PushAndRemove(&'static str, &'static str, &'static str),
+    /// Writes each of these files with its text, commits nothing, and answers
+    /// with the last text
+    WriteMany(&'static [(&'static str, &'static str)], &'static str),
+    /// Writes this file with this text and answers with the third, after
+    /// removing the file that links the worktree's git folder to its repo, so
+    /// kelpie's own git commands about the worktree fail
+    WriteAndBreakGit(&'static str, &'static str, &'static str),
     /// Commits and pushes the first file as `Push` does, then leaves a new
     /// file with the third name uncommitted
     PushAndPlant(&'static str, &'static str, &'static str),
@@ -334,6 +344,41 @@ impl Agents for FakeClaude {
                 Ok(AgentReply {
                     session_id: call.session.id().clone(),
                     text: "done".into(),
+                    usage: Usage::default(),
+                    session_cost: Some(Cost(0)),
+                })
+            }
+            Some(Scripted::PushAndRemove(file, text, removed)) => {
+                std::fs::remove_file(call.cwd.join(removed)).unwrap();
+                write_in(&call.cwd, file, text);
+                git(&call.cwd, &["add", file]);
+                git(&call.cwd, &["commit", "--quiet", "-m", file]);
+                git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);
+                Ok(AgentReply {
+                    session_id: call.session.id().clone(),
+                    text: "pushed".into(),
+                    usage: Usage::default(),
+                    session_cost: Some(Cost(0)),
+                })
+            }
+            Some(Scripted::WriteAndBreakGit(file, text, say)) => {
+                write_in(&call.cwd, file, text);
+                let own = git(&call.cwd, &["rev-parse", "--absolute-git-dir"]);
+                std::fs::remove_file(std::path::Path::new(&own).join("commondir")).unwrap();
+                Ok(AgentReply {
+                    session_id: call.session.id().clone(),
+                    text: say.into(),
+                    usage: Usage::default(),
+                    session_cost: Some(Cost(0)),
+                })
+            }
+            Some(Scripted::WriteMany(files, say)) => {
+                for (file, text) in files {
+                    write_in(&call.cwd, file, text);
+                }
+                Ok(AgentReply {
+                    session_id: call.session.id().clone(),
+                    text: say.into(),
                     usage: Usage::default(),
                     session_cost: Some(Cost(0)),
                 })

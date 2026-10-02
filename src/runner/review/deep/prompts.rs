@@ -259,6 +259,9 @@ pub(super) fn fix_file(held: &[Held], deferred: &Path, again: bool) -> String {
          fix, as the review wrote it: a test left uncommitted or edited since, and any \
          other file left new in your worktree, counts as a fix not pushed. A HIGH marked unconfirmed is one the review could not make a test fail for: \
          check it yourself before you fix it or leave it, and say which in your commit. \
+         A finding with a failing test that you leave, as below, has its test taken out of \
+         the check: remove that test from your worktree and do not commit it, since a \
+         failing test must not be committed. \
          A finding that is out of scope for this pull request may be left: copy its line, \
          as it stands here, onto a line of its own in {}. Kelpie files what is there as \
          an issue once the pull request merges.\n\n",

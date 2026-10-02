@@ -423,6 +423,11 @@ fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
              so a review round did not run."
                 .to_owned()
         }
+        RulingKind::FixNotPushed { why: Some(_), .. } => {
+            "A fix for review findings is not what the review checked, so those findings \
+             still hold."
+                .to_owned()
+        }
         RulingKind::FixNotPushed { .. } => {
             "A fix for review findings ended without a push, so those findings still hold."
                 .to_owned()
@@ -567,7 +572,7 @@ fn decide(
         }),
         (Answer::Yes, RulingKind::LocalModelSpilled { review, .. }) => Phase::Review(review),
         // The fix ends under the same round, which checks the head again.
-        (Answer::Yes, RulingKind::FixNotPushed { fix, prompt }) => {
+        (Answer::Yes, RulingKind::FixNotPushed { fix, prompt, .. }) => {
             let phase = match fix {
                 Fix::Review(review) => Phase::Review(review),
                 Fix::CodeRabbit { head, .. } => fixing(Some(head)),
@@ -672,7 +677,7 @@ pub(super) fn question(
              Once the model is back on the GPU, {yes} runs the round again",
             review.round
         ),
-        RulingKind::FixNotPushed { fix, .. } => {
+        RulingKind::FixNotPushed { fix, why, .. } => {
             let round = match fix {
                 Fix::Review(review) if matches!(review.stage, ReviewStage::Deep(_)) => {
                     format!("the deep review (round {})", review.round)
@@ -680,10 +685,16 @@ pub(super) fn question(
                 Fix::Review(review) => format!("round {} of the qwen-review loop", review.round),
                 Fix::CodeRabbit { round, .. } => format!("{bot} round {round}"),
             };
-            format!(
-                "The worker on {about} ended its fix for {round} without pushing, \
-                 so those findings still hold. {yes} sends it the findings again"
-            )
+            match why {
+                Some(why) => format!(
+                    "The worker on {about} ended its fix for {round}, but {why}, \
+                     so those findings still hold. {yes} sends it the findings again"
+                ),
+                None => format!(
+                    "The worker on {about} ended its fix for {round} without pushing, \
+                     so those findings still hold. {yes} sends it the findings again"
+                ),
+            }
         }
         RulingKind::Audit { head, gaps, .. } => format!(
             "The whole-issue check of {about} at {} still finds gaps after the \

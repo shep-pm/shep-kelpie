@@ -347,6 +347,10 @@ pub enum RulingKind {
         fix: Fix,
         /// The fix turn a yes starts
         prompt: String,
+        /// What is wrong with the fix when it did push, and was found not to
+        /// be what the findings need; none when it pushed nothing
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        why: Option<String>,
     },
     /// The whole-issue check still finds gaps after sending the worker back
     /// twice. A yes sends the worker the gaps once more, and merging by hand

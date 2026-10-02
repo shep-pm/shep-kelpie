@@ -162,7 +162,14 @@ impl Runner {
                     let path = findings::findings_path(build);
                     let prompt = findings::again_prompt(number, round, &path);
                     let fix = Fix::Review(review);
-                    return self.raise(number, RulingKind::FixNotPushed { fix, prompt });
+                    return self.raise(
+                        number,
+                        RulingKind::FixNotPushed {
+                            fix,
+                            prompt,
+                            why: None,
+                        },
+                    );
                 }
                 Ok(now) => Some(now),
                 Err(reason) => return Ok(self.gate_failed(reason)),
