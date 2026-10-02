@@ -1,5 +1,6 @@
 //! The work item in flight, as the state file keeps it
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read};
 use std::path::PathBuf;
@@ -58,11 +59,12 @@ pub struct WorkItem {
     /// `review.local_rounds` caps
     #[serde(default, skip_serializing_if = "is_zero")]
     pub local_rounds: u32,
-    /// Local rounds in a row that reviewed nothing, because the model could
-    /// not be reached. The first is retried; the second leaves the loop to
-    /// its other reviewers for the rest of the work item.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub local_failures: u32,
+    /// Rounds in a row that reviewed nothing, by the local reviewer that ran
+    /// them, because its model could not be reached. The first is retried;
+    /// the second leaves the loop to the other reviewers for the rest of the
+    /// work item. A round that reviewed clears its reviewer's count.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub local_failures: BTreeMap<ReviewerName, u32>,
     /// Its worktree
     pub worktree: PathBuf,
     /// Its worker's build folder
@@ -401,10 +403,16 @@ pub enum ReviewStage {
 }
 
 impl WorkItem {
-    /// Whether its local reviewer reviewed nothing twice in a row, which
-    /// leaves the loop to its other reviewers
-    pub fn local_reviewer_down(&self) -> bool {
-        self.local_failures >= 2
+    /// Whether local reviewer `name` reviewed nothing twice in a row, which
+    /// leaves the loop to the other reviewers
+    pub fn local_reviewer_down(&self, name: &ReviewerName) -> bool {
+        self.local_failures.get(name).is_some_and(|n| *n >= 2)
+    }
+
+    /// The local reviewers that reviewed nothing twice in a row
+    pub fn local_reviewers_down(&self) -> Vec<&ReviewerName> {
+        let down = self.local_failures.iter().filter(|(_, n)| **n >= 2);
+        down.map(|(name, _)| name).collect()
     }
 
     /// Remembers findings sent to the worker, once each

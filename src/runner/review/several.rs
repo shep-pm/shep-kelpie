@@ -133,6 +133,59 @@ fn one_listed_reviewer_ends_the_loop_on_one_clean_round() {
     assert!(rig.reviewer.seen().is_empty(), "no local round ran");
 }
 
+// What qwen-review.sh writes when the model behind it cannot be reached.
+const UNREACHABLE: &str = "\
+LOW|work.txt:0|not reviewed: curl: (7) Failed to connect to gpu.box port 8080|raw response kept at /tmp/qwen-review/raw/work.txt.txt
+";
+
+#[test]
+fn a_local_reviewer_that_is_down_leaves_the_other_local_reviewers_to_run() {
+    let rig = listing(r#"["mine", "other"]"#);
+    let other = rig.home.path().join("bin/other");
+    crate::test::write_script(&other, "#!/bin/sh\nexit 0\n");
+    let kelpie = std::fs::read_to_string(rig.paths().kelpie_settings).unwrap();
+    rig.set_kelpie_settings(&format!(
+        "{kelpie}[local_reviewers.other]\nkind = \"command\"\ncommand = \"{}\"\n",
+        other.display()
+    ));
+    let runner = at_review(&rig, "work.txt");
+    let down = crate::ports::parse_findings(UNREACHABLE);
+    rig.reviewer.script([
+        ScriptedRound::Findings(down.clone()),
+        ScriptedRound::Findings(down),
+    ]);
+    step(&runner).unwrap(); // mine reviews nothing, and is retried
+    step(&runner).unwrap(); // mine reviews nothing again: it is down
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(
+        status["work_item"]["local_reviewers_down"],
+        serde_json::json!(["mine"])
+    );
+
+    // `other` is a different command and still runs, and as the only one
+    // left, one clean round from it ends the loop with no Claude round.
+    step(&runner).unwrap();
+    let seen = rig.reviewer.seen();
+    let commands: Vec<_> = seen
+        .iter()
+        .map(|round| match &round.local {
+            LocalRound::Command(c) => c
+                .command
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            _ => unreachable!("every listed local reviewer here is a command"),
+        })
+        .collect();
+    assert_eq!(commands, ["review", "review", "other"]);
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+        "ci"
+    );
+    assert!(reviewer_models(&rig).is_empty(), "no Claude round ran");
+}
+
 #[test]
 fn a_reviewer_limited_to_paths_runs_only_where_the_pull_request_changes_them() {
     let rig = listing(r#"["claude", "opus"]"#);

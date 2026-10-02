@@ -397,7 +397,7 @@ fn a_local_round_that_fails_twice_leaves_the_loop_to_claude_and_status_says_so()
     rig.claude.script([Scripted::Text("CLEAN")]);
     step(&runner).unwrap(); // fails, retried
     let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["work_item"].get("local_reviewer_down"), None);
+    assert_eq!(status["work_item"].get("local_reviewers_down"), None);
     assert_eq!(
         step(&runner).unwrap(), // fails again
         Some(StepReport::LocalRoundFailed {
@@ -410,7 +410,7 @@ fn a_local_round_that_fails_twice_leaves_the_loop_to_claude_and_status_says_so()
         })
     );
     let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["work_item"]["local_reviewer_down"], true);
+    assert_eq!(status["work_item"]["local_reviewers_down"], json!(["qwen"]));
     assert_eq!(status["work_item"]["phase"]["state"], "review");
 
     // Claude is the only reviewer left, so its one clean round ends the loop.
@@ -442,5 +442,5 @@ fn a_round_with_some_files_unreviewed_keeps_its_real_findings() {
     let findings = &status["work_item"]["phase"]["stage"]["findings"];
     assert_eq!(findings.as_array().unwrap().len(), 1, "{findings}");
     assert_eq!(findings[0]["file"], "src/c.rs");
-    assert_eq!(status["work_item"].get("local_reviewer_down"), None);
+    assert_eq!(status["work_item"].get("local_reviewers_down"), None);
 }

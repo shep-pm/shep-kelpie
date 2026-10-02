@@ -510,7 +510,7 @@ impl Runner {
             merge_queued: None,
             summon_owed: false,
             local_rounds: 0,
-            local_failures: 0,
+            local_failures: Default::default(),
             rebased: false,
             shots: None,
             shots_comment: None,

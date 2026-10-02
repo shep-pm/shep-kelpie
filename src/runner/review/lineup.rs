@@ -46,16 +46,17 @@ impl Runner {
             false => Vec::new(),
         };
         let local_left = self.local_left();
-        let local_down = self
-            .current()
-            .is_some_and(|item| item.local_reviewer_down());
+        let down = |r: &LoopReviewer| {
+            let item = self.current();
+            item.is_some_and(|item| item.local_reviewer_down(&r.name))
+        };
         let runs = |r: &LoopReviewer| {
             let paths = r.paths();
             let touched = paths.is_empty()
                 || changed
                     .iter()
                     .any(|file| paths.iter().any(|glob| matches(glob.as_str(), file)));
-            touched && (!r.is_local() || (local_left > 0 && !local_down))
+            touched && (!r.is_local() || (local_left > 0 && !down(r)))
         };
         let eligible = self.lineup.iter().filter(|r| runs(r)).count();
         let len = self.lineup.len();

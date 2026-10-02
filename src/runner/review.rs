@@ -29,7 +29,7 @@ use crate::ports::{
     AgentCall, AgentError, AgentReply, Agents, Finding, Reviewer, ReviewerError, RoundStage,
     Severity, Timestamp, Verdict, read_review,
 };
-use crate::settings::{ReviewerName, Runs};
+use crate::settings::{QWEN, ReviewerName, Runs};
 use crate::state::{Fix, RulingKind, StateError};
 use crate::work_item::{CallKind, Phase, Review, ReviewCallState, ReviewStage, Turn, WorkItem};
 use crate::worktree;
@@ -349,6 +349,10 @@ impl Runner {
             }
             result => (result, Vec::new()),
         };
+        // An older state file names no reviewer for its local round.
+        let local_name = review.reviewer.clone().unwrap_or_else(|| {
+            ReviewerName::try_from(QWEN.to_owned()).expect("the local round's name is valid")
+        });
         let unreviewed: Vec<String> = unreviewed.into_iter().map(|f: Finding| f.file).collect();
 
         let report = match result {
@@ -361,8 +365,8 @@ impl Runner {
                 if !matches!(review.stage, ReviewStage::Round) {
                     unreachable!("a round's findings only arrive while awaiting that round");
                 }
-                item.local_failures += 1;
-                let retrying = !item.local_reviewer_down();
+                *item.local_failures.entry(local_name.clone()).or_default() += 1;
+                let retrying = !item.local_reviewer_down(&local_name);
                 if !retrying && let Phase::Review(kept) = &mut item.phase {
                     // The next round chooses its reviewer afresh.
                     kept.reviewer = None;
@@ -372,7 +376,7 @@ impl Runner {
                     issue,
                     pull_request: number,
                     round,
-                    reviewer: review.reviewer.clone().unwrap_or_else(ReviewerName::claude),
+                    reviewer: local_name,
                     unreviewed,
                     retrying,
                 }
@@ -382,9 +386,7 @@ impl Runner {
                 if !matches!(review.stage, ReviewStage::Round) {
                     unreachable!("a round's findings only arrive while awaiting that round");
                 }
-                if local_round {
-                    item.local_failures = 0;
-                }
+                item.local_failures.remove(&local_name);
                 item.phase = advance(review, true, now, local, &mut item.local_rounds);
                 StepReport::ReviewFindingsSent {
                     issue,
@@ -400,9 +402,7 @@ impl Runner {
                 }
                 let reviewer = review.reviewer.clone().unwrap_or_else(ReviewerName::claude);
                 let count = findings.len();
-                if local_round {
-                    item.local_failures = 0;
-                }
+                item.local_failures.remove(&local_name);
                 item.phase = Phase::Review(Review {
                     stage: ReviewStage::Judging {
                         findings,
