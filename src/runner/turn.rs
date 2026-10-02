@@ -572,6 +572,16 @@ impl Runner {
                 let commit_first = !uncommitted.is_empty();
                 item.turn = if commit_first {
                     item.asked_to_commit = true;
+                    // The pull request this turn opened still owes its first
+                    // review, which the follow-up's end is too late to see as
+                    // a discovery.
+                    if discovering
+                        && item.pull_request.is_some()
+                        && item.resume.is_none()
+                        && matches!(item.phase, Phase::Implement)
+                    {
+                        item.resume = Some(Phase::Review(Review::first()));
+                    }
                     Turn::Next {
                         prompt: uncommitted_prompt(&uncommitted),
                     }

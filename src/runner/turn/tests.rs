@@ -6,7 +6,7 @@ use super::*;
 use crate::ports::{Cost, Usage};
 use crate::profile;
 use crate::settings::Effort;
-use crate::test::{LEFT_BEHIND, Rig, Scripted, git, write_in};
+use crate::test::{Hold, LEFT_BEHIND, Rig, Scripted, git, write_in};
 
 fn usage(n: u64) -> Usage {
     Usage {
@@ -685,6 +685,35 @@ fn a_worker_sent_back_for_uncommitted_files_is_not_sent_back_for_them_again() {
     let [_, dirty, stopped] = rig.claude.calls().try_into().unwrap();
     assert!(dirty.prompt.contains("fix.txt"), "{}", dirty.prompt);
     assert_eq!(stopped.prompt, SENT_BACK);
+}
+
+// Turn 1 pushes the branch and opens no pull request. Turn 2 opens one, pushes
+// nothing and leaves a file uncommitted, so it is sent back to commit. The
+// pull request was found at turn 2's end, so the review loop is still owed.
+#[test]
+fn a_pull_request_found_on_a_turn_sent_back_to_commit_still_goes_to_review_first() {
+    let (rig, runner) = with_issue_7("zeus");
+    let hold = Hold::default();
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Hold(hold.clone()),
+        Scripted::Reply(usage(1), Cost(1)),
+    ]);
+    step(&runner).unwrap();
+    std::thread::scope(|scope| {
+        let turn = scope.spawn(|| step(&runner));
+        assert!(hold.entered(Duration::from_secs(30)), "turn 2 never ran");
+        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+        write_in(&rig.worktree_7(), "left.txt", "left\n");
+        hold.release();
+        turn.join().unwrap().unwrap();
+    });
+    step(&runner).unwrap();
+    let [_, _, commit] = rig.claude.calls().try_into().unwrap();
+    assert!(commit.prompt.contains("left.txt"), "{}", commit.prompt);
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["pull_request"], 71);
+    assert_eq!(status["work_item"]["phase"]["state"], "review");
 }
 
 #[test]
