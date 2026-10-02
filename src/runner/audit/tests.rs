@@ -203,6 +203,41 @@ fn a_third_trip_to_the_worker_goes_to_the_maintainer_whose_yes_sends_it_once_mor
 }
 
 #[test]
+fn a_head_that_passes_gives_a_later_head_its_trips_to_the_worker_again() {
+    let (rig, runner, mut head) = Rig::with_pull_request("shep");
+    rig.claude.script([
+        Scripted::Audit(UNMET),
+        Scripted::Push("one.txt", "1\n"),
+        Scripted::Audit(UNMET),
+        Scripted::Push("two.txt", "2\n"),
+    ]);
+    for _ in 0..2 {
+        rig.forge.set_checks(&head, Checks::Passed);
+        the_item_is_sent_back(rig.verdict(&runner));
+        step(&runner).unwrap(); // the worker's turn
+        head = rig.forge.head_of("kelpie/7").unwrap();
+    }
+    rig.forge.set_checks(&head, Checks::Passed);
+    let Some(StepReport::Ruling { id, .. }) = rig.verdict(&runner) else {
+        panic!("a head with nothing wrong goes to the merge ruling");
+    };
+
+    // The maintainer's no brings a new head through the review loop and CI.
+    rig.claude.script([
+        Scripted::Push("three.txt", "3\n"),
+        Scripted::Text("CLEAN"),
+        Scripted::Audit(UNMET),
+    ]);
+    rig.ask(&runner, "rule", Some(&format!("{id} no one more thing")));
+    step(&runner).unwrap(); // the worker's turn
+    step(&runner).unwrap(); // review round 1, qwen: clean by default
+    step(&runner).unwrap(); // review round 2, claude: clean
+    head = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+    the_item_is_sent_back(rig.verdict(&runner));
+}
+
+#[test]
 fn an_unmet_criterion_sends_the_worker_back_with_the_gap_named() {
     let (rig, runner, head) = Rig::with_pull_request("shep");
     rig.claude.script([

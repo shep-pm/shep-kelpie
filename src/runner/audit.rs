@@ -172,6 +172,8 @@ impl Runner {
             self.update(|item| {
                 let audit = item.audit.get_or_insert_with(Audit::default);
                 audit.passed = Some(head_now);
+                // A later head's gaps get the worker's trips afresh.
+                audit.sent_back = 0;
             })?;
             return Ok(Some(StepReport::AuditPassed {
                 issue,
