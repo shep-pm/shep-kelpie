@@ -102,6 +102,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         local_rounds: 0,
         local_failures: Default::default(),
         local_unreviewed: Vec::new(),
+        local_unreviewed_by: None,
         rebased: false,
         shots: None,
         shots_comment: None,

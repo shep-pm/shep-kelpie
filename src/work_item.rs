@@ -77,6 +77,11 @@ pub struct WorkItem {
     /// local round replaces the list with what it leaves.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub local_unreviewed: Vec<String>,
+    /// The local reviewer whose round left `local_unreviewed`. Only that
+    /// reviewer leaving the same files again counts against it: another
+    /// reviewer's first miss on them is its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_unreviewed_by: Option<ReviewerName>,
     /// Its worktree
     pub worktree: PathBuf,
     /// Its worker's build folder
@@ -426,18 +431,22 @@ impl WorkItem {
     /// Records a local round by `reviewer` that reviewed something, leaving
     /// `unreviewed` unreviewed
     ///
-    /// A file left unreviewed again counts against the reviewer; a round
-    /// that left none, or only new ones, clears its count.
+    /// A file the same reviewer left unreviewed last time and leaves again
+    /// counts against it; a round that left none, or only new ones, or
+    /// whose files another reviewer left, clears its count.
     pub fn note_local_round(&mut self, reviewer: &ReviewerName, unreviewed: &[String]) {
-        let again = unreviewed
-            .iter()
-            .any(|file| self.local_unreviewed.contains(file));
+        let mine = self.local_unreviewed_by.as_ref() == Some(reviewer);
+        let again = mine
+            && unreviewed
+                .iter()
+                .any(|file| self.local_unreviewed.contains(file));
         if again {
             *self.local_failures.entry(reviewer.clone()).or_default() += 1;
         } else {
             self.local_failures.remove(reviewer);
         }
         self.local_unreviewed = unreviewed.to_vec();
+        self.local_unreviewed_by = Some(reviewer.clone());
     }
 
     /// The local reviewers that reviewed nothing twice in a row
