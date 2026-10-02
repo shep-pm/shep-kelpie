@@ -135,19 +135,33 @@ impl Runner {
             return Ok(held);
         }
         // What the session adds is told against the worktree as it finds it.
-        let before = match self.found_before() {
-            Ok(before) => before,
-            Err(reason) => return Ok(self.gate_failed(reason)),
-        };
-        self.update(|item| {
-            if let Phase::Review(Review {
-                stage: ReviewStage::Deep(Deep::Confirming { before: kept, .. }),
+        // A try stopped with the runner has left the snapshot of its first try
+        // saved, which a retry keeps, so it restores to what the first found.
+        let saved = matches!(
+            self.current().map(|item| &item.phase),
+            Some(Phase::Review(Review {
+                stage: ReviewStage::Deep(Deep::Confirming {
+                    before: Some(_),
+                    ..
+                }),
                 ..
-            }) = &mut item.phase
-            {
-                *kept = before;
-            }
-        })?;
+            }))
+        );
+        if !saved {
+            let before = match self.found_before() {
+                Ok(before) => before,
+                Err(reason) => return Ok(self.gate_failed(reason)),
+            };
+            self.update(|item| {
+                if let Phase::Review(Review {
+                    stage: ReviewStage::Deep(Deep::Confirming { before: kept, .. }),
+                    ..
+                }) = &mut item.phase
+                {
+                    *kept = Some(before);
+                }
+            })?;
+        }
         let base = self.current().expect("a work item's").review_base();
         let call = self.working_call(prompts::confirm_prompt(&base, finding), true);
         self.start_call(call)
@@ -415,10 +429,7 @@ impl Runner {
                         }
                     } else {
                         let held = all.into_iter().map(Held::new).collect();
-                        item.phase = in_stage(Deep::Confirming {
-                            held,
-                            before: Vec::new(),
-                        });
+                        item.phase = in_stage(Deep::Confirming { held, before: None });
                         StepReport::DeepRead {
                             issue,
                             pull_request: number,
@@ -447,7 +458,11 @@ impl Runner {
                 };
                 held[at].backing = match confirmed {
                     Confirmation::Test { file, command } => {
-                        match self.added_by_session(&file, &before, &mut held) {
+                        match self.added_by_session(
+                            &file,
+                            before.as_deref().unwrap_or_default(),
+                            &mut held,
+                        ) {
                             Ok(written) => Backing::Test {
                                 file,
                                 command,
@@ -464,8 +479,10 @@ impl Runner {
                 };
                 // A session that did not confirm leaves nothing behind: what it
                 // wrote is no test for the worker to commit.
-                if let Backing::Unconfirmed { why } = &mut held[at].backing
-                    && let Err(e) = self.restore_before(&before)
+                // With no snapshot saved there is nothing to put it back to.
+                if let (Backing::Unconfirmed { why }, Some(saved)) =
+                    (&mut held[at].backing, &before)
+                    && let Err(e) = self.restore_before(saved)
                 {
                     why.push_str(&format!(
                         ", and kelpie could not clean up what it left in the worktree: {e}"
@@ -473,10 +490,7 @@ impl Runner {
                 }
                 let backed = matches!(held[at].backing, Backing::Test { .. });
                 let finding = format!("{}:{}", held[at].finding.file, held[at].finding.line);
-                item.phase = in_stage(Deep::Confirming {
-                    held,
-                    before: Vec::new(),
-                });
+                item.phase = in_stage(Deep::Confirming { held, before: None });
                 StepReport::DeepConfirmed {
                     issue,
                     pull_request: number,

@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use serde_json::Value;
 
-use crate::ports::{Role, Tools};
+use crate::ports::{AgentError, Role, Tools};
 use crate::runner::{Runner, StepReport, step};
 use crate::settings::Effort;
 use crate::test::{Rig, Scripted, Seen};
@@ -505,6 +505,41 @@ fn a_session_whose_reply_cannot_be_read_puts_back_what_it_found_not_the_head() {
         "mine\n",
         "what was there before the session stays"
     );
+}
+
+#[test]
+fn a_confirmation_stopped_with_the_runner_is_restored_to_what_its_first_try_found() {
+    let (rig, runner) = at_the_deep_round();
+    rig.claude.script([
+        Scripted::Text(HIGH),
+        Scripted::Text("CLEAN"),
+        // The runner stops with the session after it wrote a file.
+        Scripted::WriteThenFail("tests/half.rs", "#[test]", AgentError::Stopped),
+    ]);
+    step(&runner).unwrap(); // the first reader
+    step(&runner).unwrap(); // the second reader
+    assert_eq!(
+        step(&runner).unwrap(),
+        None,
+        "a stopped call reports nothing"
+    );
+    let half = rig.worktree_7().join("tests/half.rs");
+    assert!(half.exists(), "the stopped session left its file");
+    drop(runner);
+
+    // The retry must not take its snapshot over what the first try left.
+    let runner = rig.open().unwrap();
+    rig.claude
+        .script([Scripted::Text("UNCONFIRMED|it could not be made to fail")]);
+    let report = step(&runner).unwrap();
+    assert!(
+        matches!(
+            report,
+            Some(StepReport::DeepConfirmed { backed: false, .. })
+        ),
+        "{report:#?}"
+    );
+    assert!(!half.exists(), "what the first try wrote is gone");
 }
 
 #[test]

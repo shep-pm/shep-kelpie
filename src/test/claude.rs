@@ -40,6 +40,8 @@ pub(crate) enum Scripted {
     /// Commits and pushes the first file as `Push` does, after deleting the
     /// third, which was in the worktree and is not committed
     PushAndRemove(&'static str, &'static str, &'static str),
+    /// Writes this file with this text in the worktree, then fails with this error
+    WriteThenFail(&'static str, &'static str, AgentError),
     /// Writes each of these files with its text, commits nothing, and answers
     /// with the last text
     WriteMany(&'static [(&'static str, &'static str)], &'static str),
@@ -371,6 +373,10 @@ impl Agents for FakeClaude {
                     usage: Usage::default(),
                     session_cost: Some(Cost(0)),
                 })
+            }
+            Some(Scripted::WriteThenFail(file, text, error)) => {
+                write_in(&call.cwd, file, text);
+                Err(error)
             }
             Some(Scripted::WriteMany(files, say)) => {
                 for (file, text) in files {

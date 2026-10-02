@@ -25,9 +25,11 @@ pub enum Deep {
         /// Every finding both readers held, HIGHs first
         held: Vec<Held>,
         /// The worktree's files that differ from its head, as the session
-        /// now confirming found them, so what it adds can be told
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        before: Vec<Found>,
+        /// now confirming found them, so what it adds can be told. None until
+        /// the session's first try takes it, and kept through a retry after
+        /// a stop, so the retry restores to what the first try found.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before: Option<Vec<Found>>,
     },
     /// What the worker is to be sent is about to be written and sent
     Sending {
