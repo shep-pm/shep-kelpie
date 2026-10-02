@@ -320,6 +320,40 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn a_fix_left_uncommitted_is_sent_back_naming_its_files_before_the_worker_is_parked() {
+        let (rig, runner, head) = Rig::with_pull_request("koji");
+        rig.forge
+            .set_checks(&head, Checks::Failed(vec!["test".into()]));
+        rig.verdict(&runner);
+        rig.claude.script([
+            Scripted::Plant("fix.txt", "fixed\n"),
+            Scripted::Push("fix.txt", "fixed\n"),
+        ]);
+        step(&runner).unwrap();
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Ended { issue: 7, .. })
+        ));
+        let [first, _, again] = rig.claude.calls().try_into().unwrap();
+        assert_eq!(again.session, Session::Resume(first.session.id().clone()));
+        assert!(
+            again
+                .prompt
+                .starts_with("Your last turn ended with uncommitted changes in your worktree"),
+            "{}",
+            again.prompt
+        );
+        assert!(again.prompt.contains("fix.txt"), "{}", again.prompt);
+        assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
+
+        let fixed = rig.forge.head_of("kelpie/7").unwrap();
+        assert_ne!(fixed, head);
+        rig.forge.set_checks(&fixed, Checks::Passed);
+        let (_, question) = ruling_report(rig.verdict(&runner));
+        assert!(question.contains(&fixed[..7]), "{question}");
+    }
+
+    #[test]
     fn a_second_red_run_on_a_head_the_worker_left_alone_parks_it() {
         let (rig, runner, head) = Rig::with_pull_request("rotom");
         rig.forge

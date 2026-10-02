@@ -396,6 +396,27 @@ pub fn head(repo: &Path, worktree: &Path) -> Result<String, WorktreeError> {
     trusted(repo, worktree)?(&["rev-parse", "HEAD"])
 }
 
+/// The files `worktree` holds that its last commit does not: changed, staged
+/// or new and not ignored
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn uncommitted(repo: &Path, worktree: &Path) -> Result<Vec<String>, WorktreeError> {
+    let git = trusted(repo, worktree)?;
+    let changed = git(&["diff", "--name-only", "-z", "HEAD"])?;
+    let new = git(&["ls-files", "--others", "--exclude-standard", "-z"])?;
+    let mut files: Vec<String> = changed
+        .split('\0')
+        .chain(new.split('\0'))
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect();
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
 /// Moves the worktree's branch from `from`, the head kelpie knew, to `to`
 ///
 /// `to` is a head on `origin` the maintainer accepted. A worktree at neither,

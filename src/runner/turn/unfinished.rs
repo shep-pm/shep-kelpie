@@ -33,6 +33,34 @@ const PUSHED_NOTHING: &str = "Your last turn ended without a new push to this \
                               maintainer can unblock you, end your reply with a \
                               <kelpie-question> block.";
 
+/// The most uncommitted files a prompt names before it counts the rest
+const NAMED_FILES: usize = 10;
+
+/// The prompt that sends back a worker whose turn pushed nothing and left
+/// `files` uncommitted in its worktree
+///
+/// A turn that ends is over, and nothing the worker started in the
+/// background will wake it, so the prompt says to wait in the foreground.
+pub(super) fn uncommitted_prompt(files: &[String]) -> String {
+    let mut named = files
+        .iter()
+        .take(NAMED_FILES)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
+    if files.len() > NAMED_FILES {
+        named.push_str(&format!(" and {} more", files.len() - NAMED_FILES));
+    }
+    format!(
+        "Your last turn ended with uncommitted changes in your worktree and nothing \
+         pushed: {named}. A turn that ends is over, and nothing wakes you when a \
+         command you left running finishes, so run commands in the foreground and \
+         wait for them. Finish the work, commit it, and push it with \
+         `git push origin HEAD`, or discard what you do not want. If only the \
+         maintainer can unblock you, end your reply with a <kelpie-question> block."
+    )
+}
+
 /// Why a turn that stopped short twice parks
 const STOPPED_TWICE: &str = "it ended twice with no pull request and no question";
 

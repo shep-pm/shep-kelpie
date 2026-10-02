@@ -643,6 +643,64 @@ fn a_turn_that_ends_with_no_pull_request_and_no_question_sends_the_worker_back_o
 }
 
 #[test]
+fn a_turn_that_ends_with_uncommitted_files_and_no_push_is_sent_back_naming_them() {
+    let (rig, runner) = with_issue_7("zeus");
+    rig.claude.script([
+        Scripted::Plant("fix.txt", "fixed\n"),
+        Scripted::Push("fix.txt", "fixed\n"),
+    ]);
+    step(&runner).unwrap();
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Ended { issue: 7, .. })
+    ));
+    let [first, again] = rig.claude.calls().try_into().unwrap();
+    assert_eq!(again.session, Session::Resume(first.session.id().clone()));
+    assert!(
+        again
+            .prompt
+            .starts_with("Your last turn ended with uncommitted changes in your worktree"),
+        "{}",
+        again.prompt
+    );
+    assert!(again.prompt.contains("fix.txt"), "{}", again.prompt);
+    assert_eq!(
+        rig.ask(&runner, "status", None)["rulings"],
+        json!([]),
+        "the worker was sent back before any ruling"
+    );
+}
+
+#[test]
+fn a_worker_sent_back_for_uncommitted_files_is_not_sent_back_for_them_again() {
+    let (rig, runner) = with_issue_7("zeus");
+    rig.claude.script([
+        Scripted::Plant("fix.txt", "fixed\n"),
+        Scripted::Plant("fix.txt", "fixed\n"),
+        Scripted::Reply(usage(1), Cost(1)),
+    ]);
+    for _ in 0..3 {
+        step(&runner).unwrap();
+    }
+    let [_, dirty, stopped] = rig.claude.calls().try_into().unwrap();
+    assert!(dirty.prompt.contains("fix.txt"), "{}", dirty.prompt);
+    assert_eq!(stopped.prompt, SENT_BACK);
+}
+
+#[test]
+fn a_turn_that_ends_with_a_clean_worktree_is_not_sent_back_for_uncommitted_files() {
+    let (rig, runner) = with_issue_7("zeus");
+    rig.claude.script([
+        Scripted::Reply(usage(1), Cost(1)),
+        Scripted::Reply(usage(1), Cost(1)),
+    ]);
+    step(&runner).unwrap();
+    step(&runner).unwrap();
+    let [_, again] = rig.claude.calls().try_into().unwrap();
+    assert_eq!(again.prompt, SENT_BACK);
+}
+
+#[test]
 fn a_second_turn_that_stops_short_parks_the_worker_on_a_ruling() {
     let (rig, runner) = with_issue_7("zeus");
     rig.claude.script([

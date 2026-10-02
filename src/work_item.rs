@@ -112,6 +112,11 @@ pub struct WorkItem {
     /// parks it on a ruling.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sent_back: bool,
+    /// Whether a worker turn ended with uncommitted files and nothing
+    /// pushed, and kelpie sent the worker back once to commit them. Cleared
+    /// when the next turn ends, so a later turn gets its own chance.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub asked_to_commit: bool,
     /// The head of the last merge under `auto` that answered an error. A
     /// pull request later found merged at it is kelpie's merge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
