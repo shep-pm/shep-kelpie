@@ -377,6 +377,9 @@ impl Runner {
                     unreachable!("a round's findings only arrive while awaiting that round");
                 }
                 *item.local_failures.entry(local_name.clone()).or_default() += 1;
+                // The retry leaving any of these unreviewed again counts too.
+                item.local_unreviewed.clone_from(&unreviewed);
+                item.local_unreviewed_by = Some(local_name.clone());
                 let retrying = !item.local_reviewer_down(&local_name);
                 if !retrying && let Phase::Review(kept) = &mut item.phase {
                     // The next round chooses its reviewer afresh.

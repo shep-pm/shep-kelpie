@@ -625,6 +625,19 @@ fn a_clean_local_round_clears_that_reviewers_failures() {
 }
 
 #[test]
+fn a_retry_that_leaves_the_failed_rounds_files_unreviewed_again_takes_its_reviewer_down() {
+    let rig = Rig::new("koji");
+    let runner = at_round_one(&rig);
+    // Nothing reviewed, then a retry that finds something but misses a.rs and
+    // b.rs again.
+    rig.reviewer.script([found(UNREACHABLE), found(MIXED)]);
+    step(&runner).unwrap(); // round 1: nothing reviewed, retried
+    step(&runner).unwrap(); // the retry: one finding, the same files unreviewed
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["local_reviewers_down"], json!(["qwen"]));
+}
+
+#[test]
 fn a_file_skipped_for_its_size_stays_a_finding_and_is_not_unreviewed() {
     let rig = Rig::new("koji");
     let runner = at_round_one(&rig);
