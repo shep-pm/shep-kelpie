@@ -320,6 +320,9 @@ pub struct RoleAgentNames {
     /// The one-shot that plans a ready issue before it opens a work item
     #[serde(default)]
     pub planner: Option<AgentName>,
+    /// The one-shot that checks a whole work item against its issue before the merge
+    #[serde(default)]
+    pub auditor: Option<AgentName>,
 }
 
 /// The model and effort each role runs on, from the agent it names
@@ -333,6 +336,8 @@ pub struct RoleAgents {
     pub judge: RoleModel,
     /// The planning call's one-shots
     pub planner: RoleModel,
+    /// The whole-issue check's one-shots
+    pub auditor: RoleModel,
     /// What holds each role's calls back
     pub limits: RoleLimits,
 }
@@ -348,6 +353,8 @@ pub struct RoleLimits {
     pub judge: Limit,
     /// The planning call's one-shots
     pub planner: Limit,
+    /// The whole-issue check's one-shots
+    pub auditor: Limit,
 }
 
 impl Settings {
@@ -408,16 +415,19 @@ impl Settings {
             pick("reviewer", &self.agents.reviewer, &self.models.reviewer)?;
         let (judge, judge_limit) = pick("judge", &self.agents.judge, &self.models.judge)?;
         let (planner, planner_limit) = pick("planner", &self.agents.planner, &self.models.planner)?;
+        let (auditor, auditor_limit) = pick("auditor", &self.agents.auditor, &self.models.auditor)?;
         Ok(RoleAgents {
             worker,
             reviewer,
             judge,
             planner,
+            auditor,
             limits: RoleLimits {
                 worker: worker_limit,
                 reviewer: reviewer_limit,
                 judge: judge_limit,
                 planner: planner_limit,
+                auditor: auditor_limit,
             },
         })
     }

@@ -15,10 +15,8 @@ const AGENTS: &str = "[agents.codex]\nharness = \"stand-in\"\n\
                       [agents.qwen]\nharness = \"stand-in\"\n\
                       model = \"qwen3-coder\"\neffort = \"low\"\nusage = \"none\"\n";
 
-const ALL_CODEX: &str =
-    "worker = \"codex\"\nreviewer = \"codex\"\njudge = \"codex\"\nplanner = \"codex\"\n";
-const ALL_QWEN: &str =
-    "worker = \"qwen\"\nreviewer = \"qwen\"\njudge = \"qwen\"\nplanner = \"qwen\"\n";
+const ALL_CODEX: &str = "worker = \"codex\"\nreviewer = \"codex\"\njudge = \"codex\"\nplanner = \"codex\"\nauditor = \"codex\"\n";
+const ALL_QWEN: &str = "worker = \"qwen\"\nreviewer = \"qwen\"\njudge = \"qwen\"\nplanner = \"qwen\"\nauditor = \"qwen\"\n";
 
 // A running project whose roles name kelpie's agents as `names` says.
 fn named(project: &str, names: &str) -> (Rig, Mutex<Runner>) {

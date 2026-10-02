@@ -31,6 +31,7 @@ mod adopt;
 #[cfg(test)]
 mod agents_tests;
 mod alert;
+mod audit;
 mod claim;
 mod claude_files;
 #[cfg(test)]
@@ -516,6 +517,7 @@ impl Runner {
             rebased: false,
             shots: None,
             shots_comment: None,
+            audit: None,
             held: Vec::new(),
             follow_ups: None,
             timings: Some(Timings::starting(self.ports.clock.now())),

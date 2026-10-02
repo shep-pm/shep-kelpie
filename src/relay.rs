@@ -111,6 +111,7 @@ impl Wants {
             | RulingKind::ReviewGuard { .. }
             | RulingKind::LocalModelSpilled { .. }
             | RulingKind::FixNotPushed { .. }
+            | RulingKind::Audit { .. }
             | RulingKind::CodeRabbitCap { .. }
             | RulingKind::CodeRabbitSilent { .. }
             | RulingKind::TurnTimeout { .. }

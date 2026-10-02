@@ -31,6 +31,8 @@ pub enum CallKind {
     Judge,
     /// A shots run
     Shots,
+    /// The whole-issue check before the merge
+    Audit,
 }
 
 /// A work item's time so far
@@ -155,6 +157,7 @@ mod tests {
             CallKind::Claude,
             CallKind::Judge,
             CallKind::Shots,
+            CallKind::Audit,
         ];
         let names = kinds.map(|k| serde_json::to_value(k).unwrap());
         assert_eq!(
@@ -163,7 +166,8 @@ mod tests {
                 json!("local"),
                 json!("claude"),
                 json!("judge"),
-                json!("shots")
+                json!("shots"),
+                json!("audit")
             ]
         );
     }

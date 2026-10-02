@@ -41,6 +41,8 @@ pub struct Spend {
     pub reviewer: RoleSpend,
     /// The judge's calls
     pub judge: RoleSpend,
+    /// The whole-issue checks
+    pub auditor: RoleSpend,
 }
 
 /// A work item's qwen rounds. They cost no money, so it is the count and the
@@ -64,6 +66,7 @@ impl WorkItem {
                 Role::Worker => &mut spend.worker,
                 Role::Reviewer => &mut spend.reviewer,
                 Role::Judge => &mut spend.judge,
+                Role::Auditor => &mut spend.auditor,
                 // A planning call runs before any work item opens.
                 Role::Planner => continue,
             };

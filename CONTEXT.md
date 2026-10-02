@@ -90,12 +90,21 @@ The checks a pull request must pass before it merges.
 
 **Timings**:
 Where a work item's wall time went, by timing phase: `worker`, `gpu_wait`,
-`local_round`, `claude_round`, `judging`, `ci`, `coderabbit_window`,
+`local_round`, `claude_round`, `judging`, `audit`, `ci`, `coderabbit_window`,
 `coderabbit_review`, `ruling`, `merge`, `shots`, `paused` and `other`. Every
 second lands in exactly one. A timing phase is a bucket of time, not the
 stage a work item is in (its **phase**). `status` shows the open items'
 timings, and `timings <n>` totals the last `n` finished ones.
 _Avoid_: profile, metrics
+
+**Whole-issue check**:
+The last check before a merge ruling, or an `auto` merge: a fresh session on the
+`auditor` role that reads the issue (and what its body points to), the pull
+request's body and the final diff. It answers whether each acceptance
+criterion is met, and what the change assumes about the world outside the repo
+and whether the code or a test checks each assumption against the real thing.
+A gap goes back to the worker like a held finding.
+_Avoid_: audit (the code's name for it), final review
 
 **Lease**:
 Kelpie-granted use of a shared resource: the GPU, a pull request

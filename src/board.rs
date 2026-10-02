@@ -711,6 +711,7 @@ mod tests {
             reviewer: model("claude-sonnet-5"),
             judge: model("claude-opus-5-5"),
             planner: model("claude-opus-5-5"),
+            auditor: model("claude-opus-5-5"),
             limits: RoleLimits {
                 worker: Limit::Lease(LeaseName::gpu()),
                 ..RoleLimits::default()

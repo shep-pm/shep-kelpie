@@ -347,6 +347,17 @@ pub enum RulingKind {
         /// The fix turn a yes starts
         prompt: String,
     },
+    /// The whole-issue check still finds gaps after sending the worker back
+    /// twice. A yes sends the worker the gaps once more, and merging by hand
+    /// overrules the check.
+    Audit {
+        /// The head the gaps are on
+        head: String,
+        /// Each criterion not met and each assumption not checked
+        gaps: Vec<String>,
+        /// The turn a yes starts
+        prompt: String,
+    },
     /// CodeRabbit's rounds reached their cap with findings the judge held.
     /// A yes sends the worker those findings and lifts the cap for the rest
     /// of this work item.

@@ -142,18 +142,31 @@ pub struct Models {
     /// Opus 5.5 at medium effort when absent.
     #[serde(default = "default_planner")]
     pub planner: RoleModel,
+    /// The one-shot that checks the whole work item against its issue
+    /// before the merge. Opus 5.5 at high effort when absent.
+    #[serde(default = "default_auditor")]
+    pub auditor: RoleModel,
     /// The model id each `worker:<model>-<effort>` label name runs, each
     /// at its default when absent
     #[serde(default)]
     pub labels: LabelModels,
 }
 
-fn default_planner() -> RoleModel {
+// Opus 5.5 on Claude Code, for a role whose default is Opus
+fn opus(effort: Effort) -> RoleModel {
     RoleModel {
         model: NonBlank("claude-opus-5-5".to_owned()),
-        effort: Effort::Medium,
+        effort,
         harness: AgentHarness::ClaudeCode,
     }
+}
+
+fn default_planner() -> RoleModel {
+    opus(Effort::Medium)
+}
+
+fn default_auditor() -> RoleModel {
+    opus(Effort::High)
 }
 
 /// Planning settings

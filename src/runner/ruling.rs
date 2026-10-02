@@ -425,6 +425,12 @@ fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
             "A fix for review findings ended without a push, so those findings still hold."
                 .to_owned()
         }
+        RulingKind::Audit { head, gaps, .. } => format!(
+            "Kelpie's check of this pull request against its issue at {} still finds \
+             {} gaps after the worker was sent back twice.",
+            short(head),
+            gaps.len()
+        ),
         RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
             "{bot} has run {rounds} rounds here, its cap, \
              and {held} of its findings still hold."
@@ -565,6 +571,13 @@ fn decide(
                 force: None,
             });
         }
+        (Answer::Yes, RulingKind::Audit { prompt, .. }) => {
+            return Ok(Move::Turn {
+                prompt,
+                phase: Phase::Implement,
+                force: Some(Phase::Review(Review::first())),
+            });
+        }
         (Answer::Yes, RulingKind::CodeRabbitCap { prompt, head, .. }) => {
             return Ok(Move::Turn {
                 prompt,
@@ -654,6 +667,16 @@ pub(super) fn question(
                  so those findings still hold. {yes} sends it the findings again"
             )
         }
+        RulingKind::Audit { head, gaps, .. } => format!(
+            "The whole-issue check of {about} at {} still finds gaps after the \
+             worker was sent back twice:\n\n{}\n\n{yes} sends the worker the gaps once \
+             more. Merging {about} by hand overrules the check",
+            short(head),
+            gaps.iter()
+                .map(|g| format!("- {g}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ),
         RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
             "{bot} has run {rounds} rounds on {about}, its cap, and the judge \
              still holds {held} of its findings. {yes} sends the worker those \

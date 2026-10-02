@@ -205,6 +205,28 @@ fn the_judge_in_flight_is_judging() {
 }
 
 #[test]
+fn the_whole_issue_check_in_flight_is_audit() {
+    let (rig, runner, head) = Rig::with_pull_request("koji");
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert_eq!(
+        step(&runner).unwrap(),
+        None,
+        "CI waits for its checks to settle"
+    );
+    rig.clock.advance(crate::runner::CHECKS_SETTLE);
+    let hold = Hold::default();
+    rig.claude
+        .script([Scripted::HoldAudit(hold.clone(), crate::test::AUDIT_PASSES)]);
+    let t = read_while_held(&rig, &runner, &hold, 70);
+    assert_eq!(t["phase"], "audit");
+    assert_eq!(
+        (secs(&t, "audit"), secs(&t, "ci")),
+        (70, crate::runner::CHECKS_SETTLE)
+    );
+    assert_sums(&t);
+}
+
+#[test]
 fn coderabbit_is_the_window_until_the_summon_and_the_review_after() {
     let rig = Rig::new("koji");
     rig.coderabbit_on();
