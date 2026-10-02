@@ -133,6 +133,94 @@ fn one_listed_reviewer_ends_the_loop_on_one_clean_round() {
     assert!(rig.reviewer.seen().is_empty(), "no local round ran");
 }
 
+// What qwen-review.sh writes when the model behind it cannot be reached.
+const UNREACHABLE: &str = "\
+LOW|work.txt:0|not reviewed: curl: (7) Failed to connect to gpu.box port 8080|raw response kept at /tmp/qwen-review/raw/work.txt.txt
+";
+
+// A rig whose project lists two local reviewers, `mine` then `other`, each a
+// command of its own.
+fn two_local() -> Rig {
+    let rig = listing(r#"["mine", "other"]"#);
+    let other = rig.home.path().join("bin/other");
+    crate::test::write_script(&other, "#!/bin/sh\nexit 0\n");
+    let kelpie = std::fs::read_to_string(rig.paths().kelpie_settings).unwrap();
+    rig.set_kelpie_settings(&format!(
+        "{kelpie}[local_reviewers.other]\nkind = \"command\"\ncommand = \"{}\"\n",
+        other.display()
+    ));
+    rig
+}
+
+// A round that found something real and left `work.txt` unreviewed.
+const MIXED: &str = "\
+MEDIUM|src/c.rs:4|leftover debug print|noisy logs
+LOW|work.txt:0|not reviewed: curl: (7) Failed to connect to gpu.box port 8080|raw response kept at /tmp/qwen-review/raw/work.txt.txt
+";
+
+#[test]
+fn another_reviewers_first_miss_on_a_file_is_not_a_failure_against_it() {
+    let rig = two_local();
+    let runner = at_review(&rig, "work.txt");
+    let mixed = crate::ports::parse_findings(MIXED);
+    rig.reviewer
+        .script((0..4).map(|_| ScriptedRound::Findings(mixed.clone())));
+    let rejects = r#"{"holds": false, "severity": "low", "reason": "it is a test file"}"#;
+    rig.claude.script((0..4).map(|_| Scripted::Text(rejects)));
+    // mine, other, mine, other each leave the same file unreviewed, and the
+    // judge rejects each round's one finding. No reviewer misses it twice
+    // running, so neither is down.
+    for _ in 0..4 {
+        step(&runner).unwrap(); // the local round
+        step(&runner).unwrap(); // the judge rejects its finding
+        step(&runner).unwrap(); // the round is not clean
+    }
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"].get("local_reviewers_down"), None);
+    assert_eq!(rig.reviewer.seen().len(), 4);
+}
+
+#[test]
+fn a_local_reviewer_that_is_down_leaves_the_other_local_reviewers_to_run() {
+    let rig = two_local();
+    let runner = at_review(&rig, "work.txt");
+    let down = crate::ports::parse_findings(UNREACHABLE);
+    rig.reviewer.script([
+        ScriptedRound::Findings(down.clone()),
+        ScriptedRound::Findings(down),
+    ]);
+    step(&runner).unwrap(); // mine reviews nothing, and is retried
+    step(&runner).unwrap(); // mine reviews nothing again: it is down
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(
+        status["work_item"]["local_reviewers_down"],
+        serde_json::json!(["mine"])
+    );
+
+    // `other` is a different command and still runs, and as the only one
+    // left, one clean round from it ends the loop with no Claude round.
+    step(&runner).unwrap();
+    let seen = rig.reviewer.seen();
+    let commands: Vec<_> = seen
+        .iter()
+        .map(|round| match &round.local {
+            LocalRound::Command(c) => c
+                .command
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            _ => unreachable!("every listed local reviewer here is a command"),
+        })
+        .collect();
+    assert_eq!(commands, ["review", "review", "other"]);
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+        "ci"
+    );
+    assert!(reviewer_models(&rig).is_empty(), "no Claude round ran");
+}
+
 #[test]
 fn a_reviewer_limited_to_paths_runs_only_where_the_pull_request_changes_them() {
     let rig = listing(r#"["claude", "opus"]"#);

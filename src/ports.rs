@@ -673,6 +673,39 @@ pub struct Finding {
     pub why: String,
 }
 
+/// How `what` begins in the line qwen-review.sh writes for a file it did not
+/// review, whatever the reason
+const NOT_REVIEWED: &str = "not reviewed: ";
+
+/// What the script says of a file over its chunk limit, after
+/// [`NOT_REVIEWED`]
+const TOO_LARGE: &str = "exceeds the chunk limit";
+
+impl Finding {
+    /// Whether this is the line the script writes for a file it skipped as
+    /// over the chunk limit
+    ///
+    /// The model is up, so the line is a finding: the file needs a hunk
+    /// review, or reviewing by hand. This and [`Finding::is_unreviewed`] are
+    /// the two kinds of `not reviewed:` line, so they never both hold.
+    pub fn is_skipped_for_size(&self) -> bool {
+        self.is_not_reviewed() && self.what.contains(TOO_LARGE)
+    }
+
+    /// Whether this is a line the script writes for a file it could not
+    /// review for any other reason, such as the model not being reached
+    ///
+    /// Both kinds are told apart by the script's own wording, since the
+    /// state file's findings have no field to hold the reason.
+    pub fn is_unreviewed(&self) -> bool {
+        self.is_not_reviewed() && !self.what.contains(TOO_LARGE)
+    }
+
+    fn is_not_reviewed(&self) -> bool {
+        self.severity == Severity::Low && self.line == 0 && self.what.starts_with(NOT_REVIEWED)
+    }
+}
+
 /// Parses reviewer output in qwen's `SEVERITY|file:line|what|why` format
 ///
 /// A line that does not fit the shape is skipped rather than failing the

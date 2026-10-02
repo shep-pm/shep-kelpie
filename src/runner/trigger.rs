@@ -14,7 +14,7 @@ use crate::board::{Skip, WorkerModel};
 use crate::lease::gpu::LockHolder;
 use crate::ports::{ModelSeat, SessionId, Timestamp};
 use crate::relay::Settled;
-use crate::settings::MergeAuthority;
+use crate::settings::{MergeAuthority, ReviewerName};
 use crate::skills::StepSkill;
 use crate::state::{Finished, LeaseHeld, Ruling, RunState, StateError, Waiting};
 use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Split, Turn, WorkItem};
@@ -147,6 +147,10 @@ pub struct WorkItemStatus<'a> {
     pub by_role: Spend,
     /// Its qwen rounds, which cost no money
     pub qwen: QwenTally,
+    /// The local reviewers that reviewed nothing twice, so the loop goes on
+    /// without them
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub local_reviewers_down: Vec<&'a ReviewerName>,
     /// Why kelpie's last shots run failed, when it did
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shots_failed: Option<&'a str>,
@@ -178,6 +182,7 @@ impl<'a> WorkItemStatus<'a> {
             unpriced_calls: item.calls.iter().filter(|c| c.unpriced).count(),
             by_role: item.spend(),
             qwen: item.qwen,
+            local_reviewers_down: item.local_reviewers_down(),
             shots_failed: item.shots.as_ref().and_then(|r| r.run.failed.as_deref()),
             timings,
         }
