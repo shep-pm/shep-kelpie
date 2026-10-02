@@ -436,15 +436,22 @@ impl Runner {
             return Ok(Some(report));
         };
         // The worker has been sent back once already: the maintainer decides.
-        let head = match self.origin_head() {
-            Ok(head) => head,
-            Err(reason) => return Ok(Some(failed("re-check", reason))),
-        };
+        // A failure to write what the ruling needs still keeps what the call
+        // cost and that it ended, and the stage stays at the re-check.
+        let head = self.origin_head();
         let path = findings::findings_path(&build);
         let text = prompts::fix_file(&unfixed, &findings::deferred_path(&build), true);
-        if let Err(reason) = turn::write(&build, &path, &text) {
-            return Ok(Some(failed("re-check", reason)));
-        }
+        let written = head.and_then(|head| {
+            turn::write(&build, &path, &text)?;
+            Ok(head)
+        });
+        let head = match written {
+            Ok(head) => head,
+            Err(reason) => {
+                self.save(next)?;
+                return Ok(Some(failed("re-check", reason)));
+            }
+        };
         let prompt = prompts::fix_prompt(number, unfixed.len(), &path, true);
         let said = unfixed.iter().map(unfixed_line).collect();
         let stage = ReviewStage::Deep(Deep::Fixing {

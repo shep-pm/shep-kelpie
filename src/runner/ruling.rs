@@ -433,7 +433,7 @@ fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
         ),
         RulingKind::DeepReview { unfixed, .. } => format!(
             "Kelpie's deep review of this pull request still finds {} findings unfixed \
-             after the worker was sent back twice.",
+             after the worker was sent back once.",
             unfixed.len()
         ),
         RulingKind::CodeRabbitCap { rounds, held, .. } => format!(

@@ -323,6 +323,48 @@ fn a_fix_the_failing_test_still_fails_for_goes_back_to_the_worker_once_and_then_
 }
 
 #[test]
+fn a_second_recheck_whose_ruling_cannot_be_written_still_keeps_what_the_call_cost() {
+    let (rig, runner) = at_the_deep_round();
+    rig.claude.script([
+        Scripted::Text(MEDIUM),
+        Scripted::Text("CLEAN"),
+        Scripted::Push("one.txt", "1\n"),
+        Scripted::Text("UNFIXED|1|it still panics"),
+        Scripted::Push("two.txt", "2\n"),
+        Scripted::Text("UNFIXED|1|it still panics"),
+    ]);
+    // Step to where the second fix turn has ended, and take away what the ruling is written to.
+    for _ in 0..30 {
+        if roles(&rig).len() == 6 {
+            break;
+        }
+        step(&runner).unwrap();
+    }
+    assert_eq!(roles(&rig).len(), 6, "{:?}", roles(&rig));
+    let held = rig.build_7().join("review-findings.md");
+    std::fs::remove_file(&held).unwrap();
+    std::fs::create_dir(&held).unwrap();
+    step(&runner).unwrap(); // the fix is seen to have pushed
+    let report = step(&runner).unwrap(); // the second re-check, which cannot raise its ruling
+    assert!(
+        matches!(&report, Some(StepReport::GateFailed { reason, .. }) if reason.contains("re-check")),
+        "{report:#?}"
+    );
+
+    let status = rig.ask(&runner, "status", None);
+    let item = &status["work_item"];
+    assert_ne!(
+        item["review_call"]["state"], "running",
+        "the call ended: {item}"
+    );
+    assert_eq!(
+        item["by_role"]["deep_reviewer"]["calls"], 4,
+        "both readers and both re-checks are counted"
+    );
+    assert_eq!(item["phase"]["stage"]["step"], "rechecking");
+}
+
+#[test]
 fn a_high_no_session_could_confirm_goes_to_the_fix_turn_marked_unconfirmed() {
     let (rig, runner) = at_the_deep_round();
     rig.claude.script([
