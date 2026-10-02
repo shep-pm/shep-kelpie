@@ -39,7 +39,7 @@ fn the_first_turn_starts_the_workers_session_in_its_own_worktree() {
     assert_eq!(call.role, Role::Worker);
     assert_eq!(
         (call.model.as_str(), call.effort),
-        ("claude-sonnet-5", Effort::Medium)
+        ("claude-sonnet-5-5", Effort::High)
     );
     assert!(
         matches!(call.session, Session::New(_)),

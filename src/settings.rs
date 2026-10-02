@@ -32,6 +32,7 @@ mod table;
 
 pub use table::table_of;
 mod agents;
+mod labels;
 mod local;
 mod reviewers;
 mod skills;
@@ -40,6 +41,7 @@ pub use agents::{
     Account, Agent, AgentHarness, AgentName, Harness, Limit, ModelServer, RoleAgentNames,
     RoleAgents, RoleLimits, UsageReader,
 };
+pub use labels::{LabelModels, LabelName};
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use reviewers::{
     AgentSession, CLAUDE, ClaudeSession, Definition, LeaseName, LoopReviewer, QWEN, ReviewerName,
@@ -140,6 +142,10 @@ pub struct Models {
     /// Opus 5.5 at medium effort when absent.
     #[serde(default = "default_planner")]
     pub planner: RoleModel,
+    /// The model id each `worker:<model>-<effort>` label name runs, each
+    /// at its default when absent
+    #[serde(default)]
+    pub labels: LabelModels,
 }
 
 fn default_planner() -> RoleModel {

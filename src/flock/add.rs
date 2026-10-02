@@ -67,8 +67,8 @@ max_items = 1
 generated = []
 
 [models.worker]
-model = "claude-sonnet-5"
-effort = "medium"
+model = "claude-sonnet-5-5"
+effort = "high"
 
 [models.reviewer]
 model = "claude-sonnet-5"

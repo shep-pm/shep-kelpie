@@ -167,7 +167,7 @@ Put `ready-for-agent` on an issue that says what done looks like, with acceptanc
 What decides whether, and when, the first issue starts:
 
 - The board skips an issue that is assigned to anyone or already has an open pull request, and one blocked by an issue that is still open. Don't assign it to yourself
-- Of the rest, `priority: P0` to `P3` labels order them, then the oldest goes first. A `worker:<model>-<effort>` label, such as `worker:opus-high`, picks the model that works it, from `opus`, `sonnet`, `haiku` and `fable`. `worker:local` picks the project's local worker
+- Of the rest, `priority: P0` to `P3` labels order them, then the oldest goes first. A `worker:<model>-<effort>` label, such as `worker:opus-high`, picks the model that works it, from `opus`, `sonnet`, `haiku` and `fable`, each run as the id `[app.dogs.kelpie.models.labels]` gives it. `worker:local` picks the project's local worker
 - No turn starts while Claude's 5-hour window is at 50% or more, and no new work item starts once today's share of the week is spent. `shep kelpie status` says why under `pacer`, and `enabled = false` in the project's `[app.dogs.kelpie.pacing]` turns both off
 - On a public repo, after CI each pull request waits for CodeRabbit, at one review an hour. shep-kelpie asks for a review by putting the `review please` label on, so the repo's `.coderabbit.yaml` must review only labelled pull requests. Without that, CodeRabbit reviews every push on its own and spends the hour a round is waiting on:
 

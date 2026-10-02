@@ -45,7 +45,7 @@ fn a_project_that_names_no_agent_keeps_its_models_on_claude_code() {
     let settings = project("");
     let agents = settings.role_agents(&kelpie(AGENTS).agents).unwrap();
     assert_eq!(agents.worker, settings.models.worker);
-    assert_eq!(pair(&agents.worker), ("claude-sonnet-5", Effort::Medium));
+    assert_eq!(pair(&agents.worker), ("claude-sonnet-5-5", Effort::High));
     assert_eq!(pair(&agents.reviewer), ("claude-sonnet-5", Effort::Medium));
     assert_eq!(pair(&agents.judge), ("claude-opus-5-5", Effort::Low));
 }
