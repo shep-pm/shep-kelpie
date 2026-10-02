@@ -21,6 +21,24 @@ fn audits(rig: &Rig) -> Vec<AgentCall> {
         .collect()
 }
 
+// What the check was given: its prompt, and the files the prompt sends it to,
+// as they stand now
+fn read_all(call: &AgentCall) -> String {
+    let mut text = call.prompt.clone();
+    for folder in &call.reach.read {
+        let mut files: Vec<_> = std::fs::read_dir(folder).unwrap().flatten().collect();
+        files.sort_by_key(|f| f.file_name());
+        for file in files {
+            text.push_str(&std::fs::read_to_string(file.path()).unwrap());
+        }
+    }
+    text
+}
+
+fn last_audit_read(rig: &Rig) -> String {
+    read_all(&audits(rig).pop().expect("the check ran"))
+}
+
 const FAKE_ONLY: &str = r#"{"criteria": [
     {"criterion": "Labels the pull request", "met": true, "where": "src/label.rs:9"}],
   "assumptions": [
@@ -129,7 +147,11 @@ fn the_check_reads_the_issue_what_it_points_to_the_pull_request_and_the_diff() {
     ));
 
     let [call] = audits(&rig).try_into().unwrap();
-    let prompt = &call.prompt;
+    let prompt = read_all(&call);
+    assert!(
+        call.prompt.contains("issue.md") && call.prompt.contains("diff.patch"),
+        "the prompt sends the check to its files"
+    );
     assert!(prompt.contains("every item of #9 is fixed"), "the issue");
     assert!(
         prompt.contains("Fix what #9 lists"),
@@ -347,8 +369,12 @@ fn a_long_issue_is_read_whole_so_no_criterion_goes_unseen() {
         Some(StepReport::Ruling { .. })
     ));
     let [call] = audits(&rig).try_into().unwrap();
-    assert!(call.prompt.contains("the very last criterion"));
-    assert!(!call.prompt.contains("left out"));
+    let seen = read_all(&call);
+    assert!(seen.contains("the very last criterion"));
+    assert!(!seen.contains("left out"));
+    // A harness passes the prompt as one argument, which a long issue and a
+    // diff would overflow, so the prompt itself stays short.
+    assert!(call.prompt.len() < 10_000, "{}", call.prompt.len());
 }
 
 const NO_EVIDENCE: &str = r#"{"criteria": [
@@ -370,6 +396,22 @@ fn a_success_that_names_no_evidence_is_a_gap_like_a_failure() {
 }
 
 #[test]
+fn every_item_the_issue_points_to_is_pulled_in_however_many() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    let refs: Vec<String> = (100..112).map(|n| format!("#{n}")).collect();
+    rig.forge
+        .set_issue_body(7, &format!("See {}.", refs.join(", ")));
+    rig.forge
+        .set_issue_body(111, "the twelfth one asks for a thing");
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::Ruling { .. })
+    ));
+    assert!(last_audit_read(&rig).contains("the twelfth one asks for a thing"));
+}
+
+#[test]
 fn an_issue_edited_after_a_pass_is_checked_again_on_the_same_head() {
     let (rig, runner, head) = Rig::with_pull_request("shep");
     rig.forge.set_checks(&head, Checks::Passed);
@@ -383,6 +425,7 @@ fn an_issue_edited_after_a_pass_is_checked_again_on_the_same_head() {
         step(&runner).unwrap(),
         Some(StepReport::AuditPassed { .. })
     ));
+    assert!(!last_audit_read(&rig).contains("a new one"));
 
     // The issue gains a criterion before the ruling is raised.
     rig.forge
@@ -391,9 +434,7 @@ fn an_issue_edited_after_a_pass_is_checked_again_on_the_same_head() {
         step(&runner).unwrap(),
         Some(StepReport::AuditPassed { .. })
     ));
-    let [first, second] = audits(&rig).try_into().unwrap();
-    assert!(second.prompt.contains("a new one"));
-    assert!(!first.prompt.contains("a new one"));
+    assert!(last_audit_read(&rig).contains("a new one"));
 
     assert!(matches!(
         step(&runner).unwrap(),
@@ -441,8 +482,7 @@ fn an_issue_edited_while_the_check_ran_drops_its_answer() {
         step(&runner).unwrap(),
         Some(StepReport::AuditPassed { .. })
     ));
-    let [_, second] = audits(&rig).try_into().unwrap();
-    assert!(second.prompt.contains("added meanwhile"));
+    assert!(last_audit_read(&rig).contains("added meanwhile"));
 }
 
 #[test]

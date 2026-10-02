@@ -13,6 +13,7 @@
 use std::collections::BTreeSet;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::path::Path;
 
 use serde::Deserialize;
 
@@ -30,11 +31,17 @@ use crate::worktree;
 #[cfg(test)]
 mod tests;
 
+/// The folder in the work item's build folder that the check's files go in
+const FOLDER: &str = "audit";
+
 /// Where the check's throwaway settings go
 const SETTINGS_FILE: &str = "audit-settings.json";
 
-/// The most items an issue's body may point to that are pulled in
-const POINTED_AT: usize = 8;
+/// The file of what the check reads but the diff, in its folder
+const MATERIAL_FILE: &str = "issue.md";
+
+/// The file of the final diff, in its folder
+const DIFF_FILE: &str = "diff.patch";
 
 impl Runner {
     // Whether `head`, which CI passed, goes on to the merge ruling: the
@@ -102,17 +109,25 @@ impl Runner {
         let item = self.current().expect("the check is of a work item");
         let base = format!("origin/{}", worktree::BASE);
         let diff = diff_against(&item.worktree, &base)?;
+        // What it reads goes in files, not in the prompt, which a harness
+        // passes as one argument, and a long issue and diff would not fit.
+        let folder = item.build.join(FOLDER);
+        let write = |name: &str, text: String| {
+            std::fs::create_dir_all(&folder)
+                .and_then(|()| std::fs::write(folder.join(name), text))
+                .map_err(|e| format!("cannot write the whole-issue check's {name}: {}", e.kind()))
+        };
+        write(MATERIAL_FILE, inputs.material(issue, number))?;
+        write(DIFF_FILE, diff)?;
         let prompt = prompt(&Reading {
-            issue,
-            number,
-            inputs,
+            folder: &folder,
             base: &base,
-            diff: &diff,
         });
         let model = &self.agents.auditor;
         let limit = &self.agents.limits.auditor;
         let mut call = build_call(Role::Auditor, issue, &item.worktree, (model, limit), prompt)?;
         call.settings = self.paths.worker.join(SETTINGS_FILE);
+        call.reach.read = vec![folder];
         // It reads the worktree to see what the code and its tests check,
         // and runs no command.
         call.tools = Tools::Review;
@@ -311,39 +326,45 @@ impl Inputs {
     }
 }
 
-/// What the check read, for its prompt
+/// Where the check's files are
 struct Reading<'a> {
-    issue: u64,
-    number: u64,
-    inputs: &'a Inputs,
+    folder: &'a Path,
     base: &'a str,
-    diff: &'a str,
+}
+
+impl Inputs {
+    // The issue, what it points to and the pull request, as the check reads them.
+    fn material(&self, issue: u64, number: u64) -> String {
+        let pointed = match self.pointed.is_empty() {
+            true => String::new(),
+            false => format!(
+                "\n\n--- what the issue points to ---\n{}\n--- end ---",
+                self.pointed
+            ),
+        };
+        format!(
+            "--- issue #{issue}: {} ---\n{}\n--- end ---{pointed}\n\n\
+             --- pull request #{number}: {} ---\n{}\n--- end ---\n",
+            self.title,
+            self.body.trim(),
+            self.pull_title,
+            self.pull_body.trim(),
+        )
+    }
 }
 
 fn prompt(r: &Reading<'_>) -> String {
-    let Reading {
-        issue,
-        number,
-        inputs,
-        base,
-        diff,
-    } = r;
-    let Inputs {
-        title,
-        body,
-        pointed,
-        pull_title,
-        pull_body,
-    } = inputs;
-    let pointed = match pointed.is_empty() {
-        true => String::new(),
-        false => format!("\n\n--- what the issue points to ---\n{pointed}\n--- end ---"),
-    };
+    let Reading { folder, base } = r;
+    let (material, diff) = (folder.join(MATERIAL_FILE), folder.join(DIFF_FILE));
     format!(
         "You are the last check before a pull request merges. The review rounds before you \
          read the diff line by line; you read the work as a whole. You may open any file \
          in this worktree with Read, Grep or Glob to check your answer; do not run any \
          command and do not edit anything.\n\n\
+         What you check is in two files. Read each to its end, in parts if it is long, \
+         before you answer.\n\
+         - {}: the issue, whatever its body points to, and the pull request's own text\n\
+         - {}: the final diff against {base}\n\n\
          Answer two questions.\n\
          1. For each acceptance criterion of the issue, and each item the issue points to \
          that it asks for, is it met by the final diff, and where? An issue with no \
@@ -358,12 +379,9 @@ fn prompt(r: &Reading<'_>) -> String {
          thing; one that only a fake touches, or that nothing touches, is not.\n\n\
          Output exactly one JSON object and nothing else:\n\
          {{\"criteria\": [{{\"criterion\": \"<text>\", \"met\": true|false, \"where\": \"<text>\"}}], \
-         \"assumptions\": [{{\"assumption\": \"<text>\", \"checked\": true|false, \"where\": \"<text>\"}}]}}\n\n\
-         --- issue #{issue}: {title} ---\n{}\n--- end ---{pointed}\n\n\
-         --- pull request #{number}: {pull_title} ---\n{}\n--- end ---\n\n\
-         --- final diff against {base} ---\n{diff}\n--- end ---",
-        body.trim(),
-        pull_body.trim(),
+         \"assumptions\": [{{\"assumption\": \"<text>\", \"checked\": true|false, \"where\": \"<text>\"}}]}}",
+        material.display(),
+        diff.display(),
     )
 }
 
@@ -459,7 +477,8 @@ fn gap_prompt(number: u64, head: &str, gaps: &[String]) -> String {
 }
 
 // The issue numbers `body` points to with `#<n>`, in order of first mention,
-// leaving out `own`, and at most [`POINTED_AT`] of them.
+// leaving out `own`. Every one is pulled in: a request in the ninth would
+// otherwise go unread while an empty answer still passed.
 fn pointed_at(body: &str, own: &[u64]) -> Vec<u64> {
     let bytes = body.as_bytes();
     let mut seen = BTreeSet::new();
@@ -485,6 +504,5 @@ fn pointed_at(body: &str, own: &[u64]) -> Vec<u64> {
             found.push(n);
         }
     }
-    found.truncate(POINTED_AT);
     found
 }
