@@ -217,6 +217,8 @@ mod tests {
     #[test]
     fn a_table_changed_in_lookout_reaches_the_running_runner() {
         let rig = Rig::new("shep");
+        // The older form of the local round, which the rig's project sets, is a notice.
+        rig.deep_review();
         let runner = rig.open().unwrap();
         let entry = std::fs::read_to_string(rig.paths().settings).unwrap();
         let table = Arc::new(Mutex::new(project_table(&entry)));
