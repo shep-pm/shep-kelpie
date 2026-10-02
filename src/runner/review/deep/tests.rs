@@ -4,10 +4,12 @@ use std::sync::Mutex;
 
 use serde_json::Value;
 
-use crate::ports::{AgentError, Role, Tools};
+use crate::ports::{AgentError, Cost, Role, SessionId, Tools, Usage};
+use crate::runner::report::{ReviewResult, Spent};
 use crate::runner::{Runner, StepReport, step};
 use crate::settings::Effort;
 use crate::test::{Rig, Scripted, Seen};
+use crate::work_item::CallKind;
 
 // A new project whose worker opened pull request 71 and whose local round
 // found nothing, so the deep round is next.
@@ -540,6 +542,54 @@ fn a_confirmation_stopped_with_the_runner_is_restored_to_what_its_first_try_foun
         "{report:#?}"
     );
     assert!(!half.exists(), "what the first try wrote is gone");
+}
+
+#[test]
+fn a_deep_call_that_ends_after_its_stage_moved_on_still_keeps_its_cost_and_its_end() {
+    let (rig, runner) = at_the_deep_round(); // its stage is the next round's, not a deep step
+    let report = {
+        let mut runner = runner.lock().unwrap();
+        runner.mark_review_call_running(CallKind::Deep).unwrap();
+        let spent = Spent::Claude {
+            role: Role::DeepReviewer,
+            session: SessionId("late".into()),
+            usage: Usage::default(),
+            session_cost: Some(Cost(7)),
+        };
+        runner
+            .end_deep(ReviewResult::Deep(Ok("CLEAN".into())), Some(spent))
+            .unwrap()
+    };
+    assert_eq!(report, None, "there is no step left for it to answer");
+    let item = &rig.ask(&runner, "status", None)["work_item"];
+    assert_eq!(item["by_role"]["deep_reviewer"]["calls"], 1, "{item}");
+    assert_ne!(item["review_call"]["state"], "running", "{item}");
+}
+
+#[test]
+fn a_deletion_the_worker_had_not_committed_stays_deleted_when_a_session_does_not_confirm() {
+    let (rig, runner) = at_the_deep_round();
+    let tree = rig.worktree_7();
+    std::fs::remove_file(tree.join("work.txt")).unwrap(); // a tracked file, deleted and not committed
+    rig.claude.script([
+        Scripted::Text(HIGH),
+        Scripted::Text("CLEAN"),
+        Scripted::WriteMany(
+            &[("tests/half.rs", "#[test]")],
+            "UNCONFIRMED|it could not be made to fail",
+        ),
+    ]);
+    step(&runner).unwrap(); // the first reader
+    step(&runner).unwrap(); // the second reader
+    step(&runner).unwrap(); // the confirmation, which does not confirm
+    assert!(
+        !tree.join("tests/half.rs").exists(),
+        "the session's file is gone"
+    );
+    assert!(
+        !tree.join("work.txt").exists(),
+        "the worktree is as it was before the session, deletion and all"
+    );
 }
 
 #[test]

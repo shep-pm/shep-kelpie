@@ -61,3 +61,28 @@ fn a_recorded_findings_file_parses() {
         "not reviewed: 900 lines exceeds the chunk limit"
     );
 }
+
+#[test]
+fn a_finding_is_the_same_by_its_file_line_and_what_and_not_its_why_or_severity() {
+    let finding = |severity, why: &str| Finding {
+        severity,
+        file: "src/lib.rs".into(),
+        line: 3,
+        what: "the flag is read first".into(),
+        why: why.into(),
+    };
+    let one = finding(Severity::High, "a caller sees nothing");
+    assert!(one.is_same_as(&finding(Severity::Low, "worded again")));
+    assert!(!one.is_same_as(&Finding {
+        line: 4,
+        ..one.clone()
+    }));
+    assert!(!one.is_same_as(&Finding {
+        file: "src/b.rs".into(),
+        ..one.clone()
+    }));
+    assert!(!one.is_same_as(&Finding {
+        what: "another thing".into(),
+        ..one.clone()
+    }));
+}

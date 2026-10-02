@@ -414,19 +414,24 @@ pub fn uncommitted(repo: &Path, worktree: &Path) -> Result<Vec<String>, Worktree
     Ok(files)
 }
 
-/// The files `worktree` holds that its last commit does not, with the git
-/// blob id of each as it is on disk, a file that is gone left out
+/// The files `worktree` differs from its last commit in, with the git blob id
+/// of each as it is on disk, or `None` for one that is gone
 ///
 /// # Errors
 ///
 /// [`WorktreeError`] naming the git command that failed, which a file that
 /// is there and cannot be read also does.
-pub fn differing(repo: &Path, worktree: &Path) -> Result<Vec<(String, String)>, WorktreeError> {
+pub fn differing(
+    repo: &Path,
+    worktree: &Path,
+) -> Result<Vec<(String, Option<String>)>, WorktreeError> {
     let mut found = Vec::new();
     for path in uncommitted(repo, worktree)? {
-        if worktree.join(&path).is_file() {
-            found.push((path.clone(), blob_of(repo, worktree, &path)?));
-        }
+        let blob = match worktree.join(&path).is_file() {
+            true => Some(blob_of(repo, worktree, &path)?),
+            false => None,
+        };
+        found.push((path, blob));
     }
     Ok(found)
 }
@@ -494,7 +499,8 @@ pub fn blob_of(repo: &Path, worktree: &Path, path: &str) -> Result<String, Workt
 ///
 /// A file made since is removed, a file edited since is written back as it
 /// was, and a file that was not there is restored. One that was at its
-/// head's version then is put back at it.
+/// head's version then is put back at it, and one that was gone then, which
+/// is a deletion not yet committed, is gone again.
 ///
 /// # Errors
 ///
@@ -502,7 +508,7 @@ pub fn blob_of(repo: &Path, worktree: &Path, path: &str) -> Result<String, Workt
 pub fn restore(
     repo: &Path,
     worktree: &Path,
-    before: &[(String, String)],
+    before: &[(String, Option<String>)],
 ) -> Result<(), WorktreeError> {
     let git = trusted(repo, worktree)?;
     let mut paths = uncommitted(repo, worktree)?;
@@ -513,7 +519,12 @@ pub fn restore(
     for path in paths {
         let file = worktree.join(&path);
         match before.iter().find(|(p, _)| *p == path) {
-            Some((_, blob)) => {
+            Some((_, None)) => match std::fs::remove_file(&file) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(io(&path, e)),
+            },
+            Some((_, Some(blob))) => {
                 let held = file
                     .is_file()
                     .then(|| blob_of(repo, worktree, &path))

@@ -37,7 +37,7 @@ impl Runner {
     // commit, nor counted for the next session.
     pub(super) fn restore_before(&self, before: &[Found]) -> Result<(), String> {
         let item = self.current().expect("the deep round is a work item's");
-        let before: Vec<(String, String)> = before
+        let before: Vec<(String, Option<String>)> = before
             .iter()
             .map(|f| (f.path.clone(), f.blob.clone()))
             .collect();
@@ -60,8 +60,12 @@ impl Runner {
         let (repo, tree) = (&self.settings.repo, &item.worktree);
         let mut written = Vec::new();
         for (path, after) in worktree::differing(repo, tree).map_err(wrong)? {
+            // A file the session deleted adds no line.
+            let Some(after) = after else {
+                continue;
+            };
             let was = match before.iter().find(|f| f.path == path) {
-                Some(found) => Some(found.blob.clone()),
+                Some(found) => found.blob.clone(),
                 None => worktree::blob_at_head(repo, tree, &path).map_err(wrong)?,
             };
             if was.as_deref() == Some(after.as_str()) {

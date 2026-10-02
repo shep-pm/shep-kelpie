@@ -331,6 +331,28 @@ fn a_pi_worker_beside_the_preview_or_guard_hooks_is_refused_at_load() {
 }
 
 #[test]
+fn a_pi_deep_reviewer_may_not_be_allowed_the_model_host_or_the_loopback_either() {
+    // Its sessions that run commands get the worker's allowed domains.
+    for domain in ["box", "localhost", "127.0.0.1"] {
+        let mut settings = project("deep_reviewer = \"qwen\"\n");
+        settings.worker.allowed_domains = vec![domain.to_owned().try_into().unwrap()];
+        let err = settings
+            .role_agents(&kelpie(QWEN).agents)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("worker.allowed_domains")
+                && err.contains(domain)
+                && err.contains("a pi deep_reviewer"),
+            "{err}"
+        );
+    }
+    let mut settings = project("deep_reviewer = \"qwen\"\n");
+    settings.worker.allowed_domains = vec!["github.com".to_owned().try_into().unwrap()];
+    assert!(settings.role_agents(&kelpie(QWEN).agents).is_ok());
+}
+
+#[test]
 fn a_deep_reviewer_on_pi_or_codex_beside_guard_hooks_is_refused_at_load() {
     let hooks = vec![crate::settings::GuardHook {
         event: crate::settings::HookEvent::PreToolUse,

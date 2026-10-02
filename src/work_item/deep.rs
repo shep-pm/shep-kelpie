@@ -140,8 +140,10 @@ pub struct Written {
 pub struct Found {
     /// The file, from the repo's root
     pub path: String,
-    /// Its git blob id
-    pub blob: String,
+    /// Its git blob id, or none when the file was gone, a deletion not yet
+    /// committed
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blob: Option<String>,
 }
 
 impl Backing {

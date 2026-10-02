@@ -215,7 +215,10 @@ pub(super) fn read_unfixed(text: &str, held: &[Held]) -> Result<Vec<Held>, Strin
         let note = note.trim();
         match verdict {
             "FIXED" if !note.is_empty() => fixed[at] = true,
-            "FIXED" => said[at] = Some("it was called fixed with nothing to show for it".into()),
+            "FIXED" => {
+                fixed[at] = false;
+                said[at] = Some("it was called fixed with nothing to show for it".into());
+            }
             "UNFIXED" => {
                 fixed[at] = false;
                 said[at] = Some(note.to_owned());
@@ -454,6 +457,14 @@ SEVERITY|file:line|what is wrong, and its trigger|what goes wrong, and who sees 
             unfixed_lines("FIXED|1|ran it\nUNFIXED|1|it fails again", 1),
             [(1, "it fails again".to_owned())],
             "the later word stands"
+        );
+        assert_eq!(
+            unfixed_lines("FIXED|1|ran it\nFIXED|1|", 1),
+            [(
+                1,
+                "it was called fixed with nothing to show for it".to_owned()
+            )],
+            "a last word of fixed with nothing to show is not fixed"
         );
         assert_eq!(
             unfixed_lines("FIXED|9|nothing of the kind\nFIXED|1|ok", 1),

@@ -430,10 +430,8 @@ pub enum ReviewStage {
 impl WorkItem {
     /// Remembers findings sent to the worker, once each
     pub fn record_held(&mut self, held: &[Finding]) {
-        let same =
-            |a: &Finding, b: &Finding| (&a.file, a.line, &a.what) == (&b.file, b.line, &b.what);
         for finding in held {
-            if !self.held.iter().any(|known| same(known, finding)) {
+            if !self.held.iter().any(|known| known.is_same_as(finding)) {
                 self.held.push(finding.clone());
             }
         }

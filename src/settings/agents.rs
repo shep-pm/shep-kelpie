@@ -380,44 +380,7 @@ impl Settings {
             Some(name) => find(defined, name, &format!("agents.{role}"), "agents"),
         };
         let (worker, worker_limit) = pick("worker", &self.agents.worker, &self.models.worker)?;
-        // Only Claude Code runs the preview's MCP servers and the project's hooks.
-        let other = match &worker.harness {
-            AgentHarness::Pi(_) => Some(("pi", "pi runs no MCP servers")),
-            AgentHarness::Codex => {
-                Some(("codex", "kelpie bridges MCP servers to Claude Code only"))
-            }
-            _ => None,
-        };
-        if let (Some((harness, why)), Some(name)) = (other, &self.agents.worker) {
-            let what = match (self.preview.enabled, self.worker.guard_hooks.is_empty()) {
-                (true, _) => Some(format!("`preview.enabled`, since {why}")),
-                (false, false) => Some("`worker.guard_hooks`, which are Claude Code hooks".into()),
-                (false, true) => None,
-            };
-            if let Some(what) = what {
-                return Err(SettingsError::Invalid {
-                    setting: "agents",
-                    reason: format!(
-                        "`agents.worker` names {name}, on {harness}, which cannot run {what}: \
-                         turn that off or put the worker on Claude Code"
-                    ),
-                });
-            }
-        }
-        if let AgentHarness::Pi(server) = &worker.harness
-            && let Ok(upstream) = Upstream::new(&server.url)
-            && let Some(domain) =
-                (self.worker.allowed_domains.iter()).find(|d| upstream.is_reached_by(d.as_str()))
-        {
-            return Err(SettingsError::Invalid {
-                setting: "worker.allowed_domains",
-                reason: format!(
-                    "`{}` would give a pi worker the model server's host, or every local \
-                     port, past the forwarder: remove it",
-                    domain.as_str()
-                ),
-            });
-        }
+        self.under_worker_fence("worker", &worker, &self.agents.worker, true)?;
         let (reviewer, reviewer_limit) =
             pick("reviewer", &self.agents.reviewer, &self.models.reviewer)?;
         let (judge, judge_limit) = pick("judge", &self.agents.judge, &self.models.judge)?;
@@ -428,27 +391,13 @@ impl Settings {
             &self.agents.deep_reviewer,
             &self.models.deep_reviewer,
         )?;
-        // Its sessions that run commands run under the worker's fence, hooks
-        // included, and only Claude Code runs the project's hooks.
-        let other = match &deep_reviewer.harness {
-            AgentHarness::Pi(_) => Some("pi"),
-            AgentHarness::Codex => Some("codex"),
-            _ => None,
-        };
-        if let (Some(harness), Some(name), false) = (
-            other,
+        // Its sessions that run commands run under the worker's fence.
+        self.under_worker_fence(
+            "deep_reviewer",
+            &deep_reviewer,
             &self.agents.deep_reviewer,
-            self.worker.guard_hooks.is_empty(),
-        ) {
-            return Err(SettingsError::Invalid {
-                setting: "agents",
-                reason: format!(
-                    "`agents.deep_reviewer` names {name}, on {harness}, which cannot run \
-                     `worker.guard_hooks`, which are Claude Code hooks: put the deep \
-                     reviewer on Claude Code, or take the hooks off"
-                ),
-            });
-        }
+            false,
+        )?;
         Ok(RoleAgents {
             worker,
             reviewer,
@@ -465,6 +414,61 @@ impl Settings {
                 deep_reviewer: deep_reviewer_limit,
             },
         })
+    }
+}
+
+impl Settings {
+    // Refuses a role whose sessions run under the worker's fence, on an agent
+    // that is not Claude Code, where the fence's settings would not hold: only
+    // Claude Code runs the project's hooks, and the preview's MCP servers where
+    // the role runs them (`with_preview`), and a pi agent must not be given its
+    // model server's host past the forwarder by `worker.allowed_domains`.
+    fn under_worker_fence(
+        &self,
+        role: &str,
+        agent: &RoleModel,
+        named: &Option<AgentName>,
+        with_preview: bool,
+    ) -> Result<(), SettingsError> {
+        let other = match &agent.harness {
+            AgentHarness::Pi(_) => Some(("pi", "pi runs no MCP servers")),
+            AgentHarness::Codex => {
+                Some(("codex", "kelpie bridges MCP servers to Claude Code only"))
+            }
+            _ => None,
+        };
+        if let (Some((harness, why)), Some(name)) = (other, named) {
+            let preview = with_preview && self.preview.enabled;
+            let what = match (preview, self.worker.guard_hooks.is_empty()) {
+                (true, _) => Some(format!("`preview.enabled`, since {why}")),
+                (false, false) => Some("`worker.guard_hooks`, which are Claude Code hooks".into()),
+                (false, true) => None,
+            };
+            if let Some(what) = what {
+                return Err(SettingsError::Invalid {
+                    setting: "agents",
+                    reason: format!(
+                        "`agents.{role}` names {name}, on {harness}, which cannot run {what}: \
+                         turn that off or put the {role} on Claude Code"
+                    ),
+                });
+            }
+        }
+        if let AgentHarness::Pi(server) = &agent.harness
+            && let Ok(upstream) = Upstream::new(&server.url)
+            && let Some(domain) =
+                (self.worker.allowed_domains.iter()).find(|d| upstream.is_reached_by(d.as_str()))
+        {
+            return Err(SettingsError::Invalid {
+                setting: "worker.allowed_domains",
+                reason: format!(
+                    "`{}` would give a pi {role} the model server's host, or every local \
+                     port, past the forwarder: remove it",
+                    domain.as_str()
+                ),
+            });
+        }
+        Ok(())
     }
 }
 

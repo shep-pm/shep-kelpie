@@ -77,7 +77,7 @@ impl Runner {
             },
             Deep::Sending { held, again } => self.send_to_worker(review, held, again),
             Deep::Fixing { held, head, again } => self.deep_fix_ended(review, held, head, again),
-            Deep::Rechecking { held, head, .. } => self.recheck_call(&held, &head),
+            Deep::Rechecking { held, head, .. } => self.recheck_call(&review, &held, &head),
         }
     }
 
@@ -169,7 +169,12 @@ impl Runner {
 
     // The re-check of the fix: a session that may run commands, shown only
     // what changed since the findings were sent.
-    fn recheck_call(&mut self, held: &[Held], head: &str) -> Result<Begin, StateError> {
+    fn recheck_call(
+        &mut self,
+        review: &Review,
+        held: &[Held],
+        head: &str,
+    ) -> Result<Begin, StateError> {
         if let Some(held) = self.deep_held()? {
             return Ok(held);
         }
@@ -179,10 +184,7 @@ impl Runner {
         let (checked, deferred) = apart_deferred(&item.build, held);
         if checked.is_empty() {
             // Everything was deferred: there is nothing left to check.
-            let round = match &item.phase {
-                Phase::Review(review) => review.round,
-                _ => 0,
-            };
+            let round = review.round;
             let since = self.ports.clock.now();
             self.update(|item| item.phase = Phase::Ci { head: None, since })?;
             return Ok(Begin::Report(StepReport::DeepRechecked {
@@ -362,10 +364,13 @@ impl Runner {
             return Ok(None);
         };
         super::record_spent(item, spent, now);
+        // What the call cost and that it ended are kept whatever became of its answer.
         let Phase::Review(review) = item.phase.clone() else {
+            self.save(next)?;
             return Ok(None);
         };
         let ReviewStage::Deep(deep) = review.stage.clone() else {
+            self.save(next)?;
             return Ok(None);
         };
         let issue = item.issue;
@@ -410,9 +415,7 @@ impl Runner {
                     let findings = more.len();
                     let mut all = first;
                     for f in more {
-                        let same =
-                            |k: &Finding| (&k.file, k.line, &k.what) == (&f.file, f.line, &f.what);
-                        if !all.iter().any(same) {
+                        if !all.iter().any(|k| k.is_same_as(&f)) {
                             all.push(f);
                         }
                     }
@@ -444,6 +447,7 @@ impl Runner {
             Deep::Confirming { mut held, before } => {
                 let at = held.iter().position(Held::to_confirm);
                 let Some(at) = at else {
+                    self.save(next)?;
                     return Ok(None);
                 };
                 // A session that cannot say whether it confirmed leaves the
@@ -528,7 +532,10 @@ impl Runner {
                     }
                 }
             }
-            Deep::Sending { .. } | Deep::Fixing { .. } => return Ok(None),
+            Deep::Sending { .. } | Deep::Fixing { .. } => {
+                self.save(next)?;
+                return Ok(None);
+            }
         };
         let Some(unfixed) = ruling else {
             self.save(next)?;
@@ -593,11 +600,8 @@ fn unfixed_line(held: &Held) -> String {
 // merges, so neither its fix nor its test is checked.
 fn apart_deferred(build: &std::path::Path, held: &[Held]) -> (Vec<Held>, usize) {
     let deferred = pin::deferred_findings(build);
-    let (deferred_held, checked): (Vec<&Held>, Vec<&Held>) = held.iter().partition(|h| {
-        let f = &h.finding;
-        deferred
-            .iter()
-            .any(|d| (&d.file, d.line, &d.what) == (&f.file, f.line, &f.what))
-    });
+    let (deferred_held, checked): (Vec<&Held>, Vec<&Held>) = held
+        .iter()
+        .partition(|h| deferred.iter().any(|d| d.is_same_as(&h.finding)));
     (checked.into_iter().cloned().collect(), deferred_held.len())
 }
