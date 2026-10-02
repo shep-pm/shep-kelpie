@@ -367,9 +367,11 @@ SEVERITY|file:line|what is wrong, and its trigger|what goes wrong, and who sees 
         );
     }
 
+    // A folder holding a worktree with `file` in it, and a file beside the worktree.
     fn worktree_with(file: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join(file);
+        std::fs::write(dir.path().join("outside-the-worktree"), "x").unwrap();
+        let path = dir.path().join("worktree").join(file);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, "test").unwrap();
         dir
@@ -380,7 +382,7 @@ SEVERITY|file:line|what is wrong, and its trigger|what goes wrong, and who sees 
         let dir = worktree_with("tests/a.rs");
         let said = "Wrote it.\nCONFIRMED|tests/a.rs|cargo test --test a\n";
         assert_eq!(
-            read_confirmation(said, dir.path()),
+            read_confirmation(said, &dir.path().join("worktree")),
             Confirmation::Test {
                 file: "tests/a.rs".into(),
                 command: "cargo test --test a".into()
@@ -391,7 +393,7 @@ SEVERITY|file:line|what is wrong, and its trigger|what goes wrong, and who sees 
     #[test]
     fn anything_else_is_a_finding_left_unconfirmed() {
         let dir = worktree_with("tests/a.rs");
-        let unconfirmed = |said: &str| match read_confirmation(said, dir.path()) {
+        let unconfirmed = |said: &str| match read_confirmation(said, &dir.path().join("worktree")) {
             Confirmation::Unconfirmed(why) => why,
             other => panic!("{other:?}"),
         };
@@ -402,7 +404,6 @@ SEVERITY|file:line|what is wrong, and its trigger|what goes wrong, and who sees 
             unconfirmed("CONFIRMED|tests/b.rs|cargo test").contains("tests/b.rs, is not there")
         );
         // A path out of the worktree is no test of it, whatever is there.
-        std::fs::write(dir.path().join("../outside-the-worktree"), "x").ok();
         assert!(
             unconfirmed("CONFIRMED|../outside-the-worktree|cargo test").contains("is not there")
         );
