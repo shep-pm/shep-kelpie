@@ -108,7 +108,6 @@ fn the_check_reads_the_issue_what_it_points_to_the_pull_request_and_the_diff() {
         9,
         "1. the first of three things\n2. the second\n3. the third\n",
     );
-    rig.forge.remove_issue(277);
     rig.forge.open_pull_request(277, "kelpie/277", &[]);
     rig.forge.review(
         277,
@@ -280,6 +279,53 @@ fn a_pull_request_merged_while_the_check_ran_is_left_to_the_gate() {
         step(&runner).unwrap(),
         Some(StepReport::Finished { merged: true, .. })
     ));
+}
+
+#[test]
+fn a_head_pushed_while_the_check_ran_drops_its_answer() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert_eq!(
+        step(&runner).unwrap(),
+        None,
+        "CI waits for its checks to settle"
+    );
+    rig.clock.advance(crate::runner::CHECKS_SETTLE);
+    let hold = Hold::default();
+    rig.claude
+        .script([Scripted::HoldAudit(hold.clone(), crate::test::AUDIT_PASSES)]);
+
+    std::thread::scope(|scope| {
+        let call = scope.spawn(|| step(&runner));
+        assert!(
+            hold.entered(Duration::from_secs(10)),
+            "the check never began"
+        );
+        rig.push_by_hand("kelpie/7", "late.txt");
+        hold.release();
+        assert_eq!(
+            call.join().unwrap().unwrap(),
+            None,
+            "a stale answer is dropped"
+        );
+    });
+    let moved = rig.forge.head_of("kelpie/7").unwrap();
+    assert_ne!(moved, head);
+
+    // The gate takes the head from there: a push it did not make is the
+    // maintainer's to rule on, and no merge ruling on a head nothing checked.
+    rig.forge.set_checks(&moved, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::Ruling { .. })
+    ));
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["rulings"][0]["kind"]["kind"], "foreign-change");
+    assert_eq!(
+        audits(&rig).len(),
+        1,
+        "the old head's answer passed nothing"
+    );
 }
 
 #[test]

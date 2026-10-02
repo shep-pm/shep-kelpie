@@ -122,28 +122,31 @@ impl Runner {
         self.prepared(call)
     }
 
-    // What `n`, which the issue's body points to, says: an issue's title and
-    // body, or a pull request's with the review comments still unresolved on
-    // it. Said so when it cannot be read, for the check to count against.
+    // What `n`, which the issue's body points to, says: a pull request's
+    // title and body with the review comments still unresolved on it, or an
+    // issue's title and body. A pull request is asked for first, since the
+    // forge's issue view answers for a pull request's number too, with its
+    // title and body alone, while a pull request view of an issue fails.
+    // Said so when it cannot be read, for the check to count against.
     fn pulled_in(&self, n: u64) -> String {
         let forge = &self.ports.forge;
         let repo = &self.settings.forge;
-        if let Ok(found) = forge.issue(repo, n) {
-            let said = format!("#{n} {}\n\n{}", found.title.trim(), found.body.trim());
+        if let Ok(pull) = forge.reviewed(repo, n) {
+            let mut said = format!("#{n} {}\n\n{}", pull.title.trim(), pull.body.trim());
+            let comments = pull.review.iter().flat_map(|r| &r.comments);
+            for comment in comments {
+                let line = comment.line.map(|l| format!(":{l}")).unwrap_or_default();
+                said.push_str(&format!(
+                    "\n\nreview comment on {}{line}: {}",
+                    comment.file,
+                    comment.body.trim()
+                ));
+            }
             return cut(&said, MOST);
         }
-        match forge.reviewed(repo, n) {
-            Ok(pull) => {
-                let mut said = format!("#{n} {}\n\n{}", pull.title.trim(), pull.body.trim());
-                let comments = pull.review.iter().flat_map(|r| &r.comments);
-                for comment in comments {
-                    let line = comment.line.map(|l| format!(":{l}")).unwrap_or_default();
-                    said.push_str(&format!(
-                        "\n\nreview comment on {}{line}: {}",
-                        comment.file,
-                        comment.body.trim()
-                    ));
-                }
+        match forge.issue(repo, n) {
+            Ok(found) => {
+                let said = format!("#{n} {}\n\n{}", found.title.trim(), found.body.trim());
                 cut(&said, MOST)
             }
             Err(e) => format!("#{n} could not be read: {e}"),

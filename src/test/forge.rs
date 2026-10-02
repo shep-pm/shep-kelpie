@@ -595,9 +595,22 @@ impl Forge for FakeForge {
         // Each read takes its own lock, so none may be held across another.
         let open = !self.closed.lock().unwrap().contains(&number);
         let body = self.bodies.lock().unwrap().get(&number).cloned();
+        // As on GitHub, an issue view of a pull request's number answers with
+        // the pull request, its title and body alone.
+        let pull = self.pull_requests.lock().unwrap().contains_key(&number);
+        let (title, said) = match pull {
+            true => (
+                format!("Title of pull request #{number}"),
+                format!("Body of pull request #{number}.\n"),
+            ),
+            false => (
+                format!("Title of #{number}"),
+                format!("Body of #{number}.\n"),
+            ),
+        };
         Ok(Issue {
-            title: format!("Title of #{number}"),
-            body: body.unwrap_or_else(|| format!("Body of #{number}.\n")),
+            title,
+            body: body.unwrap_or(said),
             labels: self.labels_of(number),
             open,
             parent: self.parent_of(number),
