@@ -414,6 +414,174 @@ pub fn uncommitted(repo: &Path, worktree: &Path) -> Result<Vec<String>, Worktree
     Ok(files)
 }
 
+/// The files `worktree` differs from its last commit in, with the git blob id
+/// of each as it is on disk, or `None` for one that is gone
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed, which a file that
+/// is there and cannot be read also does.
+pub fn differing(
+    repo: &Path,
+    worktree: &Path,
+) -> Result<Vec<(String, Option<String>)>, WorktreeError> {
+    let mut found = Vec::new();
+    for path in uncommitted(repo, worktree)? {
+        let blob = match worktree.join(&path).is_file() {
+            true => Some(blob_of(repo, worktree, &path)?),
+            false => None,
+        };
+        found.push((path, blob));
+    }
+    Ok(found)
+}
+
+/// The lines that went in and out turning the blob `before` into the blob
+/// `after`, each trimmed, with the blank ones left out
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn lines_changed(
+    repo: &Path,
+    worktree: &Path,
+    before: &str,
+    after: &str,
+) -> Result<(Vec<String>, Vec<String>), WorktreeError> {
+    let diff =
+        trusted(repo, worktree)?(&["diff", "--no-color", "--no-ext-diff", "-U0", before, after])?;
+    let (mut added, mut removed) = (Vec::new(), Vec::new());
+    // Everything before the first hunk is the header, which `+++` and `---` are part of.
+    let mut in_hunk = false;
+    for line in diff.lines() {
+        if line.starts_with("@@") {
+            in_hunk = true;
+        } else if in_hunk {
+            let kept = |rest: &str| (!rest.trim().is_empty()).then(|| rest.trim().to_owned());
+            match line.split_at_checked(1) {
+                Some(("+", rest)) => added.extend(kept(rest)),
+                Some(("-", rest)) => removed.extend(kept(rest)),
+                _ => {}
+            }
+        }
+    }
+    Ok((added, removed))
+}
+
+/// Every line of the git blob `blob`, trimmed, with the blank ones left out
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn lines_of(repo: &Path, worktree: &Path, blob: &str) -> Result<Vec<String>, WorktreeError> {
+    let text = trusted(repo, worktree)?(&["cat-file", "-p", blob])?;
+    Ok(text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+/// The git blob id of the file `path` of `worktree` as it is on disk now, the
+/// blob written to the repo so what it held can be read back
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed, as it does for a
+/// file that is not there.
+pub fn blob_of(repo: &Path, worktree: &Path, path: &str) -> Result<String, WorktreeError> {
+    trusted(repo, worktree)?(&["hash-object", "-w", "--", path])
+}
+
+/// Puts `worktree` back as it was when `before` was taken: what differed
+/// from its head then, with the blob each file held
+///
+/// A file made since is removed, a file edited since is written back as it
+/// was, and a file that was not there is restored. One that was at its
+/// head's version then is put back at it, and one that was gone then, which
+/// is a deletion not yet committed, is gone again.
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command or the file that failed.
+pub fn restore(
+    repo: &Path,
+    worktree: &Path,
+    before: &[(String, Option<String>)],
+) -> Result<(), WorktreeError> {
+    let git = trusted(repo, worktree)?;
+    let mut paths = uncommitted(repo, worktree)?;
+    paths.extend(before.iter().map(|(path, _)| path.clone()));
+    paths.sort();
+    paths.dedup();
+    let io = |path: &str, e: io::Error| WorktreeError::Spawn(format!("{path}: {e}"));
+    for path in paths {
+        let file = worktree.join(&path);
+        match before.iter().find(|(p, _)| *p == path) {
+            Some((_, None)) => match std::fs::remove_file(&file) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(io(&path, e)),
+            },
+            Some((_, Some(blob))) => {
+                let held = file
+                    .is_file()
+                    .then(|| blob_of(repo, worktree, &path))
+                    .transpose()?;
+                if held.as_deref() != Some(blob.as_str()) {
+                    let bytes = blob_bytes(repo, worktree, blob)?;
+                    if let Some(parent) = file.parent() {
+                        std::fs::create_dir_all(parent).map_err(|e| io(&path, e))?;
+                    }
+                    std::fs::write(&file, bytes).map_err(|e| io(&path, e))?;
+                }
+            }
+            None if blob_at_head(repo, worktree, &path)?.is_some() => {
+                git(&["restore", "--source=HEAD", "--worktree", "--", &path])?;
+            }
+            None => match std::fs::remove_file(&file) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(io(&path, e)),
+            },
+        }
+    }
+    Ok(())
+}
+
+// What the blob `blob` holds, byte for byte, which `git` through [`git`] would trim.
+fn blob_bytes(repo: &Path, worktree: &Path, blob: &str) -> Result<Vec<u8>, WorktreeError> {
+    let output = Command::new("git")
+        .args(trusted_prefix(repo, worktree)?)
+        .args(["cat-file", "blob", blob])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| WorktreeError::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        return Err(WorktreeError::Git {
+            args: format!("cat-file blob {blob}"),
+            stderr: String::from_utf8_lossy(&output.stderr).into(),
+        });
+    }
+    Ok(output.stdout)
+}
+
+/// The git blob id of `path` in the commit `worktree` has checked out, or
+/// `None` when that commit has no such file
+///
+/// # Errors
+///
+/// [`WorktreeError`] when git cannot be run for the worktree at all.
+pub fn blob_at_head(
+    repo: &Path,
+    worktree: &Path,
+    path: &str,
+) -> Result<Option<String>, WorktreeError> {
+    let at = format!("HEAD:{path}");
+    Ok(trusted(repo, worktree)?(&["rev-parse", "--verify", "--quiet", &at]).ok())
+}
+
 // The paths in `git status --porcelain=v2 -z`, where an entry is a kind, its
 // fields and then the path, and a rename or copy adds the old path as an
 // entry of its own.
@@ -617,6 +785,15 @@ pub(crate) fn trusted<'a>(
     repo: &Path,
     worktree: &'a Path,
 ) -> Result<impl Fn(&[&str]) -> Result<String, WorktreeError> + 'a, WorktreeError> {
+    let prefix = trusted_prefix(repo, worktree)?;
+    Ok(move |args: &[&str]| {
+        let args = prefix.iter().cloned().chain(args.iter().map(Into::into));
+        git(worktree, args.collect::<Vec<std::ffi::OsString>>())
+    })
+}
+
+// The options that make `git` about `worktree` the trusted one.
+fn trusted_prefix(repo: &Path, worktree: &Path) -> Result<Vec<std::ffi::OsString>, WorktreeError> {
     let foreign = || WorktreeError::Foreign(worktree.to_owned());
     let common = git(
         repo,
@@ -628,7 +805,7 @@ pub(crate) fn trusted<'a>(
     if canonical(&own.join(named.trim())) != common {
         return Err(foreign());
     }
-    let prefix = [
+    Ok(vec![
         "--git-dir".into(),
         own.into_os_string(),
         "--work-tree".into(),
@@ -636,11 +813,7 @@ pub(crate) fn trusted<'a>(
         "-c".into(),
         "core.hooksPath=/dev/null".into(),
         "--no-replace-objects".into(),
-    ];
-    Ok(move |args: &[&str]| {
-        let args = prefix.iter().cloned().chain(args.iter().map(Into::into));
-        git(worktree, args.collect::<Vec<std::ffi::OsString>>())
-    })
+    ])
 }
 
 // Everything about the worktree is read from the project's repo, never from

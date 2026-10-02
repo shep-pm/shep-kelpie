@@ -192,6 +192,7 @@ pub struct Finished {
     /// Seconds from its creation to `at`
     pub wall: u64,
     /// Every phase, summing to `wall`
+    #[serde(serialize_with = "crate::work_item::saved_seconds")]
     pub seconds: Seconds,
 }
 
@@ -346,6 +347,10 @@ pub enum RulingKind {
         fix: Fix,
         /// The fix turn a yes starts
         prompt: String,
+        /// What is wrong with the fix when it did push, and was found not to
+        /// be what the findings need; none when it pushed nothing
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        why: Option<String>,
     },
     /// The whole-issue check still finds gaps after sending the worker back
     /// twice. A yes sends the worker the gaps once more, and merging by hand
@@ -356,6 +361,16 @@ pub enum RulingKind {
         /// Each criterion not met and each assumption not checked
         gaps: Vec<String>,
         /// The turn a yes starts
+        prompt: String,
+    },
+    /// The deep round's re-check still finds findings unfixed after the worker
+    /// was sent back once. A yes sends the worker them once more.
+    DeepReview {
+        /// The review, at the fix the yes starts again
+        review: Review,
+        /// Each finding still unfixed, with what is still wrong
+        unfixed: Vec<String>,
+        /// The fix turn a yes starts
         prompt: String,
     },
     /// CodeRabbit's rounds reached their cap with findings the judge held.

@@ -63,9 +63,10 @@ fn a_project_lists_its_reviewers_in_the_order_the_loop_runs_them() {
 }
 
 #[test]
-fn no_list_is_today_s_loop_of_qwen_then_claude() {
+fn no_list_is_the_local_round_and_then_the_deep_round() {
     let lineup = lineup("[]", DEFINED).unwrap();
-    assert_eq!(names(&lineup), ["qwen", "claude"]);
+    assert_eq!(names(&lineup), ["qwen", "deep"]);
+    assert_eq!(lineup[1].runs, Runs::Deep);
     assert_eq!(
         lineup[0].runs,
         Runs::Local(LocalRound::default_at(Path::new(HOME))),
@@ -88,6 +89,17 @@ fn claude_is_each_project_s_own_and_cannot_be_defined() {
     let section = "[local_reviewers.claude]\nkind = \"claude\"\nmodel = \"m\"\neffort = \"low\"\n";
     let err = lineup(r#"["claude"]"#, section).unwrap_err();
     assert!(err.contains("`[local_reviewers.claude]` is taken"), "{err}");
+}
+
+#[test]
+fn deep_is_each_project_s_own_deep_round_and_may_be_listed_but_not_defined() {
+    let listed = lineup(r#"["qwen", "deep"]"#, DEFINED).unwrap();
+    assert_eq!(names(&listed), ["qwen", "deep"]);
+    assert_eq!(listed[1].runs, Runs::Deep);
+
+    let section = "[local_reviewers.deep]\nkind = \"claude\"\nmodel = \"m\"\neffort = \"low\"\n";
+    let err = lineup(r#"["deep"]"#, section).unwrap_err();
+    assert!(err.contains("`[local_reviewers.deep]` is taken"), "{err}");
 }
 
 #[test]

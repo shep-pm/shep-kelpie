@@ -182,7 +182,10 @@ fn argv(call: &AgentCall, mcp_config: Option<&Path>) -> Vec<OsString> {
         "--output-format".into(),
         "json".into(),
     ];
-    if call.role == Role::Worker {
+    // A session of the deep round that runs commands has no one to answer a
+    // permission prompt, and the fence is what holds it, as it holds a worker.
+    let runs_commands = call.role == Role::DeepReviewer && call.tools == crate::ports::Tools::Work;
+    if call.role == Role::Worker || runs_commands {
         argv.extend(["--permission-mode".into(), "bypassPermissions".into()]);
     }
     if let Some(config) = mcp_config {
@@ -418,6 +421,19 @@ mod tests {
             let argv = strings(&call(role, fresh()));
             assert!(!argv.iter().any(|a| a == "--permission-mode"), "{role:?}");
         }
+    }
+
+    #[test]
+    fn a_deep_session_that_runs_commands_bypasses_permissions_and_a_reader_does_not() {
+        let mut runs = call(Role::DeepReviewer, fresh());
+        runs.tools = Tools::Work;
+        let argv = strings(&runs);
+        let at = argv.iter().position(|a| a == "--permission-mode").unwrap();
+        assert_eq!(argv[at + 1], "bypassPermissions");
+
+        let mut reads = call(Role::DeepReviewer, fresh());
+        reads.tools = Tools::Review;
+        assert!(!strings(&reads).iter().any(|a| a == "--permission-mode"));
     }
 
     #[test]

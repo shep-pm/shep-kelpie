@@ -13,7 +13,7 @@ fn listing(list: &str) -> Rig {
     let rig = Rig::new("koji");
     rig.edit_settings(|s| {
         assert!(s.contains("loop_guard = 8\n"), "the example's guard moved");
-        s.replace(
+        s.replace(crate::test::OLD_LOCAL, "").replace(
             "loop_guard = 8\n",
             &format!("loop_guard = 8\nreviewers = {list}\n"),
         )
@@ -74,7 +74,7 @@ fn reviewer_models(rig: &Rig) -> Vec<String> {
 }
 
 #[test]
-fn no_list_runs_today_s_loop_of_qwen_then_claude() {
+fn the_older_local_round_runs_the_older_loop_of_qwen_then_claude() {
     let rig = Rig::new("koji");
     let runner = at_review(&rig, "work.txt");
     rig.claude.script([Scripted::Text("CLEAN")]);

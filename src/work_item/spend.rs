@@ -43,6 +43,8 @@ pub struct Spend {
     pub judge: RoleSpend,
     /// The whole-issue checks
     pub auditor: RoleSpend,
+    /// The deep review rounds' sessions
+    pub deep_reviewer: RoleSpend,
 }
 
 /// A work item's qwen rounds. They cost no money, so it is the count and the
@@ -67,6 +69,7 @@ impl WorkItem {
                 Role::Reviewer => &mut spend.reviewer,
                 Role::Judge => &mut spend.judge,
                 Role::Auditor => &mut spend.auditor,
+                Role::DeepReviewer => &mut spend.deep_reviewer,
                 // A planning call runs before any work item opens.
                 Role::Planner => continue,
             };

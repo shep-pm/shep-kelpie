@@ -682,6 +682,16 @@ const NOT_REVIEWED: &str = "not reviewed: ";
 const TOO_LARGE: &str = "exceeds the chunk limit";
 
 impl Finding {
+    /// Whether `other` is the same finding: in the same file, at the same
+    /// line, saying the same thing, whoever else wrote it up and however
+    /// differently it says why
+    ///
+    /// The key held findings are remembered by, readers' lists are merged by,
+    /// and a deferred finding is matched to the one the worker was sent by.
+    pub fn is_same_as(&self, other: &Self) -> bool {
+        (&self.file, self.line, &self.what) == (&other.file, other.line, &other.what)
+    }
+
     /// Whether this is the line the script writes for a file it skipped as
     /// over the chunk limit
     ///

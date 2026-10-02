@@ -44,8 +44,8 @@ pub use agents::{
 pub use labels::{LabelModels, LabelName};
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use reviewers::{
-    AgentSession, CLAUDE, ClaudeSession, Definition, LeaseName, LoopReviewer, QWEN, ReviewerName,
-    Runs,
+    AgentSession, CLAUDE, ClaudeSession, DEEP, Definition, LeaseName, LoopReviewer, QWEN,
+    ReviewerName, Runs,
 };
 pub use skills::{SkillChoice, SkillName, StepSkills};
 
@@ -146,6 +146,11 @@ pub struct Models {
     /// before the merge. Opus 5.5 at high effort when absent.
     #[serde(default = "default_auditor")]
     pub auditor: RoleModel,
+    /// The sessions of the deep review round: its two readers, the one that
+    /// confirms each HIGH with a failing test and the re-check of the fix.
+    /// Opus 5.5 at high effort when absent.
+    #[serde(default = "default_deep_reviewer")]
+    pub deep_reviewer: RoleModel,
     /// The model id each `worker:<model>-<effort>` label name runs, each
     /// at its default when absent
     #[serde(default)]
@@ -166,6 +171,10 @@ fn default_planner() -> RoleModel {
 }
 
 fn default_auditor() -> RoleModel {
+    opus(Effort::High)
+}
+
+fn default_deep_reviewer() -> RoleModel {
     opus(Effort::High)
 }
 
@@ -236,13 +245,15 @@ impl Effort {
 pub struct Review {
     /// Rounds after which the worker is parked for a ruling
     pub loop_guard: NonZeroU32,
-    /// The reviewers the loop runs, in order, from `claude` and those
-    /// kelpie's `[local_reviewers]` define. When absent or empty, the local
-    /// round in `review.local` and then `claude`.
+    /// The reviewers the loop runs, in order, from `deep`, `claude` and those
+    /// kelpie's `[local_reviewers]` define. When absent or empty, the
+    /// maintainer's qwen-review script when it is there and then `deep`, the
+    /// one deep round; with `review.local` set, that round and then `claude`.
     #[serde(default)]
     pub reviewers: Vec<ReviewerName>,
     /// The older form of a local round, `[review.local]`, which alternates
-    /// with `claude`. The maintainer's qwen-review script when absent.
+    /// with `claude`. Absent, the maintainer's qwen-review script runs first
+    /// when it is there, and the deep round after it.
     #[serde(default)]
     pub local: Option<LocalRound>,
     /// At most this many rounds from local reviewers per work item. Once

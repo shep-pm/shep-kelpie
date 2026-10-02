@@ -189,6 +189,32 @@ fn a_claude_round_in_flight_is_claude_round() {
 }
 
 #[test]
+fn a_deep_round_session_in_flight_is_deep_round() {
+    let rig = Rig::new("koji");
+    rig.deep_review();
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+    step(&runner).unwrap(); // the worker's first turn
+    step(&runner).unwrap(); // round 1, local: clean by default
+    let hold = Hold::default();
+    rig.claude.script([Scripted::Hold(hold.clone())]);
+    let t = read_while_held(&rig, &runner, &hold, 90);
+    assert_eq!(t["phase"], "deep_round");
+    assert_eq!(
+        (
+            secs(&t, "deep_round"),
+            secs(&t, "claude_round"),
+            secs(&t, "judging")
+        ),
+        (90, 0, 0)
+    );
+    assert_sums(&t);
+}
+
+#[test]
 fn the_judge_in_flight_is_judging() {
     let (rig, runner) = at_the_claude_round();
     rig.claude

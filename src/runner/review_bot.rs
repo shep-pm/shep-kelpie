@@ -669,7 +669,14 @@ impl Runner {
             let path = findings::findings_path(&self.item().build);
             let prompt = findings::again_prompt(number, round, &path);
             let fix = Fix::CodeRabbit { round, head };
-            return self.raise(number, RulingKind::FixNotPushed { fix, prompt });
+            return self.raise(
+                number,
+                RulingKind::FixNotPushed {
+                    fix,
+                    prompt,
+                    why: None,
+                },
+            );
         }
         let since = self.ports.clock.now();
         self.update(|item| item.phase = Phase::Ci { head: None, since })?;

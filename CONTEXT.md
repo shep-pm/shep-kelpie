@@ -90,12 +90,22 @@ The checks a pull request must pass before it merges.
 
 **Timings**:
 Where a work item's wall time went, by timing phase: `worker`, `gpu_wait`,
-`local_round`, `claude_round`, `judging`, `audit`, `ci`, `coderabbit_window`,
-`coderabbit_review`, `ruling`, `merge`, `shots`, `paused` and `other`. Every
+`local_round`, `claude_round`, `deep_round`, `judging`, `audit`, `ci`,
+`coderabbit_window`, `coderabbit_review`, `ruling`, `merge`, `shots`, `paused`
+and `other`. Every
 second lands in exactly one. A timing phase is a bucket of time, not the
 stage a work item is in (its **phase**). `status` shows the open items'
 timings, and `timings <n>` totals the last `n` finished ones.
 _Avoid_: profile, metrics
+
+**Deep round**:
+A new project's review, in place of the loop's alternating rounds: two fresh
+sessions on the `deep_reviewer` role read the whole pull request for defects,
+a session that may run commands writes a failing test for each HIGH they hold,
+one worker turn fixes everything held, and one re-check reads only the fix
+commits and runs those tests. A finding it finds unfixed goes back to the
+worker once, then to a ruling. The loop ends after it.
+_Avoid_: deep review (a review bot's rounds are reviews of their own)
 
 **Whole-issue check**:
 The last check before a merge ruling, or an `auto` merge: a fresh session on the

@@ -155,6 +155,7 @@ mod tests {
             .replace("# judge = \"opus-high\"", "judge = \"opus-high\"")
             .replace("# planner = \"opus-high\"", "planner = \"opus-high\"")
             .replace("# auditor = \"opus-high\"", "auditor = \"opus-high\"")
+            .replace("# deep_reviewer = \"opus-high\"", "deep_reviewer = \"opus-high\"")
             .replace("# [app.dogs.kelpie.models.labels]", "[app.dogs.kelpie.models.labels]")
             .replace("# opus = \"claude-opus-5-5\"", "opus = \"claude-opus-5-5\"")
             .replace("# sonnet = \"claude-sonnet-5-5\"", "sonnet = \"claude-sonnet-5-5\"")

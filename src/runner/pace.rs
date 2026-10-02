@@ -138,16 +138,19 @@ impl Runner {
         Ok(Pace::Clear)
     }
 
-    // Each role's limit, the planner's and auditor's included, then each session reviewer's.
+    // Each role's limit, the planner's, auditor's and deep reviewer's included, then each session reviewer's.
     fn spent_limits(&self) -> impl Iterator<Item = &Limit> {
         let limits = &self.agents.limits;
         let sessions = self.lineup.iter().filter_map(|r| match &r.runs {
             Runs::Claude(session) => Some(&session.limit),
-            Runs::Local(_) => None,
+            Runs::Local(_) | Runs::Deep => None,
         });
         // Beside a local worker, every issue it is not given runs on Claude.
         const CLAUDE: Limit = Limit::Account(Account::Claude);
         let claude_worker = limits.worker.lease().map(|_| &CLAUDE);
+        // Only a project that runs the deep round spends its role.
+        let deep = self.lineup.iter().any(|r| r.runs == Runs::Deep);
+        let deep = deep.then_some(&limits.deep_reviewer);
         [
             &limits.worker,
             &limits.reviewer,
@@ -156,6 +159,7 @@ impl Runner {
             &limits.auditor,
         ]
         .into_iter()
+        .chain(deep)
         .chain(claude_worker)
         .chain(sessions)
     }

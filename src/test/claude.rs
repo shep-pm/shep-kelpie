@@ -32,6 +32,30 @@ pub(crate) enum Scripted {
     /// Writes this file with this text in the worktree, commits nothing,
     /// and answers: a write that got past the fence
     Plant(&'static str, &'static str),
+    /// Commits and pushes the first file as `Push` does, then changes the
+    /// second, tracked file and leaves it uncommitted
+    PushLeaving(&'static str, &'static str, &'static str),
+    /// Commits and pushes each of these files with this text in one commit
+    PushMany(&'static [(&'static str, &'static str)]),
+    /// Commits and pushes the first file as `Push` does, after deleting the
+    /// third, which was in the worktree and is not committed
+    PushAndRemove(&'static str, &'static str, &'static str),
+    /// Writes this file with this text in the worktree, then fails with this error
+    WriteThenFail(&'static str, &'static str, AgentError),
+    /// Writes each of these files with its text, commits nothing, and answers
+    /// with the last text
+    WriteMany(&'static [(&'static str, &'static str)], &'static str),
+    /// Writes this file with this text and answers with the third, after
+    /// removing the file that links the worktree's git folder to its repo, so
+    /// kelpie's own git commands about the worktree fail
+    WriteAndBreakGit(&'static str, &'static str, &'static str),
+    /// Commits and pushes the first file as `Push` does, then leaves a new
+    /// file with the third name uncommitted
+    PushAndPlant(&'static str, &'static str, &'static str),
+    /// Writes this file with this text in the worktree, commits nothing, and
+    /// answers with this exact text: a session that confirms a finding with a
+    /// failing test
+    Write(&'static str, &'static str, &'static str),
     /// Stages this file with this text, commits nothing, and deletes the
     /// working copy, so only the index holds it, and answers
     Stage(&'static str, &'static str),
@@ -228,18 +252,17 @@ impl Agents for FakeClaude {
             }
             other => other,
         };
+        let said = |text: &str| answer(call, text);
         match next {
             Some(Scripted::Reply(usage, session_cost)) => Ok(AgentReply {
-                session_id: call.session.id().clone(),
-                text: "done".into(),
                 usage,
                 session_cost: Some(session_cost),
+                ..said("done")
             }),
             Some(Scripted::Tokens(usage)) => Ok(AgentReply {
-                session_id: call.session.id().clone(),
-                text: "done".into(),
                 usage,
                 session_cost: None,
+                ..said("done")
             }),
             Some(Scripted::Spend(..)) => unreachable!("turned into a reply above"),
             Some(Scripted::Fail(error)) => Err(error),
@@ -247,51 +270,23 @@ impl Agents for FakeClaude {
                 std::fs::write(call.cwd.join(LEFT_BEHIND), "work in progress\n").unwrap();
                 panic!("the runner is killed mid-turn");
             }
-            Some(Scripted::Text(text)) => Ok(AgentReply {
-                session_id: call.session.id().clone(),
-                text: text.to_owned(),
-                usage: Usage::default(),
-                session_cost: Some(Cost(0)),
-            }),
+            Some(Scripted::Text(text) | Scripted::Say(text)) => Ok(said(text)),
             Some(Scripted::Billed(text, cost)) => Ok(AgentReply {
-                session_id: call.session.id().clone(),
-                text: text.to_owned(),
-                usage: Usage::default(),
                 session_cost: Some(cost),
+                ..said(text)
             }),
-            Some(Scripted::Audit(text)) if call.role == Role::Auditor => Ok(AgentReply {
-                session_id: call.session.id().clone(),
-                text: text.to_owned(),
-                usage: Usage::default(),
-                session_cost: Some(Cost(0)),
-            }),
+            Some(Scripted::Audit(text)) if call.role == Role::Auditor => Ok(said(text)),
             Some(Scripted::HoldAudit(hold, text)) if call.role == Role::Auditor => {
                 hold.block();
-                Ok(AgentReply {
-                    session_id: call.session.id().clone(),
-                    text: text.to_owned(),
-                    usage: Usage::default(),
-                    session_cost: Some(Cost(0)),
-                })
+                Ok(said(text))
             }
             Some(Scripted::Audit(_) | Scripted::HoldAudit(..)) => Err(AgentError::Failed(
                 crate::settings::Harness::ClaudeCode,
                 "the rig scripts a whole-issue check's answer for another call".into(),
             )),
-            Some(Scripted::Say(text)) => Ok(AgentReply {
-                session_id: call.session.id().clone(),
-                text: text.into(),
-                usage: Usage::default(),
-                session_cost: Some(Cost(0)),
-            }),
             Some(Scripted::Hold(hold)) => {
                 hold.block();
-                Ok(AgentReply {
-                    session_id: call.session.id().clone(),
-                    text: "done".into(),
-                    usage: Usage::default(),
-                    session_cost: Some(Cost(0)),
-                })
+                Ok(said("done"))
             }
             Some(Scripted::HoldThenFail(hold, error)) => {
                 hold.block();
@@ -299,35 +294,56 @@ impl Agents for FakeClaude {
             }
             Some(Scripted::Plant(file, text)) => {
                 write_in(&call.cwd, file, text);
-                Ok(AgentReply {
-                    session_id: call.session.id().clone(),
-                    text: "done".into(),
-                    usage: Usage::default(),
-                    session_cost: Some(Cost(0)),
-                })
+                Ok(said("done"))
+            }
+            Some(Scripted::Write(file, text, say)) => {
+                write_in(&call.cwd, file, text);
+                Ok(said(say))
             }
             Some(Scripted::Stage(file, text)) => {
                 write_in(&call.cwd, file, text);
                 git(&call.cwd, &["add", file]);
                 std::fs::remove_file(call.cwd.join(file)).unwrap();
-                Ok(AgentReply {
-                    session_id: call.session.id().clone(),
-                    text: "done".into(),
-                    usage: Usage::default(),
-                    session_cost: Some(Cost(0)),
-                })
+                Ok(said("done"))
+            }
+            Some(Scripted::PushAndRemove(file, text, removed)) => {
+                std::fs::remove_file(call.cwd.join(removed)).unwrap();
+                push(&call.cwd, &[(file, text)], file);
+                Ok(said("pushed"))
+            }
+            Some(Scripted::WriteAndBreakGit(file, text, say)) => {
+                write_in(&call.cwd, file, text);
+                let own = git(&call.cwd, &["rev-parse", "--absolute-git-dir"]);
+                std::fs::remove_file(std::path::Path::new(&own).join("commondir")).unwrap();
+                Ok(said(say))
+            }
+            Some(Scripted::WriteThenFail(file, text, error)) => {
+                write_in(&call.cwd, file, text);
+                Err(error)
+            }
+            Some(Scripted::WriteMany(files, say)) => {
+                for (file, text) in files {
+                    write_in(&call.cwd, file, text);
+                }
+                Ok(said(say))
+            }
+            Some(Scripted::PushMany(files)) => {
+                push(&call.cwd, files, "fix");
+                Ok(said("pushed"))
+            }
+            Some(Scripted::PushAndPlant(file, text, junk)) => {
+                push(&call.cwd, &[(file, text)], file);
+                write_in(&call.cwd, junk, "left behind\n");
+                Ok(said("pushed"))
+            }
+            Some(Scripted::PushLeaving(file, text, tracked)) => {
+                push(&call.cwd, &[(file, text)], file);
+                write_in(&call.cwd, tracked, "an edit the worker left uncommitted\n");
+                Ok(said("pushed"))
             }
             Some(Scripted::Push(file, text)) => {
-                write_in(&call.cwd, file, text);
-                git(&call.cwd, &["add", file]);
-                git(&call.cwd, &["commit", "--quiet", "-m", file]);
-                git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);
-                Ok(AgentReply {
-                    session_id: call.session.id().clone(),
-                    text: "pushed".into(),
-                    usage: Usage::default(),
-                    session_cost: Some(Cost(0)),
-                })
+                push(&call.cwd, &[(file, text)], file);
+                Ok(said("pushed"))
             }
             Some(Scripted::MergeMain) => {
                 git(&call.cwd, &["fetch", "--quiet", "origin", "main"]);
@@ -343,12 +359,7 @@ impl Agents for FakeClaude {
                     ],
                 );
                 git(&call.cwd, &["push", "--quiet", "origin", "HEAD"]);
-                Ok(AgentReply {
-                    session_id: call.session.id().clone(),
-                    text: "merged".into(),
-                    usage: Usage::default(),
-                    session_cost: Some(Cost(0)),
-                })
+                Ok(said("merged"))
             }
             None => Err(AgentError::Failed(
                 crate::settings::Harness::ClaudeCode,
@@ -356,4 +367,25 @@ impl Agents for FakeClaude {
             )),
         }
     }
+}
+
+// What a call that cost nothing answers, saying `text`.
+fn answer(call: &AgentCall, text: &str) -> AgentReply {
+    AgentReply {
+        session_id: call.session.id().clone(),
+        text: text.to_owned(),
+        usage: Usage::default(),
+        session_cost: Some(Cost(0)),
+    }
+}
+
+// Writes each file, commits them in one commit with `message`, and pushes it
+// the way a worker does.
+fn push(cwd: &Path, files: &[(&str, &str)], message: &str) {
+    for (file, text) in files {
+        write_in(cwd, file, text);
+        git(cwd, &["add", file]);
+    }
+    git(cwd, &["commit", "--quiet", "-m", message]);
+    git(cwd, &["push", "--quiet", "origin", "HEAD"]);
 }

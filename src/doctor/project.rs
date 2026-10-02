@@ -129,12 +129,15 @@ fn spends_codex(settings: &Settings, kelpie: &KelpieSettings, here: Here<'_>) ->
     let lineup = settings.lineup(kelpie, here.home).unwrap_or_default();
     let sessions = lineup.iter().any(|r| match &r.runs {
         Runs::Claude(session) => codex(&session.limit),
-        Runs::Local(_) => false,
+        Runs::Local(_) | Runs::Deep => false,
     });
+    let deep = lineup.iter().any(|r| r.runs == Runs::Deep);
     sessions
         || roles.is_some_and(|l| {
+            let deep = deep.then_some(l.deep_reviewer);
             [l.worker, l.reviewer, l.judge, l.planner, l.auditor]
                 .iter()
+                .chain(&deep)
                 .any(codex)
         })
 }

@@ -182,11 +182,7 @@ fn read_deferred(path: &Path, held: &[Finding], worktree: &Path) -> Result<Vec<F
         Err(e) => return Err(format!("cannot read {}: {}", path.display(), e.kind())),
     };
     let deferred = parse_findings(&text);
-    let named = |held: &Finding| {
-        deferred
-            .iter()
-            .any(|d| (&d.file, d.line, &d.what) == (&held.file, held.line, &held.what))
-    };
+    let named = |held: &Finding| deferred.iter().any(|d| d.is_same_as(held));
     Ok(held
         .iter()
         .filter(|held| named(held))

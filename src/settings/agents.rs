@@ -323,6 +323,9 @@ pub struct RoleAgentNames {
     /// The one-shot that checks a whole work item against its issue before the merge
     #[serde(default)]
     pub auditor: Option<AgentName>,
+    /// The sessions of the deep review round
+    #[serde(default)]
+    pub deep_reviewer: Option<AgentName>,
 }
 
 /// The model and effort each role runs on, from the agent it names
@@ -338,6 +341,8 @@ pub struct RoleAgents {
     pub planner: RoleModel,
     /// The whole-issue check's one-shots
     pub auditor: RoleModel,
+    /// The deep review round's sessions
+    pub deep_reviewer: RoleModel,
     /// What holds each role's calls back
     pub limits: RoleLimits,
 }
@@ -355,6 +360,8 @@ pub struct RoleLimits {
     pub planner: Limit,
     /// The whole-issue check's one-shots
     pub auditor: Limit,
+    /// The deep review round's sessions
+    pub deep_reviewer: Limit,
 }
 
 impl Settings {
@@ -373,16 +380,66 @@ impl Settings {
             Some(name) => find(defined, name, &format!("agents.{role}"), "agents"),
         };
         let (worker, worker_limit) = pick("worker", &self.agents.worker, &self.models.worker)?;
-        // Only Claude Code runs the preview's MCP servers and the project's hooks.
-        let other = match &worker.harness {
+        self.under_worker_fence("worker", &worker, &self.agents.worker, true)?;
+        let (reviewer, reviewer_limit) =
+            pick("reviewer", &self.agents.reviewer, &self.models.reviewer)?;
+        let (judge, judge_limit) = pick("judge", &self.agents.judge, &self.models.judge)?;
+        let (planner, planner_limit) = pick("planner", &self.agents.planner, &self.models.planner)?;
+        let (auditor, auditor_limit) = pick("auditor", &self.agents.auditor, &self.models.auditor)?;
+        let (deep_reviewer, deep_reviewer_limit) = pick(
+            "deep_reviewer",
+            &self.agents.deep_reviewer,
+            &self.models.deep_reviewer,
+        )?;
+        // Its sessions that run commands run under the worker's fence.
+        self.under_worker_fence(
+            "deep_reviewer",
+            &deep_reviewer,
+            &self.agents.deep_reviewer,
+            false,
+        )?;
+        Ok(RoleAgents {
+            worker,
+            reviewer,
+            judge,
+            planner,
+            auditor,
+            deep_reviewer,
+            limits: RoleLimits {
+                worker: worker_limit,
+                reviewer: reviewer_limit,
+                judge: judge_limit,
+                planner: planner_limit,
+                auditor: auditor_limit,
+                deep_reviewer: deep_reviewer_limit,
+            },
+        })
+    }
+}
+
+impl Settings {
+    // Refuses a role whose sessions run under the worker's fence, on an agent
+    // that is not Claude Code, where the fence's settings would not hold: only
+    // Claude Code runs the project's hooks, and the preview's MCP servers where
+    // the role runs them (`with_preview`), and a pi agent must not be given its
+    // model server's host past the forwarder by `worker.allowed_domains`.
+    fn under_worker_fence(
+        &self,
+        role: &str,
+        agent: &RoleModel,
+        named: &Option<AgentName>,
+        with_preview: bool,
+    ) -> Result<(), SettingsError> {
+        let other = match &agent.harness {
             AgentHarness::Pi(_) => Some(("pi", "pi runs no MCP servers")),
             AgentHarness::Codex => {
                 Some(("codex", "kelpie bridges MCP servers to Claude Code only"))
             }
             _ => None,
         };
-        if let (Some((harness, why)), Some(name)) = (other, &self.agents.worker) {
-            let what = match (self.preview.enabled, self.worker.guard_hooks.is_empty()) {
+        if let (Some((harness, why)), Some(name)) = (other, named) {
+            let preview = with_preview && self.preview.enabled;
+            let what = match (preview, self.worker.guard_hooks.is_empty()) {
                 (true, _) => Some(format!("`preview.enabled`, since {why}")),
                 (false, false) => Some("`worker.guard_hooks`, which are Claude Code hooks".into()),
                 (false, true) => None,
@@ -391,13 +448,13 @@ impl Settings {
                 return Err(SettingsError::Invalid {
                     setting: "agents",
                     reason: format!(
-                        "`agents.worker` names {name}, on {harness}, which cannot run {what}: \
-                         turn that off or put the worker on Claude Code"
+                        "`agents.{role}` names {name}, on {harness}, which cannot run {what}: \
+                         turn that off or put the {role} on Claude Code"
                     ),
                 });
             }
         }
-        if let AgentHarness::Pi(server) = &worker.harness
+        if let AgentHarness::Pi(server) = &agent.harness
             && let Ok(upstream) = Upstream::new(&server.url)
             && let Some(domain) =
                 (self.worker.allowed_domains.iter()).find(|d| upstream.is_reached_by(d.as_str()))
@@ -405,31 +462,13 @@ impl Settings {
             return Err(SettingsError::Invalid {
                 setting: "worker.allowed_domains",
                 reason: format!(
-                    "`{}` would give a pi worker the model server's host, or every local \
+                    "`{}` would give a pi {role} the model server's host, or every local \
                      port, past the forwarder: remove it",
                     domain.as_str()
                 ),
             });
         }
-        let (reviewer, reviewer_limit) =
-            pick("reviewer", &self.agents.reviewer, &self.models.reviewer)?;
-        let (judge, judge_limit) = pick("judge", &self.agents.judge, &self.models.judge)?;
-        let (planner, planner_limit) = pick("planner", &self.agents.planner, &self.models.planner)?;
-        let (auditor, auditor_limit) = pick("auditor", &self.agents.auditor, &self.models.auditor)?;
-        Ok(RoleAgents {
-            worker,
-            reviewer,
-            judge,
-            planner,
-            auditor,
-            limits: RoleLimits {
-                worker: worker_limit,
-                reviewer: reviewer_limit,
-                judge: judge_limit,
-                planner: planner_limit,
-                auditor: auditor_limit,
-            },
-        })
+        Ok(())
     }
 }
 

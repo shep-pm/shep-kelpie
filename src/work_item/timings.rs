@@ -13,7 +13,7 @@ mod phase;
 mod seconds;
 
 pub use phase::TimingPhase;
-pub use seconds::Seconds;
+pub use seconds::{Seconds, saved};
 
 #[cfg(doc)]
 use super::WorkItem;
@@ -33,6 +33,8 @@ pub enum CallKind {
     Shots,
     /// The whole-issue check before the merge
     Audit,
+    /// A session of a deep review round
+    Deep,
 }
 
 /// A work item's time so far
@@ -46,6 +48,7 @@ pub struct Timings {
     /// The instant `seconds` counts up to
     pub since: Timestamp,
     /// The seconds charged so far
+    #[serde(serialize_with = "saved")]
     pub seconds: Seconds,
     /// The call in flight outside the runner's lock, while one is
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -158,6 +161,7 @@ mod tests {
             CallKind::Judge,
             CallKind::Shots,
             CallKind::Audit,
+            CallKind::Deep,
         ];
         let names = kinds.map(|k| serde_json::to_value(k).unwrap());
         assert_eq!(
@@ -167,7 +171,8 @@ mod tests {
                 json!("claude"),
                 json!("judge"),
                 json!("shots"),
-                json!("audit")
+                json!("audit"),
+                json!("deep")
             ]
         );
     }

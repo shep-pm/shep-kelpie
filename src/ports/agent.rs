@@ -28,6 +28,26 @@ pub enum Role {
     Planner,
     /// A one-shot that checks a whole work item against its issue before the merge
     Auditor,
+    /// A session of the deep review round: a reader, the confirmation of a
+    /// HIGH, or the re-check of the fix
+    #[serde(rename = "deep_reviewer")]
+    DeepReviewer,
+}
+
+#[cfg(test)]
+mod role_tests {
+    use super::Role;
+
+    // A call record keeps its role in the state file by this name, and a build
+    // from before a role refuses a record that holds it.
+    #[test]
+    fn every_role_keeps_its_name_in_the_state_file() {
+        let name = |role| serde_json::to_value(role).unwrap();
+        assert_eq!(name(Role::Reviewer), "reviewer");
+        assert_eq!(name(Role::Auditor), "auditor");
+        assert_eq!(name(Role::DeepReviewer), "deep_reviewer");
+        assert_eq!(Role::DeepReviewer.as_str(), "deep_reviewer");
+    }
 }
 
 impl Role {
@@ -39,6 +59,7 @@ impl Role {
             Self::Judge => "judge",
             Self::Planner => "planner",
             Self::Auditor => "auditor",
+            Self::DeepReviewer => "deep_reviewer",
         }
     }
 }

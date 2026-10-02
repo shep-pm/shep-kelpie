@@ -305,7 +305,7 @@ pub enum StepReport {
         /// Whether the pull request merged
         merged: bool,
         /// What its Claude calls cost, by role
-        spend: Spend,
+        spend: Box<Spend>,
         /// Its qwen rounds
         qwen: QwenTally,
         /// Where its time went
@@ -592,6 +592,47 @@ pub enum StepReport {
         /// Each criterion not met and each assumption not checked
         gaps: Vec<String>,
     },
+    /// A reader of the deep round reported
+    DeepRead {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The round
+        round: u32,
+        /// Which reader: 1 for the first, 2 for the one shown its findings
+        reader: u8,
+        /// How many findings it reported
+        findings: usize,
+    },
+    /// A session that may run commands tried to confirm a HIGH with a failing test
+    DeepConfirmed {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The round
+        round: u32,
+        /// Where the finding is, as `file:line`
+        finding: String,
+        /// Whether it wrote a test that fails; if not, the HIGH is sent unconfirmed
+        backed: bool,
+    },
+    /// The re-check of the deep round's fix ran
+    DeepRechecked {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The round
+        round: u32,
+        /// How many findings the fix fixed
+        fixed: usize,
+        /// How many the worker left for an issue of their own, which are not re-checked
+        deferred: usize,
+        /// How many it did not fix
+        unfixed: usize,
+    },
     /// The worker's fix turn for a round's held findings ended, and the
     /// round counts
     FixPushed {
@@ -702,6 +743,8 @@ pub(super) enum ReviewCall {
     ClaudeRound(AgentCall),
     /// The judge's one-shot on a single finding
     Judge(AgentCall),
+    /// A session of the deep round: a reader, a confirmation or a re-check
+    Deep(AgentCall),
 }
 
 /// What a [`ReviewCall`] cost, for the work item's record
@@ -734,6 +777,8 @@ pub(super) enum ReviewResult {
     /// The local model sat partly or wholly on the CPU, so the round did not
     /// run, and why
     Spilled(String),
+    /// What a deep round's session said, as text, or why its call failed
+    Deep(Result<String, String>),
     /// The call was ended because the runner is stopping, before it came
     /// back with anything
     Stopped,

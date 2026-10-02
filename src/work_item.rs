@@ -13,6 +13,7 @@ use crate::settings::ReviewerName;
 use crate::shots::ShotsRecord;
 
 mod audit;
+mod deep;
 mod follow_ups;
 mod local;
 mod round;
@@ -20,11 +21,12 @@ mod spend;
 mod timings;
 
 pub use audit::{Audit, Passed, SENDS_BACK};
+pub use deep::{Backing, Deep, Found, Held, Written};
 pub use follow_ups::FollowUps;
 pub use local::LOCAL_FAILURES_DOWN;
 pub use round::{CodeRabbitStage, CodeRabbitTally, OpenThread};
 pub use spend::{QwenTally, RoleSpend, Spend};
-pub use timings::{CallKind, Seconds, Split, TimingPhase, Timings};
+pub use timings::{CallKind, Seconds, Split, TimingPhase, Timings, saved as saved_seconds};
 
 /// The work item in flight
 // wire format: changing this is a breaking change to the state file
@@ -421,15 +423,15 @@ pub enum ReviewStage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         head: Option<String>,
     },
+    /// The deep round, which ends the loop once its fix is re-checked
+    Deep(Deep),
 }
 
 impl WorkItem {
     /// Remembers findings sent to the worker, once each
     pub fn record_held(&mut self, held: &[Finding]) {
-        let same =
-            |a: &Finding, b: &Finding| (&a.file, a.line, &a.what) == (&b.file, b.line, &b.what);
         for finding in held {
-            if !self.held.iter().any(|known| same(known, finding)) {
+            if !self.held.iter().any(|known| known.is_same_as(finding)) {
                 self.held.push(finding.clone());
             }
         }

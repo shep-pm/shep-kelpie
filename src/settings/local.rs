@@ -360,15 +360,26 @@ mod tests {
     }
 
     #[test]
-    fn a_table_with_neither_form_runs_the_qwen_review_script_from_the_home_folder_then_claude() {
-        let [qwen, claude] = lineup("").try_into().unwrap();
+    fn a_table_with_neither_form_runs_the_qwen_review_script_from_the_home_folder_then_deep() {
+        let [qwen, deep] = lineup("").try_into().unwrap();
+        assert_eq!(qwen.name.as_str(), "qwen");
+        assert_eq!(
+            qwen.runs,
+            Runs::Local(command("/home/me/.claude/scripts/qwen-review.sh"))
+        );
+        assert_eq!(deep.name.as_str(), "deep");
+        assert_eq!(deep.runs, Runs::Deep);
+    }
+
+    #[test]
+    fn a_table_with_the_older_form_keeps_the_older_loop_of_that_round_and_claude() {
+        let [qwen, claude] = lineup(TABLE).try_into().unwrap();
         assert_eq!(qwen.name.as_str(), "qwen");
         assert_eq!(
             qwen.runs,
             Runs::Local(command("/home/me/.claude/scripts/qwen-review.sh"))
         );
         assert_eq!(claude.name.as_str(), "claude");
-        assert_eq!(lineup(TABLE), [qwen, claude]);
     }
 
     #[test]
