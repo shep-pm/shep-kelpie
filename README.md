@@ -469,6 +469,7 @@ A local worker gets only the issues labelled `worker:local`. The rest run on `mo
 For how it works and why:
 
 - `CONTEXT.md`: the vocabulary
+- `docs/how-it-works.md`: one issue's path from label to merge, every agent kelpie runs on the way, and how the review loop ends
 - `docs/adr/`: decisions that are hard to reverse
 - `docs/design-log.md`: every decision so far, the facts behind them, and the test plan
 - `docs/specs/`: each test series and its results
