@@ -1,5 +1,5 @@
 //! The real ports: the system clock, `gh`, `curl`, the `claude` command
-//! line, its `/usage`, the relay session, the local review
+//! line, its `/usage`, the local review
 //! round, kelpie's shots, the machine's sandbox programs, and the dog's
 //! leases over the shepherd channel
 
@@ -22,7 +22,6 @@ mod ntfy;
 mod orphans;
 mod pi;
 mod process;
-mod relay;
 mod shots;
 mod srt;
 mod usage;
@@ -43,7 +42,6 @@ pub use host::SystemHost;
 pub use leases::ShepLeases;
 pub use local::LocalReviewer;
 pub use pi::PiCli;
-pub use relay::RelayCli;
 pub use shots::ShotsCli;
 pub use srt::SandboxRuntime;
 #[cfg(test)]

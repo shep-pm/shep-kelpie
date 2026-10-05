@@ -20,9 +20,8 @@ use super::Runner;
 use super::alert::backoff;
 use super::report::StepReport;
 use super::trigger::lock;
-use super::words::read_answer;
+use super::words::{Wants, read_answer};
 use crate::ports::{Alert, AlertError, Alerts, Reply, ReplyWith, Since, Takes, Timestamp};
-use crate::relay::Wants;
 use crate::settings::SettingsError;
 use crate::state::{LastRead, RulingKind, StateError};
 use crate::totp::answers::{Answers, Claim, FAILURES, Failure};
@@ -438,7 +437,7 @@ impl Runner {
             Ok(answer) => answer,
             Err(reason) => return self.reply_refused(id, reason),
         };
-        match self.rule_and_tell(id, answer) {
+        match self.rule(id, answer) {
             Ok(()) => (StepReport::ReplyAnswered { id }, None),
             Err(e) => self.reply_refused(id, e.to_string()),
         }

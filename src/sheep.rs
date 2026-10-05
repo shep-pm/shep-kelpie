@@ -16,7 +16,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::adapters::{
-    ClaudeCli, Curl, Gh, GpuCurl, LocalReviewer, RelayCli, ShepLeases, ShotsCli, SystemClock,
+    ClaudeCli, Curl, Gh, GpuCurl, LocalReviewer, ShepLeases, ShotsCli, SystemClock,
 };
 use crate::coderabbit::CodeRabbit;
 use crate::codex::Codex;
@@ -129,12 +129,6 @@ fn serve(project: &str) -> Result<(), String> {
         local_leases: Arc::new(reviewer.clone()),
         review_bots: vec![Arc::new(CodeRabbit), Arc::new(Cubic), Arc::new(Codex)],
         shots: Arc::new(shots.clone()),
-        relay: Arc::new(RelayCli::new(
-            home.clone(),
-            kelpie_home.join("relay"),
-            shep_home.clone(),
-            kelpie.clone(),
-        )),
         alerts: Arc::new(Curl),
         leases: Arc::clone(&leases) as Arc<dyn Leases>,
         clock: Box::new(SystemClock),

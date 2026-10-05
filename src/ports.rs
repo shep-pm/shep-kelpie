@@ -26,7 +26,6 @@ mod gpu;
 mod leased;
 mod local_paths;
 mod model_seat;
-mod relay;
 mod reviewer;
 mod routed;
 mod sandbox;
@@ -39,7 +38,6 @@ pub use gpu::{Gpu, GpuError, GpuMetrics};
 pub use leased::{Leased, LocalLeases};
 pub use local_paths::Guarded;
 pub use model_seat::ModelSeat;
-pub use relay::{Cleared, Relay, RelayError};
 pub use reviewer::{Reviewer, ReviewerError, RoundStage};
 pub use routed::Routed;
 pub use sandbox::{Forward, Policy, Sandbox, SandboxError, Unreadable};
@@ -620,8 +618,6 @@ pub enum AlertError {
     Unreachable(i32),
     /// The webhook answered with this HTTP status, not a success
     Refused(u16),
-    /// The webhook is off and the relay could not take the ruling, with why
-    Relay(String),
     /// The webhook's replies came back in a shape kelpie cannot read
     Unreadable,
 }
@@ -632,7 +628,6 @@ impl fmt::Display for AlertError {
             Self::Spawn(error) => write!(f, "cannot run curl: {error}"),
             Self::Unreachable(code) => write!(f, "curl could not reach the webhook (exit {code})"),
             Self::Refused(status) => write!(f, "the webhook answered HTTP {status}"),
-            Self::Relay(reason) => f.write_str(reason),
             Self::Unreadable => f.write_str("the webhook's replies could not be read"),
         }
     }
@@ -844,8 +839,6 @@ pub struct Ports {
     pub review_bots: Vec<Arc<dyn Profile>>,
     /// The GPU's figures, for `status`
     pub gpu: Arc<dyn GpuMetrics>,
-    /// The maintainer's relay session, sent every ruling alongside the webhook
-    pub relay: Arc<dyn Relay>,
     /// The maintainer's webhook, shared so a post runs without holding the runner
     pub alerts: Arc<dyn Alerts>,
     /// The dog's book leases, which the runner's `grant` trigger fills

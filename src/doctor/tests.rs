@@ -561,19 +561,12 @@ async fn a_local_round_that_is_off_or_ready_is_ok() {
 }
 
 #[tokio::test]
-async fn rulings_for_a_webhook_kelpie_has_none_of_are_missing_a_webhook() {
+async fn rulings_with_no_webhook_are_fine_and_say_where_they_appear() {
     let scene = Scene::new().await;
     scene.shepherd.holds_section("");
-    let report = scene.report().await;
-    let (what, fix) = missing(&report, "koji: rulings");
-    assert!(what.contains("name none"), "{what}");
-    assert!(fix.contains("kelpie-settings.example.toml"), "{fix}");
-
-    scene.runs("golbat", |t| {
-        t.insert("ruling_channels".into(), json!(["relay"]));
-    });
-    let found = ok(&scene.report().await, "golbat: rulings");
-    assert!(found.contains("relay session"), "{found}");
+    let found = ok(&scene.report().await, "koji: rulings");
+    assert!(found.contains("only in the log"), "{found}");
+    assert!(found.contains("shep kelpie rule"), "{found}");
 }
 
 #[tokio::test]

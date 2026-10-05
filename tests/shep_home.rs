@@ -1,4 +1,4 @@
-//! A runner and the relay's commands without `SHEP_HOME`, and the adopted
+//! A runner without `SHEP_HOME`, and the adopted
 //! dog without its channel, against the real binary: each refuses, and says
 //! what fixes it.
 
@@ -60,26 +60,6 @@ fn a_bare_shep_kelpie_prints_the_usage_and_runs_no_dog() {
     let stderr = stderr(&output);
     assert!(stderr.starts_with("usage: "), "{stderr}");
     assert!(!stderr.contains("shepherd channel"), "{stderr}");
-}
-
-#[test]
-fn the_relay_commands_without_shep_home_refuse() {
-    for args in [
-        &["relay-yes", "shep", "1"][..],
-        &["relay-answer", "shep", "1 no rename it"][..],
-    ] {
-        let output = kelpie(args);
-        assert!(!output.status.success(), "{args:?}");
-        let stderr = stderr(&output);
-        assert!(
-            stderr.contains("SHEP_HOME is not set"),
-            "{args:?}: {stderr}"
-        );
-        assert!(
-            stderr.contains("the relay's settings"),
-            "{args:?}: {stderr}"
-        );
-    }
 }
 
 // The move from the old home waits on the socket check, so a home the

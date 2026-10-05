@@ -24,8 +24,6 @@ fn big_state(n: u64) -> ProjectState {
             pull_request: Some(n),
             kind: RulingKind::Closed,
             alerted: false,
-            relayed: false,
-            resend: false,
         })
         .collect();
     state
@@ -59,8 +57,6 @@ fn a_saved_state_loads_back_whole() {
             shots_failed: false,
         },
         alerted: true,
-        relayed: true,
-        resend: false,
     });
     state.last_ruling = 1;
     state.leases.push(LeaseHeld {
@@ -147,8 +143,6 @@ fn the_file_format_is_pinned() {
         pull_request: Some(30),
         kind,
         alerted: id.is_multiple_of(2),
-        relayed: id.is_multiple_of(3),
-        resend: false,
     };
     state.rulings = vec![
         ruling(
@@ -240,7 +234,6 @@ fn the_file_format_is_pinned() {
             "pull_request": 30,
             "kind": kind,
             "alerted": id.is_multiple_of(2),
-            "relayed": id.is_multiple_of(3),
         })
     };
     assert_eq!(
@@ -536,6 +529,41 @@ fn a_ruling_saved_before_webhooks_is_posted_once() {
         "leases":[]}"#;
     fs::write(dir.path().join("state.json"), old).unwrap();
     assert!(!store.load().unwrap().unwrap().rulings[0].alerted);
+}
+
+// A file saved while the relay existed, with its count of clears and each
+// ruling's relayed and resend fields.
+#[test]
+fn a_state_saved_while_the_relay_existed_loads_and_saves_without_its_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path());
+    let old = r#"{"version":2,"run":"running","since":7,"work_item":null,
+        "relay_clears":4,
+        "rulings":[{"id":1,"question":"q","pull_request":3,"kind":{"kind":"closed"},
+                    "alerted":true,"relayed":true,"resend":true}],
+        "leases":[]}"#;
+    fs::write(dir.path().join("state.json"), old).unwrap();
+    let state = store.load().unwrap().unwrap();
+    assert!(state.rulings[0].alerted);
+
+    store.save(&state).unwrap();
+    let saved = fs::read_to_string(dir.path().join("state.json")).unwrap();
+    for gone in ["relay_clears", "relayed", "resend"] {
+        assert!(!saved.contains(gone), "{gone} was saved again: {saved}");
+    }
+}
+
+#[test]
+fn other_unknown_fields_are_still_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path());
+    let old = r#"{"version":2,"run":"running","since":7,"work_item":null,
+        "rulings":[{"id":1,"question":"q","pull_request":3,"kind":{"kind":"closed"},
+                    "relayed":false,"pigeon":true}],
+        "leases":[]}"#;
+    fs::write(dir.path().join("state.json"), old).unwrap();
+    let err = store.load().unwrap_err();
+    assert!(err.to_string().contains("pigeon"), "{err}");
 }
 
 #[test]

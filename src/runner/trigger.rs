@@ -13,16 +13,14 @@ use super::{Answer, Runner};
 use crate::board::{Skip, WorkerModel};
 use crate::lease::gpu::LockHolder;
 use crate::ports::{ModelSeat, SessionId, Timestamp};
-use crate::relay::Settled;
 use crate::settings::{MergeAuthority, ReviewerName};
 use crate::skills::StepSkill;
 use crate::state::{Finished, LeaseHeld, Ruling, RunState, StateError, Waiting};
 use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Split, Turn, WorkItem};
 
 /// The triggers a runner answers
-pub const ACTIONS: [&str; 11] = [
-    "status", "start", "pause", "add", "rework", "adopt", "rule", RELAY_RULE, "gate", "drop",
-    "timings",
+pub const ACTIONS: [&str; 10] = [
+    "status", "start", "pause", "add", "rework", "adopt", "rule", "gate", "drop", "timings",
 ];
 
 /// How many finished work items `timings` totals when given no count
@@ -31,11 +29,7 @@ const TIMINGS_DEFAULT: usize = 10;
 /// How many finished work items `status` lists
 pub(super) const STATUS_HISTORY: usize = 10;
 
-/// `rule`, sent by the relay: the same answer, but the relay is not told
-/// of it, since it already knows
-pub const RELAY_RULE: &str = "relay-rule";
-
-/// What `rule` and `relay-rule` take, as their refusals say
+/// What `rule` takes, as its refusals say
 const RULE_USAGE: &str = "takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`";
 
 /// What `status` answers
@@ -198,7 +192,6 @@ enum Request {
     Rework(u64),
     Adopt(u64),
     Rule(u64, Answer),
-    RelayRule(u64, Answer),
     Gate(Option<u64>),
     Drop(Option<u64>),
     Timings(usize),
@@ -207,15 +200,12 @@ enum Request {
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
 ///
 /// Blank params count as none. `add` takes an issue number, `rework` and
-/// `adopt` a pull request number, `rule` and `relay-rule` take `<id> yes`,
-/// `<id> no <note>` or `<id> answer <text>`, `gate` and `drop` take the
+/// `adopt` a pull request number, `rule` takes `<id> yes`, `<id> no <note>` or
+/// `<id> answer <text>`, `gate` and `drop` take the
 /// issue of the work item they are about when more than one is open,
 /// `timings` takes how many finished work items to total (ten when left
 /// out) and answers the totals, not the status, and every other action takes
 /// nothing.
-///
-/// A ruling the relay was sent, settled by anything but `relay-rule`, is
-/// told to it.
 pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> String {
     let error = |message: String| serde_json::json!({ "error": message }).to_string();
     let request = match read(action, params.map(str::trim).filter(|p| !p.is_empty())) {
@@ -236,17 +226,9 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
         Request::Add(issue) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
         Request::Rework(number) => runner.rework(number).map(drop).map_err(|e| e.to_string()),
         Request::Adopt(number) => runner.adopt(number).map_err(|e| e.to_string()),
-        Request::Rule(id, answer) => runner.rule_and_tell(id, answer).map_err(|e| e.to_string()),
-        Request::RelayRule(id, answer) => runner.rule(id, answer).map_err(|e| e.to_string()),
+        Request::Rule(id, answer) => runner.rule(id, answer).map_err(|e| e.to_string()),
         Request::Gate(issue) => runner.gate(issue).map_err(|e| e.to_string()),
-        Request::Drop(issue) => {
-            let relayed = runner.relayed();
-            let dropped = runner.drop_work_item(issue).map_err(|e| e.to_string());
-            if dropped.is_ok() {
-                runner.settled_without_relay(&relayed, &Settled::Dropped);
-            }
-            dropped
-        }
+        Request::Drop(issue) => runner.drop_work_item(issue).map_err(|e| e.to_string()),
     };
     match (changed, totals_of) {
         (Ok(()), Some(last)) => {
@@ -282,15 +264,12 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
         ("rule", Some(p)) => read_rule(p)
             .map(|(id, answer)| Request::Rule(id, answer))
             .ok_or_else(|| format!("`{action}` {RULE_USAGE}, not {p:?}")),
-        (RELAY_RULE, Some(p)) => read_rule(p)
-            .map(|(id, answer)| Request::RelayRule(id, answer))
-            .ok_or_else(|| format!("`{action}` {RULE_USAGE}, not {p:?}")),
         ("timings", Some(p)) => number(p)
             .and_then(|n| usize::try_from(n).ok())
             .map(Request::Timings)
             .ok_or_else(|| format!("`timings` takes a count of finished work items, not {p:?}")),
         ("timings", None) => Ok(Request::Timings(TIMINGS_DEFAULT)),
-        ("rule" | RELAY_RULE, None) => Err(format!("`{action}` {RULE_USAGE}")),
+        ("rule", None) => Err(format!("`{action}` {RULE_USAGE}")),
         (_, _) if !ACTIONS.contains(&action) => Err(format!("unknown action `{action}`")),
         (_, Some(_)) => Err(format!("`{action}` takes no params")),
         ("start", None) => Ok(Request::Start),
@@ -313,20 +292,6 @@ pub(super) fn read_rule(params: &str) -> Option<(u64, Answer)> {
         _ => return None,
     };
     Some((id, answer))
-}
-
-/// Whether `params` reads as `rule`'s own `<id> no <note>` or
-/// `<id> answer <text>`, and never as `<id> yes`
-///
-/// The relay's settings pre-allow `kelpie relay-answer`, so this is what
-/// keeps a "yes" the relay was talked into forwarding as an "answer" from
-/// reaching `rule` as one: the same parser `rule` itself reads decides it,
-/// not a second guess at the grammar.
-pub fn is_no_or_answer(params: &str) -> bool {
-    matches!(
-        read_rule(params),
-        Some((_, Answer::No(_) | Answer::Text(_)))
-    )
 }
 
 // Digits only, so `+7` and `#7` are refused rather than read as 7.
@@ -489,25 +454,6 @@ mod tests {
     }
 
     #[test]
-    fn is_no_or_answer_refuses_every_shape_of_yes() {
-        for refused in [
-            "3 yes",
-            "3 Yes",
-            " 3 yes",
-            "3  yes",
-            "3 yes extra",
-            "yes",
-            "3",
-            "",
-        ] {
-            assert!(!is_no_or_answer(refused), "{refused:?}");
-        }
-        for allowed in ["3 no rename it", "3 answer use --dry-run"] {
-            assert!(is_no_or_answer(allowed), "{allowed:?}");
-        }
-    }
-
-    #[test]
     fn a_new_project_is_paused_with_nothing_in_flight() {
         let rig = Rig::new("koji");
         let runner = rig.open().unwrap();
@@ -542,7 +488,7 @@ mod tests {
         let runner = rig.open().unwrap();
         for action in ACTIONS
             .into_iter()
-            .filter(|a| !["rework", "adopt", "rule", RELAY_RULE, "gate", "drop"].contains(a))
+            .filter(|a| !["rework", "adopt", "rule", "gate", "drop"].contains(a))
         {
             let params = (action == "add").then_some("7");
             assert_eq!(
@@ -564,12 +510,8 @@ mod tests {
             json!({ "error": "no ruling 1 is pending" })
         );
         assert_eq!(
-            rig.ask(&runner, RELAY_RULE, Some("1 yes")),
-            json!({ "error": "no ruling 1 is pending" })
-        );
-        assert_eq!(
-            rig.ask(&runner, RELAY_RULE, None),
-            json!({ "error": "`relay-rule` takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`" })
+            rig.ask(&runner, "rule", None),
+            json!({ "error": "`rule` takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`" })
         );
         assert_eq!(
             rig.ask(&runner, "merge", None),

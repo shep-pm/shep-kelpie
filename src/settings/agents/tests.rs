@@ -398,7 +398,7 @@ const CODEX: &str =
     "[agents.gpt]\nharness = \"codex\"\nmodel = \"gpt-6-sol\"\neffort = \"medium\"\n";
 
 #[test]
-fn a_codex_agent_runs_every_role_but_the_relay_on_the_codex_account() {
+fn a_codex_agent_runs_every_role_on_the_codex_account() {
     let names = "worker = \"gpt\"\nreviewer = \"gpt\"\njudge = \"gpt\"\n\
                  planner = \"gpt\"\nauditor = \"gpt\"\n";
     let agents = project(names).role_agents(&kelpie(CODEX).agents).unwrap();

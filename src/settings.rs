@@ -8,7 +8,7 @@
 //! `coderabbit.rounds`,
 //! `pacing.enabled`, `worker.allowed_domains`, `worker.build_env`,
 //! `worker.instructions_file`, `worker.turn_timeout`, `worker.guard_hooks`,
-//! `ruling_channels`, `pull_request_reviewers`, `[preview]`, `[skills]` and
+//! `pull_request_reviewers`, `[preview]`, `[skills]` and
 //! `[agents]`).
 //! `settings.example.toml` beside this crate holds the defaults.
 
@@ -22,7 +22,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use shep_client::dogs::dog_config;
 
-use crate::channels::Channels;
 use crate::preview::Preview;
 use crate::review_bot::Bot;
 
@@ -34,6 +33,7 @@ pub use table::table_of;
 mod agents;
 mod labels;
 mod local;
+mod removed;
 mod reviewers;
 mod skills;
 
@@ -104,14 +104,15 @@ pub struct Settings {
     /// Showing a work item's UI, off unless `enabled` and a launch file on `main`
     #[serde(default)]
     pub preview: Preview,
-    /// How rulings reach the maintainer, over what kelpie's own settings say.
-    /// Kelpie's settings decide when absent.
-    #[serde(default)]
-    pub ruling_channels: Option<Channels>,
     /// The skill each step runs, over kelpie's vendored defaults
     #[serde(default)]
     pub skills: StepSkills,
 }
+
+pub(crate) use removed::refuse as refuse_removed;
+
+// The keys the relay's removal left behind
+const REMOVED: &[&str] = &["ruling_channels", "models.relay"];
 
 /// Who decides a merge
 ///
@@ -136,8 +137,6 @@ pub struct Models {
     pub reviewer: RoleModel,
     /// The one-shot that judges every finding
     pub judge: RoleModel,
-    /// The session that carries rulings to the maintainer
-    pub relay: RoleModel,
     /// The one-shot that plans a ready issue before it opens a work item.
     /// Opus 5.5 at medium effort when absent.
     #[serde(default = "default_planner")]
@@ -608,6 +607,7 @@ impl Settings {
     }
 
     pub(crate) fn parse(text: &str, home: &Path) -> Result<Self, String> {
+        removed::refuse(text, REMOVED)?;
         let mut settings: Self = toml::from_str(text).map_err(|e| e.to_string())?;
         settings.expand(home);
         settings.check_local()?;

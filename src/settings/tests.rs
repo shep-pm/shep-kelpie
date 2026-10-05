@@ -47,10 +47,6 @@ fn the_example_holds_the_first_build_defaults() {
         role(&s.models.judge),
         ("claude-opus-5-5".into(), Effort::Low)
     );
-    assert_eq!(
-        role(&s.models.relay),
-        ("claude-haiku-4-5-20251001".into(), Effort::Low)
-    );
     assert_eq!(s.review.loop_guard.get(), 8);
     assert!(s.coderabbit.enabled);
     assert_eq!(s.coderabbit.divisor.get(), 1000);
@@ -167,6 +163,27 @@ fn pacing_can_be_turned_off() {
 fn a_zero_turn_timeout_is_still_refused() {
     let err = parse_err(&EXAMPLE.replace("turn_timeout = 60", "turn_timeout = 0"));
     assert!(err.contains("`worker.turn_timeout = 0`"), "{err}");
+}
+
+#[test]
+fn the_relays_settings_are_refused_by_name() {
+    let table = "[app.dogs.kelpie]\n";
+    let relay = "[app.dogs.kelpie.models.relay]\nmodel = \"m\"\neffort = \"low\"\n";
+    let with_model = format!("{EXAMPLE}\n{relay}");
+    let err = parse_err(&with_model);
+    assert!(
+        err.contains("`models.relay` is no longer a setting"),
+        "{err}"
+    );
+    assert!(err.contains("delete it"), "{err}");
+
+    let with_channels =
+        EXAMPLE.replace(table, &format!("{table}ruling_channels = [\"webhook\"]\n"));
+    let err = parse_err(&with_channels);
+    assert!(
+        err.contains("`ruling_channels` is no longer a setting"),
+        "{err}"
+    );
 }
 
 #[test]

@@ -338,21 +338,6 @@ fn an_unclaimed_id_another_project_may_hold_needs_the_project_named() {
 }
 
 #[test]
-fn a_relayed_ruling_answered_by_reply_is_told_to_the_relay() {
-    let (rig, runner, _) = Rig::parked("golbat");
-    rig.relay.set_up(true);
-    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
-    rig.reply("golbat 1 yes");
-    assert_eq!(
-        step(&runner).unwrap(),
-        Some(StepReport::ReplyAnswered { id: 1 })
-    );
-    step(&runner).unwrap();
-    let [told] = rig.relay.told().try_into().unwrap();
-    assert!(told.contains("ruling=1 settled=yes"), "{told}");
-}
-
-#[test]
 fn reading_resumes_after_the_last_reply_across_a_restart() {
     let (rig, runner, _) = alerted("koji");
     rig.alerts.reply("hello from the phone", rig.clock.now());

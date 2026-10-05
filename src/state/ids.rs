@@ -145,8 +145,6 @@ mod tests {
                 pull_request: None,
                 kind: RulingKind::Closed,
                 alerted: false,
-                relayed: false,
-                resend: false,
             })
             .collect();
         let path = home.join(name).join("state.json");

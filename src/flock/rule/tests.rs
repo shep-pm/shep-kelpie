@@ -14,8 +14,6 @@ fn yes_or_no(id: u64) -> Ruling {
         pull_request: Some(71),
         kind: RulingKind::Closed,
         alerted: true,
-        relayed: false,
-        resend: false,
     }
 }
 

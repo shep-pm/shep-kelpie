@@ -45,14 +45,6 @@
 //!
 //! `kelpie mcp-connect <socket>`: what an agent starts in place of such a
 //! server, inside its sandbox, which carries its stdio to the server's socket.
-//!
-//! `kelpie relay-yes <project> <id>`, `kelpie relay-answer <project>
-//! <params>`: what the relay's own settings gate on. Both send
-//! `relay-rule <params>` to the project's runner on the shepherd `SHEP_HOME`
-//! names; the relay runs them, never the maintainer.
-//!
-//! `kelpie relay-gate <kelpie>`: the hook that refuses the relay every
-//! other tool call. Claude Code runs it, like `confine`.
 
 #![forbid(unsafe_code)]
 
@@ -64,8 +56,6 @@ use shep_kelpie::adapters::ShotsCli;
 use shep_kelpie::confine::{Verdict, judge};
 use shep_kelpie::guard::{self, Checkout};
 use shep_kelpie::preview::Tools;
-use shep_kelpie::relay::gate;
-use shep_kelpie::relay::rule::{self, Ruling};
 use shep_kelpie::runner::{ProjectName, ProjectPaths};
 use shep_kelpie::settings::moving;
 use shep_kelpie::settings::source::Files;
@@ -147,9 +137,6 @@ fn main() -> ExitCode {
             let folders: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
             hook(judge(std::io::stdin().lock(), &folders))
         }
-        [role, kelpie_path] if role == "relay-gate" => {
-            hook(gate::judge(std::io::stdin().lock(), kelpie_path))
-        }
         [command, sub] if command == "tools" && sub == "install" => install_tools(),
         [command] if command == "totp" => totp(false),
         [command, flag] if command == "totp" && flag == "--rotate" => totp(true),
@@ -180,16 +167,6 @@ fn main() -> ExitCode {
                 }
             }
         }
-        [role, project, id] if role == "relay-yes" => {
-            with_shep_home(role, shep_home::RELAY_FIX, |home| {
-                rule::send(home, project, Ruling::Yes(id))
-            })
-        }
-        [role, project, params] if role == "relay-answer" => {
-            with_shep_home(role, shep_home::RELAY_FIX, |home| {
-                rule::send(home, project, Ruling::NoOrAnswer(params))
-            })
-        }
         // `shep kelpie` with no verb also sets SHEP_DOG_NAME; only the
         // shepherd's own start sets SHEP_NAME.
         [] if ["SHEP_DOG_NAME", "SHEP_NAME"]
@@ -200,7 +177,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: shep-kelpie add [<project>] | add <issue>\n       shep-kelpie start | pause | status\n       shep-kelpie rule [<id> <answer>]\n       shep-kelpie rework <pr> | adopt <pr>\n       shep-kelpie gate [<issue>] | drop [<issue>]\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie upgrade --ref <git ref> | --release <version> | --binary <path> | --rollback\n       shep-kelpie version [--json]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie browse-guard <domain>...\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n       shep-kelpie shots-mcp <tools> <job>\n       shep-kelpie mcp-connect <socket>\n       shep-kelpie relay-yes <project> <id>\n       shep-kelpie relay-answer <project> <params>\n       shep-kelpie relay-gate <kelpie>\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.\n\n{}\n\n{}",
+                "usage: shep-kelpie add [<project>] | add <issue>\n       shep-kelpie start | pause | status\n       shep-kelpie rule [<id> <answer>]\n       shep-kelpie rework <pr> | adopt <pr>\n       shep-kelpie gate [<issue>] | drop [<issue>]\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie upgrade --ref <git ref> | --release <version> | --binary <path> | --rollback\n       shep-kelpie version [--json]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie browse-guard <domain>...\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n       shep-kelpie shots-mcp <tools> <job>\n       shep-kelpie mcp-connect <socket>\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.\n\n{}\n\n{}",
                 shep_kelpie::lease::cli::USAGE,
                 shep_kelpie::flock::USAGE,
                 shep_kelpie::flock::rule::HELP

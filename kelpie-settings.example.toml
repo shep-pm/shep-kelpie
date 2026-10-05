@@ -3,11 +3,6 @@
 # pane and draws the URL `<set>`. Every key is optional.
 
 [kelpie]
-# How rulings reach the maintainer: `webhook`, `relay` (the Claude app on the
-# phone) or both. A project's own `ruling_channels` wins over this. Both when
-# neither says. At least one is required.
-# ruling_channels = ["webhook", "relay"]
-
 # The folder holding kelpie's own Codex login, apart from your `~/.codex`,
 # which no call reads. Sign it in once with
 # `CODEX_HOME=$SHEP_HOME/kelpie/codex codex login --device-auth`. Every Codex
@@ -23,7 +18,8 @@
 # gpu_metrics_url = "http://gpu-box:9835/metrics"
 
 # Where the webhook posts a ruling, so the maintainer hears of it away from
-# the terminal. Needed only by a project whose rulings go to the webhook.
+# the terminal. Without it a ruling reaches you only in the log, `status`
+# and `shep kelpie rule`.
 # `kind` is `discord` (a channel's webhook URL) or `ntfy` (a topic's URL); both
 # keys are required. The URL is a credential: anyone holding it can post, or
 # read an ntfy topic. Keep `dogs.toml` private.

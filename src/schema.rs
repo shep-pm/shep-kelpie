@@ -129,7 +129,6 @@ mod tests {
     // round, so each key is counted.
     fn examples_with_every_key() -> Vec<String> {
         let text = include_str!("../settings.example.toml")
-            .replace("# ruling_channels =", "ruling_channels =")
             .replace("# pull_request_reviewers =", "pull_request_reviewers =")
             .replace("build_env = {}", "build_env = { BUN = \"bun\" }")
             .replace(
@@ -219,7 +218,6 @@ mod tests {
         let mut root = schema();
         root.as_object_mut().unwrap().remove(SHEEP_SCHEMA_KEY);
         let example = include_str!("../kelpie-settings.example.toml")
-            .replace("# ruling_channels =", "ruling_channels =")
             .replace("# codex_home =", "codex_home =")
             .replace("# gpu_metrics_url =", "gpu_metrics_url =")
             .replace("# [kelpie.reviewers.", "[kelpie.reviewers.")
@@ -254,7 +252,6 @@ mod tests {
         let defs = &schema()["$defs"];
         assert_eq!(defs["KickoffHours"]["minimum"], 1);
         assert_eq!(defs["KickoffHours"]["maximum"], 24);
-        assert_eq!(defs["Channels"]["minItems"], 1);
         assert_eq!(defs["Route"]["pattern"], "^/");
         assert_eq!(defs["ContextSize"]["minimum"], 4096);
         let max_items = &defs["Settings"]["properties"]["max_items"];

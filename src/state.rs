@@ -86,15 +86,6 @@ pub struct ProjectState {
     /// Where reading the webhook's replies has got to
     #[serde(default)]
     pub replies: Replies,
-    /// The relay's count of clears, by any project's runner, when this
-    /// runner last read it. Every ruling marked relayed was sent after that
-    /// many clears, so a higher count means the relay no longer holds it.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub relay_clears: u64,
-}
-
-fn is_zero(n: &u64) -> bool {
-    *n == 0
 }
 
 impl ProjectState {
@@ -118,7 +109,6 @@ impl ProjectState {
             codex_pacing: None,
             notices: Vec::new(),
             replies: Replies::default(),
-            relay_clears: 0,
         }
     }
 
@@ -239,13 +229,6 @@ pub struct Ruling {
     /// webhooks existed is posted once.
     #[serde(default)]
     pub alerted: bool,
-    /// Whether it reached a running relay, which is told if it is settled
-    /// any other way
-    #[serde(default)]
-    pub relayed: bool,
-    /// Whether a clear took it from the relay, which is sent it again
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub resend: bool,
 }
 
 /// Where reading replies on the webhook's topic has got to
@@ -646,7 +629,9 @@ impl StateStore {
                 found,
             });
         }
-        let state: ProjectState = serde_json::from_str(&text).map_err(malformed)?;
+        let mut value: serde_json::Value = serde_json::from_str(&text).map_err(malformed)?;
+        drop_relay_fields(&mut value);
+        let state: ProjectState = serde_json::from_value(value).map_err(malformed)?;
         Ok(Some(ProjectState {
             version: VERSION,
             ..state.one_item_moved()
@@ -674,6 +659,24 @@ impl StateStore {
         StateError::Read {
             path: self.path.clone(),
             kind: e.kind(),
+        }
+    }
+}
+
+// A file saved while the relay existed carries its bookkeeping: the count of
+// clears, and on each ruling whether it was relayed and whether to resend it.
+// Those are dropped before reading, and these names only; any other unknown
+// field is still refused.
+fn drop_relay_fields(value: &mut serde_json::Value) {
+    let Some(state) = value.as_object_mut() else {
+        return;
+    };
+    state.remove("relay_clears");
+    let rulings = state.get_mut("rulings").and_then(|r| r.as_array_mut());
+    for ruling in rulings.into_iter().flatten() {
+        if let Some(ruling) = ruling.as_object_mut() {
+            ruling.remove("relayed");
+            ruling.remove("resend");
         }
     }
 }

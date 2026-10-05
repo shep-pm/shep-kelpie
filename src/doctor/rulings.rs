@@ -3,12 +3,8 @@
 use std::path::Path;
 
 use super::Line;
-use crate::channels::{Channel, Channels};
 use crate::ports::{Alert, Alerts};
 use crate::webhook::{KelpieSettings, WebhookKind};
-
-const NO_WEBHOOK_FIX: &str = "add a `webhook` table to kelpie's [kelpie] section of dogs.toml, as \
-    kelpie-settings.example.toml shows, or drop `webhook` from `ruling_channels`";
 
 /// Kelpie's own settings: its `[kelpie]` section, else the file it had before one
 ///
@@ -34,30 +30,15 @@ pub(super) fn kelpie_settings(section: &str, file: &Path) -> Result<KelpieSettin
 }
 
 /// Whether one project's rulings can reach the maintainer
-pub(super) fn channel(
-    subject: String,
-    project: Option<&Channels>,
-    kelpie: &KelpieSettings,
-) -> Line {
-    let channels = project
-        .or(kelpie.ruling_channels.as_ref())
-        .cloned()
-        .unwrap_or_default();
-    if !channels.has(Channel::Webhook) {
-        return Line::ok(
-            subject,
-            "rulings go to the relay session, and the webhook is off",
-        );
-    }
+pub(super) fn channel(subject: String, kelpie: &KelpieSettings) -> Line {
     match &kelpie.webhook {
         Some(webhook) => Line::ok(
             subject,
             format!("rulings post to the {} webhook", kind(webhook.kind)),
         ),
-        None => Line::missing(
+        None => Line::ok(
             subject,
-            "rulings go to the webhook, and kelpie's settings name none",
-            NO_WEBHOOK_FIX,
+            "no webhook, so rulings reach you only in the log, `status` and `shep kelpie rule`",
         ),
     }
 }
@@ -76,7 +57,7 @@ pub(super) fn test_alert(kelpie: Option<&KelpieSettings>, alerts: &dyn Alerts) -
         return Line::unsure(
             subject,
             "there is no webhook to post to",
-            "add one, as kelpie-settings.example.toml shows, or leave rulings to the relay",
+            "add one, as kelpie-settings.example.toml shows",
         );
     };
     let alert = Alert {

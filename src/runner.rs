@@ -12,7 +12,6 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 
 use crate::board::{LabelError, Skip, WorkerModel, worker_for, worker_override};
-use crate::channels::{Channel, Channels};
 use crate::local_paths::LocalPaths;
 use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Guarded, Leased, Ports, SessionId, Timestamp, Visibility};
@@ -79,10 +78,10 @@ pub use rework::{HUMAN, ReworkError};
 pub use ruling::{Answer, RuleError};
 pub use timings::{Totals, settle};
 use trigger::issue_list;
-pub use trigger::{ACTIONS, RELAY_RULE, Status, WorkItemStatus, answer, is_no_or_answer};
+pub use trigger::{ACTIONS, Status, WorkItemStatus, answer};
 pub use trigger::{GateError, WhichItem};
 pub use turn::step;
-pub use words::read_answer;
+pub use words::{Wants, read_answer};
 
 #[cfg(test)]
 pub(crate) use gate::CHECKS_SETTLE;
@@ -193,17 +192,10 @@ pub struct Runner {
     home: PathBuf,
     // The GPU's last reading, from the page kelpie's settings name
     gpu: gpu::GpuWatch,
-    // None when rulings do not go to the webhook
+    // None when kelpie's settings set no webhook
     webhook: Option<Webhook>,
-    channels: Channels,
     // The last failed webhook post, kept in memory so a restart tries at once
     retry: Option<alert::Retry>,
-    // Notices for the relay of rulings settled without it, kept in memory
-    // only: one lost to a restart leaves the question up, and `rule`
-    // refuses a tap on it.
-    relay_notices: Vec<alert::SettledNotice>,
-    // The ruling whose relay send is out, which an answer can settle first
-    relaying: Option<u64>,
     // Reading the webhook's topic for replies, kept in memory only
     reading: replies::Reading,
     // What a reply's code is checked against, on an ntfy webhook
@@ -255,7 +247,13 @@ impl Runner {
         );
         let agents = settings.role_agents(&kelpie_settings.agents)?;
         let lineup = settings.lineup(&kelpie_settings, home)?;
-        let (channels, webhook) = ruling_channels(&settings, kelpie_settings)?;
+        let webhook = kelpie_settings.webhook;
+        if webhook.is_none() {
+            eprintln!(
+                "kelpie's settings set no webhook, so rulings reach you only in the log, \
+                 `status` and `shep kelpie rule`"
+            );
+        }
         let totp = replies::authenticator(webhook.as_ref(), &paths.totp)?;
         check_repo(&settings)?;
         let [worktrees, _] = paths.owned();
@@ -329,10 +327,7 @@ impl Runner {
             home: home.to_owned(),
             gpu,
             webhook,
-            channels,
             retry: None,
-            relay_notices: Vec::new(),
-            relaying: None,
             reading: replies::Reading::default(),
             totp,
             viewer: None,
@@ -604,30 +599,6 @@ pub(crate) fn check_repo(settings: &Settings) -> Result<(), SettingsError> {
         )));
     }
     Ok(())
-}
-
-// The project's channels, else kelpie's, else every one; and the webhook
-// they need, which only a project that posts to the webhook cannot do without.
-fn ruling_channels(
-    settings: &Settings,
-    kelpie: KelpieSettings,
-) -> Result<(Channels, Option<Webhook>), SettingsError> {
-    let channels = (settings.ruling_channels.clone())
-        .or(kelpie.ruling_channels)
-        .unwrap_or_default();
-    if !channels.has(Channel::Webhook) {
-        return Ok((channels, None));
-    }
-    match kelpie.webhook {
-        Some(webhook) => Ok((channels, Some(webhook))),
-        None => Err(SettingsError::Invalid {
-            setting: "ruling_channels",
-            reason: "rulings go to the webhook, and kelpie's settings name none: add a \
-                     `webhook` table to its [kelpie] section of dogs.toml, or drop `webhook` \
-                     from `ruling_channels`"
-                .to_owned(),
-        }),
-    }
 }
 
 /// Whether `worker.instructions_file`, when set, can be read, which the runner needs to open

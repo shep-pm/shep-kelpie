@@ -321,7 +321,7 @@ impl Runner {
 
     // Posts a saved ruling on its pull request, if it has one and has
     // anything to say there, and returns why the comment failed, if it did.
-    // The pull request carries no question: the webhook and the relay do.
+    // The pull request carries no question: the webhook does.
     pub(super) fn post_ruling(&self, number: Option<u64>, id: u64) -> Option<String> {
         let number = number?;
         let ruling = self.state.rulings.iter().find(|r| r.id == id)?;
@@ -389,8 +389,6 @@ pub(super) fn park(
         pull_request,
         kind,
         alerted: false,
-        relayed: false,
-        resend: false,
     });
     (id, text)
 }

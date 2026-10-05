@@ -14,8 +14,8 @@ use crate::coderabbit::CodeRabbit;
 use crate::codex::Codex;
 use crate::cubic::Cubic;
 use crate::ports::{
-    Checks, Clock, Cost, Meter, MeterError, Ports, Relay, Role, SessionId, Timestamp, Usage,
-    Utilization, Window,
+    Checks, Clock, Cost, Meter, MeterError, Ports, Role, SessionId, Timestamp, Usage, Utilization,
+    Window,
 };
 use crate::review_bot::Profile;
 use crate::runner::{
@@ -33,7 +33,6 @@ mod cubic;
 mod endpoint;
 mod forge;
 mod leases;
-mod relay;
 mod reviewer;
 mod sandbox;
 mod script;
@@ -45,7 +44,6 @@ pub(crate) use claude::{AUDIT_PASSES, FakeClaude, Hold, LEFT_BEHIND, Scripted, S
 pub(crate) use endpoint::{Answer, StandInEndpoint, unreachable_url};
 pub(crate) use forge::FakeForge;
 pub(crate) use leases::{FakeLeases, Told};
-pub(crate) use relay::FakeRelay;
 pub(crate) use reviewer::{FakeReviewer, ScriptedRound};
 pub(crate) use sandbox::OpenSandbox;
 pub(crate) use script::write_script;
@@ -250,7 +248,6 @@ pub(crate) struct Rig {
     pub(crate) codex_meter: FakeMeter,
     pub(crate) reviewer: FakeReviewer,
     pub(crate) local_leases: LocalReviewer,
-    pub(crate) relay: Arc<FakeRelay>,
     pub(crate) alerts: FakeAlerts,
     pub(crate) leases: FakeLeases,
     pub(crate) shots: FakeShots,
@@ -301,7 +298,6 @@ impl Rig {
             codex_meter: FakeMeter::idle(),
             reviewer: FakeReviewer::default(),
             local_leases: LocalReviewer::default().with_temp_dir(home.path().join("tmp")),
-            relay: Arc::new(FakeRelay::default()),
             alerts: FakeAlerts::on(clock.clone()),
             leases: FakeLeases::default(),
             shots: FakeShots::default(),
@@ -370,15 +366,6 @@ impl Rig {
     /// Replaces the rig's kelpie settings file with `text`
     pub(crate) fn set_kelpie_settings(&self, text: &str) {
         std::fs::write(self.paths().kelpie_settings, text).unwrap();
-    }
-
-    /// Sets the project's `ruling_channels`, as its settings file would
-    pub(crate) fn set_ruling_channels(&self, list: &str) {
-        let table = "[app.dogs.kelpie]\n";
-        self.edit_settings(|s| {
-            assert!(s.contains(table), "the rig's entry has no kelpie table");
-            s.replacen(table, &format!("{table}ruling_channels = {list}\n"), 1)
-        });
     }
 
     fn make_repo(&self) {
@@ -555,7 +542,6 @@ impl Rig {
             gpu: Arc::new(GpuCurl),
             local_leases: Arc::new(self.local_leases.clone()),
             review_bots,
-            relay: Arc::clone(&self.relay) as Arc<dyn Relay>,
             alerts: Arc::new(self.alerts.clone()),
             leases: Arc::new(self.leases.clone()),
             shots: Arc::new(self.shots.clone()),
