@@ -94,7 +94,6 @@ fn still_asks(rig: &Rig, runner: &Mutex<Runner>, id: u64, kind: &str) {
 fn green_gates_merge_with_no_ruling_and_one_notice_after() {
     let (rig, runner, head) = Rig::with_pull_request("shep");
     let runner = under_auto(&rig, runner);
-    rig.relay.set_up(true);
     rig.forge.set_checks(&head, Checks::Passed);
     assert_eq!(
         rig.verdict(&runner),
@@ -129,7 +128,6 @@ fn green_gates_merge_with_no_ruling_and_one_notice_after() {
             &head[..7]
         )
     );
-    assert_eq!(rig.relay.sent(), [], "a notice takes no answer");
     let status = rig.ask(&runner, "status", None);
     assert_eq!(
         (&status["work_item"], &status["rulings"]),

@@ -9,7 +9,7 @@
 //!
 //! A tool kelpie's code or instructions name is not here: `SendMessage`,
 //! `Agent`, `Skill`, `ToolSearch` and the `Task*` tools stay. Nor is
-//! `disableRemoteControl`: the relay launches with `--remote-control`.
+//! `disableRemoteControl`.
 
 use serde_json::{Value, json};
 

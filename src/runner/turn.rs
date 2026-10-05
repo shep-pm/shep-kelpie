@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use super::Runner;
 use super::adopt;
-use super::alert::{post_due, see_clears, tell_settled};
+use super::alert::post_due;
 use super::claude_files::Unchecked;
 use super::instructions;
 use super::question::asked;
@@ -70,20 +70,17 @@ const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
 /// [`StateError`] when the turn's start or end, or a post, cannot be saved.
 pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
     lock(runner).beat();
-    let (claude, reviewer, relay, alerts, shots, turns) = {
+    let (claude, reviewer, alerts, shots, turns) = {
         let runner = lock(runner);
         (
             Arc::clone(&runner.ports.agents),
             Arc::clone(&runner.ports.reviewer),
-            Arc::clone(&runner.ports.relay),
             Arc::clone(&runner.ports.alerts),
             Arc::clone(&runner.ports.shots),
             runner.live_turns.clone(),
         )
     };
-    see_clears(runner, relay.as_ref())?;
-    tell_settled(runner, relay.as_ref());
-    if let Some(posted) = post_due(runner, relay.as_ref(), alerts.as_ref()) {
+    if let Some(posted) = post_due(runner, alerts.as_ref()) {
         return posted.map(Some);
     }
     if let Some(answered) = answer_replies(runner, alerts.as_ref()) {

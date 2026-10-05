@@ -10,8 +10,8 @@ use crate::runner::{ProjectName, ProjectPaths};
 use crate::shepherd;
 use crate::state::ids::RulingIds;
 
-/// The verbs [`main`] runs: every trigger a runner takes but the relay's,
-/// and `add` also registers a checkout
+/// The verbs [`main`] runs: every trigger a runner takes, and `add` also
+/// registers a checkout
 pub const VERBS: [&str; 10] = [
     "add", "start", "pause", "status", "rule", "rework", "adopt", "gate", "drop", "timings",
 ];

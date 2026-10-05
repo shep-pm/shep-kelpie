@@ -8,8 +8,7 @@
 
 use std::io::{BufRead, Write};
 
-use crate::relay::Wants;
-use crate::runner::{ProjectName, read_answer};
+use crate::runner::{ProjectName, Wants, read_answer};
 use crate::state::Ruling;
 use crate::state::ids::RulingIds;
 

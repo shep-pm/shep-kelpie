@@ -122,19 +122,16 @@ ok       scratch: push access: may push to shep-pm/shep
 ok       scratch: labels: shep-pm/shep has `ready-for-agent`, `ready-for-human`, `in-progress`, `review please`
 ok       scratch: coderabbit: CodeRabbit has commented on a pull request of shep-pm/shep
 ok       scratch: local review: ready
-MISSING  scratch: rulings: rulings go to the webhook, and kelpie's settings name none. Fix: add a `webhook` table to kelpie's [kelpie] section of dogs.toml, as kelpie-settings.example.toml shows, or drop `webhook` from `ruling_channels`
-1 thing a project needs is missing
+ok       scratch: rulings: no webhook, so rulings reach you only in the log, `status` and `shep kelpie rule`
+nothing a project needs is missing
 ```
 
-Each `MISSING` line names its fix, and `doctor` exits non-zero until they are done. A ruling is a question shep-kelpie cannot settle itself, such as a merge, and it must reach you. Pick where:
+Each `MISSING` line names its fix, and `doctor` exits non-zero until they are done. A ruling is a question shep-kelpie cannot settle itself, such as a merge, and it must reach you. With no webhook it shows only in the runner's log, `shep kelpie status` and `shep kelpie rule`, so you have to look. To be told, add a `[kelpie.webhook]` table for ntfy or Discord to `dogs.toml` in the shepherd's home. Copy that table alone from `kelpie-settings.example.toml`, and put your own URL in it: the file's `url` is a public ntfy.sh topic anyone can read.
 
-- ntfy or Discord: add a `[kelpie.webhook]` table to `dogs.toml` in the shepherd's home. Copy that table alone from `kelpie-settings.example.toml`, and put your own URL in it: the file's `url` is a public ntfy.sh topic anyone can read
-- the Claude app on your phone: put `ruling_channels = ["relay"]` in the `[kelpie]` section of that file instead. The relay is a Claude Code session started in your home folder, which Claude Code must already trust, with Remote Control on and the phone app signed in
-
-Run `shep kelpie doctor` again. With the relay alone it ends:
+Run `shep kelpie doctor` again. With a webhook set it ends:
 
 ```
-ok       scratch: rulings: rulings go to the relay session, and the webhook is off
+ok       scratch: rulings: rulings post to the ntfy webhook
 nothing a project needs is missing
 ```
 
@@ -259,11 +256,11 @@ Quotes are optional, but zsh still needs them around a note with `?`, `*`, `!` o
 
 `add` names the project after the repo, or `shep kelpie add <name>`. It makes the four labels where the repo lacks them, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name. `shep stop <project>` stops a runner, and `shep delete <project>` removes it.
 
-`doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's labels, CodeRabbit where a project turns it on, the local review command or endpoint where one is set, the preview tools for a project that shows its UI, and that rulings have a webhook where they go to one. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
+`doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's labels, CodeRabbit where a project turns it on, the local review command or endpoint where one is set, the preview tools for a project that shows its UI, and which webhook, if any, rulings post to. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
 
 `shep describe <project>` labels each Claude session the runner starts with its issue and role, such as `#114 worker`.
 
-shep-kelpie refuses a shepherd on another shep minor or major than the pinned one, naming both versions. The relay's `kelpie relay-*` commands talk to the shepherd's socket with the shep client shep-kelpie is built with, never a `shep` on `PATH`.
+shep-kelpie refuses a shepherd on another shep minor or major than the pinned one, naming both versions. shep-kelpie's commands talk to the shepherd's socket with the shep client it is built with, never a `shep` on `PATH`.
 
 ### Leases
 
@@ -277,7 +274,7 @@ A project's settings are its `[app.dogs.kelpie]` table, which lookout edits in t
 
 shep-kelpie's own settings, shared by every project, are the `[kelpie]` section of `dogs.toml`, which lookout edits in the dog's pane. Start from `kelpie-settings.example.toml`, and keep `dogs.toml` private: the webhook's URL is a credential.
 
-- `ruling_channels`, there or in a project's table, picks the webhook, the relay or both. Both is the default, and only a project that posts to the webhook needs a `webhook` table
+- `[kelpie.webhook]` is where rulings are posted, and the only way one reaches you away from the terminal. With none, a ruling shows only in the log, `status` and `shep kelpie rule`
 - `[kelpie.reviewers]` defines the pull request reviewers, CodeRabbit, cubic and Codex, by their review windows, and a project's `pull_request_reviewers` lists the ones it uses in preference order: each round goes to the first whose window is free. Codex's table also takes `reviews_on_ready`, off when absent: turn it on only where Codex's automatic reviews are enabled. Then marking a draft ready is its summon and shep-kelpie posts no comment on top, so one round spends one review
 - `gpu_metrics_url` is the GPU's Prometheus metrics page, such as `nvidia_gpu_exporter`'s `/metrics`. `status` then shows the GPU's load, memory, power and temperature under `gpu`, read every 15 seconds
 - A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start. The dog reads `[kelpie.leases]` and `[kelpie.reviewers]` only when it starts, so after a change run `shep restart kelpie`
@@ -288,7 +285,7 @@ On an ntfy webhook, a ruling can be answered from the topic: run `shep kelpie to
 
 shep-kelpie keeps everything under `$SHEP_HOME/kelpie`, or the folder `KELPIE_HOME` names:
 
-- `settings.toml`, `totp`, `tools`, `relay` and `rulings`, shared by every project
+- `settings.toml`, `totp`, `tools` and `rulings`, shared by every project
 - `dog`, with the dog's book and its door, `lease.sock`. The adopted dog gets `SHEP_HOME` and no `KELPIE_HOME` from shep, so it is always under `$SHEP_HOME/kelpie`, even with `KELPIE_HOME` set for your own commands
 - `<project>`, with the project's `state.json`, worker files, `worktrees`, `builds`, `shots` and `playwright`
 

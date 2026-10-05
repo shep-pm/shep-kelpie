@@ -4,10 +4,48 @@
 //! `no <note>`, for a ruling that asks yes or no, and any text at all for the
 //! worker's question, a lone `yes` included. What they read goes to the
 //! runner as `rule`'s own `<id> yes`, `<id> no <note>` or `<id> answer
-//! <text>`, so the relay's stricter grammar is never widened.
+//! <text>`.
 
 use super::Answer;
-use crate::relay::Wants;
+use crate::state::RulingKind;
+
+/// Which answer a ruling takes
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wants {
+    /// A worker's question, answered with `<id> answer <text>`
+    Answer,
+    /// Every other ruling: `<id> yes`, or `<id> no <note>`
+    YesOrNo,
+}
+
+impl Wants {
+    /// What a ruling of `kind` takes
+    pub fn of(kind: &RulingKind) -> Self {
+        match kind {
+            RulingKind::Question { .. } => Self::Answer,
+            RulingKind::Merge { .. }
+            | RulingKind::Rebase { .. }
+            | RulingKind::StillRed { .. }
+            | RulingKind::MergeRefused { .. }
+            | RulingKind::Closed
+            | RulingKind::ReviewGuard { .. }
+            | RulingKind::LocalModelSpilled { .. }
+            | RulingKind::FixNotPushed { .. }
+            | RulingKind::Audit { .. }
+            | RulingKind::DeepReview { .. }
+            | RulingKind::CodeRabbitCap { .. }
+            | RulingKind::CodeRabbitSilent { .. }
+            | RulingKind::TurnTimeout { .. }
+            | RulingKind::TurnFailed { .. }
+            | RulingKind::ClaudeFiles { .. }
+            | RulingKind::ForeignChange { .. }
+            | RulingKind::FollowUp { .. }
+            | RulingKind::Split { .. }
+            | RulingKind::SplitStuck { .. }
+            | RulingKind::CloseStuck { .. } => Self::YesOrNo,
+        }
+    }
+}
 
 /// `words` as the answer to a ruling that wants `wants`
 ///
@@ -58,6 +96,20 @@ impl Answer {
 mod tests {
     use super::*;
     use crate::runner::trigger::read_rule;
+
+    #[test]
+    fn a_question_takes_an_answer_and_every_other_ruling_a_yes_or_no() {
+        let question = RulingKind::Question {
+            asked: String::new(),
+            resume: crate::state::Resume::Nothing,
+        };
+        assert_eq!(Wants::of(&question), Wants::Answer);
+        let merge = RulingKind::Merge {
+            head: "abc".into(),
+            shots_failed: false,
+        };
+        assert_eq!(Wants::of(&merge), Wants::YesOrNo);
+    }
 
     #[test]
     fn a_yes_or_no_ruling_takes_yes_or_a_no_with_a_note() {

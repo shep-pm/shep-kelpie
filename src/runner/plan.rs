@@ -245,8 +245,6 @@ impl Runner {
             pull_request: None,
             kind,
             alerted: false,
-            relayed: false,
-            resend: false,
         });
         self.save(next)?;
         Ok((id, text))

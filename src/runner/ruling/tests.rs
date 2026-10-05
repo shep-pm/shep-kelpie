@@ -9,7 +9,7 @@ use crate::runner::step;
 use crate::test::{Rig, Scripted};
 
 // The pull request is public: it gets what happened and who it waits on,
-// and never a command, which the webhook and the relay carry instead.
+// and never a command, which the webhook carries instead.
 #[test]
 fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
     let review = Review::first();

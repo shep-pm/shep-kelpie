@@ -30,9 +30,6 @@ fn is_zero(n: &usize) -> bool {
 }
 
 /// What a work item's agent calls have cost, by role
-///
-/// The relay's calls are not here: the relay is one session for every
-/// ruling, and kelpie only delivers to it, so no cost comes back.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
 pub struct Spend {
     /// The worker's turns

@@ -6,11 +6,7 @@
 //! checked as a start checks it, and one that fails keeps the settings the
 //! runner has.
 
-use super::{
-    OpenError, Runner, check_coderabbit, check_local, check_reviewers, instructions,
-    ruling_channels,
-};
-use crate::channels::Channels;
+use super::{OpenError, Runner, check_coderabbit, check_local, check_reviewers, instructions};
 use crate::review_bot::Bot;
 use crate::settings::Settings;
 use crate::skills::Skills;
@@ -43,11 +39,8 @@ impl Runner {
         let gpu_metrics_url = kelpie.gpu_metrics_url.clone();
         let agents = settings.role_agents(&kelpie.agents)?;
         let lineup = settings.lineup(&kelpie, &self.home)?;
-        let (channels, webhook) = ruling_channels(&settings, kelpie)?;
-        let mut changed = changed(
-            (&self.settings, &self.channels, &self.webhook),
-            (&settings, &channels, &webhook),
-        );
+        let webhook = kelpie.webhook;
+        let mut changed = changed((&self.settings, &self.webhook), (&settings, &webhook));
         if reviewers != self.reviewers {
             changed.push("reviewers");
         }
@@ -82,7 +75,6 @@ impl Runner {
         self.agents = agents;
         self.gpu.point_at(gpu_metrics_url);
         self.extra_instructions = extra_instructions;
-        self.channels = channels;
         self.webhook = webhook;
         // Read again under the new pacing settings at the next look.
         self.pacing.clear();
@@ -106,12 +98,12 @@ impl Runner {
     }
 }
 
-// A project's settings, the channels its rulings go to, and the webhook.
-type Reach<'a> = (&'a Settings, &'a Channels, &'a Option<Webhook>);
+// A project's settings and the webhook.
+type Reach<'a> = (&'a Settings, &'a Option<Webhook>);
 
-// The top-level settings that differ. `ruling_channels` and `webhook` also
-// change when kelpie's own settings do.
-fn changed((old, went, was): Reach<'_>, (new, goes, now): Reach<'_>) -> Vec<&'static str> {
+// The top-level settings that differ. `webhook` also changes when kelpie's
+// own settings do.
+fn changed((old, was): Reach<'_>, (new, now): Reach<'_>) -> Vec<&'static str> {
     [
         (
             "merge_authority",
@@ -119,7 +111,6 @@ fn changed((old, went, was): Reach<'_>, (new, goes, now): Reach<'_>) -> Vec<&'st
         ),
         ("ci", old.ci != new.ci),
         ("max_items", old.max_items != new.max_items),
-        ("ruling_channels", went != goes),
         ("generated", old.generated != new.generated),
         ("models", old.models != new.models),
         ("review", old.review != new.review),
@@ -300,18 +291,18 @@ mod tests {
     }
 
     #[test]
-    fn a_webhook_taken_from_a_project_that_posts_to_it_is_refused() {
+    fn a_webhook_taken_away_takes_effect_at_once() {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
         let mut runner = runner.lock().unwrap();
-        let err = runner
+        let line = runner
             .reread(rig.settings(), KelpieSettings::default())
-            .unwrap_err();
-        assert!(
-            err.to_string().starts_with("setting `ruling_channels`"),
-            "{err}"
+            .unwrap();
+        assert_eq!(
+            line.as_deref(),
+            Some("settings changed: webhook now in effect")
         );
-        assert!(runner.webhook.is_some());
+        assert!(runner.webhook.is_none());
     }
 
     #[test]

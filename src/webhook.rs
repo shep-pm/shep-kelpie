@@ -1,11 +1,12 @@
-//! Kelpie's own settings: the webhook, the channels rulings go to, the
+//! Kelpie's own settings: the webhook, the
 //! pull request reviewers, the local reviewers, the agents, the counted
 //! leases' capacities and kelpie's own Codex login
 //!
 //! Kelpie's `[kelpie]` section of `dogs.toml`, or the file under kelpie's
 //! home it had before one, shared by every project. Every part is
-//! optional: the `webhook` table, whose keys are both required, is needed
-//! only by a project whose rulings go to the webhook. The URL is a
+//! optional: the `webhook` table, whose keys are both required, is the one way
+//! a ruling is posted, and with none rulings reach the maintainer only in the
+//! log, `status` and `shep kelpie rule`. The URL is a
 //! credential, so no error, log line or status carries it.
 //! `kelpie-settings.example.toml` beside this crate shows the section.
 
@@ -18,7 +19,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use shep_client::dogs::dog_config;
 
-use crate::channels::Channels;
 use crate::lease::counted::CARGO_TEST_CAPACITY;
 use crate::review_bot::Reviewers;
 use crate::settings::{Agent, AgentName, Definition, EndpointUrl, ReviewerName, SettingsError};
@@ -32,10 +32,6 @@ pub struct KelpieSettings {
     /// the terminal
     #[serde(default)]
     pub webhook: Option<Webhook>,
-    /// How rulings reach the maintainer, unless a project says otherwise.
-    /// Every channel when absent.
-    #[serde(default)]
-    pub ruling_channels: Option<Channels>,
     /// The pull request reviewers a project may list, each by its window
     #[serde(default)]
     pub reviewers: Reviewers,
@@ -155,8 +151,7 @@ fn authority(rest: &str) -> &str {
 
 /// What a malformed file is told, since the parser's own message could quote the URL
 const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntfy`) \
-                     and an `https://` `url`, `ruling_channels`, a list of \
-                     `webhook` and `relay`, and `[reviewers.coderabbit]` and \
+                     and an `https://` `url`, and `[reviewers.coderabbit]` and \
                      `[reviewers.cubic]` and `[reviewers.codex]` tables with `reviews` and `hours`, \
                      `[local_reviewers.<name>]` tables with a `kind` of \
                      `endpoint`, `command`, `claude` or `session` and that \
@@ -228,6 +223,7 @@ impl KelpieSettings {
     }
 
     fn parse(text: &str) -> Result<Self, String> {
+        crate::settings::refuse_removed(text, &["ruling_channels"])?;
         toml::from_str(text).map_err(|e: toml::de::Error| {
             let line = e
                 .span()
@@ -243,7 +239,6 @@ impl KelpieSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::channels::Channel;
 
     // The example's section as shep hands it over: re-rooted, so `[webhook]`.
     fn example() -> String {
@@ -265,7 +260,6 @@ mod tests {
         let webhook = s.webhook.expect("the example names a webhook");
         assert_eq!(webhook.kind, WebhookKind::Ntfy);
         assert!(webhook.url.expose().starts_with("https://ntfy.sh/"));
-        assert_eq!(s.ruling_channels, None);
     }
 
     #[test]
@@ -286,19 +280,22 @@ mod tests {
     }
 
     #[test]
-    fn the_webhook_is_only_needed_by_a_project_that_posts_to_it() {
-        assert_eq!(KelpieSettings::parse(""), Ok(KelpieSettings::default()));
-        let s = KelpieSettings::parse("ruling_channels = [\"relay\"]\n").unwrap();
+    fn the_webhook_is_optional() {
+        let s = KelpieSettings::parse("").unwrap();
+        assert_eq!(s, KelpieSettings::default());
         assert_eq!(s.webhook, None);
-        assert!(!s.ruling_channels.unwrap().has(Channel::Webhook));
     }
 
     #[test]
-    fn no_channel_is_refused_without_quoting_the_file() {
+    fn ruling_channels_is_refused_by_name_without_quoting_the_file() {
         let text =
             format!("ruling_channels = []\n[webhook]\nkind = \"ntfy\"\nurl = \"{SECRET}\"\n");
         let err = parse_err(&text);
-        assert!(err.starts_with("line 1 is not right"), "{err}");
+        assert!(
+            err.starts_with("`ruling_channels` is no longer a setting"),
+            "{err}"
+        );
+        assert!(err.ends_with("delete it"), "{err}");
         assert!(!err.contains("s3cr3t"), "{err}");
     }
 

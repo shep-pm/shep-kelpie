@@ -114,8 +114,7 @@ pub(super) fn checks(
         });
     }
     if let Some(kelpie) = kelpie {
-        let project = settings.ruling_channels.as_ref();
-        lines.push(rulings::channel(at("rulings"), project, kelpie));
+        lines.push(rulings::channel(at("rulings"), kelpie));
     }
     lines
 }

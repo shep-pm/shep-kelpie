@@ -338,7 +338,7 @@ pub enum StepReport {
         /// When the post is tried again at the earliest
         retry_at: Timestamp,
     },
-    /// The notice of an automatic merge was sent to the webhook, or the relay where the webhook is off
+    /// The notice of an automatic merge was sent to the webhook, or only logged where there is none
     Noticed {
         /// The work item's issue
         issue: u64,
