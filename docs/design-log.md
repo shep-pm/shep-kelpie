@@ -2,6 +2,8 @@
 
 Decisions from the design sessions starting 2026-09-24, and the facts behind them. The hard-to-reverse ones are also ADRs in `docs/adr/`. The vocabulary is in `CONTEXT.md`.
 
+The cleanup of 2026-10-05: ADR 0005 hands every stop to shep, and ADR 0006 cuts the flow to one builder and a serial list of reviewers that each run once. The sections below still describe the code as it stands. Each phase of the cleanup rewrites the sections for what it removes, in the same pull request.
+
 ## Why kelpie exists
 
 Before kelpie, one long-running Claude session per project acted as a control room. It held the board, rationed reviews, relayed messages between the sessions that owned pull requests, and merged. Measured 2026-09-24 over shep's transcripts, in units weighted by cache pricing (cache read 0.1, one-hour cache write 2, output 5, uncached input 1):
