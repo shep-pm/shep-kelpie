@@ -83,44 +83,6 @@ pub enum StepReport {
         /// Why the comment could not be posted, if it could not
         comment_failed: Option<String>,
     },
-    /// The planning call on the board's pick answered
-    Planned {
-        /// The issue planned
-        issue: u64,
-        /// What it decided, and what kelpie does next
-        outcome: PlanOutcome,
-        /// What the call used
-        usage: Usage,
-        /// What the call cost, in US dollars, or null when no reply
-        /// reported dollars
-        cost_usd: Option<f64>,
-    },
-    /// A split's sub-issues are open and linked, and its issue says so
-    Split {
-        /// The issue split
-        issue: u64,
-        /// Its sub-issues, one per piece in order
-        sub_issues: Vec<u64>,
-        /// Why the plan's comment could not be posted, if it could not
-        comment_failed: Option<String>,
-    },
-    /// A split could not finish this step, and carries on at the next
-    /// unless it was parked on a ruling
-    SplitFailed {
-        /// The issue being split
-        issue: u64,
-        /// Why
-        reason: String,
-        /// The ruling it is parked on, once the forge refused too often
-        ruling: Option<u64>,
-    },
-    /// A split was given up: its issue was closed or left the board
-    SplitDropped {
-        /// The issue
-        issue: u64,
-        /// Why
-        reason: String,
-    },
     /// An issue whose sub-issues are all closed was closed too
     ParentClosed {
         /// The issue
@@ -132,8 +94,9 @@ pub enum StepReport {
         issue: u64,
         /// Why
         reason: String,
-        /// The ruling it is parked on, once the forge refused too often
-        ruling: Option<u64>,
+        /// Whether the forge refused too often in a row, so this runner
+        /// passes the issue over until it restarts
+        given_up: bool,
     },
     /// Nothing was dispatched: the board could not be read, or the issue it
     /// picked could not be taken
@@ -653,65 +616,12 @@ impl StepReport {
         matches!(
             self,
             Self::BoardFailed { .. }
-                | Self::SplitFailed { .. }
                 | Self::ParentCloseFailed { .. }
                 | Self::GateFailed { .. }
                 | Self::Held { .. }
                 | Self::RepliesFailed { .. }
         )
     }
-}
-
-/// What a planning call decided
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "plan", rename_all = "kebab-case")]
-pub enum PlanOutcome {
-    /// One pull request: the issue opens a work item
-    Whole {
-        /// Why, as the call said
-        why: String,
-        /// What the issue's worker runs on, once the pick is applied or
-        /// found to fall back
-        worker: WholeWorker,
-    },
-    /// Several, under `auto`: the sub-issues open next
-    Split {
-        /// How many
-        pieces: usize,
-    },
-    /// Several, under `ask`: a ruling waits on the maintainer
-    Asked {
-        /// The ruling
-        ruling: u64,
-        /// The question, with the triggers that answer it
-        question: String,
-    },
-    /// The call failed or its reply was not a plan, so the issue is worked whole
-    Failed {
-        /// Why
-        reason: String,
-    },
-}
-
-/// What became of the worker a kept-whole issue's plan named
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum WholeWorker {
-    /// The issue already carried a `worker:` label, which wins over the pick
-    Already,
-    /// The plan's pick, applied as this label
-    Picked {
-        /// `worker:<model>-<effort>`
-        label: String,
-    },
-    /// The plan named no worker kelpie runs, or the label could not be
-    /// applied, so the issue falls back to the project's own worker
-    Defaulted {
-        /// Why
-        reason: String,
-        /// Why the comment saying so could not be posted, if it could not
-        comment_failed: Option<String>,
-    },
 }
 
 /// What a step found there was to do, before the outer loop runs it
@@ -722,8 +632,6 @@ pub(super) enum Begin {
     Review(ReviewCall),
     /// A shots run of this head
     Shots(Box<ShotsJob>, String),
-    /// A planning call, and the detached worktree it reads
-    Plan(Box<AgentCall>, PathBuf),
     /// The whole-issue check of this head
     Audit(Box<AgentCall>, Audited),
 }

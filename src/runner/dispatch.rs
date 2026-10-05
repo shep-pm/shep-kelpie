@@ -7,7 +7,6 @@
 //! waits for it to end.
 
 use super::Runner;
-use super::plan::Planning;
 use super::report::{Begin, StepReport};
 use crate::board::{self, ReadyIssue, Skip};
 use crate::state::StateError;
@@ -16,10 +15,6 @@ impl Runner {
     // The step runs this only while a slot is free, and it opens at most one
     // work item, so nothing here checks `max_items` again.
     pub(super) fn dispatch(&mut self) -> Result<Begin, StateError> {
-        // A split under way finishes before the board is read again.
-        if let Some(begin) = self.split_under_way()? {
-            return Ok(begin);
-        }
         let forge = &self.ports.forge;
         let repo = &self.settings.forge;
         let listed = forge
@@ -37,7 +32,7 @@ impl Runner {
         // An issue in flight is left out, and not listed in `skipped`: it is
         // being worked on, not passed over.
         ready.retain(|issue| self.state.item(issue.number).is_none());
-        if let Some(begin) = self.close_split_done(&ready)? {
+        if let Some(begin) = self.close_done_parent(&ready) {
             return Ok(begin);
         }
         // An adopted pull request, then one asking for a rework, goes before
@@ -54,14 +49,11 @@ impl Runner {
             return Ok(begin);
         }
         let mut paced = false;
-        // Picks that wait on a ruling on their plan
-        let mut waiting = Vec::new();
         loop {
             let local = self.agents.limits.worker.lease().is_some();
             let pick = board::pick(&ready, &open, &self.state.finished, local);
             let mut skipped = pick.skipped;
             skipped.extend(failed.iter().cloned());
-            skipped.extend(waiting.iter().cloned());
             skipped.sort_by_key(Skip::issue);
             let Some(issue) = pick.issue else {
                 let reason = failed
@@ -96,19 +88,6 @@ impl Runner {
                     return Ok(held);
                 }
                 paced = true;
-            }
-            let picked = ready.iter().find(|i| i.number == issue);
-            match picked.map(|i| self.plan_pick(i)).transpose()?.flatten() {
-                None => {}
-                Some(Planning::Skip(skip)) => {
-                    waiting.push(skip);
-                    ready.retain(|i| i.number != issue);
-                    continue;
-                }
-                Some(Planning::Begin(begin)) => {
-                    self.skipped = skipped;
-                    return Ok(*begin);
-                }
             }
             match self.add(issue) {
                 Ok(worker) => {

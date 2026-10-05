@@ -29,8 +29,6 @@ pub use vendored::{PIN, PLUGIN, UPSTREAM};
 pub enum Step {
     /// Triaging an issue
     Triage,
-    /// Splitting a plan into work items
-    Planning,
     /// Writing a spec
     Spec,
     /// The worker's first turn on an issue
@@ -51,9 +49,8 @@ pub enum Step {
 
 impl Step {
     /// Every step, in the order a work item meets them
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 9] = [
         Self::Triage,
-        Self::Planning,
         Self::Spec,
         Self::Implement,
         Self::Tests,
@@ -68,7 +65,6 @@ impl Step {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Triage => "triage",
-            Self::Planning => "planning",
             Self::Spec => "spec",
             Self::Implement => "implement",
             Self::Tests => "tests",
@@ -84,7 +80,6 @@ impl Step {
     pub fn default_skill(self) -> &'static str {
         match self {
             Self::Triage => "triage",
-            Self::Planning => "to-tickets",
             Self::Spec => "to-spec",
             Self::Implement => "implement",
             Self::Tests => "tdd",
@@ -292,13 +287,6 @@ fn rules(step: Step) -> String {
         Step::Review => {
             "- Run no commands. Review the diff below, and check it with Read, Grep and \
              Glob where you have them.\n"
-        }
-        Step::Planning => {
-            return format!(
-                "{HEADLESS}- Run no commands and publish nothing: open no issue, write no \
-                 file, set no label. Kelpie opens the tickets your reply describes, and \
-                 links them itself.\n{IN_REPLY}"
-            );
         }
         Step::Triage | Step::Spec | Step::Reset | Step::Retro => IN_REPLY,
     };

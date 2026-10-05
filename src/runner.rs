@@ -47,8 +47,8 @@ mod instructions;
 mod limits_tests;
 mod merge;
 mod pace;
+mod parent;
 mod paths;
-mod plan;
 mod question;
 mod replies;
 mod report;
@@ -182,6 +182,8 @@ pub struct Runner {
     pacing: BTreeMap<Account, (Timestamp, Assessment)>,
     // What the board passed over on its last poll, kept in memory only
     skipped: Vec<Skip>,
+    // The forge's refusals in a row to close a done parent, kept in memory only
+    close_refused: parent::Refused,
     // The pull request reviewers kelpie's own settings define
     reviewers: Reviewers,
     // The review loop's reviewers, in order, from the project's list
@@ -321,6 +323,7 @@ impl Runner {
             local,
             pacing: BTreeMap::new(),
             skipped: Vec::new(),
+            close_refused: parent::Refused::new(),
             reviewers,
             lineup,
             agents,
@@ -453,7 +456,6 @@ impl Runner {
             .map_err(AddError::Label)?;
         let session = new_session_id().map_err(|e| AddError::Session(e.to_string()))?;
         let mut next = self.state.clone();
-        next.plans.retain(|p| p.issue != issue);
         next.work_items
             .push(self.fresh(issue, found.title, worker.clone(), session));
         self.save(next).map_err(AddError::State)?;

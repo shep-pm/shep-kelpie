@@ -196,20 +196,6 @@ pub trait Forge: Send {
         labels: &[&str],
     ) -> Result<u64, ForgeError>;
 
-    /// Makes issue `child` a sub-issue of issue `parent`
-    ///
-    /// # Errors
-    ///
-    /// [`ForgeError`] when the forge refuses or cannot be asked.
-    fn add_sub_issue(&self, repo: &ForgeSlug, parent: u64, child: u64) -> Result<(), ForgeError>;
-
-    /// Marks issue `number` blocked by issue `blocker`
-    ///
-    /// # Errors
-    ///
-    /// [`ForgeError`] when the forge refuses or cannot be asked.
-    fn add_blocker(&self, repo: &ForgeSlug, number: u64, blocker: u64) -> Result<(), ForgeError>;
-
     /// Closes issue `number` with `comment`
     ///
     /// # Errors

@@ -317,9 +317,6 @@ pub struct RoleAgentNames {
     /// The one-shot that judges every finding
     #[serde(default)]
     pub judge: Option<AgentName>,
-    /// The one-shot that plans a ready issue before it opens a work item
-    #[serde(default)]
-    pub planner: Option<AgentName>,
     /// The one-shot that checks a whole work item against its issue before the merge
     #[serde(default)]
     pub auditor: Option<AgentName>,
@@ -337,8 +334,6 @@ pub struct RoleAgents {
     pub reviewer: RoleModel,
     /// The judge's one-shots
     pub judge: RoleModel,
-    /// The planning call's one-shots
-    pub planner: RoleModel,
     /// The whole-issue check's one-shots
     pub auditor: RoleModel,
     /// The deep review round's sessions
@@ -356,8 +351,6 @@ pub struct RoleLimits {
     pub reviewer: Limit,
     /// The judge's one-shots
     pub judge: Limit,
-    /// The planning call's one-shots
-    pub planner: Limit,
     /// The whole-issue check's one-shots
     pub auditor: Limit,
     /// The deep review round's sessions
@@ -384,7 +377,6 @@ impl Settings {
         let (reviewer, reviewer_limit) =
             pick("reviewer", &self.agents.reviewer, &self.models.reviewer)?;
         let (judge, judge_limit) = pick("judge", &self.agents.judge, &self.models.judge)?;
-        let (planner, planner_limit) = pick("planner", &self.agents.planner, &self.models.planner)?;
         let (auditor, auditor_limit) = pick("auditor", &self.agents.auditor, &self.models.auditor)?;
         let (deep_reviewer, deep_reviewer_limit) = pick(
             "deep_reviewer",
@@ -402,14 +394,12 @@ impl Settings {
             worker,
             reviewer,
             judge,
-            planner,
             auditor,
             deep_reviewer,
             limits: RoleLimits {
                 worker: worker_limit,
                 reviewer: reviewer_limit,
                 judge: judge_limit,
-                planner: planner_limit,
                 auditor: auditor_limit,
                 deep_reviewer: deep_reviewer_limit,
             },

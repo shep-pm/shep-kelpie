@@ -223,7 +223,11 @@ impl KelpieSettings {
     }
 
     fn parse(text: &str) -> Result<Self, String> {
-        crate::settings::refuse_removed(text, &["ruling_channels"])?;
+        let channels = crate::settings::Removed {
+            key: "ruling_channels",
+            because: "the relay is gone",
+        };
+        crate::settings::refuse_removed(text, &[channels])?;
         toml::from_str(text).map_err(|e: toml::de::Error| {
             let line = e
                 .span()

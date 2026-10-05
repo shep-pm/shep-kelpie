@@ -15,8 +15,10 @@ const AGENTS: &str = "[agents.codex]\nharness = \"stand-in\"\n\
                       [agents.qwen]\nharness = \"stand-in\"\n\
                       model = \"qwen3-coder\"\neffort = \"low\"\nusage = \"none\"\n";
 
-const ALL_CODEX: &str = "worker = \"codex\"\nreviewer = \"codex\"\njudge = \"codex\"\nplanner = \"codex\"\nauditor = \"codex\"\n";
-const ALL_QWEN: &str = "worker = \"qwen\"\nreviewer = \"qwen\"\njudge = \"qwen\"\nplanner = \"qwen\"\nauditor = \"qwen\"\n";
+const ALL_CODEX: &str =
+    "worker = \"codex\"\nreviewer = \"codex\"\njudge = \"codex\"\nauditor = \"codex\"\n";
+const ALL_QWEN: &str =
+    "worker = \"qwen\"\nreviewer = \"qwen\"\njudge = \"qwen\"\nauditor = \"qwen\"\n";
 
 // A running project whose roles name kelpie's agents as `names` says.
 fn named(project: &str, names: &str) -> (Rig, Mutex<Runner>) {
@@ -123,26 +125,6 @@ fn each_account_keeps_its_own_day() {
         reason.starts_with("today's Codex allowance of 11.4% of the week is spent (15%"),
         "{reason}"
     );
-}
-
-#[test]
-fn a_planner_on_codex_holds_planning_on_codexs_window() {
-    let (rig, first) = named("koji", "planner = \"codex\"\n");
-    drop(first);
-    rig.planning_on();
-    let runner = rig.open().unwrap();
-    rig.forge.list_ready(5, false);
-    rig.codex_meter.set(Rig::utilization(0, 60));
-
-    let (kind, reason) = held(step(&runner).unwrap());
-    assert_eq!(kind, HoldKind::Window);
-    assert!(
-        reason.starts_with("Codex's 5-hour window is at 60%"),
-        "{reason}"
-    );
-    assert_eq!(rig.claude.all_calls(), [], "nothing planned");
-    let pacer = &rig.ask(&runner, "status", None)["pacer"];
-    assert_eq!(pacer["codex"]["holding"]["kind"], "window");
 }
 
 #[test]

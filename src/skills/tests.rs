@@ -82,7 +82,7 @@ fn each_step_runs_its_default_skill_from_kelpies_own_copy() {
 
     let status = rig.ask(&runner, "status", None);
     assert_eq!(
-        status["skills"][5],
+        status["skills"][4],
         json!({ "step": "review", "skill": "/mattpocock:code-review", "fallback": null })
     );
     assert_eq!(status["skills"].as_array().unwrap().len(), Step::ALL.len());
@@ -122,7 +122,7 @@ fn a_projects_skill_folder_replaces_the_default() {
     let reviewer = call_of(&rig, Role::Reviewer);
     assert!(reviewer.prompt.starts_with("/mattpocock:code-review "));
     let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["skills"][3]["skill"], "/kelpie-implement:build-it");
+    assert_eq!(status["skills"][2]["skill"], "/kelpie-implement:build-it");
 }
 
 #[test]
@@ -183,9 +183,9 @@ fn a_skill_that_cannot_load_falls_back_to_kelpies_prompt_and_says_why() {
         ]
     );
     let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["skills"][3]["skill"], json!(null));
+    assert_eq!(status["skills"][2]["skill"], json!(null));
     assert_eq!(
-        status["skills"][3]["fallback"],
+        status["skills"][2]["fallback"],
         format!("{} holds no SKILL.md", gone.display())
     );
 
@@ -215,7 +215,7 @@ fn a_step_set_to_none_runs_kelpies_prompt_with_no_notice() {
     assert_eq!(runner.lock().unwrap().skill_notices().count(), 0);
     let status = rig.ask(&runner, "status", None);
     assert_eq!(
-        status["skills"][5],
+        status["skills"][4],
         json!({ "step": "review", "skill": null, "fallback": null })
     );
 }
@@ -251,8 +251,8 @@ fn a_changed_skill_takes_effect_without_a_restart() {
         Some("settings changed: skills now in effect")
     );
     let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["skills"][5]["skill"], json!(null));
-    assert_eq!(status["skills"][3]["skill"], "/mattpocock:implement");
+    assert_eq!(status["skills"][4]["skill"], json!(null));
+    assert_eq!(status["skills"][2]["skill"], "/mattpocock:implement");
 }
 
 #[test]
@@ -300,8 +300,8 @@ fn a_projects_plugin_may_not_take_kelpies_own_names() {
         );
         let runner = rig.open().unwrap();
         let status = rig.ask(&runner, "status", None);
-        assert_eq!(status["skills"][5]["skill"], json!(null), "{name}");
-        let fallback = status["skills"][5]["fallback"].as_str().unwrap();
+        assert_eq!(status["skills"][4]["skill"], json!(null), "{name}");
+        let fallback = status["skills"][4]["fallback"].as_str().unwrap();
         assert!(fallback.ends_with(&format!("is named {name}, which is kelpie's own")));
     }
 }

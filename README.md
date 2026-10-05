@@ -164,6 +164,7 @@ Put `ready-for-agent` on an issue that says what done looks like, with acceptanc
 What decides whether, and when, the first issue starts:
 
 - The board skips an issue that is assigned to anyone or already has an open pull request, and one blocked by an issue that is still open. Don't assign it to yourself
+- An issue with sub-issues is never worked itself: its sub-issues are, and shep-kelpie closes it once every sub-issue is closed
 - Of the rest, `priority: P0` to `P3` labels order them, then the oldest goes first. A `worker:<model>-<effort>` label, such as `worker:opus-high`, picks the model that works it, from `opus`, `sonnet`, `haiku` and `fable`, each run as the id `[app.dogs.kelpie.models.labels]` gives it. `worker:local` picks the project's local worker
 - No turn starts while Claude's 5-hour window is at 50% or more, and no new work item starts once today's share of the week is spent. `shep kelpie status` says why under `pacer`, and `enabled = false` in the project's `[app.dogs.kelpie.pacing]` turns both off
 - On a public repo, after CI each pull request waits for CodeRabbit, at one review an hour. shep-kelpie asks for a review by putting the `review please` label on, so the repo's `.coderabbit.yaml` must review only labelled pull requests. Without that, CodeRabbit reviews every push on its own and spends the hour a round is waiting on:
@@ -177,7 +178,7 @@ What decides whether, and when, the first issue starts:
 
 - `coderabbit.enabled` is the switch for every pull request reviewer, cubic and Codex too. A private repo has it off, so a private repo that wants cubic or Codex turns it on
 
-`shep kelpie add <issue>` opens a work item for an issue at once, without the label, ahead of the board's order and without planning. It queues nothing: while `max_items` work items are open, `add <issue>` is refused.
+`shep kelpie add <issue>` opens a work item for an issue at once, without the label, ahead of the board's order. It queues nothing: while `max_items` work items are open, `add <issue>` is refused.
 
 ### 8. Answer a ruling
 
@@ -206,26 +207,6 @@ The current turn finishes, then the worker parks. `shep kelpie start` resumes it
 A project on `merge_authority = "auto"` merges its pull requests without asking once every gate passes, and posts a notice after. The example settings use `ask`, which raises a ruling before every merge.
 
 Before either, once CI is green, a fresh Opus session reads the work as a whole: the issue with whatever its body points to (an issue or a pull request, with its latest review and its unresolved comments), the pull request's body and the final diff. It answers two questions. For each acceptance criterion, is it met, and where? And what does the change assume about the world outside the repo (labels, files, settings, other services), and does the code or a test check each assumption against the real thing, rather than a fake that accepts anything? A criterion not met or an assumption nothing real checks goes to the worker as its next turn, with the gap named, and what it pushes goes through the review loop, CI and the check again, like any other fix. After two such trips the next gap is a ruling: a yes sends the worker the gaps once more, the same way, and merging by hand overrules the check. `[models.auditor]` picks its model (Opus 5.5 at high effort when left out), an agent can run it through `[agents] auditor`, and its time shows as `audit` under `timings`.
-
-### Planning
-
-When the board picks an issue, a planning call on Opus reads the repo at `main` and decides whether it is one pull request or several, and picks the worker each runs on. Most stay one. Several become sub-issues of the issue, each with its labels and blocked by the pieces it needs first, and the issue gets one comment with the plan.
-
-The planning call picks one of three workers, and no other:
-
-| Pick | When |
-| --- | --- |
-| `sonnet-high` | The default: any feature, new behaviour across modules, state, persistence, timing, process lifecycle |
-| `sonnet-medium` | Small or mechanical: docs, config, a rename, test-only, one module, no state or concurrency |
-| `opus-high` | Only where a bad first build is hard to undo: migrations, credentials, irreversible operations |
-
-- Under `auto` the split happens on its own. Under `ask` it's a ruling: `yes` opens the sub-issues, and `no <note>` works the issue whole, on its own `worker:` label or the project's worker, and a comment says which
-- A planned issue kept whole gets the pick as a `worker:` label, and each sub-issue of a split gets its own. shep-kelpie makes the label on the repo the first time it needs it. An issue that already carries a `worker:` label keeps it over the pick
-- A reply that names no worker or any other, or a label that can't be made or added, falls back to the project's own worker, and a comment says why
-- An issue with sub-issues is never worked itself, and shep-kelpie closes it once every sub-issue is closed
-- A sub-issue is never planned again, and neither is an issue added with `add`
-- Off by default until the sub-issue and blocked-by calls have run against a real repo: `[planning] enabled = true` turns it on, and `[models.planner]` picks the model the planning call itself runs on
-- A split or a parent close the forge refuses three times in a row waits on a ruling, and the board goes on
 
 ### Running a project
 
@@ -315,7 +296,6 @@ Every step shep-kelpie drives an agent through runs a skill, by default from [ma
 | step | default skill | where it runs |
 |---|---|---|
 | `triage` | `triage` | not driven yet |
-| `planning` | `to-tickets` | the planning call on each issue the board picks |
 | `spec` | `to-spec` | not driven yet |
 | `implement` | `implement` | the worker's first turn on an issue |
 | `tests` | `tdd` | named in the worker's instructions |
