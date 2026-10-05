@@ -8,21 +8,21 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage};
-use crate::settings::{AgentName, ReviewerName};
+use crate::settings::AgentName;
 
-mod deep;
 mod follow_ups;
 mod local;
+mod review;
 mod round;
 mod spend;
 mod timings;
 
-pub use deep::Deep;
 pub use follow_ups::FollowUps;
 pub use local::LOCAL_FAILURES_DOWN;
+pub use review::{Review, ReviewStage};
 pub use round::{CodeRabbitStage, CodeRabbitTally, OpenThread};
 pub use spend::{QwenTally, RoleSpend, Spend};
-pub use timings::{CallKind, Seconds, Split, TimingPhase, Timings, saved as saved_seconds};
+pub use timings::{CallKind, Seconds, Split, TimingPhase, Timings};
 
 /// The work item in flight
 // wire format: changing this is a breaking change to the state file
@@ -65,7 +65,7 @@ pub struct WorkItem {
     /// for the rest of the work item. A round that left no file, or only new
     /// ones, unreviewed clears its reviewer's count.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub local_failures: BTreeMap<ReviewerName, u32>,
+    pub local_failures: BTreeMap<AgentName, u32>,
     /// The files the last local round that reviewed anything left
     /// unreviewed. The next local round replaces the list with what it leaves.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -74,7 +74,7 @@ pub struct WorkItem {
     /// reviewer leaving the same files again counts against it: another
     /// reviewer's first miss on them is its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub local_unreviewed_by: Option<ReviewerName>,
+    pub local_unreviewed_by: Option<AgentName>,
     /// Its worktree
     pub worktree: PathBuf,
     /// Its worker's build folder
@@ -119,7 +119,12 @@ pub struct WorkItem {
     /// The reviewers whose calls failed so often in a row that a pass went
     /// on without them
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub reviewers_skipped: Vec<ReviewerName>,
+    pub reviewers_skipped: Vec<AgentName>,
+    /// Why the last review pass ended with no reviewer having read the pull
+    /// request, as a listed reviewer was down or failed. None once a later
+    /// pass has a reviewer read it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unreviewed: Option<String>,
     /// The pull request's labels, ready state and head, as kelpie and its
     /// worker leave them. A mismatch at the gate is a change kelpie did not make.
     #[serde(default)]
@@ -346,89 +351,6 @@ pub enum ReviewCallState {
     },
 }
 
-/// Where the review stands
-///
-/// A pass runs the project's reviewers once each, in order. A round that
-/// finds anything above a nit (LOW) sends the worker all of its findings for
-/// one fix turn before the next reviewer runs. After the last, the pull
-/// request goes to CI.
-// wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Review {
-    /// The round now running or about to run, 1-indexed from the start of
-    /// its pass
-    pub round: u32,
-    /// Where this round stands
-    pub stage: ReviewStage,
-    /// Who reviews this round, once it has started. None in an older state
-    /// file, whose rounds alternated local first.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reviewer: Option<ReviewerName>,
-    /// The reviewers this pass has run, oldest first. The next round goes to
-    /// the first listed reviewer not among them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub ran: Vec<ReviewerName>,
-    /// The calls of this round's reviewer that failed in a row
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub failures: u32,
-    /// The reviewer before, in a state file saved before `ran`. It is kept
-    /// until the next round, which reads it into `ran`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last: Option<ReviewerName>,
-}
-
-impl Review {
-    /// The first round of a pass, about to run
-    pub fn first() -> Self {
-        Self {
-            round: 1,
-            stage: ReviewStage::Round,
-            reviewer: None,
-            ran: Vec::new(),
-            failures: 0,
-            last: None,
-        }
-    }
-
-    /// The next round of the same pass, once this one's reviewer is done
-    pub fn next_round(self) -> Self {
-        let mut ran = self.ran;
-        ran.extend(self.reviewer);
-        Self {
-            round: self.round + 1,
-            stage: ReviewStage::Round,
-            reviewer: None,
-            ran,
-            failures: 0,
-            last: None,
-        }
-    }
-}
-
-/// Where one review round stands
-// wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "stage", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum ReviewStage {
-    /// About to run this round's reviewer
-    Round,
-    /// The round's findings, about to go to the worker if any is above a nit
-    Found {
-        /// What the reviewer found
-        findings: Vec<Finding>,
-    },
-    /// The round's findings were sent to the worker; waiting for its fix
-    Fixing {
-        /// The pull request's head when the findings were sent, which a fix
-        /// moves. None in an older state file, whose fix is not checked.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        head: Option<String>,
-    },
-    /// The deep round's reads, whose findings then go on as `Found`
-    Deep(Deep),
-}
-
 impl WorkItem {
     /// Forgets the review bot threads sent to the worker, which no fix of
     /// this round will resolve now
@@ -627,9 +549,10 @@ mod tests {
                 "state": "review",
                 "round": 2,
                 "stage": { "stage": "round" },
+                "unread": true,
             })
         );
-        let name = |n: &str| Some(ReviewerName::try_from(n.to_owned()).unwrap());
+        let name = |n: &str| Some(AgentName::try_from(n.to_owned()).unwrap());
         assert_eq!(
             value(Phase::Review(Review {
                 round: 3,
@@ -645,6 +568,7 @@ mod tests {
                 "reviewer": "opus",
                 "ran": ["qwen"],
                 "failures": 1,
+                "unread": true,
             })
         );
         let older = json!({
@@ -732,43 +656,6 @@ mod tests {
             .unwrap(),
             json!({ "state": "next", "prompt": "fix it" })
         );
-    }
-
-    #[test]
-    fn every_review_stage_is_pinned() {
-        let value = |s: ReviewStage| serde_json::to_value(s).unwrap();
-        let finding = Finding {
-            severity: crate::ports::Severity::High,
-            file: "a.rs".into(),
-            line: 3,
-            what: "bad".into(),
-            why: "breaks".into(),
-        };
-        assert_eq!(
-            value(ReviewStage::Found {
-                findings: vec![finding],
-            }),
-            json!({
-                "stage": "found",
-                "findings": [{
-                    "severity": "high",
-                    "file": "a.rs",
-                    "line": 3,
-                    "what": "bad",
-                    "why": "breaks",
-                }],
-            })
-        );
-        assert_eq!(
-            value(ReviewStage::Fixing {
-                head: Some("c0ffee".into())
-            }),
-            json!({ "stage": "fixing", "head": "c0ffee" })
-        );
-        let saved_before_the_head: ReviewStage =
-            serde_json::from_value(json!({ "stage": "fixing" })).unwrap();
-        assert_eq!(saved_before_the_head, ReviewStage::Fixing { head: None });
-        assert_eq!(value(saved_before_the_head), json!({ "stage": "fixing" }));
     }
 
     #[test]

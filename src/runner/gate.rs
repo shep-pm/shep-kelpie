@@ -108,12 +108,14 @@ impl Runner {
 
     // Green CI goes to a review bot round while one is owed. Then `auto`
     // merges by the path a yes takes, and `ask` raises the merge ruling with
-    // the pull request handed back `ready-for-human`.
+    // the pull request handed back `ready-for-human`. A pull request no
+    // reviewer read gets the ruling under `auto` too, naming why.
     fn passed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
         if self.review_bot_due() {
             return self.start_round(head);
         }
-        if self.settings.merge_authority == MergeAuthority::Auto {
+        let unreviewed = self.current().and_then(|item| item.unreviewed.clone());
+        if self.settings.merge_authority == MergeAuthority::Auto && unreviewed.is_none() {
             self.update(|item| {
                 item.phase = Phase::Merge {
                     head,
@@ -130,7 +132,7 @@ impl Runner {
             item.known.labels.retain(|l| l != READY && l != HUMAN);
             item.known.labels.push(HUMAN.to_owned());
         })?;
-        self.raise(number, RulingKind::Merge { head })
+        self.raise(number, RulingKind::Merge { head, unreviewed })
     }
 
     // A worker that pushed nothing after its last red run would get the

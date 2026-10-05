@@ -21,7 +21,7 @@ use super::report::{Begin, StepReport};
 use crate::lease::gpu::LockHolder;
 use crate::pacer::{Assessment, Hold, RECHECK_SECS, Reading, Scope, assess, named};
 use crate::ports::Timestamp;
-use crate::settings::{Account, Limit, Runs};
+use crate::settings::{Account, Limit};
 use crate::state::StateError;
 
 /// What `status` shows of the pacer
@@ -138,22 +138,11 @@ impl Runner {
         Ok(Pace::Clear)
     }
 
-    // Each implementer's limit and each review role's, the deep reviewer's
-    // included, then each session reviewer's.
+    // Each implementer's limit, then each listed reviewer's that runs sessions.
     fn spent_limits(&self) -> impl Iterator<Item = &Limit> {
-        let limits = &self.agents.limits;
-        let sessions = self.lineup.iter().filter_map(|r| match &r.runs {
-            Runs::Claude(session) => Some(&session.limit),
-            Runs::Local(_) | Runs::Deep => None,
-        });
+        let sessions = self.lineup.iter().filter_map(|r| r.runs.session());
         let implementers = self.agents.implementers.iter().map(|i| &i.limit);
-        // Only a project that runs the deep round spends its role.
-        let deep = self.lineup.iter().any(|r| r.runs == Runs::Deep);
-        let deep = deep.then_some(&limits.deep_reviewer);
-        implementers
-            .chain([&limits.reviewer])
-            .chain(deep)
-            .chain(sessions)
+        implementers.chain(sessions.map(|(_, limit)| limit))
     }
 
     // The accounts the project's calls spend, each once.

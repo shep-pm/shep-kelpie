@@ -51,12 +51,14 @@ fn each_step_runs_its_default_skill_from_kelpies_own_copy() {
     assert_invoked(&worker.prompt, implement, first);
     assert!(worker.prompt.contains("Run no /code-review"));
     assert_eq!(worker.plugin_dirs, std::slice::from_ref(&plugin));
+    // A reviewer's prompt is its agent file's body, which runs no skill.
     let reviewer = call_of(&rig, Role::Reviewer);
-    let review = "/mattpocock:code-review";
-    assert_invoked(&reviewer.prompt, review, "You are a founding engineer");
-    assert!(reviewer.prompt.contains("- Run no commands."));
-    assert!(reviewer.prompt.contains("kelpie's wins"));
-    assert_eq!(reviewer.plugin_dirs, std::slice::from_ref(&plugin));
+    assert!(
+        reviewer.prompt.starts_with("Review the change against"),
+        "{}",
+        reviewer.prompt
+    );
+    assert!(reviewer.plugin_dirs.is_empty());
     let seen = rig.claude.all_seen();
     let reviewed = seen.iter().find(|s| s.call.role == Role::Reviewer).unwrap();
     assert_eq!(
@@ -119,8 +121,6 @@ fn a_projects_skill_folder_replaces_the_default() {
         serde_json::from_str::<serde_json::Value>(&manifest).unwrap()["name"],
         "kelpie-implement"
     );
-    let reviewer = call_of(&rig, Role::Reviewer);
-    assert!(reviewer.prompt.starts_with("/mattpocock:code-review "));
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["skills"][2]["skill"], "/kelpie-implement:build-it");
 }
@@ -130,23 +130,23 @@ fn a_skill_in_a_projects_plugin_replaces_the_default() {
     let (rig, _runner, _) = Rig::with_pull_request_set("shep", |rig| {
         let plugin = rig.home.path().join("house-plugin");
         plugin_folder(&plugin, "house");
-        skill_folder(&plugin.join("skills/review-hard"), "Review hard.\n");
+        skill_folder(&plugin.join("skills/build-hard"), "Build hard.\n");
         choose(
             rig,
             &format!(
-                "review = {{ kind = \"plugin\", plugin = \"{}\", skill = \"review-hard\" }}\n",
+                "implement = {{ kind = \"plugin\", plugin = \"{}\", skill = \"build-hard\" }}\n",
                 plugin.display()
             ),
         );
     });
-    let reviewer = call_of(&rig, Role::Reviewer);
-    let review = "You are a founding engineer";
-    assert_invoked(&reviewer.prompt, "/house:review-hard", review);
+    let worker = call_of(&rig, Role::Worker);
+    let first = "Your work item is issue #7: ";
+    assert_invoked(&worker.prompt, "/house:build-hard", first);
     let plugin = rig.home.path().join("house-plugin");
     assert!(
-        reviewer.plugin_dirs.contains(&plugin),
+        worker.plugin_dirs.contains(&plugin),
         "{:?}",
-        reviewer.plugin_dirs
+        worker.plugin_dirs
     );
 }
 
@@ -204,19 +204,19 @@ fn a_skill_that_cannot_load_falls_back_to_kelpies_prompt_and_says_why() {
 #[test]
 fn a_step_set_to_none_runs_kelpies_prompt_with_no_notice() {
     let (rig, runner, _) = Rig::with_pull_request_set("shep", |rig| {
-        choose(rig, "review = { kind = \"none\" }\n");
+        choose(rig, "implement = { kind = \"none\" }\n");
     });
-    let reviewer = call_of(&rig, Role::Reviewer);
+    let worker = call_of(&rig, Role::Worker);
     assert!(
-        reviewer.prompt.starts_with("You are a founding engineer"),
+        worker.prompt.starts_with("Your work item is issue #7: "),
         "{}",
-        reviewer.prompt
+        worker.prompt
     );
     assert_eq!(runner.lock().unwrap().skill_notices().count(), 0);
     let status = rig.ask(&runner, "status", None);
     assert_eq!(
-        status["skills"][4],
-        json!({ "step": "review", "skill": null, "fallback": null })
+        status["skills"][2],
+        json!({ "step": "implement", "skill": null, "fallback": null })
     );
 }
 

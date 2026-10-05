@@ -5,8 +5,8 @@ use crate::runner::{Runner, StepReport, step};
 use crate::settings::Effort;
 use crate::test::{Rig, Scripted, ScriptedRound};
 
-const SONNET_LOW: &str = "---\nrole: implementer\nharness: claude-code\n\
-                          model: claude-sonnet-5\neffort: low\n---\n";
+const SONNET_LOW: &str = "---\nrole: reviewer\nharness: claude-code\n\
+                          model: claude-sonnet-5\neffort: low\n---\nReview {{DIFF}}.\n";
 const HAIKU: &str = "---\nrole: implementer\nharness: claude-code\n\
                      model: claude-haiku-4-5-20251001\neffort: low\n---\n";
 
@@ -73,10 +73,8 @@ fn a_project_naming_a_different_agent_per_role_reaches_each() {
     let rig = Rig::new("shep");
     rig.merge_auto();
     rig.write_agent("sonnet-low", SONNET_LOW);
-    name_agents(
-        &rig,
-        "implementers = [\"opus-high\"]\nreviewer = \"sonnet-low\"\n",
-    );
+    name_agents(&rig, "implementers = [\"opus-high\"]\n");
+    rig.reviewers(&["qwen", "sonnet-low"]);
     let runner = rig.open().unwrap();
     whole_work_item(&rig, &runner);
     let seen: Vec<(Role, String, Effort)> = rig
@@ -162,13 +160,19 @@ fn a_settings_file_that_cannot_be_written_keeps_the_turn_for_its_retry() {
 #[test]
 fn a_role_naming_an_agent_kelpie_lacks_stops_the_runner_naming_it() {
     let rig = Rig::new("shep");
-    name_agents(&rig, "reviewer = \"fable\"\n");
+    rig.reviewers(&["fable"]);
     let err = rig.open().unwrap_err().to_string();
     assert!(
-        err.contains("`agents.reviewer` names fable, which has no agent file"),
+        err.contains("`agents.reviewers` names fable, which has no agent file"),
         "{err}"
     );
-    rig.edit_settings(|s| s.replace("reviewer = \"fable\"\n", "implementers = [\"fable\"]\n"));
+    rig.edit_settings(|s| {
+        s.replace("reviewers = [\"fable\"]\n", crate::test::RIG_REVIEWERS)
+            .replace(
+                "implementers = [\"sonnet-high\"]\n",
+                "implementers = [\"fable\"]\n",
+            )
+    });
     let err = rig.open().unwrap_err().to_string();
     assert_eq!(
         err,

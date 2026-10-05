@@ -1,12 +1,13 @@
 //! Agent definition files
 //!
 //! Each agent is `<name>.md` in the `agents` folder of kelpie's home: YAML
-//! frontmatter naming what it is for, its harness, model and effort, then a
-//! Markdown body added to kelpie's own instructions. Kelpie embeds its
-//! defaults, which a file of the same name replaces, and `shep kelpie add`
-//! writes out any that are missing. A file that cannot be read or used stops
-//! the runner, naming the file and what is wrong with it. A `.md` file whose
-//! name is no agent's, such as a `README.md`, is skipped and named in the log.
+//! frontmatter naming what it is for and what runs it, then a Markdown body.
+//! An implementer's body is added to kelpie's own instructions, and a
+//! reviewer's is its prompt. Kelpie embeds its defaults, which a file of the
+//! same name replaces, and `shep kelpie add` writes out any that are
+//! missing. A file that cannot be read or used stops the runner, naming the
+//! file and what is wrong with it. A `.md` file whose name is no agent's,
+//! such as a `README.md`, is skipped and named in the log.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -16,11 +17,11 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::forwarder::Upstream;
 use crate::settings::{
-    Account, AgentHarness, AgentName, ContextSize, Effort, EndpointUrl, Harness, LeaseName, Limit,
-    ModelServer, NonBlank, RoleModel, UsageReader,
+    AgentName, Effort, Endpoint, Limit, LocalCommand, LocalRound, NonBlank, RoleModel,
 };
+
+mod front;
 
 /// The folder in kelpie's home that holds the agent files
 pub const FOLDER: &str = "agents";
@@ -28,13 +29,45 @@ pub const FOLDER: &str = "agents";
 /// The implementer a project lists when it names none
 pub const DEFAULT_IMPLEMENTER: &str = "sonnet-high";
 
+/// The reviewer every project lists when it names none
+pub const DEFECT_HUNTER: &str = "defect-hunter";
+
+/// The reviewer that runs the maintainer's qwen-review script
+pub const QWEN: &str = "qwen";
+
+/// The maintainer's qwen-review script, which the `qwen` reviewer runs
+pub const QWEN_REVIEW: &str = "~/.claude/scripts/qwen-review.sh";
+
+// When `add` writes one of kelpie's own agents out.
+#[derive(Debug, Clone, Copy)]
+enum Written {
+    Always,
+    // Only where this file, under the home folder, is installed.
+    Beside(&'static str),
+}
+
 // Kelpie's own agents, by name: what `add` writes out, and what a missing file falls back to.
-const DEFAULTS: [(&str, &str); 2] = [
+const DEFAULTS: [(&str, &str, Written); 4] = [
     (
         DEFAULT_IMPLEMENTER,
         include_str!("../agents/sonnet-high.md"),
+        Written::Always,
     ),
-    ("opus-high", include_str!("../agents/opus-high.md")),
+    (
+        "opus-high",
+        include_str!("../agents/opus-high.md"),
+        Written::Always,
+    ),
+    (
+        DEFECT_HUNTER,
+        include_str!("../agents/defect-hunter.md"),
+        Written::Always,
+    ),
+    (
+        QWEN,
+        include_str!("../agents/qwen.md"),
+        Written::Beside(QWEN_REVIEW),
+    ),
 ];
 
 /// What an agent is for
@@ -43,6 +76,54 @@ const DEFAULTS: [(&str, &str); 2] = [
 pub enum Role {
     /// It builds a work item, once a project lists it in `agents.implementers`
     Implementer,
+    /// It reads a pull request once a pass, once a project lists it in
+    /// `agents.reviewers`
+    Reviewer,
+}
+
+impl Role {
+    /// The role's name, as an agent file writes it
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Implementer => "implementer",
+            Self::Reviewer => "reviewer",
+        }
+    }
+}
+
+/// What runs an agent's calls
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Runs {
+    /// A fresh or resumed session on a harness, at a model and effort
+    Session {
+        /// Its harness, model and effort
+        model: RoleModel,
+        /// What holds its calls back
+        limit: Limit,
+    },
+    /// A command that keeps the README's contract: a reviewer only
+    Command(LocalCommand),
+    /// Kelpie's own reviewer over an OpenAI-compatible server: a reviewer only
+    Endpoint(Endpoint),
+}
+
+impl Runs {
+    /// The session's model and limit, for an agent that runs sessions
+    pub fn session(&self) -> Option<(&RoleModel, &Limit)> {
+        match self {
+            Self::Session { model, limit } => Some((model, limit)),
+            Self::Command(_) | Self::Endpoint(_) => None,
+        }
+    }
+
+    /// The local round, for an agent that runs on its own
+    pub fn local(&self) -> Option<LocalRound> {
+        match self {
+            Self::Session { .. } => None,
+            Self::Command(command) => Some(LocalRound::Command(command.clone())),
+            Self::Endpoint(endpoint) => Some(LocalRound::Endpoint(endpoint.clone())),
+        }
+    }
 }
 
 /// One agent, as a call on it takes it
@@ -50,12 +131,17 @@ pub enum Role {
 pub struct Agent {
     /// What it is for
     pub role: Role,
-    /// Its harness, model and effort
-    pub model: RoleModel,
-    /// What holds its calls back
-    pub limit: Limit,
-    /// Its file's body, added to kelpie's own instructions. None when blank.
+    /// What runs its calls
+    pub runs: Runs,
+    /// Its file's body: an implementer's addition to kelpie's own
+    /// instructions, or a reviewer's prompt. None when blank.
     pub prompt: Option<String>,
+    /// Globs of the files a pull request must change for this reviewer to
+    /// run. Every pull request when empty, and always empty for an implementer.
+    pub paths: Vec<NonBlank>,
+    /// Whether this reviewer reads twice, the second time shown what it found
+    /// the first and asked only for what it missed. Never for an implementer.
+    pub second_look: bool,
 }
 
 /// Every agent kelpie knows: its defaults, and the files that replace or add to them
@@ -69,9 +155,9 @@ impl Agents {
     /// Kelpie's own agents, with no file read
     pub fn embedded() -> Self {
         // A test pins that every default parses, so none is dropped here.
-        let parsed = DEFAULTS.iter().filter_map(|(name, text)| {
+        let parsed = DEFAULTS.iter().filter_map(|(name, text, _)| {
             let name = AgentName::try_from((*name).to_owned()).ok()?;
-            Some((name, parse(text).ok()?))
+            Some((name, front::parse(text).ok()?))
         });
         Self {
             agents: parsed.collect(),
@@ -90,18 +176,14 @@ impl Agents {
     /// cannot be read or used.
     pub fn load(folder: &Path) -> Result<Self, AgentsError> {
         let mut agents = Self::embedded();
-        let unread = |path: &Path, e: io::Error| AgentsError::Read {
-            path: path.to_owned(),
-            kind: e.kind(),
-        };
         let entries = match fs::read_dir(folder) {
             Ok(entries) => entries,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(agents),
-            Err(e) => return Err(unread(folder, e)),
+            Err(e) => return Err(failed(folder, e)),
         };
         let mut files = Vec::new();
         for entry in entries {
-            let path = entry.map_err(|e| unread(folder, e))?.path();
+            let path = entry.map_err(|e| failed(folder, e))?.path();
             if path.extension().is_some_and(|e| e == "md") && path.is_file() {
                 files.push(path);
             }
@@ -113,8 +195,8 @@ impl Agents {
                 agents.skipped.push(path);
                 continue;
             };
-            let text = fs::read_to_string(&path).map_err(|e| unread(&path, e))?;
-            let agent = parse(&text).map_err(|message| AgentsError::File {
+            let text = fs::read_to_string(&path).map_err(|e| failed(&path, e))?;
+            let agent = front::parse(&text).map_err(|message| AgentsError::File {
                 path: path.clone(),
                 message,
             })?;
@@ -147,7 +229,7 @@ impl Agents {
     #[cfg(test)]
     #[track_caller]
     pub(crate) fn with(mut self, name: &str, text: &str) -> Self {
-        let agent = parse(text).unwrap_or_else(|e| panic!("agent {name}: {e}"));
+        let agent = front::parse(text).unwrap_or_else(|e| panic!("agent {name}: {e}"));
         self.agents
             .insert(name.to_owned().try_into().unwrap(), agent);
         self
@@ -156,31 +238,51 @@ impl Agents {
 
 /// Writes each of kelpie's own agents that `folder` lacks, never over a file
 ///
-/// Returns the names written, in order.
+/// The `qwen` reviewer is written only where the maintainer's qwen-review
+/// script is installed under `home`. Returns the names written, in order.
 ///
 /// # Errors
 ///
 /// [`AgentsError::Read`] naming the folder or file that could not be written.
-pub fn write_defaults(folder: &Path) -> Result<Vec<&'static str>, AgentsError> {
-    let failed = |path: &Path, e: io::Error| AgentsError::Read {
-        path: path.to_owned(),
-        kind: e.kind(),
-    };
+pub fn write_defaults(folder: &Path, home: &Path) -> Result<Vec<&'static str>, AgentsError> {
     fs::create_dir_all(folder).map_err(|e| failed(folder, e))?;
     let mut written = Vec::new();
-    for (name, text) in DEFAULTS {
-        let path = folder.join(format!("{name}.md"));
-        match fs::File::create_new(&path) {
-            Ok(mut file) => {
-                file.write_all(text.as_bytes())
-                    .map_err(|e| failed(&path, e))?;
-                written.push(name);
-            }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(failed(&path, e)),
+    for (name, text, when) in DEFAULTS {
+        let wanted = match when {
+            Written::Always => true,
+            Written::Beside(file) => installed(file, home),
+        };
+        if wanted && write_new(&folder.join(format!("{name}.md")), text)? {
+            written.push(name);
         }
     }
     Ok(written)
+}
+
+/// Whether `file`, written with a leading `~/`, is a file under `home`
+pub fn installed(file: &str, home: &Path) -> bool {
+    file.strip_prefix("~/")
+        .is_some_and(|rest| home.join(rest).is_file())
+}
+
+// Writes `text` to `path` when nothing is there, and says whether it did.
+fn write_new(path: &Path, text: &str) -> Result<bool, AgentsError> {
+    match fs::File::create_new(path) {
+        Ok(mut file) => {
+            file.write_all(text.as_bytes())
+                .map_err(|e| failed(path, e))?;
+            Ok(true)
+        }
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(failed(path, e)),
+    }
+}
+
+fn failed(path: &Path, e: io::Error) -> AgentsError {
+    AgentsError::Read {
+        path: path.to_owned(),
+        kind: e.kind(),
+    }
 }
 
 /// What `folder`'s `.md` files hold, by file name, so a change to any of
@@ -229,25 +331,12 @@ pub fn write_kept(
          role: implementer\nharness: claude-code\nmodel: \"{model}\"\neffort: {}\n---\n",
         effort.as_str()
     );
-    let usable = !model.contains(['"', '\\', '\n']) && parse(&text).is_ok();
+    let usable = !model.contains(['"', '\\', '\n']) && front::parse(&text).is_ok();
     if !usable {
         return Ok(false);
     }
-    let failed = |path: &Path, e: io::Error| AgentsError::Read {
-        path: path.to_owned(),
-        kind: e.kind(),
-    };
     fs::create_dir_all(folder).map_err(|e| failed(folder, e))?;
-    let path = folder.join(format!("{name}.md"));
-    match fs::File::create_new(&path) {
-        Ok(mut file) => {
-            file.write_all(text.as_bytes())
-                .map_err(|e| failed(&path, e))?;
-            Ok(true)
-        }
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(false),
-        Err(e) => Err(failed(&path, e)),
-    }
+    write_new(&folder.join(format!("{name}.md")), &text)
 }
 
 /// Why kelpie's agents cannot be used
@@ -282,155 +371,6 @@ impl fmt::Display for AgentsError {
 }
 
 impl core::error::Error for AgentsError {}
-
-// An agent file's frontmatter
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Front {
-    role: Role,
-    harness: Harness,
-    model: NonBlank,
-    effort: Effort,
-    #[serde(default)]
-    usage: Option<UsageReader>,
-    #[serde(default)]
-    lease: Option<LeaseName>,
-    #[serde(default)]
-    url: Option<EndpointUrl>,
-    #[serde(default)]
-    context: Option<ContextSize>,
-}
-
-/// The agent an agent file's `text` defines, or what is wrong with it
-fn parse(text: &str) -> Result<Agent, String> {
-    let Some((front, body)) = split(text) else {
-        return Err("must start with a `---` line, then the YAML frontmatter, \
-                    then a `---` line of its own"
-            .into());
-    };
-    // A blank first line stands for the opening `---`, so a message's line is the file's.
-    let yaml = format!("\n{front}");
-    let front: Front = serde_saphyr::from_str(&yaml).map_err(|e| yaml_error(&yaml, &e))?;
-    let model = front.role_model()?;
-    let limit = front.limit()?;
-    let body = body.trim();
-    Ok(Agent {
-        role: front.role,
-        model,
-        limit,
-        prompt: (!body.is_empty()).then(|| body.to_owned()),
-    })
-}
-
-// The parser's message, led by the key whose value it refuses. A missing or
-// unknown key is already named, and placed at the start of a line.
-fn yaml_error(yaml: &str, error: &serde_saphyr::Error) -> String {
-    let message = error.without_snippet().to_string();
-    let key = error
-        .location()
-        .filter(|at| at.column() > 1)
-        .and_then(|at| {
-            let line = yaml
-                .lines()
-                .nth(usize::try_from(at.line()).ok()?.checked_sub(1)?)?;
-            let (key, _) = line.split_once(':')?;
-            Some(key.trim()).filter(|k| !k.is_empty() && !k.starts_with('#'))
-        });
-    match key {
-        Some(key) => format!("`{key}`: {message}"),
-        None => message,
-    }
-}
-
-// The frontmatter between the opening and closing `---` lines, and the body after.
-fn split(text: &str) -> Option<(&str, &str)> {
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let rest = text
-        .strip_prefix("---\n")
-        .or_else(|| text.strip_prefix("---\r\n"))?;
-    let mut at = 0;
-    for line in rest.split_inclusive('\n') {
-        if line.trim_end_matches(['\n', '\r']) == "---" {
-            return Some((&rest[..at], &rest[at + line.len()..]));
-        }
-        at += line.len();
-    }
-    None
-}
-
-impl Front {
-    /// Its model and effort, as a call on its harness takes them, or why its
-    /// keys cannot reach that model
-    fn role_model(&self) -> Result<RoleModel, String> {
-        let harness = match (self.harness, &self.url, self.context) {
-            (Harness::ClaudeCode, None, None) => AgentHarness::ClaudeCode,
-            (Harness::ClaudeCode, ..) => {
-                return Err("runs on claude-code, which takes no `url` or `context`".into());
-            }
-            (Harness::Pi, Some(url), Some(context)) => {
-                if let Err(e) = Upstream::new(url) {
-                    return Err(format!(
-                        "runs on pi, with a `url` kelpie cannot forward to: {e}"
-                    ));
-                }
-                AgentHarness::Pi(ModelServer {
-                    url: url.clone(),
-                    context,
-                })
-            }
-            (Harness::Pi, ..) => {
-                return Err("runs on pi, which needs the model's server as `url` \
-                            and its context size as `context`"
-                    .into());
-            }
-            (Harness::Codex, None, None) => AgentHarness::Codex,
-            (Harness::Codex, ..) => {
-                return Err("runs on codex, which takes no `url` or `context`".into());
-            }
-            #[cfg(test)]
-            (Harness::StandIn, ..) => AgentHarness::StandIn,
-        };
-        Ok(RoleModel {
-            model: self.model.clone(),
-            effort: self.effort,
-            harness,
-        })
-    }
-
-    /// What holds its calls back, or why its keys do not say
-    ///
-    /// The reader must be the harness's own: an agent on Claude Code spends
-    /// the Claude account whatever its `usage` says.
-    fn limit(&self) -> Result<Limit, String> {
-        let own = match self.harness {
-            Harness::ClaudeCode => UsageReader::Claude,
-            Harness::Pi => UsageReader::None,
-            Harness::Codex => UsageReader::Codex,
-            #[cfg(test)]
-            Harness::StandIn => self.usage.unwrap_or(UsageReader::Claude),
-        };
-        let usage = self.usage.unwrap_or(own);
-        if usage != own {
-            return Err(format!(
-                "runs on {}, whose usage is read with `{}`, so it cannot set \
-                 `usage: {}`: leave `usage` out",
-                self.harness.as_str(),
-                own.as_str(),
-                usage.as_str()
-            ));
-        }
-        match (usage, &self.lease) {
-            (UsageReader::None, lease) => {
-                Ok(Limit::Lease(lease.clone().unwrap_or_else(LeaseName::gpu)))
-            }
-            (_, Some(_)) => {
-                Err("sets `lease`, which only an agent with `usage: none` takes".into())
-            }
-            (UsageReader::Claude, None) => Ok(Limit::Account(Account::Claude)),
-            (UsageReader::Codex, None) => Ok(Limit::Account(Account::Codex)),
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests;

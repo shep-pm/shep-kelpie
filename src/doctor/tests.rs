@@ -9,7 +9,7 @@ use crate::ports::{ForgeError, MeterError, Visibility};
 use crate::shepherd::SHEP_VERSION;
 use crate::test::{
     FakeAlerts, FakeClock, FakeForge, FakeMeter, FakeReviewer, FakeShepherd, git, project_table,
-    unreachable_url, write_script,
+    unreachable_url,
 };
 use crate::tools::Tools;
 
@@ -95,7 +95,7 @@ impl Scene {
         table.insert("repo".into(), json!(repo));
         table.insert("forge".into(), json!(format!("shep-pm/{name}")));
         table["coderabbit"]["enabled"] = json!(false);
-        table["review"]["local"] = json!({ "kind": "off" });
+        table["agents"]["reviewers"] = json!(["defect-hunter"]);
         edit(&mut table);
         let launch = Launch {
             kelpie: "/opt/kelpie".into(),
@@ -234,13 +234,13 @@ async fn a_machine_with_everything_in_place_passes_and_changes_nothing() {
             "golbat: push access",
             "golbat: labels",
             "golbat: coderabbit",
-            "golbat: local review",
+            "golbat: reviewers",
             "golbat: rulings",
             "koji: checkout",
             "koji: implementers",
             "koji: push access",
             "koji: labels",
-            "koji: local review",
+            "koji: reviewers",
             "koji: rulings",
         ]
     );
@@ -522,34 +522,44 @@ async fn coderabbit_that_has_never_commented_is_unsure_and_does_not_fail_the_run
     assert!(report.passed());
 }
 
+// Writes kelpie's agent file `name.md` holding `text`, and lists it alone
+// as golbat's reviewer.
+fn reviewed_by(scene: &Scene, name: &str, text: &str) {
+    crate::test::write_in(
+        &scene.kelpie_home.join("agents"),
+        &format!("{name}.md"),
+        text,
+    );
+    let name = name.to_owned();
+    scene.runs("golbat", |t| {
+        t["agents"]["reviewers"] = json!([name]);
+    });
+}
+
 #[tokio::test]
 async fn a_local_command_that_is_not_there_is_named() {
     let scene = Scene::new().await;
-    scene.runs("golbat", |t| {
-        t["review"]["local"] = json!({ "kind": "command", "command": "~/no-such-review.sh" });
-    });
+    let mine = "---\nrole: reviewer\nharness: command\ncommand: ~/no-such-review.sh\n---\n";
+    reviewed_by(&scene, "mine", mine);
     let report = scene.report().await;
-    let (what, fix) = missing(&report, "golbat: local review");
-    assert!(what.contains("no-such-review.sh"), "{what}");
-    assert!(fix.contains("`kind` to `off`"), "{fix}");
+    let (what, fix) = missing(&report, "golbat: reviewers");
+    assert!(
+        what.starts_with("mine: ") && what.contains("no-such-review.sh"),
+        "{what}"
+    );
+    assert!(fix.contains("point its agent file"), "{fix}");
     assert!(!report.passed());
 }
 
 #[tokio::test]
-async fn a_relative_local_command_is_read_from_the_project_s_folder_as_the_runner_does() {
+async fn a_reviewer_with_no_agent_file_is_named() {
     let scene = Scene::new().await;
     scene.runs("golbat", |t| {
-        t["review"]["local"] = json!({ "kind": "command", "command": "review.sh" });
+        t["agents"]["reviewers"] = json!(["fable"]);
     });
-    let folder = scene.kelpie_home.join("golbat");
-    std::fs::create_dir_all(&folder).unwrap();
-
-    write_script(&scene.home.join("review.sh"), "#!/bin/sh\nexit 0\n");
-    let (what, _) = missing(&scene.report().await, "golbat: local review");
-    assert!(what.contains("kelpie/golbat/review.sh"), "{what}");
-
-    write_script(&folder.join("review.sh"), "#!/bin/sh\nexit 0\n");
-    assert_eq!(ok(&scene.report().await, "golbat: local review"), "ready");
+    let (what, fix) = missing(&scene.report().await, "golbat: reviewers");
+    assert!(what.contains("fable, which has no agent file"), "{what}");
+    assert!(fix.contains("take it off `agents.reviewers`"), "{fix}");
 }
 
 #[tokio::test]
@@ -588,29 +598,37 @@ async fn extra_instructions_the_runner_cannot_read_are_missing() {
 #[tokio::test]
 async fn a_local_endpoint_nothing_answers_on_is_named() {
     let scene = Scene::new().await;
-    scene.runs("golbat", |t| {
-        t["review"]["local"] = json!({
-            "kind": "endpoint", "url": unreachable_url(), "model": "qwen", "context": 8192,
-        });
-    });
-    let (what, _) = missing(&scene.report().await, "golbat: local review");
+    let endpoint = format!(
+        "---\nrole: reviewer\nharness: endpoint\nurl: {}\nmodel: qwen\ncontext: 8192\n---\n",
+        unreachable_url()
+    );
+    reviewed_by(&scene, "gpu-box", &endpoint);
+    let (what, _) = missing(&scene.report().await, "golbat: reviewers");
     assert!(what.contains("127.0.0.1:1"), "{what}");
 }
 
 #[tokio::test]
-async fn a_local_round_that_is_off_or_ready_is_ok() {
+async fn a_review_list_that_can_run_names_its_reviewers_in_order() {
     let scene = Scene::new().await;
     let script = scene.home.join("review.sh");
     crate::test::write_script(&script, "#!/bin/sh\nexit 0\n");
+    let mine = format!(
+        "---\nrole: reviewer\nharness: command\ncommand: {}\n---\n",
+        script.display()
+    );
+    crate::test::write_in(&scene.kelpie_home.join("agents"), "mine.md", &mine);
     scene.runs("golbat", |t| {
-        t["review"]["local"] = json!({ "kind": "command", "command": script });
+        t["agents"]["reviewers"] = json!(["mine", "defect-hunter"]);
     });
     let report = scene.report().await;
     assert_eq!(
-        ok(&report, "koji: local review"),
-        "off, so every round is the Claude round"
+        ok(&report, "koji: reviewers"),
+        "each pull request is read by defect-hunter"
     );
-    assert_eq!(ok(&report, "golbat: local review"), "ready");
+    assert_eq!(
+        ok(&report, "golbat: reviewers"),
+        "each pull request is read by mine, then defect-hunter"
+    );
 }
 
 #[tokio::test]

@@ -72,11 +72,14 @@ url = "https://ntfy.sh/your-private-topic"
 
 # Agents are not settings: each is a file of its own, `agents/<name>.md` in
 # kelpie's home (`$SHEP_HOME/kelpie/agents/`), YAML frontmatter then a
-# Markdown body added to kelpie's own instructions for that agent. Kelpie
-# ships `sonnet-high` and `opus-high`, which `shep kelpie add` writes out
-# and never overwrites. A project lists the ones that build its work items
-# in `agents.implementers`, and an issue labelled `agent:<name>` runs on that
-# one. The README describes every key; a pi agent, for one, reads:
+# Markdown body. Kelpie ships `sonnet-high` and `opus-high`, which build,
+# and `defect-hunter`, which reviews, and `shep kelpie add` writes them out
+# and never overwrites one. It writes `qwen`, a reviewer that runs the
+# maintainer's qwen-review script, only where that script is installed. A
+# project lists the ones that build its work items in `agents.implementers`
+# and the ones that review its pull requests in `agents.reviewers`. The
+# README describes every key. An implementer's body is added to kelpie's
+# own instructions; a pi implementer, for one, reads:
 #
 #   ---
 #   role: implementer
@@ -88,21 +91,42 @@ url = "https://ntfy.sh/your-private-topic"
 #   ---
 #
 #   Run the narrowest test that covers the change.
-
-# The reviewers a project may list in `review.reviewers`, in order, by
-# name. `claude` is always the project's own Claude round, so it is not
-# defined here. The README says what each kind does.
 #
-# `command` runs a command that keeps the README's contract, here the
-# maintainer's qwen-review script. A leading `~/` is the home folder.
-# `endpoint` is kelpie's own reviewer: any OpenAI-compatible server (Ollama,
-# LM Studio, llama.cpp's server), its model, and the context size the server
-# gives that model, in tokens. `claude` is a fresh Claude session on its own
-# model and effort, and `session` a fresh session on the agent file its
-# `agent` names. A missing command or an unreachable
-# endpoint stops the runner of a project that lists it.
+# A reviewer's body is its prompt, with `{{BASE}}` and `{{DIFF}}` where the
+# commit the change is against and the diff go, and kelpie adds the issue's
+# acceptance criteria. It runs a fresh session on `claude-code`, `codex` or
+# `pi`, which reads the worktree and runs no command; `paths` limits it to
+# pull requests that change a file under one of its globs, and
+# `second_look: true` runs it twice before the one fix turn, the second
+# time shown what the first found:
 #
-# `lease` is the lock kelpie holds around each round. `gpu` is this
+#   ---
+#   role: reviewer
+#   harness: claude-code
+#   model: claude-opus-5-5
+#   effort: high
+#   paths: ["src/runner/merge/**", "src/guard/**"]
+#   ---
+#
+#   Read the change against {{BASE}} for defects in merging ...
+#
+# Or it runs on its own, with no body. `harness: command` runs a command
+# that keeps the README's contract, its path in `command` with a leading
+# `~/` for the home folder. `harness: endpoint` is kelpie's own reviewer:
+# any OpenAI-compatible server (Ollama, LM Studio, llama.cpp's server) as
+# `url`, its `model`, and the context size the server gives that model, in
+# tokens, as `context`:
+#
+#   ---
+#   role: reviewer
+#   harness: endpoint
+#   url: http://gpu-box:11434/v1
+#   model: qwen2.5-coder:14b
+#   context: 32768
+#   lease: gpu-box
+#   ---
+#
+# `lease` is the lock kelpie holds around each such round. `gpu` is this
 # machine's GPU lock, the one the qwen scripts take, so leave it off for a
 # command that takes that lock itself, as the script does. Any other name
 # is a lock of its own, so a reviewer on another machine's GPU never waits
@@ -110,23 +134,5 @@ url = "https://ntfy.sh/your-private-topic"
 # the host's `/api/ps`: a model partly or wholly on the CPU fails the round
 # and raises a ruling. An endpoint's host is its url. A command names its
 # host with `ollama` and may name its model with `ollama_model`, else every
-# model the host has loaded is checked.
-#
-# `paths` limits a reviewer to pull requests that change a file under one of
-# its globs. Every reviewer's prompt carries the issue's acceptance criteria.
-# [kelpie.local_reviewers.qwen]
-# kind = "command"
-# command = "~/.claude/scripts/qwen-review.sh"
-#
-# [kelpie.local_reviewers.gpu-box]
-# kind = "endpoint"
-# url = "http://gpu-box:11434/v1"
-# model = "qwen2.5-coder:14b"
-# context = 32768
-# lease = "gpu-box"
-#
-# [kelpie.local_reviewers.opus]
-# kind = "claude"
-# model = "claude-opus-5-5"
-# effort = "high"
-# paths = ["src/runner/merge/**", "src/guard/**", "src/totp.rs"]
+# model the host has loaded is checked. A missing command or an unreachable
+# endpoint stops the runner of a project that lists it.

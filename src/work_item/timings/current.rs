@@ -42,7 +42,6 @@ impl WorkItem {
                 CallKind::Local if queued => TimingPhase::GpuWait,
                 CallKind::Local => TimingPhase::LocalRound,
                 CallKind::Claude => TimingPhase::ClaudeRound,
-                CallKind::Deep => TimingPhase::DeepRound,
             };
         }
         if run == RunState::Paused {
@@ -125,7 +124,6 @@ mod tests {
         assert_eq!(phase(CallKind::Local, false), TimingPhase::LocalRound);
         assert_eq!(phase(CallKind::Local, true), TimingPhase::GpuWait);
         assert_eq!(phase(CallKind::Claude, false), TimingPhase::ClaudeRound);
-        assert_eq!(phase(CallKind::Deep, false), TimingPhase::DeepRound);
         assert_eq!(
             running_call(CallKind::Local, false).timing_phase(RunState::Paused, false),
             TimingPhase::LocalRound,

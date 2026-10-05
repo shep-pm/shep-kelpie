@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use super::calls::severity_tag;
-use crate::ports::Finding;
+use crate::ports::{Finding, parse_findings};
 use crate::runner::turn;
 
 /// Where a round's findings are written for the worker's next turn
@@ -23,6 +23,56 @@ pub(in crate::runner) fn findings_path(build: &Path) -> PathBuf {
 /// folder as the findings file
 pub(in crate::runner) fn deferred_path(build: &Path) -> PathBuf {
     build.join(DEFERRED_FILE)
+}
+
+/// The findings the worker copied into the deferred findings file in
+/// `build`, as it wrote them: none when there is no file
+///
+/// # Errors
+///
+/// A message naming the file when it is there but cannot be read.
+pub(in crate::runner) fn deferred(build: &Path) -> Result<Vec<Finding>, String> {
+    let path = deferred_path(build);
+    match std::fs::read_to_string(&path) {
+        Ok(text) => Ok(parse_findings(&text)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(format!("cannot read {}: {}", path.display(), e.kind())),
+    }
+}
+
+/// The findings a round sent the worker, and the deferred findings file's
+/// lines when it sent them
+#[derive(Debug, Clone, Copy)]
+pub(in crate::runner) struct Sent<'a> {
+    /// The findings sent
+    pub findings: &'a [Finding],
+    /// The deferred findings file's lines then
+    pub deferred_before: &'a [Finding],
+}
+
+/// Whether the worker deferred every finding `sent` holds since they were
+/// sent, which is never so when none were
+///
+/// A line the file held before counts once against the lines now, so a
+/// deferral left by an earlier round defers nothing in this one.
+///
+/// # Errors
+///
+/// As [`deferred`].
+pub(in crate::runner) fn all_deferred(build: &Path, sent: Sent<'_>) -> Result<bool, String> {
+    if sent.findings.is_empty() {
+        return Ok(false);
+    }
+    let mut since = deferred(build)?;
+    for before in sent.deferred_before {
+        if let Some(at) = since.iter().position(|d| d.is_same_as(before)) {
+            since.remove(at);
+        }
+    }
+    Ok(sent
+        .findings
+        .iter()
+        .all(|f| since.iter().any(|d| d.is_same_as(f))))
 }
 
 pub(in crate::runner) fn write_findings_file(
@@ -247,6 +297,13 @@ mod tests {
                     "stage": {
                         "stage": "fixing",
                         "head": rig.forge.head_of("kelpie/7"),
+                        "sent": [{
+                            "severity": "medium",
+                            "file": "src/lib.rs",
+                            "line": 3,
+                            "what": "the flag is misnamed",
+                            "why": "it reads as its opposite",
+                        }],
                     },
                 },
                 "prompt": again_prompt(71, 1, &path),
@@ -290,6 +347,88 @@ mod tests {
                 "ran": ["qwen"],
             }),
             "the next reviewer in the list reads the fix"
+        );
+    }
+
+    #[test]
+    fn a_fix_turn_that_defers_every_finding_goes_on_to_the_next_reviewer() {
+        let (rig, runner) = findings_sent();
+        // The worker copies the finding's line as the findings file holds it.
+        let line = "MEDIUM|src/lib.rs:3|the flag is misnamed|it reads as its opposite\n";
+        std::fs::write(rig.build_7().join("deferred-findings.md"), line).unwrap();
+        rig.claude
+            .script([Scripted::Say("That is out of scope, so I deferred it.")]);
+        step(&runner).unwrap(); // the fix turn ends with nothing pushed
+        assert_eq!(
+            step(&runner).unwrap(),
+            Some(StepReport::FindingsDeferred {
+                issue: 7,
+                pull_request: 71,
+                round: 1,
+                deferred: 1,
+            })
+        );
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["rulings"], json!([]));
+        assert_eq!(
+            status["work_item"]["phase"],
+            json!({
+                "state": "review",
+                "round": 2,
+                "stage": { "stage": "round" },
+                "ran": ["qwen"],
+            }),
+            "the next reviewer in the list reads the pull request as it stands"
+        );
+    }
+
+    #[test]
+    fn a_deferral_an_earlier_round_left_does_not_defer_this_rounds_finding() {
+        let rig = Rig::new("shep");
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "start", None);
+        rig.ask(&runner, "add", Some("7"));
+        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+        rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+        step(&runner).unwrap(); // opens the pull request, enters round 1 (qwen)
+        // The same line, deferred before this round's findings are sent.
+        let line = "MEDIUM|src/lib.rs:3|the flag is misnamed|it reads as its opposite\n";
+        std::fs::write(rig.build_7().join("deferred-findings.md"), line).unwrap();
+        rig.reviewer.script([ScriptedRound::Findings(vec![Finding {
+            severity: Severity::Medium,
+            file: "src/lib.rs".into(),
+            line: 3,
+            what: "the flag is misnamed".into(),
+            why: "it reads as its opposite".into(),
+        }])]);
+        step(&runner).unwrap(); // round 1's qwen call
+        step(&runner).unwrap(); // the findings go out: the fix turn is next
+        rig.claude.script([Scripted::Say("Already deferred.")]);
+        step(&runner).unwrap(); // the fix turn ends with nothing pushed
+        let report = step(&runner).unwrap();
+        assert!(
+            matches!(report, Some(StepReport::Ruling { .. })),
+            "{report:?}"
+        );
+        let deferred = std::fs::read_to_string(rig.build_7().join("deferred-findings.md"));
+        assert_eq!(
+            deferred.unwrap(),
+            line,
+            "the file is kept for the follow-ups"
+        );
+    }
+
+    #[test]
+    fn a_fix_turn_that_defers_only_some_findings_and_pushes_nothing_still_parks() {
+        let (rig, runner) = findings_sent();
+        let other = "MEDIUM|src/lib.rs:9|another thing|it is wrong\n";
+        std::fs::write(rig.build_7().join("deferred-findings.md"), other).unwrap();
+        rig.claude.script([Scripted::Say("Done.")]);
+        step(&runner).unwrap(); // the fix turn ends with nothing pushed
+        let report = step(&runner).unwrap();
+        assert!(
+            matches!(report, Some(StepReport::Ruling { .. })),
+            "{report:?}"
         );
     }
 

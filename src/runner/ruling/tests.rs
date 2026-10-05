@@ -70,7 +70,10 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
             assert!(!said.contains(internal), "{internal} in {said}");
         }
     }
-    let merge = RulingKind::Merge { head: "abc".into() };
+    let merge = RulingKind::Merge {
+        head: "abc".into(),
+        unreviewed: None,
+    };
     assert_eq!(comment(&merge, "CodeRabbit"), None);
 }
 

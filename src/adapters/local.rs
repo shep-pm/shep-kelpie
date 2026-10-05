@@ -147,7 +147,6 @@ impl LocalLeases for LocalReviewer {
 impl Reviewer for LocalReviewer {
     fn check(&self, local: &LocalRound) -> Result<(), String> {
         match local {
-            LocalRound::Off {} => Ok(()),
             LocalRound::Command(local) => check_command(&local.command),
             LocalRound::Endpoint(endpoint) => self.check_endpoint(endpoint),
         }
@@ -189,7 +188,6 @@ impl Reviewer for LocalReviewer {
         };
         self.check_seat(local)?;
         match local {
-            LocalRound::Off {} => Ok(Vec::new()),
             LocalRound::Command(command) => {
                 // A command under a lease of kelpie's is not queued on the gpu
                 // lock the watcher reads. One with none is assumed to queue
@@ -275,10 +273,8 @@ mod tests {
         LocalRound::Command(LocalCommand {
             command: path.to_owned(),
             lease,
-            gpu_lease: false,
             ollama: None,
             ollama_model: None,
-            paths: Vec::new(),
         })
     }
 
@@ -301,7 +297,6 @@ mod tests {
         let script = dir.path().join("review");
         write_script(&script, "#!/bin/sh\nexit 0\n");
         assert_eq!(reviewer.check(&command(&script, false)), Ok(()));
-        assert_eq!(reviewer.check(&LocalRound::Off {}), Ok(()));
     }
 
     // The stand-in reports whether the lock was there while it ran.

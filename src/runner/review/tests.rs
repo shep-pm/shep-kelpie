@@ -233,6 +233,7 @@ fn a_round_the_script_could_not_finish_is_reported_and_retried() {
             "stage": { "stage": "round" },
             "reviewer": "qwen",
             "failures": 1,
+            "unread": true,
         }),
         "the round stays due, and the next step tries it again"
     );
@@ -268,7 +269,7 @@ fn a_reviewer_whose_call_fails_three_times_in_a_row_is_passed_over_for_the_pass(
             issue: 7,
             pull_request: 71,
             round: 1,
-            reviewer: ReviewerName::try_from("qwen".to_owned()).unwrap(),
+            reviewer: AgentName::try_from("qwen".to_owned()).unwrap(),
             reason: "the local round left no completion marker".into(),
         })
     );
@@ -281,7 +282,9 @@ fn a_reviewer_whose_call_fails_three_times_in_a_row_is_passed_over_for_the_pass(
             "round": 2,
             "stage": { "stage": "round" },
             "ran": ["qwen"],
-        })
+            "unread": true,
+        }),
+        "qwen was passed over, so nobody has read it yet"
     );
     rig.claude.script([Scripted::Text("CLEAN")]);
     step(&runner).unwrap(); // round 2, claude
@@ -353,6 +356,7 @@ fn a_spilled_model_parks_the_round_on_a_ruling_that_alerts_and_a_yes_runs_it_aga
             "round": 1,
             "stage": { "stage": "round" },
             "reviewer": "qwen",
+            "unread": true,
         }),
         "the same round is due again"
     );

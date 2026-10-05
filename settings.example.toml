@@ -1,7 +1,7 @@
 # A project's runner, as its `[[app]]` entry in your shepherd's Flockfile. The project's
 # settings are the sheep's `[app.dogs.kelpie]` table: shep keeps it and hands
 # it to the runner, and lookout edits it in the sheep's pane. Every key is
-# required except `max_items`, `review`, `pacing.enabled`,
+# required except `max_items`, `pacing.enabled`,
 # `worker.allowed_domains`, `worker.build_env`, `worker.instructions_file`,
 # `worker.turn_timeout`, `pull_request_reviewers`,
 # `skills` and `agents`, which a table written
@@ -53,17 +53,6 @@ generated = [
 # often a regex, which this is not: spell out each name it would match.
 # private_names = ["Acme Corp"]
 
-[app.dogs.kelpie.models.reviewer]
-model = "claude-sonnet-5"
-effort = "medium"
-
-# The deep review round, a new project's review: two fresh sessions that read
-# the whole pull request for defects, the second shown what the first found.
-# Both run on this role.
-[app.dogs.kelpie.models.deep_reviewer]
-model = "claude-opus-5-5"
-effort = "high"
-
 # The agents that build the project's work items, by the names of kelpie's
 # agent files, `$SHEP_HOME/kelpie/agents/<name>.md`, which `shep kelpie add`
 # writes out. An issue labelled `agent:<name>` runs on that one, and any
@@ -72,41 +61,18 @@ effort = "high"
 # agent it opened on. `sonnet-high` alone when absent.
 [app.dogs.kelpie.agents]
 implementers = ["sonnet-high"]
-# The agent the project's Claude round and the deep round run on, from the
-# same files, over `models.reviewer` and `models.deep_reviewer`.
-# reviewer = "opus-high"
-# deep_reviewer = "opus-high"
-
-[app.dogs.kelpie.review]
-# The reviewers, in order, each run once: `deep`, the project's own deep round
-# on `models.deep_reviewer`, `claude`, its own Claude round on
-# `models.reviewer`, and the ones kelpie's `[kelpie.local_reviewers]` define.
-# After each one that finds anything above a nit, the worker gets one turn to
-# fix all of that reviewer's findings; a round of nits, or of nothing, goes
-# straight to the next. After the last, the pull request goes to CI. A
-# reviewer limited to `paths` runs only on a pull request that changes one of
-# them. Absent or empty, a new project's review is the maintainer's
-# qwen-review script when it is there, and then the deep round:
-# two fresh sessions read the whole pull request for defects, and what they
-# find goes to the worker as any reviewer's findings do. `review.local`
-# below, set, runs that round and then `claude`.
-#
-# A local model alone:
-# reviewers = ["qwen"]
-# A Claude round alone:
-# reviewers = ["claude"]
-# Both, and a deeper Claude round on the paths `opus` lists:
-# reviewers = ["qwen", "claude", "opus"]
-# The local model and then the deep round, which is the default:
-# reviewers = ["qwen", "deep"]
-
-# The older form of the local round, which runs before `claude` and cannot be
-# set beside `reviewers`. A runner on it says so at start. `kind` is `off`, or
-# `endpoint` or `command` with the keys a `[kelpie.local_reviewers]`
-# definition of that kind takes.
-# [app.dogs.kelpie.review.local]
-# kind = "command"
-# command = "~/.claude/scripts/qwen-review.sh"
+# The agents that review each pull request, from the same files, whose
+# role is `reviewer`: each reads it once, in this order. After each one that
+# finds anything above a nit, the worker gets one turn to fix all of that
+# reviewer's findings; a round of nits, or of nothing, goes straight to the
+# next. After the last, the pull request goes to CI. A reviewer whose file
+# sets `paths` runs only on a pull request that changes one of them.
+# `defect-hunter` is kelpie's own: Opus 5.5 at high, reading for defects and
+# then looking again for what it missed, with one fix turn after both.
+# `qwen` runs the maintainer's qwen-review script, and `add` writes it only
+# where the script is installed. Absent, `qwen` where the script is
+# installed and then `defect-hunter`; empty, no review at all.
+# reviewers = ["qwen", "defect-hunter"]
 
 # The rounds of every pull request reviewer listed above. CodeRabbit's free
 # plan reviews public repos only, so a private repo lists only cubic or
@@ -162,6 +128,6 @@ turn_timeout = 60
 # and `status` say why. Kelpie rewrites `$SHEP_HOME/kelpie/<project>/skills/`
 # at every start, so a folder of your own inside it stops the runner.
 # [app.dogs.kelpie.skills]
-# review = { kind = "path", path = "~/skills/review" }
+# implement = { kind = "path", path = "~/skills/implement" }
 # ci = { kind = "plugin", plugin = "~/plugins/house", skill = "debug" }
 # retro = { kind = "none" }

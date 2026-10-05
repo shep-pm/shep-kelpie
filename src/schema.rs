@@ -125,8 +125,8 @@ mod tests {
         keys
     }
 
-    // The example with every optional key set, once for each kind of local
-    // round, so each key is counted.
+    // The example with every optional key set, once for each kind of skill,
+    // so each key is counted.
     fn examples_with_every_key() -> Vec<String> {
         let text = include_str!("../settings.example.toml")
             .replace("# pull_request_reviewers =", "pull_request_reviewers =")
@@ -141,30 +141,21 @@ mod tests {
             )
             .replace("# private_names =", "private_names =")
             .replace("# rounds =", "rounds =")
-            .replace("# reviewers = [\"qwen\", \"claude\", \"opus\"]", "reviewers = [\"qwen\"]")
-            .replace("# reviewer = \"opus-high\"", "reviewer = \"opus-high\"")
-            .replace("# deep_reviewer = \"opus-high\"", "deep_reviewer = \"opus-high\"");
+            .replace("# reviewers = [\"qwen\", \"defect-hunter\"]", "reviewers = [\"qwen\"]");
         assert!(
             text.contains("reviewers = [\"qwen\"]"),
             "the example's list moved"
         );
-        let command = "kind = \"command\"\ncommand = \"~/.claude/scripts/qwen-review.sh\"\n\
-                       gpu_lease = true\nollama = \"http://localhost:11434\"\n\
-                       ollama_model = \"m\"\npaths = [\"src/**\"]\n";
-        let endpoint = "kind = \"endpoint\"\nurl = \"http://localhost:11434/v1\"\n\
-                        model = \"m\"\ncontext = 32768\nlease = \"gpu\"\n";
         // Each kind of skill once, every step naming it.
         let kinds = [
             "{ kind = \"path\", path = \"skills/mine\" }",
             "{ kind = \"plugin\", plugin = \"plugins/house\", skill = \"mine\" }",
             "{ kind = \"none\" }",
         ];
-        [command, endpoint, "kind = \"off\"\n"]
+        kinds
             .into_iter()
-            .zip(kinds)
-            .map(|(local, kind)| {
-                let table = format!("[app.dogs.kelpie.review.local]\n{local}");
-                let mut text = crate::test::with_tables(&text, &table);
+            .map(|kind| {
+                let mut text = text.clone();
                 text.push_str("\n[app.dogs.kelpie.skills]\n");
                 for step in crate::skills::Step::ALL {
                     text.push_str(&format!("{step} = {kind}\n"));
@@ -186,10 +177,9 @@ mod tests {
             .collect();
         assert_eq!(sheep, set);
         for key in [
-            "models.deep_reviewer.effort",
+            "agents.reviewers",
+            "agents.implementers",
             "worker.build_env",
-            "review.local.context",
-            "review.local.command",
         ] {
             assert!(sheep.contains(key), "{key}: {sheep:?}");
         }
@@ -209,15 +199,7 @@ mod tests {
             .replace(
                 "# [kelpie.leases]\n# cargo-test",
                 "[kelpie.leases]\ncargo-test",
-            )
-            .replace(
-                "# [kelpie.local_reviewers.qwen]\n# kind = \"command\"\n# command =",
-                "[kelpie.local_reviewers.qwen]\nkind = \"command\"\ncommand =",
             );
-        assert!(
-            example.contains("\n[kelpie.local_reviewers.qwen]"),
-            "the example moved"
-        );
         let example: toml::Table = toml::from_str(&example).unwrap();
         let section = toml::to_string(&example["kelpie"]).unwrap();
         assert_eq!(keys_of_schema(&root), keys_of_table(&root, &root, &section));
@@ -228,7 +210,6 @@ mod tests {
         let defs = &schema()["$defs"];
         assert_eq!(defs["KickoffHours"]["minimum"], 1);
         assert_eq!(defs["KickoffHours"]["maximum"], 24);
-        assert_eq!(defs["ContextSize"]["minimum"], 4096);
         let max_items = &defs["Settings"]["properties"]["max_items"];
         assert_eq!(
             (&max_items["minimum"], &max_items["default"]),

@@ -133,7 +133,8 @@ fn a_merge_ruling_and_a_notice_lose_whether_the_shots_failed() {
     assert_eq!(
         state.rulings[0].kind,
         RulingKind::Merge {
-            head: "c0ffee".into()
+            head: "c0ffee".into(),
+            unreviewed: None,
         }
     );
     assert_eq!(

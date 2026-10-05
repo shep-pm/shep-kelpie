@@ -24,11 +24,15 @@ use crate::settings::Account;
 use crate::work_item::{Known, Phase, Review, Seconds, Turn, WorkItem};
 
 /// The state file's format version
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
 const ONE_ITEM: u32 = 1;
+
+/// The format before reviewers were agent files, whose `deep` and `claude`
+/// reviewers this kelpie reads as `defect-hunter`
+const BUILT_IN_REVIEWERS: u32 = 2;
 
 /// How many finished work items the state file keeps a record of
 ///
@@ -180,7 +184,6 @@ pub struct Finished {
     /// Seconds from its creation to `at`
     pub wall: u64,
     /// Every phase, summing to `wall`
-    #[serde(serialize_with = "crate::work_item::saved_seconds")]
     pub seconds: Seconds,
 }
 
@@ -275,6 +278,9 @@ pub enum RulingKind {
     Merge {
         /// The head the question is about
         head: String,
+        /// Why no reviewer read the pull request in its last pass, when none did
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unreviewed: Option<String>,
     },
     /// Kelpie could not rebase the branch onto `main`. A yes looks again.
     Rebase {
@@ -523,7 +529,7 @@ impl fmt::Display for StateError {
             }
             Self::Version { path, found } => write!(
                 f,
-                "state file {} is version {found}, and this kelpie reads versions {ONE_ITEM} and {VERSION}",
+                "state file {} is version {found}, and this kelpie reads versions {ONE_ITEM} to {VERSION}",
                 path.display()
             ),
             Self::RemovedRuling { path, id, kind } => write!(
@@ -584,7 +590,7 @@ impl StateStore {
         let found = serde_json::from_str::<Versioned>(&text)
             .map_err(malformed)?
             .version;
-        if found != VERSION && found != ONE_ITEM {
+        if !(ONE_ITEM..=VERSION).contains(&found) {
             return Err(StateError::Version {
                 path: self.path.clone(),
                 found,
@@ -596,6 +602,9 @@ impl StateStore {
             return Err(StateError::RemovedRuling { path, id, kind });
         }
         removed::drop_removed_fields(&mut value);
+        if found <= BUILT_IN_REVIEWERS {
+            removed::name_reviewers_as_files(&mut value);
+        }
         let state: ProjectState = serde_json::from_value(value).map_err(malformed)?;
         Ok(Some(ProjectState {
             version: VERSION,

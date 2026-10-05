@@ -145,8 +145,8 @@ fn only_a_worker_runs_commands_and_a_call_with_no_fence_writes_no_file() {
     let w = World::new();
     let mut review = w.call(Role::Reviewer, Session::New(id(WORKER_ID)));
     review.tools = Tools::Review;
-    let deep = w.call(Role::DeepReviewer, Session::New(id(WORKER_ID)));
-    for call in [&review, &deep] {
+    let answer = w.call(Role::Reviewer, Session::New(id(WORKER_ID)));
+    for call in [&review, &answer] {
         let argv = strings(call, None, None);
         assert!(argv.windows(2).any(|w| w == ["--disable", "shell_tool"]));
         assert!(argv.iter().any(|a| a == "--dangerously-bypass-hook-trust"));
@@ -277,8 +277,8 @@ fn a_call_reads_the_login_and_writes_only_its_own_codex_home() {
     assert!(policy.no_write.contains(&w.path("wt/**/.codex")));
     assert_eq!(policy.hosts, ["github.com", "api.github.com", MODEL_HOST]);
 
-    let deep = w.call(Role::DeepReviewer, Session::New(id(WORKER_ID)));
-    let unfenced = super::policy(&deep, &login, &Files::of(&deep));
+    let review = w.call(Role::Reviewer, Session::New(id(WORKER_ID)));
+    let unfenced = super::policy(&review, &login, &Files::of(&review));
     assert_eq!(unfenced.hosts, [MODEL_HOST]);
     assert!(
         unfenced.verify_tls,

@@ -20,11 +20,8 @@ use crate::settings::{AgentHarness, Effort, GuardHook, Harness, LeaseName};
 pub enum Role {
     /// A turn of the worker's session
     Worker,
-    /// A Claude review round, always a fresh session
+    /// A reviewer's session, always a fresh one
     Reviewer,
-    /// A reader of the deep review round, the first or the second look
-    #[serde(rename = "deep_reviewer")]
-    DeepReviewer,
 }
 
 #[cfg(test)]
@@ -37,8 +34,7 @@ mod role_tests {
     fn every_role_keeps_its_name_in_the_state_file() {
         let name = |role| serde_json::to_value(role).unwrap();
         assert_eq!(name(Role::Reviewer), "reviewer");
-        assert_eq!(name(Role::DeepReviewer), "deep_reviewer");
-        assert_eq!(Role::DeepReviewer.as_str(), "deep_reviewer");
+        assert_eq!(Role::Reviewer.as_str(), "reviewer");
     }
 }
 
@@ -48,7 +44,6 @@ impl Role {
         match self {
             Self::Worker => "worker",
             Self::Reviewer => "reviewer",
-            Self::DeepReviewer => "deep_reviewer",
         }
     }
 }

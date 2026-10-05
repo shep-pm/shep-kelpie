@@ -5,7 +5,7 @@ use shep_client::shep_core::config::AppConfig;
 
 use super::*;
 use crate::runner::ProjectPaths;
-use crate::settings::{ForgeSlug, ReviewerName};
+use crate::settings::{AgentName, ForgeSlug};
 use crate::shepherd;
 use crate::test::{FakeForge, FakeShepherd};
 
@@ -103,8 +103,11 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
     assert_eq!(settings.forge.as_str(), "shep-pm/koji-website");
     assert!(settings.ci, "the checkout has workflows");
     assert!(!settings.coderabbit.enabled, "the repo is private");
-    assert_eq!(settings.review.local, None);
-    assert_eq!(settings.review.reviewers, [ReviewerName::deep()]);
+    let reviewers = settings.agents.reviewers.clone().unwrap();
+    assert_eq!(
+        reviewers,
+        [AgentName::try_from("defect-hunter".to_owned()).unwrap()]
+    );
     let listed: Vec<&str> = (settings.agents.implementers.iter())
         .map(|n| n.as_str())
         .collect();
@@ -113,6 +116,12 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
     assert_eq!(sonnet, include_str!("../../../agents/sonnet-high.md"));
     let opus = std::fs::read_to_string(scene.agents().join("opus-high.md")).unwrap();
     assert_eq!(opus, include_str!("../../../agents/opus-high.md"));
+    let hunter = std::fs::read_to_string(scene.agents().join("defect-hunter.md")).unwrap();
+    assert_eq!(hunter, include_str!("../../../agents/defect-hunter.md"));
+    assert!(
+        !scene.agents().join("qwen.md").exists(),
+        "no qwen-review script, so no qwen reviewer"
+    );
     assert_eq!(
         scene.forge.repo_labels_now(),
         [
@@ -125,6 +134,22 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
     );
     let (_, running) = scene.shepherd.sheep("koji").unwrap();
     assert!(!running, "add starts nothing");
+}
+
+#[tokio::test]
+async fn where_the_qwen_review_script_is_installed_add_writes_qwen_and_lists_it_first() {
+    let scene = Scene::new().await;
+    let script = scene.home.join(".claude/scripts/qwen-review.sh");
+    std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+    crate::test::write_script(&script, "#!/bin/sh\nexit 0\n");
+    scene.add().await.unwrap();
+
+    let listed: Vec<String> = (scene.settings().agents.reviewers.unwrap().iter())
+        .map(|n| n.as_str().to_owned())
+        .collect();
+    assert_eq!(listed, ["qwen", "defect-hunter"]);
+    let qwen = std::fs::read_to_string(scene.agents().join("qwen.md")).unwrap();
+    assert_eq!(qwen, include_str!("../../../agents/qwen.md"));
 }
 
 // The runner works its home out from the `SHEP_HOME` its entry carries.

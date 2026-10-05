@@ -13,7 +13,7 @@ use super::{Answer, Runner};
 use crate::board::Skip;
 use crate::lease::gpu::LockHolder;
 use crate::ports::{ModelSeat, SessionId, Timestamp};
-use crate::settings::{AgentName, MergeAuthority, ReviewerName};
+use crate::settings::{AgentName, MergeAuthority};
 use crate::skills::StepSkill;
 use crate::state::{Finished, LeaseHeld, Ruling, RunState, StateError, Waiting};
 use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Split, Turn, WorkItem};
@@ -144,11 +144,14 @@ pub struct WorkItemStatus<'a> {
     /// The local reviewers that reviewed nothing twice, so the review goes on
     /// without them
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub local_reviewers_down: Vec<&'a ReviewerName>,
+    pub local_reviewers_down: Vec<&'a AgentName>,
     /// The reviewers whose calls failed so often in a row that a pass went
     /// on without them
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
-    pub reviewers_skipped: &'a [ReviewerName],
+    pub reviewers_skipped: &'a [AgentName],
+    /// Why its last review pass ended with no reviewer having read it
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unreviewed: Option<&'a str>,
     /// Where its wall time went, and the phase it is in now
     pub timings: Split,
 }
@@ -179,6 +182,7 @@ impl<'a> WorkItemStatus<'a> {
             qwen: item.qwen,
             local_reviewers_down: item.local_reviewers_down(),
             reviewers_skipped: &item.reviewers_skipped,
+            unreviewed: item.unreviewed.as_deref(),
             timings,
         }
     }

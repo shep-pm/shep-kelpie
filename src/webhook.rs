@@ -1,5 +1,5 @@
 //! Kelpie's own settings: the webhook, the
-//! pull request reviewers, the local reviewers, the counted
+//! pull request reviewers, the counted
 //! leases' capacities and kelpie's own Codex login
 //!
 //! Kelpie's `[kelpie]` section of `dogs.toml`, or the file under kelpie's
@@ -10,7 +10,6 @@
 //! credential, so no error, log line or status carries it.
 //! `kelpie-settings.example.toml` beside this crate shows the section.
 
-use std::collections::BTreeMap;
 use std::fmt;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
@@ -21,7 +20,7 @@ use shep_client::dogs::dog_config;
 
 use crate::lease::counted::CARGO_TEST_CAPACITY;
 use crate::review_bot::Reviewers;
-use crate::settings::{Definition, EndpointUrl, ReviewerName, SettingsError};
+use crate::settings::{EndpointUrl, SettingsError};
 
 /// What every project shares
 #[dog_config]
@@ -35,10 +34,6 @@ pub struct KelpieSettings {
     /// The pull request reviewers a project may list, each by its window
     #[serde(default)]
     pub reviewers: Reviewers,
-    /// The reviewers a project may list in `review.reviewers`,
-    /// by name. `claude` is always the project's own Claude round.
-    #[serde(default)]
-    pub local_reviewers: BTreeMap<ReviewerName, Definition>,
     /// How many commands may hold each counted lease at once
     #[serde(default)]
     pub leases: Leases,
@@ -150,9 +145,7 @@ fn authority(rest: &str) -> &str {
 const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntfy`) \
                      and an `https://` `url`, and `[reviewers.coderabbit]` and \
                      `[reviewers.cubic]` and `[reviewers.codex]` tables with `reviews` and `hours`, \
-                     `[local_reviewers.<name>]` tables with a `kind` of \
-                     `endpoint`, `command`, `claude` or `session` and that \
-                     kind's keys, a `[leases]` table with a \
+                     a `[leases]` table with a \
                      `cargo-test` count, a `gpu_metrics_url`, a `codex_home` path, and nothing else";
 
 impl KelpieSettings {
@@ -231,6 +224,15 @@ impl KelpieSettings {
                 fix: "write each `[agents.<name>]` table as `agents/<name>.md`, its keys \
                       as YAML frontmatter with `role: implementer`, and delete the tables",
             },
+            crate::settings::Removed {
+                key: "local_reviewers",
+                because: "reviewers are agent files listed in a project's `agents.reviewers`",
+                fix: "write each `[local_reviewers.<name>]` table as `agents/<name>.md` in \
+                      kelpie's home, with `role: reviewer`, its `kind` as `harness` and \
+                      `gpu_lease = true` as `lease: gpu`; a `kind = \"claude\"` or \
+                      `\"session\"` table is a session reviewer on its model and effort \
+                      whose body is its prompt. Then delete the tables",
+            },
         ];
         crate::settings::refuse_removed(text, &removed)?;
         toml::from_str(text).map_err(|e: toml::de::Error| {
@@ -272,23 +274,6 @@ mod tests {
     }
 
     #[test]
-    fn the_example_s_local_reviewers_read_once_uncommented() {
-        let start = "# [kelpie.local_reviewers.qwen]";
-        let text = example();
-        let at = text
-            .find(start)
-            .expect("the example defines local reviewers");
-        let defined: String = text[at..]
-            .lines()
-            .map(|line| line.trim_start_matches('#').trim_start())
-            .map(|line| format!("{}\n", line.replace("[kelpie.", "[")))
-            .collect();
-        let s = KelpieSettings::parse(&defined).unwrap();
-        let names: Vec<&str> = s.local_reviewers.keys().map(|n| n.as_str()).collect();
-        assert_eq!(names, ["gpu-box", "opus", "qwen"]);
-    }
-
-    #[test]
     fn the_webhook_is_optional() {
         let s = KelpieSettings::parse("").unwrap();
         assert_eq!(s, KelpieSettings::default());
@@ -305,6 +290,26 @@ mod tests {
             "{err}"
         );
         assert!(err.ends_with("delete it"), "{err}");
+        assert!(!err.contains("s3cr3t"), "{err}");
+    }
+
+    #[test]
+    fn local_reviewers_are_refused_saying_they_are_agent_files_now() {
+        let text = format!(
+            "[webhook]\nkind = \"ntfy\"\nurl = \"{SECRET}\"\n\
+             [local_reviewers.qwen]\nkind = \"command\"\ncommand = \"~/q.sh\"\n"
+        );
+        let err = parse_err(&text);
+        assert!(
+            err.starts_with(
+                "`local_reviewers` is no longer a setting, because reviewers are agent files \
+                 listed in a project's `agents.reviewers`: write each"
+            ),
+            "{err}"
+        );
+        assert!(err.contains("`role: reviewer`"), "{err}");
+        assert!(err.contains("`gpu_lease = true` as `lease: gpu`"), "{err}");
+        assert!(err.contains("whose body is its prompt"), "{err}");
         assert!(!err.contains("s3cr3t"), "{err}");
     }
 

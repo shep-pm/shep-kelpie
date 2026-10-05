@@ -98,7 +98,10 @@ mod tests {
             resume: crate::state::Resume::Nothing,
         };
         assert_eq!(Wants::of(&question), Wants::Answer);
-        let merge = RulingKind::Merge { head: "abc".into() };
+        let merge = RulingKind::Merge {
+            head: "abc".into(),
+            unreviewed: None,
+        };
         assert_eq!(Wants::of(&merge), Wants::YesOrNo);
     }
 

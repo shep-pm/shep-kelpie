@@ -75,11 +75,16 @@ in the maintainer's terminal and files it ready for a worker.
 _Avoid_: planner, planning call
 
 **Reviewer**:
-An agent in a project's review list. Each reads the pull request once, in
-the list's order, against the issue's acceptance criteria. A **review bot**
-(CodeRabbit, cubic, Codex) is a reviewer on the bot harness, summoned on the
-pull request and answering there within a rate window of its own.
-_Avoid_: judge, local reviewer, round
+An agent in a project's review list, `agents.reviewers`. Each reads the
+pull request once, in the list's order, against the issue's acceptance
+criteria, and its file's body is its prompt. It runs a fresh session on a
+harness, or a command, or kelpie's own endpoint reviewer. One with a
+**second look** reads twice, the second time shown what it found the first
+and asked only for what it missed, before its one fix turn. Kelpie ships
+`defect-hunter`, which does. A **review bot** (CodeRabbit, cubic, Codex) is
+a reviewer on the bot harness, summoned on the pull request and answering
+there within a rate window of its own.
+_Avoid_: judge, local reviewer, round, deep round
 
 ## In shep's terms
 

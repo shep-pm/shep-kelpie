@@ -6,15 +6,15 @@ use serde_json::{Value, json};
 
 use super::saved_with;
 use crate::ports::Finding;
-use crate::settings::ReviewerName;
+use crate::settings::AgentName;
 use crate::state::{Fix, RulingKind, StateError};
 use crate::test::a_work_item;
 use crate::work_item::{
     CallKind, CodeRabbitStage, OpenThread, Phase, Review, ReviewStage, TimingPhase,
 };
 
-fn named(name: &str) -> Option<ReviewerName> {
-    Some(ReviewerName::try_from(name.to_owned()).unwrap())
+fn named(name: &str) -> Option<AgentName> {
+    Some(AgentName::try_from(name.to_owned()).unwrap())
 }
 
 fn racy() -> Value {
@@ -65,6 +65,7 @@ fn a_review_saved_between_rounds_goes_on_after_the_reviewer_it_recorded() {
             stage: ReviewStage::Round,
             reviewer: None,
             last: named("qwen"),
+            unread: false,
             ..Review::first()
         })
     );
@@ -100,7 +101,9 @@ fn a_fix_under_way_loses_its_streak_mark() {
     assert_eq!(
         review.stage,
         ReviewStage::Fixing {
-            head: Some("c0ffee".into())
+            head: Some("c0ffee".into()),
+            sent: Vec::new(),
+            deferred_before: Vec::new(),
         }
     );
 }
@@ -152,6 +155,7 @@ fn a_review_kept_by_a_ruling_or_a_resume_loses_the_loops_fields_too() {
         stage,
         reviewer: None,
         last: named("qwen"),
+        unread: false,
         ..Review::first()
     };
     assert_eq!(
@@ -162,7 +166,9 @@ fn a_review_kept_by_a_ruling_or_a_resume_loses_the_loops_fields_too() {
         state.rulings[0].kind,
         RulingKind::FixNotPushed {
             fix: Fix::Review(round_3(ReviewStage::Fixing {
-                head: Some("c0ffee".into())
+                head: Some("c0ffee".into()),
+                sent: Vec::new(),
+                deferred_before: Vec::new(),
             })),
             prompt: "p".into(),
         }

@@ -7,7 +7,7 @@ use crate::agents::Agents;
 use crate::flock::add::LABELS;
 use crate::ports::{NewLabel, Visibility};
 use crate::runner::{ProjectName, ProjectPaths, SUMMON_LABEL, check_instructions, check_repo};
-use crate::settings::{Account, Limit, Runs, Settings};
+use crate::settings::{Account, Limit, Settings};
 use crate::webhook::KelpieSettings;
 
 /// Every check for the project on `sheep`, whose table is `table`
@@ -96,14 +96,8 @@ pub(super) fn checks(
             probes,
         ));
     }
-    lines.push(local_review(
-        at("local review"),
-        &settings,
-        kelpie,
-        (&book, here),
-        probes,
-    ));
-    if let Some(kelpie) = kelpie.filter(|kelpie| spends_codex(&settings, kelpie, &book, here)) {
+    lines.push(reviewers(at("reviewers"), &settings, (&book, here), probes));
+    if let Some(kelpie) = kelpie.filter(|_| spends_codex(&settings, &book, here)) {
         lines.push(match kelpie.codex_home(here.home, here.kelpie_home) {
             Ok(codex_home) => super::machine::codex(
                 at("codex usage"),
@@ -155,30 +149,17 @@ fn implementers(subject: String, settings: &Settings, paths: &ProjectPaths) -> (
     (book, line)
 }
 
-// Whether an implementer, a review role or a session reviewer runs on an
-// agent that spends Codex. Settings that do not resolve are another line's
-// to report.
-fn spends_codex(
-    settings: &Settings,
-    kelpie: &KelpieSettings,
-    book: &Agents,
-    here: Here<'_>,
-) -> bool {
+// Whether an implementer or a listed reviewer runs on an agent that spends
+// Codex. Settings that do not resolve are another line's to report.
+fn spends_codex(settings: &Settings, book: &Agents, here: Here<'_>) -> bool {
     let codex = |limit: &Limit| *limit == Limit::Account(Account::Codex);
     let roles = settings.role_agents(book).ok();
-    let lineup = settings.lineup(kelpie, book, here.home).unwrap_or_default();
-    let sessions = lineup.iter().any(|r| match &r.runs {
-        Runs::Claude(session) => codex(&session.limit),
-        Runs::Local(_) | Runs::Deep => false,
-    });
-    let deep = lineup.iter().any(|r| r.runs == Runs::Deep);
-    sessions
-        || roles.is_some_and(|roles| {
-            let l = &roles.limits;
-            let deep = deep.then_some(&l.deep_reviewer);
-            let implementers = roles.implementers.iter().map(|i| &i.limit);
-            implementers.chain([&l.reviewer]).chain(deep).any(codex)
-        })
+    let lineup = settings.lineup(book, here.home).unwrap_or_default();
+    let sessions = lineup
+        .iter()
+        .filter_map(|r| r.runs.session())
+        .any(|(_, limit)| codex(limit));
+    sessions || roles.is_some_and(|roles| roles.implementers.iter().any(|i| codex(&i.limit)))
 }
 
 fn checkout(subject: String, settings: &Settings) -> Line {
@@ -263,45 +244,41 @@ fn review_bot(subject: &str, settings: &Settings, probes: Probes<'_>) -> Line {
 }
 
 // Every local reviewer the project lists can run.
-fn local_review(
+fn reviewers(
     subject: String,
     settings: &Settings,
-    kelpie: Option<&KelpieSettings>,
     (book, here): (&Agents, Here<'_>),
     probes: Probes<'_>,
 ) -> Line {
-    let none = KelpieSettings::default();
-    let lineup = match settings.lineup(kelpie.unwrap_or(&none), book, here.home) {
+    let lineup = match settings.lineup(book, here.home) {
         Ok(lineup) => lineup,
         Err(e) => {
             return Line::missing(
                 subject,
                 e.to_string(),
-                "define it in kelpie's `[local_reviewers]` or its `agents` folder, or take \
-                 it off `review.reviewers` or `agents`",
+                "write the reviewer's file in kelpie's `agents` folder, or take it off \
+                 `agents.reviewers`",
             );
         }
     };
-    let mut local = 0;
     for reviewer in &lineup {
-        let Runs::Local(round) = &reviewer.runs else {
+        let Some(round) = reviewer.runs.local() else {
             continue;
         };
-        local += 1;
-        if let Err(reason) = probes.reviewer.check(round) {
-            let fix = match settings.review.reviewers.is_empty() {
-                true => {
-                    "install it, point `review.local` at one that exists, or set its `kind` to `off`"
-                }
-                false => {
-                    "install it, or point its `[local_reviewers]` definition at one that exists"
-                }
-            };
+        if let Err(reason) = probes.reviewer.check(&round) {
+            let fix = "install it, or point its agent file at one that exists";
             return Line::missing(subject, format!("{}: {reason}", reviewer.name), fix);
         }
     }
-    match local {
-        0 => Line::ok(subject, "off, so every round is the Claude round"),
-        _ => Line::ok(subject, "ready"),
+    let names: Vec<&str> = lineup.iter().map(|r| r.name.as_str()).collect();
+    match names.is_empty() {
+        true => Line::ok(
+            subject,
+            "none listed, so a pull request goes straight to CI",
+        ),
+        false => Line::ok(
+            subject,
+            format!("each pull request is read by {}", names.join(", then ")),
+        ),
     }
 }

@@ -427,14 +427,26 @@ impl Runner {
                 item.issue
             ));
         };
+        let Some((model, limit)) = agent
+            .runs
+            .session()
+            .filter(|_| agent.role == crate::agents::Role::Implementer)
+        else {
+            return Err(format!(
+                "issue #{} runs on agent {name}, whose file is a reviewer's now: give \
+                 `agents/{name}.md` in kelpie's home `role: implementer` again, or drop and \
+                 add the issue",
+                item.issue
+            ));
+        };
         self.settings
-            .under_worker_fence(name, &agent.model)
+            .under_worker_fence(name, model)
             .map_err(|e| e.to_string())?;
         Ok(WorkerAgent {
-            harness: agent.model.harness.clone(),
-            limit: agent.limit.clone(),
-            model: agent.model.model.as_str().to_owned(),
-            effort: agent.model.effort,
+            harness: model.harness.clone(),
+            limit: limit.clone(),
+            model: model.model.as_str().to_owned(),
+            effort: model.effort,
             prompt: agent.prompt.clone(),
         })
     }
