@@ -1,21 +1,23 @@
 //! What removed features left in a state file saved before they went
 //!
 //! Such a file still loads. The relay's, the planning call's, the
-//! whole-issue check's and the review loop's fields are dropped before
-//! reading, and the check's and the judge's time and calls count as review's,
-//! so totals still add up. A review saved mid-loop goes on from the reviewer
-//! after the one it last recorded. A pending ruling of a removed kind has
-//! nothing here to answer it, so the file is refused.
+//! whole-issue check's, the review loop's and the deep round's later steps'
+//! fields are dropped before reading, and the check's and the judge's time
+//! and calls count as review's, so totals still add up. A review saved
+//! mid-loop goes on from the reviewer after the one it last recorded. A
+//! pending ruling of a removed kind has nothing here to answer it, so the
+//! file is refused.
 
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 
 // The kinds of ruling removed features raised, which nothing answers now
-const RULINGS: [&str; 5] = [
+const RULINGS: [&str; 6] = [
     "split",
     "split-stuck",
     "close-stuck",
     "audit",
     "review-guard",
+    "deep-review",
 ];
 
 // The judge and the check each ran as a fresh Claude session reviewing the
@@ -49,6 +51,12 @@ pub(super) fn drop_removed_fields(value: &mut Value) {
         ruling.remove("resend");
         if let Some(kind) = ruling.get_mut("kind") {
             drop_loop(kind);
+            // Only the deep round's pin check said why a pushed fix fell short.
+            if let Some(kind) = kind.as_object_mut()
+                && kind.get("kind").and_then(Value::as_str) == Some("fix-not-pushed")
+            {
+                kind.remove("why");
+            }
         }
     }
     for item in objects(state.get_mut("work_items")) {
@@ -119,6 +127,7 @@ fn drop_loop(value: &mut Value) {
                 map.remove("consecutive_clean");
                 map.remove("guard_cleared");
                 map.remove("alone");
+                finish_deep(map);
             }
             match map.get("stage").and_then(Value::as_str) {
                 Some("judging") => {
@@ -134,6 +143,35 @@ fn drop_loop(value: &mut Value) {
         }
         _ => {}
     }
+}
+
+// A deep round saved past its two reads has finished reading. Findings not
+// yet sent go to the fix turn as any round's do, a fix under way goes on, and
+// a fix already made ends the round, so the pass goes on.
+fn finish_deep(review: &mut Map<String, Value>) {
+    let Some(stage) = review.get_mut("stage").and_then(Value::as_object_mut) else {
+        return;
+    };
+    if stage.get("stage").and_then(Value::as_str) != Some("deep") {
+        return;
+    }
+    let again = stage.get("again").and_then(Value::as_bool) == Some(true);
+    let held = stage.get("held").and_then(Value::as_array).map(|held| {
+        let findings = held.iter().filter_map(|h| h.get("finding")).cloned();
+        findings.collect::<Vec<_>>()
+    });
+    // Anything else is left for the parser to refuse.
+    let next = match (stage.get("step").and_then(Value::as_str), held) {
+        (Some("confirming"), Some(held)) => json!({ "stage": "found", "findings": held }),
+        (Some("sending"), Some(held)) if !again => json!({ "stage": "found", "findings": held }),
+        (Some("sending" | "rechecking"), Some(_)) => json!({ "stage": "found", "findings": [] }),
+        (Some("fixing"), Some(_)) => match stage.get("head") {
+            Some(head) => json!({ "stage": "fixing", "head": head }),
+            None => json!({ "stage": "fixing" }),
+        },
+        _ => return,
+    };
+    review.insert("stage".to_owned(), next);
 }
 
 #[cfg(test)]

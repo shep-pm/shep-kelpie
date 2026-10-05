@@ -119,7 +119,7 @@ impl Runner {
             ReviewStage::Found { findings } => self.send_findings(review, findings),
             // begin_turn drives the fix turn itself, and comes here once it ends.
             ReviewStage::Fixing { head } => self.fix_ended(number, &build, review, head),
-            ReviewStage::Deep(deep) => self.deep_step(review, deep),
+            ReviewStage::Deep(deep) => self.deep_step(deep),
         }
     }
 
@@ -147,14 +147,7 @@ impl Runner {
                     let path = findings::findings_path(build);
                     let prompt = findings::again_prompt(number, round, &path);
                     let fix = Fix::Review(review);
-                    return self.raise(
-                        number,
-                        RulingKind::FixNotPushed {
-                            fix,
-                            prompt,
-                            why: None,
-                        },
-                    );
+                    return self.raise(number, RulingKind::FixNotPushed { fix, prompt });
                 }
                 Ok(now) => Some(now),
                 Err(reason) => return Ok(self.gate_failed(reason)),

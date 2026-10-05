@@ -549,34 +549,6 @@ pub enum StepReport {
         /// How many findings it reported
         findings: usize,
     },
-    /// A session that may run commands tried to confirm a HIGH with a failing test
-    DeepConfirmed {
-        /// The work item's issue
-        issue: u64,
-        /// Its pull request
-        pull_request: u64,
-        /// The round
-        round: u32,
-        /// Where the finding is, as `file:line`
-        finding: String,
-        /// Whether it wrote a test that fails; if not, the HIGH is sent unconfirmed
-        backed: bool,
-    },
-    /// The re-check of the deep round's fix ran
-    DeepRechecked {
-        /// The work item's issue
-        issue: u64,
-        /// Its pull request
-        pull_request: u64,
-        /// The round
-        round: u32,
-        /// How many findings the fix fixed
-        fixed: usize,
-        /// How many the worker left for an issue of their own, which are not re-checked
-        deferred: usize,
-        /// How many it did not fix
-        unfixed: usize,
-    },
     /// The worker's fix turn for a round's held findings ended, and the
     /// round counts
     FixPushed {
@@ -628,7 +600,7 @@ pub(super) enum ReviewCall {
     },
     /// A fresh Claude review round
     ClaudeRound(AgentCall),
-    /// A session of the deep round: a reader, a confirmation or a re-check
+    /// A reader of the deep round
     Deep(AgentCall),
 }
 
@@ -660,7 +632,7 @@ pub(super) enum ReviewResult {
     /// The local model sat partly or wholly on the CPU, so the round did not
     /// run, and why
     Spilled(String),
-    /// What a deep round's session said, as text, or why its call failed
+    /// What a deep round's reader said, as text, or why its call failed
     Deep(Result<String, String>),
     /// The call was ended because the runner is stopping, before it came
     /// back with anything

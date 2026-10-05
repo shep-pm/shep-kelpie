@@ -15,9 +15,7 @@ use super::{Names, Runner};
 use crate::ports::Timestamp;
 use crate::settings::MergeAuthority;
 use crate::state::{Fix, ProjectState, Resume, Ruling, RulingKind, StateError};
-use crate::work_item::{
-    CodeRabbitStage, Known, Phase, Review, ReviewStage, Turn, WorkItem, foreign_change,
-};
+use crate::work_item::{CodeRabbitStage, Known, Phase, Review, Turn, WorkItem, foreign_change};
 use crate::worktree;
 
 /// The prompt for a turn resumed after the maintainer accepts a timed-out
@@ -408,20 +406,10 @@ fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
              so a review round did not run."
                 .to_owned()
         }
-        RulingKind::FixNotPushed { why: Some(_), .. } => {
-            "A fix for review findings is not what the review checked, so those findings \
-             still hold."
-                .to_owned()
-        }
         RulingKind::FixNotPushed { .. } => {
             "A fix for review findings ended without a push, so those findings still hold."
                 .to_owned()
         }
-        RulingKind::DeepReview { unfixed, .. } => format!(
-            "Kelpie's deep review of this pull request still finds {} findings unfixed \
-             after the worker was sent back once.",
-            unfixed.len()
-        ),
         RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
             "{bot} has run {rounds} rounds here, its cap, \
              and {held} of its threads are still open."
@@ -554,14 +542,6 @@ fn decide(
                 force: None,
             });
         }
-        // The fix ends under the same review, which re-checks it again.
-        (Answer::Yes, RulingKind::DeepReview { review, prompt, .. }) => {
-            return Ok(Move::Turn {
-                prompt,
-                phase: Phase::Review(review),
-                force: None,
-            });
-        }
         (Answer::Yes, RulingKind::CodeRabbitCap { prompt, head, .. }) => {
             return Ok(Move::Turn {
                 prompt,
@@ -630,35 +610,16 @@ pub(super) fn question(
              Once the model is back on the GPU, {yes} runs the round again",
             review.round
         ),
-        RulingKind::FixNotPushed { fix, why, .. } => {
+        RulingKind::FixNotPushed { fix, .. } => {
             let round = match fix {
-                Fix::Review(review) if matches!(review.stage, ReviewStage::Deep(_)) => {
-                    format!("the deep review (round {})", review.round)
-                }
                 Fix::Review(review) => format!("round {} of the review", review.round),
                 Fix::CodeRabbit { round, .. } => format!("{bot} round {round}"),
             };
-            match why {
-                Some(why) => format!(
-                    "The worker on {about} ended its fix for {round}, but {why}, \
-                     so those findings still hold. {yes} sends it the findings again"
-                ),
-                None => format!(
-                    "The worker on {about} ended its fix for {round} without pushing, \
-                     so those findings still hold. {yes} sends it the findings again"
-                ),
-            }
+            format!(
+                "The worker on {about} ended its fix for {round} without pushing, \
+                 so those findings still hold. {yes} sends it the findings again"
+            )
         }
-        RulingKind::DeepReview { unfixed, .. } => format!(
-            "The deep review of {about} re-checked the worker's fix twice and still \
-             finds these unfixed:\n\n{}\n\n{yes} sends the worker them once more. \
-             Merging {about} by hand overrules the review",
-            unfixed
-                .iter()
-                .map(|g| format!("- {g}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        ),
         RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
             "{bot} has run {rounds} rounds on {about}, its cap, and {held} of its \
              threads are still open. {yes} sends the worker those findings and lets \

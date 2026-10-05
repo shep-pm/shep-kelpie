@@ -22,8 +22,7 @@ pub enum Role {
     Worker,
     /// A Claude review round, always a fresh session
     Reviewer,
-    /// A session of the deep review round: a reader, the confirmation of a
-    /// HIGH, or the re-check of the fix
+    /// A reader of the deep review round, the first or the second look
     #[serde(rename = "deep_reviewer")]
     DeepReviewer,
 }

@@ -202,8 +202,8 @@ pub enum Runs {
     Local(LocalRound),
     /// A fresh Claude session
     Claude(ClaudeSession),
-    /// The deep round: two readers, the confirmation of each HIGH, one fix
-    /// turn and a re-check of it, on the `deep_reviewer` role
+    /// The deep round: two readers on the `deep_reviewer` role, then one fix
+    /// turn as any reviewer's findings get
     Deep,
 }
 

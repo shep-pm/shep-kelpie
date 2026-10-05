@@ -362,7 +362,6 @@ fn the_coderabbit_rulings_are_pinned() {
             head: "c0ffee".into(),
         },
         prompt: "again".into(),
-        why: None,
     };
     for kind in [&cap, &silent, &unpushed] {
         let saved = serde_json::to_value(kind).unwrap();
