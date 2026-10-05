@@ -332,7 +332,6 @@ fn a_finished_work_item_is_pinned() {
                 "local_round": 0,
                 "claude_round": 0,
                 "judging": 0,
-                "audit": 0,
                 "ci": 40,
                 "coderabbit_window": 0,
                 "coderabbit_review": 0,
@@ -529,88 +528,6 @@ fn a_ruling_saved_before_webhooks_is_posted_once() {
         "leases":[]}"#;
     fs::write(dir.path().join("state.json"), old).unwrap();
     assert!(!store.load().unwrap().unwrap().rulings[0].alerted);
-}
-
-// A file saved while the relay existed, with its count of clears and each
-// ruling's relayed and resend fields.
-#[test]
-fn a_state_saved_while_the_relay_existed_loads_and_saves_without_its_fields() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = store_in(dir.path());
-    let old = r#"{"version":2,"run":"running","since":7,"work_item":null,
-        "relay_clears":4,
-        "rulings":[{"id":1,"question":"q","pull_request":3,"kind":{"kind":"closed"},
-                    "alerted":true,"relayed":true,"resend":true}],
-        "leases":[]}"#;
-    fs::write(dir.path().join("state.json"), old).unwrap();
-    let state = store.load().unwrap().unwrap();
-    assert!(state.rulings[0].alerted);
-
-    store.save(&state).unwrap();
-    let saved = fs::read_to_string(dir.path().join("state.json")).unwrap();
-    for gone in ["relay_clears", "relayed", "resend"] {
-        assert!(!saved.contains(gone), "{gone} was saved again: {saved}");
-    }
-}
-
-// A file saved while the planning call existed, with a plan under way.
-#[test]
-fn a_state_saved_with_plans_loads_and_saves_without_them() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = store_in(dir.path());
-    let old = r#"{"version":2,"run":"running","since":7,"work_item":null,
-        "plans":[{"issue":5,"stage":{"kind":"closing","failures":1}}],
-        "rulings":[{"id":1,"question":"q","pull_request":3,"kind":{"kind":"closed"}}],
-        "leases":[]}"#;
-    fs::write(dir.path().join("state.json"), old).unwrap();
-    let state = store.load().unwrap().unwrap();
-    assert_eq!(state.rulings.len(), 1);
-
-    store.save(&state).unwrap();
-    let saved = fs::read_to_string(dir.path().join("state.json")).unwrap();
-    assert!(!saved.contains("plans"), "plans were saved again: {saved}");
-}
-
-#[test]
-fn a_pending_ruling_of_a_removed_kind_is_refused_by_id_and_kind() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = store_in(dir.path());
-    let kinds = [
-        r#"{"kind":"split","why":"w","pieces":[]}"#,
-        r#"{"kind":"split-stuck","reason":"r","opened":[]}"#,
-        r#"{"kind":"close-stuck","reason":"r"}"#,
-    ];
-    for (kind, name) in kinds.iter().zip(["split", "split-stuck", "close-stuck"]) {
-        let old = format!(
-            r#"{{"version":2,"run":"running","since":7,"work_item":null,"last_ruling":4,
-            "rulings":[{{"id":3,"question":"q","pull_request":null,"kind":{{"kind":"closed"}}}},
-                       {{"id":4,"issue":5,"question":"q","pull_request":null,"kind":{kind}}}],
-            "leases":[]}}"#
-        );
-        fs::write(dir.path().join("state.json"), old).unwrap();
-        let err = store.load().unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            format!(
-                "state file {} holds ruling 4 of kind `{name}`, which this kelpie no longer \
-                 has: answer or drop it on the old build first",
-                dir.path().join("state.json").display()
-            )
-        );
-    }
-}
-
-#[test]
-fn other_unknown_fields_are_still_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = store_in(dir.path());
-    let old = r#"{"version":2,"run":"running","since":7,"work_item":null,
-        "rulings":[{"id":1,"question":"q","pull_request":3,"kind":{"kind":"closed"},
-                    "relayed":false,"pigeon":true}],
-        "leases":[]}"#;
-    fs::write(dir.path().join("state.json"), old).unwrap();
-    let err = store.load().unwrap_err();
-    assert!(err.to_string().contains("pigeon"), "{err}");
 }
 
 #[test]

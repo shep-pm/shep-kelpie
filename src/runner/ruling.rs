@@ -421,12 +421,6 @@ fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
             "A fix for review findings ended without a push, so those findings still hold."
                 .to_owned()
         }
-        RulingKind::Audit { head, gaps, .. } => format!(
-            "Kelpie's check of this pull request against its issue at {} still finds \
-             {} gaps after the worker was sent back twice.",
-            short(head),
-            gaps.len()
-        ),
         RulingKind::DeepReview { unfixed, .. } => format!(
             "Kelpie's deep review of this pull request still finds {} findings unfixed \
              after the worker was sent back once.",
@@ -568,13 +562,6 @@ fn decide(
                 force: None,
             });
         }
-        (Answer::Yes, RulingKind::Audit { prompt, .. }) => {
-            return Ok(Move::Turn {
-                prompt,
-                phase: Phase::Implement,
-                force: Some(Phase::Review(Review::first())),
-            });
-        }
         // The fix ends under the same review, which re-checks it again.
         (Answer::Yes, RulingKind::DeepReview { review, prompt, .. }) => {
             return Ok(Move::Turn {
@@ -675,16 +662,6 @@ pub(super) fn question(
                 ),
             }
         }
-        RulingKind::Audit { head, gaps, .. } => format!(
-            "The whole-issue check of {about} at {} still finds gaps after the \
-             worker was sent back twice:\n\n{}\n\n{yes} sends the worker the gaps once \
-             more. Merging {about} by hand overrules the check",
-            short(head),
-            gaps.iter()
-                .map(|g| format!("- {g}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        ),
         RulingKind::DeepReview { unfixed, .. } => format!(
             "The deep review of {about} re-checked the worker's fix twice and still \
              finds these unfixed:\n\n{}\n\n{yes} sends the worker them once more. \

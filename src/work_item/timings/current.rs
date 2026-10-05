@@ -44,7 +44,6 @@ impl WorkItem {
                 CallKind::Claude => TimingPhase::ClaudeRound,
                 CallKind::Judge => TimingPhase::Judging,
                 CallKind::Shots => TimingPhase::Shots,
-                CallKind::Audit => TimingPhase::Audit,
                 CallKind::Deep => TimingPhase::DeepRound,
             };
         }

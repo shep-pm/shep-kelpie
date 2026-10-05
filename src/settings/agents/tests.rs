@@ -48,7 +48,6 @@ fn a_project_that_names_no_agent_keeps_its_models_on_claude_code() {
     assert_eq!(pair(&agents.worker), ("claude-sonnet-5-5", Effort::High));
     assert_eq!(pair(&agents.reviewer), ("claude-sonnet-5", Effort::Medium));
     assert_eq!(pair(&agents.judge), ("claude-opus-5-5", Effort::Low));
-    assert_eq!(pair(&agents.auditor), ("claude-opus-5-5", Effort::High));
     assert_eq!(
         pair(&agents.deep_reviewer),
         ("claude-opus-5-5", Effort::High)
@@ -75,18 +74,6 @@ fn the_deep_round_runs_on_the_agent_or_model_its_role_names() {
         pair(&agents.deep_reviewer),
         ("claude-haiku-4-5-20251001", Effort::Low)
     );
-}
-
-#[test]
-fn the_whole_issue_check_runs_on_the_model_its_models_entry_names() {
-    let mut settings = project("");
-    settings.models.auditor = RoleModel {
-        model: NonBlank::try_from("claude-opus-5-5".to_owned()).unwrap(),
-        effort: Effort::Max,
-        harness: AgentHarness::ClaudeCode,
-    };
-    let agents = settings.role_agents(&kelpie(AGENTS).agents).unwrap();
-    assert_eq!(pair(&agents.auditor), ("claude-opus-5-5", Effort::Max));
 }
 
 #[test]
@@ -399,20 +386,14 @@ const CODEX: &str =
 
 #[test]
 fn a_codex_agent_runs_every_role_on_the_codex_account() {
-    let names = "worker = \"gpt\"\nreviewer = \"gpt\"\njudge = \"gpt\"\n\
-                 auditor = \"gpt\"\n";
+    let names = "worker = \"gpt\"\nreviewer = \"gpt\"\njudge = \"gpt\"\n";
     let agents = project(names).role_agents(&kelpie(CODEX).agents).unwrap();
-    for role in [
-        &agents.worker,
-        &agents.reviewer,
-        &agents.judge,
-        &agents.auditor,
-    ] {
+    for role in [&agents.worker, &agents.reviewer, &agents.judge] {
         assert_eq!(role.harness, AgentHarness::Codex);
         assert_eq!(pair(role), ("gpt-6-sol", Effort::Medium));
     }
     let limits = agents.limits;
-    for limit in [limits.worker, limits.reviewer, limits.judge, limits.auditor] {
+    for limit in [limits.worker, limits.reviewer, limits.judge] {
         assert_eq!(limit, Limit::Account(Account::Codex));
     }
 }

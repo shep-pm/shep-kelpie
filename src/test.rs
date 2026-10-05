@@ -40,7 +40,7 @@ mod shepherd;
 mod shots;
 
 pub(crate) use alerts::FakeAlerts;
-pub(crate) use claude::{AUDIT_PASSES, FakeClaude, Hold, LEFT_BEHIND, Scripted, Seen};
+pub(crate) use claude::{FakeClaude, Hold, LEFT_BEHIND, Scripted, Seen};
 pub(crate) use endpoint::{Answer, StandInEndpoint, unreachable_url};
 pub(crate) use forge::FakeForge;
 pub(crate) use leases::{FakeLeases, Told};
@@ -104,7 +104,6 @@ pub(crate) fn a_work_item() -> WorkItem {
         rebased: false,
         shots: None,
         shots_comment: None,
-        audit: None,
         held: Vec::new(),
         follow_ups: None,
         timings: Some(Timings {
@@ -614,29 +613,13 @@ impl Rig {
 
     /// Steps once and, if nothing happened, waits out CI's settling and
     /// steps again: how a CI verdict is reached
-    ///
-    /// A whole-issue check that finds nothing is not a verdict: the step
-    /// after it is.
     pub(crate) fn verdict(&self, runner: &Mutex<Runner>) -> Option<StepReport> {
-        let report = self.step_past_audits(runner);
+        let report = step(runner).unwrap();
         if report.is_some() {
             return report;
         }
         self.clock.advance(CHECKS_SETTLE);
-        self.step_past_audits(runner)
-    }
-
-    /// Steps once, and again while the step was a whole-issue check that
-    /// found nothing
-    pub(crate) fn step_past_audits(&self, runner: &Mutex<Runner>) -> Option<StepReport> {
-        // A check passes a head once, so more than a few in a row is a bug.
-        for _ in 0..10 {
-            let report = step(runner).unwrap();
-            if !matches!(report, Some(StepReport::AuditPassed { .. })) {
-                return report;
-            }
-        }
-        panic!("the whole-issue check passed ten steps in a row");
+        step(runner).unwrap()
     }
 
     /// The worktree kelpie makes for issue 7

@@ -106,17 +106,12 @@ impl Runner {
         }
     }
 
-    // Green CI goes to a review bot round while one is owed. Then the
-    // whole-issue check looks at the head, and sends the worker back when it
-    // finds a gap. Then `auto` merges by the path a yes takes, and `ask`
-    // raises the merge ruling with the pull request handed back
-    // `ready-for-human`.
+    // Green CI goes to a review bot round while one is owed. Then `auto`
+    // merges by the path a yes takes, and `ask` raises the merge ruling with
+    // the pull request handed back `ready-for-human`.
     fn passed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
         if self.review_bot_due() {
             return self.start_round(head);
-        }
-        if let Some(begin) = self.audit_before_merge(number, &head)? {
-            return Ok(begin);
         }
         if let Some(begin) = self.shots_before_merge(number, &head)? {
             return Ok(begin);
@@ -461,7 +456,7 @@ pub(super) mod tests {
         rig.clock.advance(CHECKS_SETTLE - 1);
         assert_eq!(step(&runner).unwrap(), None);
         rig.clock.advance(1);
-        ruling_report(rig.step_past_audits(&runner));
+        ruling_report(step(&runner).unwrap());
     }
 
     #[test]
@@ -483,7 +478,7 @@ pub(super) mod tests {
         rig.forge
             .set_checks(&head, Checks::Failed(vec!["lint".into()]));
 
-        let (id, question) = ruling_report(rig.step_past_audits(&runner));
+        let (id, question) = ruling_report(step(&runner).unwrap());
         assert!(question.starts_with("Merge pull request #71"), "{question}");
         rig.ask(&runner, "rule", Some(&format!("{id} yes")));
         assert!(matches!(

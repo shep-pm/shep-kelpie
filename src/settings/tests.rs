@@ -218,6 +218,30 @@ fn the_planning_calls_settings_are_refused_by_name() {
 }
 
 #[test]
+fn the_whole_issue_checks_settings_are_refused_by_name() {
+    let removed = [
+        (
+            "models.auditor",
+            "[app.dogs.kelpie.models.auditor]\nmodel = \"m\"\neffort = \"low\"\n",
+        ),
+        (
+            "agents.auditor",
+            "[app.dogs.kelpie.agents]\nauditor = \"opus\"\n",
+        ),
+    ];
+    for (key, block) in removed {
+        let err = parse_err(&format!("{EXAMPLE}\n{block}"));
+        assert!(
+            err.contains(&format!(
+                "`{key}` is no longer a setting, because the whole-issue check is gone: \
+                 delete it"
+            )),
+            "{key}: {err}"
+        );
+    }
+}
+
+#[test]
 fn a_misspelt_setting_is_named() {
     let text = EXAMPLE.replace("loop_guard", "loop_gaurd");
     let err = parse_err(&text);

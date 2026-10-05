@@ -138,7 +138,7 @@ impl Runner {
         Ok(Pace::Clear)
     }
 
-    // Each role's limit, the auditor's and deep reviewer's included, then each session reviewer's.
+    // Each role's limit, the deep reviewer's included, then each session reviewer's.
     fn spent_limits(&self) -> impl Iterator<Item = &Limit> {
         let limits = &self.agents.limits;
         let sessions = self.lineup.iter().filter_map(|r| match &r.runs {
@@ -151,16 +151,11 @@ impl Runner {
         // Only a project that runs the deep round spends its role.
         let deep = self.lineup.iter().any(|r| r.runs == Runs::Deep);
         let deep = deep.then_some(&limits.deep_reviewer);
-        [
-            &limits.worker,
-            &limits.reviewer,
-            &limits.judge,
-            &limits.auditor,
-        ]
-        .into_iter()
-        .chain(deep)
-        .chain(claude_worker)
-        .chain(sessions)
+        [&limits.worker, &limits.reviewer, &limits.judge]
+            .into_iter()
+            .chain(deep)
+            .chain(claude_worker)
+            .chain(sessions)
     }
 
     // The accounts the project's calls spend, each once.

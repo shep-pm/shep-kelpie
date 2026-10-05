@@ -30,7 +30,7 @@ impl Runner {
 }
 
 /// The acceptance criteria section of `body`, or the whole body, cut to [`MOST`]
-pub(in crate::runner) fn acceptance(body: &str) -> String {
+fn acceptance(body: &str) -> String {
     let level = |line: &str| {
         let hashes = line.bytes().take_while(|b| *b == b'#').count();
         (hashes > 0 && line[hashes..].starts_with(' ')).then_some(hashes)

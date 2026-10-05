@@ -38,8 +38,6 @@ pub struct Spend {
     pub reviewer: RoleSpend,
     /// The judge's calls
     pub judge: RoleSpend,
-    /// The whole-issue checks
-    pub auditor: RoleSpend,
     /// The deep review rounds' sessions
     pub deep_reviewer: RoleSpend,
 }
@@ -65,7 +63,6 @@ impl WorkItem {
                 Role::Worker => &mut spend.worker,
                 Role::Reviewer => &mut spend.reviewer,
                 Role::Judge => &mut spend.judge,
-                Role::Auditor => &mut spend.auditor,
                 Role::DeepReviewer => &mut spend.deep_reviewer,
             };
             role.calls += 1;

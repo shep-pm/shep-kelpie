@@ -43,7 +43,7 @@ fn every_phase_is_listed_with_zeros() {
     rig.ask(&runner, "add", Some("7"));
     let t = timings(&rig, &runner);
     let names: Vec<_> = t["seconds"].as_object().unwrap().keys().cloned().collect();
-    assert_eq!(names.len(), 15, "{names:?}");
+    assert_eq!(names.len(), 14, "{names:?}");
 }
 
 #[test]
