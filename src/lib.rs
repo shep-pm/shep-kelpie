@@ -10,8 +10,6 @@
 
 pub mod adapters;
 pub mod board;
-pub mod bridge;
-pub mod browse;
 pub mod coderabbit;
 pub mod codex;
 pub mod confine;
@@ -27,7 +25,6 @@ pub mod lease;
 pub mod local_paths;
 pub mod pacer;
 pub mod ports;
-pub mod preview;
 pub mod profile;
 pub mod review_bot;
 pub mod runner;
@@ -36,9 +33,9 @@ pub mod settings;
 pub mod sheep;
 pub mod shep_home;
 pub mod shepherd;
-pub mod shots;
 pub mod skills;
 pub mod state;
+pub mod tools;
 pub mod totp;
 mod trim;
 pub mod upgrade;

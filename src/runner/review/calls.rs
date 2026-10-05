@@ -9,19 +9,11 @@ use std::process::{Command, Stdio};
 
 use crate::ports::{AgentCall, Reach, Role, Session, Severity, Tools};
 use crate::settings::{Limit, RoleModel};
-use crate::shots::ShotsRun;
 use crate::skills::{Skills, Step};
 use crate::work_item::new_session_id;
 
 /// Where the Claude round's throwaway settings go
 const REVIEW_SETTINGS_FILE: &str = "review-settings.json";
-
-/// Kelpie's shots for a Claude round, and the folder they sit under
-#[derive(Debug, Clone, Copy)]
-pub(super) struct Screens<'a> {
-    pub(super) dir: &'a Path,
-    pub(super) run: &'a ShotsRun,
-}
 
 /// What a Claude round reviews, and against what
 #[derive(Debug, Clone, Copy)]
@@ -37,7 +29,6 @@ pub(super) struct Round<'a> {
 pub(super) fn reviewer_call(
     round: Round<'_>,
     (model, limit): (&RoleModel, &Limit),
-    shots: Option<Screens<'_>>,
     skills: &Skills,
 ) -> Result<AgentCall, String> {
     let Round {
@@ -56,15 +47,11 @@ pub(super) fn reviewer_call(
              in the same format.\n\n{criteria}"
         ));
     }
-    if let Some(shots) = shots {
-        prompt.push_str(&shots_prompt(shots.run));
-    }
     let prompt = skills.invoke(Step::Review, &prompt);
     let mut call = build_call(Role::Reviewer, issue, worktree, (model, limit), prompt)?;
     call.settings = worker_folder.join(REVIEW_SETTINGS_FILE);
     // A review skill may spawn sub-agents or run commands; the round does neither.
     call.tools = Tools::Review;
-    call.reach.read = shots.map(|s| s.dir.to_owned()).into_iter().collect();
     call.plugin_dirs = skills.plugin_dirs().to_vec();
     Ok(call)
 }
@@ -92,23 +79,11 @@ pub(in crate::runner) fn build_call(
         instructions: None,
         prompt,
         timeout: None,
-        mcp_config: None,
         plugin_dirs: Vec::new(),
         tools: Tools::Answer,
         reach: Reach::default(),
         lease: limit.lease().cloned(),
     })
-}
-
-pub(super) fn shots_prompt(run: &ShotsRun) -> String {
-    format!(
-        "\n\nKelpie took screenshots of this branch's UI from its dev server, at a \
-         phone and a desktop width, light and dark. Open the ones the diff touches \
-         with Read, and check the change looks right and nothing broke. A finding \
-         about a screenshot gives its location as the PNG's full path and `:0`.\n\n\
-         --- shots ---\n{}--- end ---",
-        run.text()
-    )
 }
 
 pub(in crate::runner) fn diff_against(worktree: &Path, base: &str) -> Result<String, String> {
@@ -245,7 +220,7 @@ mod tests {
             worker_folder: &worker,
             criteria: "",
         };
-        let call = reviewer_call(round, (&model, &Limit::default()), None, &skills).unwrap();
+        let call = reviewer_call(round, (&model, &Limit::default()), &skills).unwrap();
         let cli = ClaudeCli::default();
         cli.prepare(&call).expect("the settings were written");
         let reply = cli.run(&call).expect("the round ran");

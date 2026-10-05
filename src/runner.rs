@@ -58,7 +58,6 @@ mod rework;
 mod ruling;
 #[cfg(test)]
 mod several;
-mod shots;
 mod timings;
 mod trigger;
 mod turn;
@@ -175,8 +174,6 @@ pub struct Runner {
     store: StateStore,
     state: ProjectState,
     ports: Ports,
-    // What no forge post may name, which `ports.forge` refuses too
-    local: LocalPaths,
     // The pacer's last reading of each account's usage and when, kept in memory only
     pacing: BTreeMap<Account, (Timestamp, Assessment)>,
     // What the board passed over on its last poll, kept in memory only
@@ -238,7 +235,7 @@ impl Runner {
         let folders = [home, paths.kelpie_home.as_path(), settings.repo.as_path()];
         let names = settings.private_names.iter().map(NonBlank::as_str);
         let local = LocalPaths::new(folders, names);
-        ports.forge = Box::new(Guarded::new(ports.forge, local.clone()));
+        ports.forge = Box::new(Guarded::new(ports.forge, local));
         let leases = Arc::clone(&ports.local_leases);
         ports.agents = Arc::new(Leased::new(Arc::clone(&ports.agents), leases));
         let reviewers = kelpie_settings.reviewers;
@@ -292,15 +289,6 @@ impl Runner {
             }
             store.save(&state)?;
         }
-        // A dev server the last run left behind holds its port, and one the
-        // state file no longer names, such as a merged item's, is found by
-        // the folders it works in.
-        ports.shots.stop_orphans(&paths.owned());
-        for item in &state.work_items {
-            ports
-                .shots
-                .stop_left(&paths.shots(item.issue).join(crate::shots::SERVER_PID));
-        }
         // A new run is a new epoch, and the dog reclaims what the old one held.
         if !state.leases.is_empty() {
             state.leases.clear();
@@ -319,7 +307,6 @@ impl Runner {
             store,
             state,
             ports,
-            local,
             pacing: BTreeMap::new(),
             skipped: Vec::new(),
             close_refused: parent::Refused::new(),
@@ -513,8 +500,6 @@ impl Runner {
             local_unreviewed: Vec::new(),
             local_unreviewed_by: None,
             rebased: false,
-            shots: None,
-            shots_comment: None,
             held: Vec::new(),
             follow_ups: None,
             timings: Some(Timings::starting(self.ports.clock.now())),

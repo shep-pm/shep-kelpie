@@ -121,9 +121,6 @@ pub struct Fence {
     /// Unix sockets it may connect to: the kelpie dog's lease socket,
     /// where a worker takes the lease it runs tests under
     pub sockets: Vec<PathBuf>,
-    /// The domains its browser may open, when it runs the preview's dev
-    /// server and browser. `None` without a preview.
-    pub preview: Option<Vec<String>>,
     /// Kelpie's own checks, which judge its actions before they run
     pub guard: Guard,
     /// The project's own hooks, which run after kelpie's
@@ -175,8 +172,6 @@ pub struct AgentCall {
     pub instructions: Option<PathBuf>,
     /// The turn's prompt
     pub prompt: String,
-    /// The MCP servers the session starts with, beside any the repo names
-    pub mcp_config: Option<PathBuf>,
     /// The plugin folders its steps' skills are in
     pub plugin_dirs: Vec<PathBuf>,
     /// Kills the call, and returns [`AgentError::TimedOut`], once it has

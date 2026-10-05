@@ -214,13 +214,6 @@ fn upstream(server: &ModelServer) -> Result<Upstream, AgentError> {
 
 // What a worker on Claude Code has and pi cannot give it.
 fn refuse_unsupported(call: &AgentCall) -> Result<(), AgentError> {
-    if call.mcp_config.is_some() {
-        return Err(AgentError::Setup(
-            "pi runs no MCP servers, so a worker on pi cannot run the preview: \
-             turn `preview` off or put the worker on Claude Code"
-                .into(),
-        ));
-    }
     if call
         .reach
         .fence

@@ -150,13 +150,6 @@ impl Forge for Gh {
             .map_err(|_| ForgeError::Unreadable(text.into_owned()))
     }
 
-    fn edit_comment(&self, repo: &ForgeSlug, id: u64, body: &str) -> Result<(), ForgeError> {
-        let path = format!("repos/{}/issues/comments/{id}", repo.as_str());
-        let field = format!("body={body}");
-        let args = ["api", "--method", "PATCH", &path, "-f", &field, "--silent"];
-        gh(&args).map(drop)
-    }
-
     fn open_issues(&self, repo: &ForgeSlug) -> Result<Vec<OpenIssue>, ForgeError> {
         issues::open_issues(repo)
     }

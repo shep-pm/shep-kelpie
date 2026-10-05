@@ -6,7 +6,7 @@ use crate::state::RunState;
 use crate::work_item::{CodeRabbitStage, Phase, ReviewCallState, Turn, WorkItem};
 
 impl WorkItem {
-    /// Marks a review call, or a shots run, in flight outside the runner's lock
+    /// Marks a review call in flight outside the runner's lock
     pub fn call_started(&mut self, kind: CallKind, since: Timestamp) {
         self.review_call = ReviewCallState::Running { since };
         if let Some(timings) = &mut self.timings {
@@ -42,7 +42,6 @@ impl WorkItem {
                 CallKind::Local if queued => TimingPhase::GpuWait,
                 CallKind::Local => TimingPhase::LocalRound,
                 CallKind::Claude => TimingPhase::ClaudeRound,
-                CallKind::Shots => TimingPhase::Shots,
                 CallKind::Deep => TimingPhase::DeepRound,
             };
         }
@@ -127,7 +126,6 @@ mod tests {
         assert_eq!(phase(CallKind::Local, true), TimingPhase::GpuWait);
         assert_eq!(phase(CallKind::Claude, false), TimingPhase::ClaudeRound);
         assert_eq!(phase(CallKind::Deep, false), TimingPhase::DeepRound);
-        assert_eq!(phase(CallKind::Shots, false), TimingPhase::Shots);
         assert_eq!(
             running_call(CallKind::Local, false).timing_phase(RunState::Paused, false),
             TimingPhase::LocalRound,

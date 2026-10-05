@@ -10,12 +10,11 @@ mod prompts;
 #[cfg(test)]
 mod tests;
 
-use super::calls::{build_call, diff_against, shots_prompt};
+use super::calls::{build_call, diff_against};
 use crate::pacer::Scope;
 use crate::ports::{Finding, Role, Tools, read_review};
 use crate::runner::Runner;
 use crate::runner::report::{Begin, ReviewCall, ReviewResult, Spent, StepReport};
-use crate::runner::shots::RoundShots;
 use crate::settings::LoopReviewer;
 use crate::state::StateError;
 use crate::work_item::{CallKind, Deep, Phase, Review, ReviewStage};
@@ -65,27 +64,17 @@ impl Runner {
             Ok(criteria) => criteria,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
-        let shots = match self.round_shots()? {
-            RoundShots::Take(begin) => return Ok(*begin),
-            RoundShots::Ready(shots) => shots,
-        };
         let diff = match diff_against(&worktree, &base) {
             Ok(diff) => diff,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
-        let mut prompt = prompts::reader_prompt(&base, &diff, &criteria, first.as_deref());
-        if let Some(run) = &shots {
-            prompt.push_str(&shots_prompt(run));
-        }
+        let prompt = prompts::reader_prompt(&base, &diff, &criteria, first.as_deref());
         let model = (&self.agents.deep_reviewer, &limit);
         let call = build_call(Role::DeepReviewer, issue, &worktree, model, prompt);
         let call = call.map(|mut call| {
             call.settings = self.paths.worker.join(READ_SETTINGS_FILE);
             // It reads the worktree to check its work, and runs no command.
             call.tools = Tools::Review;
-            if shots.is_some() {
-                call.reach.read = vec![self.paths.shots(issue)];
-            }
             call
         });
         match call.and_then(|call| self.prepared(call)) {

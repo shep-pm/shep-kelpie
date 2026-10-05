@@ -1,13 +1,12 @@
 //! The real ports: the system clock, `gh`, `curl`, the `claude` command
 //! line, its `/usage`, the local review
-//! round, kelpie's shots, the machine's sandbox programs, and the dog's
+//! round, the machine's sandbox programs, and the dog's
 //! leases over the shepherd channel
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::ports::{Clock, Timestamp};
 
-mod bridge;
 mod claude;
 mod codex;
 mod codex_usage;
@@ -19,10 +18,8 @@ mod host;
 mod leases;
 mod local;
 mod ntfy;
-mod orphans;
 mod pi;
 mod process;
-mod shots;
 mod srt;
 mod usage;
 
@@ -42,7 +39,6 @@ pub use host::SystemHost;
 pub use leases::ShepLeases;
 pub use local::LocalReviewer;
 pub use pi::PiCli;
-pub use shots::ShotsCli;
 pub use srt::SandboxRuntime;
 #[cfg(test)]
 pub(crate) use srt::srt_settings;

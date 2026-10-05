@@ -88,7 +88,6 @@ mod tests {
             settings: PathBuf::from("/k/worker/settings.json"),
             instructions: None,
             prompt: "go".into(),
-            mcp_config: None,
             plugin_dirs: Vec::new(),
             timeout: None,
             tools: Tools::Work,

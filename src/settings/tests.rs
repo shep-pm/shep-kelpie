@@ -67,14 +67,20 @@ fn the_example_holds_the_first_build_defaults() {
 }
 
 #[test]
-fn a_table_with_no_preview_table_captures_the_root() {
-    assert!(
-        !EXAMPLE.contains("\n[app.dogs.kelpie.preview]"),
-        "the example sets no preview"
-    );
-    let s = parse(EXAMPLE).unwrap();
-    assert_eq!(s.preview.routes.len(), 1);
-    assert_eq!(s.preview.routes[0].as_str(), "/");
+fn the_previews_settings_are_refused_by_name() {
+    for block in [
+        "[app.dogs.kelpie.preview]\nenabled = true\nroutes = [\"/\"]\n",
+        "[app.dogs.kelpie.preview]\n",
+    ] {
+        let err = parse_err(&format!("{EXAMPLE}\n{block}"));
+        assert!(
+            err.contains(
+                "`preview` is no longer a setting, because shots and the preview are parked: \
+                 delete it"
+            ),
+            "{err}"
+        );
+    }
 }
 
 #[test]

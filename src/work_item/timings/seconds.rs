@@ -103,7 +103,7 @@ mod tests {
     fn seconds_serialize_every_phase_zeros_included() {
         let seconds = Seconds::of(&[(TimingPhase::Ci, 7)]);
         let value = serde_json::to_value(&seconds).unwrap();
-        assert_eq!(value.as_object().unwrap().len(), 13);
+        assert_eq!(value.as_object().unwrap().len(), 12);
         assert_eq!((&value["ci"], &value["worker"]), (&json!(7), &json!(0)));
         let back: Seconds = serde_json::from_value(value).unwrap();
         assert_eq!(back, seconds);
@@ -123,7 +123,7 @@ mod tests {
             .keys()
             .map(String::as_str)
             .collect();
-        assert_eq!(keys.len(), 12, "{keys:?}");
+        assert_eq!(keys.len(), 11, "{keys:?}");
         assert!(
             !keys.contains(&"deep_round"),
             "a build before it cannot read the key"

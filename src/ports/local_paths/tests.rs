@@ -44,7 +44,6 @@ fn every_encoding_of_a_local_path_is_refused_at_every_post() {
         };
         refused(forge.comment(&repo, 3, text));
         refused(forge.post_comment(&repo, 3, text).map(drop));
-        refused(forge.edit_comment(&repo, 9000, text));
         refused(forge.create_issue(&repo, "a title", text, &[]).map(drop));
         refused(forge.create_issue(&repo, text, "a body", &[]).map(drop));
         assert_eq!(fake.comments(), [], "{text}");

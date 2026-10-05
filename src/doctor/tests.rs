@@ -6,12 +6,12 @@ use serde_json::{Map, Value, json};
 use super::*;
 use crate::flock::Launch;
 use crate::ports::{ForgeError, MeterError, Visibility};
-use crate::preview::Tools;
 use crate::shepherd::SHEP_VERSION;
 use crate::test::{
     FakeAlerts, FakeClock, FakeForge, FakeMeter, FakeReviewer, FakeShepherd, git, project_table,
     unreachable_url, write_script,
 };
+use crate::tools::Tools;
 
 // Bounds every call against a fake shepherd, so a hang fails by name.
 const PATIENCE: Duration = Duration::from_secs(10);
@@ -643,41 +643,6 @@ async fn kelpie_settings_that_do_not_parse_are_missing_and_never_quote_the_url()
     assert!(!what.contains("s3cr3t"), "{what}");
     assert!(subjects(&report).contains(&"koji: labels"));
     assert!(!subjects(&report).contains(&"koji: rulings"));
-}
-
-#[tokio::test]
-async fn preview_tools_are_checked_only_for_a_project_that_shows_its_ui() {
-    let scene = Scene::new().await;
-    let report = scene.report().await;
-    assert!(!subjects(&report).contains(&"koji: preview tools"));
-
-    scene.runs("golbat", |t| {
-        t.insert("preview".into(), json!({ "enabled": true }));
-    });
-    let report = scene.report().await;
-    let (what, fix) = missing(&report, "golbat: preview tools");
-    assert!(what.contains("headless Chromium"), "{what}");
-    assert!(what.contains("skips its screenshots"), "{what}");
-    assert_eq!(fix, "run `shep kelpie tools install`");
-
-    let tools = Tools::under(&scene.kelpie_home);
-    for file in [
-        tools.playwright_mcp(),
-        tools.playwright_cli(),
-        tools.sandbox(),
-    ] {
-        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(file, "").unwrap();
-    }
-    let (what, _) = missing(&scene.report().await, "golbat: preview tools");
-    assert!(
-        what.starts_with("the preview tools lack headless Chromium,"),
-        "{what}"
-    );
-
-    std::fs::create_dir_all(tools.browsers().join("chromium-headless-shell")).unwrap();
-    let found = ok(&scene.report().await, "golbat: preview tools");
-    assert!(found.starts_with("installed under "), "{found}");
 }
 
 #[tokio::test]

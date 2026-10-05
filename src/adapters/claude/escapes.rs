@@ -9,9 +9,9 @@ use std::process::{Command, Output};
 use super::sandbox::{policy, transcripts};
 use crate::adapters::SandboxRuntime;
 use crate::ports::{AgentCall, Role, Sandbox, Session, SessionId, Tools};
-use crate::preview::Tools as KelpieTools;
 use crate::profile::WorkerProfile;
 use crate::settings::Effort;
+use crate::tools::Tools as KelpieTools;
 
 const NEEDS: &str = "needs kelpie's tools: KELPIE_TOOLS=<dir> from `shep kelpie tools install`";
 
@@ -50,9 +50,7 @@ impl World {
             guard_hooks: &[],
             allowed_domains: &[],
             build_env: &BTreeMap::new(),
-            preview: None,
             shep_home: &self.path("shep"),
-            reads: &[],
             door: &self.path("dog/lease.sock"),
         };
         AgentCall {
@@ -67,7 +65,6 @@ impl World {
             instructions: None,
             prompt: String::new(),
             timeout: None,
-            mcp_config: None,
             plugin_dirs: Vec::new(),
             tools: Tools::Work,
             reach: profile.reach(),
@@ -231,7 +228,7 @@ fn codexs_own_files_are_refused_in_any_case() {
 }
 
 // The real adapter on Haiku: a worker turn with kelpie's hooks from this
-// build and the shots tool bridged in, then the same session resumed.
+// build, then the same session resumed.
 #[test]
 #[ignore = "runs real Claude calls on Haiku under KELPIE_TOOLS' sandbox, after `cargo build`; about 1 min"]
 fn a_live_worker_turn_runs_inside_the_sandbox_and_resumes() {
@@ -272,26 +269,7 @@ fn a_live_worker_turn_runs_inside_the_sandbox_and_resumes() {
     let (build, worker) = (root.join("build"), root.join("worker"));
     std::fs::create_dir_all(&build).unwrap();
     std::fs::create_dir_all(&worker).unwrap();
-    let job = worker.join("shots-job.json");
-    let shots = crate::shots::ShotsJob {
-        worktree: wt.clone(),
-        build: build.clone(),
-        out: root.join("shots"),
-        launch: Err("this probe has no launch file".into()),
-        routes: Vec::new(),
-        domains: Vec::new(),
-        env: BTreeMap::new(),
-        server_pid: root.join("shots/dev-server.pid"),
-        shep_home: root.join("shep"),
-    };
-    std::fs::write(&job, serde_json::to_string(&shots).unwrap()).unwrap();
-    let config = worker.join("mcp.json");
-    let servers = serde_json::json!({ "mcpServers": { "kelpie": {
-        "command": kelpie, "args": ["shots-mcp", tools.dir(), job],
-    } } });
-    std::fs::write(&config, servers.to_string()).unwrap();
     let git_dir = repo.join(".git");
-    let preview: [crate::settings::NonBlank; 0] = [];
     let profile = WorkerProfile {
         worktree: &wt,
         build: &build,
@@ -305,9 +283,7 @@ fn a_live_worker_turn_runs_inside_the_sandbox_and_resumes() {
         guard_hooks: &[],
         allowed_domains: &[],
         build_env: &BTreeMap::new(),
-        preview: Some(&preview),
         shep_home: &root.join("shep"),
-        reads: &[],
         door: &root.join("dog/lease.sock"),
     };
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
@@ -330,12 +306,10 @@ fn a_live_worker_turn_runs_inside_the_sandbox_and_resumes() {
              (2) Write the file .claude/settings.local.json with the text {{}} \
              (3) Bash: mkdir other && mv other .codex \
              (4) Bash: echo x > {outside} \
-             (5) Bash: curl -sS -m 10 https://example.com -o /dev/null \
-             (6) call the mcp__kelpie__shots tool with routes [\"/\"]",
+             (5) Bash: curl -sS -m 10 https://example.com -o /dev/null",
             outside = root.join("outside.txt").display()
         ),
         timeout: Some(std::time::Duration::from_secs(300)),
-        mcp_config: Some(config),
         plugin_dirs: Vec::new(),
         tools: Tools::Work,
         reach: profile.reach(),
@@ -355,34 +329,17 @@ fn a_live_worker_turn_runs_inside_the_sandbox_and_resumes() {
     ] {
         assert!(!escaped.exists(), "{} was written", escaped.display());
     }
-    assert!(
-        reply.text.contains("launch file"),
-        "the shots tool was not reached"
-    );
 
     call.session = Session::Resume(id);
     call.prompt = "What did step 1 print? Answer with that word alone.".into();
     let reply = cli.run(&call).expect("the resumed turn ran");
     println!("--- resumed ---\n{}\n---", reply.text);
     assert!(reply.text.contains("inside"), "{}", reply.text);
-    assert_eq!(
-        std::fs::read_dir(&worker)
-            .unwrap()
-            .filter(|e| e
-                .as_ref()
-                .unwrap()
-                .path()
-                .extension()
-                .is_some_and(|x| x == "sock"))
-            .count(),
-        0,
-        "a bridge's socket outlived its call"
-    );
 }
 
 #[test]
 #[ignore = "needs kelpie's tools: KELPIE_TOOLS=<dir> from `shep kelpie tools install`"]
-fn a_host_not_allowed_and_a_socket_not_bridged_are_refused() {
+fn a_host_not_allowed_and_a_socket_not_listed_are_refused() {
     let w = World::new();
     let out = w.try_to("curl -sS -m 20 -o /dev/null -w '%{http_code}' https://example.com/");
     assert!(

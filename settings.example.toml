@@ -4,7 +4,7 @@
 # required except `max_items`, `review`, `pacing.enabled`,
 # `worker.allowed_domains`, `worker.build_env`, `worker.instructions_file`,
 # `worker.turn_timeout`, `pull_request_reviewers`,
-# `preview`, `skills` and `agents`, which a table written
+# `skills` and `agents`, which a table written
 # before them may leave out. This entry holds the first build's defaults, for
 # shep.
 
@@ -159,17 +159,6 @@ turn_timeout = 60
 # event = "PreToolUse"
 # matcher = "Bash"
 # command = "~/bin/lint-guard"
-
-# Off unless `enabled = true`, and then only for a repo with
-# `.claude/launch.json` on `main`. Kelpie starts that file's dev server to
-# take its shots, and gives workers the Playwright MCP server.
-# `configuration` is the file's first when absent, `routes` is ["/"], and
-# `domains`, the hosts the app itself calls, is empty.
-# [app.dogs.kelpie.preview]
-# enabled = true
-# configuration = "dev"
-# routes = ["/", "/events"]
-# domains = ["pokemon-go-api.github.io", "leekduck.com", "*.leekduck.com"]
 
 # The skill each step runs. A step left out runs its default from kelpie's
 # own copy of mattpocock/skills, so the project installs nothing; the README

@@ -2,7 +2,7 @@
 //!
 //! It is the engine under Claude Code's own sandbox: Seatbelt on macOS,
 //! bubblewrap on Linux, and a proxy that holds the network to a host list.
-//! Kelpie pins its version in [`crate::preview::PACKAGE`]. On macOS a sandbox
+//! Kelpie pins its version in [`crate::tools::PACKAGE`]. On macOS a sandbox
 //! cannot start inside another, so nothing it runs may start one of its own.
 
 use std::path::Path;
@@ -11,7 +11,7 @@ use std::process::Command;
 use serde_json::{Value, json};
 
 use crate::ports::{Policy, Sandbox, SandboxError};
-use crate::preview::Tools;
+use crate::tools::Tools;
 
 /// The sandbox runtime installed under kelpie's tools
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,12 +79,6 @@ pub(crate) fn srt_settings(policy: &Policy) -> Value {
         hosts.push(forward.host.clone());
         network["allowedDomains"] = json!(hosts);
         network["mitmProxy"] = json!({ "socketPath": forward.socket, "domains": [&forward.host] });
-    }
-    if policy.listen {
-        network["allowLocalBinding"] = true.into();
-    }
-    if !policy.services.is_empty() {
-        network["allowMachLookup"] = json!(policy.services);
     }
     if !policy.sockets.is_empty() {
         network["allowUnixSockets"] = json!(policy.sockets);

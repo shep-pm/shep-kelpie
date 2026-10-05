@@ -102,11 +102,6 @@ impl Forge for Guarded {
         self.forge.post_comment(repo, number, body)
     }
 
-    fn edit_comment(&self, repo: &ForgeSlug, id: u64, body: &str) -> Result<(), ForgeError> {
-        self.check("the comment", body)?;
-        self.forge.edit_comment(repo, id, body)
-    }
-
     fn open_issues(&self, repo: &ForgeSlug) -> Result<Vec<OpenIssue>, ForgeError> {
         self.forge.open_issues(repo)
     }

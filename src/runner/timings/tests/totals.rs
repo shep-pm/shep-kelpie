@@ -62,7 +62,7 @@ fn nothing_finished_is_zeros_not_an_error() {
         (&json!(0), &json!([]), &json!(0))
     );
     assert_eq!(summed(&t), 0);
-    assert_eq!(t["seconds"].as_object().unwrap().len(), 13);
+    assert_eq!(t["seconds"].as_object().unwrap().len(), 12);
     assert!(
         t["table"]
             .as_str()
@@ -106,7 +106,6 @@ fn the_table_lists_every_phase_then_the_total() {
         row("coderabbit_review", "0", "0h00m00s", "0.0%"),
         row("ruling", "40", "0h00m40s", "26.7%"),
         row("merge", "0", "0h00m00s", "0.0%"),
-        row("shots", "0", "0h00m00s", "0.0%"),
         row("paused", "0", "0h00m00s", "0.0%"),
         row("other", "0", "0h00m00s", "0.0%"),
         row("total", "150", "0h02m30s", "100.0%"),
@@ -131,7 +130,6 @@ fn the_timings_reply_is_pinned() {
         "coderabbit_review          0   0h00m00s    0.0%",
         "ruling                    40   0h00m40s   23.5%",
         "merge                      5   0h00m05s    2.9%",
-        "shots                      0   0h00m00s    0.0%",
         "paused                     0   0h00m00s    0.0%",
         "other                      0   0h00m00s    0.0%",
         "total                    170   0h02m50s  100.0%",
@@ -148,7 +146,7 @@ fn the_timings_reply_is_pinned() {
             "seconds": {
                 "worker": 70, "gpu_wait": 15, "local_round": 0, "claude_round": 0, "deep_round": 0,
                 "ci": 40, "coderabbit_window": 0, "coderabbit_review": 0,
-                "ruling": 40, "merge": 5, "shots": 0, "paused": 0, "other": 0,
+                "ruling": 40, "merge": 5, "paused": 0, "other": 0,
             },
             "table": table,
         })

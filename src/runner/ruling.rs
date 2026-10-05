@@ -28,12 +28,6 @@ const TIMEOUT_CONTINUE: &str = "Kelpie stopped your last turn: it ran past its c
 const FAILED_CONTINUE: &str = "Your last turn failed before it finished. \
                                Carry on with the work item from where you left off.";
 
-/// What the merge ruling and the notice say of a failed shots run: no path,
-/// and none of the run's own words
-pub(super) const SHOTS_FAILED: &str = " Kelpie's shots of it failed, so none of this head's are \
-                                        on the pull request (an earlier head's may be); \
-                                        the runner's log says why.";
-
 /// The maintainer's answer to a ruling
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Answer {
@@ -578,10 +572,9 @@ pub(super) fn question(
         ""
     };
     let ask = match kind {
-        RulingKind::Merge { head, shots_failed } => {
-            let shots = if *shots_failed { SHOTS_FAILED } else { "" };
+        RulingKind::Merge { head } => {
             format!(
-                "Merge {about} at {} into main?{shots} {yes} merges it",
+                "Merge {about} at {} into main? {yes} merges it",
                 short(head)
             )
         }

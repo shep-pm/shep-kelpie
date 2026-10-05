@@ -7,10 +7,10 @@ use std::sync::Arc;
 use super::*;
 use crate::adapters::SandboxRuntime;
 use crate::ports::{Reach, Role};
-use crate::preview::Tools as KelpieTools;
 use crate::profile::WorkerProfile;
 use crate::settings::{ContextSize, Effort, EndpointUrl};
 use crate::test::OpenSandbox;
+use crate::tools::Tools as KelpieTools;
 
 // Recorded from pi 0.85.1 on qwen3.8:27b through Ollama, by the ignored test
 // below, with the temporary folder renamed: a new session asked to say ok...
@@ -133,7 +133,7 @@ fn each_kind_of_call_gets_its_own_tools() {
 
     let mut review = w.call(URL, Role::Reviewer, Session::New(id(FRESH_ID)));
     assert!(strings(&review).iter().any(|a| a == "--no-tools"));
-    review.reach.read = vec![w.path("shots")];
+    review.reach.read = vec![w.path("extra")];
     let argv = strings(&review);
     let at = argv.iter().position(|a| a == "--tools").unwrap();
     assert_eq!(argv[at + 1], "read");
@@ -346,13 +346,6 @@ fn a_guard_whose_checks_cannot_run_refuses() {
 fn what_pi_cannot_give_a_worker_fails_before_the_call() {
     let w = World::new();
     let pi = stand_in(&w, FRESH);
-    let mut call = w.fenced(URL, Path::new("/k/kelpie"), Session::New(id(WORKER_ID)));
-    call.mcp_config = Some(w.path("worker/mcp.json"));
-    let err = pi.prepare(&call).unwrap_err();
-    assert!(
-        matches!(&err, AgentError::Setup(why) if why.contains("no MCP servers")),
-        "{err:?}"
-    );
     let mut call = w.fenced(URL, Path::new("/k/kelpie"), Session::New(id(WORKER_ID)));
     let fence = call.reach.fence.as_mut().unwrap();
     fence.hooks = vec![crate::settings::GuardHook {
@@ -628,7 +621,6 @@ impl World {
             instructions: None,
             prompt: String::new(),
             timeout: None,
-            mcp_config: None,
             plugin_dirs: Vec::new(),
             tools: Tools::Answer,
             reach: Reach::default(),
@@ -651,9 +643,7 @@ impl World {
             guard_hooks: &[],
             allowed_domains: &[],
             build_env: &BTreeMap::new(),
-            preview: None,
             shep_home: &self.path("shep"),
-            reads: &[],
             door: Path::new("/k/dog/lease.sock"),
         };
         AgentCall {

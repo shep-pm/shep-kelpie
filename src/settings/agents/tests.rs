@@ -294,14 +294,10 @@ fn an_agent_must_say_where_its_model_runs_exactly_when_its_harness_needs_it() {
 }
 
 #[test]
-fn a_pi_worker_beside_the_preview_or_guard_hooks_is_refused_at_load() {
+fn a_pi_worker_beside_guard_hooks_is_refused_at_load() {
     let mut settings = project("worker = \"qwen\"\n");
     let defined = kelpie(QWEN).agents;
     assert!(settings.role_agents(&defined).is_ok());
-    settings.preview.enabled = true;
-    let err = settings.role_agents(&defined).unwrap_err().to_string();
-    assert!(err.contains("which cannot run `preview.enabled`"), "{err}");
-    settings.preview.enabled = false;
     settings.worker.guard_hooks = vec![crate::settings::GuardHook {
         event: crate::settings::HookEvent::PreToolUse,
         matcher: None,
@@ -315,7 +311,7 @@ fn a_pi_worker_beside_the_preview_or_guard_hooks_is_refused_at_load() {
     let reviewer = project("reviewer = \"qwen\"\n");
     assert!(
         reviewer.role_agents(&defined).is_ok(),
-        "a pi reviewer runs no preview"
+        "a pi reviewer runs no guard hooks"
     );
 }
 
@@ -374,13 +370,17 @@ fn a_codex_agent_takes_no_server_and_no_reader_but_codexs_own() {
 }
 
 #[test]
-fn a_codex_worker_beside_the_preview_is_refused_at_load() {
+fn a_codex_worker_beside_guard_hooks_is_refused_at_load() {
     let mut settings = project("worker = \"gpt\"\n");
     let defined = kelpie(CODEX).agents;
-    settings.preview.enabled = true;
+    settings.worker.guard_hooks = vec![crate::settings::GuardHook {
+        event: crate::settings::HookEvent::PreToolUse,
+        matcher: None,
+        command: "true".to_owned().try_into().unwrap(),
+    }];
     let err = settings.role_agents(&defined).unwrap_err().to_string();
     assert!(
-        err.contains("names gpt, on codex, which cannot run `preview.enabled`"),
+        err.contains("names gpt, on codex, which cannot run `worker.guard_hooks`"),
         "{err}"
     );
     assert!(

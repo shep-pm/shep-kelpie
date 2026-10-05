@@ -8,10 +8,10 @@ use std::time::Instant;
 use super::*;
 use crate::adapters::SandboxRuntime;
 use crate::ports::{Reach, Role, Unreadable};
-use crate::preview::Tools as KelpieTools;
 use crate::profile::WorkerProfile;
 use crate::settings::Effort;
 use crate::test::OpenSandbox;
+use crate::tools::Tools as KelpieTools;
 
 const WORKER_ID: &str = "5a2e9d40-1c7b-4b38-8e6f-2d4a9c1b7e53";
 const REVIEW_ID: &str = "7c41b2e8-0d3a-4f6e-9b15-3e8a2c6d4f90";
@@ -471,9 +471,18 @@ fn a_usage_limit_fails_the_turn_naming_it() {
 fn what_codex_cannot_give_a_worker_fails_before_the_call() {
     let w = World::new();
     let mut call = w.fenced(Path::new("/k/kelpie"), Session::New(id(WORKER_ID)));
-    call.mcp_config = Some(w.path("worker/mcp.json"));
+    let fence = call.reach.fence.as_mut().unwrap();
+    fence.hooks = vec![crate::settings::GuardHook {
+        event: crate::settings::HookEvent::PreToolUse,
+        matcher: None,
+        command: "true".to_owned().try_into().unwrap(),
+    }];
     let cli = stand_in(&w, "");
-    assert!(matches!(cli.prepare(&call), Err(AgentError::Setup(_))));
+    let err = cli.prepare(&call).unwrap_err();
+    assert!(
+        matches!(&err, AgentError::Setup(why) if why.contains("guard_hooks")),
+        "{err:?}"
+    );
     let mut call = w.call(Role::Reviewer, Session::New(id(WORKER_ID)));
     call.harness = AgentHarness::ClaudeCode;
     assert!(matches!(cli.prepare(&call), Err(AgentError::Setup(_))));
@@ -535,7 +544,6 @@ impl World {
             instructions: None,
             prompt: String::new(),
             timeout: None,
-            mcp_config: None,
             plugin_dirs: Vec::new(),
             tools: Tools::Answer,
             reach: Reach::default(),
@@ -570,9 +578,7 @@ fn worker_in(wt: &Path, build: &Path, kelpie: &Path, root: &Path, call: AgentCal
         guard_hooks: &[],
         allowed_domains: &[],
         build_env: &BTreeMap::new(),
-        preview: None,
         shep_home: &root.join("shep"),
-        reads: &[],
         door: Path::new("/k/dog/lease.sock"),
     };
     AgentCall {

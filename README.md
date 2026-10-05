@@ -72,7 +72,7 @@ shep kelpie tools install
 installed kelpie's tools in /path/to/.shep/kelpie/tools
 ```
 
-It downloads a headless Chrome of about 95 MiB, and puts it under shep-kelpie's home, `$SHEP_HOME/kelpie`.
+It puts the sandbox runtime under shep-kelpie's home, `$SHEP_HOME/kelpie`.
 
 ### 4. Add your project
 
@@ -236,7 +236,7 @@ Quotes are optional, but zsh still needs them around a note with `?`, `*`, `!` o
 
 `add` names the project after the repo, or `shep kelpie add <name>`. It makes the four labels where the repo lacks them, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name. `shep stop <project>` stops a runner, and `shep delete <project>` removes it.
 
-`doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's labels, CodeRabbit where a project turns it on, the local review command or endpoint where one is set, the preview tools for a project that shows its UI, and which webhook, if any, rulings post to. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
+`doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's labels, CodeRabbit where a project turns it on, the local review command or endpoint where one is set, and which webhook, if any, rulings post to. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
 
 `shep describe <project>` labels each Claude session the runner starts with its issue and role, such as `#114 worker`.
 
@@ -267,7 +267,7 @@ shep-kelpie keeps everything under `$SHEP_HOME/kelpie`, or the folder `KELPIE_HO
 
 - `settings.toml`, `totp`, `tools` and `rulings`, shared by every project
 - `dog`, with the dog's book and its door, `lease.sock`. The adopted dog gets `SHEP_HOME` and no `KELPIE_HOME` from shep, so it is always under `$SHEP_HOME/kelpie`, even with `KELPIE_HOME` set for your own commands
-- `<project>`, with the project's `state.json`, worker files, `worktrees`, `builds`, `shots` and `playwright`
+- `<project>`, with the project's `state.json`, worker files, `worktrees` and `builds`
 
 So a project can't be named for one of shep-kelpie's own folders. Socket paths must stay under 104 bytes, so a runner with a long `SHEP_HOME` refuses to start and names the path that is too long. Keep a shepherd's `SHEP_HOME` short.
 
@@ -414,7 +414,7 @@ url = "http://<host>:11434/v1"
 context = 65536
 ```
 
-Kelpie runs pi with a home of its own, so your `~/.pi` is never read. pi starts no MCP servers and runs no Claude Code hooks, so a worker on pi can't have the preview or `worker.guard_hooks`, and the runner refuses to start with either. Kelpie's own checks still run on every command and file write.
+Kelpie runs pi with a home of its own, so your `~/.pi` is never read. pi runs no Claude Code hooks, so a worker on pi can't have `worker.guard_hooks`, and the runner refuses to start with them. Kelpie's own checks still run on every command and file write.
 
 A pi call's sandbox allows no host of the model's, since the sandbox opens every port of an allowed host and Ollama's admin calls (pull, delete, create) answer beside chat. Kelpie runs a forwarder outside the sandbox for each call, and the sandbox allows only that. It passes `POST` to the server's `/v1/chat/completions` and refuses every other path and method, naming what was asked. The worker never sees the model's address. The forwarder dials `http://`, so `url` is the server's `http://` address: an `https://` one is refused when settings load.
 
@@ -433,7 +433,7 @@ effort = "medium"
 CODEX_HOME="${SHEP_HOME:-$HOME/.shep}/kelpie/codex" codex login --device-auth
 ```
 
-Each Codex call gets a home of its own with that login linked in, so no call sees another's sessions. A runner reads `codex_home` when it starts. A worker on Codex can't have the preview or `worker.guard_hooks`, the same as pi. Kelpie's checks run as Codex's own hooks: `confine` on every `apply_patch`, `guard` on every command.
+Each Codex call gets a home of its own with that login linked in, so no call sees another's sessions. A runner reads `codex_home` when it starts. A worker on Codex can't have `worker.guard_hooks`, the same as pi. Kelpie's checks run as Codex's own hooks: `confine` on every `apply_patch`, `guard` on every command.
 
 A local worker gets only the issues labelled `worker:local`. The rest run on `models.worker`, so you pick which issues it takes. Each account keeps its own daily allowance and 5-hour stop, shown under its name in `status.pacer`, and a new work item waits on every account its roles spend. `shep kelpie doctor` checks Codex answers for a project that spends it. A `none` agent holds `lease` (the GPU lock, `gpu`, by default) for the whole of each call instead, so a qwen round waits behind its turn, and `status.local_leases` shows who holds it.
 

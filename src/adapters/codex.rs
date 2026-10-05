@@ -278,13 +278,6 @@ fn is_codex(call: &AgentCall) -> Result<(), AgentError> {
 
 // What a worker on Claude Code has and Codex here does not give it.
 fn refuse_unsupported(call: &AgentCall) -> Result<(), AgentError> {
-    if call.mcp_config.is_some() {
-        return Err(AgentError::Setup(
-            "kelpie bridges MCP servers to Claude Code only, so a worker on codex \
-             cannot run the preview: turn `preview` off or put the worker on Claude Code"
-                .into(),
-        ));
-    }
     if call
         .reach
         .fence

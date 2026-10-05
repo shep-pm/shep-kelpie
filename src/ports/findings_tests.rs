@@ -31,16 +31,6 @@ fn blank_and_malformed_lines_are_skipped() {
     assert_eq!(parse_findings(text), vec![]);
 }
 
-// What a live Claude round wrote, with the screenshot's path shortened
-#[test]
-fn a_screenshot_named_without_a_line_is_line_zero() {
-    let text = "HIGH|/k/shots/lab/7/events-mobile-dark.png|dark matches light|no dark theme\n\
-                LOW|src/app.tsx|no line|dropped";
-    let [finding] = parse_findings(text).try_into().unwrap();
-    assert_eq!(finding.file, "/k/shots/lab/7/events-mobile-dark.png");
-    assert_eq!(finding.line, 0);
-}
-
 #[test]
 fn severities_order_low_to_high() {
     assert!(Severity::Low < Severity::Medium);

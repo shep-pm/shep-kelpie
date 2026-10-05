@@ -37,7 +37,6 @@ mod reviewer;
 mod sandbox;
 mod script;
 mod shepherd;
-mod shots;
 
 pub(crate) use alerts::FakeAlerts;
 pub(crate) use claude::{FakeClaude, Hold, LEFT_BEHIND, Scripted, Seen};
@@ -48,7 +47,6 @@ pub(crate) use reviewer::{FakeReviewer, ScriptedRound};
 pub(crate) use sandbox::OpenSandbox;
 pub(crate) use script::write_script;
 pub(crate) use shepherd::FakeShepherd;
-pub(crate) use shots::{FakeShots, ScriptedShots};
 
 /// A work item with one call, so every field of its format shows
 pub(crate) fn a_work_item() -> WorkItem {
@@ -104,8 +102,6 @@ pub(crate) fn a_work_item() -> WorkItem {
         local_unreviewed: Vec::new(),
         local_unreviewed_by: None,
         rebased: false,
-        shots: None,
-        shots_comment: None,
         held: Vec::new(),
         follow_ups: None,
         timings: Some(Timings {
@@ -169,9 +165,6 @@ command = \"~/.claude/scripts/qwen-review.sh\"\n";
 /// The CodeRabbit gate as `settings.example.toml` sets it, and turned off
 pub(crate) const CODERABBIT_ON: &str = "[app.dogs.kelpie.coderabbit]\nenabled = true\n";
 pub(crate) const CODERABBIT_OFF: &str = "[app.dogs.kelpie.coderabbit]\nenabled = false\n";
-
-/// A launch file like the playground's
-const LAUNCH: &str = r#"{"version": "0.0.1", "configurations": [{"name": "dev", "runtimeExecutable": "bun", "runtimeArgs": ["run", "dev"], "port": 3000}]}"#;
 
 /// A meter that reports what a test sets, and counts its reads
 ///
@@ -248,7 +241,6 @@ pub(crate) struct Rig {
     pub(crate) local_leases: LocalReviewer,
     pub(crate) alerts: FakeAlerts,
     pub(crate) leases: FakeLeases,
-    pub(crate) shots: FakeShots,
     pub(crate) clock: FakeClock,
 }
 
@@ -298,7 +290,6 @@ impl Rig {
             local_leases: LocalReviewer::default().with_temp_dir(home.path().join("tmp")),
             alerts: FakeAlerts::on(clock.clone()),
             leases: FakeLeases::default(),
-            shots: FakeShots::default(),
             clock,
             home,
         };
@@ -411,12 +402,6 @@ impl Rig {
         git(&other, &["commit", "--quiet", "-m", "landed elsewhere"]);
         git(&other, &["push", "--quiet", "origin", "main"]);
         git(&other, &["rev-parse", "HEAD"])
-    }
-
-    /// Lands `.claude/launch.json` on origin's `main`, as a repo with a
-    /// preview carries it, and returns the commit
-    pub(crate) fn land_launch_file(&self) -> String {
-        self.land(crate::preview::LAUNCH_FILE, LAUNCH)
     }
 
     /// Pushes a commit of `file` to `branch` on origin from another clone,
@@ -533,7 +518,6 @@ impl Rig {
             review_bots,
             alerts: Arc::new(self.alerts.clone()),
             leases: Arc::new(self.leases.clone()),
-            shots: Arc::new(self.shots.clone()),
             clock: Box::new(self.clock.clone()),
         };
         let paths = self.paths();

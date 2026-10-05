@@ -32,19 +32,13 @@
 //! file, and kelpie's own, into their tables on kelpie's shepherd.
 //!
 //! `shep kelpie tools install`: installs the sandbox runtime every agent runs
-//! in, and the tools kelpie shows a work item's UI with, under kelpie's home.
+//! in, under kelpie's home.
 //!
 //! `shep kelpie totp [--rotate]`, run as `shep kelpie totp [--rotate]` where kelpie
 //! is not on the PATH: prints the authenticator secret that answers a ruling
 //! from ntfy, as a URI and a QR code to scan, drawing it the first time, or
 //! afresh with `--rotate`. `shep kelpie totp --unlock` turns answers from
 //! ntfy back on after too many wrong codes.
-//!
-//! `kelpie shots-mcp <tools> <job>`: a worker's shots tool, an MCP server
-//! kelpie starts outside the worker's sandbox.
-//!
-//! `kelpie mcp-connect <socket>`: what an agent starts in place of such a
-//! server, inside its sandbox, which carries its stdio to the server's socket.
 
 #![forbid(unsafe_code)]
 
@@ -52,13 +46,12 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use shep_kelpie::adapters::ShotsCli;
 use shep_kelpie::confine::{Verdict, judge};
 use shep_kelpie::guard::{self, Checkout};
-use shep_kelpie::preview::Tools;
 use shep_kelpie::runner::{ProjectName, ProjectPaths};
 use shep_kelpie::settings::moving;
 use shep_kelpie::settings::source::Files;
+use shep_kelpie::tools::Tools;
 use shep_kelpie::{shep_home, shepherd};
 
 /// A PreToolUse hook's exit code that refuses the tool call
@@ -130,9 +123,6 @@ fn main() -> ExitCode {
         [command, rest @ ..] if command == "upgrade" => shep_kelpie::upgrade::main(rest),
         [command] if command == "version" => version(false),
         [command, flag] if command == "version" && flag == "--json" => version(true),
-        [role, domains @ ..] if role == "browse-guard" => {
-            hook(shep_kelpie::browse::judge(std::io::stdin().lock(), domains))
-        }
         [role, folders @ ..] if role == "confine" && !folders.is_empty() => {
             let folders: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
             hook(judge(std::io::stdin().lock(), &folders))
@@ -146,27 +136,6 @@ fn main() -> ExitCode {
         {
             move_settings(project, sheep.first().unwrap_or(project))
         }
-        [role, socket] if role == "mcp-connect" => {
-            match shep_kelpie::bridge::connect(Path::new(socket)) {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(e) => {
-                    eprintln!("{e}");
-                    ExitCode::FAILURE
-                }
-            }
-        }
-        [role, tools, job] if role == "shots-mcp" => {
-            let shots = ShotsCli::new(Tools::at(PathBuf::from(tools)));
-            stop_on_signal(shots.clone());
-            let (stdin, stdout) = (std::io::stdin().lock(), std::io::stdout().lock());
-            match shep_kelpie::shots::mcp::serve(Path::new(job), &shots, stdin, stdout) {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(e) => {
-                    eprintln!("{e}");
-                    ExitCode::FAILURE
-                }
-            }
-        }
         // `shep kelpie` with no verb also sets SHEP_DOG_NAME; only the
         // shepherd's own start sets SHEP_NAME.
         [] if ["SHEP_DOG_NAME", "SHEP_NAME"]
@@ -177,7 +146,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: shep-kelpie add [<project>] | add <issue>\n       shep-kelpie start | pause | status\n       shep-kelpie rule [<id> <answer>]\n       shep-kelpie rework <pr> | adopt <pr>\n       shep-kelpie gate [<issue>] | drop [<issue>]\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie upgrade --ref <git ref> | --release <version> | --binary <path> | --rollback\n       shep-kelpie version [--json]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie browse-guard <domain>...\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n       shep-kelpie shots-mcp <tools> <job>\n       shep-kelpie mcp-connect <socket>\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.\n\n{}\n\n{}",
+                "usage: shep-kelpie add [<project>] | add <issue>\n       shep-kelpie start | pause | status\n       shep-kelpie rule [<id> <answer>]\n       shep-kelpie rework <pr> | adopt <pr>\n       shep-kelpie gate [<issue>] | drop [<issue>]\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie upgrade --ref <git ref> | --release <version> | --binary <path> | --rollback\n       shep-kelpie version [--json]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.\n\n{}\n\n{}",
                 shep_kelpie::lease::cli::USAGE,
                 shep_kelpie::flock::USAGE,
                 shep_kelpie::flock::rule::HELP
@@ -196,39 +165,6 @@ fn version(json: bool) -> ExitCode {
         println!("shep-kelpie {} (shep {})", build.kelpie, build.shep);
     }
     ExitCode::SUCCESS
-}
-
-// A signal ends the shots tool's run, dev server included, then the tool: its
-// server runs in its own process group, which a signal to this one misses.
-fn stop_on_signal(shots: ShotsCli) {
-    std::thread::spawn(move || {
-        use tokio::signal::unix::{SignalKind, signal};
-        let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
-            .enable_io()
-            .build()
-        else {
-            return;
-        };
-        runtime.block_on(async {
-            let kinds = [
-                SignalKind::terminate(),
-                SignalKind::interrupt(),
-                SignalKind::hangup(),
-            ];
-            let (Ok(mut term), Ok(mut int), Ok(mut hup)) =
-                (signal(kinds[0]), signal(kinds[1]), signal(kinds[2]))
-            else {
-                return;
-            };
-            tokio::select! {
-                _ = term.recv() => {}
-                _ = int.recv() => {}
-                _ = hup.recv() => {}
-            }
-            shots.stop();
-            std::process::exit(143);
-        });
-    });
 }
 
 // Kelpie's home as the runner works it out. Only a runner or the dog moves

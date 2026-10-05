@@ -54,7 +54,6 @@ fn a_saved_state_loads_back_whole() {
         pull_request: Some(43),
         kind: RulingKind::Merge {
             head: "c0ffee".into(),
-            shots_failed: false,
         },
         alerted: true,
     });
@@ -149,7 +148,6 @@ fn the_file_format_is_pinned() {
             1,
             RulingKind::Merge {
                 head: "c0ffee".into(),
-                shots_failed: true,
             },
         ),
         ruling(
@@ -198,7 +196,6 @@ fn the_file_format_is_pinned() {
         issue: 22,
         pull_request: 30,
         head: "c0ffee".into(),
-        shots_failed: true,
     }];
     state.finished = vec![22, 30];
     state.reworked = vec!["PRR_1".into()];
@@ -244,7 +241,7 @@ fn the_file_format_is_pinned() {
             "since": 7,
             "work_items": [],
             "rulings": [
-                pinned(1, serde_json::json!({ "kind": "merge", "head": "c0ffee", "shots_failed": true })),
+                pinned(1, serde_json::json!({ "kind": "merge", "head": "c0ffee" })),
                 pinned(2, serde_json::json!({ "kind": "rebase", "reason": "conflicts" })),
                 pinned(3, serde_json::json!({ "kind": "still-red", "head": "bad", "checks": ["lint"] })),
                 pinned(4, serde_json::json!({ "kind": "closed" })),
@@ -278,7 +275,7 @@ fn the_file_format_is_pinned() {
             ],
             "leases": [{ "resource": "coderabbit", "issue": 22, "since": 8 }],
             "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
-            "notices": [{ "issue": 22, "pull_request": 30, "head": "c0ffee", "shots_failed": true }],
+            "notices": [{ "issue": 22, "pull_request": 30, "head": "c0ffee" }],
             "replies": { "last": { "id": "W3EqiUm5rsNq", "time": 5 } },
         })
     );
@@ -336,7 +333,6 @@ fn a_finished_work_item_is_pinned() {
                 "coderabbit_review": 0,
                 "ruling": 0,
                 "merge": 0,
-                "shots": 0,
                 "paused": 0,
                 "other": 0,
             },

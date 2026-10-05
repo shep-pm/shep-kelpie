@@ -139,7 +139,7 @@ fn a_worker_reads_its_worktree_inside_the_shepherds_home_and_not_shep_s_socket()
             .contains(&json!(shep_rule))
     );
     let allowed = files["allowRead"].as_array().unwrap();
-    for own in [&worktree, &build, &kelpie.join("koji/shots/7")] {
+    for own in [&worktree, &build] {
         assert!(allowed.contains(&json!(own)), "{own:?} not in {allowed:?}");
     }
     assert!(
