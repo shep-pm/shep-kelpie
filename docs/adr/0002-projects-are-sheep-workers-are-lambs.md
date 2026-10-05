@@ -12,3 +12,5 @@ Each project runs as a sheep, kelpie's project runner, which holds the project m
 - A runner labels each worker, reviewer and judge lamb with its issue and role (shep-pm/shep#624), so `shep describe` names them.
 - Per-project settings ride on the sheep entry as its `[app.dogs.kelpie]` table (shep-pm/shep#623), which the runner reads itself through the shep client.
 - Kelpie and its runners talk through shep: triggers down, channel metrics up on the bus. Runners report running totals, because metrics drop under backpressure.
+
+ADR 0005 reopens this ADR's claim that shep's stop ladder already stops a project's workers.
