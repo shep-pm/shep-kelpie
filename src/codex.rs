@@ -162,10 +162,10 @@ fn refused(body: &str) -> bool {
             .any(|phrase| body.contains(phrase) && body.contains(" limit"))
 }
 
-/// A thread as a finding the judge can rule on
+/// A thread as a finding the worker is sent
 ///
 /// The severity comes from Codex's badge: P0 and P1 are high, P2 is medium,
-/// P3 is a nit. The badge goes to the judge as the why.
+/// P3 is a nit. The badge goes to the worker as the why.
 fn finding(thread: &Thread) -> Finding {
     let mut lines = thread.body.lines();
     let head = lines.next().unwrap_or_default();
@@ -336,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn a_thread_reaches_the_judge_with_its_badge_and_title() {
+    fn a_thread_reaches_the_worker_with_its_badge_and_title() {
         let first = Codex.finding(&thread(
             "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  \
              Guard against empty input**\n\n`parse()` panics when `input` is empty.\n\n\

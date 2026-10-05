@@ -3,12 +3,13 @@
 //! A round marks a draft pull request ready, since a review bot may skip
 //! drafts, takes the bot's lease, puts its label on, and gives the lease back
 //! once the bot answers. A refusal reschedules the dog's window and the round
-//! asks again. Once a review covers the head the label comes off, the judge
-//! reads every open thread, rejected ones are resolved and held ones go to the
-//! worker. Satisfied means no thread open and nothing held. Past the cap,
-//! held findings park the worker. A fixed number of rounds replaces the
-//! cap: the last round's held findings go to the worker with the label off,
-//! and the fix push summons nothing.
+//! asks again. Once a review covers the head the label comes off and every
+//! open thread goes to the worker as a finding. Kelpie resolves those threads
+//! once the worker's fix moves the head, and after three steps the forge
+//! refuses goes on to CI with them open. Satisfied means a review of the
+//! head left no thread open. Past the cap, open threads park the worker. A fixed number
+//! of rounds replaces the cap: the last round's threads go to the worker with
+//! the label off, and the fix push summons nothing.
 //!
 //! On a pull request the bot read before, the label asks only for what is
 //! new, and after an adoption or a catch-up with `main` it finds nothing.
@@ -32,14 +33,14 @@ mod two_bots;
 
 use super::Runner;
 use super::gate::settled;
-use super::report::{Begin, ReviewCall, ReviewResult, Spent, StepReport};
-use super::review::{calls, findings, record_spent};
+use super::report::{Begin, StepReport};
+use super::review::findings;
 
 use crate::lease::wire::WindowFact;
-use crate::ports::{Finding, PullRequestState, Timestamp, Verdict};
+use crate::ports::{Finding, PullRequestState, Timestamp};
 use crate::review_bot::{Activity, Bot, Profile, Reading};
 use crate::state::{Fix, RulingKind, StateError};
-use crate::work_item::{CallKind, CodeRabbitStage, OpenThread, Phase, Turn, WorkItem};
+use crate::work_item::{CodeRabbitStage, OpenThread, Phase, Turn, WorkItem};
 
 // A summon the bot gave no sign of in fifteen minutes may never have
 // reached it, and is sent once more. What counts as a sign is its profile's.
@@ -56,6 +57,10 @@ pub(super) const REVIEW_WAIT: u64 = 2 * 3600;
 // CodeRabbit posts a review a few seconds before it marks the head done
 // (nine on shep#614), so done with nothing posted is read a minute on.
 pub(super) const DONE_SETTLE: u64 = 60;
+
+// Steps in a row that may fail to resolve the threads sent before the fix
+// goes on to CI with them open: one the forge keeps refusing never resolves.
+const RESOLVE_FAILURES: u32 = 3;
 
 impl Runner {
     /// Whether the work item owes the review bot a round before its merge ruling
@@ -113,12 +118,7 @@ impl Runner {
                 full,
                 resent,
             } => self.await_review(bot, head, at, full, resent),
-            CodeRabbitStage::Judging {
-                bot,
-                threads,
-                verdicts,
-                ..
-            } => self.judge_threads(bot, &threads, &verdicts),
+            CodeRabbitStage::Found { bot, threads, .. } => self.send_threads(bot, &threads),
             CodeRabbitStage::Fixing { head } => self.fix_turn_ended(head),
         }
     }
@@ -525,12 +525,7 @@ impl Runner {
         }
         self.update(|item| {
             item.coderabbit.rounds = round;
-            item.phase = Phase::CodeRabbit(CodeRabbitStage::Judging {
-                bot,
-                head,
-                threads,
-                verdicts: Vec::new(),
-            });
+            item.phase = Phase::CodeRabbit(CodeRabbitStage::Found { bot, head, threads });
         })?;
         Ok(Begin::Report(StepReport::CodeRabbitReviewed {
             issue: self.item().issue,
@@ -540,71 +535,12 @@ impl Runner {
         }))
     }
 
-    fn judge_threads(
-        &mut self,
-        bot: Bot,
-        threads: &[OpenThread],
-        verdicts: &[Verdict],
-    ) -> Result<Begin, StateError> {
-        let Some(next) = threads.get(verdicts.len()) else {
-            return self.judged(bot, threads, verdicts);
-        };
-        let item = self.item();
-        let (issue, worktree, folder) =
-            (item.issue, item.worktree.clone(), self.paths.worker.clone());
-        let model = self.agents.judge.clone();
-        // A review bot reviews the whole pull request, so its judge diffs from `main`.
-        let main = format!("origin/{}", crate::worktree::BASE);
-        match calls::judge_call(
-            issue,
-            &worktree,
-            &main,
-            &folder,
-            (&model, &self.agents.limits.judge),
-            &next.finding,
-            None,
-        )
-        .and_then(|call| self.prepared(call))
-        {
-            Ok(call) => {
-                self.mark_review_call_running(CallKind::Judge)?;
-                Ok(Begin::Review(ReviewCall::Judge(call)))
-            }
-            Err(reason) => Ok(self.gate_failed(reason)),
-        }
-    }
-
-    // Resolving is safe to repeat, so a failure part way retries it all.
-    fn judged(
-        &mut self,
-        bot: Bot,
-        threads: &[OpenThread],
-        verdicts: &[Verdict],
-    ) -> Result<Begin, StateError> {
+    // Every open thread goes to the worker, at the bot's own severity, and
+    // is kept to resolve once the fix moves the head.
+    fn send_threads(&mut self, bot: Bot, threads: &[OpenThread]) -> Result<Begin, StateError> {
         let number = self.number();
-        let mut held = Vec::new();
-        let mut resolved = 0;
-        for (thread, verdict) in threads.iter().zip(verdicts) {
-            if verdict.holds {
-                held.push(Finding {
-                    severity: verdict.severity,
-                    ..thread.finding.clone()
-                });
-                continue;
-            }
-            let done = self
-                .ports
-                .forge
-                .resolve_thread(&self.settings.forge, &thread.id);
-            if let Err(e) = done {
-                return Ok(self.gate_failed(format!("cannot resolve a thread on #{number}: {e}")));
-            }
-            resolved += 1;
-        }
+        let held: Vec<Finding> = threads.iter().map(|t| t.finding.clone()).collect();
         let tally = self.item().coderabbit;
-        if held.is_empty() {
-            return self.satisfied(number, tally.rounds);
-        }
         let build = &self.item().build;
         let path = findings::findings_path(build);
         let round = tally.rounds;
@@ -612,7 +548,14 @@ impl Runner {
             return Ok(self.gate_failed(reason));
         }
         let prompt = fix_prompt(self.profile(bot).name(), number, round, held.len(), &path);
-        self.update(|item| item.record_held(&held))?;
+        self.update(|item| {
+            item.record_held(&held);
+            for thread in threads {
+                if !item.threads_sent.contains(&thread.id) {
+                    item.threads_sent.push(thread.id.clone());
+                }
+            }
+        })?;
         let head = match self.origin_head() {
             Ok(head) => head,
             Err(reason) => return Ok(self.gate_failed(reason)),
@@ -647,17 +590,18 @@ impl Runner {
             item.turn = Turn::Next { prompt };
             item.phase = Phase::CodeRabbit(CodeRabbitStage::Fixing { head });
         })?;
-        Ok(Begin::Report(StepReport::CodeRabbitJudged {
+        Ok(Begin::Report(StepReport::CodeRabbitSent {
             issue: self.item().issue,
             pull_request: number,
             round,
             held: held.len(),
-            resolved,
         }))
     }
 
     // A fix turn that pushed nothing fixed nothing, whatever it says: the
-    // held findings still stand, and CI would pass the same head again.
+    // threads sent still stand, and CI would pass the same head again. One
+    // that pushed answers them, so they are resolved. Resolving is safe to
+    // repeat, so a failure part way retries it all.
     fn fix_turn_ended(&mut self, head: String) -> Result<Begin, StateError> {
         let number = self.number();
         let round = self.item().coderabbit.rounds;
@@ -678,8 +622,42 @@ impl Runner {
                 },
             );
         }
+        let mut left = self.item().threads_sent.clone();
+        let mut failed = None;
+        for id in self.item().threads_sent.clone() {
+            match self.ports.forge.resolve_thread(&self.settings.forge, &id) {
+                Ok(()) => left.retain(|t| t != &id),
+                Err(e) => {
+                    failed = Some(format!("cannot resolve a thread on #{number}: {e}"));
+                    break;
+                }
+            }
+        }
+        let failures = self.item().resolve_failures + 1;
+        if let Some(reason) = failed.as_ref()
+            && failures < RESOLVE_FAILURES
+        {
+            self.update(|item| {
+                item.threads_sent.clone_from(&left);
+                item.resolve_failures = failures;
+            })?;
+            return Ok(self.gate_failed(reason.clone()));
+        }
         let since = self.ports.clock.now();
-        self.update(|item| item.phase = Phase::Ci { head: None, since })?;
+        self.update(|item| {
+            item.threads_sent.clear();
+            item.resolve_failures = 0;
+            item.phase = Phase::Ci { head: None, since };
+        })?;
+        // Open still, they go to the worker again with the next review.
+        if let Some(reason) = failed {
+            return Ok(Begin::Report(StepReport::ThreadsLeftOpen {
+                issue: self.item().issue,
+                pull_request: number,
+                threads: left,
+                reason,
+            }));
+        }
         Ok(Begin::Report(StepReport::FixPushed {
             issue: self.item().issue,
             pull_request: number,
@@ -722,43 +700,6 @@ impl Runner {
         self.summon(head, None, false)
     }
 
-    /// Takes the judge's verdict on one open thread
-    pub(super) fn review_bot_verdict(
-        &mut self,
-        result: ReviewResult,
-        spent: Option<Spent>,
-    ) -> Result<Option<StepReport>, StateError> {
-        let now = self.ports.clock.now();
-        let mut next = self.state.clone();
-        let Some(item) = self.current_in(&mut next) else {
-            return Ok(None);
-        };
-        record_spent(item, spent, now);
-        let issue = item.issue;
-        let round = item.coderabbit.rounds;
-        let report = match (result, &mut item.phase) {
-            (
-                ReviewResult::Verdict(Ok(verdict)),
-                Phase::CodeRabbit(CodeRabbitStage::Judging { verdicts, .. }),
-            ) => {
-                let (holds, severity) = (verdict.holds, verdict.severity);
-                verdicts.push(verdict);
-                Some(StepReport::FindingJudged {
-                    issue,
-                    round,
-                    holds,
-                    severity,
-                })
-            }
-            (ReviewResult::Verdict(Err(reason)) | ReviewResult::Findings(Err(reason)), _) => {
-                Some(StepReport::GateFailed { issue, reason })
-            }
-            _ => None,
-        };
-        self.save(next)?;
-        Ok(report)
-    }
-
     /// Gives back the lease of every bot the round may hold and takes each
     /// one's label off, when the work item leaves a round for good
     pub(super) fn leave_round(&mut self) {
@@ -769,6 +710,7 @@ impl Runner {
             let _ = self.release(bot);
             let _ = self.label(bot, number, false);
         }
+        let _ = self.update(WorkItem::forget_threads);
     }
 
     // The head the round is on, whatever its stage.
@@ -778,7 +720,7 @@ impl Runner {
         };
         match stage {
             CodeRabbitStage::Lease { head, .. } | CodeRabbitStage::Summoned { head, .. } => head,
-            CodeRabbitStage::Judging { head, .. } | CodeRabbitStage::Fixing { head } => head,
+            CodeRabbitStage::Found { head, .. } | CodeRabbitStage::Fixing { head } => head,
         }
         .clone()
     }
@@ -857,7 +799,7 @@ fn open_threads(profile: &dyn Profile, activity: &Activity) -> Vec<OpenThread> {
 fn fix_prompt(bot: &str, number: u64, round: u32, count: usize, path: &std::path::Path) -> String {
     format!(
         "{bot} round {round} on your pull request #{number} left {count} \
-         finding(s) that hold, in {}. Fix each one, then commit and push with \
+         open thread(s), in {}. Fix each one, then commit and push with \
          `git push origin HEAD`.",
         path.display()
     )

@@ -222,7 +222,7 @@ fn the_summon_after_kelpie_catches_the_branch_up_asks_for_a_full_review() {
     let (rig, runner, head) = summoned("shep");
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "Name the flag."),
-        Some(StepReport::CodeRabbitJudged { .. })
+        Some(StepReport::CodeRabbitSent { .. })
     ));
     rig.claude.script([Scripted::Push("fix.txt", "fixed\n")]);
     step(&runner).unwrap();
@@ -249,7 +249,7 @@ fn the_summon_after_kelpie_catches_the_branch_up_asks_for_a_full_review() {
     rig.forge.coderabbit.settle("PRRT_71_0");
     assert!(matches!(
         hold_a_finding(&rig, &runner, &rebased, "Name it again."),
-        Some(StepReport::CodeRabbitJudged { .. })
+        Some(StepReport::CodeRabbitSent { .. })
     ));
     fixed(&rig, &runner, "fix-2.txt");
     assert_eq!(

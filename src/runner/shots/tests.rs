@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use crate::ports::{Checks, Finding, Role, Severity};
+use crate::ports::{Checks, Role};
 use crate::profile;
 use crate::runner::{Runner, StepReport, step};
 use crate::shots::publish::MARKER;
@@ -429,7 +429,49 @@ fn the_claude_round_gets_the_latest_shots_and_may_open_them() {
 }
 
 #[test]
-fn a_finding_that_cites_a_screenshot_is_judged_with_it_open() {
+fn a_listed_claude_session_gets_the_shots_as_the_projects_own_round_does() {
+    let rig = with_preview("lab");
+    rig.edit_settings(|s| {
+        s.replace(crate::test::OLD_LOCAL, "").replace(
+            "[app.dogs.kelpie.review]\n",
+            "[app.dogs.kelpie.review]\nreviewers = [\"opus\"]\n",
+        )
+    });
+    let kelpie = std::fs::read_to_string(rig.paths().kelpie_settings).unwrap();
+    rig.set_kelpie_settings(&format!(
+        "{kelpie}[local_reviewers.opus]\nkind = \"claude\"\nmodel = \"claude-opus-5-5\"\n\
+         effort = \"high\"\n"
+    ));
+    let runner = started(&rig);
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    step(&runner).unwrap(); // the worker's turn
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Shots { .. })
+    ));
+    step(&runner).unwrap(); // round 1, opus
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    let dir = rig.home.path().join("shep/kelpie/lab/shots/7");
+    let all = rig.claude.all_seen();
+    let round = all.iter().find(|s| s.call.role == Role::Reviewer).unwrap();
+    assert_eq!(round.call.model, "claude-opus-5-5");
+    let shot = dir.join(&head[..7]).join("events-mobile-dark.png");
+    assert!(
+        round.call.prompt.contains(&shot.display().to_string()),
+        "{}",
+        round.call.prompt
+    );
+    assert_eq!(
+        round.settings["permissions"]["additionalDirectories"],
+        json!([dir])
+    );
+}
+
+#[test]
+fn a_finding_that_cites_a_screenshot_reaches_the_worker() {
     let rig = with_preview("lab");
     let runner = started(&rig);
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);
@@ -443,67 +485,15 @@ fn a_finding_that_cites_a_screenshot_is_judged_with_it_open() {
         "HIGH|{}:0|white text on white in dark mode|unreadable",
         shot.display()
     );
-    rig.claude.script([
-        Scripted::Say(Box::leak(finding.into_boxed_str())),
-        Scripted::Text(r#"{"holds": true, "severity": "high", "reason": "it is unreadable"}"#),
-    ]);
+    rig.claude
+        .script([Scripted::Say(Box::leak(finding.into_boxed_str()))]);
     step(&runner).unwrap(); // round 2, claude: one finding
-    step(&runner).unwrap(); // the judge
-
-    let all = rig.claude.all_seen();
-    let judge = all.iter().find(|s| s.call.role == Role::Judge).unwrap();
-    assert!(
-        judge
-            .call
-            .prompt
-            .contains(&format!("the screenshot {}", shot.display()))
-    );
-    let deny = judge.settings["permissions"]["deny"].as_array().unwrap();
-    assert!(!deny.contains(&json!("Read")), "{deny:?}");
-    assert!(deny.contains(&json!("Bash")));
-    assert_eq!(
-        judge.settings["permissions"]["additionalDirectories"],
-        json!([dir])
-    );
 
     let Some(StepReport::ReviewFindingsSent { held: 1, .. }) = step(&runner).unwrap() else {
-        panic!("the held screenshot finding did not reach the worker");
+        panic!("the screenshot finding did not reach the worker");
     };
     let findings = std::fs::read_to_string(rig.build_7().join("review-findings.md"));
     assert!(findings.unwrap().contains(&shot.display().to_string()));
-}
-
-#[test]
-fn a_finding_on_a_file_is_judged_with_every_tool_denied_as_before() {
-    let rig = with_preview("lab");
-    let runner = started(&rig);
-    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
-    step(&runner).unwrap();
-    rig.reviewer
-        .script([crate::test::ScriptedRound::Findings(vec![Finding {
-            severity: Severity::Low,
-            file: "src/app.tsx".into(),
-            line: 4,
-            what: "unused import".into(),
-            why: "dead code".into(),
-        }])]);
-    step(&runner).unwrap(); // round 1, qwen: one finding
-    rig.claude.script([Scripted::Text(
-        r#"{"holds": false, "severity": "low", "reason": "no"}"#,
-    )]);
-    step(&runner).unwrap(); // the judge
-    let all = rig.claude.all_seen();
-    let judge = all.iter().find(|s| s.call.role == Role::Judge).unwrap();
-    assert_eq!(
-        judge.settings["permissions"]["additionalDirectories"],
-        Value::Null
-    );
-    assert!(
-        judge.settings["permissions"]["deny"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("Read"))
-    );
 }
 
 #[test]
@@ -527,7 +517,7 @@ fn a_head_that_cannot_be_fetched_leaves_the_round_a_note_not_a_failure() {
             report,
             Some(StepReport::ReviewFindingsSent {
                 round: 2,
-                clean: true,
+                held: 0,
                 ..
             })
         ),
@@ -582,7 +572,7 @@ fn a_failed_shots_run_is_reported_and_the_round_goes_on() {
     assert_eq!(
         rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
         "ci",
-        "two clean rounds end the loop, shots or none"
+        "the last reviewer ends the review, shots or none"
     );
 }
 

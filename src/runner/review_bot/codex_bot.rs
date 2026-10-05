@@ -5,11 +5,11 @@ use std::num::NonZeroU32;
 use crate::codex::SUMMON;
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
-use crate::ports::{Leases, Role, Timestamp};
+use crate::ports::{Leases, Timestamp};
 use crate::review_bot::{Bot, CodexReviewer, Reviewers};
 use crate::runner::coderabbit::tests::now;
 use crate::runner::review_bot::two_bots::{
-    HOLDS, comments_of, cr, green, labels, listing, ready, summoned,
+    comments_of, cr, green, labels, listing, ready, summoned,
 };
 use crate::runner::{StepReport, step};
 use crate::test::{Rig, Scripted, Told};
@@ -21,7 +21,7 @@ fn codex() -> LeaseKind {
 }
 
 #[test]
-fn a_codex_review_reaches_the_judge_with_its_badge_and_the_fix_names_codex() {
+fn a_codex_review_reaches_the_worker_with_its_badge_and_the_fix_names_codex() {
     let rig = listing("shep", r#"["codex"]"#);
     let (runner, head) = ready(&rig);
     assert_eq!(step(&runner).unwrap(), summoned(&head));
@@ -53,22 +53,15 @@ fn a_codex_review_reaches_the_judge_with_its_badge_and_the_fix_names_codex() {
             open_threads: 1
         })
     );
-    rig.claude.script([Scripted::Text(HOLDS)]);
-    step(&runner).unwrap();
-    let calls = rig.claude.all_calls();
-    let judged = calls.iter().rfind(|c| c.role == Role::Judge).unwrap();
-    assert!(
-        judged.prompt.contains(
-            "severity: HIGH\nlocation: work.txt:1\nwhat: Keep the stamped prefix: `bleats` strips \
-             a prefix shep did not stamp.\nwhy: Codex rates it P1."
-        ),
-        "{}",
-        judged.prompt
-    );
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitJudged { held: 1, .. })
+        Some(StepReport::CodeRabbitSent { held: 1, .. })
     ));
+    let file = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
+    assert!(
+        file.contains("HIGH|work.txt:1|Keep the stamped prefix: `bleats` strips a prefix shep did not stamp.|Codex rates it P1."),
+        "{file}"
+    );
     rig.claude
         .script([Scripted::Push("work.txt", "stripped\n")]);
     step(&runner).unwrap();

@@ -35,7 +35,7 @@ pub struct KelpieSettings {
     /// The pull request reviewers a project may list, each by its window
     #[serde(default)]
     pub reviewers: Reviewers,
-    /// The review loop's reviewers a project may list in `review.reviewers`,
+    /// The reviewers a project may list in `review.reviewers`,
     /// by name. `claude` is always the project's own Claude round.
     #[serde(default)]
     pub local_reviewers: BTreeMap<ReviewerName, Definition>,

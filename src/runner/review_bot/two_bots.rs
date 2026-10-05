@@ -9,13 +9,12 @@ use crate::coderabbit::LABEL;
 use crate::cubic::SUMMON;
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
-use crate::ports::{Checks, Leases, PullRequestState, Role, Timestamp};
+use crate::ports::{Checks, Leases, PullRequestState, Timestamp};
 use crate::review_bot::{Bot, ReviewWindow, Reviewers};
 use crate::runner::coderabbit::tests::now;
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{Rig, Scripted, Told};
 
-pub(super) const HOLDS: &str = r#"{"holds": true, "severity": "medium", "reason": "real"}"#;
 const CUBIC_WINDOW: &str = "\n[reviewers.cubic]\nreviews = 20\nhours = 720\n";
 pub(super) const CODEX_WINDOW: &str = "\n[reviewers.codex]\nreviews = 10\nhours = 168\n";
 const MONTH: u64 = 720 * 3600;
@@ -41,7 +40,7 @@ pub(super) fn listing(project: &str, list: &str) -> Rig {
     rig
 }
 
-// Pull request 71 with the qwen-review loop settled, green CI, and the draft
+// Pull request 71 with the review done, green CI, and the draft
 // still a draft.
 pub(super) fn green(rig: &Rig) -> (Mutex<Runner>, String) {
     let runner = rig.open().unwrap();
@@ -50,7 +49,7 @@ pub(super) fn green(rig: &Rig) -> (Mutex<Runner>, String) {
     (runner, head)
 }
 
-// Pull request 71 with the qwen-review loop settled, green CI, and the
+// Pull request 71 with the review done, green CI, and the
 // draft marked ready: the next step summons.
 pub(super) fn ready(rig: &Rig) -> (Mutex<Runner>, String) {
     let runner = rig.open().unwrap();
@@ -123,8 +122,8 @@ pub(super) fn summoned(head: &str) -> Option<StepReport> {
 }
 
 #[test]
-fn coderabbits_window_busy_sends_the_round_to_cubic_whose_finding_reaches_the_judge_with_its_level()
-{
+fn coderabbits_window_busy_sends_the_round_to_cubic_whose_finding_reaches_the_worker_with_its_level()
+ {
     let rig = listing("shep", r#"["coderabbit", "cubic"]"#);
     rig.leases.close(&cr(), true);
     let (runner, head) = ready(&rig);
@@ -164,22 +163,15 @@ fn coderabbits_window_busy_sends_the_round_to_cubic_whose_finding_reaches_the_ju
             open_threads: 1
         })
     );
-    rig.claude.script([Scripted::Text(HOLDS)]);
-    step(&runner).unwrap();
-    let calls = rig.claude.all_calls();
-    let judged = calls.iter().rfind(|c| c.role == Role::Judge).unwrap();
-    assert!(
-        judged.prompt.contains(
-            "severity: MEDIUM\nlocation: work.txt:1\nwhat: `bleats` loses a stamped prefix. \
-             Strip only files shep stamped.\nwhy: cubic rates it P2, with confidence 8 of 10."
-        ),
-        "{}",
-        judged.prompt
-    );
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitJudged { held: 1, .. })
+        Some(StepReport::CodeRabbitSent { held: 1, .. })
     ));
+    let file = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
+    assert!(
+        file.contains("MEDIUM|work.txt:1|`bleats` loses a stamped prefix. Strip only files shep stamped.|cubic rates it P2, with confidence 8 of 10."),
+        "{file}"
+    );
     rig.claude
         .script([Scripted::Push("work.txt", "stripped\n")]);
     step(&runner).unwrap();
@@ -406,9 +398,9 @@ fn a_bot_dropped_mid_round_gives_its_lease_back_when_the_work_item_ends() {
 }
 
 // CodeRabbit left a thread open on an older head, and cubic takes the next
-// round: that thread still needs a ruling before the round is satisfied.
+// round: that thread goes to the worker too before the round is satisfied.
 #[test]
-fn the_other_bots_open_threads_are_judged_with_the_rounds_own() {
+fn the_other_bots_open_threads_go_to_the_worker_with_the_rounds_own() {
     let rig = listing("shep", r#"["coderabbit", "cubic"]"#);
     rig.leases.close(&cr(), true);
     rig.forge

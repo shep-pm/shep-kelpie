@@ -9,7 +9,7 @@ pub const LOCAL_FAILURES_DOWN: u32 = 2;
 
 impl WorkItem {
     /// Whether local reviewer `name` reviewed nothing twice in a row, which
-    /// leaves the loop to the other reviewers
+    /// leaves the review to the other reviewers
     pub fn local_reviewer_down(&self, name: &ReviewerName) -> bool {
         self.local_failures
             .get(name)
@@ -44,11 +44,5 @@ impl WorkItem {
             .iter()
             .filter(|(name, _)| self.local_reviewer_down(name));
         down.map(|(name, _)| name).collect()
-    }
-
-    /// Whether a round that would be clean on its own counts as clean: not
-    /// while a local round's unreviewed files are still owed a review
-    pub fn counts_as_clean(&self, clean: bool) -> bool {
-        clean && self.local_unreviewed.is_empty()
     }
 }

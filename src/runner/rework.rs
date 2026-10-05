@@ -367,7 +367,7 @@ impl Runner {
                 ..CodeRabbitTally::default()
             },
             pull_request: Some(number),
-            // The fix is new code, so the qwen-review loop runs before CI.
+            // The fix is new code, so a pass of the review runs before CI.
             resume: Some(Phase::Review(Review::first())),
             known: Known {
                 labels,

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::board::WorkerModel;
-use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage, Verdict};
+use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage};
 use crate::settings::ReviewerName;
 use crate::shots::ShotsRecord;
 
@@ -46,8 +46,8 @@ pub struct WorkItem {
     /// rewrites the branch's commits.
     #[serde(default)]
     pub adopted: bool,
-    /// An adopted pull request's head as it arrived, which its qwen-review
-    /// loop diffs against instead of `origin/main`
+    /// An adopted pull request's head as it arrived, which its review diffs
+    /// against instead of `origin/main`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arrived: Option<String>,
     /// Whether an adopted pull request still waits for a CodeRabbit review
@@ -59,23 +59,17 @@ pub struct WorkItem {
     /// so the next summon asks it for a full review.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub rebased: bool,
-    /// Local rounds finished in every pass of its review loop so far, which
-    /// `review.local_rounds` caps
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub local_rounds: u32,
     /// Rounds in a row that left files unreviewed, by the local reviewer that
     /// ran them: ones that reviewed nothing, and ones that left the same
     /// files unreviewed again. Whatever the cause, the script's own
     /// `not reviewed:` lines are all kelpie sees. The first failure of a
-    /// round that reviewed nothing is retried; at [`LOCAL_FAILURES_DOWN`] the
-    /// loop goes on without the reviewer for the rest of the work item. A
-    /// round that left no file, or only new ones, unreviewed clears its
-    /// reviewer's count.
+    /// At [`LOCAL_FAILURES_DOWN`] the review goes on without the reviewer
+    /// for the rest of the work item. A round that left no file, or only new
+    /// ones, unreviewed clears its reviewer's count.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub local_failures: BTreeMap<ReviewerName, u32>,
     /// The files the last local round that reviewed anything left
-    /// unreviewed. No round counts as clean while any are left, and the next
-    /// local round replaces the list with what it leaves.
+    /// unreviewed. The next local round replaces the list with what it leaves.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub local_unreviewed: Vec<String>,
     /// The local reviewer whose round left `local_unreviewed`. Only that
@@ -106,16 +100,27 @@ pub struct WorkItem {
     pub conflict: Option<Conflict>,
     /// What phase to force once the turn now running ends, overriding the
     /// ordinary rule that a known pull request goes straight to CI. Set by
-    /// a ruling's answer that needs the qwen-review loop to run again, or by
-    /// a rework; cleared once applied.
+    /// a ruling's answer that needs the review to run again, or by a rework;
+    /// cleared once applied.
     #[serde(default)]
     pub resume: Option<Phase>,
-    /// Whether a review round or judge call is in flight
+    /// Whether a review call is in flight
     #[serde(default)]
     pub review_call: ReviewCallState,
     /// Its pull request reviewer rounds so far, from every bot
     #[serde(default)]
     pub coderabbit: CodeRabbitTally,
+    /// The forge's ids of the review bot threads sent to the worker, which
+    /// kelpie resolves once its fix moves the head
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub threads_sent: Vec<String>,
+    /// Steps in a row that could not resolve `threads_sent`
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub resolve_failures: u32,
+    /// The reviewers whose calls failed so often in a row that a pass went
+    /// on without them
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reviewers_skipped: Vec<ReviewerName>,
     /// The pull request's labels, ready state and head, as kelpie and its
     /// worker leave them. A mismatch at the gate is a change kelpie did not make.
     #[serde(default)]
@@ -291,10 +296,10 @@ fn joined(labels: &[&String]) -> String {
 #[serde(tag = "state", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Phase {
     /// The worker's turns. One that ends with a pull request open starts the
-    /// qwen-review loop.
+    /// review.
     #[default]
     Implement,
-    /// The qwen-review loop, between the draft pull request and CI
+    /// The review, between the draft pull request and CI
     Review(Review),
     /// Waiting for CI on the pull request's head
     Ci {
@@ -329,7 +334,7 @@ pub enum Phase {
     },
 }
 
-/// Whether a review round or judge call is in flight
+/// Whether a review call is in flight
 ///
 /// Recorded in state the way a running turn is: `drop` refuses while a
 /// call is running, since it runs outside the runner's lock and a dropped
@@ -341,55 +346,69 @@ pub enum ReviewCallState {
     /// Nothing is running
     #[default]
     Idle,
-    /// A round or a judge call is running, started at this time
+    /// A review call is running, started at this time
     Running {
         /// When it started
         since: Timestamp,
     },
 }
 
-/// Where the review loop stands
+/// Where the review stands
 ///
-/// Rounds go down the project's reviewers in order. The loop ends once two
-/// rounds in a row, from two different reviewers, hold nothing above a nit
-/// (LOW), or once one does where only one reviewer could run. The worker's
-/// fix turn for each round is folded in before the next.
+/// A pass runs the project's reviewers once each, in order. A round that
+/// finds anything above a nit (LOW) sends the worker all of its findings for
+/// one fix turn before the next reviewer runs. After the last, the pull
+/// request goes to CI.
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Review {
-    /// The round now running or about to run, 1-indexed
+    /// The round now running or about to run, 1-indexed from the start of
+    /// its pass
     pub round: u32,
-    /// Rounds finished in a row with nothing held above a nit
-    pub consecutive_clean: u32,
-    /// Whether the maintainer already let the loop past its round guard
-    pub guard_cleared: bool,
     /// Where this round stands
     pub stage: ReviewStage,
     /// Who reviews this round, once it has started. None in an older state
     /// file, whose rounds alternated local first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reviewer: Option<ReviewerName>,
-    /// Who reviewed the round before, if any
+    /// The reviewers this pass has run, oldest first. The next round goes to
+    /// the first listed reviewer not among them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ran: Vec<ReviewerName>,
+    /// The calls of this round's reviewer that failed in a row
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub failures: u32,
+    /// The reviewer before, in a state file saved before `ran`. It is kept
+    /// until the next round, which reads it into `ran`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last: Option<ReviewerName>,
-    /// Whether this round's reviewer was the only one that could run, so
-    /// one clean round ends the loop
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub alone: bool,
 }
 
 impl Review {
-    /// The first round, about to run
+    /// The first round of a pass, about to run
     pub fn first() -> Self {
         Self {
             round: 1,
-            consecutive_clean: 0,
-            guard_cleared: false,
             stage: ReviewStage::Round,
             reviewer: None,
+            ran: Vec::new(),
+            failures: 0,
             last: None,
-            alone: false,
+        }
+    }
+
+    /// The next round of the same pass, once this one's reviewer is done
+    pub fn next_round(self) -> Self {
+        let mut ran = self.ran;
+        ran.extend(self.reviewer);
+        Self {
+            round: self.round + 1,
+            stage: ReviewStage::Round,
+            reviewer: None,
+            ran,
+            failures: 0,
+            last: None,
         }
     }
 }
@@ -401,28 +420,31 @@ impl Review {
 pub enum ReviewStage {
     /// About to run this round's reviewer
     Round,
-    /// The round's raw findings, judged in order, oldest first
-    Judging {
+    /// The round's findings, about to go to the worker if any is above a nit
+    Found {
         /// What the reviewer found
         findings: Vec<Finding>,
-        /// The judge's verdict on each finding judged so far, same order
-        verdicts: Vec<Verdict>,
     },
-    /// The findings the judge held were sent to the worker; waiting for its fix
+    /// The round's findings were sent to the worker; waiting for its fix
     Fixing {
-        /// Whether every held finding was a nit (LOW), so a clean fix keeps
-        /// or extends the consecutive-clean streak
-        clean: bool,
         /// The pull request's head when the findings were sent, which a fix
         /// moves. None in an older state file, whose fix is not checked.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         head: Option<String>,
     },
-    /// The deep round, which ends the loop once its fix is re-checked
+    /// The deep round, which goes on to the next reviewer once its fix is
+    /// re-checked
     Deep(Deep),
 }
 
 impl WorkItem {
+    /// Forgets the review bot threads sent to the worker, which no fix of
+    /// this round will resolve now
+    pub fn forget_threads(&mut self) {
+        self.threads_sent.clear();
+        self.resolve_failures = 0;
+    }
+
     /// Remembers findings sent to the worker, once each
     pub fn record_held(&mut self, held: &[Finding]) {
         for finding in held {
@@ -439,8 +461,8 @@ impl WorkItem {
         self.rebased = true;
     }
 
-    /// The commit its qwen-review loop diffs against: `origin/main`, or the
-    /// head an adopted pull request arrived with, so none of that is reviewed
+    /// The commit its review diffs against: `origin/main`, or the head an
+    /// adopted pull request arrived with, so none of that is reviewed
     pub fn review_base(&self) -> String {
         self.arrived
             .clone()
@@ -567,7 +589,7 @@ mod tests {
                     "since": 12,
                     "seconds": {
                         "worker": 4, "gpu_wait": 0, "local_round": 0, "claude_round": 0,
-                        "judging": 0, "ci": 3, "coderabbit_window": 0, "coderabbit_review": 0,
+                        "ci": 3, "coderabbit_window": 0, "coderabbit_review": 0,
                         "ruling": 0, "merge": 0, "shots": 0, "paused": 0, "other": 0,
                     },
                 },
@@ -607,14 +629,11 @@ mod tests {
         assert_eq!(
             value(Phase::Review(Review {
                 round: 2,
-                consecutive_clean: 1,
                 ..Review::first()
             })),
             json!({
                 "state": "review",
                 "round": 2,
-                "consecutive_clean": 1,
-                "guard_cleared": false,
                 "stage": { "stage": "round" },
             })
         );
@@ -623,21 +642,27 @@ mod tests {
             value(Phase::Review(Review {
                 round: 3,
                 reviewer: name("opus"),
-                last: name("qwen"),
-                alone: true,
+                ran: name("qwen").into_iter().collect(),
+                failures: 1,
                 ..Review::first()
             })),
             json!({
                 "state": "review",
                 "round": 3,
-                "consecutive_clean": 0,
-                "guard_cleared": false,
                 "stage": { "stage": "round" },
                 "reviewer": "opus",
-                "last": "qwen",
-                "alone": true,
+                "ran": ["qwen"],
+                "failures": 1,
             })
         );
+        let older = json!({
+            "state": "review",
+            "round": 3,
+            "stage": { "stage": "round" },
+            "last": "qwen",
+        });
+        let read: Phase = serde_json::from_value(older.clone()).unwrap();
+        assert_eq!(value(read), older, "kept until the next round reads it");
         assert_eq!(
             value(Phase::CodeRabbit(CodeRabbitStage::Summoned {
                 bot: Bot::Coderabbit,
@@ -665,7 +690,7 @@ mod tests {
         let cubic = json!({ "state": "coderabbit", "stage": "summoned", "bot": "cubic", "head": "c0ffee", "at": 12, "full": true });
         let by_cubic: Phase = serde_json::from_value(cubic.clone()).unwrap();
         assert_eq!(value(by_cubic), cubic);
-        let judging = Phase::CodeRabbit(CodeRabbitStage::Judging {
+        let found = Phase::CodeRabbit(CodeRabbitStage::Found {
             bot: Bot::Cubic,
             head: "c0ffee".into(),
             threads: vec![OpenThread {
@@ -678,12 +703,12 @@ mod tests {
                     why: "y".into(),
                 },
             }],
-            verdicts: vec![],
         });
-        let pinned = value(judging.clone());
+        let pinned = value(found.clone());
+        assert_eq!(pinned["stage"], "found");
         assert_eq!(pinned["threads"][0]["id"], "PRRT_1");
         assert_eq!(pinned["bot"], "cubic");
-        assert_eq!(serde_json::from_value::<Phase>(pinned).unwrap(), judging);
+        assert_eq!(serde_json::from_value::<Phase>(pinned).unwrap(), found);
         assert_eq!(
             value(Phase::Ruling { id: 3 }),
             json!({ "state": "ruling", "id": 3 })
@@ -727,18 +752,12 @@ mod tests {
             what: "bad".into(),
             why: "breaks".into(),
         };
-        let verdict = Verdict {
-            holds: true,
-            severity: crate::ports::Severity::Medium,
-            reason: "regraded".into(),
-        };
         assert_eq!(
-            value(ReviewStage::Judging {
-                findings: vec![finding.clone()],
-                verdicts: vec![verdict.clone()],
+            value(ReviewStage::Found {
+                findings: vec![finding],
             }),
             json!({
-                "stage": "judging",
+                "stage": "found",
                 "findings": [{
                     "severity": "high",
                     "file": "a.rs",
@@ -746,29 +765,18 @@ mod tests {
                     "what": "bad",
                     "why": "breaks",
                 }],
-                "verdicts": [{ "holds": true, "severity": "medium", "reason": "regraded" }],
             })
         );
         assert_eq!(
             value(ReviewStage::Fixing {
-                clean: true,
                 head: Some("c0ffee".into())
             }),
-            json!({ "stage": "fixing", "clean": true, "head": "c0ffee" })
+            json!({ "stage": "fixing", "head": "c0ffee" })
         );
         let saved_before_the_head: ReviewStage =
-            serde_json::from_value(json!({ "stage": "fixing", "clean": true })).unwrap();
-        assert_eq!(
-            saved_before_the_head,
-            ReviewStage::Fixing {
-                clean: true,
-                head: None
-            }
-        );
-        assert_eq!(
-            value(saved_before_the_head),
-            json!({ "stage": "fixing", "clean": true })
-        );
+            serde_json::from_value(json!({ "stage": "fixing" })).unwrap();
+        assert_eq!(saved_before_the_head, ReviewStage::Fixing { head: None });
+        assert_eq!(value(saved_before_the_head), json!({ "stage": "fixing" }));
     }
 
     #[test]
@@ -797,7 +805,7 @@ mod tests {
     }
 
     #[test]
-    fn the_review_loop_diffs_from_main_unless_a_pull_request_arrived_at_a_head() {
+    fn the_review_diffs_from_main_unless_a_pull_request_arrived_at_a_head() {
         let mut item = a_work_item();
         assert_eq!(item.review_base(), "origin/main");
         item.arrived = Some("c0ffee".into());

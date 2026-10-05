@@ -86,7 +86,7 @@ fn a_new_projects_review_is_one_deep_round_one_fix_turn_and_one_recheck_of_the_f
     assert_eq!(
         state(&rig, &runner),
         "ci",
-        "the loop ends after the re-check"
+        "the review ends after the re-check"
     );
     assert_eq!(
         roles(&rig),
@@ -199,7 +199,6 @@ fn two_readers_that_find_nothing_end_the_review_with_no_fix_turn() {
             pull_request: 71,
             round: 2,
             held: 0,
-            clean: true,
         }),
         "{reports:#?}"
     );
@@ -346,7 +345,7 @@ fn a_fix_the_failing_test_still_fails_for_goes_back_to_the_worker_once_and_then_
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["rulings"][0]["kind"]["kind"], "deep-review");
 
-    // A yes sends it the findings once more, and the re-check of that fix ends the loop.
+    // A yes sends it the findings once more, and the re-check of that fix ends the review.
     rig.ask(&runner, "rule", Some(&format!("{id} yes")));
     rig.claude.script([
         Scripted::Push("three.txt", "3\n"),

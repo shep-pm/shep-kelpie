@@ -70,8 +70,8 @@ url = "https://ntfy.sh/your-private-topic"
 # [kelpie.leases]
 # cargo-test = 3
 
-# The agents a project may name for its worker, reviewer and judge, and its
-# session reviewers: a harness, and the model and effort it runs on. The
+# The agents a project may name for its worker, reviewer and deep reviewer,
+# and its session reviewers: a harness, and the model and effort it runs on. The
 # harnesses are Claude Code, `claude-code`, pi, `pi`, and Codex, `codex`.
 #
 # `usage` is how its usage is read, and so which account paces it: `claude`
@@ -106,7 +106,7 @@ url = "https://ntfy.sh/your-private-topic"
 # effort = "medium"
 
 
-# The review loop's reviewers a project may list in `review.reviewers`, by
+# The reviewers a project may list in `review.reviewers`, in order, by
 # name. `claude` is always the project's own Claude round, so it is not
 # defined here. The README says what each kind does.
 #

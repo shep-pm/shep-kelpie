@@ -18,6 +18,7 @@ pub(crate) struct FakeCodeRabbit {
     resolved: Arc<Mutex<Vec<String>>>,
     logins: Arc<Mutex<Vec<String>>>,
     down: Arc<AtomicBool>,
+    resolve_down: Arc<AtomicBool>,
 }
 
 // CodeRabbit's own store on pull request `number`.
@@ -195,8 +196,17 @@ impl FakeCodeRabbit {
         Ok(activity.get(&key).cloned().unwrap_or_default())
     }
 
-    // Refuses a thread that does not exist, as GitHub does.
+    /// Makes resolving a thread fail, or work again
+    pub(crate) fn set_resolve_down(&self, down: bool) {
+        self.resolve_down.store(down, Ordering::SeqCst);
+    }
+
+    // A thread that does not exist is done, as the gh adapter reads
+    // GitHub's not-found.
     pub(super) fn resolve(&self, id: &str) -> Result<(), ForgeError> {
+        if self.resolve_down.load(Ordering::SeqCst) {
+            return Err(ForgeError::Failed("resolving is down".into()));
+        }
         let activity = self.activity.lock().unwrap();
         let known = activity
             .values()
@@ -204,7 +214,7 @@ impl FakeCodeRabbit {
             .any(|t| t.id == id);
         drop(activity);
         if !known {
-            return Err(ForgeError::Failed(format!("no thread {id}")));
+            return Ok(());
         }
         self.settle(id);
         self.resolved.lock().unwrap().push(id.to_owned());

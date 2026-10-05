@@ -1,6 +1,6 @@
 //! Findings a merged pull request left unfixed, filed as issues on the project
 //!
-//! The judge holds a finding, and the worker fixes it. One it leaves, because
+//! A reviewer's finding goes to the worker, which fixes it. One it leaves, because
 //! the fix is out of scope for the pull request, it copies into the deferred
 //! findings file in its build folder. When the pull request merges, kelpie
 //! reads that file once and files only findings it sent the worker itself,

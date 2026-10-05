@@ -13,7 +13,8 @@ const AGENTS: &str = "[agents.opus-high]\nharness = \"claude-code\"\n\
                       model = \"claude-haiku-4-5-20251001\"\neffort = \"low\"\n";
 
 // Issue 7 from dispatch to merge under `auto`: the worker's turn, a qwen
-// round with one finding the judge holds, the fix, then two clean rounds.
+// round whose one MEDIUM finding goes to the worker, the fix, and a clean
+// Claude round that reads it, each reviewer once.
 fn whole_work_item(rig: &Rig, runner: &Mutex<Runner>) {
     rig.ask(runner, "start", None);
     rig.ask(runner, "add", Some("7"));
@@ -27,7 +28,6 @@ fn whole_work_item(rig: &Rig, runner: &Mutex<Runner>) {
     }])]);
     rig.claude.script([
         Scripted::Push("work.txt", "work\n"),
-        Scripted::Text(r#"{"holds": true, "severity": "medium", "reason": "it is a typo"}"#),
         Scripted::Push("work.txt", "fixed\n"),
         Scripted::Text("CLEAN"),
     ]);
@@ -55,15 +55,8 @@ fn a_stand_in_agent_runs_a_whole_work_item() {
     whole_work_item(&rig, &runner);
     let [(number, _)] = rig.forge.merges().try_into().unwrap();
     assert_eq!(number, 71);
-    assert_eq!(
-        roles(&rig),
-        [Role::Worker, Role::Judge, Role::Worker, Role::Reviewer]
-    );
-    assert_eq!(
-        rig.reviewer.seen().len(),
-        2,
-        "qwen before and after the fix"
-    );
+    assert_eq!(roles(&rig), [Role::Worker, Role::Worker, Role::Reviewer]);
+    assert_eq!(rig.reviewer.seen().len(), 1, "qwen once, before the fix");
 }
 
 #[test]
@@ -75,7 +68,7 @@ fn a_project_naming_a_different_agent_per_role_reaches_each() {
     rig.edit_settings(|s| {
         let gate = "\n[app.dogs.kelpie.coderabbit]\n";
         let agents = "[app.dogs.kelpie.agents]\nworker = \"opus-high\"\n\
-                      reviewer = \"sonnet-low\"\njudge = \"haiku\"\n";
+                      reviewer = \"sonnet-low\"\n";
         s.replacen(gate, &format!("\n{agents}{gate}"), 1)
     });
     let runner = rig.open().unwrap();
@@ -91,7 +84,6 @@ fn a_project_naming_a_different_agent_per_role_reaches_each() {
         seen,
         [
             on(Role::Worker, "claude-opus-5-5", Effort::High),
-            on(Role::Judge, "claude-haiku-4-5-20251001", Effort::Low),
             on(Role::Worker, "claude-opus-5-5", Effort::High),
             on(Role::Reviewer, "claude-sonnet-5", Effort::Low),
         ]
@@ -173,13 +165,13 @@ fn a_role_naming_an_agent_kelpie_lacks_stops_the_runner_naming_it() {
         let gate = "\n[app.dogs.kelpie.coderabbit]\n";
         s.replacen(
             gate,
-            &format!("\n[app.dogs.kelpie.agents]\njudge = \"fable\"\n{gate}"),
+            &format!("\n[app.dogs.kelpie.agents]\nreviewer = \"fable\"\n{gate}"),
             1,
         )
     });
     let err = rig.open().unwrap_err().to_string();
     assert!(
-        err.contains("`agents.judge` names fable, which is not defined"),
+        err.contains("`agents.reviewer` names fable, which is not defined"),
         "{err}"
     );
 }

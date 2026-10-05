@@ -27,7 +27,7 @@ pub enum DropError {
     Which(WhichItem),
     /// The worker's turn is running, and the work item stays until it ends
     TurnRunning(u64),
-    /// A review round or judge call is running, and the work item stays
+    /// A review call is running, and the work item stays
     /// until it ends, since its result runs outside the runner's lock
     ReviewRunning(u64),
     /// A yes is being carried out, and the merge is not stopped halfway
@@ -44,7 +44,7 @@ impl fmt::Display for DropError {
             Self::Which(e) => e.fmt(f),
             Self::TurnRunning(issue) => write!(f, "the worker's turn on #{issue} is running"),
             Self::ReviewRunning(issue) => {
-                write!(f, "the qwen-review loop's round on #{issue} is running")
+                write!(f, "a review round on #{issue} is running")
             }
             Self::Merging(issue) => write!(f, "the work item for #{issue} is merging"),
             Self::Cleanup(reason) => f.write_str(reason),
@@ -759,7 +759,7 @@ mod tests {
         assert!(rig.worktree_7().exists());
     }
 
-    // A review round or judge call runs outside the runner's lock, the
+    // A review call runs outside the runner's lock, the
     // same as a worker's turn. Dropping the work item out from under one
     // used to clear it while the call was still in flight, so the result
     // panicked the runner (`end_review`'s `.expect` on a work item that

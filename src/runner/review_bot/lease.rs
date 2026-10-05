@@ -91,7 +91,7 @@ impl Runner {
         };
         let phase = match &item.phase {
             Phase::CodeRabbit(
-                CodeRabbitStage::Summoned { bot, .. } | CodeRabbitStage::Judging { bot, .. },
+                CodeRabbitStage::Summoned { bot, .. } | CodeRabbitStage::Found { bot, .. },
             ) => Some(*bot),
             _ => None,
         };

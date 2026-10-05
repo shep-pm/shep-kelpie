@@ -10,9 +10,7 @@ use serde::Serialize;
 
 use crate::board::{Skip, WorkerModel};
 use crate::pacer::HoldKind;
-use crate::ports::{
-    AgentCall, Cost, Finding, Role, SessionId, Severity, Timestamp, Usage, Verdict,
-};
+use crate::ports::{AgentCall, Cost, Finding, Role, SessionId, Timestamp, Usage};
 use crate::settings::{LocalRound, ReviewerName};
 use crate::shots::ShotsJob;
 use crate::work_item::{QwenTally, Spend, Split};
@@ -248,8 +246,8 @@ pub enum StepReport {
         /// What changed since the gate passed, or why the forge refused
         reason: String,
     },
-    /// Under `auto`, a head no gate saw goes back through the qwen-review
-    /// loop and CodeRabbit before any merge
+    /// Under `auto`, a head no gate saw goes back through the review and
+    /// CodeRabbit before any merge
     Regated {
         /// The work item's issue
         issue: u64,
@@ -396,7 +394,22 @@ pub enum StepReport {
         #[serde(skip_serializing_if = "Vec::is_empty")]
         unreviewed: Vec<String>,
     },
-    /// A local round reviewed no file at all, so it counts for nothing
+    /// A reviewer's call failed three times in a row, so the review went on
+    /// to the next reviewer without it
+    ReviewerSkipped {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The round
+        round: u32,
+        /// Which reviewer it was
+        reviewer: ReviewerName,
+        /// Why its last call failed
+        reason: String,
+    },
+    /// A local round reviewed no file at all, so the review went on to the
+    /// next reviewer
     LocalRoundFailed {
         /// The work item's issue
         issue: u64,
@@ -408,20 +421,6 @@ pub enum StepReport {
         reviewer: ReviewerName,
         /// The files it could not review
         unreviewed: Vec<String>,
-        /// Whether the round runs again; if not, the loop goes on without
-        /// this reviewer
-        retrying: bool,
-    },
-    /// The judge ruled on one finding
-    FindingJudged {
-        /// The work item's issue
-        issue: u64,
-        /// The round the finding came from
-        round: u32,
-        /// Whether it held
-        holds: bool,
-        /// The judge's severity
-        severity: Severity,
     },
     /// Kelpie put the `review please` label on, holding the CodeRabbit lease
     Summoned {
@@ -459,24 +458,33 @@ pub enum StepReport {
         pull_request: u64,
         /// Which round this was
         round: u32,
-        /// Its threads still open, which the judge now reads
+        /// Its threads still open, which now go to the worker
         open_threads: usize,
     },
-    /// The judge ruled on every open CodeRabbit thread
-    CodeRabbitJudged {
+    /// Every open review bot thread went to the worker as a finding
+    CodeRabbitSent {
         /// The work item's issue
         issue: u64,
         /// Its pull request
         pull_request: u64,
         /// The round
         round: u32,
-        /// Threads the judge held, sent to the worker
+        /// Threads sent to the worker
         held: usize,
-        /// Threads the judge rejected, now resolved
-        resolved: usize,
     },
-    /// No CodeRabbit thread is open and the judge holds nothing: CI, then
-    /// the merge ruling
+    /// The fix moved the head, but the forge kept refusing to resolve these
+    /// threads, so the fix went on to CI with them open
+    ThreadsLeftOpen {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The forge's ids of the threads still open
+        threads: Vec<String>,
+        /// Why the last try failed
+        reason: String,
+    },
+    /// No CodeRabbit thread is open: CI, then the merge ruling
     CodeRabbitSatisfied {
         /// The work item's issue
         issue: u64,
@@ -485,7 +493,8 @@ pub enum StepReport {
         /// Rounds it took
         rounds: u32,
     },
-    /// The round's held findings were sent to the worker's next turn
+    /// The round's findings were sent to the worker's next turn, or, all
+    /// nits or none, went nowhere and the review moved on
     ReviewFindingsSent {
         /// The work item's issue
         issue: u64,
@@ -493,10 +502,8 @@ pub enum StepReport {
         pull_request: u64,
         /// The round
         round: u32,
-        /// How many findings held
+        /// How many findings were sent: none for a round of nits
         held: usize,
-        /// Whether every one was a nit (LOW)
-        clean: bool,
     },
     /// Kelpie took shots of a head, before a Claude review round or the merge ruling
     Shots {
@@ -608,7 +615,7 @@ pub(super) enum Begin {
     Shots(Box<ShotsJob>, String),
 }
 
-/// Something the review loop needs run outside the runner's lock
+/// Something the review needs run outside the runner's lock
 pub(super) enum ReviewCall {
     /// One local round, of the project's kind
     Local {
@@ -621,8 +628,6 @@ pub(super) enum ReviewCall {
     },
     /// A fresh Claude review round
     ClaudeRound(AgentCall),
-    /// The judge's one-shot on a single finding
-    Judge(AgentCall),
     /// A session of the deep round: a reader, a confirmation or a re-check
     Deep(AgentCall),
 }
@@ -652,8 +657,6 @@ pub(super) struct Reviewed {
 pub(super) enum ReviewResult {
     /// A round's raw findings, from the local round or a Claude round
     Findings(Result<Vec<Finding>, String>),
-    /// The judge's verdict on one finding
-    Verdict(Result<Verdict, String>),
     /// The local model sat partly or wholly on the CPU, so the round did not
     /// run, and why
     Spilled(String),

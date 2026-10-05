@@ -1,10 +1,12 @@
-//! The review loop under each kind of local round, and the check at start
+//! The review under each kind of local round, and the check at start
+
+use std::sync::Mutex;
 
 use serde_json::json;
 
-use crate::ports::{Finding, Role, Severity};
+use crate::ports::Checks;
 use crate::runner::report::StepReport;
-use crate::runner::step;
+use crate::runner::{Runner, step};
 use crate::settings::LocalRound;
 use crate::settings::ReviewerName;
 use crate::test::{Answer, Rig, Scripted, ScriptedRound, StandInEndpoint, unreachable_url};
@@ -42,7 +44,6 @@ fn with_the_local_round_off_one_clean_claude_round_reaches_ci() {
             pull_request: 71,
             round: 1,
             held: 0,
-            clean: true,
         })
     );
     let status = rig.ask(&runner, "status", None);
@@ -52,7 +53,7 @@ fn with_the_local_round_off_one_clean_claude_round_reaches_ci() {
 }
 
 #[test]
-fn with_the_local_round_off_a_round_after_a_fix_is_claudes_again() {
+fn with_the_local_round_off_claudes_fix_goes_on_to_ci() {
     let rig = rig_with("[app.dogs.kelpie.review.local]\nkind = \"off\"\n");
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
@@ -61,39 +62,23 @@ fn with_the_local_round_off_a_round_after_a_fix_is_claudes_again() {
     rig.claude.script([
         Scripted::Push("work.txt", "work\n"),
         Scripted::Text("HIGH|src/lib.rs:9|racy|two writers"),
-        Scripted::Text(r#"{"holds": true, "severity": "high", "reason": "it is"}"#),
         Scripted::Push("fixed.txt", "fixed\n"),
-        Scripted::Text("CLEAN"),
     ]);
     step(&runner).unwrap(); // the worker's first turn
     step(&runner).unwrap(); // round 1, claude: one finding
-    step(&runner).unwrap(); // the judge holds it
-    let Some(StepReport::ReviewFindingsSent { clean, .. }) = step(&runner).unwrap() else {
-        panic!("the held finding was not sent to the worker");
+    let Some(StepReport::ReviewFindingsSent { held: 1, .. }) = step(&runner).unwrap() else {
+        panic!("the finding was not sent to the worker");
     };
-    assert!(!clean);
     step(&runner).unwrap(); // the worker's fix turn
     step(&runner).unwrap(); // the fix is pushed
-    assert_eq!(
-        rig.ask(&runner, "status", None)["work_item"]["phase"],
-        json!({
-            "state": "review",
-            "round": 2,
-            "consecutive_clean": 0,
-            "guard_cleared": false,
-            "stage": { "stage": "round" },
-            "last": "claude",
-        }),
-    );
-    step(&runner).unwrap(); // round 2, claude: scripted clean above
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["work_item"]["phase"]["state"], "ci");
-    assert_eq!(status["work_item"]["by_role"]["reviewer"]["calls"], 2);
+    assert_eq!(status["work_item"]["by_role"]["reviewer"]["calls"], 1);
     assert!(rig.reviewer.seen().is_empty(), "no local round ran");
 }
 
 #[test]
-fn the_endpoint_reviewers_findings_reach_the_judge() {
+fn the_endpoint_reviewers_findings_reach_the_worker() {
     let server = StandInEndpoint::start([Answer::Says(
         "MEDIUM|work.txt:1|leftover placeholder text|ships to users",
     )]);
@@ -120,17 +105,9 @@ fn the_endpoint_reviewers_findings_reach_the_judge() {
     assert!(diff.contains("### work.txt\n"), "{diff}");
     assert!(diff.contains("     1 +work\n"), "{diff}");
 
-    rig.claude.script([Scripted::Text(
-        r#"{"holds": false, "severity": "low", "reason": "it is a test file"}"#,
-    )]);
-    step(&runner).unwrap(); // the judge
-    let calls = rig.claude.all_calls();
-    let judge = calls.iter().find(|c| c.role == Role::Judge).unwrap();
-    assert!(
-        judge.prompt.contains("leftover placeholder text"),
-        "{}",
-        judge.prompt
-    );
+    step(&runner).unwrap(); // the finding goes to the worker
+    let text = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
+    assert!(text.contains("leftover placeholder text"), "{text}");
 }
 
 #[test]
@@ -239,94 +216,6 @@ fn with_the_local_round_off_no_command_is_needed() {
     assert!(rig.open().is_ok());
 }
 
-#[test]
-fn past_its_local_rounds_every_round_is_claudes_and_one_clean_one_ends_the_loop() {
-    let rig = Rig::new("koji");
-    rig.edit_settings(|s| {
-        assert!(s.contains("loop_guard = 8\n"), "the example's guard moved");
-        s.replace("loop_guard = 8\n", "loop_guard = 8\nlocal_rounds = 1\n")
-    });
-    let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
-    rig.ask(&runner, "add", Some("7"));
-    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-    rig.reviewer.script([ScriptedRound::Findings(vec![Finding {
-        severity: Severity::Medium,
-        file: "src/lib.rs".into(),
-        line: 3,
-        what: "the flag is misnamed".into(),
-        why: "it reads as its opposite".into(),
-    }])]);
-    let holds = r#"{"holds": true, "severity": "high", "reason": "it is"}"#;
-    rig.claude.script([
-        Scripted::Push("work.txt", "work\n"),
-        Scripted::Text(holds),
-        Scripted::Push("named.txt", "named\n"),
-        Scripted::Text("HIGH|src/lib.rs:9|racy|two writers"),
-        Scripted::Text(holds),
-        Scripted::Push("fixed.txt", "fixed\n"),
-        Scripted::Text("CLEAN"),
-    ]);
-    step(&runner).unwrap(); // the worker's first turn
-    let mut reviewers = Vec::new();
-    for _ in 0..12 {
-        match step(&runner).unwrap() {
-            Some(StepReport::ReviewRound { reviewer, .. }) => reviewers.push(reviewer),
-            // Only a Claude round is left to come back with nothing.
-            Some(StepReport::ReviewFindingsSent { held: 0, .. }) => {
-                reviewers.push(ReviewerName::claude());
-                break;
-            }
-            _ => {}
-        }
-    }
-    let names: Vec<&str> = reviewers.iter().map(ReviewerName::as_str).collect();
-    assert_eq!(names, ["qwen", "claude", "claude"]);
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["work_item"]["phase"]["state"], "ci");
-    assert_eq!(rig.reviewer.seen().len(), 1, "one local round");
-}
-
-#[test]
-fn local_rounds_spent_before_a_no_stay_spent_in_the_next_pass() {
-    let (rig, runner, _) = Rig::parked_set("koji", |rig| {
-        rig.edit_settings(|s| s.replace("loop_guard = 8\n", "loop_guard = 8\nlocal_rounds = 1\n"));
-    });
-    assert_eq!(
-        rig.reviewer.seen().len(),
-        1,
-        "the first pass ran its local round"
-    );
-    rig.ask(&runner, "rule", Some("1 no rename it"));
-    rig.claude.script([
-        Scripted::Push("rename.txt", "renamed\n"),
-        Scripted::Text("CLEAN"),
-    ]);
-    step(&runner).unwrap(); // the noted turn: pushes, enters round 1
-    step(&runner).unwrap(); // round 1, claude: scripted clean above
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["work_item"]["phase"]["state"], "ci");
-    assert_eq!(rig.reviewer.seen().len(), 1, "no second local round");
-}
-
-#[test]
-fn a_local_round_with_no_limit_set_leaves_the_state_file_as_it_was() {
-    let rig = Rig::new("koji");
-    let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
-    rig.ask(&runner, "add", Some("7"));
-    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-    rig.claude.script([
-        Scripted::Push("work.txt", "work\n"),
-        Scripted::Text("CLEAN"),
-    ]);
-    step(&runner).unwrap(); // the worker's first turn
-    step(&runner).unwrap(); // round 1, local: clean by default
-    assert_eq!(rig.reviewer.seen().len(), 1, "the local round ran");
-    let saved = std::fs::read_to_string(rig.paths().state).unwrap();
-    assert!(!saved.contains("local_rounds"), "{saved}");
-}
-
 // What qwen-review.sh itself writes, one line per file, when the GPU box
 // cannot be reached, and when it answers with nothing.
 const UNREACHABLE: &str = "\
@@ -342,7 +231,7 @@ fn qwen() -> ReviewerName {
     ReviewerName::try_from("qwen".to_owned()).unwrap()
 }
 
-fn at_round_one(rig: &Rig) -> std::sync::Mutex<crate::runner::Runner> {
+fn at_round_one(rig: &Rig) -> Mutex<Runner> {
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
@@ -352,17 +241,27 @@ fn at_round_one(rig: &Rig) -> std::sync::Mutex<crate::runner::Runner> {
     runner
 }
 
-fn judge_calls(rig: &Rig) -> usize {
-    let calls = rig.claude.all_calls();
-    calls.iter().filter(|c| c.role == Role::Judge).count()
+// Takes the work item, its review done, through green CI to the merge
+// ruling, and answers it no: the worker's fix starts a fresh pass.
+fn next_pass(rig: &Rig, runner: &Mutex<Runner>, fix: &'static str) {
+    assert_eq!(phase(rig, runner)["state"], "ci");
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+    let Some(StepReport::Ruling { id, .. }) = rig.verdict(runner) else {
+        panic!("no merge ruling");
+    };
+    rig.ask(runner, "rule", Some(&format!("{id} no fix it")));
+    rig.claude.script([Scripted::Push(fix, "fixed\n")]);
+    step(runner).unwrap(); // the noted turn: pushes, and a pass begins
+    assert_eq!(phase(rig, runner)["round"], 1);
 }
 
 #[test]
-fn a_local_round_that_reviewed_nothing_is_retried_once_and_not_judged() {
+fn a_local_round_that_reviewed_nothing_goes_on_to_the_next_reviewer() {
     let rig = Rig::new("koji");
     let runner = at_round_one(&rig);
-    rig.reviewer
-        .script([found(UNREACHABLE), ScriptedRound::Findings(Vec::new())]);
+    rig.reviewer.script([found(UNREACHABLE)]);
+    rig.claude.script([Scripted::Text("CLEAN")]);
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::LocalRoundFailed {
@@ -371,54 +270,43 @@ fn a_local_round_that_reviewed_nothing_is_retried_once_and_not_judged() {
             round: 1,
             reviewer: qwen(),
             unreviewed: vec!["src/a.rs".into(), "src/b.rs".into()],
-            retrying: true,
         })
     );
-    let phase = &rig.ask(&runner, "status", None)["work_item"]["phase"];
-    assert_eq!(phase["round"], 1, "{phase}");
-    assert_eq!(phase["consecutive_clean"], 0, "{phase}");
-    assert_eq!(phase["stage"]["stage"], "round", "{phase}");
-    assert_eq!(judge_calls(&rig), 0);
-
-    // The retry reviewed everything and found nothing: that round is clean.
-    step(&runner).unwrap();
-    assert_eq!(rig.reviewer.seen().len(), 2, "the same reviewer again");
-    let phase = &rig.ask(&runner, "status", None)["work_item"]["phase"];
+    let phase = phase(&rig, &runner);
     assert_eq!(phase["round"], 2, "{phase}");
-    assert_eq!(phase["consecutive_clean"], 1, "{phase}");
+    assert_eq!(phase["ran"], serde_json::json!(["qwen"]), "{phase}");
+    assert_eq!(rig.claude.all_calls().len(), 1, "only the worker's turn");
+
+    step(&runner).unwrap(); // round 2, claude: scripted clean above
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["phase"]["state"], "ci");
+    assert_eq!(rig.reviewer.seen().len(), 1, "qwen ran once");
 }
 
 #[test]
-fn a_local_round_that_fails_twice_leaves_the_loop_to_claude_and_status_says_so() {
+fn a_local_round_that_fails_in_two_passes_is_left_out_of_the_next_and_status_says_so() {
     let rig = Rig::new("koji");
     let runner = at_round_one(&rig);
     rig.reviewer
         .script([found(UNREACHABLE), found(UNREACHABLE)]);
     rig.claude.script([Scripted::Text("CLEAN")]);
-    step(&runner).unwrap(); // fails, retried
+    step(&runner).unwrap(); // qwen fails
+    step(&runner).unwrap(); // claude: clean
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["work_item"].get("local_reviewers_down"), None);
-    assert_eq!(
-        step(&runner).unwrap(), // fails again
-        Some(StepReport::LocalRoundFailed {
-            issue: 7,
-            pull_request: 71,
-            round: 1,
-            reviewer: qwen(),
-            unreviewed: vec!["src/a.rs".into(), "src/b.rs".into()],
-            retrying: false,
-        })
-    );
+
+    next_pass(&rig, &runner, "second.txt");
+    rig.claude.script([Scripted::Text("CLEAN")]);
+    step(&runner).unwrap(); // qwen fails again
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["work_item"]["local_reviewers_down"], json!(["qwen"]));
-    assert_eq!(status["work_item"]["phase"]["state"], "review");
+    step(&runner).unwrap(); // claude: clean
 
-    // Claude is the only reviewer left, so its one clean round ends the loop.
-    step(&runner).unwrap();
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["work_item"]["phase"]["state"], "ci");
+    next_pass(&rig, &runner, "third.txt");
+    rig.claude.script([Scripted::Text("CLEAN")]);
+    step(&runner).unwrap(); // claude, the only reviewer left: clean
+    assert_eq!(phase(&rig, &runner)["state"], "ci");
     assert_eq!(rig.reviewer.seen().len(), 2, "no third local round");
-    assert_eq!(judge_calls(&rig), 0);
 }
 
 #[test]
@@ -445,196 +333,70 @@ fn a_round_with_some_files_unreviewed_keeps_its_real_findings() {
     assert_eq!(status["work_item"].get("local_reviewers_down"), None);
 }
 
-// A round that found something real and left two files unreviewed.
+// A round that found a nit and left two files unreviewed.
 const MIXED: &str = "\
-MEDIUM|src/c.rs:4|leftover debug print|noisy logs
+LOW|src/c.rs:4|leftover debug print|noisy logs
 LOW|src/a.rs:0|not reviewed: curl: (7) Failed to connect to gpu.box port 8080|raw response kept at /tmp/qwen-review/raw/src_a.rs.txt
 LOW|src/b.rs:0|not reviewed: empty response|raw response kept at /tmp/qwen-review/raw/src_b.rs.txt
 ";
 
-const REJECTS: &str = r#"{"holds": false, "severity": "low", "reason": "it is a test file"}"#;
-
-fn phase(rig: &Rig, runner: &std::sync::Mutex<crate::runner::Runner>) -> serde_json::Value {
+fn phase(rig: &Rig, runner: &Mutex<Runner>) -> serde_json::Value {
     rig.ask(runner, "status", None)["work_item"]["phase"].clone()
 }
 
-#[test]
-fn a_mixed_round_whose_findings_the_judge_rejects_is_not_clean_and_no_round_after_it_is() {
-    let rig = Rig::new("koji");
-    let runner = at_round_one(&rig);
-    rig.reviewer.script([found(MIXED)]);
-    rig.claude
-        .script([Scripted::Text(REJECTS), Scripted::Text("CLEAN")]);
-    step(&runner).unwrap(); // round 1, local: one finding, two files unreviewed
-    step(&runner).unwrap(); // the judge rejects it
-    assert_eq!(
-        step(&runner).unwrap(),
-        Some(StepReport::ReviewFindingsSent {
-            issue: 7,
-            pull_request: 71,
-            round: 1,
-            held: 0,
-            clean: false,
-        })
-    );
-    assert_eq!(phase(&rig, &runner)["round"], 2);
-    assert_eq!(phase(&rig, &runner)["consecutive_clean"], 0);
+// One pass in which qwen's round is `round` and claude's is clean, ending at CI.
+fn pass(rig: &Rig, runner: &Mutex<Runner>, round: ScriptedRound) {
+    rig.reviewer.script([round]);
+    rig.claude.script([Scripted::Text("CLEAN")]);
+    for _ in 0..4 {
+        if phase(rig, runner)["state"] != "review" {
+            return;
+        }
+        step(runner).unwrap();
+    }
+    panic!("the pass never reached CI: {}", phase(rig, runner));
+}
 
-    // Claude's round is clean, but two files still wait on a local review.
-    assert_eq!(
-        step(&runner).unwrap(),
-        Some(StepReport::ReviewFindingsSent {
-            issue: 7,
-            pull_request: 71,
-            round: 2,
-            held: 0,
-            clean: false,
-        })
-    );
-    let phase = phase(&rig, &runner);
-    assert_eq!(phase["state"], "review", "{phase}");
-    assert_eq!(phase["consecutive_clean"], 0, "{phase}");
+fn down(rig: &Rig, runner: &Mutex<Runner>) -> serde_json::Value {
+    let status = rig.ask(runner, "status", None);
+    status["work_item"]["local_reviewers_down"].clone()
 }
 
 #[test]
-fn a_later_local_round_that_reviews_the_files_brings_clean_credit_back() {
+fn files_left_unreviewed_again_count_against_the_reviewer_until_it_is_left_out() {
     let rig = Rig::new("koji");
     let runner = at_round_one(&rig);
-    rig.reviewer
-        .script([found(MIXED), ScriptedRound::Findings(Vec::new())]);
-    rig.claude.script([
-        Scripted::Text(REJECTS),
-        Scripted::Text("CLEAN"),
-        Scripted::Text("CLEAN"),
-    ]);
-    step(&runner).unwrap(); // round 1, local: one finding, two files unreviewed
-    step(&runner).unwrap(); // the judge rejects it
-    step(&runner).unwrap(); // round 1 is not clean
-    step(&runner).unwrap(); // round 2, claude: clean, but earns nothing
-    assert_eq!(phase(&rig, &runner)["consecutive_clean"], 0);
-
-    // Round 3 reviews everything and finds nothing.
-    assert_eq!(
-        step(&runner).unwrap(),
-        Some(StepReport::ReviewFindingsSent {
-            issue: 7,
-            pull_request: 71,
-            round: 3,
-            held: 0,
-            clean: true,
-        })
-    );
-    let phase = phase(&rig, &runner);
-    assert_eq!(
-        phase["state"], "review",
-        "claude's round before it earned nothing"
-    );
-    assert_eq!(phase["consecutive_clean"], 1, "{phase}");
-
-    // Claude's next clean round is the second, from a different reviewer.
-    step(&runner).unwrap();
-    assert_eq!(
-        rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
-        "ci"
-    );
-}
-
-#[test]
-fn files_left_unreviewed_again_count_against_the_reviewer_until_the_loop_goes_on_without_it() {
-    let rig = Rig::new("koji");
-    let runner = at_round_one(&rig);
-    rig.reviewer
-        .script([found(MIXED), found(MIXED), found(MIXED)]);
-    rig.claude.script([
-        Scripted::Text(REJECTS),
-        Scripted::Text("CLEAN"), // round 2
-        Scripted::Text(REJECTS),
-        Scripted::Text("CLEAN"), // round 4
-        Scripted::Text(REJECTS),
-        Scripted::Text("CLEAN"), // round 6, once the local reviewer is down
-    ]);
-    let local_round = |down: bool| {
-        step(&runner).unwrap(); // the local round
-        step(&runner).unwrap(); // the judge rejects its finding
-        step(&runner).unwrap(); // the round is not clean
-        let status = rig.ask(&runner, "status", None);
-        assert_eq!(
-            status["work_item"].get("local_reviewers_down").is_some(),
-            down,
-            "{status}"
-        );
-    };
-    local_round(false); // round 1: first time, nothing yet counts
-    step(&runner).unwrap(); // round 2, claude
-    local_round(false); // round 3: the same files again, one failure
-    step(&runner).unwrap(); // round 4, claude
-    local_round(true); // round 5: again, a second in a row
-    assert_eq!(
-        rig.ask(&runner, "status", None)["work_item"]["local_reviewers_down"],
-        json!(["qwen"])
-    );
-
-    // Claude is all that is left: its round owes no local review, and as the
-    // only reviewer one clean round ends the loop.
-    step(&runner).unwrap();
-    assert_eq!(
-        rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
-        "ci"
-    );
-    assert_eq!(rig.reviewer.seen().len(), 3, "no fourth local round");
+    pass(&rig, &runner, found(MIXED)); // first time, nothing yet counts
+    assert_eq!(down(&rig, &runner), json!(null));
+    next_pass(&rig, &runner, "second.txt");
+    pass(&rig, &runner, found(MIXED)); // the same files again, one failure
+    assert_eq!(down(&rig, &runner), json!(null));
+    next_pass(&rig, &runner, "third.txt");
+    pass(&rig, &runner, found(MIXED)); // again, a second in a row
+    assert_eq!(down(&rig, &runner), json!(["qwen"]));
+    assert_eq!(rig.reviewer.seen().len(), 3);
 }
 
 #[test]
 fn a_clean_local_round_clears_that_reviewers_failures() {
     let rig = Rig::new("koji");
     let runner = at_round_one(&rig);
-    rig.reviewer.script([
-        found(UNREACHABLE),
-        ScriptedRound::Findings(Vec::new()),
-        found(UNREACHABLE),
-    ]);
-    let holds = r#"{"holds": true, "severity": "high", "reason": "it is"}"#;
-    rig.claude.script([
-        Scripted::Text("HIGH|work.txt:1|wrong|it is"),
-        Scripted::Text(holds),
-        Scripted::Push("fixed.txt", "fixed\n"),
-    ]);
-    step(&runner).unwrap(); // round 1, local: nothing reviewed, retried
-    step(&runner).unwrap(); // the retry reviews everything: clean
-    step(&runner).unwrap(); // round 2, claude: one finding
-    step(&runner).unwrap(); // the judge holds it
-    step(&runner).unwrap(); // it goes to the worker
-    step(&runner).unwrap(); // the worker's fix turn
-    step(&runner).unwrap(); // the fix is pushed
-
-    // The earlier failure was cleared, so this is a first failure, retried,
-    // and not a second that would leave the reviewer down.
-    assert_eq!(
-        step(&runner).unwrap(),
-        Some(StepReport::LocalRoundFailed {
-            issue: 7,
-            pull_request: 71,
-            round: 3,
-            reviewer: qwen(),
-            unreviewed: vec!["src/a.rs".into(), "src/b.rs".into()],
-            retrying: true,
-        })
-    );
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["work_item"].get("local_reviewers_down"), None);
+    pass(&rig, &runner, found(UNREACHABLE)); // a first failure
+    next_pass(&rig, &runner, "second.txt");
+    pass(&rig, &runner, ScriptedRound::Findings(Vec::new())); // clean: cleared
+    next_pass(&rig, &runner, "third.txt");
+    pass(&rig, &runner, found(UNREACHABLE)); // a first failure again
+    assert_eq!(down(&rig, &runner), json!(null));
 }
 
 #[test]
-fn a_retry_that_leaves_the_failed_rounds_files_unreviewed_again_takes_its_reviewer_down() {
+fn a_round_that_leaves_a_failed_rounds_files_unreviewed_again_takes_its_reviewer_down() {
     let rig = Rig::new("koji");
     let runner = at_round_one(&rig);
-    // Nothing reviewed, then a retry that finds something but misses a.rs and
-    // b.rs again.
-    rig.reviewer.script([found(UNREACHABLE), found(MIXED)]);
-    step(&runner).unwrap(); // round 1: nothing reviewed, retried
-    step(&runner).unwrap(); // the retry: one finding, the same files unreviewed
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["work_item"]["local_reviewers_down"], json!(["qwen"]));
+    pass(&rig, &runner, found(UNREACHABLE)); // nothing reviewed
+    next_pass(&rig, &runner, "second.txt");
+    pass(&rig, &runner, found(MIXED)); // a nit, and a.rs and b.rs missed again
+    assert_eq!(down(&rig, &runner), json!(["qwen"]));
 }
 
 #[test]
@@ -656,6 +418,6 @@ fn a_file_skipped_for_its_size_stays_a_finding_and_is_not_unreviewed() {
         })
     );
     let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["work_item"]["phase"]["stage"]["stage"], "judging");
+    assert_eq!(status["work_item"]["phase"]["stage"]["stage"], "found");
     assert_eq!(status["work_item"].get("local_reviewers_down"), None);
 }

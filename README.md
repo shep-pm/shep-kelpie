@@ -159,7 +159,7 @@ For npm, that is `registry.npmjs.org`. A change reaches a running runner at its 
 shep kelpie start
 ```
 
-Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria. The runner gives it to a worker, which opens a draft pull request. Then the review loop runs, then CI, then on a repo with CodeRabbit on, CodeRabbit. Last, you get a ruling before the merge. `shep kelpie status` shows every project. A worker whose first turn ends with no pull request and no question is sent back once, and asks you for a ruling if it stops short again.
+Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria. The runner gives it to a worker, which opens a draft pull request. Then the review runs, each listed reviewer once, then CI, then on a repo with CodeRabbit on, CodeRabbit. Last, you get a ruling before the merge. `shep kelpie status` shows every project. A worker whose first turn ends with no pull request and no question is sent back once, and asks you for a ruling if it stops short again.
 
 What decides whether, and when, the first issue starts:
 
@@ -177,6 +177,7 @@ What decides whether, and when, the first issue starts:
   ```
 
 - `coderabbit.enabled` is the switch for every pull request reviewer, cubic and Codex too. A private repo has it off, so a private repo that wants cubic or Codex turns it on
+- Every thread a pull request reviewer leaves open goes to the worker as a finding, and shep-kelpie resolves those threads once the worker's fix moves the head. If the forge refuses three steps in a row, the fix goes on to CI with them open and the next review sends them again
 
 `shep kelpie add <issue>` opens a work item for an issue at once, without the label, ahead of the board's order. It queues nothing: while `max_items` work items are open, `add <issue>` is refused.
 
@@ -311,18 +312,18 @@ A step that runs a skill starts its prompt with the skill's slash command, such 
 
 A skill that can't load runs shep-kelpie's own prompt instead. The runner logs why, and `status` shows it under `skills`.
 
-### The review loop
+### The review
 
-Each pull request goes through a review loop before CI. A project lists its reviewers in `review.reviewers`, in the order the loop runs them, and shep-kelpie's own settings define each one by name in `[kelpie.local_reviewers.<name>]`:
+Each pull request goes through a review before CI. A project lists its reviewers in `review.reviewers`, in the order the review runs them, and shep-kelpie's own settings define each one by name in `[kelpie.local_reviewers.<name>]`:
 
 - `kind = "command"`: a command of your own that keeps the contract below
 - `kind = "endpoint"`: shep-kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server
 - `kind = "claude"`: a fresh Claude session on its own `model` and `effort`
 - `kind = "session"`: a fresh session on the agent its `agent` names (see Agents below)
 
-`claude` is always defined: the project's own Claude round on its reviewer's agent, `models.reviewer` unless the project names one. The loop ends once two rounds in a row, from two different reviewers, find nothing above a nit, and those nits get fixed with no further round. Where only one reviewer can run, one clean round ends it.
+`claude` is always defined: the project's own Claude round on its reviewer's agent, `models.reviewer` unless the project names one. Each listed reviewer runs once, in order, and a list changed mid-pass runs whichever listed reviewers the pass has not. A reviewer whose call fails three times in a row is passed over for the rest of the pass, and `status` lists it under `reviewers_skipped`. One that finds anything above a nit sends the worker all of its findings, nits included and at its own severity, for one fix turn, and the next reviewer reads the fix. A round of nits, or of nothing, goes straight to the next reviewer. After the last one the pull request goes to CI. There is no judge and no second pass: whatever the last fix leaves is what CI and the merge see. A pass starts again from the top only on new code the review has not seen, such as the fix a merge ruling's `no` asks for, a change you accept that someone else pushed, or a rework. Where no listed reviewer can run, the project's own Claude round runs once.
 
-`deep` is always defined too, and it is a new project's review: one deep round instead of a loop of shallow ones. A fresh session on `models.deep_reviewer` (Opus 5.5 at high effort unless the project says otherwise) reads the whole pull request for defects, meaning a trigger and an effect that a failing test could be written from, and not for style or naming. A second fresh session on the same model is shown what the first found and asked only for what it missed. Each HIGH they hold is then confirmed by a session that may run commands in the worktree, which writes a failing test for it, and a HIGH it cannot confirm goes on marked unconfirmed. One worker turn fixes everything held, both readers' lists with the tests. One re-check then reads only the fix commits against the findings and runs each failing test, since a fixer's word that it fixed something is not evidence. A finding it finds unfixed goes back to the worker once, and after that to a ruling, whose yes sends the worker it once more. A fix that passes ends the loop. The local reviewers' rounds and CodeRabbit's stay as they are, and `deep` ends the loop whenever it is listed, so `reviewers = ["qwen", "claude", "opus"]` is still the loop of alternating rounds for a project that wants it. Its time is the `deep_round` timing phase.
+`deep` is always defined too, and it is a new project's review: one deep round instead of a loop of shallow ones. A fresh session on `models.deep_reviewer` (Opus 5.5 at high effort unless the project says otherwise) reads the whole pull request for defects, meaning a trigger and an effect that a failing test could be written from, and not for style or naming. A second fresh session on the same model is shown what the first found and asked only for what it missed. Each HIGH they hold is then confirmed by a session that may run commands in the worktree, which writes a failing test for it, and a HIGH it cannot confirm goes on marked unconfirmed. One worker turn fixes everything held, both readers' lists with the tests. One re-check then reads only the fix commits against the findings and runs each failing test, since a fixer's word that it fixed something is not evidence. A finding it finds unfixed goes back to the worker once, and after that to a ruling, whose yes sends the worker it once more. A fix that passes goes on to the next reviewer in the list, or to CI when `deep` is last. `deep` is one entry in the list like any other. Its time is the `deep_round` timing phase.
 
 A local model alone:
 
@@ -357,9 +358,9 @@ effort = "high"
 paths = ["src/auth/**", "migrations/**"]
 ```
 
-`paths` limits a reviewer to pull requests that change a file under one of its globs, and the loop skips it elsewhere. Every round's prompt carries the issue's acceptance criteria: the section under an "Acceptance criteria" heading, or the whole body without one.
+`paths` limits a reviewer to pull requests that change a file under one of its globs, and the review skips it elsewhere. Every round's prompt carries the issue's acceptance criteria: the section under an "Acceptance criteria" heading, or the whole body without one.
 
-A project that lists none and sets no `review.local` runs `~/.claude/scripts/qwen-review.sh`, an optional local review script, when it exists, and then the deep round. One that sets `review.local` keeps the older loop of that round and `claude`. `review.local` is the older form: it takes the same keys as a definition, or `kind = "off"`, and the runner says so at start. `review.local_rounds` caps the rounds from local reviewers per work item. Once they are spent, only Claude reviewers run.
+A project that lists none and sets no `review.local` runs `~/.claude/scripts/qwen-review.sh`, an optional local review script, when it exists, and then the deep round. One that sets `review.local` runs that round and then `claude`. `review.local` is the older form: it takes the same keys as a definition, or `kind = "off"`, and the runner says so at start.
 
 A missing command or an endpoint that doesn't answer stops the runner at start.
 
@@ -372,7 +373,7 @@ A command is run as `<command> --dir <worktree> --round <n> --diff <base>`, with
 - `TMPDIR`: the folder the GPU lock lives under
 - `KELPIE_REVIEW_CRITERIA`: a file holding the issue's acceptance criteria
 
-It writes `round-<n>.txt` in that folder, one finding per line as `SEVERITY|path:line|what|why` with `HIGH`, `MEDIUM` or `LOW`, and then an empty `round-<n>.txt.done`. Kelpie reads nothing without the marker, and nothing from stdout. A nonzero exit fails the round. A command that writes `LOW|<path>:0|not reviewed: <n> lines exceeds the chunk limit|...` is run again with `--files <hunk file>` in place of `--diff`, on that file alone. If that run fails, its file is left unreviewed, as below, with the failure as the reason; only when kelpie cannot cut the hunk with `git diff` does the placeholder stay as the finding. Any other `LOW|<path>:0|not reviewed: <why>|...` line, as the script writes when the model cannot be reached, is a file left unreviewed and not a finding. A round with nothing but those lines reviewed nothing: it is not judged and counts as neither clean nor a reviewer's turn, and it is run once more. A second such round in a row leaves the loop to the other reviewers for the rest of the work item, and `status` lists the reviewer under `local_reviewers_down`. Another local reviewer, on another command or server, still runs. A round with real findings and some `not reviewed:` lines keeps its findings, but neither it nor any round after it counts as clean until a later local round leaves no file unreviewed.
+It writes `round-<n>.txt` in that folder, one finding per line as `SEVERITY|path:line|what|why` with `HIGH`, `MEDIUM` or `LOW`, and then an empty `round-<n>.txt.done`. Kelpie reads nothing without the marker, and nothing from stdout. A nonzero exit fails the round. A command that writes `LOW|<path>:0|not reviewed: <n> lines exceeds the chunk limit|...` is run again with `--files <hunk file>` in place of `--diff`, on that file alone. If that run fails, its file is left unreviewed, as below, with the failure as the reason; only when kelpie cannot cut the hunk with `git diff` does the placeholder stay as the finding. Any other `LOW|<path>:0|not reviewed: <why>|...` line, as the script writes when the model cannot be reached, is a file left unreviewed and not a finding. A round with nothing but those lines reviewed nothing, and the review goes on to the next reviewer. A round that leaves the same files unreviewed as the same reviewer's last round counts against it too, and one that leaves none clears its count. A second such round in a row, which takes two passes, leaves the reviewer out of the review for the rest of the work item, and `status` lists it under `local_reviewers_down`. Another local reviewer, on another command or server, still runs. A round with real findings and some `not reviewed:` lines keeps its findings.
 
 `lease` names the lock kelpie holds around each round of a command or an endpoint. `gpu` is this machine's GPU lock, the one the qwen scripts take. Any other name is a lock of its own, so a reviewer on another machine's GPU never waits on this one's. Leave it off for a command that takes the lock itself, as `qwen-review.sh` does. `gpu_lease = true` is the older spelling of `lease = "gpu"`.
 
@@ -395,7 +396,7 @@ effort = "high"
 
 # the project's table
 [app.dogs.kelpie.agents]
-judge = "opus-high"
+reviewer = "opus-high"
 ```
 
 A role left out keeps its `models` entry, so a project that names none runs as before. A local reviewer of kind `session` names an agent from the same list. An agent nobody defines stops the runner at start, naming it.

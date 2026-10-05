@@ -145,13 +145,11 @@ mod tests {
             .replace("# routes =", "routes =")
             .replace("# domains =", "domains =")
             .replace("# private_names =", "private_names =")
-            .replace("# local_rounds =", "local_rounds =")
             .replace("# rounds =", "rounds =")
             .replace("# reviewers = [\"qwen\", \"claude\", \"opus\"]", "reviewers = [\"qwen\"]")
             .replace("# [app.dogs.kelpie.agents]", "[app.dogs.kelpie.agents]")
             .replace("# worker = \"opus-high\"", "worker = \"opus-high\"")
             .replace("# reviewer = \"opus-high\"", "reviewer = \"opus-high\"")
-            .replace("# judge = \"opus-high\"", "judge = \"opus-high\"")
             .replace("# deep_reviewer = \"opus-high\"", "deep_reviewer = \"opus-high\"")
             .replace("# [app.dogs.kelpie.models.labels]", "[app.dogs.kelpie.models.labels]")
             .replace("# opus = \"claude-opus-5-5\"", "opus = \"claude-opus-5-5\"")
@@ -200,7 +198,7 @@ mod tests {
             .collect();
         assert_eq!(sheep, set);
         for key in [
-            "models.judge.effort",
+            "models.deep_reviewer.effort",
             "worker.build_env",
             "preview.enabled",
             "preview.routes",

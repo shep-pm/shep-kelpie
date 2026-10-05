@@ -303,12 +303,6 @@ pub enum RulingKind {
     /// Someone closed the pull request without merging it. A yes drops the
     /// work item and keeps its branch on the forge.
     Closed,
-    /// The qwen-review loop passed its round guard without settling. A yes
-    /// lets it past the guard for the rest of this work item.
-    ReviewGuard {
-        /// The review, at the round the guard stopped it on
-        review: Review,
-    },
     /// The local model sat partly or wholly on the CPU, so a review round was
     /// not run. A yes runs the same round again, once the model is back on
     /// the GPU.
@@ -341,14 +335,14 @@ pub enum RulingKind {
         /// The fix turn a yes starts
         prompt: String,
     },
-    /// CodeRabbit's rounds reached their cap with findings the judge held.
-    /// A yes sends the worker those findings and lifts the cap for the rest
-    /// of this work item.
+    /// CodeRabbit's rounds reached their cap with threads still open. A yes
+    /// sends the worker those threads and lifts the cap for the rest of this
+    /// work item.
     #[serde(rename = "coderabbit-cap")]
     CodeRabbitCap {
         /// Rounds run
         rounds: u32,
-        /// Findings the judge held
+        /// The threads still open
         held: u32,
         /// The fix turn a yes starts
         prompt: String,
@@ -370,7 +364,7 @@ pub enum RulingKind {
     /// A merged pull request left confirmed findings unfixed. A yes files
     /// each as an issue on the project, and a no drops them.
     FollowUp {
-        /// The findings, at the judge's severity
+        /// The findings, at their reviewer's severity
         findings: Vec<Finding>,
         /// Why the forge would not take them, when it has refused for hours
         /// and a yes tries again. None when the ruling comes before filing.
@@ -381,7 +375,7 @@ pub enum RulingKind {
     Question {
         /// The question, verbatim from the worker's question block
         asked: String,
-        /// Where the qwen-review loop stood when the question interrupted
+        /// Where the review stood when the question interrupted
         /// it, so the answer resumes the right place instead of the
         /// ordinary rule (a known pull request goes straight to CI)
         resume: Resume,
@@ -429,7 +423,7 @@ pub enum RulingKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Fix {
-    /// A qwen-review round: the review, still fixing it
+    /// A review round: the review, still fixing it
     Review(Review),
     /// A CodeRabbit round
     #[serde(rename = "coderabbit")]
@@ -441,7 +435,7 @@ pub enum Fix {
     },
 }
 
-/// Where the qwen-review loop stood when a worker's question interrupted
+/// Where the review stood when a worker's question interrupted
 /// it
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -449,10 +443,10 @@ pub enum Fix {
 pub enum Resume {
     /// No pull request existed yet; answering it changes nothing
     Nothing,
-    /// A pull request existed, but the loop had not run its first round;
+    /// A pull request existed, but the review had not run its first round;
     /// once answered, start it
     ReviewFirst,
-    /// The loop had already reached this round and stage; once answered,
+    /// The review had already reached this round and stage; once answered,
     /// resume exactly there
     Review(Review),
     /// A CodeRabbit round's fix turn from `head`; once answered, the fix
@@ -483,7 +477,7 @@ pub struct LeaseHeld {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Resource {
-    /// The GPU the qwen-review loop runs on
+    /// The GPU local review rounds run on
     Gpu,
     /// CodeRabbit's review window
     Coderabbit,

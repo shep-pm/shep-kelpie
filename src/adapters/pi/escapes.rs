@@ -170,7 +170,7 @@ fn pi_answers_through_the_forwarder_with_no_model_host_in_its_sandbox() {
         )
         .pi();
     let session = id(WORKER_ID);
-    let mut call = world.call(server.url(), Role::Judge, Session::New(session.clone()));
+    let mut call = world.call(server.url(), Role::Reviewer, Session::New(session.clone()));
     call.prompt = "Reply with the single word ok.".into();
     pi.prepare(&call).unwrap();
     let reply = pi.run(&call).unwrap();

@@ -5,13 +5,12 @@ use std::sync::{Arc, Mutex};
 use super::{DONE_SETTLE, HEARD_WAIT};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
-use crate::ports::{Checks, Finding, Role, Severity, Timestamp};
+use crate::ports::{Checks, Finding, Severity, Timestamp};
 use crate::review_bot::{Activity, Bot, Comment, Login, Profile, Reading, Review, Status, Thread};
 use crate::runner::coderabbit::tests::now;
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{Rig, Scripted, Told};
 
-const HOLDS: &str = r#"{"holds": true, "severity": "medium", "reason": "real"}"#;
 const LABEL: &str = "stand-in please";
 const LOGIN: &str = "stand-in[bot]";
 
@@ -137,7 +136,7 @@ fn read_as_stand_in(rig: &Rig) {
     assert!(logins.iter().all(|l| l == LOGIN), "{logins:?}");
 }
 
-// Pull request 71 with the stand-in on, the qwen-review loop settled, green
+// Pull request 71 with the stand-in on, the review done, green
 // CI, the draft marked ready, and the stand-in summoned.
 fn summoned(project: &str) -> (Rig, Mutex<Runner>, String) {
     let rig = Rig::new(project);
@@ -169,7 +168,7 @@ fn summoned(project: &str) -> (Rig, Mutex<Runner>, String) {
 }
 
 #[test]
-fn a_stand_in_bot_runs_a_whole_round_through_the_judge_to_the_worker() {
+fn a_stand_in_bot_runs_a_whole_round_through_to_the_worker() {
     let (rig, runner, head) = summoned("shep");
     let summon = now(&rig);
     let thread = Thread {
@@ -203,28 +202,22 @@ fn a_stand_in_bot_runs_a_whole_round_through_the_judge_to_the_worker() {
             .contains(&Told::Window(WindowFact::Summoned, summon))
     );
 
-    rig.claude.script([Scripted::Text(HOLDS)]);
-    step(&runner).unwrap();
-    let calls = rig.claude.all_calls();
-    let judged = calls.iter().rfind(|c| c.role == Role::Judge).unwrap();
-    assert!(
-        judged.prompt.contains(
-            "severity: HIGH\nlocation: work.txt:1\nwhat: Close the file.\nwhy: It leaks a handle."
-        ),
-        "{}",
-        judged.prompt
-    );
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitJudged { held: 1, .. })
+        Some(StepReport::CodeRabbitSent { held: 1, .. })
     ));
+    let file = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
+    assert!(
+        file.contains("HIGH|work.txt:1|Close the file.|It leaks a handle."),
+        "{file}"
+    );
 
     rig.claude.script([Scripted::Push("work.txt", "closed\n")]);
     step(&runner).unwrap();
     let fix = rig.claude.calls().pop().unwrap();
     assert!(
         fix.prompt
-            .starts_with("Stand-in round 1 on your pull request #71 left 1 finding(s) that hold"),
+            .starts_with("Stand-in round 1 on your pull request #71 left 1 open thread(s)"),
         "{}",
         fix.prompt
     );

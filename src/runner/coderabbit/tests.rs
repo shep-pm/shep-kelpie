@@ -7,23 +7,21 @@ use serde_json::json;
 use super::{ANSWER_WAIT, HEARD_WAIT, LABEL, REVIEW_WAIT};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
-use crate::ports::{AgentError, Checks, Cost, Role};
+use crate::ports::{AgentError, Checks};
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::test::{Rig, Scripted, Told, git};
 
 mod again;
 mod budget;
 mod full;
-
-const HOLDS: &str = r#"{"holds": true, "severity": "medium", "reason": "real"}"#;
-const REJECTED: &str = r#"{"holds": false, "severity": "low", "reason": "not so"}"#;
+mod threads;
 
 fn cr() -> LeaseKind {
     LeaseKind::coderabbit()
 }
 
 // A running project with CodeRabbit on, whose worker opened pull request
-// 71 and whose qwen-review loop settled. CI has not reported.
+// 71 and whose review is done. CI has not reported.
 pub(in crate::runner) fn reviewed_by_qwen(project: &str) -> (Rig, Mutex<Runner>, String) {
     let rig = Rig::new(project);
     rig.coderabbit_on();
@@ -313,7 +311,7 @@ fn a_rework_on_a_ready_pull_request_leaves_it_ready_and_summons_at_once() {
     let (rig, runner, head) = summoned("shep");
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "Name the flag."),
-        Some(StepReport::CodeRabbitJudged { round: 1, .. })
+        Some(StepReport::CodeRabbitSent { round: 1, .. })
     ));
     fixed(&rig, &runner, "flag.txt");
     assert_eq!(rig.forge.readied(), [71], "marked once, before round one");
@@ -416,7 +414,7 @@ fn a_summon_nobody_answers_is_counted_spent_and_then_asked_about() {
 }
 
 #[test]
-fn the_judge_reads_every_open_thread_rejected_ones_are_resolved_and_held_ones_go_to_the_worker() {
+fn every_open_thread_goes_to_the_worker_and_is_resolved_once_its_fix_moves_the_head() {
     let (rig, runner, head) = summoned("shep");
     rig.forge.coderabbit.review(
         71,
@@ -434,50 +432,34 @@ fn the_judge_reads_every_open_thread_rejected_ones_are_resolved_and_held_ones_go
             open_threads: 2
         })
     );
-    rig.claude
-        .script([Scripted::Text(HOLDS), Scripted::Text(REJECTED)]);
-    step(&runner).unwrap();
-    step(&runner).unwrap();
-    let judged: Vec<_> = rig
-        .claude
-        .all_calls()
-        .into_iter()
-        .filter(|c| c.role == Role::Judge)
-        .collect();
-    assert_eq!(judged.len(), 2);
-    assert!(judged[0].prompt.contains("what: Name the flag."));
-    assert!(judged[1].prompt.contains("what: Guard the index."));
-
     assert_eq!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitJudged {
+        Some(StepReport::CodeRabbitSent {
             issue: 7,
             pull_request: 71,
             round: 1,
-            held: 1,
-            resolved: 1
+            held: 2,
         })
     );
-    assert_eq!(rig.forge.coderabbit.resolved(), ["PRRT_71_1"]);
+    assert!(
+        rig.forge.coderabbit.resolved().is_empty(),
+        "nothing is resolved before the fix"
+    );
 
     rig.claude.script([Scripted::Push("flag.txt", "named\n")]);
     step(&runner).unwrap();
     let fix = rig.claude.calls().pop().unwrap();
     assert!(
         fix.prompt
-            .starts_with("CodeRabbit round 1 on your pull request #71 left 1 finding(s) that hold"),
+            .starts_with("CodeRabbit round 1 on your pull request #71 left 2 open thread(s)"),
         "{}",
         fix.prompt
     );
     let file = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
     assert!(file.contains("Name the flag."), "{file}");
-    assert!(
-        !file.contains("Guard the index."),
-        "the worker never sees it"
-    );
+    assert!(file.contains("Guard the index."), "{file}");
 
-    // The fix goes through CI, then round two, whose review CodeRabbit
-    // wrote after seeing the fix and resolving its own thread.
+    // The fix resolves both threads and goes through CI, then round two.
     let fixed = rig.forge.head_of("kelpie/7").unwrap();
     assert_eq!(
         step(&runner).unwrap(),
@@ -488,6 +470,7 @@ fn the_judge_reads_every_open_thread_rejected_ones_are_resolved_and_held_ones_go
             head: Some(fixed.clone()),
         })
     );
+    assert_eq!(rig.forge.coderabbit.resolved(), ["PRRT_71_0", "PRRT_71_1"]);
     assert_eq!(step(&runner).unwrap(), None, "CI on the fix is pending");
     assert_eq!(labels(&rig), [on(), off()]);
     rig.forge.set_checks(&fixed, Checks::Passed);
@@ -495,7 +478,6 @@ fn the_judge_reads_every_open_thread_rejected_ones_are_resolved_and_held_ones_go
         rig.verdict(&runner),
         Some(StepReport::Summoned { .. })
     ));
-    rig.forge.coderabbit.settle("PRRT_71_0");
     rig.forge.coderabbit.review(71, &fixed, now(&rig) + 60, &[]);
     rig.clock.advance(60);
     assert_eq!(
@@ -509,25 +491,7 @@ fn the_judge_reads_every_open_thread_rejected_ones_are_resolved_and_held_ones_go
     assert_eq!(labels(&rig), [on(), off(), on(), off()]);
 }
 
-#[test]
-fn a_thread_the_judge_holds_nothing_on_leaves_coderabbit_satisfied() {
-    let (rig, runner, head) = summoned("rotom");
-    rig.forge
-        .coderabbit
-        .review(71, &head, now(&rig) + 60, &["Nothing real."]);
-    rig.clock.advance(60);
-    step(&runner).unwrap();
-    rig.claude.script([Scripted::Text(REJECTED)]);
-    step(&runner).unwrap();
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSatisfied { rounds: 1, .. })
-    ));
-    assert_eq!(rig.forge.coderabbit.resolved(), ["PRRT_71_0"]);
-    assert_eq!(rig.claude.calls().len(), 1, "the worker took no turn");
-}
-
-// Round one's fix, CI, and round two, each holding a finding.
+// A review of `head` with one open thread, which goes to the worker.
 pub(in crate::runner) fn hold_a_finding(
     rig: &Rig,
     runner: &Mutex<Runner>,
@@ -538,8 +502,6 @@ pub(in crate::runner) fn hold_a_finding(
         .coderabbit
         .review(71, head, now(rig) + 60, &[title]);
     rig.clock.advance(60);
-    step(runner).unwrap();
-    rig.claude.script([Scripted::Text(HOLDS)]);
     step(runner).unwrap();
     step(runner).unwrap()
 }
@@ -566,7 +528,7 @@ fn a_fix_turn_that_pushes_nothing_parks_instead_of_opening_round_two() {
     let (rig, runner, head) = summoned("shep");
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "Name the flag."),
-        Some(StepReport::CodeRabbitJudged { round: 1, .. })
+        Some(StepReport::CodeRabbitSent { round: 1, .. })
     ));
     rig.claude
         .script([Scripted::Say("I can't push from this sandbox.")]);
@@ -675,7 +637,7 @@ fn a_question_during_a_fix_turn_resumes_that_round() {
     assert_eq!(
         rig.reviewer.seen().len(),
         rounds,
-        "the qwen-review loop never restarted"
+        "the review never restarted"
     );
 }
 
@@ -685,7 +647,7 @@ fn a_fix_past_the_cap_that_pushes_nothing_still_parks() {
     let (rig, runner, head) = summoned("rotom");
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "First."),
-        Some(StepReport::CodeRabbitJudged { round: 1, .. })
+        Some(StepReport::CodeRabbitSent { round: 1, .. })
     ));
     let head = fixed(&rig, &runner, "one.txt");
     rig.forge.coderabbit.settle("PRRT_71_0");
@@ -725,7 +687,7 @@ fn the_cap_leaves_generated_files_out_and_parks_the_worker_with_findings_open() 
     git(&worktree, &["push", "--quiet", "origin", "HEAD"]);
     let head = rig.forge.head_of("kelpie/7").unwrap();
     rig.forge.set_checks(&head, Checks::Passed);
-    // Not the worker's push, so it waits on a yes and a clean review loop.
+    // Not the worker's push, so it waits on a yes and a pass of the review.
     let Some(StepReport::Ruling { id, .. }) = step(&runner).unwrap() else {
         panic!("the lockfile commit did not park the worker");
     };
@@ -744,7 +706,7 @@ fn the_cap_leaves_generated_files_out_and_parks_the_worker_with_findings_open() 
 
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "First."),
-        Some(StepReport::CodeRabbitJudged { round: 1, .. })
+        Some(StepReport::CodeRabbitSent { round: 1, .. })
     ));
     // Two changed lines by round two: ceil(2 / 2) + 1 = 2 rounds.
     let head = fixed(&rig, &runner, "one.txt");
@@ -756,8 +718,8 @@ fn the_cap_leaves_generated_files_out_and_parks_the_worker_with_findings_open() 
     };
     assert!(
         question.starts_with(
-            "CodeRabbit has run 2 rounds on pull request #71, its cap, and the judge \
-             still holds 1 of its findings."
+            "CodeRabbit has run 2 rounds on pull request #71, its cap, and 1 of its \
+             threads are still open."
         ),
         "{question}"
     );
@@ -766,7 +728,7 @@ fn the_cap_leaves_generated_files_out_and_parks_the_worker_with_findings_open() 
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(rig.claude.calls().len(), turns, "a parked worker waits");
 
-    // A yes sends the held findings, and the cap no longer parks.
+    // A yes sends the open threads, and the cap no longer parks.
     rig.ask(&runner, "rule", Some(&format!("{id} yes")));
     let head = fixed(&rig, &runner, "two.txt");
     let fix = rig.claude.calls().pop().unwrap();
@@ -777,7 +739,7 @@ fn the_cap_leaves_generated_files_out_and_parks_the_worker_with_findings_open() 
     rig.forge.coderabbit.settle("PRRT_71_1");
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "Third."),
-        Some(StepReport::CodeRabbitJudged { round: 3, .. })
+        Some(StepReport::CodeRabbitSent { round: 3, .. })
     ));
 }
 
@@ -859,32 +821,6 @@ fn a_pull_request_merged_by_hand_mid_round_ends_the_work_item() {
 }
 
 #[test]
-fn a_round_with_a_held_finding_records_a_judge_call_that_the_finished_totals_carry() {
-    let (rig, runner, head) = summoned("shep");
-    rig.forge
-        .coderabbit
-        .review(71, &head, now(&rig) + 60, &["Name the flag."]);
-    rig.clock.advance(60);
-    step(&runner).unwrap(); // the review covers the head
-    rig.claude
-        .script([Scripted::Billed(HOLDS, Cost(12_000_000))]);
-    step(&runner).unwrap(); // the judge holds the finding
-
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(
-        status["work_item"]["by_role"]["judge"],
-        json!({ "calls": 1, "tokens": { "input": 0, "cache_write": 0, "cache_read": 0, "output": 0 }, "cost_usd": 0.012 })
-    );
-
-    rig.forge
-        .set_state(71, crate::ports::PullRequestState::Merged);
-    let Some(StepReport::Finished { spend, .. }) = step(&runner).unwrap() else {
-        panic!("the merged work item did not finish");
-    };
-    assert_eq!(spend.judge.calls, 1);
-}
-
-#[test]
 fn coderabbit_that_cannot_be_read_is_tried_again_later() {
     let (rig, runner, head) = summoned("koji");
     rig.forge.coderabbit.set_down(true);
@@ -940,7 +876,7 @@ fn a_commit_pushed_by_hand_after_the_round_parks_rather_than_reaching_the_merge_
 }
 
 #[test]
-fn a_yes_on_a_commit_pushed_by_hand_runs_the_review_loop_and_coderabbit_on_it() {
+fn a_yes_on_a_commit_pushed_by_hand_runs_the_review_and_coderabbit_on_it() {
     let (rig, runner, _) = satisfied("zeus");
     let by_hand = rig.push_by_hand("kelpie/7", "by-hand.txt");
     let Some(StepReport::Ruling { id, .. }) = rig.verdict(&runner) else {

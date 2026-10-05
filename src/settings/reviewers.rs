@@ -1,11 +1,13 @@
-//! The review loop's reviewers, by name
+//! The review's reviewers, by name
 //!
 //! Kelpie's `[local_reviewers]` define each one: a local model at an
 //! endpoint, a command, a Claude session with its model and effort, or a
 //! session on an agent kelpie's `[agents]` define. A project lists them in
-//! `review.reviewers`, in the order the loop runs them. `claude` is always
-//! defined: the project's own Claude round on its reviewer's agent. A project that lists none runs `review.local`, the
-//! maintainer's qwen-review script when that is absent too, then `claude`.
+//! `review.reviewers`, in the order the review runs them, each once.
+//! `claude` is always defined: the project's own Claude round on its
+//! reviewer's agent. A project that lists none runs `review.local` then
+//! `claude`, or with no `review.local` the maintainer's qwen-review script,
+//! when it is there, then `deep`.
 
 use std::fmt;
 use std::path::Path;
@@ -278,8 +280,8 @@ impl Settings {
         let agents = self.role_agents(&kelpie.agents)?;
         let claude = LoopReviewer::claude(&agents.reviewer, &agents.limits.reviewer);
         if self.review.reviewers.is_empty() {
-            // The older form of the local round is the older loop: a project
-            // that sets it keeps its rounds alternating with Claude's.
+            // The older form of the local round runs before the project's
+            // Claude round, not before the deep round.
             let older = self.review.local.is_some();
             let last = if older { claude } else { LoopReviewer::deep() };
             let local = (self.review.local.clone()).unwrap_or_else(|| LocalRound::default_at(home));

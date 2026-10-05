@@ -97,7 +97,9 @@ pub(crate) fn a_work_item() -> WorkItem {
         merge_tried: None,
         merge_queued: None,
         summon_owed: false,
-        local_rounds: 0,
+        threads_sent: Vec::new(),
+        resolve_failures: 0,
+        reviewers_skipped: Vec::new(),
         local_failures: Default::default(),
         local_unreviewed: Vec::new(),
         local_unreviewed_by: None,
@@ -560,9 +562,9 @@ impl Rig {
     /// A running project whose worker's first turn pushed `work.txt` on
     /// `kelpie/7` and opened draft pull request 71, with CI not yet reported
     ///
-    /// Its qwen-review loop ran two clean rounds first, so the gate tests
-    /// all start where the gate itself begins: the worker's pull request
-    /// open and its review settled.
+    /// Its review ran each reviewer once, a clean qwen round and then a clean
+    /// Claude round, so the gate tests all start where the gate itself
+    /// begins: the worker's pull request open and its one pass over.
     ///
     /// Returns the pull request's head.
     pub(crate) fn with_pull_request(project: &str) -> (Self, Mutex<Runner>, String) {

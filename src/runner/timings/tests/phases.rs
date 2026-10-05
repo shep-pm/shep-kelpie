@@ -178,7 +178,7 @@ fn a_claude_round_in_flight_is_claude_round() {
     rig.claude.script([Scripted::Hold(hold.clone())]);
     let t = read_while_held(&rig, &runner, &hold, 90);
     assert_eq!(t["phase"], "claude_round");
-    assert_eq!((secs(&t, "claude_round"), secs(&t, "judging")), (90, 0));
+    assert_eq!(secs(&t, "claude_round"), 90);
     assert_sums(&t);
     let t = timings(&rig, &runner);
     assert_eq!(
@@ -203,30 +203,7 @@ fn a_deep_round_session_in_flight_is_deep_round() {
     rig.claude.script([Scripted::Hold(hold.clone())]);
     let t = read_while_held(&rig, &runner, &hold, 90);
     assert_eq!(t["phase"], "deep_round");
-    assert_eq!(
-        (
-            secs(&t, "deep_round"),
-            secs(&t, "claude_round"),
-            secs(&t, "judging")
-        ),
-        (90, 0, 0)
-    );
-    assert_sums(&t);
-}
-
-#[test]
-fn the_judge_in_flight_is_judging() {
-    let (rig, runner) = at_the_claude_round();
-    rig.claude
-        .script([Scripted::Text("MEDIUM|src/lib.rs:3|racy|two writers")]);
-    step(&runner).unwrap(); // round 2, Claude: one finding
-    rig.clock.advance(5);
-    let hold = Hold::default();
-    rig.claude.script([Scripted::Hold(hold.clone())]);
-    let t = read_while_held(&rig, &runner, &hold, 40);
-    assert_eq!(t["phase"], "judging");
-    assert_eq!((secs(&t, "judging"), secs(&t, "claude_round")), (40, 0));
-    assert_eq!(secs(&t, "other"), 5, "the wait between the two calls");
+    assert_eq!((secs(&t, "deep_round"), secs(&t, "claude_round")), (90, 0));
     assert_sums(&t);
 }
 

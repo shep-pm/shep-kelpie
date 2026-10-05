@@ -150,18 +150,18 @@ mod tests {
         let runner = rig.open().unwrap();
         let next = settings_with(&rig, |s| {
             s.replace("merge_authority = \"ask\"", "merge_authority = \"auto\"")
-                .replace("loop_guard = 8", "loop_guard = 3")
+                .replace("divisor = 1000", "divisor = 500")
                 .replace("max_items = 1", "max_items = 2")
         });
         let mut runner = runner.lock().unwrap();
         let line = runner.reread(next, rig.kelpie_settings()).unwrap();
         assert_eq!(
             line.as_deref(),
-            Some("settings changed: merge_authority, max_items, review now in effect")
+            Some("settings changed: merge_authority, max_items, coderabbit now in effect")
         );
         assert_eq!(runner.settings().max_items.get(), 2);
         assert_eq!(runner.settings().merge_authority, MergeAuthority::Auto);
-        assert_eq!(runner.settings().review.loop_guard.get(), 3);
+        assert_eq!(runner.settings().coderabbit.divisor.get(), 500);
         assert_eq!(runner.status().merge_authority, MergeAuthority::Auto);
     }
 
@@ -184,14 +184,14 @@ mod tests {
         let next = settings_with(&rig, |s| {
             s.replace("forge = \"shep-pm/shep\"", "forge = \"shep-pm/elsewhere\"")
                 .replace(&repo, "/srv/elsewhere")
-                .replace("loop_guard = 8", "loop_guard = 3")
+                .replace("divisor = 1000", "divisor = 500")
         });
         let mut runner = runner.lock().unwrap();
         let line = runner.reread(next, rig.kelpie_settings()).unwrap();
         assert_eq!(
             line.as_deref(),
             Some(
-                "settings changed: review now in effect; repo and forge from the runner's next start"
+                "settings changed: coderabbit now in effect; repo and forge from the runner's next start"
             )
         );
         assert_eq!(runner.settings().forge.as_str(), "shep-pm/shep");
@@ -238,8 +238,8 @@ mod tests {
         let rig = Rig::new("shep");
         rig.edit_settings(|s| {
             s.replace(crate::test::OLD_LOCAL, "").replace(
-                "loop_guard = 8\n",
-                "loop_guard = 8\nreviewers = [\"mine\", \"claude\"]\n",
+                "[app.dogs.kelpie.review]\n",
+                "[app.dogs.kelpie.review]\nreviewers = [\"mine\", \"claude\"]\n",
             )
         });
         let script = rig.home.path().join("review.sh");

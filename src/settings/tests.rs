@@ -43,11 +43,7 @@ fn the_example_holds_the_first_build_defaults() {
         role(&s.models.reviewer),
         ("claude-sonnet-5".into(), Effort::Medium)
     );
-    assert_eq!(
-        role(&s.models.judge),
-        ("claude-opus-5-5".into(), Effort::Low)
-    );
-    assert_eq!(s.review.loop_guard.get(), 8);
+    assert_eq!(s.review, crate::settings::Review::default());
     assert!(s.coderabbit.enabled);
     assert_eq!(s.coderabbit.divisor.get(), 1000);
     assert!(s.pacing.enabled);
@@ -218,6 +214,39 @@ fn the_planning_calls_settings_are_refused_by_name() {
 }
 
 #[test]
+fn the_review_loops_settings_are_refused_by_name() {
+    let review = "[app.dogs.kelpie.review]\n";
+    let removed = [
+        (
+            "models.judge",
+            format!("{EXAMPLE}\n[app.dogs.kelpie.models.judge]\nmodel = \"m\"\neffort = \"low\"\n"),
+        ),
+        (
+            "agents.judge",
+            format!("{EXAMPLE}\n[app.dogs.kelpie.agents]\njudge = \"opus\"\n"),
+        ),
+        (
+            "review.loop_guard",
+            EXAMPLE.replace(review, &format!("{review}loop_guard = 8\n")),
+        ),
+        (
+            "review.local_rounds",
+            EXAMPLE.replace(review, &format!("{review}local_rounds = 1\n")),
+        ),
+    ];
+    for (key, text) in removed {
+        let err = parse_err(&text);
+        assert!(
+            err.contains(&format!(
+                "`{key}` is no longer a setting, because the review loop and its judge \
+                 are gone: delete it"
+            )),
+            "{key}: {err}"
+        );
+    }
+}
+
+#[test]
 fn the_whole_issue_checks_settings_are_refused_by_name() {
     let removed = [
         (
@@ -243,10 +272,10 @@ fn the_whole_issue_checks_settings_are_refused_by_name() {
 
 #[test]
 fn a_misspelt_setting_is_named() {
-    let text = EXAMPLE.replace("loop_guard", "loop_gaurd");
+    let text = EXAMPLE.replace("divisor = 1000", "divisr = 1000");
     let err = parse_err(&text);
     assert!(
-        err.contains("`review.loop_gaurd = 8`: unknown field `loop_gaurd`"),
+        err.contains("`coderabbit.divisr = 1000`: unknown field `divisr`"),
         "{err}"
     );
 }
@@ -269,30 +298,34 @@ fn merge_authority_ask_surface_is_refused() {
 }
 
 #[test]
-fn a_zero_loop_guard_is_refused() {
-    let text = EXAMPLE.replace("loop_guard = 8", "loop_guard = 0");
+fn a_zero_divisor_is_refused() {
+    let text = EXAMPLE.replace("divisor = 1000", "divisor = 0");
     let err = parse_err(&text);
     assert_eq!(
         err,
-        "the [app.dogs.kelpie] table on shep: `review.loop_guard = 0`: \
+        "the [app.dogs.kelpie] table on shep: `coderabbit.divisor = 0`: \
          invalid value: integer `0`, expected a nonzero u32"
     );
 }
 
 #[test]
-fn the_review_budget_is_unset_until_a_table_sets_it() {
+fn the_review_bot_rounds_are_unset_until_a_table_sets_them() {
     let s = parse(EXAMPLE).unwrap();
-    assert_eq!((s.review.local_rounds, s.coderabbit.rounds), (None, None));
-    let text = EXAMPLE
-        .replace("loop_guard = 8\n", "loop_guard = 8\nlocal_rounds = 2\n")
-        .replace("divisor = 1000\n", "divisor = 1000\nrounds = 1\n");
+    assert_eq!(s.coderabbit.rounds, None);
+    let text = EXAMPLE.replace("divisor = 1000\n", "divisor = 1000\nrounds = 1\n");
     let s = parse(&text).unwrap();
-    assert_eq!(s.review.local_rounds.map(NonZeroU32::get), Some(2));
     assert_eq!(s.coderabbit.rounds.map(NonZeroU32::get), Some(1));
     let err = parse_err(&EXAMPLE.replace("divisor = 1000\n", "divisor = 1000\nrounds = 0\n"));
     assert!(err.contains("`coderabbit.rounds = 0`"), "{err}");
-    let err = parse_err(&EXAMPLE.replace("loop_guard = 8\n", "loop_guard = 8\nlocal_rounds = 0\n"));
-    assert!(err.contains("`review.local_rounds = 0`"), "{err}");
+}
+
+#[test]
+fn a_project_with_no_review_table_runs_the_default_list() {
+    let text = EXAMPLE.replace("[app.dogs.kelpie.review]\n", "");
+    assert_eq!(
+        parse(&text).unwrap().review,
+        crate::settings::Review::default()
+    );
 }
 
 #[test]

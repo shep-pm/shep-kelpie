@@ -27,8 +27,6 @@ pub enum CallKind {
     Local,
     /// A Claude review round
     Claude,
-    /// The judge, on a review round's findings or CodeRabbit's threads
-    Judge,
     /// A shots run
     Shots,
     /// A session of a deep review round
@@ -156,7 +154,6 @@ mod tests {
         let kinds = [
             CallKind::Local,
             CallKind::Claude,
-            CallKind::Judge,
             CallKind::Shots,
             CallKind::Deep,
         ];
@@ -166,7 +163,6 @@ mod tests {
             [
                 json!("local"),
                 json!("claude"),
-                json!("judge"),
                 json!("shots"),
                 json!("deep")
             ]

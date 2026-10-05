@@ -6,7 +6,7 @@ use serde_json::json;
 
 use super::super::{FULL_REVIEW, HEARD_WAIT};
 use super::full::adopted_set;
-use super::{HOLDS, LABEL, fixed, hold_a_finding, labels, now, off, on, reviewed_by_qwen};
+use super::{LABEL, fixed, hold_a_finding, labels, now, off, on, reviewed_by_qwen};
 use crate::ports::Checks;
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::test::{Rig, Scripted};
@@ -55,11 +55,11 @@ fn last_fix(rig: &Rig, runner: &Mutex<Runner>, branch: &str) -> Option<StepRepor
 }
 
 #[test]
-fn one_round_sends_its_held_findings_and_the_fix_goes_to_the_merge_without_a_summon() {
+fn one_round_sends_its_open_threads_and_the_fix_goes_to_the_merge_without_a_summon() {
     let (rig, runner, head) = summoned_with("shep", 1);
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "Name the flag."),
-        Some(StepReport::CodeRabbitJudged {
+        Some(StepReport::CodeRabbitSent {
             round: 1,
             held: 1,
             ..
@@ -93,11 +93,9 @@ fn a_label_left_on_after_the_last_round_comes_off_before_the_fix() {
     rig.clock.advance(60);
     step(&runner).unwrap(); // the review lands and the label comes off
     rig.forge.label_pull_request(71, LABEL);
-    rig.claude.script([Scripted::Text(HOLDS)]);
-    step(&runner).unwrap(); // the judge holds it
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitJudged { .. })
+        Some(StepReport::CodeRabbitSent { .. })
     ));
     assert_eq!(labels(&rig), [on(), off(), off()]);
 }
@@ -107,13 +105,13 @@ fn two_rounds_summon_once_more_after_the_first_fix_and_not_after_the_second() {
     let (rig, runner, head) = summoned_with("golbat", 2);
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "First."),
-        Some(StepReport::CodeRabbitJudged { round: 1, .. })
+        Some(StepReport::CodeRabbitSent { round: 1, .. })
     ));
     let head = fixed(&rig, &runner, "one.txt");
     rig.forge.coderabbit.settle("PRRT_71_0");
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "Second."),
-        Some(StepReport::CodeRabbitJudged { round: 2, .. })
+        Some(StepReport::CodeRabbitSent { round: 2, .. })
     ));
     assert!(matches!(
         last_fix(&rig, &runner, "kelpie/7"),
@@ -132,7 +130,7 @@ fn a_re_send_in_the_one_round_is_that_round_and_the_fix_still_reaches_the_merge(
     ));
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "Name the flag."),
-        Some(StepReport::CodeRabbitJudged { round: 1, .. })
+        Some(StepReport::CodeRabbitSent { round: 1, .. })
     ));
     assert!(matches!(
         last_fix(&rig, &runner, "kelpie/7"),
@@ -171,11 +169,9 @@ fn an_adopted_pull_request_whose_earlier_review_spent_the_rounds_still_gets_one_
         .review(80, &head, summon + 600, &["Name the flag."]);
     rig.clock.advance(600);
     step(&runner).unwrap(); // the review lands
-    rig.claude.script([Scripted::Text(HOLDS)]);
-    step(&runner).unwrap(); // the judge holds it
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitJudged { held: 1, .. })
+        Some(StepReport::CodeRabbitSent { held: 1, .. })
     ));
     assert!(matches!(
         last_fix(&rig, &runner, "fix/timeline"),

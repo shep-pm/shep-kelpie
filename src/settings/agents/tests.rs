@@ -24,11 +24,11 @@ fn project(names: &str) -> Settings {
     .unwrap()
 }
 
-// The example's project, its review loop running the local reviewer `first`, then `claude`.
+// The example's project, its review running the local reviewer `first`, then `claude`.
 fn reviewing(first: &str) -> Settings {
-    let guard = "loop_guard = 8\n";
-    let reviewers = format!("{guard}reviewers = [\"{first}\", \"claude\"]\n");
-    let table = project_table(&EXAMPLE.replace(guard, &reviewers));
+    let review = "[app.dogs.kelpie.review]\n";
+    let reviewers = format!("{review}reviewers = [\"{first}\", \"claude\"]\n");
+    let table = project_table(&EXAMPLE.replace(review, &reviewers));
     Settings::from_table(&table, "shep", Path::new("/h"), Path::new("/p")).unwrap()
 }
 
@@ -47,7 +47,6 @@ fn a_project_that_names_no_agent_keeps_its_models_on_claude_code() {
     assert_eq!(agents.worker, settings.models.worker);
     assert_eq!(pair(&agents.worker), ("claude-sonnet-5-5", Effort::High));
     assert_eq!(pair(&agents.reviewer), ("claude-sonnet-5", Effort::Medium));
-    assert_eq!(pair(&agents.judge), ("claude-opus-5-5", Effort::Low));
     assert_eq!(
         pair(&agents.deep_reviewer),
         ("claude-opus-5-5", Effort::High)
@@ -78,13 +77,16 @@ fn the_deep_round_runs_on_the_agent_or_model_its_role_names() {
 
 #[test]
 fn each_role_runs_on_the_agent_it_names() {
-    let settings = project("worker = \"opus-high\"\njudge = \"haiku\"\n");
+    let settings = project("worker = \"opus-high\"\nreviewer = \"haiku\"\n");
     let agents = settings.role_agents(&kelpie(AGENTS).agents).unwrap();
     assert_eq!(pair(&agents.worker), ("claude-opus-5-5", Effort::High));
-    assert_eq!(pair(&agents.reviewer), ("claude-sonnet-5", Effort::Medium));
     assert_eq!(
-        pair(&agents.judge),
+        pair(&agents.reviewer),
         ("claude-haiku-4-5-20251001", Effort::Low)
+    );
+    assert_eq!(
+        pair(&agents.deep_reviewer),
+        ("claude-opus-5-5", Effort::High)
     );
 }
 
@@ -165,12 +167,12 @@ fn each_role_is_held_back_by_its_agents_account_or_lease() {
     assert_eq!(none.limits, RoleLimits::default());
     assert_eq!(none.limits.worker, Limit::Account(Account::Claude));
 
-    let named = project("worker = \"codex\"\nreviewer = \"qwen\"\njudge = \"box\"\n");
+    let named = project("worker = \"codex\"\nreviewer = \"qwen\"\ndeep_reviewer = \"box\"\n");
     let limits = named.role_agents(&defined).unwrap().limits;
     assert_eq!(limits.worker, Limit::Account(Account::Codex));
     assert_eq!(limits.reviewer, Limit::Lease(LeaseName::gpu()));
-    let Limit::Lease(lease) = limits.judge else {
-        panic!("{:?}", limits.judge);
+    let Limit::Lease(lease) = limits.deep_reviewer else {
+        panic!("{:?}", limits.deep_reviewer);
     };
     assert_eq!(lease.as_str(), "gpu-box");
 
@@ -245,7 +247,7 @@ const QWEN: &str = "[agents.qwen]\nharness = \"pi\"\nmodel = \"qwen3.8:27b\"\n\
 
 #[test]
 fn a_pi_agent_runs_on_its_server_and_holds_the_gpu() {
-    let agents = project("worker = \"qwen\"\njudge = \"qwen\"\n")
+    let agents = project("worker = \"qwen\"\ndeep_reviewer = \"qwen\"\n")
         .role_agents(&kelpie(QWEN).agents)
         .unwrap();
     let AgentHarness::Pi(server) = &agents.worker.harness else {
@@ -255,7 +257,7 @@ fn a_pi_agent_runs_on_its_server_and_holds_the_gpu() {
     assert_eq!(server.context.get(), 65536);
     assert_eq!(pair(&agents.worker), ("qwen3.8:27b", Effort::Low));
     assert_eq!(agents.limits.worker, Limit::Lease(LeaseName::gpu()));
-    assert_eq!(agents.limits.judge, Limit::Lease(LeaseName::gpu()));
+    assert_eq!(agents.limits.deep_reviewer, Limit::Lease(LeaseName::gpu()));
     assert_eq!(agents.reviewer.harness, AgentHarness::ClaudeCode);
     assert_eq!(agents.limits.reviewer, Limit::Account(Account::Claude));
 }
@@ -386,14 +388,14 @@ const CODEX: &str =
 
 #[test]
 fn a_codex_agent_runs_every_role_on_the_codex_account() {
-    let names = "worker = \"gpt\"\nreviewer = \"gpt\"\njudge = \"gpt\"\n";
+    let names = "worker = \"gpt\"\nreviewer = \"gpt\"\ndeep_reviewer = \"gpt\"\n";
     let agents = project(names).role_agents(&kelpie(CODEX).agents).unwrap();
-    for role in [&agents.worker, &agents.reviewer, &agents.judge] {
+    for role in [&agents.worker, &agents.reviewer, &agents.deep_reviewer] {
         assert_eq!(role.harness, AgentHarness::Codex);
         assert_eq!(pair(role), ("gpt-6-sol", Effort::Medium));
     }
     let limits = agents.limits;
-    for limit in [limits.worker, limits.reviewer, limits.judge] {
+    for limit in [limits.worker, limits.reviewer, limits.deep_reviewer] {
         assert_eq!(limit, Limit::Account(Account::Codex));
     }
 }
@@ -433,7 +435,11 @@ fn a_codex_worker_beside_the_preview_is_refused_at_load() {
         err.contains("names gpt, on codex, which cannot run `preview.enabled`"),
         "{err}"
     );
-    assert!(project("judge = \"gpt\"\n").role_agents(&defined).is_ok());
+    assert!(
+        project("reviewer = \"gpt\"\n")
+            .role_agents(&defined)
+            .is_ok()
+    );
 }
 
 #[test]

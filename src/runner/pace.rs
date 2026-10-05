@@ -151,7 +151,7 @@ impl Runner {
         // Only a project that runs the deep round spends its role.
         let deep = self.lineup.iter().any(|r| r.runs == Runs::Deep);
         let deep = deep.then_some(&limits.deep_reviewer);
-        [&limits.worker, &limits.reviewer, &limits.judge]
+        [&limits.worker, &limits.reviewer]
             .into_iter()
             .chain(deep)
             .chain(claude_worker)

@@ -101,10 +101,10 @@ fn refused(body: &str) -> bool {
         && (body.contains("reached") || body.contains("exceeded"))
 }
 
-/// A thread as a finding the judge can rule on
+/// A thread as a finding the worker is sent
 ///
 /// The severity comes from cubic's level: P0 and P1 are high, P2 is
-/// medium, P3 is a nit. The level and confidence go to the judge as the why.
+/// medium, P3 is a nit. The level and confidence go to the worker as the why.
 fn finding(thread: &Thread) -> Finding {
     let prose: Vec<&str> = thread
         .body
@@ -226,7 +226,7 @@ mod tests {
     }
 
     #[test]
-    fn a_thread_reaches_the_judge_with_its_level_and_confidence() {
+    fn a_thread_reaches_the_worker_with_its_level_and_confidence() {
         let seen = activity("", REVIEWS_637);
         let first = Cubic.finding(&seen.threads[0]);
         assert_eq!(first.severity, Severity::Medium, "P2");

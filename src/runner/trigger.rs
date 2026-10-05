@@ -141,10 +141,14 @@ pub struct WorkItemStatus<'a> {
     pub by_role: Spend,
     /// Its qwen rounds, which cost no money
     pub qwen: QwenTally,
-    /// The local reviewers that reviewed nothing twice, so the loop goes on
+    /// The local reviewers that reviewed nothing twice, so the review goes on
     /// without them
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub local_reviewers_down: Vec<&'a ReviewerName>,
+    /// The reviewers whose calls failed so often in a row that a pass went
+    /// on without them
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    pub reviewers_skipped: &'a [ReviewerName],
     /// Why kelpie's last shots run failed, when it did
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shots_failed: Option<&'a str>,
@@ -177,6 +181,7 @@ impl<'a> WorkItemStatus<'a> {
             by_role: item.spend(),
             qwen: item.qwen,
             local_reviewers_down: item.local_reviewers_down(),
+            reviewers_skipped: &item.reviewers_skipped,
             shots_failed: item.shots.as_ref().and_then(|r| r.run.failed.as_deref()),
             timings,
         }

@@ -402,32 +402,11 @@ fn a_turn_past_its_ceiling_still_parks_on_a_ruling() {
 }
 
 #[test]
-fn the_review_loops_round_guard_still_parks_on_a_ruling() {
-    let (rig, runner, _) = Rig::with_pull_request("reactmap");
-    drop(runner);
-    let state = rig.paths().state;
-    let text = std::fs::read_to_string(&state).unwrap();
-    let mut saved: serde_json::Value = serde_json::from_str(&text).unwrap();
-    saved["work_items"][0]["phase"] = json!({
-        "state": "review",
-        "round": 9,
-        "consecutive_clean": 0,
-        "guard_cleared": false,
-        "stage": { "stage": "round" },
-    });
-    std::fs::write(&state, saved.to_string()).unwrap();
-    rig.merge_auto();
-    let runner = rig.open().unwrap();
-    let id = raised(step(&runner).unwrap());
-    still_asks(&rig, &runner, id, "review-guard");
-}
-
-#[test]
 fn a_fix_that_pushes_nothing_still_parks_on_a_ruling() {
     let (rig, runner, head) = summoned_under_auto("shep");
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "Name the flag."),
-        Some(StepReport::CodeRabbitJudged { round: 1, .. })
+        Some(StepReport::CodeRabbitSent { round: 1, .. })
     ));
     rig.claude.script([Scripted::Say("Nothing to change.")]);
     step(&runner).unwrap();
@@ -440,7 +419,7 @@ fn coderabbits_cap_still_parks_on_a_ruling() {
     let (rig, runner, head) = summoned_under_auto("koji");
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "First."),
-        Some(StepReport::CodeRabbitJudged { round: 1, .. })
+        Some(StepReport::CodeRabbitSent { round: 1, .. })
     ));
     let head = fixed(&rig, &runner, "one.txt");
     rig.forge.coderabbit.settle("PRRT_71_0");

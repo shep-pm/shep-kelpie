@@ -1,4 +1,4 @@
-//! Writing a round's held findings to the file its fix turn reads
+//! Writing a round's findings to the file its fix turn reads
 
 use std::path::{Path, PathBuf};
 
@@ -6,10 +6,10 @@ use super::calls::severity_tag;
 use crate::ports::Finding;
 use crate::runner::turn;
 
-/// Where a round's held findings are written for the worker's next turn
+/// Where a round's findings are written for the worker's next turn
 const FINDINGS_FILE: &str = "review-findings.md";
 
-/// Where the worker copies the held findings it leaves unfixed
+/// Where the worker copies the findings it leaves unfixed
 const DEFERRED_FILE: &str = "deferred-findings.md";
 
 // The worker can read its build folder, and a commit never carries it. The
@@ -19,7 +19,7 @@ pub(in crate::runner) fn findings_path(build: &Path) -> PathBuf {
     build.join(FINDINGS_FILE)
 }
 
-/// Where the worker copies a held finding it leaves unfixed, in the same
+/// Where the worker copies a finding it leaves unfixed, in the same
 /// folder as the findings file
 pub(in crate::runner) fn deferred_path(build: &Path) -> PathBuf {
     build.join(DEFERRED_FILE)
@@ -33,7 +33,7 @@ pub(in crate::runner) fn write_findings_file(
 ) -> Result<(), String> {
     let deferred = deferred_path(folder);
     let mut text = format!(
-        "Round {round}'s held findings, at the judge's severity. Fix each one, then \
+        "Round {round}'s findings, at the reviewer's severity. Fix each one, then \
          commit and push. A finding that is out of scope for this pull request may be \
          left: copy its line, as it stands here, onto a line of its own in {}. Kelpie \
          files what is there as an issue once the pull request merges.\n\n",
@@ -54,7 +54,7 @@ pub(in crate::runner) fn write_findings_file(
 
 pub(super) fn fix_prompt(number: u64, round: u32, count: usize, path: &Path) -> String {
     format!(
-        "Round {round} of the qwen-review loop on your pull request #{number} held \
+        "Round {round} of the review on your pull request #{number} found \
          {count} finding(s), in {}. Fix each one, then commit and push with \
          `git push origin HEAD`.",
         path.display()
@@ -136,7 +136,7 @@ mod tests {
         write_findings_file(dir.path(), &path, 3, &findings).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            text.starts_with("Round 3's held findings, at the judge's severity."),
+            text.starts_with("Round 3's findings, at the reviewer's severity."),
             "{text}"
         );
         assert!(
@@ -161,7 +161,7 @@ mod tests {
         let prompt = fix_prompt(71, 3, 2, Path::new("/k/targets/shep/7/review-findings.md"));
         assert_eq!(
             prompt,
-            "Round 3 of the qwen-review loop on your pull request #71 held 2 \
+            "Round 3 of the review on your pull request #71 found 2 \
              finding(s), in /k/targets/shep/7/review-findings.md. Fix each one, then \
              commit and push with `git push origin HEAD`."
         );
@@ -193,7 +193,7 @@ mod tests {
         std::fs::set_permissions(&folder, perms).unwrap();
     }
 
-    // Round 1 on pull request 71 held one MEDIUM finding, and its fix turn is next.
+    // Round 1 on pull request 71 found one MEDIUM finding, and its fix turn is next.
     fn findings_sent() -> (Rig, Mutex<Runner>) {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
@@ -210,11 +210,7 @@ mod tests {
             why: "it reads as its opposite".into(),
         }])]);
         step(&runner).unwrap(); // round 1's qwen call
-        rig.claude.script([Scripted::Text(
-            r#"{"holds": true, "severity": "medium", "reason": "it does"}"#,
-        )]);
-        step(&runner).unwrap(); // the judge holds it
-        step(&runner).unwrap(); // the round finalizes: the fix turn is next
+        step(&runner).unwrap(); // the findings go out: the fix turn is next
         (rig, runner)
     }
 
@@ -265,7 +261,7 @@ mod tests {
         assert!(
             question.starts_with(
                 "The worker on pull request #71 ended its fix for round 1 of the \
-                 qwen-review loop without pushing, so those findings still hold."
+                 review without pushing, so those findings still hold."
             ),
             "{question}"
         );
@@ -278,12 +274,9 @@ mod tests {
                 "kind": "fix-not-pushed",
                 "review": {
                     "round": 1,
-                    "consecutive_clean": 0,
-                    "guard_cleared": false,
                     "reviewer": "qwen",
                     "stage": {
                         "stage": "fixing",
-                        "clean": false,
                         "head": rig.forge.head_of("kelpie/7"),
                     },
                 },
@@ -324,12 +317,10 @@ mod tests {
             json!({
                 "state": "review",
                 "round": 2,
-                "consecutive_clean": 0,
-                "guard_cleared": false,
                 "stage": { "stage": "round" },
-                "last": "qwen",
+                "ran": ["qwen"],
             }),
-            "a MEDIUM finding, fixed, still resets the streak"
+            "the next reviewer in the list reads the fix"
         );
     }
 
@@ -351,7 +342,7 @@ mod tests {
             panic!("the resumed fix was not checked for a push");
         };
         assert!(
-            question.contains("round 1 of the qwen-review loop without pushing"),
+            question.contains("round 1 of the review without pushing"),
             "{question}"
         );
     }

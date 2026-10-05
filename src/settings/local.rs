@@ -2,9 +2,9 @@
 //!
 //! Kelpie's `[local_reviewers]` define these by name, and a project lists
 //! them in `review.reviewers`. The older form is one project's
-//! `[app.dogs.kelpie.review.local]`, alternating with the Claude round,
-//! local first. A table with neither runs the maintainer's qwen-review
-//! script, then the Claude round.
+//! `[app.dogs.kelpie.review.local]`, which runs once before the Claude
+//! round. A table with neither runs the maintainer's qwen-review script,
+//! then the deep round.
 
 use std::path::{Path, PathBuf};
 
@@ -287,7 +287,7 @@ mod tests {
             .expect("the table sets it")
     }
 
-    // The loop `table` runs, with nothing defined in kelpie's settings.
+    // The review `table` runs, with nothing defined in kelpie's settings.
     fn lineup(table: &str) -> Vec<LoopReviewer> {
         let settings = with_table(table).unwrap();
         settings

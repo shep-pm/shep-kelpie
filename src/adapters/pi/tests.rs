@@ -131,10 +131,10 @@ fn each_kind_of_call_gets_its_own_tools() {
     assert_eq!(argv[at + 1], "read,grep,find,ls");
     assert!(!argv.iter().any(|a| a == "--extension"));
 
-    let mut judge = w.call(URL, Role::Judge, Session::New(id(FRESH_ID)));
-    assert!(strings(&judge).iter().any(|a| a == "--no-tools"));
-    judge.reach.read = vec![w.path("shots")];
-    let argv = strings(&judge);
+    let mut review = w.call(URL, Role::Reviewer, Session::New(id(FRESH_ID)));
+    assert!(strings(&review).iter().any(|a| a == "--no-tools"));
+    review.reach.read = vec![w.path("shots")];
+    let argv = strings(&review);
     let at = argv.iter().position(|a| a == "--tools").unwrap();
     assert_eq!(argv[at + 1], "read");
 }
@@ -171,7 +171,7 @@ fn a_steps_skill_runs_as_pis_own_slash_command() {
 #[test]
 fn prepare_writes_pis_own_home_with_the_one_model() {
     let w = World::new();
-    let call = w.call(URL, Role::Judge, Session::New(id(FRESH_ID)));
+    let call = w.call(URL, Role::Reviewer, Session::New(id(FRESH_ID)));
     stand_in(&w, FRESH).prepare(&call).unwrap();
     let home = w.path("worker/settings.pi");
     let models: serde_json::Value =
@@ -194,7 +194,7 @@ fn a_model_server_the_forwarder_cannot_dial_fails_before_the_call() {
     let w = World::new();
     let call = w.call(
         "https://192.0.2.9/v1",
-        Role::Judge,
+        Role::Reviewer,
         Session::New(id(FRESH_ID)),
     );
     let err = stand_in(&w, FRESH).prepare(&call).unwrap_err();
@@ -403,7 +403,7 @@ fn the_sandbox_lets_pi_write_only_its_sessions_and_reach_only_the_forwarder() {
             "{credentials}"
         );
     }
-    let open = w.call(URL, Role::Judge, Session::New(id(FRESH_ID)));
+    let open = w.call(URL, Role::Reviewer, Session::New(id(FRESH_ID)));
     let policy = super::policy(&open, &Files::of(&open), &socket);
     assert_eq!(
         policy.write,
@@ -430,7 +430,7 @@ fn the_sandbox_lets_pi_write_only_its_sessions_and_reach_only_the_forwarder() {
 fn a_turn_answers_with_its_text_and_its_tokens_and_no_price() {
     let w = World::new();
     let pi = stand_in(&w, FRESH);
-    let call = w.call(URL, Role::Judge, Session::New(id(FRESH_ID)));
+    let call = w.call(URL, Role::Reviewer, Session::New(id(FRESH_ID)));
     pi.prepare(&call).unwrap();
     let reply = pi.run(&call).unwrap();
     assert_eq!(reply.session_id, id(FRESH_ID));
@@ -445,7 +445,7 @@ fn a_turn_answers_with_its_text_and_its_tokens_and_no_price() {
 fn a_resumed_turn_reports_only_its_own_tokens() {
     let w = World::new();
     let pi = stand_in(&w, RESUMED);
-    let call = w.call(URL, Role::Judge, Session::Resume(id(FRESH_ID)));
+    let call = w.call(URL, Role::Reviewer, Session::Resume(id(FRESH_ID)));
     pi.prepare(&call).unwrap();
     let err = pi.run(&call).unwrap_err();
     assert_eq!(err, AgentError::NoSession(Harness::Pi, id(FRESH_ID)));
@@ -582,7 +582,7 @@ fn a_failed_call_says_why() {
 #[test]
 fn a_call_on_no_model_server_is_refused() {
     let w = World::new();
-    let mut call = w.call(URL, Role::Judge, Session::New(id(FRESH_ID)));
+    let mut call = w.call(URL, Role::Reviewer, Session::New(id(FRESH_ID)));
     call.harness = AgentHarness::ClaudeCode;
     let err = stand_in(&w, FRESH).prepare(&call).unwrap_err();
     assert!(matches!(err, AgentError::Setup(_)), "{err:?}");
@@ -699,14 +699,14 @@ fn record_a_turn_a_resumed_turn_and_two_refusals() {
         std::fs::write(record.join(name), text).unwrap();
     };
 
-    let mut fresh = world.call(&url, Role::Judge, Session::New(fresh_id.clone()));
+    let mut fresh = world.call(&url, Role::Reviewer, Session::New(fresh_id.clone()));
     fresh.prompt = "Reply with the single word ok.".into();
     pi.prepare(&fresh).unwrap();
     let out = run_raw(&pi, &fresh);
     save("pi-p-fresh.jsonl", &out);
     let first = parse_result(&out, &fresh_id).unwrap();
 
-    let mut again = world.call(&url, Role::Judge, Session::Resume(fresh_id.clone()));
+    let mut again = world.call(&url, Role::Reviewer, Session::Resume(fresh_id.clone()));
     again.prompt = "Which word did you reply with? Answer in one word.".into();
     let out = run_raw(&pi, &again);
     save("pi-p-resumed.jsonl", &out);
