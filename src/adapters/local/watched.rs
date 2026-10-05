@@ -19,10 +19,8 @@ fn leased(path: &Path, lease: Option<LeaseName>) -> LocalRound {
     LocalRound::Command(LocalCommand {
         command: path.to_owned(),
         lease,
-        gpu_lease: false,
         ollama: None,
         ollama_model: None,
-        paths: Vec::new(),
     })
 }
 

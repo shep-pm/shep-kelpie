@@ -34,14 +34,9 @@ fn the_example_holds_the_first_build_defaults() {
     assert_eq!(s.merge_authority, MergeAuthority::Ask);
     assert!(s.ci);
     assert_eq!(s.max_items.get(), 1);
-    let role = |r: &RoleModel| (r.model.as_str().to_owned(), r.effort);
     let implementers: Vec<&str> = s.agents.implementers.iter().map(|n| n.as_str()).collect();
     assert_eq!(implementers, ["sonnet-high"]);
-    assert_eq!(
-        role(&s.models.reviewer),
-        ("claude-sonnet-5".into(), Effort::Medium)
-    );
-    assert_eq!(s.review, crate::settings::Review::default());
+    assert_eq!(s.agents.reviewers, None, "kelpie's default list");
     assert!(s.coderabbit.enabled);
     assert_eq!(s.coderabbit.divisor.get(), 1000);
     assert!(s.pacing.enabled);
@@ -219,21 +214,15 @@ fn the_planning_calls_settings_are_refused_by_name() {
 
 #[test]
 fn the_review_loops_settings_are_refused_by_name() {
-    let review = "[app.dogs.kelpie.review]\n";
+    let review = |key: &str| format!("{EXAMPLE}\n[app.dogs.kelpie.review]\n{key}\n");
     let removed = [
         (
             "models.judge",
             format!("{EXAMPLE}\n[app.dogs.kelpie.models.judge]\nmodel = \"m\"\neffort = \"low\"\n"),
         ),
         ("agents.judge", with_agents("judge = \"opus\"\n")),
-        (
-            "review.loop_guard",
-            EXAMPLE.replace(review, &format!("{review}loop_guard = 8\n")),
-        ),
-        (
-            "review.local_rounds",
-            EXAMPLE.replace(review, &format!("{review}local_rounds = 1\n")),
-        ),
+        ("review.loop_guard", review("loop_guard = 8")),
+        ("review.local_rounds", review("local_rounds = 1")),
     ];
     for (key, text) in removed {
         let err = parse_err(&text);
@@ -279,7 +268,6 @@ fn with_agents(keys: &str) -> String {
 
 #[test]
 fn the_worker_settings_agent_files_replace_are_refused_saying_what_replaces_each() {
-    let models = "[app.dogs.kelpie.models.reviewer]\n";
     let removed = [
         (
             "agents.worker",
@@ -288,11 +276,8 @@ fn the_worker_settings_agent_files_replace_are_refused_saying_what_replaces_each
         ),
         (
             "models.worker",
-            EXAMPLE.replace(
-                models,
-                &format!(
-                    "[app.dogs.kelpie.models.worker]\nmodel = \"m\"\neffort = \"low\"\n\n{models}"
-                ),
+            format!(
+                "{EXAMPLE}\n[app.dogs.kelpie.models.worker]\nmodel = \"m\"\neffort = \"low\"\n"
             ),
             "name the agent that builds in `agents.implementers`, such as `sonnet-high`, \
              which is Sonnet 5.5 at high",
@@ -307,10 +292,7 @@ fn the_worker_settings_agent_files_replace_are_refused_saying_what_replaces_each
             )
         );
     }
-    let labels = EXAMPLE.replace(
-        models,
-        &format!("[app.dogs.kelpie.models.labels]\nopus = \"claude-opus-6\"\n\n{models}"),
-    );
+    let labels = format!("{EXAMPLE}\n[app.dogs.kelpie.models.labels]\nopus = \"claude-opus-6\"\n");
     assert_eq!(
         parse_err(&labels),
         "the [app.dogs.kelpie] table on shep: `models.labels` is no longer a setting, \
@@ -369,11 +351,62 @@ fn the_review_bot_rounds_are_unset_until_a_table_sets_them() {
 }
 
 #[test]
-fn a_project_with_no_review_table_runs_the_default_list() {
-    let text = EXAMPLE.replace("[app.dogs.kelpie.review]\n", "");
+fn the_review_settings_reviewer_files_replace_are_refused_saying_what_replaces_each() {
+    let table = |name: &str, keys: &str| format!("{EXAMPLE}\n[app.dogs.kelpie.{name}]\n{keys}\n");
+    let model = "model = \"m\"\neffort = \"low\"";
+    let removed = [
+        (
+            "models.reviewer",
+            table("models.reviewer", model),
+            "write the model and effort as a reviewer's agent file, or list kelpie's \
+             `defect-hunter`, Opus 5.5 at high, in `agents.reviewers`",
+        ),
+        (
+            "models.deep_reviewer",
+            table("models.deep_reviewer", model),
+            "list `defect-hunter` in `agents.reviewers`: it is the deep round, and its \
+             file holds the model and effort",
+        ),
+        (
+            "agents.reviewer",
+            with_agents("reviewer = \"opus-high\"\n"),
+            "list the reviewer's agent file in `agents.reviewers`",
+        ),
+        (
+            "agents.deep_reviewer",
+            with_agents("deep_reviewer = \"opus-high\"\n"),
+            "list `defect-hunter`, or a reviewer file with `second_look: true`, in \
+             `agents.reviewers`",
+        ),
+        (
+            "review.reviewers",
+            table("review", "reviewers = [\"deep\"]"),
+            "list them in `agents.reviewers`: `deep` is now `defect-hunter`, and \
+             `claude` and each of kelpie's `[local_reviewers]` an agent file of its own",
+        ),
+        (
+            "review.local",
+            table("review.local", "kind = \"command\"\ncommand = \"~/q.sh\""),
+            "write the round as an agent file with `role: reviewer`, its `kind` as \
+             `harness` and `gpu_lease = true` as `lease: gpu`, and list it in \
+             `agents.reviewers`; `kind = \"off\"` is `agents.reviewers = [\"defect-hunter\"]`",
+        ),
+        ("review", table("review", ""), "delete it"),
+    ];
+    for (key, text, fix) in removed {
+        assert_eq!(
+            parse_err(&text),
+            format!(
+                "the [app.dogs.kelpie] table on shep: `{key}` is no longer a setting, \
+                 because reviewers are agent files listed in `agents.reviewers`: {fix}"
+            )
+        );
+    }
     assert_eq!(
-        parse(&text).unwrap().review,
-        crate::settings::Review::default()
+        parse_err(&table("models", "")),
+        "the [app.dogs.kelpie] table on shep: `models` is no longer a setting, because \
+         agents are files in kelpie's home's `agents` folder, which hold each model and \
+         effort: delete it"
     );
 }
 
@@ -402,12 +435,6 @@ fn every_effort_parses_from_what_claude_takes() {
 }
 
 #[test]
-fn an_unknown_effort_is_refused() {
-    let text = EXAMPLE.replacen("effort = \"medium\"", "effort = \"huge\"", 1);
-    assert!(parse_err(&text).contains("unknown variant `huge`"));
-}
-
-#[test]
 fn a_forge_slug_needs_an_owner_and_a_name() {
     for slug in [
         "shep",
@@ -419,12 +446,6 @@ fn a_forge_slug_needs_an_owner_and_a_name() {
         let text = EXAMPLE.replace("\"shep-pm/shep\"", &format!("{slug:?}"));
         assert!(parse_err(&text).contains("must be `owner/name`"), "{slug}");
     }
-}
-
-#[test]
-fn a_blank_model_is_refused() {
-    let text = EXAMPLE.replacen("model = \"claude-sonnet-5\"", "model = \" \"", 1);
-    assert!(parse_err(&text).contains("must not be blank"));
 }
 
 #[test]
@@ -549,25 +570,6 @@ fn a_file_moves_into_an_equal_table() {
     let table = crate::test::project_table(EXAMPLE);
     let old_file = toml::to_string(&table).unwrap();
     assert_eq!(table_of(&old_file), Ok(table));
-}
-
-#[test]
-fn a_table_s_local_command_expands_the_home_folder_and_takes_the_project_folder() {
-    let command = |path: &str| {
-        let table =
-            format!("[app.dogs.kelpie.review.local]\nkind = \"command\"\ncommand = \"{path}\"\n");
-        let text = crate::test::with_tables(EXAMPLE, &table);
-        match parse(&text).unwrap().review.local {
-            Some(LocalRound::Command(local)) => local.command,
-            other => panic!("{other:?}"),
-        }
-    };
-    assert_eq!(
-        command("~/.claude/scripts/qwen-review.sh"),
-        Path::new("/home/me/.claude/scripts/qwen-review.sh")
-    );
-    assert_eq!(command("review.sh"), Path::new(FOLDER).join("review.sh"));
-    assert_eq!(command("/opt/review.sh"), Path::new("/opt/review.sh"));
 }
 
 #[test]

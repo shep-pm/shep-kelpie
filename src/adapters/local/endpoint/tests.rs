@@ -120,9 +120,7 @@ fn local(url: &str, context: u32) -> LocalRound {
         url: EndpointUrl::try_from(url.to_owned()).unwrap(),
         model: NonBlank::try_from("coder".to_owned()).unwrap(),
         context: ContextSize::try_from(i64::from(context)).unwrap(),
-        gpu_lease: false,
         lease: None,
-        paths: Vec::new(),
     })
 }
 
@@ -343,7 +341,7 @@ fn leased(url: &str) -> LocalRound {
     let LocalRound::Endpoint(endpoint) = &mut local else {
         unreachable!()
     };
-    endpoint.gpu_lease = true;
+    endpoint.lease = Some(crate::settings::LeaseName::gpu());
     local
 }
 
@@ -441,11 +439,9 @@ fn a_server_with_no_api_ps_is_not_checked() {
 fn command(script: &Path, host: &str, model: Option<&str>) -> LocalRound {
     LocalRound::Command(crate::settings::LocalCommand {
         command: script.to_owned(),
-        gpu_lease: true,
         ollama: Some(EndpointUrl::try_from(host.to_owned()).unwrap()),
         ollama_model: model.map(|m| NonBlank::try_from(m.to_owned()).unwrap()),
-        lease: None,
-        paths: Vec::new(),
+        lease: Some(crate::settings::LeaseName::gpu()),
     })
 }
 

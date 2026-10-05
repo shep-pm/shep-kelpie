@@ -41,16 +41,13 @@ impl Runner {
         let gpu_metrics_url = kelpie.gpu_metrics_url.clone();
         let book = Agents::load(&self.paths.agents)?;
         let agents = settings.role_agents(&book)?;
-        let lineup = settings.lineup(&kelpie, &book, &self.home)?;
+        let lineup = settings.lineup(&book, &self.home)?;
         let webhook = kelpie.webhook;
         let mut changed = changed((&self.settings, &self.webhook), (&settings, &webhook));
         if reviewers != self.reviewers {
             changed.push("reviewers");
         }
-        if lineup != self.lineup && !changed.contains(&"review") {
-            changed.push("local_reviewers");
-        }
-        if agents != self.agents || book != self.book {
+        if agents != self.agents || lineup != self.lineup || book != self.book {
             changed.push("agents");
         }
         if gpu_metrics_url != self.gpu.url() {
@@ -67,7 +64,7 @@ impl Runner {
             check_coderabbit(&settings, &self.ports)?;
         }
         if lineup != self.lineup {
-            check_local(&settings, &lineup, &self.ports)?;
+            check_local(&lineup, &self.ports)?;
         }
         crate::skills::check(&settings.skills, &self.paths.skills)?;
         let skills = (settings.skills != self.settings.skills)
@@ -119,8 +116,6 @@ fn changed((old, was): Reach<'_>, (new, now): Reach<'_>) -> Vec<&'static str> {
         ("ci", old.ci != new.ci),
         ("max_items", old.max_items != new.max_items),
         ("generated", old.generated != new.generated),
-        ("models", old.models != new.models),
-        ("review", old.review != new.review),
         ("coderabbit", old.coderabbit != new.coderabbit),
         (
             "pull_request_reviewers",
@@ -141,7 +136,7 @@ mod tests {
     use std::path::Path;
 
     use crate::ports::Visibility;
-    use crate::settings::{LocalRound, MergeAuthority};
+    use crate::settings::MergeAuthority;
     use crate::test::Rig;
     use crate::webhook::{KelpieSettings, WebhookKind};
 
@@ -205,80 +200,47 @@ mod tests {
     }
 
     #[test]
-    fn a_local_round_change_is_checked_as_a_start_checks_it() {
+    fn a_changed_reviewer_file_is_checked_as_a_start_checks_it_and_named() {
         let rig = Rig::new("shep");
-        let local = |command: &str| {
-            format!("[app.dogs.kelpie.review.local]\nkind = \"command\"\ncommand = \"{command}\"\n")
-        };
-        let qwen = local("~/.claude/scripts/qwen-review.sh");
-        rig.edit_settings(|s| crate::test::with_tables(&s, &qwen));
-        let runner = rig.open().unwrap();
-        let before = rig.settings().review.local;
-        let missing = settings_with(&rig, |s| {
-            s.replace("~/.claude/scripts/qwen-review.sh", "/nonexistent/review.sh")
-        });
-        let mut runner = runner.lock().unwrap();
-        let err = runner.reread(missing, rig.kelpie_settings()).unwrap_err();
-        assert!(
-            err.to_string().starts_with("setting `review.local`"),
-            "{err}"
-        );
-        assert_eq!(runner.settings().review.local, before);
-
-        let off = settings_with(&rig, |s| {
-            s.replace(
-                "kind = \"command\"\ncommand = \"/nonexistent/review.sh\"",
-                "kind = \"off\"",
-            )
-        });
-        let line = runner.reread(off, rig.kelpie_settings()).unwrap();
-        assert_eq!(
-            line.as_deref(),
-            Some("settings changed: review now in effect")
-        );
-        assert_eq!(runner.settings().review.local, Some(LocalRound::Off {}));
-    }
-
-    #[test]
-    fn a_changed_local_reviewer_definition_is_checked_and_named() {
-        let rig = Rig::new("shep");
-        rig.edit_settings(|s| {
-            s.replace(crate::test::OLD_LOCAL, "").replace(
-                "[app.dogs.kelpie.review]\n",
-                "[app.dogs.kelpie.review]\nreviewers = [\"mine\", \"claude\"]\n",
-            )
-        });
+        rig.reviewers(&["mine", "claude"]);
         let script = rig.home.path().join("review.sh");
         crate::test::write_script(&script, "#!/bin/sh\nexit 0\n");
-        let base = std::fs::read_to_string(rig.paths().kelpie_settings).unwrap();
         let define = |command: &str| {
-            format!("{base}[local_reviewers.mine]\nkind = \"command\"\ncommand = \"{command}\"\n")
+            let text = format!("---\nrole: reviewer\nharness: command\ncommand: {command}\n---\n");
+            rig.write_agent("mine", &text);
         };
-        rig.set_kelpie_settings(&define(&script.display().to_string()));
+        define(&script.display().to_string());
         let runner = rig.open().unwrap();
         let mut runner = runner.lock().unwrap();
 
-        rig.set_kelpie_settings(&define("/nonexistent/review.sh"));
+        define("/nonexistent/review.sh");
         let err = runner
             .reread(rig.settings(), rig.kelpie_settings())
             .unwrap_err();
         assert!(
             err.to_string()
-                .starts_with("setting `review.reviewers`: cannot run /nonexistent"),
+                .starts_with("setting `agents.reviewers`: mine: cannot run /nonexistent"),
             "{err}"
         );
 
-        rig.set_kelpie_settings(&define("~/review.sh"));
+        define("~/review.sh");
         let line = runner
             .reread(rig.settings(), rig.kelpie_settings())
             .unwrap();
-        assert_eq!(line, None, "the same command, spelt from the home folder");
+        assert_eq!(
+            line.as_deref(),
+            Some("settings changed: agents now in effect"),
+            "the same command, spelt from the home folder, in an edited file"
+        );
 
-        rig.set_kelpie_settings(&base);
+        std::fs::remove_file(rig.paths().agents.join("mine.md")).unwrap();
         let err = runner
             .reread(rig.settings(), rig.kelpie_settings())
             .unwrap_err();
-        assert!(err.to_string().contains("mine is not defined"), "{err}");
+        assert!(
+            err.to_string().contains("mine, which has no agent file"),
+            "{err}"
+        );
     }
 
     #[test]

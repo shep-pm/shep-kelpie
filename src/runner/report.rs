@@ -11,7 +11,7 @@ use serde::Serialize;
 use crate::board::Skip;
 use crate::pacer::HoldKind;
 use crate::ports::{AgentCall, Cost, Finding, Role, SessionId, Timestamp, Usage};
-use crate::settings::{AgentName, LocalRound, ReviewerName};
+use crate::settings::{AgentName, LocalRound};
 use crate::work_item::{QwenTally, Spend, Split};
 
 /// What asked for a rework on the pull request itself
@@ -386,7 +386,7 @@ pub enum StepReport {
         /// The round
         round: u32,
         /// Which reviewer ran it
-        reviewer: ReviewerName,
+        reviewer: AgentName,
         /// How many findings it reported
         findings: usize,
         /// The files it could not review, which are no findings
@@ -403,7 +403,7 @@ pub enum StepReport {
         /// The round
         round: u32,
         /// Which reviewer it was
-        reviewer: ReviewerName,
+        reviewer: AgentName,
         /// Why its last call failed
         reason: String,
     },
@@ -417,7 +417,7 @@ pub enum StepReport {
         /// The round
         round: u32,
         /// Which reviewer ran it
-        reviewer: ReviewerName,
+        reviewer: AgentName,
         /// The files it could not review
         unreviewed: Vec<String>,
     },
@@ -504,18 +504,43 @@ pub enum StepReport {
         /// How many findings were sent: none for a round of nits
         held: usize,
     },
-    /// A reader of the deep round reported
-    DeepRead {
+    /// A reviewer with a second look read once, and reads again next,
+    /// shown what it found
+    FirstLook {
         /// The work item's issue
         issue: u64,
         /// Its pull request
         pull_request: u64,
         /// The round
         round: u32,
-        /// Which reader: 1 for the first, 2 for the one shown its findings
-        reader: u8,
-        /// How many findings it reported
+        /// Who reviews it
+        reviewer: AgentName,
+        /// How many findings the first look reported
         findings: usize,
+    },
+    /// A review pass ended with no reviewer having read the pull request,
+    /// as a listed one was down or kept failing, so the work item is marked
+    /// unreviewed and goes to CI
+    Unreviewed {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// Which reviewers did not read it, and why
+        reason: String,
+    },
+    /// The worker's fix turn pushed nothing, having deferred every finding
+    /// sent as out of scope, so the next reviewer reads the pull request as
+    /// it stands
+    FindingsDeferred {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The round whose findings it deferred
+        round: u32,
+        /// How many findings it deferred
+        deferred: usize,
     },
     /// The worker's fix turn for a round's held findings ended, and the
     /// round counts
@@ -564,15 +589,13 @@ pub(super) enum ReviewCall {
         round: u32,
         criteria: String,
     },
-    /// A fresh Claude review round
-    ClaudeRound(AgentCall),
-    /// A reader of the deep round
-    Deep(AgentCall),
+    /// A fresh session of a reviewer, its first look or its second
+    Session(AgentCall),
 }
 
 /// What a [`ReviewCall`] cost, for the work item's record
 pub(super) enum Spent {
-    /// A Claude call that came back, in `session`
+    /// A session's call that came back, in `session`
     Claude {
         role: Role,
         session: SessionId,
@@ -593,13 +616,11 @@ pub(super) struct Reviewed {
 
 /// What a [`ReviewCall`] came back with
 pub(super) enum ReviewResult {
-    /// A round's raw findings, from the local round or a Claude round
+    /// A round's raw findings, from a local round or a reviewer's session
     Findings(Result<Vec<Finding>, String>),
     /// The local model sat partly or wholly on the CPU, so the round did not
     /// run, and why
     Spilled(String),
-    /// What a deep round's reader said, as text, or why its call failed
-    Deep(Result<String, String>),
     /// The call was ended because the runner is stopping, before it came
     /// back with anything
     Stopped,

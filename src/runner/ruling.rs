@@ -572,9 +572,12 @@ pub(super) fn question(
         ""
     };
     let ask = match kind {
-        RulingKind::Merge { head } => {
+        RulingKind::Merge { head, unreviewed } => {
+            let unread = unreviewed.as_ref().map_or_else(String::new, |why| {
+                format!(" No reviewer read it in its last review: {why}.")
+            });
             format!(
-                "Merge {about} at {} into main? {yes} merges it",
+                "Merge {about} at {} into main?{unread} {yes} merges it",
                 short(head)
             )
         }

@@ -1,4 +1,5 @@
-//! A state file saved while the deep round confirmed and re-checked
+//! A state file saved while the deep round read, confirmed and re-checked:
+//! its reviewer is `defect-hunter`, and its two reads are its two looks
 
 use std::fs;
 
@@ -6,9 +7,9 @@ use serde_json::{Value, json};
 
 use super::saved_with;
 use crate::ports::Finding;
-use crate::settings::ReviewerName;
+use crate::settings::AgentName;
 use crate::state::{Fix, RulingKind, StateError};
-use crate::work_item::{Deep, Phase, Review, ReviewStage};
+use crate::work_item::{Phase, Review, ReviewStage};
 
 fn high() -> Value {
     json!({ "severity": "high", "file": "a.rs", "line": 3, "what": "racy", "why": "two writers" })
@@ -47,12 +48,13 @@ fn in_phase(review: Value) -> Value {
 }
 
 fn round_2(stage: ReviewStage) -> Review {
-    let name = |n: &str| ReviewerName::try_from(n.to_owned()).unwrap();
+    let name = |n: &str| AgentName::try_from(n.to_owned()).unwrap();
     Review {
         round: 2,
         stage,
-        reviewer: Some(name("deep")),
+        reviewer: Some(name("defect-hunter")),
         ran: vec![name("qwen")],
+        unread: false,
         ..Review::first()
     }
 }
@@ -89,16 +91,13 @@ fn done() -> ReviewStage {
 }
 
 #[test]
-fn the_two_reads_load_as_they_were() {
-    assert_eq!(
-        loaded_stage(json!({ "step": "read" })),
-        ReviewStage::Deep(Deep::Read)
-    );
+fn the_two_reads_load_as_defect_hunters_two_looks() {
+    assert_eq!(loaded_stage(json!({ "step": "read" })), ReviewStage::Round);
     assert_eq!(
         loaded_stage(json!({ "step": "missed", "first": [high()] })),
-        ReviewStage::Deep(Deep::Missed {
+        ReviewStage::SecondLook {
             first: findings(&[high()])
-        })
+        }
     );
 }
 
@@ -139,7 +138,9 @@ fn a_fix_under_way_goes_on_and_must_still_move_the_head() {
     assert_eq!(
         loaded_stage(fixing),
         ReviewStage::Fixing {
-            head: Some("c0ffee".into())
+            head: Some("c0ffee".into()),
+            sent: Vec::new(),
+            deferred_before: Vec::new(),
         }
     );
 }
@@ -165,7 +166,9 @@ fn a_fix_not_pushed_ruling_of_the_deep_round_loads_without_its_why() {
         state.rulings[0].kind,
         RulingKind::FixNotPushed {
             fix: Fix::Review(round_2(ReviewStage::Fixing {
-                head: Some("c0ffee".into())
+                head: Some("c0ffee".into()),
+                sent: Vec::new(),
+                deferred_before: Vec::new(),
             })),
             prompt: "p".into(),
         }

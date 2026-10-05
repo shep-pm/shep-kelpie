@@ -98,7 +98,8 @@ On a repo without those four labels, `add` makes them. The runner puts `in-progr
 - `max_items = 1`: one work item at a time
 - `ci` is on when the checkout has `.github/workflows`
 - `coderabbit.enabled` is on for a public repo, off for a private one
-- `review.reviewers = ["deep"]`, unless `~/.claude/scripts/qwen-review.sh` exists, which then runs first
+- `agents.implementers = ["sonnet-high"]`
+- `agents.reviewers = ["defect-hunter"]`, with `qwen` first when `~/.claude/scripts/qwen-review.sh` exists
 - `pacing.enabled = true`
 - `worker.allowed_domains = []`
 - `worker.turn_timeout = 60`, in minutes
@@ -236,7 +237,7 @@ Quotes are optional, but zsh still needs them around a note with `?`, `*`, `!` o
 
 `add` names the project after the repo, or `shep kelpie add <name>`. It makes the four labels where the repo lacks them, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name. `shep stop <project>` stops a runner, and `shep delete <project>` removes it.
 
-`doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's labels, CodeRabbit where a project turns it on, the local review command or endpoint where one is set, and which webhook, if any, rulings post to. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
+`doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's labels, CodeRabbit where a project turns it on, each project's reviewers, in order, with any command or endpoint among them checked as a runner's start checks it, and which webhook, if any, rulings post to. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
 
 `shep describe <project>` labels each Claude session the runner starts with its issue and role, such as `#114 worker`.
 
@@ -298,7 +299,7 @@ Every step shep-kelpie drives an agent through runs a skill, by default from [ma
 | `spec` | `to-spec` | not driven yet |
 | `implement` | `implement` | the worker's first turn on an issue |
 | `tests` | `tdd` | named in the worker's instructions |
-| `review` | `code-review` | each Claude review round |
+| `review` | `code-review` | not driven: a reviewer's prompt is its agent file's body |
 | `ci` | `diagnosing-bugs` | the worker's turn on a red CI run |
 | `pr` | `pr` | named in the worker's instructions, unless the repo has a pull request template |
 | `reset` | `handoff` | not driven yet |
@@ -314,53 +315,48 @@ A skill that can't load runs shep-kelpie's own prompt instead. The runner logs w
 
 ### The review
 
-Each pull request goes through a review before CI. A project lists its reviewers in `review.reviewers`, in the order the review runs them, and shep-kelpie's own settings define each one by name in `[kelpie.local_reviewers.<name>]`:
+Each pull request goes through a review before CI. A project lists its reviewers in `agents.reviewers`, in the order the review runs them, each an agent file whose `role` is `reviewer` (see Agents below). Each listed reviewer runs once, in order, and a list changed mid-pass runs whichever listed reviewers the pass has not. A reviewer whose call fails three times in a row is passed over for the rest of the pass, and `status` lists it under `reviewers_skipped`. One that finds anything above a nit sends the worker all of its findings, nits included and at its own severity, for one fix turn, and the next reviewer reads the fix. A round of nits, or of nothing, goes straight to the next reviewer. A fix turn that pushes nothing parks on a ruling, unless the worker deferred every finding it was sent, in which case the next reviewer reads the pull request as it stands. A pass that ends with no reviewer having read the pull request, because one was down, kept failing or reviewed no file, marks the work item unreviewed: `status` shows why, the merge ruling's question says so, and under `auto` it gets the merge ruling instead of merging. An empty list, or reviewers whose `paths` all miss the change, is your choice, and the log says so once. After the last one the pull request goes to CI. There is no judge and no second pass: whatever the last fix leaves is what CI and the merge see. A pass starts again from the top only on new code the review has not seen, such as the fix a merge ruling's `no` asks for, a change you accept that someone else pushed, or a rework. An empty list reviews nothing.
 
-- `kind = "command"`: a command of your own that keeps the contract below
-- `kind = "endpoint"`: shep-kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server
-- `kind = "claude"`: a fresh Claude session on its own `model` and `effort`
-- `kind = "session"`: a fresh session on the agent its `agent` names (see Agents below)
+A reviewer runs in one of three ways, by its file's `harness`:
 
-`claude` is always defined: the project's own Claude round on its reviewer's agent, `models.reviewer` unless the project names one. Each listed reviewer runs once, in order, and a list changed mid-pass runs whichever listed reviewers the pass has not. A reviewer whose call fails three times in a row is passed over for the rest of the pass, and `status` lists it under `reviewers_skipped`. One that finds anything above a nit sends the worker all of its findings, nits included and at its own severity, for one fix turn, and the next reviewer reads the fix. A round of nits, or of nothing, goes straight to the next reviewer. After the last one the pull request goes to CI. There is no judge and no second pass: whatever the last fix leaves is what CI and the merge see. A pass starts again from the top only on new code the review has not seen, such as the fix a merge ruling's `no` asks for, a change you accept that someone else pushed, or a rework. Where no listed reviewer can run, the project's own Claude round runs once.
+- `claude-code`, `codex` or `pi`: a fresh session on its `model` and `effort`, which reads the worktree with Read, Grep and Glob and runs no command. The file's body is its prompt.
+- `command`: a command of your own that keeps the contract below, and takes no body.
+- `endpoint`: shep-kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server, and takes no body.
 
-`deep` is always defined too, and it is a new project's review: one deep round instead of a loop of shallow ones. A fresh session on `models.deep_reviewer` (Opus 5.5 at high effort unless the project says otherwise) reads the whole pull request for defects, meaning a trigger and an effect that a failing test could be written from, and not for style or naming. A second fresh session on the same model is shown what the first found and asked only for what it missed. Neither runs a command. What the two found then goes to the worker as any reviewer's findings do: one fix turn for both lists when anything is above a nit, and then the next reviewer in the list, or CI when `deep` is last. `deep` is one entry in the list like any other. Its time is the `deep_round` timing phase.
+A session's prompt is its file's body with the commit the change is against at `{{BASE}}` and the diff at `{{DIFF}}`. A body with no `{{DIFF}}` gets the diff after it. The body asks for kelpie's format, one finding per line as `SEVERITY|file:line|what|why`, or `CLEAN` alone. Every reviewer's prompt carries the issue's acceptance criteria: the section under an "Acceptance criteria" heading, or the whole body without one. `paths` limits a reviewer to pull requests that change a file under one of its globs, and the review skips it elsewhere. `second_look: true` runs a session twice: the second fresh session is shown what the first found and asked only for what it missed, and the worker gets one fix turn for both lists.
 
-A local model alone:
+shep-kelpie ships `defect-hunter`: Opus 5.5 at high effort reading the whole pull request for defects, meaning a trigger and an effect a failing test could be written from, and not for style or naming, with a second look. It is a project's review when the project lists none. `qwen` runs `~/.claude/scripts/qwen-review.sh`, an optional local review script, and when that script exists a project that lists none runs `qwen` first.
 
-```toml
-# the project's [app.dogs.kelpie.review]
-reviewers = ["qwen"]
-
-# shep-kelpie's [kelpie] section
-[kelpie.local_reviewers.qwen]
-kind = "endpoint"
-url = "http://localhost:11434/v1"
-model = "qwen2.5-coder:14b"
-context = 32768
-lease = "gpu"
-```
-
-Claude alone:
+A local model before the defect hunter, and a deeper read of the paths where it pays:
 
 ```toml
-reviewers = ["claude"]
+[app.dogs.kelpie.agents]
+reviewers = ["gpu-box", "defect-hunter", "merge-reader"]
 ```
 
-Both, with a deeper Claude round only where it pays:
-
-```toml
-reviewers = ["qwen", "claude", "opus"]
-
-[kelpie.local_reviewers.opus]
-kind = "claude"
-model = "claude-opus-5-5"
-effort = "high"
-paths = ["src/auth/**", "migrations/**"]
+```markdown
+---
+role: reviewer
+harness: endpoint
+url: http://localhost:11434/v1
+model: qwen2.5-coder:14b
+context: 32768
+lease: gpu
+---
 ```
 
-`paths` limits a reviewer to pull requests that change a file under one of its globs, and the review skips it elsewhere. Every round's prompt carries the issue's acceptance criteria: the section under an "Acceptance criteria" heading, or the whole body without one.
+```markdown
+---
+role: reviewer
+harness: claude-code
+model: claude-opus-5-5
+effort: high
+paths: ["src/auth/**", "migrations/**"]
+---
 
-A project that lists none and sets no `review.local` runs `~/.claude/scripts/qwen-review.sh`, an optional local review script, when it exists, and then the deep round. One that sets `review.local` runs that round and then `claude`. `review.local` is the older form: it takes the same keys as a definition, or `kind = "off"`, and the runner says so at start.
+Read the change against {{BASE}} for ways it lets the wrong account in. Output
+one finding per line as SEVERITY|file:line|what|why, or exactly CLEAN.
+```
 
 A missing command or an endpoint that doesn't answer stops the runner at start.
 
@@ -375,9 +371,9 @@ A command is run as `<command> --dir <worktree> --round <n> --diff <base>`, with
 
 It writes `round-<n>.txt` in that folder, one finding per line as `SEVERITY|path:line|what|why` with `HIGH`, `MEDIUM` or `LOW`, and then an empty `round-<n>.txt.done`. Kelpie reads nothing without the marker, and nothing from stdout. A nonzero exit fails the round. A command that writes `LOW|<path>:0|not reviewed: <n> lines exceeds the chunk limit|...` is run again with `--files <hunk file>` in place of `--diff`, on that file alone. If that run fails, its file is left unreviewed, as below, with the failure as the reason; only when kelpie cannot cut the hunk with `git diff` does the placeholder stay as the finding. Any other `LOW|<path>:0|not reviewed: <why>|...` line, as the script writes when the model cannot be reached, is a file left unreviewed and not a finding. A round with nothing but those lines reviewed nothing, and the review goes on to the next reviewer. A round that leaves the same files unreviewed as the same reviewer's last round counts against it too, and one that leaves none clears its count. A second such round in a row, which takes two passes, leaves the reviewer out of the review for the rest of the work item, and `status` lists it under `local_reviewers_down`. Another local reviewer, on another command or server, still runs. A round with real findings and some `not reviewed:` lines keeps its findings.
 
-`lease` names the lock kelpie holds around each round of a command or an endpoint. `gpu` is this machine's GPU lock, the one the qwen scripts take. Any other name is a lock of its own, so a reviewer on another machine's GPU never waits on this one's. Leave it off for a command that takes the lock itself, as `qwen-review.sh` does. `gpu_lease = true` is the older spelling of `lease = "gpu"`.
+`lease` names the lock kelpie holds around each round of a command or an endpoint. `gpu` is this machine's GPU lock, the one the qwen scripts take. Any other name is a lock of its own, so a reviewer on another machine's GPU never waits on this one's. Leave it off for a command that takes the lock itself, as `qwen-review.sh` does.
 
-With a lease, before a round against Ollama, kelpie reads the host's `/api/ps`. An endpoint's host is its `url` without the `/v1`. A command names its host with `ollama = "http://localhost:11434"`, which needs a lease, and its model with `ollama_model`, else every model the host has loaded is checked. A model partly or wholly on the CPU fails the round and raises a ruling, and a yes runs the round again once the model is back on the GPU. A host with no `/api/ps` is not checked, and `status` shows the model's name, its share on the GPU, its context length and when it unloads.
+With a lease, before a round against Ollama, kelpie reads the host's `/api/ps`. An endpoint's host is its `url` without the `/v1`. A command names its host with `ollama: http://localhost:11434`, which needs a lease, and its model with `ollama_model`, else every model the host has loaded is checked. A model partly or wholly on the CPU fails the round and raises a ruling, and a yes runs the round again once the model is back on the GPU. A host with no `/api/ps` is not checked, and `status` shows the model's name, its share on the GPU, its context length and when it unloads.
 
 ### The board
 
@@ -385,7 +381,7 @@ Issues labelled `ready-for-agent` are the board. On a pull request kelpie opened
 
 ## Agents
 
-An agent is a file: `$SHEP_HOME/kelpie/agents/<name>.md` (or the `agents` folder of the home `KELPIE_HOME` names), YAML frontmatter and then a Markdown body. The name is the file's name without `.md`. The body is added to kelpie's own instructions for that agent, and an empty body adds nothing.
+An agent is a file: `$SHEP_HOME/kelpie/agents/<name>.md` (or the `agents` folder of the home `KELPIE_HOME` names), YAML frontmatter and then a Markdown body. The name is the file's name without `.md`. An implementer's body is added to kelpie's own instructions for that agent, and an empty body adds nothing. A reviewer's body is its prompt (see The review above).
 
 ```markdown
 ---
@@ -398,18 +394,19 @@ effort: high
 Extra instructions for this agent, added to kelpie's own.
 ```
 
-`role` is what the agent is for: `implementer`, an agent that builds a work item. `harness` is Claude Code, `claude-code`, pi, `pi`, which runs a model on an OpenAI-compatible server such as Ollama, or Codex, `codex`, on a ChatGPT plan. `model` and `effort` are what the harness runs. Any other key stops the runner, and so does a file that does not parse or misses a key its harness needs, naming the file and the key. A `.md` file whose name is no agent's, such as a `README.md`, is skipped and named in the log. A runner sees an edit to the folder the next time it wakes, as it sees a settings change.
+`role` is what the agent is for: `implementer`, an agent that builds a work item, or `reviewer`, one that reads a pull request. A key only the other role takes, such as a reviewer's `paths` or `second_look`, stops the runner. `harness` is Claude Code, `claude-code`, pi, `pi`, which runs a model on an OpenAI-compatible server such as Ollama, or Codex, `codex`, on a ChatGPT plan. `model` and `effort` are what the harness runs. Any other key stops the runner, and so does a file that does not parse or misses a key its harness needs, naming the file and the key. A `.md` file whose name is no agent's, such as a `README.md`, is skipped and named in the log. A runner sees an edit to the folder the next time it wakes, as it sees a settings change.
 
-Kelpie ships two: `sonnet-high`, Sonnet 5.5 at high, the default implementer, and `opus-high`, Opus 5.5 at high, for work that is hard to undo. `shep kelpie add` writes out any that are missing and never writes over one you edited, and a file named for one replaces it.
+Kelpie ships `sonnet-high`, Sonnet 5.5 at high, the default implementer, `opus-high`, Opus 5.5 at high, for work that is hard to undo, `defect-hunter`, the default reviewer, and `qwen`, the reviewer that runs the qwen-review script. `shep kelpie add` writes out any that are missing, `qwen` only where the script exists, and never writes over one you edited, and a file named for one replaces it.
 
-A project lists the agents that build its work items, from those files:
+A project lists the agents that build its work items and the ones that review its pull requests, from those files:
 
 ```toml
 [app.dogs.kelpie.agents]
 implementers = ["sonnet-high", "opus-high"]
+reviewers = ["defect-hunter"]
 ```
 
-An issue labelled `agent:<name>` (the prefix in any case) runs on that agent, which the project must list, and any other issue on the first listed that is not a local model. A work item keeps the agent it opened on, and each turn runs that agent's file as it is then. `sonnet-high` alone when absent. The `agents` table's `reviewer` and `deep_reviewer`, and a local reviewer of kind `session`, name an agent file the same way.
+An issue labelled `agent:<name>` (the prefix in any case) runs on that agent, which the project must list, and any other issue on the first listed that is not a local model. A work item keeps the agent it opened on, and each turn runs that agent's file as it is then. `sonnet-high` alone when absent. An implementer's file must say `role: implementer`, and a reviewer's `role: reviewer`.
 
 `usage` says how an agent's usage is read, and so which account paces it: `claude` (the default on Claude Code) reads `/usage`, `codex` reads Codex's own 5-hour and weekly windows, and `none` is a local model that is never paced. It must be the harness's own reader, so leave it out: Claude Code reads `claude`, pi reads `none` and Codex reads `codex`.
 

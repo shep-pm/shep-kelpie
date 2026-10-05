@@ -7,27 +7,39 @@ use serde_json::json;
 use crate::ports::Checks;
 use crate::runner::report::StepReport;
 use crate::runner::{Runner, step};
+use crate::settings::AgentName;
 use crate::settings::LocalRound;
-use crate::settings::ReviewerName;
 use crate::test::{Answer, Rig, Scripted, ScriptedRound, StandInEndpoint, unreachable_url};
 
-// A rig whose project runs `table` as its local round.
-fn rig_with(table: &str) -> Rig {
+// A rig whose project lists only `mine`, the reviewer `file` defines.
+fn rig_with(file: &str) -> Rig {
     let rig = Rig::new("koji");
-    rig.edit_settings(|s| crate::test::with_tables(&s, table));
+    rig.reviewers(&["mine"]);
+    rig.write_agent("mine", file);
+    rig
+}
+
+// A rig whose project lists only its Claude session, and no local round.
+fn claude_alone() -> Rig {
+    let rig = Rig::new("koji");
+    rig.reviewers(&["claude"]);
     rig
 }
 
 fn endpoint(url: &str) -> String {
     format!(
-        "[app.dogs.kelpie.review.local]\nkind = \"endpoint\"\nurl = \"{url}\"\n\
-         model = \"stand-in\"\ncontext = 8192\n"
+        "---\nrole: reviewer\nharness: endpoint\nurl: {url}\nmodel: stand-in\n\
+         context: 8192\n---\n"
     )
 }
 
+fn command(path: &str) -> String {
+    format!("---\nrole: reviewer\nharness: command\ncommand: {path}\n---\n")
+}
+
 #[test]
-fn with_the_local_round_off_one_clean_claude_round_reaches_ci() {
-    let rig = rig_with("[app.dogs.kelpie.review.local]\nkind = \"off\"\n");
+fn with_no_local_round_listed_one_clean_claude_round_reaches_ci() {
+    let rig = claude_alone();
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
@@ -53,8 +65,8 @@ fn with_the_local_round_off_one_clean_claude_round_reaches_ci() {
 }
 
 #[test]
-fn with_the_local_round_off_claudes_fix_goes_on_to_ci() {
-    let rig = rig_with("[app.dogs.kelpie.review.local]\nkind = \"off\"\n");
+fn with_no_local_round_listed_claudes_fix_goes_on_to_ci() {
+    let rig = claude_alone();
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
@@ -121,11 +133,8 @@ fn a_named_command_runs_in_place_of_the_script() {
          echo 'MEDIUM|work.txt:1|named command ran|it did' > \"$QWEN_REVIEW_OUT/round-1.txt\"\n\
          : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n",
     );
-    let table = format!(
-        "[app.dogs.kelpie.review.local]\nkind = \"command\"\ncommand = \"{}\"\n",
-        command.display()
-    );
-    rig.edit_settings(|s| crate::test::with_tables(&s, &table));
+    rig.reviewers(&["mine"]);
+    rig.write_agent("mine", &self::command(&command.display().to_string()));
     rig.reviewer.pass_through();
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
@@ -150,8 +159,8 @@ fn a_named_command_runs_in_place_of_the_script() {
 }
 
 #[test]
-fn a_claude_round_that_says_neither_findings_nor_clean_fails() {
-    let rig = rig_with("[app.dogs.kelpie.review.local]\nkind = \"off\"\n");
+fn a_session_that_says_neither_findings_nor_clean_fails() {
+    let rig = claude_alone();
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
@@ -167,7 +176,7 @@ fn a_claude_round_that_says_neither_findings_nor_clean_fails() {
             step(&runner).unwrap(),
             Some(StepReport::GateFailed {
                 issue: 7,
-                reason: format!("the Claude round's reply is neither findings nor CLEAN: {said}"),
+                reason: format!("the reviewer's reply is neither findings nor CLEAN: {said}"),
             })
         );
     }
@@ -180,11 +189,12 @@ fn a_claude_round_that_says_neither_findings_nor_clean_fails() {
 
 #[test]
 fn a_missing_command_stops_the_runner_naming_it() {
-    let table =
-        "[app.dogs.kelpie.review.local]\nkind = \"command\"\ncommand = \"~/bin/no-such-review\"\n";
-    let err = rig_with(table).open().unwrap_err().to_string();
+    let err = rig_with(&command("~/bin/no-such-review"))
+        .open()
+        .unwrap_err()
+        .to_string();
     assert!(
-        err.starts_with("setting `review.local`: cannot run "),
+        err.starts_with("setting `agents.reviewers`: mine: cannot run "),
         "{err}"
     );
     assert!(
@@ -199,20 +209,18 @@ fn an_unreachable_endpoint_stops_the_runner_naming_it() {
     let err = rig_with(&endpoint(&url)).open().unwrap_err().to_string();
     assert!(
         err.starts_with(&format!(
-            "setting `review.local`: cannot reach {url}/models: "
+            "setting `agents.reviewers`: mine: cannot reach {url}/models: "
         )),
         "{err}"
     );
 }
 
 #[test]
-fn with_the_local_round_off_no_command_is_needed() {
+fn with_no_local_round_listed_no_command_is_needed() {
     let rig = Rig::new("koji");
     std::fs::remove_file(rig.home.path().join(".claude/scripts/qwen-review.sh")).unwrap();
-    assert!(rig.open().is_err(), "the default command is checked");
-    rig.edit_settings(|s| {
-        crate::test::with_tables(&s, "[app.dogs.kelpie.review.local]\nkind = \"off\"\n")
-    });
+    assert!(rig.open().is_err(), "the listed qwen command is checked");
+    rig.reviewers(&["claude"]);
     assert!(rig.open().is_ok());
 }
 
@@ -227,8 +235,8 @@ fn found(lines: &str) -> ScriptedRound {
     ScriptedRound::Findings(crate::ports::parse_findings(lines))
 }
 
-fn qwen() -> ReviewerName {
-    ReviewerName::try_from("qwen".to_owned()).unwrap()
+fn qwen() -> AgentName {
+    AgentName::try_from("qwen".to_owned()).unwrap()
 }
 
 fn at_round_one(rig: &Rig) -> Mutex<Runner> {

@@ -4,8 +4,7 @@
 //! project had before one. Unknown keys are refused, so a misspelt or
 //! malformed setting stops the runner with a message naming it. Every
 //! setting is required except the ones added after the first build
-//! (`max_items`, `[review]`, `review.local`, `review.reviewers`,
-//! `coderabbit.rounds`,
+//! (`max_items`, `coderabbit.rounds`,
 //! `pacing.enabled`, `worker.allowed_domains`, `worker.build_env`,
 //! `worker.instructions_file`, `worker.turn_timeout`, `worker.guard_hooks`,
 //! `pull_request_reviewers`, `[skills]` and
@@ -37,13 +36,10 @@ mod skills;
 
 pub use agents::{
     Account, AgentHarness, AgentName, Harness, Implementer, Limit, ModelServer, RoleAgentNames,
-    RoleAgents, RoleLimits, UsageReader,
+    RoleAgents, UsageReader,
 };
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
-pub use reviewers::{
-    AgentSession, CLAUDE, ClaudeSession, DEEP, Definition, LeaseName, LoopReviewer, QWEN,
-    ReviewerName, Runs,
-};
+pub use reviewers::{LeaseName, ListedReviewer, default_reviewers};
 pub use skills::{SkillChoice, SkillName, StepSkills};
 
 /// Everything kelpie reads about one project
@@ -75,16 +71,10 @@ pub struct Settings {
     /// words, whatever their case. None when absent.
     #[serde(default)]
     pub private_names: Vec<NonBlank>,
-    /// The model and effort for each review role that names no agent
-    pub models: Models,
-    /// The agents that build the project's work items, and the agent each
-    /// review role runs on over `models`, from kelpie's agent files
+    /// The agents that build the project's work items and review its pull
+    /// requests, from kelpie's agent files
     #[serde(default)]
     pub agents: RoleAgentNames,
-    /// The review: its reviewers, each run once in order. Kelpie's
-    /// default list when absent.
-    #[serde(default)]
-    pub review: Review,
     /// The CodeRabbit gate, which holds every pull request reviewer's rounds
     pub coderabbit: CodeRabbit,
     /// The pull request reviewers a round may summon, in preference order,
@@ -109,6 +99,7 @@ const AUDIT: &str = "the whole-issue check is gone";
 const LOOP: &str = "the review loop and its judge are gone";
 const SHOTS: &str = "shots and the preview are parked";
 const AGENT_FILES: &str = "agents are files in kelpie's home's `agents` folder";
+const REVIEWER_FILES: &str = "reviewers are agent files listed in `agents.reviewers`";
 
 // The keys removed features left behind
 const REMOVED: &[Removed] = &[
@@ -193,6 +184,53 @@ const REMOVED: &[Removed] = &[
         because: "an `agent:<name>` label names its agent file, which holds the model id",
         fix: "list each agent a label may name in `agents.implementers`",
     },
+    Removed {
+        key: "models.reviewer",
+        because: REVIEWER_FILES,
+        fix: "write the model and effort as a reviewer's agent file, or list kelpie's \
+              `defect-hunter`, Opus 5.5 at high, in `agents.reviewers`",
+    },
+    Removed {
+        key: "models.deep_reviewer",
+        because: REVIEWER_FILES,
+        fix: "list `defect-hunter` in `agents.reviewers`: it is the deep round, and its \
+              file holds the model and effort",
+    },
+    Removed {
+        key: "models",
+        because: "agents are files in kelpie's home's `agents` folder, which hold each \
+                  model and effort",
+        fix: DELETE,
+    },
+    Removed {
+        key: "agents.reviewer",
+        because: REVIEWER_FILES,
+        fix: "list the reviewer's agent file in `agents.reviewers`",
+    },
+    Removed {
+        key: "agents.deep_reviewer",
+        because: REVIEWER_FILES,
+        fix: "list `defect-hunter`, or a reviewer file with `second_look: true`, in \
+              `agents.reviewers`",
+    },
+    Removed {
+        key: "review.reviewers",
+        because: REVIEWER_FILES,
+        fix: "list them in `agents.reviewers`: `deep` is now `defect-hunter`, and \
+              `claude` and each of kelpie's `[local_reviewers]` an agent file of its own",
+    },
+    Removed {
+        key: "review.local",
+        because: REVIEWER_FILES,
+        fix: "write the round as an agent file with `role: reviewer`, its `kind` as \
+              `harness` and `gpu_lease = true` as `lease: gpu`, and list it in \
+              `agents.reviewers`; `kind = \"off\"` is `agents.reviewers = [\"defect-hunter\"]`",
+    },
+    Removed {
+        key: "review",
+        because: REVIEWER_FILES,
+        fix: DELETE,
+    },
 ];
 
 /// Who decides a merge
@@ -206,31 +244,6 @@ pub enum MergeAuthority {
     Ask,
     /// Kelpie merges once every gate passes, then posts a notice of the merge
     Auto,
-}
-
-/// The model and effort for each review role that calls Claude
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Models {
-    /// Each Claude review round, a fresh session every time
-    pub reviewer: RoleModel,
-    /// The sessions of the deep review round: its two readers. Opus 5.5 at
-    /// high effort when absent.
-    #[serde(default = "default_deep_reviewer")]
-    pub deep_reviewer: RoleModel,
-}
-
-// Opus 5.5 on Claude Code, for a role whose default is Opus
-fn opus(effort: Effort) -> RoleModel {
-    RoleModel {
-        model: NonBlank("claude-opus-5-5".to_owned()),
-        effort,
-        harness: AgentHarness::ClaudeCode,
-    }
-}
-
-fn default_deep_reviewer() -> RoleModel {
-    opus(Effort::High)
 }
 
 /// One role's model and effort
@@ -282,24 +295,6 @@ impl Effort {
             .into_iter()
             .find(|e| e.as_str() == s)
     }
-}
-
-/// The review's settings
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Review {
-    /// The reviewers the review runs, each once, in order, from `deep`,
-    /// `claude` and those kelpie's `[local_reviewers]` define. When absent or
-    /// empty, the maintainer's qwen-review script when it is there and then
-    /// `deep`, the one deep round; with `review.local` set, that round and
-    /// then `claude`.
-    #[serde(default)]
-    pub reviewers: Vec<ReviewerName>,
-    /// The older form of a local round, `[review.local]`, which runs before
-    /// `claude`. Absent, the maintainer's qwen-review script runs first
-    /// when it is there, and the deep round after it.
-    #[serde(default)]
-    pub local: Option<LocalRound>,
 }
 
 /// The CodeRabbit gate's settings
@@ -651,16 +646,7 @@ impl Settings {
         removed::refuse(text, REMOVED)?;
         let mut settings: Self = toml::from_str(text).map_err(|e| e.to_string())?;
         settings.expand(home);
-        settings.check_local()?;
         Ok(settings)
-    }
-
-    // The older local round can work as written.
-    pub(crate) fn check_local(&self) -> Result<(), String> {
-        match &self.review.local {
-            Some(local) => local.check("review.local"),
-            None => Ok(()),
-        }
     }
 
     // `~/` in a path setting is the home folder.
@@ -684,11 +670,7 @@ impl Settings {
 
     // The paths that expand `~/` and are taken from the project's folder.
     fn files_mut(&mut self) -> impl Iterator<Item = &mut PathBuf> {
-        let local = match &mut self.review.local {
-            Some(LocalRound::Command(local)) => Some(&mut local.command),
-            _ => None,
-        };
-        [self.worker.instructions_file.as_mut(), local]
+        [self.worker.instructions_file.as_mut()]
             .into_iter()
             .flatten()
             .chain(self.skills.paths_mut())

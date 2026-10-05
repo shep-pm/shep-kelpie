@@ -72,10 +72,6 @@ generated = []
 [agents]
 implementers = ["sonnet-high"]
 
-[models.reviewer]
-model = "claude-sonnet-5"
-effort = "medium"
-
 [coderabbit]
 divisor = 1000
 
@@ -89,9 +85,6 @@ build_env = {}
 guard_hooks = []
 turn_timeout = 60
 "#;
-
-/// The maintainer's own local-round command, which the default loop runs
-const QWEN_REVIEW: &str = "~/.claude/scripts/qwen-review.sh";
 
 /// Registers `place.checkout` as project `name`, and says what it did
 ///
@@ -195,7 +188,7 @@ pub async fn add(
         }
 
         let folder = place.agents.display();
-        match crate::agents::write_defaults(place.agents).map_err(|e| e.to_string())? {
+        match crate::agents::write_defaults(place.agents, place.home).map_err(|e| e.to_string())? {
             written if written.is_empty() => {
                 done.push(format!("agent files: kelpie's own already in {folder}"));
             }
@@ -265,14 +258,11 @@ fn settings(
             if let Some(Value::Object(coderabbit)) = table.get_mut("coderabbit") {
                 coderabbit.insert("enabled".into(), Value::Bool(public));
             }
-            let installed = QWEN_REVIEW
-                .strip_prefix("~/")
-                .is_some_and(|script| place.home.join(script).is_file());
-            // With the script, the default runs it and then the deep round.
-            if !installed {
-                let deep = Value::Array(vec![text(crate::settings::DEEP)]);
-                let review = Map::from_iter([("reviewers".to_owned(), deep)]);
-                table.insert("review".into(), Value::Object(review));
+            // `qwen` first where the maintainer's script is installed, as `add` writes its file.
+            let reviewers = crate::settings::default_reviewers(place.home);
+            let reviewers = reviewers.iter().map(|name| text(name.as_str())).collect();
+            if let Some(Value::Object(agents)) = table.get_mut("agents") {
+                agents.insert("reviewers".into(), Value::Array(reviewers));
             }
             table
         }

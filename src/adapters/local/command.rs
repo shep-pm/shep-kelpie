@@ -228,11 +228,9 @@ mod tests {
     fn local(script: &Path) -> LocalRound {
         LocalRound::Command(LocalCommand {
             command: script.to_owned(),
-            gpu_lease: false,
             ollama: None,
             ollama_model: None,
             lease: None,
-            paths: Vec::new(),
         })
     }
 

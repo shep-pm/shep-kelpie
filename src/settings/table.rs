@@ -36,7 +36,6 @@ impl Settings {
         let mut settings: Self = toml::from_str(&text).map_err(|e| refused(located(&text, &e)))?;
         settings.expand(home);
         settings.relative_to(folder);
-        settings.check_local().map_err(refused)?;
         Ok(settings)
     }
 }

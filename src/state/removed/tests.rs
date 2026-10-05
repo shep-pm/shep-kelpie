@@ -10,6 +10,7 @@ use crate::work_item::{CallKind, Seconds, TimingPhase};
 
 mod deep_round;
 mod review_loop;
+mod reviewers;
 mod shots;
 mod worker;
 
@@ -17,8 +18,8 @@ fn store_in(dir: &Path) -> StateStore {
     StateStore::new(dir.join("state.json"))
 }
 
-// One open work item and one finished, as this build saves them, then
-// changed by `old` into what a build with the whole-issue check saved.
+// One open work item and one finished, as this build saves them in a
+// version 2 file, then changed by `old` into what an older build saved.
 fn saved_with(dir: &Path, old: impl FnOnce(&mut Value)) -> StateStore {
     let mut state = ProjectState::new(Timestamp(7));
     state.work_items.push(a_work_item());
@@ -32,6 +33,7 @@ fn saved_with(dir: &Path, old: impl FnOnce(&mut Value)) -> StateStore {
         seconds: Seconds::of(&[(TimingPhase::Worker, 40), (TimingPhase::Ci, 10)]),
     });
     let mut value = serde_json::to_value(&state).unwrap();
+    value["version"] = json!(2);
     old(&mut value);
     fs::write(dir.join("state.json"), value.to_string()).unwrap();
     store_in(dir)

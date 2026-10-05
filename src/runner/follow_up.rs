@@ -9,14 +9,13 @@
 //! `ask` the maintainer is asked first. A finding an open issue already holds
 //! gets a comment on that issue instead of a second one.
 
-use std::io;
 use std::path::Path;
 
 use super::Runner;
 use super::report::{Begin, StepReport};
 use super::review::findings;
 use crate::board::READY;
-use crate::ports::{Finding, ForgeError, OpenIssue, Severity, parse_findings};
+use crate::ports::{Finding, ForgeError, OpenIssue, Severity};
 use crate::settings::MergeAuthority;
 use crate::state::{RulingKind, StateError};
 use crate::work_item::FollowUps;
@@ -49,8 +48,7 @@ impl Runner {
         let pending = match item.follow_ups.clone() {
             Some(pending) => pending,
             None => {
-                let path = findings::deferred_path(&item.build);
-                let found = match read_deferred(&path, &item.held, &item.worktree) {
+                let found = match read_deferred(&item.build, &item.held, &item.worktree) {
                     Ok(found) => found,
                     Err(reason) => return Ok(Some(self.gate_failed(reason))),
                 };
@@ -175,13 +173,8 @@ impl Runner {
 // The findings kelpie sent the worker that the file names again, in kelpie's
 // own words and each once. A file that was never written is a worker with
 // nothing to defer.
-fn read_deferred(path: &Path, held: &[Finding], worktree: &Path) -> Result<Vec<Finding>, String> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(format!("cannot read {}: {}", path.display(), e.kind())),
-    };
-    let deferred = parse_findings(&text);
+fn read_deferred(build: &Path, held: &[Finding], worktree: &Path) -> Result<Vec<Finding>, String> {
+    let deferred = findings::deferred(build)?;
     let named = |held: &Finding| deferred.iter().any(|d| d.is_same_as(held));
     Ok(held
         .iter()

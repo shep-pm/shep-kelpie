@@ -93,6 +93,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         threads_sent: Vec::new(),
         resolve_failures: 0,
         reviewers_skipped: Vec::new(),
+        unreviewed: None,
         local_failures: Default::default(),
         local_unreviewed: Vec::new(),
         local_unreviewed_by: None,
@@ -134,28 +135,27 @@ pub(crate) fn project_table(entry: &str) -> serde_json::Map<String, serde_json::
 }
 
 /// A runner entry like `settings.example.toml` with `tables` added to its
-/// kelpie table, such as an older `[app.dogs.kelpie.review.local]`
+/// kelpie table, such as an older `[app.dogs.kelpie.review]`
 pub(crate) fn with_tables(entry: &str, tables: &str) -> String {
     const GATE: &str = "\n[app.dogs.kelpie.coderabbit]\n";
     assert!(entry.contains(GATE), "the example's CodeRabbit table moved");
-    // The rig's own `review.local` gives way to the one `tables` sets.
-    let entry = match tables.contains("[app.dogs.kelpie.review.local]") {
-        true => entry.replace(OLD_LOCAL, ""),
-        false => entry.to_owned(),
-    };
     entry.replace(GATE, &format!("\n{tables}{GATE}"))
 }
 
 /// The `repo` in `settings.example.toml`, which the rig points at its own
 const EXAMPLE_REPO: &str = "~/GitHub/shep";
 
-/// The older form of the local round, as `settings.example.toml` has it
-/// commented out, and on: a project that sets it runs the older loop, the
-/// local round and then Claude's, and is not the default
-const OLD_LOCAL_OFF: &str = "# [app.dogs.kelpie.review.local]\n# kind = \"command\"\n\
-# command = \"~/.claude/scripts/qwen-review.sh\"\n";
-pub(crate) const OLD_LOCAL: &str = "[app.dogs.kelpie.review.local]\nkind = \"command\"\n\
-command = \"~/.claude/scripts/qwen-review.sh\"\n";
+/// The reviewers `settings.example.toml` lists, commented out
+const EXAMPLE_REVIEWERS: &str = "# reviewers = [\"qwen\", \"defect-hunter\"]\n";
+
+/// The rig's reviewers: its qwen round and then its own Claude session, `claude`
+pub(crate) const RIG_REVIEWERS: &str = "reviewers = [\"qwen\", \"claude\"]\n";
+
+/// The rig's own session reviewer, as the older Claude round ran: Sonnet 5
+/// at medium, asked for findings in kelpie's format
+pub(crate) const CLAUDE_REVIEWER: &str = "---\nrole: reviewer\nharness: claude-code\n\
+model: claude-sonnet-5\neffort: medium\n---\nReview the change against {{BASE}} for \
+defects. Output one finding per line as SEVERITY|file:line|what|why, or exactly CLEAN.\n";
 
 /// The CodeRabbit gate as `settings.example.toml` sets it, and turned off
 pub(crate) const CODERABBIT_ON: &str = "[app.dogs.kelpie.coderabbit]\nenabled = true\n";
@@ -295,21 +295,22 @@ impl Rig {
         let example = include_str!("../settings.example.toml");
         assert!(example.contains(EXAMPLE_REPO), "the example's repo moved");
         assert!(example.contains(CODERABBIT_ON), "the example's gate moved");
-        // Most tests are about what comes after the review, or about the older
-        // loop of a local round and Claude's, so the rig's project runs it. A
-        // test of a new project's review takes that out with [`Rig::deep_review`].
+        // Most tests are about what comes after the review, so the rig's
+        // project runs a short one: a local round and then a Claude session. A
+        // test of a new project's review takes that out with [`Rig::default_review`].
         assert!(
-            example.contains(OLD_LOCAL_OFF),
-            "the example's local round moved"
+            example.contains(EXAMPLE_REVIEWERS),
+            "the example's reviewers moved"
         );
         let settings = example
             .replace(EXAMPLE_REPO, &rig.repo().display().to_string())
             .replace(CODERABBIT_ON, CODERABBIT_OFF)
-            .replace(OLD_LOCAL_OFF, OLD_LOCAL);
+            .replace(EXAMPLE_REVIEWERS, RIG_REVIEWERS);
         let paths = rig.paths();
         std::fs::create_dir_all(paths.settings.parent().unwrap()).unwrap();
         std::fs::write(&paths.settings, settings).unwrap();
-        // The example's local round, which the runner checks is there as it starts.
+        rig.write_agent("claude", CLAUDE_REVIEWER);
+        // The maintainer's qwen-review script, which the runner checks is there as it starts.
         let script = rig.home.path().join(".claude/scripts/qwen-review.sh");
         std::fs::create_dir_all(script.parent().unwrap()).unwrap();
         write_script(&script, "#!/bin/sh\nexit 1\n");
@@ -490,9 +491,19 @@ impl Rig {
         });
     }
 
-    /// Makes the project a new one, whose review is the deep round: no reviewers listed
-    pub(crate) fn deep_review(&self) {
-        self.edit_settings(|s| s.replace(OLD_LOCAL, ""));
+    /// Makes the project a new one, which lists no reviewers: the qwen round,
+    /// since the rig has the script, and then `defect-hunter`
+    pub(crate) fn default_review(&self) {
+        self.edit_settings(|s| s.replace(RIG_REVIEWERS, ""));
+    }
+
+    /// Lists `names` as the project's reviewers, read when a runner next opens
+    pub(crate) fn reviewers(&self, names: &[&str]) {
+        let listed = format!("reviewers = {names:?}\n");
+        self.edit_settings(|s| {
+            assert!(s.contains(RIG_REVIEWERS), "the rig's reviewers moved");
+            s.replace(RIG_REVIEWERS, &listed)
+        });
     }
 
     pub(crate) fn edit_settings(&self, edit: impl FnOnce(String) -> String) {

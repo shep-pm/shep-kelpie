@@ -1,10 +1,8 @@
 //! Agents by name: a harness, the model and effort it runs on, and its limit
 //!
 //! Kelpie's agent files define each one (`crate::agents`). A project lists
-//! its implementers in `agents.implementers`, may name one per review role
-//! in the rest of its `[agents]` table, and a local reviewer of kind
-//! `session` names one too. A review role that names none runs on Claude
-//! Code with its `models` entry.
+//! its implementers in `agents.implementers` and its reviewers in
+//! `agents.reviewers`, each by an agent file whose role is that one.
 //!
 //! An agent's limit is its account's usage windows, read the way its
 //! `usage` says, or for a local model a lease held for each whole call.
@@ -17,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use super::local::{ContextSize, EndpointUrl};
 use super::reviewers::{LeaseName, lowercase_name};
 use super::{RoleModel, Settings, SettingsError};
-use crate::agents::{Agent, Agents, FOLDER};
+use crate::agents::{Agent, Agents, FOLDER, Role, Runs};
 use crate::forwarder::Upstream;
 
 /// An agent's name: lowercase letters, digits and `-`
@@ -28,6 +26,11 @@ use crate::forwarder::Upstream;
 pub struct AgentName(String);
 
 impl AgentName {
+    /// One of kelpie's own agents' names, which are all valid
+    pub(crate) fn kelpies(name: &'static str) -> Self {
+        Self(name.to_owned())
+    }
+
     /// The name as written
     #[inline]
     pub fn as_str(&self) -> &str {
@@ -205,7 +208,7 @@ impl Default for Limit {
     }
 }
 
-/// The agents a project names: its implementers, and an agent per review role
+/// The agents a project names: its implementers and its reviewers
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RoleAgentNames {
@@ -214,28 +217,24 @@ pub struct RoleAgentNames {
     /// first that is not a local model. `["sonnet-high"]` when absent.
     #[serde(default = "default_implementers")]
     pub implementers: Vec<AgentName>,
-    /// The project's own Claude round, `claude` in `review.reviewers`, from
-    /// kelpie's agent files. `models.reviewer` on Claude Code when absent.
+    /// The agents that review each pull request, from kelpie's agent files,
+    /// each once a pass, in this order. When absent, `qwen` where the
+    /// maintainer's qwen-review script is installed, then `defect-hunter`.
     #[serde(default)]
-    pub reviewer: Option<AgentName>,
-    /// The sessions of the deep review round, from kelpie's agent files.
-    /// `models.deep_reviewer` on Claude Code when absent.
-    #[serde(default)]
-    pub deep_reviewer: Option<AgentName>,
+    pub reviewers: Option<Vec<AgentName>>,
 }
 
 impl Default for RoleAgentNames {
     fn default() -> Self {
         Self {
             implementers: default_implementers(),
-            reviewer: None,
-            deep_reviewer: None,
+            reviewers: None,
         }
     }
 }
 
 fn default_implementers() -> Vec<AgentName> {
-    vec![AgentName(crate::agents::DEFAULT_IMPLEMENTER.to_owned())]
+    vec![AgentName::kelpies(crate::agents::DEFAULT_IMPLEMENTER)]
 }
 
 /// One agent a project lists in `agents.implementers`
@@ -258,7 +257,7 @@ impl Implementer {
     }
 }
 
-/// The model and effort each role runs on, from the agent it names
+/// The project's implementers, from the agents it names
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoleAgents {
     /// The project's implementers, in its order, each once
@@ -266,12 +265,6 @@ pub struct RoleAgents {
     /// The implementer an issue with no `agent:` label runs on: the first
     /// listed that is not a local model
     pub default_implementer: Implementer,
-    /// The project's own Claude round
-    pub reviewer: RoleModel,
-    /// The deep review round's sessions
-    pub deep_reviewer: RoleModel,
-    /// What holds each review role's calls back
-    pub limits: RoleLimits,
 }
 
 impl RoleAgents {
@@ -286,39 +279,32 @@ impl RoleAgents {
     }
 }
 
-/// What holds each review role's calls back, from the agent it names
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RoleLimits {
-    /// The project's own Claude round
-    pub reviewer: Limit,
-    /// The deep review round's sessions
-    pub deep_reviewer: Limit,
-}
-
 /// The setting a refusal about the implementers names
 const IMPLEMENTERS: &str = "agents.implementers";
 
 impl Settings {
-    /// Each role's agent, from `agents`: the implementers the project lists,
-    /// and for a review role the agent it names, or `models`' entry on Claude Code
+    /// The implementers the project lists, from `agents`
     ///
     /// # Errors
     ///
-    /// [`SettingsError::Invalid`] naming an agent `agents` lacks, an
-    /// implementer the worker's fence cannot hold, or a list with no
-    /// implementer that is not a local model.
+    /// [`SettingsError::Invalid`] naming an agent `agents` lacks or whose
+    /// file is a reviewer's, an implementer the worker's fence cannot hold,
+    /// or a list with no implementer that is not a local model.
     pub fn role_agents(&self, agents: &Agents) -> Result<RoleAgents, SettingsError> {
         let mut implementers: Vec<Implementer> = Vec::new();
         for name in &self.agents.implementers {
             if implementers.iter().any(|i| &i.name == name) {
                 continue;
             }
-            let agent = find(agents, name, IMPLEMENTERS, "agents")?;
-            self.under_worker_fence(name, &agent.model)?;
+            let agent = find(agents, name, IMPLEMENTERS, "agents", Role::Implementer)?;
+            let Runs::Session { model, limit } = &agent.runs else {
+                unreachable!("an implementer's file only parses to a session")
+            };
+            self.under_worker_fence(name, model)?;
             implementers.push(Implementer {
                 name: name.clone(),
-                model: agent.model.clone(),
-                limit: agent.limit.clone(),
+                model: model.clone(),
+                limit: limit.clone(),
                 prompt: agent.prompt.clone(),
             });
         }
@@ -331,27 +317,9 @@ impl Settings {
                     .into(),
             });
         };
-        let pick = |role: &str, named: &Option<AgentName>, model: &RoleModel| match named {
-            None => Ok((model.clone(), Limit::default())),
-            Some(name) => find(agents, name, &format!("agents.{role}"), "agents")
-                .map(|agent| (agent.model.clone(), agent.limit.clone())),
-        };
-        let (reviewer, reviewer_limit) =
-            pick("reviewer", &self.agents.reviewer, &self.models.reviewer)?;
-        let (deep_reviewer, deep_reviewer_limit) = pick(
-            "deep_reviewer",
-            &self.agents.deep_reviewer,
-            &self.models.deep_reviewer,
-        )?;
         Ok(RoleAgents {
             implementers,
             default_implementer,
-            reviewer,
-            deep_reviewer,
-            limits: RoleLimits {
-                reviewer: reviewer_limit,
-                deep_reviewer: deep_reviewer_limit,
-            },
         })
     }
 
@@ -402,24 +370,35 @@ impl Settings {
     }
 }
 
-/// The agent `name` from `agents`, which the setting `at` names
+/// The agent `name` from `agents`, which the setting `at` names for `role`
 ///
 /// # Errors
 ///
-/// [`SettingsError::Invalid`] on `setting` when `agents` lacks it.
+/// [`SettingsError::Invalid`] on `setting` when `agents` lacks it, or its
+/// file is another role's.
 pub(super) fn find<'a>(
     agents: &'a Agents,
     name: &AgentName,
     at: &str,
     setting: &'static str,
+    role: Role,
 ) -> Result<&'a Agent, SettingsError> {
-    agents.get(name).ok_or_else(|| SettingsError::Invalid {
-        setting,
-        reason: format!(
+    let invalid = |reason: String| SettingsError::Invalid { setting, reason };
+    let Some(agent) = agents.get(name) else {
+        return Err(invalid(format!(
             "`{at}` names {name}, which has no agent file: write `{FOLDER}/{name}.md` \
              in kelpie's home"
-        ),
-    })
+        )));
+    };
+    if agent.role != role {
+        return Err(invalid(format!(
+            "`{at}` names {name}, whose agent file's role is `{}`: list it where that \
+             role goes, or name an agent whose role is `{}`",
+            agent.role.as_str(),
+            role.as_str()
+        )));
+    }
+    Ok(agent)
 }
 
 #[cfg(test)]

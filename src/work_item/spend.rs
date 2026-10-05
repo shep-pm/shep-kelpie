@@ -34,10 +34,8 @@ fn is_zero(n: &usize) -> bool {
 pub struct Spend {
     /// The worker's turns
     pub worker: RoleSpend,
-    /// The Claude review rounds
+    /// The reviewers' sessions, on any harness
     pub reviewer: RoleSpend,
-    /// The deep review rounds' sessions
-    pub deep_reviewer: RoleSpend,
 }
 
 /// A work item's qwen rounds. They cost no money, so it is the count and the
@@ -60,7 +58,6 @@ impl WorkItem {
             let role = match call.role {
                 Role::Worker => &mut spend.worker,
                 Role::Reviewer => &mut spend.reviewer,
-                Role::DeepReviewer => &mut spend.deep_reviewer,
             };
             role.calls += 1;
             role.tokens += call.usage;

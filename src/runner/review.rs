@@ -3,30 +3,36 @@
 //! A round whose findings are all nits (LOW), or none, goes straight to the
 //! next reviewer. One with anything above a nit sends the worker all of its
 //! findings, at the reviewer's own severity, for one fix turn, and the next
-//! reviewer reads the fix. After the last reviewer the work item goes on to
-//! [`super::gate`].
+//! reviewer reads the fix. A reviewer with a second look reads twice first,
+//! the second time shown what it found, and both lists go to that one fix
+//! turn. After the last reviewer the work item goes on to [`super::gate`].
 
 pub(super) mod calls;
 mod criteria;
-mod deep;
 pub(super) mod findings;
 mod lineup;
 #[cfg(test)]
 mod local;
+mod prompts;
+#[cfg(test)]
+mod second_look;
 #[cfg(test)]
 mod several;
+#[cfg(test)]
+mod unread;
 
 use std::path::Path;
 
 use super::Runner;
 use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, Spent, StepReport};
 use super::ruling::park;
+use crate::agents::{DEFECT_HUNTER, QWEN};
 use crate::pacer::Scope;
 use crate::ports::{
     AgentCall, AgentError, AgentReply, Agents, Finding, Reviewer, ReviewerError, RoundStage,
     Severity, Timestamp, read_review,
 };
-use crate::settings::{LoopReviewer, QWEN, ReviewerName, Runs};
+use crate::settings::{AgentName, ListedReviewer};
 use crate::state::{Fix, RulingKind, StateError};
 use crate::work_item::{CallKind, Phase, Review, ReviewCallState, ReviewStage, Turn, WorkItem};
 use crate::worktree;
@@ -48,7 +54,6 @@ impl Runner {
         let (issue, worktree) = (item.issue, item.worktree.clone());
         let base = item.review_base();
         let build = item.build.clone();
-        let worker_folder = self.paths.worker.clone();
         // A new pass reviews new code, so no fix of the last one will
         // resolve the bot threads it sent.
         let fresh = review == Review::first();
@@ -60,82 +65,147 @@ impl Runner {
             ReviewStage::Round => {
                 let chosen = match self.choose_reviewer(&review, &worktree, &base) {
                     Ok(Some(chosen)) => chosen,
-                    Ok(None) => return self.pass_ended(),
+                    Ok(None) => return self.pass_ended(&review),
                     Err(reason) => return Ok(self.gate_failed(reason)),
                 };
-                if matches!(chosen.runs, Runs::Deep) {
-                    return self.deep_started(&chosen, review);
-                }
+                let Some(local) = chosen.runs.local() else {
+                    return self.session_call(&chosen, None);
+                };
                 let criteria = match self.criteria(issue) {
                     Ok(criteria) => criteria,
                     Err(reason) => return Ok(self.gate_failed(reason)),
                 };
-                match chosen.runs.clone() {
-                    Runs::Local(local) => {
-                        self.round_started(&chosen, CallKind::Local)?;
-                        Ok(Begin::Review(ReviewCall::Local {
-                            local,
-                            worktree,
-                            base,
-                            out: build.join("qwen-review"),
-                            round: review.round,
-                            criteria,
-                        }))
-                    }
-                    Runs::Deep => unreachable!("the deep round returned above"),
-                    Runs::Claude(session) => {
-                        if let Some(held) = self.pace(Scope::Turn, &session.limit)?.holds() {
-                            return Ok(held);
-                        }
-                        let call = calls::reviewer_call(
-                            calls::Round {
-                                issue,
-                                worktree: &worktree,
-                                base: &base,
-                                worker_folder: &worker_folder,
-                                criteria: &criteria,
-                            },
-                            (&session.model(), &session.limit),
-                            &self.skills,
-                        );
-                        match call.and_then(|call| self.prepared(call)) {
-                            Ok(call) => {
-                                self.round_started(&chosen, CallKind::Claude)?;
-                                Ok(Begin::Review(ReviewCall::ClaudeRound(call)))
-                            }
-                            Err(reason) => Ok(self.gate_failed(reason)),
-                        }
-                    }
+                self.round_started(&chosen, CallKind::Local)?;
+                Ok(Begin::Review(ReviewCall::Local {
+                    local,
+                    worktree,
+                    base,
+                    out: build.join("qwen-review"),
+                    round: review.round,
+                    criteria,
+                }))
+            }
+            ReviewStage::SecondLook { first } => {
+                let listed = review.reviewer.as_ref().and_then(|n| self.listed(n));
+                match listed {
+                    Some(chosen) => self.session_call(&chosen, Some(first)),
+                    // Taken off the list since its first look, whose findings go on alone.
+                    None => self.send_findings(review, first),
                 }
             }
             ReviewStage::Found { findings } => self.send_findings(review, findings),
             // begin_turn drives the fix turn itself, and comes here once it ends.
-            ReviewStage::Fixing { head } => self.fix_ended(number, &build, review, head),
-            ReviewStage::Deep(deep) => self.deep_step(deep),
+            ReviewStage::Fixing {
+                head,
+                sent,
+                deferred_before,
+            } => {
+                let sent = findings::Sent {
+                    findings: &sent,
+                    deferred_before: &deferred_before,
+                };
+                self.fix_ended(number, &build, review, head, sent)
+            }
         }
     }
 
-    // The last reviewer is done, so the work item goes on to CI in this step.
-    fn pass_ended(&mut self) -> Result<Begin, StateError> {
+    // A fresh session of `chosen`: its first look, or with `first` its second.
+    fn session_call(
+        &mut self,
+        chosen: &ListedReviewer,
+        first: Option<Vec<Finding>>,
+    ) -> Result<Begin, StateError> {
+        let Some((model, limit)) = chosen.runs.session() else {
+            unreachable!("only a reviewer that runs sessions is called in one")
+        };
+        if let Some(held) = self.pace(Scope::Turn, limit)?.holds() {
+            return Ok(held);
+        }
+        let item = self.current().expect("a review is a work item's");
+        let (issue, worktree, base) = (item.issue, item.worktree.clone(), item.review_base());
+        let criteria = match self.criteria(issue) {
+            Ok(criteria) => criteria,
+            Err(reason) => return Ok(self.gate_failed(reason)),
+        };
+        let diff = match calls::diff_against(&worktree, &base) {
+            Ok(diff) => diff,
+            Err(reason) => return Ok(self.gate_failed(reason)),
+        };
+        let body = chosen.prompt.as_deref().unwrap_or_default();
+        let prompt = prompts::reviewer_prompt(body, &base, &diff, &criteria, first.as_deref());
+        let call =
+            calls::reviewer_call(issue, &worktree, &self.paths.worker, (model, limit), prompt);
+        match call.and_then(|call| self.prepared(call)) {
+            Ok(call) => {
+                match first {
+                    None => self.round_started(chosen, CallKind::Claude)?,
+                    Some(_) => self.mark_review_call_running(CallKind::Claude)?,
+                }
+                Ok(Begin::Review(ReviewCall::Session(call)))
+            }
+            Err(reason) => Ok(self.gate_failed(reason)),
+        }
+    }
+
+    // The last reviewer is done, so the work item goes on to CI. A pass no
+    // reviewer read because one was down or failing marks the work item
+    // unreviewed, which the merge ruling names and which `auto` will not
+    // merge. One with nobody to read it, by the project's own list, is noted.
+    fn pass_ended(&mut self, review: &Review) -> Result<Begin, StateError> {
         let since = self.ports.clock.now();
-        self.update(|item| item.phase = Phase::Ci { head: None, since })?;
-        self.check_ci()
+        let item = self.current().expect("a pass is a work item's");
+        let (issue, number) = (item.issue, item.pull_request);
+        let unread = review.unread.then(|| self.unread(item, review));
+        if let Some(None) = &unread {
+            let why = match self.lineup.is_empty() {
+                true => "the project lists no reviewer",
+                false => "no listed reviewer's `paths` matches its changes",
+            };
+            self.notes.push(format!(
+                "issue #{issue}'s pull request goes to CI with no reviewer's read: {why}"
+            ));
+        }
+        let reason = unread.flatten();
+        let flagged = reason.clone();
+        self.update(|item| {
+            item.phase = Phase::Ci { head: None, since };
+            if flagged.is_some() {
+                item.unreviewed = flagged;
+            }
+        })?;
+        match (reason, number) {
+            (Some(reason), Some(pull_request)) => Ok(Begin::Report(StepReport::Unreviewed {
+                issue,
+                pull_request,
+                reason,
+            })),
+            _ => self.check_ci(),
+        }
     }
 
     // A fix turn that pushed nothing fixed nothing, whatever it says: the
-    // findings sent still stand, so the next reviewer does not run yet.
+    // findings sent still stand, so the next reviewer does not run yet,
+    // unless the worker deferred every one of them as out of scope.
     fn fix_ended(
         &mut self,
         number: u64,
         build: &Path,
         review: Review,
         head: Option<String>,
+        sent: findings::Sent<'_>,
     ) -> Result<Begin, StateError> {
         let issue = self.current().expect("a fix is a work item's").issue;
         let round = review.round;
         let pushed = match head {
             Some(before) => match self.origin_head() {
                 Ok(now) if now == before => {
+                    match findings::all_deferred(build, sent) {
+                        Ok(true) => {
+                            return self.all_deferred(number, review, sent.findings.len());
+                        }
+                        Ok(false) => {}
+                        Err(reason) => return Ok(self.gate_failed(reason)),
+                    }
                     let path = findings::findings_path(build);
                     let prompt = findings::again_prompt(number, round, &path);
                     let fix = Fix::Review(review);
@@ -156,6 +226,26 @@ impl Runner {
         }))
     }
 
+    // Every finding sent was left for a follow-up issue, so there was nothing
+    // to push, and the next reviewer reads the pull request as it stands.
+    fn all_deferred(
+        &mut self,
+        number: u64,
+        review: Review,
+        deferred: usize,
+    ) -> Result<Begin, StateError> {
+        let issue = self.current().expect("a fix is a work item's").issue;
+        let round = review.round;
+        let next = self.after_round(review, self.ports.clock.now());
+        self.update(|item| item.phase = next)?;
+        Ok(Begin::Report(StepReport::FindingsDeferred {
+            issue,
+            pull_request: number,
+            round,
+            deferred,
+        }))
+    }
+
     // Asks git rather than the forge: the forge's head lags a push by a moment.
     pub(super) fn origin_head(&self) -> Result<String, String> {
         let item = self.current().expect("a head is a work item's");
@@ -173,7 +263,7 @@ impl Runner {
 
     // Marks the call running and keeps who reviews the round, so a round
     // cut short resumes with the same reviewer.
-    fn round_started(&mut self, chosen: &LoopReviewer, kind: CallKind) -> Result<(), StateError> {
+    fn round_started(&mut self, chosen: &ListedReviewer, kind: CallKind) -> Result<(), StateError> {
         let since = self.ports.clock.now();
         let name = chosen.name.clone();
         self.update(|item| {
@@ -218,11 +308,19 @@ impl Runner {
         }
         let held = findings.len();
         let prompt = findings::fix_prompt(number, round, held, &path);
+        let deferred_before = match findings::deferred(build) {
+            Ok(deferred) => deferred,
+            Err(reason) => return Ok(self.gate_failed(reason)),
+        };
         self.update(|item| {
             item.record_held(&findings);
             item.turn = Turn::Next { prompt };
             item.phase = Phase::Review(Review {
-                stage: ReviewStage::Fixing { head: Some(head) },
+                stage: ReviewStage::Fixing {
+                    head: Some(head),
+                    sent: findings,
+                    deferred_before,
+                },
                 ..review
             });
         })?;
@@ -245,16 +343,15 @@ impl Runner {
         if matches!(result, ReviewResult::Stopped) {
             return Ok(None);
         }
-        let in_deep_round = self.current().is_some_and(
-            |item| matches!(&item.phase, Phase::Review(r) if matches!(r.stage, ReviewStage::Deep(_))),
-        );
-        if in_deep_round {
-            return self.end_deep(result, spent);
-        }
         let now = self.ports.clock.now();
-        let local_round = self.current().is_some_and(
-            |item| matches!(&item.phase, Phase::Review(review) if self.is_local_round(review)),
-        );
+        let (local_round, second_look) = match self.current().map(|item| &item.phase) {
+            Some(Phase::Review(review)) => {
+                let listed = review.reviewer.as_ref().and_then(|n| self.listed(n));
+                let second_look = listed.as_ref().is_some_and(|r| r.second_look);
+                (self.is_local_round(review), second_look)
+            }
+            _ => (false, false),
+        };
         let mut next = self.state.clone();
         // Tolerated the same way `end_turn` tolerates a turn's result
         // arriving with nothing (or something else) to apply it to: the
@@ -265,9 +362,18 @@ impl Runner {
             return Ok(None);
         };
         record_spent(item, spent, now);
+        // What the call cost and that it ended are kept whatever became of its answer.
         let Phase::Review(review) = item.phase.clone() else {
+            self.save(next)?;
             return Ok(None);
         };
+        if !matches!(
+            review.stage,
+            ReviewStage::Round | ReviewStage::SecondLook { .. }
+        ) {
+            self.save(next)?;
+            return Ok(None);
+        }
         let issue = item.issue;
         let number = item
             .pull_request
@@ -290,31 +396,49 @@ impl Runner {
                 comment_failed,
             }));
         }
+        let ReviewResult::Findings(result) = result else {
+            unreachable!("a stopped call and a spilled model return above")
+        };
 
         // The script writes a line for a file it could not review, and still
         // finishes the round: those lines are not findings.
         let (result, unreviewed) = match result {
-            ReviewResult::Findings(Ok(findings)) if local_round => {
+            Ok(findings) if local_round => {
                 let (unreviewed, findings) = findings.into_iter().partition(Finding::is_unreviewed);
-                (ReviewResult::Findings(Ok(findings)), unreviewed)
+                (Ok(findings), unreviewed)
             }
             result => (result, Vec::new()),
         };
-        // An older state file names no reviewer for its local round.
-        let local_name = review.reviewer.clone().unwrap_or_else(|| {
-            ReviewerName::try_from(QWEN.to_owned()).expect("the local round's name is valid")
-        });
+        // An older state file names no reviewer for its round.
+        let reviewer = review
+            .reviewer
+            .clone()
+            .unwrap_or_else(|| AgentName::kelpies(if local_round { QWEN } else { DEFECT_HUNTER }));
         let unreviewed: Vec<String> = unreviewed.into_iter().map(|f: Finding| f.file).collect();
 
-        let report = match result {
-            // The round stays due; one that keeps failing goes no further.
-            ReviewResult::Findings(Err(reason)) if review.failures + 1 < ROUND_FAILURES => {
+        let report = match (review.stage.clone(), result) {
+            // The call stays due; one that keeps failing goes no further.
+            (_, Err(reason)) if review.failures + 1 < ROUND_FAILURES => {
                 let failures = review.failures + 1;
                 item.phase = Phase::Review(Review { failures, ..review });
                 StepReport::GateFailed { issue, reason }
             }
-            ReviewResult::Findings(Err(reason)) => {
-                let reviewer = review.reviewer.clone().unwrap_or_else(ReviewerName::claude);
+            // A second look that keeps failing leaves the first's findings to go alone.
+            (ReviewStage::SecondLook { first }, Err(reason)) => {
+                item.phase = Phase::Review(Review {
+                    stage: ReviewStage::Found { findings: first },
+                    failures: 0,
+                    ..review
+                });
+                StepReport::GateFailed {
+                    issue,
+                    reason: format!(
+                        "{reviewer}'s second look on #{number} failed {ROUND_FAILURES} times, \
+                         so its first look's findings go on alone: {reason}"
+                    ),
+                }
+            }
+            (_, Err(reason)) => {
                 if !item.reviewers_skipped.contains(&reviewer) {
                     item.reviewers_skipped.push(reviewer.clone());
                 }
@@ -327,81 +451,101 @@ impl Runner {
                     reason,
                 }
             }
-            // Every file went unreviewed, so the round looked at nothing, and
-            // the pass goes on to the next reviewer.
-            ReviewResult::Findings(Ok(findings))
-                if findings.is_empty() && !unreviewed.is_empty() =>
-            {
-                if !matches!(review.stage, ReviewStage::Round) {
-                    unreachable!("a round's findings only arrive while awaiting that round");
-                }
-                *item.local_failures.entry(local_name.clone()).or_default() += 1;
-                // The next round leaving any of these unreviewed again counts too.
-                item.local_unreviewed.clone_from(&unreviewed);
-                item.local_unreviewed_by = Some(local_name.clone());
-                item.phase = self.after_round(review, now);
-                StepReport::LocalRoundFailed {
-                    issue,
-                    pull_request: number,
-                    round,
-                    reviewer: local_name,
-                    unreviewed,
-                }
-            }
-            // Nothing found: the pass goes on to the next reviewer at once.
-            ReviewResult::Findings(Ok(findings)) if findings.is_empty() => {
-                if !matches!(review.stage, ReviewStage::Round) {
-                    unreachable!("a round's findings only arrive while awaiting that round");
-                }
-                if local_round {
-                    item.note_local_round(&local_name, &unreviewed);
-                }
-                item.phase = self.after_round(review, now);
-                StepReport::ReviewFindingsSent {
-                    issue,
-                    pull_request: number,
-                    round,
-                    held: 0,
-                }
-            }
-            ReviewResult::Findings(Ok(findings)) => {
-                if !matches!(review.stage, ReviewStage::Round) {
-                    unreachable!("a round's findings only arrive while awaiting that round");
-                }
-                // The same name `note_local_round` keeps the failures under.
-                let reviewer = if local_round {
-                    local_name.clone()
-                } else {
-                    review.reviewer.clone().unwrap_or_else(ReviewerName::claude)
-                };
-                if local_round {
-                    item.note_local_round(&local_name, &unreviewed);
-                }
-                let count = findings.len();
+            (ReviewStage::Round, Ok(first)) if second_look && !local_round => {
+                let findings = first.len();
+                item.unreviewed = None;
                 item.phase = Phase::Review(Review {
-                    stage: ReviewStage::Found { findings },
+                    stage: ReviewStage::SecondLook { first },
+                    failures: 0,
+                    unread: false,
                     ..review
                 });
-                StepReport::ReviewRound {
+                StepReport::FirstLook {
                     issue,
                     pull_request: number,
                     round,
                     reviewer,
-                    findings: count,
-                    unreviewed,
+                    findings,
                 }
             }
-            ReviewResult::Deep(_) => unreachable!("a deep session's reply comes in the deep round"),
-            ReviewResult::Stopped => unreachable!("a stopped call returns above"),
-            ReviewResult::Spilled(_) => unreachable!("a spilled model returns above"),
+            (stage, Ok(found)) => {
+                let findings = match stage {
+                    ReviewStage::SecondLook { first } => both_looks(first, found),
+                    _ => found,
+                };
+                // Every file went unreviewed, so the round looked at nothing,
+                // and the pass goes on to the next reviewer.
+                if findings.is_empty() && !unreviewed.is_empty() {
+                    *item.local_failures.entry(reviewer.clone()).or_default() += 1;
+                    // The next round leaving any of these unreviewed again counts too.
+                    item.local_unreviewed.clone_from(&unreviewed);
+                    item.local_unreviewed_by = Some(reviewer.clone());
+                    item.phase = self.after_round(review, now);
+                    StepReport::LocalRoundFailed {
+                        issue,
+                        pull_request: number,
+                        round,
+                        reviewer,
+                        unreviewed,
+                    }
+                } else {
+                    // A reviewer read the pull request, so this pass has.
+                    let review = Review {
+                        unread: false,
+                        ..review
+                    };
+                    item.unreviewed = None;
+                    if local_round {
+                        item.note_local_round(&reviewer, &unreviewed);
+                    }
+                    // Nothing found: the pass goes on to the next reviewer at once.
+                    if findings.is_empty() {
+                        item.phase = self.after_round(review, now);
+                        StepReport::ReviewFindingsSent {
+                            issue,
+                            pull_request: number,
+                            round,
+                            held: 0,
+                        }
+                    } else {
+                        let count = findings.len();
+                        item.phase = Phase::Review(Review {
+                            stage: ReviewStage::Found { findings },
+                            failures: 0,
+                            ..review
+                        });
+                        StepReport::ReviewRound {
+                            issue,
+                            pull_request: number,
+                            round,
+                            reviewer,
+                            findings: count,
+                            unreviewed,
+                        }
+                    }
+                }
+            }
         };
         self.save(next)?;
         Ok(Some(report))
     }
 }
 
-/// Runs `action` outside the runner's lock: the local round, or a fresh
-/// Claude call for a review round or a deep round's session
+// What both looks found, each once, the worst first. A stable sort keeps
+// each look's own order within a severity.
+fn both_looks(first: Vec<Finding>, more: Vec<Finding>) -> Vec<Finding> {
+    let mut all = first;
+    for f in more {
+        if !all.iter().any(|k| k.is_same_as(&f)) {
+            all.push(f);
+        }
+    }
+    all.sort_by_key(|f| std::cmp::Reverse(f.severity));
+    all
+}
+
+/// Runs `action` outside the runner's lock: a local round, or a fresh
+/// session of a reviewer
 ///
 /// A call stopped with the runner comes back as [`ReviewResult::Stopped`]
 /// rather than an error, so `end_review` can tell it from a failed gate.
@@ -432,7 +576,7 @@ pub(super) fn run_review_call(
                 },
             }
         }
-        ReviewCall::ClaudeRound(call) => {
+        ReviewCall::Session(call) => {
             let (reply, spent) = run_claude(claude, &call);
             match reply {
                 Err(AgentError::Stopped) => stopped(),
@@ -441,23 +585,11 @@ pub(super) fn run_review_call(
                         |reply| {
                             read_review(&reply.text).map_err(|text| {
                                 format!(
-                                    "the Claude round's reply is neither findings nor CLEAN: {text}"
+                                    "the reviewer's reply is neither findings nor CLEAN: {text}"
                                 )
                             })
                         },
                     )),
-                    spent,
-                },
-            }
-        }
-        ReviewCall::Deep(call) => {
-            let (reply, spent) = run_claude(claude, &call);
-            match reply {
-                Err(AgentError::Stopped) => stopped(),
-                reply => Reviewed {
-                    result: ReviewResult::Deep(
-                        reply.map(|reply| reply.text).map_err(|e| e.to_string()),
-                    ),
                     spent,
                 },
             }

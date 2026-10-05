@@ -13,10 +13,8 @@ pub enum TimingPhase {
     GpuWait,
     /// A local review round runs, after any GPU wait
     LocalRound,
-    /// A Claude review round runs
+    /// A reviewer's session runs, on any harness
     ClaudeRound,
-    /// A deep review round's reader runs
-    DeepRound,
     /// Waiting for CI
     Ci,
     /// Waiting for the CodeRabbit lease and hourly window
@@ -37,12 +35,11 @@ pub enum TimingPhase {
 
 impl TimingPhase {
     /// Every phase, in the order `status` and the table list them
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 11] = [
         Self::Worker,
         Self::GpuWait,
         Self::LocalRound,
         Self::ClaudeRound,
-        Self::DeepRound,
         Self::Ci,
         Self::CodeRabbitWindow,
         Self::CodeRabbitReview,
@@ -59,7 +56,6 @@ impl TimingPhase {
             Self::GpuWait => "gpu_wait",
             Self::LocalRound => "local_round",
             Self::ClaudeRound => "claude_round",
-            Self::DeepRound => "deep_round",
             Self::Ci => "ci",
             Self::CodeRabbitWindow => "coderabbit_window",
             Self::CodeRabbitReview => "coderabbit_review",
@@ -87,7 +83,6 @@ mod tests {
                 "gpu_wait",
                 "local_round",
                 "claude_round",
-                "deep_round",
                 "ci",
                 "coderabbit_window",
                 "coderabbit_review",

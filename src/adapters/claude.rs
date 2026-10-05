@@ -181,10 +181,7 @@ fn argv(call: &AgentCall) -> Vec<OsString> {
         "--output-format".into(),
         "json".into(),
     ];
-    // A session of the deep round that runs commands has no one to answer a
-    // permission prompt, and the fence is what holds it, as it holds a worker.
-    let runs_commands = call.role == Role::DeepReviewer && call.tools == crate::ports::Tools::Work;
-    if call.role == Role::Worker || runs_commands {
+    if call.role == Role::Worker {
         argv.extend(["--permission-mode".into(), "bypassPermissions".into()]);
     }
     for plugin in &call.plugin_dirs {
@@ -395,7 +392,7 @@ mod tests {
             .map(|pair| pair[1].as_str())
             .collect();
         assert_eq!(dirs, ["/k/skills/mattpocock", "/k/skills/review"]);
-        let argv = strings(&call(Role::DeepReviewer, fresh()));
+        let argv = strings(&call(Role::Reviewer, fresh()));
         assert!(!argv.iter().any(|a| a == "--plugin-dir"));
     }
 
@@ -403,19 +400,6 @@ mod tests {
     fn only_a_worker_bypasses_permissions() {
         let argv = strings(&call(Role::Reviewer, fresh()));
         assert!(!argv.iter().any(|a| a == "--permission-mode"));
-    }
-
-    #[test]
-    fn a_deep_session_that_runs_commands_bypasses_permissions_and_a_reader_does_not() {
-        let mut runs = call(Role::DeepReviewer, fresh());
-        runs.tools = Tools::Work;
-        let argv = strings(&runs);
-        let at = argv.iter().position(|a| a == "--permission-mode").unwrap();
-        assert_eq!(argv[at + 1], "bypassPermissions");
-
-        let mut reads = call(Role::DeepReviewer, fresh());
-        reads.tools = Tools::Review;
-        assert!(!strings(&reads).iter().any(|a| a == "--permission-mode"));
     }
 
     #[test]
@@ -568,7 +552,7 @@ mod tests {
             ..ClaudeCli::labelling(Arc::clone(&lambs) as Arc<dyn LambLabels>)
         }
         .sandboxed(Arc::new(OpenSandbox::default()), dir.path().join("home"));
-        for role in [Role::Worker, Role::Reviewer, Role::DeepReviewer] {
+        for role in [Role::Worker, Role::Reviewer] {
             let mut call = call(role, fresh());
             call.cwd = dir.path().to_owned();
             call.settings = dir.path().join("settings.json");
@@ -577,12 +561,12 @@ mod tests {
         }
         let labels = lambs.0.lock().unwrap().clone();
         let names: Vec<&str> = labels.iter().map(|(_, l)| l.as_str()).collect();
-        assert_eq!(names, ["#6 worker", "#6 reviewer", "#6 deep_reviewer"]);
+        assert_eq!(names, ["#6 worker", "#6 reviewer"]);
         let pid: u32 = std::fs::read_to_string(&pid_file)
             .unwrap()
             .trim()
             .parse()
             .unwrap();
-        assert_eq!(labels[2].0, pid, "the label is not on the process that ran");
+        assert_eq!(labels[1].0, pid, "the label is not on the process that ran");
     }
 }

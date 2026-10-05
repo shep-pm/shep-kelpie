@@ -7,26 +7,24 @@ use crate::runner::{Runner, step};
 use crate::settings::LocalRound;
 use crate::test::{Rig, Scripted, ScriptedRound};
 
-// A rig whose project lists `list`, over kelpie's definitions of `mine`, a
-// stand-in command, and `opus`, a Claude session limited to `src/`.
-fn listing(list: &str) -> Rig {
+// A rig whose project lists `list`, over agent files for `mine`, a stand-in
+// command, and `opus`, a Claude session limited to `src/`.
+fn listing(list: &[&str]) -> Rig {
     let rig = Rig::new("koji");
-    rig.edit_settings(|s| {
-        let table = "[app.dogs.kelpie.review]\n";
-        assert!(s.contains(table), "the example's review table moved");
-        s.replace(crate::test::OLD_LOCAL, "")
-            .replace(table, &format!("{table}reviewers = {list}\n"))
-    });
+    rig.reviewers(list);
     let script = rig.home.path().join("bin/review");
     std::fs::create_dir_all(script.parent().unwrap()).unwrap();
     crate::test::write_script(&script, "#!/bin/sh\nexit 0\n");
-    let kelpie = std::fs::read_to_string(rig.paths().kelpie_settings).unwrap();
-    rig.set_kelpie_settings(&format!(
-        "{kelpie}[local_reviewers.mine]\nkind = \"command\"\ncommand = \"{}\"\n\
-         [local_reviewers.opus]\nkind = \"claude\"\nmodel = \"claude-opus-5-5\"\n\
-         effort = \"high\"\npaths = [\"src/**\"]\n",
+    let mine = format!(
+        "---\nrole: reviewer\nharness: command\ncommand: {}\n---\n",
         script.display()
-    ));
+    );
+    rig.write_agent("mine", &mine);
+    rig.write_agent(
+        "opus",
+        "---\nrole: reviewer\nharness: claude-code\nmodel: claude-opus-5-5\neffort: high\n\
+         paths: [\"src/**\"]\n---\nRead {{DIFF}} for defects.\n",
+    );
     rig
 }
 
@@ -41,8 +39,8 @@ fn reviewers_until_ci(rig: &Rig, runner: &Mutex<Runner>) -> Vec<&'static str> {
         let (local, claude) = (rig.reviewer.seen().len(), reviewer_models(rig).len());
         step(runner).unwrap();
         if let Some(round) = rig.reviewer.seen().get(local) {
-            let mine = round.local.paths().is_empty()
-                && matches!(&round.local, LocalRound::Command(c) if c.command.ends_with("bin/review"));
+            let mine =
+                matches!(&round.local, LocalRound::Command(c) if c.command.ends_with("bin/review"));
             seen.push(if mine { "mine" } else { "qwen" });
         }
         if let Some(model) = reviewer_models(rig).get(claude) {
@@ -73,7 +71,7 @@ fn reviewer_models(rig: &Rig) -> Vec<String> {
 }
 
 #[test]
-fn the_older_local_round_runs_qwen_then_claude() {
+fn the_rigs_review_runs_qwen_then_claude() {
     let rig = Rig::new("koji");
     let runner = at_review(&rig, "work.txt");
     rig.claude.script([Scripted::Text("CLEAN")]);
@@ -84,7 +82,7 @@ fn the_older_local_round_runs_qwen_then_claude() {
 
 #[test]
 fn each_listed_reviewer_runs_once_in_the_lists_order() {
-    let rig = listing(r#"["claude", "mine"]"#);
+    let rig = listing(&["claude", "mine"]);
     let runner = at_review(&rig, "work.txt");
     rig.claude.script([Scripted::Text("CLEAN")]);
     assert_eq!(reviewers_until_ci(&rig, &runner), ["claude", "mine"]);
@@ -97,7 +95,7 @@ fn each_listed_reviewer_runs_once_in_the_lists_order() {
 
 #[test]
 fn a_fix_goes_to_the_next_reviewer_and_no_reviewer_runs_twice() {
-    let rig = listing(r#"["claude", "mine"]"#);
+    let rig = listing(&["claude", "mine"]);
     let runner = at_review(&rig, "work.txt");
     rig.claude.script([
         Scripted::Text("HIGH|work.txt:1|wrong|it is"),
@@ -122,12 +120,12 @@ fn a_fix_goes_to_the_next_reviewer_and_no_reviewer_runs_twice() {
 
 #[test]
 fn one_listed_reviewer_runs_once() {
-    let rig = listing(r#"["mine"]"#);
+    let rig = listing(&["mine"]);
     let runner = at_review(&rig, "work.txt");
     assert_eq!(reviewers_until_ci(&rig, &runner), ["mine"]);
     assert!(reviewer_models(&rig).is_empty(), "no Claude round ran");
 
-    let rig = listing(r#"["claude"]"#);
+    let rig = listing(&["claude"]);
     let runner = at_review(&rig, "work.txt");
     rig.claude.script([Scripted::Text("CLEAN")]);
     assert_eq!(reviewers_until_ci(&rig, &runner), ["claude"]);
@@ -142,14 +140,14 @@ LOW|work.txt:0|not reviewed: curl: (7) Failed to connect to gpu.box port 8080|ra
 // A rig whose project lists two local reviewers, `mine` then `other`, each a
 // command of its own.
 fn two_local() -> Rig {
-    let rig = listing(r#"["mine", "other"]"#);
+    let rig = listing(&["mine", "other"]);
     let other = rig.home.path().join("bin/other");
     crate::test::write_script(&other, "#!/bin/sh\nexit 0\n");
-    let kelpie = std::fs::read_to_string(rig.paths().kelpie_settings).unwrap();
-    rig.set_kelpie_settings(&format!(
-        "{kelpie}[local_reviewers.other]\nkind = \"command\"\ncommand = \"{}\"\n",
+    let text = format!(
+        "---\nrole: reviewer\nharness: command\ncommand: {}\n---\n",
         other.display()
-    ));
+    );
+    rig.write_agent("other", &text);
     rig
 }
 
@@ -209,13 +207,13 @@ fn a_local_round_that_reviews_nothing_goes_on_to_the_next_local_reviewer() {
 
 #[test]
 fn a_reviewer_limited_to_paths_runs_only_where_the_pull_request_changes_them() {
-    let rig = listing(r#"["claude", "opus"]"#);
+    let rig = listing(&["claude", "opus"]);
     let runner = at_review(&rig, "docs/notes.md");
     rig.claude.script([Scripted::Text("CLEAN")]);
     assert_eq!(reviewers_until_ci(&rig, &runner), ["claude"]);
     assert_eq!(reviewer_models(&rig), ["claude-sonnet-5"]);
 
-    let rig = listing(r#"["claude", "opus"]"#);
+    let rig = listing(&["claude", "opus"]);
     let runner = at_review(&rig, "src/merge.rs");
     rig.claude
         .script([Scripted::Text("CLEAN"), Scripted::Text("CLEAN")]);
@@ -231,7 +229,7 @@ fn a_reviewer_limited_to_paths_runs_only_where_the_pull_request_changes_them() {
 
 #[test]
 fn every_round_s_prompt_carries_the_issue_s_acceptance_criteria() {
-    let rig = listing(r#"["mine", "claude"]"#);
+    let rig = listing(&["mine", "claude"]);
     let runner = at_review(&rig, "work.txt");
     rig.reviewer.script([ScriptedRound::Findings(vec![Finding {
         severity: Severity::Low,
@@ -256,15 +254,15 @@ fn every_round_s_prompt_carries_the_issue_s_acceptance_criteria() {
 }
 
 // The pass so far ran `mine`; the list then changes before the next round.
-fn after_mine_the_list_becomes(to: &str) -> Vec<&'static str> {
-    let rig = listing(r#"["mine", "claude"]"#);
+fn after_mine_the_list_becomes(to: &[&str]) -> Vec<&'static str> {
+    let rig = listing(&["mine", "claude"]);
     let runner = at_review(&rig, "work.txt");
     step(&runner).unwrap(); // round 1, mine: clean by default
     drop(runner);
     rig.edit_settings(|s| {
         s.replace(
             r#"reviewers = ["mine", "claude"]"#,
-            &format!("reviewers = {to}"),
+            &format!("reviewers = {to:?}"),
         )
     });
     let runner = rig.open().unwrap();
@@ -276,13 +274,10 @@ fn after_mine_the_list_becomes(to: &str) -> Vec<&'static str> {
 
 #[test]
 fn a_reviewer_taken_off_the_list_mid_pass_leaves_the_rest_to_run() {
-    assert_eq!(after_mine_the_list_becomes(r#"["claude"]"#), ["claude"]);
+    assert_eq!(after_mine_the_list_becomes(&["claude"]), ["claude"]);
 }
 
 #[test]
 fn a_list_reordered_mid_pass_runs_what_the_pass_has_not() {
-    assert_eq!(
-        after_mine_the_list_becomes(r#"["claude", "mine"]"#),
-        ["claude"]
-    );
+    assert_eq!(after_mine_the_list_becomes(&["claude", "mine"]), ["claude"]);
 }

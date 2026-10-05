@@ -239,16 +239,12 @@ mod tests {
         let w = World::new();
         let sandbox = OpenSandbox::default();
         let cli = w.cli(Arc::new(sandbox.clone()));
-        for call in [
-            w.worker(),
-            w.call(Role::Reviewer),
-            w.call(Role::DeepReviewer),
-        ] {
+        for call in [w.worker(), w.call(Role::Reviewer)] {
             cli.prepare(&call).unwrap();
             cli.run(&call).unwrap();
         }
         let wrapped = sandbox.wrapped();
-        assert_eq!(wrapped.len(), 3);
+        assert_eq!(wrapped.len(), 2);
         for (_, settings) in &wrapped {
             assert_eq!(settings, &w.path("worker/settings.sandbox.json"));
         }
@@ -259,7 +255,7 @@ mod tests {
         let w = World::new();
         let none = SandboxRuntime::new(KelpieTools::at(w.path("no-tools")));
         let cli = w.cli(Arc::new(none));
-        for call in [w.worker(), w.call(Role::DeepReviewer)] {
+        for call in [w.worker(), w.call(Role::Reviewer)] {
             let err = cli.run(&call).unwrap_err();
             assert!(
                 matches!(&err, AgentError::Setup(why) if why.contains("tools install")),
@@ -318,11 +314,7 @@ mod tests {
     fn no_role_can_start_a_background_command_or_agent() {
         let w = World::new();
         let cli = w.cli(Arc::new(OpenSandbox::default()));
-        for call in [
-            w.worker(),
-            w.call(Role::Reviewer),
-            w.call(Role::DeepReviewer),
-        ] {
+        for call in [w.worker(), w.call(Role::Reviewer)] {
             let command = cli.sandboxed_command(&call).unwrap();
             let set = command
                 .get_envs()

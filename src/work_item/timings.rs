@@ -13,7 +13,7 @@ mod phase;
 mod seconds;
 
 pub use phase::TimingPhase;
-pub use seconds::{Seconds, saved};
+pub use seconds::Seconds;
 
 #[cfg(doc)]
 use super::WorkItem;
@@ -25,10 +25,8 @@ use super::WorkItem;
 pub enum CallKind {
     /// A local review round
     Local,
-    /// A Claude review round
+    /// A reviewer's session, on any harness
     Claude,
-    /// A session of a deep review round
-    Deep,
 }
 
 /// A work item's time so far
@@ -42,7 +40,6 @@ pub struct Timings {
     /// The instant `seconds` counts up to
     pub since: Timestamp,
     /// The seconds charged so far
-    #[serde(serialize_with = "saved")]
     pub seconds: Seconds,
     /// The call in flight outside the runner's lock, while one is
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -149,8 +146,8 @@ mod tests {
         assert_eq!(value["timings"]["queued"], true);
         let back: WorkItem = serde_json::from_value(value).unwrap();
         assert_eq!(back.timings, item.timings);
-        let kinds = [CallKind::Local, CallKind::Claude, CallKind::Deep];
+        let kinds = [CallKind::Local, CallKind::Claude];
         let names = kinds.map(|k| serde_json::to_value(k).unwrap());
-        assert_eq!(names, [json!("local"), json!("claude"), json!("deep")]);
+        assert_eq!(names, [json!("local"), json!("claude")]);
     }
 }

@@ -62,7 +62,7 @@ fn nothing_finished_is_zeros_not_an_error() {
         (&json!(0), &json!([]), &json!(0))
     );
     assert_eq!(summed(&t), 0);
-    assert_eq!(t["seconds"].as_object().unwrap().len(), 12);
+    assert_eq!(t["seconds"].as_object().unwrap().len(), 11);
     assert!(
         t["table"]
             .as_str()
@@ -100,7 +100,6 @@ fn the_table_lists_every_phase_then_the_total() {
         row("gpu_wait", "0", "0h00m00s", "0.0%"),
         row("local_round", "0", "0h00m00s", "0.0%"),
         row("claude_round", "0", "0h00m00s", "0.0%"),
-        row("deep_round", "0", "0h00m00s", "0.0%"),
         row("ci", "40", "0h00m40s", "26.7%"),
         row("coderabbit_window", "0", "0h00m00s", "0.0%"),
         row("coderabbit_review", "0", "0h00m00s", "0.0%"),
@@ -124,7 +123,6 @@ fn the_timings_reply_is_pinned() {
         "gpu_wait                  15   0h00m15s    8.8%",
         "local_round                0   0h00m00s    0.0%",
         "claude_round               0   0h00m00s    0.0%",
-        "deep_round                 0   0h00m00s    0.0%",
         "ci                        40   0h00m40s   23.5%",
         "coderabbit_window          0   0h00m00s    0.0%",
         "coderabbit_review          0   0h00m00s    0.0%",
@@ -144,7 +142,7 @@ fn the_timings_reply_is_pinned() {
             "issues": [7, 9, 12],
             "wall": 170,
             "seconds": {
-                "worker": 70, "gpu_wait": 15, "local_round": 0, "claude_round": 0, "deep_round": 0,
+                "worker": 70, "gpu_wait": 15, "local_round": 0, "claude_round": 0,
                 "ci": 40, "coderabbit_window": 0, "coderabbit_review": 0,
                 "ruling": 40, "merge": 5, "paused": 0, "other": 0,
             },

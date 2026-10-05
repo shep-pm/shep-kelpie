@@ -1,5 +1,5 @@
 use super::*;
-use crate::settings::AgentName;
+use crate::settings::{Account, AgentHarness, AgentName, LeaseName};
 
 const QWEN: &str = "---\nrole: implementer\nharness: pi\nmodel: qwen3.8:27b\neffort: low\n\
                     url: http://box:11434/v1\ncontext: 65536\n---\n";
@@ -8,8 +8,16 @@ fn name(name: &str) -> AgentName {
     AgentName::try_from(name.to_owned()).unwrap()
 }
 
+fn model(agent: &Agent) -> &RoleModel {
+    agent.runs.session().expect("it runs sessions").0
+}
+
+fn limit(agent: &Agent) -> &Limit {
+    agent.runs.session().expect("it runs sessions").1
+}
+
 fn pair(agent: &Agent) -> (&str, Effort) {
-    (agent.model.model.as_str(), agent.model.effort)
+    (model(agent).model.as_str(), model(agent).effort)
 }
 
 // A fresh `agents` folder holding `files`, as (name, text).
@@ -35,13 +43,13 @@ fn kelpies_own_agents_are_sonnet_and_opus_at_high_on_claude_code() {
     assert_eq!(pair(opus), ("claude-opus-5-5", Effort::High));
     for agent in [sonnet, opus] {
         assert_eq!(agent.role, Role::Implementer);
-        assert_eq!(agent.model.harness, AgentHarness::ClaudeCode);
-        assert_eq!(agent.limit, Limit::Account(Account::Claude));
+        assert_eq!(model(agent).harness, AgentHarness::ClaudeCode);
+        assert_eq!(*limit(agent), Limit::Account(Account::Claude));
         assert_eq!(agent.prompt, None, "the comments are not a prompt");
     }
     assert_eq!(
+        Agents::embedded().agents.len(),
         DEFAULTS.len(),
-        2,
         "a default that failed to parse would be dropped"
     );
 }
@@ -67,12 +75,12 @@ fn a_file_adds_an_agent_and_one_named_for_a_default_replaces_it() {
     assert_eq!(pair(sonnet), ("claude-sonnet-6", Effort::Medium));
     assert_eq!(sonnet.prompt.as_deref(), Some("Keep each commit small."));
     let qwen = agents.get(&name("qwen")).unwrap();
-    let AgentHarness::Pi(server) = &qwen.model.harness else {
+    let AgentHarness::Pi(server) = &model(qwen).harness else {
         panic!("{qwen:?}");
     };
     assert_eq!(server.url.as_str(), "http://box:11434/v1");
     assert_eq!(server.context.get(), 65536);
-    assert_eq!(qwen.limit, Limit::Lease(LeaseName::gpu()));
+    assert_eq!(*limit(qwen), Limit::Lease(LeaseName::gpu()));
     assert!(agents.get(&name("opus-high")).is_some());
     assert!(agents.get(&name("notes")).is_none());
 }
@@ -83,8 +91,8 @@ fn a_codex_agent_spends_the_codex_account() {
     let dir = folder(&[("gpt.md", gpt)]);
     let agents = Agents::load(dir.path()).unwrap();
     let gpt = agents.get(&name("gpt")).unwrap();
-    assert_eq!(gpt.model.harness, AgentHarness::Codex);
-    assert_eq!(gpt.limit, Limit::Account(Account::Codex));
+    assert_eq!(model(gpt).harness, AgentHarness::Codex);
+    assert_eq!(*limit(gpt), Limit::Account(Account::Codex));
 }
 
 #[test]
@@ -141,6 +149,15 @@ fn a_missing_or_unknown_key_is_refused_naming_it() {
         err.contains("qwen.md: `role`: unknown variant `judge`"),
         "{err}"
     );
+    let huge = QWEN.replace("effort: low", "effort: huge");
+    let err = refused(&[("qwen.md", &huge)]);
+    assert!(
+        err.contains("qwen.md: `effort`: unknown variant `huge`"),
+        "{err}"
+    );
+    let blank = QWEN.replace("model: qwen3.8:27b", "model: \" \"");
+    let err = refused(&[("qwen.md", &blank)]);
+    assert!(err.contains("qwen.md: `model`: must not be blank"), "{err}");
     let small = QWEN.replace("context: 65536", "context: 12");
     let err = refused(&[("qwen.md", &small)]);
     assert!(
@@ -192,7 +209,7 @@ fn a_kept_agent_is_written_on_claude_code_once_and_only_when_usable() {
     let agents = Agents::load(dir.path()).unwrap();
     let kept = agents.get(&opus).unwrap();
     assert_eq!(pair(kept), ("claude-opus-5-5", Effort::Medium));
-    assert_eq!(kept.model.harness, AgentHarness::ClaudeCode);
+    assert_eq!(model(kept).harness, AgentHarness::ClaudeCode);
     assert_eq!(kept.prompt, None);
     let written = fs::read_to_string(dir.path().join("opus-medium.md")).unwrap();
     assert!(!write_kept(dir.path(), &opus, "claude-haiku", Effort::Low).unwrap());
@@ -247,18 +264,162 @@ fn a_harness_missing_a_key_it_needs_is_refused_naming_the_key() {
 fn defaults_are_written_where_missing_and_never_over_a_file() {
     let dir = tempfile::tempdir().unwrap();
     let agents = dir.path().join("agents");
+    let home = dir.path().join("home");
     assert_eq!(
-        write_defaults(&agents).unwrap(),
-        ["sonnet-high", "opus-high"]
+        write_defaults(&agents, &home).unwrap(),
+        ["sonnet-high", "opus-high", "defect-hunter"]
     );
     assert_eq!(Agents::load(&agents).unwrap(), Agents::embedded());
+    assert!(!agents.join("qwen.md").exists(), "no qwen-review script");
     let mine = QWEN.replace("model: qwen3.8:27b", "model: mine");
     fs::write(agents.join("opus-high.md"), &mine).unwrap();
     fs::remove_file(agents.join("sonnet-high.md")).unwrap();
-    assert_eq!(write_defaults(&agents).unwrap(), ["sonnet-high"]);
+    assert_eq!(write_defaults(&agents, &home).unwrap(), ["sonnet-high"]);
     assert_eq!(
         fs::read_to_string(agents.join("opus-high.md")).unwrap(),
         mine
     );
-    assert_eq!(write_defaults(&agents).unwrap(), Vec::<&str>::new());
+    assert_eq!(write_defaults(&agents, &home).unwrap(), Vec::<&str>::new());
+    let script = home.join(".claude/scripts/qwen-review.sh");
+    fs::create_dir_all(script.parent().unwrap()).unwrap();
+    fs::write(&script, "#!/bin/sh\n").unwrap();
+    assert_eq!(write_defaults(&agents, &home).unwrap(), ["qwen"]);
+}
+
+const REVIEWER: &str = "---\nrole: reviewer\nharness: claude-code\nmodel: claude-opus-5-5\n\
+                        effort: high\npaths: [\"src/**\"]\n---\nRead {{DIFF}} for defects.\n";
+
+const COMMAND: &str = "---\nrole: reviewer\nharness: command\ncommand: ~/bin/review\n---\n";
+
+#[test]
+fn kelpies_own_reviewers_are_defect_hunter_and_qwen() {
+    let agents = Agents::embedded();
+    let hunter = agents.get(&name("defect-hunter")).unwrap();
+    assert_eq!(hunter.role, Role::Reviewer);
+    assert_eq!(pair(hunter), ("claude-opus-5-5", Effort::High));
+    assert_eq!(model(hunter).harness, AgentHarness::ClaudeCode);
+    assert!(hunter.second_look);
+    assert!(hunter.paths.is_empty());
+    let prompt = hunter.prompt.as_deref().unwrap();
+    assert!(prompt.starts_with("You are reviewing a pull request for defects"));
+    assert!(prompt.ends_with("--- diff against {{BASE}} ---\n{{DIFF}}\n--- end ---"));
+
+    let qwen = agents.get(&name("qwen")).unwrap();
+    assert_eq!(qwen.role, Role::Reviewer);
+    let Runs::Command(command) = &qwen.runs else {
+        panic!("{qwen:?}");
+    };
+    assert_eq!(
+        command.command,
+        PathBuf::from("~/.claude/scripts/qwen-review.sh")
+    );
+    assert_eq!(command.lease, None, "the script takes the GPU lock itself");
+    assert_eq!(qwen.prompt, None);
+}
+
+#[test]
+fn a_reviewer_runs_a_session_a_command_or_an_endpoint() {
+    let dir = folder(&[
+        ("mine.md", REVIEWER),
+        ("script.md", COMMAND),
+        (
+            "box.md",
+            "---\nrole: reviewer\nharness: endpoint\nurl: http://box:11434/v1\n\
+             model: coder\ncontext: 32768\nlease: gpu-box\n---\n",
+        ),
+    ]);
+    let agents = Agents::load(dir.path()).unwrap();
+    let mine = agents.get(&name("mine")).unwrap();
+    assert_eq!(pair(mine), ("claude-opus-5-5", Effort::High));
+    assert_eq!(mine.paths[0].as_str(), "src/**");
+    assert!(!mine.second_look);
+    assert_eq!(mine.prompt.as_deref(), Some("Read {{DIFF}} for defects."));
+    let Runs::Endpoint(endpoint) = &agents.get(&name("box")).unwrap().runs else {
+        panic!("not an endpoint");
+    };
+    assert_eq!(endpoint.url.as_str(), "http://box:11434/v1");
+    assert_eq!(endpoint.context.get(), 32768);
+    assert_eq!(endpoint.lease.as_ref().unwrap().as_str(), "gpu-box");
+    let script = agents.get(&name("script")).unwrap();
+    assert!(matches!(&script.runs, Runs::Command(c) if c.lease.is_none()));
+}
+
+#[test]
+fn a_key_of_the_other_role_is_refused_by_name() {
+    let paths = QWEN.replace("effort: low\n", "effort: low\npaths: [\"src/**\"]\n");
+    let err = refused(&[("qwen.md", &paths)]);
+    assert!(err.contains("qwen.md: unknown field `paths`"), "{err}");
+    let look = QWEN.replace("effort: low\n", "effort: low\nsecond_look: true\n");
+    let err = refused(&[("qwen.md", &look)]);
+    assert!(
+        err.contains("qwen.md: unknown field `second_look`"),
+        "{err}"
+    );
+    let command = "---\nrole: implementer\nharness: command\ncommand: /bin/x\n---\n";
+    let err = refused(&[("x.md", command)]);
+    assert!(
+        err.contains("x.md: `harness`: unknown variant `command`"),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_reviewer_whose_keys_its_harness_cannot_use_is_refused_naming_why() {
+    let cases = [
+        (
+            REVIEWER.replace("Read {{DIFF}} for defects.\n", ""),
+            "runs a session on claude-code, whose prompt is the file's body",
+        ),
+        (
+            REVIEWER.replace("effort: high\n", ""),
+            "runs a session on claude-code, which needs `model` and `effort`",
+        ),
+        (
+            format!("{COMMAND}Review it.\n"),
+            "runs on command, which writes its own prompt: leave the body empty",
+        ),
+        (
+            COMMAND.replace(
+                "command: ~/bin/review\n",
+                "command: ~/bin/review\nsecond_look: true\n",
+            ),
+            "runs on command, which cannot be shown its own findings",
+        ),
+        (
+            COMMAND.replace(
+                "command: ~/bin/review\n",
+                "command: ~/bin/review\nmodel: m\n",
+            ),
+            "runs a command, which takes no `model`",
+        ),
+        (
+            COMMAND.replace("~/bin/review", "bin/review"),
+            "`command` must start with `/` or `~/`",
+        ),
+        (
+            COMMAND.replace(
+                "command: ~/bin/review\n",
+                "command: ~/bin/review\nollama: http://h:1\n",
+            ),
+            "`ollama` needs a lease",
+        ),
+        (
+            COMMAND.replace(
+                "command: ~/bin/review\n",
+                "command: ~/bin/review\nollama_model: m\n",
+            ),
+            "`ollama_model` needs `ollama`",
+        ),
+        (
+            "---\nrole: reviewer\nharness: endpoint\nurl: http://box/v1\nmodel: m\n---\n"
+                .to_owned(),
+            "runs on an endpoint, which needs the server as `url`, its `model` and the \
+             model's context size as `context`",
+        ),
+    ];
+    for (text, why) in cases {
+        let err = refused(&[("x.md", &text)]);
+        assert!(err.contains("x.md: "), "{err}");
+        assert!(err.contains(why), "{err}\nwanted: {why}");
+    }
 }

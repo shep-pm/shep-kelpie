@@ -18,7 +18,7 @@ use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Guarded, Leased, Ports, SessionId, Timestamp, Visibility};
 use crate::review_bot::{Bot, Profile, Reviewers};
 use crate::settings::{
-    Account, AgentName, LoopReviewer, NonBlank, RoleAgents, Runs, Settings, SettingsError,
+    Account, AgentName, ListedReviewer, NonBlank, RoleAgents, Settings, SettingsError,
 };
 use crate::skills::Skills;
 use crate::state::ids::RulingIds;
@@ -198,8 +198,8 @@ pub struct Runner {
     // The pull request reviewers kelpie's own settings define
     reviewers: Reviewers,
     // The review's reviewers, in order, from the project's list
-    lineup: Vec<LoopReviewer>,
-    // The project's implementers, and the model and effort each review role runs on
+    lineup: Vec<ListedReviewer>,
+    // The project's implementers
     agents: RoleAgents,
     // Every agent kelpie's files define, from which each turn runs its work item's agent
     book: Agents,
@@ -265,7 +265,7 @@ impl Runner {
         let (book, mut notes) = kept::keep_old_agents(&store, &paths.agents, book)?;
         notes.extend(book.skipped());
         let agents = settings.role_agents(&book)?;
-        let lineup = settings.lineup(&kelpie_settings, &book, home)?;
+        let lineup = settings.lineup(&book, home)?;
         let webhook = kelpie_settings.webhook;
         if webhook.is_none() {
             eprintln!(
@@ -293,7 +293,7 @@ impl Runner {
         crate::skills::check(&settings.skills, &paths.skills)?;
         let skills = Skills::load(&settings.skills, &paths.skills);
         check_coderabbit(&settings, &ports)?;
-        check_local(&settings, &lineup, &ports)?;
+        check_local(&lineup, &ports)?;
         let mut state = store
             .load()?
             .unwrap_or_else(|| ProjectState::new(ports.clock.now()));
@@ -528,6 +528,7 @@ impl Runner {
             threads_sent: Vec::new(),
             resolve_failures: 0,
             reviewers_skipped: Vec::new(),
+            unreviewed: None,
             local_failures: Default::default(),
             local_unreviewed: Vec::new(),
             local_unreviewed_by: None,
@@ -630,23 +631,18 @@ pub(crate) fn check_instructions(settings: &Settings) -> Result<(), SettingsErro
 }
 
 // Each local reviewer's command is there, or its endpoint answers.
-fn check_local(
-    settings: &Settings,
-    lineup: &[LoopReviewer],
-    ports: &Ports,
-) -> Result<(), SettingsError> {
-    let setting = match settings.review.reviewers.is_empty() {
-        true => "review.local",
-        false => "review.reviewers",
-    };
+fn check_local(lineup: &[ListedReviewer], ports: &Ports) -> Result<(), SettingsError> {
     for reviewer in lineup {
-        let Runs::Local(local) = &reviewer.runs else {
+        let Some(local) = reviewer.runs.local() else {
             continue;
         };
         ports
             .reviewer
-            .check(local)
-            .map_err(|reason| SettingsError::Invalid { setting, reason })?;
+            .check(&local)
+            .map_err(|reason| SettingsError::Invalid {
+                setting: "agents.reviewers",
+                reason: format!("{}: {reason}", reviewer.name),
+            })?;
     }
     Ok(())
 }

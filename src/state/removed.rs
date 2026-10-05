@@ -2,12 +2,14 @@
 //!
 //! Such a file still loads. The relay's, the planning call's, the
 //! whole-issue check's, the review loop's, the deep round's later steps' and
-//! the shots' fields are dropped before reading. The check's and the judge's
-//! time and calls count as review's, and the shots' time as other, so totals
-//! still add up. A review saved mid-loop goes on from the reviewer after the
-//! one it last recorded. A work item's worker model becomes the agent named
-//! for it. A pending ruling of a removed kind has nothing here to answer it,
-//! so the file is refused.
+//! the shots' fields are dropped before reading. The check's, the judge's
+//! and the deep round's time and calls count as a reviewer's session's, and
+//! the shots' time as other, so totals still add up. A review saved mid-loop
+//! goes on from the reviewer after the one it last recorded. The deep round
+//! and the project's own Claude round, `deep` and `claude`, are
+//! `defect-hunter`, and a deep round's two reads are its two looks. A work
+//! item's worker model becomes the agent named for it. A pending ruling of a
+//! removed kind has nothing here to answer it, so the file is refused.
 
 use serde_json::{Map, Value, json};
 
@@ -24,13 +26,19 @@ const RULINGS: [&str; 6] = [
 // The judge and the check each ran as a fresh Claude session reviewing the
 // work, so their time is a Claude round's and their calls a reviewer's. A
 // shots run was kelpie's own, between steps, so its time is other.
-const PHASES: [(&str, &str); 3] = [
+const PHASES: [(&str, &str); 4] = [
     ("audit", "claude_round"),
     ("judging", "claude_round"),
+    ("deep_round", "claude_round"),
     ("shots", "other"),
 ];
-const CALLS: [&str; 2] = ["audit", "judge"];
-const ROLES: [&str; 2] = ["auditor", "judge"];
+const CALLS: [&str; 3] = ["audit", "judge", "deep"];
+const ROLES: [&str; 3] = ["auditor", "judge", "deep_reviewer"];
+
+// The reviewers kelpie defined itself before reviewers were agent files,
+// and the agent each now is: the deep round is `defect-hunter`, and so is
+// the Claude round, whose quality prompt measured worse than the defect one.
+const REVIEWERS: [(&str, &str); 2] = [("deep", "defect-hunter"), ("claude", "defect-hunter")];
 
 // The model ids a `worker:<model>-<effort>` label ran by default, by the
 // label's name for them, which the agents named for them start with.
@@ -263,7 +271,9 @@ fn drop_loop(value: &mut Value) {
     }
 }
 
-// A deep round saved past its two reads has finished reading. Findings not
+// A deep round saved at a read is `defect-hunter`'s look: the first is a
+// round, and the second its second look. One saved past its two reads has
+// finished reading. Findings not
 // yet sent go to the fix turn as any round's do, a fix under way goes on, and
 // a fix already made ends the round, so the pass goes on.
 fn finish_deep(review: &mut Map<String, Value>) {
@@ -280,6 +290,11 @@ fn finish_deep(review: &mut Map<String, Value>) {
     });
     // Anything else is left for the parser to refuse.
     let next = match (stage.get("step").and_then(Value::as_str), held) {
+        (Some("read"), _) => json!({ "stage": "round" }),
+        (Some("missed"), _) => match stage.get("first") {
+            Some(first) => json!({ "stage": "second-look", "first": first }),
+            None => return,
+        },
         (Some("confirming"), Some(held)) => json!({ "stage": "found", "findings": held }),
         (Some("sending"), Some(held)) if !again => json!({ "stage": "found", "findings": held }),
         (Some("sending" | "rechecking"), Some(_)) => json!({ "stage": "found", "findings": [] }),
@@ -290,6 +305,75 @@ fn finish_deep(review: &mut Map<String, Value>) {
         _ => return,
     };
     review.insert("stage".to_owned(), next);
+}
+
+/// Names a file's reviewers as agent files: its `deep` and `claude` become
+/// `defect-hunter`, wherever a review or a work item's skipped list keeps one
+///
+/// Only for a file saved before reviewers were agent files, since a newer
+/// one may list agents of those names.
+pub(super) fn name_reviewers_as_files(value: &mut Value) {
+    match value {
+        Value::Array(list) => list.iter_mut().for_each(name_reviewers_as_files),
+        Value::Object(map) => {
+            if map.contains_key("round") && map.contains_key("stage") {
+                rename_reviewers(map);
+            }
+            if map.contains_key("issue") && map.contains_key("branch") {
+                rename_skipped(map);
+            }
+            map.values_mut().for_each(name_reviewers_as_files);
+        }
+        _ => {}
+    }
+}
+
+// A review's reviewer, the pass's reviewers and the one before, each once.
+fn rename_reviewers(review: &mut Map<String, Value>) {
+    for key in ["reviewer", "last"] {
+        if let Some(name) = review.get_mut(key) {
+            rename(name);
+        }
+    }
+    if let Some(Value::Array(ran)) = review.get_mut("ran") {
+        rename_each(ran);
+    }
+    // A pass that ran `deep` and was cut short in `claude` has run
+    // `defect-hunter` already, so it does not run again.
+    let ran = review.get("ran").and_then(Value::as_array);
+    let reviewer = review.get("reviewer");
+    if reviewer.is_some_and(|name| ran.is_some_and(|ran| ran.contains(name))) {
+        review.remove("reviewer");
+    }
+}
+
+// The reviewers a work item skipped, by their names as agent files. Only a
+// local reviewer's name keys its failures, and none of those is renamed.
+fn rename_skipped(item: &mut Map<String, Value>) {
+    if let Some(Value::Array(skipped)) = item.get_mut("reviewers_skipped") {
+        rename_each(skipped);
+    }
+}
+
+// Two old names can become one, which a list keeps once.
+fn rename_each(names: &mut Vec<Value>) {
+    names.iter_mut().for_each(rename);
+    let mut seen = Vec::new();
+    names.retain(|name| {
+        let first = !seen.contains(name);
+        seen.push(name.clone());
+        first
+    });
+}
+
+fn rename(name: &mut Value) {
+    let renamed = REVIEWERS
+        .iter()
+        .find(|(old, _)| name.as_str() == Some(old))
+        .map(|(_, new)| *new);
+    if let Some(new) = renamed {
+        *name = new.into();
+    }
 }
 
 #[cfg(test)]

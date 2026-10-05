@@ -2,7 +2,7 @@
 //! unreviewed
 
 use super::WorkItem;
-use crate::settings::ReviewerName;
+use crate::settings::AgentName;
 
 /// How many failed rounds in a row take a local reviewer out of a work item
 pub const LOCAL_FAILURES_DOWN: u32 = 2;
@@ -10,7 +10,7 @@ pub const LOCAL_FAILURES_DOWN: u32 = 2;
 impl WorkItem {
     /// Whether local reviewer `name` reviewed nothing twice in a row, which
     /// leaves the review to the other reviewers
-    pub fn local_reviewer_down(&self, name: &ReviewerName) -> bool {
+    pub fn local_reviewer_down(&self, name: &AgentName) -> bool {
         self.local_failures
             .get(name)
             .is_some_and(|n| *n >= LOCAL_FAILURES_DOWN)
@@ -22,7 +22,7 @@ impl WorkItem {
     /// A file the same reviewer left unreviewed last time and leaves again
     /// counts against it; a round that left none, or only new ones, or
     /// whose files another reviewer left, clears its count.
-    pub fn note_local_round(&mut self, reviewer: &ReviewerName, unreviewed: &[String]) {
+    pub fn note_local_round(&mut self, reviewer: &AgentName, unreviewed: &[String]) {
         let mine = self.local_unreviewed_by.as_ref() == Some(reviewer);
         let again = mine
             && unreviewed
@@ -38,7 +38,7 @@ impl WorkItem {
     }
 
     /// The local reviewers that reviewed nothing twice in a row
-    pub fn local_reviewers_down(&self) -> Vec<&ReviewerName> {
+    pub fn local_reviewers_down(&self) -> Vec<&AgentName> {
         let down = self
             .local_failures
             .iter()
