@@ -1,9 +1,0 @@
-{
-  "name": "kelpie-tools",
-  "private": true,
-  "description": "Written by `shep kelpie tools install`: the tools kelpie runs to show a work item's UI",
-  "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "0.0.77",
-    "@playwright/mcp": "0.0.82"
-  }
-}

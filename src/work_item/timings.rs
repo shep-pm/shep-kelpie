@@ -27,8 +27,6 @@ pub enum CallKind {
     Local,
     /// A Claude review round
     Claude,
-    /// A shots run
-    Shots,
     /// A session of a deep review round
     Deep,
 }
@@ -151,21 +149,8 @@ mod tests {
         assert_eq!(value["timings"]["queued"], true);
         let back: WorkItem = serde_json::from_value(value).unwrap();
         assert_eq!(back.timings, item.timings);
-        let kinds = [
-            CallKind::Local,
-            CallKind::Claude,
-            CallKind::Shots,
-            CallKind::Deep,
-        ];
+        let kinds = [CallKind::Local, CallKind::Claude, CallKind::Deep];
         let names = kinds.map(|k| serde_json::to_value(k).unwrap());
-        assert_eq!(
-            names,
-            [
-                json!("local"),
-                json!("claude"),
-                json!("shots"),
-                json!("deep")
-            ]
-        );
+        assert_eq!(names, [json!("local"), json!("claude"), json!("deep")]);
     }
 }

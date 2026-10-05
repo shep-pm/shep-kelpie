@@ -31,10 +31,6 @@ pub struct Policy {
     pub denied_addresses: Vec<String>,
     /// A host it may reach only through a process outside, and no other way
     pub forward: Option<Forward>,
-    /// Whether it may listen on a local port, as a dev server does
-    pub listen: bool,
-    /// The macOS services it may look up, beyond the sandbox's own
-    pub services: Vec<String>,
     /// Whether it may ask macOS to verify a certificate, which Go's TLS needs
     pub verify_tls: bool,
 }

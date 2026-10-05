@@ -14,7 +14,6 @@ use std::sync::Mutex;
 use super::Runner;
 use super::gate::short;
 use super::report::StepReport;
-use super::ruling::SHOTS_FAILED;
 use super::trigger::lock;
 use crate::ports::{Alert, AlertError, Alerts, ReplyWith, Timestamp};
 use crate::state::{Notice, StateError};
@@ -191,14 +190,12 @@ fn notice_alert(project: &str, notice: &Notice) -> Alert {
         issue,
         pull_request,
         head,
-        shots_failed,
     } = notice;
-    let shots = if *shots_failed { SHOTS_FAILED } else { "" };
     Alert {
         title: format!("kelpie: {project} merged #{pull_request}"),
         text: format!(
             "Pull request #{pull_request} for issue #{issue} merged into main at {} \
-             on {project}, every gate passed.{shots} Nothing to answer.",
+             on {project}, every gate passed. Nothing to answer.",
             short(head)
         ),
         reply: None,

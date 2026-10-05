@@ -8,8 +8,8 @@ use shep_client::shep_core::protocol::request::ProcessInfo;
 use super::Line;
 use super::host::Host;
 use crate::ports::{Clock, Forge, ForgeError, Meter, MeterError};
-use crate::preview::Tools;
 use crate::shepherd::ConnectRefused;
+use crate::tools::Tools;
 
 // A tool's own message can run to a page, and the first line says what went wrong.
 fn first_line(text: &str) -> &str {

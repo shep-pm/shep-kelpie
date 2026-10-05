@@ -51,18 +51,6 @@ pub(crate) const NO_TOOLS: [&str; 12] = [
 // What `kelpie guard` judges: every command, and a subagent's isolation.
 const GUARDED_TOOLS: &str = "Bash|Agent|Task";
 
-// Every Playwright MCP tool, which `kelpie browse-guard` holds to the preview
-const PLAYWRIGHT_TOOLS: &str = "mcp__playwright__.*";
-
-// The Playwright MCP server runs outside the sandbox. These tools read a local
-// file (or run code that could), so none is the worker's.
-pub(crate) const PLAYWRIGHT_DENY: [&str; 4] = [
-    "mcp__playwright__browser_run_code_unsafe",
-    "mcp__playwright__browser_file_upload",
-    "mcp__playwright__browser_drop",
-    "mcp__playwright__browser_set_storage_state",
-];
-
 /// The settings file's contents for a call with these tools and sandbox
 pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
     let mut deny: Vec<String> = Vec::new();
@@ -83,9 +71,6 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
         }
         return trimmed(json!({ "permissions": permissions }));
     };
-    if fence.preview.is_some() {
-        deny.extend(PLAYWRIGHT_DENY.iter().map(|&r| r.to_owned()));
-    }
     let mut permissions = json!({ "deny": deny });
     if !reach.read.is_empty() {
         permissions["additionalDirectories"] = json!(reach.read);
@@ -166,10 +151,6 @@ fn read_rule(path: &str) -> String {
 // The project's own variables come last, so one it names wins.
 fn env(fence: &Fence) -> Value {
     let mut env = json!({});
-    if fence.preview.is_some() {
-        // Node's fetch ignores the sandbox's proxy without it.
-        env["NODE_USE_ENV_PROXY"] = "1".into();
-    }
     for (name, value) in &fence.env {
         env[name.as_str()] = json!(value);
     }
@@ -183,15 +164,6 @@ fn hooks(fence: &Fence) -> Value {
         .map(|p| shell_quote(&p.to_string_lossy()))
         .join(" ");
     let mut pre = vec![entry(Some(FILE_TOOLS), &confine)];
-    if let Some(domains) = &fence.preview {
-        let browse = [kelpie.to_string_lossy().as_ref(), "browse-guard"]
-            .into_iter()
-            .chain(domains.iter().map(String::as_str))
-            .map(shell_quote)
-            .collect::<Vec<_>>()
-            .join(" ");
-        pre.push(entry(Some(PLAYWRIGHT_TOOLS), &browse));
-    }
     let commands = [
         kelpie,
         Path::new("guard"),
@@ -277,13 +249,13 @@ mod tests {
     fn a_review_round_keeps_its_read_tools_and_reads_its_folders() {
         let bare = settings(Tools::Review, &Reach::default());
         assert_eq!(bare["permissions"]["deny"], deny_with_trim(&REVIEW_DENY));
-        let shots = Reach {
-            read: vec![PathBuf::from("/k/shots/7")],
+        let extra = Reach {
+            read: vec![PathBuf::from("/k/extra/7")],
             fence: None,
         };
         assert_eq!(
-            settings(Tools::Review, &shots)["permissions"]["additionalDirectories"],
-            json!(["/k/shots/7"])
+            settings(Tools::Review, &extra)["permissions"]["additionalDirectories"],
+            json!(["/k/extra/7"])
         );
     }
 
@@ -291,11 +263,11 @@ mod tests {
     fn an_answer_reads_nothing_unless_its_sandbox_lists_a_folder() {
         let none = settings(Tools::Answer, &Reach::default());
         assert_eq!(none["permissions"]["deny"], deny_with_trim(&NO_TOOLS));
-        let shot = Reach {
-            read: vec![PathBuf::from("/k/shots/7")],
+        let extra = Reach {
+            read: vec![PathBuf::from("/k/extra/7")],
             fence: None,
         };
-        let deny = settings(Tools::Answer, &shot)["permissions"]["deny"].clone();
+        let deny = settings(Tools::Answer, &extra)["permissions"]["deny"].clone();
         let without_read: Vec<&str> = NO_TOOLS.into_iter().filter(|t| *t != "Read").collect();
         assert_eq!(deny, deny_with_trim(&without_read));
     }

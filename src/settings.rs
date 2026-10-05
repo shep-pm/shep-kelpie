@@ -8,7 +8,7 @@
 //! `coderabbit.rounds`,
 //! `pacing.enabled`, `worker.allowed_domains`, `worker.build_env`,
 //! `worker.instructions_file`, `worker.turn_timeout`, `worker.guard_hooks`,
-//! `pull_request_reviewers`, `[preview]`, `[skills]` and
+//! `pull_request_reviewers`, `[skills]` and
 //! `[agents]`).
 //! `settings.example.toml` beside this crate holds the defaults.
 
@@ -22,7 +22,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use shep_client::dogs::dog_config;
 
-use crate::preview::Preview;
 use crate::review_bot::Bot;
 
 pub mod moving;
@@ -100,9 +99,6 @@ pub struct Settings {
     pub pacing: Pacing,
     /// What every worker is started with
     pub worker: Worker,
-    /// Showing a work item's UI, off unless `enabled` and a launch file on `main`
-    #[serde(default)]
-    pub preview: Preview,
     /// The skill each step runs, over kelpie's vendored defaults
     #[serde(default)]
     pub skills: StepSkills,
@@ -114,6 +110,7 @@ const RELAY: &str = "the relay is gone";
 const PLANNING: &str = "the planning call is gone";
 const AUDIT: &str = "the whole-issue check is gone";
 const LOOP: &str = "the review loop and its judge are gone";
+const SHOTS: &str = "shots and the preview are parked";
 
 // The keys removed features left behind
 const REMOVED: &[Removed] = &[
@@ -164,6 +161,10 @@ const REMOVED: &[Removed] = &[
     Removed {
         key: "review.local_rounds",
         because: LOOP,
+    },
+    Removed {
+        key: "preview",
+        because: SHOTS,
     },
 ];
 

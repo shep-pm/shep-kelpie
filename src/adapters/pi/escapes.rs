@@ -12,8 +12,8 @@ use super::tests::{WORKER_ID, World, id};
 use super::*;
 use crate::adapters::SandboxRuntime;
 use crate::ports::Role;
-use crate::preview::Tools as KelpieTools;
 use crate::test::{Answer, StandInEndpoint};
+use crate::tools::Tools as KelpieTools;
 
 const NEEDS: &str = "needs kelpie's tools: KELPIE_TOOLS=<dir> from `shep kelpie tools install`";
 

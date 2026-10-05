@@ -139,11 +139,6 @@ mod tests {
                 "# [[app.dogs.kelpie.worker.guard_hooks]]\n# event = \"PreToolUse\"\n# matcher = \"Bash\"\n# command =",
                 "[[app.dogs.kelpie.worker.guard_hooks]]\nevent = \"PreToolUse\"\nmatcher = \"Bash\"\ncommand =",
             )
-            .replace("# [app.dogs.kelpie.preview]", "[app.dogs.kelpie.preview]")
-            .replace("# enabled = true", "enabled = true")
-            .replace("# configuration =", "configuration =")
-            .replace("# routes =", "routes =")
-            .replace("# domains =", "domains =")
             .replace("# private_names =", "private_names =")
             .replace("# rounds =", "rounds =")
             .replace("# reviewers = [\"qwen\", \"claude\", \"opus\"]", "reviewers = [\"qwen\"]")
@@ -200,8 +195,6 @@ mod tests {
         for key in [
             "models.deep_reviewer.effort",
             "worker.build_env",
-            "preview.enabled",
-            "preview.routes",
             "review.local.context",
             "review.local.command",
         ] {
@@ -248,7 +241,6 @@ mod tests {
         let defs = &schema()["$defs"];
         assert_eq!(defs["KickoffHours"]["minimum"], 1);
         assert_eq!(defs["KickoffHours"]["maximum"], 24);
-        assert_eq!(defs["Route"]["pattern"], "^/");
         assert_eq!(defs["ContextSize"]["minimum"], 4096);
         let max_items = &defs["Settings"]["properties"]["max_items"];
         assert_eq!(

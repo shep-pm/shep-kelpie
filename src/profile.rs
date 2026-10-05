@@ -120,14 +120,9 @@ pub struct WorkerProfile<'a> {
     pub allowed_domains: &'a [NonBlank],
     /// Variables the project's settings point into the build folder
     pub build_env: &'a BTreeMap<EnvName, BuildDir>,
-    /// The preview's domains, for a project with the preview on; `None` with it off
-    pub preview: Option<&'a [NonBlank]>,
     /// The shepherd's home, whose `dogs.toml` holds the webhook's URL. The
     /// worker reads none of it but its own folders in kelpie's.
     pub shep_home: &'a Path,
-    /// Kelpie's folders for this work item that the worker reads and does
-    /// not write: its shots and its browser's output
-    pub reads: &'a [PathBuf],
     /// The dog's door, the one Unix socket the worker may connect to
     pub door: &'a Path,
 }
@@ -171,7 +166,6 @@ impl WorkerProfile<'_> {
         let read = [self.worktree, self.build, self.kelpie]
             .into_iter()
             .map(Path::to_owned)
-            .chain(self.reads.iter().cloned())
             .collect();
         let no_commands = PM_ONLY
             .iter()
@@ -180,18 +174,9 @@ impl WorkerProfile<'_> {
             .chain(push_to_base())
             .chain(PUSH_FLAGS.iter().map(|&c| c.to_owned()))
             .collect();
-        let preview = self
-            .preview
-            .map(|domains| domains.iter().map(|d| d.as_str().to_owned()).collect());
         let hosts = GITHUB
             .into_iter()
             .chain(self.allowed_domains.iter().map(NonBlank::as_str))
-            .chain(
-                self.preview
-                    .unwrap_or_default()
-                    .iter()
-                    .map(NonBlank::as_str),
-            )
             .map(str::to_owned)
             .collect();
         let fence = Fence {
@@ -203,7 +188,6 @@ impl WorkerProfile<'_> {
             no_commands,
             env: self.env(),
             sockets: vec![self.door.to_owned()],
-            preview,
             guard: Guard {
                 kelpie: self.kelpie.to_owned(),
                 worktree: self.worktree.to_owned(),
@@ -297,9 +281,7 @@ mod tests {
             guard_hooks: hooks,
             allowed_domains: domains,
             build_env: &BTreeMap::new(),
-            preview: None,
             shep_home: Path::new("/srv/shep"),
-            reads: &[],
             door: Path::new("/k/dog/lease.sock"),
         }
         .settings()
@@ -337,9 +319,7 @@ mod tests {
             guard_hooks: &[],
             allowed_domains: &[],
             build_env: &BTreeMap::new(),
-            preview: None,
             shep_home: &shep,
-            reads: &[],
             door: Path::new("/s/kelpie/dog/lease.sock"),
         }
         .settings();
@@ -459,9 +439,7 @@ mod tests {
             guard_hooks: &[],
             allowed_domains: &[],
             build_env: &build_env,
-            preview: None,
             shep_home: Path::new("/srv/shep"),
-            reads: &[],
             door: Path::new("/k/dog/lease.sock"),
         }
         .settings();
@@ -473,34 +451,6 @@ mod tests {
                 "KELPIE_LEASE_SOCKET": "/k/dog/lease.sock",
             })
         );
-    }
-
-    #[test]
-    fn a_projects_build_env_wins_over_the_previews_own_variable() {
-        let build_env = BTreeMap::from([(
-            EnvName::try_from("NODE_USE_ENV_PROXY".to_owned()).unwrap(),
-            BuildDir::try_from("node".to_owned()).unwrap(),
-        )]);
-        let s = WorkerProfile {
-            worktree: Path::new("/k/wt/lab/7"),
-            build: Path::new("/k/targets/lab/7"),
-            git_common_dir: Path::new("/k/repos/lab/.git"),
-            git_dir: Path::new("/k/repos/lab/.git/worktrees/7"),
-            branch: "kelpie/7",
-            kelpie: Path::new("/opt/kelpie"),
-            kelpie_home: Path::new("/k"),
-            repo: Path::new("/k/repos/shep"),
-            private_names: &[],
-            guard_hooks: &[],
-            allowed_domains: &[],
-            build_env: &build_env,
-            preview: Some(&[]),
-            shep_home: Path::new("/srv/shep"),
-            reads: &[],
-            door: Path::new("/k/dog/lease.sock"),
-        }
-        .settings();
-        assert_eq!(s["env"]["NODE_USE_ENV_PROXY"], "/k/targets/lab/7/node");
     }
 
     #[test]
@@ -521,119 +471,13 @@ mod tests {
         assert_eq!(settings(&[])["sandbox"]["network"]["strictAllowlist"], true);
     }
 
-    fn with_preview(domains: &[NonBlank]) -> Value {
-        WorkerProfile {
-            worktree: Path::new("/k/wt/lab/7"),
-            build: Path::new("/k/targets/lab/7"),
-            git_common_dir: Path::new("/k/repos/lab/.git"),
-            git_dir: Path::new("/k/repos/lab/.git/worktrees/7"),
-            branch: "kelpie/7",
-            kelpie: Path::new("/opt/kelpie"),
-            kelpie_home: Path::new("/k"),
-            repo: Path::new("/k/repos/shep"),
-            private_names: &[],
-            guard_hooks: &[],
-            allowed_domains: &[],
-            build_env: &BTreeMap::new(),
-            preview: Some(domains),
-            shep_home: Path::new("/srv/shep"),
-            reads: &[],
-            door: Path::new("/k/dog/lease.sock"),
-        }
-        .settings()
-    }
-
     #[test]
-    fn a_preview_lets_a_dev_server_bind_and_watch_and_nothing_wider() {
-        let api = [NonBlank::try_from("pokemon-go-api.github.io".to_owned()).unwrap()];
-        let s = with_preview(&api);
-        assert_eq!(
-            s["sandbox"]["network"],
-            json!({
-                "allowedDomains": ["github.com", "api.github.com", "pokemon-go-api.github.io"],
-                "deniedDomains": [],
-                "strictAllowlist": true,
-                "allowLocalBinding": true,
-                "allowMachLookup": ["com.apple.FSEvents"],
-                "allowUnixSockets": ["/k/dog/lease.sock"],
-            })
-        );
-        assert_eq!(s["env"]["NODE_USE_ENV_PROXY"], "1");
-        for key in ["allowWrite", "denyWrite"] {
-            assert_eq!(
-                s["sandbox"]["filesystem"][key],
-                settings(&[])["sandbox"]["filesystem"][key]
-                    .to_string()
-                    .replace("/shep/", "/lab/")
-                    .parse::<Value>()
-                    .unwrap(),
-                "the write fence does not move"
-            );
-        }
-    }
-
-    #[test]
-    fn a_preview_denies_the_playwright_tools_that_reach_past_the_page() {
-        let deny = with_preview(&[])["permissions"]["deny"].clone();
-        let deny = strings(&deny);
-        for tool in [
-            "browser_run_code_unsafe",
-            "browser_file_upload",
-            "browser_drop",
-            "browser_set_storage_state",
-        ] {
-            let rule = format!("mcp__playwright__{tool}");
-            assert!(deny.contains(&rule.as_str()), "{rule}");
-        }
-    }
-
-    // The preview widens nothing the fence on agents' own files holds.
-    #[test]
-    fn a_preview_keeps_the_fence_on_claude_files_beside_its_own() {
-        let s = with_preview(&[]);
-        let deny_write = strings(&s["sandbox"]["filesystem"]["denyWrite"]);
-        for path in [
-            "/k/wt/lab/7/.claude",
-            "/k/wt/lab/7/**/.claude",
-            "/k/wt/lab/7/.mcp.json",
-        ] {
-            assert!(deny_write.contains(&path), "{path}: {deny_write:?}");
-        }
-        assert!(deny_write.contains(&"/k/repos/lab/.git/config"));
-        let deny = s["permissions"]["deny"].to_string();
-        assert!(deny.contains("Read(~/.ssh/**)"), "{deny}");
-        assert!(deny.contains("mcp__playwright__browser_drop"), "{deny}");
-        let pre = s["hooks"]["PreToolUse"].to_string();
-        assert!(pre.contains("'confine'"), "{pre}");
-        assert!(pre.contains("'browse-guard'"), "{pre}");
-    }
-
-    #[test]
-    fn a_preview_holds_every_playwright_tool_to_kelpies_browse_guard() {
-        let domains = [NonBlank::try_from("*.leekduck.com".to_owned()).unwrap()];
-        assert_eq!(
-            with_preview(&domains)["hooks"]["PreToolUse"][1],
-            json!({
-                "matcher": "mcp__playwright__.*",
-                "hooks": [{
-                    "type": "command",
-                    "command": "'/opt/kelpie' 'browse-guard' '*.leekduck.com'",
-                }],
-            })
-        );
-        let hooks = settings(&[])["hooks"].to_string();
-        assert!(!hooks.contains("browse-guard"), "{hooks}");
-    }
-
-    #[test]
-    fn without_a_preview_nothing_binds_a_port() {
+    fn a_worker_binds_no_port() {
         let s = settings(&[]);
         let network = s["sandbox"]["network"].as_object().unwrap();
         assert!(!network.contains_key("allowLocalBinding"), "{network:?}");
         assert!(!network.contains_key("allowMachLookup"), "{network:?}");
         assert_eq!(s["env"]["NODE_USE_ENV_PROXY"], Value::Null);
-        let deny = s["permissions"]["deny"].to_string();
-        assert!(!deny.contains("mcp__playwright"), "{deny}");
     }
 
     #[test]
@@ -669,7 +513,6 @@ mod tests {
     #[test]
     fn a_projects_settings_cannot_switch_the_hooks_off() {
         assert_eq!(settings(&[])["disableAllHooks"], false);
-        assert_eq!(with_preview(&[])["disableAllHooks"], false);
     }
 
     #[test]
@@ -813,8 +656,6 @@ mod tests {
         );
         assert_eq!(s["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
         assert_eq!(s["hooks"]["PostToolUse"], Value::Null);
-        let preview = with_preview(&[])["hooks"]["PreToolUse"][2].to_string();
-        assert!(preview.contains("'guard'"), "{preview}");
     }
 
     #[test]
@@ -833,9 +674,7 @@ mod tests {
             guard_hooks: &[],
             allowed_domains: &[],
             build_env: &BTreeMap::new(),
-            preview: None,
             shep_home: Path::new("/srv/shep"),
-            reads: &[],
             door: Path::new("/k/dog/lease.sock"),
         };
         let s = profile.settings();

@@ -21,7 +21,6 @@ use std::path::Path;
 use super::Runner;
 use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, Spent, StepReport};
 use super::ruling::park;
-use super::shots::RoundShots;
 use crate::pacer::Scope;
 use crate::ports::{
     AgentCall, AgentError, AgentReply, Agents, Finding, Reviewer, ReviewerError, RoundStage,
@@ -88,12 +87,6 @@ impl Runner {
                         if let Some(held) = self.pace(Scope::Turn, &session.limit)?.holds() {
                             return Ok(held);
                         }
-                        let shots = match self.round_shots()? {
-                            RoundShots::Take(begin) => return Ok(*begin),
-                            RoundShots::Ready(shots) => shots,
-                        };
-                        let dir = self.paths.shots(issue);
-                        let shots = shots.as_ref().map(|run| calls::Screens { dir: &dir, run });
                         let call = calls::reviewer_call(
                             calls::Round {
                                 issue,
@@ -103,7 +96,6 @@ impl Runner {
                                 criteria: &criteria,
                             },
                             (&session.model(), &session.limit),
-                            shots,
                             &self.skills,
                         );
                         match call.and_then(|call| self.prepared(call)) {

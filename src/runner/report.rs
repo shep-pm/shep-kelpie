@@ -12,7 +12,6 @@ use crate::board::{Skip, WorkerModel};
 use crate::pacer::HoldKind;
 use crate::ports::{AgentCall, Cost, Finding, Role, SessionId, Timestamp, Usage};
 use crate::settings::{LocalRound, ReviewerName};
-use crate::shots::ShotsJob;
 use crate::work_item::{QwenTally, Spend, Split};
 
 /// What asked for a rework on the pull request itself
@@ -505,37 +504,6 @@ pub enum StepReport {
         /// How many findings were sent: none for a round of nits
         held: usize,
     },
-    /// Kelpie took shots of a head, before a Claude review round or the merge ruling
-    Shots {
-        /// The work item's issue
-        issue: u64,
-        /// The head the worktree held
-        head: String,
-        /// How many screenshots it took
-        shots: usize,
-        /// What went wrong, each naming its page, the whole run's failure included
-        problems: Vec<String>,
-    },
-    /// The shots of the head about to be ruled on are on its pull request's comment
-    ShotsPosted {
-        /// The work item's issue
-        issue: u64,
-        /// Its pull request
-        pull_request: u64,
-        /// The head they show
-        head: String,
-        /// The comment's id, edited in place by every later run
-        comment: u64,
-    },
-    /// The shots could not all reach the pull request; the merge ruling goes on
-    ShotsNotPosted {
-        /// The work item's issue
-        issue: u64,
-        /// Its pull request
-        pull_request: u64,
-        /// Why
-        reason: String,
-    },
     /// A reader of the deep round reported
     DeepRead {
         /// The work item's issue
@@ -583,8 +551,6 @@ pub(super) enum Begin {
     Report(StepReport),
     Call(AgentCall),
     Review(ReviewCall),
-    /// A shots run of this head
-    Shots(Box<ShotsJob>, String),
 }
 
 /// Something the review needs run outside the runner's lock

@@ -7,7 +7,7 @@ use serde_json::json;
 use super::{PATIENCE, assert_sums, held_while, read_while_held, secs, timings};
 use crate::ports::Checks;
 use crate::runner::{Runner, StepReport, step};
-use crate::test::{Hold, Rig, Scripted, ScriptedRound, ScriptedShots};
+use crate::test::{Hold, Rig, Scripted, ScriptedRound};
 use crate::work_item::TimingPhase;
 
 // One work item's clock runs through a held worker turn and a held local
@@ -252,27 +252,4 @@ fn coderabbit_is_the_window_until_the_summon_and_the_review_after() {
         (300, 700)
     );
     assert_sums(&t);
-}
-
-#[test]
-fn a_shots_run_in_flight_is_shots() {
-    let rig = Rig::new("lab");
-    rig.land_launch_file();
-    rig.edit_settings(|s| {
-        format!("{s}\n[app.dogs.kelpie.preview]\nenabled = true\nroutes = [\"/\"]\n")
-    });
-    let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
-    rig.ask(&runner, "add", Some("7"));
-    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
-    step(&runner).unwrap(); // the worker's first turn
-    step(&runner).unwrap(); // round 1, local: clean by default
-    let hold = Hold::default();
-    rig.shots.script([ScriptedShots::Hold(hold.clone())]);
-    let t = read_while_held(&rig, &runner, &hold, 55);
-    assert_eq!(t["phase"], "shots");
-    assert_eq!((secs(&t, "shots"), secs(&t, "claude_round")), (55, 0));
-    assert_sums(&t);
-    assert_eq!(rig.shots.jobs().len(), 1);
 }

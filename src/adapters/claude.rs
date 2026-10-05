@@ -14,8 +14,8 @@ use crate::ports::{
     AgentCall, AgentError, AgentReply, Agents, Cost, Role, Sandbox, Session, SessionId, Unreadable,
     Usage,
 };
-use crate::preview::Tools;
 use crate::settings::Harness;
+use crate::tools::Tools;
 
 /// This adapter's harness, as its errors name it
 const CLAUDE: Harness = Harness::ClaudeCode;
@@ -128,8 +128,7 @@ impl Agents for ClaudeCli {
     }
 
     fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
-        // The bridges stay open until the call has ended.
-        let (mut command, _bridges) = self.sandboxed_command(call)?;
+        let mut command = self.sandboxed_command(call)?;
         let label = format!("#{} {}", call.issue, call.role.as_str());
         let spawned = |pid| {
             if let Some(lambs) = &self.lambs {
@@ -167,7 +166,7 @@ pub(crate) fn write_settings(call: &AgentCall) -> Result<(), AgentError> {
 // `--setting-sources project` keeps the project's CLAUDE.md and skills and
 // drops the maintainer's own hooks, plugins and skills. It also drops the
 // worktree's `settings.local.json`, which nothing kelpie runs needs.
-fn argv(call: &AgentCall, mcp_config: Option<&Path>) -> Vec<OsString> {
+fn argv(call: &AgentCall) -> Vec<OsString> {
     let mut argv: Vec<OsString> = vec![
         "-p".into(),
         call.prompt.as_str().into(),
@@ -187,9 +186,6 @@ fn argv(call: &AgentCall, mcp_config: Option<&Path>) -> Vec<OsString> {
     let runs_commands = call.role == Role::DeepReviewer && call.tools == crate::ports::Tools::Work;
     if call.role == Role::Worker || runs_commands {
         argv.extend(["--permission-mode".into(), "bypassPermissions".into()]);
-    }
-    if let Some(config) = mcp_config {
-        argv.extend(["--mcp-config".into(), config.into()]);
     }
     for plugin in &call.plugin_dirs {
         argv.extend(["--plugin-dir".into(), plugin.into()]);
@@ -274,7 +270,7 @@ mod tests {
     #[test]
     fn a_runners_calls_on_every_harness_leave_kelpies_codex_login_unread() {
         let dir = tempfile::tempdir().unwrap();
-        let tools = crate::preview::Tools::at(dir.path().join("tools"));
+        let tools = crate::tools::Tools::at(dir.path().join("tools"));
         std::fs::create_dir_all(tools.sandbox().parent().unwrap()).unwrap();
         std::fs::write(tools.sandbox(), "").unwrap();
         let login = dir.path().join("codex");
@@ -339,7 +335,6 @@ mod tests {
             instructions: Some(PathBuf::from("/k/worker/instructions.md")),
             prompt: "implement #6".into(),
             timeout: None,
-            mcp_config: None,
             plugin_dirs: Vec::new(),
             tools: Tools::Work,
             reach: Reach::default(),
@@ -348,7 +343,7 @@ mod tests {
     }
 
     fn strings(call: &AgentCall) -> Vec<String> {
-        argv(call, call.mcp_config.as_deref())
+        argv(call)
             .into_iter()
             .map(|a| a.into_string().unwrap())
             .collect()
@@ -387,17 +382,6 @@ mod tests {
         assert_eq!(argv[argv.len() - 2..], ["--resume", "abc"]);
         assert!(!argv.iter().any(|a| a == "--append-system-prompt-file"));
         assert!(!argv.iter().any(|a| a == "--session-id"));
-    }
-
-    #[test]
-    fn a_call_with_mcp_servers_names_their_config() {
-        let mut with = call(Role::Worker, fresh());
-        with.mcp_config = Some(PathBuf::from("/k/worker/mcp.json"));
-        let argv = strings(&with);
-        let at = argv.iter().position(|a| a == "--mcp-config").unwrap();
-        assert_eq!(argv[at + 1], "/k/worker/mcp.json");
-        let argv = strings(&call(Role::Worker, fresh()));
-        assert!(!argv.iter().any(|a| a == "--mcp-config"));
     }
 
     #[test]
@@ -440,7 +424,7 @@ mod tests {
         let mut review = call(Role::Reviewer, fresh());
         review.settings = dir.path().join("worker/review-settings.json");
         review.tools = Tools::Review;
-        review.reach.read = vec![dir.path().join("shots")];
+        review.reach.read = vec![dir.path().join("extra")];
         ClaudeCli::default().prepare(&review).unwrap();
         let written: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&review.settings).unwrap()).unwrap();
@@ -450,7 +434,7 @@ mod tests {
         );
         assert_eq!(
             written["permissions"]["additionalDirectories"],
-            serde_json::json!([dir.path().join("shots")])
+            serde_json::json!([dir.path().join("extra")])
         );
         assert_eq!(written["disableBundledSkills"], true);
 

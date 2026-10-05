@@ -11,7 +11,7 @@
 //! Dropping the [`Forwarder`] stops every connection and removes the socket.
 
 use std::collections::HashMap;
-use std::io::{self, BufReader, Write};
+use std::io::{self, BufReader, Read, Write};
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -20,7 +20,6 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-use super::bridge::{LONGEST_SOCKET, unguessable};
 use crate::confine::Verdict;
 use crate::forwarder::Upstream;
 use http::{Head, Reply, Timed};
@@ -40,6 +39,9 @@ const REPLY_STALL: Duration = Duration::from_secs(60);
 
 /// How many connections are served at once. pi's calls come one at a time.
 const MAX_CONNECTIONS: usize = 8;
+
+// macOS refuses a socket path of 104 bytes or more.
+const LONGEST_SOCKET: usize = 103;
 
 /// The headers of a chat call that go on to the model server
 const PASSED: [&str; 4] = ["content-type", "accept", "authorization", "user-agent"];
@@ -350,4 +352,13 @@ fn request(upstream: &Upstream, head: &Head, length: usize) -> Vec<u8> {
     }
     text.push_str("\r\n");
     text.into_bytes()
+}
+
+// 128 random bits as hex, from the system's own source.
+fn unguessable() -> Result<String, String> {
+    let mut bytes = [0u8; 16];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut bytes))
+        .map_err(|e| format!("cannot draw a socket name: {e}"))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }

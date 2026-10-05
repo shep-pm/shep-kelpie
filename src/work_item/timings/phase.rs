@@ -29,8 +29,6 @@ pub enum TimingPhase {
     Ruling,
     /// Merged and being cleaned up
     Merge,
-    /// A shots run takes screenshots
-    Shots,
     /// The project is paused and nothing is running for the work item
     Paused,
     /// Anything else: between steps, and while kelpie is not running
@@ -39,7 +37,7 @@ pub enum TimingPhase {
 
 impl TimingPhase {
     /// Every phase, in the order `status` and the table list them
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 12] = [
         Self::Worker,
         Self::GpuWait,
         Self::LocalRound,
@@ -50,7 +48,6 @@ impl TimingPhase {
         Self::CodeRabbitReview,
         Self::Ruling,
         Self::Merge,
-        Self::Shots,
         Self::Paused,
         Self::Other,
     ];
@@ -68,7 +65,6 @@ impl TimingPhase {
             Self::CodeRabbitReview => "coderabbit_review",
             Self::Ruling => "ruling",
             Self::Merge => "merge",
-            Self::Shots => "shots",
             Self::Paused => "paused",
             Self::Other => "other",
         }
@@ -97,7 +93,6 @@ mod tests {
                 "coderabbit_review",
                 "ruling",
                 "merge",
-                "shots",
                 "paused",
                 "other",
             ]

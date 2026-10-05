@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use crate::board::WorkerModel;
 use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage};
 use crate::settings::ReviewerName;
-use crate::shots::ShotsRecord;
 
 mod deep;
 mod follow_ups;
@@ -155,12 +154,6 @@ pub struct WorkItem {
     /// queued it until it merges or the queue removes it
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_queued: Option<MergeQueued>,
-    /// Kelpie's last shots run, for a project with the preview on
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub shots: Option<ShotsRecord>,
-    /// The pull request's shots comment, once posted
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub shots_comment: Option<u64>,
     /// Every finding kelpie has sent the worker to fix, across rounds. The
     /// worker can only defer one of these.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -589,7 +582,7 @@ mod tests {
                     "seconds": {
                         "worker": 4, "gpu_wait": 0, "local_round": 0, "claude_round": 0,
                         "ci": 3, "coderabbit_window": 0, "coderabbit_review": 0,
-                        "ruling": 0, "merge": 0, "shots": 0, "paused": 0, "other": 0,
+                        "ruling": 0, "merge": 0, "paused": 0, "other": 0,
                     },
                 },
                 "calls": [{

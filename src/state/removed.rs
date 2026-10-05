@@ -1,12 +1,12 @@
 //! What removed features left in a state file saved before they went
 //!
 //! Such a file still loads. The relay's, the planning call's, the
-//! whole-issue check's, the review loop's and the deep round's later steps'
-//! fields are dropped before reading, and the check's and the judge's time
-//! and calls count as review's, so totals still add up. A review saved
-//! mid-loop goes on from the reviewer after the one it last recorded. A
-//! pending ruling of a removed kind has nothing here to answer it, so the
-//! file is refused.
+//! whole-issue check's, the review loop's, the deep round's later steps' and
+//! the shots' fields are dropped before reading. The check's and the judge's
+//! time and calls count as review's, and the shots' time as other, so totals
+//! still add up. A review saved mid-loop goes on from the reviewer after the
+//! one it last recorded. A pending ruling of a removed kind has nothing here
+//! to answer it, so the file is refused.
 
 use serde_json::{Map, Value, json};
 
@@ -21,8 +21,13 @@ const RULINGS: [&str; 6] = [
 ];
 
 // The judge and the check each ran as a fresh Claude session reviewing the
-// work, so their time is a Claude round's and their calls a reviewer's.
-const PHASES: [&str; 2] = ["audit", "judging"];
+// work, so their time is a Claude round's and their calls a reviewer's. A
+// shots run was kelpie's own, between steps, so its time is other.
+const PHASES: [(&str, &str); 3] = [
+    ("audit", "claude_round"),
+    ("judging", "claude_round"),
+    ("shots", "other"),
+];
 const CALLS: [&str; 2] = ["audit", "judge"];
 const ROLES: [&str; 2] = ["auditor", "judge"];
 
@@ -37,7 +42,7 @@ pub(super) fn removed_ruling(value: &Value) -> Option<(u64, String)> {
 }
 
 /// Drops what removed features saved, and moves the whole-issue check's and
-/// the judge's time and calls to review's
+/// the judge's time and calls to review's, and the shots' time to other
 ///
 /// Only these names are touched; any other unknown field is still refused.
 pub(super) fn drop_removed_fields(value: &mut Value) {
@@ -46,11 +51,17 @@ pub(super) fn drop_removed_fields(value: &mut Value) {
     };
     state.remove("relay_clears");
     state.remove("plans");
+    for notice in objects(state.get_mut("notices")) {
+        notice.remove("shots_failed");
+    }
     for ruling in objects(state.get_mut("rulings")) {
         ruling.remove("relayed");
         ruling.remove("resend");
         if let Some(kind) = ruling.get_mut("kind") {
             drop_loop(kind);
+            if let Some(kind) = kind.as_object_mut() {
+                kind.remove("shots_failed");
+            }
             // Only the deep round's pin check said why a pushed fix fell short.
             if let Some(kind) = kind.as_object_mut()
                 && kind.get("kind").and_then(Value::as_str) == Some("fix-not-pushed")
@@ -62,13 +73,16 @@ pub(super) fn drop_removed_fields(value: &mut Value) {
     for item in objects(state.get_mut("work_items")) {
         item.remove("audit");
         item.remove("local_rounds");
+        item.remove("shots");
+        item.remove("shots_comment");
+        end_shots_run(item);
         fold_review_calls(item);
         for value in item.values_mut() {
             drop_loop(value);
         }
     }
     for finished in objects(state.get_mut("history")) {
-        fold_review_seconds(finished);
+        fold_seconds(finished);
     }
 }
 
@@ -77,9 +91,23 @@ fn objects(list: Option<&mut Value>) -> impl Iterator<Item = &mut Map<String, Va
     list.filter_map(Value::as_object_mut)
 }
 
+// A shots run in flight never resumes, so it ends as the runner's start ends
+// any call cut short, and its time from there counts by the work item's phase.
+fn end_shots_run(item: &mut Map<String, Value>) {
+    let Some(timings) = item.get_mut("timings").and_then(Value::as_object_mut) else {
+        return;
+    };
+    if timings.get("call").and_then(Value::as_str) != Some("shots") {
+        return;
+    }
+    timings.remove("call");
+    timings.remove("queued");
+    item.insert("review_call".to_owned(), json!({ "state": "idle" }));
+}
+
 fn fold_review_calls(item: &mut Map<String, Value>) {
     if let Some(timings) = item.get_mut("timings").and_then(Value::as_object_mut) {
-        fold_review_seconds(timings);
+        fold_seconds(timings);
         if timings
             .get("call")
             .and_then(Value::as_str)
@@ -99,19 +127,19 @@ fn fold_review_calls(item: &mut Map<String, Value>) {
     }
 }
 
-fn fold_review_seconds(holder: &mut Map<String, Value>) {
+fn fold_seconds(holder: &mut Map<String, Value>) {
     let Some(seconds) = holder.get_mut("seconds").and_then(Value::as_object_mut) else {
         return;
     };
-    for phase in PHASES {
+    for (phase, into) in PHASES {
         let from = seconds.get(phase).and_then(Value::as_u64);
-        let round = seconds.get("claude_round").map_or(Some(0), Value::as_u64);
+        let to = seconds.get(into).map_or(Some(0), Value::as_u64);
         // Anything that is not a count is left for the parser to refuse.
-        let (Some(from), Some(round)) = (from, round) else {
+        let (Some(from), Some(to)) = (from, to) else {
             continue;
         };
         seconds.remove(phase);
-        seconds.insert("claude_round".to_owned(), from.saturating_add(round).into());
+        seconds.insert(into.to_owned(), from.saturating_add(to).into());
     }
 }
 

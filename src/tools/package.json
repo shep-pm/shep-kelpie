@@ -1,0 +1,8 @@
+{
+  "name": "kelpie-tools",
+  "private": true,
+  "description": "Written by `shep kelpie tools install`: the sandbox runtime every agent runs in",
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.77"
+  }
+}

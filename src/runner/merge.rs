@@ -15,7 +15,6 @@ use super::report::{Begin, StepReport};
 use super::trigger::WhichItem;
 use crate::ports::{Checks, PullRequestState};
 use crate::settings::MergeAuthority;
-use crate::shots::publish;
 use crate::state::{Finished, Notice, RulingKind, StateError};
 use crate::work_item::{Phase, Review, ReviewCallState, Turn};
 use crate::worktree::{self, Base};
@@ -265,7 +264,6 @@ impl Runner {
         head: String,
         notice: bool,
     ) -> Result<Begin, StateError> {
-        let shots_failed = self.shots_failed(&head);
         let mut next = self.state.clone();
         let item = self
             .current_in(&mut next)
@@ -276,7 +274,6 @@ impl Runner {
                 issue,
                 pull_request: number,
                 head,
-                shots_failed,
             });
         }
         self.save(next)?;
@@ -329,7 +326,7 @@ impl Runner {
         self.withdraw(issue, number, true, reason)
     }
 
-    // Removes the worktree, branch, build and shots folders, then the work
+    // Removes the worktree, branch and build folder, then the work
     // item, and records its issue so the board never takes it again. A pull
     // request left unmerged is handed back to the maintainer first.
     pub(super) fn finish(&mut self, merged: bool) -> Result<Begin, StateError> {
@@ -339,12 +336,6 @@ impl Runner {
         }
         self.release_all()?;
         let item = self.current().expect("a finish is of a work item");
-        // First, so a failure here leaves everything else for the retry.
-        if let Some(number) = item.pull_request
-            && let Err(e) = publish::delete(&self.settings.repo, &publish::branch(number))
-        {
-            return Ok(self.gate_failed(format!("cannot delete the shots branch: {e}")));
-        }
         if let (false, Some(number)) = (merged, item.pull_request)
             && let Err(reason) = self.hand_back(number)
         {
@@ -359,20 +350,6 @@ impl Runner {
         );
         if let Err(e) = removed {
             return Ok(self.gate_failed(format!("cannot clean up: {e}")));
-        }
-        for folder in [
-            self.paths.shots(item.issue),
-            self.paths.playwright(item.issue),
-        ] {
-            if let Err(e) = std::fs::remove_dir_all(&folder)
-                && e.kind() != std::io::ErrorKind::NotFound
-            {
-                return Ok(self.gate_failed(format!(
-                    "cannot remove {}: {}",
-                    folder.display(),
-                    e.kind()
-                )));
-            }
         }
         let now = self.ports.clock.now();
         let timings = item.split(now, self.timing_phase(item));

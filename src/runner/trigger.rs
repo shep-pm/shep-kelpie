@@ -149,9 +149,6 @@ pub struct WorkItemStatus<'a> {
     /// on without them
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     pub reviewers_skipped: &'a [ReviewerName],
-    /// Why kelpie's last shots run failed, when it did
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub shots_failed: Option<&'a str>,
     /// Where its wall time went, and the phase it is in now
     pub timings: Split,
 }
@@ -182,7 +179,6 @@ impl<'a> WorkItemStatus<'a> {
             qwen: item.qwen,
             local_reviewers_down: item.local_reviewers_down(),
             reviewers_skipped: &item.reviewers_skipped,
-            shots_failed: item.shots.as_ref().and_then(|r| r.run.failed.as_deref()),
             timings,
         }
     }

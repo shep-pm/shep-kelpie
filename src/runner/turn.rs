@@ -8,7 +8,7 @@
 //! that ends on a question block parks the worker on a ruling.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -27,9 +27,8 @@ use super::trigger::lock;
 use crate::board::WorkerModel;
 use crate::pacer::Scope;
 use crate::ports::{AgentCall, AgentError, AgentReply, Cost, Issue, Reach, Role, Session, Tools};
-use crate::preview::{self, McpFiles, WORKER_INSTRUCTIONS};
 use crate::profile::WorkerProfile;
-use crate::settings::{AgentHarness, Effort, Limit, NonBlank};
+use crate::settings::{AgentHarness, Effort, Limit};
 use crate::skills::{Step, split_command};
 use crate::state::{Resume, RulingKind, RunState, StateError};
 use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
@@ -70,13 +69,12 @@ const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
 /// [`StateError`] when the turn's start or end, or a post, cannot be saved.
 pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
     lock(runner).beat();
-    let (claude, reviewer, alerts, shots, turns) = {
+    let (claude, reviewer, alerts, turns) = {
         let runner = lock(runner);
         (
             Arc::clone(&runner.ports.agents),
             Arc::clone(&runner.ports.reviewer),
             Arc::clone(&runner.ports.alerts),
-            Arc::clone(&runner.ports.shots),
             runner.live_turns.clone(),
         )
     };
@@ -125,10 +123,6 @@ pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
                 };
                 let reviewed = run_review_call(claude.as_ref(), reviewer.as_ref(), action, &watch);
                 return lock(runner).on(issue).end_review(reviewed);
-            }
-            Begin::Shots(job, head) => {
-                let run = shots.take(&job);
-                return lock(runner).on(issue).end_shots(head, run);
             }
         }
     }
@@ -227,7 +221,7 @@ impl Runner {
                 }
                 return self.review_bot_step();
             }
-            Phase::Ruling { .. } => return self.retry_shots(),
+            Phase::Ruling { .. } => return Ok(Begin::Idle),
             Phase::Merge { .. } => return self.merge(),
             Phase::Done { merged } => return self.finish(*merged),
         }
@@ -325,26 +319,15 @@ impl Runner {
             Start::Main
         };
         let reach = self.worker_reach(item, start)?;
-        let previewed = self.previewed();
         let folder = &self.paths.worker;
         let settings = folder.join("settings.json");
         let instructions = folder.join("instructions.md");
-        let mut text = instructions::compose(
+        let text = instructions::compose(
             self.extra_instructions.as_deref(),
             &item.worktree,
             &self.skills,
             &self.kelpie,
         );
-        let mcp_config = if previewed {
-            text.push_str(WORKER_INSTRUCTIONS);
-            let config = self.settings.preview.configuration.as_ref();
-            if let Ok(launch) = preview::launch(&self.settings.repo, config.map(NonBlank::as_str)) {
-                text.push_str(&preview::worker_server(&launch, &item.worktree));
-            }
-            Some(self.write_mcp_config(item)?)
-        } else {
-            None
-        };
         write(folder, &instructions, &text)?;
         let prompt = match prompt {
             Some(prompt) => prompt,
@@ -378,7 +361,6 @@ impl Runner {
             instructions: Some(instructions),
             prompt,
             timeout: Some(timeout),
-            mcp_config,
             plugin_dirs: self.skills.plugin_dirs().to_vec(),
             tools: Tools::Work,
             reach,
@@ -405,10 +387,6 @@ impl Runner {
         if let Some(reason) = self.claude_files_refusal() {
             return Err(reason);
         }
-        let reads = [
-            self.paths.shots(item.issue),
-            self.paths.playwright(item.issue),
-        ];
         let profile = WorkerProfile {
             worktree: &item.worktree,
             build: &item.build,
@@ -422,11 +400,7 @@ impl Runner {
             private_names: &self.settings.private_names,
             allowed_domains: &self.settings.worker.allowed_domains,
             build_env: &self.settings.worker.build_env,
-            preview: self
-                .previewed()
-                .then_some(self.settings.preview.domains.as_slice()),
             shep_home: &self.paths.shep_home,
-            reads: &reads,
             door: &self.paths.door,
         };
         Ok(profile.reach())
@@ -486,47 +460,10 @@ impl Runner {
         Ok(call)
     }
 
-    // The worker's MCP servers: Playwright's, fenced to the preview's
-    // domains, and kelpie's shots tool with the job it runs.
-    fn write_mcp_config(&self, item: &WorkItem) -> Result<PathBuf, String> {
-        let folder = &self.paths.worker;
-        let (job, browser, mcp) = (
-            folder.join("shots-job.json"),
-            folder.join("playwright.json"),
-            folder.join("mcp.json"),
-        );
-        let shots = self.shots_job(item, self.paths.shots(item.issue));
-        let domains = &self.settings.preview.domains;
-        let out = self.paths.playwright(item.issue);
-        own_folder(&out)?;
-        let json = |v: &serde_json::Value| serde_json::to_string_pretty(v).expect("config is JSON");
-        let job_text = serde_json::to_string_pretty(&shots).expect("the job is JSON");
-        write(folder, &job, &job_text)?;
-        write(
-            folder,
-            &browser,
-            &json(&preview::browser_config(&out, domains)),
-        )?;
-        let files = McpFiles {
-            tools: &self.paths.tools,
-            kelpie: &self.kelpie,
-            job: &job,
-            browser: &browser,
-        };
-        write(folder, &mcp, &json(&preview::mcp_config(files)))?;
-        Ok(mcp)
-    }
-
     fn end_turn(
         &mut self,
         result: Result<AgentReply, AgentError>,
     ) -> Result<Option<StepReport>, StateError> {
-        // However the turn ended, a dev server its shots tool started is done.
-        if let Some(item) = self.current() {
-            self.ports
-                .shots
-                .stop_left(&self.paths.shots(item.issue).join(crate::shots::SERVER_PID));
-        }
         // A turn stopped with the runner stays running, to resume on restart.
         // Its time so far is saved to the worker, which still runs it.
         if matches!(result, Err(AgentError::Stopped)) {
@@ -713,21 +650,6 @@ impl Runner {
             .find(|pr| pr.head == branch)
             .map(|pr| pr.number)
     }
-}
-
-// Makes `dir` if it is missing, and refuses it if it is a symlink: whatever it
-// points at would join the Playwright server's file fence.
-fn own_folder(dir: &Path) -> Result<(), String> {
-    fs::create_dir_all(dir).map_err(|e| format!("cannot make {}: {}", dir.display(), e.kind()))?;
-    let meta = fs::symlink_metadata(dir)
-        .map_err(|e| format!("cannot read {}: {}", dir.display(), e.kind()))?;
-    if !meta.is_dir() {
-        return Err(format!(
-            "{} is a symlink, not kelpie's own folder",
-            dir.display()
-        ));
-    }
-    Ok(())
 }
 
 pub(super) fn write(folder: &Path, file: &Path, text: &str) -> Result<(), String> {

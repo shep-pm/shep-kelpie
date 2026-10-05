@@ -100,9 +100,6 @@ pub(super) fn checks(
         here,
         probes,
     ));
-    if settings.preview.enabled {
-        lines.push(preview(at("preview tools"), here));
-    }
     if let Some(kelpie) = kelpie.filter(|kelpie| spends_codex(&settings, kelpie, here)) {
         lines.push(match kelpie.codex_home(here.home, here.kelpie_home) {
             Ok(codex_home) => super::machine::codex(
@@ -261,23 +258,4 @@ fn local_review(
         0 => Line::ok(subject, "off, so every round is the Claude round"),
         _ => Line::ok(subject, "ready"),
     }
-}
-
-fn preview(subject: String, here: Here<'_>) -> Line {
-    let tools = super::tools(here);
-    let missing = tools.missing();
-    if missing.is_empty() {
-        return Line::ok(
-            subject,
-            format!("installed under {}", tools.dir().display()),
-        );
-    }
-    Line::missing(
-        subject,
-        format!(
-            "the preview tools lack {}, so every run skips its screenshots, with a line only in the log",
-            missing.join(", ")
-        ),
-        "run `shep kelpie tools install`",
-    )
 }

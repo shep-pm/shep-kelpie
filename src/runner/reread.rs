@@ -121,7 +121,6 @@ fn changed((old, was): Reach<'_>, (new, now): Reach<'_>) -> Vec<&'static str> {
         ),
         ("pacing", old.pacing != new.pacing),
         ("worker", old.worker != new.worker),
-        ("preview", old.preview != new.preview),
         ("skills", old.skills != new.skills),
         ("webhook", was != now),
     ]

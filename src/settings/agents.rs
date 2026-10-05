@@ -383,9 +383,8 @@ impl Settings {
 impl Settings {
     // Refuses a role whose sessions run under the worker's fence, on an agent
     // that is not Claude Code, where the fence's settings would not hold: only
-    // Claude Code runs the project's hooks and the preview's MCP servers, and
-    // a pi agent must not be given its model server's host past the forwarder
-    // by `worker.allowed_domains`.
+    // Claude Code runs the project's hooks, and a pi agent must not be given
+    // its model server's host past the forwarder by `worker.allowed_domains`.
     fn under_worker_fence(
         &self,
         role: &str,
@@ -393,27 +392,21 @@ impl Settings {
         named: &Option<AgentName>,
     ) -> Result<(), SettingsError> {
         let other = match &agent.harness {
-            AgentHarness::Pi(_) => Some(("pi", "pi runs no MCP servers")),
-            AgentHarness::Codex => {
-                Some(("codex", "kelpie bridges MCP servers to Claude Code only"))
-            }
+            AgentHarness::Pi(_) => Some("pi"),
+            AgentHarness::Codex => Some("codex"),
             _ => None,
         };
-        if let (Some((harness, why)), Some(name)) = (other, named) {
-            let what = match (self.preview.enabled, self.worker.guard_hooks.is_empty()) {
-                (true, _) => Some(format!("`preview.enabled`, since {why}")),
-                (false, false) => Some("`worker.guard_hooks`, which are Claude Code hooks".into()),
-                (false, true) => None,
-            };
-            if let Some(what) = what {
-                return Err(SettingsError::Invalid {
-                    setting: "agents",
-                    reason: format!(
-                        "`agents.{role}` names {name}, on {harness}, which cannot run {what}: \
-                         turn that off or put the {role} on Claude Code"
-                    ),
-                });
-            }
+        if let (Some(harness), Some(name)) = (other, named)
+            && !self.worker.guard_hooks.is_empty()
+        {
+            let what = "`worker.guard_hooks`, which are Claude Code hooks";
+            return Err(SettingsError::Invalid {
+                setting: "agents",
+                reason: format!(
+                    "`agents.{role}` names {name}, on {harness}, which cannot run {what}: \
+                     turn that off or put the {role} on Claude Code"
+                ),
+            });
         }
         if let AgentHarness::Pi(server) = &agent.harness
             && let Ok(upstream) = Upstream::new(&server.url)

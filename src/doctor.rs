@@ -20,11 +20,11 @@ use crate::adapters::{ClaudeCli, Curl, Gh, LocalReviewer, SystemClock, SystemHos
 use crate::coderabbit::CodeRabbit;
 use crate::flock;
 use crate::ports::{Alerts, Clock, Forge, Meter, Reviewer};
-use crate::preview::Tools;
 use crate::review_bot::Profile;
 use crate::runner::ProjectName;
 use crate::shep_home;
 use crate::shepherd;
+use crate::tools::Tools;
 
 /// How one check came out
 #[derive(Debug, Clone, PartialEq, Eq)]

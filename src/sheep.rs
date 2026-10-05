@@ -15,9 +15,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use crate::adapters::{
-    ClaudeCli, Curl, Gh, GpuCurl, LocalReviewer, ShepLeases, ShotsCli, SystemClock,
-};
+use crate::adapters::{ClaudeCli, Curl, Gh, GpuCurl, LocalReviewer, ShepLeases, SystemClock};
 use crate::coderabbit::CodeRabbit;
 use crate::codex::Codex;
 use crate::cubic::Cubic;
@@ -112,7 +110,6 @@ fn serve(project: &str) -> Result<(), String> {
         &codex_home,
     );
     let reviewer = LocalReviewer::default();
-    let shots = ShotsCli::new(paths.tools.clone());
     let epoch = Epoch(u64::from(std::process::id()));
     let leases = Arc::new(ShepLeases::new(shepherd.clone(), Asker::new(epoch)));
     let ports = Ports {
@@ -128,7 +125,6 @@ fn serve(project: &str) -> Result<(), String> {
         gpu: Arc::new(GpuCurl),
         local_leases: Arc::new(reviewer.clone()),
         review_bots: vec![Arc::new(CodeRabbit), Arc::new(Cubic), Arc::new(Codex)],
-        shots: Arc::new(shots.clone()),
         alerts: Arc::new(Curl),
         leases: Arc::clone(&leases) as Arc<dyn Leases>,
         clock: Box::new(SystemClock),
@@ -198,7 +194,6 @@ fn serve(project: &str) -> Result<(), String> {
     let let_go = worker.stop(JOIN_BOUND, || {
         claude.stop();
         reviewer.stop();
-        shots.stop();
     });
     if let_go {
         if let Err(e) = crate::runner::settle(&runner) {

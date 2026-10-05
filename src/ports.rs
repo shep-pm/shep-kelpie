@@ -1,5 +1,5 @@
 //! The runner's ports: agents, the forge, the account's usage, the
-//! maintainer's webhook, kelpie's shots and the clock
+//! maintainer's webhook and the clock
 //!
 //! The work-item loop reaches the outside world only through these traits.
 //! [`crate::adapters`] holds the real ones and the test rig holds stand-ins,
@@ -18,7 +18,6 @@ use crate::lease::wire::WindowFact;
 use crate::local_paths::Leak;
 use crate::review_bot::{Activity, Login, Profile};
 use crate::settings::{Account, ForgeSlug};
-use crate::shots::{ShotsJob, ShotsRun};
 use crate::webhook::Webhook;
 
 mod agent;
@@ -168,13 +167,6 @@ pub trait Forge: Send {
     ///
     /// [`ForgeError`] when the comment cannot be posted or its id read.
     fn post_comment(&self, repo: &ForgeSlug, number: u64, body: &str) -> Result<u64, ForgeError>;
-
-    /// Replaces comment `id`'s body with `body`
-    ///
-    /// # Errors
-    ///
-    /// [`ForgeError`] when the comment is gone or cannot be edited.
-    fn edit_comment(&self, repo: &ForgeSlug, id: u64, body: &str) -> Result<(), ForgeError>;
 
     /// The open issues on `repo`, for telling a finding already filed
     ///
@@ -741,12 +733,8 @@ fn parse_finding_line(line: &str) -> Option<Finding> {
     let location = parts.next()?;
     let what = parts.next()?;
     let why = parts.next()?;
-    // A screenshot has no lines, and a Claude round names one without `:0`.
-    let (file, line) = match location.rsplit_once(':') {
-        Some((file, n)) => (file, n.parse().ok()?),
-        None if location.ends_with(".png") => (location, 0),
-        None => return None,
-    };
+    let (file, line) = location.rsplit_once(':')?;
+    let line = line.parse().ok()?;
     Some(Finding {
         severity,
         file: file.to_owned(),
@@ -754,25 +742,6 @@ fn parse_finding_line(line: &str) -> Option<Finding> {
         what: what.to_owned(),
         why: why.to_owned(),
     })
-}
-
-/// Takes a work item's shots
-pub trait Shots: Send + Sync {
-    /// Runs `job` to its end
-    ///
-    /// Never fails: whatever went wrong, the whole run included, is in the
-    /// run it returns, since a shots run never holds a gate.
-    fn take(&self, job: &ShotsJob) -> ShotsRun;
-
-    /// Stops the dev server a run recorded in `server_pid` and left behind,
-    /// such as one the worker's shots tool started before its `claude` was
-    /// killed. Reads that one file, never a folder's listing.
-    fn stop_left(&self, server_pid: &std::path::Path);
-
-    /// Stops dev servers nothing runs any more that sit under `folders`,
-    /// the worktrees and build folders kelpie owns. Matches only by those
-    /// folders, never by a program's name or a port alone.
-    fn stop_orphans(&self, folders: &[std::path::PathBuf]);
 }
 
 /// A runner's side of the dog's book leases
@@ -816,8 +785,6 @@ pub struct Ports {
     pub alerts: Arc<dyn Alerts>,
     /// The dog's book leases, which the runner's `grant` trigger fills
     pub leases: Arc<dyn Leases>,
-    /// Kelpie's shots, shared so a run takes them without holding the runner
-    pub shots: Arc<dyn Shots>,
     /// The clock
     pub clock: Box<dyn Clock>,
 }

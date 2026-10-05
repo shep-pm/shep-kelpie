@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::preview::Tools;
+use crate::tools::Tools;
 
 /// A project's name, which is also its sheep's name
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -94,14 +94,12 @@ pub struct ProjectPaths {
     pub door: PathBuf,
     worktrees: PathBuf,
     builds: PathBuf,
-    shots: PathBuf,
-    playwright: PathBuf,
 }
 
 impl ProjectPaths {
     /// `<kelpie home>/<project>/`, holding the project's state, settings and
-    /// worker files, and its `worktrees`, `builds`, `shots` and `playwright`
-    /// folders, beside kelpie's own `settings.toml`, `totp` and `tools`
+    /// worker files, and its `worktrees` and `builds` folders, beside
+    /// kelpie's own `settings.toml`, `totp` and `tools`
     pub fn under(kelpie_home: &Path, shep_home: &Path, project: &ProjectName) -> Self {
         let folder = kelpie_home.join(project.as_str());
         Self {
@@ -117,8 +115,6 @@ impl ProjectPaths {
             door: kelpie_home.join("dog/lease.sock"),
             worktrees: folder.join("worktrees"),
             builds: folder.join("builds"),
-            shots: folder.join("shots"),
-            playwright: folder.join("playwright"),
         }
     }
 
@@ -133,8 +129,8 @@ impl ProjectPaths {
         crate::home::socket_fits(&self.worker.join(format!("{}.sock", "0".repeat(32))))
     }
 
-    /// The folders a dev server of this project's can work in: every
-    /// worktree and every build folder
+    /// The folders kelpie owns for the project's work items: every worktree
+    /// and every build folder
     pub fn owned(&self) -> [PathBuf; 2] {
         [self.worktrees.clone(), self.builds.clone()]
     }
@@ -147,18 +143,6 @@ impl ProjectPaths {
     /// The build folder for the work item that resolves `issue`
     pub fn build(&self, issue: u64) -> PathBuf {
         self.builds.join(issue.to_string())
-    }
-
-    /// Issue `issue`'s shots: out of its worker's reach for writes, not for
-    /// reads. Only kelpie's own processes write there.
-    pub fn shots(&self, issue: u64) -> PathBuf {
-        self.shots.join(issue.to_string())
-    }
-
-    /// Issue `issue`'s Playwright MCP output folder, kept apart from its shots:
-    /// a page the worker drives can download a file into it
-    pub fn playwright(&self, issue: u64) -> PathBuf {
-        self.playwright.join(issue.to_string())
     }
 }
 
