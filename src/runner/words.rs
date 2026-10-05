@@ -30,7 +30,6 @@ impl Wants {
             | RulingKind::Closed
             | RulingKind::LocalModelSpilled { .. }
             | RulingKind::FixNotPushed { .. }
-            | RulingKind::DeepReview { .. }
             | RulingKind::CodeRabbitCap { .. }
             | RulingKind::CodeRabbitSilent { .. }
             | RulingKind::TurnTimeout { .. }

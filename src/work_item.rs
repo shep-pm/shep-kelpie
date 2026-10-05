@@ -19,7 +19,7 @@ mod round;
 mod spend;
 mod timings;
 
-pub use deep::{Backing, Deep, Found, Held, Written};
+pub use deep::Deep;
 pub use follow_ups::FollowUps;
 pub use local::LOCAL_FAILURES_DOWN;
 pub use round::{CodeRabbitStage, CodeRabbitTally, OpenThread};
@@ -432,8 +432,7 @@ pub enum ReviewStage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         head: Option<String>,
     },
-    /// The deep round, which goes on to the next reviewer once its fix is
-    /// re-checked
+    /// The deep round's reads, whose findings then go on as `Found`
     Deep(Deep),
 }
 

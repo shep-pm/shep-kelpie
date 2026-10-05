@@ -32,7 +32,7 @@ use crate::profile::WorkerProfile;
 use crate::settings::{AgentHarness, Effort, Limit, NonBlank};
 use crate::skills::{Step, split_command};
 use crate::state::{Resume, RulingKind, RunState, StateError};
-use crate::work_item::{CodeRabbitStage, Deep, Phase, Review, ReviewStage, Turn, WorkItem};
+use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree::{self, Start};
 pub(super) use unfinished::failed;
 use unfinished::{awaits_a_push, timed_out, uncommitted_prompt};
@@ -210,10 +210,8 @@ impl Runner {
             Phase::Implement => {}
             // A fix turn that ended goes back to its round, to check it pushed.
             Phase::Review(review)
-                if matches!(
-                    review.stage,
-                    ReviewStage::Fixing { .. } | ReviewStage::Deep(Deep::Fixing { .. })
-                ) && !matches!(item.turn, Turn::Ended { .. }) => {}
+                if matches!(review.stage, ReviewStage::Fixing { .. })
+                    && !matches!(item.turn, Turn::Ended { .. }) => {}
             Phase::Review(_) => {
                 if let Some(parked) = self.fence_gate()? {
                     return Ok(parked);

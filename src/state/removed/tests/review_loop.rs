@@ -165,7 +165,6 @@ fn a_review_kept_by_a_ruling_or_a_resume_loses_the_loops_fields_too() {
                 head: Some("c0ffee".into())
             })),
             prompt: "p".into(),
-            why: None,
         }
     );
     assert_eq!(

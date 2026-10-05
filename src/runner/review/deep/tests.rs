@@ -4,14 +4,12 @@ use std::sync::Mutex;
 
 use serde_json::Value;
 
-use crate::ports::{AgentError, Cost, Role, SessionId, Tools, Usage};
+use crate::ports::{Cost, Role, SessionId, Tools, Usage};
 use crate::runner::report::{ReviewResult, Spent};
 use crate::runner::{Runner, StepReport, step};
 use crate::settings::Effort;
 use crate::test::{Rig, Scripted, Seen};
 use crate::work_item::CallKind;
-
-mod pinned;
 
 // A new project whose worker opened pull request 71 and whose local round
 // found nothing, so the deep round is next.
@@ -68,26 +66,18 @@ fn deep_calls(rig: &Rig) -> Vec<Seen> {
 const MEDIUM: &str =
     "MEDIUM|work.txt:1|the flag is read before it is set|a caller sees the old value";
 const OTHER: &str = "MEDIUM|src/other.rs:9|an empty list panics|the reviewer sees a crash";
-// What the confirming session writes, and what a worker commits with its fix.
-const FAILING_TEST: &str = "#[test]\nfn fails() { panic!() }\n";
-const HIGH: &str = "HIGH|work.txt:1|the value is read before it is set|a caller gets nothing back";
 
 #[test]
-fn a_new_projects_review_is_one_deep_round_one_fix_turn_and_one_recheck_of_the_fix() {
+fn a_new_projects_review_is_two_deep_reads_and_one_fix_turn() {
     let (rig, runner) = at_the_deep_round();
     rig.claude.script([
         Scripted::Text(MEDIUM),
         Scripted::Text(OTHER),
         Scripted::Push("fixed.txt", "fixed\n"),
-        Scripted::Text("FIXED|1|work.txt:1 sets it first\nFIXED|2|the empty list returns early"),
     ]);
-    let reports = until_it_leaves_review(&rig, &runner);
+    until_it_leaves_review(&rig, &runner);
 
-    assert_eq!(
-        state(&rig, &runner),
-        "ci",
-        "the review ends after the re-check"
-    );
+    assert_eq!(state(&rig, &runner), "ci", "the review ends after the fix");
     assert_eq!(
         roles(&rig),
         [
@@ -95,37 +85,20 @@ fn a_new_projects_review_is_one_deep_round_one_fix_turn_and_one_recheck_of_the_f
             Role::DeepReviewer, // the first reader
             Role::DeepReviewer, // the second reader, shown the first's findings
             Role::Worker,       // the one fix turn, for both lists
-            Role::DeepReviewer, // the re-check of the fix
         ]
-    );
-    assert!(
-        reports.iter().any(|r| matches!(
-            r,
-            StepReport::DeepRechecked {
-                fixed: 2,
-                unfixed: 0,
-                ..
-            }
-        )),
-        "{reports:#?}"
     );
 
     let deep = deep_calls(&rig);
     for seen in &deep {
         assert_eq!(seen.call.model, "claude-opus-5-5");
         assert_eq!(seen.call.effort, Effort::High);
+        assert_eq!(seen.call.tools, Tools::Review, "it runs no command");
     }
-    let sessions: Vec<String> = deep.iter().map(|s| s.call.session.id().0.clone()).collect();
-    assert_eq!(
-        sessions
-            .iter()
-            .collect::<std::collections::BTreeSet<_>>()
-            .len(),
-        3,
+    assert_ne!(
+        deep[0].call.session.id(),
+        deep[1].call.session.id(),
         "every session is a fresh one"
     );
-    assert_eq!(deep[0].call.tools, Tools::Review);
-    assert_eq!(deep[1].call.tools, Tools::Review);
     assert!(
         deep[0]
             .call
@@ -155,31 +128,18 @@ fn a_new_projects_review_is_one_deep_round_one_fix_turn_and_one_recheck_of_the_f
     );
 
     let fix = rig.claude.calls().pop().unwrap();
-    assert!(fix.prompt.contains("held 2 finding(s)"), "{}", fix.prompt);
+    assert!(fix.prompt.contains("found 2 finding(s)"), "{}", fix.prompt);
     let held = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
     assert!(
         held.contains(MEDIUM) && held.contains(OTHER),
         "both lists go to the fix turn: {held}"
     );
-
-    assert_eq!(
-        deep[2].call.tools,
-        Tools::Work,
-        "the re-check runs commands"
-    );
-    let shown = deep[2]
-        .call
-        .prompt
-        .split_once("--- the fix, diff since")
-        .unwrap()
-        .1;
     assert!(
-        shown.contains("+++ b/fixed.txt"),
-        "it is shown the fix commits: {shown}"
+        held.contains("deferred-findings.md"),
+        "a finding out of scope may be deferred: {held}"
     );
-    assert!(!shown.contains("work.txt"), "and only those: {shown}");
     let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["work_item"]["by_role"]["deep_reviewer"]["calls"], 3);
+    assert_eq!(status["work_item"]["by_role"]["deep_reviewer"]["calls"], 2);
 }
 
 #[test]
@@ -207,228 +167,22 @@ fn two_readers_that_find_nothing_end_the_review_with_no_fix_turn() {
 }
 
 #[test]
-fn a_high_is_confirmed_with_a_failing_test_that_the_fix_is_rechecked_by_running() {
+fn nits_alone_from_both_readers_are_not_worth_a_fix_turn() {
     let (rig, runner) = at_the_deep_round();
     rig.claude.script([
-        Scripted::Text(HIGH),
+        Scripted::Text("LOW|work.txt:1|a name is misleading|a reader is confused"),
         Scripted::Text("CLEAN"),
-        Scripted::Write(
-            "tests/high.rs",
-            FAILING_TEST,
-            "CONFIRMED|tests/high.rs|cargo test --test high",
-        ),
-        Scripted::PushMany(&[("fixed.txt", "fixed\n"), ("tests/high.rs", FAILING_TEST)]),
-        Scripted::Text("FIXED|1|`cargo test --test high` passes: 1 passed"),
     ]);
     until_it_leaves_review(&rig, &runner);
     assert_eq!(state(&rig, &runner), "ci");
     assert_eq!(
         roles(&rig),
-        [
-            Role::Worker,
-            Role::DeepReviewer,
-            Role::DeepReviewer,
-            Role::DeepReviewer, // the confirmation
-            Role::Worker,
-            Role::DeepReviewer, // the re-check
-        ]
-    );
-
-    let deep = deep_calls(&rig);
-    let confirm = &deep[2].call;
-    assert_eq!(confirm.tools, Tools::Work, "it may run commands");
-    assert!(confirm.prompt.contains(HIGH), "{}", confirm.prompt);
-    assert!(confirm.prompt.contains("failing test"));
-    let fence = confirm.reach.fence.as_ref().expect("it is fenced");
-    let (worktree, build) = (confirm.cwd.clone(), rig.build_7());
-    assert_eq!(
-        fence.write,
-        [worktree, build],
-        "it writes its test and builds, and can commit nothing"
-    );
-
-    let held = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
-    assert!(
-        held.contains("failing test, in tests/high.rs: `cargo test --test high`"),
-        "{held}"
-    );
-    let recheck = &deep[3].call;
-    assert_eq!(
-        recheck.tools,
-        Tools::Work,
-        "it runs the test, which it may do"
-    );
-    assert!(
-        recheck.prompt.contains("`cargo test --test high`")
-            && recheck.prompt.contains("tests/high.rs"),
-        "it is told which test to run: {}",
-        recheck.prompt
-    );
-    assert!(recheck.prompt.contains("run that test now"));
-    let fence = recheck.reach.fence.as_ref().expect("it is fenced");
-    assert_eq!(
-        fence.write,
-        [rig.build_7()],
-        "it writes its builds and not the source it verifies"
+        [Role::Worker, Role::DeepReviewer, Role::DeepReviewer]
     );
 }
 
 #[test]
-fn a_fix_pushed_in_part_is_not_rechecked_but_parks_like_one_that_pushed_nothing() {
-    let (rig, runner) = at_the_deep_round();
-    rig.claude.script([
-        Scripted::Text(MEDIUM),
-        Scripted::Text("CLEAN"),
-        // work.txt is the worker's own, tracked file: its edit stays uncommitted.
-        Scripted::PushLeaving("fix.txt", "fix\n", "work.txt"),
-    ]);
-    let reports = until_it_leaves_review(&rig, &runner);
-    let Some(StepReport::Ruling { .. }) = reports.last() else {
-        panic!("a fix left in part raised no ruling: {reports:#?}");
-    };
-    assert_eq!(
-        roles(&rig).last(),
-        Some(&Role::Worker),
-        "the worktree is not what was pushed, so nothing verifies it"
-    );
-    let status = rig.ask(&runner, "status", None);
-    let prompt = status["rulings"][0]["kind"]["prompt"].as_str().unwrap();
-    assert!(
-        prompt.contains("not all of your fix: work.txt are changed or new and not committed"),
-        "{prompt}"
-    );
-}
-
-#[test]
-fn a_fix_the_failing_test_still_fails_for_goes_back_to_the_worker_once_and_then_to_a_ruling() {
-    let (rig, runner) = at_the_deep_round();
-    rig.claude.script([
-        Scripted::Text(HIGH),
-        Scripted::Text("CLEAN"),
-        Scripted::Write(
-            "tests/high.rs",
-            FAILING_TEST,
-            "CONFIRMED|tests/high.rs|cargo test --test high",
-        ),
-        Scripted::PushMany(&[("one.txt", "1\n"), ("tests/high.rs", FAILING_TEST)]),
-        Scripted::Text("UNFIXED|1|`cargo test --test high` still fails: the value is read first"),
-        Scripted::Push("two.txt", "2\n"),
-        Scripted::Text("UNFIXED|1|it still fails the same way"),
-    ]);
-    let reports = until_it_leaves_review(&rig, &runner);
-    let Some(StepReport::Ruling { id, question, .. }) = reports.last().cloned() else {
-        panic!("the second unfixed re-check raised no ruling: {reports:#?}");
-    };
-    assert!(
-        question.contains("re-checked the worker's fix twice and still finds these unfixed"),
-        "{question}"
-    );
-    assert!(
-        question.contains("it still fails the same way"),
-        "{question}"
-    );
-    assert_eq!(
-        roles(&rig).iter().filter(|r| **r == Role::Worker).count(),
-        3,
-        "the first turn, the fix, and the one trip back"
-    );
-    let again = rig.claude.calls()[2].prompt.clone();
-    assert!(
-        again.starts_with("Kelpie's re-check of your fix"),
-        "{again}"
-    );
-    let held = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
-    assert!(
-        held.contains("still unfixed after your fix: it still fails the same way"),
-        "the worker is told what is still wrong: {held}"
-    );
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["rulings"][0]["kind"]["kind"], "deep-review");
-
-    // A yes sends it the findings once more, and the re-check of that fix ends the review.
-    rig.ask(&runner, "rule", Some(&format!("{id} yes")));
-    rig.claude.script([
-        Scripted::Push("three.txt", "3\n"),
-        Scripted::Text("FIXED|1|`cargo test --test high` passes"),
-    ]);
-    until_it_leaves_review(&rig, &runner);
-    assert_eq!(state(&rig, &runner), "ci");
-    assert_eq!(
-        roles(&rig).iter().filter(|r| **r == Role::Worker).count(),
-        4
-    );
-}
-
-#[test]
-fn a_second_recheck_whose_ruling_cannot_be_written_still_keeps_what_the_call_cost() {
-    let (rig, runner) = at_the_deep_round();
-    rig.claude.script([
-        Scripted::Text(MEDIUM),
-        Scripted::Text("CLEAN"),
-        Scripted::Push("one.txt", "1\n"),
-        Scripted::Text("UNFIXED|1|it still panics"),
-        Scripted::Push("two.txt", "2\n"),
-        Scripted::Text("UNFIXED|1|it still panics"),
-    ]);
-    // Step to where the second fix turn has ended, and take away what the ruling is written to.
-    for _ in 0..30 {
-        if roles(&rig).len() == 6 {
-            break;
-        }
-        step(&runner).unwrap();
-    }
-    assert_eq!(roles(&rig).len(), 6, "{:?}", roles(&rig));
-    let held = rig.build_7().join("review-findings.md");
-    std::fs::remove_file(&held).unwrap();
-    std::fs::create_dir(&held).unwrap();
-    step(&runner).unwrap(); // the fix is seen to have pushed
-    let report = step(&runner).unwrap(); // the second re-check, which cannot raise its ruling
-    assert!(
-        matches!(&report, Some(StepReport::GateFailed { reason, .. }) if reason.contains("re-check")),
-        "{report:#?}"
-    );
-
-    let status = rig.ask(&runner, "status", None);
-    let item = &status["work_item"];
-    assert_ne!(
-        item["review_call"]["state"], "running",
-        "the call ended: {item}"
-    );
-    assert_eq!(
-        item["by_role"]["deep_reviewer"]["calls"], 4,
-        "both readers and both re-checks are counted"
-    );
-    assert_eq!(item["phase"]["stage"]["step"], "rechecking");
-}
-
-#[test]
-fn a_high_no_session_could_confirm_goes_to_the_fix_turn_marked_unconfirmed() {
-    let (rig, runner) = at_the_deep_round();
-    rig.claude.script([
-        Scripted::Text(HIGH),
-        Scripted::Text("CLEAN"),
-        Scripted::Text("UNCONFIRMED|a caller already guards it"),
-        Scripted::Push("fixed.txt", "fixed\n"),
-        Scripted::Text("FIXED|1|the value is set first now"),
-    ]);
-    let reports = until_it_leaves_review(&rig, &runner);
-    assert!(
-        reports.iter().any(|r| matches!(
-            r,
-            StepReport::DeepConfirmed { backed: false, finding, .. } if finding == "work.txt:1"
-        )),
-        "{reports:#?}"
-    );
-    let held = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
-    assert!(
-        held.contains("unconfirmed, no failing test could be made: a caller already guards it"),
-        "{held}"
-    );
-    assert!(held.contains(HIGH), "it still goes to the worker: {held}");
-}
-
-#[test]
-fn a_fix_turn_that_pushes_nothing_parks_instead_of_being_rechecked() {
+fn a_fix_turn_that_pushes_nothing_parks_like_any_reviewers() {
     let (rig, runner) = at_the_deep_round();
     rig.claude.script([
         Scripted::Text(MEDIUM),
@@ -440,34 +194,11 @@ fn a_fix_turn_that_pushes_nothing_parks_instead_of_being_rechecked() {
         panic!("a fix with nothing pushed raised no ruling: {reports:#?}");
     };
     assert!(
-        question.contains("ended its fix for the deep review (round 2) without pushing"),
+        question.contains("ended its fix for round 2 of the review without pushing"),
         "{question}"
     );
-    assert_eq!(
-        roles(&rig).last(),
-        Some(&Role::Worker),
-        "no re-check of a fix that is not there"
-    );
-}
-
-#[test]
-fn a_recheck_that_says_nothing_of_the_findings_is_a_failed_gate_and_runs_again() {
-    let (rig, runner) = at_the_deep_round();
-    rig.claude.script([
-        Scripted::Text(MEDIUM),
-        Scripted::Text("CLEAN"),
-        Scripted::Push("fixed.txt", "fixed\n"),
-        Scripted::Text("Looks good to me."),
-        Scripted::Text("FIXED|1|it sets the flag first"),
-    ]);
-    let reports = until_it_leaves_review(&rig, &runner);
-    assert!(
-        reports.iter().any(
-            |r| matches!(r, StepReport::GateFailed { reason, .. } if reason.contains("re-check"))
-        ),
-        "{reports:#?}"
-    );
-    assert_eq!(state(&rig, &runner), "ci");
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["rulings"][0]["kind"]["kind"], "fix-not-pushed");
 }
 
 #[test]
@@ -485,4 +216,26 @@ fn the_deep_round_is_its_own_phase_in_status_and_timings() {
     let timings = rig.ask(&runner, "timings", None);
     let seconds: &Value = &timings["seconds"];
     assert!(seconds.get("deep_round").is_some(), "{timings}");
+}
+
+#[test]
+fn a_deep_call_that_ends_after_its_stage_moved_on_still_keeps_its_cost_and_its_end() {
+    let (rig, runner) = at_the_deep_round(); // its stage is the next round's, not a deep step
+    let report = {
+        let mut runner = runner.lock().unwrap();
+        runner.mark_review_call_running(CallKind::Deep).unwrap();
+        let spent = Spent::Claude {
+            role: Role::DeepReviewer,
+            session: SessionId("late".into()),
+            usage: Usage::default(),
+            session_cost: Some(Cost(7)),
+        };
+        runner
+            .end_deep(ReviewResult::Deep(Ok("CLEAN".into())), Some(spent))
+            .unwrap()
+    };
+    assert_eq!(report, None, "there is no step left for it to answer");
+    let item = &rig.ask(&runner, "status", None)["work_item"];
+    assert_eq!(item["by_role"]["deep_reviewer"]["calls"], 1, "{item}");
+    assert_ne!(item["review_call"]["state"], "running", "{item}");
 }

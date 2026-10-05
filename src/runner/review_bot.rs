@@ -613,14 +613,7 @@ impl Runner {
             let path = findings::findings_path(&self.item().build);
             let prompt = findings::again_prompt(number, round, &path);
             let fix = Fix::CodeRabbit { round, head };
-            return self.raise(
-                number,
-                RulingKind::FixNotPushed {
-                    fix,
-                    prompt,
-                    why: None,
-                },
-            );
+            return self.raise(number, RulingKind::FixNotPushed { fix, prompt });
         }
         let mut left = self.item().threads_sent.clone();
         let mut failed = None;

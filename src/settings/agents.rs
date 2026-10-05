@@ -359,20 +359,13 @@ impl Settings {
             Some(name) => find(defined, name, &format!("agents.{role}"), "agents"),
         };
         let (worker, worker_limit) = pick("worker", &self.agents.worker, &self.models.worker)?;
-        self.under_worker_fence("worker", &worker, &self.agents.worker, true)?;
+        self.under_worker_fence("worker", &worker, &self.agents.worker)?;
         let (reviewer, reviewer_limit) =
             pick("reviewer", &self.agents.reviewer, &self.models.reviewer)?;
         let (deep_reviewer, deep_reviewer_limit) = pick(
             "deep_reviewer",
             &self.agents.deep_reviewer,
             &self.models.deep_reviewer,
-        )?;
-        // Its sessions that run commands run under the worker's fence.
-        self.under_worker_fence(
-            "deep_reviewer",
-            &deep_reviewer,
-            &self.agents.deep_reviewer,
-            false,
         )?;
         Ok(RoleAgents {
             worker,
@@ -390,15 +383,14 @@ impl Settings {
 impl Settings {
     // Refuses a role whose sessions run under the worker's fence, on an agent
     // that is not Claude Code, where the fence's settings would not hold: only
-    // Claude Code runs the project's hooks, and the preview's MCP servers where
-    // the role runs them (`with_preview`), and a pi agent must not be given its
-    // model server's host past the forwarder by `worker.allowed_domains`.
+    // Claude Code runs the project's hooks and the preview's MCP servers, and
+    // a pi agent must not be given its model server's host past the forwarder
+    // by `worker.allowed_domains`.
     fn under_worker_fence(
         &self,
         role: &str,
         agent: &RoleModel,
         named: &Option<AgentName>,
-        with_preview: bool,
     ) -> Result<(), SettingsError> {
         let other = match &agent.harness {
             AgentHarness::Pi(_) => Some(("pi", "pi runs no MCP servers")),
@@ -408,8 +400,7 @@ impl Settings {
             _ => None,
         };
         if let (Some((harness, why)), Some(name)) = (other, named) {
-            let preview = with_preview && self.preview.enabled;
-            let what = match (preview, self.worker.guard_hooks.is_empty()) {
+            let what = match (self.preview.enabled, self.worker.guard_hooks.is_empty()) {
                 (true, _) => Some(format!("`preview.enabled`, since {why}")),
                 (false, false) => Some("`worker.guard_hooks`, which are Claude Code hooks".into()),
                 (false, true) => None,

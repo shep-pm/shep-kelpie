@@ -15,8 +15,7 @@ pub enum TimingPhase {
     LocalRound,
     /// A Claude review round runs
     ClaudeRound,
-    /// A deep review round's session runs: a reader, the confirmation of a
-    /// HIGH, or the re-check of its fix
+    /// A deep review round's reader runs
     DeepRound,
     /// Waiting for CI
     Ci,

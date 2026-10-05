@@ -188,9 +188,8 @@ pub struct Models {
     pub worker: RoleModel,
     /// Each Claude review round, a fresh session every time
     pub reviewer: RoleModel,
-    /// The sessions of the deep review round: its two readers, the one that
-    /// confirms each HIGH with a failing test and the re-check of the fix.
-    /// Opus 5.5 at high effort when absent.
+    /// The sessions of the deep review round: its two readers. Opus 5.5 at
+    /// high effort when absent.
     #[serde(default = "default_deep_reviewer")]
     pub deep_reviewer: RoleModel,
     /// The model id each `worker:<model>-<effort>` label name runs, each

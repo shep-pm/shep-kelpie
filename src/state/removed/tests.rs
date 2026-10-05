@@ -8,6 +8,7 @@ use crate::state::{Finished, ProjectState, StateError, StateStore};
 use crate::test::a_work_item;
 use crate::work_item::{CallKind, Seconds, TimingPhase};
 
+mod deep_round;
 mod review_loop;
 
 fn store_in(dir: &Path) -> StateStore {
