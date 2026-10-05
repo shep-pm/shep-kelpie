@@ -33,7 +33,7 @@ pub(crate) struct SeenRound {
 }
 
 /// A local round's stand-in. Clean (no findings) once its script runs out, so
-/// tests that do not care about the review loop see it pass straight through.
+/// tests that do not care about the review see it pass straight through.
 /// Its start check is the real one, and [`Self::pass_through`] makes its
 /// rounds real too.
 #[derive(Debug, Clone, Default)]

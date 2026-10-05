@@ -10,9 +10,9 @@ const HOME: &str = "/home/me";
 
 // The example's project listing `list`, over kelpie's `section`.
 fn lineup(list: &str, section: &str) -> Result<Vec<LoopReviewer>, String> {
-    let guard = "loop_guard = 8\n";
-    assert!(EXAMPLE.contains(guard), "the example's guard moved");
-    let entry = EXAMPLE.replace(guard, &format!("{guard}reviewers = {list}\n"));
+    let table = "[app.dogs.kelpie.review]\n";
+    assert!(EXAMPLE.contains(table), "the example's review table moved");
+    let entry = EXAMPLE.replace(table, &format!("{table}reviewers = {list}\n"));
     let table = crate::test::project_table(&entry);
     let settings = Settings::from_table(&table, "shep", Path::new(HOME), Path::new("/p"))
         .map_err(|e| e.to_string())?;
@@ -36,7 +36,7 @@ const DEFINED: &str = "[local_reviewers.qwen]\nkind = \"command\"\n\
                        paths = [\"src/runner/merge/**\"]\n";
 
 #[test]
-fn a_project_lists_its_reviewers_in_the_order_the_loop_runs_them() {
+fn a_project_lists_its_reviewers_in_the_order_the_review_runs_them() {
     let lineup = lineup(r#"["opus", "qwen", "claude", "gpu-box", "qwen"]"#, DEFINED).unwrap();
     assert_eq!(names(&lineup), ["opus", "qwen", "claude", "gpu-box"]);
     let Runs::Claude(opus) = &lineup[0].runs else {
@@ -106,8 +106,8 @@ fn deep_is_each_project_s_own_deep_round_and_may_be_listed_but_not_defined() {
 fn the_older_local_round_cannot_be_set_beside_a_list() {
     let local = "[app.dogs.kelpie.review.local]\nkind = \"off\"\n";
     let entry = crate::test::with_tables(EXAMPLE, local).replace(
-        "loop_guard = 8\n",
-        "loop_guard = 8\nreviewers = [\"claude\"]\n",
+        "[app.dogs.kelpie.review]\n",
+        "[app.dogs.kelpie.review]\nreviewers = [\"claude\"]\n",
     );
     let table = crate::test::project_table(&entry);
     let settings = Settings::from_table(&table, "shep", Path::new(HOME), Path::new("/p")).unwrap();

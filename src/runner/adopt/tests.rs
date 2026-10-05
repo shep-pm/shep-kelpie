@@ -541,10 +541,6 @@ fn one_coderabbit_review_of_the_head_it_arrived_with_is_round_one_not_the_cap() 
         rig.verdict(&runner),
         Some(StepReport::CodeRabbitReviewed { round: 1, .. })
     ));
-    rig.claude.script([Scripted::Text(
-        r#"{"holds": true, "severity": "medium", "reason": "real"}"#,
-    )]);
-    step(&runner).unwrap(); // the judge
     step(&runner).unwrap(); // the finding goes to the worker
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["rulings"], json!([]), "no cap ruling");
@@ -696,23 +692,33 @@ fn a_clean_review_from_before_the_adoption_never_satisfies_the_round() {
 }
 
 #[test]
-fn findings_from_before_the_adoption_the_judge_rejects_still_leave_a_summon_owed() {
+fn threads_from_before_the_adoption_go_to_the_worker_and_its_fix_still_owes_a_summon() {
     let rig = Rig::new("rotom");
-    let (runner, head) = adopted_reviewed_under_auto(&rig, &["Not real."]);
+    let (runner, head) = adopted_reviewed_under_auto(&rig, &["Check the bounds"]);
     assert!(matches!(
         rig.verdict(&runner),
         Some(StepReport::CodeRabbitReviewed { round: 1, .. })
     ));
-    rig.claude.script([Scripted::Text(
-        r#"{"holds": false, "severity": "low", "reason": "not so"}"#,
-    )]);
-    step(&runner).unwrap(); // the judge
-    assert_eq!(
+    assert!(matches!(
         step(&runner).unwrap(),
+        Some(StepReport::CodeRabbitSent { held: 1, .. })
+    ));
+    rig.claude
+        .script([Scripted::Push("bounds.txt", "checked\n")]);
+    step(&runner).unwrap(); // the fix turn
+    let fixed = rig.forge.head_of("fix/timeline").unwrap();
+    assert_ne!(fixed, head);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::FixPushed { .. })
+    ));
+    rig.forge.set_checks(&fixed, Checks::Passed);
+    assert_eq!(
+        rig.verdict(&runner),
         Some(StepReport::Summoned {
             issue: 5,
             pull_request: 80,
-            head,
+            head: fixed,
         })
     );
     let status = rig.ask(&runner, "status", None);

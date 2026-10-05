@@ -239,10 +239,10 @@ fn after<'a>(text: &'a str, marker: &str) -> Option<&'a str> {
     text.find(marker).map(|at| &text[at + marker.len()..])
 }
 
-/// A thread as a finding the judge can rule on, in qwen's shape
+/// A thread as a finding the worker is sent, in qwen's shape
 ///
 /// The severity comes from CodeRabbit's own label: Critical and Major are
-/// high, Minor is medium, Trivial is a nit. The judge regrades it anyway.
+/// high, Minor is medium, Trivial is a nit.
 fn finding(thread: &Thread) -> Finding {
     let label = thread.body.lines().next().unwrap_or_default();
     let severity = if label.contains("Critical") || label.contains("Major") {
@@ -258,7 +258,7 @@ fn finding(thread: &Thread) -> Finding {
         .map(str::trim)
         .filter(|p| !p.is_empty())
         .collect();
-    // Without a bold title the judge still gets the text, past the label.
+    // Without a bold title the worker still gets the text, past the label.
     let (what, why) = match paragraphs.iter().position(|p| p.starts_with("**")) {
         Some(at) => (
             one_line(paragraphs[at].trim_matches('*')),
@@ -562,7 +562,7 @@ mod tests {
     }
 
     #[test]
-    fn a_thread_without_a_bold_title_still_gives_the_judge_its_text() {
+    fn a_thread_without_a_bold_title_still_gives_the_worker_its_text() {
         let thread = Thread {
             id: "t".into(),
             resolved: false,

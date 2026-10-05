@@ -27,9 +27,6 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
             checks: vec!["test".into(), "lint".into()],
         },
         RulingKind::Closed,
-        RulingKind::ReviewGuard {
-            review: review.clone(),
-        },
         RulingKind::FixNotPushed {
             fix: Fix::Review(review),
             prompt: "fix it".into(),
@@ -121,8 +118,8 @@ fn nothing_merges_without_a_yes() {
     assert!(rig.worktree_7().exists());
 }
 
-// A no's fix is new code the loop has not seen: it goes back through
-// the qwen-review loop, not straight to CI, before the next ruling.
+// A no's fix is new code the review has not seen: it goes back through
+// a pass of the review, not straight to CI, before the next ruling.
 #[test]
 fn a_no_sends_the_note_to_the_worker_and_it_goes_through_review_before_the_next_ruling() {
     let (rig, runner, _) = Rig::parked("rotom");
@@ -142,7 +139,7 @@ fn a_no_sends_the_note_to_the_worker_and_it_goes_through_review_before_the_next_
     assert_eq!(
         rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
         "review",
-        "a no's fix resumes the loop, not CI directly"
+        "a no's fix starts a pass of the review, not CI directly"
     );
 
     let pushed = rig.forge.head_of("kelpie/7").unwrap();

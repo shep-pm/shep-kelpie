@@ -701,7 +701,6 @@ mod tests {
         let mut agents = RoleAgents {
             worker: model("qwen3.8:27b"),
             reviewer: model("claude-sonnet-5"),
-            judge: model("claude-opus-5-5"),
             deep_reviewer: model("claude-opus-5-5"),
             limits: RoleLimits {
                 worker: Limit::Lease(LeaseName::gpu()),

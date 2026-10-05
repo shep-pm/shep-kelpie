@@ -331,7 +331,6 @@ fn a_finished_work_item_is_pinned() {
                 "gpu_wait": 0,
                 "local_round": 0,
                 "claude_round": 0,
-                "judging": 0,
                 "ci": 40,
                 "coderabbit_window": 0,
                 "coderabbit_review": 0,
@@ -474,9 +473,7 @@ fn a_qwen_fix_not_pushed_keeps_its_wire_shape() {
         "kind": "fix-not-pushed",
         "review": {
             "round": 1,
-            "consecutive_clean": 0,
-            "guard_cleared": false,
-            "stage": { "stage": "fixing", "clean": false, "head": "c0ffee" },
+            "stage": { "stage": "fixing", "head": "c0ffee" },
         },
         "prompt": "again",
     });

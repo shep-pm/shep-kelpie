@@ -4,7 +4,7 @@
 //! project had before one. Unknown keys are refused, so a misspelt or
 //! malformed setting stops the runner with a message naming it. Every
 //! setting is required except the ones added after the first build
-//! (`max_items`, `review.local`, `review.reviewers`, `review.local_rounds`,
+//! (`max_items`, `[review]`, `review.local`, `review.reviewers`,
 //! `coderabbit.rounds`,
 //! `pacing.enabled`, `worker.allowed_domains`, `worker.build_env`,
 //! `worker.instructions_file`, `worker.turn_timeout`, `worker.guard_hooks`,
@@ -85,7 +85,9 @@ pub struct Settings {
     /// Claude Code.
     #[serde(default)]
     pub agents: RoleAgentNames,
-    /// The review loop
+    /// The review: its reviewers, each run once in order. Kelpie's
+    /// default list when absent.
+    #[serde(default)]
     pub review: Review,
     /// The CodeRabbit gate, which holds every pull request reviewer's rounds
     pub coderabbit: CodeRabbit,
@@ -111,6 +113,7 @@ pub(crate) use removed::{Removed, refuse as refuse_removed};
 const RELAY: &str = "the relay is gone";
 const PLANNING: &str = "the planning call is gone";
 const AUDIT: &str = "the whole-issue check is gone";
+const LOOP: &str = "the review loop and its judge are gone";
 
 // The keys removed features left behind
 const REMOVED: &[Removed] = &[
@@ -146,6 +149,22 @@ const REMOVED: &[Removed] = &[
         key: "agents.auditor",
         because: AUDIT,
     },
+    Removed {
+        key: "models.judge",
+        because: LOOP,
+    },
+    Removed {
+        key: "agents.judge",
+        because: LOOP,
+    },
+    Removed {
+        key: "review.loop_guard",
+        because: LOOP,
+    },
+    Removed {
+        key: "review.local_rounds",
+        because: LOOP,
+    },
 ];
 
 /// Who decides a merge
@@ -169,8 +188,6 @@ pub struct Models {
     pub worker: RoleModel,
     /// Each Claude review round, a fresh session every time
     pub reviewer: RoleModel,
-    /// The one-shot that judges every finding
-    pub judge: RoleModel,
     /// The sessions of the deep review round: its two readers, the one that
     /// confirms each HIGH with a failing test and the re-check of the fix.
     /// Opus 5.5 at high effort when absent.
@@ -246,27 +263,22 @@ impl Effort {
     }
 }
 
-/// The review loop's settings
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
+/// The review's settings
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Review {
-    /// Rounds after which the worker is parked for a ruling
-    pub loop_guard: NonZeroU32,
-    /// The reviewers the loop runs, in order, from `deep`, `claude` and those
-    /// kelpie's `[local_reviewers]` define. When absent or empty, the
-    /// maintainer's qwen-review script when it is there and then `deep`, the
-    /// one deep round; with `review.local` set, that round and then `claude`.
+    /// The reviewers the review runs, each once, in order, from `deep`,
+    /// `claude` and those kelpie's `[local_reviewers]` define. When absent or
+    /// empty, the maintainer's qwen-review script when it is there and then
+    /// `deep`, the one deep round; with `review.local` set, that round and
+    /// then `claude`.
     #[serde(default)]
     pub reviewers: Vec<ReviewerName>,
-    /// The older form of a local round, `[review.local]`, which alternates
-    /// with `claude`. Absent, the maintainer's qwen-review script runs first
+    /// The older form of a local round, `[review.local]`, which runs before
+    /// `claude`. Absent, the maintainer's qwen-review script runs first
     /// when it is there, and the deep round after it.
     #[serde(default)]
     pub local: Option<LocalRound>,
-    /// At most this many rounds from local reviewers per work item. Once
-    /// they are spent, only Claude reviewers run. No limit when absent.
-    #[serde(default)]
-    pub local_rounds: Option<NonZeroU32>,
 }
 
 /// The CodeRabbit gate's settings

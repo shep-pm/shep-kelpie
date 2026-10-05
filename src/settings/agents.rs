@@ -314,9 +314,6 @@ pub struct RoleAgentNames {
     /// The project's own Claude round, `claude` in `review.reviewers`
     #[serde(default)]
     pub reviewer: Option<AgentName>,
-    /// The one-shot that judges every finding
-    #[serde(default)]
-    pub judge: Option<AgentName>,
     /// The sessions of the deep review round
     #[serde(default)]
     pub deep_reviewer: Option<AgentName>,
@@ -329,8 +326,6 @@ pub struct RoleAgents {
     pub worker: RoleModel,
     /// The project's own Claude round
     pub reviewer: RoleModel,
-    /// The judge's one-shots
-    pub judge: RoleModel,
     /// The deep review round's sessions
     pub deep_reviewer: RoleModel,
     /// What holds each role's calls back
@@ -344,8 +339,6 @@ pub struct RoleLimits {
     pub worker: Limit,
     /// The project's own Claude round
     pub reviewer: Limit,
-    /// The judge's one-shots
-    pub judge: Limit,
     /// The deep review round's sessions
     pub deep_reviewer: Limit,
 }
@@ -369,7 +362,6 @@ impl Settings {
         self.under_worker_fence("worker", &worker, &self.agents.worker, true)?;
         let (reviewer, reviewer_limit) =
             pick("reviewer", &self.agents.reviewer, &self.models.reviewer)?;
-        let (judge, judge_limit) = pick("judge", &self.agents.judge, &self.models.judge)?;
         let (deep_reviewer, deep_reviewer_limit) = pick(
             "deep_reviewer",
             &self.agents.deep_reviewer,
@@ -385,12 +377,10 @@ impl Settings {
         Ok(RoleAgents {
             worker,
             reviewer,
-            judge,
             deep_reviewer,
             limits: RoleLimits {
                 worker: worker_limit,
                 reviewer: reviewer_limit,
-                judge: judge_limit,
                 deep_reviewer: deep_reviewer_limit,
             },
         })

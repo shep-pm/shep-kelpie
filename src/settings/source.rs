@@ -16,7 +16,7 @@ use crate::webhook::KelpieSettings;
 /// What a project still on `review.local` is told at start
 pub const OLD_LOCAL: &str = "`review.local` still runs, before the Claude round, but the \
      newer form names reviewers: define the local one in kelpie's \
-     `[local_reviewers.<name>]` and list the loop in `review.reviewers`, \
+     `[local_reviewers.<name>]` and list the reviewers in `review.reviewers`, \
      such as `[\"qwen\", \"claude\"]`.";
 
 /// The files a project had before its tables, and whose they are

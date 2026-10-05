@@ -42,7 +42,6 @@ impl WorkItem {
                 CallKind::Local if queued => TimingPhase::GpuWait,
                 CallKind::Local => TimingPhase::LocalRound,
                 CallKind::Claude => TimingPhase::ClaudeRound,
-                CallKind::Judge => TimingPhase::Judging,
                 CallKind::Shots => TimingPhase::Shots,
                 CallKind::Deep => TimingPhase::DeepRound,
             };
@@ -128,7 +127,6 @@ mod tests {
         assert_eq!(phase(CallKind::Local, true), TimingPhase::GpuWait);
         assert_eq!(phase(CallKind::Claude, false), TimingPhase::ClaudeRound);
         assert_eq!(phase(CallKind::Deep, false), TimingPhase::DeepRound);
-        assert_eq!(phase(CallKind::Judge, false), TimingPhase::Judging);
         assert_eq!(phase(CallKind::Shots, false), TimingPhase::Shots);
         assert_eq!(
             running_call(CallKind::Local, false).timing_phase(RunState::Paused, false),

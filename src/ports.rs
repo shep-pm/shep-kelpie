@@ -250,6 +250,8 @@ pub trait Forge: Send {
 
     /// Resolves review thread `thread`
     ///
+    /// A thread already resolved, or one the forge no longer has, is done.
+    ///
     /// # Errors
     ///
     /// [`ForgeError`] when the forge refuses or cannot be asked.
@@ -623,8 +625,7 @@ impl core::error::Error for AlertError {}
 
 /// How serious a review finding is
 ///
-/// Qwen and the Claude review round report only these three; the judge may
-/// regrade to any of them but never invents a fourth. LOW is the nit level.
+/// Every reviewer reports one of these three. LOW is the nit level.
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -753,20 +754,6 @@ fn parse_finding_line(line: &str) -> Option<Finding> {
         what: what.to_owned(),
         why: why.to_owned(),
     })
-}
-
-/// The judge's ruling on one finding
-// wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Verdict {
-    /// Whether the finding holds
-    pub holds: bool,
-    /// The judge's severity, which may regrade the reviewer's in either
-    /// direction. Meaningless when the finding does not hold.
-    pub severity: Severity,
-    /// One sentence
-    pub reason: String,
 }
 
 /// Takes a work item's shots

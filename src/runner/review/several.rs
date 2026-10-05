@@ -1,4 +1,4 @@
-//! The review loop over a project's list of reviewers
+//! The review over a project's list of reviewers
 
 use std::sync::Mutex;
 
@@ -12,11 +12,10 @@ use crate::test::{Rig, Scripted, ScriptedRound};
 fn listing(list: &str) -> Rig {
     let rig = Rig::new("koji");
     rig.edit_settings(|s| {
-        assert!(s.contains("loop_guard = 8\n"), "the example's guard moved");
-        s.replace(crate::test::OLD_LOCAL, "").replace(
-            "loop_guard = 8\n",
-            &format!("loop_guard = 8\nreviewers = {list}\n"),
-        )
+        let table = "[app.dogs.kelpie.review]\n";
+        assert!(s.contains(table), "the example's review table moved");
+        s.replace(crate::test::OLD_LOCAL, "")
+            .replace(table, &format!("{table}reviewers = {list}\n"))
     });
     let script = rig.home.path().join("bin/review");
     std::fs::create_dir_all(script.parent().unwrap()).unwrap();
@@ -31,7 +30,7 @@ fn listing(list: &str) -> Rig {
     rig
 }
 
-// Steps until the loop leaves review, naming who reviewed each round by the
+// Steps until the review is done, naming who reviewed each round by the
 // stand-in it reached: the local reviewer's command, or the Claude model.
 fn reviewers_until_ci(rig: &Rig, runner: &Mutex<Runner>) -> Vec<&'static str> {
     let mut seen = Vec::new();
@@ -54,7 +53,7 @@ fn reviewers_until_ci(rig: &Rig, runner: &Mutex<Runner>) -> Vec<&'static str> {
             });
         }
     }
-    panic!("the loop never left review: {seen:?}");
+    panic!("the review never ended: {seen:?}");
 }
 
 fn at_review(rig: &Rig, push: &'static str) -> Mutex<Runner> {
@@ -74,7 +73,7 @@ fn reviewer_models(rig: &Rig) -> Vec<String> {
 }
 
 #[test]
-fn the_older_local_round_runs_the_older_loop_of_qwen_then_claude() {
+fn the_older_local_round_runs_qwen_then_claude() {
     let rig = Rig::new("koji");
     let runner = at_review(&rig, "work.txt");
     rig.claude.script([Scripted::Text("CLEAN")]);
@@ -84,7 +83,7 @@ fn the_older_local_round_runs_the_older_loop_of_qwen_then_claude() {
 }
 
 #[test]
-fn two_clean_rounds_from_different_reviewers_end_the_loop() {
+fn each_listed_reviewer_runs_once_in_the_lists_order() {
     let rig = listing(r#"["claude", "mine"]"#);
     let runner = at_review(&rig, "work.txt");
     rig.claude.script([Scripted::Text("CLEAN")]);
@@ -97,30 +96,32 @@ fn two_clean_rounds_from_different_reviewers_end_the_loop() {
 }
 
 #[test]
-fn a_dirty_round_between_two_clean_ones_restarts_the_count() {
-    let rig = listing(r#"["mine", "claude"]"#);
+fn a_fix_goes_to_the_next_reviewer_and_no_reviewer_runs_twice() {
+    let rig = listing(r#"["claude", "mine"]"#);
     let runner = at_review(&rig, "work.txt");
-    rig.reviewer.script([
-        ScriptedRound::Findings(Vec::new()),
-        ScriptedRound::Findings(Vec::new()),
-    ]);
-    let holds = r#"{"holds": true, "severity": "high", "reason": "it is"}"#;
     rig.claude.script([
         Scripted::Text("HIGH|work.txt:1|wrong|it is"),
-        Scripted::Text(holds),
         Scripted::Push("fixed.txt", "fixed\n"),
-        Scripted::Text("CLEAN"),
     ]);
-    // mine clean, claude holds a finding and the worker fixes it, mine
-    // clean, claude clean: the last two are a clean pair from two reviewers.
-    assert_eq!(
-        reviewers_until_ci(&rig, &runner),
-        ["mine", "claude", "mine", "claude"]
-    );
+    rig.reviewer.script([ScriptedRound::Findings(vec![Finding {
+        severity: Severity::High,
+        file: "fixed.txt".into(),
+        line: 1,
+        what: "still wrong".into(),
+        why: "it is".into(),
+    }])]);
+    rig.claude
+        .script([Scripted::Push("again.txt", "fixed again\n")]);
+    // claude finds one, the worker fixes it, mine reads the fix and finds
+    // one, the worker fixes that, and the pass is over.
+    assert_eq!(reviewers_until_ci(&rig, &runner), ["claude", "mine"]);
+    let calls = rig.claude.all_calls();
+    let workers = calls.iter().filter(|c| c.role == Role::Worker).count();
+    assert_eq!(workers, 3, "the first turn and one fix per reviewer");
 }
 
 #[test]
-fn one_listed_reviewer_ends_the_loop_on_one_clean_round() {
+fn one_listed_reviewer_runs_once() {
     let rig = listing(r#"["mine"]"#);
     let runner = at_review(&rig, "work.txt");
     assert_eq!(reviewers_until_ci(&rig, &runner), ["mine"]);
@@ -152,9 +153,9 @@ fn two_local() -> Rig {
     rig
 }
 
-// A round that found something real and left `work.txt` unreviewed.
+// A round that found a nit and left `work.txt` unreviewed.
 const MIXED: &str = "\
-MEDIUM|src/c.rs:4|leftover debug print|noisy logs
+LOW|src/c.rs:4|leftover debug print|noisy logs
 LOW|work.txt:0|not reviewed: curl: (7) Failed to connect to gpu.box port 8080|raw response kept at /tmp/qwen-review/raw/work.txt.txt
 ";
 
@@ -164,41 +165,26 @@ fn another_reviewers_first_miss_on_a_file_is_not_a_failure_against_it() {
     let runner = at_review(&rig, "work.txt");
     let mixed = crate::ports::parse_findings(MIXED);
     rig.reviewer
-        .script((0..4).map(|_| ScriptedRound::Findings(mixed.clone())));
-    let rejects = r#"{"holds": false, "severity": "low", "reason": "it is a test file"}"#;
-    rig.claude.script((0..4).map(|_| Scripted::Text(rejects)));
-    // mine, other, mine, other each leave the same file unreviewed, and the
-    // judge rejects each round's one finding. No reviewer misses it twice
-    // running, so neither is down.
-    for _ in 0..4 {
-        step(&runner).unwrap(); // the local round
-        step(&runner).unwrap(); // the judge rejects its finding
-        step(&runner).unwrap(); // the round is not clean
-    }
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["work_item"].get("local_reviewers_down"), None);
-    assert_eq!(rig.reviewer.seen().len(), 4);
+        .script((0..2).map(|_| ScriptedRound::Findings(mixed.clone())));
+    // mine, then other, each leave the same file unreviewed with one nit.
+    // Neither missed it before, so neither has a failure against it.
+    reviewers_until_ci(&rig, &runner);
+    let failures = runner.lock().unwrap().state.work_items[0]
+        .local_failures
+        .clone();
+    assert!(failures.is_empty(), "{failures:?}");
+    assert_eq!(rig.reviewer.seen().len(), 2);
 }
 
 #[test]
-fn a_local_reviewer_that_is_down_leaves_the_other_local_reviewers_to_run() {
+fn a_local_round_that_reviews_nothing_goes_on_to_the_next_local_reviewer() {
     let rig = two_local();
     let runner = at_review(&rig, "work.txt");
     let down = crate::ports::parse_findings(UNREACHABLE);
-    rig.reviewer.script([
-        ScriptedRound::Findings(down.clone()),
-        ScriptedRound::Findings(down),
-    ]);
-    step(&runner).unwrap(); // mine reviews nothing, and is retried
-    step(&runner).unwrap(); // mine reviews nothing again: it is down
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(
-        status["work_item"]["local_reviewers_down"],
-        serde_json::json!(["mine"])
-    );
+    rig.reviewer.script([ScriptedRound::Findings(down)]);
+    step(&runner).unwrap(); // mine reviews nothing
 
-    // `other` is a different command and still runs, and as the only one
-    // left, one clean round from it ends the loop with no Claude round.
+    // `other` is the next in the list, and the last.
     step(&runner).unwrap();
     let seen = rig.reviewer.seen();
     let commands: Vec<_> = seen
@@ -213,7 +199,7 @@ fn a_local_reviewer_that_is_down_leaves_the_other_local_reviewers_to_run() {
             _ => unreachable!("every listed local reviewer here is a command"),
         })
         .collect();
-    assert_eq!(commands, ["review", "review", "other"]);
+    assert_eq!(commands, ["review", "other"]);
     assert_eq!(
         rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
         "ci"
@@ -254,10 +240,7 @@ fn every_round_s_prompt_carries_the_issue_s_acceptance_criteria() {
         what: "a nit".into(),
         why: "it is".into(),
     }])]);
-    rig.claude.script([
-        Scripted::Text(r#"{"holds": false, "severity": "low", "reason": "no"}"#),
-        Scripted::Text("CLEAN"),
-    ]);
+    rig.claude.script([Scripted::Text("CLEAN")]);
     reviewers_until_ci(&rig, &runner);
     assert_eq!(
         rig.reviewer.seen()[0].criteria,
@@ -269,5 +252,37 @@ fn every_round_s_prompt_carries_the_issue_s_acceptance_criteria() {
         review.prompt.contains("asks for the following") && review.prompt.contains("Body of #7."),
         "{}",
         review.prompt
+    );
+}
+
+// The pass so far ran `mine`; the list then changes before the next round.
+fn after_mine_the_list_becomes(to: &str) -> Vec<&'static str> {
+    let rig = listing(r#"["mine", "claude"]"#);
+    let runner = at_review(&rig, "work.txt");
+    step(&runner).unwrap(); // round 1, mine: clean by default
+    drop(runner);
+    rig.edit_settings(|s| {
+        s.replace(
+            r#"reviewers = ["mine", "claude"]"#,
+            &format!("reviewers = {to}"),
+        )
+    });
+    let runner = rig.open().unwrap();
+    rig.claude.script([Scripted::Text("CLEAN")]);
+    let after = reviewers_until_ci(&rig, &runner);
+    assert_eq!(rig.reviewer.seen().len(), 1, "mine ran once");
+    after
+}
+
+#[test]
+fn a_reviewer_taken_off_the_list_mid_pass_leaves_the_rest_to_run() {
+    assert_eq!(after_mine_the_list_becomes(r#"["claude"]"#), ["claude"]);
+}
+
+#[test]
+fn a_list_reordered_mid_pass_runs_what_the_pass_has_not() {
+    assert_eq!(
+        after_mine_the_list_becomes(r#"["claude", "mine"]"#),
+        ["claude"]
     );
 }

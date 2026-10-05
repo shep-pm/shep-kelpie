@@ -63,8 +63,8 @@ pub(crate) enum Scripted {
     /// side of any conflict, and pushes it without force, as a worker
     /// resolving a conflict does
     MergeMain,
-    /// Answers with this exact text and no cost: a review round or judge
-    /// one-shot, whose reply is read rather than acted on
+    /// Answers with this exact text and no cost: a review round, whose
+    /// reply is read rather than acted on
     Text(&'static str),
     /// Answers like [`Self::Text`], with this cost for the session
     Billed(&'static str, Cost),
@@ -162,8 +162,8 @@ impl FakeClaude {
     }
 
     /// The worker's own calls, in order: what every test before the review
-    /// loop existed already asserted on, so a reviewer or judge call never
-    /// shows up and shifts their counts.
+    /// existed already asserted on, so a reviewer call never shows up and
+    /// shifts their counts.
     pub(crate) fn calls(&self) -> Vec<AgentCall> {
         self.seen().into_iter().map(|s| s.call).collect()
     }
@@ -176,7 +176,7 @@ impl FakeClaude {
             .collect()
     }
 
-    /// Every call, worker, reviewer and judge alike, in order
+    /// Every call, worker and reviewer alike, in order
     pub(crate) fn all_calls(&self) -> Vec<AgentCall> {
         self.all_seen().into_iter().map(|s| s.call).collect()
     }

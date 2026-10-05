@@ -28,7 +28,6 @@ impl Wants {
             | RulingKind::StillRed { .. }
             | RulingKind::MergeRefused { .. }
             | RulingKind::Closed
-            | RulingKind::ReviewGuard { .. }
             | RulingKind::LocalModelSpilled { .. }
             | RulingKind::FixNotPushed { .. }
             | RulingKind::DeepReview { .. }

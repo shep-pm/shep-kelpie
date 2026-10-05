@@ -1,8 +1,7 @@
 # A project's runner, as its `[[app]]` entry in your shepherd's Flockfile. The project's
 # settings are the sheep's `[app.dogs.kelpie]` table: shep keeps it and hands
 # it to the runner, and lookout edits it in the sheep's pane. Every key is
-# required except `max_items`, `review.reviewers`, `review.local`,
-# `review.local_rounds`, `pacing.enabled`,
+# required except `max_items`, `review`, `pacing.enabled`,
 # `worker.allowed_domains`, `worker.build_env`, `worker.instructions_file`,
 # `worker.turn_timeout`, `pull_request_reviewers`,
 # `preview`, `skills` and `agents`, which a table written
@@ -62,10 +61,6 @@ effort = "high"
 model = "claude-sonnet-5"
 effort = "medium"
 
-[app.dogs.kelpie.models.judge]
-model = "claude-opus-5-5"
-effort = "low"
-
 # The deep review round, a new project's review: two fresh sessions that read
 # the whole pull request for defects, a session that writes a failing test for
 # each HIGH they hold, and one that re-checks the worker's fix by running those
@@ -87,57 +82,50 @@ effort = "high"
 # [app.dogs.kelpie.agents]
 # worker = "opus-high"
 # reviewer = "opus-high"
-# judge = "opus-high"
 # deep_reviewer = "opus-high"
 
 [app.dogs.kelpie.review]
-loop_guard = 8
-# The reviewers the loop runs, in order: `deep`, the project's own deep round
+# The reviewers, in order, each run once: `deep`, the project's own deep round
 # on `models.deep_reviewer`, `claude`, its own Claude round on
 # `models.reviewer`, and the ones kelpie's `[kelpie.local_reviewers]` define.
-# Absent or empty, a new project's review is the maintainer's qwen-review
-# script when it is there, and then the deep round. The deep round is one pass:
+# After each one that finds anything above a nit, the worker gets one turn to
+# fix all of that reviewer's findings; a round of nits, or of nothing, goes
+# straight to the next. After the last, the pull request goes to CI. A
+# reviewer limited to `paths` runs only on a pull request that changes one of
+# them. Absent or empty, a new project's review is the maintainer's
+# qwen-review script when it is there, and then the deep round:
 # two fresh sessions read the whole pull request for defects, each HIGH they
 # hold gets a failing test from a session that may run commands, one worker
 # turn fixes everything held, and one re-check reads only the fix and runs
 # those tests. A finding it finds unfixed goes back to the worker once, then
-# to a ruling. The loop of `claude` and the others ends once two rounds in a
-# row, from two different reviewers, find nothing above a nit, and the nits
-# are fixed with no further round. Where only one reviewer can run, one clean
-# round ends it. A reviewer limited to `paths` runs only on a pull request
-# that changes one of them. `review.local` below, set, keeps the older loop of
-# that round and then `claude`.
+# to a ruling. `review.local` below, set, runs that round and then `claude`.
 #
 # A local model alone:
 # reviewers = ["qwen"]
-# The older loop of Claude rounds alone:
+# A Claude round alone:
 # reviewers = ["claude"]
 # Both, and a deeper Claude round on the paths `opus` lists:
 # reviewers = ["qwen", "claude", "opus"]
 # The local model and then the deep round, which is the default:
 # reviewers = ["qwen", "deep"]
 
-# At most this many rounds from local reviewers per work item. Once they are
-# spent, only Claude reviewers run. No limit when absent.
-# local_rounds = 1
-
-# The older form of the local round, which alternates with `claude`, local
-# first, and cannot be set beside `reviewers`. A runner on it says so at
-# start. `kind` is `off`, or `endpoint` or `command` with the keys a
-# `[kelpie.local_reviewers]` definition of that kind takes.
+# The older form of the local round, which runs before `claude` and cannot be
+# set beside `reviewers`. A runner on it says so at start. `kind` is `off`, or
+# `endpoint` or `command` with the keys a `[kelpie.local_reviewers]`
+# definition of that kind takes.
 # [app.dogs.kelpie.review.local]
 # kind = "command"
 # command = "~/.claude/scripts/qwen-review.sh"
 
 # The rounds of every pull request reviewer listed above. CodeRabbit's free
 # plan reviews public repos only, so a private repo lists only cubic or
-# turns this off, and then goes from the review loop and CI straight to
-# the merge ruling. The cap counts rounds from every reviewer.
+# turns this off, and then goes from the review and CI straight to the
+# merge ruling. The cap counts rounds from every reviewer.
 [app.dogs.kelpie.coderabbit]
 enabled = true
 divisor = 1000
 # A fixed number of rounds per pull request, in place of the divisor's cap of
-# ceil(changed lines / divisor) + 1. The last round's held findings go to the
+# ceil(changed lines / divisor) + 1. The last round's open threads go to the
 # worker, and its fix goes to CI and the merge with no further summon.
 # rounds = 1
 

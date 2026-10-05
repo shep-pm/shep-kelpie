@@ -211,8 +211,8 @@ mod tests {
     }
 
     // A question on the very turn that opens the pull request interrupts
-    // before the qwen-review loop ever started; once answered, the loop
-    // still runs, rather than skipping straight to CI the way it used to.
+    // before the review ever started; once answered, the review still
+    // runs, rather than skipping straight to CI.
     #[test]
     fn a_question_on_the_pr_opening_turn_still_runs_the_loop() {
         let (rig, runner) = asking("shep");
@@ -249,7 +249,7 @@ mod tests {
         assert_eq!(
             rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
             "review",
-            "answering resumes the qwen-review loop, not CI directly"
+            "answering resumes the review, not CI directly"
         );
         step(&runner).unwrap(); // review round 1, qwen: clean by default
         step(&runner).unwrap(); // review round 2, claude: scripted clean above
@@ -291,7 +291,7 @@ mod tests {
 
     // A question asked mid-fix, during a review round's own turn,
     // interrupts that exact round; once answered, it resumes there rather
-    // than restarting the loop.
+    // than restarting the review.
     #[test]
     fn a_question_during_a_fix_turn_resumes_that_round() {
         let rig = Rig::new("shep");
@@ -310,11 +310,7 @@ mod tests {
             why: "dead code".into(),
         }])]);
         step(&runner).unwrap(); // round 1's qwen call
-        rig.claude.script([Scripted::Text(
-            r#"{"holds": true, "severity": "low", "reason": "a nit"}"#,
-        )]);
-        step(&runner).unwrap(); // the judge holds it, a nit
-        step(&runner).unwrap(); // the round finalizes: sends the worker its fix
+        step(&runner).unwrap(); // the finding goes to the worker
 
         rig.claude.script([Scripted::Say(ASKS)]);
         let Some(StepReport::Asked { id, .. }) = step(&runner).unwrap() else {
@@ -338,10 +334,8 @@ mod tests {
             json!({
                 "state": "review",
                 "round": 2,
-                "consecutive_clean": 1,
-                "guard_cleared": false,
                 "stage": { "stage": "round" },
-                "last": "qwen",
+                "ran": ["qwen"],
             }),
             "resumed round 1, not restarted at round 1 again"
         );
@@ -349,7 +343,7 @@ mod tests {
         assert_eq!(
             rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
             "ci",
-            "two clean rounds in a row end the loop"
+            "claude was the last reviewer"
         );
     }
 

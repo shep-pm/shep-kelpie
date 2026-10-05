@@ -36,8 +36,6 @@ pub struct Spend {
     pub worker: RoleSpend,
     /// The Claude review rounds
     pub reviewer: RoleSpend,
-    /// The judge's calls
-    pub judge: RoleSpend,
     /// The deep review rounds' sessions
     pub deep_reviewer: RoleSpend,
 }
@@ -62,7 +60,6 @@ impl WorkItem {
             let role = match call.role {
                 Role::Worker => &mut spend.worker,
                 Role::Reviewer => &mut spend.reviewer,
-                Role::Judge => &mut spend.judge,
                 Role::DeepReviewer => &mut spend.deep_reviewer,
             };
             role.calls += 1;

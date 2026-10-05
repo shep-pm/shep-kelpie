@@ -411,16 +411,14 @@ mod tests {
             .map(|pair| pair[1].as_str())
             .collect();
         assert_eq!(dirs, ["/k/skills/mattpocock", "/k/skills/review"]);
-        let argv = strings(&call(Role::Judge, fresh()));
+        let argv = strings(&call(Role::DeepReviewer, fresh()));
         assert!(!argv.iter().any(|a| a == "--plugin-dir"));
     }
 
     #[test]
     fn only_a_worker_bypasses_permissions() {
-        for role in [Role::Reviewer, Role::Judge] {
-            let argv = strings(&call(role, fresh()));
-            assert!(!argv.iter().any(|a| a == "--permission-mode"), "{role:?}");
-        }
+        let argv = strings(&call(Role::Reviewer, fresh()));
+        assert!(!argv.iter().any(|a| a == "--permission-mode"));
     }
 
     #[test]
@@ -586,7 +584,7 @@ mod tests {
             ..ClaudeCli::labelling(Arc::clone(&lambs) as Arc<dyn LambLabels>)
         }
         .sandboxed(Arc::new(OpenSandbox::default()), dir.path().join("home"));
-        for role in [Role::Worker, Role::Reviewer, Role::Judge] {
+        for role in [Role::Worker, Role::Reviewer, Role::DeepReviewer] {
             let mut call = call(role, fresh());
             call.cwd = dir.path().to_owned();
             call.settings = dir.path().join("settings.json");
@@ -595,7 +593,7 @@ mod tests {
         }
         let labels = lambs.0.lock().unwrap().clone();
         let names: Vec<&str> = labels.iter().map(|(_, l)| l.as_str()).collect();
-        assert_eq!(names, ["#6 worker", "#6 reviewer", "#6 judge"]);
+        assert_eq!(names, ["#6 worker", "#6 reviewer", "#6 deep_reviewer"]);
         let pid: u32 = std::fs::read_to_string(&pid_file)
             .unwrap()
             .trim()

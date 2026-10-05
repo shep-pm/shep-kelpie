@@ -145,8 +145,8 @@ fn only_a_worker_runs_commands_and_a_call_with_no_fence_writes_no_file() {
     let w = World::new();
     let mut review = w.call(Role::Reviewer, Session::New(id(WORKER_ID)));
     review.tools = Tools::Review;
-    let judge = w.call(Role::Judge, Session::New(id(WORKER_ID)));
-    for call in [&review, &judge] {
+    let deep = w.call(Role::DeepReviewer, Session::New(id(WORKER_ID)));
+    for call in [&review, &deep] {
         let argv = strings(call, None, None);
         assert!(argv.windows(2).any(|w| w == ["--disable", "shell_tool"]));
         assert!(argv.iter().any(|a| a == "--dangerously-bypass-hook-trust"));
@@ -204,7 +204,7 @@ fn a_steps_skill_is_a_file_a_worker_reads_and_text_a_call_with_no_shell_is_given
     let prompt = strings(&call, None, None).pop().unwrap();
     assert_eq!(prompt, "/mattpocock:tdd Implement issue #7");
 
-    // A review round or a judge has no tool that reads a file.
+    // A review call has no tool that reads a file.
     let mut review = w.call(Role::Reviewer, Session::New(id(REVIEW_ID)));
     review.tools = Tools::Review;
     review.plugin_dirs = vec![plugin.clone()];
@@ -277,8 +277,8 @@ fn a_call_reads_the_login_and_writes_only_its_own_codex_home() {
     assert!(policy.no_write.contains(&w.path("wt/**/.codex")));
     assert_eq!(policy.hosts, ["github.com", "api.github.com", MODEL_HOST]);
 
-    let judge = w.call(Role::Judge, Session::New(id(WORKER_ID)));
-    let unfenced = super::policy(&judge, &login, &Files::of(&judge));
+    let deep = w.call(Role::DeepReviewer, Session::New(id(WORKER_ID)));
+    let unfenced = super::policy(&deep, &login, &Files::of(&deep));
     assert_eq!(unfenced.hosts, [MODEL_HOST]);
     assert!(
         unfenced.verify_tls,
@@ -325,7 +325,7 @@ fn a_fenced_call_reads_its_codex_home_inside_the_shepherds() {
 fn every_call_runs_on_a_codex_home_of_its_own_with_the_login_linked_in() {
     let w = World::new();
     let cli = stand_in(&w, "");
-    let call = w.call(Role::Judge, Session::New(id(WORKER_ID)));
+    let call = w.call(Role::Reviewer, Session::New(id(WORKER_ID)));
     cli.prepare(&call).unwrap();
     let home = w.path("worker/settings.codex");
     let link = home.join("auth.json");
@@ -368,7 +368,7 @@ fn every_call_runs_on_a_codex_home_of_its_own_with_the_login_linked_in() {
 #[test]
 fn codexs_databases_and_logs_go_in_folders_the_call_may_write() {
     let w = World::new();
-    let call = w.call(Role::Judge, Session::New(id(WORKER_ID)));
+    let call = w.call(Role::Reviewer, Session::New(id(WORKER_ID)));
     let argv = strings(&call, None, None);
     let home = w.path("worker/settings.codex");
     for (key, folder) in [("sqlite_home", "db"), ("log_dir", "log")] {
@@ -474,7 +474,7 @@ fn what_codex_cannot_give_a_worker_fails_before_the_call() {
     call.mcp_config = Some(w.path("worker/mcp.json"));
     let cli = stand_in(&w, "");
     assert!(matches!(cli.prepare(&call), Err(AgentError::Setup(_))));
-    let mut call = w.call(Role::Judge, Session::New(id(WORKER_ID)));
+    let mut call = w.call(Role::Reviewer, Session::New(id(WORKER_ID)));
     call.harness = AgentHarness::ClaudeCode;
     assert!(matches!(cli.prepare(&call), Err(AgentError::Setup(_))));
 }

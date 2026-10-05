@@ -74,13 +74,6 @@ effort = "high"
 model = "claude-sonnet-5"
 effort = "medium"
 
-[models.judge]
-model = "claude-opus-5-5"
-effort = "low"
-
-[review]
-loop_guard = 8
-
 [coderabbit]
 divisor = 1000
 
@@ -263,10 +256,10 @@ fn settings(
                 .strip_prefix("~/")
                 .is_some_and(|script| place.home.join(script).is_file());
             // With the script, the default runs it and then the deep round.
-            let review = table.get_mut("review");
-            if let (false, Some(Value::Object(review))) = (installed, review) {
+            if !installed {
                 let deep = Value::Array(vec![text(crate::settings::DEEP)]);
-                review.insert("reviewers".into(), deep);
+                let review = Map::from_iter([("reviewers".to_owned(), deep)]);
+                table.insert("review".into(), Value::Object(review));
             }
             table
         }

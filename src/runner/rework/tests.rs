@@ -107,7 +107,7 @@ fn a_reworked_pull_request_goes_through_every_gate_to_the_merge_ruling() {
     assert_eq!(
         rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
         "review",
-        "the fix is new code, so the qwen-review loop runs first"
+        "the fix is new code, so the review runs first"
     );
     step(&runner).unwrap(); // review round 1, qwen: clean
     step(&runner).unwrap(); // review round 2, claude: clean

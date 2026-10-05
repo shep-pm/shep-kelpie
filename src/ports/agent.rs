@@ -22,8 +22,6 @@ pub enum Role {
     Worker,
     /// A Claude review round, always a fresh session
     Reviewer,
-    /// A one-shot that judges findings
-    Judge,
     /// A session of the deep review round: a reader, the confirmation of a
     /// HIGH, or the re-check of the fix
     #[serde(rename = "deep_reviewer")]
@@ -51,7 +49,6 @@ impl Role {
         match self {
             Self::Worker => "worker",
             Self::Reviewer => "reviewer",
-            Self::Judge => "judge",
             Self::DeepReviewer => "deep_reviewer",
         }
     }

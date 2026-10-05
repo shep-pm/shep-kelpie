@@ -106,15 +106,20 @@ pub(super) fn label(
     gh(&["pr", "edit", &number, "--repo", repo.as_str(), flag, label]).map(drop)
 }
 
+// GitHub answers an already resolved thread as resolved, and one it no
+// longer has with a not-found error, which leaves nothing to resolve.
 pub(super) fn resolve(thread: &str) -> Result<(), ForgeError> {
-    let resolved = gh(&[
+    let resolved = match gh(&[
         "api",
         "graphql",
         "-f",
         &format!("query={RESOLVE}"),
         "-f",
         &format!("id={thread}"),
-    ])?;
+    ]) {
+        Err(e) if gone(&e) => return Ok(()),
+        reply => reply?,
+    };
     #[derive(Deserialize)]
     struct Reply {
         data: Data,
@@ -139,6 +144,12 @@ pub(super) fn resolve(thread: &str) -> Result<(), ForgeError> {
     } else {
         Err(unreadable(&resolved))
     }
+}
+
+// Whether `error` is GitHub's answer for a node id it does not have.
+fn gone(error: &ForgeError) -> bool {
+    matches!(error, ForgeError::Failed(stderr)
+        if stderr.contains("Could not resolve to a node with the global id"))
 }
 
 fn time(text: &str, stdout: &[u8]) -> Result<Timestamp, ForgeError> {
@@ -331,6 +342,15 @@ pub(crate) fn parse_threads(stdout: &[u8], bot: &str) -> Result<Vec<Thread>, For
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_thread_github_no_longer_has_is_gone_and_any_other_refusal_is_not() {
+        let missing = "gh: Could not resolve to a node with the global id of 'PRRT_kwDOx'.\n";
+        assert!(super::gone(&ForgeError::Failed(missing.into())));
+        let scope = "gh: Resource not accessible by integration (HTTP 403)\n";
+        assert!(!super::gone(&ForgeError::Failed(scope.into())));
+        assert!(!super::gone(&ForgeError::Spawn("no gh".into())));
+    }
+
     use super::*;
 
     #[test]

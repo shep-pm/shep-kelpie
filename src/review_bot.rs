@@ -326,7 +326,7 @@ pub trait Profile: Send + Sync + fmt::Debug {
     /// The quota it last stated, reviews an hour, and when it stated it
     fn quota(&self, activity: &Activity) -> Option<(u32, Timestamp)>;
 
-    /// A thread as a finding the judge can rule on
+    /// A thread as a finding the worker is sent
     fn finding(&self, thread: &Thread) -> Finding;
 }
 

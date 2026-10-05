@@ -10,8 +10,6 @@ use crate::runner::coderabbit::tests::{fixed, hold_a_finding, summoned};
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::test::{Rig, Scripted, ScriptedRound};
 
-const HOLDS: &str = r#"{"holds": true, "severity": "high", "reason": "it holds"}"#;
-
 fn finding(file: &str, what: &str) -> Finding {
     Finding {
         severity: Severity::High,
@@ -37,8 +35,8 @@ fn defer(rig: &Rig, text: &str) {
     std::fs::write(rig.build_7().join("deferred-findings.md"), text).unwrap();
 }
 
-// A pull request whose review the judge held `found` in, the worker fixed
-// with one push, and two clean rounds then settled. CI has not reported.
+// A pull request whose qwen round found `found`, the worker fixed with one
+// push, and a clean Claude round then read. CI has not reported.
 fn reviewed_in(rig: Rig, found: &[Finding], auto: bool) -> (Rig, Mutex<Runner>, String) {
     if auto {
         rig.merge_auto();
@@ -49,13 +47,11 @@ fn reviewed_in(rig: Rig, found: &[Finding], auto: bool) -> (Rig, Mutex<Runner>, 
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.reviewer
         .script([ScriptedRound::Findings(found.to_vec())]);
-    let mut script = vec![Scripted::Push("work.txt", "work\n")];
-    script.extend(found.iter().map(|_| Scripted::Text(HOLDS)));
-    script.extend([
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
         Scripted::Push("fixed.txt", "fixed\n"),
         Scripted::Text("CLEAN"),
     ]);
-    rig.claude.script(script);
     for _ in 0..20 {
         step(&runner).unwrap();
         if rig.ask(&runner, "status", None)["work_item"]["phase"]["state"] == "ci" {
@@ -144,7 +140,7 @@ fn a_finding_the_worker_fixed_files_nothing() {
 }
 
 #[test]
-fn a_line_the_judge_never_held_files_nothing() {
+fn a_line_kelpie_never_sent_files_nothing() {
     let invented = finding("src/lib.rs", "the whole crate is insecure");
     let (rig, runner) = auto_ready_to_merge(&[racy()], &lines(&[invented]));
 
@@ -232,27 +228,31 @@ fn the_same_finding_deferred_twice_files_once() {
 }
 
 #[test]
-fn a_finding_the_judge_refuted_files_nothing() {
+fn a_nit_that_was_never_sent_files_nothing() {
     let rig = Rig::new("shep");
     rig.merge_auto();
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-    rig.reviewer.script([ScriptedRound::Findings(vec![racy()])]);
+    let nit = Finding {
+        severity: Severity::Low,
+        ..racy()
+    };
+    rig.reviewer
+        .script([ScriptedRound::Findings(vec![nit.clone()])]);
     rig.claude.script([
         Scripted::Push("work.txt", "work\n"),
-        Scripted::Text(r#"{"holds": false, "severity": "high", "reason": "behind a mutex"}"#),
         Scripted::Text("CLEAN"),
     ]);
     step(&runner).unwrap(); // the worker's first turn
-    step(&runner).unwrap(); // round 1, qwen: one finding
-    step(&runner).unwrap(); // the judge refutes it
-    step(&runner).unwrap(); // the round holds nothing
+    step(&runner).unwrap(); // round 1, qwen: one nit
+    step(&runner).unwrap(); // a round of nits sends nothing
     step(&runner).unwrap(); // round 2, claude: clean
     let head = rig.forge.head_of("kelpie/7").expect("the worker pushed");
-    // Even a worker that copied the refuted finding into the file files nothing.
-    defer(&rig, &lines(&[racy()]));
+    // Even a worker that copied the nit into the file files nothing.
+    let line = format!("LOW|{}:{}|{}|{}\n", nit.file, nit.line, nit.what, nit.why);
+    defer(&rig, &line);
     rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
         rig.verdict(&runner),

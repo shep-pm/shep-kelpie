@@ -37,7 +37,7 @@ fn running(rig: Rig) -> (Rig, Mutex<Runner>) {
     (rig, runner)
 }
 
-// Both work items through their first turn and a settled qwen-review loop,
+// Both work items through their first turn and a finished review,
 // taking turns, and parked on merge rulings 1 (#7) and 2 (#8)
 fn both_parked(project: &str) -> (Rig, Mutex<Runner>) {
     let (rig, runner) = two_slots(project);

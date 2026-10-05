@@ -15,8 +15,8 @@ const AGENTS: &str = "[agents.codex]\nharness = \"stand-in\"\n\
                       [agents.qwen]\nharness = \"stand-in\"\n\
                       model = \"qwen3-coder\"\neffort = \"low\"\nusage = \"none\"\n";
 
-const ALL_CODEX: &str = "worker = \"codex\"\nreviewer = \"codex\"\njudge = \"codex\"\n";
-const ALL_QWEN: &str = "worker = \"qwen\"\nreviewer = \"qwen\"\njudge = \"qwen\"\n";
+const ALL_CODEX: &str = "worker = \"codex\"\nreviewer = \"codex\"\n";
+const ALL_QWEN: &str = "worker = \"qwen\"\nreviewer = \"qwen\"\n";
 
 // A running project whose roles name kelpie's agents as `names` says.
 fn named(project: &str, names: &str) -> (Rig, Mutex<Runner>) {
@@ -127,7 +127,7 @@ fn each_account_keeps_its_own_day() {
 
 #[test]
 fn a_new_work_item_waits_on_any_account_its_roles_spend() {
-    // A local worker, with the Claude reviewer and judge every project has by default.
+    // A local worker, with the Claude reviewer every project has by default.
     let (rig, runner) = named("shep", "worker = \"qwen\"\n");
     rig.forge.list_ready(7, false);
     assert!(dispatched(&step(&runner).unwrap()));
@@ -171,10 +171,10 @@ fn codex_usage_that_cannot_be_read_holds_until_it_can() {
 fn a_review_round_waits_on_its_reviewers_account_while_the_worker_works_on() {
     let (rig, first) = named("chelone", "worker = \"codex\"\n");
     drop(first);
-    let only_claude = "loop_guard = 8\nreviewers = [\"claude\"]\n";
+    let only_claude = "[app.dogs.kelpie.review]\nreviewers = [\"claude\"]\n";
     rig.edit_settings(|s| {
         s.replace(crate::test::OLD_LOCAL, "")
-            .replace("loop_guard = 8\n", only_claude)
+            .replace("[app.dogs.kelpie.review]\n", only_claude)
     });
     let runner = rig.open().unwrap();
     rig.meter.set(Rig::utilization(0, 60));
@@ -332,10 +332,10 @@ fn an_issue_given_to_the_local_worker_fails_its_turn_once_no_local_agent_is_left
 fn a_review_round_on_a_local_agent_runs_on_that_agent_under_its_lease() {
     let (rig, first) = named("chelone", "reviewer = \"qwen\"\n");
     drop(first);
-    let only_claude = "loop_guard = 8\nreviewers = [\"claude\"]\n";
+    let only_claude = "[app.dogs.kelpie.review]\nreviewers = [\"claude\"]\n";
     rig.edit_settings(|s| {
         s.replace(crate::test::OLD_LOCAL, "")
-            .replace("loop_guard = 8\n", only_claude)
+            .replace("[app.dogs.kelpie.review]\n", only_claude)
     });
     let runner = rig.open().unwrap();
     rig.meter.set(Rig::utilization(0, 1));
@@ -422,7 +422,7 @@ fn spend_without_dollars_shows_tokens_and_says_it_has_none() {
     );
     let none = json!({ "input": 0, "cache_write": 0, "cache_read": 0, "output": 0 });
     assert_eq!(
-        item["by_role"]["judge"],
+        item["by_role"]["reviewer"],
         json!({ "calls": 0, "tokens": none, "cost_usd": null })
     );
 }

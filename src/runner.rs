@@ -185,7 +185,7 @@ pub struct Runner {
     close_refused: parent::Refused,
     // The pull request reviewers kelpie's own settings define
     reviewers: Reviewers,
-    // The review loop's reviewers, in order, from the project's list
+    // The review's reviewers, in order, from the project's list
     lineup: Vec<LoopReviewer>,
     // The model and effort each role runs on, from the agent it names
     agents: RoleAgents,
@@ -506,7 +506,9 @@ impl Runner {
             merge_tried: None,
             merge_queued: None,
             summon_owed: false,
-            local_rounds: 0,
+            threads_sent: Vec::new(),
+            resolve_failures: 0,
+            reviewers_skipped: Vec::new(),
             local_failures: Default::default(),
             local_unreviewed: Vec::new(),
             local_unreviewed_by: None,

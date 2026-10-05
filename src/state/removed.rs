@@ -1,14 +1,28 @@
 //! What removed features left in a state file saved before they went
 //!
-//! Such a file still loads. The relay's, the planning call's and the
-//! whole-issue check's fields are dropped before reading, and the check's time
-//! and calls count as review's, so totals still add up. A pending ruling of a
-//! removed kind has nothing here to answer it, so the file is refused.
+//! Such a file still loads. The relay's, the planning call's, the
+//! whole-issue check's and the review loop's fields are dropped before
+//! reading, and the check's and the judge's time and calls count as review's,
+//! so totals still add up. A review saved mid-loop goes on from the reviewer
+//! after the one it last recorded. A pending ruling of a removed kind has
+//! nothing here to answer it, so the file is refused.
 
 use serde_json::{Map, Value};
 
 // The kinds of ruling removed features raised, which nothing answers now
-const RULINGS: [&str; 4] = ["split", "split-stuck", "close-stuck", "audit"];
+const RULINGS: [&str; 5] = [
+    "split",
+    "split-stuck",
+    "close-stuck",
+    "audit",
+    "review-guard",
+];
+
+// The judge and the check each ran as a fresh Claude session reviewing the
+// work, so their time is a Claude round's and their calls a reviewer's.
+const PHASES: [&str; 2] = ["audit", "judging"];
+const CALLS: [&str; 2] = ["audit", "judge"];
+const ROLES: [&str; 2] = ["auditor", "judge"];
 
 /// The first pending ruling of a removed kind, by id and kind
 pub(super) fn removed_ruling(value: &Value) -> Option<(u64, String)> {
@@ -20,8 +34,8 @@ pub(super) fn removed_ruling(value: &Value) -> Option<(u64, String)> {
     })
 }
 
-/// Drops what removed features saved, and moves the whole-issue check's time
-/// and calls to review's
+/// Drops what removed features saved, and moves the whole-issue check's and
+/// the judge's time and calls to review's
 ///
 /// Only these names are touched; any other unknown field is still refused.
 pub(super) fn drop_removed_fields(value: &mut Value) {
@@ -33,12 +47,20 @@ pub(super) fn drop_removed_fields(value: &mut Value) {
     for ruling in objects(state.get_mut("rulings")) {
         ruling.remove("relayed");
         ruling.remove("resend");
+        if let Some(kind) = ruling.get_mut("kind") {
+            drop_loop(kind);
+        }
     }
     for item in objects(state.get_mut("work_items")) {
-        drop_audit(item);
+        item.remove("audit");
+        item.remove("local_rounds");
+        fold_review_calls(item);
+        for value in item.values_mut() {
+            drop_loop(value);
+        }
     }
     for finished in objects(state.get_mut("history")) {
-        fold_audit_seconds(finished);
+        fold_review_seconds(finished);
     }
 }
 
@@ -47,38 +69,71 @@ fn objects(list: Option<&mut Value>) -> impl Iterator<Item = &mut Map<String, Va
     list.filter_map(Value::as_object_mut)
 }
 
-// The check was a fresh Claude session reviewing the work, so its time is a
-// Claude round's and its calls a reviewer's.
-fn drop_audit(item: &mut Map<String, Value>) {
-    item.remove("audit");
+fn fold_review_calls(item: &mut Map<String, Value>) {
     if let Some(timings) = item.get_mut("timings").and_then(Value::as_object_mut) {
-        fold_audit_seconds(timings);
-        if timings.get("call").and_then(Value::as_str) == Some("audit") {
+        fold_review_seconds(timings);
+        if timings
+            .get("call")
+            .and_then(Value::as_str)
+            .is_some_and(|call| CALLS.contains(&call))
+        {
             timings.insert("call".to_owned(), "claude".into());
         }
     }
     for call in objects(item.get_mut("calls")) {
-        if call.get("role").and_then(Value::as_str) == Some("auditor") {
+        if call
+            .get("role")
+            .and_then(Value::as_str)
+            .is_some_and(|role| ROLES.contains(&role))
+        {
             call.insert("role".to_owned(), "reviewer".into());
         }
     }
 }
 
-fn fold_audit_seconds(holder: &mut Map<String, Value>) {
+fn fold_review_seconds(holder: &mut Map<String, Value>) {
     let Some(seconds) = holder.get_mut("seconds").and_then(Value::as_object_mut) else {
         return;
     };
-    let audit = seconds.get("audit").and_then(Value::as_u64);
-    let round = seconds.get("claude_round").map_or(Some(0), Value::as_u64);
-    // Anything that is not a count is left for the parser to refuse.
-    let (Some(audit), Some(round)) = (audit, round) else {
-        return;
-    };
-    seconds.remove("audit");
-    seconds.insert(
-        "claude_round".to_owned(),
-        audit.saturating_add(round).into(),
-    );
+    for phase in PHASES {
+        let from = seconds.get(phase).and_then(Value::as_u64);
+        let round = seconds.get("claude_round").map_or(Some(0), Value::as_u64);
+        // Anything that is not a count is left for the parser to refuse.
+        let (Some(from), Some(round)) = (from, round) else {
+            continue;
+        };
+        seconds.remove(phase);
+        seconds.insert("claude_round".to_owned(), from.saturating_add(round).into());
+    }
+}
+
+// Every review, wherever a phase, a resume or a ruling keeps one, loses the
+// loop's streak, guard and lone-reviewer mark, and its `last` reviewer is
+// where the pass goes on from. A round or a bot's review waiting on the
+// judge keeps its findings, without verdicts, and a fix loses its streak mark.
+fn drop_loop(value: &mut Value) {
+    match value {
+        Value::Array(list) => list.iter_mut().for_each(drop_loop),
+        Value::Object(map) => {
+            if map.contains_key("round") && map.contains_key("stage") {
+                map.remove("consecutive_clean");
+                map.remove("guard_cleared");
+                map.remove("alone");
+            }
+            match map.get("stage").and_then(Value::as_str) {
+                Some("judging") => {
+                    map.insert("stage".to_owned(), "found".into());
+                    map.remove("verdicts");
+                }
+                Some("fixing") => {
+                    map.remove("clean");
+                }
+                _ => {}
+            }
+            map.values_mut().for_each(drop_loop);
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]

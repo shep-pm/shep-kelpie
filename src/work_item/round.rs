@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ports::{Finding, Timestamp, Verdict};
+use crate::ports::{Finding, Timestamp};
 use crate::review_bot::Bot;
 
 /// A work item's pull request reviewer rounds so far, from every bot
@@ -15,8 +15,8 @@ pub struct CodeRabbitTally {
     pub rounds: u32,
     /// Whether the maintainer let the rounds past their cap
     pub cap_cleared: bool,
-    /// Whether the reviewers are satisfied with the code as it stands. A
-    /// worker's turn changes the code, so it clears this.
+    /// Whether a review that covered the head left no thread open from any
+    /// listed bot. A worker's turn changes the code, so it clears this.
     pub satisfied: bool,
 }
 
@@ -54,8 +54,8 @@ pub enum CodeRabbitStage {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         resent: bool,
     },
-    /// The open threads of a review of `head`, judged in order
-    Judging {
+    /// The open threads of a review of `head`, about to go to the worker
+    Found {
         /// The bot whose review it is. CodeRabbit when absent.
         #[serde(default, skip_serializing_if = "Bot::is_coderabbit")]
         bot: Bot,
@@ -63,17 +63,15 @@ pub enum CodeRabbitStage {
         head: String,
         /// Every thread still open, as a finding
         threads: Vec<OpenThread>,
-        /// The judge's verdict on each thread judged so far, same order
-        verdicts: Vec<Verdict>,
     },
-    /// The findings the judge held were sent to the worker; waiting for its fix
+    /// The open threads were sent to the worker; waiting for its fix
     Fixing {
         /// The head the findings are on, which a fix moves
         head: String,
     },
 }
 
-/// A review bot's thread still open, as the judge reads it
+/// A review bot's thread still open, as the worker is sent it
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

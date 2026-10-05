@@ -18,8 +18,6 @@ pub enum TimingPhase {
     /// A deep review round's session runs: a reader, the confirmation of a
     /// HIGH, or the re-check of its fix
     DeepRound,
-    /// The judge runs
-    Judging,
     /// Waiting for CI
     Ci,
     /// Waiting for the CodeRabbit lease and hourly window
@@ -42,13 +40,12 @@ pub enum TimingPhase {
 
 impl TimingPhase {
     /// Every phase, in the order `status` and the table list them
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 13] = [
         Self::Worker,
         Self::GpuWait,
         Self::LocalRound,
         Self::ClaudeRound,
         Self::DeepRound,
-        Self::Judging,
         Self::Ci,
         Self::CodeRabbitWindow,
         Self::CodeRabbitReview,
@@ -67,7 +64,6 @@ impl TimingPhase {
             Self::LocalRound => "local_round",
             Self::ClaudeRound => "claude_round",
             Self::DeepRound => "deep_round",
-            Self::Judging => "judging",
             Self::Ci => "ci",
             Self::CodeRabbitWindow => "coderabbit_window",
             Self::CodeRabbitReview => "coderabbit_review",
@@ -97,7 +93,6 @@ mod tests {
                 "local_round",
                 "claude_round",
                 "deep_round",
-                "judging",
                 "ci",
                 "coderabbit_window",
                 "coderabbit_review",

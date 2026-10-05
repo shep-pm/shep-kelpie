@@ -689,7 +689,7 @@ fn a_worker_sent_back_for_uncommitted_files_is_not_sent_back_for_them_again() {
 
 // Turn 1 pushes the branch and opens no pull request. Turn 2 opens one, pushes
 // nothing and leaves a file uncommitted, so it is sent back to commit. The
-// pull request was found at turn 2's end, so the review loop is still owed.
+// pull request was found at turn 2's end, so the review is still owed.
 #[test]
 fn a_pull_request_found_on_a_turn_sent_back_to_commit_still_goes_to_review_first() {
     let (rig, runner) = with_issue_7("zeus");

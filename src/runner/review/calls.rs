@@ -1,16 +1,13 @@
-//! Building the Claude calls the qwen-review loop makes itself: a fresh
-//! review round, and the judge's one-shot on a single finding
+//! Building the Claude calls the review makes itself: a fresh review round
 //!
-//! Neither is the worker's: both draw a fresh session id and run under
-//! their own throwaway settings, never the worker's own. The Claude round
-//! keeps its read tools, to check its own work against the worktree; the
-//! judge has no tools, so its answer is exactly the JSON it was asked for
-//! and nothing it read on the side.
+//! It is not the worker's: it draws a fresh session id and runs under its
+//! own throwaway settings, never the worker's own. It keeps its read tools,
+//! to check its own work against the worktree.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::ports::{AgentCall, Finding, Reach, Role, Session, Severity, Tools, Verdict};
+use crate::ports::{AgentCall, Reach, Role, Session, Severity, Tools};
 use crate::settings::{Limit, RoleModel};
 use crate::shots::ShotsRun;
 use crate::skills::{Skills, Step};
@@ -18,9 +15,6 @@ use crate::work_item::new_session_id;
 
 /// Where the Claude round's throwaway settings go
 const REVIEW_SETTINGS_FILE: &str = "review-settings.json";
-
-/// Where the judge's throwaway settings go
-const JUDGE_SETTINGS_FILE: &str = "judge-settings.json";
 
 /// Kelpie's shots for a Claude round, and the folder they sit under
 #[derive(Debug, Clone, Copy)]
@@ -75,48 +69,7 @@ pub(super) fn reviewer_call(
     Ok(call)
 }
 
-// A finding that names a PNG under `shots` is about a screenshot, and its
-// judge may open that folder with Read and nothing else.
-pub(in crate::runner) fn judge_call(
-    issue: u64,
-    worktree: &Path,
-    base: &str,
-    worker_folder: &Path,
-    (model, limit): (&RoleModel, &Limit),
-    finding: &Finding,
-    shots: Option<&Path>,
-) -> Result<AgentCall, String> {
-    let diff = diff_against(worktree, base)?;
-    let shot = shots.filter(|dir| is_shot(&finding.file, dir));
-    let mut prompt = judge_prompt(base, &diff, finding);
-    if shot.is_some() {
-        prompt.push_str(&format!(
-            "\n\nThe finding is about the screenshot {}. Open it with Read before you decide.",
-            finding.file
-        ));
-    }
-    let mut call = build_call(Role::Judge, issue, worktree, (model, limit), prompt)?;
-    call.settings = worker_folder.join(JUDGE_SETTINGS_FILE);
-    call.reach.read = shot.map(Path::to_owned).into_iter().collect();
-    Ok(call)
-}
-
-// Whether `file` is a PNG really inside `dir`, kelpie's shots folder. A
-// reviewer writes `file`, so `..` and symlinks must not reach past `dir`.
-fn is_shot(file: &str, dir: &Path) -> bool {
-    let path = Path::new(file);
-    if path.extension().is_none_or(|e| e != "png")
-        || path.components().any(|c| c == Component::ParentDir)
-    {
-        return false;
-    }
-    match (path.canonicalize(), dir.canonicalize()) {
-        (Ok(file), Ok(dir)) => file.starts_with(dir) && file.is_file(),
-        _ => false,
-    }
-}
-
-// The shape every call the review loop makes itself shares: a fresh
+// The shape every call the review makes itself shares: a fresh
 // session, the worktree as its folder, no instructions file, no tools, no
 // fence and no plugins unless the caller adds them, and the role and prompt.
 pub(in crate::runner) fn build_call(
@@ -196,28 +149,6 @@ fn reviewer_prompt(base: &str, diff: &str) -> String {
     )
 }
 
-fn judge_prompt(base: &str, diff: &str, finding: &Finding) -> String {
-    format!(
-        "You are judging one code-review finding on a pull request. You did not write \
-         the finding and will not fix it; you only decide whether it holds against the \
-         diff below.\n\n\
-         Finding:\n\
-         severity: {}\n\
-         location: {}:{}\n\
-         what: {}\n\
-         why: {}\n\n\
-         Decide whether it holds. You may regrade its severity in either direction, \
-         whether or not it holds. Output exactly one line of JSON and nothing else:\n\
-         {{\"holds\": true|false, \"severity\": \"low\"|\"medium\"|\"high\", \"reason\": \"<one sentence>\"}}\n\n\
-         --- diff against {base} ---\n{diff}\n--- end ---",
-        severity_tag(finding.severity),
-        finding.file,
-        finding.line,
-        finding.what,
-        finding.why,
-    )
-}
-
 /// The severity as qwen's own wire format spells it
 pub(super) fn severity_tag(severity: Severity) -> &'static str {
     match severity {
@@ -227,127 +158,13 @@ pub(super) fn severity_tag(severity: Severity) -> &'static str {
     }
 }
 
-/// The judge's verdict, from a one-line JSON reply that may be wrapped in
-/// prose or a code fence; `None` if no well-formed JSON object with the
-/// expected shape can be found in it
-pub(in crate::runner) fn parse_verdict(text: &str) -> Option<Verdict> {
-    #[derive(serde::Deserialize)]
-    struct Raw {
-        holds: bool,
-        severity: String,
-        reason: String,
-    }
-    let start = text.find('{')?;
-    let end = text.rfind('}')?;
-    if end < start {
-        return None;
-    }
-    let raw: Raw = serde_json::from_str(&text[start..=end]).ok()?;
-    let severity = match raw.severity.to_lowercase().as_str() {
-        "low" => Severity::Low,
-        "medium" => Severity::Medium,
-        "high" => Severity::High,
-        _ => return None,
-    };
-    Some(Verdict {
-        holds: raw.holds,
-        severity,
-        reason: raw.reason,
-    })
-}
-
 #[cfg(test)]
 mod tests {
 
     use super::*;
-    use crate::adapters::NO_TOOLS;
     use crate::runner::step;
-    use crate::test::{Rig, Scripted, ScriptedRound};
+    use crate::test::{Rig, Scripted};
     use crate::trim::deny_with_trim;
-
-    #[test]
-    fn only_a_png_really_inside_the_shots_folder_is_a_shot() {
-        let home = tempfile::tempdir().unwrap();
-        let shots = home.path().join("shots/lab/7");
-        std::fs::create_dir_all(shots.join("abc1234")).unwrap();
-        let png = shots.join("abc1234/root-mobile-dark.png");
-        std::fs::write(&png, "png").unwrap();
-        let secret = home.path().join("settings.toml");
-        std::fs::write(&secret, "url").unwrap();
-        std::os::unix::fs::symlink(&secret, shots.join("abc1234/leak.png")).unwrap();
-        std::fs::write(home.path().join("outside.png"), "png").unwrap();
-
-        let cited = |file: &Path| is_shot(&file.display().to_string(), &shots);
-        assert!(cited(&png));
-        assert!(!cited(&shots.join("../../../settings.toml")));
-        assert!(!cited(&shots.join("../../../outside.png")));
-        assert!(!cited(&shots.join("abc1234/leak.png")), "a symlink out");
-        assert!(!cited(&shots.join("abc1234/missing.png")));
-        assert!(!cited(Path::new("src/app.tsx")));
-    }
-
-    #[test]
-    fn a_judge_reply_wrapped_in_prose_or_fences_still_parses() {
-        let plain = r#"{"holds": true, "severity": "medium", "reason": "it does hold"}"#;
-        assert_eq!(
-            parse_verdict(plain),
-            Some(Verdict {
-                holds: true,
-                severity: Severity::Medium,
-                reason: "it does hold".into(),
-            })
-        );
-        let fenced = format!("```json\n{plain}\n```");
-        assert_eq!(parse_verdict(&fenced), parse_verdict(plain));
-        let cased = r#"{"holds": false, "severity": "HIGH", "reason": "no"}"#;
-        assert_eq!(parse_verdict(cased).unwrap().severity, Severity::High);
-    }
-
-    #[test]
-    fn an_unparseable_judge_reply_is_none() {
-        assert_eq!(parse_verdict("I think it holds."), None);
-        assert_eq!(parse_verdict(r#"{"holds": true}"#), None);
-        assert_eq!(
-            parse_verdict(r#"{"holds": true, "severity": "urgent", "reason": "x"}"#),
-            None
-        );
-    }
-
-    #[test]
-    fn the_judge_gets_every_tool_denied() {
-        let rig = Rig::new("shep");
-        let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
-        rig.ask(&runner, "add", Some("7"));
-        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-        rig.claude.script([Scripted::Push("work.txt", "work\n")]);
-        step(&runner).unwrap(); // opens the pull request, enters round 1 (qwen)
-
-        rig.reviewer.script([ScriptedRound::Findings(vec![Finding {
-            severity: Severity::Low,
-            file: "src/lib.rs".into(),
-            line: 3,
-            what: "unused variable".into(),
-            why: "dead code".into(),
-        }])]);
-        step(&runner).unwrap(); // round 1's qwen call
-
-        rig.claude.script([Scripted::Text(
-            r#"{"holds": true, "severity": "low", "reason": "real, but minor"}"#,
-        )]);
-        step(&runner).unwrap(); // the judge's one-shot
-
-        let all = rig.claude.all_seen();
-        let judge = all
-            .iter()
-            .find(|s| s.call.role == Role::Judge)
-            .expect("the judge ran");
-        assert_eq!(
-            judge.settings["permissions"]["deny"],
-            deny_with_trim(&NO_TOOLS),
-            "every tool denied, then the trimmed features"
-        );
-    }
 
     #[test]
     fn the_claude_round_keeps_its_read_tools_to_check_its_own_work() {
@@ -372,7 +189,7 @@ mod tests {
         assert_eq!(
             reviewer.settings["permissions"]["deny"],
             deny_with_trim(&["Agent", "Task", "Bash"]),
-            "Read, Grep and Glob stay, unlike the judge's"
+            "Read, Grep and Glob stay"
         );
         assert!(!reviewer.settings.to_string().contains("\"Read\""));
     }

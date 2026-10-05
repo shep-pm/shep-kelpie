@@ -104,7 +104,7 @@ enum Move {
     /// A yes on a failed turn: the turn goes back as it stood, under its phase
     Retry { turn: Turn, phase: Phase },
     /// A yes on a foreign change: kelpie adopts it. A new head goes
-    /// through the qwen-review loop, and anything else back to CI.
+    /// through the review, and anything else back to CI.
     Accept(Known),
     /// A no on a head moved from `from` to `to`: the worker builds on `to`,
     /// taking a turn with this prompt
@@ -249,7 +249,7 @@ impl Runner {
             if let Some((turn, phase, force)) = worker {
                 item.turn = turn;
                 item.phase = phase;
-                // A turn the ruling interrupted may still owe the review loop.
+                // A turn the ruling interrupted may still owe the review.
                 item.resume = force.or(item.resume.take());
                 // The worker's turn again, so the hand-back label comes off.
                 if let Some(number) = item.pull_request
@@ -403,10 +403,6 @@ fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
             format!("Merging at {} was refused twice.", short(head))
         }
         RulingKind::Closed => "This pull request was closed without merging.".to_owned(),
-        RulingKind::ReviewGuard { review } => format!(
-            "The review of this pull request has run {} rounds without settling.",
-            review.round.saturating_sub(1)
-        ),
         RulingKind::LocalModelSpilled { .. } => {
             "The local model for this pull request's review is not fully on the GPU, \
              so a review round did not run."
@@ -428,7 +424,7 @@ fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
         ),
         RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
             "{bot} has run {rounds} rounds here, its cap, \
-             and {held} of its findings still hold."
+             and {held} of its threads are still open."
         ),
         RulingKind::CodeRabbitSilent { bot: silent, head } => {
             format!("{} never reviewed {}.", silent.name(), short(head))
@@ -472,10 +468,10 @@ fn decide(
     }
     let phase = match (answer, ruling.kind) {
         (Answer::Text(text), RulingKind::Question { resume, .. }) => {
-            // A question resumes exactly where it interrupted the qwen-review
-            // loop; one asked before the loop ever started, with a pull
-            // request already open, starts it once answered instead of the
-            // ordinary rule of going straight to CI.
+            // A question resumes exactly where it interrupted the review;
+            // one asked before the review ever started, with a pull request
+            // already open, starts it once answered instead of the ordinary
+            // rule of going straight to CI.
             let (phase, force) = match resume {
                 Resume::Nothing => (Phase::Implement, None),
                 Resume::ReviewFirst => (Phase::Implement, Some(Phase::Review(Review::first()))),
@@ -521,8 +517,8 @@ fn decide(
         (Answer::Yes, RulingKind::ForeignChange { known, .. }) => return Ok(Move::Accept(known)),
         // The pull request is merged, so a no has no worker to send a note to.
         (Answer::Yes | Answer::No(_), RulingKind::FollowUp { .. }) => Phase::Done { merged: true },
-        // A no's fix is new code, unreviewed: it goes through the
-        // qwen-review loop again before CI, whatever ruling this answers.
+        // A no's fix is new code, unreviewed: it goes through a pass of the
+        // review again before CI, whatever ruling this answers.
         (Answer::No(note), _) => {
             return Ok(Move::Turn {
                 prompt: note_prompt(ruling.pull_request, &note),
@@ -545,10 +541,6 @@ fn decide(
             since: now,
         },
         (Answer::Yes, RulingKind::Closed) => Phase::Done { merged: false },
-        (Answer::Yes, RulingKind::ReviewGuard { review }) => Phase::Review(Review {
-            guard_cleared: true,
-            ..review
-        }),
         (Answer::Yes, RulingKind::LocalModelSpilled { review, .. }) => Phase::Review(review),
         // The fix ends under the same round, which checks the head again.
         (Answer::Yes, RulingKind::FixNotPushed { fix, prompt, .. }) => {
@@ -633,13 +625,8 @@ pub(super) fn question(
              item and keeps its branch on the forge",
             capitalized(&about)
         ),
-        RulingKind::ReviewGuard { review } => format!(
-            "The qwen-review loop on {about} has run {} rounds without \
-             settling. {yes} lets it keep going",
-            review.round.saturating_sub(1)
-        ),
         RulingKind::LocalModelSpilled { review, reason } => format!(
-            "Round {} of the qwen-review loop on {about} did not run: {reason}. \
+            "Round {} of the review on {about} did not run: {reason}. \
              Once the model is back on the GPU, {yes} runs the round again",
             review.round
         ),
@@ -648,7 +635,7 @@ pub(super) fn question(
                 Fix::Review(review) if matches!(review.stage, ReviewStage::Deep(_)) => {
                     format!("the deep review (round {})", review.round)
                 }
-                Fix::Review(review) => format!("round {} of the qwen-review loop", review.round),
+                Fix::Review(review) => format!("round {} of the review", review.round),
                 Fix::CodeRabbit { round, .. } => format!("{bot} round {round}"),
             };
             match why {
@@ -673,9 +660,9 @@ pub(super) fn question(
                 .join("\n")
         ),
         RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
-            "{bot} has run {rounds} rounds on {about}, its cap, and the judge \
-             still holds {held} of its findings. {yes} sends the worker those \
-             findings and lets the rounds go past the cap"
+            "{bot} has run {rounds} rounds on {about}, its cap, and {held} of its \
+             threads are still open. {yes} sends the worker those findings and lets \
+             the rounds go past the cap"
         ),
         RulingKind::CodeRabbitSilent { bot: silent, head } => format!(
             "{} never reviewed {about} at {} after kelpie summoned it. \

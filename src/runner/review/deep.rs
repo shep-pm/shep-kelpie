@@ -8,7 +8,8 @@
 //! everything held. One re-check then reads only the fix commits against the
 //! findings, and runs each failing test, since a fixer's word that it fixed
 //! something is not evidence. A finding it finds unfixed goes back to the
-//! worker once, and after that to a ruling. A fix that passes ends the loop.
+//! worker once, and after that to a ruling. A fix that passes goes on to the
+//! next reviewer in the project's list.
 
 mod pin;
 mod prompts;
@@ -25,11 +26,11 @@ use crate::runner::report::{Begin, ReviewCall, ReviewResult, Spent, StepReport};
 use crate::runner::ruling::park;
 use crate::runner::shots::RoundShots;
 use crate::runner::turn;
+use crate::settings::LoopReviewer;
 use crate::state::{Fix, RulingKind, StateError};
 use crate::work_item::{Backing, CallKind, Deep, Held, Phase, Review, ReviewStage, Turn};
 use crate::worktree::Start;
 
-use super::lineup::Chosen;
 use prompts::Confirmation;
 
 /// Where a reader's throwaway settings go
@@ -46,13 +47,11 @@ impl Runner {
     // so a restart resumes at the step it was on.
     pub(super) fn deep_started(
         &mut self,
-        chosen: &Chosen,
+        chosen: &LoopReviewer,
         review: Review,
     ) -> Result<Begin, StateError> {
-        let (name, alone) = (chosen.reviewer.name.clone(), chosen.alone);
         let review = Review {
-            reviewer: Some(name),
-            alone,
+            reviewer: Some(chosen.name.clone()),
             stage: ReviewStage::Deep(Deep::Read),
             ..review
         };
@@ -185,8 +184,8 @@ impl Runner {
         if checked.is_empty() {
             // Everything was deferred: there is nothing left to check.
             let round = review.round;
-            let since = self.ports.clock.now();
-            self.update(|item| item.phase = Phase::Ci { head: None, since })?;
+            let next = self.after_round(review.clone(), self.ports.clock.now());
+            self.update(|item| item.phase = next)?;
             return Ok(Begin::Report(StepReport::DeepRechecked {
                 issue,
                 pull_request: number,
@@ -290,7 +289,6 @@ impl Runner {
             pull_request: number,
             round,
             held: count,
-            clean: false,
         }))
     }
 
@@ -390,10 +388,7 @@ impl Runner {
             issue,
             reason: format!("the deep round's {what} on #{number} failed: {reason}"),
         };
-        let ends = Phase::Ci {
-            head: None,
-            since: now,
-        };
+        let ends = self.after_round(review.clone(), now);
         let mut ruling = None;
         let report = match deep {
             Deep::Read => match reply.and_then(|text| read_review(&text)) {
@@ -428,7 +423,6 @@ impl Runner {
                             pull_request: number,
                             round,
                             held: 0,
-                            clean: true,
                         }
                     } else {
                         let held = all.into_iter().map(Held::new).collect();

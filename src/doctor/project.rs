@@ -134,10 +134,7 @@ fn spends_codex(settings: &Settings, kelpie: &KelpieSettings, here: Here<'_>) ->
     sessions
         || roles.is_some_and(|l| {
             let deep = deep.then_some(l.deep_reviewer);
-            [l.worker, l.reviewer, l.judge]
-                .iter()
-                .chain(&deep)
-                .any(codex)
+            [l.worker, l.reviewer].iter().chain(&deep).any(codex)
         })
 }
 
