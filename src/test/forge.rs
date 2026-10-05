@@ -31,10 +31,6 @@ pub(crate) struct FakeForge {
     sub_issues: Arc<Mutex<HashMap<u64, Vec<u64>>>>,
     // The issues kelpie closed, with the comment each got
     closings: Arc<Mutex<Vec<(u64, String)>>>,
-    // Whether linking a sub-issue is refused, as on a repo without them
-    links_down: Arc<AtomicBool>,
-    // Whether the next link lands but its answer is lost
-    link_answers_lost: Arc<AtomicBool>,
     // Whether closing an issue is refused
     closes_down: Arc<AtomicBool>,
     open: Arc<Mutex<Vec<OpenPullRequest>>>,
@@ -74,12 +70,6 @@ pub(crate) struct FakeForge {
     saved_at_comment: Arc<Mutex<Vec<serde_json::Value>>>,
     default_branch: Arc<Mutex<String>>,
     repo_labels: Arc<Mutex<Vec<String>>>,
-    // Whether an issue may take only a label the repo has, as on GitHub
-    strict_labels: Arc<AtomicBool>,
-    label_creates_down: Arc<AtomicBool>,
-    // Every label kelpie asked to make, and how often it read the repo's
-    label_creates: Arc<Mutex<Vec<String>>>,
-    label_reads: Arc<AtomicUsize>,
     pushes: Arc<AtomicBool>,
     bot_seen: Arc<AtomicBool>,
     viewer_down: Arc<Mutex<Option<ForgeError>>>,
@@ -124,8 +114,6 @@ impl FakeForge {
             closed: Arc::default(),
             sub_issues: Arc::default(),
             closings: Arc::default(),
-            links_down: Arc::default(),
-            link_answers_lost: Arc::default(),
             closes_down: Arc::default(),
             open: Arc::default(),
             board_down: Arc::default(),
@@ -159,10 +147,6 @@ impl FakeForge {
             saved_at_comment: Arc::default(),
             default_branch: Arc::new(Mutex::new("main".to_owned())),
             repo_labels: Arc::default(),
-            strict_labels: Arc::default(),
-            label_creates_down: Arc::default(),
-            label_creates: Arc::default(),
-            label_reads: Arc::default(),
             pushes: Arc::new(AtomicBool::new(true)),
             bot_seen: Arc::new(AtomicBool::new(true)),
             viewer_down: Arc::default(),
@@ -206,6 +190,15 @@ impl FakeForge {
 
     pub(crate) fn set_default_branch(&self, branch: &str) {
         *self.default_branch.lock().unwrap() = branch.to_owned();
+    }
+
+    /// The repo's labels, those it started with and those made since
+    pub(crate) fn repo_labels_now(&self) -> Vec<String> {
+        self.repo_labels.lock().unwrap().clone()
+    }
+
+    pub(crate) fn set_repo_labels(&self, labels: &[&str]) {
+        *self.repo_labels.lock().unwrap() = labels.iter().map(|&l| l.to_owned()).collect();
     }
 
     pub(crate) fn remove_issue(&self, number: u64) {
@@ -252,16 +245,6 @@ impl FakeForge {
     /// The issues issue `number` is blocked by, open or closed
     pub(crate) fn blockers(&self, number: u64) -> Vec<u64> {
         self.blockers_of(number).iter().map(|b| b.number).collect()
-    }
-
-    /// Makes linking a sub-issue fail, or work again
-    pub(crate) fn set_links_down(&self, down: bool) {
-        self.links_down.store(down, Ordering::SeqCst);
-    }
-
-    /// Makes the next link land on the forge but answer with an error
-    pub(crate) fn lose_next_link_answer(&self) {
-        self.link_answers_lost.store(true, Ordering::SeqCst);
     }
 
     /// Makes closing an issue fail, or work again
@@ -572,12 +555,19 @@ impl Forge for FakeForge {
     }
 
     fn repo_labels(&self, _repo: &ForgeSlug) -> Result<Vec<String>, ForgeError> {
-        self.label_reads.fetch_add(1, Ordering::SeqCst);
-        Ok(self.repo_labels_now())
+        Ok(self.repo_labels.lock().unwrap().clone())
     }
 
     fn create_label(&self, _repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError> {
-        self.make_label(label.name)
+        let mut labels = self.repo_labels.lock().unwrap();
+        if labels.iter().any(|l| l == label.name) {
+            return Err(ForgeError::Failed(format!(
+                "label with name \"{}\" already exists",
+                label.name
+            )));
+        }
+        labels.push(label.name.to_owned());
+        Ok(())
     }
 
     fn can_push(&self, _repo: &ForgeSlug) -> Result<bool, ForgeError> {
@@ -771,7 +761,6 @@ impl Forge for FakeForge {
         labels: &[&str],
     ) -> Result<u64, ForgeError> {
         self.issues_up()?;
-        self.refuse_missing(labels)?;
         if let Some(left) = self.creates_left.lock().unwrap().as_mut() {
             if *left == 0 {
                 return Err(ForgeError::Failed("issues are down".into()));
@@ -799,32 +788,6 @@ impl Forge for FakeForge {
             self.label(number, label);
         }
         Ok(number)
-    }
-
-    fn add_sub_issue(&self, _repo: &ForgeSlug, parent: u64, child: u64) -> Result<(), ForgeError> {
-        self.issues_up()?;
-        if self.links_down.load(Ordering::SeqCst) {
-            return Err(ForgeError::Failed("sub-issues are not enabled".into()));
-        }
-        if self.parent_of(child).is_some() {
-            return Err(ForgeError::Failed(format!("#{child} already has a parent")));
-        }
-        self.link_sub_issue(parent, child);
-        if self.link_answers_lost.swap(false, Ordering::SeqCst) {
-            return Err(ForgeError::Failed("the connection dropped".into()));
-        }
-        Ok(())
-    }
-
-    fn add_blocker(&self, _repo: &ForgeSlug, number: u64, blocker: u64) -> Result<(), ForgeError> {
-        self.issues_up()?;
-        if self.blockers(number).contains(&blocker) {
-            return Err(ForgeError::Failed(format!(
-                "#{number} is already blocked by #{blocker}"
-            )));
-        }
-        self.block(number, blocker);
-        Ok(())
     }
 
     fn close_issue(&self, _repo: &ForgeSlug, number: u64, comment: &str) -> Result<(), ForgeError> {
@@ -876,9 +839,6 @@ impl Forge for FakeForge {
     ) -> Result<(), ForgeError> {
         if self.labels_down.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("labels are down".into()));
-        }
-        if on {
-            self.refuse_missing(&[label])?;
         }
         let mut labels = self.labels.lock().unwrap();
         let on_issue = labels.entry(number).or_default();
@@ -947,5 +907,4 @@ impl Forge for FakeForge {
     }
 }
 
-mod labels;
 mod queue;

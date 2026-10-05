@@ -94,9 +94,6 @@ pub struct Settings {
     /// first whose window is free. CodeRabbit alone when absent or empty.
     #[serde(default)]
     pub pull_request_reviewers: Vec<Bot>,
-    /// Planning, which decides whether a ready issue is one pull request or several
-    #[serde(default)]
-    pub planning: Planning,
     /// Usage pacing
     pub pacing: Pacing,
     /// What every worker is started with
@@ -109,10 +106,38 @@ pub struct Settings {
     pub skills: StepSkills,
 }
 
-pub(crate) use removed::refuse as refuse_removed;
+pub(crate) use removed::{Removed, refuse as refuse_removed};
 
-// The keys the relay's removal left behind
-const REMOVED: &[&str] = &["ruling_channels", "models.relay"];
+const RELAY: &str = "the relay is gone";
+const PLANNING: &str = "the planning call is gone";
+
+// The keys removed features left behind
+const REMOVED: &[Removed] = &[
+    Removed {
+        key: "ruling_channels",
+        because: RELAY,
+    },
+    Removed {
+        key: "models.relay",
+        because: RELAY,
+    },
+    Removed {
+        key: "planning",
+        because: PLANNING,
+    },
+    Removed {
+        key: "models.planner",
+        because: PLANNING,
+    },
+    Removed {
+        key: "agents.planner",
+        because: PLANNING,
+    },
+    Removed {
+        key: "skills.planning",
+        because: PLANNING,
+    },
+];
 
 /// Who decides a merge
 ///
@@ -137,10 +162,6 @@ pub struct Models {
     pub reviewer: RoleModel,
     /// The one-shot that judges every finding
     pub judge: RoleModel,
-    /// The one-shot that plans a ready issue before it opens a work item.
-    /// Opus 5.5 at medium effort when absent.
-    #[serde(default = "default_planner")]
-    pub planner: RoleModel,
     /// The one-shot that checks the whole work item against its issue
     /// before the merge. Opus 5.5 at high effort when absent.
     #[serde(default = "default_auditor")]
@@ -165,26 +186,12 @@ fn opus(effort: Effort) -> RoleModel {
     }
 }
 
-fn default_planner() -> RoleModel {
-    opus(Effort::Medium)
-}
-
 fn default_auditor() -> RoleModel {
     opus(Effort::High)
 }
 
 fn default_deep_reviewer() -> RoleModel {
     opus(Effort::High)
-}
-
-/// Planning settings
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Planning {
-    /// Whether a ready issue the board picks is planned first, and may
-    /// become sub-issues. Off when absent, until splits have run on a real repo.
-    #[serde(default)]
-    pub enabled: bool,
 }
 
 /// One role's model and effort

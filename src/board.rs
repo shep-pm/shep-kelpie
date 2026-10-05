@@ -121,13 +121,6 @@ pub enum Skip {
         /// Its sub-issues still open
         open: u64,
     },
-    /// A ruling on splitting it waits on the maintainer
-    Planning {
-        /// The issue
-        issue: u64,
-        /// The ruling
-        ruling: u64,
-    },
     /// An issue it is blocked by is still open
     Blocked {
         /// The issue
@@ -179,7 +172,6 @@ impl Skip {
             | Self::Finished { issue }
             | Self::Assigned { issue }
             | Self::Split { issue, .. }
-            | Self::Planning { issue, .. }
             | Self::Blocked { issue, .. }
             | Self::Label { issue, .. }
             | Self::Failed { issue, .. }
@@ -710,7 +702,6 @@ mod tests {
             worker: model("qwen3.8:27b"),
             reviewer: model("claude-sonnet-5"),
             judge: model("claude-opus-5-5"),
-            planner: model("claude-opus-5-5"),
             auditor: model("claude-opus-5-5"),
             deep_reviewer: model("claude-opus-5-5"),
             limits: RoleLimits {

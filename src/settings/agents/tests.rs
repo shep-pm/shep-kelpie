@@ -400,26 +400,19 @@ const CODEX: &str =
 #[test]
 fn a_codex_agent_runs_every_role_on_the_codex_account() {
     let names = "worker = \"gpt\"\nreviewer = \"gpt\"\njudge = \"gpt\"\n\
-                 planner = \"gpt\"\nauditor = \"gpt\"\n";
+                 auditor = \"gpt\"\n";
     let agents = project(names).role_agents(&kelpie(CODEX).agents).unwrap();
     for role in [
         &agents.worker,
         &agents.reviewer,
         &agents.judge,
-        &agents.planner,
         &agents.auditor,
     ] {
         assert_eq!(role.harness, AgentHarness::Codex);
         assert_eq!(pair(role), ("gpt-6-sol", Effort::Medium));
     }
     let limits = agents.limits;
-    for limit in [
-        limits.worker,
-        limits.reviewer,
-        limits.judge,
-        limits.planner,
-        limits.auditor,
-    ] {
+    for limit in [limits.worker, limits.reviewer, limits.judge, limits.auditor] {
         assert_eq!(limit, Limit::Account(Account::Codex));
     }
 }

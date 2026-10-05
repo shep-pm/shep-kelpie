@@ -19,9 +19,6 @@ pub struct StepSkills {
     /// Triaging an issue, `triage` by default
     #[serde(default)]
     pub triage: Option<SkillChoice>,
-    /// Splitting a plan into work items, `to-tickets` by default
-    #[serde(default)]
-    pub planning: Option<SkillChoice>,
     /// Writing a spec, `to-spec` by default
     #[serde(default)]
     pub spec: Option<SkillChoice>,
@@ -53,7 +50,6 @@ impl StepSkills {
     pub fn choice(&self, step: Step) -> Option<&SkillChoice> {
         match step {
             Step::Triage => self.triage.as_ref(),
-            Step::Planning => self.planning.as_ref(),
             Step::Spec => self.spec.as_ref(),
             Step::Implement => self.implement.as_ref(),
             Step::Tests => self.tests.as_ref(),
@@ -71,7 +67,6 @@ impl StepSkills {
     pub(super) fn paths_mut(&mut self) -> impl Iterator<Item = &mut PathBuf> {
         let Self {
             triage,
-            planning,
             spec,
             implement,
             tests,
@@ -81,15 +76,13 @@ impl StepSkills {
             reset,
             retro,
         } = self;
-        [
-            triage, planning, spec, implement, tests, review, ci, pr, reset, retro,
-        ]
-        .into_iter()
-        .filter_map(|choice| match choice {
-            Some(SkillChoice::Path { path }) => Some(path),
-            Some(SkillChoice::Plugin { plugin, .. }) => Some(plugin),
-            Some(SkillChoice::None {}) | None => None,
-        })
+        [triage, spec, implement, tests, review, ci, pr, reset, retro]
+            .into_iter()
+            .filter_map(|choice| match choice {
+                Some(SkillChoice::Path { path }) => Some(path),
+                Some(SkillChoice::Plugin { plugin, .. }) => Some(plugin),
+                Some(SkillChoice::None {}) | None => None,
+            })
     }
 }
 

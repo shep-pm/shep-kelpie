@@ -204,7 +204,7 @@ fn a_steps_skill_is_a_file_a_worker_reads_and_text_a_call_with_no_shell_is_given
     let prompt = strings(&call, None, None).pop().unwrap();
     assert_eq!(prompt, "/mattpocock:tdd Implement issue #7");
 
-    // A review round, a planner or a judge has no tool that reads a file.
+    // A review round or a judge has no tool that reads a file.
     let mut review = w.call(Role::Reviewer, Session::New(id(REVIEW_ID)));
     review.tools = Tools::Review;
     review.plugin_dirs = vec![plugin.clone()];

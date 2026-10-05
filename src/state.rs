@@ -15,7 +15,6 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
-use crate::plan::{Piece, Plan};
 use crate::ports::{Finding, Timestamp};
 use crate::review_bot::Bot;
 use crate::settings::Account;
@@ -68,9 +67,6 @@ pub struct ProjectState {
     /// Pull requests adopted and waiting for a free slot, oldest first
     #[serde(default)]
     pub adopted: Vec<Waiting>,
-    /// Issues planned, or being planned, before their work items open
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub plans: Vec<Plan>,
     /// Leases this project holds
     pub leases: Vec<LeaseHeld>,
     /// What the Claude account's week had spent when today began, once
@@ -103,7 +99,6 @@ impl ProjectState {
             history: Vec::new(),
             reworked: Vec::new(),
             adopted: Vec::new(),
-            plans: Vec::new(),
             leases: Vec::new(),
             pacing: None,
             codex_pacing: None,
@@ -429,29 +424,6 @@ pub enum RulingKind {
         /// The phase the gate was in, which a yes goes back to
         phase: Phase,
     },
-    /// The planning call would split the issue into these pieces, before any
-    /// work item opens. A yes opens them as sub-issues, a no works the issue
-    /// whole, and an answer plans it again with the maintainer's note.
-    Split {
-        /// Why, for the issue's comment
-        why: String,
-        /// The pieces, blockers first
-        pieces: Vec<Piece>,
-    },
-    /// The forge refused a split step several times in a row. A yes tries
-    /// again, and a no gives the split up and works the issue whole.
-    SplitStuck {
-        /// The forge's last refusal
-        reason: String,
-        /// The sub-issues opened before it stopped
-        opened: Vec<u64>,
-    },
-    /// The forge refused several times to close an issue whose sub-issues
-    /// are all closed. A yes tries again, and a no leaves it open.
-    CloseStuck {
-        /// The forge's last refusal
-        reason: String,
-    },
     /// The pull request's labels or ready state changed outside kelpie. A
     /// yes accepts the change and kelpie carries on watching it.
     ForeignChange {
@@ -555,6 +527,16 @@ pub enum StateError {
         /// The version it carries
         found: u32,
     },
+    /// A pending ruling is of a kind this kelpie no longer has, so nothing
+    /// here could answer it
+    RemovedRuling {
+        /// The file
+        path: PathBuf,
+        /// The ruling
+        id: u64,
+        /// Its kind, as the file names it
+        kind: String,
+    },
     /// Writing the file failed, and the previous state still stands
     Write {
         /// The file
@@ -576,6 +558,12 @@ impl fmt::Display for StateError {
             Self::Version { path, found } => write!(
                 f,
                 "state file {} is version {found}, and this kelpie reads versions {ONE_ITEM} and {VERSION}",
+                path.display()
+            ),
+            Self::RemovedRuling { path, id, kind } => write!(
+                f,
+                "state file {} holds ruling {id} of kind `{kind}`, which this kelpie no \
+                 longer has: answer or drop it on the old build first",
                 path.display()
             ),
             Self::Write { path, kind } => {
@@ -630,7 +618,11 @@ impl StateStore {
             });
         }
         let mut value: serde_json::Value = serde_json::from_str(&text).map_err(malformed)?;
-        drop_relay_fields(&mut value);
+        if let Some((id, kind)) = removed_ruling(&value) {
+            let path = self.path.clone();
+            return Err(StateError::RemovedRuling { path, id, kind });
+        }
+        drop_removed_fields(&mut value);
         let state: ProjectState = serde_json::from_value(value).map_err(malformed)?;
         Ok(Some(ProjectState {
             version: VERSION,
@@ -663,15 +655,31 @@ impl StateStore {
     }
 }
 
-// A file saved while the relay existed carries its bookkeeping: the count of
-// clears, and on each ruling whether it was relayed and whether to resend it.
-// Those are dropped before reading, and these names only; any other unknown
-// field is still refused.
-fn drop_relay_fields(value: &mut serde_json::Value) {
+// The kinds of ruling the planning call raised, which nothing answers now
+const REMOVED_RULINGS: [&str; 3] = ["split", "split-stuck", "close-stuck"];
+
+// The first pending ruling of a kind in `REMOVED_RULINGS`, by id and kind.
+fn removed_ruling(value: &serde_json::Value) -> Option<(u64, String)> {
+    let rulings = value.get("rulings")?.as_array()?;
+    rulings.iter().find_map(|ruling| {
+        let kind = ruling.get("kind")?.get("kind")?.as_str()?;
+        let id = ruling.get("id")?.as_u64()?;
+        REMOVED_RULINGS
+            .contains(&kind)
+            .then(|| (id, kind.to_owned()))
+    })
+}
+
+// A file saved before the relay and the planning call went carries their
+// bookkeeping: the relay's count of clears, each ruling's relayed and resend
+// flags, and the plans. Only these names are dropped before reading; any
+// other unknown field is still refused.
+fn drop_removed_fields(value: &mut serde_json::Value) {
     let Some(state) = value.as_object_mut() else {
         return;
     };
     state.remove("relay_clears");
+    state.remove("plans");
     let rulings = state.get_mut("rulings").and_then(|r| r.as_array_mut());
     for ruling in rulings.into_iter().flatten() {
         if let Some(ruling) = ruling.as_object_mut() {

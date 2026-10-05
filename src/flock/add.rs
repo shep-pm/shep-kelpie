@@ -78,13 +78,6 @@ effort = "medium"
 model = "claude-opus-5-5"
 effort = "low"
 
-[models.planner]
-model = "claude-opus-5-5"
-effort = "medium"
-
-[planning]
-enabled = false
-
 [review]
 loop_guard = 8
 

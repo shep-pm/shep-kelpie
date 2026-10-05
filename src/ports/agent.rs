@@ -24,8 +24,6 @@ pub enum Role {
     Reviewer,
     /// A one-shot that judges findings
     Judge,
-    /// A one-shot that plans a ready issue before any work item opens
-    Planner,
     /// A one-shot that checks a whole work item against its issue before the merge
     Auditor,
     /// A session of the deep review round: a reader, the confirmation of a
@@ -57,7 +55,6 @@ impl Role {
             Self::Worker => "worker",
             Self::Reviewer => "reviewer",
             Self::Judge => "judge",
-            Self::Planner => "planner",
             Self::Auditor => "auditor",
             Self::DeepReviewer => "deep_reviewer",
         }

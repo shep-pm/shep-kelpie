@@ -67,8 +67,6 @@ impl WorkItem {
                 Role::Judge => &mut spend.judge,
                 Role::Auditor => &mut spend.auditor,
                 Role::DeepReviewer => &mut spend.deep_reviewer,
-                // A planning call runs before any work item opens.
-                Role::Planner => continue,
             };
             role.calls += 1;
             role.tokens += call.usage;

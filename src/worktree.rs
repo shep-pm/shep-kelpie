@@ -243,47 +243,6 @@ pub fn remove(
     }
 }
 
-/// Makes `view` a detached worktree of `repo` at `origin/main`, just
-/// fetched, whatever was there before
-///
-/// # Errors
-///
-/// [`WorktreeError`] naming the git command or folder that failed.
-pub fn view(repo: &Path, view: &Path) -> Result<(), WorktreeError> {
-    remove_view(repo, view)?;
-    if let Some(parent) = view.parent() {
-        create(parent)?;
-    }
-    git(repo, ["fetch", "--quiet", "origin", BASE])?;
-    let base = format!("origin/{BASE}");
-    let args: [&OsStr; 5] = [
-        "worktree".as_ref(),
-        "add".as_ref(),
-        "--detach".as_ref(),
-        view.as_os_str(),
-        base.as_ref(),
-    ];
-    git(repo, args).map(drop)
-}
-
-/// Removes the detached worktree [`view`] made, if it is there
-///
-/// # Errors
-///
-/// [`WorktreeError`] naming the git command that failed.
-pub fn remove_view(repo: &Path, view: &Path) -> Result<(), WorktreeError> {
-    if view.exists() {
-        let args: [&OsStr; 4] = [
-            "worktree".as_ref(),
-            "remove".as_ref(),
-            "--force".as_ref(),
-            view.as_os_str(),
-        ];
-        git(repo, args)?;
-    }
-    git(repo, ["worktree", "prune"]).map(drop)
-}
-
 /// Points git's links from `repo` at each worktree in `worktrees` again
 ///
 /// A move that died before it relinked, or a link git wrote relative, would

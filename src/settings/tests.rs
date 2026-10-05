@@ -187,6 +187,37 @@ fn the_relays_settings_are_refused_by_name() {
 }
 
 #[test]
+fn the_planning_calls_settings_are_refused_by_name() {
+    let table = "[app.dogs.kelpie]\n";
+    let removed = [
+        ("planning", "[app.dogs.kelpie.planning]\nenabled = false\n"),
+        (
+            "models.planner",
+            "[app.dogs.kelpie.models.planner]\nmodel = \"m\"\neffort = \"low\"\n",
+        ),
+        (
+            "agents.planner",
+            "[app.dogs.kelpie.agents]\nplanner = \"opus\"\n",
+        ),
+        (
+            "skills.planning",
+            "[app.dogs.kelpie.skills]\nplanning = { kind = \"none\" }\n",
+        ),
+    ];
+    for (key, block) in removed {
+        let err = parse_err(&format!("{EXAMPLE}\n{block}"));
+        assert!(
+            err.contains(&format!(
+                "`{key}` is no longer a setting, because the planning call is gone: delete it"
+            )),
+            "{key}: {err}"
+        );
+    }
+    let at_top = EXAMPLE.replace(table, &format!("{table}planning = {{ enabled = true }}\n"));
+    assert!(parse_err(&at_top).contains("`planning` is no longer"));
+}
+
+#[test]
 fn a_misspelt_setting_is_named() {
     let text = EXAMPLE.replace("loop_guard", "loop_gaurd");
     let err = parse_err(&text);

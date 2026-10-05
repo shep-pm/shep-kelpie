@@ -479,7 +479,7 @@ fn argv(
         argv.extend(["-c".into(), config("developer_instructions", text)]);
     }
     let mut off: Vec<&str> = FEATURES_OFF.into();
-    // Only a worker runs commands. A review round or planner reads what
+    // Only a worker runs commands. A review round or judge reads what
     // its prompt holds, as Claude Code's do, with no command to run.
     if call.tools != Tools::Work {
         off.push("shell_tool");
