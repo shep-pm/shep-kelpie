@@ -7,10 +7,10 @@
 //! too. A change is checked as a start checks it, and one that fails keeps
 //! the settings the runner has.
 
-use super::{OpenError, Runner, check_coderabbit, check_local, check_reviewers, instructions};
+use super::{OpenError, Runner, check_bots, check_coderabbit, check_local, instructions};
 use crate::agents::Agents;
 use crate::review_bot::Bot;
-use crate::settings::Settings;
+use crate::settings::{ListedReviewer, Settings};
 use crate::skills::Skills;
 use crate::webhook::{KelpieSettings, Webhook};
 
@@ -37,16 +37,12 @@ impl Runner {
             waiting.push("forge");
             settings.forge = self.settings.forge.clone();
         }
-        let reviewers = kelpie.reviewers;
         let gpu_metrics_url = kelpie.gpu_metrics_url.clone();
         let book = Agents::load(&self.paths.agents)?;
         let agents = settings.role_agents(&book)?;
         let lineup = settings.lineup(&book, &self.home)?;
         let webhook = kelpie.webhook;
         let mut changed = changed((&self.settings, &self.webhook), (&settings, &webhook));
-        if reviewers != self.reviewers {
-            changed.push("reviewers");
-        }
         if agents != self.agents || lineup != self.lineup || book != self.book {
             changed.push("agents");
         }
@@ -57,11 +53,13 @@ impl Runner {
             return Ok(None);
         }
         let extra_instructions = instructions::read_extra(&settings)?;
-        check_reviewers(&settings, &reviewers, &self.ports)?;
-        let listed =
-            |s: &Settings| s.coderabbit.enabled && s.reviewers().contains(&Bot::Coderabbit);
-        if listed(&settings) && !listed(&self.settings) {
-            check_coderabbit(&settings, &self.ports)?;
+        check_bots(&lineup, &self.ports)?;
+        let listed = |lineup: &[ListedReviewer]| {
+            let coderabbit = |r: &ListedReviewer| r.bot().is_some_and(|b| b.bot == Bot::Coderabbit);
+            lineup.iter().any(coderabbit)
+        };
+        if listed(&lineup) && !listed(&self.lineup) {
+            check_coderabbit(&settings, &lineup, &self.ports)?;
         }
         if lineup != self.lineup {
             check_local(&lineup, &self.ports)?;
@@ -70,7 +68,6 @@ impl Runner {
         let skills = (settings.skills != self.settings.skills)
             .then(|| Skills::load(&settings.skills, &self.paths.skills));
         self.settings = settings;
-        self.reviewers = reviewers;
         self.lineup = lineup;
         self.agents = agents;
         if book != self.book {
@@ -115,12 +112,6 @@ fn changed((old, was): Reach<'_>, (new, now): Reach<'_>) -> Vec<&'static str> {
         ),
         ("ci", old.ci != new.ci),
         ("max_items", old.max_items != new.max_items),
-        ("generated", old.generated != new.generated),
-        ("coderabbit", old.coderabbit != new.coderabbit),
-        (
-            "pull_request_reviewers",
-            old.pull_request_reviewers != new.pull_request_reviewers,
-        ),
         ("pacing", old.pacing != new.pacing),
         ("worker", old.worker != new.worker),
         ("skills", old.skills != new.skills),
@@ -151,18 +142,18 @@ mod tests {
         let runner = rig.open().unwrap();
         let next = settings_with(&rig, |s| {
             s.replace("merge_authority = \"ask\"", "merge_authority = \"auto\"")
-                .replace("divisor = 1000", "divisor = 500")
+                .replace("kickoff_hours = 8", "kickoff_hours = 6")
                 .replace("max_items = 1", "max_items = 2")
         });
         let mut runner = runner.lock().unwrap();
         let line = runner.reread(next, rig.kelpie_settings()).unwrap();
         assert_eq!(
             line.as_deref(),
-            Some("settings changed: merge_authority, max_items, coderabbit now in effect")
+            Some("settings changed: merge_authority, max_items, pacing now in effect")
         );
         assert_eq!(runner.settings().max_items.get(), 2);
         assert_eq!(runner.settings().merge_authority, MergeAuthority::Auto);
-        assert_eq!(runner.settings().coderabbit.divisor.get(), 500);
+        assert_eq!(runner.settings().pacing.kickoff_hours.get(), 6);
         assert_eq!(runner.status().merge_authority, MergeAuthority::Auto);
     }
 
@@ -185,14 +176,14 @@ mod tests {
         let next = settings_with(&rig, |s| {
             s.replace("forge = \"shep-pm/shep\"", "forge = \"shep-pm/elsewhere\"")
                 .replace(&repo, "/srv/elsewhere")
-                .replace("divisor = 1000", "divisor = 500")
+                .replace("kickoff_hours = 8", "kickoff_hours = 6")
         });
         let mut runner = runner.lock().unwrap();
         let line = runner.reread(next, rig.kelpie_settings()).unwrap();
         assert_eq!(
             line.as_deref(),
             Some(
-                "settings changed: coderabbit now in effect; repo and forge from the runner's next start"
+                "settings changed: pacing now in effect; repo and forge from the runner's next start"
             )
         );
         assert_eq!(runner.settings().forge.as_str(), "shep-pm/shep");
@@ -285,14 +276,26 @@ mod tests {
             .reread(next, rig.kelpie_settings())
             .unwrap_err()
             .to_string();
-        assert!(err.starts_with("setting `coderabbit.enabled`"), "{err}");
-        assert!(!runner.settings().coderabbit.enabled);
+        assert!(
+            err.starts_with("setting `agents.reviewers`: coderabbit"),
+            "{err}"
+        );
+        let listed = runner
+            .settings()
+            .agents
+            .reviewers
+            .clone()
+            .unwrap_or_default();
+        assert!(!listed.iter().any(|name| name.as_str() == "coderabbit"));
         let missing = settings_with(&rig, |s| {
-            s.replace(crate::test::CODERABBIT_ON, crate::test::CODERABBIT_OFF)
-                .replace(
-                    "build_env = {}\n",
-                    "instructions_file = \"/nonexistent/w.md\"\n",
-                )
+            s.replace(
+                crate::test::RIG_REVIEWERS_AND_CODERABBIT,
+                crate::test::RIG_REVIEWERS,
+            )
+            .replace(
+                "build_env = {}\n",
+                "instructions_file = \"/nonexistent/w.md\"\n",
+            )
         });
         let err = runner
             .reread(missing, rig.kelpie_settings())

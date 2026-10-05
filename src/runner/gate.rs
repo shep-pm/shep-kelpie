@@ -8,9 +8,8 @@
 //! the worker's next turn, naming the files. A conflict the worker left
 //! standing parks it on a ruling. A pending run, or none yet, waits for the
 //! next step. A red run is the worker's next turn, naming the checks that
-//! failed. A green run starts a CodeRabbit round while one is owed, and
-//! otherwise raises the merge ruling, or under `auto` merges. A project
-//! without CI skips the checks.
+//! failed. A green run raises the merge ruling, or under `auto` merges. A
+//! project without CI skips the checks.
 
 use super::Runner;
 use super::claude_files::Unchecked;
@@ -106,13 +105,14 @@ impl Runner {
         }
     }
 
-    // Green CI goes to a review bot round while one is owed. Then `auto`
-    // merges by the path a yes takes, and `ask` raises the merge ruling with
-    // the pull request handed back `ready-for-human`. A pull request no
-    // reviewer read gets the ruling under `auto` too, naming why.
+    // Green CI: `auto` merges by the path a yes takes, and `ask` raises the
+    // merge ruling with the pull request handed back `ready-for-human`. A
+    // pull request no reviewer read gets the ruling under `auto` too, naming
+    // why. One an older state file left owing the listed bots a pass gets it
+    // first.
     fn passed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
-        if self.review_bot_due() {
-            return self.start_round(head);
+        if self.bots_before_merge()? {
+            return self.review_step();
         }
         let unreviewed = self.current().and_then(|item| item.unreviewed.clone());
         if self.settings.merge_authority == MergeAuthority::Auto && unreviewed.is_none() {

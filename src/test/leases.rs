@@ -2,7 +2,7 @@
 //! the grants back or hands it a real book, and keeps every ask, return of
 //! a held lease and window fact in order
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -11,7 +11,7 @@ use crate::lease::book::LeaseBook;
 use crate::lease::wire::WindowFact;
 use crate::lease::{Epoch, Holder, LeaseKind};
 use crate::ports::{Leases, Timestamp};
-use crate::review_bot::Reviewers;
+use crate::review_bot::{ReviewWindow, Reviewers};
 use crate::runner::ProjectName;
 
 /// What the runner told the dog
@@ -31,6 +31,7 @@ pub(crate) struct FakeLeases {
     held: Arc<Mutex<BTreeSet<LeaseKind>>>,
     withheld: Arc<AtomicBool>,
     closed: Arc<Mutex<BTreeSet<LeaseKind>>>,
+    opens: Arc<Mutex<BTreeMap<LeaseKind, Timestamp>>>,
     book: Arc<Mutex<Option<(LeaseBook, Holder)>>>,
 }
 
@@ -55,6 +56,12 @@ impl FakeLeases {
         } else {
             all.remove(kind);
         }
+    }
+
+    /// Has the dog's book say `kind`'s window opens at `at`, as a book whose
+    /// window is spent says, until a test says otherwise
+    pub(crate) fn opens_at(&self, kind: &LeaseKind, at: Timestamp) {
+        self.opens.lock().unwrap().insert(kind.clone(), at);
     }
 
     /// Answers from a real lease book on `clock` from now on, as the runner
@@ -131,5 +138,14 @@ impl Leases for FakeLeases {
         if all.last() != Some(&told) {
             all.push(told);
         }
+    }
+
+    fn opens(&self, kind: &LeaseKind, _window: ReviewWindow, now: Timestamp) -> Option<Timestamp> {
+        if let Some((book, _)) = self.book.lock().unwrap().as_ref() {
+            let line = book.status().into_iter().find(|l| &l.kind == kind)?;
+            return line.window?.opens;
+        }
+        let at = self.opens.lock().unwrap().get(kind).copied()?;
+        (at > now).then_some(at)
     }
 }

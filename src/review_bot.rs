@@ -10,18 +10,15 @@
 use std::fmt;
 use std::num::NonZeroU32;
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::lease::LeaseKind;
 use crate::ports::{Finding, Timestamp};
 use crate::state::Resource;
 
-/// A review bot kelpie has a profile for, as settings and the state file name it
-// wire format: changing this is a breaking change to settings and the state file
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
-)]
+/// A review bot kelpie has a profile for, as agent files and the state file name it
+// wire format: changing this is a breaking change to agent files and the state file
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Bot {
     /// CodeRabbit
@@ -37,7 +34,7 @@ impl Bot {
     /// Every bot kelpie has a profile for
     pub const ALL: [Self; 3] = [Self::Coderabbit, Self::Cubic, Self::Codex];
 
-    /// Its name as settings write it, which also names its lease
+    /// Its name as its agent file writes it, which also names its lease and the file
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Coderabbit => "coderabbit",
@@ -86,40 +83,56 @@ impl fmt::Display for Bot {
     }
 }
 
-/// The pull request reviewers kelpie's own settings define, each by its window
+/// A review bot as a reviewer agent file runs it: the bot, its window and
+/// how it is summoned
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BotReviewer {
+    /// Which bot
+    pub bot: Bot,
+    /// Its window, account-wide, which the dog holds
+    pub window: ReviewWindow,
+    /// Whether marking a draft ready is its summon, because it reviews a
+    /// pull request when it leaves draft. Codex's alone.
+    pub reviews_on_ready: bool,
+    /// The most reads it makes of a work item's pull request, whatever its
+    /// passes. Once every pass when `None`.
+    pub rounds: Option<NonZeroU32>,
+}
+
+/// Each review bot's window, as its agent file defines it, for the dog's book
 ///
-/// A project lists only reviewers defined here. CodeRabbit is defined with
-/// one review an hour when absent, which its review footers raise.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+/// A bot whose file kelpie cannot read is undefined, and the dog never
+/// grants it, apart from CodeRabbit, which is one review an hour then.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Reviewers {
-    /// CodeRabbit's window
-    #[serde(default)]
-    pub coderabbit: Option<ReviewWindow>,
-    /// cubic's window. Its free plan gives a private repo 20 reviews a month.
-    #[serde(default)]
-    pub cubic: Option<ReviewWindow>,
-    /// Codex's window: the weekly allowance its plan gives code reviews
-    #[serde(default)]
-    pub codex: Option<CodexReviewer>,
+    windows: std::collections::BTreeMap<Bot, ReviewWindow>,
 }
 
 impl Reviewers {
-    /// The window of `bot`, or `None` when it is not defined
-    pub fn window(&self, bot: Bot) -> Option<ReviewWindow> {
-        match bot {
-            Bot::Coderabbit => Some(self.coderabbit.unwrap_or(ReviewWindow::HOURLY)),
-            Bot::Cubic => self.cubic,
-            Bot::Codex => self.codex.map(CodexReviewer::window),
+    /// The window of each bot whose file in `agents`, named for it, runs it
+    pub fn from_agents(agents: &crate::agents::Agents) -> Self {
+        let mut reviewers = Self::default();
+        for bot in Bot::ALL {
+            let name = crate::settings::AgentName::kelpies(bot.as_str());
+            if let Some(defined) = agents.get(&name).and_then(|a| a.runs.bot()) {
+                reviewers = reviewers.with(bot, defined.window);
+            }
         }
+        reviewers
     }
 
-    /// Whether marking a draft ready is `bot`'s summon, because it reviews a
-    /// pull request when it leaves draft
-    pub fn ready_summons(&self, bot: Bot) -> bool {
-        match bot {
-            Bot::Codex => self.codex.is_some_and(|codex| codex.reviews_on_ready),
-            Bot::Coderabbit | Bot::Cubic => false,
+    /// These windows, and `bot`'s as `window`
+    pub fn with(mut self, bot: Bot, window: ReviewWindow) -> Self {
+        self.windows.insert(bot, window);
+        self
+    }
+
+    /// The window of `bot`, or `None` when it is not defined
+    pub fn window(&self, bot: Bot) -> Option<ReviewWindow> {
+        match (bot, self.windows.get(&bot)) {
+            (_, Some(window)) => Some(*window),
+            (Bot::Coderabbit, None) => Some(ReviewWindow::HOURLY),
+            (Bot::Cubic | Bot::Codex, None) => None,
         }
     }
 
@@ -131,35 +144,8 @@ impl Reviewers {
     }
 }
 
-/// Codex's definition: its window, and whether it reviews on its own
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct CodexReviewer {
-    /// Reviews it allows at once
-    pub reviews: NonZeroU32,
-    /// Hours each accepted summon holds its place
-    pub hours: NonZeroU32,
-    /// Whether Codex reviews a pull request when it leaves draft, as the
-    /// repo's Codex settings may say. Then marking ready is its summon, taken
-    /// under its lease, and kelpie posts no comment for it. Off when absent:
-    /// it was never seen to.
-    #[serde(default)]
-    pub reviews_on_ready: bool,
-}
-
-impl CodexReviewer {
-    /// Its window
-    pub fn window(self) -> ReviewWindow {
-        ReviewWindow {
-            reviews: self.reviews,
-            hours: self.hours,
-        }
-    }
-}
-
 /// A review window: so many reviews in so many hours
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReviewWindow {
     /// Reviews it allows at once. A quota the bot states overrides it.
     pub reviews: NonZeroU32,

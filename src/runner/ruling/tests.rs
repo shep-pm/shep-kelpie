@@ -31,16 +31,6 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
             fix: Fix::Review(review),
             prompt: "fix it".into(),
         },
-        RulingKind::CodeRabbitCap {
-            rounds: 3,
-            held: 2,
-            prompt: "fix it".into(),
-            head: None,
-        },
-        RulingKind::CodeRabbitSilent {
-            bot: crate::review_bot::Bot::Coderabbit,
-            head: "abcdef123".into(),
-        },
         RulingKind::Question {
             asked: "Which flag?".into(),
             resume: Resume::Nothing,
@@ -57,7 +47,7 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
         },
     ];
     for kind in kinds {
-        let said = comment(&kind, "CodeRabbit").unwrap_or_default();
+        let said = comment(&kind).unwrap_or_default();
         assert!(said.ends_with("\n\nWaiting on the maintainer."), "{said}");
         for internal in [
             "shep trigger",
@@ -74,7 +64,7 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
         head: "abc".into(),
         unreviewed: None,
     };
-    assert_eq!(comment(&merge, "CodeRabbit"), None);
+    assert_eq!(comment(&merge), None);
 }
 
 #[test]

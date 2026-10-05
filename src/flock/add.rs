@@ -19,7 +19,7 @@ use shep_client::shep_core::protocol::request::Response;
 use super::{Checkout, Launch, flock, kelpie_sheep, send, tables};
 use crate::board::READY;
 use crate::dog;
-use crate::ports::{Forge, NewLabel, Visibility};
+use crate::ports::{Forge, NewLabel};
 use crate::runner::{HUMAN, IN_PROGRESS, ProjectName, SUMMON_LABEL as SUMMON};
 use crate::settings::{Settings, table_of};
 use crate::shepherd::DOG;
@@ -67,13 +67,9 @@ pub struct Place<'a> {
 const DEFAULTS: &str = r#"
 merge_authority = "ask"
 max_items = 1
-generated = []
 
 [agents]
 implementers = ["sonnet-high"]
-
-[coderabbit]
-divisor = 1000
 
 [pacing]
 enabled = true
@@ -121,10 +117,6 @@ pub async fn add(
              against `main`"
         ));
     }
-    let public = forge
-        .visibility(repo)
-        .map_err(|e| asked("visibility", &e))?
-        == Visibility::Public;
     let rows = flock(client).await?;
     let mut done = Vec::new();
     let runner = kelpie_sheep(client, &rows, name.as_str(), &["runner", name.as_str()]).await?;
@@ -160,7 +152,7 @@ pub async fn add(
     // The runner's table as set, or the one to write.
     let (set, table) = match tables.remove(name.as_str()) {
         Some(set) => (true, set),
-        None => (false, settings(name, place, public)?),
+        None => (false, settings(name, place)?),
     };
     if set {
         let loaded = Settings::from_table(&table, name.as_str(), place.home, place.home)
@@ -238,11 +230,7 @@ pub async fn add(
 
 // The project's settings: its file from before the tables when it has one,
 // else the defaults with what the checkout and the forge say.
-fn settings(
-    name: &ProjectName,
-    place: Place<'_>,
-    public: bool,
-) -> Result<Map<String, Value>, String> {
+fn settings(name: &ProjectName, place: Place<'_>) -> Result<Map<String, Value>, String> {
     let root = &place.checkout.root;
     let table = match std::fs::read_to_string(place.old_settings) {
         Ok(text) => table_of(&text)?,
@@ -255,10 +243,8 @@ fn settings(
                 "ci".into(),
                 Value::Bool(root.join(".github/workflows").is_dir()),
             );
-            if let Some(Value::Object(coderabbit)) = table.get_mut("coderabbit") {
-                coderabbit.insert("enabled".into(), Value::Bool(public));
-            }
-            // `qwen` first where the maintainer's script is installed, as `add` writes its file.
+            // `qwen` first where the maintainer's script is installed, as `add`
+            // writes its file, and no review bot: those are listed by hand.
             let reviewers = crate::settings::default_reviewers(place.home);
             let reviewers = reviewers.iter().map(|name| text(name.as_str())).collect();
             if let Some(Value::Object(agents)) = table.get_mut("agents") {

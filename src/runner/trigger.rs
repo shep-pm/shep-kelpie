@@ -13,10 +13,11 @@ use super::{Answer, Runner};
 use crate::board::Skip;
 use crate::lease::gpu::LockHolder;
 use crate::ports::{ModelSeat, SessionId, Timestamp};
+use crate::review_bot::Bot;
 use crate::settings::{AgentName, MergeAuthority};
 use crate::skills::StepSkill;
 use crate::state::{Finished, LeaseHeld, Ruling, RunState, StateError, Waiting};
-use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Split, Turn, WorkItem};
+use crate::work_item::{BotSkipped, Phase, QwenTally, Spend, Split, Turn, WorkItem};
 
 /// The triggers a runner answers
 pub const ACTIONS: [&str; 10] = [
@@ -128,8 +129,13 @@ pub struct WorkItemStatus<'a> {
     pub phase: &'a Phase,
     /// The worker's draft pull request, once kelpie has seen it
     pub pull_request: Option<u64>,
-    /// Its CodeRabbit rounds so far
-    pub coderabbit: CodeRabbitTally,
+    /// The reads each review bot has made of its pull request
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub bot_reads: &'a BTreeMap<Bot, u32>,
+    /// The listed review bots its pass went on without, and why: one whose
+    /// window opens more than an hour on, or one that never answered
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    pub bots_skipped: &'a [BotSkipped],
     /// Claude calls made for it so far
     pub calls: usize,
     /// What the calls whose harness reports dollars have cost, in US dollars
@@ -174,7 +180,8 @@ impl<'a> WorkItemStatus<'a> {
             turn: &item.turn,
             phase: &item.phase,
             pull_request: item.pull_request,
-            coderabbit: item.coderabbit,
+            bot_reads: &item.bot_reads,
+            bots_skipped: &item.bots_skipped,
             calls: item.calls.len(),
             cost_usd: item.cost().usd(),
             unpriced_calls: item.calls.iter().filter(|c| c.unpriced).count(),

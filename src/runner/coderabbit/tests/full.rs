@@ -6,10 +6,10 @@ use std::sync::Mutex;
 
 use serde_json::json;
 
-use super::super::{DONE_SETTLE, FULL_REVIEW, HEARD_WAIT, LABEL, REVIEW_WAIT};
-use super::{cr, fixed, hold_a_finding, labels, now, off, on, reviewed_by_qwen, summoned};
+use super::super::{DONE_SETTLE, FAR, FULL_REVIEW, HEARD_WAIT, LABEL, REVIEW_WAIT};
+use super::{coderabbit, cr, fixed, hold_a_finding, labels, now, off, on, reviewed, summoned};
 use crate::lease::wire::WindowFact;
-use crate::ports::Checks;
+use crate::ports::{Checks, Timestamp};
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{Rig, Scripted, Told};
 
@@ -25,8 +25,9 @@ fn summoned_80(head: &str) -> Option<StepReport> {
     })
 }
 
-// Pull request 80, ready, adopted with CodeRabbit on, and green. CodeRabbit
-// reviewed its first commit clean before the adoption.
+// Pull request 80, ready and green, adopted by a project that lists
+// CodeRabbit, so a pass of the bots owes it a read. CodeRabbit reviewed its
+// first commit clean before the adoption.
 fn adopted(project: &str) -> (Rig, Mutex<Runner>, String) {
     adopted_set(project, |_| {})
 }
@@ -39,7 +40,7 @@ pub(super) fn adopted_set(project: &str, setup: impl FnOnce(&Rig)) -> (Rig, Mute
     let reviewed = rig.push_by_hand("fix/timeline", "work.txt");
     rig.forge
         .coderabbit
-        .review(80, &reviewed, Rig::EPOCH - 60, &[]);
+        .review(80, &reviewed, Rig::EPOCH - 3600, &[]);
     let head = rig.push_by_hand("fix/timeline", "more.txt");
     rig.forge.open_pull_request(80, "fix/timeline", &[5]);
     rig.forge.ready_pull_request(80);
@@ -60,8 +61,11 @@ fn an_adopted_pull_requests_owed_summon_asks_for_a_full_review_under_the_lease()
     assert_eq!(rig.forge.pull_request_labels(80), Vec::<String>::new());
     let summon = now(&rig);
     assert_eq!(
-        rig.forge.saved_at_comment()[0]["work_items"][0]["phase"],
-        json!({ "state": "coderabbit", "stage": "summoned", "head": head, "at": summon, "full": true }),
+        rig.forge.saved_at_comment()[0]["work_items"][0]["phase"]["stage"],
+        json!({
+            "stage": "summoned", "bot": "coderabbit", "started": summon, "head": head,
+            "at": summon, "full": true,
+        }),
         "the summon is saved before the comment goes out, so no restart posts it twice"
     );
     assert_eq!(
@@ -71,10 +75,14 @@ fn an_adopted_pull_requests_owed_summon_asks_for_a_full_review_under_the_lease()
 
     rig.forge.coderabbit.review(80, &head, summon + 600, &[]);
     rig.clock.advance(600);
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSatisfied { .. })
-    ));
+    assert_eq!(step(&runner).unwrap(), read_80(0));
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["phase"]["state"], "ci");
+    assert_eq!(
+        status["work_item"]["bot_reads"],
+        json!({ "coderabbit": 2 }),
+        "the read from before the adoption, and kelpie's own"
+    );
     assert!(
         rig.leases
             .told()
@@ -104,8 +112,7 @@ fn paused_like_614(project: &str) -> (Rig, String) {
     let mut saved: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
     let item = &mut saved["work_items"][0];
-    item["phase"] =
-        json!({ "state": "coderabbit", "stage": "summoned", "head": head, "at": summon });
+    item["phase"]["stage"] = json!({ "stage": "summoned", "bot": "coderabbit", "started": summon, "head": head, "at": summon });
     item["known"]["labels"] = json!([LABEL]);
     std::fs::write(&state, saved.to_string()).unwrap();
     rig.forge.label_pull_request(80, LABEL);
@@ -146,28 +153,37 @@ fn an_owed_summon_marked_done_with_nothing_posted_asks_once_for_a_full_review_th
 
     rig.forge.coderabbit.review(80, &head, asked + 900, &[]);
     rig.clock.advance(900);
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSatisfied { .. })
-    ));
+    assert_eq!(step(&runner).unwrap(), read_80(0));
 }
 
+fn read_80(open_threads: usize) -> Option<StepReport> {
+    Some(StepReport::BotReviewed {
+        issue: 5,
+        pull_request: 80,
+        round: 1,
+        reviewer: coderabbit(),
+        open_threads,
+    })
+}
+
+// Nobody else read the adopted pull request, so the pass is marked unread.
 #[test]
-fn a_full_review_answered_with_nothing_again_is_the_maintainers_after_two_hours() {
+fn a_full_review_answered_with_nothing_again_is_passed_over_after_two_hours() {
     let (rig, runner, head) = adopted("rotom");
     assert_eq!(rig.verdict(&runner), summoned_80(&head));
     rig.forge.coderabbit.complete(80, &head, now(&rig) + 30);
     rig.clock.advance(REVIEW_WAIT);
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::Ruling { .. })
+        Some(StepReport::ReviewerSkipped { round: 1, .. })
     ));
-    assert_eq!(
-        rig.ask(&runner, "status", None)["rulings"][0]["kind"]["kind"],
-        "coderabbit-silent"
-    );
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Unreviewed { .. })
+    ));
     let comments = rig.forge.comments().into_iter();
     assert_eq!(comments.filter(|(_, c)| c == FULL_REVIEW).count(), 1);
+    assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
 }
 
 #[test]
@@ -205,16 +221,32 @@ fn a_head_marked_done_with_nothing_posted_is_a_clean_read_once_it_settles() {
     assert!(!rig.leases.held(&cr()), "but the summon was answered");
 
     rig.clock.advance(DONE_SETTLE);
-    assert_eq!(
-        step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSatisfied {
-            issue: 7,
-            pull_request: 71,
-            rounds: 1,
-        })
-    );
+    assert_eq!(step(&runner).unwrap(), reviewed(0));
     assert_eq!(labels(&rig), [on(), off()]);
     assert_eq!(rig.forge.comments(), []);
+}
+
+// A merge ruling's no starts a pass of its own, after the catch-up.
+fn noted_after_a_catch_up(rig: &Rig, runner: &Mutex<Runner>, head: &str) -> String {
+    rig.land_on_origin("landed.txt");
+    rig.forge.set_checks(head, Checks::Passed);
+    let Some(StepReport::Rebased { head: rebased, .. }) = rig.verdict(runner) else {
+        panic!("the branch was not caught up");
+    };
+    rig.forge.set_checks(&rebased, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(runner),
+        Some(StepReport::Ruling { id: 1, .. })
+    ));
+    rig.ask(runner, "rule", Some("1 no name the flag"));
+    rig.claude.script([
+        Scripted::Push("flag.txt", "named\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    step(runner).unwrap(); // the noted turn: pushes, and a pass begins
+    step(runner).unwrap(); // round 1, qwen: clean by default
+    step(runner).unwrap(); // round 2, claude: scripted clean above
+    rig.forge.head_of("kelpie/7").unwrap()
 }
 
 #[test]
@@ -222,42 +254,20 @@ fn the_summon_after_kelpie_catches_the_branch_up_asks_for_a_full_review() {
     let (rig, runner, head) = summoned("shep");
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "Name the flag."),
-        Some(StepReport::CodeRabbitSent { .. })
+        Some(StepReport::ReviewFindingsSent { .. })
     ));
-    rig.claude.script([Scripted::Push("fix.txt", "fixed\n")]);
-    step(&runner).unwrap();
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::FixPushed { .. })
-    ));
-    rig.land_on_origin("landed.txt");
-    let Some(StepReport::Rebased { head: rebased, .. }) = rig.verdict(&runner) else {
-        panic!("the branch was not caught up");
-    };
-    rig.forge.set_checks(&rebased, Checks::Passed);
-    assert!(matches!(
-        rig.verdict(&runner),
-        Some(StepReport::Summoned { .. })
-    ));
-    assert_eq!(rig.forge.comments(), full_review(71));
-    assert_eq!(labels(&rig), [on(), off()], "round one's label only");
-
-    // A round past the default cap's two would park on a ruling instead.
-    drop(runner);
-    rig.edit_settings(|s| s.replace("divisor = 1000", "divisor = 1"));
-    let runner = rig.open().unwrap();
-    rig.forge.coderabbit.settle("PRRT_71_0");
-    assert!(matches!(
-        hold_a_finding(&rig, &runner, &rebased, "Name it again."),
-        Some(StepReport::CodeRabbitSent { .. })
-    ));
-    fixed(&rig, &runner, "fix-2.txt");
+    let head = fixed(&rig, &runner, "fix.txt");
+    let noted = noted_after_a_catch_up(&rig, &runner, &head);
     assert_eq!(
-        labels(&rig),
-        [on(), off(), on()],
-        "the full review read the catch-up, so the next round asks by label"
+        step(&runner).unwrap(),
+        Some(StepReport::Summoned {
+            issue: 7,
+            pull_request: 71,
+            head: noted,
+        })
     );
     assert_eq!(rig.forge.comments(), full_review(71));
+    assert_eq!(labels(&rig), [on(), off()], "the first pass's label only");
 }
 
 #[test]
@@ -295,23 +305,29 @@ fn an_owed_summon_waiting_for_the_lease_to_ask_again_takes_the_label_off_first()
     assert_eq!(rig.forge.comments(), full_review(80));
 }
 
+// The first pass went on without CodeRabbit, so it never read the pull request.
 #[test]
 fn a_catch_up_before_coderabbits_first_read_is_summoned_by_the_label_alone() {
-    let (rig, runner, head) = reviewed_by_qwen("golbat");
-    rig.land_on_origin("landed.txt");
-    rig.forge.set_checks(&head, Checks::Passed);
-    let Some(StepReport::Rebased { head: rebased, .. }) = rig.verdict(&runner) else {
-        panic!("the branch was not caught up");
-    };
-    rig.forge.set_checks(&rebased, Checks::Passed);
+    let (rig, runner, head) = super::reviewed_by_qwen("golbat");
+    rig.leases.opens_at(&cr(), Timestamp(now(&rig) + FAR + 1));
     assert!(matches!(
-        rig.verdict(&runner),
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewerSkipped { .. })
+    ));
+    rig.leases.opens_at(&cr(), Timestamp(now(&rig)));
+    let noted = noted_after_a_catch_up(&rig, &runner, &head);
+    assert!(matches!(
+        step(&runner).unwrap(),
         Some(StepReport::MarkedReady { .. })
     ));
-    assert!(matches!(
-        rig.verdict(&runner),
-        Some(StepReport::Summoned { .. })
-    ));
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Summoned {
+            issue: 7,
+            pull_request: 71,
+            head: noted,
+        })
+    );
     assert_eq!(labels(&rig), [on()]);
     assert_eq!(rig.forge.comments(), []);
 }

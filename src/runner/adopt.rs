@@ -3,9 +3,11 @@
 //! The maintainer adopts one with `adopt <pr>`, or with `ready-for-agent` on
 //! one whose branch isn't `kelpie/N`, seen on the board's poll. Adopted pull
 //! requests wait in the state file for a free slot, one at a time, and go
-//! before the board's issues. Each starts at CI on its branch as
-//! `origin` holds it, with its labels, ready state and head taken as kelpie's
-//! own. A review asking for changes is the worker's first turn instead. The
+//! before the board's issues. Each starts on its branch as `origin` holds
+//! it, with its labels, ready state and head taken as kelpie's own, at a
+//! pass of the review bots the project lists, which each owe it a read of
+//! kelpie's own summon, or at CI when it lists none. A review asking for
+//! changes is the worker's first turn instead. The
 //! branch's owner may still be pushing, so only a push the worker's worktree
 //! holds is the worker's.
 
@@ -355,27 +357,21 @@ impl Runner {
         prepared.map_err(|e| AdoptError::Worktree(e.to_string()))?;
         let head = worktree::origin_head(&self.settings.repo, &pr.branch)
             .map_err(|e| AdoptError::Worktree(e.to_string()))?;
-        // The cap counts every listed bot's reviews so far. One of this head
-        // counts when the gate finds it, as any round does.
-        let bots: Vec<_> = self
-            .settings
-            .reviewers()
-            .into_iter()
-            .map(|b| self.profile(b))
-            .collect();
-        let mut rounds = 0u32;
-        let counted = if self.settings.coderabbit.enabled {
-            &bots[..]
-        } else {
-            &[]
-        };
-        for bot in counted {
+        // A listed bot's `rounds` counts the reviews it gave so far. One of
+        // this head counts when the bot's round finds it, as any read does.
+        let listed = self.listed_bots();
+        let mut bot_reads = std::collections::BTreeMap::new();
+        for bot in &listed {
+            let bot = self.profile(bot.bot);
             let activity = self
                 .ports
                 .forge
                 .review_bot(&repo, number, bot.login())
                 .map_err(|e| AdoptError::ReviewBot(bot.name().to_owned(), number, e))?;
-            rounds = rounds.saturating_add(bot.reviewed_besides(&activity, &head));
+            let reads = bot.reviewed_besides(&activity, &head);
+            if reads > 0 {
+                bot_reads.insert(bot.bot(), reads);
+            }
         }
         let review = pr
             .review
@@ -386,7 +382,7 @@ impl Runner {
         turn::write(&fresh.build, &adopted_path(&fresh.build), &text).map_err(AdoptError::File)?;
         // With the summon labels off, no push summons a review bot outside the lease.
         let mut labels = pr.labels;
-        let summons = bots.iter().filter_map(|bot| bot.label());
+        let summons = self.ports.review_bots.iter().filter_map(|bot| bot.label());
         for label in [READY, HUMAN].into_iter().chain(summons) {
             if labels.iter().any(|l| l == label) {
                 self.ports
@@ -404,6 +400,14 @@ impl Runner {
                 next.reworked.push(review.id.clone());
                 let first = Some(Phase::Review(Review::first()));
                 (Turn::Due, Phase::Implement, first)
+            }
+            // A listed bot owes it a read of kelpie's own before CI.
+            None if !listed.is_empty() => {
+                let bots = Phase::Review(Review {
+                    bots_only: true,
+                    ..Review::first()
+                });
+                (Turn::Ended { at: now }, bots, None)
             }
             None => {
                 let ci = Phase::Ci {
@@ -428,8 +432,8 @@ impl Runner {
             },
             ..fresh
         };
-        item.coderabbit.rounds = rounds;
-        item.summon_owed = self.settings.coderabbit.enabled;
+        item.bot_reads = bot_reads;
+        item.summons_owed = listed.iter().map(|bot| bot.bot).collect();
         next.work_items.push(item);
         self.save(next).map_err(AdoptError::State)?;
         self.mark_held(issue, true);

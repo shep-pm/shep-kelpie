@@ -233,14 +233,14 @@ fn a_labelled_pull_request_refused_loses_the_label_and_gets_the_comment_once() {
 }
 
 #[test]
-fn an_adopted_pull_request_skips_the_qwen_loop_and_reaches_coderabbit() {
+fn an_adopted_pull_request_skips_the_other_reviewers_and_reaches_coderabbit() {
     let rig = Rig::new("shep");
     rig.coderabbit_on();
     rig.push_by_hand("fix/timeline", "work.txt");
     let reviewed = rig.forge.head_of("fix/timeline").unwrap();
     rig.forge
         .coderabbit
-        .review(80, &reviewed, Rig::EPOCH - 60, &[]);
+        .review(80, &reviewed, Rig::EPOCH - 3600, &[]);
     let head = rig.push_by_hand("fix/timeline", "more.txt");
     rig.forge.open_pull_request(80, "fix/timeline", &[5]);
     rig.forge.label_pull_request(80, LABEL);
@@ -249,8 +249,9 @@ fn an_adopted_pull_request_skips_the_qwen_loop_and_reaches_coderabbit() {
     step(&runner).unwrap();
     let status = rig.ask(&runner, "status", None);
     assert_eq!(
-        status["work_item"]["coderabbit"]["rounds"], 1,
-        "the cap counts the review already there"
+        status["work_item"]["bot_reads"],
+        json!({ "coderabbit": 1 }),
+        "its reads count the review already there"
     );
     assert_eq!(
         rig.forge.pull_request_labels(80),
@@ -258,16 +259,15 @@ fn an_adopted_pull_request_skips_the_qwen_loop_and_reaches_coderabbit() {
         "no push summons outside the lease"
     );
 
-    rig.forge.set_checks(&head, Checks::Passed);
     assert_eq!(
-        rig.verdict(&runner),
+        step(&runner).unwrap(),
         Some(StepReport::MarkedReady {
             issue: 5,
             pull_request: 80,
         })
     );
     assert_eq!(
-        rig.verdict(&runner),
+        step(&runner).unwrap(),
         Some(StepReport::Summoned {
             issue: 5,
             pull_request: 80,
@@ -511,31 +511,41 @@ fn a_push_by_the_branchs_owner_before_the_workers_turn_parks_it_with_no_turn() {
 }
 
 #[test]
-fn one_coderabbit_review_of_the_head_it_arrived_with_is_round_one_not_the_cap() {
+fn a_coderabbit_review_of_the_head_it_arrived_with_counts_once_its_own_read_lands() {
     let rig = Rig::new("shep");
     rig.coderabbit_on();
     let head = opened_80(&rig);
     rig.forge.ready_pull_request(80);
     rig.forge
         .coderabbit
-        .review(80, &head, Rig::EPOCH - 60, &["Check the bounds"]);
+        .review(80, &head, Rig::EPOCH - 3600, &["Check the bounds"]);
     let runner = running(&rig);
     rig.ask(&runner, "adopt", Some("80"));
     step(&runner).unwrap();
     assert_eq!(
-        rig.ask(&runner, "status", None)["work_item"]["coderabbit"]["rounds"],
-        0
+        rig.ask(&runner, "status", None)["work_item"]["bot_reads"],
+        json!(null)
     );
 
-    rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
-        rig.verdict(&runner),
-        Some(StepReport::CodeRabbitReviewed { round: 1, .. })
+        step(&runner).unwrap(),
+        Some(StepReport::Summoned { .. })
+    ));
+    let at = crate::ports::Clock::now(&rig.clock).0;
+    rig.forge.coderabbit.review(80, &head, at + 60, &[]);
+    rig.clock.advance(60);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::BotReviewed {
+            round: 1,
+            open_threads: 1,
+            ..
+        })
     ));
     step(&runner).unwrap(); // the finding goes to the worker
     let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["rulings"], json!([]), "no cap ruling");
-    assert_eq!(status["work_item"]["coderabbit"]["rounds"], 1);
+    assert_eq!(status["rulings"], json!([]));
+    assert_eq!(status["work_item"]["bot_reads"], json!({ "coderabbit": 1 }));
 }
 
 #[test]
@@ -561,9 +571,8 @@ fn a_start_retried_after_a_failure_begins_at_the_head_origin_holds_now() {
     );
     let worktree = rig.paths().worktree(5);
     assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), moved);
-    rig.forge.set_checks(&moved, Checks::Passed);
     assert!(matches!(
-        rig.verdict(&runner),
+        step(&runner).unwrap(),
         Some(StepReport::MarkedReady { .. })
     ));
 }
@@ -629,8 +638,9 @@ fn taking_the_label_off_a_waiting_pull_request_takes_it_back() {
     assert_eq!(rig.forge.comments(), []);
 }
 
-// Pull request 80 adopted under `auto` with CodeRabbit on, ready, its head
-// already reviewed by CodeRabbit before the adoption. Returns its head.
+// Pull request 80 adopted under `auto` by a project listing CodeRabbit,
+// ready and green, its head already reviewed by CodeRabbit before the
+// adoption. Returns its head.
 fn adopted_reviewed_under_auto(rig: &Rig, titles: &[&str]) -> (Mutex<Runner>, String) {
     rig.coderabbit_on();
     rig.merge_auto();
@@ -638,7 +648,7 @@ fn adopted_reviewed_under_auto(rig: &Rig, titles: &[&str]) -> (Mutex<Runner>, St
     rig.forge.ready_pull_request(80);
     rig.forge
         .coderabbit
-        .review(80, &head, Rig::EPOCH - 60, titles);
+        .review(80, &head, Rig::EPOCH - 3600, titles);
     let runner = running(rig);
     rig.ask(&runner, "adopt", Some("80"));
     step(&runner).unwrap();
@@ -647,7 +657,7 @@ fn adopted_reviewed_under_auto(rig: &Rig, titles: &[&str]) -> (Mutex<Runner>, St
 }
 
 #[test]
-fn a_clean_review_from_before_the_adoption_never_satisfies_the_round() {
+fn a_clean_review_from_before_the_adoption_never_stands_for_the_bots_read() {
     let rig = Rig::new("shep");
     let (runner, head) = adopted_reviewed_under_auto(&rig, &[]);
     assert_eq!(
@@ -658,8 +668,7 @@ fn a_clean_review_from_before_the_adoption_never_satisfies_the_round() {
             head: head.clone(),
         })
     );
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["work_item"]["coderabbit"]["satisfied"], false);
+    assert_eq!(rig.forge.comments().len(), 1, "a full review, by comment");
     rig.clock.advance(60);
     assert_eq!(step(&runner).unwrap(), None, "the old review is no answer");
     assert_eq!(rig.forge.merges(), []);
@@ -669,7 +678,10 @@ fn a_clean_review_from_before_the_adoption_never_satisfies_the_round() {
     rig.clock.advance(60);
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSatisfied { .. })
+        Some(StepReport::BotReviewed {
+            open_threads: 0,
+            ..
+        })
     ));
     assert!(matches!(
         rig.verdict(&runner),
@@ -679,16 +691,27 @@ fn a_clean_review_from_before_the_adoption_never_satisfies_the_round() {
 }
 
 #[test]
-fn threads_from_before_the_adoption_go_to_the_worker_and_its_fix_still_owes_a_summon() {
+fn threads_from_before_the_adoption_go_to_the_worker_once_kelpies_own_read_lands() {
     let rig = Rig::new("rotom");
     let (runner, head) = adopted_reviewed_under_auto(&rig, &["Check the bounds"]);
     assert!(matches!(
         rig.verdict(&runner),
-        Some(StepReport::CodeRabbitReviewed { round: 1, .. })
+        Some(StepReport::Summoned { .. })
+    ));
+    let at = crate::ports::Clock::now(&rig.clock).0;
+    rig.forge.coderabbit.review(80, &head, at + 60, &[]);
+    rig.clock.advance(60);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::BotReviewed {
+            round: 1,
+            open_threads: 1,
+            ..
+        })
     ));
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSent { held: 1, .. })
+        Some(StepReport::ReviewFindingsSent { held: 1, .. })
     ));
     rig.claude
         .script([Scripted::Push("bounds.txt", "checked\n")]);
@@ -699,17 +722,11 @@ fn threads_from_before_the_adoption_go_to_the_worker_and_its_fix_still_owes_a_su
         step(&runner).unwrap(),
         Some(StepReport::FixPushed { .. })
     ));
+    assert_eq!(rig.forge.coderabbit.resolved(), ["PRRT_80_0"]);
     rig.forge.set_checks(&fixed, Checks::Passed);
-    assert_eq!(
+    assert!(matches!(
         rig.verdict(&runner),
-        Some(StepReport::Summoned {
-            issue: 5,
-            pull_request: 80,
-            head: fixed,
-        })
-    );
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["work_item"]["coderabbit"]["satisfied"], false);
-    assert_eq!(status["work_item"]["coderabbit"]["rounds"], 1);
-    assert_eq!(rig.forge.merges(), []);
+        Some(StepReport::Finished { merged: true, .. })
+    ));
+    assert_eq!(rig.forge.merges(), [(80, fixed)]);
 }

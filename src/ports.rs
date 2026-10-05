@@ -16,7 +16,7 @@ use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
 use crate::local_paths::Leak;
-use crate::review_bot::{Activity, Login, Profile};
+use crate::review_bot::{Activity, Login, Profile, ReviewWindow};
 use crate::settings::{Account, ForgeSlug};
 use crate::webhook::Webhook;
 
@@ -761,6 +761,10 @@ pub trait Leases: Send + Sync {
 
     /// Tells the dog what this run saw of `kind`'s review window
     fn window(&self, kind: &LeaseKind, fact: WindowFact, value: u64);
+
+    /// When the dog's book says `kind`'s window, defined as `window`, opens
+    /// after `now`, or `None` while it is open or the book cannot be read
+    fn opens(&self, kind: &LeaseKind, window: ReviewWindow, now: Timestamp) -> Option<Timestamp>;
 }
 
 /// Every port the runner uses, as one bundle

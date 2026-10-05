@@ -1,6 +1,5 @@
-//! Kelpie's own settings: the webhook, the
-//! pull request reviewers, the counted
-//! leases' capacities and kelpie's own Codex login
+//! Kelpie's own settings: the webhook, the counted leases' capacities, the
+//! GPU's metrics page and kelpie's own Codex login
 //!
 //! Kelpie's `[kelpie]` section of `dogs.toml`, or the file under kelpie's
 //! home it had before one, shared by every project. Every part is
@@ -19,7 +18,6 @@ use serde::Deserialize;
 use shep_client::dogs::dog_config;
 
 use crate::lease::counted::CARGO_TEST_CAPACITY;
-use crate::review_bot::Reviewers;
 use crate::settings::{EndpointUrl, SettingsError};
 
 /// What every project shares
@@ -31,9 +29,6 @@ pub struct KelpieSettings {
     /// the terminal
     #[serde(default)]
     pub webhook: Option<Webhook>,
-    /// The pull request reviewers a project may list, each by its window
-    #[serde(default)]
-    pub reviewers: Reviewers,
     /// How many commands may hold each counted lease at once
     #[serde(default)]
     pub leases: Leases,
@@ -143,9 +138,7 @@ fn authority(rest: &str) -> &str {
 
 /// What a malformed file is told, since the parser's own message could quote the URL
 const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntfy`) \
-                     and an `https://` `url`, and `[reviewers.coderabbit]` and \
-                     `[reviewers.cubic]` and `[reviewers.codex]` tables with `reviews` and `hours`, \
-                     a `[leases]` table with a \
+                     and an `https://` `url`, a `[leases]` table with a \
                      `cargo-test` count, a `gpu_metrics_url`, a `codex_home` path, and nothing else";
 
 impl KelpieSettings {
@@ -233,6 +226,14 @@ impl KelpieSettings {
                       `\"session\"` table is a session reviewer on its model and effort \
                       whose body is its prompt. Then delete the tables",
             },
+            crate::settings::Removed {
+                key: "reviewers",
+                because: "review bots are reviewer agent files on the `bot` harness, which \
+                          hold each bot's window",
+                fix: "write each `[reviewers.<bot>]` table's `reviews` and `hours`, and \
+                      Codex's `reviews_on_ready`, into `agents/<bot>.md` in kelpie's home, \
+                      which `shep kelpie add` writes out, and delete the tables",
+            },
         ];
         crate::settings::refuse_removed(text, &removed)?;
         toml::from_str(text).map_err(|e: toml::de::Error| {
@@ -311,6 +312,22 @@ mod tests {
         assert!(err.contains("`gpu_lease = true` as `lease: gpu`"), "{err}");
         assert!(err.contains("whose body is its prompt"), "{err}");
         assert!(!err.contains("s3cr3t"), "{err}");
+    }
+
+    #[test]
+    fn kelpies_reviewer_windows_are_refused_saying_they_are_bot_files_now() {
+        let text = format!(
+            "[webhook]\nkind = \"ntfy\"\nurl = \"{SECRET}\"\n\
+             [reviewers.cubic]\nreviews = 20\nhours = 720\n"
+        );
+        assert_eq!(
+            parse_err(&text),
+            "`reviewers` is no longer a setting, because review bots are reviewer agent \
+             files on the `bot` harness, which hold each bot's window: write each \
+             `[reviewers.<bot>]` table's `reviews` and `hours`, and Codex's \
+             `reviews_on_ready`, into `agents/<bot>.md` in kelpie's home, which \
+             `shep kelpie add` writes out, and delete the tables"
+        );
     }
 
     #[test]

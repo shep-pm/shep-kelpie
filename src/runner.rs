@@ -16,7 +16,7 @@ use crate::board::{LabelError, Skip, agent_label, old_worker_label};
 use crate::local_paths::LocalPaths;
 use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Guarded, Leased, Ports, SessionId, Timestamp, Visibility};
-use crate::review_bot::{Bot, Profile, Reviewers};
+use crate::review_bot::{Bot, Profile};
 use crate::settings::{
     Account, AgentName, ListedReviewer, NonBlank, RoleAgents, Settings, SettingsError,
 };
@@ -25,8 +25,7 @@ use crate::state::ids::RulingIds;
 use crate::state::{ProjectState, RunState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{
-    CodeRabbitTally, Known, Phase, QwenTally, ReviewCallState, Timings, Turn, WorkItem,
-    new_session_id,
+    Known, Phase, QwenTally, ReviewCallState, Timings, Turn, WorkItem, new_session_id,
 };
 
 mod adopt;
@@ -51,6 +50,7 @@ mod kept_tests;
 #[cfg(test)]
 mod limits_tests;
 mod merge;
+mod older_bots;
 mod pace;
 mod parent;
 mod paths;
@@ -195,8 +195,6 @@ pub struct Runner {
     skipped: Vec<Skip>,
     // The forge's refusals in a row to close a done parent, kept in memory only
     close_refused: parent::Refused,
-    // The pull request reviewers kelpie's own settings define
-    reviewers: Reviewers,
     // The review's reviewers, in order, from the project's list
     lineup: Vec<ListedReviewer>,
     // The project's implementers
@@ -255,7 +253,6 @@ impl Runner {
         ports.forge = Box::new(Guarded::new(ports.forge, local));
         let leases = Arc::clone(&ports.local_leases);
         ports.agents = Arc::new(Leased::new(Arc::clone(&ports.agents), leases));
-        let reviewers = kelpie_settings.reviewers;
         let gpu = gpu::GpuWatch::start(
             Arc::clone(&ports.gpu),
             kelpie_settings.gpu_metrics_url.clone(),
@@ -289,10 +286,10 @@ impl Runner {
             env_home.as_deref(),
             std::env::var_os("PATH").as_deref(),
         )?;
-        check_reviewers(&settings, &reviewers, &ports)?;
+        check_bots(&lineup, &ports)?;
         crate::skills::check(&settings.skills, &paths.skills)?;
         let skills = Skills::load(&settings.skills, &paths.skills);
-        check_coderabbit(&settings, &ports)?;
+        check_coderabbit(&settings, &lineup, &ports)?;
         check_local(&lineup, &ports)?;
         let mut state = store
             .load()?
@@ -330,7 +327,6 @@ impl Runner {
             pacing: BTreeMap::new(),
             skipped: Vec::new(),
             close_refused: parent::Refused::new(),
-            reviewers,
             lineup,
             agents,
             book,
@@ -346,6 +342,7 @@ impl Runner {
             notes,
             live_turns: timings::LiveTurns::default(),
         };
+        runner.settle_older_bots()?;
         runner.settle_labels();
         Ok(runner)
     }
@@ -361,19 +358,19 @@ impl Runner {
         std::sync::Arc::clone(found.expect("a listed review bot has a profile"))
     }
 
+    // The review bots the project lists, in its order.
+    fn listed_bots(&self) -> Vec<crate::review_bot::BotReviewer> {
+        self.lineup.iter().filter_map(ListedReviewer::bot).collect()
+    }
+
     /// A log line for each step whose skill could not load
     pub fn skill_notices(&self) -> impl Iterator<Item = String> + '_ {
         self.skills.notices()
     }
 
     fn names(&self) -> Names<'_> {
-        let listed = self.settings.reviewers().into_iter();
-        let names: Vec<String> = listed
-            .map(|bot| self.profile(bot).name().to_owned())
-            .collect();
         Names {
             project: self.project.as_str(),
-            bot: names.join("/"),
             ids: RulingIds::under(&self.paths.kelpie_home),
         }
     }
@@ -515,7 +512,8 @@ impl Runner {
             conflict: None,
             resume: None,
             review_call: ReviewCallState::default(),
-            coderabbit: CodeRabbitTally::default(),
+            bot_reads: Default::default(),
+            bots_skipped: Vec::new(),
             known: Known::default(),
             claude_files_accepted: None,
             qwen: QwenTally::default(),
@@ -525,6 +523,8 @@ impl Runner {
             merge_tried: None,
             merge_queued: None,
             summon_owed: false,
+            summons_owed: Default::default(),
+            bots_after_ci: false,
             threads_sent: Vec::new(),
             resolve_failures: 0,
             reviewers_skipped: Vec::new(),
@@ -647,52 +647,52 @@ fn check_local(lineup: &[ListedReviewer], ports: &Ports) -> Result<(), SettingsE
     Ok(())
 }
 
-// What a ruling's question names: its project, and the review bots it may
-// be about, as one name, and where its id comes from.
+// What a ruling's question names: its project, and where its id comes from.
 #[derive(Debug, Clone)]
 struct Names<'a> {
     project: &'a str,
-    bot: String,
     ids: RulingIds,
 }
 
-// Every listed reviewer needs a definition in kelpie's settings and a profile.
-fn check_reviewers(
-    settings: &Settings,
-    reviewers: &Reviewers,
-    ports: &Ports,
-) -> Result<(), SettingsError> {
-    let invalid = |reason: String| SettingsError::Invalid {
-        setting: "pull_request_reviewers",
-        reason,
-    };
-    for bot in settings.reviewers() {
-        if reviewers.window(bot).is_none() {
-            return Err(invalid(format!(
-                "{bot} is not defined: kelpie's own settings need a [reviewers.{bot}] table"
-            )));
-        }
-        if !ports.review_bots.iter().any(|p| p.bot() == bot) {
-            return Err(invalid(format!("kelpie has no profile for {bot}")));
+// Every listed review bot needs a profile.
+fn check_bots(lineup: &[ListedReviewer], ports: &Ports) -> Result<(), SettingsError> {
+    for reviewer in lineup {
+        let Some(bot) = reviewer.bot() else {
+            continue;
+        };
+        if !ports.review_bots.iter().any(|p| p.bot() == bot.bot) {
+            return Err(SettingsError::Invalid {
+                setting: "agents.reviewers",
+                reason: format!("{}: kelpie has no profile for {}", reviewer.name, bot.bot),
+            });
         }
     }
     Ok(())
 }
 
-fn check_coderabbit(settings: &Settings, ports: &Ports) -> Result<(), OpenError> {
-    let listed = settings.reviewers().contains(&Bot::Coderabbit);
-    if !settings.coderabbit.enabled || !listed {
+// CodeRabbit's free plan reviews public repos only, so listing it for a
+// repo the forge reports otherwise stops the runner.
+fn check_coderabbit(
+    settings: &Settings,
+    lineup: &[ListedReviewer],
+    ports: &Ports,
+) -> Result<(), OpenError> {
+    let listed = lineup
+        .iter()
+        .find(|r| r.bot().is_some_and(|b| b.bot == Bot::Coderabbit));
+    let Some(listed) = listed else {
         return Ok(());
-    }
+    };
     let visibility = match ports.forge.visibility(&settings.forge)? {
         Visibility::Public => return Ok(()),
         Visibility::Private => "private",
         Visibility::Internal => "internal",
     };
     Err(SettingsError::Invalid {
-        setting: "coderabbit.enabled",
+        setting: "agents.reviewers",
         reason: format!(
-            "{} is {visibility}, and {}'s free plan reviews public repos only",
+            "{}: {} is {visibility}, and {}'s free plan reviews public repos only",
+            listed.name,
             settings.forge.as_str(),
             Bot::Coderabbit.name()
         ),
@@ -805,7 +805,7 @@ mod tests {
     }
 
     #[test]
-    fn coderabbit_on_for_a_repo_that_is_not_public_stops_the_runner() {
+    fn coderabbit_listed_for_a_repo_that_is_not_public_stops_the_runner() {
         for (visibility, seen_by) in [
             (Visibility::Private, "private"),
             (Visibility::Internal, "internal"),
@@ -816,7 +816,7 @@ mod tests {
             assert_eq!(
                 rig.open().unwrap_err().to_string(),
                 format!(
-                    "setting `coderabbit.enabled`: shep-pm/shep is {seen_by}, \
+                    "setting `agents.reviewers`: coderabbit: shep-pm/shep is {seen_by}, \
                      and CodeRabbit's free plan reviews public repos only"
                 )
             );
@@ -824,7 +824,7 @@ mod tests {
     }
 
     #[test]
-    fn coderabbit_on_for_a_public_repo_asks_the_forge_once() {
+    fn coderabbit_listed_for_a_public_repo_asks_the_forge_once() {
         let rig = Rig::new("shep");
         rig.coderabbit_on();
         rig.open().unwrap();
@@ -832,8 +832,17 @@ mod tests {
     }
 
     #[test]
-    fn coderabbit_off_never_asks_the_forge() {
-        let rig = Rig::new("zeus");
+    fn a_project_listing_no_bot_never_asks_the_forge() {
+        let rig = Rig::new("acme");
+        rig.forge.set_visibility(Visibility::Private);
+        rig.open().unwrap();
+        assert_eq!(rig.forge.calls(), 0);
+    }
+
+    #[test]
+    fn a_repo_github_marks_private_may_list_cubic() {
+        let rig = Rig::new("acme");
+        rig.reviewers(&["qwen", "claude", "cubic"]);
         rig.forge.set_visibility(Visibility::Private);
         rig.open().unwrap();
         assert_eq!(rig.forge.calls(), 0);

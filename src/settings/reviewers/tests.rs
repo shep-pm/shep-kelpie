@@ -131,3 +131,27 @@ fn a_commands_leading_tilde_is_the_home_folder_and_an_absolute_path_stays() {
         [home.path().join("bin/review"), "/opt/review".into()]
     );
 }
+
+const CODEX_ON_READY: &str = "---\nrole: reviewer\nharness: bot\nbot: codex\nreviews: 10\n\
+                              hours: 168\nreviews_on_ready: true\n---\n";
+
+#[test]
+fn a_bot_that_reviews_on_ready_is_refused_after_another_bot_and_kept_before_it() {
+    let book = book().with("codex", CODEX_ON_READY);
+    let (settings, home) = project(Some(r#"["defect-hunter", "coderabbit", "codex"]"#));
+    let err = settings.lineup(&book, home.path()).unwrap_err().to_string();
+    assert_eq!(
+        err,
+        "setting `agents.reviewers`: codex reviews a pull request when it leaves draft, \
+         so list it before coderabbit: a bot listed before it marks the draft ready, \
+         which draws Codex's own review outside its lease"
+    );
+    let (settings, home) = project(Some(r#"["codex", "defect-hunter", "coderabbit"]"#));
+    let lineup = settings.lineup(&book, home.path()).unwrap();
+    assert_eq!(names(&lineup), ["codex", "defect-hunter", "coderabbit"]);
+    let (settings, home) = project(Some(r#"["coderabbit", "codex"]"#));
+    assert!(
+        settings.lineup(&Agents::embedded(), home.path()).is_ok(),
+        "kelpie's own Codex file does not review on ready"
+    );
+}

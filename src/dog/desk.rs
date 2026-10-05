@@ -343,12 +343,12 @@ pub(super) mod tests {
         world_with(Reviewers::default())
     }
 
-    // A dog whose section defines `reviewers`.
+    // A dog whose agent files define `reviewers`.
     pub(crate) fn world_with(reviewers: Reviewers) -> World {
         let _temp = tempfile::tempdir().unwrap();
         let clock = FakeClock::at(EPOCH);
         let gpu = GpuLock::under(_temp.path());
-        let desk = Desk::new(Box::new(clock.clone()), gpu, reviewers);
+        let desk = Desk::new(Box::new(clock.clone()), gpu, reviewers.clone());
         World {
             desk,
             clock,
@@ -386,7 +386,12 @@ pub(super) mod tests {
             file.save(&self.desk.saved()).unwrap();
             let saved = file.load().unwrap().expect("a saved book");
             let gpu = GpuLock::under(self._temp.path());
-            self.desk = Desk::restore(Box::new(self.clock.clone()), gpu, saved, self.reviewers);
+            self.desk = Desk::restore(
+                Box::new(self.clock.clone()),
+                gpu,
+                saved,
+                self.reviewers.clone(),
+            );
         }
 
         pub(crate) fn book_line(&mut self) -> Value {
@@ -791,10 +796,7 @@ pub(super) mod tests {
             reviews: std::num::NonZeroU32::new(20).unwrap(),
             hours: std::num::NonZeroU32::new(720).unwrap(),
         };
-        let mut w = world_with(Reviewers {
-            cubic: Some(month),
-            ..Reviewers::default()
-        });
+        let mut w = world_with(Reviewers::default().with(crate::review_bot::Bot::Cubic, month));
         let (cr, cubic) = (
             LeaseKind::coderabbit(),
             crate::review_bot::Bot::Cubic.lease(),

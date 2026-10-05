@@ -373,11 +373,20 @@ fn rework_takes_one_plain_pull_request_number() {
     }
 }
 
+// CodeRabbit's file with `rounds` set, read when a runner next opens.
+fn with_rounds(rig: &Rig, rounds: u32) {
+    let file = format!(
+        "---\nrole: reviewer\nharness: bot\nbot: coderabbit\nreviews: 1\nhours: 1\n\
+         rounds: {rounds}\n---\n"
+    );
+    rig.write_agent("coderabbit", &file);
+}
+
 #[test]
-fn a_rework_of_a_pull_request_coderabbit_reviewed_spends_no_second_round() {
+fn a_rework_of_a_pull_request_coderabbit_reviewed_spends_no_second_read() {
     let rig = Rig::new("shep");
     rig.coderabbit_on();
-    rig.edit_settings(|s| s.replace("divisor = 1000\n", "divisor = 1000\nrounds = 1\n"));
+    with_rounds(&rig, 1);
     let reviewed = reviewed_71(&rig);
     rig.push_by_hand("kelpie/7", "later.txt");
     rig.forge.coderabbit.review(
@@ -404,7 +413,7 @@ fn a_rework_of_a_pull_request_coderabbit_reviewed_spends_no_second_round() {
     ));
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["rulings"][0]["kind"]["kind"], json!("merge"));
-    assert_eq!(status["work_item"]["coderabbit"]["rounds"], json!(1));
+    assert_eq!(status["work_item"]["bot_reads"], json!({ "coderabbit": 1 }));
     let summons = rig.forge.coderabbit.label_log().into_iter();
     let summon = crate::runner::coderabbit::LABEL;
     assert_eq!(summons.filter(|(_, l, _)| l == summon).count(), 0);
@@ -414,7 +423,7 @@ fn a_rework_of_a_pull_request_coderabbit_reviewed_spends_no_second_round() {
 fn a_review_of_the_current_head_is_left_out_of_a_reworks_count_as_an_adoptions_is() {
     let rig = Rig::new("shep");
     rig.coderabbit_on();
-    rig.edit_settings(|s| s.replace("divisor = 1000\n", "divisor = 1000\nrounds = 2\n"));
+    with_rounds(&rig, 2);
     let head = reviewed_71(&rig);
     rig.forge
         .coderabbit
@@ -422,14 +431,14 @@ fn a_review_of_the_current_head_is_left_out_of_a_reworks_count_as_an_adoptions_i
     let runner = running(&rig);
     rig.ask(&runner, "rework", Some("71"));
     let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["work_item"]["coderabbit"]["rounds"], json!(0));
+    assert_eq!(status["work_item"]["bot_reads"], json!(null));
 }
 
 #[test]
 fn a_rework_is_refused_while_the_forge_cannot_show_coderabbits_reviews() {
     let rig = Rig::new("shep");
     rig.coderabbit_on();
-    rig.edit_settings(|s| s.replace("divisor = 1000\n", "divisor = 1000\nrounds = 2\n"));
+    with_rounds(&rig, 2);
     reviewed_71(&rig);
     let runner = running(&rig);
     rig.forge.coderabbit.set_down(true);

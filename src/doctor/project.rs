@@ -61,8 +61,9 @@ pub(super) fn checks(
         ),
     });
 
+    let coderabbit = coderabbit_listed(&settings, &book, here.home);
     let wanted: Vec<NewLabel> = (LABELS.into_iter())
-        .filter(|l| settings.coderabbit.enabled || l.name != SUMMON_LABEL)
+        .filter(|l| coderabbit || l.name != SUMMON_LABEL)
         .collect();
     lines.push(match probes.forge.repo_labels(repo) {
         Ok(have) => {
@@ -89,7 +90,7 @@ pub(super) fn checks(
         ),
     });
 
-    if settings.coderabbit.enabled {
+    if coderabbit {
         lines.push(review_bot(
             &at(&probes.review_bot.name().to_lowercase()),
             &settings,
@@ -195,7 +196,17 @@ fn names(labels: &[NewLabel]) -> String {
     quoted.join(", ")
 }
 
-// The runner refuses to start with the bot on for a repo that is not
+// Whether the project lists CodeRabbit's file among its reviewers. A list
+// that cannot be read is the `reviewers` line's to report.
+fn coderabbit_listed(settings: &Settings, book: &Agents, home: &std::path::Path) -> bool {
+    let lineup = settings.lineup(book, home).unwrap_or_default();
+    let listed = |r: &crate::settings::ListedReviewer| r.bot().map(|b| b.bot);
+    lineup
+        .iter()
+        .any(|r| listed(r) == Some(crate::review_bot::Bot::Coderabbit))
+}
+
+// The runner refuses to start with the bot listed for a repo that is not
 // public, and a bot that has never commented on it is likely not installed.
 fn review_bot(subject: &str, settings: &Settings, probes: Probes<'_>) -> Line {
     let (repo, bot) = (&settings.forge, probes.review_bot);
@@ -209,7 +220,7 @@ fn review_bot(subject: &str, settings: &Settings, probes: Probes<'_>) -> Line {
                     "{slug} is not public, and {}'s free plan reviews public repos only",
                     bot.name()
                 ),
-                "set `coderabbit.enabled = false` for this project, or make the repo public",
+                "take `coderabbit` off this project's `agents.reviewers`, or make the repo public",
             );
         }
         Err(e) => {
@@ -232,7 +243,7 @@ fn review_bot(subject: &str, settings: &Settings, probes: Probes<'_>) -> Line {
                 bot.name()
             ),
             format!(
-                "install it on {slug}, or set `coderabbit.enabled = false`; a repo with no reviewed pull request yet reads this way"
+                "install it on {slug}, or take `coderabbit` off `agents.reviewers`; a repo with no reviewed pull request yet reads this way"
             ),
         ),
         Err(e) => Line::unsure(

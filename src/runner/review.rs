@@ -5,7 +5,9 @@
 //! findings, at the reviewer's own severity, for one fix turn, and the next
 //! reviewer reads the fix. A reviewer with a second look reads twice first,
 //! the second time shown what it found, and both lists go to that one fix
-//! turn. After the last reviewer the work item goes on to [`super::gate`].
+//! turn. A review bot's round is [`super::review_bot`]'s, and its open
+//! threads are its findings. After the last reviewer the work item goes on
+//! to [`super::gate`].
 
 pub(super) mod calls;
 mod criteria;
@@ -25,6 +27,7 @@ use std::path::Path;
 
 use super::Runner;
 use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, Spent, StepReport};
+use super::review_bot::Resolved;
 use super::ruling::park;
 use crate::agents::{DEFECT_HUNTER, QWEN};
 use crate::pacer::Scope;
@@ -55,10 +58,14 @@ impl Runner {
         let base = item.review_base();
         let build = item.build.clone();
         // A new pass reviews new code, so no fix of the last one will
-        // resolve the bot threads it sent.
-        let fresh = review == Review::first();
-        if fresh && !item.threads_sent.is_empty() {
-            self.update(WorkItem::forget_threads)?;
+        // resolve the bot threads it sent, and its bots are asked afresh.
+        let fresh = review
+            == Review {
+                bots_only: review.bots_only,
+                ..Review::first()
+            };
+        if fresh && (!item.threads_sent.is_empty() || !item.bots_skipped.is_empty()) {
+            self.update(WorkItem::new_pass)?;
         }
 
         match review.stage.clone() {
@@ -68,6 +75,9 @@ impl Runner {
                     Ok(None) => return self.pass_ended(&review),
                     Err(reason) => return Ok(self.gate_failed(reason)),
                 };
+                if let Some(bot) = chosen.bot() {
+                    return self.bot_round(&chosen, bot, review);
+                }
                 let Some(local) = chosen.runs.local() else {
                     return self.session_call(&chosen, None);
                 };
@@ -90,10 +100,13 @@ impl Runner {
                 match listed {
                     Some(chosen) => self.session_call(&chosen, Some(first)),
                     // Taken off the list since its first look, whose findings go on alone.
-                    None => self.send_findings(review, first),
+                    None => self.send_findings(review, first, Vec::new()),
                 }
             }
-            ReviewStage::Found { findings } => self.send_findings(review, findings),
+            ReviewStage::Found { findings, threads } => {
+                self.send_findings(review, findings, threads)
+            }
+            ReviewStage::Summon { .. } | ReviewStage::Summoned { .. } => self.bot_step(),
             // begin_turn drives the fix turn itself, and comes here once it ends.
             ReviewStage::Fixing {
                 head,
@@ -159,7 +172,7 @@ impl Runner {
         if let Some(None) = &unread {
             let why = match self.lineup.is_empty() {
                 true => "the project lists no reviewer",
-                false => "no listed reviewer's `paths` matches its changes",
+                false => "each listed reviewer's `paths`, or a bot's `rounds`, passed it over",
             };
             self.notes.push(format!(
                 "issue #{issue}'s pull request goes to CI with no reviewer's read: {why}"
@@ -196,6 +209,7 @@ impl Runner {
     ) -> Result<Begin, StateError> {
         let issue = self.current().expect("a fix is a work item's").issue;
         let round = review.round;
+        let mut left_open = None;
         let pushed = match head {
             Some(before) => match self.origin_head() {
                 Ok(now) if now == before => {
@@ -211,23 +225,42 @@ impl Runner {
                     let fix = Fix::Review(review);
                     return self.raise(number, RulingKind::FixNotPushed { fix, prompt });
                 }
-                Ok(now) => Some(now),
+                // A fix that moved the head answers the bot threads it was sent.
+                Ok(now) => {
+                    match self.resolve_sent(number)? {
+                        Resolved::Done => {}
+                        Resolved::Retry(reason) => return Ok(self.gate_failed(reason)),
+                        Resolved::LeftOpen { threads, reason } => {
+                            left_open = Some((threads, reason));
+                        }
+                    }
+                    Some(now)
+                }
                 Err(reason) => return Ok(self.gate_failed(reason)),
             },
             None => None,
         };
         let next = self.after_round(review, self.ports.clock.now());
         self.update(|item| item.phase = next)?;
-        Ok(Begin::Report(StepReport::FixPushed {
-            issue,
-            pull_request: number,
-            round,
-            head: pushed,
+        Ok(Begin::Report(match left_open {
+            Some((threads, reason)) => StepReport::ThreadsLeftOpen {
+                issue,
+                pull_request: number,
+                threads,
+                reason,
+            },
+            None => StepReport::FixPushed {
+                issue,
+                pull_request: number,
+                round,
+                head: pushed,
+            },
         }))
     }
 
     // Every finding sent was left for a follow-up issue, so there was nothing
     // to push, and the next reviewer reads the pull request as it stands.
+    // Bot threads sent stay open, since nothing answered them.
     fn all_deferred(
         &mut self,
         number: u64,
@@ -237,7 +270,10 @@ impl Runner {
         let issue = self.current().expect("a fix is a work item's").issue;
         let round = review.round;
         let next = self.after_round(review, self.ports.clock.now());
-        self.update(|item| item.phase = next)?;
+        self.update(|item| {
+            item.forget_threads();
+            item.phase = next;
+        })?;
         Ok(Begin::Report(StepReport::FindingsDeferred {
             issue,
             pull_request: number,
@@ -275,11 +311,13 @@ impl Runner {
     }
 
     // Nits alone are not worth a fix turn. Otherwise every finding goes, at
-    // the reviewer's own severity, nits included.
+    // the reviewer's own severity, nits included, and a bot's threads sent
+    // with them are kept to resolve once the fix moves the head.
     fn send_findings(
         &mut self,
         review: Review,
         findings: Vec<Finding>,
+        threads: Vec<String>,
     ) -> Result<Begin, StateError> {
         let item = self.current().expect("findings are a work item's");
         let issue = item.issue;
@@ -297,6 +335,10 @@ impl Runner {
                 held: 0,
             }));
         }
+        if let Err(reason) = self.bot_label_off(&review) {
+            return Ok(self.gate_failed(reason));
+        }
+        let item = self.current().expect("findings are a work item's");
         let head = match self.origin_head() {
             Ok(head) => head,
             Err(reason) => return Ok(self.gate_failed(reason)),
@@ -314,6 +356,11 @@ impl Runner {
         };
         self.update(|item| {
             item.record_held(&findings);
+            for thread in threads {
+                if !item.threads_sent.contains(&thread) {
+                    item.threads_sent.push(thread);
+                }
+            }
             item.turn = Turn::Next { prompt };
             item.phase = Phase::Review(Review {
                 stage: ReviewStage::Fixing {
@@ -426,7 +473,10 @@ impl Runner {
             // A second look that keeps failing leaves the first's findings to go alone.
             (ReviewStage::SecondLook { first }, Err(reason)) => {
                 item.phase = Phase::Review(Review {
-                    stage: ReviewStage::Found { findings: first },
+                    stage: ReviewStage::Found {
+                        findings: first,
+                        threads: Vec::new(),
+                    },
                     failures: 0,
                     ..review
                 });
@@ -510,7 +560,10 @@ impl Runner {
                     } else {
                         let count = findings.len();
                         item.phase = Phase::Review(Review {
-                            stage: ReviewStage::Found { findings },
+                            stage: ReviewStage::Found {
+                                findings,
+                                threads: Vec::new(),
+                            },
                             failures: 0,
                             ..review
                         });

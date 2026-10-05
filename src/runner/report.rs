@@ -219,7 +219,7 @@ pub enum StepReport {
         /// Why the question could not be posted on the pull request, if it could not
         comment_failed: Option<String>,
     },
-    /// The draft was marked ready, before a CodeRabbit round or after a yes
+    /// The draft was marked ready, before a review bot's summon or after a yes
     MarkedReady {
         /// The work item's issue
         issue: u64,
@@ -245,8 +245,8 @@ pub enum StepReport {
         /// What changed since the gate passed, or why the forge refused
         reason: String,
     },
-    /// Under `auto`, a head no gate saw goes back through the review and
-    /// CodeRabbit before any merge
+    /// Under `auto`, a head no gate saw goes back through the review before
+    /// any merge
     Regated {
         /// The work item's issue
         issue: u64,
@@ -393,8 +393,9 @@ pub enum StepReport {
         #[serde(skip_serializing_if = "Vec::is_empty")]
         unreviewed: Vec<String>,
     },
-    /// A reviewer's call failed three times in a row, so the review went on
-    /// to the next reviewer without it
+    /// A reviewer's call failed three times in a row, or a review bot's
+    /// window opens more than an hour on or it never answered its summon, so
+    /// the review went on to the next reviewer without it
     ReviewerSkipped {
         /// The work item's issue
         issue: u64,
@@ -404,7 +405,7 @@ pub enum StepReport {
         round: u32,
         /// Which reviewer it was
         reviewer: AgentName,
-        /// Why its last call failed
+        /// Why its last call failed, or why the bot was passed over
         reason: String,
     },
     /// A local round reviewed no file at all, so the review went on to the
@@ -421,7 +422,7 @@ pub enum StepReport {
         /// The files it could not review
         unreviewed: Vec<String>,
     },
-    /// Kelpie put the `review please` label on, holding the CodeRabbit lease
+    /// Kelpie summoned a review bot, by its label or its comment, holding its lease
     Summoned {
         /// The work item's issue
         issue: u64,
@@ -430,7 +431,7 @@ pub enum StepReport {
         /// The head the summon is for
         head: String,
     },
-    /// CodeRabbit gave no sign of the summon in fifteen minutes, so kelpie
+    /// The bot gave no sign of the summon in fifteen minutes, so kelpie
     /// sent it once more, in the same round
     SummonedAgain {
         /// The work item's issue
@@ -440,39 +441,31 @@ pub enum StepReport {
         /// The head the summon is for
         head: String,
     },
-    /// CodeRabbit refused the summon, and the label came off
+    /// The bot refused the summon, and its label came off
     SummonRefused {
         /// The work item's issue
         issue: u64,
         /// Its pull request
         pull_request: u64,
-        /// When CodeRabbit said its window opens
+        /// When the bot said its window opens, or its window's span from now
         opens: Timestamp,
     },
-    /// A CodeRabbit review covered the head, and the label came off
-    CodeRabbitReviewed {
-        /// The work item's issue
-        issue: u64,
-        /// Its pull request
-        pull_request: u64,
-        /// Which round this was
-        round: u32,
-        /// Its threads still open, which now go to the worker
-        open_threads: usize,
-    },
-    /// Every open review bot thread went to the worker as a finding
-    CodeRabbitSent {
+    /// A review bot's review covered the head, and its label came off. Its
+    /// open threads are the round's findings.
+    BotReviewed {
         /// The work item's issue
         issue: u64,
         /// Its pull request
         pull_request: u64,
         /// The round
         round: u32,
-        /// Threads sent to the worker
-        held: usize,
+        /// Which reviewer it was
+        reviewer: AgentName,
+        /// Its threads still open
+        open_threads: usize,
     },
     /// The fix moved the head, but the forge kept refusing to resolve these
-    /// threads, so the fix went on to CI with them open
+    /// threads, so the review went on with them open
     ThreadsLeftOpen {
         /// The work item's issue
         issue: u64,
@@ -482,15 +475,6 @@ pub enum StepReport {
         threads: Vec<String>,
         /// Why the last try failed
         reason: String,
-    },
-    /// No CodeRabbit thread is open: CI, then the merge ruling
-    CodeRabbitSatisfied {
-        /// The work item's issue
-        issue: u64,
-        /// Its pull request
-        pull_request: u64,
-        /// Rounds it took
-        rounds: u32,
     },
     /// The round's findings were sent to the worker's next turn, or, all
     /// nits or none, went nowhere and the review moved on

@@ -3,7 +3,8 @@
 //! A project lists them in `agents.reviewers`, in the order the review runs
 //! them, each once, by agent files whose role is `reviewer`. A project that
 //! lists none runs `qwen` where the maintainer's qwen-review script is
-//! installed, then `defect-hunter`.
+//! installed, then `defect-hunter`. A review bot is listed the same way, by
+//! its file, and none is listed unless the project says so.
 
 use std::path::Path;
 
@@ -13,6 +14,7 @@ use serde::Deserialize;
 use super::agents::find;
 use super::{AgentName, NonBlank, Settings, SettingsError};
 use crate::agents::{self, Agents, DEFECT_HUNTER, QWEN, QWEN_REVIEW, Role, Runs};
+use crate::review_bot::BotReviewer;
 
 /// Where a project lists its reviewers, as a refusal names it
 const SETTING: &str = "agents.reviewers";
@@ -81,6 +83,11 @@ impl ListedReviewer {
     pub fn is_local(&self) -> bool {
         self.runs.local().is_some()
     }
+
+    /// The review bot it is, if it is one
+    pub fn bot(&self) -> Option<BotReviewer> {
+        self.runs.bot()
+    }
 }
 
 impl Settings {
@@ -90,8 +97,9 @@ impl Settings {
     ///
     /// # Errors
     ///
-    /// [`SettingsError::Invalid`] naming a reviewer that has no agent file, or
-    /// whose file is an implementer's.
+    /// [`SettingsError::Invalid`] naming a reviewer that has no agent file,
+    /// whose file is an implementer's, or a bot that reviews on ready listed
+    /// after another bot.
     pub fn lineup(
         &self,
         agents: &Agents,
@@ -121,8 +129,34 @@ impl Settings {
                 second_look: agent.second_look,
             });
         }
+        on_ready_first(&lineup)?;
         Ok(lineup)
     }
+}
+
+// A bot listed earlier marks the draft ready for its own summon, which
+// draws the review of a bot that reviews on ready outside that bot's lease.
+fn on_ready_first(lineup: &[ListedReviewer]) -> Result<(), SettingsError> {
+    let bots = lineup.iter().filter(|r| r.bot().is_some());
+    let mut before: Option<&AgentName> = None;
+    for reviewer in bots {
+        if let (Some(first), Some(bot)) = (before, reviewer.bot())
+            && bot.reviews_on_ready
+        {
+            return Err(SettingsError::Invalid {
+                setting: SETTING,
+                reason: format!(
+                    "{} reviews a pull request when it leaves draft, so list it before \
+                     {first}: a bot listed before it marks the draft ready, which draws \
+                     {}'s own review outside its lease",
+                    reviewer.name,
+                    bot.bot.name()
+                ),
+            });
+        }
+        before = before.or(Some(&reviewer.name));
+    }
+    Ok(())
 }
 
 /// `qwen` where the maintainer's qwen-review script is installed under

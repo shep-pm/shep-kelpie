@@ -76,7 +76,7 @@ fn a_rate_limit_notice_is_a_sign_and_reschedules_as_before() {
 }
 
 #[test]
-fn a_review_stuck_in_progress_is_the_maintainers_after_two_hours() {
+fn a_review_stuck_in_progress_is_passed_over_after_two_hours() {
     let (rig, runner, head) = summoned("zeus");
     rig.forge.coderabbit.progress(71, &head, now(&rig) + 20);
     rig.clock.advance(REVIEW_WAIT - 1);
@@ -84,16 +84,15 @@ fn a_review_stuck_in_progress_is_the_maintainers_after_two_hours() {
     rig.clock.advance(1);
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::Ruling { .. })
+        Some(StepReport::ReviewerSkipped { round: 3, .. })
     ));
-    assert_eq!(
-        rig.ask(&runner, "status", None)["rulings"][0]["kind"]["kind"],
-        "coderabbit-silent"
-    );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["bots_skipped"][0]["why"], "silent");
+    assert_eq!(status["rulings"], serde_json::json!([]));
 }
 
 #[test]
-fn a_second_silence_raises_the_ruling_at_two_hours() {
+fn a_second_silence_passes_the_bot_over_at_two_hours() {
     let (rig, runner, head) = summoned("zeus");
     rig.clock.advance(HEARD_WAIT);
     assert_eq!(step(&runner).unwrap(), again(&head));
@@ -102,11 +101,7 @@ fn a_second_silence_raises_the_ruling_at_two_hours() {
     rig.clock.advance(1);
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::Ruling { .. })
+        Some(StepReport::ReviewerSkipped { round: 3, .. })
     ));
-    assert_eq!(
-        rig.ask(&runner, "status", None)["rulings"][0]["kind"]["kind"],
-        "coderabbit-silent"
-    );
     assert_eq!(labels(&rig), [on(), off(), on(), off()]);
 }

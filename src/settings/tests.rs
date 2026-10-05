@@ -36,13 +36,13 @@ fn the_example_holds_the_first_build_defaults() {
     assert_eq!(s.max_items.get(), 1);
     let implementers: Vec<&str> = s.agents.implementers.iter().map(|n| n.as_str()).collect();
     assert_eq!(implementers, ["sonnet-high"]);
-    assert_eq!(s.agents.reviewers, None, "kelpie's default list");
-    assert!(s.coderabbit.enabled);
-    assert_eq!(s.coderabbit.divisor.get(), 1000);
+    assert_eq!(
+        s.agents.reviewers, None,
+        "kelpie's default list, with no bot"
+    );
     assert!(s.pacing.enabled);
     assert_eq!(s.pacing.kickoff_hours.get(), 8);
     assert_eq!(s.worker.turn_timeout.get(), 60);
-    assert!(s.generated.iter().any(|g| g == "Cargo.lock"));
     assert!(
         s.worker.guard_hooks.is_empty(),
         "kelpie's own guard needs none"
@@ -92,10 +92,10 @@ fn a_missing_setting_is_named() {
 
 #[test]
 fn a_missing_nested_setting_is_named_with_its_table() {
-    let text = EXAMPLE.replace("divisor = 1000\n", "");
+    let text = EXAMPLE.replace("kickoff_hours = 8\n", "");
     let err = parse_err(&text);
-    assert!(err.contains("missing field `divisor`"), "{err}");
-    assert!(err.contains("`coderabbit`"), "{err}");
+    assert!(err.contains("missing field `kickoff_hours`"), "{err}");
+    assert!(err.contains("`pacing`"), "{err}");
 }
 
 #[test]
@@ -303,10 +303,10 @@ fn the_worker_settings_agent_files_replace_are_refused_saying_what_replaces_each
 
 #[test]
 fn a_misspelt_setting_is_named() {
-    let text = EXAMPLE.replace("divisor = 1000", "divisr = 1000");
+    let text = EXAMPLE.replace("turn_timeout = 60", "turn_timout = 60");
     let err = parse_err(&text);
     assert!(
-        err.contains("`coderabbit.divisr = 1000`: unknown field `divisr`"),
+        err.contains("`worker.turn_timout = 60`: unknown field `turn_timout`"),
         "{err}"
     );
 }
@@ -329,25 +329,109 @@ fn merge_authority_ask_surface_is_refused() {
 }
 
 #[test]
-fn a_zero_divisor_is_refused() {
-    let text = EXAMPLE.replace("divisor = 1000", "divisor = 0");
+fn a_zero_turn_timeout_is_refused() {
+    let text = EXAMPLE.replace("turn_timeout = 60", "turn_timeout = 0");
     let err = parse_err(&text);
     assert_eq!(
         err,
-        "the [app.dogs.kelpie] table on shep: `coderabbit.divisor = 0`: \
+        "the [app.dogs.kelpie] table on shep: `worker.turn_timeout = 0`: \
          invalid value: integer `0`, expected a nonzero u32"
     );
 }
 
+const BOT_FILES: &str = "review bots are reviewer agent files on the `bot` harness, listed \
+                         in `agents.reviewers` and run once a pass in their place";
+
 #[test]
-fn the_review_bot_rounds_are_unset_until_a_table_sets_them() {
-    let s = parse(EXAMPLE).unwrap();
-    assert_eq!(s.coderabbit.rounds, None);
-    let text = EXAMPLE.replace("divisor = 1000\n", "divisor = 1000\nrounds = 1\n");
-    let s = parse(&text).unwrap();
-    assert_eq!(s.coderabbit.rounds.map(NonZeroU32::get), Some(1));
-    let err = parse_err(&EXAMPLE.replace("divisor = 1000\n", "divisor = 1000\nrounds = 0\n"));
-    assert!(err.contains("`coderabbit.rounds = 0`"), "{err}");
+fn the_review_bot_settings_bot_files_replace_are_refused_saying_what_replaces_each() {
+    let gate = |keys: &str| format!("{EXAMPLE}\n[app.dogs.kelpie.coderabbit]\n{keys}\n");
+    let refused = |text: &str| parse_err(text).replace("the [app.dogs.kelpie] table on shep: ", "");
+    assert_eq!(
+        refused(&gate("enabled = true")),
+        format!(
+            "`coderabbit.enabled` is no longer a setting, because {BOT_FILES}: for `true`, \
+             list `coderabbit` where its read should come, as in \
+             `agents.reviewers = [\"defect-hunter\", \"coderabbit\"]`, and for `false` leave \
+             it out; then delete the key"
+        )
+    );
+    assert_eq!(
+        refused(&gate("rounds = 1")),
+        format!(
+            "`coderabbit.rounds` is no longer a setting, because {BOT_FILES}: set `rounds` in the \
+             bot's file, such as `agents/coderabbit.md`, where it is the most reads that bot \
+             makes of a work item's pull request"
+        )
+    );
+    assert_eq!(
+        refused(&gate("divisor = 1000")),
+        "`coderabbit.divisor` is no longer a setting, because a review bot reads once a \
+         pass, so no round cap is counted: delete it"
+    );
+    assert_eq!(
+        refused(&gate("")),
+        format!("`coderabbit` is no longer a setting, because {BOT_FILES}: delete it")
+    );
+    let listed = EXAMPLE.replace(
+        "max_items = 1\n",
+        "max_items = 1\npull_request_reviewers = [\"cubic\"]\n",
+    );
+    assert_eq!(
+        refused(&listed),
+        format!(
+            "`pull_request_reviewers` is no longer a setting, because {BOT_FILES}: list each \
+             bot's file, `coderabbit`, `cubic` or `codex`, in `agents.reviewers` where its \
+             read should come, which `shep kelpie add` writes out"
+        )
+    );
+    let generated = EXAMPLE.replace("max_items = 1\n", "max_items = 1\ngenerated = []\n");
+    assert_eq!(
+        refused(&generated),
+        "`generated` is no longer a setting, because it only kept files out of the review \
+         bot cap's changed-line count, and a review bot now reads once a pass: delete it"
+    );
+}
+
+// A live table from before bot files, its own review list set: every key
+// it must drop is named at once, and the fix lists its own reviewers.
+#[test]
+fn a_table_carrying_several_removed_keys_names_them_all_at_once() {
+    let text = EXAMPLE
+        .replace(
+            "max_items = 1\n",
+            "max_items = 1\ngenerated = [\"Cargo.lock\"]\n",
+        )
+        .replace(
+            "# reviewers = [\"qwen\", \"defect-hunter\"]",
+            "reviewers = [\"qwen\", \"defect-hunter\"]",
+        );
+    let text = format!(
+        "{text}\n[app.dogs.kelpie.coderabbit]\nenabled = true\ndivisor = 1000\nrounds = 1\n"
+    );
+    let err = parse_err(&text);
+    let lines: Vec<&str> = err.lines().collect();
+    assert_eq!(
+        lines[0],
+        "the [app.dogs.kelpie] table on shep: these are no longer settings:"
+    );
+    let named: Vec<&str> = lines[1..]
+        .iter()
+        .map(|l| l.split('`').nth(1).unwrap())
+        .collect();
+    assert_eq!(
+        named,
+        [
+            "coderabbit.enabled",
+            "coderabbit.rounds",
+            "coderabbit.divisor",
+            "generated"
+        ],
+        "`[coderabbit]` is named by its keys"
+    );
+    assert!(
+        err.contains("`agents.reviewers = [\"qwen\", \"defect-hunter\", \"coderabbit\"]`"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -488,13 +572,16 @@ fn build_env_names_folders_inside_the_build_folder() {
 fn private_names_are_read_and_default_to_none() {
     assert_eq!(parse(EXAMPLE).unwrap().private_names, []);
     let text = EXAMPLE.replace(
-        "generated = [",
-        "private_names = [\"Acme Corp\", \"zeta\"]\ngenerated = [",
+        "max_items = 1\n",
+        "max_items = 1\nprivate_names = [\"Acme Corp\", \"zeta\"]\n",
     );
     let names: Vec<_> = parse(&text).unwrap().private_names;
     let names: Vec<&str> = names.iter().map(NonBlank::as_str).collect();
     assert_eq!(names, ["Acme Corp", "zeta"]);
-    let blank = EXAMPLE.replace("generated = [", "private_names = [\" \"]\ngenerated = [");
+    let blank = EXAMPLE.replace(
+        "max_items = 1\n",
+        "max_items = 1\nprivate_names = [\" \"]\n",
+    );
     assert!(parse_err(&blank).contains("blank"), "{}", parse_err(&blank));
 }
 

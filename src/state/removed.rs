@@ -8,10 +8,15 @@
 //! goes on from the reviewer after the one it last recorded. The deep round
 //! and the project's own Claude round, `deep` and `claude`, are
 //! `defect-hunter`, and a deep round's two reads are its two looks. A work
-//! item's worker model becomes the agent named for it. A pending ruling of a
-//! removed kind has nothing here to answer it, so the file is refused.
+//! item's worker model becomes the agent named for it. A review bot round
+//! becomes a pass of the listed bots. A pending ruling of a removed kind has
+//! nothing here to answer it, so the file is refused.
 
 use serde_json::{Map, Value, json};
+
+mod bot_rounds;
+
+pub(super) use bot_rounds::fold_bot_rounds;
 
 // The kinds of ruling removed features raised, which nothing answers now
 const RULINGS: [&str; 6] = [

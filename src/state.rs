@@ -19,12 +19,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
 use crate::ports::{Finding, Timestamp};
-use crate::review_bot::Bot;
 use crate::settings::Account;
 use crate::work_item::{Known, Phase, Review, Seconds, Turn, WorkItem};
 
 /// The state file's format version
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
@@ -33,6 +32,10 @@ const ONE_ITEM: u32 = 1;
 /// The format before reviewers were agent files, whose `deep` and `claude`
 /// reviewers this kelpie reads as `defect-hunter`
 const BUILT_IN_REVIEWERS: u32 = 2;
+
+/// The format before review bots ran in the review pass, whose bot round
+/// this kelpie reads into a pass of the listed bots
+const BOT_ROUNDS: u32 = 3;
 
 /// How many finished work items the state file keeps a record of
 ///
@@ -323,32 +326,6 @@ pub enum RulingKind {
         /// The fix turn a yes starts
         prompt: String,
     },
-    /// CodeRabbit's rounds reached their cap with threads still open. A yes
-    /// sends the worker those threads and lifts the cap for the rest of this
-    /// work item.
-    #[serde(rename = "coderabbit-cap")]
-    CodeRabbitCap {
-        /// Rounds run
-        rounds: u32,
-        /// The threads still open
-        held: u32,
-        /// The fix turn a yes starts
-        prompt: String,
-        /// The head the findings are on, which the fix must move. None in
-        /// an older state file, whose fix is not checked.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        head: Option<String>,
-    },
-    /// A review bot never reviewed this head after a summon. A yes looks at
-    /// CI again, and summons again once it is green.
-    #[serde(rename = "coderabbit-silent")]
-    CodeRabbitSilent {
-        /// The bot summoned. CodeRabbit when absent.
-        #[serde(default, skip_serializing_if = "Bot::is_coderabbit")]
-        bot: Bot,
-        /// The head the summon was for
-        head: String,
-    },
     /// A merged pull request left confirmed findings unfixed. A yes files
     /// each as an issue on the project, and a no drops them.
     FollowUp {
@@ -413,14 +390,6 @@ pub enum RulingKind {
 pub enum Fix {
     /// A review round: the review, still fixing it
     Review(Review),
-    /// A CodeRabbit round
-    #[serde(rename = "coderabbit")]
-    CodeRabbit {
-        /// Its number
-        round: u32,
-        /// The head its findings are on, which the fix must move
-        head: String,
-    },
 }
 
 /// Where the review stood when a worker's question interrupted
@@ -437,13 +406,6 @@ pub enum Resume {
     /// The review had already reached this round and stage; once answered,
     /// resume exactly there
     Review(Review),
-    /// A CodeRabbit round's fix turn from `head`; once answered, the fix
-    /// ends back in that round, which checks it moved the head
-    #[serde(rename = "coderabbit-fix")]
-    CodeRabbitFix {
-        /// The head the findings are on
-        head: String,
-    },
 }
 
 /// A lease the dog granted this project
@@ -604,6 +566,9 @@ impl StateStore {
         removed::drop_removed_fields(&mut value);
         if found <= BUILT_IN_REVIEWERS {
             removed::name_reviewers_as_files(&mut value);
+        }
+        if found <= BOT_ROUNDS {
+            removed::fold_bot_rounds(&mut value);
         }
         let state: ProjectState = serde_json::from_value(value).map_err(malformed)?;
         Ok(Some(ProjectState {

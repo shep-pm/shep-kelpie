@@ -97,9 +97,8 @@ On a repo without those four labels, `add` makes them. The runner puts `in-progr
 - `merge_authority = "ask"`: you rule on every merge
 - `max_items = 1`: one work item at a time
 - `ci` is on when the checkout has `.github/workflows`
-- `coderabbit.enabled` is on for a public repo, off for a private one
 - `agents.implementers = ["sonnet-high"]`
-- `agents.reviewers = ["defect-hunter"]`, with `qwen` first when `~/.claude/scripts/qwen-review.sh` exists
+- `agents.reviewers = ["defect-hunter"]`, with `qwen` first when `~/.claude/scripts/qwen-review.sh` exists, and no review bot
 - `pacing.enabled = true`
 - `worker.allowed_domains = []`
 - `worker.turn_timeout = 60`, in minutes
@@ -121,7 +120,6 @@ ok       dog: kelpie's dog is running and has named itself
 ok       scratch: checkout: /path/to/checkout is a git checkout with an origin
 ok       scratch: push access: may push to shep-pm/shep
 ok       scratch: labels: shep-pm/shep has `ready-for-agent`, `ready-for-human`, `in-progress`, `review please`
-ok       scratch: coderabbit: CodeRabbit has commented on a pull request of shep-pm/shep
 ok       scratch: local review: ready
 ok       scratch: rulings: no webhook, so rulings reach you only in the log, `status` and `shep kelpie rule`
 nothing a project needs is missing
@@ -160,7 +158,7 @@ For npm, that is `registry.npmjs.org`. A change reaches a running runner at its 
 shep kelpie start
 ```
 
-Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria. The runner gives it to a worker, which opens a draft pull request. Then the review runs, each listed reviewer once, then CI, then on a repo with CodeRabbit on, CodeRabbit. Last, you get a ruling before the merge. `shep kelpie status` shows every project. A worker whose first turn ends with no pull request and no question is sent back once, and asks you for a ruling if it stops short again.
+Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria. The runner gives it to a worker, which opens a draft pull request. Then the review runs, each listed reviewer once, a review bot such as CodeRabbit among them where the project lists one, then CI. Last, you get a ruling before the merge. `shep kelpie status` shows every project. A worker whose first turn ends with no pull request and no question is sent back once, and asks you for a ruling if it stops short again.
 
 What decides whether, and when, the first issue starts:
 
@@ -168,7 +166,7 @@ What decides whether, and when, the first issue starts:
 - An issue with sub-issues is never worked itself: its sub-issues are, and shep-kelpie closes it once every sub-issue is closed
 - Of the rest, `priority: P0` to `P3` labels order them, then the oldest goes first. An `agent:<name>` label, such as `agent:opus-high`, picks the agent that works it from those the project lists in `agents.implementers` (see [Agents](#agents)), and a label naming one it does not list keeps the issue off the board. An old `worker:` label is no longer read: that issue runs on the default implementer, and the runner's log says so
 - No turn starts while Claude's 5-hour window is at 50% or more, and no new work item starts once today's share of the week is spent. `shep kelpie status` says why under `pacer`, and `enabled = false` in the project's `[app.dogs.kelpie.pacing]` turns both off
-- On a public repo, after CI each pull request waits for CodeRabbit, at one review an hour. shep-kelpie asks for a review by putting the `review please` label on, so the repo's `.coderabbit.yaml` must review only labelled pull requests. Without that, CodeRabbit reviews every push on its own and spends the hour a round is waiting on:
+- A project that lists `coderabbit` in `agents.reviewers` waits in CodeRabbit's place in the review for its window, one review an hour. shep-kelpie asks for a review by putting the `review please` label on, so the repo's `.coderabbit.yaml` must review only labelled pull requests. Without that, CodeRabbit reviews every push on its own and spends the hour a round is waiting on:
 
   ```yaml
   reviews:
@@ -177,8 +175,8 @@ What decides whether, and when, the first issue starts:
         - "review please"
   ```
 
-- `coderabbit.enabled` is the switch for every pull request reviewer, cubic and Codex too. A private repo has it off, so a private repo that wants cubic or Codex turns it on
-- Every thread a pull request reviewer leaves open goes to the worker as a finding, and shep-kelpie resolves those threads once the worker's fix moves the head. If the forge refuses three steps in a row, the fix goes on to CI with them open and the next review sends them again
+- No review bot is listed unless you list it, and a project that lists none never asks the forge about one. CodeRabbit's free plan reviews public repos only, so a repo GitHub marks private cannot list it, and lists `cubic` or `codex` instead
+- Every thread a review bot leaves open goes to the worker as a finding, and shep-kelpie resolves those threads once the worker's fix moves the head. If the forge refuses three steps in a row, the review goes on with them open and the bot's next read sends them again
 
 `shep kelpie add <issue>` opens a work item for an issue at once, without the label, ahead of the board's order. It queues nothing: while `max_items` work items are open, `add <issue>` is refused.
 
@@ -237,7 +235,7 @@ Quotes are optional, but zsh still needs them around a note with `?`, `*`, `!` o
 
 `add` names the project after the repo, or `shep kelpie add <name>`. It makes the four labels where the repo lacks them, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name. `shep stop <project>` stops a runner, and `shep delete <project>` removes it.
 
-`doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's labels, CodeRabbit where a project turns it on, each project's reviewers, in order, with any command or endpoint among them checked as a runner's start checks it, and which webhook, if any, rulings post to. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
+`doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's labels, CodeRabbit where a project lists it, each project's reviewers, in order, with any command or endpoint among them checked as a runner's start checks it, and which webhook, if any, rulings post to. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
 
 `shep describe <project>` labels each Claude session the runner starts with its issue and role, such as `#114 worker`.
 
@@ -256,9 +254,8 @@ A project's settings are its `[app.dogs.kelpie]` table, which lookout edits in t
 shep-kelpie's own settings, shared by every project, are the `[kelpie]` section of `dogs.toml`, which lookout edits in the dog's pane. Start from `kelpie-settings.example.toml`, and keep `dogs.toml` private: the webhook's URL is a credential.
 
 - `[kelpie.webhook]` is where rulings are posted, and the only way one reaches you away from the terminal. With none, a ruling shows only in the log, `status` and `shep kelpie rule`
-- `[kelpie.reviewers]` defines the pull request reviewers, CodeRabbit, cubic and Codex, by their review windows, and a project's `pull_request_reviewers` lists the ones it uses in preference order: each round goes to the first whose window is free. Codex's table also takes `reviews_on_ready`, off when absent: turn it on only where Codex's automatic reviews are enabled. Then marking a draft ready is its summon and shep-kelpie posts no comment on top, so one round spends one review
 - `gpu_metrics_url` is the GPU's Prometheus metrics page, such as `nvidia_gpu_exporter`'s `/metrics`. `status` then shows the GPU's load, memory, power and temperature under `gpu`, read every 15 seconds
-- A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start. The dog reads `[kelpie.leases]` and `[kelpie.reviewers]` only when it starts, so after a change run `shep restart kelpie`
+- A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start. The dog reads `[kelpie.leases]`, and each review bot's window from its agent file, only when it starts, so after a change to either run `shep restart kelpie`
 
 On an ntfy webhook, a ruling can be answered from the topic: run `shep kelpie totp` once and scan the QR code into an authenticator app, then reply with the line the alert ends on, such as `14 yes <code>`, with the app's code last. A reply takes the same answers as `shep kelpie rule`. Anyone who can read the topic can read rulings, but only a reply with the code of the moment answers one, and each code answers once. Five wrong codes turn answers off until `shep kelpie totp --unlock`, and `shep kelpie totp --rotate` replaces a secret that may have leaked.
 
@@ -317,11 +314,12 @@ A skill that can't load runs shep-kelpie's own prompt instead. The runner logs w
 
 Each pull request goes through a review before CI. A project lists its reviewers in `agents.reviewers`, in the order the review runs them, each an agent file whose `role` is `reviewer` (see Agents below). Each listed reviewer runs once, in order, and a list changed mid-pass runs whichever listed reviewers the pass has not. A reviewer whose call fails three times in a row is passed over for the rest of the pass, and `status` lists it under `reviewers_skipped`. One that finds anything above a nit sends the worker all of its findings, nits included and at its own severity, for one fix turn, and the next reviewer reads the fix. A round of nits, or of nothing, goes straight to the next reviewer. A fix turn that pushes nothing parks on a ruling, unless the worker deferred every finding it was sent, in which case the next reviewer reads the pull request as it stands. A pass that ends with no reviewer having read the pull request, because one was down, kept failing or reviewed no file, marks the work item unreviewed: `status` shows why, the merge ruling's question says so, and under `auto` it gets the merge ruling instead of merging. An empty list, or reviewers whose `paths` all miss the change, is your choice, and the log says so once. After the last one the pull request goes to CI. There is no judge and no second pass: whatever the last fix leaves is what CI and the merge see. A pass starts again from the top only on new code the review has not seen, such as the fix a merge ruling's `no` asks for, a change you accept that someone else pushed, or a rework. An empty list reviews nothing.
 
-A reviewer runs in one of three ways, by its file's `harness`:
+A reviewer runs in one of four ways, by its file's `harness`:
 
 - `claude-code`, `codex` or `pi`: a fresh session on its `model` and `effort`, which reads the worktree with Read, Grep and Glob and runs no command. The file's body is its prompt.
 - `command`: a command of your own that keeps the contract below, and takes no body.
 - `endpoint`: shep-kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server, and takes no body.
+- `bot`: a pull request review bot, CodeRabbit, cubic or Codex, summoned on the pull request (see Review bots below), and takes no body.
 
 A session's prompt is its file's body with the commit the change is against at `{{BASE}}` and the diff at `{{DIFF}}`. A body with no `{{DIFF}}` gets the diff after it. The body asks for kelpie's format, one finding per line as `SEVERITY|file:line|what|why`, or `CLEAN` alone. Every reviewer's prompt carries the issue's acceptance criteria: the section under an "Acceptance criteria" heading, or the whole body without one. `paths` limits a reviewer to pull requests that change a file under one of its globs, and the review skips it elsewhere. `second_look: true` runs a session twice: the second fresh session is shown what the first found and asked only for what it missed, and the worker gets one fix turn for both lists.
 
@@ -360,6 +358,27 @@ one finding per line as SEVERITY|file:line|what|why, or exactly CLEAN.
 
 A missing command or an endpoint that doesn't answer stops the runner at start.
 
+#### Review bots
+
+A review bot reads the pull request on the forge, in its place in `agents.reviewers`, once a pass. shep-kelpie ships a file for each, `coderabbit`, `cubic` and `codex`, which `add` writes out and no project lists until you list it:
+
+```toml
+[app.dogs.kelpie.agents]
+reviewers = ["defect-hunter", "coderabbit"]
+```
+
+```markdown
+---
+role: reviewer
+harness: bot
+bot: coderabbit
+reviews: 1
+hours: 1
+---
+```
+
+A bot's file is named for its bot, since `reviews` in `hours` is its account's window, which the dog books from that file when it starts and every project shares. Its round marks a draft ready, since a bot may skip drafts, waits for the bot's window and lease, and summons it: CodeRabbit by the `review please` label, or by `@coderabbitai full review` on a pull request it read before that would otherwise find nothing new, cubic and Codex by their comments. A summon with no sign of being heard in fifteen minutes goes out once more. Once a review covers the head, the bot's open threads are its findings, and go to one fix turn as any reviewer's do. A refusal hands the window back to the dog and the round asks again. A window that opens more than an hour on, by the dog's book or by the bot's refusal, passes the bot over for the pass, and so do two hours with no review, two hours its round could not summon it, a bot you stop listing mid-round, and CodeRabbit on a repo the forge reports not public, which is checked just before each summon; `status` lists each under `bots_skipped`, and a pass nobody else read is marked unreviewed. `rounds: 1` lets a bot read a work item's pull request once, whatever its passes, counting its reviews from before a rework or an adoption, and is unset by default. An adopted pull request goes through a pass of the listed bots alone, and until each bot answers a summon of shep-kelpie's own, none of its reviews from before the adoption stands for its read. Codex's `reviews_on_ready: true` says it reviews a pull request when it leaves draft, as the repo's Codex settings may have it: then marking ready, under its lease, is the summon, with no comment, and it is never asked again by comment. List it before any other bot, whose mark-ready would draw its review outside its lease: the runner refuses the other order.
+
 An endpoint takes `url` (the base, up to and including `/v1`), `model`, and `context`, the context size in tokens the server gives that model. Kelpie diffs the pull request, cuts the diff to fit that context, and sends each piece with its own review prompt. Set `context` to what the server really uses: Ollama gives its OpenAI-compatible endpoint a small default context unless `OLLAMA_CONTEXT_LENGTH` says more, and drops whatever doesn't fit without saying so.
 
 A command is run as `<command> --dir <worktree> --round <n> --diff <base>`, with:
@@ -394,9 +413,9 @@ effort: high
 Extra instructions for this agent, added to kelpie's own.
 ```
 
-`role` is what the agent is for: `implementer`, an agent that builds a work item, or `reviewer`, one that reads a pull request. A key only the other role takes, such as a reviewer's `paths` or `second_look`, stops the runner. `harness` is Claude Code, `claude-code`, pi, `pi`, which runs a model on an OpenAI-compatible server such as Ollama, or Codex, `codex`, on a ChatGPT plan. `model` and `effort` are what the harness runs. Any other key stops the runner, and so does a file that does not parse or misses a key its harness needs, naming the file and the key. A `.md` file whose name is no agent's, such as a `README.md`, is skipped and named in the log. A runner sees an edit to the folder the next time it wakes, as it sees a settings change.
+`role` is what the agent is for: `implementer`, an agent that builds a work item, or `reviewer`, one that reads a pull request, a review bot included. A key only the other role takes, such as a reviewer's `paths` or `second_look`, stops the runner. `harness` is Claude Code, `claude-code`, pi, `pi`, which runs a model on an OpenAI-compatible server such as Ollama, or Codex, `codex`, on a ChatGPT plan. `model` and `effort` are what the harness runs. Any other key stops the runner, and so does a file that does not parse or misses a key its harness needs, naming the file and the key. A `.md` file whose name is no agent's, such as a `README.md`, is skipped and named in the log. A runner sees an edit to the folder the next time it wakes, as it sees a settings change.
 
-Kelpie ships `sonnet-high`, Sonnet 5.5 at high, the default implementer, `opus-high`, Opus 5.5 at high, for work that is hard to undo, `defect-hunter`, the default reviewer, and `qwen`, the reviewer that runs the qwen-review script. `shep kelpie add` writes out any that are missing, `qwen` only where the script exists, and never writes over one you edited, and a file named for one replaces it.
+Kelpie ships `sonnet-high`, Sonnet 5.5 at high, the default implementer, `opus-high`, Opus 5.5 at high, for work that is hard to undo, `defect-hunter`, the default reviewer, `qwen`, the reviewer that runs the qwen-review script, and the review bots `coderabbit`, `cubic` and `codex`. `shep kelpie add` writes out any that are missing, `qwen` only where the script exists, and never writes over one you edited, and a file named for one replaces it.
 
 A project lists the agents that build its work items and the ones that review its pull requests, from those files:
 

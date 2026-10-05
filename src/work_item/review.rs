@@ -3,15 +3,16 @@
 use serde::{Deserialize, Serialize};
 
 use super::is_zero;
-use crate::ports::Finding;
+use crate::ports::{Finding, Timestamp};
+use crate::review_bot::Bot;
 use crate::settings::AgentName;
 
 /// Where the review stands
 ///
-/// A pass runs the project's reviewers once each, in order. A round that
-/// finds anything above a nit (LOW) sends the worker all of its findings for
-/// one fix turn before the next reviewer runs. After the last, the pull
-/// request goes to CI.
+/// A pass runs the project's reviewers once each, in order, review bots
+/// among them. A round that finds anything above a nit (LOW) sends the
+/// worker all of its findings for one fix turn before the next reviewer
+/// runs. After the last, the pull request goes to CI.
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -41,6 +42,11 @@ pub struct Review {
     /// in a state file from before it was kept, which is not known to be unread.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unread: bool,
+    /// Whether the pass runs the listed review bots alone: an adopted pull
+    /// request's owed summon, or a review bot round an older state file
+    /// kept, whose other reviewers had already read it
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bots_only: bool,
 }
 
 impl Review {
@@ -54,6 +60,7 @@ impl Review {
             failures: 0,
             last: None,
             unread: true,
+            bots_only: false,
         }
     }
 
@@ -70,6 +77,7 @@ impl Review {
             failures: 0,
             last: None,
             unread: self.unread,
+            bots_only: self.bots_only,
         }
     }
 }
@@ -85,6 +93,11 @@ pub enum ReviewStage {
     Found {
         /// What the reviewer found
         findings: Vec<Finding>,
+        /// The forge's ids of a review bot's open threads, which kelpie
+        /// resolves once a fix for them moves the head. None from any other
+        /// reviewer.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        threads: Vec<String>,
     },
     /// The round's findings were sent to the worker; waiting for its fix
     Fixing {
@@ -107,6 +120,44 @@ pub enum ReviewStage {
     SecondLook {
         /// What the first read found
         first: Vec<Finding>,
+    },
+    /// A review bot's round, waiting for its window and lease to summon a
+    /// review of `head`. A draft is marked ready first, since a bot may skip
+    /// drafts.
+    Summon {
+        /// The bot
+        bot: Bot,
+        /// When the bot's round began, or went back to waiting to ask for a
+        /// full review after the bot marked the head done, which bounds its
+        /// wait to summon
+        started: Timestamp,
+        /// The pull request's head, which the review must cover
+        head: String,
+        /// When kelpie marked the draft ready, until the forge reads it so
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        readied: Option<Timestamp>,
+        /// Whether the summon asks for a full review whatever the bot read
+        /// before, because the last one was answered with nothing new
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        full: bool,
+    },
+    /// The bot's label went on, or the comment that summons it was posted,
+    /// at `at`. The lease goes back once the bot answers.
+    Summoned {
+        /// The bot
+        bot: Bot,
+        /// When the round's wait to summon began
+        started: Timestamp,
+        /// The head the summon is for
+        head: String,
+        /// When the summon was made
+        at: Timestamp,
+        /// Whether it asked for a full review
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        full: bool,
+        /// Whether the bot gave no sign of it and it went out once more
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        resent: bool,
     },
 }
 
@@ -138,6 +189,7 @@ mod tests {
         assert_eq!(
             value(ReviewStage::Found {
                 findings: vec![finding],
+                threads: Vec::new(),
             }),
             json!({
                 "stage": "found",

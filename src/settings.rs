@@ -4,11 +4,9 @@
 //! project had before one. Unknown keys are refused, so a misspelt or
 //! malformed setting stops the runner with a message naming it. Every
 //! setting is required except the ones added after the first build
-//! (`max_items`, `coderabbit.rounds`,
-//! `pacing.enabled`, `worker.allowed_domains`, `worker.build_env`,
-//! `worker.instructions_file`, `worker.turn_timeout`, `worker.guard_hooks`,
-//! `pull_request_reviewers`, `[skills]` and
-//! `[agents]`).
+//! (`max_items`, `pacing.enabled`, `worker.allowed_domains`,
+//! `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout`,
+//! `worker.guard_hooks`, `[skills]` and `[agents]`).
 //! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
@@ -20,8 +18,6 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use shep_client::dogs::dog_config;
-
-use crate::review_bot::Bot;
 
 pub mod moving;
 pub mod source;
@@ -64,8 +60,6 @@ pub struct Settings {
     /// when absent.
     #[serde(default = "default_max_items")]
     pub max_items: NonZeroU32,
-    /// Globs for files left out of a pull request's changed-line count
-    pub generated: Vec<String>,
     /// Words that stay off the forge: kelpie refuses a post naming one, and
     /// a worker's guard refuses a commit or `gh` text that does. Whole
     /// words, whatever their case. None when absent.
@@ -75,13 +69,6 @@ pub struct Settings {
     /// requests, from kelpie's agent files
     #[serde(default)]
     pub agents: RoleAgentNames,
-    /// The CodeRabbit gate, which holds every pull request reviewer's rounds
-    pub coderabbit: CodeRabbit,
-    /// The pull request reviewers a round may summon, in preference order,
-    /// from those kelpie's own settings define. Each round goes to the
-    /// first whose window is free. CodeRabbit alone when absent or empty.
-    #[serde(default)]
-    pub pull_request_reviewers: Vec<Bot>,
     /// Usage pacing
     pub pacing: Pacing,
     /// What every worker is started with
@@ -100,6 +87,9 @@ const LOOP: &str = "the review loop and its judge are gone";
 const SHOTS: &str = "shots and the preview are parked";
 const AGENT_FILES: &str = "agents are files in kelpie's home's `agents` folder";
 const REVIEWER_FILES: &str = "reviewers are agent files listed in `agents.reviewers`";
+const BOT_FILES: &str = "review bots are reviewer agent files on the `bot` harness, listed \
+                         in `agents.reviewers` and run once a pass in their place";
+const ONCE_A_PASS: &str = "a review bot reads once a pass, so no round cap is counted";
 
 // The keys removed features left behind
 const REMOVED: &[Removed] = &[
@@ -231,6 +221,40 @@ const REMOVED: &[Removed] = &[
         because: REVIEWER_FILES,
         fix: DELETE,
     },
+    Removed {
+        key: "pull_request_reviewers",
+        because: BOT_FILES,
+        fix: "list each bot's file, `coderabbit`, `cubic` or `codex`, in `agents.reviewers` \
+              where its read should come, which `shep kelpie add` writes out",
+    },
+    Removed {
+        key: "coderabbit.enabled",
+        because: BOT_FILES,
+        fix: "for `true`, list `coderabbit` where its read should come, as in \
+              LISTED_WITH_CODERABBIT, and for `false` leave it out; then delete the key",
+    },
+    Removed {
+        key: "coderabbit.rounds",
+        because: BOT_FILES,
+        fix: "set `rounds` in the bot's file, such as `agents/coderabbit.md`, where it is \
+              the most reads that bot makes of a work item's pull request",
+    },
+    Removed {
+        key: "coderabbit.divisor",
+        because: ONCE_A_PASS,
+        fix: DELETE,
+    },
+    Removed {
+        key: "coderabbit",
+        because: BOT_FILES,
+        fix: DELETE,
+    },
+    Removed {
+        key: "generated",
+        because: "it only kept files out of the review bot cap's changed-line count, and \
+                  a review bot now reads once a pass",
+        fix: DELETE,
+    },
 ];
 
 /// Who decides a merge
@@ -295,25 +319,6 @@ impl Effort {
             .into_iter()
             .find(|e| e.as_str() == s)
     }
-}
-
-/// The CodeRabbit gate's settings
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct CodeRabbit {
-    /// Whether pull requests go through CodeRabbit rounds at all
-    ///
-    /// CodeRabbit's free plan reviews public repos only, so the runner
-    /// refuses to start with this on for a private one.
-    pub enabled: bool,
-    /// Changed lines per extra round: the cap is `ceil(changed / divisor) + 1`
-    pub divisor: NonZeroU32,
-    /// A fixed number of rounds per pull request, in place of the divisor's cap
-    ///
-    /// The last round's held findings go to the worker, and its fix push
-    /// summons no further round. The divisor's cap when absent.
-    #[serde(default)]
-    pub rounds: Option<NonZeroU32>,
 }
 
 /// Usage pacing settings
@@ -606,21 +611,6 @@ impl fmt::Display for SettingsError {
 impl core::error::Error for SettingsError {}
 
 impl Settings {
-    /// The pull request reviewers a round may summon, in preference order,
-    /// each once
-    pub fn reviewers(&self) -> Vec<Bot> {
-        let mut listed: Vec<Bot> = Vec::new();
-        for bot in &self.pull_request_reviewers {
-            if !listed.contains(bot) {
-                listed.push(*bot);
-            }
-        }
-        if listed.is_empty() {
-            listed.push(Bot::Coderabbit);
-        }
-        listed
-    }
-
     /// Reads and checks a settings file, expanding `~/` in `repo` against `home`
     ///
     /// # Errors
@@ -643,7 +633,7 @@ impl Settings {
     }
 
     pub(crate) fn parse(text: &str, home: &Path) -> Result<Self, String> {
-        removed::refuse(text, REMOVED)?;
+        refuse_removed_settings(text, home)?;
         let mut settings: Self = toml::from_str(text).map_err(|e| e.to_string())?;
         settings.expand(home);
         Ok(settings)
@@ -675,6 +665,42 @@ impl Settings {
             .flatten()
             .chain(self.skills.paths_mut())
     }
+}
+
+/// Refuses `text` when it sets a key a removed feature left behind
+///
+/// The fix for `coderabbit.enabled` shows the project's reviewers, as its
+/// table lists them or as `add` would, with `coderabbit` after them.
+///
+/// # Errors
+///
+/// A message naming every removed key `text` sets, each with what replaces it.
+pub(crate) fn refuse_removed_settings(text: &str, home: &Path) -> Result<(), String> {
+    removed::refuse(text, REMOVED).map_err(|message| {
+        let table = text.parse::<toml::Table>().unwrap_or_default();
+        let listed = table
+            .get("agents")
+            .and_then(|agents| agents.get("reviewers"))
+            .and_then(toml::Value::as_array)
+            .map(|names| {
+                names
+                    .iter()
+                    .filter_map(|n| n.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                let names = default_reviewers(home).into_iter();
+                names.map(|n| n.as_str().to_owned()).collect::<Vec<_>>()
+            });
+        let all: Vec<String> = listed
+            .into_iter()
+            .chain(["coderabbit".to_owned()])
+            .collect();
+        message.replace(
+            "LISTED_WITH_CODERABBIT",
+            &format!("`agents.reviewers = {all:?}`"),
+        )
+    })
 }
 
 #[cfg(test)]

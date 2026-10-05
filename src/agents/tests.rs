@@ -1,6 +1,8 @@
 use super::*;
 use crate::settings::{Account, AgentHarness, AgentName, LeaseName};
 
+mod bots;
+
 const QWEN: &str = "---\nrole: implementer\nharness: pi\nmodel: qwen3.8:27b\neffort: low\n\
                     url: http://box:11434/v1\ncontext: 65536\n---\n";
 
@@ -267,7 +269,14 @@ fn defaults_are_written_where_missing_and_never_over_a_file() {
     let home = dir.path().join("home");
     assert_eq!(
         write_defaults(&agents, &home).unwrap(),
-        ["sonnet-high", "opus-high", "defect-hunter"]
+        [
+            "sonnet-high",
+            "opus-high",
+            "defect-hunter",
+            "coderabbit",
+            "cubic",
+            "codex"
+        ]
     );
     assert_eq!(Agents::load(&agents).unwrap(), Agents::embedded());
     assert!(!agents.join("qwen.md").exists(), "no qwen-review script");

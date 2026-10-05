@@ -1,4 +1,5 @@
-//! Resolving the threads a round sent the worker, once its fix moves the head
+//! Resolving the threads a bot's round sent the worker, once its fix moves
+//! the head
 
 use super::{hold_a_finding, now, phase, summoned};
 use crate::ports::Checks;
@@ -6,7 +7,7 @@ use crate::runner::{StepReport, step};
 use crate::test::Scripted;
 
 #[test]
-fn a_forge_that_keeps_refusing_to_resolve_lets_the_fix_go_on_after_three_steps() {
+fn a_forge_that_keeps_refusing_to_resolve_lets_the_pass_go_on_after_three_steps() {
     let (rig, runner, head) = summoned("shep");
     hold_a_finding(&rig, &runner, &head, "Name the flag.");
     rig.forge.coderabbit.set_resolve_down(true);
@@ -17,7 +18,11 @@ fn a_forge_that_keeps_refusing_to_resolve_lets_the_fix_go_on_after_three_steps()
             step(&runner).unwrap(),
             Some(StepReport::GateFailed { .. })
         ));
-        assert_eq!(phase(&rig, &runner)["stage"], "fixing", "tried again");
+        assert_eq!(
+            phase(&rig, &runner)["stage"]["stage"],
+            "fixing",
+            "tried again"
+        );
     }
     assert_eq!(
         step(&runner).unwrap(),
@@ -32,20 +37,35 @@ fn a_forge_that_keeps_refusing_to_resolve_lets_the_fix_go_on_after_three_steps()
     let item = runner.lock().unwrap().state.work_items[0].clone();
     assert_eq!((item.threads_sent.len(), item.resolve_failures), (0, 0));
 
-    // Still open, the thread goes to the worker again with the next review.
+    // Still open, the thread is a finding again in the bot's next read.
     rig.forge.coderabbit.set_resolve_down(false);
     let fixed = rig.forge.head_of("kelpie/7").unwrap();
     rig.forge.set_checks(&fixed, Checks::Passed);
     assert!(matches!(
         rig.verdict(&runner),
+        Some(StepReport::Ruling { id: 1, .. })
+    ));
+    rig.ask(&runner, "rule", Some("1 no guard it too"));
+    rig.claude.script([
+        Scripted::Push("guard.txt", "guarded\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    step(&runner).unwrap(); // the noted turn: pushes, and a pass begins
+    step(&runner).unwrap(); // round 1, qwen: clean by default
+    step(&runner).unwrap(); // round 2, claude: scripted clean above
+    assert!(matches!(
+        step(&runner).unwrap(),
         Some(StepReport::Summoned { .. })
     ));
-    rig.forge.coderabbit.review(71, &fixed, now(&rig) + 60, &[]);
+    let guarded = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge
+        .coderabbit
+        .review(71, &guarded, now(&rig) + 60, &[]);
     rig.clock.advance(60);
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitReviewed {
-            round: 2,
+        Some(StepReport::BotReviewed {
+            round: 3,
             open_threads: 1,
             ..
         })
@@ -53,7 +73,7 @@ fn a_forge_that_keeps_refusing_to_resolve_lets_the_fix_go_on_after_three_steps()
 }
 
 #[test]
-fn one_refusal_then_a_resolve_goes_on_to_ci_as_usual() {
+fn one_refusal_then_a_resolve_goes_on_as_usual() {
     let (rig, runner, head) = summoned("rotom");
     hold_a_finding(&rig, &runner, &head, "Name the flag.");
     rig.forge.coderabbit.set_resolve_down(true);
@@ -73,10 +93,10 @@ fn one_refusal_then_a_resolve_goes_on_to_ci_as_usual() {
     assert_eq!(item.resolve_failures, 0);
 }
 
-// A file saved by a build before `threads_sent` holds a bot fix with no
-// thread ids, and nothing on the work item names them, so none is resolved.
+// A file whose work item lost its `threads_sent` names nothing to resolve,
+// so the fix resolves none and the thread stays open for the next read.
 #[test]
-fn a_bot_fix_saved_before_threads_were_kept_resolves_none_and_the_next_review_sends_them_again() {
+fn a_bot_fix_with_no_threads_kept_resolves_none() {
     let (rig, runner, head) = summoned("koji");
     hold_a_finding(&rig, &runner, &head, "Name the flag.");
     drop(runner);
@@ -88,7 +108,7 @@ fn a_bot_fix_saved_before_threads_were_kept_resolves_none_and_the_next_review_se
     std::fs::write(&state, saved.to_string()).unwrap();
 
     let runner = rig.open().unwrap();
-    assert_eq!(phase(&rig, &runner)["stage"], "fixing");
+    assert_eq!(phase(&rig, &runner)["stage"]["stage"], "fixing");
     rig.claude.script([Scripted::Push("flag.txt", "named\n")]);
     step(&runner).unwrap(); // the fix turn
     assert!(matches!(
@@ -96,21 +116,7 @@ fn a_bot_fix_saved_before_threads_were_kept_resolves_none_and_the_next_review_se
         Some(StepReport::FixPushed { .. })
     ));
     assert!(rig.forge.coderabbit.resolved().is_empty());
-    let fixed = rig.forge.head_of("kelpie/7").unwrap();
-    rig.forge.set_checks(&fixed, Checks::Passed);
-    assert!(matches!(
-        rig.verdict(&runner),
-        Some(StepReport::Summoned { .. })
-    ));
-    rig.forge.coderabbit.review(71, &fixed, now(&rig) + 60, &[]);
-    rig.clock.advance(60);
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitReviewed {
-            open_threads: 1,
-            ..
-        })
-    ));
+    assert_eq!(phase(&rig, &runner)["state"], "ci");
 }
 
 #[test]

@@ -33,36 +33,6 @@
 kind = "ntfy"
 url = "https://ntfy.sh/your-private-topic"
 
-# The pull request reviewers a project may list, each by its window: so many
-# reviews in so many hours, account-wide, which the dog holds. CodeRabbit is
-# defined with one review an hour when absent, and its review footers raise
-# that. cubic is listed only once defined here. Its free plan gives a
-# private repo 20 reviews a month; a public repo draws on a fair-use pool of
-# reviewed lines it does not publish. Codex is listed only once defined here
-# too, with the weekly allowance its plan gives code reviews, which is the
-# window its "usage limits for code reviews" reply parks it for; its
-# reviews run on the ChatGPT plan, not the repo's. `reviews_on_ready` says
-# Codex reviews a pull request when it leaves draft, as the repo's Codex
-# settings may have it: then marking ready is the summon, taken under the
-# lease with no comment, since a comment on top would spend a second review
-# the window does not count. Off when absent, since it was never seen to:
-# turn it on only where Codex's automatic reviews are enabled, and kelpie
-# otherwise summons by comment. A round that goes
-# to another reviewer still marks the draft ready, so turn Codex's automatic
-# reviews off to keep it out of those. The dog reads these when it starts.
-# [kelpie.reviewers.coderabbit]
-# reviews = 1
-# hours = 1
-#
-# [kelpie.reviewers.cubic]
-# reviews = 20
-# hours = 720
-#
-# [kelpie.reviewers.codex]
-# reviews = 10
-# hours = 168
-# reviews_on_ready = false
-
 # How many commands may hold the `cargo-test` lease at once, 3 when absent.
 # A worker runs its test suite under it, as does anything on this machine
 # that runs `shep kelpie lease run cargo-test -- <command>`, and the rest
@@ -136,3 +106,33 @@ url = "https://ntfy.sh/your-private-topic"
 # host with `ollama` and may name its model with `ollama_model`, else every
 # model the host has loaded is checked. A missing command or an unreachable
 # endpoint stops the runner of a project that lists it.
+#
+# A pull request review bot is a reviewer too, on `harness: bot`. Kelpie
+# ships `coderabbit`, `cubic` and `codex`, which `add` writes out and no
+# project lists until told to. A bot's file is named for it and holds its
+# window, so many `reviews` in so many `hours`, account-wide: the dog books
+# each bot's window from its file when it starts, and holds the bot's lease
+# by it. CodeRabbit's is one an hour, which its review footers raise. cubic's
+# free plan gives a repo GitHub marks private 20 reviews a month, and a
+# public repo draws on a fair-use pool of reviewed lines. Codex's is the
+# weekly allowance its plan gives code reviews, which its "usage limits"
+# reply holds it for. A listed bot reads once a pass, in its place: a round
+# that waits more than an hour for its window goes on without it. `rounds`
+# is the most reads it makes of a work item's pull request, whatever its
+# passes. Codex's `reviews_on_ready: true` says it reviews a pull request
+# when it leaves draft, as the repo's Codex settings may have it: then
+# marking ready, under its lease, is the summon, with no comment, since a
+# comment on top would spend a second review the window does not count.
+# A runner refuses a list with another bot before it, whose mark-ready
+# would draw its review outside its lease, and never asks it again by
+# comment. Leave it off unless Codex's automatic reviews are on. A bot
+# writes its own
+# prompt, so the body stays empty:
+#
+#   ---
+#   role: reviewer
+#   harness: bot
+#   bot: cubic
+#   reviews: 20
+#   hours: 720
+#   ---

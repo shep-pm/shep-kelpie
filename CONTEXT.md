@@ -83,8 +83,12 @@ harness, or a command, or kelpie's own endpoint reviewer. One with a
 and asked only for what it missed, before its one fix turn. Kelpie ships
 `defect-hunter`, which does. A **review bot** (CodeRabbit, cubic, Codex) is
 a reviewer on the bot harness, summoned on the pull request and answering
-there within a rate window of its own.
-_Avoid_: judge, local reviewer, round, deep round
+there within a rate window of its own. Its file is named for it and holds
+that window. A listed bot reads once a pass in its place, and its open
+threads are its findings; one whose window opens more than an hour on, or
+that never answers, is passed over for the pass. No bot is listed unless
+the project lists it.
+_Avoid_: judge, local reviewer, round, deep round, pull request reviewer
 
 ## In shep's terms
 
@@ -147,16 +151,18 @@ _Avoid_: profile, metrics
 
 **Lease**:
 Kelpie-granted use of a shared resource: a review bot's window, such as
-CodeRabbit's, or a share of the machine for running tests (`cargo-test`),
-which a few commands hold at once.
+CodeRabbit's, which the dog books from the bot's file, or a share of the
+machine for running tests (`cargo-test`), which a few commands hold at once.
+A bot's round summons only under its lease.
 _Avoid_: lock (the file the lease is built on)
 
 **Summon**:
 Anything that makes a review bot spend its review window. For CodeRabbit on
 shep that is adding the `review please` label, pushing to a pull request that
 carries it, or asking for a full review in a comment. For cubic it is the
-`@cubic-dev-ai review` comment, and for Codex the `@codex review` comment.
-Only kelpie's code summons.
+`@cubic-dev-ai review` comment, and for Codex the `@codex review` comment, or
+marking a draft ready where its file says it reviews on ready. Only kelpie's
+code summons, in the listed bot's round of a review pass.
 
 **Ruling**:
 A decision only the maintainer makes, one of five kinds: `merge`,
