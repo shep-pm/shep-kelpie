@@ -5,28 +5,28 @@
 //! `P1`, `P2`, `P3`, then an issue with no priority label. Within a priority
 //! the oldest goes first, by issue number. An issue that already
 //! has an open pull request or an assignee is someone's work in progress, and
-//! is skipped. So is one whose `worker:` label cannot be read, since kelpie
-//! would not know which model to run it on. An issue waits while any issue it
-//! is blocked by is open, even one with a pull request. An issue the runner
-//! picks but cannot take, because the forge cannot show it or its `worker:`
-//! label fails when `add` reads it, is skipped too, so it cannot stall the
-//! issues behind it. An issue with sub-issues is never worked itself: its
-//! sub-issues are.
+//! is skipped. So is one whose `agent:` label names no implementer the
+//! project lists, since kelpie would not know which agent to run it on. An
+//! issue waits while any issue it is blocked by is open, even one with a pull
+//! request. An issue the runner picks but cannot take, because the forge
+//! cannot show it or its `agent:` label fails when `add` reads it, is skipped
+//! too, so it cannot stall the issues behind it. An issue with sub-issues is
+//! never worked itself: its sub-issues are.
 
 use std::fmt;
 
 use serde::Serialize;
 
-use crate::settings::{Effort, LabelModels, LabelName, RoleAgents, RoleModel};
+use crate::settings::AgentName;
 
 /// The label that puts an issue on the board
 pub const READY: &str = "ready-for-agent";
 
-/// The prefix of the label that overrides the worker's model and effort
-pub const WORKER_LABEL: &str = "worker:";
+/// The prefix of the label that names the implementer an issue runs on
+pub const AGENT_LABEL: &str = "agent:";
 
-/// What follows [`WORKER_LABEL`] to ask for the project's local worker
-const LOCAL: &str = "local";
+/// The prefix of the label that named the worker's model before `agent:`
+const OLD_WORKER_LABEL: &str = "worker:";
 
 // The priority labels, highest first. An issue with none ranks after them all.
 const PRIORITIES: [&str; 4] = [
@@ -131,7 +131,7 @@ pub enum Skip {
         #[serde(skip_serializing_if = "is_zero")]
         unlisted: u64,
     },
-    /// Its `worker:` label cannot be read
+    /// Its `agent:` label names no listed implementer
     Label {
         /// The issue
         issue: u64,
@@ -200,7 +200,12 @@ pub struct Pick {
 /// `finished` lists the issues whose work items kelpie already finished. The
 /// forge can still list one as open and ready for a while after its pull
 /// request merges, so the board never takes one again.
-pub fn pick(ready: &[ReadyIssue], open: &[OpenPullRequest], finished: &[u64], local: bool) -> Pick {
+pub fn pick(
+    ready: &[ReadyIssue],
+    open: &[OpenPullRequest],
+    finished: &[u64],
+    implementers: &[AgentName],
+) -> Pick {
     let mut ready: Vec<&ReadyIssue> = ready.iter().collect();
     ready.sort_by_key(|i| (priority_rank(&i.labels), i.number));
     let mut skipped = Vec::new();
@@ -236,7 +241,7 @@ pub fn pick(ready: &[ReadyIssue], open: &[OpenPullRequest], finished: &[u64], lo
                 by,
                 unlisted: issue.unlisted_blockers,
             });
-        } else if let Some(error) = label_error(&issue.labels, local) {
+        } else if let Some(error) = label_error(&issue.labels, implementers) {
             skipped.push(Skip::Label {
                 issue: number,
                 error,
@@ -263,166 +268,83 @@ fn priority_rank(labels: &[String]) -> usize {
         .unwrap_or(PRIORITIES.len())
 }
 
-// Why the board cannot take an issue with `labels`, given whether the
-// project has a local worker, before anything is spent on it.
-fn label_error(labels: &[String], local: bool) -> Option<LabelError> {
-    match worker_override(labels) {
-        Err(error) => Some(error),
-        Ok(Some(WorkerLabel::Local)) if !local => Some(LabelError::NoLocal),
-        Ok(_) => None,
-    }
+// Why the board cannot take an issue with `labels`, given the project's
+// implementers, before anything is spent on it.
+fn label_error(labels: &[String], implementers: &[AgentName]) -> Option<LabelError> {
+    agent_label(labels, implementers).err()
 }
 
-/// What an issue's `worker:` label asks for
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WorkerLabel {
-    /// `worker:<model>-<effort>`: a Claude model and effort
-    Model(LabelModel),
-    /// `worker:local`: the project's local worker agent
-    Local,
-}
-
-/// What an issue's `worker:` label asks for, if it has one
+/// The implementer an issue's `agent:<name>` label names, if it has one
+///
+/// The prefix is read in any case, so `Agent:opus-high` is a label too.
 ///
 /// # Errors
 ///
-/// [`LabelError`] when a `worker:` label names no known model or effort, or
-/// the issue has more than one.
-pub fn worker_override(labels: &[String]) -> Result<Option<WorkerLabel>, LabelError> {
-    let mut found = labels.iter().filter_map(|l| l.strip_prefix(WORKER_LABEL));
-    let Some(value) = found.next() else {
+/// [`LabelError`] when the issue has more than one `agent:` label, or its
+/// label names no agent in `implementers`.
+pub fn agent_label(
+    labels: &[String],
+    implementers: &[AgentName],
+) -> Result<Option<AgentName>, LabelError> {
+    let prefixed = |l: &&String| {
+        l.get(..AGENT_LABEL.len())
+            .is_some_and(|p| p.eq_ignore_ascii_case(AGENT_LABEL))
+    };
+    let mut found = labels.iter().filter(prefixed);
+    let Some(label) = found.next() else {
         return Ok(None);
     };
     if found.next().is_some() {
         return Err(LabelError::Several);
     }
-    parse_worker_value(value).map(Some)
-}
-
-/// What a `worker:` label's value asks for, the part after `worker:`
-///
-/// # Errors
-///
-/// [`LabelError::Unreadable`] when it is not `local`, nor `<model>-<effort>`
-/// with a known model and effort.
-pub fn parse_worker_value(value: &str) -> Result<WorkerLabel, LabelError> {
-    if value == LOCAL {
-        return Ok(WorkerLabel::Local);
-    }
-    let unreadable = || LabelError::Unreadable(format!("{WORKER_LABEL}{value}"));
-    let (name, effort) = value.split_once('-').ok_or_else(unreadable)?;
-    let name = LabelName::parse(name).ok_or_else(unreadable)?;
-    let effort = Effort::parse(effort).ok_or_else(unreadable)?;
-    Ok(WorkerLabel::Model(LabelModel { name, effort }))
-}
-
-/// The model names a `worker:<model>-<effort>` label may use
-pub fn worker_model_names() -> [&'static str; LabelName::ALL.len()] {
-    LabelName::ALL.map(LabelName::as_str)
-}
-
-/// The model name and effort a `worker:<model>-<effort>` label asks for
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LabelModel {
-    /// The model's name, which the project's `models.labels` maps to an id
-    pub name: LabelName,
-    /// Passed to `claude --effort`
-    pub effort: Effort,
-}
-
-/// The model and effort an issue's worker runs on, from its label and the
-/// project's agents
-///
-/// A local worker agent takes only the issues labelled `worker:local`, which
-/// the maintainer chooses. The rest run on `models`' worker, and a model
-/// label runs the id `labels` gives its name.
-///
-/// # Errors
-///
-/// [`LabelError::NoLocal`] when the label asks for a local worker the
-/// project does not name.
-pub fn worker_for(
-    label: Option<WorkerLabel>,
-    agents: &RoleAgents,
-    models: &RoleModel,
-    labels: &LabelModels,
-) -> Result<WorkerModel, LabelError> {
-    let local = agents.limits.worker.lease().is_some();
-    match (label, local) {
-        (Some(WorkerLabel::Model(model)), _) => Ok(WorkerModel {
-            model: labels.id(model.name).to_owned(),
-            effort: model.effort,
-            local: false,
+    let value = &label[AGENT_LABEL.len()..];
+    match implementers.iter().find(|name| name.as_str() == value) {
+        Some(name) => Ok(Some(name.clone())),
+        None => Err(LabelError::NotListed {
+            label: label.clone(),
+            listed: implementers.iter().map(AgentName::to_string).collect(),
         }),
-        (Some(WorkerLabel::Local), true) => Ok(WorkerModel {
-            local: true,
-            ..WorkerModel::from(&agents.worker)
-        }),
-        (Some(WorkerLabel::Local), false) => Err(LabelError::NoLocal),
-        (None, true) => Ok(WorkerModel::from(models)),
-        (None, false) => Ok(WorkerModel::from(&agents.worker)),
     }
 }
 
-/// Why a `worker:` label cannot be used
+/// An issue's `worker:` label, which kelpie no longer reads, if it has one
+pub fn old_worker_label(labels: &[String]) -> Option<&str> {
+    labels
+        .iter()
+        .find(|l| l.starts_with(OLD_WORKER_LABEL))
+        .map(String::as_str)
+}
+
+/// Why an `agent:` label cannot be used
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LabelError {
-    /// The issue has more than one `worker:` label
+    /// The issue has more than one `agent:` label
     Several,
-    /// This label is not `worker:<model>-<effort>` with a known model and
-    /// effort, nor `worker:local`
-    Unreadable(String),
-    /// The issue is labelled `worker:local`, and the project's worker agent is not local
-    NoLocal,
+    /// The label names no agent the project lists in `agents.implementers`
+    NotListed {
+        /// The label
+        label: String,
+        /// The agents the project lists
+        listed: Vec<String>,
+    },
 }
 
 impl fmt::Display for LabelError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Several => f.write_str("the issue has more than one `worker:` label"),
-            Self::Unreadable(label) => {
-                let names = worker_model_names();
-                write!(
-                    f,
-                    "label `{label}` is not `worker:local`, nor `worker:<model>-<effort>` \
-                     with a model from {}",
-                    names.join(", ")
-                )
-            }
-            Self::NoLocal => f.write_str(
-                "the issue is labelled `worker:local`, and the project's `agents.worker` \
-                 names no local agent",
+            Self::Several => f.write_str("the issue has more than one `agent:` label"),
+            Self::NotListed { label, listed } => write!(
+                f,
+                "label `{label}` names no agent the project lists in `agents.implementers`, \
+                 which are {}",
+                listed.join(", ")
             ),
         }
     }
 }
 
 impl core::error::Error for LabelError {}
-
-/// The model and effort one work item's worker runs on
-// wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WorkerModel {
-    /// Passed to `--model` as written
-    pub model: String,
-    /// Passed to `--effort`
-    pub effort: Effort,
-    /// Whether the maintainer gave the issue to the project's local worker
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub local: bool,
-}
-
-impl From<&RoleModel> for WorkerModel {
-    fn from(role: &RoleModel) -> Self {
-        Self {
-            model: role.model.as_str().to_owned(),
-            effort: role.effort,
-            local: false,
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -452,9 +374,16 @@ mod tests {
         names.iter().map(|&n| n.to_owned()).collect()
     }
 
+    // A project listing `sonnet-high` then `opus-high`.
+    fn listed() -> Vec<AgentName> {
+        ["sonnet-high", "opus-high"]
+            .map(|n| AgentName::try_from(n.to_owned()).unwrap())
+            .to_vec()
+    }
+
     #[test]
     fn the_oldest_ready_issue_is_picked_whatever_order_they_are_listed_in() {
-        let pick = pick(&[ready(16), ready(12), ready(14)], &[], &[], true);
+        let pick = pick(&[ready(16), ready(12), ready(14)], &[], &[], &listed());
         assert_eq!(pick.issue, Some(12));
         assert_eq!(pick.skipped, []);
     }
@@ -467,7 +396,12 @@ mod tests {
 
     #[test]
     fn a_p0_issue_is_picked_before_an_older_unlabelled_one() {
-        let pick = pick(&[ready(3), prioritised(9, "priority: P0")], &[], &[], true);
+        let pick = pick(
+            &[ready(3), prioritised(9, "priority: P0")],
+            &[],
+            &[],
+            &listed(),
+        );
         assert_eq!(pick.issue, Some(9));
         assert_eq!(pick.skipped, []);
     }
@@ -485,7 +419,7 @@ mod tests {
             prioritised(7, "priority: P1"),
             prioritised(8, "priority: P0"),
         ];
-        while let Some(next) = pick(&issues, &[], &[], true).issue {
+        while let Some(next) = pick(&issues, &[], &[], &listed()).issue {
             order.push(next);
             issues.retain(|i| i.number != next);
         }
@@ -496,7 +430,7 @@ mod tests {
     fn an_issue_with_several_priority_labels_ranks_by_the_highest() {
         let mut both = prioritised(9, "priority: P3");
         both.labels.push("priority: P1".into());
-        let pick = pick(&[prioritised(2, "priority: P2"), both], &[], &[], true);
+        let pick = pick(&[prioritised(2, "priority: P2"), both], &[], &[], &listed());
         assert_eq!(pick.issue, Some(9));
     }
 
@@ -504,7 +438,7 @@ mod tests {
     fn a_blocked_p0_issue_waits_and_the_next_priority_is_picked() {
         let mut p0 = blocked(9, &[(4, true)]);
         p0.labels.push("priority: P0".into());
-        let pick = pick(&[p0, ready(1)], &[], &[], true);
+        let pick = pick(&[p0, ready(1)], &[], &[], &listed());
         assert_eq!(pick.issue, Some(1));
         assert_eq!(pick.skipped.len(), 1);
     }
@@ -518,7 +452,7 @@ mod tests {
         };
         let mut piece = ready(5);
         piece.parent = Some(4);
-        let pick = pick(&[parent, piece], &[], &[], true);
+        let pick = pick(&[parent, piece], &[], &[], &listed());
         assert_eq!(pick.issue, Some(5));
         assert_eq!(pick.skipped, [Skip::Split { issue: 4, open: 2 }]);
     }
@@ -526,7 +460,7 @@ mod tests {
     #[test]
     fn nothing_ready_picks_nothing() {
         assert_eq!(
-            pick(&[], &[], &[], true),
+            pick(&[], &[], &[], &listed()),
             Pick {
                 issue: None,
                 skipped: vec![]
@@ -544,7 +478,7 @@ mod tests {
             closes: vec![2],
             labels: vec![],
         }];
-        let pick = pick(&[ready(2), taken, ready(5)], &open, &[], true);
+        let pick = pick(&[ready(2), taken, ready(5)], &open, &[], &listed());
         assert_eq!(pick.issue, Some(5));
         assert_eq!(
             pick.skipped,
@@ -560,7 +494,7 @@ mod tests {
 
     #[test]
     fn an_issue_kelpie_finished_is_passed_over_while_the_forge_still_lists_it() {
-        let pick = pick(&[ready(22), ready(23)], &[], &[22], true);
+        let pick = pick(&[ready(22), ready(23)], &[], &[22], &listed());
         assert_eq!(pick.issue, Some(23));
         assert_eq!(pick.skipped, [Skip::Finished { issue: 22 }]);
     }
@@ -570,7 +504,7 @@ mod tests {
         let mut taken = ready(3);
         taken.assigned = true;
         assert_eq!(
-            pick(&[taken], &[], &[], true),
+            pick(&[taken], &[], &[], &listed()),
             Pick {
                 issue: None,
                 skipped: vec![Skip::Assigned { issue: 3 }]
@@ -579,39 +513,41 @@ mod tests {
     }
 
     #[test]
-    fn an_issue_with_an_unreadable_worker_label_is_passed_over() {
+    fn an_issue_labelled_for_an_agent_the_project_does_not_list_is_passed_over() {
         let mut odd = ready(1);
-        odd.labels.push("worker:gpt-high".into());
-        let pick = pick(&[odd, ready(2)], &[], &[], true);
+        odd.labels.push("agent:haiku-low".into());
+        let pick = pick(&[odd, ready(2)], &[], &[], &listed());
         assert_eq!(pick.issue, Some(2));
         assert_eq!(
             pick.skipped,
             [Skip::Label {
                 issue: 1,
-                error: LabelError::Unreadable("worker:gpt-high".into())
+                error: LabelError::NotListed {
+                    label: "agent:haiku-low".into(),
+                    listed: vec!["sonnet-high".into(), "opus-high".into()],
+                }
             }]
+        );
+        let Skip::Label { error, .. } = &pick.skipped[0] else {
+            panic!("{:?}", pick.skipped);
+        };
+        assert_eq!(
+            error.to_string(),
+            "label `agent:haiku-low` names no agent the project lists in \
+             `agents.implementers`, which are sonnet-high, opus-high"
         );
     }
 
     #[test]
-    fn an_issue_for_a_local_worker_the_project_lacks_is_passed_over() {
-        let mut local = ready(1);
-        local.labels.push("worker:local".into());
-        let without = pick(&[local.clone(), ready(2)], &[], &[], false);
-        assert_eq!(without.issue, Some(2));
-        assert_eq!(
-            without.skipped,
-            [Skip::Label {
-                issue: 1,
-                error: LabelError::NoLocal
-            }]
-        );
-        assert_eq!(pick(&[local, ready(2)], &[], &[], true).issue, Some(1));
+    fn an_old_worker_label_is_no_label_error() {
+        let mut old = ready(1);
+        old.labels.push("worker:gpt-high".into());
+        assert_eq!(pick(&[old, ready(2)], &[], &[], &listed()).issue, Some(1));
     }
 
     #[test]
     fn an_issue_with_an_open_blocker_is_passed_over_for_the_next_oldest() {
-        let pick = pick(&[blocked(8, &[(32, true)]), ready(9)], &[], &[], true);
+        let pick = pick(&[blocked(8, &[(32, true)]), ready(9)], &[], &[], &listed());
         assert_eq!(pick.issue, Some(9));
         assert_eq!(
             pick.skipped,
@@ -625,7 +561,12 @@ mod tests {
 
     #[test]
     fn an_issue_whose_blockers_are_all_closed_is_picked() {
-        let pick = pick(&[blocked(8, &[(32, false), (33, false)])], &[], &[], true);
+        let pick = pick(
+            &[blocked(8, &[(32, false), (33, false)])],
+            &[],
+            &[],
+            &listed(),
+        );
         assert_eq!(pick.issue, Some(8));
         assert_eq!(pick.skipped, []);
     }
@@ -634,7 +575,7 @@ mod tests {
     fn a_skip_for_blockers_names_only_the_open_ones_lowest_first() {
         let mixed = blocked(27, &[(40, true), (24, false), (19, true), (37, true)]);
         assert_eq!(
-            pick(&[mixed], &[], &[], true),
+            pick(&[mixed], &[], &[], &listed()),
             Pick {
                 issue: None,
                 skipped: vec![Skip::Blocked {
@@ -650,7 +591,7 @@ mod tests {
     fn blockers_the_forge_did_not_list_count_as_open() {
         let mut long = blocked(8, &[(12, false)]);
         long.unlisted_blockers = 3;
-        let pick = pick(&[long, ready(9)], &[], &[], true);
+        let pick = pick(&[long, ready(9)], &[], &[], &listed());
         assert_eq!(pick.issue, Some(9));
         assert_eq!(
             pick.skipped,
@@ -668,94 +609,39 @@ mod tests {
     }
 
     #[test]
-    fn a_worker_label_names_the_model_and_effort() {
+    fn an_agent_label_names_a_listed_implementer() {
+        let opus = AgentName::try_from("opus-high".to_owned()).unwrap();
         assert_eq!(
-            worker_override(&labels(&[READY, "worker:opus-medium"])),
-            Ok(Some(WorkerLabel::Model(LabelModel {
-                name: LabelName::Opus,
-                effort: Effort::Medium,
-            })))
+            agent_label(&labels(&[READY, "agent:opus-high"]), &listed()),
+            Ok(Some(opus))
         );
+        assert_eq!(agent_label(&labels(&[READY, "bug"]), &listed()), Ok(None));
         assert_eq!(
-            worker_override(&labels(&["worker:haiku-max"])),
-            Ok(Some(WorkerLabel::Model(LabelModel {
-                name: LabelName::Haiku,
-                effort: Effort::Max,
-            })))
+            agent_label(&labels(&["worker:opus-high"]), &listed()),
+            Ok(None)
         );
-        assert_eq!(
-            worker_override(&labels(&[READY, "worker:local"])),
-            Ok(Some(WorkerLabel::Local))
-        );
-        assert_eq!(worker_override(&labels(&[READY, "bug"])), Ok(None));
-    }
-
-    #[test]
-    fn a_local_worker_takes_only_the_issues_labelled_for_it() {
-        use crate::settings::{LeaseName, Limit, NonBlank, RoleLimits};
-        let model = |name: &str| RoleModel {
-            model: NonBlank::try_from(name.to_owned()).unwrap(),
-            effort: Effort::Low,
-            harness: Default::default(),
-        };
-        let mut agents = RoleAgents {
-            worker: model("qwen3.8:27b"),
-            reviewer: model("claude-sonnet-5"),
-            deep_reviewer: model("claude-opus-5-5"),
-            limits: RoleLimits {
-                worker: Limit::Lease(LeaseName::gpu()),
-                ..RoleLimits::default()
-            },
-        };
-        let models = model("claude-sonnet-5");
-        let ids = LabelModels::default();
-        let worker = |label, agents: &RoleAgents| worker_for(label, agents, &models, &ids);
-        let ran = |m: Result<WorkerModel, LabelError>| m.map(|m| m.model);
-        assert_eq!(ran(worker(None, &agents)), Ok("claude-sonnet-5".into()));
-        let local = Some(WorkerLabel::Local);
-        assert_eq!(
-            ran(worker(local.clone(), &agents)),
-            Ok("qwen3.8:27b".into())
-        );
-        let opus = worker_override(&labels(&["worker:opus-low"])).unwrap();
-        assert_eq!(ran(worker(opus, &agents)), Ok("claude-opus-5-5".into()));
-        let sonnet = worker_override(&labels(&["worker:sonnet-high"])).unwrap();
-        assert_eq!(
-            ran(worker(sonnet.clone(), &agents)),
-            Ok("claude-sonnet-5-5".into())
-        );
-        let mapped: LabelModels = toml::from_str("sonnet = \"claude-sonnet-6\"").unwrap();
-        assert_eq!(
-            ran(worker_for(sonnet, &agents, &models, &mapped)),
-            Ok("claude-sonnet-6".into())
-        );
-
-        agents.limits.worker = Limit::default();
-        assert_eq!(ran(worker(None, &agents)), Ok("qwen3.8:27b".into()));
-        assert_eq!(worker(local, &agents), Err(LabelError::NoLocal));
-    }
-
-    #[test]
-    fn a_worker_label_that_cannot_be_read_is_an_error() {
-        for bad in [
-            "worker:opus",
-            "worker:opus-",
-            "worker:-low",
-            "worker:gpt-low",
-            "worker:opus-huge",
-            "worker:Opus-low",
-            "worker:Local",
-            "worker:local-low",
-        ] {
-            assert_eq!(
-                worker_override(&labels(&[bad])),
-                Err(LabelError::Unreadable(bad.into())),
+        for bad in ["agent:", "agent:Opus-high", "agent:opus-low"] {
+            assert!(
+                matches!(
+                    agent_label(&labels(&[bad]), &listed()),
+                    Err(LabelError::NotListed { label, .. }) if label == bad
+                ),
                 "{bad}"
             );
         }
         assert_eq!(
-            worker_override(&labels(&["worker:opus-low", "worker:sonnet-high"])),
+            agent_label(
+                &labels(&["agent:opus-high", "agent:sonnet-high"]),
+                &listed()
+            ),
             Err(LabelError::Several)
         );
+    }
+
+    #[test]
+    fn an_old_worker_label_is_found_to_be_told_about() {
+        let found = labels(&[READY, "worker:opus-medium"]);
+        assert_eq!(old_worker_label(&found), Some("worker:opus-medium"));
+        assert_eq!(old_worker_label(&labels(&[READY, "agent:x"])), None);
     }
 }

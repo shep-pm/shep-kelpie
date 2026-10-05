@@ -18,8 +18,9 @@ use super::report::{Begin, StepReport};
 use super::rework::{HUMAN, review_text};
 use super::trigger;
 use super::turn;
-use crate::board::{LabelError, OpenPullRequest, READY, Skip, WorkerModel};
+use crate::board::{LabelError, OpenPullRequest, READY, Skip};
 use crate::ports::{ForgeError, Issue, MaintainerReview, PullRequestState, Reviewed, Role};
+use crate::settings::AgentName;
 use crate::state::{StateError, Waiting};
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem, new_session_id};
 use crate::worktree::{self, Start};
@@ -48,7 +49,7 @@ pub enum AdoptError {
     Viewer(ForgeError),
     /// The forge could not show the pull request's issue
     Issue(u64, ForgeError),
-    /// The issue's `worker:` label cannot be used
+    /// The issue's `agent:` label cannot be used
     Label(LabelError),
     /// No random session id could be drawn, with the OS's reason
     Session(String),
@@ -203,10 +204,10 @@ impl Runner {
                 return Ok((Some(held), skipped));
             }
             let begin = match self.start_adoption(number) {
-                Ok((issue, worker)) => Begin::Report(StepReport::Adopted {
+                Ok((issue, agent)) => Begin::Report(StepReport::Adopted {
                     issue,
                     pull_request: number,
-                    worker,
+                    agent,
                 }),
                 Err(AdoptError::State(e)) => return Err(e),
                 Err(AdoptError::NotOpen(..)) => {
@@ -313,7 +314,7 @@ impl Runner {
     // Checks the pull request can be adopted, then prepares its worktree,
     // writes what the worker needs, takes the triage and summon labels off
     // and saves the work item, in that order.
-    fn start_adoption(&mut self, number: u64) -> Result<(u64, WorkerModel), AdoptError> {
+    fn start_adoption(&mut self, number: u64) -> Result<(u64, AgentName), AdoptError> {
         let repo = self.settings.forge.clone();
         let pr = self
             .ports
@@ -329,11 +330,11 @@ impl Runner {
             .forge
             .issue(&repo, issue)
             .map_err(|e| AdoptError::Issue(issue, e))?;
-        let worker = self
-            .labelled_worker(&found.labels)
+        let (agent, note) = self
+            .labelled_agent(issue, &found.labels)
             .map_err(AdoptError::Label)?;
         let session = new_session_id().map_err(|e| AdoptError::Session(e.to_string()))?;
-        let fresh = self.fresh(issue, found.title.clone(), worker.clone(), session);
+        let fresh = self.fresh(issue, found.title.clone(), agent.clone(), session);
         // A start that failed part way leaves a worktree on a head `origin`
         // may have moved past, so each start begins from a fresh one.
         let removed = worktree::remove(
@@ -432,7 +433,8 @@ impl Runner {
         next.work_items.push(item);
         self.save(next).map_err(AdoptError::State)?;
         self.mark_held(issue, true);
-        Ok((issue, worker))
+        self.notes.extend(note);
+        Ok((issue, agent))
     }
 }
 

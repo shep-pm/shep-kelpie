@@ -1008,6 +1008,7 @@ dependencies = [
  "qrcode",
  "schemars",
  "serde",
+ "serde-saphyr",
  "serde_json",
  "sha1",
  "shep-channel",

@@ -9,6 +9,7 @@
 #![doc(test(attr(deny(warnings))))]
 
 pub mod adapters;
+pub mod agents;
 pub mod board;
 pub mod coderabbit;
 pub mod codex;

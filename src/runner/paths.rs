@@ -75,6 +75,8 @@ pub struct ProjectPaths {
     pub kelpie_settings: PathBuf,
     /// The authenticator secret and the codes used, which every project shares
     pub totp: PathBuf,
+    /// The agent files, which every project shares
+    pub agents: PathBuf,
     /// The settings file
     pub settings: PathBuf,
     /// The state file
@@ -99,12 +101,13 @@ pub struct ProjectPaths {
 impl ProjectPaths {
     /// `<kelpie home>/<project>/`, holding the project's state, settings and
     /// worker files, and its `worktrees` and `builds` folders, beside
-    /// kelpie's own `settings.toml`, `totp` and `tools`
+    /// kelpie's own `settings.toml`, `totp`, `agents` and `tools`
     pub fn under(kelpie_home: &Path, shep_home: &Path, project: &ProjectName) -> Self {
         let folder = kelpie_home.join(project.as_str());
         Self {
             kelpie_settings: kelpie_home.join("settings.toml"),
             totp: kelpie_home.join("totp"),
+            agents: kelpie_home.join(crate::agents::FOLDER),
             settings: folder.join("settings.toml"),
             state: folder.join("state.json"),
             worker: folder.join("worker"),

@@ -10,10 +10,10 @@ use serde::Serialize;
 use super::gpu::GpuStatus;
 use super::pace::PacerStatus;
 use super::{Answer, Runner};
-use crate::board::{Skip, WorkerModel};
+use crate::board::Skip;
 use crate::lease::gpu::LockHolder;
 use crate::ports::{ModelSeat, SessionId, Timestamp};
-use crate::settings::{MergeAuthority, ReviewerName};
+use crate::settings::{AgentName, MergeAuthority, ReviewerName};
 use crate::skills::StepSkill;
 use crate::state::{Finished, LeaseHeld, Ruling, RunState, StateError, Waiting};
 use crate::work_item::{CodeRabbitTally, Phase, QwenTally, Spend, Split, Turn, WorkItem};
@@ -118,8 +118,8 @@ pub struct WorkItemStatus<'a> {
     pub adopted: bool,
     /// Its worktree
     pub worktree: &'a Path,
-    /// The model and effort its worker runs on
-    pub worker: &'a WorkerModel,
+    /// The implementer its worker runs on
+    pub agent: &'a AgentName,
     /// The worker's session, which the maintainer can resume by hand
     pub session: &'a SessionId,
     /// Where the worker's turn stands
@@ -166,7 +166,7 @@ impl<'a> WorkItemStatus<'a> {
             branch: &item.branch,
             adopted: item.adopted,
             worktree: &item.worktree,
-            worker: &item.worker,
+            agent: &item.agent,
             session: &item.session,
             turn: &item.turn,
             phase: &item.phase,

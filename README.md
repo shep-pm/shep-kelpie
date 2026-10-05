@@ -165,7 +165,7 @@ What decides whether, and when, the first issue starts:
 
 - The board skips an issue that is assigned to anyone or already has an open pull request, and one blocked by an issue that is still open. Don't assign it to yourself
 - An issue with sub-issues is never worked itself: its sub-issues are, and shep-kelpie closes it once every sub-issue is closed
-- Of the rest, `priority: P0` to `P3` labels order them, then the oldest goes first. A `worker:<model>-<effort>` label, such as `worker:opus-high`, picks the model that works it, from `opus`, `sonnet`, `haiku` and `fable`, each run as the id `[app.dogs.kelpie.models.labels]` gives it. `worker:local` picks the project's local worker
+- Of the rest, `priority: P0` to `P3` labels order them, then the oldest goes first. An `agent:<name>` label, such as `agent:opus-high`, picks the agent that works it from those the project lists in `agents.implementers` (see [Agents](#agents)), and a label naming one it does not list keeps the issue off the board. An old `worker:` label is no longer read: that issue runs on the default implementer, and the runner's log says so
 - No turn starts while Claude's 5-hour window is at 50% or more, and no new work item starts once today's share of the week is spent. `shep kelpie status` says why under `pacer`, and `enabled = false` in the project's `[app.dogs.kelpie.pacing]` turns both off
 - On a public repo, after CI each pull request waits for CodeRabbit, at one review an hour. shep-kelpie asks for a review by putting the `review please` label on, so the repo's `.coderabbit.yaml` must review only labelled pull requests. Without that, CodeRabbit reviews every push on its own and spends the hour a round is waiting on:
 
@@ -385,33 +385,45 @@ Issues labelled `ready-for-agent` are the board. On a pull request kelpie opened
 
 ## Agents
 
-An agent is a harness plus the model and effort it runs on. The harnesses are Claude Code, `claude-code`, pi, `pi`, which runs a model on an OpenAI-compatible server such as Ollama, and Codex, `codex`, on a ChatGPT plan. Kelpie's own settings define agents by name, and a project names one per role, over its `models` entry:
+An agent is a file: `$SHEP_HOME/kelpie/agents/<name>.md` (or the `agents` folder of the home `KELPIE_HOME` names), YAML frontmatter and then a Markdown body. The name is the file's name without `.md`. The body is added to kelpie's own instructions for that agent, and an empty body adds nothing.
 
-```toml
-# kelpie's [kelpie] section
-[kelpie.agents.opus-high]
-harness = "claude-code"
-model = "claude-opus-5-5"
-effort = "high"
+```markdown
+---
+role: implementer
+harness: claude-code
+model: claude-sonnet-5-5
+effort: high
+---
 
-# the project's table
-[app.dogs.kelpie.agents]
-reviewer = "opus-high"
+Extra instructions for this agent, added to kelpie's own.
 ```
 
-A role left out keeps its `models` entry, so a project that names none runs as before. A local reviewer of kind `session` names an agent from the same list. An agent nobody defines stops the runner at start, naming it.
+`role` is what the agent is for: `implementer`, an agent that builds a work item. `harness` is Claude Code, `claude-code`, pi, `pi`, which runs a model on an OpenAI-compatible server such as Ollama, or Codex, `codex`, on a ChatGPT plan. `model` and `effort` are what the harness runs. Any other key stops the runner, and so does a file that does not parse or misses a key its harness needs, naming the file and the key. A `.md` file whose name is no agent's, such as a `README.md`, is skipped and named in the log. A runner sees an edit to the folder the next time it wakes, as it sees a settings change.
+
+Kelpie ships two: `sonnet-high`, Sonnet 5.5 at high, the default implementer, and `opus-high`, Opus 5.5 at high, for work that is hard to undo. `shep kelpie add` writes out any that are missing and never writes over one you edited, and a file named for one replaces it.
+
+A project lists the agents that build its work items, from those files:
+
+```toml
+[app.dogs.kelpie.agents]
+implementers = ["sonnet-high", "opus-high"]
+```
+
+An issue labelled `agent:<name>` (the prefix in any case) runs on that agent, which the project must list, and any other issue on the first listed that is not a local model. A work item keeps the agent it opened on, and each turn runs that agent's file as it is then. `sonnet-high` alone when absent. The `agents` table's `reviewer` and `deep_reviewer`, and a local reviewer of kind `session`, name an agent file the same way.
 
 `usage` says how an agent's usage is read, and so which account paces it: `claude` (the default on Claude Code) reads `/usage`, `codex` reads Codex's own 5-hour and weekly windows, and `none` is a local model that is never paced. It must be the harness's own reader, so leave it out: Claude Code reads `claude`, pi reads `none` and Codex reads `codex`.
 
 A pi agent also needs the model's server and the context size it gives the model:
 
-```toml
-[kelpie.agents.qwen]
-harness = "pi"
-model = "qwen3.8:27b"
-effort = "medium"
-url = "http://<host>:11434/v1"
-context = 65536
+```markdown
+---
+role: implementer
+harness: pi
+model: qwen3.8:27b
+effort: medium
+url: http://<host>:11434/v1
+context: 65536
+---
 ```
 
 Kelpie runs pi with a home of its own, so your `~/.pi` is never read. pi runs no Claude Code hooks, so a worker on pi can't have `worker.guard_hooks`, and the runner refuses to start with them. Kelpie's own checks still run on every command and file write.
@@ -420,14 +432,16 @@ A pi call's sandbox allows no host of the model's, since the sandbox opens every
 
 A Codex agent needs the `codex` command on the shepherd's `PATH` and a ChatGPT plan, and takes only `model` and `effort`:
 
-```toml
-[kelpie.agents.gpt]
-harness = "codex"
-model = "gpt-6.1-sol"
-effort = "medium"
+```markdown
+---
+role: implementer
+harness: codex
+model: gpt-6.1-sol
+effort: medium
+---
 ```
 
-`codex debug models` lists the plan's models. A project names the agent for a role in its `[app.dogs.kelpie.agents]` table, as above. It runs on shep-kelpie's own ChatGPT login, in `codex_home` (`$SHEP_HOME/kelpie/codex` by default, or the path `codex_home` in the `[kelpie]` section names), never your `~/.codex`. Sign it in once:
+`codex debug models` lists the plan's models. It runs on shep-kelpie's own ChatGPT login, in `codex_home` (`$SHEP_HOME/kelpie/codex` by default, or the path `codex_home` in the `[kelpie]` section names), never your `~/.codex`. Sign it in once:
 
 ```sh
 CODEX_HOME="${SHEP_HOME:-$HOME/.shep}/kelpie/codex" codex login --device-auth
@@ -435,7 +449,7 @@ CODEX_HOME="${SHEP_HOME:-$HOME/.shep}/kelpie/codex" codex login --device-auth
 
 Each Codex call gets a home of its own with that login linked in, so no call sees another's sessions. A runner reads `codex_home` when it starts. A worker on Codex can't have `worker.guard_hooks`, the same as pi. Kelpie's checks run as Codex's own hooks: `confine` on every `apply_patch`, `guard` on every command.
 
-A local worker gets only the issues labelled `worker:local`. The rest run on `models.worker`, so you pick which issues it takes. Each account keeps its own daily allowance and 5-hour stop, shown under its name in `status.pacer`, and a new work item waits on every account its roles spend. `shep kelpie doctor` checks Codex answers for a project that spends it. A `none` agent holds `lease` (the GPU lock, `gpu`, by default) for the whole of each call instead, so a qwen round waits behind its turn, and `status.local_leases` shows who holds it.
+A local implementer, one whose usage is `none`, is never the default: it gets only the issues labelled `agent:<name>` for it, so you pick which issues it takes. Each account keeps its own daily allowance and 5-hour stop, shown under its name in `status.pacer`, and a new work item waits on every account its roles spend. `shep kelpie doctor` checks Codex answers for a project that spends it. A `none` agent holds `lease` (the GPU lock, `gpu`, by default) for the whole of each call instead, so a qwen round waits behind its turn, and `status.local_leases` shows who holds it.
 
 `status` shows each role's tokens in `by_role`, with `cost_usd` only for calls whose harness reports dollars. `unpriced_calls` counts the rest.
 

@@ -11,6 +11,7 @@ use crate::work_item::{CallKind, Seconds, TimingPhase};
 mod deep_round;
 mod review_loop;
 mod shots;
+mod worker;
 
 fn store_in(dir: &Path) -> StateStore {
     StateStore::new(dir.join("state.json"))

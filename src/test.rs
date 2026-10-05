@@ -9,7 +9,6 @@ use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 
 use crate::adapters::{GpuCurl, LocalReviewer};
-use crate::board::WorkerModel;
 use crate::coderabbit::CodeRabbit;
 use crate::codex::Codex;
 use crate::cubic::Cubic;
@@ -21,7 +20,7 @@ use crate::review_bot::Profile;
 use crate::runner::{
     CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
 };
-use crate::settings::{Effort, Settings, SettingsError};
+use crate::settings::{Settings, SettingsError};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{CallRecord, Known, Phase, Seconds, TimingPhase, Timings, Turn, WorkItem};
 
@@ -59,11 +58,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         arrived: None,
         worktree: "/k/wt/shep/42".into(),
         build: "/k/targets/shep/42".into(),
-        worker: WorkerModel {
-            model: "claude-opus-5-5".into(),
-            effort: Effort::Medium,
-            local: false,
-        },
+        agent: "opus-high".to_owned().try_into().unwrap(),
         session: SessionId("5e55".into()),
         turn: Turn::Running {
             since: Timestamp(9),
@@ -469,6 +464,29 @@ impl Rig {
         self.edit_settings(|s| {
             assert!(s.contains(ask), "the example's merge authority moved");
             s.replace(ask, auto)
+        });
+    }
+
+    /// Writes kelpie's agent file `name.md` holding `text`, read when a runner next opens
+    pub(crate) fn write_agent(&self, name: &str, text: &str) {
+        write_in(&self.paths().agents, &format!("{name}.md"), text);
+    }
+
+    /// Lists `names` as the project's implementers, read when a runner next opens
+    pub(crate) fn implementers(&self, names: &[&str]) {
+        let listed = format!("implementers = {names:?}");
+        self.edit_settings(|s| {
+            assert!(
+                s.contains("\nimplementers = "),
+                "the example's implementers moved"
+            );
+            let lines = s
+                .lines()
+                .map(|line| match line.starts_with("implementers = ") {
+                    true => listed.as_str(),
+                    false => line,
+                });
+            lines.map(|line| format!("{line}\n")).collect()
         });
     }
 

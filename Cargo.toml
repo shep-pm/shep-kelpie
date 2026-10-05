@@ -26,6 +26,8 @@ qrcode = { version = "0.14", default-features = false }
 # The settings' JSON Schema, in the version shep-client builds it with
 schemars = { version = "1.2.2", default-features = false, features = ["derive", "std"] }
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
+# Agent files' YAML frontmatter, in the version shep-core already builds
+serde-saphyr = { version = "1", default-features = false, features = ["deserialize"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 sha1 = { version = "0.11", default-features = false }
 shep-channel = { version = "=0.12.0", default-features = false, features = ["client"] }

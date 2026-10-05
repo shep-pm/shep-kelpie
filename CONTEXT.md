@@ -60,6 +60,12 @@ implementers and its reviewers by agent.
 _Avoid_: model (one part of an agent), bot (a review bot is one kind of
 reviewer)
 
+**Implementer**:
+An agent a project lists to build its work items. An issue's `agent:<name>`
+label picks one, and an issue without one runs on the first listed that is
+not a local model. A work item keeps the implementer it opened on.
+_Avoid_: worker model, local worker
+
 **Issue writer**:
 The agent that turns a request into an issue: it researches, scopes the work
 to one pull request or splits it, writes the acceptance criteria and labels

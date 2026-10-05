@@ -52,6 +52,10 @@ impl Scene {
         }
     }
 
+    fn agents(&self) -> PathBuf {
+        self.home.join(".shep/kelpie/agents")
+    }
+
     fn old_settings(&self) -> PathBuf {
         self.home
             .join(".kelpie/projects")
@@ -61,11 +65,12 @@ impl Scene {
 
     async fn add(&self) -> Result<Vec<String>, String> {
         let client = shepherd::connect(self.shepherd.home()).await.unwrap();
-        let old = self.old_settings();
+        let (old, agents) = (self.old_settings(), self.agents());
         let place = Place {
             checkout: &self.checkout,
             home: &self.home,
             old_settings: &old,
+            agents: &agents,
         };
         let added = add(&client, &self.forge, &self.launch, &self.name, place);
         tokio::time::timeout(PATIENCE, added)
@@ -100,6 +105,14 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
     assert!(!settings.coderabbit.enabled, "the repo is private");
     assert_eq!(settings.review.local, None);
     assert_eq!(settings.review.reviewers, [ReviewerName::deep()]);
+    let listed: Vec<&str> = (settings.agents.implementers.iter())
+        .map(|n| n.as_str())
+        .collect();
+    assert_eq!(listed, ["sonnet-high"]);
+    let sonnet = std::fs::read_to_string(scene.agents().join("sonnet-high.md")).unwrap();
+    assert_eq!(sonnet, include_str!("../../../agents/sonnet-high.md"));
+    let opus = std::fs::read_to_string(scene.agents().join("opus-high.md")).unwrap();
+    assert_eq!(opus, include_str!("../../../agents/opus-high.md"));
     assert_eq!(
         scene.forge.repo_labels_now(),
         [
@@ -139,8 +152,14 @@ async fn add_twice_changes_nothing() {
     scene.shepherd.writes();
     let before = scene.shepherd.sheep("koji");
 
+    let mine = "---\nrole: implementer\nharness: claude-code\nmodel: claude-sonnet-6\n\
+                effort: high\n---\n";
+    std::fs::write(scene.agents().join("sonnet-high.md"), mine).unwrap();
+
     let lines = scene.add().await.unwrap();
     assert_eq!(scene.shepherd.writes(), []);
+    let kept = std::fs::read_to_string(scene.agents().join("sonnet-high.md")).unwrap();
+    assert_eq!(kept, mine, "add never writes over an agent file");
     assert_eq!(
         scene.forge.repo_labels_now(),
         [
@@ -152,8 +171,8 @@ async fn add_twice_changes_nothing() {
         ]
     );
     assert_eq!(scene.shepherd.sheep("koji"), before);
-    // Four labels and the runner, each already there.
-    assert_eq!(lines.len(), 5, "{lines:?}");
+    // Four labels, kelpie's agent files and the runner, each already there.
+    assert_eq!(lines.len(), 6, "{lines:?}");
     assert!(lines.iter().all(|l| l.contains("already")), "{lines:?}");
 }
 

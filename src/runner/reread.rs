@@ -2,11 +2,13 @@
 //!
 //! Every setting takes effect live, at the next step or call that reads
 //! it, except `repo` and `forge`: a work item's worktree and pull request
-//! belong to them, so those wait for the runner's next start. A change is
-//! checked as a start checks it, and one that fails keeps the settings the
-//! runner has.
+//! belong to them, so those wait for the runner's next start. The agent
+//! files are read again with them, and a change to those alone is a change
+//! too. A change is checked as a start checks it, and one that fails keeps
+//! the settings the runner has.
 
 use super::{OpenError, Runner, check_coderabbit, check_local, check_reviewers, instructions};
+use crate::agents::Agents;
 use crate::review_bot::Bot;
 use crate::settings::Settings;
 use crate::skills::Skills;
@@ -37,8 +39,9 @@ impl Runner {
         }
         let reviewers = kelpie.reviewers;
         let gpu_metrics_url = kelpie.gpu_metrics_url.clone();
-        let agents = settings.role_agents(&kelpie.agents)?;
-        let lineup = settings.lineup(&kelpie, &self.home)?;
+        let book = Agents::load(&self.paths.agents)?;
+        let agents = settings.role_agents(&book)?;
+        let lineup = settings.lineup(&kelpie, &book, &self.home)?;
         let webhook = kelpie.webhook;
         let mut changed = changed((&self.settings, &self.webhook), (&settings, &webhook));
         if reviewers != self.reviewers {
@@ -47,7 +50,7 @@ impl Runner {
         if lineup != self.lineup && !changed.contains(&"review") {
             changed.push("local_reviewers");
         }
-        if agents != self.agents {
+        if agents != self.agents || book != self.book {
             changed.push("agents");
         }
         if gpu_metrics_url != self.gpu.url() {
@@ -73,6 +76,10 @@ impl Runner {
         self.reviewers = reviewers;
         self.lineup = lineup;
         self.agents = agents;
+        if book != self.book {
+            self.notes.extend(book.skipped());
+        }
+        self.book = book;
         self.gpu.point_at(gpu_metrics_url);
         self.extra_instructions = extra_instructions;
         self.webhook = webhook;

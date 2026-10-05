@@ -8,6 +8,8 @@
 pub mod ids;
 mod removed;
 
+pub use removed::OldWorker;
+
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -549,6 +551,13 @@ impl StateStore {
     /// A store for the state file at `path`
     pub fn new(path: PathBuf) -> Self {
         Self { path }
+    }
+
+    /// The workers of the work items a file saved before agent files holds,
+    /// as it holds them; none once it is saved again, or when it cannot be read
+    pub fn old_workers(&self) -> Vec<OldWorker> {
+        let text = fs::read_to_string(&self.path).unwrap_or_default();
+        serde_json::from_str(&text).map_or_else(|_| Vec::new(), |v| removed::old_workers(&v))
     }
 
     /// Reads the state, or `None` when no state has been saved yet

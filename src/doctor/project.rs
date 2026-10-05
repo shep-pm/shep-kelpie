@@ -3,6 +3,7 @@
 use serde_json::{Map, Value};
 
 use super::{Here, Line, Probes, rulings};
+use crate::agents::Agents;
 use crate::flock::add::LABELS;
 use crate::ports::{NewLabel, Visibility};
 use crate::runner::{ProjectName, ProjectPaths, SUMMON_LABEL, check_instructions, check_repo};
@@ -43,6 +44,8 @@ pub(super) fn checks(
     if settings.worker.instructions_file.is_some() {
         lines.push(instructions(at("instructions"), &settings));
     }
+    let (book, line) = implementers(at("implementers"), &settings, &paths);
+    lines.push(line);
 
     lines.push(match probes.forge.can_push(repo) {
         Ok(true) => Line::ok(at("push access"), format!("may push to {slug}")),
@@ -97,10 +100,10 @@ pub(super) fn checks(
         at("local review"),
         &settings,
         kelpie,
-        here,
+        (&book, here),
         probes,
     ));
-    if let Some(kelpie) = kelpie.filter(|kelpie| spends_codex(&settings, kelpie, here)) {
+    if let Some(kelpie) = kelpie.filter(|kelpie| spends_codex(&settings, kelpie, &book, here)) {
         lines.push(match kelpie.codex_home(here.home, here.kelpie_home) {
             Ok(codex_home) => super::machine::codex(
                 at("codex usage"),
@@ -116,22 +119,65 @@ pub(super) fn checks(
     lines
 }
 
-// Whether a role or session reviewer runs on an agent that spends Codex.
-// Settings that do not resolve are another line's to report.
-fn spends_codex(settings: &Settings, kelpie: &KelpieSettings, here: Here<'_>) -> bool {
+// The agent files, and whether the project's implementers can be used.
+// Files that cannot be read leave kelpie's own agents for the other lines.
+fn implementers(subject: String, settings: &Settings, paths: &ProjectPaths) -> (Agents, Line) {
+    let book = match Agents::load(&paths.agents) {
+        Ok(book) => book,
+        Err(e) => {
+            let fix = "correct the file it names, or move it out of kelpie's `agents` folder";
+            return (
+                Agents::embedded(),
+                Line::missing(subject, e.to_string(), fix),
+            );
+        }
+    };
+    let skipped: Vec<String> = book.skipped().collect();
+    let line = match settings.role_agents(&book) {
+        Ok(_) if !skipped.is_empty() => Line::unsure(
+            subject,
+            skipped.join("; "),
+            "rename it to the agent's name, or move it out of kelpie's `agents` folder",
+        ),
+        Ok(roles) => Line::ok(
+            subject,
+            format!(
+                "an issue with no `agent:` label runs on {}",
+                roles.default_implementer.name
+            ),
+        ),
+        Err(e) => Line::missing(
+            subject,
+            e.to_string(),
+            "write the agent file it names, or correct `agents.implementers`",
+        ),
+    };
+    (book, line)
+}
+
+// Whether an implementer, a review role or a session reviewer runs on an
+// agent that spends Codex. Settings that do not resolve are another line's
+// to report.
+fn spends_codex(
+    settings: &Settings,
+    kelpie: &KelpieSettings,
+    book: &Agents,
+    here: Here<'_>,
+) -> bool {
     let codex = |limit: &Limit| *limit == Limit::Account(Account::Codex);
-    let roles = settings.role_agents(&kelpie.agents).ok();
-    let roles = roles.map(|agents| agents.limits);
-    let lineup = settings.lineup(kelpie, here.home).unwrap_or_default();
+    let roles = settings.role_agents(book).ok();
+    let lineup = settings.lineup(kelpie, book, here.home).unwrap_or_default();
     let sessions = lineup.iter().any(|r| match &r.runs {
         Runs::Claude(session) => codex(&session.limit),
         Runs::Local(_) | Runs::Deep => false,
     });
     let deep = lineup.iter().any(|r| r.runs == Runs::Deep);
     sessions
-        || roles.is_some_and(|l| {
-            let deep = deep.then_some(l.deep_reviewer);
-            [l.worker, l.reviewer].iter().chain(&deep).any(codex)
+        || roles.is_some_and(|roles| {
+            let l = &roles.limits;
+            let deep = deep.then_some(&l.deep_reviewer);
+            let implementers = roles.implementers.iter().map(|i| &i.limit);
+            implementers.chain([&l.reviewer]).chain(deep).any(codex)
         })
 }
 
@@ -221,18 +267,18 @@ fn local_review(
     subject: String,
     settings: &Settings,
     kelpie: Option<&KelpieSettings>,
-    here: Here<'_>,
+    (book, here): (&Agents, Here<'_>),
     probes: Probes<'_>,
 ) -> Line {
     let none = KelpieSettings::default();
-    let lineup = match settings.lineup(kelpie.unwrap_or(&none), here.home) {
+    let lineup = match settings.lineup(kelpie.unwrap_or(&none), book, here.home) {
         Ok(lineup) => lineup,
         Err(e) => {
             return Line::missing(
                 subject,
                 e.to_string(),
-                "define it in kelpie's `[local_reviewers]` or `[agents]`, or take it off \
-                 `review.reviewers` or `agents`",
+                "define it in kelpie's `[local_reviewers]` or its `agents` folder, or take \
+                 it off `review.reviewers` or `agents`",
             );
         }
     };

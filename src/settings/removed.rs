@@ -1,8 +1,8 @@
 //! Settings a removed feature left behind, refused by name
 //!
 //! A key serde would call unknown is refused with the same words as any other
-//! stale key, but this one also says why: its feature is gone, so the setting
-//! has nothing left to do and is deleted rather than ignored.
+//! stale key, but this one also says why and what to do: delete it when its
+//! feature is gone, or move it to what replaced it.
 
 /// A setting that no longer exists, and why
 #[derive(Debug, Clone, Copy)]
@@ -11,7 +11,12 @@ pub(crate) struct Removed {
     pub key: &'static str,
     /// Why it went, as the rest of "because ..."
     pub because: &'static str,
+    /// What to do instead, such as [`DELETE`]
+    pub fix: &'static str,
 }
+
+/// The fix for a setting whose feature is gone
+pub(crate) const DELETE: &str = "delete it";
 
 /// Refuses `text` when it sets one of `keys`
 ///
@@ -20,14 +25,14 @@ pub(crate) struct Removed {
 /// # Errors
 ///
 /// A message naming the first of `keys` that `text` sets, why it went, and
-/// saying to delete it.
+/// what to do instead.
 pub(crate) fn refuse(text: &str, keys: &[Removed]) -> Result<(), String> {
     let Ok(table) = text.parse::<toml::Table>() else {
         return Ok(());
     };
     match keys.iter().find(|removed| sets(&table, removed.key)) {
-        Some(Removed { key, because }) => Err(format!(
-            "`{key}` is no longer a setting, because {because}: delete it"
+        Some(Removed { key, because, fix }) => Err(format!(
+            "`{key}` is no longer a setting, because {because}: {fix}"
         )),
         None => Ok(()),
     }
@@ -51,10 +56,12 @@ mod tests {
         Removed {
             key: "ruling_channels",
             because: "the relay is gone",
+            fix: DELETE,
         },
         Removed {
             key: "models.planner",
             because: "the planning call is gone",
+            fix: "name nothing",
         },
     ];
 
@@ -64,7 +71,7 @@ mod tests {
         assert_eq!(
             err,
             "`models.planner` is no longer a setting, because the planning call is gone: \
-             delete it"
+             name nothing"
         );
         let err = refuse("ruling_channels = [\"relay\"]\n", &KEYS).unwrap_err();
         assert_eq!(

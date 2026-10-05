@@ -92,8 +92,11 @@ fn serve(project: &str) -> Result<(), String> {
         shep_home.clone(),
         sheep,
         project.as_str().to_owned(),
-        paths.settings.clone(),
-        paths.kelpie_settings.clone(),
+        look::Sources {
+            settings: paths.settings.clone(),
+            kelpie_settings: paths.kelpie_settings.clone(),
+            agents: paths.agents.clone(),
+        },
         home.clone(),
     );
     let loaded = look.read()?;

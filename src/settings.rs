@@ -30,17 +30,15 @@ mod table;
 
 pub use table::table_of;
 mod agents;
-mod labels;
 mod local;
 mod removed;
 mod reviewers;
 mod skills;
 
 pub use agents::{
-    Account, Agent, AgentHarness, AgentName, Harness, Limit, ModelServer, RoleAgentNames,
+    Account, AgentHarness, AgentName, Harness, Implementer, Limit, ModelServer, RoleAgentNames,
     RoleAgents, RoleLimits, UsageReader,
 };
-pub use labels::{LabelModels, LabelName};
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use reviewers::{
     AgentSession, CLAUDE, ClaudeSession, DEEP, Definition, LeaseName, LoopReviewer, QWEN,
@@ -77,11 +75,10 @@ pub struct Settings {
     /// words, whatever their case. None when absent.
     #[serde(default)]
     pub private_names: Vec<NonBlank>,
-    /// The model and effort for each role
+    /// The model and effort for each review role that names no agent
     pub models: Models,
-    /// The agent each role runs on, from those kelpie's own settings
-    /// define, over `models`. A role left out keeps its `models` entry on
-    /// Claude Code.
+    /// The agents that build the project's work items, and the agent each
+    /// review role runs on over `models`, from kelpie's agent files
     #[serde(default)]
     pub agents: RoleAgentNames,
     /// The review: its reviewers, each run once in order. Kelpie's
@@ -104,67 +101,97 @@ pub struct Settings {
     pub skills: StepSkills,
 }
 
-pub(crate) use removed::{Removed, refuse as refuse_removed};
+pub(crate) use removed::{DELETE, Removed, refuse as refuse_removed};
 
 const RELAY: &str = "the relay is gone";
 const PLANNING: &str = "the planning call is gone";
 const AUDIT: &str = "the whole-issue check is gone";
 const LOOP: &str = "the review loop and its judge are gone";
 const SHOTS: &str = "shots and the preview are parked";
+const AGENT_FILES: &str = "agents are files in kelpie's home's `agents` folder";
 
 // The keys removed features left behind
 const REMOVED: &[Removed] = &[
     Removed {
         key: "ruling_channels",
         because: RELAY,
+        fix: DELETE,
     },
     Removed {
         key: "models.relay",
         because: RELAY,
+        fix: DELETE,
     },
     Removed {
         key: "planning",
         because: PLANNING,
+        fix: DELETE,
     },
     Removed {
         key: "models.planner",
         because: PLANNING,
+        fix: DELETE,
     },
     Removed {
         key: "agents.planner",
         because: PLANNING,
+        fix: DELETE,
     },
     Removed {
         key: "skills.planning",
         because: PLANNING,
+        fix: DELETE,
     },
     Removed {
         key: "models.auditor",
         because: AUDIT,
+        fix: DELETE,
     },
     Removed {
         key: "agents.auditor",
         because: AUDIT,
+        fix: DELETE,
     },
     Removed {
         key: "models.judge",
         because: LOOP,
+        fix: DELETE,
     },
     Removed {
         key: "agents.judge",
         because: LOOP,
+        fix: DELETE,
     },
     Removed {
         key: "review.loop_guard",
         because: LOOP,
+        fix: DELETE,
     },
     Removed {
         key: "review.local_rounds",
         because: LOOP,
+        fix: DELETE,
     },
     Removed {
         key: "preview",
         because: SHOTS,
+        fix: DELETE,
+    },
+    Removed {
+        key: "agents.worker",
+        because: AGENT_FILES,
+        fix: "list the agents that build in `agents.implementers`, the first being the default",
+    },
+    Removed {
+        key: "models.worker",
+        because: AGENT_FILES,
+        fix: "name the agent that builds in `agents.implementers`, such as `sonnet-high`, \
+              which is Sonnet 5.5 at high",
+    },
+    Removed {
+        key: "models.labels",
+        because: "an `agent:<name>` label names its agent file, which holds the model id",
+        fix: "list each agent a label may name in `agents.implementers`",
     },
 ];
 
@@ -181,22 +208,16 @@ pub enum MergeAuthority {
     Auto,
 }
 
-/// The model and effort for each role that calls Claude
+/// The model and effort for each review role that calls Claude
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Models {
-    /// The worker's sessions
-    pub worker: RoleModel,
     /// Each Claude review round, a fresh session every time
     pub reviewer: RoleModel,
     /// The sessions of the deep review round: its two readers. Opus 5.5 at
     /// high effort when absent.
     #[serde(default = "default_deep_reviewer")]
     pub deep_reviewer: RoleModel,
-    /// The model id each `worker:<model>-<effort>` label name runs, each
-    /// at its default when absent
-    #[serde(default)]
-    pub labels: LabelModels,
 }
 
 // Opus 5.5 on Claude Code, for a role whose default is Opus

@@ -291,7 +291,11 @@ mod tests {
     fn lineup(table: &str) -> Vec<LoopReviewer> {
         let settings = with_table(table).unwrap();
         settings
-            .lineup(&KelpieSettings::default(), Path::new("/home/me"))
+            .lineup(
+                &KelpieSettings::default(),
+                &crate::agents::Agents::embedded(),
+                Path::new("/home/me"),
+            )
             .unwrap()
     }
 

@@ -79,7 +79,7 @@ impl Runner {
                 // Its turn fails at once, saying why, so nothing waits on a window.
                 Err(_) => return Ok(Pace::Clear),
             },
-            None => self.agents.limits.worker.clone(),
+            None => self.agents.default_implementer.limit.clone(),
         };
         self.pace(scope, &limit)
     }
@@ -138,23 +138,21 @@ impl Runner {
         Ok(Pace::Clear)
     }
 
-    // Each role's limit, the deep reviewer's included, then each session reviewer's.
+    // Each implementer's limit and each review role's, the deep reviewer's
+    // included, then each session reviewer's.
     fn spent_limits(&self) -> impl Iterator<Item = &Limit> {
         let limits = &self.agents.limits;
         let sessions = self.lineup.iter().filter_map(|r| match &r.runs {
             Runs::Claude(session) => Some(&session.limit),
             Runs::Local(_) | Runs::Deep => None,
         });
-        // Beside a local worker, every issue it is not given runs on Claude.
-        const CLAUDE: Limit = Limit::Account(Account::Claude);
-        let claude_worker = limits.worker.lease().map(|_| &CLAUDE);
+        let implementers = self.agents.implementers.iter().map(|i| &i.limit);
         // Only a project that runs the deep round spends its role.
         let deep = self.lineup.iter().any(|r| r.runs == Runs::Deep);
         let deep = deep.then_some(&limits.deep_reviewer);
-        [&limits.worker, &limits.reviewer]
-            .into_iter()
+        implementers
+            .chain([&limits.reviewer])
             .chain(deep)
-            .chain(claude_worker)
             .chain(sessions)
     }
 
