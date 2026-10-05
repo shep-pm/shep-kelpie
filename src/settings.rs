@@ -110,6 +110,7 @@ pub(crate) use removed::{Removed, refuse as refuse_removed};
 
 const RELAY: &str = "the relay is gone";
 const PLANNING: &str = "the planning call is gone";
+const AUDIT: &str = "the whole-issue check is gone";
 
 // The keys removed features left behind
 const REMOVED: &[Removed] = &[
@@ -137,6 +138,14 @@ const REMOVED: &[Removed] = &[
         key: "skills.planning",
         because: PLANNING,
     },
+    Removed {
+        key: "models.auditor",
+        because: AUDIT,
+    },
+    Removed {
+        key: "agents.auditor",
+        because: AUDIT,
+    },
 ];
 
 /// Who decides a merge
@@ -162,10 +171,6 @@ pub struct Models {
     pub reviewer: RoleModel,
     /// The one-shot that judges every finding
     pub judge: RoleModel,
-    /// The one-shot that checks the whole work item against its issue
-    /// before the merge. Opus 5.5 at high effort when absent.
-    #[serde(default = "default_auditor")]
-    pub auditor: RoleModel,
     /// The sessions of the deep review round: its two readers, the one that
     /// confirms each HIGH with a failing test and the re-check of the fix.
     /// Opus 5.5 at high effort when absent.
@@ -184,10 +189,6 @@ fn opus(effort: Effort) -> RoleModel {
         effort,
         harness: AgentHarness::ClaudeCode,
     }
-}
-
-fn default_auditor() -> RoleModel {
-    opus(Effort::High)
 }
 
 fn default_deep_reviewer() -> RoleModel {

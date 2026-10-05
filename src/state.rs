@@ -6,6 +6,7 @@
 //! a runner killed mid-write leaves the previous state whole.
 
 pub mod ids;
+mod removed;
 
 use std::fmt;
 use std::fs::{self, File};
@@ -330,17 +331,6 @@ pub enum RulingKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         why: Option<String>,
     },
-    /// The whole-issue check still finds gaps after sending the worker back
-    /// twice. A yes sends the worker the gaps once more, and merging by hand
-    /// overrules the check.
-    Audit {
-        /// The head the gaps are on
-        head: String,
-        /// Each criterion not met and each assumption not checked
-        gaps: Vec<String>,
-        /// The turn a yes starts
-        prompt: String,
-    },
     /// The deep round's re-check still finds findings unfixed after the worker
     /// was sent back once. A yes sends the worker them once more.
     DeepReview {
@@ -618,11 +608,11 @@ impl StateStore {
             });
         }
         let mut value: serde_json::Value = serde_json::from_str(&text).map_err(malformed)?;
-        if let Some((id, kind)) = removed_ruling(&value) {
+        if let Some((id, kind)) = removed::removed_ruling(&value) {
             let path = self.path.clone();
             return Err(StateError::RemovedRuling { path, id, kind });
         }
-        drop_removed_fields(&mut value);
+        removed::drop_removed_fields(&mut value);
         let state: ProjectState = serde_json::from_value(value).map_err(malformed)?;
         Ok(Some(ProjectState {
             version: VERSION,
@@ -651,40 +641,6 @@ impl StateStore {
         StateError::Read {
             path: self.path.clone(),
             kind: e.kind(),
-        }
-    }
-}
-
-// The kinds of ruling the planning call raised, which nothing answers now
-const REMOVED_RULINGS: [&str; 3] = ["split", "split-stuck", "close-stuck"];
-
-// The first pending ruling of a kind in `REMOVED_RULINGS`, by id and kind.
-fn removed_ruling(value: &serde_json::Value) -> Option<(u64, String)> {
-    let rulings = value.get("rulings")?.as_array()?;
-    rulings.iter().find_map(|ruling| {
-        let kind = ruling.get("kind")?.get("kind")?.as_str()?;
-        let id = ruling.get("id")?.as_u64()?;
-        REMOVED_RULINGS
-            .contains(&kind)
-            .then(|| (id, kind.to_owned()))
-    })
-}
-
-// A file saved before the relay and the planning call went carries their
-// bookkeeping: the relay's count of clears, each ruling's relayed and resend
-// flags, and the plans. Only these names are dropped before reading; any
-// other unknown field is still refused.
-fn drop_removed_fields(value: &mut serde_json::Value) {
-    let Some(state) = value.as_object_mut() else {
-        return;
-    };
-    state.remove("relay_clears");
-    state.remove("plans");
-    let rulings = state.get_mut("rulings").and_then(|r| r.as_array_mut());
-    for ruling in rulings.into_iter().flatten() {
-        if let Some(ruling) = ruling.as_object_mut() {
-            ruling.remove("relayed");
-            ruling.remove("resend");
         }
     }
 }

@@ -8,7 +8,6 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use super::audit::Audited;
 use crate::board::{Skip, WorkerModel};
 use crate::pacer::HoldKind;
 use crate::ports::{
@@ -530,31 +529,6 @@ pub enum StepReport {
         /// Why
         reason: String,
     },
-    /// The whole-issue check found every criterion met and every assumption
-    /// checked against the real thing, so the head goes on to the merge
-    AuditPassed {
-        /// The work item's issue
-        issue: u64,
-        /// Its pull request
-        pull_request: u64,
-        /// The head it checked
-        head: String,
-        /// How many criteria it went through
-        criteria: usize,
-        /// How many assumptions about the outside world it found
-        assumptions: usize,
-    },
-    /// The whole-issue check found gaps, and they are the worker's next turn
-    AuditSentBack {
-        /// The work item's issue
-        issue: u64,
-        /// Its pull request
-        pull_request: u64,
-        /// The head it checked
-        head: String,
-        /// Each criterion not met and each assumption not checked
-        gaps: Vec<String>,
-    },
     /// A reader of the deep round reported
     DeepRead {
         /// The work item's issue
@@ -632,8 +606,6 @@ pub(super) enum Begin {
     Review(ReviewCall),
     /// A shots run of this head
     Shots(Box<ShotsJob>, String),
-    /// The whole-issue check of this head
-    Audit(Box<AgentCall>, Audited),
 }
 
 /// Something the review loop needs run outside the runner's lock

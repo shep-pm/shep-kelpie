@@ -68,12 +68,6 @@ pub(crate) enum Scripted {
     Text(&'static str),
     /// Answers like [`Self::Text`], with this cost for the session
     Billed(&'static str, Cost),
-    /// Answers the whole-issue check with this exact text. The check takes
-    /// only this: the worker's and a review round's items stay for them.
-    Audit(&'static str),
-    /// Holds the whole-issue check until the test releases it, then answers
-    /// it with this exact text
-    HoldAudit(Hold, &'static str),
     /// Answers with this final message
     Say(&'static str),
     /// Blocks until the test releases it, then answers
@@ -150,12 +144,6 @@ pub(crate) struct Seen {
     pub(crate) build_existed: bool,
 }
 
-/// What the stand-in answers the whole-issue check once its script has none for it:
-/// every criterion met and every assumption checked
-pub(crate) const AUDIT_PASSES: &str = r#"{"criteria": [
-    {"criterion": "what the issue asks", "met": true, "where": "src/lib.rs:1"}],
-  "assumptions": []}"#;
-
 /// Records every call and answers from a script, failing once it runs out
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FakeClaude {
@@ -231,18 +219,7 @@ impl Agents for FakeClaude {
             sandbox,
             build_existed,
         });
-        let next = {
-            let mut script = self.script.lock().unwrap();
-            // The whole-issue check comes between the worker's turns, so it
-            // takes only what is scripted for it and passes otherwise.
-            match (call.role, script.front()) {
-                (Role::Auditor, Some(Scripted::Audit(_) | Scripted::HoldAudit(..))) => {
-                    script.pop_front()
-                }
-                (Role::Auditor, _) => Some(Scripted::Audit(AUDIT_PASSES)),
-                _ => script.pop_front(),
-            }
-        };
+        let next = self.script.lock().unwrap().pop_front();
         let next = match next {
             Some(Scripted::Spend(account, usage, cost)) => {
                 if let Some(meter) = &self.meter {
@@ -275,15 +252,6 @@ impl Agents for FakeClaude {
                 session_cost: Some(cost),
                 ..said(text)
             }),
-            Some(Scripted::Audit(text)) if call.role == Role::Auditor => Ok(said(text)),
-            Some(Scripted::HoldAudit(hold, text)) if call.role == Role::Auditor => {
-                hold.block();
-                Ok(said(text))
-            }
-            Some(Scripted::Audit(_) | Scripted::HoldAudit(..)) => Err(AgentError::Failed(
-                crate::settings::Harness::ClaudeCode,
-                "the rig scripts a whole-issue check's answer for another call".into(),
-            )),
             Some(Scripted::Hold(hold)) => {
                 hold.block();
                 Ok(said("done"))

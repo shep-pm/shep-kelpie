@@ -152,7 +152,6 @@ mod tests {
             .replace("# worker = \"opus-high\"", "worker = \"opus-high\"")
             .replace("# reviewer = \"opus-high\"", "reviewer = \"opus-high\"")
             .replace("# judge = \"opus-high\"", "judge = \"opus-high\"")
-            .replace("# auditor = \"opus-high\"", "auditor = \"opus-high\"")
             .replace("# deep_reviewer = \"opus-high\"", "deep_reviewer = \"opus-high\"")
             .replace("# [app.dogs.kelpie.models.labels]", "[app.dogs.kelpie.models.labels]")
             .replace("# opus = \"claude-opus-5-5\"", "opus = \"claude-opus-5-5\"")

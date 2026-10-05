@@ -57,13 +57,7 @@ fn a_stand_in_agent_runs_a_whole_work_item() {
     assert_eq!(number, 71);
     assert_eq!(
         roles(&rig),
-        [
-            Role::Worker,
-            Role::Judge,
-            Role::Worker,
-            Role::Reviewer,
-            Role::Auditor
-        ]
+        [Role::Worker, Role::Judge, Role::Worker, Role::Reviewer]
     );
     assert_eq!(
         rig.reviewer.seen().len(),
@@ -81,7 +75,7 @@ fn a_project_naming_a_different_agent_per_role_reaches_each() {
     rig.edit_settings(|s| {
         let gate = "\n[app.dogs.kelpie.coderabbit]\n";
         let agents = "[app.dogs.kelpie.agents]\nworker = \"opus-high\"\n\
-                      reviewer = \"sonnet-low\"\njudge = \"haiku\"\nauditor = \"haiku\"\n";
+                      reviewer = \"sonnet-low\"\njudge = \"haiku\"\n";
         s.replacen(gate, &format!("\n{agents}{gate}"), 1)
     });
     let runner = rig.open().unwrap();
@@ -100,7 +94,6 @@ fn a_project_naming_a_different_agent_per_role_reaches_each() {
             on(Role::Judge, "claude-haiku-4-5-20251001", Effort::Low),
             on(Role::Worker, "claude-opus-5-5", Effort::High),
             on(Role::Reviewer, "claude-sonnet-5", Effort::Low),
-            on(Role::Auditor, "claude-haiku-4-5-20251001", Effort::Low),
         ]
     );
 }

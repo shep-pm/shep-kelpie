@@ -206,8 +206,6 @@ The current turn finishes, then the worker parks. `shep kelpie start` resumes it
 
 A project on `merge_authority = "auto"` merges its pull requests without asking once every gate passes, and posts a notice after. The example settings use `ask`, which raises a ruling before every merge.
 
-Before either, once CI is green, a fresh Opus session reads the work as a whole: the issue with whatever its body points to (an issue or a pull request, with its latest review and its unresolved comments), the pull request's body and the final diff. It answers two questions. For each acceptance criterion, is it met, and where? And what does the change assume about the world outside the repo (labels, files, settings, other services), and does the code or a test check each assumption against the real thing, rather than a fake that accepts anything? A criterion not met or an assumption nothing real checks goes to the worker as its next turn, with the gap named, and what it pushes goes through the review loop, CI and the check again, like any other fix. After two such trips the next gap is a ruling: a yes sends the worker the gaps once more, the same way, and merging by hand overrules the check. `[models.auditor]` picks its model (Opus 5.5 at high effort when left out), an agent can run it through `[agents] auditor`, and its time shows as `audit` under `timings`.
-
 ### Running a project
 
 shep-kelpie runs in your own shepherd, beside your other sheep. The adopted dog holds the leases every runner asks before a summon, and it asks shep for the channel the lease commands reach it on. `add` and `start` say how to bring the dog up when it is not running with its channel.
@@ -398,7 +396,6 @@ effort = "high"
 # the project's table
 [app.dogs.kelpie.agents]
 judge = "opus-high"
-auditor = "opus-high"
 ```
 
 A role left out keeps its `models` entry, so a project that names none runs as before. A local reviewer of kind `session` names an agent from the same list. An agent nobody defines stops the runner at start, naming it.

@@ -12,7 +12,6 @@ use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage, Verdict};
 use crate::settings::ReviewerName;
 use crate::shots::ShotsRecord;
 
-mod audit;
 mod deep;
 mod follow_ups;
 mod local;
@@ -20,7 +19,6 @@ mod round;
 mod spend;
 mod timings;
 
-pub use audit::{Audit, Passed, SENDS_BACK};
 pub use deep::{Backing, Deep, Found, Held, Written};
 pub use follow_ups::FollowUps;
 pub use local::LOCAL_FAILURES_DOWN;
@@ -158,9 +156,6 @@ pub struct WorkItem {
     /// The pull request's shots comment, once posted
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shots_comment: Option<u64>,
-    /// What the whole-issue check before the merge has found
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub audit: Option<Audit>,
     /// Every finding kelpie has sent the worker to fix, across rounds. The
     /// worker can only defer one of these.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -572,7 +567,7 @@ mod tests {
                     "since": 12,
                     "seconds": {
                         "worker": 4, "gpu_wait": 0, "local_round": 0, "claude_round": 0,
-                        "judging": 0, "audit": 0, "ci": 3, "coderabbit_window": 0, "coderabbit_review": 0,
+                        "judging": 0, "ci": 3, "coderabbit_window": 0, "coderabbit_review": 0,
                         "ruling": 0, "merge": 0, "shots": 0, "paused": 0, "other": 0,
                     },
                 },

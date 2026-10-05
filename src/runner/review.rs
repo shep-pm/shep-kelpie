@@ -10,7 +10,7 @@
 //! ruling; a yes clears the guard for the rest of this work item.
 
 pub(super) mod calls;
-pub(super) mod criteria;
+mod criteria;
 mod deep;
 pub(super) mod findings;
 mod lineup;
