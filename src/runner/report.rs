@@ -8,10 +8,10 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use crate::board::{Skip, WorkerModel};
+use crate::board::Skip;
 use crate::pacer::HoldKind;
 use crate::ports::{AgentCall, Cost, Finding, Role, SessionId, Timestamp, Usage};
-use crate::settings::{LocalRound, ReviewerName};
+use crate::settings::{AgentName, LocalRound, ReviewerName};
 use crate::work_item::{QwenTally, Spend, Split};
 
 /// What asked for a rework on the pull request itself
@@ -32,8 +32,8 @@ pub enum StepReport {
     Dispatched {
         /// The work item's issue
         issue: u64,
-        /// The model and effort its worker runs on
-        worker: WorkerModel,
+        /// The implementer its worker runs on
+        agent: AgentName,
         /// Older ready issues the board passed over, and why
         skipped: Vec<Skip>,
     },
@@ -44,8 +44,8 @@ pub enum StepReport {
         issue: u64,
         /// The pull request
         pull_request: u64,
-        /// The model and effort its worker runs on
-        worker: WorkerModel,
+        /// The implementer its worker runs on
+        agent: AgentName,
         /// What asked for it: the `ready-for-agent` label, or a review
         /// requesting changes
         by: ReworkBy,
@@ -56,8 +56,8 @@ pub enum StepReport {
         issue: u64,
         /// The pull request
         pull_request: u64,
-        /// The model and effort its worker runs on
-        worker: WorkerModel,
+        /// The implementer its worker runs on
+        agent: AgentName,
     },
     /// An adopted pull request cannot start, and the refusal went to it as a
     /// comment

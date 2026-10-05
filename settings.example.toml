@@ -53,10 +53,6 @@ generated = [
 # often a regex, which this is not: spell out each name it would match.
 # private_names = ["Acme Corp"]
 
-[app.dogs.kelpie.models.worker]
-model = "claude-sonnet-5-5"
-effort = "high"
-
 [app.dogs.kelpie.models.reviewer]
 model = "claude-sonnet-5"
 effort = "medium"
@@ -68,18 +64,16 @@ effort = "medium"
 model = "claude-opus-5-5"
 effort = "high"
 
-# The model id each `worker:<model>-<effort>` label's name runs. Each name
-# keeps the id shown here when left out.
-# [app.dogs.kelpie.models.labels]
-# opus = "claude-opus-5-5"
-# sonnet = "claude-sonnet-5-5"
-# haiku = "claude-haiku-4-5-20251001"
-# fable = "claude-fable-5-1"
-
-# The agent each role runs on, from those kelpie's `[kelpie.agents]` define,
-# over its `models` entry. A role left out keeps `models` on Claude Code.
-# [app.dogs.kelpie.agents]
-# worker = "opus-high"
+# The agents that build the project's work items, by the names of kelpie's
+# agent files, `$SHEP_HOME/kelpie/agents/<name>.md`, which `shep kelpie add`
+# writes out. An issue labelled `agent:<name>` runs on that one, and any
+# other on the first listed that is not a local model (`usage: none`): a
+# local one runs only the issues labelled for it. A work item keeps the
+# agent it opened on. `sonnet-high` alone when absent.
+[app.dogs.kelpie.agents]
+implementers = ["sonnet-high"]
+# The agent the project's Claude round and the deep round run on, from the
+# same files, over `models.reviewer` and `models.deep_reviewer`.
 # reviewer = "opus-high"
 # deep_reviewer = "opus-high"
 

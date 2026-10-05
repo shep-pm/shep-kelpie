@@ -142,15 +142,8 @@ mod tests {
             .replace("# private_names =", "private_names =")
             .replace("# rounds =", "rounds =")
             .replace("# reviewers = [\"qwen\", \"claude\", \"opus\"]", "reviewers = [\"qwen\"]")
-            .replace("# [app.dogs.kelpie.agents]", "[app.dogs.kelpie.agents]")
-            .replace("# worker = \"opus-high\"", "worker = \"opus-high\"")
             .replace("# reviewer = \"opus-high\"", "reviewer = \"opus-high\"")
-            .replace("# deep_reviewer = \"opus-high\"", "deep_reviewer = \"opus-high\"")
-            .replace("# [app.dogs.kelpie.models.labels]", "[app.dogs.kelpie.models.labels]")
-            .replace("# opus = \"claude-opus-5-5\"", "opus = \"claude-opus-5-5\"")
-            .replace("# sonnet = \"claude-sonnet-5-5\"", "sonnet = \"claude-sonnet-5-5\"")
-            .replace("# haiku = \"claude-haiku", "haiku = \"claude-haiku")
-            .replace("# fable = \"claude-fable-5-1\"", "fable = \"claude-fable-5-1\"");
+            .replace("# deep_reviewer = \"opus-high\"", "deep_reviewer = \"opus-high\"");
         assert!(
             text.contains("reviewers = [\"qwen\"]"),
             "the example's list moved"
@@ -220,12 +213,6 @@ mod tests {
             .replace(
                 "# [kelpie.local_reviewers.qwen]\n# kind = \"command\"\n# command =",
                 "[kelpie.local_reviewers.qwen]\nkind = \"command\"\ncommand =",
-            )
-            .replace(
-                "# [kelpie.agents.opus-high]\n# harness = \"claude-code\"\n\
-                 # model = \"claude-opus-5-5\"\n# effort = \"high\"",
-                "[kelpie.agents.opus-high]\nharness = \"claude-code\"\n\
-                 model = \"claude-opus-5-5\"\neffort = \"high\"",
             );
         assert!(
             example.contains("\n[kelpie.local_reviewers.qwen]"),

@@ -1,9 +1,10 @@
 //! `shep kelpie add`: a checkout becomes a project in the maintainer's flock
 //!
 //! Everything is read first, so a refusal changes nothing. Then the repo
-//! gets the labels kelpie uses, and the flock gets the project's runner
-//! holding its settings as its `[app.dogs.kelpie]` table. Each is made only
-//! when it is missing, so a second `add` changes nothing. The runner is
+//! gets the labels kelpie uses, kelpie's home gets its own agent files, and
+//! the flock gets the project's runner holding its settings as its
+//! `[app.dogs.kelpie]` table. Each is made only when it is missing, so a
+//! second `add` changes nothing. The runner is
 //! registered stopped: `shep kelpie start` starts it. The dog is the
 //! adopted kelpie, and `add` says when it is not running.
 
@@ -56,6 +57,8 @@ pub struct Place<'a> {
     pub home: &'a Path,
     /// The project's settings file from before the tables, if it has one
     pub old_settings: &'a Path,
+    /// Kelpie's `agents` folder, where its own agent files are written
+    pub agents: &'a Path,
 }
 
 /// A new project's settings, less what `add` reads from the checkout and
@@ -66,9 +69,8 @@ merge_authority = "ask"
 max_items = 1
 generated = []
 
-[models.worker]
-model = "claude-sonnet-5-5"
-effort = "high"
+[agents]
+implementers = ["sonnet-high"]
 
 [models.reviewer]
 model = "claude-sonnet-5"
@@ -190,6 +192,17 @@ pub async fn add(
                     .map_err(|e| format!("cannot make label `{}` on {slug}: {e}", label.name))?;
                 done.push(format!("label `{}`: made on {slug}", label.name));
             }
+        }
+
+        let folder = place.agents.display();
+        match crate::agents::write_defaults(place.agents).map_err(|e| e.to_string())? {
+            written if written.is_empty() => {
+                done.push(format!("agent files: kelpie's own already in {folder}"));
+            }
+            written => done.push(format!(
+                "agent files: wrote {} in {folder}",
+                written.join(", ")
+            )),
         }
 
         match (runner, set) {

@@ -5,8 +5,9 @@
 //! the shots' fields are dropped before reading. The check's and the judge's
 //! time and calls count as review's, and the shots' time as other, so totals
 //! still add up. A review saved mid-loop goes on from the reviewer after the
-//! one it last recorded. A pending ruling of a removed kind has nothing here
-//! to answer it, so the file is refused.
+//! one it last recorded. A work item's worker model becomes the agent named
+//! for it. A pending ruling of a removed kind has nothing here to answer it,
+//! so the file is refused.
 
 use serde_json::{Map, Value, json};
 
@@ -30,6 +31,19 @@ const PHASES: [(&str, &str); 3] = [
 ];
 const CALLS: [&str; 2] = ["audit", "judge"];
 const ROLES: [&str; 2] = ["auditor", "judge"];
+
+// The model ids a `worker:<model>-<effort>` label ran by default, by the
+// label's name for them, which the agents named for them start with.
+const LABELLED: [(&str, &str); 4] = [
+    ("claude-opus-5-5", "opus"),
+    ("claude-sonnet-5-5", "sonnet"),
+    ("claude-haiku-4-5-20251001", "haiku"),
+    ("claude-fable-5-1", "fable"),
+];
+
+// What a work item given to the old local worker runs on: the project named
+// that agent in settings, which the state file never held.
+const LOCAL: &str = "local";
 
 /// The first pending ruling of a removed kind, by id and kind
 pub(super) fn removed_ruling(value: &Value) -> Option<(u64, String)> {
@@ -70,7 +84,12 @@ pub(super) fn drop_removed_fields(value: &mut Value) {
             }
         }
     }
+    // A version 1 file's one work item is moved into the list after this.
+    if let Some(Value::Object(item)) = state.get_mut("work_item") {
+        name_the_agent(item);
+    }
     for item in objects(state.get_mut("work_items")) {
+        name_the_agent(item);
         item.remove("audit");
         item.remove("local_rounds");
         item.remove("shots");
@@ -84,6 +103,77 @@ pub(super) fn drop_removed_fields(value: &mut Value) {
     for finished in objects(state.get_mut("history")) {
         fold_seconds(finished);
     }
+}
+
+/// A work item's worker as a state file saved it before agent files
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OldWorker {
+    /// The work item's issue
+    pub issue: u64,
+    /// The agent the work item now runs on
+    pub agent: String,
+    /// The model its worker ran
+    pub model: String,
+    /// The effort its worker ran at
+    pub effort: String,
+    /// Whether it was given to the project's local worker
+    pub local: bool,
+}
+
+/// Each work item's worker in a state file saved before agent files
+pub(super) fn old_workers(value: &Value) -> Vec<OldWorker> {
+    let one = value.get("work_item").into_iter();
+    let listed = value.get("work_items").and_then(Value::as_array);
+    one.chain(listed.into_iter().flatten())
+        .filter_map(Value::as_object)
+        .filter_map(old_worker)
+        .collect()
+}
+
+// A worker's model and effort become the agent `<model>-<effort>`, so Sonnet
+// 5.5 at high is `sonnet-high`, as kelpie's own agent files name them. An
+// item given to the local worker runs on the agent `local`.
+fn old_worker(item: &Map<String, Value>) -> Option<OldWorker> {
+    let worker = item.get("worker")?.as_object()?;
+    let model = worker.get("model")?.as_str()?;
+    let effort = worker.get("effort")?.as_str()?;
+    let local = worker.get("local").and_then(Value::as_bool) == Some(true);
+    let agent = match local {
+        true => LOCAL.to_owned(),
+        false => {
+            let named = LABELLED.iter().find(|(id, _)| *id == model);
+            let model = named.map_or_else(|| as_name(model), |(_, name)| (*name).to_owned());
+            format!("{model}-{effort}")
+        }
+    };
+    Some(OldWorker {
+        issue: item
+            .get("issue")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        agent,
+        model: model.to_owned(),
+        effort: effort.to_owned(),
+        local,
+    })
+}
+
+// Anything that is not a worker record is left for the parser to refuse.
+fn name_the_agent(item: &mut Map<String, Value>) {
+    let Some(old) = old_worker(item) else {
+        return;
+    };
+    item.remove("worker");
+    item.insert("agent".to_owned(), old.agent.into());
+}
+
+// A model id as part of an agent's name: lowercase letters, digits and `-`.
+fn as_name(model: &str) -> String {
+    let allowed = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
+    let name = model.to_ascii_lowercase();
+    name.chars()
+        .map(|c| if allowed(c) { c } else { '-' })
+        .collect()
 }
 
 fn objects(list: Option<&mut Value>) -> impl Iterator<Item = &mut Map<String, Value>> {

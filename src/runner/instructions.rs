@@ -1,8 +1,9 @@
 //! What a worker is told beyond kelpie's own instructions
 //!
-//! Kelpie's instructions are the same for every project. Two things vary:
-//! the repo's pull request template, found in the worker's worktree, and the
-//! project's own file of extra instructions, read once when the runner starts.
+//! Kelpie's instructions are the same for every project. Three things vary:
+//! the repo's pull request template, found in the worker's worktree, the
+//! body of the work item's agent file, and the project's own file of extra
+//! instructions, read once when the runner starts.
 
 use std::fs;
 use std::path::Path;
@@ -29,17 +30,22 @@ pub(super) fn read_extra(settings: &Settings) -> Result<Option<String>, Settings
         })
 }
 
+/// What a worker is told after kelpie's own instructions
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct Extra<'a> {
+    /// The body of the work item's agent file
+    pub(super) agent: Option<&'a str>,
+    /// The project's file of extra instructions
+    pub(super) project: Option<&'a str>,
+}
+
 /// The instructions file for one worker turn
 ///
-/// Kelpie's own, naming the `kelpie` binary, then the skills the worker writes tests and its pull
-/// request's body with, then the project's extra instructions. A pull
-/// request template in the worktree stands in for the body's skill.
-pub(super) fn compose(
-    extra: Option<&str>,
-    worktree: &Path,
-    skills: &Skills,
-    kelpie: &Path,
-) -> String {
+/// Kelpie's own, naming the `kelpie` binary, then the skills the worker
+/// writes tests and its pull request's body with, then the agent's
+/// instructions, then the project's. A pull request template in the
+/// worktree stands in for the body's skill.
+pub(super) fn compose(extra: Extra<'_>, worktree: &Path, skills: &Skills, kelpie: &Path) -> String {
     let mut text = profile::instructions(kelpie);
     let mut lines = Vec::new();
     if let Some(tdd) = skills.command(Step::Tests) {
@@ -63,10 +69,17 @@ pub(super) fn compose(
         text.push('\n');
         text.push_str(&rules);
     }
-    if let Some(extra) = extra.filter(|e| !e.trim().is_empty()) {
-        text.push_str("\n# This project's instructions\n\n");
-        text.push_str(extra);
-        if !extra.ends_with('\n') {
+    let sections = [
+        ("This agent's instructions", extra.agent),
+        ("This project's instructions", extra.project),
+    ];
+    for (heading, section) in sections {
+        let Some(section) = section.filter(|e| !e.trim().is_empty()) else {
+            continue;
+        };
+        text.push_str(&format!("\n# {heading}\n\n"));
+        text.push_str(section);
+        if !section.ends_with('\n') {
             text.push('\n');
         }
     }
@@ -233,16 +246,51 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("pull_request_template.md"), "## Summary\n").unwrap();
         let skills = Skills::load(&StepSkills::default(), &dir.path().join("skills"));
-        let text = compose(Some(EXTRA), dir.path(), &skills, Path::new(Rig::KELPIE));
+        let extra = Extra {
+            agent: Some("Mind the migrations."),
+            project: Some(EXTRA),
+        };
+        let text = compose(extra, dir.path(), &skills, Path::new(Rig::KELPIE));
         let at = |needle: &str| text.find(needle).expect(needle);
         assert!(at("/mattpocock:tdd") < at("pull request template"));
-        assert!(at("pull request template") < at("# This project's instructions"));
+        assert!(at("pull request template") < at("# This agent's instructions"));
+        assert!(
+            text.contains("# This agent's instructions\n\nMind the migrations.\n"),
+            "{text}"
+        );
+        assert!(at("Mind the migrations.") < at("# This project's instructions"));
         assert!(text.ends_with(EXTRA), "{text}");
+        let blank = Extra {
+            agent: Some("\n"),
+            project: Some(" \n"),
+        };
         let (blank, none) = (
-            compose(Some(" \n"), dir.path(), &skills, Path::new(Rig::KELPIE)),
-            compose(None, dir.path(), &skills, Path::new(Rig::KELPIE)),
+            compose(blank, dir.path(), &skills, Path::new(Rig::KELPIE)),
+            compose(
+                Extra::default(),
+                dir.path(),
+                &skills,
+                Path::new(Rig::KELPIE),
+            ),
         );
         assert_eq!(blank, none);
+    }
+
+    #[test]
+    fn an_agent_files_body_reaches_its_workers_turn() {
+        let rig = Rig::new("koji");
+        rig.write_agent(
+            "sonnet-high",
+            "---\nrole: implementer\nharness: claude-code\nmodel: claude-sonnet-5-5\n\
+             effort: high\n---\n\nKeep each commit small.\n",
+        );
+        let runner = rig.open().unwrap();
+        let text = first_instructions(&rig, &runner);
+        assert!(text.starts_with(&kelpies()), "{text}");
+        assert!(
+            text.ends_with("\n# This agent's instructions\n\nKeep each commit small.\n"),
+            "{text}"
+        );
     }
 
     #[test]

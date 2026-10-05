@@ -1,5 +1,5 @@
 //! Kelpie's own settings: the webhook, the
-//! pull request reviewers, the local reviewers, the agents, the counted
+//! pull request reviewers, the local reviewers, the counted
 //! leases' capacities and kelpie's own Codex login
 //!
 //! Kelpie's `[kelpie]` section of `dogs.toml`, or the file under kelpie's
@@ -21,7 +21,7 @@ use shep_client::dogs::dog_config;
 
 use crate::lease::counted::CARGO_TEST_CAPACITY;
 use crate::review_bot::Reviewers;
-use crate::settings::{Agent, AgentName, Definition, EndpointUrl, ReviewerName, SettingsError};
+use crate::settings::{Definition, EndpointUrl, ReviewerName, SettingsError};
 
 /// What every project shares
 #[dog_config]
@@ -39,9 +39,6 @@ pub struct KelpieSettings {
     /// by name. `claude` is always the project's own Claude round.
     #[serde(default)]
     pub local_reviewers: BTreeMap<ReviewerName, Definition>,
-    /// The agents a project's roles and session reviewers may name
-    #[serde(default)]
-    pub agents: BTreeMap<AgentName, Agent>,
     /// How many commands may hold each counted lease at once
     #[serde(default)]
     pub leases: Leases,
@@ -155,8 +152,7 @@ const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntf
                      `[reviewers.cubic]` and `[reviewers.codex]` tables with `reviews` and `hours`, \
                      `[local_reviewers.<name>]` tables with a `kind` of \
                      `endpoint`, `command`, `claude` or `session` and that \
-                     kind's keys, `[agents.<name>]` tables with `harness`, \
-                     `model` and `effort`, a `[leases]` table with a \
+                     kind's keys, a `[leases]` table with a \
                      `cargo-test` count, a `gpu_metrics_url`, a `codex_home` path, and nothing else";
 
 impl KelpieSettings {
@@ -223,11 +219,20 @@ impl KelpieSettings {
     }
 
     fn parse(text: &str) -> Result<Self, String> {
-        let channels = crate::settings::Removed {
-            key: "ruling_channels",
-            because: "the relay is gone",
-        };
-        crate::settings::refuse_removed(text, &[channels])?;
+        let removed = [
+            crate::settings::Removed {
+                key: "ruling_channels",
+                because: "the relay is gone",
+                fix: crate::settings::DELETE,
+            },
+            crate::settings::Removed {
+                key: "agents",
+                because: "agents are files in kelpie's home's `agents` folder",
+                fix: "write each `[agents.<name>]` table as `agents/<name>.md`, its keys \
+                      as YAML frontmatter with `role: implementer`, and delete the tables",
+            },
+        ];
+        crate::settings::refuse_removed(text, &removed)?;
         toml::from_str(text).map_err(|e: toml::de::Error| {
             let line = e
                 .span()
@@ -301,6 +306,20 @@ mod tests {
         );
         assert!(err.ends_with("delete it"), "{err}");
         assert!(!err.contains("s3cr3t"), "{err}");
+    }
+
+    #[test]
+    fn kelpies_agents_tables_are_refused_saying_they_are_files_now() {
+        let text = format!(
+            "[webhook]\nkind = \"ntfy\"\nurl = \"{SECRET}\"\n\
+             [agents.qwen]\nharness = \"pi\"\nmodel = \"m\"\neffort = \"low\"\n"
+        );
+        assert_eq!(
+            parse_err(&text),
+            "`agents` is no longer a setting, because agents are files in kelpie's home's \
+             `agents` folder: write each `[agents.<name>]` table as `agents/<name>.md`, its \
+             keys as YAML frontmatter with `role: implementer`, and delete the tables"
+        );
     }
 
     // A derived Debug would print the URL wherever settings are debugged.

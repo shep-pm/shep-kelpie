@@ -2,7 +2,7 @@
 //!
 //! Kelpie's `[local_reviewers]` define each one: a local model at an
 //! endpoint, a command, a Claude session with its model and effort, or a
-//! session on an agent kelpie's `[agents]` define. A project lists them in
+//! session on an agent from kelpie's agent files. A project lists them in
 //! `review.reviewers`, in the order the review runs them, each once.
 //! `claude` is always defined: the project's own Claude round on its
 //! reviewer's agent. A project that lists none runs `review.local` then
@@ -20,6 +20,7 @@ use super::{
     AgentName, Effort, Endpoint, LocalCommand, LocalRound, NonBlank, RoleModel, Settings,
     SettingsError,
 };
+use crate::agents::Agents;
 use crate::webhook::KelpieSettings;
 
 /// The name of the project's own Claude round, which kelpie always defines
@@ -136,7 +137,7 @@ pub enum Definition {
     Command(LocalCommand),
     /// A fresh Claude session on its own model and effort
     Claude(ClaudeSession),
-    /// A fresh session on an agent kelpie's `[agents]` define
+    /// A fresh session on an agent from kelpie's agent files
     Session(AgentSession),
 }
 
@@ -144,7 +145,7 @@ pub enum Definition {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AgentSession {
-    /// The agent, from kelpie's `[agents]`
+    /// The agent, by its agent file's name
     pub agent: AgentName,
     /// Globs of the files a pull request must change for this reviewer to
     /// run. Every pull request when absent.
@@ -248,8 +249,8 @@ impl LoopReviewer {
 impl Settings {
     /// The reviewers the project's loop runs, in order, each once
     ///
-    /// Reviewers and agents are `kelpie`'s, and `~/` in a command expands
-    /// against `home`.
+    /// Reviewers are `kelpie`'s and agents come from `agents`, and `~/` in
+    /// a command expands against `home`.
     ///
     /// # Errors
     ///
@@ -258,6 +259,7 @@ impl Settings {
     pub fn lineup(
         &self,
         kelpie: &KelpieSettings,
+        agents: &Agents,
         home: &Path,
     ) -> Result<Vec<LoopReviewer>, SettingsError> {
         let defined = &kelpie.local_reviewers;
@@ -277,8 +279,8 @@ impl Settings {
                  project's own Claude round on its reviewer's agent, so name yours otherwise"
             )));
         }
-        let agents = self.role_agents(&kelpie.agents)?;
-        let claude = LoopReviewer::claude(&agents.reviewer, &agents.limits.reviewer);
+        let roles = self.role_agents(agents)?;
+        let claude = LoopReviewer::claude(&roles.reviewer, &roles.limits.reviewer);
         if self.review.reviewers.is_empty() {
             // The older form of the local round runs before the project's
             // Claude round, not before the deep round.
@@ -333,13 +335,13 @@ impl Settings {
                 Definition::Claude(session) => Runs::Claude(session),
                 Definition::Session(AgentSession { agent, paths }) => {
                     let at = format!("{at}.agent");
-                    let (model, limit) = find(&kelpie.agents, &agent, &at, SETTING)?;
+                    let found = find(agents, &agent, &at, SETTING)?;
                     Runs::Claude(ClaudeSession {
-                        model: model.model,
-                        effort: model.effort,
+                        model: found.model.model.clone(),
+                        effort: found.model.effort,
                         paths,
-                        limit,
-                        harness: model.harness,
+                        limit: found.limit.clone(),
+                        harness: found.model.harness.clone(),
                     })
                 }
             };

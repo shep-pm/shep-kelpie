@@ -7,9 +7,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::board::WorkerModel;
 use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage};
-use crate::settings::ReviewerName;
+use crate::settings::{AgentName, ReviewerName};
 
 mod deep;
 mod follow_ups;
@@ -80,8 +79,9 @@ pub struct WorkItem {
     pub worktree: PathBuf,
     /// Its worker's build folder
     pub build: PathBuf,
-    /// The model and effort its worker runs on
-    pub worker: WorkerModel,
+    /// The implementer its worker runs on, chosen when it opened and kept
+    /// until it ends. Each turn runs that agent's file as it then stands.
+    pub agent: AgentName,
     /// The worker's session, chosen before its first turn
     pub session: SessionId,
     /// Where the worker's turn stands
@@ -564,7 +564,7 @@ mod tests {
                 "adopted": false,
                 "worktree": "/k/wt/shep/42",
                 "build": "/k/targets/shep/42",
-                "worker": { "model": "claude-opus-5-5", "effort": "medium" },
+                "agent": "opus-high",
                 "session": "5e55",
                 "turn": { "state": "running", "since": 9 },
                 "pull_request": 51,

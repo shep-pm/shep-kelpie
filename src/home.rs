@@ -25,7 +25,8 @@ pub const OLD: &str = ".kelpie";
 
 /// Kelpie's own entries in its home, and the old layout's that a home kept
 /// in place still has, which no project may be named for
-pub const OWN: [&str; 15] = [
+pub const OWN: [&str; 16] = [
+    "agents",
     "builds",
     "codex",
     "dog",

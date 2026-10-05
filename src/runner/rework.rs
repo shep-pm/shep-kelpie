@@ -15,8 +15,9 @@ use super::Runner;
 use super::report::{Begin, ReworkBy, StepReport};
 use super::trigger::{self, issue_list};
 use super::turn;
-use crate::board::{LabelError, OpenPullRequest, READY, Skip, WorkerModel};
+use crate::board::{LabelError, OpenPullRequest, READY, Skip};
 use crate::ports::{ForgeError, MaintainerReview, PullRequestState, Reviewed};
+use crate::settings::AgentName;
 use crate::state::StateError;
 use crate::work_item::{CodeRabbitTally, Known, Phase, Review, WorkItem, new_session_id};
 use crate::worktree;
@@ -48,7 +49,7 @@ pub enum ReworkError {
     NothingToRework(u64),
     /// The forge could not show the pull request's issue
     Issue(u64, ForgeError),
-    /// The issue's `worker:` label cannot be used
+    /// The issue's `agent:` label cannot be used
     Label(LabelError),
     /// No random session id could be drawn, with the OS's reason
     Session(String),
@@ -115,7 +116,7 @@ impl ReworkError {
 
 impl Runner {
     /// Opens a work item reworking open pull request `number`, which kelpie
-    /// opened, and returns the model and effort its worker runs on
+    /// opened, and returns the implementer its worker runs on
     ///
     /// Its first turn runs once the project is running.
     ///
@@ -124,7 +125,7 @@ impl Runner {
     /// [`ReworkError`] naming why the pull request cannot be reworked, or
     /// the change cannot be saved. A refusal changes nothing. A label or
     /// save that fails after the triage labels began coming off leaves them off.
-    pub fn rework(&mut self, number: u64) -> Result<WorkerModel, ReworkError> {
+    pub fn rework(&mut self, number: u64) -> Result<AgentName, ReworkError> {
         if !self.slot_free() {
             return Err(ReworkError::InFlight(self.state.open_issues()));
         }
@@ -197,10 +198,10 @@ impl Runner {
             }
             let review = pr.review.as_ref().map(|r| r.id.clone());
             let begin = match self.start_rework(number, pr) {
-                Ok(worker) => Begin::Report(StepReport::Reworked {
+                Ok(agent) => Begin::Report(StepReport::Reworked {
                     issue,
                     pull_request: number,
-                    worker,
+                    agent,
                     by,
                 }),
                 Err(ReworkError::State(e)) => return Err(e),
@@ -292,7 +293,7 @@ impl Runner {
 
     // Checks `pr` can be reworked, then writes its review for the worker,
     // takes the triage labels off and saves the work item, in that order.
-    fn start_rework(&mut self, number: u64, pr: Reviewed) -> Result<WorkerModel, ReworkError> {
+    fn start_rework(&mut self, number: u64, pr: Reviewed) -> Result<AgentName, ReworkError> {
         match pr.state {
             PullRequestState::Open => {}
             PullRequestState::Merged => return Err(ReworkError::NotOpen(number, "merged")),
@@ -318,11 +319,11 @@ impl Runner {
             .forge
             .issue(repo, issue)
             .map_err(|e| ReworkError::Issue(issue, e))?;
-        let worker = self
-            .labelled_worker(&found.labels)
+        let (agent, note) = self
+            .labelled_agent(issue, &found.labels)
             .map_err(ReworkError::Label)?;
         let session = new_session_id().map_err(|e| ReworkError::Session(e.to_string()))?;
-        let fresh = self.fresh(issue, found.title, worker.clone(), session);
+        let fresh = self.fresh(issue, found.title, agent.clone(), session);
         // A rework stays on its pull request, so a fixed number of rounds
         // counts the reviews every listed bot gave it before. As an adoption
         // does, it leaves out a review of the current head, which the gate
@@ -377,8 +378,9 @@ impl Runner {
             ..fresh
         });
         self.save(next).map_err(ReworkError::State)?;
+        self.notes.extend(note);
         self.mark_held(issue, true);
-        Ok(worker)
+        Ok(agent)
     }
 }
 

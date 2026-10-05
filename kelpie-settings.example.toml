@@ -70,41 +70,24 @@ url = "https://ntfy.sh/your-private-topic"
 # [kelpie.leases]
 # cargo-test = 3
 
-# The agents a project may name for its worker, reviewer and deep reviewer,
-# and its session reviewers: a harness, and the model and effort it runs on. The
-# harnesses are Claude Code, `claude-code`, pi, `pi`, and Codex, `codex`.
+# Agents are not settings: each is a file of its own, `agents/<name>.md` in
+# kelpie's home (`$SHEP_HOME/kelpie/agents/`), YAML frontmatter then a
+# Markdown body added to kelpie's own instructions for that agent. Kelpie
+# ships `sonnet-high` and `opus-high`, which `shep kelpie add` writes out
+# and never overwrites. A project lists the ones that build its work items
+# in `agents.implementers`, and an issue labelled `agent:<name>` runs on that
+# one. The README describes every key; a pi agent, for one, reads:
 #
-# `usage` is how its usage is read, and so which account paces it: `claude`
-# (`/usage`, the default on Claude Code), `codex` (Codex's own windows), or
-# `none` for a local model, which is never paced and holds `lease` for each
-# whole call instead. `lease` defaults to `gpu`, the qwen scripts' lock.
-# It must be the harness's own reader: Claude Code takes only `claude`, pi
-# only `none` and Codex only `codex`.
-# [kelpie.agents.opus-high]
-# harness = "claude-code"
-# model = "claude-opus-5-5"
-# effort = "high"
+#   ---
+#   role: implementer
+#   harness: pi
+#   model: qwen3.8:27b
+#   effort: medium
+#   url: http://<host>:11434/v1
+#   context: 65536
+#   ---
 #
-# pi runs a model on an OpenAI-compatible server: `url`, its `http://`
-# address up to and including its `/v1`, and `context`, the context size in
-# tokens it gives the model. Its calls reach the server through a forwarder
-# that passes only the chat completions call. A
-# project's local worker takes only issues labelled `worker:local`.
-# [kelpie.agents.qwen]
-# harness = "pi"
-# model = "qwen3.8:27b"
-# effort = "medium"
-# url = "http://<host>:11434/v1"
-# context = 65536
-#
-# Codex runs on kelpie's own ChatGPT login, in `codex_home` above, paced by
-# that plan's 5-hour and weekly windows. Its worker runs no
-# `worker.guard_hooks`. `codex debug models` lists the plan's models.
-# [kelpie.agents.gpt]
-# harness = "codex"
-# model = "gpt-6.1-sol"
-# effort = "medium"
-
+#   Run the narrowest test that covers the change.
 
 # The reviewers a project may list in `review.reviewers`, in order, by
 # name. `claude` is always the project's own Claude round, so it is not
@@ -115,8 +98,8 @@ url = "https://ntfy.sh/your-private-topic"
 # `endpoint` is kelpie's own reviewer: any OpenAI-compatible server (Ollama,
 # LM Studio, llama.cpp's server), its model, and the context size the server
 # gives that model, in tokens. `claude` is a fresh Claude session on its own
-# model and effort, and `session` a fresh session on the agent its `agent`
-# names from `[kelpie.agents]` above. A missing command or an unreachable
+# model and effort, and `session` a fresh session on the agent file its
+# `agent` names. A missing command or an unreachable
 # endpoint stops the runner of a project that lists it.
 #
 # `lease` is the lock kelpie holds around each round. `gpu` is this

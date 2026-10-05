@@ -50,8 +50,8 @@ impl Runner {
         }
         let mut paced = false;
         loop {
-            let local = self.agents.limits.worker.lease().is_some();
-            let pick = board::pick(&ready, &open, &self.state.finished, local);
+            let implementers = self.agents.implementer_names();
+            let pick = board::pick(&ready, &open, &self.state.finished, &implementers);
             let mut skipped = pick.skipped;
             skipped.extend(failed.iter().cloned());
             skipped.sort_by_key(Skip::issue);
@@ -90,11 +90,11 @@ impl Runner {
                 paced = true;
             }
             match self.add(issue) {
-                Ok(worker) => {
+                Ok(agent) => {
                     self.skipped.clone_from(&skipped);
                     return Ok(Begin::Report(StepReport::Dispatched {
                         issue,
-                        worker,
+                        agent,
                         skipped,
                     }));
                 }
@@ -147,10 +147,10 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::board::{Skip, WorkerModel};
+    use crate::board::Skip;
     use crate::ports::{AgentError, Cost, PullRequestState, Usage};
     use crate::runner::{StepReport, step};
-    use crate::settings::Effort;
+    use crate::settings::{AgentName, Effort};
     use crate::test::{Rig, Scripted};
 
     fn running(project: &str) -> (Rig, Mutex<Runner>) {
@@ -160,12 +160,8 @@ mod tests {
         (rig, runner)
     }
 
-    fn sonnet_high() -> WorkerModel {
-        WorkerModel {
-            model: "claude-sonnet-5-5".into(),
-            effort: Effort::High,
-            local: false,
-        }
+    fn sonnet_high() -> AgentName {
+        AgentName::try_from("sonnet-high".to_owned()).unwrap()
     }
 
     #[test]
@@ -178,7 +174,7 @@ mod tests {
             step(&runner).unwrap(),
             Some(StepReport::Dispatched {
                 issue: 9,
-                worker: sonnet_high(),
+                agent: sonnet_high(),
                 skipped: vec![],
             })
         );
@@ -209,7 +205,7 @@ mod tests {
             step(&runner).unwrap(),
             Some(StepReport::Dispatched {
                 issue: 5,
-                worker: sonnet_high(),
+                agent: sonnet_high(),
                 skipped: vec![
                     Skip::PullRequest {
                         issue: 3,
@@ -229,11 +225,20 @@ mod tests {
         assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
     }
 
+    // A project listing both of kelpie's own implementers.
+    fn listing_opus(project: &str) -> (Rig, Mutex<Runner>) {
+        let rig = Rig::new(project);
+        rig.implementers(&["sonnet-high", "opus-high"]);
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "start", None);
+        (rig, runner)
+    }
+
     #[test]
-    fn a_worker_label_runs_that_items_worker_on_its_model_and_effort() {
-        let (rig, runner) = running("golbat");
+    fn an_agent_label_runs_that_items_worker_on_the_agent_it_names() {
+        let (rig, runner) = listing_opus("golbat");
         rig.forge.list_ready(6, false);
-        rig.forge.label(6, "worker:opus-medium");
+        rig.forge.label(6, "agent:opus-high");
         step(&runner).unwrap();
         rig.claude
             .script([Scripted::Reply(Usage::default(), Cost(1))]);
@@ -242,20 +247,20 @@ mod tests {
         let [call] = rig.claude.calls().try_into().unwrap();
         assert_eq!(
             (call.model.as_str(), call.effort),
-            ("claude-opus-5-5", Effort::Medium)
+            ("claude-opus-5-5", Effort::High)
         );
         assert_eq!(
-            rig.ask(&runner, "status", None)["work_item"]["worker"],
-            json!({ "model": "claude-opus-5-5", "effort": "medium" })
+            rig.ask(&runner, "status", None)["work_item"]["agent"],
+            json!("opus-high")
         );
     }
 
     #[test]
-    fn a_worker_label_added_after_dispatch_changes_nothing() {
-        let (rig, runner) = running("chelone");
+    fn an_agent_label_added_after_dispatch_changes_nothing() {
+        let (rig, runner) = listing_opus("chelone");
         rig.forge.list_ready(6, false);
         step(&runner).unwrap();
-        rig.forge.label(6, "worker:opus-high");
+        rig.forge.label(6, "agent:opus-high");
         rig.claude
             .script([Scripted::Reply(Usage::default(), Cost(1))]);
         step(&runner).unwrap();
@@ -263,20 +268,25 @@ mod tests {
     }
 
     #[test]
-    fn add_takes_the_worker_label_too_and_refuses_one_it_cannot_read() {
+    fn add_takes_the_agent_label_too_and_refuses_one_naming_no_listed_implementer() {
         let (rig, runner) = running("xilriws");
-        rig.forge.label(8, "worker:gpt-high");
+        rig.forge.label(8, "agent:opus-high");
         assert_eq!(
             rig.ask(&runner, "add", Some("8")),
-            json!({ "error": "label `worker:gpt-high` is not `worker:local`, nor \
-                              `worker:<model>-<effort>` with a model from opus, sonnet, \
-                              haiku, fable" })
+            json!({ "error": "label `agent:opus-high` names no agent the project lists in \
+                              `agents.implementers`, which are sonnet-high" })
         );
         rig.forge.label(9, "worker:haiku-low");
         let item = &rig.ask(&runner, "add", Some("9"))["work_item"];
+        assert_eq!(item["agent"], json!("sonnet-high"));
+        let notes = runner.lock().unwrap().take_notes();
         assert_eq!(
-            item["worker"],
-            json!({ "model": "claude-haiku-4-5-20251001", "effort": "low" })
+            notes,
+            [
+                "issue #9 is labelled `worker:haiku-low`, which kelpie no longer reads, so it \
+              runs on the default implementer, sonnet-high: an `agent:<name>` label picks \
+              another that `agents.implementers` lists"
+            ]
         );
     }
 
@@ -346,7 +356,7 @@ mod tests {
             step(&runner).unwrap(),
             Some(StepReport::Dispatched {
                 issue: 6,
-                worker: sonnet_high(),
+                agent: sonnet_high(),
                 skipped: vec![skip],
             })
         );
@@ -397,7 +407,7 @@ mod tests {
             step(&runner).unwrap(),
             Some(StepReport::Dispatched {
                 issue: 9,
-                worker: sonnet_high(),
+                agent: sonnet_high(),
                 skipped: vec![Skip::Blocked {
                     issue: 8,
                     by: vec![32],

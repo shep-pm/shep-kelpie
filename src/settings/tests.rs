@@ -35,10 +35,8 @@ fn the_example_holds_the_first_build_defaults() {
     assert!(s.ci);
     assert_eq!(s.max_items.get(), 1);
     let role = |r: &RoleModel| (r.model.as_str().to_owned(), r.effort);
-    assert_eq!(
-        role(&s.models.worker),
-        ("claude-sonnet-5-5".into(), Effort::High)
-    );
+    let implementers: Vec<&str> = s.agents.implementers.iter().map(|n| n.as_str()).collect();
+    assert_eq!(implementers, ["sonnet-high"]);
     assert_eq!(
         role(&s.models.reviewer),
         ("claude-sonnet-5".into(), Effort::Medium)
@@ -198,16 +196,16 @@ fn the_planning_calls_settings_are_refused_by_name() {
             "[app.dogs.kelpie.models.planner]\nmodel = \"m\"\neffort = \"low\"\n",
         ),
         (
-            "agents.planner",
-            "[app.dogs.kelpie.agents]\nplanner = \"opus\"\n",
-        ),
-        (
             "skills.planning",
             "[app.dogs.kelpie.skills]\nplanning = { kind = \"none\" }\n",
         ),
     ];
-    for (key, block) in removed {
-        let err = parse_err(&format!("{EXAMPLE}\n{block}"));
+    let removed = removed
+        .map(|(key, block)| (key, format!("{EXAMPLE}\n{block}")))
+        .into_iter()
+        .chain([("agents.planner", with_agents("planner = \"opus\"\n"))]);
+    for (key, text) in removed {
+        let err = parse_err(&text);
         assert!(
             err.contains(&format!(
                 "`{key}` is no longer a setting, because the planning call is gone: delete it"
@@ -227,10 +225,7 @@ fn the_review_loops_settings_are_refused_by_name() {
             "models.judge",
             format!("{EXAMPLE}\n[app.dogs.kelpie.models.judge]\nmodel = \"m\"\neffort = \"low\"\n"),
         ),
-        (
-            "agents.judge",
-            format!("{EXAMPLE}\n[app.dogs.kelpie.agents]\njudge = \"opus\"\n"),
-        ),
+        ("agents.judge", with_agents("judge = \"opus\"\n")),
         (
             "review.loop_guard",
             EXAMPLE.replace(review, &format!("{review}loop_guard = 8\n")),
@@ -257,15 +252,14 @@ fn the_whole_issue_checks_settings_are_refused_by_name() {
     let removed = [
         (
             "models.auditor",
-            "[app.dogs.kelpie.models.auditor]\nmodel = \"m\"\neffort = \"low\"\n",
+            format!(
+                "{EXAMPLE}\n[app.dogs.kelpie.models.auditor]\nmodel = \"m\"\neffort = \"low\"\n"
+            ),
         ),
-        (
-            "agents.auditor",
-            "[app.dogs.kelpie.agents]\nauditor = \"opus\"\n",
-        ),
+        ("agents.auditor", with_agents("auditor = \"opus\"\n")),
     ];
-    for (key, block) in removed {
-        let err = parse_err(&format!("{EXAMPLE}\n{block}"));
+    for (key, text) in removed {
+        let err = parse_err(&text);
         assert!(
             err.contains(&format!(
                 "`{key}` is no longer a setting, because the whole-issue check is gone: \
@@ -274,6 +268,55 @@ fn the_whole_issue_checks_settings_are_refused_by_name() {
             "{key}: {err}"
         );
     }
+}
+
+// The example with `keys` added to its `[agents]` table.
+fn with_agents(keys: &str) -> String {
+    let table = "[app.dogs.kelpie.agents]\n";
+    assert!(EXAMPLE.contains(table), "the example's agents table moved");
+    EXAMPLE.replace(table, &format!("{table}{keys}"))
+}
+
+#[test]
+fn the_worker_settings_agent_files_replace_are_refused_saying_what_replaces_each() {
+    let models = "[app.dogs.kelpie.models.reviewer]\n";
+    let removed = [
+        (
+            "agents.worker",
+            with_agents("worker = \"opus-high\"\n"),
+            "list the agents that build in `agents.implementers`, the first being the default",
+        ),
+        (
+            "models.worker",
+            EXAMPLE.replace(
+                models,
+                &format!(
+                    "[app.dogs.kelpie.models.worker]\nmodel = \"m\"\neffort = \"low\"\n\n{models}"
+                ),
+            ),
+            "name the agent that builds in `agents.implementers`, such as `sonnet-high`, \
+             which is Sonnet 5.5 at high",
+        ),
+    ];
+    for (key, text, fix) in removed {
+        assert_eq!(
+            parse_err(&text),
+            format!(
+                "the [app.dogs.kelpie] table on shep: `{key}` is no longer a setting, \
+                 because agents are files in kelpie's home's `agents` folder: {fix}"
+            )
+        );
+    }
+    let labels = EXAMPLE.replace(
+        models,
+        &format!("[app.dogs.kelpie.models.labels]\nopus = \"claude-opus-6\"\n\n{models}"),
+    );
+    assert_eq!(
+        parse_err(&labels),
+        "the [app.dogs.kelpie] table on shep: `models.labels` is no longer a setting, \
+         because an `agent:<name>` label names its agent file, which holds the model id: \
+         list each agent a label may name in `agents.implementers`"
+    );
 }
 
 #[test]

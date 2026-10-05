@@ -24,7 +24,6 @@ use super::review::run_review_call;
 use super::rework;
 use super::ruling::park;
 use super::trigger::lock;
-use crate::board::WorkerModel;
 use crate::pacer::Scope;
 use crate::ports::{AgentCall, AgentError, AgentReply, Cost, Issue, Reach, Role, Session, Tools};
 use crate::profile::WorkerProfile;
@@ -48,6 +47,8 @@ pub(super) struct WorkerAgent {
     pub(super) model: String,
     /// How hard the model thinks
     pub(super) effort: Effort,
+    /// Its agent file's body, added to kelpie's own instructions
+    pub(super) prompt: Option<String>,
 }
 
 /// The prompt for a turn resumed after the runner restarted
@@ -318,12 +319,22 @@ impl Runner {
         } else {
             Start::Main
         };
+        let WorkerAgent {
+            harness,
+            limit,
+            model,
+            effort,
+            prompt: agent_prompt,
+        } = self.worker_agent(item)?;
         let reach = self.worker_reach(item, start)?;
         let folder = &self.paths.worker;
         let settings = folder.join("settings.json");
         let instructions = folder.join("instructions.md");
         let text = instructions::compose(
-            self.extra_instructions.as_deref(),
+            instructions::Extra {
+                agent: agent_prompt.as_deref(),
+                project: self.extra_instructions.as_deref(),
+            },
             &item.worktree,
             &self.skills,
             &self.kelpie,
@@ -343,12 +354,6 @@ impl Runner {
                     .invoke(Step::Implement, &first_prompt(item.issue, &issue))
             }
         };
-        let WorkerAgent {
-            harness,
-            limit,
-            model,
-            effort,
-        } = self.worker_agent(item)?;
         self.prepared(AgentCall {
             role: Role::Worker,
             harness,
@@ -406,46 +411,32 @@ impl Runner {
         Ok(profile.reach())
     }
 
-    /// The harness `item`'s worker runs on, and what holds its turns back
-    ///
-    /// An item given to the local worker runs on the project's local agent.
-    /// Any other runs on the worker's agent if it is that agent's model, and
-    /// otherwise on Claude Code: a `worker:` label names a Claude model.
+    /// The agent `item`'s worker runs on: the one it opened on, as that
+    /// agent's file now stands
     ///
     /// # Errors
     ///
-    /// Why not, when an item given to the local worker has none to run on.
+    /// Why not, when kelpie no longer has that agent, or the worker's fence
+    /// would not hold on it.
     pub(super) fn worker_agent(&self, item: &WorkItem) -> Result<WorkerAgent, String> {
-        let (agent, limit) = (&self.agents.worker, &self.agents.limits.worker);
-        let local = limit.lease().is_some();
-        let own = WorkerModel {
-            local: item.worker.local,
-            ..WorkerModel::from(agent)
-        };
-        let on = |harness, limit, model: WorkerModel| WorkerAgent {
-            harness,
-            limit,
-            model: model.model,
-            effort: model.effort,
-        };
-        match (item.worker.local, local) {
-            (true, false) => Err(format!(
-                "issue #{} is labelled for the local worker, and `agents.worker` names \
-                 no local agent now: name one again, or take the label off and drop \
-                 and add the issue",
+        let name = &item.agent;
+        let Some(agent) = self.book.get(name) else {
+            return Err(format!(
+                "issue #{} runs on agent {name}, which has no agent file now: write \
+                 `agents/{name}.md` in kelpie's home again, or drop and add the issue",
                 item.issue
-            )),
-            // The label asks for the local worker, not a model, so it runs today's.
-            (true, true) => Ok(on(agent.harness.clone(), limit.clone(), own)),
-            (false, false) if item.worker == own => {
-                Ok(on(agent.harness.clone(), limit.clone(), own))
-            }
-            (false, _) => Ok(on(
-                AgentHarness::ClaudeCode,
-                Limit::default(),
-                item.worker.clone(),
-            )),
-        }
+            ));
+        };
+        self.settings
+            .under_worker_fence(name, &agent.model)
+            .map_err(|e| e.to_string())?;
+        Ok(WorkerAgent {
+            harness: agent.model.harness.clone(),
+            limit: agent.limit.clone(),
+            model: agent.model.model.as_str().to_owned(),
+            effort: agent.model.effort,
+            prompt: agent.prompt.clone(),
+        })
     }
 
     /// `call`, once its harness has what it needs on disk

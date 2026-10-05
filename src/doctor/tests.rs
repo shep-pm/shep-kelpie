@@ -154,11 +154,14 @@ fn ok(report: &Report, subject: &str) -> String {
 #[tokio::test]
 async fn a_project_that_spends_codex_checks_codex_answers_its_usage() {
     let scene = Scene::new().await;
-    let codex = "[agents.codex]\nharness = \"stand-in\"\nmodel = \"gpt-5-codex\"\n\
-                 effort = \"medium\"\nusage = \"codex\"\n";
-    scene.shepherd.holds_section(&format!("{WEBHOOK}{codex}"));
+    let codex = "---\nrole: implementer\nharness: stand-in\nmodel: gpt-5-codex\n\
+                 effort: medium\nusage: codex\n---\n";
+    crate::test::write_in(&scene.kelpie_home.join("agents"), "codex.md", codex);
     scene.runs("golbat", |t| {
-        t.insert("agents".into(), json!({ "worker": "codex" }));
+        t.insert(
+            "agents".into(),
+            json!({ "implementers": ["sonnet-high", "codex"] }),
+        );
     });
     let report = scene.report().await;
     let found = ok(&report, "golbat: codex usage");
@@ -227,12 +230,14 @@ async fn a_machine_with_everything_in_place_passes_and_changes_nothing() {
             "shepherd",
             "dog",
             "golbat: checkout",
+            "golbat: implementers",
             "golbat: push access",
             "golbat: labels",
             "golbat: coderabbit",
             "golbat: local review",
             "golbat: rulings",
             "koji: checkout",
+            "koji: implementers",
             "koji: push access",
             "koji: labels",
             "koji: local review",
@@ -246,6 +251,54 @@ async fn a_machine_with_everything_in_place_passes_and_changes_nothing() {
         report.render().last().unwrap(),
         "nothing a project needs is missing"
     );
+    assert_eq!(
+        ok(&report, "golbat: implementers"),
+        "an issue with no `agent:` label runs on sonnet-high"
+    );
+}
+
+#[tokio::test]
+async fn an_md_file_named_for_no_agent_is_named_and_unsure() {
+    let scene = Scene::new().await;
+    scene.runs("golbat", |_| {});
+    let agents = scene.kelpie_home.join("agents");
+    crate::test::write_in(&agents, "README.md", "# What these are\n");
+    let report = scene.report().await;
+    let Verdict::Unsure { what, next } = verdict(&report, "golbat: implementers") else {
+        panic!("{:#?}", report.render());
+    };
+    assert_eq!(
+        what,
+        &format!(
+            "agent file {} is skipped: an agent's name is lowercase letters, digits and `-`",
+            agents.join("README.md").display()
+        )
+    );
+    assert!(next.contains("rename it"), "{next}");
+}
+
+#[tokio::test]
+async fn an_agent_file_that_cannot_be_used_or_an_implementer_without_one_is_missing() {
+    let scene = Scene::new().await;
+    scene.runs("golbat", |t| {
+        t.insert("agents".into(), json!({ "implementers": ["fable"] }));
+    });
+    let (what, fix) = missing(&scene.report().await, "golbat: implementers");
+    assert!(
+        what.contains("names fable, which has no agent file"),
+        "{what}"
+    );
+    assert!(fix.contains("write the agent file"), "{fix}");
+
+    let agents = scene.kelpie_home.join("agents");
+    crate::test::write_in(&agents, "fable.md", "role: implementer\n");
+    let (what, fix) = missing(&scene.report().await, "golbat: implementers");
+    let file = agents.join("fable.md");
+    assert!(
+        what.starts_with(&format!("agent file {}: ", file.display())),
+        "{what}"
+    );
+    assert!(fix.contains("correct the file"), "{fix}");
 }
 
 // Shep lists a dog that is up and never named itself as silent, then gives

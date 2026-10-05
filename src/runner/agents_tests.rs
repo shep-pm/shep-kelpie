@@ -5,12 +5,21 @@ use crate::runner::{Runner, StepReport, step};
 use crate::settings::Effort;
 use crate::test::{Rig, Scripted, ScriptedRound};
 
-const AGENTS: &str = "[agents.opus-high]\nharness = \"claude-code\"\n\
-                      model = \"claude-opus-5-5\"\neffort = \"high\"\n\
-                      [agents.sonnet-low]\nharness = \"claude-code\"\n\
-                      model = \"claude-sonnet-5\"\neffort = \"low\"\n\
-                      [agents.haiku]\nharness = \"claude-code\"\n\
-                      model = \"claude-haiku-4-5-20251001\"\neffort = \"low\"\n";
+const SONNET_LOW: &str = "---\nrole: implementer\nharness: claude-code\n\
+                          model: claude-sonnet-5\neffort: low\n---\n";
+const HAIKU: &str = "---\nrole: implementer\nharness: claude-code\n\
+                     model: claude-haiku-4-5-20251001\neffort: low\n---\n";
+
+/// The example's own `[agents]` table
+const LISTED: &str = "[app.dogs.kelpie.agents]\nimplementers = [\"sonnet-high\"]\n";
+
+// The rig's project with `names` as its `[agents]` table.
+fn name_agents(rig: &Rig, names: &str) {
+    rig.edit_settings(|s| {
+        assert!(s.contains(LISTED), "the example's agents table moved");
+        s.replace(LISTED, &format!("[app.dogs.kelpie.agents]\n{names}"))
+    });
+}
 
 // Issue 7 from dispatch to merge under `auto`: the worker's turn, a qwen
 // round whose one MEDIUM finding goes to the worker, the fix, and a clean
@@ -63,14 +72,11 @@ fn a_stand_in_agent_runs_a_whole_work_item() {
 fn a_project_naming_a_different_agent_per_role_reaches_each() {
     let rig = Rig::new("shep");
     rig.merge_auto();
-    let kelpie = std::fs::read_to_string(rig.paths().kelpie_settings).unwrap();
-    rig.set_kelpie_settings(&format!("{kelpie}\n{AGENTS}"));
-    rig.edit_settings(|s| {
-        let gate = "\n[app.dogs.kelpie.coderabbit]\n";
-        let agents = "[app.dogs.kelpie.agents]\nworker = \"opus-high\"\n\
-                      reviewer = \"sonnet-low\"\n";
-        s.replacen(gate, &format!("\n{agents}{gate}"), 1)
-    });
+    rig.write_agent("sonnet-low", SONNET_LOW);
+    name_agents(
+        &rig,
+        "implementers = [\"opus-high\"]\nreviewer = \"sonnet-low\"\n",
+    );
     let runner = rig.open().unwrap();
     whole_work_item(&rig, &runner);
     let seen: Vec<(Role, String, Effort)> = rig
@@ -93,14 +99,9 @@ fn a_project_naming_a_different_agent_per_role_reaches_each() {
 #[test]
 fn naming_an_agent_while_the_runner_runs_takes_effect_at_the_next_dispatch() {
     let rig = Rig::new("shep");
-    let kelpie = std::fs::read_to_string(rig.paths().kelpie_settings).unwrap();
-    rig.set_kelpie_settings(&format!("{kelpie}\n{AGENTS}"));
+    rig.write_agent("haiku", HAIKU);
     let runner = rig.open().unwrap();
-    rig.edit_settings(|s| {
-        let gate = "\n[app.dogs.kelpie.coderabbit]\n";
-        let agents = "[app.dogs.kelpie.agents]\nworker = \"haiku\"\n";
-        s.replacen(gate, &format!("\n{agents}{gate}"), 1)
-    });
+    rig.implementers(&["haiku"]);
     let line = runner
         .lock()
         .unwrap()
@@ -161,17 +162,59 @@ fn a_settings_file_that_cannot_be_written_keeps_the_turn_for_its_retry() {
 #[test]
 fn a_role_naming_an_agent_kelpie_lacks_stops_the_runner_naming_it() {
     let rig = Rig::new("shep");
-    rig.edit_settings(|s| {
-        let gate = "\n[app.dogs.kelpie.coderabbit]\n";
-        s.replacen(
-            gate,
-            &format!("\n[app.dogs.kelpie.agents]\nreviewer = \"fable\"\n{gate}"),
-            1,
-        )
-    });
+    name_agents(&rig, "reviewer = \"fable\"\n");
     let err = rig.open().unwrap_err().to_string();
     assert!(
-        err.contains("`agents.reviewer` names fable, which is not defined"),
+        err.contains("`agents.reviewer` names fable, which has no agent file"),
         "{err}"
+    );
+    rig.edit_settings(|s| s.replace("reviewer = \"fable\"\n", "implementers = [\"fable\"]\n"));
+    let err = rig.open().unwrap_err().to_string();
+    assert_eq!(
+        err,
+        "setting `agents`: `agents.implementers` names fable, which has no \
+         agent file: write `agents/fable.md` in kelpie's home"
+    );
+}
+
+#[test]
+fn an_agent_file_that_cannot_be_used_stops_the_runner_naming_the_file_and_the_key() {
+    let rig = Rig::new("shep");
+    let file = rig.paths().agents.join("qwen.md");
+    let cases = [
+        ("role: implementer\n", "must start with a `---` line"),
+        (
+            "---\nrole: implementer\nharness: gemini\nmodel: m\neffort: low\n---\n",
+            "`harness`: unknown variant `gemini`",
+        ),
+        (
+            "---\nrole: implementer\nharness: pi\nmodel: m\neffort: low\n---\n",
+            "runs on pi, which needs the model's server as `url` and its context size as \
+             `context`",
+        ),
+    ];
+    for (text, why) in cases {
+        rig.write_agent("qwen", text);
+        let err = rig.open().unwrap_err().to_string();
+        assert!(
+            err.starts_with(&format!("agent file {}: ", file.display())),
+            "{err}"
+        );
+        assert!(err.contains(why), "{err}\nwanted: {why}");
+    }
+}
+
+#[test]
+fn an_md_file_named_for_no_agent_is_skipped_and_logged_and_the_runner_starts() {
+    let rig = Rig::new("shep");
+    rig.write_agent("README", "# What these are\n");
+    let runner = rig.open().unwrap();
+    let file = rig.paths().agents.join("README.md");
+    assert_eq!(
+        runner.lock().unwrap().take_notes(),
+        [format!(
+            "agent file {} is skipped: an agent's name is lowercase letters, digits and `-`",
+            file.display()
+        )]
     );
 }

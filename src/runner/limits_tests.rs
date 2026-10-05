@@ -10,23 +10,27 @@ use crate::runner::{Runner, StepReport, step};
 use crate::settings::AgentHarness;
 use crate::test::{Hold, Rig, Scripted};
 
-const AGENTS: &str = "[agents.codex]\nharness = \"stand-in\"\n\
-                      model = \"gpt-5-codex\"\neffort = \"medium\"\nusage = \"codex\"\n\
-                      [agents.qwen]\nharness = \"stand-in\"\n\
-                      model = \"qwen3-coder\"\neffort = \"low\"\nusage = \"none\"\n";
+const CODEX: &str = "---\nrole: implementer\nharness: stand-in\nmodel: gpt-5-codex\n\
+                     effort: medium\nusage: codex\n---\n";
+const QWEN: &str = "---\nrole: implementer\nharness: stand-in\nmodel: qwen3-coder\n\
+                    effort: low\nusage: none\n---\n";
 
-const ALL_CODEX: &str = "worker = \"codex\"\nreviewer = \"codex\"\n";
-const ALL_QWEN: &str = "worker = \"qwen\"\nreviewer = \"qwen\"\n";
+/// The example's own `[agents]` table, which `named` replaces
+const LISTED: &str = "[app.dogs.kelpie.agents]\nimplementers = [\"sonnet-high\"]\n";
 
-// A running project whose roles name kelpie's agents as `names` says.
+const ALL_CODEX: &str = "implementers = [\"codex\"]\nreviewer = \"codex\"\n";
+const BESIDE_QWEN: &str = "implementers = [\"sonnet-high\", \"qwen\"]\n";
+const ALL_QWEN: &str = "implementers = [\"sonnet-high\", \"qwen\"]\nreviewer = \"qwen\"\n";
+
+// A running project whose `[agents]` table is `names`, over kelpie's agent
+// files and two more: `codex` on the Codex account, and `qwen` on the GPU.
 fn named(project: &str, names: &str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
-    let kelpie = std::fs::read_to_string(rig.paths().kelpie_settings).unwrap();
-    rig.set_kelpie_settings(&format!("{kelpie}\n{AGENTS}"));
+    rig.write_agent("codex", CODEX);
+    rig.write_agent("qwen", QWEN);
     rig.edit_settings(|s| {
-        let gate = "\n[app.dogs.kelpie.coderabbit]\n";
-        let agents = format!("[app.dogs.kelpie.agents]\n{names}");
-        s.replacen(gate, &format!("\n{agents}{gate}"), 1)
+        assert!(s.contains(LISTED), "the example's agents table moved");
+        s.replace(LISTED, &format!("[app.dogs.kelpie.agents]\n{names}"))
     });
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
@@ -127,8 +131,8 @@ fn each_account_keeps_its_own_day() {
 
 #[test]
 fn a_new_work_item_waits_on_any_account_its_roles_spend() {
-    // A local worker, with the Claude reviewer every project has by default.
-    let (rig, runner) = named("shep", "worker = \"qwen\"\n");
+    // A local implementer, with the Claude reviewer every project has by default.
+    let (rig, runner) = named("shep", BESIDE_QWEN);
     rig.forge.list_ready(7, false);
     assert!(dispatched(&step(&runner).unwrap()));
     assert_eq!(rig.meter.reads(), 1);
@@ -169,7 +173,7 @@ fn codex_usage_that_cannot_be_read_holds_until_it_can() {
 
 #[test]
 fn a_review_round_waits_on_its_reviewers_account_while_the_worker_works_on() {
-    let (rig, first) = named("chelone", "worker = \"codex\"\n");
+    let (rig, first) = named("chelone", "implementers = [\"codex\"]\n");
     drop(first);
     let only_claude = "[app.dogs.kelpie.review]\nreviewers = [\"claude\"]\n";
     rig.edit_settings(|s| {
@@ -218,7 +222,7 @@ fn a_local_worker_is_never_paced_and_holds_the_gpu_for_its_whole_turn() {
     rig.codex_meter.set(Rig::utilization(90, 90));
     let lock = GpuLock::under(&rig.home.path().join("tmp"));
     rig.forge.list_ready(7, false);
-    rig.forge.label(7, "worker:local");
+    rig.forge.label(7, "agent:qwen");
     assert!(dispatched(&step(&runner).unwrap()));
     // Both accounts past half their windows: neither is the local model's limit.
     rig.clock.advance(RECHECK_SECS);
@@ -258,8 +262,8 @@ fn a_local_worker_is_never_paced_and_holds_the_gpu_for_its_whole_turn() {
 
 #[test]
 fn a_local_turn_waits_while_a_review_round_holds_the_gpu() {
-    let (rig, runner) = named("xilriws", "worker = \"qwen\"\n");
-    rig.forge.label(7, "worker:local");
+    let (rig, runner) = named("xilriws", BESIDE_QWEN);
+    rig.forge.label(7, "agent:qwen");
     rig.ask(&runner, "add", Some("7"));
     let lock = GpuLock::under(&rig.home.path().join("tmp"));
     let round = Claim {
@@ -280,26 +284,27 @@ fn a_local_turn_waits_while_a_review_round_holds_the_gpu() {
     assert_eq!(rig.claude.calls().len(), 1);
 }
 
-// The project at `named`'s settings, reopened with `swap` applied to kelpie's own.
-fn reopened(rig: &Rig, runner: Mutex<Runner>, swap: (&str, &str)) -> Mutex<Runner> {
+// The runner for `named`'s rig, reopened once `change` has been made.
+fn reopened(rig: &Rig, runner: Mutex<Runner>, change: impl FnOnce()) -> Mutex<Runner> {
     drop(runner);
-    let kelpie = std::fs::read_to_string(rig.paths().kelpie_settings).unwrap();
-    rig.set_kelpie_settings(&kelpie.replace(swap.0, swap.1));
+    change();
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
     runner
 }
 
 #[test]
-fn an_issue_given_to_the_local_worker_stays_on_its_agent_when_the_agent_changes() {
-    let (rig, runner) = named("rotom", "worker = \"qwen\"\n");
-    rig.forge.label(7, "worker:local");
+fn a_work_item_keeps_its_agent_and_runs_its_file_as_it_now_stands() {
+    let (rig, runner) = named("rotom", BESIDE_QWEN);
+    rig.forge.label(7, "agent:qwen");
     rig.ask(&runner, "add", Some("7"));
-    let swap = (
-        "model = \"qwen3-coder\"\neffort = \"low\"",
-        "model = \"qwen3-coder-next\"\neffort = \"high\"",
-    );
-    let runner = reopened(&rig, runner, swap);
+    let runner = reopened(&rig, runner, || {
+        rig.write_agent(
+            "qwen",
+            &QWEN.replace("qwen3-coder\neffort: low", "next\neffort: high"),
+        );
+        rig.implementers(&["sonnet-high"]);
+    });
     rig.claude.script([Scripted::Say("done")]);
     step(&runner).unwrap();
     let call = &rig.claude.calls()[0];
@@ -307,22 +312,30 @@ fn an_issue_given_to_the_local_worker_stays_on_its_agent_when_the_agent_changes(
     assert_eq!(call.lease.as_ref().map(|l| l.as_str()), Some("gpu"));
     assert_eq!(
         (call.model.as_str(), call.effort),
-        ("qwen3-coder-next", crate::settings::Effort::High),
-        "the label asks for the local worker, so the turn runs the agent's model today"
+        ("next", crate::settings::Effort::High),
+        "the item keeps its agent, unlisted now, and runs the agent's file as it is"
     );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["agent"], "qwen");
 }
 
 #[test]
-fn an_issue_given_to_the_local_worker_fails_its_turn_once_no_local_agent_is_left() {
-    let (rig, runner) = named("rotom", "worker = \"qwen\"\n");
-    rig.forge.label(7, "worker:local");
+fn a_work_item_whose_agent_file_is_gone_fails_its_turn_saying_so() {
+    let (rig, runner) = named("rotom", BESIDE_QWEN);
+    rig.forge.label(7, "agent:qwen");
     rig.ask(&runner, "add", Some("7"));
-    let runner = reopened(&rig, runner, ("usage = \"none\"", "usage = \"codex\""));
+    let runner = reopened(&rig, runner, || {
+        std::fs::remove_file(rig.paths().agents.join("qwen.md")).unwrap();
+        rig.implementers(&["sonnet-high"]);
+    });
     let Some(StepReport::Failed { question, .. }) = step(&runner).unwrap() else {
         panic!("the turn did not fail");
     };
     assert!(
-        question.contains("issue #7 is labelled for the local worker, and `agents.worker` names no local agent now"),
+        question.contains(
+            "issue #7 runs on agent qwen, which has no agent file now: write \
+             `agents/qwen.md` in kelpie's home again, or drop and add the issue"
+        ),
         "{question}"
     );
     assert_eq!(rig.claude.calls(), []);
@@ -359,8 +372,8 @@ fn a_review_round_on_a_local_agent_runs_on_that_agent_under_its_lease() {
 }
 
 #[test]
-fn beside_a_local_worker_an_unlabelled_issue_runs_on_claude_and_its_window() {
-    let (rig, runner) = named("rotom", "worker = \"qwen\"\n");
+fn beside_a_local_implementer_listed_first_an_unlabelled_issue_runs_on_claude_and_its_window() {
+    let (rig, runner) = named("rotom", "implementers = [\"qwen\", \"sonnet-high\"]\n");
     rig.forge.list_ready(7, false);
     rig.meter.set(Rig::utilization(0, 1));
     assert!(dispatched(&step(&runner).unwrap()));
@@ -391,8 +404,8 @@ fn a_project_with_no_local_agent_shows_no_leases() {
 
 #[test]
 fn spend_without_dollars_shows_tokens_and_says_it_has_none() {
-    let (rig, runner) = named("reactmap", "worker = \"qwen\"\n");
-    rig.forge.label(7, "worker:local");
+    let (rig, runner) = named("reactmap", BESIDE_QWEN);
+    rig.forge.label(7, "agent:qwen");
     rig.ask(&runner, "add", Some("7"));
     let used = Usage {
         input: 120,

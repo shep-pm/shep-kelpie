@@ -11,12 +11,15 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 
-use crate::board::{LabelError, Skip, WorkerModel, worker_for, worker_override};
+use crate::agents::{Agents, AgentsError};
+use crate::board::{LabelError, Skip, agent_label, old_worker_label};
 use crate::local_paths::LocalPaths;
 use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Guarded, Leased, Ports, SessionId, Timestamp, Visibility};
 use crate::review_bot::{Bot, Profile, Reviewers};
-use crate::settings::{Account, LoopReviewer, NonBlank, RoleAgents, Runs, Settings, SettingsError};
+use crate::settings::{
+    Account, AgentName, LoopReviewer, NonBlank, RoleAgents, Runs, Settings, SettingsError,
+};
 use crate::skills::Skills;
 use crate::state::ids::RulingIds;
 use crate::state::{ProjectState, RunState, StateError, StateStore};
@@ -42,6 +45,9 @@ mod gpu;
 mod gpu_tests;
 mod guard_hooks;
 mod instructions;
+mod kept;
+#[cfg(test)]
+mod kept_tests;
 #[cfg(test)]
 mod limits_tests;
 mod merge;
@@ -89,6 +95,8 @@ pub(crate) use gate::CHECKS_SETTLE;
 pub enum OpenError {
     /// A setting is missing, malformed or does not hold
     Settings(SettingsError),
+    /// An agent file cannot be read or used
+    Agents(AgentsError),
     /// The forge could not be asked about the project's repo
     Forge(ForgeError),
     /// The state file could not be read
@@ -99,6 +107,7 @@ impl fmt::Display for OpenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Settings(e) => e.fmt(f),
+            Self::Agents(e) => e.fmt(f),
             Self::Forge(e) => write!(f, "cannot check the repo on the forge: {e}"),
             Self::State(e) => e.fmt(f),
         }
@@ -110,6 +119,12 @@ impl core::error::Error for OpenError {}
 impl From<SettingsError> for OpenError {
     fn from(e: SettingsError) -> Self {
         Self::Settings(e)
+    }
+}
+
+impl From<AgentsError> for OpenError {
+    fn from(e: AgentsError) -> Self {
+        Self::Agents(e)
     }
 }
 
@@ -133,7 +148,7 @@ pub enum AddError {
     InFlight(Vec<u64>),
     /// The forge could not show the issue
     Forge(ForgeError),
-    /// The issue's `worker:` label cannot be used
+    /// The issue's `agent:` label cannot be used
     Label(LabelError),
     /// No random session id could be drawn, with the OS's reason
     Session(String),
@@ -184,8 +199,10 @@ pub struct Runner {
     reviewers: Reviewers,
     // The review's reviewers, in order, from the project's list
     lineup: Vec<LoopReviewer>,
-    // The model and effort each role runs on, from the agent it names
+    // The project's implementers, and the model and effort each review role runs on
     agents: RoleAgents,
+    // Every agent kelpie's files define, from which each turn runs its work item's agent
+    book: Agents,
     // The maintainer's home folder, for `~/` in kelpie's own settings
     home: PathBuf,
     // The GPU's last reading, from the page kelpie's settings name
@@ -243,8 +260,12 @@ impl Runner {
             Arc::clone(&ports.gpu),
             kelpie_settings.gpu_metrics_url.clone(),
         );
-        let agents = settings.role_agents(&kelpie_settings.agents)?;
-        let lineup = settings.lineup(&kelpie_settings, home)?;
+        let store = StateStore::new(paths.state.clone());
+        let book = Agents::load(&paths.agents)?;
+        let (book, mut notes) = kept::keep_old_agents(&store, &paths.agents, book)?;
+        notes.extend(book.skipped());
+        let agents = settings.role_agents(&book)?;
+        let lineup = settings.lineup(&kelpie_settings, &book, home)?;
         let webhook = kelpie_settings.webhook;
         if webhook.is_none() {
             eprintln!(
@@ -273,7 +294,6 @@ impl Runner {
         let skills = Skills::load(&settings.skills, &paths.skills);
         check_coderabbit(&settings, &ports)?;
         check_local(&settings, &lineup, &ports)?;
-        let store = StateStore::new(paths.state.clone());
         let mut state = store
             .load()?
             .unwrap_or_else(|| ProjectState::new(ports.clock.now()));
@@ -313,6 +333,7 @@ impl Runner {
             reviewers,
             lineup,
             agents,
+            book,
             home: home.to_owned(),
             gpu,
             webhook,
@@ -322,7 +343,7 @@ impl Runner {
             viewer: None,
             focus: None,
             last_acted: None,
-            notes: Vec::new(),
+            notes,
             live_turns: timings::LiveTurns::default(),
         };
         runner.settle_labels();
@@ -417,15 +438,15 @@ impl Runner {
         self.set_run(RunState::Paused)
     }
 
-    /// Opens a work item for `issue`, and returns the model and effort its
+    /// Opens a work item for `issue`, and returns the implementer its
     /// worker runs on. Its first turn runs once the project is running.
     ///
     /// # Errors
     ///
     /// [`AddError`] when the project has `max_items` open or one for this
-    /// issue already, the issue cannot be read or its `worker:` label
-    /// understood, or the change cannot be saved. Nothing changes then.
-    pub fn add(&mut self, issue: u64) -> Result<WorkerModel, AddError> {
+    /// issue already, the issue cannot be read or its `agent:` label names
+    /// no listed implementer, or the change cannot be saved. Nothing changes then.
+    pub fn add(&mut self, issue: u64) -> Result<AgentName, AddError> {
         if self.state.item(issue).is_some() {
             return Err(AddError::InFlight(vec![issue]));
         }
@@ -437,34 +458,45 @@ impl Runner {
             .forge
             .issue(&self.settings.forge, issue)
             .map_err(AddError::Forge)?;
-        let worker = self
-            .labelled_worker(&found.labels)
+        let (agent, note) = self
+            .labelled_agent(issue, &found.labels)
             .map_err(AddError::Label)?;
         let session = new_session_id().map_err(|e| AddError::Session(e.to_string()))?;
         let mut next = self.state.clone();
         next.work_items
-            .push(self.fresh(issue, found.title, worker.clone(), session));
+            .push(self.fresh(issue, found.title, agent.clone(), session));
         self.save(next).map_err(AddError::State)?;
+        self.notes.extend(note);
         self.mark_held(issue, true);
-        Ok(worker)
+        Ok(agent)
     }
 
-    // The worker an issue with `labels` runs on.
-    fn labelled_worker(&self, labels: &[String]) -> Result<WorkerModel, LabelError> {
-        let label = worker_override(labels)?;
-        let models = &self.settings.models;
-        worker_for(label, &self.agents, &models.worker, &models.labels)
+    // The implementer an issue with `labels` runs on: the one its `agent:`
+    // label names, or the default. Beside it, the log line an old `worker:`
+    // label gets once the work item opens, since it no longer picks anything.
+    fn labelled_agent(
+        &self,
+        issue: u64,
+        labels: &[String],
+    ) -> Result<(AgentName, Option<String>), LabelError> {
+        let listed = self.agents.implementer_names();
+        if let Some(agent) = agent_label(labels, &listed)? {
+            return Ok((agent, None));
+        }
+        let agent = self.agents.default_implementer.name.clone();
+        let note = old_worker_label(labels).map(|old| {
+            format!(
+                "issue #{issue} is labelled `{old}`, which kelpie no longer reads, so it runs \
+                 on the default implementer, {agent}: an `agent:<name>` label picks another \
+                 that `agents.implementers` lists"
+            )
+        });
+        Ok((agent, note))
     }
 
     // A work item on `kelpie/<issue>` whose first turn is due, with nothing
     // recorded yet
-    fn fresh(
-        &self,
-        issue: u64,
-        title: String,
-        worker: WorkerModel,
-        session: SessionId,
-    ) -> WorkItem {
+    fn fresh(&self, issue: u64, title: String, agent: AgentName, session: SessionId) -> WorkItem {
         WorkItem {
             issue,
             title,
@@ -474,7 +506,7 @@ impl Runner {
             arrived: None,
             worktree: self.paths.worktree(issue),
             build: self.paths.build(issue),
-            worker,
+            agent,
             session,
             turn: Turn::Due,
             pull_request: None,

@@ -7,7 +7,6 @@ use super::*;
 use crate::coderabbit::LABEL;
 use crate::ports::{Checks, PullRequestState, Session};
 use crate::runner::{StepReport, step};
-use crate::settings::Effort;
 use crate::test::{Hold, Rig, Scripted, git};
 
 // Pull request 80 on `fix/timeline`, opened by kelpie's account from another
@@ -29,11 +28,7 @@ fn adopted_80() -> StepReport {
     StepReport::Adopted {
         issue: 5,
         pull_request: 80,
-        worker: WorkerModel {
-            model: "claude-sonnet-5-5".into(),
-            effort: Effort::High,
-            local: false,
-        },
+        agent: "sonnet-high".to_owned().try_into().unwrap(),
     }
 }
 
@@ -451,11 +446,7 @@ fn adopted_pull_requests_wait_for_the_work_item_in_flight_across_a_restart() {
         Some(StepReport::Adopted {
             issue: 6,
             pull_request: 81,
-            worker: WorkerModel {
-                model: "claude-sonnet-5-5".into(),
-                effort: Effort::High,
-                local: false,
-            },
+            agent: "sonnet-high".to_owned().try_into().unwrap(),
         })
     );
     assert_eq!(
@@ -565,11 +556,7 @@ fn a_start_retried_after_a_failure_begins_at_the_head_origin_holds_now() {
         Some(StepReport::Adopted {
             issue: 5,
             pull_request: 80,
-            worker: WorkerModel {
-                model: "claude-sonnet-5-5".into(),
-                effort: Effort::High,
-                local: false,
-            },
+            agent: "sonnet-high".to_owned().try_into().unwrap(),
         })
     );
     let worktree = rig.paths().worktree(5);
