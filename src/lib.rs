@@ -2,7 +2,7 @@
 //! to a merged pull request
 //!
 //! Each project runs as a sheep, kelpie's project runner, under kelpie's own
-//! shepherd. `CONTEXT.md` at the repo root holds the vocabulary, and
+//! shepherd. `GLOSSARY.md` at the repo root holds the vocabulary, and
 //! `docs/design-log.md` the design.
 
 #![forbid(unsafe_code)]
