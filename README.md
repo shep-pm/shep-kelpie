@@ -649,7 +649,7 @@ A runner or the dog refuses to start while `~/.kelpie` still holds its files fro
 
 For how it works and why:
 
-- `CONTEXT.md`: the vocabulary
+- `GLOSSARY.md`: the vocabulary
 - `docs/adr/`: decisions that are hard to reverse
 - `docs/design-log.md`: every decision so far, the facts behind them, and the test plan
 - `docs/specs/`: each test series and its results

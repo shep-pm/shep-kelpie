@@ -12,7 +12,7 @@ The design is settled and the pillars are measured. The MVP is being built from 
 
 ## Vocabulary
 
-`CONTEXT.md` is the vocabulary. Use its terms exactly, in prose, code and issue titles: worker, crew, work item, phase, reset, handoff, lease, summon, ruling. In shep's terms, kelpie is a dog, a project is a sheep, and a worker is one of its lambs.
+`GLOSSARY.md` is the vocabulary. Use its terms exactly, in prose, code and issue titles: worker, crew, work item, phase, reset, handoff, lease, summon, ruling. In shep's terms, kelpie is a dog, a project is a sheep, and a worker is one of its lambs.
 
 ## Kelpie and shep
 
@@ -34,7 +34,7 @@ CI (`.github/workflows/test.yml`) runs `cargo fmt --all --check`, `cargo clippy 
 
 Kelpie works this repo too, so these hold for a kelpie worker as for anyone:
 
-- Read the issue, its parent spec #5, `CONTEXT.md`, `docs/adr/` and `docs/design-log.md` first. The design is settled there; ask only for a decision they leave open.
+- Read the issue, its parent spec #5, `GLOSSARY.md`, `docs/adr/` and `docs/design-log.md` first. The design is settled there; ask only for a decision they leave open.
 - Tests follow #5's testing decisions: the runner's work-item loop through its stand-ins, the dog's lease book with a fake clock, and adapter parsing against real recorded output. Tests assert only what the outside world sees.
 - One cargo command shape for the session, and one cargo command at a time.
 - New measured facts go in the design log's Facts section in the same pull request.
@@ -61,4 +61,4 @@ The five default roles, label string equal to role name. See `docs/agents/triage
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` at the root, ADRs in `docs/adr/`, and `docs/design-log.md`. See `docs/agents/domain.md`.
+Single-context: `GLOSSARY.md` at the root, ADRs in `docs/adr/`, and `docs/design-log.md`. See `docs/agents/domain.md`.

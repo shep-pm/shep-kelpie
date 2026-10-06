@@ -2,7 +2,7 @@
 #
 # CodeRabbit reviews a pull request only when it carries the `review please`
 # label. Kelpie's runner puts that label on its own pull requests when it wants
-# a review (see CONTEXT.md).
+# a review (see GLOSSARY.md).
 #
 # Once this repo is public, CodeRabbit's free plan reviews every pull request
 # by default, and it only gets one review an hour. A drive-by pull request

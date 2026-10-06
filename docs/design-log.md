@@ -1,6 +1,6 @@
 # Design log
 
-Decisions from the design sessions starting 2026-09-24, and the facts behind them. The hard-to-reverse ones are also ADRs in `docs/adr/`. The vocabulary is in `CONTEXT.md`.
+Decisions from the design sessions starting 2026-09-24, and the facts behind them. The hard-to-reverse ones are also ADRs in `docs/adr/`. The vocabulary is in `GLOSSARY.md`.
 
 The sections below describe the code as it stands. What was built and later changed or removed is in History, one dated line each, and how a file saved by an older kelpie loads is in Old files. What was decided and never built is in Decided, not built.
 
