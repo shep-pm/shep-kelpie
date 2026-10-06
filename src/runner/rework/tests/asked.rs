@@ -174,7 +174,7 @@ fn a_forks_pull_request_on_a_kelpie_branch_is_left_alone() {
 
 #[test]
 fn a_label_that_will_not_come_off_starts_nothing_until_it_does() {
-    let rig = Rig::new("zeus");
+    let rig = Rig::new("acme");
     reviewed_71(&rig);
     rig.forge.label_pull_request(71, READY);
     rig.forge.set_labels_down(true);
@@ -285,7 +285,7 @@ fn a_second_ask_while_a_rework_is_in_flight_changes_nothing() {
 
 #[test]
 fn ready_for_human_goes_on_at_the_merge_ruling_and_comes_off_with_a_no() {
-    let rig = Rig::new("zeus");
+    let rig = Rig::new("acme");
     reviewed_71(&rig);
     let runner = running(&rig);
     rig.ask(&runner, "rework", Some("71"));

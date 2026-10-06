@@ -373,7 +373,7 @@ mod tests {
 
     #[test]
     fn a_dropped_work_item_takes_its_question_with_it() {
-        let (rig, runner) = asking("zeus");
+        let (rig, runner) = asking("acme");
         step(&runner).unwrap();
         let status = rig.ask(&runner, "drop", None);
         assert_eq!(

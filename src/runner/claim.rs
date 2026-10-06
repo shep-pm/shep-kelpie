@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn a_merged_work_items_issue_loses_the_label() {
-        let (rig, runner, _) = Rig::parked("zeus");
+        let (rig, runner, _) = Rig::parked("acme");
         assert!(held(&rig, 7));
         rig.ask(&runner, "rule", Some("1 yes"));
         step(&runner).unwrap();

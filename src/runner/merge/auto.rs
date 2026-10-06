@@ -366,7 +366,7 @@ fn a_rebase_that_fails_still_parks_on_a_ruling() {
 
 #[test]
 fn a_closed_pull_request_still_parks_on_a_ruling() {
-    let (rig, runner, _) = Rig::with_pull_request("zeus");
+    let (rig, runner, _) = Rig::with_pull_request("acme");
     let runner = under_auto(&rig, runner);
     rig.forge.set_state(71, PullRequestState::Closed);
     let id = raised(step(&runner).unwrap());
@@ -580,7 +580,7 @@ fn a_yes_that_vouches_for_a_new_head_sends_it_back_through_every_gate() {
 
 #[test]
 fn a_yes_on_a_head_nobody_moved_goes_back_to_ci_under_auto() {
-    let (rig, runner, head) = Rig::with_pull_request("zeus");
+    let (rig, runner, head) = Rig::with_pull_request("acme");
     let runner = under_auto(&rig, runner);
     rig.forge
         .set_checks(&head, Checks::Failed(vec!["lint".into()]));

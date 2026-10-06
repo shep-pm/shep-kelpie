@@ -448,7 +448,7 @@ pub(super) mod tests {
 
     #[test]
     fn a_verdict_waits_for_the_check_set_to_settle() {
-        let (rig, runner, head) = Rig::with_pull_request("zeus");
+        let (rig, runner, head) = Rig::with_pull_request("acme");
         rig.forge.set_checks(&head, Checks::Passed);
         assert_eq!(step(&runner).unwrap(), None);
         rig.clock.advance(CHECKS_SETTLE - 1);
@@ -512,7 +512,7 @@ pub(super) mod tests {
 
     #[test]
     fn a_pull_request_merged_by_hand_ends_the_work_item_with_no_merge_by_kelpie() {
-        let (rig, runner, _) = Rig::with_pull_request("zeus");
+        let (rig, runner, _) = Rig::with_pull_request("acme");
         rig.forge.set_state(71, PullRequestState::Merged);
         assert!(matches!(
             step(&runner).unwrap(),
@@ -650,7 +650,7 @@ pub(super) mod tests {
 
     #[test]
     fn a_normal_gate_run_with_nothing_changed_outside_kelpie_asks_nothing_about_it() {
-        let (rig, runner, head) = Rig::with_pull_request("zeus");
+        let (rig, runner, head) = Rig::with_pull_request("acme");
         rig.forge.set_checks(&head, Checks::Passed);
         let (_, question) = ruling_report(rig.verdict(&runner));
         assert!(question.starts_with("Merge pull request #71"), "{question}");

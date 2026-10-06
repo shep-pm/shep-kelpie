@@ -328,7 +328,7 @@ fn a_paused_project_runs_no_turn_until_it_starts() {
 
 #[test]
 fn a_failed_turn_raises_a_ruling_carrying_why_and_alerts_like_the_rest() {
-    let (rig, runner) = with_issue_7("zeus");
+    let (rig, runner) = with_issue_7("acme");
     rig.claude.script([Scripted::Fail(AgentError::Failed(
         crate::settings::Harness::ClaudeCode,
         "overloaded".into(),
@@ -364,7 +364,7 @@ fn a_failed_turn_raises_a_ruling_carrying_why_and_alerts_like_the_rest() {
 
 #[test]
 fn a_yes_on_a_failed_turn_resumes_its_session() {
-    let (rig, runner) = with_issue_7("zeus");
+    let (rig, runner) = with_issue_7("acme");
     rig.claude.script([Scripted::Fail(AgentError::Failed(
         crate::settings::Harness::ClaudeCode,
         "overloaded".into(),
@@ -390,7 +390,7 @@ fn a_yes_on_a_failed_turn_resumes_its_session() {
 
 #[test]
 fn a_retry_whose_session_never_began_starts_it_over_from_the_issue() {
-    let (rig, runner) = with_issue_7("zeus");
+    let (rig, runner) = with_issue_7("acme");
     rig.claude.script([Scripted::Fail(AgentError::Failed(
         crate::settings::Harness::ClaudeCode,
         "overloaded".into(),
@@ -416,7 +416,7 @@ fn a_retry_whose_session_never_began_starts_it_over_from_the_issue() {
 
 #[test]
 fn a_retried_turn_gets_a_whole_ceiling_however_long_the_ruling_waited() {
-    let (rig, runner) = with_issue_7("zeus");
+    let (rig, runner) = with_issue_7("acme");
     rig.claude.script([Scripted::Fail(AgentError::Failed(
         crate::settings::Harness::ClaudeCode,
         "overloaded".into(),
@@ -454,7 +454,7 @@ fn a_no_on_a_failed_turn_stops_the_work_item_the_way_a_timed_out_one_does() {
 
 #[test]
 fn a_turn_past_its_ceiling_is_stopped_and_a_yes_resumes_its_session() {
-    let (rig, runner) = with_issue_7("zeus");
+    let (rig, runner) = with_issue_7("acme");
     rig.claude.script([Scripted::Fail(AgentError::TimedOut(
         crate::settings::Harness::ClaudeCode,
     ))]);
@@ -529,7 +529,7 @@ fn a_worker_turn_carries_the_projects_timeout() {
 
 #[test]
 fn a_restart_before_the_ceiling_passes_resumes_with_only_the_time_left() {
-    let (rig, runner) = with_issue_7("zeus");
+    let (rig, runner) = with_issue_7("acme");
     rig.claude.script([Scripted::Kill]);
     let _ = catch_unwind(AssertUnwindSafe(|| step(&runner)));
     drop(runner);
@@ -627,7 +627,7 @@ const SENT_BACK: &str = "Your last turn ended with no pull request for this work
 
 #[test]
 fn a_turn_that_ends_with_no_pull_request_and_no_question_sends_the_worker_back_once() {
-    let (rig, runner) = with_issue_7("zeus");
+    let (rig, runner) = with_issue_7("acme");
     rig.claude.script([
         Scripted::Say("cargo test failed in the sandbox, so I stopped."),
         Scripted::Reply(usage(1), Cost(1)),
@@ -644,7 +644,7 @@ fn a_turn_that_ends_with_no_pull_request_and_no_question_sends_the_worker_back_o
 
 #[test]
 fn a_turn_that_ends_with_uncommitted_files_and_no_push_is_sent_back_naming_them() {
-    let (rig, runner) = with_issue_7("zeus");
+    let (rig, runner) = with_issue_7("acme");
     rig.claude.script([
         Scripted::Plant("fix.txt", "fixed\n"),
         Scripted::Push("fix.txt", "fixed\n"),
@@ -673,7 +673,7 @@ fn a_turn_that_ends_with_uncommitted_files_and_no_push_is_sent_back_naming_them(
 
 #[test]
 fn a_worker_sent_back_for_uncommitted_files_is_not_sent_back_for_them_again() {
-    let (rig, runner) = with_issue_7("zeus");
+    let (rig, runner) = with_issue_7("acme");
     rig.claude.script([
         Scripted::Plant("fix.txt", "fixed\n"),
         Scripted::Plant("fix.txt", "fixed\n"),
@@ -692,7 +692,7 @@ fn a_worker_sent_back_for_uncommitted_files_is_not_sent_back_for_them_again() {
 // pull request was found at turn 2's end, so the review is still owed.
 #[test]
 fn a_pull_request_found_on_a_turn_sent_back_to_commit_still_goes_to_review_first() {
-    let (rig, runner) = with_issue_7("zeus");
+    let (rig, runner) = with_issue_7("acme");
     let hold = Hold::default();
     rig.claude.script([
         Scripted::Push("work.txt", "work\n"),
@@ -720,7 +720,7 @@ fn a_pull_request_found_on_a_turn_sent_back_to_commit_still_goes_to_review_first
 // ends as it did before, with no follow-up and no hold-up.
 #[test]
 fn a_worktree_git_cannot_be_read_in_ends_the_turn_without_a_follow_up() {
-    let (rig, runner) = with_issue_7("zeus");
+    let (rig, runner) = with_issue_7("acme");
     let hold = Hold::default();
     rig.claude.script([
         Scripted::Hold(hold.clone()),
@@ -751,7 +751,7 @@ fn a_worktree_git_cannot_be_read_in_ends_the_turn_without_a_follow_up() {
 
 #[test]
 fn a_change_only_staged_counts_as_uncommitted() {
-    let (rig, runner) = with_issue_7("zeus");
+    let (rig, runner) = with_issue_7("acme");
     rig.claude.script([
         Scripted::Stage("staged.txt", "staged\n"),
         Scripted::Reply(usage(1), Cost(1)),
@@ -764,7 +764,7 @@ fn a_change_only_staged_counts_as_uncommitted() {
 
 #[test]
 fn a_turn_that_ends_with_a_clean_worktree_is_not_sent_back_for_uncommitted_files() {
-    let (rig, runner) = with_issue_7("zeus");
+    let (rig, runner) = with_issue_7("acme");
     rig.claude.script([
         Scripted::Reply(usage(1), Cost(1)),
         Scripted::Reply(usage(1), Cost(1)),
@@ -777,7 +777,7 @@ fn a_turn_that_ends_with_a_clean_worktree_is_not_sent_back_for_uncommitted_files
 
 #[test]
 fn a_second_turn_that_stops_short_parks_the_worker_on_a_ruling() {
-    let (rig, runner) = with_issue_7("zeus");
+    let (rig, runner) = with_issue_7("acme");
     rig.claude.script([
         Scripted::Reply(usage(1), Cost(1)),
         Scripted::Reply(usage(1), Cost(1)),
@@ -839,7 +839,7 @@ fn a_no_on_a_worker_that_stopped_short_stops_the_work_item() {
 
 #[test]
 fn a_pull_request_the_turns_end_missed_goes_to_review_instead() {
-    let (rig, runner) = with_issue_7("zeus");
+    let (rig, runner) = with_issue_7("acme");
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);
     rig.forge.set_board_down(true);
     step(&runner).unwrap();

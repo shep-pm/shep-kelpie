@@ -644,7 +644,7 @@ mod tests {
 
     #[test]
     fn a_runner_restarted_between_ready_and_merge_still_waits_then_merges() {
-        let (rig, runner, head) = Rig::parked("zeus");
+        let (rig, runner, head) = Rig::parked("acme");
         rig.ask(&runner, "rule", Some("1 yes"));
         assert_eq!(step(&runner).unwrap(), marked_ready());
         drop(runner);
