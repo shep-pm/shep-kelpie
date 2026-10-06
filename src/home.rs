@@ -6,10 +6,10 @@
 //! keeps its book and door under `$SHEP_HOME/kelpie/dog`, since shep starts
 //! the adopted dog with `SHEP_HOME` and without `KELPIE_HOME`.
 
-pub mod migrate;
-
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+
+use crate::runner::ProjectName;
 
 /// The variable that names kelpie's home in place of the shepherd's
 pub const KELPIE_VAR: &str = "KELPIE_HOME";
@@ -23,26 +23,45 @@ const SHEP_DEFAULT: &str = ".shep";
 /// The folder kelpie kept everything in before it moved under shep's home
 pub const OLD: &str = ".kelpie";
 
-/// Kelpie's own entries in its home, and the old layout's that a home kept
-/// in place still has, which no project may be named for
-pub const OWN: [&str; 16] = [
+/// Kelpie's own entries in its home, which no project may be named for
+pub const OWN: [&str; 11] = [
     "agents",
     "builds",
     "codex",
     "dog",
-    "playwright",
-    "projects",
     "relay",
     "rulings",
     "settings.toml",
-    "shots",
-    "targets",
     "tools",
     "totp",
     "upgrade",
     "upgrade.lock",
-    "wt",
 ];
+
+/// Kelpie's shared files in the old home, which the first runner to start
+/// on a build that moved homes took, leaving `.moved-to` behind
+const OLD_SHARED: [&str; 6] = [
+    "codex",
+    "relay",
+    "rulings",
+    "settings.toml",
+    "tools",
+    "totp",
+];
+
+/// The folders of the old home that held a project's files, each in a
+/// folder named for it, until its own runner's start moved them
+const OLD_PROJECT: [&str; 5] = ["playwright", "projects", "shots", "targets", "wt"];
+
+/// The dog's book in the old home, until the dog's start moved it
+const OLD_BOOK: &str = "dog/book.json";
+
+/// The file the old home keeps once a runner moved its shared files
+const MOVED_TO: &str = ".moved-to";
+
+/// What a shepherd keeps at the top of its home, so a folder holding one
+/// is a shepherd's home and not kelpie's old one
+const SHEPHERDS: [&str; 3] = ["flock.json", "shep.toml", "run"];
 
 /// The longest path a Unix socket may have, one byte short of macOS's 104
 pub const LONGEST_SOCKET: usize = 103;
@@ -86,14 +105,81 @@ pub fn kelpie_home_of(shep_home: &Path) -> PathBuf {
         .map_or_else(|| under(shep_home), PathBuf::from)
 }
 
-/// The home kelpie used before, whose files [`migrate`] moves: the one
-/// `KELPIE_HOME` names, else `~/.kelpie`
+/// The old home a runner's files would still be in, `~/.kelpie`, when
+/// `KELPIE_HOME` does not name its home instead
 pub fn old_home() -> Option<PathBuf> {
-    let set = std::env::var_os(KELPIE_VAR).filter(|v| !v.is_empty());
-    set.map(PathBuf::from).or_else(|| {
-        let home = std::env::var_os("HOME").filter(|v| !v.is_empty())?;
-        Some(Path::new(&home).join(OLD))
-    })
+    if std::env::var_os(KELPIE_VAR).is_some_and(|v| !v.is_empty()) {
+        return None;
+    }
+    old_home_of(std::env::var_os("HOME"))
+}
+
+/// The old home the dog's book would still be in, `~/.kelpie`, since shep
+/// never hands the adopted dog `KELPIE_HOME`
+pub fn old_dog_home() -> Option<PathBuf> {
+    old_home_of(std::env::var_os("HOME"))
+}
+
+/// Refuses project `name`'s runner a start in `home` while the old home
+/// `old` still holds the project's files, or kelpie's shared files with
+/// no runner having moved them
+///
+/// # Errors
+///
+/// A message naming the old home and what it holds, and how to move it.
+pub fn runner_may_start(old: &Path, home: &Path, name: &ProjectName) -> Result<(), String> {
+    if shepherds(old) {
+        return Ok(());
+    }
+    let own = OLD_PROJECT
+        .iter()
+        .map(|folder| Path::new(folder).join(name.as_str()))
+        .find(|path| old.join(path).exists());
+    let shared = || {
+        let claimed = old.join(MOVED_TO).exists();
+        let found = OLD_SHARED.iter().find(|file| kept(&old.join(file)));
+        found.filter(|_| !claimed).map(PathBuf::from)
+    };
+    own.or_else(shared)
+        .map_or(Ok(()), |found| Err(unmoved(old, &found, home)))
+}
+
+/// Refuses the dog a start in its folder `dog` while the old home `old`
+/// still holds its book
+///
+/// # Errors
+///
+/// A message naming the old home and the book, and how to move it.
+pub fn dog_may_start(old: &Path, dog: &Path) -> Result<(), String> {
+    if shepherds(old) || !kept(&old.join(OLD_BOOK)) {
+        return Ok(());
+    }
+    Err(unmoved(old, Path::new(OLD_BOOK), dog))
+}
+
+fn old_home_of(home: Option<OsString>) -> Option<PathBuf> {
+    let home = home.filter(|v| !v.is_empty())?;
+    Some(Path::new(&home).join(OLD))
+}
+
+// Whether `old` is a shepherd's home, which kelpie never kept its files in.
+fn shepherds(old: &Path) -> bool {
+    SHEPHERDS.iter().any(|file| old.join(file).exists())
+}
+
+// Whether `path` is there and is not a link a move left.
+fn kept(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| !m.file_type().is_symlink())
+}
+
+fn unmoved(old: &Path, found: &Path, home: &Path) -> String {
+    format!(
+        "{} still holds {}, from before kelpie's home moved to {}: run the previous \
+         shep-kelpie release once, which moves it, or move it there by hand",
+        old.display(),
+        found.display(),
+        home.display()
+    )
 }
 
 fn shep_home_from(shep: Option<OsString>, home: Option<OsString>) -> Result<PathBuf, String> {
@@ -120,23 +206,6 @@ fn kelpie_home_from(
         Some(kelpie) => Ok(kelpie.into()),
         None => shep_home_from(shep, home).map(|shep| under(&shep)),
     }
-}
-
-/// `path` under kelpie's home, or where the old home kept it while no runner
-/// has moved it yet: `old`, relative to the old home
-pub fn or_old(path: PathBuf, old: &str) -> PathBuf {
-    if path.exists() {
-        return path;
-    }
-    old_home()
-        .map(|home| home.join(old))
-        .filter(|was| unmoved(was))
-        .unwrap_or(path)
-}
-
-/// Whether `path` is there and is not a link a move left
-pub fn unmoved(path: &Path) -> bool {
-    std::fs::symlink_metadata(path).is_ok_and(|m| !m.file_type().is_symlink())
 }
 
 /// Whether `socket` is short enough to bind, naming it and the fix when not
@@ -201,5 +270,85 @@ mod tests {
         let error = socket_fits(Path::new(&long)).unwrap_err();
         assert!(error.contains(&long), "{error}");
         assert!(error.contains("SHEP_HOME"), "{error}");
+    }
+
+    fn write(path: &Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "").unwrap();
+    }
+
+    fn koji() -> ProjectName {
+        ProjectName::try_from("koji").unwrap()
+    }
+
+    #[test]
+    fn a_runner_beside_an_old_home_never_moved_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let (old, home) = (root.path().join(".kelpie"), root.path().join("new"));
+        assert_eq!(runner_may_start(&old, &home, &koji()), Ok(()));
+        write(&old.join("totp/secret"));
+
+        let error = runner_may_start(&old, &home, &koji()).unwrap_err();
+
+        assert!(error.contains(&old.display().to_string()), "{error}");
+        assert!(error.contains("totp"), "{error}");
+        assert!(error.contains("previous shep-kelpie release"), "{error}");
+        assert!(error.contains("by hand"), "{error}");
+    }
+
+    // A move left `.moved-to`, and links or copies of the shared files.
+    #[test]
+    fn a_moved_old_home_lets_a_runner_start_unless_its_project_stayed() {
+        let root = tempfile::tempdir().unwrap();
+        let (old, home) = (root.path().join(".kelpie"), root.path().join("new"));
+        write(&old.join("settings.toml"));
+        write(&old.join(MOVED_TO));
+        std::os::unix::fs::symlink(home.join("totp"), old.join("totp")).unwrap();
+        assert_eq!(runner_may_start(&old, &home, &koji()), Ok(()));
+
+        write(&old.join("projects/koji/state.json"));
+
+        let error = runner_may_start(&old, &home, &koji()).unwrap_err();
+        assert!(error.contains("projects/koji"), "{error}");
+        let lab = ProjectName::try_from("lab").unwrap();
+        assert_eq!(runner_may_start(&old, &home, &lab), Ok(()));
+    }
+
+    #[test]
+    fn a_shepherds_home_on_the_old_folder_is_not_an_unmoved_kelpie_home() {
+        for marker in ["flock.json", "shep.toml", "run/shep.sock"] {
+            let root = tempfile::tempdir().unwrap();
+            let (old, home) = (root.path().join(".kelpie"), root.path().join("new"));
+            write(&old.join("settings.toml"));
+            write(&old.join("tools/srt"));
+            write(&old.join("dog/book.json"));
+            write(&old.join(marker));
+            assert_eq!(runner_may_start(&old, &home, &koji()), Ok(()), "{marker}");
+            assert_eq!(dog_may_start(&old, &home.join("dog")), Ok(()), "{marker}");
+        }
+    }
+
+    #[test]
+    fn a_dog_beside_its_old_book_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let (old, dog) = (root.path().join(".kelpie"), root.path().join("new/dog"));
+        write(&old.join("settings.toml"));
+        assert_eq!(dog_may_start(&old, &dog), Ok(()));
+        write(&old.join("dog/book.json"));
+
+        let error = dog_may_start(&old, &dog).unwrap_err();
+
+        assert!(error.contains(&old.display().to_string()), "{error}");
+        assert!(error.contains("dog/book.json"), "{error}");
+        assert!(error.contains(&dog.display().to_string()), "{error}");
+    }
+
+    #[test]
+    fn the_old_home_is_under_home() {
+        assert_eq!(
+            old_home_of(os("/Users/me")),
+            Some(PathBuf::from("/Users/me/.kelpie"))
+        );
+        assert_eq!(old_home_of(os("")), None);
     }
 }

@@ -272,13 +272,6 @@ impl Runner {
         }
         let totp = replies::authenticator(webhook.as_ref(), &paths.totp)?;
         check_repo(&settings)?;
-        let [worktrees, _] = paths.owned();
-        if let Err(e) = crate::worktree::repair(&settings.repo, &worktrees) {
-            eprintln!(
-                "cannot repair git's links to the worktrees in {}: {e}",
-                worktrees.display()
-            );
-        }
         let extra_instructions = instructions::read_extra(&settings)?;
         let env_home = std::env::var_os("HOME").map(PathBuf::from);
         guard_hooks::check(

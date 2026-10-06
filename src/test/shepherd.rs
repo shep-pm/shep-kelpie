@@ -33,8 +33,6 @@ struct Sheep {
     // What its next `status` answers, `None` being a delivery that times out,
     // the last one repeating
     says: VecDeque<Option<String>>,
-    // Its process and how long it has been up, in milliseconds
-    up: (Option<u32>, u64),
 }
 
 /// Whether a dog has named itself to the shepherd
@@ -102,16 +100,8 @@ impl FakeShepherd {
             opening: false,
             heard: Heard::Named,
             says: VecDeque::new(),
-            up: (None, 0),
         };
         self.flock.lock().unwrap().push(sheep);
-    }
-
-    /// Has `name` run as process `pid` for `uptime_ms`
-    pub(crate) fn up_for(&self, name: &str, pid: u32, uptime_ms: u64) {
-        let mut flock = self.flock.lock().unwrap();
-        let sheep = flock.iter_mut().find(|s| s.config.name == name).unwrap();
-        sheep.up = (Some(pid), uptime_ms);
     }
 
     /// Holds `toml` as kelpie's own `[kelpie]` section of `dogs.toml`
@@ -154,7 +144,6 @@ impl FakeShepherd {
             opening: false,
             heard: Heard::Named,
             says: VecDeque::new(),
-            up: (None, 0),
         };
         self.flock.lock().unwrap().push(sheep);
     }
@@ -212,9 +201,7 @@ fn info(id: usize, sheep: &Sheep) -> ProcessInfo {
     } else {
         ProcStatus::Stopped
     };
-    let mut info = ProcessInfo::builder(u32::try_from(id).unwrap(), &sheep.config.name, status)
-        .pid(sheep.up.0)
-        .uptime_ms(sheep.up.1);
+    let mut info = ProcessInfo::builder(u32::try_from(id).unwrap(), &sheep.config.name, status);
     if let Some(channel) = sheep.dog {
         info = info
             .dog(Some(DogSource::Adopted {
@@ -265,7 +252,6 @@ fn answer(flock: &mut Vec<Sheep>, section: &str, request: &Request) -> Response 
                         opening: false,
                         heard: Heard::Named,
                         says: VecDeque::new(),
-                        up: (None, 0),
                     });
                 }
             }

@@ -1,7 +1,8 @@
-//! A runner without `SHEP_HOME`, and the adopted
-//! dog without its channel, against the real binary: each refuses, and says
-//! what fixes it.
+//! A runner without `SHEP_HOME` or beside an old home that never moved, and
+//! the adopted dog without its channel, against the real binary: each
+//! refuses, and says what fixes it.
 
+use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
 const KELPIE: &str = env!("CARGO_BIN_EXE_shep-kelpie");
@@ -25,6 +26,17 @@ fn kelpie_with(args: &[&str], env: &[(&str, &str)]) -> Output {
 
 fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+fn runner_under(home: &Path, shep: &Path) -> Output {
+    Command::new(KELPIE)
+        .args(["runner", "koji"])
+        .env_clear()
+        .env("HOME", home)
+        .env("SHEP_HOME", shep)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
 }
 
 #[test]
@@ -62,28 +74,32 @@ fn a_bare_shep_kelpie_prints_the_usage_and_runs_no_dog() {
     assert!(!stderr.contains("shepherd channel"), "{stderr}");
 }
 
-// The move from the old home waits on the socket check, so a home the
-// runner refuses is never filled.
+// A runner with a long `SHEP_HOME` stops before it opens anything.
 #[test]
-fn a_runner_whose_sockets_would_be_too_long_moves_nothing() {
+fn a_runner_whose_sockets_would_be_too_long_refuses() {
     let home = tempfile::tempdir().unwrap();
-    let old = home.path().join(".kelpie");
-    std::fs::create_dir_all(old.join("totp")).unwrap();
-    std::fs::write(old.join("totp/secret"), "s").unwrap();
     let shep = home.path().join("s".repeat(90));
-
-    let output = Command::new(KELPIE)
-        .args(["runner", "koji"])
-        .env_clear()
-        .env("HOME", home.path())
-        .env("SHEP_HOME", &shep)
-        .stdin(Stdio::null())
-        .output()
-        .unwrap();
+    let output = runner_under(home.path(), &shep);
 
     assert!(!output.status.success());
     let stderr = stderr(&output);
     assert!(stderr.contains("longer than the 103"), "{stderr}");
-    assert!(old.join("totp/secret").is_file(), "the old home was moved");
     assert!(!shep.join("kelpie").exists());
+}
+
+// Kelpie's files left in `~/.kelpie` by a home that never moved.
+#[test]
+fn a_runner_beside_an_unmoved_old_home_refuses_naming_it() {
+    let home = tempfile::tempdir().unwrap();
+    let old = home.path().join(".kelpie");
+    std::fs::create_dir_all(old.join("projects/koji")).unwrap();
+    std::fs::write(old.join("projects/koji/state.json"), "{}").unwrap();
+    // Short enough for the socket check, and never made.
+    let output = runner_under(home.path(), Path::new("/s"));
+
+    assert!(!output.status.success());
+    let stderr = stderr(&output);
+    assert!(stderr.contains(&old.display().to_string()), "{stderr}");
+    assert!(stderr.contains("previous shep-kelpie release"), "{stderr}");
+    assert!(old.join("projects/koji/state.json").is_file());
 }
