@@ -554,15 +554,19 @@ impl StepReport {
     }
 }
 
-/// What a step found there was to do, before the outer loop runs it
+/// What a step found there was to do, before a call it names is started
 pub(super) enum Begin {
     Idle,
     Report(StepReport),
-    Call(AgentCall),
+    /// A worker's turn, ended at `deadline` if it runs that long
+    Call {
+        call: AgentCall,
+        deadline: Timestamp,
+    },
     Review(ReviewCall),
 }
 
-/// Something the review needs run outside the runner's lock
+/// A review call, which runs in flight like a turn
 pub(super) enum ReviewCall {
     /// One local round, of the project's kind
     Local {

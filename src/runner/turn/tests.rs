@@ -1,10 +1,12 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Mutex;
 
 use serde_json::json;
 
 use super::*;
 use crate::ports::{Cost, Usage};
 use crate::profile;
+use crate::runner::step;
 use crate::settings::Effort;
 use crate::test::{Hold, LEFT_BEHIND, Rig, Scripted, git, write_in};
 
@@ -55,9 +57,9 @@ fn the_first_turn_starts_the_workers_session_in_its_own_worktree() {
         call.prompt
     );
     let worker = rig.paths().worker;
-    assert_eq!(call.settings, worker.join("settings.json"));
-    assert_eq!(call.instructions, Some(worker.join("instructions.md")));
-    let instructions = fs::read_to_string(worker.join("instructions.md")).unwrap();
+    assert_eq!(call.settings, worker.join("settings-7.json"));
+    assert_eq!(call.instructions, Some(worker.join("instructions-7.md")));
+    let instructions = fs::read_to_string(worker.join("instructions-7.md")).unwrap();
     assert!(
         instructions.starts_with(&profile::instructions(std::path::Path::new(Rig::KELPIE))),
         "{instructions}"
@@ -415,22 +417,6 @@ fn a_retry_whose_session_never_began_starts_it_over_from_the_issue() {
 }
 
 #[test]
-fn a_retried_turn_gets_a_whole_ceiling_however_long_the_ruling_waited() {
-    let (rig, runner) = with_issue_7("acme");
-    rig.claude.script([Scripted::Fail(AgentError::Failed(
-        crate::settings::Harness::ClaudeCode,
-        "overloaded".into(),
-    ))]);
-    step(&runner).unwrap();
-    rig.clock.advance(2000);
-    rig.ask(&runner, "rule", Some("1 yes"));
-    rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
-    step(&runner).unwrap();
-    let [_, retried] = rig.claude.calls().try_into().unwrap();
-    assert_eq!(retried.timeout, Some(Duration::from_secs(3600)));
-}
-
-#[test]
 fn a_no_on_a_failed_turn_stops_the_work_item_the_way_a_timed_out_one_does() {
     let (rig, runner) = with_issue_7("rotom");
     rig.claude.script([Scripted::Fail(AgentError::Failed(
@@ -516,34 +502,6 @@ fn a_no_on_a_timed_out_turn_stops_the_work_item_keeping_nothing_of_its_own() {
     ));
     assert!(!rig.worktree_7().exists());
     assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
-}
-
-#[test]
-fn a_worker_turn_carries_the_projects_timeout() {
-    let (rig, runner) = with_issue_7("golbat");
-    rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
-    step(&runner).unwrap();
-    let [seen] = rig.claude.calls().try_into().unwrap();
-    assert_eq!(seen.timeout, Some(std::time::Duration::from_secs(3600)));
-}
-
-#[test]
-fn a_restart_before_the_ceiling_passes_resumes_with_only_the_time_left() {
-    let (rig, runner) = with_issue_7("acme");
-    rig.claude.script([Scripted::Kill]);
-    let _ = catch_unwind(AssertUnwindSafe(|| step(&runner)));
-    drop(runner);
-
-    rig.clock.advance(2000);
-    let runner = rig.open().unwrap();
-    rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
-    step(&runner).unwrap();
-    let [_, resumed] = rig.claude.calls().try_into().unwrap();
-    assert_eq!(
-        resumed.timeout,
-        Some(std::time::Duration::from_secs(1600)),
-        "the restart must not reset the ceiling to a fresh hour"
-    );
 }
 
 #[test]

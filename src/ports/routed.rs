@@ -3,7 +3,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use super::{AgentCall, AgentError, AgentReply, Agents};
+use super::{AgentCall, AgentError, AgentReply, Agents, Ending};
 use crate::settings::Harness;
 
 /// One adapter per harness, each taking the calls that name it
@@ -45,8 +45,8 @@ impl Agents for Routed {
         self.adapter(call).prepare(call)
     }
 
-    fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
-        self.adapter(call).run(call)
+    fn run(&self, call: &AgentCall, ending: &Ending) -> Result<AgentReply, AgentError> {
+        self.adapter(call).run(call, ending)
     }
 }
 
@@ -66,7 +66,7 @@ mod tests {
             Err(AgentError::Setup(self.0.into()))
         }
 
-        fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
+        fn run(&self, call: &AgentCall, _: &Ending) -> Result<AgentReply, AgentError> {
             Ok(AgentReply {
                 session_id: call.session.id().clone(),
                 text: self.0.into(),
@@ -89,7 +89,6 @@ mod tests {
             instructions: None,
             prompt: "go".into(),
             plugin_dirs: Vec::new(),
-            timeout: None,
             tools: Tools::Work,
             lease: None,
             reach: Reach::default(),
@@ -114,7 +113,7 @@ mod tests {
         ];
         for (harness, name) in harnesses {
             let call = call(harness);
-            assert_eq!(routed.run(&call).unwrap().text, name);
+            assert_eq!(routed.run(&call, &Ending::default()).unwrap().text, name);
             assert_eq!(routed.prepare(&call), Err(AgentError::Setup(name.into())));
         }
     }

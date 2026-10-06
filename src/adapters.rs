@@ -21,6 +21,7 @@ mod ntfy;
 mod pi;
 mod process;
 mod srt;
+mod stop;
 mod usage;
 
 #[cfg(test)]
@@ -42,6 +43,7 @@ pub use pi::PiCli;
 pub use srt::SandboxRuntime;
 #[cfg(test)]
 pub(crate) use srt::srt_settings;
+pub use stop::stop_calls;
 pub use usage::UsageMeter;
 
 /// The machine's wall clock

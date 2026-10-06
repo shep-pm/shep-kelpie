@@ -1,31 +1,28 @@
 //! The worker's turns
 //!
-//! A turn runs in three steps, so the runner still answers triggers while
-//! Claude works: begin (prepare the worktree and profile, mark the turn
-//! running, save), the call, and end (record the call, save). A turn still
-//! marked running when the runner starts was cut short, and its session is
-//! resumed. A session cut short before it wrote anything starts over. A turn
-//! that ends on a question block parks the worker on a ruling.
+//! A turn begins (prepare the worktree and profile, mark the turn running,
+//! save), its call runs in flight ([`super::flight`]), and a later pass
+//! ends it (record the call, save). A turn still marked running when the
+//! runner starts was cut short, and its session is resumed. A session cut
+//! short before it wrote anything starts over. A turn that ends on a
+//! question block parks the worker on a ruling.
 
 use std::fs;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::Runner;
 use super::adopt;
-use super::alert::post_due;
 use super::claude_files::Unchecked;
 use super::instructions;
 use super::question::asked;
-use super::replies::answer_replies;
 use super::report::{Begin, StepReport};
-use super::review::run_review_call;
 use super::rework;
 use super::ruling::park;
-use super::trigger::lock;
 use crate::pacer::Scope;
-use crate::ports::{AgentCall, AgentError, AgentReply, Cost, Issue, Reach, Role, Session, Tools};
+use crate::ports::{
+    AgentCall, AgentError, AgentReply, Cost, Issue, Reach, Role, Session, Timestamp, Tools,
+};
 use crate::profile::WorkerProfile;
 use crate::settings::{AgentHarness, Effort, Limit};
 use crate::skills::{Step, split_command};
@@ -52,82 +49,8 @@ pub(super) struct WorkerAgent {
 }
 
 /// The prompt for a turn resumed after the runner restarted
-const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
-                        Carry on with the work item from where you left off.";
-
-/// Posts a ruling or a notice, handles a reply on the webhook's topic, or
-/// runs the worker's next turn if one is due and the project is running
-///
-/// Each open work item is stepped in turn, starting after the one that did
-/// something last, and one with nothing to do yields to the next. Returns
-/// what happened, or `None` when there was nothing to do. A report that
-/// waits, such as a forge that cannot be read, is returned only when no
-/// other work item did anything. A ruling is posted, and a reply handled,
-/// whether the project runs or not.
-///
-/// # Errors
-///
-/// [`StateError`] when the turn's start or end, or a post, cannot be saved.
-pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
-    lock(runner).beat();
-    let (claude, reviewer, alerts, turns) = {
-        let runner = lock(runner);
-        (
-            Arc::clone(&runner.ports.agents),
-            Arc::clone(&runner.ports.reviewer),
-            Arc::clone(&runner.ports.alerts),
-            runner.live_turns.clone(),
-        )
-    };
-    if let Some(posted) = post_due(runner, alerts.as_ref()) {
-        return posted.map(Some);
-    }
-    if let Some(answered) = answer_replies(runner, alerts.as_ref()) {
-        return answered.map(Some);
-    }
-    // The work item whose session died unborn, which starts over
-    let mut start_over = None;
-    // Held until the step returns, past the save that ends the turn
-    let mut _live = None;
-    loop {
-        // The call runs outside the lock, and a trigger may work on another
-        // item meanwhile, so its end names the item it began on.
-        let (begin, issue) = {
-            let mut runner = lock(runner);
-            let begin = runner.begin_turn(start_over)?;
-            (begin, runner.focus)
-        };
-        match begin {
-            Begin::Idle => return Ok(None),
-            Begin::Report(report) => return Ok(Some(report)),
-            Begin::Call(call) => {
-                if _live.is_none() {
-                    _live = issue.map(|issue| turns.enter(issue));
-                }
-                let result = claude.run(&call);
-                if start_over.is_none() && matches!(result, Err(AgentError::NoSession(..))) {
-                    // The dead call's time is the worker's, so it is saved
-                    // before a pause can outrun the new turn.
-                    lock(runner).save_time()?;
-                    start_over = issue;
-                    continue;
-                }
-                return lock(runner).on(issue).end_turn(result);
-            }
-            Begin::Review(action) => {
-                // A failed save is told and let go. A GPU wait may then count as
-                // `local_round`, but the phases still sum to the wall time.
-                let watch = |stage| {
-                    if let Err(e) = lock(runner).on(issue).round_stage(stage) {
-                        eprintln!("cannot save the local round's stage: {e}");
-                    }
-                };
-                let reviewed = run_review_call(claude.as_ref(), reviewer.as_ref(), action, &watch);
-                return lock(runner).on(issue).end_review(reviewed);
-            }
-        }
-    }
-}
+pub(super) const CONTINUE: &str = "Kelpie restarted while your last turn was running. \
+                                   Carry on with the work item from where you left off.";
 
 fn first_prompt(number: u64, issue: &Issue) -> String {
     format!(
@@ -147,10 +70,11 @@ pub(super) enum Slot {
 }
 
 impl Runner {
-    // Steps each open work item, and the board while a slot is free, from
-    // the one after the last to act, until one acts. `start_over` is the
-    // item whose session died unborn, which begins the same turn again.
-    fn begin_turn(&mut self, start_over: Option<u64>) -> Result<Begin, StateError> {
+    // Steps each open work item with no call in flight, and the board while
+    // a slot is free, from the one after the last to act, until one acts.
+    // `start_over` is the item whose session died unborn, which begins the
+    // same turn again.
+    pub(super) fn begin_turn(&mut self, start_over: Option<u64>) -> Result<Begin, StateError> {
         if self.state.run != RunState::Running {
             return Ok(Begin::Idle);
         }
@@ -184,11 +108,13 @@ impl Runner {
         Ok(waiting.map_or(Begin::Idle, Begin::Report))
     }
 
-    // The open work items oldest first, then the board while a slot is
-    // free, from the one after the last to act, so one that keeps acting
-    // cannot starve the rest
+    // The open work items with no call in flight oldest first, then the
+    // board while a slot is free, from the one after the last to act, so
+    // one that keeps acting cannot starve the rest
     fn rotation(&self) -> Vec<Slot> {
-        let items = self.state.work_items.iter().map(|i| Slot::Item(i.issue));
+        let items = (self.state.work_items.iter())
+            .filter(|i| !self.flights.flying(i.issue))
+            .map(|i| Slot::Item(i.issue));
         let board = self.slot_free().then_some(Slot::Board);
         let mut slots: Vec<Slot> = items.chain(board).collect();
         if let Some(at) = slots.iter().position(|&s| Some(s) == self.last_acted) {
@@ -273,7 +199,7 @@ impl Runner {
             return self.park_ceiling_passed(now);
         }
         let issue = item.issue;
-        let prepared = self.prepare(item, session, prompt, remaining);
+        let prepared = self.prepare(item, session, prompt);
         let mut next = self.state.clone();
         let mut begin = match prepared {
             Ok(call) => {
@@ -281,7 +207,8 @@ impl Runner {
                     .current_in(&mut next)
                     .expect("the work item checked above");
                 item.turn = Turn::Running { since };
-                Begin::Call(call)
+                let deadline = Timestamp(since.0.saturating_add(ceiling.as_secs()));
+                Begin::Call { call, deadline }
             }
             Err(reason) => {
                 let names = self.names();
@@ -304,7 +231,6 @@ impl Runner {
         item: &WorkItem,
         session: Session,
         prompt: Option<String>,
-        timeout: Duration,
     ) -> Result<AgentCall, String> {
         let start = if item.rework || item.adopted {
             Start::Pushed
@@ -319,9 +245,11 @@ impl Runner {
             prompt: agent_prompt,
         } = self.worker_agent(item)?;
         let reach = self.worker_reach(item, start)?;
+        // Named for the work item: the open items' calls run at once, and
+        // each harness keeps its own files beside its settings file.
         let folder = &self.paths.worker;
-        let settings = folder.join("settings.json");
-        let instructions = folder.join("instructions.md");
+        let settings = folder.join(format!("settings-{}.json", item.issue));
+        let instructions = folder.join(format!("instructions-{}.md", item.issue));
         let text = instructions::compose(
             instructions::Extra {
                 agent: agent_prompt.as_deref(),
@@ -357,7 +285,6 @@ impl Runner {
             settings,
             instructions: Some(instructions),
             prompt,
-            timeout: Some(timeout),
             plugin_dirs: self.skills.plugin_dirs().to_vec(),
             tools: Tools::Work,
             reach,
@@ -455,7 +382,7 @@ impl Runner {
         Ok(call)
     }
 
-    fn end_turn(
+    pub(super) fn end_turn(
         &mut self,
         result: Result<AgentReply, AgentError>,
     ) -> Result<Option<StepReport>, StateError> {

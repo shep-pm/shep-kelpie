@@ -27,8 +27,8 @@ use crate::fence;
 use crate::forwarder::{Upstream, WORKER_HOST};
 use crate::guard::{FOLDER_FLAG, NAME_FLAG};
 use crate::ports::{
-    AgentCall, AgentError, AgentReply, Agents, Fence, Forward, Policy, Sandbox, Session, SessionId,
-    Tools, Usage,
+    AgentCall, AgentError, AgentReply, Agents, Ending, Fence, Forward, Policy, Sandbox, Session,
+    SessionId, Tools, Usage,
 };
 use crate::profile::CREDENTIALS;
 use crate::settings::{AgentHarness, Harness, ModelServer};
@@ -132,7 +132,7 @@ impl Agents for PiCli {
         Ok(())
     }
 
-    fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
+    fn run(&self, call: &AgentCall, ending: &Ending) -> Result<AgentReply, AgentError> {
         // The forwarder stays open until the call has ended.
         let (mut command, _forwarder) = self.sandboxed_command(call)?;
         let label = format!("#{} {}", call.issue, call.role.as_str());
@@ -143,7 +143,7 @@ impl Agents for PiCli {
         };
         let run = self
             .processes
-            .output_telling(&mut command, call.timeout, &spawned);
+            .output_telling(&mut command, Some(ending), &spawned);
         let output = run.map_err(|e| match e {
             RunError::Io(e) => AgentError::Spawn(PI, e.to_string()),
             RunError::Stopped => AgentError::Stopped,

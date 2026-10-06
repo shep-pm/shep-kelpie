@@ -7,7 +7,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use super::{AgentCall, AgentError, AgentReply, Agents};
+use super::{AgentCall, AgentError, AgentReply, Agents, Ending};
 use crate::lease::gpu::{GpuHold, LockHolder};
 use crate::settings::LeaseName;
 
@@ -15,11 +15,19 @@ use crate::settings::LeaseName;
 pub trait LocalLeases: Send + Sync {
     /// Waits for `lease`, then holds it for `what` until the hold drops
     ///
+    /// `None` when `ending` is asked while it waits, so a call past its
+    /// ceiling leaves the queue rather than start only to be ended.
+    ///
     /// # Errors
     ///
     /// [`AgentError::Stopped`] when the runner stops first, and
     /// [`AgentError::Setup`] when the lock cannot be taken.
-    fn hold(&self, lease: &LeaseName, what: &str) -> Result<GpuHold, AgentError>;
+    fn hold(
+        &self,
+        lease: &LeaseName,
+        what: &str,
+        ending: &Ending,
+    ) -> Result<Option<GpuHold>, AgentError>;
 
     /// Who holds `lease`, or `None` when it is free
     fn holder(&self, lease: &LeaseName) -> Option<LockHolder>;
@@ -49,7 +57,7 @@ impl Agents for Leased {
         self.agents.prepare(call)
     }
 
-    fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
+    fn run(&self, call: &AgentCall, ending: &Ending) -> Result<AgentReply, AgentError> {
         let _held = match &call.lease {
             Some(lease) => {
                 let what = format!(
@@ -58,10 +66,15 @@ impl Agents for Leased {
                     call.issue,
                     call.cwd.display()
                 );
-                Some(self.leases.hold(lease, &what)?)
+                let held = self.leases.hold(lease, &what, ending)?;
+                let Some(held) = held else {
+                    return Err(AgentError::TimedOut(call.harness.harness()));
+                };
+                ending.begin();
+                Some(held)
             }
             None => None,
         };
-        self.agents.run(call)
+        self.agents.run(call, ending)
     }
 }

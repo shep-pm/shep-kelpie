@@ -32,8 +32,8 @@ use super::ruling::park;
 use crate::agents::{DEFECT_HUNTER, QWEN};
 use crate::pacer::Scope;
 use crate::ports::{
-    AgentCall, AgentError, AgentReply, Agents, Finding, Reviewer, ReviewerError, RoundStage,
-    Severity, Timestamp, read_review,
+    AgentCall, AgentError, AgentReply, Agents, Ending, Finding, Reviewer, ReviewerError,
+    RoundStage, Severity, Timestamp, read_review,
 };
 use crate::settings::{AgentName, ListedReviewer};
 use crate::state::{Fix, RulingKind, StateError};
@@ -288,8 +288,8 @@ impl Runner {
         worktree::origin_head(&self.settings.repo, &item.branch).map_err(|e| e.to_string())
     }
 
-    // Recorded in state before the runner's lock is released for the call
-    // itself, the same as a worker's turn marks `Turn::Running`: `drop`
+    // Recorded in state before the call is started, the same as a worker's
+    // turn marks `Turn::Running`: `drop`
     // refuses while this is set, so a call in flight always has a work
     // item to land its result on.
     pub(super) fn mark_review_call_running(&mut self, kind: CallKind) -> Result<(), StateError> {
@@ -597,8 +597,8 @@ fn both_looks(first: Vec<Finding>, more: Vec<Finding>) -> Vec<Finding> {
     all
 }
 
-/// Runs `action` outside the runner's lock: a local round, or a fresh
-/// session of a reviewer
+/// Runs `action` to its end on its own thread: a local round, or a fresh
+/// session of a reviewer, which `ending` can end
 ///
 /// A call stopped with the runner comes back as [`ReviewResult::Stopped`]
 /// rather than an error, so `end_review` can tell it from a failed gate.
@@ -606,6 +606,7 @@ pub(super) fn run_review_call(
     claude: &dyn Agents,
     reviewer: &dyn Reviewer,
     action: ReviewCall,
+    ending: &Ending,
     watch: &(dyn Fn(RoundStage) + Sync),
 ) -> Reviewed {
     match action {
@@ -630,7 +631,7 @@ pub(super) fn run_review_call(
             }
         }
         ReviewCall::Session(call) => {
-            let (reply, spent) = run_claude(claude, &call);
+            let (reply, spent) = run_claude(claude, &call, ending);
             match reply {
                 Err(AgentError::Stopped) => stopped(),
                 reply => Reviewed {
@@ -686,8 +687,9 @@ fn stopped() -> Reviewed {
 fn run_claude(
     claude: &dyn Agents,
     call: &AgentCall,
+    ending: &Ending,
 ) -> (Result<AgentReply, AgentError>, Option<Spent>) {
-    let reply = claude.run(call);
+    let reply = claude.run(call, ending);
     let spent = reply.as_ref().ok().map(|reply| Spent::Claude {
         role: call.role,
         session: call.session.id().clone(),

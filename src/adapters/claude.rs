@@ -11,8 +11,8 @@ use serde::Deserialize;
 use super::process::{Processes, RunError};
 use super::srt::SandboxRuntime;
 use crate::ports::{
-    AgentCall, AgentError, AgentReply, Agents, Cost, Role, Sandbox, Session, SessionId, Unreadable,
-    Usage,
+    AgentCall, AgentError, AgentReply, Agents, Cost, Ending, Role, Sandbox, Session, SessionId,
+    Unreadable, Usage,
 };
 use crate::settings::Harness;
 use crate::tools::Tools;
@@ -127,7 +127,7 @@ impl Agents for ClaudeCli {
         sandbox::policy(call, &self.home).map(drop)
     }
 
-    fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
+    fn run(&self, call: &AgentCall, ending: &Ending) -> Result<AgentReply, AgentError> {
         let mut command = self.sandboxed_command(call)?;
         let label = format!("#{} {}", call.issue, call.role.as_str());
         let spawned = |pid| {
@@ -137,7 +137,7 @@ impl Agents for ClaudeCli {
         };
         let run = self
             .processes
-            .output_telling(&mut command, call.timeout, &spawned);
+            .output_telling(&mut command, Some(ending), &spawned);
         let output = run.map_err(|e| match e {
             RunError::Io(e) => AgentError::Spawn(CLAUDE, e.to_string()),
             RunError::Stopped => AgentError::Stopped,
@@ -331,7 +331,6 @@ mod tests {
             settings: PathBuf::from("/k/worker/settings.json"),
             instructions: Some(PathBuf::from("/k/worker/instructions.md")),
             prompt: "implement #6".into(),
-            timeout: None,
             plugin_dirs: Vec::new(),
             tools: Tools::Work,
             reach: Reach::default(),
@@ -557,7 +556,7 @@ mod tests {
             call.cwd = dir.path().to_owned();
             call.settings = dir.path().join("settings.json");
             cli.prepare(&call).unwrap();
-            cli.run(&call).unwrap();
+            cli.run(&call, &Ending::default()).unwrap();
         }
         let labels = lambs.0.lock().unwrap().clone();
         let names: Vec<&str> = labels.iter().map(|(_, l)| l.as_str()).collect();

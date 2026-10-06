@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::Arc;
 
 use crate::agents::{Agents, AgentsError};
@@ -37,6 +37,7 @@ mod claude_files;
 #[cfg(test)]
 mod coderabbit;
 mod dispatch;
+mod flight;
 mod follow_up;
 mod gate;
 mod gpu;
@@ -68,10 +69,14 @@ mod timings;
 mod trigger;
 mod turn;
 mod words;
+mod worker_files;
 
 pub use crate::coderabbit::LABEL as SUMMON_LABEL;
 pub use adopt::AdoptError;
 pub use claim::IN_PROGRESS;
+#[cfg(test)]
+pub use flight::step;
+pub use flight::{Pass, advance};
 pub use gpu::GpuStatus;
 pub use merge::DropError;
 pub use pace::PacerStatus;
@@ -84,7 +89,6 @@ pub use timings::{Totals, settle};
 use trigger::issue_list;
 pub use trigger::{ACTIONS, Status, WorkItemStatus, answer};
 pub use trigger::{GateError, WhichItem};
-pub use turn::step;
 pub use words::{Wants, read_answer};
 
 #[cfg(test)]
@@ -224,8 +228,8 @@ pub struct Runner {
     // What the runner carried on without, kept in memory only until
     // `take_notes` hands it out
     notes: Vec<String>,
-    // The turns this process runs, kept in memory only
-    live_turns: timings::LiveTurns,
+    // The calls this process has in flight, kept in memory only
+    flights: flight::Flights,
 }
 
 impl Runner {
@@ -261,6 +265,7 @@ impl Runner {
         let book = Agents::load(&paths.agents)?;
         let (book, mut notes) = kept::keep_old_agents(&store, &paths.agents, book)?;
         notes.extend(book.skipped());
+        notes.extend(worker_files::remove_old(&paths.worker));
         let agents = settings.role_agents(&book)?;
         let lineup = settings.lineup(&book, home)?;
         let webhook = kelpie_settings.webhook;
@@ -333,7 +338,7 @@ impl Runner {
             focus: None,
             last_acted: None,
             notes,
-            live_turns: timings::LiveTurns::default(),
+            flights: flight::Flights::default(),
         };
         runner.settle_older_bots()?;
         runner.settle_labels();
@@ -588,9 +593,7 @@ pub(crate) fn check_repo(settings: &Settings) -> Result<(), SettingsError> {
         return Err(invalid(format!("{} is not a folder", repo.display())));
     }
     let git = |args: &[&str]| {
-        Command::new("git")
-            .arg("-C")
-            .arg(repo)
+        crate::worktree::in_repo(repo)
             .args(args)
             .stdin(Stdio::null())
             .stderr(Stdio::null())

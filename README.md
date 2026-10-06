@@ -95,7 +95,7 @@ On a repo without those four labels, `add` makes them. The runner puts `in-progr
 `add` writes the project's settings with these defaults:
 
 - `merge_authority = "ask"`: you rule on every merge
-- `max_items = 1`: one work item at a time
+- `max_items = 1`: one work item at a time. With more, their turns and reviews run at the same time, one call at a time per work item
 - `ci` is on when the checkout has `.github/workflows`
 - `agents.implementers = ["sonnet-high"]`
 - `agents.reviewers = ["defect-hunter"]`, with `qwen` first when `~/.claude/scripts/qwen-review.sh` exists, and no review bot
@@ -198,7 +198,7 @@ On ntfy you can reply in the topic after a one-time `shep kelpie totp`, as Setti
 shep kelpie pause
 ```
 
-The current turn finishes, then the worker parks. `shep kelpie start` resumes it. A runner's log is `shep bleats <project>`, and the dog's is `shep bleats kelpie`.
+The calls already running finish, then the workers park. `shep kelpie start` resumes it. A runner's log is `shep bleats <project>`, and the dog's is `shep bleats kelpie`.
 
 ## Reference
 

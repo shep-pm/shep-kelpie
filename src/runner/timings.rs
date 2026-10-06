@@ -3,8 +3,7 @@
 //! Every save charges each open work item the time since its last charge,
 //! to the phase its state put it in until now. Reads charge nothing.
 
-use std::collections::BTreeSet;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Mutex;
 
 use serde::Serialize;
 
@@ -19,50 +18,9 @@ mod tests;
 
 /// Seconds an open work item may go uncharged while the runner steps
 ///
-/// The step loop beats between steps, so a crash usually loses about this
-/// much plus a minute to `other`. A long turn or call blocks the loop, and a
-/// crash during one loses all of it since its start to `other`.
+/// The runner's loop beats on each pass, and passes while calls run in
+/// flight, so a crash usually loses about this much plus a minute to `other`.
 const HEARTBEAT: u64 = 30;
-
-/// The work items whose worker turn this process runs
-///
-/// A turn marked running in the state file is not enough to call its time
-/// the worker's: a stop leaves one marked, and so does a restart until a step
-/// resumes it. Kept in memory only, so no restart can inherit one.
-#[derive(Debug, Clone, Default)]
-pub(super) struct LiveTurns(Arc<Mutex<BTreeSet<u64>>>);
-
-impl LiveTurns {
-    /// Counts `issue`'s turn as the worker's until the returned guard drops
-    pub(super) fn enter(&self, issue: u64) -> LiveTurn {
-        self.set().insert(issue);
-        LiveTurn {
-            turns: self.clone(),
-            issue,
-        }
-    }
-
-    fn holds(&self, issue: u64) -> bool {
-        self.set().contains(&issue)
-    }
-
-    fn set(&self) -> std::sync::MutexGuard<'_, BTreeSet<u64>> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-/// A turn this process runs, until dropped
-#[derive(Debug)]
-pub(super) struct LiveTurn {
-    turns: LiveTurns,
-    issue: u64,
-}
-
-impl Drop for LiveTurn {
-    fn drop(&mut self) {
-        self.turns.set().remove(&self.issue);
-    }
-}
 
 /// What `timings` answers
 // wire format: changing this is a breaking change to the `timings` reply
@@ -97,7 +55,7 @@ impl Runner {
 
     // The phase `item`'s time counts in while the runner holds it as it is
     pub(super) fn timing_phase(&self, item: &WorkItem) -> TimingPhase {
-        item.timing_phase(self.state.run, self.live_turns.holds(item.issue))
+        item.timing_phase(self.state.run, self.flights.runs_turn(item.issue))
     }
 
     /// The totals over the last `last` finished work items, or all of them

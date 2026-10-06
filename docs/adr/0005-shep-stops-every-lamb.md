@@ -16,6 +16,6 @@ So the stop is shep's. shep gets one general feature, shep-pm/shep#688: on any s
 
 - Until shep's sweep ships, kelpie's ladder stays as it is.
 - Kelpie keeps a process group per call only to end that one call (a turn ceiling, a pause). Ending a single lamb from the CLI or lookout is a shep feature too, asked on shep-pm/shep#354.
-- The runner never blocks a thread on a lamb, so it answers a stop at once and has nothing left to wind down past shep's default `kill_timeout`.
+- The runner never blocks a thread on a lamb (shep-pm/shep-kelpie#318), so it answers a stop at once. Once kelpie's own ladder goes, it has nothing left to wind down past shep's default `kill_timeout`.
 - The relay goes. It was a `claude --bg` session that Claude Code's own supervisor owned, so no stop of kelpie's reached it. Rulings reach the maintainer through ntfy or the webhook until shep can carry a question itself (shep-pm/shep#689).
 - The sessions the maintainer opens by hand (`--interactive`, `attach`, the project manager's) run in the maintainer's own terminal and are not lambs. git and gh calls stay short children of the runner.

@@ -173,7 +173,7 @@ fn pi_answers_through_the_forwarder_with_no_model_host_in_its_sandbox() {
     let mut call = world.call(server.url(), Role::Reviewer, Session::New(session.clone()));
     call.prompt = "Reply with the single word ok.".into();
     pi.prepare(&call).unwrap();
-    let reply = pi.run(&call).unwrap();
+    let reply = pi.run(&call, &Ending::default()).unwrap();
     assert_eq!(reply.text, "ok");
     assert_eq!(reply.session_id, session);
     assert_eq!(server.seen(), ["POST /v1/chat/completions HTTP/1.1"]);

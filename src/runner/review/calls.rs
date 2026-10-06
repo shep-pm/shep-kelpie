@@ -5,14 +5,11 @@
 //! to check its own work against the worktree, and runs no command.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use crate::ports::{AgentCall, Reach, Role, Session, Severity, Tools};
 use crate::settings::{Limit, RoleModel};
 use crate::work_item::new_session_id;
-
-/// Where a reviewer's session's throwaway settings go
-const REVIEW_SETTINGS_FILE: &str = "review-settings.json";
 
 /// A fresh session of a reviewer on `model` over issue `issue`'s
 /// `worktree`, asked `prompt`, its settings in `worker_folder`
@@ -24,7 +21,8 @@ pub(super) fn reviewer_call(
     prompt: String,
 ) -> Result<AgentCall, String> {
     let mut call = build_call(Role::Reviewer, issue, worktree, (model, limit), prompt)?;
-    call.settings = worker_folder.join(REVIEW_SETTINGS_FILE);
+    // Named for the work item, whose reviewer runs beside other items' calls.
+    call.settings = worker_folder.join(format!("review-settings-{issue}.json"));
     call.tools = Tools::Review;
     Ok(call)
 }
@@ -51,7 +49,6 @@ pub(in crate::runner) fn build_call(
         settings: PathBuf::new(),
         instructions: None,
         prompt,
-        timeout: None,
         plugin_dirs: Vec::new(),
         tools: Tools::Answer,
         reach: Reach::default(),
@@ -60,9 +57,7 @@ pub(in crate::runner) fn build_call(
 }
 
 pub(in crate::runner) fn diff_against(worktree: &Path, base: &str) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(worktree)
+    let output = crate::worktree::in_repo(worktree)
         .args(["diff", base])
         .stdin(Stdio::null())
         .output()

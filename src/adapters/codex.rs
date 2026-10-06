@@ -30,8 +30,8 @@ use super::process::{Processes, RunError};
 use crate::fence;
 use crate::guard::{FOLDER_FLAG, NAME_FLAG, PIN_FLAG};
 use crate::ports::{
-    AgentCall, AgentError, AgentReply, Agents, Fence, Policy, Sandbox, Session, SessionId, Tools,
-    Usage,
+    AgentCall, AgentError, AgentReply, Agents, Ending, Fence, Policy, Sandbox, Session, SessionId,
+    Tools, Usage,
 };
 use crate::profile::CREDENTIALS;
 use crate::settings::{AgentHarness, Harness};
@@ -167,7 +167,7 @@ impl Agents for CodexCli {
         link_login(&self.login, &files.home)
     }
 
-    fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
+    fn run(&self, call: &AgentCall, ending: &Ending) -> Result<AgentReply, AgentError> {
         let files = Files::of(call);
         let mut command = self.sandboxed_command(call)?;
         let label = format!("#{} {}", call.issue, call.role.as_str());
@@ -180,7 +180,7 @@ impl Agents for CodexCli {
         let outputs = [files.stdout.as_path(), files.stderr.as_path()];
         let run = self
             .processes
-            .output_to_files(&mut command, call.timeout, &spawned, outputs);
+            .output_to_files(&mut command, Some(ending), &spawned, outputs);
         let output = run.map_err(|e| match e {
             RunError::Io(e) => AgentError::Spawn(CODEX, e.to_string()),
             RunError::Stopped => AgentError::Stopped,
