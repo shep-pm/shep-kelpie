@@ -348,7 +348,7 @@ fn a_forge_that_keeps_refusing_is_retried_for_hours_and_then_the_maintainer_is_a
     rig.forge.set_issues_down(false);
     rig.ask(&runner, "rule", Some(&format!("{id} yes")));
     assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
-    assert!(finished(after_merge(&runner)));
+    assert!(ends_beside_900(&runner));
 }
 
 #[test]
@@ -529,6 +529,32 @@ fn ask_after_the_merge(rig: Rig, found: &[Finding]) -> (Rig, Mutex<Runner>, u64,
 }
 
 #[test]
+fn a_merged_item_on_its_follow_up_ruling_holds_back_no_new_work() {
+    let rig = Rig::new("shep");
+    rig.edit_settings(|s| s.replace("max_parked = 2", "max_parked = 1"));
+    let (rig, runner, id, _) = ask_after_the_merge(rig, &[racy()]);
+    assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id }));
+
+    // Neither `max_parked` nor its merged branch's files hold #8 back.
+    rig.forge.list_ready(8, false);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Dispatched { issue: 8, .. })
+    ));
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["parked"], json!([7]));
+}
+
+// Whether #7 finishes, once the board has opened #900, the issue just filed
+// and ready: an item answered into its end holds no slot
+fn ends_beside_900(runner: &Mutex<Runner>) -> bool {
+    match after_merge(runner) {
+        Some(StepReport::Dispatched { issue: 900, .. }) => finished(after_merge(runner)),
+        other => finished(other),
+    }
+}
+
+#[test]
 fn under_ask_the_findings_are_a_ruling_first_and_a_yes_files_them() {
     let (rig, runner, id, question) = ask_after_the_merge(Rig::new("shep"), &[racy()]);
     assert!(question.contains("src/lib.rs:9 looks racy"), "{question}");
@@ -543,12 +569,11 @@ fn under_ask_the_findings_are_a_ruling_first_and_a_yes_files_them() {
     rig.ask(&runner, "rule", Some(&format!("{id} yes")));
     assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
     assert_eq!(rig.forge.created().len(), 1);
-    assert!(finished(after_merge(&runner)));
+    assert!(ends_beside_900(&runner));
     let status = rig.ask(&runner, "status", None);
-    assert_eq!(
-        (&status["work_item"], &status["rulings"]),
-        (&json!(null), &json!([]))
-    );
+    let open = status["work_items"].as_array().unwrap();
+    assert!(open.iter().all(|item| item["issue"] != 7), "{open:?}");
+    assert_eq!(status["rulings"], json!([]));
 }
 
 #[test]

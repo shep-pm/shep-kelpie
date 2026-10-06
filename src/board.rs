@@ -160,6 +160,26 @@ pub enum Skip {
         /// Why, as the refusal reads
         error: String,
     },
+    /// Its body names a file the branch of a work item parked on a ruling
+    /// changes, so it waits for that item to move
+    Overlap {
+        /// The issue
+        issue: u64,
+        /// The parked work item's issue
+        with: u64,
+        /// The files both touch
+        files: Vec<String>,
+    },
+    /// It waits a pass for the board to read the paths its body names, or,
+    /// with `unknown`, the files of that parked work item's branch, before
+    /// the overlap with parked branches can be checked
+    PathsUnread {
+        /// The issue
+        issue: u64,
+        /// The parked work item whose branch's files are not known yet
+        #[serde(skip_serializing_if = "Option::is_none")]
+        unknown: Option<u64>,
+    },
     /// An adopted pull request that could not start this poll, and still waits
     Adopt {
         /// The pull request
@@ -181,7 +201,9 @@ impl Skip {
             | Self::Blocked { issue, .. }
             | Self::Label { issue, .. }
             | Self::Failed { issue, .. }
-            | Self::Rework { issue, .. } => *issue,
+            | Self::Rework { issue, .. }
+            | Self::Overlap { issue, .. }
+            | Self::PathsUnread { issue, .. } => *issue,
             Self::Adopt { .. } => 0,
         }
     }

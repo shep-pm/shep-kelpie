@@ -26,7 +26,7 @@ fn a_board_with_an_idle_worker_a_review_call_and_a_ruling_reads_whole() {
     let events = [BoardEvent {
         id: 41,
         at: Timestamp(NOW - 60),
-        what: "ruling 3 on #12 raised: Merge PR #30?".into(),
+        what: "ruling 3 on #13 raised: Merge PR #31?".into(),
     }];
     let mut twelve = item(
         12,
@@ -36,11 +36,21 @@ fn a_board_with_an_idle_worker_a_review_call_and_a_ruling_reads_whole() {
         Files::Diff(files(&["src/a.rs", "src/b.rs"])),
     );
     twelve.pull_request = Some(30);
-    twelve.phase = "parked on ruling 3".into();
+    twelve.phase = "review round 1".into();
+    let mut thirteen = item(
+        13,
+        Session::Still("idle".into()),
+        Files::Diff(files(&["src/c.rs"])),
+    );
+    thirteen.pull_request = Some(31);
+    thirteen.phase = "parked on ruling 3".into();
     let board = Briefing {
         project: "acme",
         now: Timestamp(NOW),
         max_items: 2,
+        max_parked: 2,
+        held: 2,
+        parked: 1,
         main: None,
         items: vec![
             item(
@@ -52,12 +62,13 @@ fn a_board_with_an_idle_worker_a_review_call_and_a_ruling_reads_whole() {
                 Files::Named(files(&["src/b.rs"])),
             ),
             twelve,
+            thirteen,
         ],
         rulings: vec![RulingLine {
             id: 3,
-            issue: Some(12),
-            pull_request: Some(30),
-            question: "Merge PR #30?".into(),
+            issue: Some(13),
+            pull_request: Some(31),
+            question: "Merge PR #31?".into(),
         }],
         ready: Some(Ready {
             read: Timestamp(NOW - 90),
@@ -72,20 +83,23 @@ fn a_board_with_an_idle_worker_a_review_call_and_a_ruling_reads_whole() {
         render(&board),
         "# Board: acme, 2026-09-21 14:13 UTC\n\
          \n\
-         2 of 2 work items open.\n\
+         3 work items open: 2 of 2 slots taken, and 1 of 2 parked on rulings.\n\
          \n\
          ## Open work\n\
          \n\
          - #11 \"Issue 11\": implementing; no pull request yet, opened 3h05m ago, on sonnet-high; \
          no commits yet, its body names 1 file\n\
          \x20 - Session: worker turn running for 1h00m, idle: no tool call or output for 50m\n\
-         - #12 \"Issue 12\": parked on ruling 3; PR #30, opened 3h05m ago, on sonnet-high; \
+         - #12 \"Issue 12\": review round 1; PR #30, opened 3h05m ago, on sonnet-high; \
          touches 2 files\n\
          \x20 - Session: review call running for 2m\n\
+         - #13 \"Issue 13\": parked on ruling 3; PR #31, opened 3h05m ago, on sonnet-high; \
+         touches 1 file\n\
+         \x20 - Session: idle\n\
          \n\
          ## Rulings waiting on the maintainer\n\
          \n\
-         - 3 on #12 (PR #30): Merge PR #30?\n\
+         - 3 on #13 (PR #31): Merge PR #31?\n\
          \n\
          ## Ready queue, read 1m ago (board rule order: priority, then oldest by number)\n\
          \n\
@@ -94,7 +108,7 @@ fn a_board_with_an_idle_worker_a_review_call_and_a_ruling_reads_whole() {
          ## Since your last wake\n\
          \n\
          (older unread events were dropped)\n\
-         - [41] 14:12 ruling 3 on #12 raised: Merge PR #30?\n\
+         - [41] 14:12 ruling 3 on #13 raised: Merge PR #31?\n\
          \n\
          ## Overlap\n\
          \n\
@@ -109,7 +123,8 @@ fn a_board_with_an_idle_worker_a_review_call_and_a_ruling_reads_whole() {
          ## Files\n\
          \n\
          - #11 (kelpie/11, named): src/b.rs\n\
-         - #12 (kelpie/12): src/a.rs, src/b.rs\n"
+         - #12 (kelpie/12): src/a.rs, src/b.rs\n\
+         - #13 (kelpie/13): src/c.rs\n"
     );
 }
 
@@ -163,6 +178,9 @@ fn quoting(body: &str) -> String {
         project: "acme",
         now: Timestamp(NOW),
         max_items: 2,
+        max_parked: 2,
+        held: 2,
+        parked: 0,
         main: None,
         items: vec![seven, eight],
         rulings: Vec::new(),

@@ -112,6 +112,7 @@ fn changed((old, was): Reach<'_>, (new, now): Reach<'_>) -> Vec<&'static str> {
         ),
         ("ci", old.ci != new.ci),
         ("max_items", old.max_items != new.max_items),
+        ("max_parked", old.max_parked != new.max_parked),
         ("pacing", old.pacing != new.pacing),
         ("worker", old.worker != new.worker),
         ("skills", old.skills != new.skills),

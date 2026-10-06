@@ -107,12 +107,16 @@ impl Runner {
         let project = self.project.as_str();
         let ruling = self.state.rulings.iter().find(|r| r.id == id);
         let ruling = ruling.expect("the ruling due is pending");
+        let text = match self.parked_note(id) {
+            Some(note) => format!("{}\n\n{note}", ruling.question),
+            None => ruling.question.clone(),
+        };
         Due {
             of: Posting::Ruling(id),
             webhook: self.webhook.clone(),
             alert: Alert {
                 title: format!("kelpie: {project} ruling {id}"),
-                text: ruling.question.clone(),
+                text,
                 reply,
             },
         }

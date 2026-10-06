@@ -48,6 +48,11 @@ const ROUND_FAILURES: u32 = 3;
 
 impl Runner {
     pub(super) fn review_step(&mut self) -> Result<Begin, StateError> {
+        // A step that just moved the work item into its review, as an owed
+        // bots' pass after green CI does, leaves it waiting when no slot is free.
+        if self.unseated() {
+            return Ok(Begin::Idle);
+        }
         let item = self.current().expect("review runs on a work item");
         let Phase::Review(review) = item.phase.clone() else {
             unreachable!("review_step only runs in the review phase")

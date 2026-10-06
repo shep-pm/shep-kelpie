@@ -3,7 +3,7 @@
 //! Its runner sheep's `[app.dogs.kelpie]` table. Unknown keys are refused, so a misspelt or
 //! malformed setting stops the runner with a message naming it. Every
 //! setting is required except the ones added after the first build
-//! (`max_items`, `pacing.enabled`, `worker.allowed_domains`,
+//! (`max_items`, `max_parked`, `pacing.enabled`, `worker.allowed_domains`,
 //! `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout`,
 //! `worker.guard_hooks`, `[skills]` and `[agents]`).
 //! `settings.example.toml` beside this crate holds the defaults.
@@ -52,11 +52,17 @@ pub struct Settings {
     /// off, kelpie reads no checks and asks for the merge once the branch
     /// has the latest `main`.
     pub ci: bool,
-    /// How many work items may be open at once, each with its own branch,
-    /// worktree and gates. The worker's turns still run one at a time. 1
-    /// when absent.
+    /// How many work items may hold a slot, which a worker's turn or a
+    /// review needs, each with its own branch, worktree and gates. One
+    /// parked on a ruling gives its slot up. 1 when absent.
     #[serde(default = "default_max_items")]
     pub max_items: NonZeroU32,
+    /// How many work items may wait parked on rulings before the board
+    /// opens nothing new. Items already working can still park past it, and
+    /// a merged item on its follow-up ruling does not count. 0 opens
+    /// nothing while any ruling waits. 2 when absent.
+    #[serde(default = "default_max_parked")]
+    pub max_parked: u32,
     /// Words that stay off the forge: kelpie refuses a post naming one, and
     /// a worker's guard refuses a commit or `gh` text that does. Whole
     /// words, whatever their case. None when absent.
@@ -377,6 +383,12 @@ pub struct Worker {
 /// One work item at a time, as every project ran before `max_items`
 fn default_max_items() -> NonZeroU32 {
     NonZeroU32::MIN
+}
+
+/// Two items waiting on the maintainer, so one unanswered ruling cannot
+/// stall a project and a run of them cannot open pull request after pull request
+fn default_max_parked() -> u32 {
+    2
 }
 
 /// The design log's default for `worker.turn_timeout`, in minutes

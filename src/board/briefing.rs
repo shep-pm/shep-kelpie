@@ -33,8 +33,15 @@ pub struct Briefing<'a> {
     pub project: &'a str,
     /// When it was written
     pub now: Timestamp,
-    /// How many work items may be open at once
+    /// How many work items may hold a slot at once
     pub max_items: u32,
+    /// How many work items parked on rulings stop the board opening work:
+    /// the point where it stops, which items already working can pass
+    pub max_parked: u32,
+    /// How many open work items hold a slot
+    pub held: usize,
+    /// How many open work items are parked on rulings `max_parked` counts
+    pub parked: usize,
     /// `origin/main`'s commit, once git has read it
     pub main: Option<String>,
     /// The open work items, oldest first
@@ -120,7 +127,8 @@ pub enum Files {
 }
 
 impl Files {
-    fn list(&self) -> &[String] {
+    /// The files, none when unknown
+    pub fn list(&self) -> &[String] {
         match self {
             Self::Diff(files) | Self::Named(files) => files,
             Self::Unknown => &[],
@@ -178,9 +186,12 @@ pub fn render(board: &Briefing<'_>) -> String {
         .map_or(String::new(), |m| format!(" Main is at {}.", short(m)));
     let _ = writeln!(
         out,
-        "{} of {} work items open.{main}\n",
+        "{} work items open: {} of {} slots taken, and {} of {} parked on rulings.{main}\n",
         board.items.len(),
-        board.max_items
+        board.held,
+        board.max_items,
+        board.parked,
+        board.max_parked
     );
     open_work(&mut out, board);
     rulings(&mut out, &board.rulings);
@@ -387,7 +398,8 @@ fn label(item: &Item) -> String {
     }
 }
 
-fn shared<'a>(a: &'a [String], b: &[String]) -> Vec<&'a str> {
+/// The files of `a` that `b` also names, in `a`'s order
+pub fn shared<'a>(a: &'a [String], b: &[String]) -> Vec<&'a str> {
     let b: BTreeSet<&str> = b.iter().map(String::as_str).collect();
     a.iter()
         .map(String::as_str)

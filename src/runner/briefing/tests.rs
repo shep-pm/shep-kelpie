@@ -53,7 +53,7 @@ fn a_new_project_gets_its_board_at_start_with_nothing_on_it() {
         format!(
             "# Board: acme, 2026-09-21 14:13 UTC\n\
              \n\
-             0 of 1 work items open. Main is at {}.\n\
+             0 work items open: 0 of 1 slots taken, and 0 of 2 parked on rulings. Main is at {}.\n\
              \n\
              ## Open work\n\
              \n\
@@ -100,7 +100,7 @@ fn two_branches_editing_one_file_read_as_a_conflict_and_a_ready_issue_naming_it_
 
 const TWO_BRANCHES: &str = r#"# Board: acme, 2026-09-21 14:18 UTC
 
-2 of 3 work items open. Main is at MAIN.
+2 work items open: 2 of 3 slots taken, and 0 of 2 parked on rulings. Main is at MAIN.
 
 ## Open work
 

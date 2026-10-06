@@ -53,8 +53,22 @@ pub struct Status<'a> {
     pub work_item: Option<WorkItemStatus<'a>>,
     /// Every open work item, oldest first
     pub work_items: Vec<WorkItemStatus<'a>>,
-    /// How many work items may be open at once
+    /// How many work items may hold a slot at once. `working` can list
+    /// more, since an item going on through CI or a merge holds none.
     pub max_items: u32,
+    /// The issues of the open work items going on, neither parked nor
+    /// waiting for a slot, oldest first
+    pub working: Vec<u64>,
+    /// The issues of the work items that gave their slot up to a ruling and
+    /// need one again for a model call, each waiting for one, oldest first
+    pub waiting_for_slot: Vec<u64>,
+    /// The issues of the work items parked on rulings, which take no slot,
+    /// oldest first
+    pub parked: Vec<u64>,
+    /// How many work items may wait parked on rulings before the board
+    /// opens nothing new. A merged item on its follow-up ruling, which
+    /// `parked` lists, does not count.
+    pub max_parked: u32,
     /// Pull requests adopted and waiting for a free slot, oldest first
     pub adopted: &'a [Waiting],
     /// Ready issues the board passed over on its last poll, and why
@@ -564,6 +578,10 @@ mod tests {
                 "work_item": null,
                 "work_items": [],
                 "max_items": 1,
+                "working": [],
+                "waiting_for_slot": [],
+                "parked": [],
+                "max_parked": 2,
                 "adopted": [],
                 "skipped": [],
                 "rulings": [],

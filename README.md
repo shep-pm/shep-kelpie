@@ -127,7 +127,8 @@ On a repo without those four labels, `add` makes them. The runner puts `in-progr
 `add` writes the project's settings with these defaults:
 
 - `merge_authority = "ask"`: you rule on every merge
-- `max_items = 1`: one work item at a time. With more, their turns and reviews run at the same time, one call at a time per work item
+- `max_items = 1`: one work item working at a time. With more, their turns and reviews run at the same time, one call at a time per work item. A work item parked on a ruling gives its slot up
+- `max_parked = 2`: at most two work items wait on your rulings before the board opens nothing new
 - `ci` is on when the checkout has `.github/workflows`
 - `agents.implementers = ["sonnet-high"]`
 - `agents.reviewers = ["defect-hunter"]`, with `qwen` first when `~/.claude/scripts/qwen-review.sh` exists, and no review bot
@@ -242,9 +243,11 @@ Issues labelled `ready-for-agent` are the board. What decides whether, and when,
 - An issue with sub-issues is never worked itself: its sub-issues are, and shep-kelpie closes it once every sub-issue is closed
 - Of the rest, `priority: P0` to `P3` labels order them, then the oldest goes first. An `agent:<name>` label, such as `agent:opus-high`, picks the agent that works it from those the project lists in `agents.implementers` (see [Agents](#agents)), and a label naming one it does not list keeps the issue off the board. An old `worker:` label is no longer read: that issue runs on the default implementer, and the runner's log says so
 - With a project manager set up (see [The project manager](#the-project-manager)), it picks among two or more issues the board could start, and may hold some back. Without one, or while it is down, the order above picks
+- A slot under `max_items` bounds model calls. A work item takes one when it opens and keeps it through CI and the merge, but one parked on a ruling gives it up, so the board opens the next issue while it waits. Once `max_parked` work items are parked, the board opens nothing new, and the alert for the ruling that filled it says so. It is the point where the board stops, not a hard limit: items already working can still park past it, and `add` ignores it. `max_parked = 0` stops the board while any ruling waits, and with none waiting the board opens work as ever. A merged pull request parked on its follow-up ruling counts toward neither cap. An issue whose body names a file the branch of a parked item not yet merged changes waits for that item, and `status` lists it under `skipped` as `overlap`. One whose paths the board has not read yet, or every one while such a branch's files are not known, waits a pass and is listed as `paths-unread`
+- Once you answer its ruling, a work item goes on without a slot through anything that calls no model: CI, a merge, or its end. When it needs a worker's turn or a review again, such as for your `no <note>` or a red CI run, it waits for the next slot to free, ahead of any new issue. `status` lists the open items' issues under `working`, `waiting_for_slot` and `parked`
 - No turn starts while Claude's 5-hour window is at 50% or more, and no new work item starts once today's share of the week is spent. `shep kelpie status` says why under `pacer`, and `enabled = false` in the project's `[app.dogs.kelpie.pacing]` turns both off
 
-`shep kelpie add <issue>` opens a work item for an issue at once, without the label, ahead of the board's order. It queues nothing: while `max_items` work items are open, `add <issue>` is refused.
+`shep kelpie add <issue>` opens a work item for an issue at once, without the label, ahead of the board's order. It queues nothing: while every slot under `max_items` is held or waited for, `add <issue>` is refused.
 
 On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep kelpie rework <pr>`. On any other open pull request of kelpie's account, `ready-for-agent` adopts it, the same as `shep kelpie adopt <pr>`. Adoptions and reworks go before any issue. Kelpie puts `ready-for-human` on each pull request it hands back.
 
@@ -503,11 +506,11 @@ Measured on 33 real decision points from this repo and shep, a project manager b
 
 When you exit `claude`, the work item carries on, and its next turn resumes the same session. A commit or push you make while attached is the worker's own, as a push in a turn is, so the gate takes it as the branch's head rather than a change kelpie did not make. The runner holds the work item while either the `attach` command or the session it started runs, each known by its pid and start time, and lets it go at its next pass once both have ended. A SIGTERM or SIGHUP to `attach` is passed on to the session, which `attach` waits for. `status` shows the hold under the item's `attached`, and `drop` refuses the item while it is held.
 
-`attach` changes nothing and says what to do instead for a work item whose worker has no session yet (its first turn starts one), one parked on a ruling (answer it first), or one merging. Only a Claude Code worker can be attached: a Codex or pi worker's session resumes another way, by hand.
+`attach` changes nothing and says what to do instead for a work item whose worker has no session yet (its first turn starts one), one parked on a ruling (answer it first), one holding no slot under `max_items` when none is free (its session would be one more model call; with one free, `attach` takes it), or one merging. Only a Claude Code worker can be attached: a Codex or pi worker's session resumes another way, by hand.
 
 ## Rulings
 
-A ruling is a decision only you make. The worker waiting on one is parked, and the rest of the project goes on. It is one of six kinds:
+A ruling is a decision only you make. The worker waiting on one is parked, and the rest of the project goes on: a parked work item gives its slot up, so the board can open another (see [The board](#the-board)). It is one of six kinds:
 
 - `merge`: CI is green, and a yes merges the pull request
 - `question`: the worker asks, and your answer is its next turn
@@ -543,6 +546,8 @@ The installed shep-kelpie is whatever program the adopted dog runs, which the sh
 Before it restarts a runner, the upgrade drains it, so the restart cuts no worker's turn short. The runner's `drain` trigger tells it to start no new call (a worker's turn, a reviewer's session or local round, the project manager's wake), while the calls it has running go on to their end and its merges go on as ever. The upgrade asks again until the runner shows no call running, saying what it waits on, then waits out any merge and restarts it. It waits no longer than the runner's turn ceiling (or the project manager's, if longer) plus five minutes, counted from when the wait began. A turn's ceiling counts from when it got the lease it waited for, and a reviewer's session has no ceiling, so either can outrun that bound. Past it the upgrade sends the runner `undrain`, so it starts calls again on the old build, names it, and restarts nothing for it, as for a merge that outlasts its wait. A runner on a build from before `drain` is restarted as before, and the upgrade says the restart cuts its calls short. `--now`, first or last, restarts without draining, for when you want the build in place at once; the merge wait still holds. The dog is never drained, since the calls are the runners'. A restart ends draining. So does a Ctrl-C or SIGTERM to the upgrade, or any failure, while a runner drains: the upgrade sends it `undrain` before it exits. Only a shepherd it cannot reach leaves one drained. The upgrade prints `shep kelpie undrain -p <project>` as each drain starts, for that case, and `shep kelpie status` marks a draining runner `(draining)`.
 
 If an upgrade stops after the swap (a merge or a call that outlasts the wait, a sheep that does not come back, Ctrl-C), the new build is already installed and the message says so. `shep kelpie upgrade --binary <installed path>` finishes the restarts and touches no file. `--rollback` does not: it swaps the two builds again.
+
+Before going back to a build older than `max_parked`, by `--rollback` or any other way, finish or drop every work item that does not hold a slot: parked, waiting for one, or going on without one. Draining only stops new calls and leaves those items in the state file, which the older build refuses.
 
 Every sheep it restarts must run the dog's path. If one does not, the upgrade stops before it changes anything and names the sheep and its path. A `--binary` without its executable bits is refused with the `chmod +x` that fixes it, and only one upgrade runs at a time: a second refuses while the first holds `$SHEP_HOME/kelpie/upgrade.lock`. The swap changes the file for every shepherd that adopts the same path, with no check against their shep.
 
@@ -611,7 +616,7 @@ The dog holds `cargo-test`, a share of this machine for running tests, and `gpu`
 A project's settings are its `[app.dogs.kelpie]` table, which lookout edits in the runner's pane. `settings.example.toml` lists every key, and shows a runner's Flockfile entry for a project set up by hand. It needs `SHEP_HOME` as an absolute path in `env`, since a sheep starts without it. An older entry's `kill_timeout = "10s"` still works, and is no longer needed. The keys:
 
 - `repo` and `forge`: the checkout and its GitHub repo
-- `merge_authority`, `ci` and `max_items`: see [CI and the merge](#ci-and-the-merge) and [Add your project](#4-add-your-project)
+- `merge_authority`, `ci`, `max_items` and `max_parked`: see [CI and the merge](#ci-and-the-merge), [Add your project](#4-add-your-project) and [The board](#the-board)
 - `private_names`: words that stay off the forge, whatever their case, and off a worker's commits and `gh` calls
 - `agents.implementers`, `agents.reviewers` and `agents.pm`: see [Agents](#agents)
 - `pacing.enabled` and `pacing.kickoff_hours`: whether usage holds work, and the hours a day the per-hour figure in `status` divides the day's allowance by
