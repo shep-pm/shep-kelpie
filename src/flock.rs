@@ -104,6 +104,7 @@ impl Launch {
     /// Project `name`'s runner, holding `table` as its settings
     pub fn runner(&self, name: &ProjectName, table: Map<String, Value>) -> AppConfig {
         let mut app = self.app(name.as_str(), &["runner", name.as_str()]);
+        app.stop_exit_codes = vec![i32::from(crate::sheep::REFUSED)];
         app.dogs.insert(DOG.to_owned(), DogTable::from(table));
         app
     }
@@ -211,6 +212,38 @@ pub(crate) async fn script(client: &Client, name: &str) -> Result<String, String
         Ok(other) => Err(format!("the shepherd answered {other:?} for `{name}`")),
         Err(e) => Err(format!("cannot read `{name}`'s config: {e}")),
     }
+}
+
+/// Gives the runner `name`'s entry the exit code a refused start ends with
+/// in its `stop_exit_codes`, keeping the codes it has, and says whether it
+/// changed anything
+///
+/// An entry from before that code existed would restart a refused runner in
+/// a loop.
+pub(crate) async fn stop_on_refusal(client: &Client, name: &str) -> Result<bool, String> {
+    let request = Request::SheepConfig {
+        name: name.to_owned(),
+    };
+    let mut codes = match client.request(request).await {
+        Ok(Response::SheepConfig(view)) => view.config.stop_exit_codes,
+        Ok(other) => return Err(format!("the shepherd answered {other:?} for `{name}`")),
+        Err(e) => return Err(format!("cannot read `{name}`'s config: {e}")),
+    };
+    let refused = i32::from(crate::sheep::REFUSED);
+    if codes.contains(&refused) {
+        return Ok(false);
+    }
+    codes.push(refused);
+    let request = Request::SetSheepField {
+        name: name.to_owned(),
+        key: "stop_exit_codes".to_owned(),
+        value: serde_json::json!(codes),
+    };
+    send(client, request, |r| {
+        matches!(r, Response::SheepFieldSet { .. })
+    })
+    .await?;
+    Ok(true)
 }
 
 /// Every sheep in the flock
@@ -354,6 +387,7 @@ mod tests {
         );
         assert!(!app.env.contains_key("KELPIE_HOME"));
         assert!(app.channel && app.shutdown_with_message && app.autorestart);
+        assert_eq!(app.stop_exit_codes, [78]);
         let shep_s_own = AppConfig::minimal("koji", "/opt/kelpie").kill_timeout;
         assert_eq!(app.kill_timeout.as_millis(), shep_s_own.as_millis());
         assert_eq!(app.dogs.get(DOG).map(DogTable::as_map), Some(&table));

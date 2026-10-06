@@ -62,6 +62,9 @@ pub struct Place<'a> {
     pub folder: &'a Path,
     /// Kelpie's `agents` folder, where its own agent files are written
     pub agents: &'a Path,
+    /// The old home, `~/.kelpie`, a runner refuses to start beside, when
+    /// `KELPIE_HOME` does not name its home instead
+    pub old_home: Option<&'a Path>,
 }
 
 /// A new project's settings, less what `add` reads from the checkout and
@@ -188,6 +191,11 @@ pub async fn add(
         let running = runner
             .as_ref()
             .is_some_and(|r| matches!(r.status, ProcStatus::Online | ProcStatus::Starting));
+        if runner.is_some() && super::stop_on_refusal(client, name.as_str()).await? {
+            done.push(format!(
+                "runner `{name}`: now stays stopped after a start it refused"
+            ));
+        }
         match (runner, set) {
             (None, _) => {
                 let request = Request::Add {
@@ -213,6 +221,14 @@ pub async fn add(
             _ => done.push(format!("runner `{name}`: already there with its settings")),
         }
 
+        if let Some(old) = place.old_home {
+            let kelpie_home = place.folder.parent().unwrap_or(place.folder);
+            if let Err(why) = crate::home::runner_may_start(old, kelpie_home, name) {
+                done.push(format!(
+                    "warning: runner `{name}` will refuse to start until this is dealt with: {why}"
+                ));
+            }
+        }
         done.extend(super::dog_down(&rows));
         done.push(match running {
             true => format!("runner `{name}` is running: `shep kelpie pause {name}` stops it"),

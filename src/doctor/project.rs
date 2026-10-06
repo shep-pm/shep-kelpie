@@ -51,6 +51,33 @@ pub(super) fn old_files(
     lines
 }
 
+/// A line for each project whose runner would refuse to start while the old
+/// home still holds its files
+pub(super) fn old_home(
+    tables: &BTreeMap<String, Map<String, Value>>,
+    here: Here<'_>,
+    only: Option<&ProjectName>,
+) -> Vec<Line> {
+    let Some(old) = here.old_home else {
+        return Vec::new();
+    };
+    let named = |sheep: &&String| only.is_none_or(|n| n.as_str() == sheep.as_str());
+    let mut lines = Vec::new();
+    for sheep in tables.keys().filter(named) {
+        let Ok(name) = ProjectName::try_from(sheep.as_str()) else {
+            continue;
+        };
+        if let Err(what) = crate::home::runner_may_start(old, here.kelpie_home, &name) {
+            lines.push(Line::missing(
+                format!("{sheep}: old home"),
+                what,
+                format!("do what it says, then `shep kelpie start {sheep}`"),
+            ));
+        }
+    }
+    lines
+}
+
 /// Every check for the project on `sheep`, whose table is `table`
 ///
 /// A table that does not load is the one line: nothing else can be read from it.

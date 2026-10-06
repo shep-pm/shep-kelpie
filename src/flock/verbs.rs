@@ -123,6 +123,7 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
                 shep_home: shep_home.to_owned(),
                 kelpie_home: kelpie_home_set,
             };
+            let old_home = crate::home::old_home();
             let folder = kelpie_home.join(name.as_str());
             let agents = kelpie_home.join(crate::agents::FOLDER);
             let place = add::Place {
@@ -130,6 +131,7 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
                 home: &home,
                 folder: &folder,
                 agents: &agents,
+                old_home: old_home.as_deref(),
             };
             add::add(&client, &Gh, &launch, &name, place).await
         }
