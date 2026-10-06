@@ -28,32 +28,45 @@ macro_rules! vendored {
 /// Every vendored file, by its path upstream, and its bytes
 pub(super) const FILES: &[(&str, &[u8])] = vendored![
     "LICENSE",
-    "skills/engineering/code-review/SKILL.md",
     "skills/engineering/code-review/agents/openai.yaml",
-    "skills/engineering/diagnosing-bugs/SKILL.md",
+    "skills/engineering/code-review/SKILL.md",
+    "skills/engineering/codebase-design/agents/openai.yaml",
+    "skills/engineering/codebase-design/DEEPENING.md",
+    "skills/engineering/codebase-design/DESIGN-IT-TWICE.md",
+    "skills/engineering/codebase-design/SKILL.md",
     "skills/engineering/diagnosing-bugs/agents/openai.yaml",
     "skills/engineering/diagnosing-bugs/scripts/hitl-loop.template.sh",
-    "skills/engineering/implement/SKILL.md",
+    "skills/engineering/diagnosing-bugs/SKILL.md",
+    "skills/engineering/domain-modeling/ADR-FORMAT.md",
+    "skills/engineering/domain-modeling/agents/openai.yaml",
+    "skills/engineering/domain-modeling/GLOSSARY-FORMAT.md",
+    "skills/engineering/domain-modeling/SKILL.md",
     "skills/engineering/implement/agents/openai.yaml",
+    "skills/engineering/implement/SKILL.md",
+    "skills/engineering/pr/agents/openai.yaml",
     "skills/engineering/pr/CREDITS.md",
     "skills/engineering/pr/SKILL.md",
-    "skills/engineering/pr/agents/openai.yaml",
-    "skills/engineering/retro/SKILL.md",
     "skills/engineering/retro/agents/openai.yaml",
-    "skills/engineering/tdd/SKILL.md",
+    "skills/engineering/retro/SKILL.md",
     "skills/engineering/tdd/agents/openai.yaml",
     "skills/engineering/tdd/mocking.md",
+    "skills/engineering/tdd/SKILL.md",
     "skills/engineering/tdd/tests.md",
-    "skills/engineering/to-spec/SKILL.md",
     "skills/engineering/to-spec/agents/openai.yaml",
-    "skills/engineering/to-tickets/SKILL.md",
+    "skills/engineering/to-spec/SKILL.md",
     "skills/engineering/to-tickets/agents/openai.yaml",
+    "skills/engineering/to-tickets/SKILL.md",
     "skills/engineering/triage/AGENT-BRIEF.md",
+    "skills/engineering/triage/agents/openai.yaml",
     "skills/engineering/triage/OUT-OF-SCOPE.md",
     "skills/engineering/triage/SKILL.md",
-    "skills/engineering/triage/agents/openai.yaml",
-    "skills/productivity/handoff/SKILL.md",
+    "skills/productivity/grilling/agents/openai.yaml",
+    "skills/productivity/grilling/SKILL.md",
     "skills/productivity/handoff/agents/openai.yaml",
+    "skills/productivity/handoff/SKILL.md",
+    "skills/productivity/writing-for-agents/agents/openai.yaml",
+    "skills/productivity/writing-for-agents/SKILL-MECHANICS.md",
+    "skills/productivity/writing-for-agents/SKILL.md",
 ];
 
 /// Writes the plugin into `dir`, replacing whatever was there
@@ -131,6 +144,67 @@ mod tests {
         }
     }
 
+    // Names a skill's text calls: "Skill tool with `x`", with "x" or for "x" and
+    // "y", "the `x` skill", and a slash command in backticks. The caller joins
+    // the text's lines first, so a call split across two lines still counts.
+    fn called_skills(text: &str) -> Vec<&str> {
+        let mut called = Vec::new();
+        for line in text.lines() {
+            let mut from = 0;
+            while let Some(at) = line[from..].find("Skill tool") {
+                from += at + "Skill tool".len();
+                let rest = &line[from..];
+                let Some(open) = rest.find(['"', '`']) else {
+                    continue;
+                };
+                if rest[..open].contains('.') || open > 20 {
+                    continue;
+                }
+                let mut rest = &rest[open..];
+                while let Some(quote) = rest.chars().next().filter(|c| matches!(c, '"' | '`')) {
+                    let Some(len) = rest[1..].find(quote) else {
+                        break;
+                    };
+                    called.push(&rest[1..=len]);
+                    rest = &rest[len + 2..];
+                    match rest.strip_prefix(" and ").or(rest.strip_prefix(", ")) {
+                        Some(next) => rest = next,
+                        None => break,
+                    }
+                }
+            }
+            for part in line.split("`/").skip(1) {
+                if let Some((name, _)) = part.split_once('`')
+                    && !name.is_empty()
+                    && name.chars().all(|c| c.is_ascii_lowercase() || c == '-')
+                {
+                    called.push(name);
+                }
+            }
+            let mut rest = line;
+            while let Some(at) = rest.find("` skill") {
+                if let Some(open) = rest[..at].rfind('`') {
+                    let name = &rest[open + 1..at];
+                    if !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c == '-')
+                    {
+                        called.push(name);
+                    }
+                }
+                rest = &rest[at + "` skill".len()..];
+            }
+        }
+        called
+    }
+
+    #[test]
+    fn a_call_in_prose_or_split_across_lines_is_found() {
+        let text = "Follow the `writing-for-agents` skill.\nCall the Skill\ntool with `tdd`.";
+        let joined = text.replace('\n', " ");
+        let called = called_skills(&joined);
+        assert!(called.contains(&"writing-for-agents"), "{called:?}");
+        assert!(called.contains(&"tdd"), "{called:?}");
+    }
+
     #[test]
     fn the_vendored_copies_match_the_pinned_version() {
         let folder = vendor_folder();
@@ -161,6 +235,37 @@ mod tests {
         let mut built: Vec<&str> = FILES.iter().map(|(path, _)| *path).collect();
         built.sort_unstable();
         assert_eq!(found, built);
+    }
+
+    // Called on purpose without being vendored
+    const NOT_VENDORED: &[&str] = &[
+        // Repo setup, which a project does once. Kelpie's repo has docs/agents/
+        // for it, and a worker must never run it.
+        "setup-matt-pocock-skills",
+        // A path in backticks, not a skill
+        "tmp",
+    ];
+
+    #[test]
+    fn every_skill_a_vendored_skill_calls_is_vendored() {
+        let vendored: Vec<&str> = FILES
+            .iter()
+            .filter_map(|(path, _)| path.strip_suffix("/SKILL.md"))
+            .filter_map(|dir| dir.rsplit('/').next())
+            .collect();
+        let mut missing = Vec::new();
+        for (path, bytes) in FILES
+            .iter()
+            .filter(|(path, _)| path.ends_with(".md") && path.starts_with("skills/"))
+        {
+            let text = std::str::from_utf8(bytes).unwrap().replace('\n', " ");
+            for name in called_skills(&text) {
+                if !vendored.contains(&name) && !NOT_VENDORED.contains(&name) {
+                    missing.push(format!("{path} calls {name}"));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "{missing:#?}");
     }
 
     #[test]

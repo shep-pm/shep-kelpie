@@ -11,7 +11,9 @@ upstream=https://github.com/mattpocock/skills
 out=skills
 skills="engineering/triage engineering/to-tickets engineering/to-spec
 engineering/implement engineering/tdd engineering/code-review
-engineering/diagnosing-bugs engineering/pr engineering/retro productivity/handoff"
+engineering/diagnosing-bugs engineering/pr engineering/retro productivity/handoff
+productivity/writing-for-agents engineering/codebase-design
+engineering/domain-modeling productivity/grilling"
 
 clone=$(mktemp -d)
 trap 'rm -rf "$clone"' EXIT
