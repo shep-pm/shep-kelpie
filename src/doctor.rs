@@ -174,6 +174,9 @@ pub struct Here<'a> {
     pub kelpie_home: &'a Path,
     /// The shepherd's home kelpie's runners work theirs out from
     pub shep_home: &'a Path,
+    /// The old home, `~/.kelpie`, a runner refuses to start beside, when
+    /// `KELPIE_HOME` does not name its home instead
+    pub old_home: Option<&'a Path>,
 }
 
 /// What doctor was asked
@@ -243,6 +246,7 @@ async fn projects(client: &Client, probes: Probes<'_>, here: Here<'_>, ask: Ask<
         ));
     }
     lines.extend(project::old_files(&tables, here.kelpie_home, ask.project));
+    lines.extend(project::old_home(&tables, here, ask.project));
     for (sheep, table) in &tables {
         if ask.project.is_none_or(|n| n.as_str() == sheep) {
             lines.extend(project::checks(sheep, table, probes, here, kelpie.as_ref()));
@@ -266,10 +270,12 @@ pub fn main(args: &[String]) -> ExitCode {
             .map(PathBuf::from)
             .ok_or("HOME is not set")?;
         let kelpie_home = crate::home::kelpie_home_of(&shep_home);
+        let old_home = crate::home::old_home();
         let here = Here {
             home: &home,
             kelpie_home: &kelpie_home,
             shep_home: &shep_home,
+            old_home: old_home.as_deref(),
         };
         let ask = Ask {
             project: project.as_ref(),

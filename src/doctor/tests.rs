@@ -45,6 +45,7 @@ struct Scene {
     clock: FakeClock,
     home: PathBuf,
     kelpie_home: PathBuf,
+    old_home: PathBuf,
 }
 
 impl Scene {
@@ -61,8 +62,10 @@ impl Scene {
         shepherd.holds_section(WEBHOOK);
         shepherd.holds_dog("kelpie", true);
         let clock = FakeClock::at(1_000);
+        let home = shepherd.scratch("home");
         let scene = Self {
-            home: shepherd.scratch("home"),
+            old_home: home.join(".kelpie"),
+            home,
             kelpie_home: shepherd.scratch("kelpie"),
             forge,
             meter: FakeMeter::idle(),
@@ -118,6 +121,7 @@ impl Scene {
             home: &self.home,
             kelpie_home: &self.kelpie_home,
             shep_home: self.shepherd.home(),
+            old_home: Some(&self.old_home),
         };
         let done = check(self.shepherd.home(), probes, here, ask);
         tokio::time::timeout(PATIENCE, done)
@@ -451,6 +455,7 @@ async fn no_shepherd_is_a_missing_shepherd_naming_its_home() {
         home: &scene.home,
         kelpie_home: &scene.kelpie_home,
         shep_home: elsewhere.path(),
+        old_home: None,
     };
     let done = check(elsewhere.path(), probes, here, Ask::default());
     let report = tokio::time::timeout(PATIENCE, done)
@@ -812,4 +817,22 @@ fn arguments_are_a_project_and_the_test_alert_flag_in_either_order() {
     for bad in [&["--fix"][..], &["a", "b"], &["Not A Name"]] {
         assert!(args(bad).is_err(), "{bad:?}");
     }
+}
+
+#[tokio::test]
+async fn a_project_folder_left_in_the_old_home_is_missing_for_that_project_alone() {
+    let scene = Scene::new().await;
+    scene.runs("golbat", |_| {});
+    assert!(!subjects(&scene.report().await).contains(&"koji: old home"));
+    let left = scene.old_home.join("projects/koji");
+    std::fs::create_dir_all(&left).unwrap();
+
+    let report = scene.report().await;
+
+    let (what, fix) = missing(&report, "koji: old home");
+    assert!(what.contains(&left.display().to_string()), "{what}");
+    assert!(what.contains("move "), "{what}");
+    assert!(fix.contains("shep kelpie start koji"), "{fix}");
+    assert!(!subjects(&report).contains(&"golbat: old home"));
+    assert!(!report.passed());
 }

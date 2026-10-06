@@ -57,18 +57,23 @@ impl Scene {
         self.home.join(".shep/kelpie/agents")
     }
 
+    fn old_home(&self) -> PathBuf {
+        self.home.join(".kelpie")
+    }
+
     fn folder(&self) -> PathBuf {
         self.home.join(".shep/kelpie").join(self.name.as_str())
     }
 
     async fn add(&self) -> Result<Vec<String>, String> {
         let client = shepherd::connect(self.shepherd.home()).await.unwrap();
-        let (folder, agents) = (self.folder(), self.agents());
+        let (folder, agents, old) = (self.folder(), self.agents(), self.old_home());
         let place = Place {
             checkout: &self.checkout,
             home: &self.home,
             folder: &folder,
             agents: &agents,
+            old_home: Some(&old),
         };
         let added = add(&client, &self.forge, &self.launch, &self.name, place);
         tokio::time::timeout(PATIENCE, added)
@@ -384,4 +389,72 @@ async fn a_runner_from_a_flockfile_with_no_table_is_given_one() {
     let writes = scene.shepherd.writes();
     let added_runner = |w: &Request| matches!(w, Request::Add { apps } if apps[0].name == "koji");
     assert!(!writes.iter().any(added_runner), "{writes:?}");
+}
+
+#[tokio::test]
+async fn add_warns_when_the_old_home_still_holds_the_runner_s_folder_and_still_adds_it() {
+    let scene = Scene::new().await;
+    let left = scene.old_home().join("projects/koji");
+    std::fs::create_dir_all(&left).unwrap();
+    std::fs::write(left.join("state.json"), "{}").unwrap();
+
+    let lines = scene.add().await.unwrap();
+
+    let warning = lines.iter().find(|l| l.starts_with("warning:")).unwrap();
+    assert!(warning.contains("`koji` will refuse to start"), "{warning}");
+    assert!(warning.contains("move "), "{warning}");
+    assert!(warning.contains(&left.display().to_string()), "{warning}");
+    assert!(
+        warning.contains(&scene.folder().display().to_string()),
+        "{warning}"
+    );
+    assert!(
+        scene.shepherd.sheep("koji").is_some(),
+        "the runner is added"
+    );
+
+    let clean = Scene::new().await;
+    let lines = clean.add().await.unwrap();
+    assert!(
+        lines.iter().all(|l| !l.starts_with("warning:")),
+        "{lines:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_runner_is_added_to_stay_stopped_after_a_refusal_the_maintainer_must_clear() {
+    let scene = Scene::new().await;
+    scene.add().await.unwrap();
+    let (runner, _) = scene.shepherd.sheep("koji").expect("a runner");
+    assert_eq!(runner.stop_exit_codes, [78]);
+}
+
+#[tokio::test]
+async fn a_runner_registered_before_the_refusal_code_is_given_it_and_keeps_its_own_codes() {
+    let mut scene = Scene::new().await;
+    let mut runner = scene.launch.runner(&scene.name, Map::new());
+    runner.dogs.clear();
+    runner.stop_exit_codes = vec![3];
+    scene.shepherd.holds(runner, true);
+
+    let lines = scene.add().await.unwrap();
+
+    assert!(
+        lines.iter().any(|l| l.contains("now stays stopped")),
+        "{lines:?}"
+    );
+    let (kept, running) = scene.shepherd.sheep("koji").unwrap();
+    assert_eq!(kept.stop_exit_codes, [3, 78]);
+    assert!(running, "the runner is not restarted");
+
+    scene.shepherd.writes();
+    let lines = scene.add().await.unwrap();
+    assert!(lines.iter().all(|l| !l.contains("now stays stopped")));
+    let writes = scene.shepherd.writes();
+    assert!(
+        !writes
+            .iter()
+            .any(|w| matches!(w, Request::SetSheepField { .. })),
+        "{writes:?}"
+    );
 }

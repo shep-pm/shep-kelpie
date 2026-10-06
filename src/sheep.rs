@@ -57,14 +57,57 @@ use look::Look;
 pub fn run(project: &str) -> ExitCode {
     match serve(project) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(message) => {
-            eprintln!("kelpie runner {project}: {message}");
-            ExitCode::FAILURE
+        Err(exit) => {
+            eprintln!("kelpie runner {project}: {}", exit.message());
+            ExitCode::from(exit.code())
         }
     }
 }
 
-fn serve(project: &str) -> Result<(), String> {
+/// The exit code of a runner that refused to start on something only the
+/// maintainer can fix, `EX_CONFIG`
+///
+/// A runner's flock entry lists it in `stop_exit_codes`, so the shepherd
+/// leaves it stopped instead of restarting it into the same refusal.
+pub const REFUSED: u8 = 78;
+
+// Why a runner stopped before it served.
+#[derive(Debug, PartialEq)]
+enum Exit {
+    // A refusal a restart cannot clear.
+    Refused(String),
+    // Anything else, which shep restarts.
+    Failed(String),
+}
+
+impl Exit {
+    fn message(&self) -> &str {
+        match self {
+            Self::Refused(message) | Self::Failed(message) => message,
+        }
+    }
+
+    fn code(&self) -> u8 {
+        match self {
+            Self::Refused(_) => REFUSED,
+            Self::Failed(_) => 1,
+        }
+    }
+}
+
+impl From<String> for Exit {
+    fn from(message: String) -> Self {
+        Self::Failed(message)
+    }
+}
+
+impl From<&str> for Exit {
+    fn from(message: &str) -> Self {
+        Self::Failed(message.to_owned())
+    }
+}
+
+fn serve(project: &str) -> Result<(), Exit> {
     let project = ProjectName::try_from(project).map_err(|e| e.to_string())?;
     let shep_home = shep_home::required(shep_home::FLOCKFILE_FIX)?;
     let home = std::env::var_os("HOME")
@@ -80,12 +123,14 @@ fn serve(project: &str) -> Result<(), String> {
     // A socket kelpie cannot bind would otherwise fail a call deep in a work item.
     paths.sockets_fit()?;
     if let Some(old) = crate::home::old_home() {
-        crate::home::runner_may_start(&old, &kelpie_home, &project)?;
+        crate::home::runner_may_start(&old, &kelpie_home, &project).map_err(Exit::Refused)?;
     }
     let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
     // Every agent call runs inside the sandbox runtime, so a runner without one stops here.
     if !paths.tools.sandbox().is_file() {
-        return Err(SandboxError::Missing(paths.tools.sandbox()).to_string());
+        return Err(SandboxError::Missing(paths.tools.sandbox())
+            .to_string()
+            .into());
     }
     let shepherd = shep_channel::serve();
     let sheep = std::env::var("SHEP_NAME")
@@ -349,6 +394,15 @@ mod tests {
 
     // The worker is a real thread on real time, so every wait has this ceiling.
     const PATIENCE: Duration = Duration::from_secs(10);
+
+    // The code is what shep's `stop_exit_codes` matches to leave a runner stopped.
+    #[test]
+    fn a_refused_start_exits_with_the_code_the_flock_entry_stops_on() {
+        let refused = Exit::Refused("old home".into());
+        assert_eq!(refused.code(), REFUSED);
+        assert_eq!(refused.message(), "old home");
+        assert_eq!(Exit::from("no HOME").code(), 1);
+    }
 
     /// A worker whose first turn on issue 7 is held open by `hold`
     fn in_a_turn(rig: &Rig, hold: &Hold) -> (Arc<Mutex<Runner>>, Worker) {

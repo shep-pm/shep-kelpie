@@ -268,6 +268,17 @@ fn answer(flock: &mut Vec<Sheep>, section: &str, request: &Request) -> Response 
                 dog: dog.clone(),
             }
         }
+        Request::SetSheepField { name, key, value } => {
+            let sheep = flock.iter_mut().find(|s| &s.config.name == name).unwrap();
+            assert_eq!(key, "stop_exit_codes", "the stand-in sets only this field");
+            sheep.config.stop_exit_codes = serde_json::from_value(value.clone()).unwrap();
+            Response::SheepFieldSet {
+                name: name.clone(),
+                key: key.clone(),
+                pending: false,
+                warning: None,
+            }
+        }
         Request::Delete { selector } => {
             let at = named(flock, selector).unwrap();
             flock.remove(at);

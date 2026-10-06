@@ -126,22 +126,41 @@ pub fn old_dog_home() -> Option<PathBuf> {
 ///
 /// # Errors
 ///
-/// A message naming the old home and what it holds, and how to move it.
+/// A message naming the old home and what it holds, and what to do with it.
 pub fn runner_may_start(old: &Path, home: &Path, name: &ProjectName) -> Result<(), String> {
     if shepherds(old) {
         return Ok(());
     }
-    let own = OLD_PROJECT
+    if let Some(found) = project_files_left(old, name) {
+        return Err(unmoved(
+            old,
+            &found,
+            &project_advice(old, &found, home, name),
+        ));
+    }
+    let claimed = old.join(MOVED_TO).exists();
+    let found = OLD_SHARED.iter().find(|file| kept(&old.join(file)));
+    match found.filter(|_| !claimed) {
+        Some(file) => {
+            let path = old.join(file);
+            let advice = format!(
+                "move {} to {}, or delete it",
+                path.display(),
+                home.display()
+            );
+            Err(unmoved(old, Path::new(file), &advice))
+        }
+        None => Ok(()),
+    }
+}
+
+// The folder of the old home `old` that still holds project `name`'s files,
+// relative to it, such as `projects/koji`.
+fn project_files_left(old: &Path, name: &ProjectName) -> Option<PathBuf> {
+    OLD_PROJECT
         .iter()
         .map(|folder| Path::new(folder).join(name.as_str()))
-        .find(|path| old.join(path).exists());
-    let shared = || {
-        let claimed = old.join(MOVED_TO).exists();
-        let found = OLD_SHARED.iter().find(|file| kept(&old.join(file)));
-        found.filter(|_| !claimed).map(PathBuf::from)
-    };
-    own.or_else(shared)
-        .map_or(Ok(()), |found| Err(unmoved(old, &found, home)))
+        .find(|path| old.join(path).exists())
 }
 
 /// Refuses the dog a start in its folder `dog` while the old home `old`
@@ -149,12 +168,14 @@ pub fn runner_may_start(old: &Path, home: &Path, name: &ProjectName) -> Result<(
 ///
 /// # Errors
 ///
-/// A message naming the old home and the book, and how to move it.
+/// A message naming the old home and the book, and what to do with it.
 pub fn dog_may_start(old: &Path, dog: &Path) -> Result<(), String> {
     if shepherds(old) || !kept(&old.join(OLD_BOOK)) {
         return Ok(());
     }
-    Err(unmoved(old, Path::new(OLD_BOOK), dog))
+    let path = old.join(OLD_BOOK);
+    let advice = format!("move {} to {}, or delete it", path.display(), dog.display());
+    Err(unmoved(old, Path::new(OLD_BOOK), &advice))
 }
 
 fn old_home_of(home: Option<OsString>) -> Option<PathBuf> {
@@ -172,13 +193,27 @@ fn kept(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|m| !m.file_type().is_symlink())
 }
 
-fn unmoved(old: &Path, found: &Path, home: &Path) -> String {
+// What to do with a project's folder in the old home. Only `projects` holds
+// state kelpie reads; a work item's state keeps the absolute path of its
+// worktree and build folder, which no release moves.
+fn project_advice(old: &Path, found: &Path, home: &Path, name: &ProjectName) -> String {
+    let path = old.join(found).display().to_string();
+    match found.iter().next().and_then(|folder| folder.to_str()) {
+        Some("projects") => format!("move {path} to {}", home.join(name.as_str()).display()),
+        Some("wt" | "targets") => format!(
+            "delete {path} once {name} has no open work item, since kelpie makes its worktrees \
+             and builds again; an open work item's state holds this folder's path, and kelpie \
+             cannot move it"
+        ),
+        _ => format!("delete {path}, which kelpie no longer uses"),
+    }
+}
+
+fn unmoved(old: &Path, found: &Path, advice: &str) -> String {
     format!(
-        "{} still holds {}, from before kelpie's home moved to {}: run the previous \
-         shep-kelpie release once, which moves it, or move it there by hand",
+        "{} still holds {}, from before kelpie's home moved: {advice}",
         old.display(),
         found.display(),
-        home.display()
     )
 }
 
@@ -292,8 +327,9 @@ mod tests {
 
         assert!(error.contains(&old.display().to_string()), "{error}");
         assert!(error.contains("totp"), "{error}");
-        assert!(error.contains("previous shep-kelpie release"), "{error}");
-        assert!(error.contains("by hand"), "{error}");
+        assert!(error.contains("move "), "{error}");
+        assert!(error.contains(&home.display().to_string()), "{error}");
+        assert!(!error.contains("previous"), "{error}");
     }
 
     // A move left `.moved-to`, and links or copies of the shared files.
@@ -310,8 +346,42 @@ mod tests {
 
         let error = runner_may_start(&old, &home, &koji()).unwrap_err();
         assert!(error.contains("projects/koji"), "{error}");
+        assert!(error.contains("move "), "{error}");
+        assert!(
+            error.contains(&home.join("koji").display().to_string()),
+            "{error}"
+        );
         let lab = ProjectName::try_from("lab").unwrap();
         assert_eq!(runner_may_start(&old, &home, &lab), Ok(()));
+    }
+
+    // Only `projects` holds state to carry over: a work item's state keeps the
+    // absolute path of its worktree and build, so those are deleted, not moved.
+    #[test]
+    fn each_old_folder_says_what_to_do_with_it() {
+        let home = Path::new("/new");
+        for (folder, says) in [
+            ("projects", "move "),
+            ("wt", "delete "),
+            ("targets", "delete "),
+            ("shots", "delete "),
+            ("playwright", "delete "),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let old = root.path().join(".kelpie");
+            write(&old.join(folder).join("koji/x"));
+
+            let error = runner_may_start(&old, home, &koji()).unwrap_err();
+
+            let held = old.join(folder).join("koji");
+            assert!(
+                error.contains(&format!("{says}{}", held.display())),
+                "{error}"
+            );
+            let carries = error.contains("open work item");
+            assert_eq!(carries, folder == "wt" || folder == "targets", "{error}");
+            assert_eq!(error.contains("/new/koji"), folder == "projects", "{error}");
+        }
     }
 
     #[test]

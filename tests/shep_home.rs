@@ -97,9 +97,10 @@ fn a_runner_beside_an_unmoved_old_home_refuses_naming_it() {
     // Short enough for the socket check, and never made.
     let output = runner_under(home.path(), Path::new("/s"));
 
-    assert!(!output.status.success());
+    // 78 is what the runner's flock entry lists in `stop_exit_codes`.
+    assert_eq!(output.status.code(), Some(78));
     let stderr = stderr(&output);
     assert!(stderr.contains(&old.display().to_string()), "{stderr}");
-    assert!(stderr.contains("previous shep-kelpie release"), "{stderr}");
+    assert!(stderr.contains("move "), "{stderr}");
     assert!(old.join("projects/koji/state.json").is_file());
 }
