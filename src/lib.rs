@@ -42,6 +42,7 @@ pub mod tools;
 pub mod totp;
 mod trim;
 pub mod upgrade;
+pub mod usage;
 pub mod webhook;
 pub mod work_item;
 pub mod worktree;

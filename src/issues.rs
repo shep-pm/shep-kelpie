@@ -21,16 +21,18 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::adapters::claude_settings;
+use crate::adapters::{SystemClock, claude_settings};
 use crate::agents::{Agents, ISSUE_WRITER, Role, Runs};
 use crate::board::{AGENT_LABEL, READY, agent_label};
 use crate::guard::IssueRules;
+use crate::ports::Clock;
 use crate::ports::{
     self, AgentCall, Ending, Fence, Forge, Guard, NewLabel, Reach, Session, SessionId, Tools,
 };
 use crate::profile::CREDENTIALS;
 use crate::runner::{HUMAN, ProjectPaths};
 use crate::settings::{AgentName, RoleAgents, RoleModel, Settings};
+use crate::usage;
 use crate::worktree;
 
 mod prompt;
@@ -235,9 +237,11 @@ pub fn headless(
     worktree::view(repo, &checkout)
         .map_err(|e| format!("cannot check out main for the issue writer: {e}"))?;
     let call = call(project, writer, request, &session, &checkout)?;
+    let started = SystemClock.now();
     let ran = agents
         .prepare(&call)
         .and_then(|()| agents.run(&call, &Ending::default()));
+    record(project, &call, &ran, started);
     let resume = |why: String| {
         format!(
             "{why}. Its checkout is kept: `cd {} && claude --resume {}` picks the session up",
@@ -263,6 +267,36 @@ pub fn headless(
         let _ = std::fs::remove_file(file);
     }
     report(project, forge, &filed)
+}
+
+// Adds the run's line to the project's usage ledger. One that cannot be
+// written is told and let go, since what was filed stands either way.
+fn record(
+    project: &Project<'_>,
+    call: &AgentCall,
+    ran: &Result<ports::AgentReply, ports::AgentError>,
+    started: ports::Timestamp,
+) {
+    let Some(ended) = usage::ended(ran) else {
+        return;
+    };
+    let draft = usage::Draft::of(call, ISSUE_WRITER, usage::CallKind::Issues, started);
+    let spent = ran.as_ref().ok().map(usage::Spent::from);
+    // A fresh session, so the call cost all of it.
+    let line = draft.line(
+        SystemClock.now(),
+        ended,
+        spent,
+        ports::Cost(0),
+        Default::default(),
+    );
+    let path = project.paths.folder.join(usage::FILE);
+    if let Err(e) = usage::append_to(&path, &usage::Line::Call(line)) {
+        eprintln!(
+            "cannot add the issue writer's run to {}: {e}",
+            path.display()
+        );
+    }
 }
 
 // The headless session's call: fresh, in `checkout`, prompted with the request.

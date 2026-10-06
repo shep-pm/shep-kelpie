@@ -5,9 +5,10 @@
 //! `shep kelpie lease ...`: the maintainer's lease commands
 //!
 //! `shep kelpie add`, `start`, `pause`, `status`, `rule`, `rework`, `adopt`,
-//! `gate`, `drop`, `timings`, `issue`, `attach`, `tell`, `pm`, `drain` and
-//! `undrain`: a project in the maintainer's own flock, the one `-p` names or
-//! whose repo holds the folder it runs in.
+//! `gate`, `drop`, `timings`, `issue`, `attach`, `tell`, `pm`, `drain`, `undrain` and
+//! `usage`: a project in the maintainer's own flock, the one `-p` names or
+//! whose repo holds the folder it runs in. `usage` with no project reports
+//! every project that has a usage ledger instead.
 //!
 //! `shep kelpie doctor [<project>] [--test-alert]`: checks what the projects need
 //! on this machine, and changes nothing. Run as `shep kelpie doctor`.

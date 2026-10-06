@@ -22,13 +22,14 @@ use serde::{Deserialize, Serialize};
 use crate::pacer::DayStart;
 use crate::ports::{Finding, SessionId, Timestamp};
 use crate::settings::Account;
-use crate::work_item::{Attached, Known, Phase, Review, Seconds, Turn, WorkItem};
+use crate::work_item::{Attached, Known, Phase, Review, Seconds, Tally, Turn, WorkItem};
 
-/// The state file's format version. 9 folded the ruling kinds to six, 8 added
-/// the project manager's session, notes and attach, 7 a work item's
+/// The state file's format version. 10 added a work item's `counts` and a
+/// finished one's `spend`, 9 folded the ruling kinds to six, 8 added the
+/// project manager's session, notes and attach, 7 a work item's
 /// `attached`, 6 folded the timing phases to six, and 5 added the board's
 /// events, each of which an older kelpie refuses
-const VERSION: u32 = 9;
+const VERSION: u32 = 10;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
@@ -45,7 +46,8 @@ const BOT_ROUNDS: u32 = 3;
 /// How many finished work items the state file keeps a record of
 ///
 /// The file is written whole at every save, a heartbeat included, and a
-/// record is about half a kilobyte, so the records stay under about 50 KB.
+/// record with its spend is about 1.2 KB, so the records stay under about
+/// 120 KB.
 pub const HISTORY_CAP: usize = 100;
 
 /// Everything a project's runner keeps across a restart
@@ -223,6 +225,9 @@ pub struct Finished {
     pub wall: u64,
     /// Every phase, summing to `wall`
     pub seconds: Seconds,
+    /// What it spent. None in a record saved before version 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spend: Option<Tally>,
 }
 
 /// A pull request adopted and waiting its turn

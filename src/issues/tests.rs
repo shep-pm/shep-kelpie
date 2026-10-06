@@ -154,6 +154,41 @@ fn a_request_runs_one_session_that_files_and_kelpie_prints_what_it_filed() {
         json!([call.cwd, Rig::KELPIE]),
         "the checkout and the guard alone"
     );
+    // The run is in the project's usage ledger.
+    let lines = usage::read(&s.paths.folder.join(usage::FILE)).unwrap();
+    let [usage::Line::Call(line)] = lines.as_slice() else {
+        panic!("one call line, not {lines:?}")
+    };
+    let line = serde_json::to_value(line).unwrap();
+    assert_eq!(
+        (
+            &line["role"],
+            &line["kind"],
+            &line["agent"],
+            &line["harness"]
+        ),
+        (
+            &json!("issue-writer"),
+            &json!("issues"),
+            &json!("issue-writer"),
+            &json!("claude-code")
+        )
+    );
+    assert_eq!(
+        (
+            &line["model"],
+            &line["effort"],
+            &line["ended"],
+            &line["issue"]
+        ),
+        (
+            &json!("claude-opus-5-5"),
+            &json!("medium"),
+            &json!("answered"),
+            &json!(null)
+        )
+    );
+    assert_eq!(line["session"], json!(call.session.id().0));
 }
 
 // The guard on every command, and the recorder of its ledger after each.

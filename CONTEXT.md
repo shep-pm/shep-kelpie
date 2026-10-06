@@ -227,6 +227,14 @@ timing phase is a bucket of time, not the stage a work item is in (its
 the last `n` finished ones.
 _Avoid_: profile, metrics
 
+**Usage ledger**:
+A project's record of every model call it made, one line each as the call
+ends, and one per finished work item, in `usage.jsonl` in its folder.
+**Units** weigh a call's tokens as the control room was measured: cache read
+0.1, one-hour cache write 2, five-minute cache write 1.25, output 5,
+uncached input 1. `shep kelpie usage` reads it.
+_Avoid_: spend log, cost log
+
 **Lease**:
 Kelpie-granted use of a shared resource. The dog's **book** holds a review
 bot's window, which it books from the bot's file, and `cargo-test`, a share

@@ -113,6 +113,13 @@ pub(crate) fn a_work_item() -> WorkItem {
             queued: false,
         }),
         attached: None,
+        counts: crate::work_item::Counts {
+            review_rounds: 2,
+            fix_turns: 1,
+            rulings: 1,
+            worker_unreported: 0,
+            reviewer_unreported: 0,
+        },
         calls: vec![CallRecord {
             role: Role::Worker,
             at: Timestamp(10),
@@ -120,6 +127,7 @@ pub(crate) fn a_work_item() -> WorkItem {
             usage: Usage {
                 input: 1,
                 cache_write: 2,
+                cache_write_5m: 0,
                 cache_read: 3,
                 output: 4,
             },

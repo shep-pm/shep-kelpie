@@ -14,6 +14,7 @@ fn usage(n: u64) -> Usage {
     Usage {
         input: n,
         cache_write: 10 * n,
+        cache_write_5m: 0,
         cache_read: 100 * n,
         output: 1000 * n,
     }

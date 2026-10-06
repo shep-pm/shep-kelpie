@@ -263,9 +263,17 @@ fn parse_result(output: &Output, session: &Session) -> Result<AgentReply, AgentE
         cache_creation_input_tokens: u64,
         cache_read_input_tokens: u64,
         output_tokens: u64,
+        // The cache writes split by how long they are kept, where reported
+        #[serde(default)]
+        cache_creation: Option<CacheCreation>,
         // One entry per model request, the last one's input being the context
         #[serde(default)]
         iterations: Vec<Iteration>,
+    }
+    #[derive(Deserialize)]
+    struct CacheCreation {
+        #[serde(default)]
+        ephemeral_5m_input_tokens: u64,
     }
     #[derive(Deserialize)]
     struct Iteration {
@@ -300,6 +308,8 @@ fn parse_result(output: &Output, session: &Session) -> Result<AgentReply, AgentE
         usage: Usage {
             input: u.input_tokens,
             cache_write: u.cache_creation_input_tokens,
+            cache_write_5m: (u.cache_creation.map_or(0, |c| c.ephemeral_5m_input_tokens))
+                .min(u.cache_creation_input_tokens),
             cache_read: u.cache_read_input_tokens,
             output: u.output_tokens,
         },
@@ -520,11 +530,30 @@ mod tests {
             Usage {
                 input: 10,
                 cache_write: 8003,
+                cache_write_5m: 0,
                 cache_read: 13673,
                 output: 53,
             }
         );
         assert_eq!(reply.session_cost, Some(Cost(17_648_300)));
+    }
+
+    // The recorded results cache for an hour only, so the split is moved here.
+    #[test]
+    fn five_minute_cache_writes_are_kept_apart_from_the_hour_s() {
+        let split = RESULT.replace(
+            r#""cache_creation":{"ephemeral_1h_input_tokens":8003,"ephemeral_5m_input_tokens":0}"#,
+            r#""cache_creation":{"ephemeral_1h_input_tokens":5003,"ephemeral_5m_input_tokens":3000}"#,
+        );
+        assert_ne!(split, RESULT, "the recorded split moved");
+        let reply = parse_result(&output(0, &split, ""), &fresh()).unwrap();
+        assert_eq!(
+            (reply.usage.cache_write, reply.usage.cache_write_5m),
+            (8003, 3000)
+        );
+        let none = RESULT.replace(r#""cache_creation":{"#, r#""cache_made":{"#);
+        let reply = parse_result(&output(0, &none, ""), &fresh()).unwrap();
+        assert_eq!(reply.usage.cache_write_5m, 0, "no split is all an hour's");
     }
 
     #[test]
@@ -568,6 +597,7 @@ mod tests {
                 Usage {
                     input: 10,
                     cache_write: 8984,
+                    cache_write_5m: 0,
                     cache_read: 13673,
                     output: 148,
                 },
@@ -580,6 +610,7 @@ mod tests {
                 Usage {
                     input: 10,
                     cache_write: 193,
+                    cache_write_5m: 0,
                     cache_read: 22657,
                     output: 34,
                 },

@@ -186,7 +186,13 @@ impl Agents for CodexCli {
             RunError::Stopped => AgentError::Stopped,
             RunError::TimedOut => AgentError::TimedOut(CODEX),
         })?;
-        let known = thread(&files, call.session.id())?;
+        // The model has run by now, so what fails from here is the call's,
+        // not its setup's.
+        let ran = |e: AgentError| match e {
+            AgentError::Setup(why) => AgentError::Failed(CODEX, why),
+            e => e,
+        };
+        let known = thread(&files, call.session.id()).map_err(ran)?;
         let turn = parse_result(&output, known.as_ref())?;
         let before = known.map(|k| k.spent).unwrap_or_default();
         let record = Thread {
@@ -196,7 +202,11 @@ impl Agents for CodexCli {
         let path = files.thread(call.session.id());
         let text = serde_json::to_string(&record).expect("a thread is JSON");
         std::fs::write(&path, text).map_err(|e| {
-            AgentError::Setup(format!("cannot write {}: {}", path.display(), e.kind()))
+            ran(AgentError::Setup(format!(
+                "cannot write {}: {}",
+                path.display(),
+                e.kind()
+            )))
         })?;
         Ok(AgentReply {
             session_id: call.session.id().clone(),
@@ -393,6 +403,7 @@ impl Spent {
                 .saturating_sub(cache_read)
                 .saturating_sub(cache_write),
             cache_write,
+            cache_write_5m: 0,
             cache_read,
             output: less(self.output_tokens, before.output_tokens),
         }

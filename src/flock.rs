@@ -12,6 +12,7 @@ mod attach;
 pub mod control;
 mod pm;
 pub mod rule;
+mod usage;
 mod verbs;
 
 pub use verbs::{USAGE, VERBS, main, split_project, verb_first};

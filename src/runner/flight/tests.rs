@@ -104,6 +104,7 @@ fn usage() -> Usage {
     Usage {
         input: 1,
         cache_write: 10,
+        cache_write_5m: 0,
         cache_read: 100,
         output: 1000,
     }

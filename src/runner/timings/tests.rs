@@ -79,6 +79,7 @@ fn finished(issue: u64, merged: bool, pairs: &[(TimingPhase, u64)]) -> Finished 
         at: crate::ports::Timestamp(Rig::EPOCH + issue),
         wall: seconds.total(),
         seconds,
+        spend: None,
     }
 }
 

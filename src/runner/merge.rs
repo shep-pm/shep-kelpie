@@ -377,7 +377,9 @@ impl Runner {
             at: now,
             wall: timings.wall,
             seconds: timings.seconds.clone(),
+            spend: Some(item.tally()),
         };
+        let line = crate::usage::FinishedLine::of(&record, &item.tally());
         let report = StepReport::Finished {
             issue: item.issue,
             pull_request: item.pull_request,
@@ -397,6 +399,7 @@ impl Runner {
         }
         next.record_finished(record);
         self.save(next)?;
+        self.ledger.append(&crate::usage::Line::Finished(line));
         self.mark_held(issue, false);
         Ok(Begin::Report(report))
     }

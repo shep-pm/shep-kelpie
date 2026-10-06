@@ -219,18 +219,27 @@ impl AgentCall {
 pub struct Usage {
     /// Uncached input tokens
     pub input: u64,
-    /// Tokens written to the prompt cache
+    /// Tokens written to the prompt cache, for five minutes or an hour
     pub cache_write: u64,
+    /// The part of `cache_write` cached for five minutes, which costs less
+    /// than an hour's, where the harness tells them apart
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub cache_write_5m: u64,
     /// Tokens read from the prompt cache
     pub cache_read: u64,
     /// Output tokens, thinking included
     pub output: u64,
 }
 
+fn is_zero(n: &u64) -> bool {
+    *n == 0
+}
+
 impl std::ops::AddAssign for Usage {
     fn add_assign(&mut self, other: Self) {
         self.input = self.input.saturating_add(other.input);
         self.cache_write = self.cache_write.saturating_add(other.cache_write);
+        self.cache_write_5m = self.cache_write_5m.saturating_add(other.cache_write_5m);
         self.cache_read = self.cache_read.saturating_add(other.cache_read);
         self.output = self.output.saturating_add(other.output);
     }
