@@ -19,7 +19,7 @@ use crate::board::READY;
 use crate::ports::{Checks, PullRequestState, Timestamp};
 use crate::settings::MergeAuthority;
 use crate::skills::Step;
-use crate::state::{RulingKind, StateError};
+use crate::state::{RulingKind, StateError, Stuck};
 use crate::work_item::{Phase, Turn, foreign_change};
 use crate::worktree::{self, Base};
 
@@ -50,7 +50,7 @@ impl Runner {
                 let notice = item.merge_tried.as_deref() == Some(pr.head.as_str());
                 return self.merged(item.issue, number, pr.head, notice);
             }
-            PullRequestState::Closed => return self.raise(number, RulingKind::Closed),
+            PullRequestState::Closed => return self.raise(number, Stuck::Closed.into()),
         }
         let known = item.known.clone();
         let now = self.ports.clock.now();
@@ -145,7 +145,7 @@ impl Runner {
     ) -> Result<Begin, StateError> {
         let item = self.current().expect("CI runs on a work item");
         if item.red_head.as_deref() == Some(head.as_str()) {
-            return self.raise(number, RulingKind::StillRed { head, checks });
+            return self.raise(number, Stuck::StillRed { head, checks }.into());
         }
         let prompt = self
             .skills

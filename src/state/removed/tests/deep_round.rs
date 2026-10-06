@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use super::saved_with;
 use crate::ports::Finding;
 use crate::settings::AgentName;
-use crate::state::{Fix, RulingKind, StateError};
+use crate::state::{Fix, RulingKind, StateError, Stuck};
 use crate::work_item::{Phase, Review, ReviewStage};
 
 fn high() -> Value {
@@ -166,14 +166,14 @@ fn a_fix_not_pushed_ruling_of_the_deep_round_loads_without_its_why() {
     let state = store.load().unwrap().unwrap();
     assert_eq!(
         state.rulings[0].kind,
-        RulingKind::FixNotPushed {
+        RulingKind::from(Stuck::FixNotPushed {
             fix: Fix::Review(round_2(ReviewStage::Fixing {
                 head: Some("c0ffee".into()),
                 sent: Vec::new(),
                 deferred_before: Vec::new(),
             })),
             prompt: "p".into(),
-        }
+        })
     );
     store.save(&state).unwrap();
     let saved = fs::read_to_string(dir.path().join("state.json")).unwrap();

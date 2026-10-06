@@ -130,7 +130,7 @@ impl RulingIds {
 mod tests {
     use super::*;
     use crate::ports::Timestamp;
-    use crate::state::RulingKind;
+    use crate::state::Stuck;
 
     // A project's state file holding open rulings `open`, with `last` as its last id.
     fn project(home: &Path, name: &str, last: u64, open: &[u64]) {
@@ -143,7 +143,7 @@ mod tests {
                 issue: Some(7),
                 question: format!("Ruling {id}?"),
                 pull_request: None,
-                kind: RulingKind::Closed,
+                kind: Stuck::Closed.into(),
                 alerted: false,
             })
             .collect();

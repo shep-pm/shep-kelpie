@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use super::saved_with;
 use crate::ports::Finding;
 use crate::settings::AgentName;
-use crate::state::{Fix, RulingKind, StateError};
+use crate::state::{Fix, RulingKind, StateError, Stuck};
 use crate::test::a_work_item;
 use crate::work_item::{CallKind, Phase, Review, ReviewStage, TimingPhase};
 
@@ -165,21 +165,21 @@ fn a_review_kept_by_a_ruling_or_a_resume_loses_the_loops_fields_too() {
     );
     assert_eq!(
         state.rulings[0].kind,
-        RulingKind::FixNotPushed {
+        RulingKind::from(Stuck::FixNotPushed {
             fix: Fix::Review(round_3(ReviewStage::Fixing {
                 head: Some("c0ffee".into()),
                 sent: Vec::new(),
                 deferred_before: Vec::new(),
             })),
             prompt: "p".into(),
-        }
+        })
     );
     assert_eq!(
         state.rulings[1].kind,
-        RulingKind::LocalModelSpilled {
+        RulingKind::from(Stuck::LocalModelSpilled {
             review: round_3(ReviewStage::Round),
-            reason: "r".into(),
-        }
+            why: "r".into(),
+        })
     );
 }
 

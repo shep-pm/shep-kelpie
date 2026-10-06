@@ -153,7 +153,7 @@ pub struct WorkItem {
     #[serde(default)]
     pub qwen: QwenTally,
     /// Whether the forge refused a merge under `auto` since the last
-    /// ruling on one. A second refusal raises a `merge-refused` ruling.
+    /// ruling on one. A second refusal raises a `stuck` ruling for `merge-refused`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub merge_refused: bool,
     /// Whether a worker turn already ended with no pull request and no

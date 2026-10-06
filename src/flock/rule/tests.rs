@@ -4,7 +4,7 @@ use super::*;
 
 const FORMS: &str = "It takes `shep kelpie rule 14 yes` or `shep kelpie rule 14 no <note>`";
 use crate::ports::Timestamp;
-use crate::state::{ProjectState, Resume, RulingKind, StateStore};
+use crate::state::{ProjectState, Resume, RulingKind, StateStore, Stuck};
 
 fn yes_or_no(id: u64) -> Ruling {
     Ruling {
@@ -12,7 +12,7 @@ fn yes_or_no(id: u64) -> Ruling {
         issue: Some(7),
         question: format!("Merge pull request #71? `shep kelpie rule {id} yes` merges it"),
         pull_request: Some(71),
-        kind: RulingKind::Closed,
+        kind: RulingKind::from(Stuck::Closed),
         alerted: true,
     }
 }

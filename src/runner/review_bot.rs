@@ -32,7 +32,7 @@ use crate::lease::wire::WindowFact;
 use crate::ports::{Finding, PullRequestState, Timestamp, Visibility};
 use crate::review_bot::{Activity, Bot, BotReviewer, Reading, ReviewWindow};
 use crate::settings::{AgentName, ListedReviewer};
-use crate::state::{RulingKind, StateError};
+use crate::state::{StateError, Stuck};
 use crate::work_item::{BotSkipped, Phase, Review, ReviewStage, WorkItem};
 
 // A summon the bot gave no sign of in fifteen minutes may never have
@@ -118,7 +118,7 @@ impl Runner {
             }
             Ok(PullRequestState::Closed) => {
                 self.leave_round();
-                return self.raise(number, RulingKind::Closed);
+                return self.raise(number, Stuck::Closed.into());
             }
             Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}: {e}"))),
         }

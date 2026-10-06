@@ -12,6 +12,7 @@ mod bot_rounds;
 mod deep_round;
 mod review_loop;
 mod reviewers;
+mod ruling_kinds;
 mod shots;
 mod timings;
 mod worker;

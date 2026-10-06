@@ -24,11 +24,11 @@ use crate::ports::{Finding, SessionId, Timestamp};
 use crate::settings::Account;
 use crate::work_item::{Attached, Known, Phase, Review, Seconds, Turn, WorkItem};
 
-/// The state file's format version. 8 added the project manager's session,
-/// notes and attach, 7 a work item's `attached`, 6 folded the timing phases
-/// to six, and 5 added the board's events, each of which an older kelpie
-/// refuses
-const VERSION: u32 = 8;
+/// The state file's format version. 9 folded the ruling kinds to six, 8 added
+/// the project manager's session, notes and attach, 7 a work item's
+/// `attached`, 6 folded the timing phases to six, and 5 added the board's
+/// events, each of which an older kelpie refuses
+const VERSION: u32 = 9;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
@@ -320,57 +320,6 @@ pub enum RulingKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         unreviewed: Option<String>,
     },
-    /// Kelpie could not rebase the branch onto `main`. A yes looks again.
-    Rebase {
-        /// Why
-        reason: String,
-    },
-    /// CI failed again on a head whose red run the worker already had. A yes looks again.
-    StillRed {
-        /// The head
-        head: String,
-        /// The checks that failed
-        checks: Vec<String>,
-    },
-    /// The forge refused an automatic merge again after a catch-up. A yes
-    /// looks again.
-    MergeRefused {
-        /// The head the second refusal was about
-        head: String,
-        /// The forge's reason
-        reason: String,
-    },
-    /// Someone closed the pull request without merging it. A yes drops the
-    /// work item and keeps its branch on the forge.
-    Closed,
-    /// The local model sat partly or wholly on the CPU, so a review round was
-    /// not run. A yes runs the same round again, once the model is back on
-    /// the GPU.
-    LocalModelSpilled {
-        /// The review, at the round that was not run
-        review: Review,
-        /// Which model, and how much of it is on the GPU
-        reason: String,
-    },
-    /// The worker's fix turn for held findings ended with nothing pushed. A
-    /// yes sends it the same findings again.
-    FixNotPushed {
-        /// The round whose findings hold, still fixing
-        #[serde(flatten)]
-        fix: Fix,
-        /// The fix turn a yes starts
-        prompt: String,
-    },
-    /// A merged pull request left confirmed findings unfixed. A yes files
-    /// each as an issue on the project, and a no drops them.
-    FollowUp {
-        /// The findings, at their reviewer's severity
-        findings: Vec<Finding>,
-        /// Why the forge would not take them, when it has refused for hours
-        /// and a yes tries again. None when the ruling comes before filing.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        refused: Option<String>,
-    },
     /// The worker ended its turn on a question. The answer is its next turn.
     Question {
         /// The question, verbatim from the worker's question block
@@ -380,27 +329,11 @@ pub enum RulingKind {
         /// ordinary rule (a known pull request goes straight to CI)
         resume: Resume,
     },
-    /// A worker's turn ran past its ceiling and kelpie stopped it, keeping
-    /// its session. A yes resumes it; a no stops the work item.
-    TurnTimeout {
-        /// The phase the turn ran in, which a yes resumes. None in an
-        /// older state file, which resumes under Implement.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        phase: Option<Phase>,
-    },
-    /// A worker's turn could not run, or its call failed. A yes retries the
-    /// step that failed; a no stops the work item.
-    TurnFailed {
-        /// Why it failed
-        reason: String,
-        /// The phase the turn ran in, which a yes goes back to
-        phase: Phase,
-        /// The turn as it stood before it failed, which a yes puts back
-        retry: Turn,
-    },
+    /// The work item cannot go on by itself. Its reason decides what a yes does.
+    Stuck(Stuck),
     /// The pull request changes agents' own files, which decide what an
     /// agent runs in the worktree. A yes accepts them at this head; a no stops the work item.
-    ClaudeFiles {
+    AgentFiles {
         /// The head that changes them
         head: String,
         /// The files it changes
@@ -416,6 +349,88 @@ pub enum RulingKind {
         /// The labels and ready state kelpie adopts as its own on a yes
         known: Known,
     },
+    /// A merged pull request left confirmed findings unfixed. A yes files
+    /// each as an issue on the project, and a no drops them.
+    FollowUp {
+        /// The findings, at their reviewer's severity
+        findings: Vec<Finding>,
+        /// Why the forge would not take them, when it has refused for hours
+        /// and a yes tries again. None when the ruling comes before filing.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        refused: Option<String>,
+    },
+}
+
+/// Why a work item is stuck, saved in its ruling's kind as `reason`
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "reason", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum Stuck {
+    /// Kelpie could not rebase the branch onto `main`. A yes looks again.
+    Rebase {
+        /// Why
+        why: String,
+    },
+    /// CI failed again on a head whose red run the worker already had. A yes looks again.
+    StillRed {
+        /// The head
+        head: String,
+        /// The checks that failed
+        checks: Vec<String>,
+    },
+    /// The forge refused an automatic merge again after a catch-up. A yes
+    /// looks again.
+    MergeRefused {
+        /// The head the second refusal was about
+        head: String,
+        /// The forge's reason
+        why: String,
+    },
+    /// Someone closed the pull request without merging it. A yes drops the
+    /// work item and keeps its branch on the forge.
+    Closed,
+    /// The local model sat partly or wholly on the CPU, so a review round was
+    /// not run. A yes runs the same round again, once the model is back on
+    /// the GPU.
+    LocalModelSpilled {
+        /// The review, at the round that was not run
+        review: Review,
+        /// Which model, and how much of it is on the GPU
+        why: String,
+    },
+    /// The worker's fix turn for held findings ended with nothing pushed. A
+    /// yes sends it the same findings again.
+    FixNotPushed {
+        /// The round whose findings hold, still fixing
+        #[serde(flatten)]
+        fix: Fix,
+        /// The fix turn a yes starts
+        prompt: String,
+    },
+    /// A worker's turn ran past its ceiling and kelpie stopped it, keeping
+    /// its session. A yes resumes it; a no stops the work item.
+    TurnTimeout {
+        /// The phase the turn ran in, which a yes resumes. None in an
+        /// older state file, which resumes under Implement.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        phase: Option<Phase>,
+    },
+    /// A worker's turn could not run, or its call failed. A yes retries the
+    /// step that failed; a no stops the work item.
+    TurnFailed {
+        /// Why it failed
+        why: String,
+        /// The phase the turn ran in, which a yes goes back to
+        phase: Phase,
+        /// The turn as it stood before it failed, which a yes puts back
+        retry: Turn,
+    },
+}
+
+impl From<Stuck> for RulingKind {
+    fn from(reason: Stuck) -> Self {
+        Self::Stuck(reason)
+    }
 }
 
 /// The round a fix that pushed nothing was for
@@ -605,6 +620,7 @@ impl StateStore {
         if found <= BOT_ROUNDS {
             removed::fold_bot_rounds(&mut value);
         }
+        removed::fold_ruling_kinds(&mut value);
         let state: ProjectState = serde_json::from_value(value).map_err(malformed)?;
         Ok(Some(ProjectState {
             version: VERSION,

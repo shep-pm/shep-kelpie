@@ -680,7 +680,8 @@ fn a_fix_turn_that_pushes_nothing_parks_and_a_yes_sends_the_threads_again() {
         path.display()
     );
     let kind = &status["rulings"][0]["kind"];
-    assert_eq!(kind["kind"], "fix-not-pushed");
+    assert_eq!(kind["kind"], "stuck");
+    assert_eq!(kind["reason"], "fix-not-pushed");
     assert_eq!(kind["prompt"], json!(again));
     assert_eq!(kind["review"]["reviewer"], "coderabbit");
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id }));

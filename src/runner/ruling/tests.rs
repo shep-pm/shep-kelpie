@@ -19,28 +19,28 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
         head: None,
     };
     let kinds = [
-        RulingKind::Rebase {
-            reason: "conflict in a.txt".into(),
-        },
-        RulingKind::StillRed {
+        RulingKind::from(Stuck::Rebase {
+            why: "conflict in a.txt".into(),
+        }),
+        RulingKind::from(Stuck::StillRed {
             head: "abcdef123".into(),
             checks: vec!["test".into(), "lint".into()],
-        },
-        RulingKind::Closed,
-        RulingKind::FixNotPushed {
+        }),
+        RulingKind::from(Stuck::Closed),
+        RulingKind::from(Stuck::FixNotPushed {
             fix: Fix::Review(review),
             prompt: "fix it".into(),
-        },
+        }),
         RulingKind::Question {
             asked: "Which flag?".into(),
             resume: Resume::Nothing,
         },
-        RulingKind::TurnTimeout { phase: None },
-        RulingKind::TurnFailed {
-            reason: "boom".into(),
+        RulingKind::from(Stuck::TurnTimeout { phase: None }),
+        RulingKind::from(Stuck::TurnFailed {
+            why: "boom".into(),
             phase: Phase::Implement,
             retry: Turn::Next { prompt: "x".into() },
-        },
+        }),
         RulingKind::ForeignChange {
             description: "the `bug` label was added".into(),
             known,

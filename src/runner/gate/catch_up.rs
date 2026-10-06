@@ -6,7 +6,7 @@
 
 use crate::runner::Runner;
 use crate::runner::report::{Begin, StepReport};
-use crate::state::{RulingKind, StateError};
+use crate::state::{StateError, Stuck};
 use crate::work_item::{Conflict, Phase, Turn};
 use crate::worktree::{self, Rebase};
 
@@ -45,7 +45,7 @@ impl Runner {
             Ok(Rebase::Conflicts { main, files }) => {
                 self.conflicted(number, head.to_owned(), main, files)
             }
-            Ok(Rebase::Refused(reason)) => self.raise(number, RulingKind::Rebase { reason }),
+            Ok(Rebase::Refused(reason)) => self.raise(number, Stuck::Rebase { why: reason }.into()),
             Err(e) => Ok(self.gate_failed(format!("cannot rebase #{number}: {e}"))),
         }
     }
@@ -66,7 +66,7 @@ impl Runner {
             sent.head == head || sent.main == main || sent.turns >= CONFLICT_TURNS
         }) {
             let reason = format!("it conflicts with main in {}", files.join(", "));
-            return self.raise(number, RulingKind::Rebase { reason });
+            return self.raise(number, Stuck::Rebase { why: reason }.into());
         }
         let issue = item.issue;
         let prompt = conflict_prompt(number, &files);
