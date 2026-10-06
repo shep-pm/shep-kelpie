@@ -269,6 +269,8 @@ shep-kelpie keeps everything under `$SHEP_HOME/kelpie`, or the folder `KELPIE_HO
 
 So a project can't be named for one of shep-kelpie's own folders. Socket paths must stay under 104 bytes, so a runner with a long `SHEP_HOME` refuses to start and names the path that is too long. Keep a shepherd's `SHEP_HOME` short.
 
+A runner or the dog refuses to start while `~/.kelpie` still holds its files from before shep-kelpie's home moved under `$SHEP_HOME`. Run the previous release once, which moves them, or move them by hand.
+
 ### Upgrading
 
 ```sh

@@ -292,7 +292,7 @@ mod tests {
 
     #[test]
     fn a_paused_project_dispatches_nothing() {
-        let rig = Rig::new("zeus");
+        let rig = Rig::new("acme");
         let runner = rig.open().unwrap();
         rig.forge.list_ready(2, false);
         assert_eq!(step(&runner).unwrap(), None);

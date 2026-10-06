@@ -376,7 +376,7 @@ fn open_items(rig: &Rig, runner: &Mutex<Runner>) -> Vec<u64> {
 
 #[test]
 fn the_board_fills_a_free_slot_and_never_takes_an_open_issue_again() {
-    let (rig, runner) = two_free_slots("zeus");
+    let (rig, runner) = two_free_slots("acme");
     for issue in [7, 8, 9] {
         rig.forge.list_ready(issue, false);
     }

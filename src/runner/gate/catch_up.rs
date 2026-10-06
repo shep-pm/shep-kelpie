@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn a_conflict_with_a_main_that_moved_again_goes_to_the_worker_again() {
-        let (rig, runner, _) = Rig::with_pull_request("zeus");
+        let (rig, runner, _) = Rig::with_pull_request("acme");
         rig.land_on_origin("work.txt");
         step(&runner).unwrap();
         rig.claude.script([Scripted::Push("extra.txt", "extra\n")]);
@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn a_worktree_with_uncommitted_changes_is_not_rebased() {
-        let (rig, runner, head) = Rig::with_pull_request("zeus");
+        let (rig, runner, head) = Rig::with_pull_request("acme");
         std::fs::write(rig.worktree_7().join("work.txt"), "half done\n").unwrap();
         rig.land_on_origin("landed.txt");
         let (_, question) = ruling_report(step(&runner).unwrap());

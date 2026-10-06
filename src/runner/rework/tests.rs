@@ -126,7 +126,7 @@ fn a_reworked_pull_request_goes_through_every_gate_to_the_merge_ruling() {
 
 #[test]
 fn a_rework_turn_past_its_ceiling_still_owes_the_review_loop_after_a_yes() {
-    let rig = Rig::new("zeus");
+    let rig = Rig::new("acme");
     reviewed_71(&rig);
     let runner = running(&rig);
     rig.ask(&runner, "rework", Some("71"));
@@ -306,7 +306,7 @@ fn a_rework_while_a_work_item_is_in_flight_is_refused() {
 
 #[test]
 fn the_worker_reads_only_its_own_pull_requests_review() {
-    let rig = Rig::new("zeus");
+    let rig = Rig::new("acme");
     reviewed_71(&rig);
     rig.push_by_hand("kelpie/8", "work.txt");
     rig.forge.open_pull_request(72, "kelpie/8", &[8]);
@@ -459,7 +459,7 @@ fn a_rework_is_refused_while_the_forge_cannot_show_coderabbits_reviews() {
 
 #[test]
 fn a_rework_turn_that_pushes_nothing_is_sent_back_once_then_parks_on_a_ruling() {
-    let rig = Rig::new("zeus");
+    let rig = Rig::new("acme");
     reviewed_71(&rig);
     let runner = running(&rig);
     rig.ask(&runner, "rework", Some("71"));
@@ -504,7 +504,7 @@ fn a_rework_turn_that_pushes_nothing_is_sent_back_once_then_parks_on_a_ruling() 
 
 #[test]
 fn a_rework_turn_sent_back_that_then_pushes_goes_on_to_the_review_loop() {
-    let rig = Rig::new("zeus");
+    let rig = Rig::new("acme");
     reviewed_71(&rig);
     let runner = running(&rig);
     rig.ask(&runner, "rework", Some("71"));

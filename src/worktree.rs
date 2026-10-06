@@ -243,33 +243,6 @@ pub fn remove(
     }
 }
 
-/// Points git's links from `repo` at each worktree in `worktrees` again
-///
-/// A move that died before it relinked, or a link git wrote relative, would
-/// otherwise be pruned with the next work item's. Repair changes nothing for
-/// a link that is right.
-///
-/// # Errors
-///
-/// [`WorktreeError`] when git cannot repair them.
-pub fn repair(repo: &Path, worktrees: &Path) -> Result<(), WorktreeError> {
-    let Ok(entries) = std::fs::read_dir(worktrees) else {
-        return Ok(());
-    };
-    let mut trees: Vec<PathBuf> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|tree| tree.join(".git").is_file())
-        .collect();
-    if trees.is_empty() {
-        return Ok(());
-    }
-    trees.sort();
-    let mut args = vec!["worktree".as_ref(), "repair".as_ref()];
-    args.extend(trees.iter().map(|t| t.as_os_str()));
-    git(repo, args).map(drop)
-}
-
 /// Whether `full_ref` is a branch on `origin` right now, asked of the remote
 fn on_origin(repo: &Path, full_ref: &str) -> Result<bool, WorktreeError> {
     Ok(!git(repo, ["ls-remote", "--heads", "origin", full_ref])?.is_empty())

@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn a_runner_restarted_while_the_pull_request_is_queued_keeps_waiting() {
-        let (rig, runner, _) = queued("zeus");
+        let (rig, runner, _) = queued("acme");
         drop(runner);
         let runner = rig.open().unwrap();
         assert_eq!(step(&runner).unwrap(), None);

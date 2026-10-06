@@ -231,12 +231,8 @@ async fn serve() -> Result<(), String> {
     let lock = GpuLock::under(&gpu::temp_dir());
     println!("the GPU lock is {}", lock.path().display());
     let file = BookFile::new(book_path()?);
-    // The adopted dog never had `KELPIE_HOME`, so its old book was always under `~/.kelpie`.
-    if let (Some(folder), Some(user)) = (file.path().parent(), std::env::var_os("HOME")) {
-        let old = PathBuf::from(user).join(home::OLD);
-        for line in home::migrate::run(&home::migrate::dog(&old, folder))? {
-            println!("{line}");
-        }
+    if let (Some(folder), Some(old)) = (file.path().parent(), home::old_dog_home()) {
+        home::dog_may_start(&old, folder)?;
     }
     if let Some(removed) = left_over::remove(&client, file.path()).await? {
         println!("{removed}");

@@ -16,7 +16,7 @@ fn again(head: &str) -> Option<StepReport> {
 
 #[test]
 fn a_summon_with_no_sign_is_sent_once_more_after_fifteen_minutes() {
-    let (rig, runner, head) = summoned("zeus");
+    let (rig, runner, head) = summoned("acme");
     let summon = now(&rig);
     rig.clock.advance(HEARD_WAIT - 1);
     assert_eq!(step(&runner).unwrap(), None);
@@ -47,7 +47,7 @@ fn a_summon_with_no_sign_is_sent_once_more_after_fifteen_minutes() {
 
 #[test]
 fn a_summon_with_an_in_progress_status_is_not_sent_again() {
-    let (rig, runner, head) = summoned("zeus");
+    let (rig, runner, head) = summoned("acme");
     rig.forge.coderabbit.progress(71, &head, now(&rig) + 20);
     rig.clock.advance(HEARD_WAIT);
     assert_eq!(step(&runner).unwrap(), None);
@@ -57,7 +57,7 @@ fn a_summon_with_an_in_progress_status_is_not_sent_again() {
 
 #[test]
 fn a_change_to_its_comment_is_a_sign_too() {
-    let (rig, runner, _) = summoned("zeus");
+    let (rig, runner, _) = summoned("acme");
     rig.forge.coderabbit.start(71, now(&rig) + 20);
     rig.clock.advance(HEARD_WAIT);
     assert_eq!(step(&runner).unwrap(), None);
@@ -66,7 +66,7 @@ fn a_change_to_its_comment_is_a_sign_too() {
 
 #[test]
 fn a_rate_limit_notice_is_a_sign_and_reschedules_as_before() {
-    let (rig, runner, _) = summoned("zeus");
+    let (rig, runner, _) = summoned("acme");
     rig.forge.coderabbit.refuse(71, now(&rig) + 20, 30);
     rig.clock.advance(30);
     assert!(matches!(
@@ -77,7 +77,7 @@ fn a_rate_limit_notice_is_a_sign_and_reschedules_as_before() {
 
 #[test]
 fn a_review_stuck_in_progress_is_passed_over_after_two_hours() {
-    let (rig, runner, head) = summoned("zeus");
+    let (rig, runner, head) = summoned("acme");
     rig.forge.coderabbit.progress(71, &head, now(&rig) + 20);
     rig.clock.advance(REVIEW_WAIT - 1);
     assert_eq!(step(&runner).unwrap(), None);
@@ -93,7 +93,7 @@ fn a_review_stuck_in_progress_is_passed_over_after_two_hours() {
 
 #[test]
 fn a_second_silence_passes_the_bot_over_at_two_hours() {
-    let (rig, runner, head) = summoned("zeus");
+    let (rig, runner, head) = summoned("acme");
     rig.clock.advance(HEARD_WAIT);
     assert_eq!(step(&runner).unwrap(), again(&head));
     rig.clock.advance(REVIEW_WAIT - HEARD_WAIT - 1);

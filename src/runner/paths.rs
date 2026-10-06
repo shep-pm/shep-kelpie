@@ -185,34 +185,4 @@ mod tests {
         let error = paths.sockets_fit().unwrap_err();
         assert!(error.contains("lease.sock"), "{error}");
     }
-
-    // A worktree moved by a start that died before it relinked, or written
-    // relative by git: the runner points git at it again as it opens.
-    #[test]
-    fn an_opening_runner_repairs_git_s_links_to_its_worktrees() {
-        use crate::test::{Rig, git};
-        let rig = Rig::new("koji");
-        let was = rig.home.path().join("elsewhere/7");
-        git(
-            &rig.repo(),
-            &[
-                "worktree",
-                "add",
-                "--quiet",
-                "-b",
-                "kelpie/7",
-                was.to_str().unwrap(),
-            ],
-        );
-        let tree = rig.paths().worktree(7);
-        std::fs::create_dir_all(tree.parent().unwrap()).unwrap();
-        std::fs::rename(&was, &tree).unwrap();
-        let listed = || git(&rig.repo(), &["worktree", "list", "--porcelain"]);
-        assert!(listed().contains("prunable"), "{}", listed());
-
-        drop(rig.open().unwrap());
-
-        assert!(listed().contains("koji/worktrees/7"), "{}", listed());
-        assert!(!listed().contains("prunable"), "{}", listed());
-    }
 }
