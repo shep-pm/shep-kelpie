@@ -25,7 +25,7 @@ use crate::state::ids::RulingIds;
 use crate::state::{ProjectState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{
-    Known, Phase, QwenTally, ReviewCallState, Timings, Turn, WorkItem, new_session_id,
+    Known, Phase, QwenTally, ReviewCallState, Seat, Timings, Turn, WorkItem, new_session_id,
 };
 
 mod adopt;
@@ -60,6 +60,8 @@ mod left;
 mod limits_tests;
 mod merge;
 mod older_bots;
+#[cfg(test)]
+mod overlap_tests;
 mod pace;
 mod parent;
 mod paths;
@@ -74,6 +76,9 @@ mod rework;
 mod ruling;
 #[cfg(test)]
 mod several;
+mod slots;
+#[cfg(test)]
+mod slots_tests;
 mod timings;
 mod trigger;
 mod turn;
@@ -164,8 +169,9 @@ impl From<StateError> for OpenError {
 /// Why `add` was refused
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AddError {
-    /// The project has `max_items` open, or one for this issue already: the
-    /// issues of those in flight
+    /// No slot is free under `max_items`, counting the items waiting for
+    /// one, or one for this issue is open already: the issues of those in
+    /// the way
     InFlight(Vec<u64>),
     /// The forge could not show the issue
     Forge(ForgeError),
@@ -426,6 +432,10 @@ impl Runner {
                 .map(|item| self.item_status(item, now))
                 .collect(),
             max_items: self.settings.max_items.get(),
+            working: self.issues_where(|i| !i.parked() && i.seat != Seat::Waiting),
+            waiting_for_slot: self.issues_where(|i| i.seat == Seat::Waiting),
+            parked: self.parked_issues(),
+            max_parked: self.settings.max_parked,
             adopted: &self.state.adopted,
             skipped: &self.skipped,
             rulings: &self.state.rulings,
@@ -456,15 +466,15 @@ impl Runner {
     ///
     /// # Errors
     ///
-    /// [`AddError`] when the project has `max_items` open or one for this
-    /// issue already, the issue cannot be read or its `agent:` label names
+    /// [`AddError`] when the project has `max_items` working or one for this
+    /// issue open already, the issue cannot be read or its `agent:` label names
     /// no listed implementer, or the change cannot be saved. Nothing changes then.
     pub fn add(&mut self, issue: u64) -> Result<AgentName, AddError> {
         if self.state.item(issue).is_some() {
             return Err(AddError::InFlight(vec![issue]));
         }
         if !self.slot_free() {
-            return Err(AddError::InFlight(self.state.open_issues()));
+            return Err(AddError::InFlight(self.slot_issues()));
         }
         let found = self
             .ports
@@ -543,6 +553,7 @@ impl Runner {
             summon_owed: false,
             summons_owed: Default::default(),
             bots_after_ci: false,
+            seat: Seat::Held,
             threads_sent: Vec::new(),
             resolve_failures: 0,
             reviewers_skipped: Vec::new(),
@@ -559,12 +570,6 @@ impl Runner {
             counts: Default::default(),
             calls: Vec::new(),
         }
-    }
-
-    // Whether another work item may open, under `max_items`
-    pub(super) fn slot_free(&self) -> bool {
-        let max = usize::try_from(self.settings.max_items.get()).unwrap_or(usize::MAX);
-        self.state.work_items.len() < max
     }
 
     // The work item the runner is working on, while it is open
@@ -584,6 +589,7 @@ impl Runner {
     }
 
     fn save(&mut self, mut next: ProjectState) -> Result<(), StateError> {
+        slots::seat(&self.state, &mut next, self.max_items());
         self.charge(&mut next);
         self.note_changes(&mut next);
         self.store.save(&next)?;

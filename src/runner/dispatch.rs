@@ -1,12 +1,13 @@
 //! Dispatch: the board's next issue opens a work item in a free slot
 //!
-//! A running project with fewer than `max_items` open asks the board on its
-//! steps, after starting any pull request it adopted and checking its open
-//! pull requests for one asking for a rework. A queued issue waits until a
-//! slot is free, and an issue, or a pull request, whose work item is open
-//! waits for it to end. With a project manager and two or more issues the
-//! board could take, its pick goes in place of the board rule's, and a
-//! ready issue it holds waits.
+//! A running project with fewer than `max_items` working and fewer than
+//! `max_parked` parked asks the board on its steps, after starting any pull
+//! request it adopted and checking its open pull requests for one asking
+//! for a rework. A queued issue waits until a slot is free, an issue, or a
+//! pull request, whose work item is open waits for it to end, and an issue
+//! naming a file a parked item's branch changes waits for that item. With a
+//! project manager and two or more issues the board could take, its pick
+//! goes in place of the board rule's, and a ready issue it holds waits.
 
 use super::Runner;
 use super::pm::Choice;
@@ -15,8 +16,8 @@ use crate::board::{self, ReadyIssue, Skip};
 use crate::state::StateError;
 
 impl Runner {
-    // The step runs this only while a slot is free, and it opens at most one
-    // work item, so nothing here checks `max_items` again.
+    // The step runs this only while the board may open a work item, and it
+    // opens at most one, so nothing here checks `max_items` again.
     pub(super) fn dispatch(&mut self) -> Result<Begin, StateError> {
         let forge = &self.ports.forge;
         let repo = &self.settings.forge;
@@ -52,6 +53,10 @@ impl Runner {
             self.skipped = failed;
             return Ok(begin);
         }
+        // One whose paths a parked item's branch touches would build on code
+        // that may yet change, and one whose paths are unread may be one.
+        let overlaps = self.parked_overlap(&ready);
+        ready.retain(|issue| !overlaps.iter().any(|s| s.issue() == issue.number));
         let implementers = self.agents.implementer_names();
         let all = takeable(&ready, &open, &self.state.finished, &implementers);
         let held = self.pm_holds(&all);
@@ -63,6 +68,7 @@ impl Runner {
             let pick = board::pick(&ready, &open, finished, &implementers);
             let mut skipped = pick.skipped;
             skipped.extend(failed.iter().cloned());
+            skipped.extend(overlaps.iter().cloned());
             skipped.sort_by_key(Skip::issue);
             let takeable = takeable(&ready, &open, finished, &implementers);
             let Some(issue) = pick.issue else {
@@ -221,10 +227,22 @@ mod tests {
         assert!(call.prompt.starts_with("/mattpocock:implement "));
         assert!(call.prompt.contains("\nYour work item is issue #9: "));
 
-        // #9 waits on its question, still in flight, so #12 waits too.
+        // #9 is parked on its question, which frees its slot for #12.
         assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 1 }));
-        assert_eq!(step(&runner).unwrap(), None);
-        assert_eq!(rig.ask(&runner, "status", None)["work_item"]["issue"], 9);
+        assert_eq!(
+            step(&runner).unwrap(),
+            Some(StepReport::Dispatched {
+                issue: 12,
+                agent: sonnet_high(),
+                skipped: vec![],
+            })
+        );
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["work_item"]["issue"], 9);
+        assert_eq!(
+            (&status["working"], &status["parked"]),
+            (&json!([12]), &json!([9]))
+        );
         assert_eq!(rig.claude.calls().len(), 1);
     }
 

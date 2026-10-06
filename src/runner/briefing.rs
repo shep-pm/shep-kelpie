@@ -20,7 +20,7 @@ use crate::board::{ReadyIssue, Skip, priority, rule_order};
 use crate::local_paths::Surface;
 use crate::ports::{AgentCall, Timestamp};
 use crate::state::{ProjectState, StateError, write_atomically};
-use crate::work_item::{Phase, ReviewStage, Turn, WorkItem};
+use crate::work_item::{Phase, ReviewStage, Seat, Turn, WorkItem};
 
 mod events;
 mod git;
@@ -45,6 +45,10 @@ pub(super) struct BoardCache {
     bodies: Vec<(u64, String)>,
     // The paths each issue's body names, as git last matched them
     named: BTreeMap<u64, Vec<String>>,
+    // The bodies `named` was read from
+    named_from: BTreeMap<u64, String>,
+    // The files each open work item's branch changes, as git last said
+    files: BTreeMap<u64, Vec<String>>,
     git: Git,
     due: bool,
     written: Option<Timestamp>,
@@ -206,6 +210,11 @@ impl Runner {
         let now = self.ports.clock.now();
         self.brief.git = std::mem::take(&mut answers.git);
         self.brief.named = std::mem::take(&mut answers.named);
+        self.brief.named_from = std::mem::take(&mut answers.bodies).into_iter().collect();
+        // A branch git could not read this time keeps the files last read.
+        let open = self.state.open_issues();
+        self.brief.files.retain(|issue, _| open.contains(issue));
+        self.brief.files.extend(std::mem::take(&mut answers.files));
         let conflicts = (answers.merges.iter())
             .filter_map(|(&pair, merge)| match merge {
                 Merge::Conflicts(files) => Some((pair, files.clone())),
@@ -236,19 +245,7 @@ impl Runner {
 
     fn briefing(&self, now: Timestamp, answers: GitAnswers) -> Briefing<'_> {
         let items = (self.state.work_items.iter())
-            .map(|item| {
-                let diff = answers.files.get(&item.issue);
-                let named = self.brief.named.get(&item.issue);
-                let files = match (diff, named) {
-                    (Some(diff), Some(named)) if diff.is_empty() && !named.is_empty() => {
-                        Files::Named(named.clone())
-                    }
-                    (Some(diff), _) => Files::Diff(diff.clone()),
-                    (None, Some(named)) => Files::Named(named.clone()),
-                    (None, None) => Files::Unknown,
-                };
-                self.item_line(item, files, now)
-            })
+            .map(|item| self.item_line(item, self.item_files(item.issue), now))
             .collect();
         let (events, dropped) = self.state.unread_events(RECENT);
         let events = events.to_vec();
@@ -256,6 +253,11 @@ impl Runner {
             project: self.project.as_str(),
             now,
             max_items: self.settings.max_items.get(),
+            max_parked: self.settings.max_parked,
+            held: self
+                .issues_where(|i| !i.parked() && i.seat == Seat::Held)
+                .len(),
+            parked: self.parked_count(),
             main: answers.main,
             items,
             rulings: (self.state.rulings.iter())
@@ -272,6 +274,33 @@ impl Runner {
             dropped,
             conflicts: answers.merges,
         }
+    }
+
+    /// The files the work item for `issue` touches, as the board last read
+    /// them: its branch's diff, or the paths its issue names while that is empty
+    pub(super) fn item_files(&self, issue: u64) -> Files {
+        let diff = self.brief.files.get(&issue);
+        let named = self.brief.named.get(&issue);
+        match (diff, named) {
+            (Some(diff), Some(named)) if diff.is_empty() && !named.is_empty() => {
+                Files::Named(named.clone())
+            }
+            (Some(diff), _) => Files::Diff(diff.clone()),
+            (None, Some(named)) => Files::Named(named.clone()),
+            (None, None) => Files::Unknown,
+        }
+    }
+
+    /// The paths `issue`'s body names, once the board has read them from
+    /// the body as it was last read from the forge
+    pub(super) fn brief_named(&self, issue: u64) -> Option<&[String]> {
+        let body = self.brief.bodies.iter().find(|(n, _)| *n == issue);
+        let read = self.brief.named_from.get(&issue);
+        match (body, read) {
+            (Some((_, body)), Some(read)) if body == read => {}
+            _ => return None,
+        }
+        self.brief.named.get(&issue).map(Vec::as_slice)
     }
 
     fn item_line(&self, item: &WorkItem, files: Files, now: Timestamp) -> Item {
@@ -363,6 +392,24 @@ fn passed_over(skip: &Skip, shown: &dyn Fn(String) -> String) -> (String, bool) 
         Skip::Label { error, .. } => (shown(error.to_string()), true),
         Skip::Failed { error, .. } => (
             format!("cannot be read: {}", shown(events::quote(error))),
+            true,
+        ),
+        Skip::PathsUnread { unknown: None, .. } => (
+            "waits a pass for its paths to be read against parked branches".into(),
+            true,
+        ),
+        Skip::PathsUnread {
+            unknown: Some(with),
+            ..
+        } => (
+            format!("waits for #{with}'s branch, parked on a ruling, to be read"),
+            true,
+        ),
+        Skip::Overlap { with, files, .. } => (
+            format!(
+                "shares {} with #{with}, parked on a ruling",
+                shown(files.join(", "))
+            ),
             true,
         ),
         Skip::Rework { error, .. } | Skip::Adopt { error, .. } => {

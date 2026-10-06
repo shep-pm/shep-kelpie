@@ -33,8 +33,9 @@ const REVIEW_FILE: &str = "maintainer-review.md";
 /// Why `rework` was refused
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReworkError {
-    /// The project has `max_items` open, or one for this issue already: the
-    /// issues of those in flight
+    /// No slot is free under `max_items`, counting the items waiting for
+    /// one, or one for this issue is open already: the issues of those in
+    /// the way
     InFlight(Vec<u64>),
     /// The forge could not show the pull request
     PullRequest(u64, ForgeError),
@@ -127,7 +128,7 @@ impl Runner {
     /// save that fails after the triage labels began coming off leaves them off.
     pub fn rework(&mut self, number: u64) -> Result<AgentName, ReworkError> {
         if !self.slot_free() {
-            return Err(ReworkError::InFlight(self.state.open_issues()));
+            return Err(ReworkError::InFlight(self.slot_issues()));
         }
         let pr = self
             .ports

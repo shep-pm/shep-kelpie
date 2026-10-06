@@ -97,6 +97,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         summon_owed: false,
         summons_owed: Default::default(),
         bots_after_ci: false,
+        seat: crate::work_item::Seat::Held,
         threads_sent: Vec::new(),
         resolve_failures: 0,
         reviewers_skipped: Vec::new(),

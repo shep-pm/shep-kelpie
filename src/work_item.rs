@@ -16,6 +16,7 @@ mod follow_ups;
 mod heads;
 mod local;
 mod review;
+mod seat;
 mod spend;
 mod tally;
 mod timings;
@@ -24,6 +25,7 @@ pub use bots::BotSkipped;
 pub use follow_ups::FollowUps;
 pub use local::LOCAL_FAILURES_DOWN;
 pub use review::{Review, ReviewStage};
+pub use seat::Seat;
 pub use spend::{QwenTally, RoleSpend, Spend};
 pub use tally::{Counts, RoleTally, Tally};
 pub use timings::{CallKind, Seconds, Split, TimingPhase, Timings};
@@ -71,6 +73,10 @@ pub struct WorkItem {
     /// so the next summon asks it for a full review.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub rebased: bool,
+    /// Whether it holds one of the slots `max_items` sets, which a phase
+    /// that calls a model needs
+    #[serde(default, skip_serializing_if = "Seat::is_held")]
+    pub seat: Seat,
     /// Rounds in a row that left files unreviewed, by the local reviewer that
     /// ran them: ones that reviewed nothing, and ones that left the same
     /// files unreviewed again. Whatever the cause, the script's own

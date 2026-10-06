@@ -22,7 +22,7 @@ use crate::ports::{Role, Session, SessionId};
 use crate::settings::Harness;
 use crate::state::StateError;
 use crate::terminal::Foreground;
-use crate::work_item::{Attached, Holder, Phase, Review, Turn, WorkItem};
+use crate::work_item::{Attached, Holder, Phase, Review, Seat, Turn, WorkItem};
 
 /// What `attach` answers
 // wire format: `shep kelpie attach` reads it from the runner's answer
@@ -63,6 +63,9 @@ pub enum AttachError {
     Ruling(u64, u64),
     /// The work item is merging or being closed, past its worker's turns
     Merging(u64),
+    /// The work item holds no slot under `max_items`, which its worker's
+    /// session needs, and none is free for it
+    NoSlot(u64),
     /// The worker runs on a harness whose sessions resume another way
     Harness(u64, Harness, SessionId),
     /// Another live process holds the work item
@@ -99,6 +102,12 @@ impl fmt::Display for AttachError {
                 f,
                 "the work item for #{issue} is merging or closing, which no attach can \
                  hold: file a new issue for anything left to do"
+            ),
+            Self::NoSlot(issue) => write!(
+                f,
+                "the work item for #{issue} holds no slot under `max_items`, which its \
+                 worker's session needs, and none is free: `shep kelpie attach {issue}` \
+                 works once another work item ends or parks and frees one"
             ),
             Self::Harness(issue, harness, session) => write!(
                 f,
@@ -159,6 +168,7 @@ impl Runner {
             return Err(AttachError::Held(issue, held.by.pid));
         }
         let mine = attached.as_ref().is_some_and(|a| a.by == me);
+        let seated = item.seat == Seat::Held;
         let flying = self.flights.flying(issue);
         if let Some(refused) = self.refusal(item, flying) {
             if mine {
@@ -167,15 +177,18 @@ impl Runner {
             }
             return Err(refused);
         }
-        if !mine {
+        if !mine || !seated {
             let by = me.clone();
             let since = self.ports.clock.now();
             self.update(|item| {
-                item.attached = Some(Attached {
-                    by,
-                    session: None,
-                    since,
-                });
+                if !mine {
+                    item.attached = Some(Attached {
+                        by,
+                        session: None,
+                        since,
+                    });
+                }
+                item.seat = Seat::Held;
             })
             .map_err(AttachError::State)?;
         }
@@ -263,6 +276,10 @@ impl Runner {
             Phase::Ruling { id } => return Some(AttachError::Ruling(issue, id)),
             Phase::Merge { .. } | Phase::Done { .. } => return Some(AttachError::Merging(issue)),
             Phase::Implement | Phase::Review(_) | Phase::Ci { .. } => {}
+        }
+        // An attach takes a free slot for the session, as a turn would.
+        if item.seat != Seat::Held && !self.slot_open_for(issue) {
+            return Some(AttachError::NoSlot(issue));
         }
         let begun = item
             .calls

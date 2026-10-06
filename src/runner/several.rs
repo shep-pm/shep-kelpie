@@ -388,7 +388,7 @@ fn the_board_fills_a_free_slot_and_never_takes_an_open_issue_again() {
     assert_eq!(issue_of(step(&runner).unwrap()), 8, "#8's first turn");
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 2 }));
 
-    // Both slots are taken, each by a worker waiting on its question, so #9 waits.
+    // Both workers are parked on their questions, which fills `max_parked`, so #9 waits.
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(open_items(&rig, &runner), [7, 8]);
 

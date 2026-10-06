@@ -45,6 +45,8 @@ pub(in crate::runner) struct GitAnswers {
     pub(super) merges: BTreeMap<(u64, u64), Merge>,
     /// The paths each issue's body names, as files on `main`
     pub(super) named: BTreeMap<u64, Vec<String>>,
+    /// The bodies those paths were read from
+    pub(super) bodies: Vec<(u64, String)>,
 }
 
 impl GitJob {
@@ -102,6 +104,7 @@ impl GitJob {
             files,
             merges,
             named,
+            bodies,
         }
     }
 }

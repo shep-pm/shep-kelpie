@@ -1,11 +1,11 @@
 # A project's runner, as its `[[app]]` entry in your shepherd's Flockfile. The project's
 # settings are the sheep's `[app.dogs.kelpie]` table: shep keeps it and hands
 # it to the runner, and lookout edits it in the sheep's pane. Every key is
-# required except `max_items`, `pacing.enabled`,
+# required except `max_items`, `max_parked`, `pacing.enabled`,
 # `worker.allowed_domains`, `worker.build_env`, `worker.instructions_file`,
-# `worker.turn_timeout`, `skills` and `agents`, which a table written
-# before them may leave out. This entry holds the first build's defaults, for
-# shep.
+# `worker.turn_timeout`, `worker.guard_hooks`, `skills` and `agents`, which
+# a table written before them may leave out. This entry holds the first
+# build's defaults, for shep.
 
 [[app]]
 name = "shep"
@@ -28,9 +28,16 @@ merge_authority = "ask"
 # with no CI from checks not registered yet, so a repo without CI says so.
 ci = true
 
-# How many work items may be open at once. Each has its own branch,
-# worktree and gates, and the worker's turns still run one at a time.
+# How many work items may hold a slot, which a worker's turn or a review
+# needs. Each has its own branch, worktree and gates. One parked on a
+# ruling gives its slot up.
 max_items = 1
+
+# How many work items may wait parked on rulings before the board opens
+# nothing new. Items already working can still park past it, and a merged
+# item on its follow-up ruling does not count. 0 opens nothing while any
+# ruling waits, and opens work as ever while none does.
+max_parked = 2
 
 # Words that stay off the forge, whatever their case: kelpie posts no text
 # naming one, and a worker's commits and `gh` calls may not either. Each entry

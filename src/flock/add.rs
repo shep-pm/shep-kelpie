@@ -73,6 +73,7 @@ pub struct Place<'a> {
 const DEFAULTS: &str = r#"
 merge_authority = "ask"
 max_items = 1
+max_parked = 2
 
 [agents]
 implementers = ["sonnet-high"]

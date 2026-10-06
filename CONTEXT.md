@@ -266,10 +266,13 @@ A decision only the maintainer makes, one of six kinds: `merge`,
 `question`, `stuck` (with its reason), `agent-files`, `foreign-change` and
 `follow-up`. A `stuck` ruling's reason is one of `rebase`, `still-red`,
 `merge-refused`, `closed`, `local-model-spilled`, `fix-not-pushed`,
-`unpushed`, `turn-timeout` and `turn-failed`. A worker waiting on one is **parked**. The
-one exception: the PM may retry a stuck item, which answers its `stuck`
-ruling for the maintainer, with a yes or, for CI still red, a note sending
-the worker back.
+`unpushed`, `turn-timeout` and `turn-failed`. A worker waiting on one is
+**parked**, and its work item gives up its slot under `max_items`, which
+bounds model calls; `max_parked` caps how many are parked on rulings that
+hold their work back, which leaves out the `follow-up` ruling of a merged
+pull request. The one exception: the PM may retry a stuck item, which
+answers its `stuck` ruling for the maintainer, with a yes or, for CI still
+red, a note sending the worker back.
 
 **Merge authority**:
 A project's setting for who decides a merge. `ask` raises a ruling before

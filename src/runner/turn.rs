@@ -27,7 +27,7 @@ use crate::profile::WorkerProfile;
 use crate::settings::{AgentHarness, Effort, Limit};
 use crate::skills::{Step, split_command};
 use crate::state::{Resume, RulingKind, StateError};
-use crate::work_item::{Phase, Review, ReviewStage, Turn, WorkItem};
+use crate::work_item::{Phase, Review, ReviewStage, Seat, Turn, WorkItem};
 use crate::worktree::{self, Start};
 use unfinished::{awaits_a_push, timed_out, uncommitted_prompt};
 pub(super) use unfinished::{failed, named_files};
@@ -65,7 +65,8 @@ fn first_prompt(number: u64, issue: &Issue) -> String {
 pub(super) enum Slot {
     /// The open work item for this issue
     Item(u64),
-    /// The board, while a slot is free under `max_items`
+    /// The board, while a slot is free under `max_items` and fewer than
+    /// `max_parked` items are parked on rulings other than a follow-up
     Board,
 }
 
@@ -82,6 +83,7 @@ impl Runner {
             }
             return self.begin_item(true);
         }
+        self.seat_waiting()?;
         let mut waiting = None;
         for slot in self.rotation() {
             let begin = match slot {
@@ -108,14 +110,17 @@ impl Runner {
         Ok(waiting.map_or(Begin::Idle, Begin::Report))
     }
 
-    // The open work items with no call in flight and none attached, oldest
-    // first, then the board while a slot is free, from the one after the
-    // last to act, so one that keeps acting cannot starve the rest
+    // The open work items with no call in flight, none attached and none
+    // waiting for a slot, oldest first, then the board while it may open
+    // one, from the one after the last to act, so one that keeps acting
+    // cannot starve the rest
     fn rotation(&self) -> Vec<Slot> {
         let items = (self.state.work_items.iter())
-            .filter(|i| !self.flights.flying(i.issue) && i.attached.is_none())
+            .filter(|i| {
+                !self.flights.flying(i.issue) && i.attached.is_none() && i.seat != Seat::Waiting
+            })
             .map(|i| Slot::Item(i.issue));
-        let board = self.slot_free().then_some(Slot::Board);
+        let board = self.board_open().then_some(Slot::Board);
         let mut slots: Vec<Slot> = items.chain(board).collect();
         if let Some(at) = slots.iter().position(|&s| Some(s) == self.last_acted) {
             slots.rotate_left(at + 1);
@@ -127,6 +132,9 @@ impl Runner {
         let Some(item) = self.current() else {
             return Ok(Begin::Idle);
         };
+        if self.unseated() {
+            return Ok(Begin::Idle);
+        }
         match &item.phase {
             Phase::Implement => {}
             // A fix turn, or a turn to push before a round, that ended goes

@@ -27,8 +27,8 @@ impl WorkItem {
     ///
     /// `live` says whether this process runs its turn: a turn marked running
     /// that nothing runs, as after a restart or a stop, is not the worker's.
-    /// A running turn or call comes first, then a ruling, then the gate the
-    /// work item waits at.
+    /// A running turn or call comes first, then a wait for a slot, then a
+    /// ruling, then the gate the work item waits at.
     pub fn timing_phase(&self, live: bool) -> TimingPhase {
         if live && matches!(self.turn, Turn::Running { .. }) {
             return TimingPhase::Worker;
@@ -36,6 +36,9 @@ impl WorkItem {
         let call = self.timings.as_ref().and_then(|t| t.call);
         if matches!(self.review_call, ReviewCallState::Running { .. }) && call.is_some() {
             return TimingPhase::Review;
+        }
+        if self.seat == crate::work_item::Seat::Waiting {
+            return TimingPhase::Other;
         }
         match &self.phase {
             Phase::Ruling { .. } => TimingPhase::Ruling,
@@ -167,6 +170,9 @@ mod tests {
             ..Review::first()
         });
         let of = |phase| in_phase(phase).timing_phase(false);
+        let mut waiting = in_phase(merge.clone());
+        waiting.seat = crate::work_item::Seat::Waiting;
+        assert_eq!(waiting.timing_phase(false), TimingPhase::Other);
         assert_eq!(of(ci), TimingPhase::Ci);
         assert_eq!(of(lease), TimingPhase::Review);
         assert_eq!(of(summoned), TimingPhase::Review);
