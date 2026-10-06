@@ -55,8 +55,9 @@ pub struct Place<'a> {
     pub checkout: &'a Checkout,
     /// The maintainer's home folder, for `~/` in settings
     pub home: &'a Path,
-    /// The project's settings file from before the tables, if it has one
-    pub old_settings: &'a Path,
+    /// The project's own folder under kelpie's home, which a relative path in
+    /// its settings is taken from
+    pub folder: &'a Path,
     /// Kelpie's `agents` folder, where its own agent files are written
     pub agents: &'a Path,
 }
@@ -122,20 +123,12 @@ pub async fn add(
     let runner = kelpie_sheep(client, &rows, name.as_str(), &["runner", name.as_str()]).await?;
     let mut tables = tables(client).await?;
     // One runner per checkout and per repo: two would take the same issues.
-    // Read from each table, or a Flockfile runner's file, by its raw keys,
-    // so one that no longer parses still counts.
-    let projects = place.old_settings.parent().and_then(Path::parent);
+    // Read from each table by its raw keys, so one that no longer parses
+    // still counts.
     for row in rows.iter().filter(|r| r.name != name.as_str()) {
         let sheep = row.name.as_str();
-        let other = match (tables.get(sheep), projects) {
-            (Some(table), _) => table.clone(),
-            (None, Some(projects)) => {
-                match std::fs::read_to_string(projects.join(sheep).join("settings.toml")) {
-                    Ok(text) => table_of(&text).unwrap_or_default(),
-                    Err(_) => continue,
-                }
-            }
-            (None, None) => continue,
+        let Some(other) = tables.get(sheep).cloned() else {
+            continue;
         };
         let text = |key: &str| other.get(key).and_then(Value::as_str).map(str::to_owned);
         let runs_from = text("repo").map(|repo| match repo.strip_prefix("~/") {
@@ -228,43 +221,26 @@ pub async fn add(
     }
 }
 
-// The project's settings: its file from before the tables when it has one,
-// else the defaults with what the checkout and the forge say.
+// The project's settings: the defaults with what the checkout and the forge say.
 fn settings(name: &ProjectName, place: Place<'_>) -> Result<Map<String, Value>, String> {
     let root = &place.checkout.root;
-    let table = match std::fs::read_to_string(place.old_settings) {
-        Ok(text) => table_of(&text)?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let mut table = table_of(DEFAULTS)?;
-            let text = |s: &str| Value::String(s.to_owned());
-            table.insert("repo".into(), text(&root.display().to_string()));
-            table.insert("forge".into(), text(place.checkout.forge.as_str()));
-            table.insert(
-                "ci".into(),
-                Value::Bool(root.join(".github/workflows").is_dir()),
-            );
-            // `qwen` first where the maintainer's script is installed, as `add`
-            // writes its file, and no review bot: those are listed by hand.
-            let reviewers = crate::settings::default_reviewers(place.home);
-            let reviewers = reviewers.iter().map(|name| text(name.as_str())).collect();
-            if let Some(Value::Object(agents)) = table.get_mut("agents") {
-                agents.insert("reviewers".into(), Value::Array(reviewers));
-            }
-            table
-        }
-        Err(e) => return Err(format!("cannot read {}: {e}", place.old_settings.display())),
-    };
-    let folder = place.old_settings.parent().unwrap_or(place.home);
-    let loaded = Settings::from_table(&table, name.as_str(), place.home, folder)
-        .map_err(|e| e.to_string())?;
-    if loaded.repo != *root || loaded.forge != place.checkout.forge {
-        return Err(format!(
-            "{} sets project {name} up for {} at {}, not this checkout",
-            place.old_settings.display(),
-            loaded.forge.as_str(),
-            loaded.repo.display()
-        ));
+    let mut table = table_of(DEFAULTS)?;
+    let text = |s: &str| Value::String(s.to_owned());
+    table.insert("repo".into(), text(&root.display().to_string()));
+    table.insert("forge".into(), text(place.checkout.forge.as_str()));
+    table.insert(
+        "ci".into(),
+        Value::Bool(root.join(".github/workflows").is_dir()),
+    );
+    // `qwen` first where the maintainer's script is installed, as `add`
+    // writes its file, and no review bot: those are listed by hand.
+    let reviewers = crate::settings::default_reviewers(place.home);
+    let reviewers = reviewers.iter().map(|name| text(name.as_str())).collect();
+    if let Some(Value::Object(agents)) = table.get_mut("agents") {
+        agents.insert("reviewers".into(), Value::Array(reviewers));
     }
+    Settings::from_table(&table, name.as_str(), place.home, place.folder)
+        .map_err(|e| e.to_string())?;
     Ok(table)
 }
 

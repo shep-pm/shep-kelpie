@@ -85,7 +85,7 @@ fn each_step_runs_its_default_skill_from_kelpies_own_copy() {
     let status = rig.ask(&runner, "status", None);
     assert_eq!(
         status["skills"][4],
-        json!({ "step": "review", "skill": "/mattpocock:code-review", "fallback": null })
+        json!({ "step": "ci", "skill": "/mattpocock:diagnosing-bugs", "fallback": null })
     );
     assert_eq!(status["skills"].as_array().unwrap().len(), Step::ALL.len());
 }
@@ -230,7 +230,7 @@ fn a_misspelt_step_or_skill_name_stops_the_runner() {
     let rig = Rig::new("shep");
     choose(
         &rig,
-        "review = { kind = \"plugin\", plugin = \"/p\", skill = \"../up\" }\n",
+        "ci = { kind = \"plugin\", plugin = \"/p\", skill = \"../up\" }\n",
     );
     let err = rig.open().unwrap_err().to_string();
     assert!(err.contains("must be a skill's name"), "{err}");
@@ -240,7 +240,7 @@ fn a_misspelt_step_or_skill_name_stops_the_runner() {
 fn a_changed_skill_takes_effect_without_a_restart() {
     let rig = Rig::new("shep");
     let runner = rig.open().unwrap();
-    choose(&rig, "review = { kind = \"none\" }\n");
+    choose(&rig, "ci = { kind = \"none\" }\n");
     let line = runner
         .lock()
         .unwrap()
@@ -258,17 +258,11 @@ fn a_changed_skill_takes_effect_without_a_restart() {
 #[test]
 fn a_folder_of_the_projects_inside_kelpies_own_stops_the_runner() {
     let rig = Rig::new("shep");
-    let mine = rig.paths().skills.join("review");
+    let mine = rig.paths().skills.join("ci");
     skill_folder(&mine, "Review.\n");
-    choose(
-        &rig,
-        "review = { kind = \"path\", path = \"skills/review\" }\n",
-    );
+    choose(&rig, "ci = { kind = \"path\", path = \"skills/ci\" }\n");
     let err = rig.open().unwrap_err().to_string();
-    assert!(
-        err.starts_with("setting `skills`: the review step's "),
-        "{err}"
-    );
+    assert!(err.starts_with("setting `skills`: the ci step's "), "{err}");
     assert!(mine.join("SKILL.md").is_file(), "the folder is left alone");
 
     let rig = Rig::new("shep");
@@ -286,7 +280,7 @@ fn a_folder_of_the_projects_inside_kelpies_own_stops_the_runner() {
 
 #[test]
 fn a_projects_plugin_may_not_take_kelpies_own_names() {
-    for name in ["mattpocock", "kelpie-review"] {
+    for name in ["mattpocock", "kelpie-ci"] {
         let rig = Rig::new("shep");
         let plugin = rig.home.path().join("theirs");
         plugin_folder(&plugin, name);
@@ -294,7 +288,7 @@ fn a_projects_plugin_may_not_take_kelpies_own_names() {
         choose(
             &rig,
             &format!(
-                "review = {{ kind = \"plugin\", plugin = \"{}\", skill = \"code-review\" }}\n",
+                "ci = {{ kind = \"plugin\", plugin = \"{}\", skill = \"code-review\" }}\n",
                 plugin.display()
             ),
         );

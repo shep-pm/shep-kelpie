@@ -35,8 +35,6 @@ pub enum Step {
     Implement,
     /// How the worker writes tests
     Tests,
-    /// Each Claude review round
-    Review,
     /// The worker's turn on a red CI run
     Ci,
     /// How the worker writes its pull request's body
@@ -49,12 +47,11 @@ pub enum Step {
 
 impl Step {
     /// Every step, in the order a work item meets them
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 8] = [
         Self::Triage,
         Self::Spec,
         Self::Implement,
         Self::Tests,
-        Self::Review,
         Self::Ci,
         Self::Pr,
         Self::Reset,
@@ -68,7 +65,6 @@ impl Step {
             Self::Spec => "spec",
             Self::Implement => "implement",
             Self::Tests => "tests",
-            Self::Review => "review",
             Self::Ci => "ci",
             Self::Pr => "pr",
             Self::Reset => "reset",
@@ -83,7 +79,6 @@ impl Step {
             Self::Spec => "to-spec",
             Self::Implement => "implement",
             Self::Tests => "tdd",
-            Self::Review => "code-review",
             Self::Ci => "diagnosing-bugs",
             Self::Pr => "pr",
             Self::Reset => "handoff",
@@ -283,10 +278,6 @@ fn rules(step: Step) -> String {
              `<kelpie-question>` block.\n\
              - Run no /code-review or other review of your own: kelpie reviews the pull \
              request once you push.\n"
-        }
-        Step::Review => {
-            "- Run no commands. Review the diff below, and check it with Read, Grep and \
-             Glob where you have them.\n"
         }
         Step::Triage | Step::Spec | Step::Reset | Step::Retro => IN_REPLY,
     };

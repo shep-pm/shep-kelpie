@@ -4,21 +4,20 @@ use std::path::Path;
 
 use super::Line;
 use crate::ports::{Alert, Alerts};
+use crate::settings::SettingsError;
 use crate::webhook::{KelpieSettings, WebhookKind};
 
-/// Kelpie's own settings: its `[kelpie]` section, else the file it had before one
+/// Kelpie's own settings: its `[kelpie]` section, empty when there is none
 ///
 /// # Errors
 ///
-/// The line to report when either is malformed. It names the line that is
+/// The line to report when it is malformed. It names the line that is
 /// wrong, never its text, since that text can be the webhook's URL.
-pub(super) fn kelpie_settings(section: &str, file: &Path) -> Result<KelpieSettings, Line> {
-    let read = if !section.trim().is_empty() {
-        KelpieSettings::from_section(section)
-    } else if file.exists() {
-        KelpieSettings::load(file)
-    } else {
+pub(super) fn kelpie_settings(section: &str) -> Result<KelpieSettings, Line> {
+    let read = if section.trim().is_empty() {
         Ok(KelpieSettings::default())
+    } else {
+        KelpieSettings::from_section(section)
     };
     read.map_err(|e| {
         Line::missing(
@@ -27,6 +26,26 @@ pub(super) fn kelpie_settings(section: &str, file: &Path) -> Result<KelpieSettin
             "correct the line it names",
         )
     })
+}
+
+/// The line to report when there is no `[kelpie]` section and kelpie's own
+/// old settings file is still there, which kelpie no longer reads
+pub(super) fn old_file(section: &str, kelpie_home: &Path) -> Option<Line> {
+    let file = kelpie_home.join("settings.toml");
+    if !section.trim().is_empty() || !file.exists() {
+        return None;
+    }
+    let what = SettingsError::Section {
+        message: format!(
+            "there is none, and kelpie no longer reads {}: move its keys into the section",
+            file.display()
+        ),
+    };
+    Some(Line::missing(
+        "kelpie settings",
+        what.to_string(),
+        "move its keys into the `[kelpie]` section of dogs.toml, then delete the file",
+    ))
 }
 
 /// Whether one project's rulings can reach the maintainer

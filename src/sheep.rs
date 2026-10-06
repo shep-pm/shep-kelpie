@@ -97,18 +97,13 @@ fn serve(project: &str) -> Result<(), String> {
     let mut look = Look::new(
         shep_home.clone(),
         sheep,
-        project.as_str().to_owned(),
         look::Sources {
-            settings: paths.settings.clone(),
-            kelpie_settings: paths.kelpie_settings.clone(),
+            folder: paths.folder.clone(),
             agents: paths.agents.clone(),
         },
         home.clone(),
     );
     let loaded = look.read()?;
-    for notice in &loaded.notices {
-        eprintln!("{notice}");
-    }
     let (settings, kelpie_settings) = (loaded.settings, loaded.kelpie);
     let codex_home = kelpie_settings
         .codex_home(&home, &kelpie_home)

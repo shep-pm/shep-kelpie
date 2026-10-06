@@ -237,6 +237,20 @@ fn the_review_loops_settings_are_refused_by_name() {
 }
 
 #[test]
+fn the_review_skill_is_refused_by_name_saying_what_replaces_it() {
+    let text = format!("{EXAMPLE}\n[app.dogs.kelpie.skills]\nreview = {{ kind = \"none\" }}\n");
+    let err = parse_err(&text);
+    assert!(
+        err.contains("`skills.review` is no longer a setting, because no step drives"),
+        "{err}"
+    );
+    assert!(
+        err.contains("the body of a reviewer's agent file, listed in `agents.reviewers`"),
+        "{err}"
+    );
+}
+
+#[test]
 fn the_whole_issue_checks_settings_are_refused_by_name() {
     let removed = [
         (
@@ -592,20 +606,6 @@ fn a_repo_path_without_a_tilde_is_kept() {
 }
 
 #[test]
-fn an_unreadable_file_names_its_path() {
-    let err = Settings::load(Path::new("/nonexistent/settings.toml"), Path::new("/"));
-    let err = err.unwrap_err();
-    assert_eq!(
-        err,
-        SettingsError::Read {
-            path: "/nonexistent/settings.toml".into(),
-            kind: io::ErrorKind::NotFound,
-        }
-    );
-    assert!(err.to_string().contains("/nonexistent/settings.toml"));
-}
-
-#[test]
 fn a_projects_own_guard_hooks_are_read() {
     let [hook] = parse(&with_hook("PostToolUse"))
         .unwrap()
@@ -638,25 +638,6 @@ fn a_relative_instructions_file_is_taken_from_the_project_folder() {
         file.as_deref(),
         Some(Path::new(FOLDER).join("w.md").as_path())
     );
-}
-
-#[test]
-fn an_old_settings_file_loads_the_same_settings_as_its_table() {
-    let table = crate::test::project_table(EXAMPLE);
-    let folder = tempfile::tempdir().unwrap();
-    let file = folder.path().join("settings.toml");
-    std::fs::write(&file, toml::to_string(&table).unwrap()).unwrap();
-    let home = Path::new(HOME);
-    let from_file = Settings::load(&file, home).unwrap();
-    let from_table = Settings::from_table(&table, "shep", home, folder.path()).unwrap();
-    assert_eq!(from_file, from_table);
-}
-
-#[test]
-fn a_file_moves_into_an_equal_table() {
-    let table = crate::test::project_table(EXAMPLE);
-    let old_file = toml::to_string(&table).unwrap();
-    assert_eq!(table_of(&old_file), Ok(table));
 }
 
 #[test]

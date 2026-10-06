@@ -55,6 +55,34 @@ pub(crate) fn refuse(text: &str, keys: &[Removed]) -> Result<(), String> {
     }
 }
 
+/// A command that no longer exists, as a key is refused: by name, with why
+/// it went and what to do instead
+const COMMANDS: &[(&[&str], Removed)] = &[(
+    &["settings", "move"],
+    Removed {
+        key: "shep kelpie settings move",
+        because: "kelpie reads no settings file now: a project's settings are its runner's \
+                  `[app.dogs.kelpie]` table and kelpie's own are the `[kelpie]` section of \
+                  `dogs.toml`, both kept by shep",
+        fix: "set them in lookout, in the runner's pane and the dog's; a settings file under \
+              kelpie's home is no longer read",
+    },
+)];
+
+/// The refusal for `words` when they start a command that was removed
+///
+/// The message names the command, why it went and what to do instead.
+/// Any other command is `None`.
+pub fn removed_command(words: &[String]) -> Option<String> {
+    let (_, gone) = COMMANDS.iter().find(|(start, _)| {
+        words.len() >= start.len() && start.iter().zip(words).all(|(a, b)| a == b)
+    })?;
+    Some(format!(
+        "`{}` is no longer a command, because {}: {}",
+        gone.key, gone.because, gone.fix
+    ))
+}
+
 fn sets(table: &toml::Table, key: &str) -> bool {
     match key.split_once('.') {
         Some((head, rest)) => table
@@ -97,6 +125,19 @@ mod tests {
         );
         assert_eq!(refuse("[models.worker]\nplanner = 1\n", &KEYS), Ok(()));
         assert_eq!(refuse("not toml [", &KEYS), Ok(()));
+    }
+
+    #[test]
+    fn a_removed_command_is_refused_by_name_and_any_other_passes() {
+        let words = |s: &str| s.split(' ').map(str::to_owned).collect::<Vec<_>>();
+        let said = removed_command(&words("settings move koji")).unwrap();
+        assert!(
+            said.starts_with("`shep kelpie settings move` is no longer a command, because"),
+            "{said}"
+        );
+        assert!(said.contains("`[app.dogs.kelpie]` table"), "{said}");
+        assert_eq!(removed_command(&words("settings")), None);
+        assert_eq!(removed_command(&words("status")), None);
     }
 
     #[test]

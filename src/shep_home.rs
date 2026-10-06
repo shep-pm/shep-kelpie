@@ -16,10 +16,6 @@ pub const FLOCKFILE_FIX: &str = "add `env = { SHEP_HOME = \"/path/to/shep\" }` \
 pub const DOG_FIX: &str =
     "shep sets it for an adopted dog, so start the dog with `shep enable kelpie`";
 
-/// What to do about a missing `SHEP_HOME` in `shep kelpie settings move`
-pub const MOVE_FIX: &str = "run it as `shep kelpie settings move <project>`, \
-     which sets it to your shepherd";
-
 /// What to do about a missing `SHEP_HOME` in `shep kelpie add`, `start`, `pause` or `status`
 pub const FLOCK_FIX: &str = "run it as `shep kelpie <command>`, which sets it to your shepherd";
 

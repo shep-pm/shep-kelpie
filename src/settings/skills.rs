@@ -28,9 +28,6 @@ pub struct StepSkills {
     /// How the worker writes tests, `tdd` by default
     #[serde(default)]
     pub tests: Option<SkillChoice>,
-    /// Each Claude review round, `code-review` by default
-    #[serde(default)]
-    pub review: Option<SkillChoice>,
     /// The worker's turn on a red CI run, `diagnosing-bugs` by default
     #[serde(default)]
     pub ci: Option<SkillChoice>,
@@ -53,7 +50,6 @@ impl StepSkills {
             Step::Spec => self.spec.as_ref(),
             Step::Implement => self.implement.as_ref(),
             Step::Tests => self.tests.as_ref(),
-            Step::Review => self.review.as_ref(),
             Step::Ci => self.ci.as_ref(),
             Step::Pr => self.pr.as_ref(),
             Step::Reset => self.reset.as_ref(),
@@ -70,13 +66,12 @@ impl StepSkills {
             spec,
             implement,
             tests,
-            review,
             ci,
             pr,
             reset,
             retro,
         } = self;
-        [triage, spec, implement, tests, review, ci, pr, reset, retro]
+        [triage, spec, implement, tests, ci, pr, reset, retro]
             .into_iter()
             .filter_map(|choice| match choice {
                 Some(SkillChoice::Path { path }) => Some(path),

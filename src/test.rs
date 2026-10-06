@@ -312,8 +312,8 @@ impl Rig {
             .replace(EXAMPLE_REPO, &rig.repo().display().to_string())
             .replace(EXAMPLE_REVIEWERS, RIG_REVIEWERS);
         let paths = rig.paths();
-        std::fs::create_dir_all(paths.settings.parent().unwrap()).unwrap();
-        std::fs::write(&paths.settings, settings).unwrap();
+        std::fs::create_dir_all(&paths.folder).unwrap();
+        std::fs::write(rig.settings_file(), settings).unwrap();
         rig.write_agent("claude", CLAUDE_REVIEWER);
         // The maintainer's qwen-review script, which the runner checks is there as it starts.
         let script = rig.home.path().join(".claude/scripts/qwen-review.sh");
@@ -323,15 +323,14 @@ impl Rig {
             "[webhook]\nkind = \"ntfy\"\nurl = \"{}\"\n",
             Self::WEBHOOK_URL
         );
-        std::fs::write(&paths.kelpie_settings, kelpie).unwrap();
+        std::fs::write(rig.kelpie_settings_file(), kelpie).unwrap();
         rig.write_totp_secret();
         rig
     }
 
     /// The webhook the rig's kelpie settings name
     pub(crate) fn webhook(&self) -> Webhook {
-        KelpieSettings::load(&self.paths().kelpie_settings)
-            .unwrap()
+        self.kelpie_settings()
             .webhook
             .expect("the rig's kelpie settings name a webhook")
     }
@@ -342,7 +341,7 @@ impl Rig {
     }
 
     fn try_kelpie_settings(&self) -> Result<KelpieSettings, SettingsError> {
-        match std::fs::read_to_string(self.paths().kelpie_settings) {
+        match std::fs::read_to_string(self.kelpie_settings_file()) {
             Ok(text) => KelpieSettings::from_section(&text),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(KelpieSettings::default()),
             Err(e) => panic!("cannot read the rig's kelpie settings: {e}"),
@@ -351,7 +350,7 @@ impl Rig {
 
     /// Replaces the rig's kelpie settings file with `text`
     pub(crate) fn set_kelpie_settings(&self, text: &str) {
-        std::fs::write(self.paths().kelpie_settings, text).unwrap();
+        std::fs::write(self.kelpie_settings_file(), text).unwrap();
     }
 
     fn make_repo(&self) {
@@ -453,6 +452,16 @@ impl Rig {
         self.home.path().join("repos").join(self.project.as_str())
     }
 
+    /// The file the rig keeps the project's table in, as the Flockfile entry's `[app.dogs.kelpie]`
+    pub(crate) fn settings_file(&self) -> PathBuf {
+        self.paths().folder.join("settings.toml")
+    }
+
+    /// The file the rig keeps kelpie's `[kelpie]` section in
+    pub(crate) fn kelpie_settings_file(&self) -> PathBuf {
+        self.paths().kelpie_home.join("settings.toml")
+    }
+
     pub(crate) fn paths(&self) -> ProjectPaths {
         // Kelpie's home under the shepherd's, as the runner works it out.
         let shep = self.home.path().join("shep");
@@ -515,7 +524,7 @@ impl Rig {
     }
 
     pub(crate) fn edit_settings(&self, edit: impl FnOnce(String) -> String) {
-        let file = self.paths().settings;
+        let file = self.settings_file();
         let text = std::fs::read_to_string(&file).unwrap();
         std::fs::write(&file, edit(text)).unwrap();
     }
@@ -528,8 +537,8 @@ impl Rig {
     // The rig keeps the runner's Flockfile entry where the old settings file was.
     fn try_settings(&self) -> Result<Settings, SettingsError> {
         let paths = self.paths();
-        let entry = std::fs::read_to_string(&paths.settings).unwrap();
-        let folder = paths.settings.parent().unwrap();
+        let entry = std::fs::read_to_string(self.settings_file()).unwrap();
+        let folder = &paths.folder;
         let (project, home) = (self.project.as_str(), self.home.path());
         Settings::from_table(&project_table(&entry), project, home, folder)
     }

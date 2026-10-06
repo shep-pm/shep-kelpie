@@ -1,11 +1,8 @@
 //! Where a runner's settings come from
 //!
 //! A project's settings are its runner sheep's `[app.dogs.kelpie]` table,
-//! and kelpie's own are its `[kelpie]` section of `dogs.toml`. A project set
-//! up before those existed has files under kelpie's home instead. A file
-//! still loads while its table is unset, with a notice naming the command
-//! that moves it. Kelpie's own settings are all optional, so with neither
-//! a section nor a file they are empty. Nothing here deletes a file.
+//! and kelpie's own are its `[kelpie]` section of `dogs.toml`. Kelpie's own
+//! settings are all optional, so with no section they are empty.
 
 use std::path::Path;
 
@@ -13,148 +10,70 @@ use super::{Settings, SettingsError};
 use crate::shepherd::Tables;
 use crate::webhook::KelpieSettings;
 
-/// The files a project had before its tables, and whose they are
-#[derive(Debug, Clone, Copy)]
-pub struct Files<'a> {
-    /// The project's name, which its runner is started with
-    pub project: &'a str,
-    /// The runner's sheep, whose table holds the project's settings
-    pub sheep: &'a str,
-    /// `<kelpie home>/<project>/settings.toml`
-    pub settings: &'a Path,
-    /// `<kelpie home>/settings.toml`
-    pub kelpie_settings: &'a Path,
-}
+// The settings file an older kelpie read, in a project's folder and in kelpie's home.
+const OLD_FILE: &str = "settings.toml";
 
-impl Files<'_> {
-    /// The command that moves both files into their tables
-    pub fn move_command(&self) -> String {
-        if self.sheep == self.project {
-            format!("shep kelpie settings move {}", self.project)
-        } else {
-            format!("shep kelpie settings move {} {}", self.project, self.sheep)
-        }
-    }
-}
-
-/// A runner's settings, and a notice for each one still read from a file
+/// A runner's settings
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Loaded {
     /// The project's settings
     pub settings: Settings,
     /// Kelpie's own settings
     pub kelpie: KelpieSettings,
-    /// One line per file read in place of a table
-    pub notices: Vec<String>,
 }
 
-/// Reads the settings from `tables`, or from `files` for a table left unset
+/// Reads the settings from `tables`
 ///
-/// `home` is the maintainer's home folder, for `~/` in settings.
+/// `home` is the maintainer's home folder, for `~/` in settings, and
+/// `folder` the project's own folder under kelpie's home, which a relative
+/// path in them is taken from.
 ///
 /// # Errors
 ///
-/// [`SettingsError`] naming the table or file that is missing or malformed.
-pub fn load(tables: &Tables, files: Files<'_>, home: &Path) -> Result<Loaded, SettingsError> {
-    let folder = files.settings.parent().unwrap_or(Path::new("/"));
-    let mut notices = Vec::new();
-    let mut from_file = |what: &str, path: &Path| {
-        notices.push(format!(
-            "{what} come from {}, as there is no table for them. `{}` moves them into it.",
-            path.display(),
-            files.move_command(),
-        ));
+/// [`SettingsError`] naming the table or section that is missing or malformed.
+pub fn load(
+    tables: &Tables,
+    sheep: &str,
+    home: &Path,
+    folder: &Path,
+) -> Result<Loaded, SettingsError> {
+    let Some(table) = &tables.project else {
+        return Err(SettingsError::Unset {
+            table: format!("[app.dogs.kelpie] table on the {sheep} sheep"),
+            old_file: Some(folder.join(OLD_FILE)).filter(|file| file.exists()),
+        });
     };
-    let settings = match &tables.project {
-        Some(table) => Settings::from_table(table, files.sheep, home, folder)?,
-        None => {
-            let table = format!("[app.dogs.kelpie] table on the {} sheep", files.sheep);
-            let settings = from_file_or_unset(files.settings, table, |p| Settings::load(p, home))?;
-            from_file(&format!("{}'s settings", files.project), files.settings);
-            settings
+    let settings = Settings::from_table(table, sheep, home, folder)?;
+    let kelpie = if tables.kelpie.trim().is_empty() {
+        // An older kelpie kept its own settings beside the projects' folders.
+        let old = folder.parent().map(|home| home.join(OLD_FILE));
+        if let Some(file) = old.filter(|file| file.exists()) {
+            return Err(SettingsError::Section {
+                message: format!(
+                    "there is none, and kelpie no longer reads {}: move its keys into the section",
+                    file.display()
+                ),
+            });
         }
-    };
-    let kelpie = if !tables.kelpie.trim().is_empty() {
-        KelpieSettings::from_section(&tables.kelpie)?
-    } else if files.kelpie_settings.exists() {
-        let kelpie = KelpieSettings::load(files.kelpie_settings)?;
-        from_file("kelpie's own settings", files.kelpie_settings);
-        kelpie
-    } else {
         KelpieSettings::default()
+    } else {
+        KelpieSettings::from_section(&tables.kelpie)?
     };
-    Ok(Loaded {
-        settings,
-        kelpie,
-        notices,
-    })
-}
-
-// A file that is not there is named beside the table it stands in for.
-fn from_file_or_unset(
-    path: &Path,
-    table: String,
-    load: impl FnOnce(&Path) -> Result<Settings, SettingsError>,
-) -> Result<Settings, SettingsError> {
-    load(path).map_err(|e| match e {
-        SettingsError::Read {
-            path,
-            kind: std::io::ErrorKind::NotFound,
-        } => SettingsError::Unset { table, path },
-        other => other,
-    })
+    Ok(Loaded { settings, kelpie })
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
     use crate::webhook::WebhookKind;
 
     const EXAMPLE: &str = include_str!("../../settings.example.toml");
     const SECTION: &str = "[webhook]\nkind = \"discord\"\nurl = \"https://discord.example/hook\"\n";
-    const KELPIE_FILE: &str = "[webhook]\nkind = \"ntfy\"\nurl = \"https://ntfy.example/t\"\n";
+    const HOME: &str = "/home/me";
+    const FOLDER: &str = "/home/me/.shep/kelpie/shep";
 
-    // Kelpie's home with the files a project had before its tables.
-    struct Home {
-        dir: tempfile::TempDir,
-    }
-
-    impl Home {
-        fn with_files() -> Self {
-            let home = Self::empty();
-            let table = crate::test::project_table(EXAMPLE);
-            std::fs::create_dir_all(home.settings().parent().unwrap()).unwrap();
-            std::fs::write(home.settings(), toml::to_string(&table).unwrap()).unwrap();
-            std::fs::write(home.kelpie_settings(), KELPIE_FILE).unwrap();
-            home
-        }
-
-        fn empty() -> Self {
-            Self {
-                dir: tempfile::tempdir().unwrap(),
-            }
-        }
-
-        fn settings(&self) -> PathBuf {
-            self.dir.path().join("projects/shep/settings.toml")
-        }
-
-        fn kelpie_settings(&self) -> PathBuf {
-            self.dir.path().join("settings.toml")
-        }
-
-        fn load(&self, tables: &Tables, sheep: &str) -> Result<Loaded, SettingsError> {
-            let (settings, kelpie_settings) = (self.settings(), self.kelpie_settings());
-            let files = Files {
-                project: "shep",
-                sheep,
-                settings: &settings,
-                kelpie_settings: &kelpie_settings,
-            };
-            load(tables, files, Path::new("/home/me"))
-        }
+    fn load_from(tables: &Tables) -> Result<Loaded, SettingsError> {
+        load(tables, "shep", Path::new(HOME), Path::new(FOLDER))
     }
 
     fn tables() -> Tables {
@@ -167,71 +86,65 @@ mod tests {
     }
 
     #[test]
-    fn the_tables_win_over_the_files_and_say_nothing() {
-        let loaded = Home::with_files().load(&tables(), "shep").unwrap();
+    fn the_table_and_the_section_are_what_a_runner_reads() {
+        let loaded = load_from(&tables()).unwrap();
         assert_eq!(loaded.settings.forge.as_str(), "shep-pm/from-table");
         assert_eq!(loaded.kelpie.webhook.unwrap().kind, WebhookKind::Discord);
-        assert!(loaded.notices.is_empty(), "{:?}", loaded.notices);
     }
 
     #[test]
-    fn with_no_tables_the_old_files_load_with_a_notice_naming_the_move() {
-        let home = Home::with_files();
-        let loaded = home.load(&Tables::default(), "shep").unwrap();
-        assert_eq!(loaded.settings.forge.as_str(), "shep-pm/shep");
-        assert_eq!(loaded.kelpie.webhook.unwrap().kind, WebhookKind::Ntfy);
-        let [project, kelpie] = loaded.notices.try_into().unwrap();
-        assert_eq!(
-            project,
-            format!(
-                "shep's settings come from {}, as there is no table for them. \
-                 `shep kelpie settings move shep` moves them into it.",
-                home.settings().display()
-            )
-        );
-        assert!(
-            kelpie.starts_with("kelpie's own settings come from "),
-            "{kelpie}"
-        );
-        assert!(
-            kelpie.contains("`shep kelpie settings move shep`"),
-            "{kelpie}"
-        );
-        assert!(home.settings().exists() && home.kelpie_settings().exists());
+    fn a_sheep_with_no_table_is_refused_naming_it() {
+        let err = load_from(&Tables::default()).unwrap_err().to_string();
+        assert_eq!(err, "there is no [app.dogs.kelpie] table on the shep sheep");
     }
 
     #[test]
-    fn a_sheep_named_apart_from_its_project_is_named_in_the_move() {
-        let loaded = Home::with_files()
-            .load(&Tables::default(), "shep-runner")
-            .unwrap();
-        assert!(
-            loaded.notices[0].contains("`shep kelpie settings move shep shep-runner`"),
-            "{:?}",
-            loaded.notices
-        );
-    }
+    fn an_old_file_where_kelpie_used_to_read_it_is_named_when_its_table_is_unset() {
+        let home = tempfile::tempdir().unwrap();
+        let folder = home.path().join("shep");
+        std::fs::create_dir_all(&folder).unwrap();
+        let load = |tables: &Tables| load(tables, "shep", Path::new(HOME), &folder);
+        let err = load(&Tables::default()).unwrap_err().to_string();
+        assert_eq!(err, "there is no [app.dogs.kelpie] table on the shep sheep");
 
-    #[test]
-    fn with_neither_a_table_nor_a_file_a_project_is_refused_and_kelpie_is_empty() {
-        let home = Home::empty();
-        let err = home
-            .load(&Tables::default(), "shep")
-            .unwrap_err()
-            .to_string();
+        let file = folder.join("settings.toml");
+        std::fs::write(&file, "forge = \"shep-pm/shep\"\n").unwrap();
+        let err = load(&Tables::default()).unwrap_err().to_string();
         assert_eq!(
             err,
             format!(
-                "there is no [app.dogs.kelpie] table on the shep sheep, and no {}",
-                home.settings().display()
+                "there is no [app.dogs.kelpie] table on the shep sheep, and kelpie no longer \
+                 reads {}: move its keys into the table",
+                file.display()
             )
         );
+
         let only_project = Tables {
             kelpie: String::new(),
             ..tables()
         };
-        let loaded = home.load(&only_project, "shep").unwrap();
+        assert!(load(&only_project).is_ok());
+        let kelpie_file = home.path().join("settings.toml");
+        std::fs::write(&kelpie_file, SECTION).unwrap();
+        let err = load(&only_project).unwrap_err().to_string();
+        assert_eq!(
+            err,
+            format!(
+                "the [kelpie] section of dogs.toml: there is none, and kelpie no longer reads \
+                 {}: move its keys into the section",
+                kelpie_file.display()
+            )
+        );
+        assert!(load(&tables()).is_ok());
+    }
+
+    #[test]
+    fn with_no_section_kelpie_s_own_settings_are_empty() {
+        let only_project = Tables {
+            kelpie: String::new(),
+            ..tables()
+        };
+        let loaded = load_from(&only_project).unwrap();
         assert_eq!(loaded.kelpie, KelpieSettings::default());
-        assert!(loaded.notices.is_empty(), "{:?}", loaded.notices);
     }
 }

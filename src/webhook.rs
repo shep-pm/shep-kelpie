@@ -178,23 +178,6 @@ impl KelpieSettings {
         Ok(path)
     }
 
-    /// Reads and checks kelpie's settings file
-    ///
-    /// # Errors
-    ///
-    /// - [`SettingsError::Read`] when the file cannot be read.
-    /// - [`SettingsError::Parse`] naming the line that is wrong, never its text.
-    pub fn load(path: &Path) -> Result<Self, SettingsError> {
-        let text = std::fs::read_to_string(path).map_err(|e| SettingsError::Read {
-            path: path.to_owned(),
-            kind: e.kind(),
-        })?;
-        Self::parse(&text).map_err(|message| SettingsError::Parse {
-            path: path.to_owned(),
-            message,
-        })
-    }
-
     /// Reads and checks kelpie's `[kelpie]` section, as shep hands it over
     ///
     /// # Errors
@@ -441,15 +424,6 @@ mod tests {
             let text = format!("[leases]\ncargo-test = {bad}\n");
             assert!(KelpieSettings::from_section(&text).is_err(), "{bad}");
         }
-    }
-
-    #[test]
-    fn a_missing_file_names_its_path() {
-        let err = KelpieSettings::load(Path::new("/nonexistent/settings.toml")).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "cannot read settings file /nonexistent/settings.toml: entity not found"
-        );
     }
 
     #[test]

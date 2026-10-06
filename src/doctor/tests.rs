@@ -118,7 +118,6 @@ impl Scene {
             home: &self.home,
             kelpie_home: &self.kelpie_home,
             shep_home: self.shepherd.home(),
-            kelpie_settings: &self.kelpie_home.join("settings.toml"),
         };
         let done = check(self.shepherd.home(), probes, here, ask);
         tokio::time::timeout(PATIENCE, done)
@@ -452,7 +451,6 @@ async fn no_shepherd_is_a_missing_shepherd_naming_its_home() {
         home: &scene.home,
         kelpie_home: &scene.kelpie_home,
         shep_home: elsewhere.path(),
-        kelpie_settings: &scene.kelpie_home.join("settings.toml"),
     };
     let done = check(elsewhere.path(), probes, here, Ask::default());
     let report = tokio::time::timeout(PATIENCE, done)
@@ -642,12 +640,38 @@ async fn rulings_with_no_webhook_are_fine_and_say_where_they_appear() {
 }
 
 #[tokio::test]
-async fn kelpie_settings_come_from_the_old_file_while_the_section_is_empty() {
+async fn an_old_settings_file_with_no_table_or_section_is_missing_and_named() {
     let scene = Scene::new().await;
     scene.shepherd.holds_section("");
+    let project = scene.kelpie_home.join("golbat");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("settings.toml"), "forge = \"a/b\"\n").unwrap();
     std::fs::write(scene.kelpie_home.join("settings.toml"), WEBHOOK).unwrap();
-    let found = ok(&scene.report().await, "koji: rulings");
-    assert_eq!(found, "rulings post to the ntfy webhook");
+    let report = scene.report().await;
+
+    let (what, fix) = missing(&report, "golbat: settings");
+    assert_eq!(
+        what,
+        format!(
+            "there is no [app.dogs.kelpie] table on the golbat sheep, and kelpie no longer \
+             reads {}: move its keys into the table",
+            project.join("settings.toml").display()
+        )
+    );
+    assert!(fix.contains("`[app.dogs.kelpie]` table"), "{fix}");
+    let (what, _) = missing(&report, "kelpie settings");
+    assert!(
+        what.contains("kelpie no longer reads") && what.ends_with("move its keys into the section"),
+        "{what}"
+    );
+    assert!(!report.passed());
+
+    // Where the table and the section are set, the old files are not mentioned.
+    scene.shepherd.holds_section(WEBHOOK);
+    std::fs::remove_dir_all(&project).unwrap();
+    let report = scene.report().await;
+    assert!(!subjects(&report).contains(&"golbat: settings"));
+    assert!(!subjects(&report).contains(&"kelpie settings"));
 }
 
 #[tokio::test]

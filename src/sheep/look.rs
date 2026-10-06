@@ -13,7 +13,7 @@ use std::sync::{Mutex, PoisonError};
 use crate::agents;
 use crate::runner::Runner;
 use crate::settings::Settings;
-use crate::settings::source::{self, Files, Loaded};
+use crate::settings::source::{self, Loaded};
 use crate::shepherd;
 use crate::webhook::KelpieSettings;
 
@@ -24,39 +24,27 @@ type Read = (Settings, KelpieSettings, Vec<(String, String)>);
 pub(super) struct Look {
     shep_home: PathBuf,
     sheep: String,
-    project: String,
-    settings: PathBuf,
-    kelpie_settings: PathBuf,
+    folder: PathBuf,
     agents: PathBuf,
     home: PathBuf,
     last: Option<Read>,
     failed: Option<String>,
 }
 
-/// The files a runner's settings are read from
+/// The folders a runner's settings and agents are read from
 pub(super) struct Sources {
-    /// The project's settings file from before its table
-    pub(super) settings: PathBuf,
-    /// Kelpie's settings file from before its section
-    pub(super) kelpie_settings: PathBuf,
+    /// The project's own folder, which a relative path in its settings is taken from
+    pub(super) folder: PathBuf,
     /// Kelpie's agent files
     pub(super) agents: PathBuf,
 }
 
 impl Look {
-    pub(super) fn new(
-        shep_home: PathBuf,
-        sheep: String,
-        project: String,
-        sources: Sources,
-        home: PathBuf,
-    ) -> Self {
+    pub(super) fn new(shep_home: PathBuf, sheep: String, sources: Sources, home: PathBuf) -> Self {
         Self {
             shep_home,
             sheep,
-            project,
-            settings: sources.settings,
-            kelpie_settings: sources.kelpie_settings,
+            folder: sources.folder,
             agents: sources.agents,
             home,
             last: None,
@@ -64,16 +52,11 @@ impl Look {
         }
     }
 
-    /// Reads the tables, or the files standing in for them, and remembers them
+    /// Reads the tables, and remembers them
     pub(super) fn read(&mut self) -> Result<Loaded, String> {
         let tables = shepherd::block_on(shepherd::read_tables(&self.shep_home, &self.sheep))?;
-        let files = Files {
-            project: &self.project,
-            sheep: &self.sheep,
-            settings: &self.settings,
-            kelpie_settings: &self.kelpie_settings,
-        };
-        let loaded = source::load(&tables, files, &self.home).map_err(|e| e.to_string())?;
+        let loaded = source::load(&tables, &self.sheep, &self.home, &self.folder)
+            .map_err(|e| e.to_string())?;
         let agents = agents::snapshot(&self.agents);
         self.last = Some((loaded.settings.clone(), loaded.kelpie.clone(), agents));
         Ok(loaded)
@@ -184,10 +167,8 @@ mod tests {
         let mut look = Look::new(
             no_shepherd.path().to_owned(),
             "shep".into(),
-            "shep".into(),
             Sources {
-                settings: paths.settings.clone(),
-                kelpie_settings: paths.kelpie_settings.clone(),
+                folder: paths.folder.clone(),
                 agents: paths.agents.clone(),
             },
             rig.home.path().to_owned(),
@@ -202,7 +183,7 @@ mod tests {
     fn a_refused_change_lands_once_what_refused_it_is_fixed() {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
-        let entry = std::fs::read_to_string(rig.paths().settings).unwrap();
+        let entry = std::fs::read_to_string(rig.settings_file()).unwrap();
         let mut on = project_table(&entry);
         let listed = ["qwen", "claude", "coderabbit"].map(|n| Value::String(n.into()));
         on["agents"]["reviewers"] = Value::Array(listed.to_vec());
@@ -213,10 +194,8 @@ mod tests {
         let mut look = Look::new(
             shep_home.path().to_owned(),
             "shep".into(),
-            "shep".into(),
             Sources {
-                settings: paths.settings.clone(),
-                kelpie_settings: paths.kelpie_settings.clone(),
+                folder: paths.folder.clone(),
                 agents: paths.agents.clone(),
             },
             rig.home.path().to_owned(),
@@ -249,7 +228,7 @@ mod tests {
     fn a_table_changed_in_lookout_reaches_the_running_runner() {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
-        let entry = std::fs::read_to_string(rig.paths().settings).unwrap();
+        let entry = std::fs::read_to_string(rig.settings_file()).unwrap();
         let table = Arc::new(Mutex::new(project_table(&entry)));
         let shep_home = tempfile::tempdir().unwrap();
         let _shepherd = shepherd(shep_home.path(), Arc::clone(&table));
@@ -257,15 +236,13 @@ mod tests {
         let mut look = Look::new(
             shep_home.path().to_owned(),
             "shep".into(),
-            "shep".into(),
             Sources {
-                settings: paths.settings.clone(),
-                kelpie_settings: paths.kelpie_settings.clone(),
+                folder: paths.folder.clone(),
                 agents: paths.agents.clone(),
             },
             rig.home.path().to_owned(),
         );
-        assert!(look.read().unwrap().notices.is_empty());
+        look.read().unwrap();
 
         table
             .lock()
@@ -283,7 +260,7 @@ mod tests {
     // A look at the rig's settings as they stand, through a shepherd that
     // holds them, read once so the next look sees only what changes after.
     fn looking(rig: &Rig) -> (Look, tokio::sync::oneshot::Sender<()>, tempfile::TempDir) {
-        let entry = std::fs::read_to_string(rig.paths().settings).unwrap();
+        let entry = std::fs::read_to_string(rig.settings_file()).unwrap();
         let table = Arc::new(Mutex::new(project_table(&entry)));
         let shep_home = tempfile::tempdir().unwrap();
         let shepherd = shepherd(shep_home.path(), table);
@@ -291,10 +268,8 @@ mod tests {
         let mut look = Look::new(
             shep_home.path().to_owned(),
             "shep".into(),
-            "shep".into(),
             Sources {
-                settings: paths.settings.clone(),
-                kelpie_settings: paths.kelpie_settings.clone(),
+                folder: paths.folder.clone(),
                 agents: paths.agents.clone(),
             },
             rig.home.path().to_owned(),
