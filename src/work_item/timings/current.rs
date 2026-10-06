@@ -2,7 +2,6 @@
 
 use super::{CallKind, Split, TimingPhase, Timings};
 use crate::ports::Timestamp;
-use crate::state::RunState;
 use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, Turn, WorkItem};
 
 impl WorkItem {
@@ -28,18 +27,15 @@ impl WorkItem {
     ///
     /// `live` says whether this process runs its turn: a turn marked running
     /// that nothing runs, as after a restart or a stop, is not the worker's.
-    /// A running turn or call comes first. Then a paused project, since
-    /// nothing steps it, then a ruling, then the gate the work item waits at.
-    pub fn timing_phase(&self, run: RunState, live: bool) -> TimingPhase {
+    /// A running turn or call comes first, then a ruling, then the gate the
+    /// work item waits at.
+    pub fn timing_phase(&self, live: bool) -> TimingPhase {
         if live && matches!(self.turn, Turn::Running { .. }) {
             return TimingPhase::Worker;
         }
         let call = self.timings.as_ref().and_then(|t| t.call);
         if matches!(self.review_call, ReviewCallState::Running { .. }) && call.is_some() {
             return TimingPhase::Review;
-        }
-        if run == RunState::Paused {
-            return TimingPhase::Other;
         }
         match &self.phase {
             Phase::Ruling { .. } => TimingPhase::Ruling,
@@ -85,44 +81,29 @@ mod tests {
     }
 
     #[test]
-    fn a_live_turn_is_the_workers_whatever_the_project_does() {
+    fn a_live_turn_is_the_workers_whatever_the_work_item_waits_for() {
         let item = a_work_item();
         assert!(matches!(item.turn, Turn::Running { .. }));
-        for run in [RunState::Running, RunState::Paused] {
-            assert_eq!(item.timing_phase(run, true), TimingPhase::Worker);
-        }
+        assert_eq!(item.timing_phase(true), TimingPhase::Worker);
         let ruling = WorkItem {
             phase: Phase::Ruling { id: 1 },
             ..a_work_item()
         };
-        assert_eq!(
-            ruling.timing_phase(RunState::Running, true),
-            TimingPhase::Worker
-        );
+        assert_eq!(ruling.timing_phase(true), TimingPhase::Worker);
     }
 
     #[test]
     fn a_turn_no_process_runs_is_not_the_workers() {
         let item = a_work_item();
-        assert_eq!(
-            item.timing_phase(RunState::Paused, false),
-            TimingPhase::Other
-        );
-        assert_eq!(item.timing_phase(RunState::Running, false), TimingPhase::Ci);
+        assert_eq!(item.timing_phase(false), TimingPhase::Ci);
     }
 
     #[test]
     fn a_call_in_flight_is_a_review_queued_or_not() {
-        let run = RunState::Running;
-        let phase = |kind, queued| running_call(kind, queued).timing_phase(run, false);
+        let phase = |kind, queued| running_call(kind, queued).timing_phase(false);
         assert_eq!(phase(CallKind::Local, false), TimingPhase::Review);
         assert_eq!(phase(CallKind::Local, true), TimingPhase::Review);
         assert_eq!(phase(CallKind::Claude, false), TimingPhase::Review);
-        assert_eq!(
-            running_call(CallKind::Local, false).timing_phase(RunState::Paused, false),
-            TimingPhase::Review,
-            "a call that is running is not paused"
-        );
     }
 
     #[test]
@@ -132,13 +113,10 @@ mod tests {
         let timings = item.timings.as_mut().unwrap();
         assert_eq!(timings.call, None);
         assert!(!timings.queued);
-        assert_eq!(
-            item.timing_phase(RunState::Running, false),
-            TimingPhase::Other
-        );
+        assert_eq!(item.timing_phase(false), TimingPhase::Other);
         item.timings.as_mut().unwrap().call = Some(CallKind::Claude);
         assert_eq!(
-            item.timing_phase(RunState::Running, false),
+            item.timing_phase(false),
             TimingPhase::Other,
             "review_call is idle, so the kind is ignored"
         );
@@ -185,8 +163,7 @@ mod tests {
             stage: ReviewStage::Round,
             ..Review::first()
         });
-        let run = RunState::Running;
-        let of = |phase| in_phase(phase).timing_phase(run, false);
+        let of = |phase| in_phase(phase).timing_phase(false);
         assert_eq!(of(ci), TimingPhase::Ci);
         assert_eq!(of(lease), TimingPhase::Review);
         assert_eq!(of(summoned), TimingPhase::Review);
@@ -195,21 +172,6 @@ mod tests {
         assert_eq!(of(Phase::Done { merged: true }), TimingPhase::Merge);
         for between_steps in [Phase::Implement, review, fixing] {
             assert_eq!(of(between_steps), TimingPhase::Other);
-        }
-    }
-
-    #[test]
-    fn a_paused_project_reads_other_whatever_the_work_item_waits_for() {
-        let paused = RunState::Paused;
-        let ci = Phase::Ci {
-            head: None,
-            since: Timestamp(1),
-        };
-        for waiting in [ci, Phase::Implement, Phase::Ruling { id: 1 }] {
-            assert_eq!(
-                in_phase(waiting).timing_phase(paused, false),
-                TimingPhase::Other
-            );
         }
     }
 }

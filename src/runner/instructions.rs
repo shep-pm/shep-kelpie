@@ -163,7 +163,6 @@ mod tests {
 
     // The instructions file the worker's first turn was started with
     fn first_instructions(rig: &Rig, runner: &Mutex<Runner>) -> String {
-        rig.ask(runner, "start", None);
         rig.ask(runner, "add", Some("7"));
         let usage = Usage {
             input: 1,

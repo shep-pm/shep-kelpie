@@ -24,7 +24,7 @@ use shep_client::shep_core::status::ProcStatus;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::time::Instant;
 
-use super::drain;
+use super::drain::{self, Purpose};
 use crate::dog;
 use crate::flock::control::{Answered, trigger};
 use crate::flock::{flock, kelpie_sheep, resume, script, tables};
@@ -67,8 +67,8 @@ pub enum Interrupt {
     After(Duration),
 }
 
-// Waits for `interrupt`, and names it.
-async fn interrupted(interrupt: Interrupt) -> &'static str {
+/// Waits for `interrupt`, and names it
+pub(crate) async fn interrupted(interrupt: Interrupt) -> &'static str {
     match interrupt {
         Interrupt::Signals => {
             let listen = |kind| signal(kind).ok();
@@ -245,20 +245,20 @@ pub async fn restart_all(
         .collect();
     // The dog goes down only when no runner is merging.
     if plan.dog.online() {
-        wait_out_merges(client, &names, patience, say).await?;
+        wait_out_merges(client, &names, patience, Purpose::Upgrade, say).await?;
         bounce_if_running(client, &plan.dog.name, patience, say).await?;
     }
     let stop = interrupted(interrupt);
     tokio::pin!(stop);
     for name in names {
         if !drain {
-            wait_out_merges(client, &[name], patience, say).await?;
+            wait_out_merges(client, &[name], patience, Purpose::Upgrade, say).await?;
             bounce_if_running(client, name, patience, say).await?;
             continue;
         }
         let restarted = async {
-            drain::drain(client, name, patience, say).await?;
-            wait_out_merges(client, &[name], patience, say).await?;
+            drain::drain(client, name, patience, Purpose::Upgrade, say).await?;
+            wait_out_merges(client, &[name], patience, Purpose::Upgrade, say).await?;
             bounce_if_running(client, name, patience, say).await
         };
         let restarted = tokio::select! {
@@ -266,7 +266,8 @@ pub async fn restart_all(
             by = &mut stop => Err(format!("stopped by {by} while `{name}` was draining")),
         };
         if let Err(e) = restarted {
-            return Err(format!("{e}{}", drain::undrain(client, name).await));
+            let undrained = drain::undrain(client, name, Purpose::Upgrade).await;
+            return Err(format!("{e}{undrained}"));
         }
     }
     Ok(())
@@ -318,13 +319,21 @@ async fn bounce(
     }
 }
 
-// Returns once none of `names` has a merge in flight, asking again until then.
-// A runner that does not answer is waited on like one that is merging, and
-// named when the wait runs out.
-async fn wait_out_merges(
+/// Returns once none of `names` has a merge in flight, asking again until then
+///
+/// A runner that does not answer is waited on like one that is merging, and
+/// named when the wait runs out.
+///
+/// # Errors
+///
+/// A message naming each runner still merging, or not answering, after
+/// `patience.merge`, and what was not done for `purpose`, or one from the
+/// shepherd.
+pub(crate) async fn wait_out_merges(
     client: &Client,
     names: &[&str],
     patience: Patience,
+    purpose: Purpose,
     say: &mut dyn FnMut(String),
 ) -> Result<(), String> {
     let waited = Instant::now();
@@ -350,9 +359,10 @@ async fn wait_out_merges(
         }
         if waited.elapsed() >= patience.merge {
             return Err(format!(
-                "{} after {}s, so nothing was restarted for it",
+                "{} after {}s, so {}",
                 busy.join(" and "),
-                patience.merge.as_secs()
+                patience.merge.as_secs(),
+                purpose.not_done()
             ));
         }
         if told != busy {

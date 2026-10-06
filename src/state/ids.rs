@@ -129,12 +129,11 @@ impl RulingIds {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::Timestamp;
     use crate::state::Stuck;
 
     // A project's state file holding open rulings `open`, with `last` as its last id.
     fn project(home: &Path, name: &str, last: u64, open: &[u64]) {
-        let mut state = ProjectState::new(Timestamp(0));
+        let mut state = ProjectState::new();
         state.last_ruling = last;
         state.rulings = open
             .iter()

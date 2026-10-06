@@ -1,6 +1,7 @@
 //! What removed features left in a state file saved before they went
 //!
-//! Such a file still loads. The relay's, the planning call's, the
+//! Such a file still loads. The run state goes, so a project saved paused
+//! runs once its runner starts. The relay's, the planning call's, the
 //! whole-issue check's, the review loop's, the deep round's later steps' and
 //! the shots' fields are dropped before reading. The check's, the judge's
 //! and the deep round's calls count as a reviewer's session's. Their time,
@@ -92,6 +93,9 @@ pub(super) fn drop_removed_fields(value: &mut Value) {
     };
     state.remove("relay_clears");
     state.remove("plans");
+    // A project runs whenever its runner does, so one saved paused runs.
+    state.remove("run");
+    state.remove("since");
     for notice in objects(state.get_mut("notices")) {
         notice.remove("shots_failed");
     }

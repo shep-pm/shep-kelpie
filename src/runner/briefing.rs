@@ -19,7 +19,7 @@ use crate::board::briefing::{
 use crate::board::{ReadyIssue, Skip, priority, rule_order};
 use crate::local_paths::Surface;
 use crate::ports::{AgentCall, Timestamp};
-use crate::state::{ProjectState, RunState, StateError, write_atomically};
+use crate::state::{ProjectState, StateError, write_atomically};
 use crate::work_item::{Phase, ReviewStage, Turn, WorkItem};
 
 mod events;
@@ -255,7 +255,6 @@ impl Runner {
         Briefing {
             project: self.project.as_str(),
             now,
-            running: self.state.run == RunState::Running,
             max_items: self.settings.max_items.get(),
             main: answers.main,
             items,

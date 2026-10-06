@@ -26,7 +26,7 @@ use crate::ports::{
 use crate::profile::WorkerProfile;
 use crate::settings::{AgentHarness, Effort, Limit};
 use crate::skills::{Step, split_command};
-use crate::state::{Resume, RulingKind, RunState, StateError};
+use crate::state::{Resume, RulingKind, StateError};
 use crate::work_item::{Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree::{self, Start};
 pub(super) use unfinished::failed;
@@ -75,9 +75,6 @@ impl Runner {
     // `start_over` is the item whose session died unborn, which begins the
     // same turn again.
     pub(super) fn begin_turn(&mut self, start_over: Option<u64>) -> Result<Begin, StateError> {
-        if self.state.run != RunState::Running {
-            return Ok(Begin::Idle);
-        }
         if let Some(issue) = start_over {
             self.focus = Some(issue);
             if self.current().is_some_and(|item| item.attached.is_some()) {

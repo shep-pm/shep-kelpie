@@ -89,7 +89,14 @@ impl Scene {
 #[tokio::test]
 async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_runner() {
     let mut scene = Scene::new().await;
-    scene.add().await.unwrap();
+    let lines = scene.add().await.unwrap();
+    assert_eq!(
+        lines[lines.len() - 2..],
+        [
+            "runner `koji`: added with its settings, stopped",
+            "`shep kelpie start koji` runs it",
+        ]
+    );
 
     let writes = scene.shepherd.writes();
     let [Request::Add { apps: runner }] = writes.as_slice() else {
@@ -212,9 +219,12 @@ async fn add_twice_changes_nothing() {
         ]
     );
     assert_eq!(scene.shepherd.sheep("koji"), before);
-    // Four labels, kelpie's agent files and the runner, each already there.
-    assert_eq!(lines.len(), 6, "{lines:?}");
-    assert!(lines.iter().all(|l| l.contains("already")), "{lines:?}");
+    // Four labels, kelpie's agent files and the runner, each already there,
+    // then how to start it.
+    let (last, already) = lines.split_last().unwrap();
+    assert_eq!(already.len(), 6, "{lines:?}");
+    assert!(already.iter().all(|l| l.contains("already")), "{lines:?}");
+    assert_eq!(last, "`shep kelpie start koji` runs it");
 }
 
 #[tokio::test]
@@ -306,8 +316,11 @@ async fn add_says_when_kelpie_s_dog_is_not_enabled() {
     scene.shepherd = FakeShepherd::new().await;
     let lines = scene.add().await.unwrap();
     assert_eq!(
-        lines.last().unwrap(),
-        "kelpie's dog is not enabled: `shep enable kelpie` runs it"
+        lines[lines.len() - 2..],
+        [
+            "kelpie's dog is not enabled: `shep enable kelpie` runs it",
+            "`shep kelpie start koji` runs it",
+        ]
     );
     let writes = scene.shepherd.writes();
     assert!(
@@ -322,7 +335,7 @@ async fn add_says_how_to_give_an_old_adoption_the_channel() {
     scene.shepherd = FakeShepherd::new().await;
     scene.shepherd.holds_dog("kelpie", false);
     let lines = scene.add().await.unwrap();
-    let last = lines.last().unwrap();
+    let last = &lines[lines.len() - 2];
     assert!(
         last.ends_with(
             "run `shep adopt /opt/kelpie --name kelpie`, then `shep disable kelpie` and \

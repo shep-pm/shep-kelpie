@@ -42,7 +42,6 @@ fn reviewed_in(rig: Rig, found: &[Finding], auto: bool) -> (Rig, Mutex<Runner>, 
         rig.merge_auto();
     }
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.reviewer
@@ -232,7 +231,6 @@ fn a_nit_that_was_never_sent_files_nothing() {
     let rig = Rig::new("shep");
     rig.merge_auto();
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     let nit = Finding {

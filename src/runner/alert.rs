@@ -302,7 +302,6 @@ mod tests {
     fn the_webhook_url_reaches_no_log_line_status_or_comment() {
         let rig = Rig::new("webapp");
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
         rig.alerts.set_down(true);

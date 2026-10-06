@@ -86,9 +86,8 @@ impl fmt::Display for AttachError {
             Self::Which(e) => e.fmt(f),
             Self::NoSession(issue) => write!(
                 f,
-                "the worker on #{issue} has no session yet: its first turn starts one once \
-                 the project runs (`shep kelpie start`), and `shep kelpie attach {issue}` \
-                 then waits for that turn to end"
+                "the worker on #{issue} has no session yet: its first turn starts one, and \
+                 `shep kelpie attach {issue}` then waits for that turn to end"
             ),
             Self::Ruling(issue, id) => write!(
                 f,

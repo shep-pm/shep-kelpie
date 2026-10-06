@@ -273,6 +273,11 @@ fn answer(flock: &mut Vec<Sheep>, section: &str, request: &Request) -> Response 
             flock.remove(at);
             Response::Deleted(vec![u32::try_from(at).unwrap()])
         }
+        Request::Stop { selector } => {
+            let at = named(flock, selector).unwrap();
+            flock[at].online = false;
+            Response::Stopped(vec![info(at, &flock[at])])
+        }
         Request::Restart { selector } => {
             let at = named(flock, selector).unwrap();
             flock[at].online = true;

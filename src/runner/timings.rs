@@ -55,7 +55,7 @@ impl Runner {
 
     // The phase `item`'s time counts in while the runner holds it as it is
     pub(super) fn timing_phase(&self, item: &WorkItem) -> TimingPhase {
-        item.timing_phase(self.state.run, self.flights.runs_turn(item.issue))
+        item.timing_phase(self.flights.runs_turn(item.issue))
     }
 
     /// The totals over the last `last` finished work items, or all of them

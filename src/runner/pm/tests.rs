@@ -30,7 +30,6 @@ fn with_pm(project: &str) -> (Rig, Mutex<Runner>) {
         s.replace(listed, "\nimplementers = [\"sonnet-high\"]\npm = \"pm\"\n")
     });
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     (rig, runner)
 }
 
@@ -200,7 +199,6 @@ fn with_the_project_manager_down_the_rule_picks_until_it_is_back() {
 fn with_no_project_manager_the_rule_picks_and_nothing_wakes() {
     let rig = Rig::new("acme");
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.forge.list_ready(12, false);
     rig.forge.list_ready(9, false);
     assert_eq!(dispatched(step(&runner).unwrap()), 9);

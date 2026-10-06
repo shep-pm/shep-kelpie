@@ -86,7 +86,7 @@ fn finished(issue: u64, merged: bool, pairs: &[(TimingPhase, u64)]) -> Finished 
 // A rig whose state file already holds these finished work items
 fn with_history(history: Vec<Finished>) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new("koji");
-    let mut state = ProjectState::new(crate::ports::Timestamp(Rig::EPOCH));
+    let mut state = ProjectState::new();
     state.history = history;
     let file = rig.paths().state;
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();

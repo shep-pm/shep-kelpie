@@ -1,10 +1,14 @@
-//! `shep kelpie start`, `pause` and `status`: the runner's own triggers,
-//! sent over the shepherd's socket
+//! `shep kelpie start`, `pause`, `status` and the triggers the other verbs
+//! send, over the shepherd's socket
 //!
-//! `start` first checks the adopted kelpie holds the leases, starts the
-//! runner's sheep when it is not running, then waits for the runner to
-//! answer, since a runner just started reads its settings before it opens
-//! its channel.
+//! A project runs while its runner's sheep does: shep's own state is the
+//! run state, so `shep start <project>` runs it too. `start` first checks
+//! the adopted kelpie holds the leases, starts the runner's sheep when it is
+//! not running, then waits for the runner to answer, since a runner just
+//! started reads its settings before it opens its channel. `pause` drains
+//! the runner, waits for its calls and any merge to end, then stops its
+//! sheep. `rule` leaves the answer for a stopped runner to act on when it
+//! starts.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -15,10 +19,12 @@ use shep_client::shep_core::protocol::{Request, SelectorSpec};
 use shep_client::shep_core::status::ProcStatus;
 use shep_client::{Client, TRIGGER_DEADLINE};
 
-use super::{flock, kelpie_sheep, resume, tables};
-use crate::runner::ProjectName;
+use super::{flock, halt, kelpie_sheep, resume, tables};
+use crate::runner::{ProjectName, leave_answer};
 use crate::settings::Settings;
 use crate::shepherd;
+use crate::upgrade::drain::{self, Purpose};
+use crate::upgrade::restart::{Interrupt, Patience, interrupted, wait_out_merges};
 
 /// How long `start` waits for a runner it started to answer
 const STARTING: Duration = Duration::from_secs(30);
@@ -107,7 +113,11 @@ fn checkout_roots(folder: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Starts `project`'s runner when it is down, then sends it `start`
+/// Starts `project`'s runner when it is down, then waits for it to answer
+/// `status`, which it answers
+///
+/// A runner still on a build from before the run state went, whose
+/// `status` says it is paused, is sent that build's own `start`.
 ///
 /// # Errors
 ///
@@ -127,8 +137,14 @@ pub async fn start(client: &Client, project: &ProjectName) -> Result<Vec<String>
     let runner = project.as_str();
     let waited = tokio::time::Instant::now();
     loop {
-        match trigger(client, runner, "start", None).await? {
-            Answered::Runner(body) => return Ok(vec![body]),
+        match trigger(client, runner, "status", None).await? {
+            Answered::Runner(body) if !paused(&body) => return Ok(vec![body]),
+            Answered::Runner(_) => {
+                return match trigger(client, runner, "start", None).await? {
+                    Answered::Runner(body) => Ok(vec![body]),
+                    other => Err(unanswered(runner, other)),
+                };
+            }
             _ if waited.elapsed() < STARTING => tokio::time::sleep(ASK_AGAIN).await,
             _ => {
                 return Err(format!(
@@ -140,21 +156,173 @@ pub async fn start(client: &Client, project: &ProjectName) -> Result<Vec<String>
     }
 }
 
-/// Sends `project`'s runner `pause`
+// Whether a runner's `status` says it is paused, as only a build from
+// before the run state was the sheep's can.
+fn paused(body: &str) -> bool {
+    let status = serde_json::from_str::<serde_json::Value>(body);
+    status.is_ok_and(|status| status["run"] == "paused")
+}
+
+/// Lets `project`'s runner end what it has running, then stops its sheep
+///
+/// The runner is drained, so it starts no new call, and waited on until no
+/// call runs and no merge is in flight, as `upgrade` waits before a restart
+/// and bounded by `patience` the same way. Each line of what it waits on
+/// goes to `say`. A session the maintainer attached is their own process,
+/// not the runner's: it goes on, and its work item stays held until it ends.
 ///
 /// # Errors
 ///
-/// A message when the project has no kelpie runner, or it is not running.
-pub async fn pause(client: &Client, project: &ProjectName) -> Result<Vec<String>, String> {
+/// A message when the project has no kelpie runner, it does not come up
+/// from starting, the wait runs out or `interrupt` comes first, or the
+/// shepherd refuses the stop. The runner is then sent `undrain` and left
+/// running. Once the stop is sent, `interrupt` is no longer heard.
+pub async fn pause(
+    client: &Client,
+    project: &ProjectName,
+    patience: Patience,
+    interrupt: Interrupt,
+    say: &mut dyn FnMut(String),
+) -> Result<Vec<String>, String> {
+    let runner = kelpie_runner(client, &flock(client).await?, project).await?;
+    let name = project.as_str();
+    if !matches!(runner.status, ProcStatus::Online | ProcStatus::Starting) {
+        return Ok(vec![format!(
+            "{name}'s runner is {}: `shep kelpie start {name}` runs it",
+            runner.status
+        )]);
+    }
+    let drained = async {
+        come_up(client, name, patience, &mut *say).await?;
+        drain::drain(client, name, patience, Purpose::Pause, &mut *say).await?;
+        wait_out_merges(client, &[name], patience, Purpose::Pause, &mut *say).await?;
+        Ok(match trigger(client, name, "status", None).await? {
+            Answered::Runner(body) => Some(attached(&body)),
+            Answered::Down => None,
+            _ => Some(Vec::new()),
+        })
+    };
+    let drained = tokio::select! {
+        drained = drained => drained,
+        by = interrupted(interrupt) => Err(format!("stopped by {by} while `{name}` was pausing")),
+    };
+    let attached = match drained {
+        Ok(Some(attached)) => attached,
+        // Gone while it was waited on, as a stop from elsewhere or a crash leaves it.
+        Ok(None) if !up(client, name).await? => {
+            return Ok(vec![format!(
+                "{name}'s runner stopped while it was being paused: `shep kelpie start {name}` \
+                 runs it again"
+            )]);
+        }
+        Ok(None) => Vec::new(),
+        Err(e) => {
+            let undrained = drain::undrain(client, name, Purpose::Pause).await;
+            return Err(format!("{e}{undrained}"));
+        }
+    };
+    if let Err(e) = halt(client, name).await {
+        let undrained = drain::undrain(client, name, Purpose::Pause).await;
+        return Err(format!("{e}{undrained}"));
+    }
+    let mut lines: Vec<String> = attached
+        .into_iter()
+        .map(|issue| {
+            format!(
+                "#{issue} is attached in your terminal: its session goes on, and the work item \
+                 stays held until it ends"
+            )
+        })
+        .collect();
+    lines.push(format!(
+        "{name}'s runner is stopped: `shep kelpie start {name}` runs it again"
+    ));
+    Ok(lines)
+}
+
+// Whether shep shows `name` running.
+async fn up(client: &Client, name: &str) -> Result<bool, String> {
+    let rows = flock(client).await?;
+    let row = rows.iter().find(|row| row.name == name);
+    Ok(row.is_some_and(|row| matches!(row.status, ProcStatus::Online | ProcStatus::Starting)))
+}
+
+// Returns once `name` answers `status` as a runner or is down, saying it
+// waits while it starts: a runner still opening takes no `drain`.
+async fn come_up(
+    client: &Client,
+    name: &str,
+    patience: Patience,
+    say: &mut dyn FnMut(String),
+) -> Result<(), String> {
+    let waited = tokio::time::Instant::now();
+    let mut told = false;
+    loop {
+        if let Answered::Runner(_) | Answered::Down = trigger(client, name, "status", None).await? {
+            return Ok(());
+        }
+        if waited.elapsed() >= patience.start {
+            return Err(format!(
+                "`{name}` did not answer in {}s, so it was not stopped: `shep bleats {name}` says \
+                 why",
+                patience.start.as_secs()
+            ));
+        }
+        if !told {
+            told = true;
+            say(format!("waiting: `{name}` is starting"));
+        }
+        tokio::time::sleep(patience.poll).await;
+    }
+}
+
+// The issues of the work items a runner's `status` shows attached.
+fn attached(status: &str) -> Vec<u64> {
+    let Ok(status) = serde_json::from_str::<serde_json::Value>(status) else {
+        return Vec::new();
+    };
+    let items = status["work_items"].as_array().into_iter().flatten();
+    items
+        .filter(|item| !item["attached"].is_null())
+        .filter_map(|item| item["issue"].as_u64())
+        .collect()
+}
+
+/// Sends `project`'s runner `rule` with `params`, or leaves the answer in
+/// `answers` for it to act on when it starts, when it is stopped
+///
+/// # Errors
+///
+/// A message when the project has no kelpie runner, the runner refused the
+/// answer, with its reason, it is starting or did not answer, or a stopped
+/// runner's answer cannot be left.
+pub async fn rule(
+    client: &Client,
+    project: &ProjectName,
+    params: &str,
+    answers: &Path,
+) -> Result<Vec<String>, String> {
     kelpie_runner(client, &flock(client).await?, project).await?;
-    let runner = project.as_str();
-    match trigger(client, runner, "pause", None).await? {
-        Answered::Runner(body) => Ok(vec![body]),
-        Answered::Starting => Err(format!(
-            "{runner}'s runner is starting: ask again in a moment"
-        )),
-        Answered::Down => Err(format!("{runner}'s runner is not running")),
-        Answered::TimedOut => Err(format!("{runner}'s runner did not answer in time")),
+    let name = project.as_str();
+    let (id, said) = params.split_once(' ').unwrap_or((params, ""));
+    let ruled = format!("ruling {id} on {name}: {said}");
+    match trigger(client, name, "rule", Some(params)).await? {
+        Answered::Runner(body) => match refusal(&body) {
+            Some(why) => Err(why),
+            None => Ok(vec![ruled]),
+        },
+        Answered::Down => {
+            leave_answer(answers, params)
+                .map_err(|e| format!("cannot leave the answer for {name}'s runner: {e}"))?;
+            Ok(vec![
+                ruled,
+                format!(
+                    "{name}'s runner is stopped, so it acts on the answer when it starts: \
+                     `shep kelpie start {name}`"
+                ),
+            ])
+        }
+        other => Err(unanswered(name, other)),
     }
 }
 
@@ -200,11 +368,17 @@ pub async fn send(
             Some(why) => Err(why),
             None => Ok(vec![body]),
         },
-        Answered::Starting => Err(format!(
-            "{runner}'s runner is starting: ask again in a moment"
-        )),
-        Answered::Down => Err(format!("{runner}'s runner is not running")),
-        Answered::TimedOut => Err(format!("{runner}'s runner did not answer in time")),
+        other => Err(unanswered(runner, other)),
+    }
+}
+
+// Why `runner` gave no answer of its own.
+fn unanswered(runner: &str, answered: Answered) -> String {
+    match answered {
+        Answered::Runner(body) => body,
+        Answered::Starting => format!("{runner}'s runner is starting: ask again in a moment"),
+        Answered::Down => format!("{runner}'s runner is not running"),
+        Answered::TimedOut => format!("{runner}'s runner did not answer in time"),
     }
 }
 

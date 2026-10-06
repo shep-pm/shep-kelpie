@@ -33,7 +33,6 @@ fn two_slot_rig(project: &str) -> Rig {
 
 fn running(rig: Rig) -> (Rig, Mutex<Runner>) {
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     (rig, runner)
 }
 
@@ -153,7 +152,6 @@ fn a_restart_leaves_no_resend_under_a_grant_another_item_took() {
 
     // The restart clears the book of leases, and #8 takes the grant.
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("8"));
     rig.claude.script([
         Scripted::Push("eight.txt", "eight\n"),

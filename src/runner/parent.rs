@@ -63,7 +63,6 @@ mod tests {
     fn running(project: &str) -> (Rig, Mutex<Runner>) {
         let rig = Rig::new(project);
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         (rig, runner)
     }
 

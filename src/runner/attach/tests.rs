@@ -141,7 +141,6 @@ fn an_attached_item_runs_nothing_and_its_push_is_the_worker_s_once_it_detaches()
 fn attach_waits_for_the_call_in_flight_and_no_call_starts_after_it() {
     let rig = Rig::new("rotom");
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     let hold = Hold::default();
     rig.claude
@@ -190,7 +189,10 @@ fn an_item_with_no_session_or_parked_on_a_ruling_says_what_to_do_and_stays_as_it
         why.starts_with("the worker on #7 has no session yet"),
         "{why}"
     );
-    assert!(why.contains("`shep kelpie start`"), "{why}");
+    assert!(
+        why.ends_with("`shep kelpie attach 7` then waits for that turn to end"),
+        "{why}"
+    );
     assert_eq!(attached(&rig, &runner), Value::Null);
 
     let (rig, runner, _) = Rig::parked("golbat");
@@ -303,7 +305,6 @@ fn only_the_process_holding_an_item_lets_it_go_until_it_ends() {
 fn a_pull_request_opened_while_attached_is_the_worker_s_and_goes_to_its_review() {
     let rig = Rig::new("webapp");
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.claude.script([Scripted::Say("done")]);
     step(&runner).unwrap();

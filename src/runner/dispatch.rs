@@ -192,7 +192,6 @@ mod tests {
     fn running(project: &str) -> (Rig, Mutex<Runner>) {
         let rig = Rig::new(project);
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         (rig, runner)
     }
 
@@ -266,7 +265,6 @@ mod tests {
         let rig = Rig::new(project);
         rig.implementers(&["sonnet-high", "opus-high"]);
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         (rig, runner)
     }
 
@@ -326,19 +324,17 @@ mod tests {
         );
     }
 
+    // A runner runs from its start: no trigger comes before its first look.
     #[test]
-    fn a_paused_project_dispatches_nothing() {
+    fn a_runner_reads_the_board_on_its_first_pass() {
         let rig = Rig::new("acme");
         let runner = rig.open().unwrap();
         rig.forge.list_ready(2, false);
-        assert_eq!(step(&runner).unwrap(), None);
-        assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
-
-        rig.ask(&runner, "start", None);
-        rig.ask(&runner, "pause", None);
-        assert_eq!(step(&runner).unwrap(), None);
-        assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
-        assert_eq!(rig.claude.calls(), []);
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Dispatched { issue: 2, .. })
+        ));
+        assert_eq!(rig.ask(&runner, "status", None)["work_item"]["issue"], 2);
     }
 
     #[test]

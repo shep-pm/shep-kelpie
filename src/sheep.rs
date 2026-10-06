@@ -353,7 +353,6 @@ mod tests {
     /// A worker whose first turn on issue 7 is held open by `hold`
     fn in_a_turn(rig: &Rig, hold: &Hold) -> (Arc<Mutex<Runner>>, Worker) {
         let runner = Arc::new(rig.open().unwrap());
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.claude.script([Scripted::Hold(hold.clone())]);
         let worker = spawn(&runner);
@@ -415,7 +414,6 @@ mod tests {
         let rig = Rig::new("acme");
         rig.edit_settings(|s| s.replace("max_items = 1", "max_items = 2"));
         let runner = Arc::new(rig.open().unwrap());
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.ask(&runner, "add", Some("8"));
         let (seven, eight) = (Hold::default(), Hold::default());
@@ -454,8 +452,8 @@ mod tests {
         let hold = Hold::default();
         let (runner, worker) = in_a_turn(&rig, &hold);
         assert_eq!(turns(&rig, &runner), [(7, "running".to_owned())]);
-        // Paused, so nothing starts once the turn's end is recorded.
-        assert_eq!(rig.ask(&runner, "pause", None)["run"], "paused");
+        // Draining, so nothing starts once the turn's end is recorded.
+        assert!(rig.ask(&runner, "drain", None)["draining"].is_object());
         hold.release();
         // Well inside the minute until the next look at the board.
         eventually("the turn's end", || {

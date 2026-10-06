@@ -216,7 +216,6 @@ mod tests {
     fn findings_sent() -> (Rig, Mutex<Runner>) {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
         rig.claude.script([Scripted::Push("work.txt", "work\n")]);
@@ -387,7 +386,6 @@ mod tests {
     fn a_deferral_an_earlier_round_left_does_not_defer_this_rounds_finding() {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
         rig.claude.script([Scripted::Push("work.txt", "work\n")]);

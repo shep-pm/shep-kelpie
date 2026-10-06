@@ -12,17 +12,17 @@ use super::pace::PacerStatus;
 use super::{Answer, Runner};
 use crate::board::Skip;
 use crate::lease::gpu::LockHolder;
-use crate::ports::{ModelSeat, SessionId, Timestamp};
+use crate::ports::{ModelSeat, SessionId};
 use crate::review_bot::Bot;
 use crate::settings::{AgentName, MergeAuthority};
 use crate::skills::StepSkill;
-use crate::state::{Finished, LeaseHeld, Ruling, RunState, StateError, Waiting};
+use crate::state::{Finished, LeaseHeld, Ruling, StateError, Waiting};
 use crate::work_item::{Attached, BotSkipped, Phase, QwenTally, Spend, Split, Turn, WorkItem};
 
 /// The triggers a runner answers
-pub const ACTIONS: [&str; 16] = [
-    "status", "start", "pause", "add", "rework", "adopt", "rule", "gate", "drop", "timings",
-    "attach", "detach", "tell", "pm", "drain", "undrain",
+pub const ACTIONS: [&str; 14] = [
+    "status", "add", "rework", "adopt", "rule", "gate", "drop", "timings", "attach", "detach",
+    "tell", "pm", "drain", "undrain",
 ];
 
 /// How many finished work items `timings` totals when given no count
@@ -48,10 +48,6 @@ pub struct Status<'a> {
     pub project: &'a str,
     /// Who decides its merges
     pub merge_authority: MergeAuthority,
-    /// Running or paused
-    pub run: RunState,
-    /// When it last started or paused
-    pub since: Timestamp,
     /// The first of `work_items`, where a status read before they existed
     /// finds the work item
     pub work_item: Option<WorkItemStatus<'a>>,
@@ -218,8 +214,6 @@ impl<'a> WorkItemStatus<'a> {
 /// A trigger, read
 enum Request {
     Status,
-    Start,
-    Pause,
     Add(u64),
     Rework(u64),
     Adopt(u64),
@@ -290,8 +284,6 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
             runner.undrain();
             Ok(())
         }
-        Request::Start => runner.start().map_err(|e| e.to_string()),
-        Request::Pause => runner.pause().map_err(|e| e.to_string()),
         Request::Add(issue) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
         Request::Rework(number) => runner.rework(number).map(drop).map_err(|e| e.to_string()),
         Request::Adopt(number) => runner.adopt(number).map_err(|e| e.to_string()),
@@ -372,8 +364,6 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
         ("rule", None) => Err(format!("`{action}` {RULE_USAGE}")),
         (_, _) if !ACTIONS.contains(&action) => Err(format!("unknown action `{action}`")),
         (_, Some(_)) => Err(format!("`{action}` takes no params")),
-        ("start", None) => Ok(Request::Start),
-        ("pause", None) => Ok(Request::Pause),
         ("gate", None) => Ok(Request::Gate(None)),
         ("drop", None) => Ok(Request::Drop(None)),
         ("drain", None) => Ok(Request::Drain),
@@ -551,7 +541,6 @@ mod tests {
     fn with_issue_7(project: &str) -> (Rig, Mutex<Runner>) {
         let rig = Rig::new(project);
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         assert_eq!(rig.ask(&runner, "add", Some("7"))["work_item"]["issue"], 7);
         (rig, runner)
     }
@@ -564,7 +553,7 @@ mod tests {
     }
 
     #[test]
-    fn a_new_project_is_paused_with_nothing_in_flight() {
+    fn a_new_project_has_nothing_in_flight() {
         let rig = Rig::new("koji");
         let runner = rig.open().unwrap();
         assert_eq!(
@@ -572,8 +561,6 @@ mod tests {
             json!({
                 "project": "koji",
                 "merge_authority": "ask",
-                "run": "paused",
-                "since": Rig::EPOCH,
                 "work_item": null,
                 "work_items": [],
                 "max_items": 1,
@@ -656,10 +643,10 @@ mod tests {
         let rig = Rig::new("rotom");
         let runner = rig.open().unwrap();
         assert_eq!(
-            rig.ask(&runner, "start", Some("now")),
-            json!({ "error": "`start` takes no params" })
+            rig.ask(&runner, "drain", Some("now")),
+            json!({ "error": "`drain` takes no params" })
         );
-        assert_eq!(rig.ask(&runner, "status", None)["run"], "paused");
+        assert_eq!(rig.ask(&runner, "status", None)["draining"], json!(null));
     }
 
     #[test]
@@ -750,7 +737,6 @@ mod tests {
             json!({ "error": "\"#7\" is not an issue number" })
         );
 
-        rig.ask(&runner, "start", None);
         rig.claude
             .script([Scripted::Reply(Usage::default(), Cost(1))]);
         step(&runner).unwrap();

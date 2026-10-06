@@ -16,7 +16,6 @@ use crate::test::{Rig, Scripted};
 fn at_review(rig: &Rig, listed: &[&str]) -> Mutex<Runner> {
     rig.reviewers(listed);
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);

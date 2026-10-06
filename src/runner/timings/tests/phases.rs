@@ -18,7 +18,6 @@ use crate::work_item::TimingPhase;
 fn a_merged_work_items_phases_sum_to_its_wall_time_at_every_stop() {
     let rig = Rig::new("koji");
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     let mut stops = Vec::new();
@@ -117,7 +116,6 @@ fn a_merged_work_items_phases_sum_to_its_wall_time_at_every_stop() {
 fn a_gpu_wait_and_the_round_both_count_as_review() {
     let rig = Rig::new("koji");
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);
@@ -161,7 +159,6 @@ fn a_gpu_wait_and_the_round_both_count_as_review() {
 fn at_the_claude_round() -> (Rig, Mutex<Runner>) {
     let rig = Rig::new("koji");
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);
@@ -192,7 +189,6 @@ fn a_second_look_in_flight_is_a_reviewers_session() {
     let rig = Rig::new("koji");
     rig.default_review();
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);
@@ -213,7 +209,6 @@ fn coderabbit_is_the_window_until_the_summon_and_the_review_after() {
     let rig = Rig::new("koji");
     rig.coderabbit_on();
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([

@@ -263,6 +263,14 @@ pub(crate) async fn resume(client: &Client, name: &str) -> Result<(), String> {
     send(client, request, |r| matches!(r, Response::Restarted { .. })).await
 }
 
+/// Stops `name`, which the caller has seen registered
+pub(crate) async fn halt(client: &Client, name: &str) -> Result<(), String> {
+    let request = Request::Stop {
+        selector: SelectorSpec::Name(name.to_owned()),
+    };
+    send(client, request, |r| matches!(r, Response::Stopped(_))).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

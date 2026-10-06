@@ -24,7 +24,6 @@ fn usage(n: u64) -> Usage {
 fn with_issue_7(project: &str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     assert_eq!(rig.ask(&runner, "add", Some("7"))["work_item"]["issue"], 7);
     (rig, runner)
 }
@@ -77,7 +76,6 @@ fn the_branch_is_cut_from_the_latest_origin_main() {
     let rig = Rig::new("reactmap");
     let landed = rig.land_on_origin("landed.txt");
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("3"));
     rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
     step(&runner).unwrap();
@@ -307,26 +305,6 @@ fn a_session_killed_before_it_began_starts_over_with_the_same_id() {
     assert_eq!(resumed.session, Session::Resume(first.clone()));
     assert_eq!(again.session, Session::New(first));
     assert_eq!(again.prompt, original.prompt);
-}
-
-#[test]
-fn a_paused_project_runs_no_turn_until_it_starts() {
-    let rig = Rig::new("chelone");
-    let runner = rig.open().unwrap();
-    rig.ask(&runner, "add", Some("5"));
-    assert_eq!(step(&runner).unwrap(), None);
-    assert_eq!(rig.claude.calls(), []);
-    assert!(
-        !rig.home
-            .path()
-            .join("shep/kelpie/chelone/worktrees/5")
-            .exists()
-    );
-
-    rig.ask(&runner, "start", None);
-    rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
-    assert!(step(&runner).unwrap().is_some());
-    assert_eq!(rig.claude.calls().len(), 1);
 }
 
 #[test]

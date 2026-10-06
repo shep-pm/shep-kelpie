@@ -59,7 +59,7 @@ mod tests {
     use super::*;
 
     fn with_events(n: u64) -> ProjectState {
-        let mut state = ProjectState::new(Timestamp(0));
+        let mut state = ProjectState::new();
         for i in 1..=n {
             state.record_event(Timestamp(i), format!("event {i}"));
         }

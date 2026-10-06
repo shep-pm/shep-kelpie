@@ -1,7 +1,8 @@
 //! The project's state file
 //!
-//! What a runner must remember across a restart: whether the project is
-//! running, its open work items, pending rulings and leases held. Each save goes
+//! What a runner must remember across a restart: its open work items,
+//! pending rulings and leases held. Whether the project runs is the
+//! runner's sheep's own state, which shep keeps. Each save goes
 //! to a temporary file that is synced and then renamed over the old one, so
 //! a runner killed mid-write leaves the previous state whole.
 
@@ -24,12 +25,12 @@ use crate::ports::{Finding, SessionId, Timestamp};
 use crate::settings::Account;
 use crate::work_item::{Attached, Known, Phase, Review, Seconds, Tally, Turn, WorkItem};
 
-/// The state file's format version. 10 added a work item's `counts` and a
-/// finished one's `spend`, 9 folded the ruling kinds to six, 8 added the
-/// project manager's session, notes and attach, 7 a work item's
-/// `attached`, 6 folded the timing phases to six, and 5 added the board's
-/// events, each of which an older kelpie refuses
-const VERSION: u32 = 10;
+/// The state file's format version. 11 dropped the run state, 10 added a
+/// work item's `counts` and a finished one's `spend`, 9 folded the ruling
+/// kinds to six, 8 added the project manager's session, notes and attach, 7
+/// a work item's `attached`, 6 folded the timing phases to six, and 5 added
+/// the board's events, each of which an older kelpie refuses
+const VERSION: u32 = 11;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
@@ -56,10 +57,6 @@ pub const HISTORY_CAP: usize = 100;
 #[serde(deny_unknown_fields)]
 pub struct ProjectState {
     version: u32,
-    /// Whether the project is running or paused
-    pub run: RunState,
-    /// When `run` last changed
-    pub since: Timestamp,
     /// The open work items, oldest first
     #[serde(default)]
     pub work_items: Vec<WorkItem>,
@@ -125,13 +122,17 @@ fn is_zero(n: &u64) -> bool {
     *n == 0
 }
 
+impl Default for ProjectState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProjectState {
-    /// A paused project with nothing in flight
-    pub fn new(since: Timestamp) -> Self {
+    /// A project with nothing in flight
+    pub fn new() -> Self {
         Self {
             version: VERSION,
-            run: RunState::Paused,
-            since,
             work_items: Vec::new(),
             work_item: None,
             rulings: Vec::new(),
@@ -239,17 +240,6 @@ pub struct Waiting {
     pub pull_request: u64,
     /// Whether `ready-for-agent` adopted it, so taking the label off takes it back
     pub by_label: bool,
-}
-
-/// Whether a project takes work
-// wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum RunState {
-    /// Dispatching and working
-    Running,
-    /// Taking no new turns
-    Paused,
 }
 
 /// A decision only the maintainer makes

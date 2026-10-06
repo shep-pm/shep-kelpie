@@ -441,7 +441,7 @@ impl Runner {
         let again = self.flights.flying.get(&issue).is_some_and(|f| f.again);
         if !again && matches!(result, Err(AgentError::NoSession(..))) {
             // The dead call's time is the worker's, so it is saved while its
-            // flight still counts it, before a pause can outrun the new turn.
+            // flight still counts it, before a drain can outrun the new turn.
             let saved = self.save_time();
             self.flights.flying.remove(&issue);
             saved?;
@@ -482,7 +482,8 @@ fn unstarted(harness: Option<Harness>, e: &std::io::Error) -> End {
 /// starting after the one that did something last, and one with nothing to
 /// do yields to the next. A report that waits, such as a forge that cannot
 /// be read, is returned only when no other work item did anything. A
-/// ruling is posted, and a reply handled, whether the project runs or not.
+/// ruling answered while the runner was stopped is acted on first. A ruling
+/// is posted, and a reply handled, while the runner drains too.
 ///
 /// # Errors
 ///
@@ -511,6 +512,7 @@ pub fn advance(runner: &Mutex<Runner>) -> Result<Pass, StateError> {
 fn one_pass(runner: &Mutex<Runner>) -> Result<Pass, StateError> {
     lock(runner).beat();
     lock(runner).let_go_of_the_gone();
+    super::left::answer_left(runner);
     loop {
         let news = lock(runner).next_news();
         let Some(news) = news else { break };

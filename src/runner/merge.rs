@@ -68,7 +68,7 @@ impl Runner {
     /// Its worktree, local branch and build folder go, and its issue is
     /// recorded as finished. Its pull request and branch on the forge stay,
     /// the pull request labelled `ready-for-human`.
-    /// It works whether the project runs or not.
+    /// It works while the runner drains too.
     ///
     /// # Errors
     ///
@@ -698,31 +698,29 @@ mod tests {
     }
 
     // The work item the playground's board wrongly took: a turn that ended
-    // with no pull request, in a project the maintainer paused.
+    // with no pull request, in a runner held from starting another.
     #[test]
-    fn drop_clears_a_work_item_in_a_paused_project_and_the_board_never_retakes_it() {
+    fn drop_clears_a_work_item_in_a_draining_runner_and_the_board_never_retakes_it() {
         let rig = Rig::new("webapp");
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.claude
             .script([Scripted::Reply(Usage::default(), Cost(1))]);
         step(&runner).unwrap();
-        rig.ask(&runner, "pause", None);
+        rig.ask(&runner, "drain", None);
         let build = rig.home.path().join("shep/kelpie/webapp/builds/7");
         assert!(rig.worktree_7().exists() && build.exists());
 
         let status = rig.ask(&runner, "drop", None);
         assert_eq!(
-            (&status["work_item"], &status["run"]),
-            (&json!(null), &json!("paused"))
+            (&status["work_item"], &status["draining"]["calls"]),
+            (&json!(null), &json!([]))
         );
         assert!(!rig.worktree_7().exists());
         assert!(!build.exists());
         assert_eq!(git(&rig.repo(), &["branch", "--list", "kelpie/7"]), "");
 
         rig.forge.list_ready(7, false);
-        rig.ask(&runner, "start", None);
         assert_eq!(step(&runner).unwrap(), None);
         assert_eq!(rig.claude.calls().len(), 1);
     }
@@ -735,7 +733,6 @@ mod tests {
             rig.ask(&runner, "drop", None),
             json!({ "error": "no work item is in flight" })
         );
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.claude.script([Scripted::Kill]);
         let _ = catch_unwind(AssertUnwindSafe(|| step(&runner)));
@@ -775,7 +772,6 @@ mod tests {
         std::fs::write(&state, saved.to_string()).unwrap();
 
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "pause", None);
         assert_eq!(
             rig.ask(&runner, "drop", None)["work_item"],
             json!(null),

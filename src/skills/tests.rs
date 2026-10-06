@@ -189,7 +189,6 @@ fn a_skill_that_cannot_load_falls_back_to_kelpies_prompt_and_says_why() {
         format!("{} holds no SKILL.md", gone.display())
     );
 
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);
     step(&runner).unwrap();

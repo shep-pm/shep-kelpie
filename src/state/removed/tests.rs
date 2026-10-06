@@ -24,7 +24,7 @@ fn store_in(dir: &Path) -> StateStore {
 // One open work item and one finished, as this build saves them in a
 // version 2 file, then changed by `old` into what an older build saved.
 fn saved_with(dir: &Path, old: impl FnOnce(&mut Value)) -> StateStore {
-    let mut state = ProjectState::new(Timestamp(7));
+    let mut state = ProjectState::new();
     state.work_items.push(a_work_item());
     state.record_finished(Finished {
         issue: 9,

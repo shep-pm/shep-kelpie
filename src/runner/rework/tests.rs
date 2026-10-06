@@ -42,9 +42,7 @@ fn reviewed_71(rig: &Rig) -> String {
 }
 
 fn running(rig: &Rig) -> Mutex<Runner> {
-    let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
-    runner
+    rig.open().unwrap()
 }
 
 #[test]

@@ -56,7 +56,6 @@ fn reviewers_until_ci(rig: &Rig, runner: &Mutex<Runner>) -> Vec<&'static str> {
 
 fn at_review(rig: &Rig, push: &'static str) -> Mutex<Runner> {
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([Scripted::Push(push, "work\n")]);

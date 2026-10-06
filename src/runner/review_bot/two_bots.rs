@@ -41,7 +41,6 @@ pub(super) fn listing(project: &str, bots: &[&str]) -> Rig {
 // the first listed bot's.
 pub(super) fn reviewed(rig: &Rig) -> (Mutex<Runner>, String) {
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     let head = item_reviewed(rig, &runner, 7);
     (runner, head)
 }
@@ -296,7 +295,6 @@ fn an_adopted_pull_request_gets_a_pass_of_the_listed_bots() {
     rig.forge.open_pull_request(80, "fix/timeline", &[5]);
     rig.forge.ready_pull_request(80);
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "adopt", Some("80"));
     step(&runner).unwrap();
     let status = rig.ask(&runner, "status", None);

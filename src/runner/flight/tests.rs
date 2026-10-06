@@ -87,7 +87,6 @@ fn seven_queued_for_the_gpu(project: &str) -> (Rig, Mutex<Runner>, GpuLock, Clai
     rig.forge.label(7, "agent:coder");
     let (rig, runner) = {
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         (rig, runner)
     };
@@ -115,7 +114,6 @@ fn two_open(project: &str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
     rig.edit_settings(|s| s.replace("max_items = 1", "max_items = 2"));
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.ask(&runner, "add", Some("8"));
     (rig, runner)
@@ -125,7 +123,6 @@ fn two_open(project: &str) -> (Rig, Mutex<Runner>) {
 fn seven_open(project: &str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     (rig, runner)
 }
@@ -187,13 +184,13 @@ fn triggers_are_answered_while_calls_run() {
 
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["work_items"].as_array().unwrap().len(), 2);
-    assert_eq!(rig.ask(&runner, "pause", None)["run"], "paused");
+    assert!(rig.ask(&runner, "drain", None)["draining"].is_object());
     assert!(
         !seven.returned() && !eight.returned(),
-        "a pause ended a call"
+        "a drain ended a call"
     );
 
-    // A paused project starts nothing, and still records the calls it had.
+    // A draining runner starts nothing, and still records the calls it had.
     seven.release();
     eight.release();
     let mut ended = vec![ended_issue(driven.landed()), ended_issue(driven.landed())];

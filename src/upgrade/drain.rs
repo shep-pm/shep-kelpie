@@ -1,14 +1,16 @@
-//! Draining a runner before its restart, so the restart cuts no call short
+//! Draining a runner before its restart or its stop, so neither cuts a call
+//! short
 //!
 //! The runner is sent `drain`, after which it starts no new call, and asked
-//! again until it shows none running. The wait is bounded by the longest a
-//! call of the runner's may run, which its answer says, plus
-//! [`Patience::margin`], counted from when the wait began. A turn's ceiling
-//! counts from when it got the lease it waited for, and a reviewer's call
-//! has none, so either can outrun the bound. Past it the runner is named and
-//! nothing is restarted for it. A runner on a build from before `drain`
-//! answers it, twice, as an action nobody took while it answers `status`: it
-//! is restarted as before, and the restart cuts its calls short.
+//! again until it shows none running. `upgrade` drains a runner before its
+//! restart, and `shep kelpie pause` before its stop ([`Purpose`]). The wait
+//! is bounded by the longest a call of the runner's may run, which its
+//! answer says, plus [`Patience::margin`], counted from when the wait began.
+//! A turn's ceiling counts from when it got the lease it waited for, and a
+//! reviewer's call has none, so either can outrun the bound. Past it the runner is named and
+//! left running. A runner on a build from before `drain` answers it, twice,
+//! as an action nobody took while it answers `status`: it is restarted or
+//! stopped as before, which cuts its calls short.
 
 use std::time::Duration;
 
@@ -18,6 +20,49 @@ use tokio::time::Instant;
 
 use super::restart::Patience;
 use crate::flock::control::{Answered, trigger};
+
+/// What a runner is drained for, which the lines about it name
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Purpose {
+    /// `shep kelpie upgrade`, which restarts it on the new build
+    Upgrade,
+    /// `shep kelpie pause`, which stops it
+    Pause,
+}
+
+impl Purpose {
+    // The command, as "if this ... stops first" names it.
+    fn command(self) -> &'static str {
+        match self {
+            Self::Upgrade => "upgrade",
+            Self::Pause => "pause",
+        }
+    }
+
+    // What the runner waits for once drained.
+    fn until(self) -> &'static str {
+        match self {
+            Self::Upgrade => "until its restart",
+            Self::Pause => "until it stops",
+        }
+    }
+
+    /// What was not done to a runner the wait ran out on
+    pub(crate) fn not_done(self) -> &'static str {
+        match self {
+            Self::Upgrade => "nothing was restarted for it",
+            Self::Pause => "it was not stopped",
+        }
+    }
+
+    // What ends a runner's calls without a drain.
+    fn cut(self) -> &'static str {
+        match self {
+            Self::Upgrade => "its restart",
+            Self::Pause => "its stop",
+        }
+    }
+}
 
 /// What a draining runner's answer says
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,8 +97,8 @@ fn call(call: &Value) -> String {
     }
 }
 
-/// Drains `name` and returns once it has no call running, saying what it
-/// waits on through `say`
+/// Drains `name` for `purpose` and returns once it has no call running,
+/// saying what it waits on through `say`
 ///
 /// A runner that is not running, or runs a build from before `drain`, is
 /// not waited on.
@@ -68,6 +113,7 @@ pub async fn drain(
     client: &Client,
     name: &str,
     patience: Patience,
+    purpose: Purpose,
     say: &mut dyn FnMut(String),
 ) -> Result<(), String> {
     let waited = Instant::now();
@@ -86,7 +132,7 @@ pub async fn drain(
         {
             answer = trigger(client, name, "drain", None).await?;
             if matches!(answer, Answered::Starting) {
-                return predates(name, say);
+                return predates(name, purpose, say);
             }
         }
         let busy = match answer {
@@ -95,16 +141,17 @@ pub async fn drain(
                     if !began {
                         began = true;
                         say(format!(
-                            "draining `{name}`, which starts no new call until its restart: if \
-                             this upgrade stops first, `shep kelpie undrain -p {name}` lets it \
-                             start them again"
+                            "draining `{name}`, which starts no new call {}: if this {} stops \
+                             first, `shep kelpie undrain -p {name}` lets it start them again",
+                            purpose.until(),
+                            purpose.command()
                         ));
                     }
                     limit = Duration::from_secs(drained.ceiling).saturating_add(patience.margin);
                     let running = |call| format!("`{name}` is running {call}");
                     drained.calls.into_iter().map(running).collect()
                 }
-                None => return predates(name, say),
+                None => return predates(name, purpose, say),
             },
             Answered::Starting => vec![format!("`{name}` is starting")],
             Answered::TimedOut => vec![format!("`{name}` did not answer `drain`")],
@@ -115,9 +162,10 @@ pub async fn drain(
         }
         if waited.elapsed() >= limit {
             return Err(format!(
-                "{} after {}s, so nothing was restarted for it",
+                "{} after {}s, so {}",
                 busy.join(" and "),
-                limit.as_secs()
+                limit.as_secs(),
+                purpose.not_done()
             ));
         }
         if told != busy {
@@ -128,10 +176,10 @@ pub async fn drain(
     }
 }
 
-fn predates(name: &str, say: &mut dyn FnMut(String)) -> Result<(), String> {
+fn predates(name: &str, purpose: Purpose, say: &mut dyn FnMut(String)) -> Result<(), String> {
     say(format!(
-        "`{name}` runs a kelpie from before `drain`, so its restart cuts short any call it has \
-         running"
+        "`{name}` runs a kelpie from before `drain`, so {} cuts short any call it has running",
+        purpose.cut()
     ));
     Ok(())
 }
@@ -140,10 +188,14 @@ fn predates(name: &str, say: &mut dyn FnMut(String)) -> Result<(), String> {
 ///
 /// A failure to send it is let go: only a shepherd that cannot be reached
 /// leaves the runner draining, and its restart ends that.
-pub async fn undrain(client: &Client, name: &str) -> String {
+pub async fn undrain(client: &Client, name: &str, purpose: Purpose) -> String {
+    let on = match purpose {
+        Purpose::Upgrade => " on the old build",
+        Purpose::Pause => "",
+    };
     match trigger(client, name, "undrain", None).await {
         Ok(Answered::Runner(_)) => {
-            ", and it was sent `undrain`, so it starts calls again on the old build".to_owned()
+            format!(", and it was sent `undrain`, so it starts calls again{on}")
         }
         _ => String::new(),
     }
