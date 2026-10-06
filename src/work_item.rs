@@ -161,6 +161,15 @@ pub struct WorkItem {
     /// to read, and kelpie's own catch-up of a head it vouches for
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sent_unread: Vec<String>,
+    /// The heads a fix turn sent only nits pushed, oldest first. A bot that
+    /// read the pull request before has its nits on one of these left open.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nit_fix_heads: Vec<String>,
+    /// The head a merge ruling's `no` was about, while the fix it asked for
+    /// goes to CI with no reviewer's read. The next merge ruling, on another
+    /// head no round read, says that head is the fix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noted_from: Option<String>,
     /// The head at which the maintainer accepted a change to `.claude` or
     /// `.mcp.json`. Later heads that leave those files as this one has them
     /// pass the gate, and so does a worktree holding this head's copies.
@@ -191,8 +200,8 @@ pub struct WorkItem {
     /// queued it until it merges or the queue removes it
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_queued: Option<MergeQueued>,
-    /// Every finding kelpie has sent the worker to fix, across rounds. The
-    /// worker can only defer one of these.
+    /// Every finding above a nit kelpie has sent the worker to fix, across
+    /// rounds. Only one of these is filed when the worker defers it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub held: Vec<Finding>,
     /// The findings the worker left unfixed, read once the pull request
@@ -429,9 +438,10 @@ impl WorkItem {
         self.bots_skipped.clear();
     }
 
-    /// Remembers findings sent to the worker, once each
+    /// Remembers findings sent to the worker, once each, but for nits: a
+    /// nit the worker leaves is never filed as a follow-up
     pub fn record_held(&mut self, held: &[Finding]) {
-        for finding in held {
+        for finding in held.iter().filter(|f| !f.is_nit()) {
             if !self.held.iter().any(|known| known.is_same_as(finding)) {
                 self.held.push(finding.clone());
             }
@@ -549,6 +559,7 @@ mod tests {
         let mut item = a_work_item();
         item.reviewed_heads = vec!["c0ffee".into()];
         item.sent_unread = vec!["f1x".into()];
+        item.nit_fix_heads = vec!["f1x".into()];
         assert_eq!(
             serde_json::to_value(item).unwrap(),
             json!({
@@ -571,6 +582,7 @@ mod tests {
                 "known": { "labels": ["review please"], "ready": false },
                 "reviewed_heads": ["c0ffee"],
                 "sent_unread": ["f1x"],
+                "nit_fix_heads": ["f1x"],
                 "qwen": { "rounds": 0, "seconds": 0 },
                 "timings": {
                     "created": 5,

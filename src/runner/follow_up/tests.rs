@@ -226,8 +226,33 @@ fn the_same_finding_deferred_twice_files_once() {
     assert_eq!(rig.forge.created().len(), 1);
 }
 
+// A version 13 state file could hold a nit among the findings sent, from a
+// round above a nit; deferred, it is not filed either.
 #[test]
-fn a_nit_that_was_never_sent_files_nothing() {
+fn a_nit_an_older_state_file_held_is_not_filed() {
+    let nit = Finding {
+        severity: Severity::Low,
+        ..finding("src/main.rs", "unused import")
+    };
+    let found = [racy()];
+    let deferred = format!(
+        "{}LOW|{}:{}|{}|{}\n",
+        lines(&found),
+        nit.file,
+        nit.line,
+        nit.what,
+        nit.why
+    );
+    let (rig, runner) = auto_ready_to_merge(&found, &deferred);
+    runner.lock().unwrap().state.work_items[0].held.push(nit);
+
+    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    let [issue] = rig.forge.created().try_into().unwrap();
+    assert_eq!(issue.title, "looks racy");
+}
+
+#[test]
+fn a_nit_the_worker_deferred_files_nothing() {
     let rig = Rig::new("shep");
     rig.merge_auto();
     let runner = rig.open().unwrap();
@@ -241,16 +266,25 @@ fn a_nit_that_was_never_sent_files_nothing() {
         .script([ScriptedRound::Findings(vec![nit.clone()])]);
     rig.claude.script([
         Scripted::Push("work.txt", "work\n"),
+        Scripted::Text("Left the nit as out of scope."),
         Scripted::Text("CLEAN"),
     ]);
     step(&runner).unwrap(); // the worker's first turn
     step(&runner).unwrap(); // round 1, qwen: one nit
-    step(&runner).unwrap(); // a round of nits sends nothing
-    step(&runner).unwrap(); // round 2, claude: clean
-    let head = rig.forge.head_of("kelpie/7").expect("the worker pushed");
-    // Even a worker that copied the nit into the file files nothing.
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewFindingsSent { held: 1, .. })
+    ));
+    // The worker copies the nit into the file and pushes nothing.
     let line = format!("LOW|{}:{}|{}|{}\n", nit.file, nit.line, nit.what, nit.why);
     defer(&rig, &line);
+    step(&runner).unwrap(); // the worker's fix turn
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::NitsDeclined { nits: 1, .. })
+    ));
+    step(&runner).unwrap(); // round 2, claude: clean
+    let head = rig.forge.head_of("kelpie/7").expect("the worker pushed");
     rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
         rig.verdict(&runner),

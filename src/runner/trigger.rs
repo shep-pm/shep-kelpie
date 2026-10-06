@@ -39,7 +39,8 @@ const ATTACH_USAGE: &str = "takes an issue number and the attaching process's pi
 const PM_USAGE: &str = "takes `attach <pid>`, `attach <pid> <session pid>` or `detach <pid>`";
 
 /// What `rule` takes, as its refusals say
-const RULE_USAGE: &str = "takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`";
+const RULE_USAGE: &str =
+    "takes `<id> yes`, `<id> no <note>`, `<id> rework <note>` or `<id> answer <text>`";
 
 /// What `status` answers
 #[derive(Debug, Serialize)]
@@ -247,8 +248,8 @@ enum Request {
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
 ///
 /// Blank params count as none. `add` takes an issue number, `rework` and
-/// `adopt` a pull request number, `rule` takes `<id> yes`, `<id> no <note>` or
-/// `<id> answer <text>`, `gate` and `drop` take the
+/// `adopt` a pull request number, `rule` takes `<id> yes`, `<id> no <note>`,
+/// `<id> rework <note>` or `<id> answer <text>`, `gate` and `drop` take the
 /// issue of the work item they are about when more than one is open,
 /// `timings` takes how many finished work items to total (ten when left
 /// out) and answers the totals, not the status, `attach` and `detach` take
@@ -386,7 +387,8 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
     }
 }
 
-/// `rule`'s params read: `<id> yes`, `<id> no <note>` or `<id> answer <text>`
+/// `rule`'s params read: `<id> yes`, `<id> no <note>`, `<id> rework <note>`
+/// or `<id> answer <text>`
 pub(super) fn read_rule(params: &str) -> Option<(u64, Answer)> {
     let (id, rest) = params.split_once(char::is_whitespace)?;
     let id = number(id)?;
@@ -394,6 +396,7 @@ pub(super) fn read_rule(params: &str) -> Option<(u64, Answer)> {
     let answer = match rest.split_once(char::is_whitespace) {
         None if rest == "yes" => Answer::Yes,
         Some(("no", note)) if !note.trim().is_empty() => Answer::No(note.trim().to_owned()),
+        Some(("rework", note)) if !note.trim().is_empty() => Answer::Rework(note.trim().to_owned()),
         Some(("answer", text)) if !text.trim().is_empty() => Answer::Text(text.trim().to_owned()),
         _ => return None,
     };
@@ -648,7 +651,7 @@ mod tests {
         );
         assert_eq!(
             rig.ask(&runner, "rule", None),
-            json!({ "error": "`rule` takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`" })
+            json!({ "error": "`rule` takes `<id> yes`, `<id> no <note>`, `<id> rework <note>` or `<id> answer <text>`" })
         );
         assert_eq!(
             rig.ask(&runner, "merge", None),

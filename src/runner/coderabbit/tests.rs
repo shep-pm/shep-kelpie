@@ -313,7 +313,8 @@ fn a_restart_during_the_settle_does_not_mark_again() {
     assert_eq!(rig.forge.readied(), [71]);
 }
 
-// A merge ruling's no sends the worker back, and its fix gets a pass of its own.
+// A merge ruling's rework sends the worker back, and its change gets a pass
+// of its own, unlike a no, whose fix goes straight to CI.
 #[test]
 fn a_later_pass_on_a_ready_pull_request_summons_at_once() {
     let (rig, runner, head) = read_clean("shep");
@@ -322,7 +323,7 @@ fn a_later_pass_on_a_ready_pull_request_summons_at_once() {
         rig.verdict(&runner),
         Some(StepReport::Ruling { id: 1, .. })
     ));
-    rig.ask(&runner, "rule", Some("1 no name the flag"));
+    rig.ask(&runner, "rule", Some("1 rework name the flag"));
     rig.claude.script([
         Scripted::Push("flag.txt", "named\n"),
         Scripted::Text("CLEAN"),

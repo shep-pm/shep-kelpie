@@ -172,13 +172,14 @@ impl Runner {
 
 // The findings kelpie sent the worker that the file names again, in kelpie's
 // own words and each once. A file that was never written is a worker with
-// nothing to defer.
+// nothing to defer. A nit is never filed, though a version 13 state file
+// may still hold one.
 fn read_deferred(build: &Path, held: &[Finding], worktree: &Path) -> Result<Vec<Finding>, String> {
     let deferred = findings::deferred(build)?;
     let named = |held: &Finding| deferred.iter().any(|d| d.is_same_as(held));
     Ok(held
         .iter()
-        .filter(|held| named(held))
+        .filter(|held| !held.is_nit() && named(held))
         .cloned()
         .map(|finding| relative(finding, worktree))
         .collect())

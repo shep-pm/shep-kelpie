@@ -1,10 +1,10 @@
 //! A ruling's answer in plain words, read by the ruling's kind
 //!
 //! `shep kelpie rule` and replies on ntfy read an answer this way: `yes`, or
-//! `no <note>`, for a ruling that asks yes or no, and any text at all for the
-//! worker's question, a lone `yes` included. What they read goes to the
-//! runner as `rule`'s own `<id> yes`, `<id> no <note>` or `<id> answer
-//! <text>`.
+//! `no <note>`, for a ruling that asks yes or no, those or `rework <note>`
+//! for a merge ruling, and any text at all for the worker's question, a lone
+//! `yes` included. What they read goes to the runner as `rule`'s own `<id>
+//! yes`, `<id> no <note>`, `<id> rework <note>` or `<id> answer <text>`.
 
 use super::Answer;
 use crate::state::RulingKind;
@@ -14,6 +14,8 @@ use crate::state::RulingKind;
 pub enum Wants {
     /// A worker's question, answered with `<id> answer <text>`
     Answer,
+    /// The merge ruling: `<id> yes`, `<id> no <note>` or `<id> rework <note>`
+    Merge,
     /// Every other ruling: `<id> yes`, or `<id> no <note>`
     YesOrNo,
 }
@@ -23,8 +25,8 @@ impl Wants {
     pub fn of(kind: &RulingKind) -> Self {
         match kind {
             RulingKind::Question { .. } => Self::Answer,
-            RulingKind::Merge { .. }
-            | RulingKind::Stuck(..)
+            RulingKind::Merge { .. } => Self::Merge,
+            RulingKind::Stuck(..)
             | RulingKind::AgentFiles { .. }
             | RulingKind::ForeignChange { .. }
             | RulingKind::FollowUp { .. } => Self::YesOrNo,
@@ -35,7 +37,7 @@ impl Wants {
 /// `words` as the answer to a ruling that wants `wants`
 ///
 /// A question's text may still start with the older `answer`, which is
-/// dropped. `yes` and `no` are read in any case.
+/// dropped. `yes`, `no` and `rework` are read in any case.
 ///
 /// # Errors
 ///
@@ -53,13 +55,19 @@ pub fn read_answer(wants: Wants, words: &str) -> Result<Answer, String> {
             }
             Ok(Answer::Text(text.to_owned()))
         }
-        Wants::YesOrNo => {
+        Wants::Merge | Wants::YesOrNo => {
             let (first, rest) = words.split_once(char::is_whitespace).unwrap_or((words, ""));
             let rest = rest.trim();
+            let merge = wants == Wants::Merge;
             match (first.to_ascii_lowercase().as_str(), rest) {
                 ("yes", "") => Ok(Answer::Yes),
                 ("no", "") => Err("a no takes a note for the worker: `no <note>`".into()),
                 ("no", note) => Ok(Answer::No(note.to_owned())),
+                ("rework", "") if merge => {
+                    Err("a rework takes a note for the worker: `rework <note>`".into())
+                }
+                ("rework", note) if merge => Ok(Answer::Rework(note.to_owned())),
+                _ if merge => Err("it takes `yes`, `no <note>` or `rework <note>`".into()),
                 _ => Err("it takes `yes`, or `no <note>`".into()),
             }
         }
@@ -72,6 +80,7 @@ impl Answer {
         match self {
             Self::Yes => format!("{id} yes"),
             Self::No(note) => format!("{id} no {note}"),
+            Self::Rework(note) => format!("{id} rework {note}"),
             Self::Text(text) => format!("{id} answer {text}"),
         }
     }
@@ -81,9 +90,10 @@ impl Answer {
 mod tests {
     use super::*;
     use crate::runner::trigger::read_rule;
+    use crate::state::Stuck;
 
     #[test]
-    fn a_question_takes_an_answer_and_every_other_ruling_a_yes_or_no() {
+    fn a_question_takes_an_answer_a_merge_ruling_a_rework_too_and_any_other_a_yes_or_no() {
         let question = RulingKind::Question {
             asked: String::new(),
             resume: crate::state::Resume::Nothing,
@@ -94,8 +104,33 @@ mod tests {
             unreviewed: None,
             open_threads: None,
             unread_head: false,
+            note_fix: false,
         };
-        assert_eq!(Wants::of(&merge), Wants::YesOrNo);
+        assert_eq!(Wants::of(&merge), Wants::Merge);
+        assert_eq!(Wants::of(&Stuck::Closed.into()), Wants::YesOrNo);
+    }
+
+    #[test]
+    fn a_merge_ruling_takes_a_rework_with_a_note_and_no_other_ruling_does() {
+        let merge = |words| read_answer(Wants::Merge, words);
+        assert_eq!(merge("yes"), Ok(Answer::Yes));
+        assert_eq!(
+            merge("no fix the nit"),
+            Ok(Answer::No("fix the nit".into()))
+        );
+        assert_eq!(
+            merge(" Rework  split the parser out "),
+            Ok(Answer::Rework("split the parser out".into()))
+        );
+        assert!(merge("rework").unwrap_err().contains("`rework <note>`"));
+        assert_eq!(
+            merge("maybe"),
+            Err("it takes `yes`, `no <note>` or `rework <note>`".into())
+        );
+        assert_eq!(
+            read_answer(Wants::YesOrNo, "rework split it"),
+            Err("it takes `yes`, or `no <note>`".into())
+        );
     }
 
     #[test]
@@ -136,6 +171,7 @@ mod tests {
         for answer in [
             Answer::Yes,
             Answer::No("rename it".into()),
+            Answer::Rework("split it".into()),
             Answer::Text("yes".into()),
             Answer::Text("line one\nline two".into()),
         ] {

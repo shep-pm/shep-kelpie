@@ -17,6 +17,9 @@ pub(super) fn reply_line(reply: &ReplyWith) -> String {
     let ruling = reply.id;
     let replies = match reply.takes {
         Takes::Answer => format!("`{ruling} <text> <code>`"),
+        Takes::Merge => format!(
+            "`{ruling} yes <code>`, `{ruling} no <note> <code>` or `{ruling} rework <note> <code>`"
+        ),
         Takes::YesOrNo => format!("`{ruling} yes <code>` or `{ruling} no <note> <code>`"),
     };
     format!("\n\nReply here with {replies}, where <code> is kelpie's authenticator code.")
@@ -190,6 +193,15 @@ mod tests {
             reply_line(&yes_or_no),
             "\n\nReply here with `3 yes <code>` or `3 no <note> <code>`, \
              where <code> is kelpie's authenticator code."
+        );
+        let merge = ReplyWith {
+            takes: Takes::Merge,
+            ..yes_or_no.clone()
+        };
+        assert_eq!(
+            reply_line(&merge),
+            "\n\nReply here with `3 yes <code>`, `3 no <note> <code>` or \
+             `3 rework <note> <code>`, where <code> is kelpie's authenticator code."
         );
         let question = ReplyWith {
             takes: Takes::Answer,

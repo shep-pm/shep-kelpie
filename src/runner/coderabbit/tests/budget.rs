@@ -46,7 +46,7 @@ fn noted(rig: &Rig, runner: &Mutex<Runner>, head: &str) {
         rig.verdict(runner),
         Some(StepReport::Ruling { id: 1, .. })
     ));
-    rig.ask(runner, "rule", Some("1 no name the flag"));
+    rig.ask(runner, "rule", Some("1 rework name the flag"));
     rig.claude.script([
         Scripted::Push("named.txt", "named\n"),
         Scripted::Text("CLEAN"),
@@ -100,7 +100,7 @@ fn two_rounds_read_two_passes_and_not_a_third() {
         rig.verdict(&runner),
         Some(StepReport::Ruling { id: 2, .. })
     ));
-    rig.ask(&runner, "rule", Some("2 no once more"));
+    rig.ask(&runner, "rule", Some("2 rework once more"));
     rig.claude.script([
         Scripted::Push("again.txt", "again\n"),
         Scripted::Text("CLEAN"),

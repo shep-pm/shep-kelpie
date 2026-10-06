@@ -476,8 +476,8 @@ pub enum StepReport {
         /// Why the last try failed
         reason: String,
     },
-    /// The round's findings were sent to the worker's next turn, or, all
-    /// nits or none, went nowhere and the review moved on
+    /// The round's findings were sent to the worker's next turn, or, with
+    /// none, the review moved on
     ReviewFindingsSent {
         /// The work item's issue
         issue: u64,
@@ -485,7 +485,7 @@ pub enum StepReport {
         pull_request: u64,
         /// The round
         round: u32,
-        /// How many findings were sent: none for a round of nits
+        /// How many findings were sent
         held: usize,
     },
     /// A reviewer with a second look read once, and reads again next,
@@ -525,6 +525,18 @@ pub enum StepReport {
         round: u32,
         /// How many findings it deferred
         deferred: usize,
+    },
+    /// The worker's fix turn was sent only nits and pushed nothing, which
+    /// declines them, so the next reviewer reads the pull request as it stands
+    NitsDeclined {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The round whose nits it declined
+        round: u32,
+        /// How many nits it was sent
+        nits: usize,
     },
     /// The worktree was not the head on `origin` as a review round was
     /// about to run, so the worker's next turn pushes or discards first

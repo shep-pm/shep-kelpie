@@ -209,8 +209,47 @@ fn under_auto_a_bots_unaddressed_threads_raise_the_merge_ruling_instead_of_mergi
     );
 }
 
+// A fix sent straight to CI could not clear the threads the ruling warns
+// of, so a no on it starts a new pass, as a rework does, and says so.
 #[test]
-fn a_held_nit_and_an_outdated_thread_raise_no_warning() {
+fn a_no_on_a_merge_ruling_that_warns_of_open_threads_starts_a_new_pass() {
+    let rig = listing("shep", &["cubic"]);
+    let runner = passed_over_then_reviewed(&rig, &[FINDING]);
+    let Some(StepReport::Ruling { question, .. }) = rig.verdict(&runner) else {
+        panic!("no merge ruling");
+    };
+    assert!(
+        question.ends_with(
+            "`shep kelpie rule 1 yes` merges it, and `shep kelpie rule 1 no <note>` or \
+             `shep kelpie rule 1 rework <note>` sends the worker your note for a change the \
+             whole review reads again, since only a new pass clears that."
+        ),
+        "{question}"
+    );
+    rig.ask(&runner, "rule", Some("1 no strip only stamped files"));
+    rig.claude
+        .script([Scripted::Push("strip.txt", "stripped\n")]);
+    step(&runner).unwrap(); // the noted turn: pushes, and a pass begins
+    let noted = rig.claude.calls().pop().unwrap();
+    assert!(
+        noted
+            .prompt
+            .ends_with("Once you push it, the whole review reads your change again.\n"),
+        "{}",
+        noted.prompt
+    );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["phase"]["state"], "review");
+    assert_eq!(status["work_item"]["phase"]["round"], 1);
+    let item = runner.lock().unwrap().state.work_items[0].clone();
+    assert_eq!(
+        item.noted_from, None,
+        "the next ruling will not call its head the note's fix"
+    );
+}
+
+#[test]
+fn a_nit_sent_to_its_fix_and_an_outdated_thread_raise_no_warning() {
     let rig = listing("shep", &["cubic"]);
     let (runner, head) = reviewed(&rig);
     step(&runner).unwrap(); // marks the draft ready
@@ -229,9 +268,17 @@ fn a_held_nit_and_an_outdated_thread_raise_no_warning() {
     assert_eq!(rig.threads_read(&runner), bot_reviewed(3, "cubic", 1));
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::ReviewFindingsSent { held: 0, .. })
+        Some(StepReport::ReviewFindingsSent { held: 1, .. })
     ));
-    rig.forge.set_checks(&head, Checks::Passed);
+    rig.claude
+        .script([Scripted::Push("shorter.txt", "shorter\n")]);
+    step(&runner).unwrap(); // the worker's fix turn
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::FixPushed { .. })
+    ));
+    let fixed = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_checks(&fixed, Checks::Passed);
     let Some(StepReport::Ruling { question, .. }) = rig.verdict(&runner) else {
         panic!("no merge ruling");
     };

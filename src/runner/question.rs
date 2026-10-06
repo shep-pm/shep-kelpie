@@ -356,7 +356,7 @@ mod tests {
         }
         assert_eq!(
             rig.ask(&runner, "rule", Some("1 answer")),
-            json!({ "error": "`rule` takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`, not \"1 answer\"" })
+            json!({ "error": "`rule` takes `<id> yes`, `<id> no <note>`, `<id> rework <note>` or `<id> answer <text>`, not \"1 answer\"" })
         );
         assert_eq!(rig.ask(&runner, "status", None)["rulings"][0]["id"], 1);
 

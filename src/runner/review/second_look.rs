@@ -152,15 +152,19 @@ fn two_looks_that_find_nothing_end_the_review_with_no_fix_turn() {
 }
 
 #[test]
-fn nits_alone_from_both_looks_are_not_worth_a_fix_turn() {
+fn nits_alone_from_both_looks_go_to_one_fix_turn() {
     let (rig, runner) = at_defect_hunter();
     rig.claude.script([
         Scripted::Text("LOW|work.txt:1|a name is misleading|a reader is confused"),
         Scripted::Text("CLEAN"),
+        Scripted::Push("renamed.txt", "renamed\n"),
     ]);
     until_it_leaves_review(&rig, &runner);
     assert_eq!(state(&rig, &runner), "ci");
-    assert_eq!(roles(&rig), [Role::Worker, Role::Reviewer, Role::Reviewer]);
+    assert_eq!(
+        roles(&rig),
+        [Role::Worker, Role::Reviewer, Role::Reviewer, Role::Worker]
+    );
 }
 
 #[test]

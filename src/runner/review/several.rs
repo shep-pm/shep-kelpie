@@ -163,6 +163,10 @@ fn another_reviewers_first_miss_on_a_file_is_not_a_failure_against_it() {
     let mixed = crate::ports::parse_findings(MIXED);
     rig.reviewer
         .script((0..2).map(|_| ScriptedRound::Findings(mixed.clone())));
+    rig.claude.script([
+        Scripted::Push("tidy-1.txt", "tidied\n"),
+        Scripted::Push("tidy-2.txt", "tidied\n"),
+    ]);
     // mine, then other, each leave the same file unreviewed with one nit.
     // Neither missed it before, so neither has a failure against it.
     reviewers_until_ci(&rig, &runner);
@@ -237,7 +241,10 @@ fn every_round_s_prompt_carries_the_issue_s_acceptance_criteria() {
         what: "a nit".into(),
         why: "it is".into(),
     }])]);
-    rig.claude.script([Scripted::Text("CLEAN")]);
+    rig.claude.script([
+        Scripted::Push("tidy.txt", "tidied\n"),
+        Scripted::Text("CLEAN"),
+    ]);
     reviewers_until_ci(&rig, &runner);
     assert_eq!(
         rig.reviewer.seen()[0].criteria,

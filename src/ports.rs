@@ -539,6 +539,8 @@ pub struct ReplyWith {
 pub enum Takes {
     /// The worker's question: an answer
     Answer,
+    /// The merge ruling: a yes, or a no or a rework with a note
+    Merge,
     /// A yes, or a no with a note
     YesOrNo,
 }
@@ -664,6 +666,11 @@ impl Finding {
     /// and a deferred finding is matched to the one the worker was sent by.
     pub fn is_same_as(&self, other: &Self) -> bool {
         (&self.file, self.line, &self.what) == (&other.file, other.line, &other.what)
+    }
+
+    /// Whether it is a nit: LOW, the lowest severity
+    pub fn is_nit(&self) -> bool {
+        self.severity <= Severity::Low
     }
 
     /// Whether this is the line the script writes for a file it skipped as
