@@ -199,6 +199,7 @@ impl WorkerProfile<'_> {
                     .iter()
                     .map(|n| n.as_str().to_owned())
                     .collect(),
+                issues: None,
             },
             hooks: self.guard_hooks.to_vec(),
         };

@@ -243,6 +243,46 @@ pub fn remove(
     }
 }
 
+/// Makes `view` a detached worktree of `repo` at `origin/main`, just
+/// fetched, for a session that reads the repo and changes nothing
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command or folder that failed.
+pub fn view(repo: &Path, view: &Path) -> Result<(), WorktreeError> {
+    if let Some(parent) = view.parent() {
+        create(parent)?;
+    }
+    git(repo, ["fetch", "--quiet", "origin", BASE])?;
+    let base = format!("origin/{BASE}");
+    let args: [&OsStr; 5] = [
+        "worktree".as_ref(),
+        "add".as_ref(),
+        "--detach".as_ref(),
+        view.as_os_str(),
+        base.as_ref(),
+    ];
+    git(repo, args).map(drop)
+}
+
+/// Removes the detached worktree [`view`] made, if it is there
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn remove_view(repo: &Path, view: &Path) -> Result<(), WorktreeError> {
+    if view.exists() {
+        let args: [&OsStr; 4] = [
+            "worktree".as_ref(),
+            "remove".as_ref(),
+            "--force".as_ref(),
+            view.as_os_str(),
+        ];
+        git(repo, args)?;
+    }
+    git(repo, ["worktree", "prune"]).map(drop)
+}
+
 /// Whether `full_ref` is a branch on `origin` right now, asked of the remote
 fn on_origin(repo: &Path, full_ref: &str) -> Result<bool, WorktreeError> {
     Ok(!git(repo, ["ls-remote", "--heads", "origin", full_ref])?.is_empty())

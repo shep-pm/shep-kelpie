@@ -98,11 +98,12 @@ pub struct ProjectPaths {
     pub door: PathBuf,
     worktrees: PathBuf,
     builds: PathBuf,
+    issues: PathBuf,
 }
 
 impl ProjectPaths {
     /// `<kelpie home>/<project>/`, holding the project's state, settings and
-    /// worker files, and its `worktrees` and `builds` folders, beside
+    /// worker files, and its `worktrees`, `builds` and `issues` folders, beside
     /// kelpie's own `settings.toml`, `totp`, `agents` and `tools`
     pub fn under(kelpie_home: &Path, shep_home: &Path, project: &ProjectName) -> Self {
         let folder = kelpie_home.join(project.as_str());
@@ -121,6 +122,7 @@ impl ProjectPaths {
             door: kelpie_home.join("dog/lease.sock"),
             worktrees: folder.join("worktrees"),
             builds: folder.join("builds"),
+            issues: folder.join("issues"),
         }
     }
 
@@ -149,6 +151,12 @@ impl ProjectPaths {
     /// The build folder for the work item that resolves `issue`
     pub fn build(&self, issue: u64) -> PathBuf {
         self.builds.join(issue.to_string())
+    }
+
+    /// The folder for the issue writer's settings, prompt and checkouts,
+    /// apart from every work item's
+    pub fn issues(&self) -> PathBuf {
+        self.issues.clone()
     }
 }
 

@@ -158,7 +158,7 @@ For npm, that is `registry.npmjs.org`. A change reaches a running runner at its 
 shep kelpie start
 ```
 
-Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria. The runner gives it to a worker, which opens a draft pull request. Then the review runs, each listed reviewer once, a review bot such as CodeRabbit among them where the project lists one, then CI. Last, you get a ruling before the merge. `shep kelpie status` shows every project. A worker whose first turn ends with no pull request and no question is sent back once, and asks you for a ruling if it stops short again.
+Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria, or have the issue writer write it (see [Writing issues](#writing-issues)). The runner gives it to a worker, which opens a draft pull request. Then the review runs, each listed reviewer once, a review bot such as CodeRabbit among them where the project lists one, then CI. Last, you get a ruling before the merge. `shep kelpie status` shows every project. A worker whose first turn ends with no pull request and no question is sent back once, and asks you for a ruling if it stops short again.
 
 What decides whether, and when, the first issue starts:
 
@@ -217,6 +217,7 @@ shep kelpie pause
 shep kelpie status     # every project
 shep kelpie doctor     # what each project still needs on this machine
 shep kelpie rule 14 yes
+shep kelpie issue "<request>"   # issues for you to read, or --interactive
 ```
 
 Every trigger the runner takes is also a verb: `add <issue>`, `rework <pr>`, `adopt <pr>`, `gate [<issue>]`, `drop [<issue>]`, `timings [<n>]` and `rule`. Each reaches the project whose repo holds the folder you run it in, a worktree of it included, or the one `-p <project>` names anywhere in the line. From anywhere else it lists the projects and guesses nothing. `shep trigger` still works.
@@ -409,6 +410,23 @@ The runner writes the board out as `board.md` in the project's folder, and `stat
 - the board's events since the project manager last read it, or the last 20 before it ever has
 - the overlap: for each pair of open branches, the files both touch and the files `git merge-tree` finds in conflict, and each ready issue's named paths against them. The conflict check needs git 2.38 or later
 
+### Writing issues
+
+The issue writer turns a request into issues an agent can build from. It reads the repo, scopes the request to one pull request's worth, or splits it where each piece works, tests and ships on its own (most requests stay whole), writes acceptance criteria into every issue, and labels each `agent:<name>` with one of the project's implementers.
+
+```sh
+shep kelpie issue "let a project be paused from lookout"
+shep kelpie issue --interactive "let a project be paused from lookout"
+```
+
+On its own, it runs one fresh session in a detached checkout of `main`, files what it writes as `ready-for-human`, and ends with the list of what it filed. shep-kelpie reads each issue back and prints it, with its `agent:` label and the issue it is a sub-issue of. Read them, then label them `ready-for-agent`. An issue without acceptance criteria, its status label or exactly one `agent:` label naming a listed implementer is named with what it lacks, and the command exits non-zero. A session that fails, or ends without the list, keeps its checkout and prints the `claude --resume` line that picks it up.
+
+With `--interactive` it runs `claude` in your terminal, in the project's checkout, with the issue writer's prompt appended and the request as your first message. You plan the issues together, and it files what you agree as `ready-for-agent`, onto the board. It is your session, not a runner's: shep-kelpie starts it and gets out of the way, and Claude Code asks you before each command it runs.
+
+Either way the session reads the checkout with Read, Grep and Glob, and nothing outside it: not gh's config, Claude Code's own files or your shell history. It edits no file. Its Bash runs only what `kelpie guard` lists for it: `gh issue create`, `gh issue view <n>` and `gh issue list` on this repo, and, for the issues it filed in this session, `gh issue edit` on labels and `gh api` on their ids and sub-issue and blocked-by links, each as plain words, with a body given as a heredoc behind a quoted delimiter (`--body-file - <<'EOF'`). It runs no git. A hook after each command records the issues it filed and the ids it read, and the guard refuses an edit or a link on any other. The guard also refuses an issue without acceptance criteria, without the status label, or without exactly one listed `agent:` label, and one whose title or body names a path on this machine. On its own the session also runs in the sandbox, with nothing to write but its own scratch folder and only GitHub to reach. Each implementer's `agent:` label is made on the repo the first time the issue writer needs it.
+
+The issue writer is the `issue-writer` agent file: edit its body to change its prompt, or its `model` and `effort`.
+
 ## Agents
 
 An agent is a file: `$SHEP_HOME/kelpie/agents/<name>.md` (or the `agents` folder of the home `KELPIE_HOME` names), YAML frontmatter and then a Markdown body. The name is the file's name without `.md`. An implementer's body is added to kelpie's own instructions for that agent, and an empty body adds nothing. A reviewer's body is its prompt (see The review above).
@@ -424,9 +442,9 @@ effort: high
 Extra instructions for this agent, added to kelpie's own.
 ```
 
-`role` is what the agent is for: `implementer`, an agent that builds a work item, or `reviewer`, one that reads a pull request, a review bot included. A key only the other role takes, such as a reviewer's `paths` or `second_look`, stops the runner. `harness` is Claude Code, `claude-code`, pi, `pi`, which runs a model on an OpenAI-compatible server such as Ollama, or Codex, `codex`, on a ChatGPT plan. `model` and `effort` are what the harness runs. Any other key stops the runner, and so does a file that does not parse or misses a key its harness needs, naming the file and the key. A `.md` file whose name is no agent's, such as a `README.md`, is skipped and named in the log. A runner sees an edit to the folder the next time it wakes, as it sees a settings change.
+`role` is what the agent is for: `implementer`, an agent that builds a work item, `reviewer`, one that reads a pull request, a review bot included, or `issue-writer`, the one `shep kelpie issue` runs, whose body is its prompt and which runs on `claude-code` alone (see [Writing issues](#writing-issues)). A key only another role takes, such as a reviewer's `paths` or `second_look`, stops the runner. `harness` is Claude Code, `claude-code`, pi, `pi`, which runs a model on an OpenAI-compatible server such as Ollama, or Codex, `codex`, on a ChatGPT plan. `model` and `effort` are what the harness runs. Any other key stops the runner, and so does a file that does not parse or misses a key its harness needs, naming the file and the key. A `.md` file whose name is no agent's, such as a `README.md`, is skipped and named in the log. A runner sees an edit to the folder the next time it wakes, as it sees a settings change.
 
-Kelpie ships `sonnet-high`, Sonnet 5.5 at high, the default implementer, `opus-high`, Opus 5.5 at high, for work that is hard to undo, `defect-hunter`, the default reviewer, `qwen`, the reviewer that runs the qwen-review script, and the review bots `coderabbit`, `cubic` and `codex`. `shep kelpie add` writes out any that are missing, `qwen` only where the script exists, and never writes over one you edited, and a file named for one replaces it.
+Kelpie ships `sonnet-high`, Sonnet 5.5 at high, the default implementer, `opus-high`, Opus 5.5 at high, for work that is hard to undo, `defect-hunter`, the default reviewer, `qwen`, the reviewer that runs the qwen-review script, the review bots `coderabbit`, `cubic` and `codex`, and `issue-writer`, Opus 5.5 at medium. `shep kelpie add` writes out any that are missing, `qwen` only where the script exists, and never writes over one you edited, and a file named for one replaces it.
 
 A project lists the agents that build its work items and the ones that review its pull requests, from those files:
 

@@ -25,7 +25,7 @@ use crate::settings::{Settings, table_of};
 use crate::shepherd::DOG;
 
 /// The labels kelpie reads and sets on a project's issues and pull requests
-pub const LABELS: [NewLabel; 4] = [
+pub const LABELS: [NewLabel<'static>; 4] = [
     NewLabel {
         name: READY,
         color: "0e8a16",

@@ -28,6 +28,7 @@ use bot::at_key;
 enum Front {
     Implementer(Implementer),
     Reviewer(Reviewer),
+    IssueWriter(IssueWriter),
 }
 
 // The first pass: the role alone, whatever else is there
@@ -53,6 +54,18 @@ struct Implementer {
     url: Option<EndpointUrl>,
     #[serde(default)]
     context: Option<ContextSize>,
+}
+
+// The issue writer's keys: a Claude Code session, since `--interactive`
+// starts `claude` and its guard is a Claude Code hook
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IssueWriter {
+    #[serde(rename = "role")]
+    _role: Role,
+    harness: Harness,
+    model: NonBlank,
+    effort: Effort,
 }
 
 // What runs a reviewer: a session on a harness, a command, an endpoint or a
@@ -135,6 +148,7 @@ pub(super) fn parse(text: &str) -> Result<Agent, String> {
     let front = match serde_saphyr::from_str::<Tag>(&yaml).map_err(refused)?.role {
         Role::Implementer => Front::Implementer(serde_saphyr::from_str(&yaml).map_err(refused)?),
         Role::Reviewer => Front::Reviewer(serde_saphyr::from_str(&yaml).map_err(refused)?),
+        Role::IssueWriter => Front::IssueWriter(serde_saphyr::from_str(&yaml).map_err(refused)?),
     };
     let body = body.trim();
     let prompt = (!body.is_empty()).then(|| body.to_owned());
@@ -162,6 +176,41 @@ pub(super) fn parse(text: &str) -> Result<Agent, String> {
                 prompt,
                 paths: keys.paths,
                 second_look: keys.second_look,
+            })
+        }
+        Front::IssueWriter(keys) => {
+            let name = keys.harness.as_str();
+            if keys.harness != Harness::ClaudeCode {
+                return Err(at_key(
+                    &yaml,
+                    "harness",
+                    &format!(
+                        "the issue writer runs on claude-code, not {name}: `--interactive` \
+                         starts `claude`, and its guard is a Claude Code hook"
+                    ),
+                ));
+            }
+            if prompt.is_none() {
+                return Err(
+                    "the issue writer's prompt is the file's body: write it below \
+                            the closing `---`"
+                        .into(),
+                );
+            }
+            Ok(Agent {
+                role: Role::IssueWriter,
+                runs: session(&SessionKeys {
+                    harness: keys.harness,
+                    model: &keys.model,
+                    effort: keys.effort,
+                    usage: None,
+                    lease: None,
+                    url: None,
+                    context: None,
+                })?,
+                prompt,
+                paths: Vec::new(),
+                second_look: false,
             })
         }
     }

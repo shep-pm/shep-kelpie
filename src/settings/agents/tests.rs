@@ -149,6 +149,18 @@ fn an_implementer_whose_file_is_a_reviewers_is_refused_naming_its_role() {
 }
 
 #[test]
+fn the_issue_writer_listed_as_an_implementer_is_refused_naming_its_role() {
+    let err = project("implementers = [\"issue-writer\"]\n")
+        .role_agents(&book())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("whose agent file's role is `issue-writer`"),
+        "{err}"
+    );
+}
+
+#[test]
 fn a_codex_implementer_builds_on_the_codex_account() {
     let agents = project("implementers = [\"gpt\"]\n")
         .role_agents(&book())

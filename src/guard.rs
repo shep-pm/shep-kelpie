@@ -17,13 +17,22 @@
 //! The hook runs outside the sandbox, so it runs git the way kelpie's own
 //! worktree steps do, with the worktree's git dirs named and checked. A
 //! repo the worker made could name any program in its own config.
+//!
+//! The issue writer's guard is the other way round: [`judge_issues`] runs
+//! only the commands it lists.
 
 mod gh;
 mod git;
+mod issues;
 mod judging;
 mod script;
 mod shell;
 mod wrap;
+
+pub use issues::{
+    AGENT_FLAG, ISSUES_FLAG, IssueRules, LEDGER_FLAG, RECORD_FLAG, issue_rules, judge_issues,
+    record_issues,
+};
 
 use std::fs;
 use std::io::Read;
@@ -76,6 +85,11 @@ pub const HERE_FLAG: &str = "--judge-here";
 /// Whether `args` asks for [`PIN_FLAG`], and the rest of them
 pub fn pin_flag(args: &[String]) -> (bool, Vec<String>) {
     take_flag(args, PIN_FLAG)
+}
+
+/// Whether `args` asks for [`RECORD_FLAG`], and the rest of them
+pub fn record_flag(args: &[String]) -> (bool, Vec<String>) {
+    take_flag(args, RECORD_FLAG)
 }
 
 /// Whether `args` asks for [`HERE_FLAG`], and the rest of them

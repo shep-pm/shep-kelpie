@@ -58,6 +58,8 @@ impl WorkItem {
             let role = match call.role {
                 Role::Worker => &mut spend.worker,
                 Role::Reviewer => &mut spend.reviewer,
+                // It runs before any work item opens, so none records it.
+                Role::IssueWriter => continue,
             };
             role.calls += 1;
             role.tokens += call.usage;

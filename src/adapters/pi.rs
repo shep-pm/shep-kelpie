@@ -53,7 +53,8 @@ const GUARD: &str = include_str!("pi/guard.ts");
 fn tool_names(tools: Tools, reads: bool) -> Option<&'static str> {
     match tools {
         Tools::Work => Some("read,bash,edit,write,grep,find,ls"),
-        Tools::Review => Some("read,grep,find,ls"),
+        // The issue writer runs on Claude Code alone, whose hook is its guard.
+        Tools::Review | Tools::Issues => Some("read,grep,find,ls"),
         Tools::Answer if reads => Some("read"),
         Tools::Answer => None,
     }

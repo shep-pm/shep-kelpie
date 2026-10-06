@@ -22,6 +22,7 @@ pub mod flock;
 pub mod forwarder;
 pub mod guard;
 pub mod home;
+pub mod issues;
 pub mod lease;
 pub mod local_paths;
 pub mod pacer;
