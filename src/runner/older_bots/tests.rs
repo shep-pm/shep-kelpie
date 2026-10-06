@@ -52,7 +52,7 @@ fn an_item_in_ci_that_no_bot_read_gets_a_pass_of_the_listed_bots_before_its_merg
         rig.forge.coderabbit.review(71, &head, now(&rig) + 60, &[]);
         rig.clock.advance(60);
         assert!(matches!(
-            step(&runner).unwrap(),
+            rig.threads_read(&runner),
             Some(StepReport::BotReviewed { round: 1, .. })
         ));
         let after = rig.verdict(&runner);

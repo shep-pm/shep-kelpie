@@ -238,6 +238,7 @@ mod tests {
         Thread {
             id: "t".into(),
             resolved: false,
+            outdated: false,
             path: "src/a.rs".into(),
             line: Some(12),
             body: body.into(),

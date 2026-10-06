@@ -108,6 +108,8 @@ pub use words::{Wants, read_answer};
 
 #[cfg(test)]
 pub(crate) use gate::CHECKS_SETTLE;
+#[cfg(test)]
+pub(crate) use review_bot::SETTLE_LEAST;
 
 /// Why a runner could not start
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -776,7 +778,7 @@ mod tests {
         drop(runner);
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
-        assert_eq!(saved["version"], 11);
+        assert_eq!(saved["version"], 12);
         assert_eq!(
             saved["events"][2]["what"], "project paused",
             "old events stay"

@@ -83,7 +83,7 @@ fn two_rounds_read_two_passes_and_not_a_third() {
     let (rig, runner, head) = summoned_with("golbat", 2);
     rig.forge.coderabbit.review(71, &head, now(&rig) + 60, &[]);
     rig.clock.advance(60);
-    step(&runner).unwrap(); // the first read lands clean
+    rig.threads_read(&runner); // the first read lands clean
     noted(&rig, &runner, &head);
     assert!(matches!(
         step(&runner).unwrap(),
@@ -94,7 +94,7 @@ fn two_rounds_read_two_passes_and_not_a_third() {
         .coderabbit
         .review(71, &second, now(&rig) + 60, &[]);
     rig.clock.advance(60);
-    step(&runner).unwrap(); // the second read lands clean
+    rig.threads_read(&runner); // the second read lands clean
     rig.forge.set_checks(&second, Checks::Passed);
     assert!(matches!(
         rig.verdict(&runner),
@@ -159,7 +159,7 @@ fn an_adopted_pull_request_whose_earlier_review_spent_the_rounds_still_gets_one_
         .coderabbit
         .review(80, &head, summon + 600, &["Name the flag."]);
     rig.clock.advance(600);
-    step(&runner).unwrap(); // the review lands
+    rig.threads_read(&runner); // the review lands
     assert!(matches!(
         step(&runner).unwrap(),
         Some(StepReport::ReviewFindingsSent { held: 1, .. })

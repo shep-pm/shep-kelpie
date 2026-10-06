@@ -40,6 +40,7 @@ impl FakeCodeRabbit {
                 .extend(findings.iter().enumerate().map(|(i, text)| Thread {
                     id: format!("PRRT_cubic_{number}_{}", first + i),
                     resolved: false,
+                    outdated: false,
                     path: "work.txt".into(),
                     line: Some(1),
                     body: format!(

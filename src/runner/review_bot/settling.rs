@@ -1,0 +1,330 @@
+//! A bot's threads read until they settle, and the threads of a bot the
+//! pass went on without, through the runner's stand-ins
+
+use crate::ports::Checks;
+use crate::review_bot::Thread;
+use crate::runner::coderabbit::tests::now;
+use crate::runner::review_bot::two_bots::{bot_reviewed, listing, reviewed, summoned};
+use crate::runner::{StepReport, step};
+use crate::test::{Rig, Scripted};
+
+const FINDING: &str = "P2: `bleats` loses a stamped prefix. Strip only files shep stamped.";
+
+// Takes the bot's threads out of the forge's answers, as a forge that lists
+// a review before the threads posted with it does.
+fn hidden(rig: &Rig, login: &str) -> Vec<Thread> {
+    let mut threads = Vec::new();
+    rig.forge.coderabbit.post_as(71, login, |seen| {
+        threads = std::mem::take(&mut seen.threads)
+    });
+    threads
+}
+
+fn shown(rig: &Rig, login: &str, threads: Vec<Thread>) {
+    rig.forge
+        .coderabbit
+        .post_as(71, login, |seen| seen.threads.extend(threads));
+}
+
+fn findings_file(rig: &Rig) -> String {
+    std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap()
+}
+
+// The settle's bounds, pinned as seconds: reads 20 apart, a landing no
+// sooner than 60 after the review was seen.
+#[test]
+fn threads_the_forge_lists_after_the_review_still_reach_the_fix_turn() {
+    let rig = listing("shep", &["coderabbit"]);
+    let (runner, head) = reviewed(&rig);
+    step(&runner).unwrap(); // marks the draft ready
+    assert_eq!(step(&runner).unwrap(), summoned(&head));
+    let login = crate::coderabbit::LOGIN.rest;
+    rig.forge
+        .coderabbit
+        .review(71, &head, now(&rig) + 240, &["Name the flag."]);
+    let late = hidden(&rig, login);
+    rig.clock.advance(240);
+    let reads = || rig.forge.coderabbit.logins().len();
+    assert_eq!(
+        step(&runner).unwrap(),
+        None,
+        "the review, with no thread yet"
+    );
+    let first = reads();
+
+    shown(&rig, login, late);
+    rig.clock.advance(19);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(reads(), first, "no read 19s on");
+    rig.clock.advance(1);
+    assert_eq!(step(&runner).unwrap(), None, "one more thread than before");
+    assert_eq!(reads(), first + 1, "a read 20s on");
+    rig.clock.advance(20);
+    assert_eq!(step(&runner).unwrap(), None, "agreed, 40s after the review");
+    rig.clock.advance(19);
+    assert_eq!(step(&runner).unwrap(), None, "59s after the review");
+    rig.clock.advance(1);
+    assert_eq!(step(&runner).unwrap(), bot_reviewed(3, "coderabbit", 1));
+    let state = std::fs::read_to_string(rig.paths().state).unwrap();
+    let state: serde_json::Value = serde_json::from_str(&state).unwrap();
+    assert_eq!(
+        state["work_items"][0]["counts"]["review_rounds"], 3,
+        "qwen's, Claude's and CodeRabbit's, its settle reads counted once"
+    );
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewFindingsSent {
+            round: 3,
+            held: 1,
+            ..
+        })
+    ));
+    assert!(findings_file(&rig).contains("Name the flag."));
+}
+
+#[test]
+fn threads_that_keep_changing_are_taken_as_they_stand_120s_after_the_review() {
+    let rig = listing("shep", &["cubic"]);
+    let (runner, head) = reviewed(&rig);
+    step(&runner).unwrap(); // marks the draft ready
+    assert_eq!(step(&runner).unwrap(), summoned(&head));
+    let at = now(&rig) + 300;
+    rig.forge.coderabbit.cubic_review(71, &head, at, &[FINDING]);
+    rig.clock.advance(300);
+    assert_eq!(step(&runner).unwrap(), None);
+    for seconds in [20, 40, 60, 80, 100] {
+        rig.forge.coderabbit.cubic_review(71, &head, at, &[FINDING]);
+        rig.clock.advance(20);
+        assert_eq!(step(&runner).unwrap(), None, "still changing at {seconds}s");
+    }
+    rig.forge.coderabbit.cubic_review(71, &head, at, &[FINDING]);
+    rig.clock.advance(20);
+    assert_eq!(step(&runner).unwrap(), bot_reviewed(3, "cubic", 7));
+}
+
+#[test]
+fn a_bot_passed_over_that_reviews_the_head_anyway_gets_a_round_before_the_next_reviewer() {
+    let rig = listing("shep", &["cubic", "coderabbit"]);
+    let (runner, head) = reviewed(&rig);
+    step(&runner).unwrap(); // marks the draft ready
+    assert_eq!(step(&runner).unwrap(), summoned(&head));
+    let summon = now(&rig);
+    rig.forge.coderabbit.cubic_refuse(71, summon + 20);
+    rig.clock.advance(20);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewerSkipped { round: 3, .. })
+    ));
+
+    rig.forge
+        .coderabbit
+        .cubic_review(71, &head, summon + 60, &[FINDING]);
+    rig.clock.advance(40);
+    assert_eq!(rig.threads_read(&runner), bot_reviewed(4, "cubic", 1));
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["bots_skipped"], serde_json::json!(null));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewFindingsSent {
+            round: 4,
+            held: 1,
+            ..
+        })
+    ));
+    assert!(findings_file(&rig).contains("`bleats` loses a stamped prefix."));
+}
+
+#[test]
+fn the_merge_ruling_names_the_threads_a_bot_passed_over_left_once_the_pass_ended() {
+    let rig = listing("shep", &["coderabbit", "cubic"]);
+    let (runner, head) = reviewed(&rig);
+    step(&runner).unwrap(); // marks the draft ready
+    assert_eq!(step(&runner).unwrap(), summoned(&head));
+    rig.forge.coderabbit.review(71, &head, now(&rig) + 60, &[]);
+    rig.clock.advance(60);
+    assert_eq!(rig.threads_read(&runner), bot_reviewed(3, "coderabbit", 0));
+    assert_eq!(step(&runner).unwrap(), summoned(&head));
+    let summon = now(&rig);
+    rig.forge.coderabbit.cubic_refuse(71, summon + 20);
+    rig.clock.advance(20);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewerSkipped { round: 4, .. })
+    ));
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+        "ci"
+    );
+
+    rig.forge
+        .coderabbit
+        .cubic_review(71, &head, summon + 60, &[FINDING, FINDING]);
+    rig.forge.set_checks(&head, Checks::Passed);
+    let Some(StepReport::Ruling { question, .. }) = rig.verdict(&runner) else {
+        panic!("no merge ruling");
+    };
+    assert!(
+        question.contains(
+            "into main? Review bot threads are still open on it: 2 from cubic. \
+             `shep kelpie rule 1 yes` merges it"
+        ),
+        "{question}"
+    );
+}
+
+// cubic, last in the pass, passed over, then reviewing the head anyway with
+// `findings`, and CI green on it: the next step is the merge ruling's.
+fn passed_over_then_reviewed(
+    rig: &Rig,
+    findings: &[&str],
+) -> std::sync::Mutex<crate::runner::Runner> {
+    let (runner, head) = reviewed(rig);
+    step(&runner).unwrap(); // marks the draft ready
+    assert_eq!(step(&runner).unwrap(), summoned(&head));
+    let summon = now(rig);
+    rig.forge.coderabbit.cubic_refuse(71, summon + 20);
+    rig.clock.advance(20);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewerSkipped { round: 3, .. })
+    ));
+    rig.forge
+        .coderabbit
+        .cubic_review(71, &head, summon + 60, findings);
+    rig.forge.set_checks(&head, Checks::Passed);
+    runner
+}
+
+#[test]
+fn under_auto_a_bots_unaddressed_threads_raise_the_merge_ruling_instead_of_merging() {
+    let rig = listing("shep", &["cubic"]);
+    rig.merge_auto();
+    let runner = passed_over_then_reviewed(&rig, &[FINDING]);
+    let Some(StepReport::Ruling { question, .. }) = rig.verdict(&runner) else {
+        panic!("merged with a thread nothing addressed");
+    };
+    assert!(
+        question.contains("Review bot threads are still open on it: 1 from cubic."),
+        "{question}"
+    );
+}
+
+#[test]
+fn a_held_nit_and_an_outdated_thread_raise_no_warning() {
+    let rig = listing("shep", &["cubic"]);
+    let (runner, head) = reviewed(&rig);
+    step(&runner).unwrap(); // marks the draft ready
+    assert_eq!(step(&runner).unwrap(), summoned(&head));
+    let at = now(&rig) + 300;
+    let nit = "P3: The name could be shorter.";
+    rig.forge
+        .coderabbit
+        .cubic_review(71, &head, at, &[nit, FINDING]);
+    rig.forge
+        .coderabbit
+        .post_as(71, crate::cubic::LOGIN.rest, |seen| {
+            seen.threads[1].outdated = true
+        });
+    rig.clock.advance(300);
+    assert_eq!(rig.threads_read(&runner), bot_reviewed(3, "cubic", 1));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewFindingsSent { held: 0, .. })
+    ));
+    rig.forge.set_checks(&head, Checks::Passed);
+    let Some(StepReport::Ruling { question, .. }) = rig.verdict(&runner) else {
+        panic!("no merge ruling");
+    };
+    assert!(!question.contains("Review bot threads"), "{question}");
+}
+
+// cubic, listed first, refuses and is passed over: the pass goes on to
+// CodeRabbit's round, which is next.
+fn cubic_passed_over(rig: &Rig) -> (std::sync::Mutex<crate::runner::Runner>, String, u64) {
+    let (runner, head) = reviewed(rig);
+    step(&runner).unwrap(); // marks the draft ready
+    assert_eq!(step(&runner).unwrap(), summoned(&head));
+    let summon = now(rig);
+    rig.forge.coderabbit.cubic_refuse(71, summon + 20);
+    rig.clock.advance(20);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewerSkipped { round: 3, .. })
+    ));
+    (runner, head, summon)
+}
+
+#[test]
+fn a_late_review_whose_threads_show_only_after_its_first_read_still_reaches_the_fix_turn() {
+    let rig = listing("shep", &["cubic", "coderabbit"]);
+    let (runner, head, summon) = cubic_passed_over(&rig);
+    let login = crate::cubic::LOGIN.rest;
+    rig.forge
+        .coderabbit
+        .cubic_review(71, &head, summon + 60, &[FINDING]);
+    let late = hidden(&rig, login);
+    rig.clock.advance(40);
+    assert_eq!(
+        step(&runner).unwrap(),
+        None,
+        "its review, with no thread yet"
+    );
+    shown(&rig, login, late);
+    rig.clock.advance(20);
+    assert_eq!(step(&runner).unwrap(), None, "one more thread than before");
+    rig.clock.advance(40);
+    assert_eq!(step(&runner).unwrap(), bot_reviewed(4, "cubic", 1));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewFindingsSent {
+            round: 4,
+            held: 1,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn a_bot_passed_over_that_reviews_while_the_last_reviewer_runs_gets_a_round_before_ci() {
+    let rig = Rig::new("shep");
+    rig.reviewers(&["qwen", "cubic", "claude"]);
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "start", None);
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    step(&runner).unwrap(); // the worker's first turn: opens the pull request
+    step(&runner).unwrap(); // review round 1, qwen: clean by default
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    step(&runner).unwrap(); // marks the draft ready
+    assert_eq!(step(&runner).unwrap(), summoned(&head));
+    let summon = now(&rig);
+    rig.forge.coderabbit.cubic_refuse(71, summon + 20);
+    rig.clock.advance(20);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewerSkipped { round: 2, .. })
+    ));
+
+    step(&runner).unwrap(); // review round 3, claude: scripted clean above
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(
+        status["work_item"]["phase"]["state"], "review",
+        "the last reviewer is done, and the pass not yet ended"
+    );
+    rig.forge
+        .coderabbit
+        .cubic_review(71, &head, summon + 30, &[FINDING]);
+    assert_eq!(rig.threads_read(&runner), bot_reviewed(4, "cubic", 1));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewFindingsSent {
+            round: 4,
+            held: 1,
+            ..
+        })
+    ));
+}

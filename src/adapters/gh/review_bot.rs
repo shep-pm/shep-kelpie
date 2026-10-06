@@ -12,7 +12,7 @@ use crate::settings::ForgeSlug;
 // would read as unresolved-but-unseen, never as satisfied.
 const THREADS: &str = "query($owner: String!, $name: String!, $number: Int!) { \
     repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
-    reviewThreads(first: 100) { nodes { id isResolved path line \
+    reviewThreads(first: 100) { nodes { id isResolved isOutdated path line \
     comments(first: 1) { nodes { author { login } body } } } } } } }";
 
 // Codex reacts on the pull request itself: a thumbs up when it has nothing to
@@ -309,6 +309,9 @@ pub(crate) fn parse_threads(stdout: &[u8], bot: &str) -> Result<Vec<Thread>, For
     struct Node {
         id: String,
         is_resolved: bool,
+        // Fixtures recorded before kelpie asked for it have none.
+        #[serde(default)]
+        is_outdated: bool,
         path: String,
         line: Option<u32>,
         comments: Nodes<First>,
@@ -332,6 +335,7 @@ pub(crate) fn parse_threads(stdout: &[u8], bot: &str) -> Result<Vec<Thread>, For
             by_bot.then_some(Thread {
                 id: node.id,
                 resolved: node.is_resolved,
+                outdated: node.is_outdated,
                 path: node.path,
                 line: node.line,
                 body: first.body,
@@ -422,5 +426,23 @@ mod tests {
              "comments":{"nodes":[{"author":null,"body":"ghost"}]}}]}}}}}"#;
         let coderabbit = crate::coderabbit::LOGIN.graphql;
         assert_eq!(parse_threads(reply, coderabbit).unwrap(), []);
+    }
+
+    #[test]
+    fn an_outdated_thread_is_read_so_and_is_not_open() {
+        let reply = br#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
+            {"id":"a","isResolved":false,"isOutdated":true,"path":"x","line":null,
+             "comments":{"nodes":[{"author":{"login":"cubic-dev-ai"},"body":"P2: old"}]}},
+            {"id":"b","isResolved":false,"isOutdated":false,"path":"x","line":3,
+             "comments":{"nodes":[{"author":{"login":"cubic-dev-ai"},"body":"P2: new"}]}}]}}}}}"#;
+        let threads = parse_threads(reply, crate::cubic::LOGIN.graphql).unwrap();
+        let outdated: Vec<bool> = threads.iter().map(|t| t.outdated).collect();
+        assert_eq!(outdated, [true, false]);
+        let activity = crate::review_bot::Activity {
+            threads,
+            ..Default::default()
+        };
+        let open: Vec<&str> = activity.open_threads().map(|t| t.id.as_str()).collect();
+        assert_eq!(open, ["b"]);
     }
 }

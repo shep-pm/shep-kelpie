@@ -532,7 +532,7 @@ fn a_coderabbit_review_of_the_head_it_arrived_with_counts_once_its_own_read_land
     rig.forge.coderabbit.review(80, &head, at + 60, &[]);
     rig.clock.advance(60);
     assert!(matches!(
-        step(&runner).unwrap(),
+        rig.threads_read(&runner),
         Some(StepReport::BotReviewed {
             round: 1,
             open_threads: 1,
@@ -673,7 +673,7 @@ fn a_clean_review_from_before_the_adoption_never_stands_for_the_bots_read() {
     rig.forge.coderabbit.review(80, &head, at + 60, &[]);
     rig.clock.advance(60);
     assert!(matches!(
-        step(&runner).unwrap(),
+        rig.threads_read(&runner),
         Some(StepReport::BotReviewed {
             open_threads: 0,
             ..
@@ -698,7 +698,7 @@ fn threads_from_before_the_adoption_go_to_the_worker_once_kelpies_own_read_lands
     rig.forge.coderabbit.review(80, &head, at + 60, &[]);
     rig.clock.advance(60);
     assert!(matches!(
-        step(&runner).unwrap(),
+        rig.threads_read(&runner),
         Some(StepReport::BotReviewed {
             round: 1,
             open_threads: 1,

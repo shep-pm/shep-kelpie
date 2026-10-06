@@ -544,12 +544,19 @@ pub(super) fn question(id: u64, issue: u64, number: Option<u64>, kind: &RulingKi
         ""
     };
     let ask = match kind {
-        RulingKind::Merge { head, unreviewed } => {
+        RulingKind::Merge {
+            head,
+            unreviewed,
+            open_threads,
+        } => {
             let unread = unreviewed.as_ref().map_or_else(String::new, |why| {
                 format!(" No reviewer read it in its last review: {why}.")
             });
+            let open = open_threads.as_ref().map_or_else(String::new, |open| {
+                format!(" Review bot threads are still open on it: {open}.")
+            });
             format!(
-                "Merge {about} at {} into main?{unread} {yes} merges it",
+                "Merge {about} at {} into main?{unread}{open} {yes} merges it",
                 short(head)
             )
         }

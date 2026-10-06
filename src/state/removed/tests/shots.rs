@@ -135,6 +135,7 @@ fn a_merge_ruling_and_a_notice_lose_whether_the_shots_failed() {
         RulingKind::Merge {
             head: "c0ffee".into(),
             unreviewed: None,
+            open_threads: None,
         }
     );
     assert_eq!(

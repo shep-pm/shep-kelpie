@@ -678,6 +678,15 @@ mod tests {
             json!({ "stage": "found", "findings": [], "threads": ["PRRT_1"] })
         );
         assert_eq!(
+            bot(ReviewStage::Settling {
+                bot: Bot::Cubic,
+                since: Timestamp(20),
+                read: Timestamp(40),
+                open: vec!["PRRT_2".into()],
+            })["stage"],
+            json!({ "stage": "settling", "bot": "cubic", "since": 20, "read": 40, "open": ["PRRT_2"] })
+        );
+        assert_eq!(
             value(Phase::Ruling { id: 3 }),
             json!({ "state": "ruling", "id": 3 })
         );

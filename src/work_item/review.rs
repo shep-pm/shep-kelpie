@@ -159,6 +159,20 @@ pub enum ReviewStage {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         resent: bool,
     },
+    /// The bot's review covers the head, and its threads are read again
+    /// until two reads agree, since the forge can show a review before
+    /// the threads posted with it
+    Settling {
+        /// The bot
+        bot: Bot,
+        /// When kelpie first saw the review, which bounds the wait
+        since: Timestamp,
+        /// When kelpie last read the threads
+        read: Timestamp,
+        /// The forge's ids of the open threads that read found
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        open: Vec<String>,
+    },
 }
 
 #[cfg(test)]

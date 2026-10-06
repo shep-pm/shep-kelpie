@@ -63,6 +63,7 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
     let merge = RulingKind::Merge {
         head: "abc".into(),
         unreviewed: None,
+        open_threads: None,
     };
     assert_eq!(comment(&merge), None);
 }

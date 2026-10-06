@@ -129,7 +129,7 @@ fn each_listed_bot_reads_in_its_own_round_and_cubics_finding_reaches_the_worker_
     );
     rig.forge.coderabbit.review(71, &head, now(&rig) + 60, &[]);
     rig.clock.advance(60);
-    assert_eq!(step(&runner).unwrap(), bot_reviewed(3, "coderabbit", 0));
+    assert_eq!(rig.threads_read(&runner), bot_reviewed(3, "coderabbit", 0));
 
     // cubic's round is the pass's fourth, on a pull request already ready.
     assert_eq!(step(&runner).unwrap(), summoned(&head));
@@ -158,7 +158,7 @@ fn each_listed_bot_reads_in_its_own_round_and_cubics_finding_reaches_the_worker_
         .coderabbit
         .cubic_review(71, &head, summon + 420, &[finding]);
     rig.clock.advance(420);
-    assert_eq!(step(&runner).unwrap(), bot_reviewed(4, "cubic", 1));
+    assert_eq!(rig.threads_read(&runner), bot_reviewed(4, "cubic", 1));
     assert!(matches!(
         step(&runner).unwrap(),
         Some(StepReport::ReviewFindingsSent {
@@ -315,7 +315,7 @@ fn an_adopted_pull_request_gets_a_pass_of_the_listed_bots() {
     rig.forge.coderabbit.review(80, &head, summon + 300, &[]);
     rig.clock.advance(300);
     assert!(matches!(
-        step(&runner).unwrap(),
+        rig.threads_read(&runner),
         Some(StepReport::BotReviewed { round: 1, .. })
     ));
 
@@ -326,7 +326,7 @@ fn an_adopted_pull_request_gets_a_pass_of_the_listed_bots() {
         .cubic_review(80, &head, now(&rig) + 300, &[]);
     rig.clock.advance(300);
     assert!(matches!(
-        step(&runner).unwrap(),
+        rig.threads_read(&runner),
         Some(StepReport::BotReviewed { round: 2, .. })
     ));
     let status = rig.ask(&runner, "status", None);
@@ -384,7 +384,7 @@ fn a_bots_round_sends_only_its_own_open_threads() {
         .coderabbit
         .cubic_review(71, &head, summon + 300, &[]);
     rig.clock.advance(300);
-    assert_eq!(step(&runner).unwrap(), bot_reviewed(3, "cubic", 0));
+    assert_eq!(rig.threads_read(&runner), bot_reviewed(3, "cubic", 0));
 }
 
 // The dog's book closed cubic's window for a month: the pass goes on to

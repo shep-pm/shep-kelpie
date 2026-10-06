@@ -191,7 +191,7 @@ fn a_read_counts_only_once_a_review_covers_the_head() {
 
     cr_bot.review(71, &head, summon + 1500, &[]);
     rig.clock.advance(1400);
-    assert_eq!(step(&runner).unwrap(), reviewed(0));
+    assert_eq!(rig.threads_read(&runner), reviewed(0));
     assert_eq!(labels(&rig), [on(), off()]);
     assert!(
         rig.leases
@@ -206,7 +206,7 @@ fn a_clean_read_ends_the_pass_and_ci_goes_on_to_the_merge_ruling() {
     let (rig, runner, head) = summoned("golbat");
     rig.forge.coderabbit.review(71, &head, now(&rig) + 60, &[]);
     rig.clock.advance(60);
-    assert_eq!(step(&runner).unwrap(), reviewed(0));
+    assert_eq!(rig.threads_read(&runner), reviewed(0));
     assert_eq!(phase(&rig, &runner)["state"], "ci");
     let state = std::fs::read_to_string(rig.paths().state).unwrap();
     let state: serde_json::Value = serde_json::from_str(&state).unwrap();
@@ -349,7 +349,7 @@ fn a_head_already_reviewed_is_not_summoned_again() {
     let (rig, runner, head) = reviewed_by_qwen("koji");
     let reviewed_at = now(&rig);
     rig.forge.coderabbit.review(71, &head, reviewed_at, &[]);
-    assert_eq!(step(&runner).unwrap(), reviewed(0));
+    assert_eq!(rig.threads_read(&runner), reviewed(0));
     assert_eq!(labels(&rig), []);
     assert!(
         rig.forge.readied().is_empty(),
@@ -565,7 +565,7 @@ fn every_open_thread_goes_to_the_worker_and_is_resolved_once_its_fix_moves_the_h
         &["Name the flag.", "Guard the index."],
     );
     rig.clock.advance(60);
-    assert_eq!(step(&runner).unwrap(), reviewed(2));
+    assert_eq!(rig.threads_read(&runner), reviewed(2));
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::ReviewFindingsSent {
@@ -629,7 +629,7 @@ pub(in crate::runner) fn hold_a_finding(
         .coderabbit
         .review(71, head, now(rig) + 60, &[title]);
     rig.clock.advance(60);
-    step(runner).unwrap();
+    rig.threads_read(runner);
     step(runner).unwrap()
 }
 
@@ -650,7 +650,7 @@ fn read_clean(project: &str) -> (Rig, Mutex<Runner>, String) {
     let (rig, runner, head) = summoned(project);
     rig.forge.coderabbit.review(71, &head, now(&rig) + 60, &[]);
     rig.clock.advance(60);
-    assert_eq!(step(&runner).unwrap(), reviewed(0));
+    assert_eq!(rig.threads_read(&runner), reviewed(0));
     (rig, runner, head)
 }
 
@@ -778,7 +778,7 @@ fn a_restart_mid_summon_reads_on_and_holds_no_stale_lease() {
     assert_eq!(rig.ask(&runner, "status", None)["leases"], json!([]));
     rig.forge.coderabbit.review(71, &head, now(&rig) + 60, &[]);
     rig.clock.advance(60);
-    assert_eq!(step(&runner).unwrap(), reviewed(0));
+    assert_eq!(rig.threads_read(&runner), reviewed(0));
     assert_eq!(labels(&rig), [on(), off()]);
 }
 
@@ -856,7 +856,7 @@ fn coderabbit_that_cannot_be_read_is_tried_again_later() {
     );
     rig.forge.coderabbit.set_down(false);
     rig.forge.coderabbit.review(71, &head, now(&rig), &[]);
-    assert_eq!(step(&runner).unwrap(), reviewed(0));
+    assert_eq!(rig.threads_read(&runner), reviewed(0));
 }
 
 #[test]

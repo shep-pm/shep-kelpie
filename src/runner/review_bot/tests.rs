@@ -174,6 +174,7 @@ fn a_stand_in_bot_runs_a_whole_round_through_to_the_worker() {
     let thread = Thread {
         id: "T_1".into(),
         resolved: false,
+        outdated: false,
         path: "work.txt".into(),
         line: Some(1),
         body: "[high] Close the file.\n\nIt leaks a handle.".into(),
@@ -184,7 +185,7 @@ fn a_stand_in_bot_runs_a_whole_round_through_to_the_worker() {
     });
     rig.clock.advance(60);
     assert_eq!(
-        step(&runner).unwrap(),
+        rig.threads_read(&runner),
         Some(StepReport::BotReviewed {
             issue: 7,
             pull_request: 71,
@@ -318,7 +319,7 @@ fn an_owed_stand_in_summon_marked_done_is_answered_not_summoned_again() {
     });
     rig.clock.advance(30 + DONE_SETTLE);
     assert!(matches!(
-        step(&runner).unwrap(),
+        rig.threads_read(&runner),
         Some(StepReport::BotReviewed {
             open_threads: 0,
             ..

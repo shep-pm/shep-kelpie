@@ -54,7 +54,7 @@ fn a_codex_review_reaches_the_worker_with_its_badge() {
         .coderabbit
         .codex_review(71, &head, summon + 240, &[finding]);
     rig.clock.advance(240);
-    assert_eq!(step(&runner).unwrap(), bot_reviewed(3, "codex", 1));
+    assert_eq!(rig.threads_read(&runner), bot_reviewed(3, "codex", 1));
     assert!(matches!(
         step(&runner).unwrap(),
         Some(StepReport::ReviewFindingsSent { held: 1, .. })
@@ -85,7 +85,7 @@ fn a_codex_review_with_nothing_to_raise_ends_its_round() {
     rig.forge.coderabbit.codex_clean(71, &head, summon + 230);
     rig.clock.advance(230);
     assert_eq!(
-        step(&runner).unwrap(),
+        rig.threads_read(&runner),
         bot_reviewed(3, "codex", 0),
         "its clean comment answers the summon"
     );
@@ -148,7 +148,7 @@ fn marking_a_draft_ready_is_codexs_summon_under_its_lease_and_no_comment_follows
     rig.forge.coderabbit.codex_start(71, summon + 8);
     rig.forge.coderabbit.codex_clean(71, &head, summon + 230);
     rig.clock.advance(230);
-    assert_eq!(step(&runner).unwrap(), bot_reviewed(3, "codex", 0));
+    assert_eq!(rig.threads_read(&runner), bot_reviewed(3, "codex", 0));
     assert_eq!(comments_of(&rig, SUMMON), 0, "one review");
     let counted = rig
         .leases
@@ -213,7 +213,7 @@ fn a_thumbs_up_alone_is_a_review_with_nothing_in_it() {
     rig.forge.coderabbit.codex_thumbs_up(71, summon + 230);
     rig.clock.advance(230 + 60);
     assert_eq!(
-        step(&runner).unwrap(),
+        rig.threads_read(&runner),
         bot_reviewed(3, "codex", 0),
         "the round does not wait out two hours"
     );

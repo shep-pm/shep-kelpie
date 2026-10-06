@@ -410,6 +410,9 @@ fn phase_text(phase: &Phase, now: Timestamp) -> String {
                 ReviewStage::Summoned { bot, at, .. } => {
                     format!(", {bot} summoned {} ago", age(now, *at))
                 }
+                ReviewStage::Settling { bot, .. } => {
+                    format!(", {bot} reviewed, reading its threads")
+                }
             };
             format!("review round {}{by}{stage}", review.round)
         }
