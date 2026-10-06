@@ -2,11 +2,18 @@
 
 use std::collections::VecDeque;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use super::{FakeMeter, git, write_in};
-use crate::ports::{AgentCall, AgentError, AgentReply, Agents, Cost, Role, Usage, Utilization};
+use crate::ports::{
+    AgentCall, AgentError, AgentReply, Agents, Cost, Ending, Role, Usage, Utilization,
+};
+
+/// How often a held call looks whether it was ended, as the real adapters
+/// look at their child
+const LOOK_EVERY: Duration = Duration::from_millis(5);
 
 /// The file a killed worker leaves in its worktree, to find after a restart
 pub(crate) const LEFT_BEHIND: &str = "left-behind.txt";
@@ -46,7 +53,9 @@ pub(crate) enum Scripted {
     Billed(&'static str, Cost),
     /// Answers with this final message
     Say(&'static str),
-    /// Blocks until the test releases it, then answers
+    /// Blocks until the test releases it, then answers. Ended first, by
+    /// the call's ending or by [`FakeClaude::stop`], it fails as the real
+    /// adapters do.
     Hold(Hold),
     /// Blocks until the test releases it, then fails with this error
     HoldThenFail(Hold, AgentError),
@@ -97,13 +106,22 @@ impl Hold {
     }
 
     pub(crate) fn block(&self) {
+        self.block_unless(|| false);
+    }
+
+    /// Blocks until the test releases it, or until `ended` says the call
+    /// was ended first, and says whether it was released
+    pub(crate) fn block_unless(&self, ended: impl Fn() -> bool) -> bool {
         let (held, changed) = &*self.0;
         let mut held = held.lock().unwrap();
         held.entered = true;
         changed.notify_all();
-        let mut held = changed.wait_while(held, |h| !h.released).unwrap();
+        while !held.released && !ended() {
+            held = changed.wait_timeout(held, LOOK_EVERY).unwrap().0;
+        }
         held.returned = true;
         changed.notify_all();
+        held.released
     }
 }
 
@@ -126,6 +144,7 @@ pub(crate) struct FakeClaude {
     seen: Arc<Mutex<Vec<Seen>>>,
     script: Arc<Mutex<VecDeque<Scripted>>>,
     meter: Option<FakeMeter>,
+    stopped: Arc<AtomicBool>,
 }
 
 impl FakeClaude {
@@ -166,6 +185,24 @@ impl FakeClaude {
     pub(crate) fn script(&self, steps: impl IntoIterator<Item = Scripted>) {
         self.script.lock().unwrap().extend(steps);
     }
+
+    /// Ends every held call, as the real adapters end their calls in flight
+    /// when the runner stops
+    pub(crate) fn stop(&self) {
+        self.stopped.store(true, Ordering::SeqCst);
+    }
+
+    // Blocks on `hold` until it is released, or the call is ended first.
+    fn hold(&self, hold: &Hold, call: &AgentCall, ending: &Ending) -> Result<(), AgentError> {
+        let stopped = || self.stopped.load(Ordering::SeqCst);
+        if hold.block_unless(|| stopped() || ending.asked()) {
+            return Ok(());
+        }
+        Err(match stopped() {
+            true => AgentError::Stopped,
+            false => AgentError::TimedOut(call.harness.harness()),
+        })
+    }
 }
 
 impl Agents for FakeClaude {
@@ -175,7 +212,7 @@ impl Agents for FakeClaude {
         crate::adapters::write_claude_settings(call)
     }
 
-    fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError> {
+    fn run(&self, call: &AgentCall, ending: &Ending) -> Result<AgentReply, AgentError> {
         let settings: serde_json::Value = std::fs::read_to_string(&call.settings)
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
@@ -229,7 +266,7 @@ impl Agents for FakeClaude {
                 ..said(text)
             }),
             Some(Scripted::Hold(hold)) => {
-                hold.block();
+                self.hold(&hold, call, ending)?;
                 Ok(said("done"))
             }
             Some(Scripted::HoldThenFail(hold, error)) => {

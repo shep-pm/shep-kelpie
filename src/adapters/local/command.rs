@@ -154,9 +154,7 @@ impl LocalReviewer {
         skipped: &Finding,
     ) -> Result<Vec<Finding>, ReviewerError> {
         let round = at.round;
-        let diff = Command::new("git")
-            .arg("-C")
-            .arg(at.worktree)
+        let diff = crate::worktree::in_repo(at.worktree)
             .args(["diff", at.base, "-U25", "--"])
             .arg(&skipped.file)
             .stdin(Stdio::null())

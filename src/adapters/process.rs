@@ -15,13 +15,15 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::ports::Ending;
+
 /// How often a running child is checked for its exit
 const POLL: Duration = Duration::from_millis(50);
 
 // Time for a child to exit on SIGTERM before it gets SIGKILL. A stop gives
 // the runner shep's `kill_timeout` after its shutdown message, which its
 // Flockfile entry must set to 10s or more, and the runner flushes for 2s after.
-const STOP_GRACE: Duration = Duration::from_secs(3);
+pub(super) const STOP_GRACE: Duration = Duration::from_secs(3);
 
 /// Why a stoppable child did not run to its end
 #[derive(Debug)]
@@ -30,7 +32,7 @@ pub(super) enum RunError {
     Io(io::Error),
     /// [`Processes::stop`] ended it, or came first
     Stopped,
-    /// It ran past its limit and was killed
+    /// It ran past its limit, or its [`Ending`] was asked, and was killed
     TimedOut,
 }
 
@@ -49,18 +51,22 @@ impl Processes {
     /// Runs `command` to its end with stdin closed, collecting its output
     #[cfg(test)]
     pub(super) fn output(&self, command: &mut Command) -> Result<Output, RunError> {
-        self.run(command, None, &|_| {}, None)
+        self.run(command, Until::default(), &|_| {}, None)
     }
 
-    /// Like `output`, killing the child after `limit` if one is
+    /// Like `output`, killing the child once `ending` is asked if one is
     /// given, and telling `spawned` its pid as soon as it runs
     pub(super) fn output_telling(
         &self,
         command: &mut Command,
-        limit: Option<Duration>,
+        ending: Option<&Ending>,
         spawned: &dyn Fn(u32),
     ) -> Result<Output, RunError> {
-        self.run(command, limit.map(|l| Instant::now() + l), spawned, None)
+        let until = Until {
+            deadline: None,
+            ending,
+        };
+        self.run(command, until, spawned, None)
     }
 
     /// Like `output_telling`, with the child's stdout and stderr written to
@@ -74,12 +80,15 @@ impl Processes {
     pub(super) fn output_to_files(
         &self,
         command: &mut Command,
-        limit: Option<Duration>,
+        ending: Option<&Ending>,
         spawned: &dyn Fn(u32),
         outputs: [&Path; 2],
     ) -> Result<Output, RunError> {
-        let deadline = limit.map(|l| Instant::now() + l);
-        self.run(command, deadline, spawned, Some(outputs))
+        let until = Until {
+            deadline: None,
+            ending,
+        };
+        self.run(command, until, spawned, Some(outputs))
     }
 
     /// Like `output`, and kills the child once `limit` has passed
@@ -88,13 +97,17 @@ impl Processes {
         command: &mut Command,
         limit: Duration,
     ) -> Result<Output, RunError> {
-        self.run(command, Some(Instant::now() + limit), &|_| {}, None)
+        let until = Until {
+            deadline: Some(Instant::now() + limit),
+            ending: None,
+        };
+        self.run(command, until, &|_| {}, None)
     }
 
     fn run(
         &self,
         command: &mut Command,
-        deadline: Option<Instant>,
+        until: Until<'_>,
         spawned: &dyn Fn(u32),
         outputs: Option<[&Path; 2]>,
     ) -> Result<Output, RunError> {
@@ -121,6 +134,7 @@ impl Processes {
         let id = {
             let mut running = self.lock();
             if running.stopping {
+                signal_group(pid, "KILL");
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(RunError::Stopped);
@@ -131,7 +145,7 @@ impl Processes {
             id
         };
         spawned(pid);
-        let status = self.wait(id, deadline)?;
+        let status = self.wait(id, until)?;
         // A stopped child's own children may hold its pipes open, so its
         // output is left unread.
         if self.lock().stopping {
@@ -214,15 +228,44 @@ impl Processes {
     }
 
     /// Stops child `id`, and whatever it spawned
+    ///
+    /// It gets the stop ladder [`Self::stop`] uses, and stays listed until
+    /// the ladder is done, so a stop that comes meanwhile waits for it too.
     pub(super) fn end(&self, id: u64) {
-        let child = {
-            let mut running = self.lock();
-            let at = running.children.iter().position(|(i, _)| *i == id);
-            at.map(|at| running.children.remove(at).1)
+        let Some(pid) = self.with_child(id, |child| child.id()) else {
+            return;
         };
-        if let Some(mut child) = child {
-            stop_child(&mut child, STOP_GRACE);
+        signal_group(pid, "TERM");
+        let deadline = Instant::now() + STOP_GRACE;
+        while Instant::now() < deadline {
+            let exited = self.with_child(id, |child| matches!(child.try_wait(), Ok(Some(_))));
+            // A zombie leader still counts as a member, so the group is
+            // asked about once the leader is reaped.
+            if exited.unwrap_or(true) && !group_running(pid) {
+                self.forget(id);
+                return;
+            }
+            thread::sleep(POLL);
         }
+        signal_group(pid, "KILL");
+        if let Some(mut child) = self.forget(id) {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    // Runs `f` on child `id` under the lock, while it is listed.
+    fn with_child<T>(&self, id: u64, f: impl FnOnce(&mut Child) -> T) -> Option<T> {
+        let mut running = self.lock();
+        let child = running.children.iter_mut().find(|(i, _)| *i == id);
+        child.map(|(_, child)| f(child))
+    }
+
+    // Takes child `id` off the list.
+    fn forget(&self, id: u64) -> Option<Child> {
+        let mut running = self.lock();
+        let at = running.children.iter().position(|(i, _)| *i == id)?;
+        Some(running.children.remove(at).1)
     }
 
     /// Whether [`Self::stop`] has been called
@@ -252,15 +295,15 @@ impl Processes {
         }
     }
 
-    fn wait(&self, id: u64, deadline: Option<Instant>) -> Result<ExitStatus, RunError> {
+    fn wait(&self, id: u64, until: Until<'_>) -> Result<ExitStatus, RunError> {
         loop {
-            let past_deadline = {
+            let passed = {
                 let mut running = self.lock();
                 let at = running
                     .children
                     .iter()
                     .position(|(i, _)| *i == id)
-                    .expect("only wait removes a child");
+                    .expect("only wait and its ladder take a child off the list");
                 // Checked before the deadline below, so a child that has
                 // already exited by the time a poll lands is never reported
                 // as timed out, however close the two were.
@@ -268,15 +311,13 @@ impl Processes {
                     running.children.remove(at);
                     return Ok(status);
                 }
-                deadline
-                    .is_some_and(|d| Instant::now() >= d)
-                    .then(|| running.children.remove(at).1)
+                until.passed()
             };
-            if let Some(mut child) = past_deadline {
+            if passed {
                 // The same stop ladder `stop` uses, so a build or test the
                 // worker started and left running past the ceiling is ended
                 // too, not just the `claude` process this struct tracked.
-                stop_child(&mut child, STOP_GRACE);
+                self.end(id);
                 return Err(RunError::TimedOut);
             }
             thread::sleep(POLL);
@@ -285,6 +326,19 @@ impl Processes {
 
     fn lock(&self) -> MutexGuard<'_, Running> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+// What ends a child before it exits: a deadline, the call's ending, or neither
+#[derive(Debug, Clone, Copy, Default)]
+struct Until<'a> {
+    deadline: Option<Instant>,
+    ending: Option<&'a Ending>,
+}
+
+impl Until<'_> {
+    fn passed(self) -> bool {
+        self.deadline.is_some_and(|d| Instant::now() >= d) || self.ending.is_some_and(Ending::asked)
     }
 }
 
@@ -417,7 +471,7 @@ mod tests {
         let output = processes
             .output_to_files(
                 Command::new("sh").args(["-c", script]),
-                Some(Duration::from_secs(30)),
+                None,
                 &|_| {},
                 [&out, &err],
             )
@@ -499,6 +553,99 @@ mod tests {
             thread::sleep(POLL);
         }
         assert!(!alive, "the grandchild survived the ceiling");
+    }
+
+    // Real time: the child is a real process, ended from another thread as
+    // the runner ends a turn past its ceiling.
+    #[test]
+    fn a_child_whose_ending_is_asked_is_ended_with_its_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("grandchild-started");
+        let pid_file = dir.path().join("grandchild.pid");
+        let script = format!(
+            "sh -c 'touch \"$1\"; sleep 30' _ {marker} &
+             echo $! > {pid_file}
+             wait",
+            marker = shell_quote(&marker),
+            pid_file = shell_quote(&pid_file),
+        );
+        let ending = Ending::default();
+        let asker = ending.clone();
+        let started = Instant::now();
+        let (done, finished) = mpsc::channel();
+        let processes = Processes::default();
+        let running = processes.clone();
+        thread::spawn(move || {
+            let mut command = Command::new("sh");
+            command.args(["-c", &script]);
+            let _ = done.send(running.output_telling(&mut command, Some(&ending), &|_| {}));
+        });
+        while !marker.exists() {
+            assert!(started.elapsed() < Duration::from_secs(10), "no grandchild");
+            thread::sleep(POLL);
+        }
+        asker.end();
+        let result = finished
+            .recv_timeout(STOP_GRACE + Duration::from_secs(10))
+            .expect("the ended call never returned");
+        assert!(matches!(result, Err(RunError::TimedOut)), "{result:?}");
+        let grandchild: u32 = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while process_is_alive(grandchild) {
+            assert!(
+                Instant::now() < deadline,
+                "the grandchild outlived its call"
+            );
+            thread::sleep(POLL);
+        }
+    }
+
+    // Real time: a child that ignores SIGTERM is in its ceiling's ladder
+    // when the runner stops, and the stop still waits for it.
+    #[test]
+    fn a_stop_during_a_ceilings_ladder_waits_for_that_child_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("child.pid");
+        let script = format!(
+            "trap '' TERM; echo $$ > {}; sleep 30",
+            shell_quote(&pid_file)
+        );
+        let processes = Processes::default();
+        let running = processes.clone();
+        let ceiling = thread::spawn(move || {
+            running.output_within(
+                Command::new("sh").args(["-c", &script]),
+                Duration::from_millis(200),
+            )
+        });
+        let started = Instant::now();
+        // Past the limit, the ladder has the child, whose SIGTERM it ignores.
+        while !pid_file.exists() || started.elapsed() < Duration::from_millis(600) {
+            assert!(started.elapsed() < Duration::from_secs(10), "no child");
+            thread::sleep(POLL);
+        }
+        let child: u32 = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+
+        processes.stop();
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while process_is_alive(child) {
+            assert!(
+                Instant::now() < deadline,
+                "the stop returned with the child still running"
+            );
+            thread::sleep(POLL);
+        }
+        let result = ceiling.join().unwrap();
+        assert!(matches!(result, Err(RunError::TimedOut)), "{result:?}");
     }
 
     fn shell_quote(path: &std::path::Path) -> String {

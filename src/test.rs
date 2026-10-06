@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tempfile::TempDir;
 
@@ -285,7 +286,10 @@ impl Rig {
             meter,
             codex_meter: FakeMeter::idle(),
             reviewer: FakeReviewer::default(),
-            local_leases: LocalReviewer::default().with_temp_dir(home.path().join("tmp")),
+            // A held lock is looked at again soon, so a test waits little.
+            local_leases: LocalReviewer::default()
+                .with_temp_dir(home.path().join("tmp"))
+                .with_naps(|_| Duration::from_millis(100)),
             alerts: FakeAlerts::on(clock.clone()),
             leases: FakeLeases::default(),
             clock,

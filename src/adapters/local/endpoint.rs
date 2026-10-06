@@ -229,9 +229,7 @@ pub(super) fn quote(text: &str) -> String {
 }
 
 fn diff(worktree: &Path, base: &str) -> Result<String, ReviewerError> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(worktree)
+    let output = crate::worktree::in_repo(worktree)
         .args([
             "diff",
             "--no-color",

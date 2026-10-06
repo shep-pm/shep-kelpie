@@ -7,7 +7,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -169,9 +170,6 @@ pub struct AgentCall {
     pub prompt: String,
     /// The plugin folders its steps' skills are in
     pub plugin_dirs: Vec<PathBuf>,
-    /// Kills the call, and returns [`AgentError::TimedOut`], once it has
-    /// run this long
-    pub timeout: Option<Duration>,
     /// The kinds of tool it may use
     pub tools: Tools,
     /// The lease the call holds from start to end, for a local agent
@@ -248,12 +246,60 @@ pub trait Agents: Send + Sync {
     /// [`AgentError::Setup`] when that cannot be written.
     fn prepare(&self, call: &AgentCall) -> Result<(), AgentError>;
 
-    /// Runs one call to its end
+    /// Runs one call to its end, or until `ending` is asked to end it
     ///
     /// # Errors
     ///
-    /// [`AgentError`] when the call cannot run or does not succeed.
-    fn run(&self, call: &AgentCall) -> Result<AgentReply, AgentError>;
+    /// [`AgentError`] when the call cannot run or does not succeed, and
+    /// [`AgentError::TimedOut`] when `ending` ended it.
+    fn run(&self, call: &AgentCall, ending: &Ending) -> Result<AgentReply, AgentError>;
+}
+
+/// The runner's hold on one call in flight, to end it past its turn's ceiling
+///
+/// Clones share the one call. The adapter running it ends its process
+/// group once asked, however soon after the call began that is. A call that
+/// waits for a lease first says when it has it, so its ceiling counts from
+/// then.
+#[derive(Clone, Default)]
+pub struct Ending {
+    asked: Arc<AtomicBool>,
+    began: Option<Arc<dyn Fn() + Send + Sync>>,
+}
+
+impl fmt::Debug for Ending {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Ending")
+            .field("asked", &self.asked())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Ending {
+    /// One that runs `began` when the call has the lease it waited for
+    pub fn telling(began: impl Fn() + Send + Sync + 'static) -> Self {
+        Self {
+            asked: Arc::default(),
+            began: Some(Arc::new(began)),
+        }
+    }
+
+    /// Asks the call to end
+    pub fn end(&self) {
+        self.asked.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether the call has been asked to end
+    pub fn asked(&self) -> bool {
+        self.asked.load(Ordering::SeqCst)
+    }
+
+    /// Says the call has the lease it waited for, and begins now
+    pub fn begin(&self) {
+        if let Some(began) = &self.began {
+            began();
+        }
+    }
 }
 
 /// Why an agent call failed, naming the harness where it was the harness's doing
@@ -267,7 +313,7 @@ pub enum AgentError {
     NoSession(Harness, SessionId),
     /// The call was ended because the runner is stopping
     Stopped,
-    /// The call ran past its turn's ceiling and was stopped
+    /// The call ran past its turn's ceiling and was ended
     TimedOut(Harness),
     /// The harness exited without a result it reports as a success
     Failed(Harness, String),

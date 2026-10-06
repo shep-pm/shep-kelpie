@@ -9,7 +9,7 @@
 //! resumes with the same one.
 
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use super::super::Runner;
 use crate::ports::Timestamp;
@@ -138,9 +138,7 @@ impl Runner {
 
 /// The files `worktree` changes from `base`, as git names them
 fn changed_files(worktree: &Path, base: &str) -> Result<Vec<String>, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(worktree)
+    let output = crate::worktree::in_repo(worktree)
         .args(["diff", "--name-only", "--no-renames", base])
         .stdin(Stdio::null())
         .output()

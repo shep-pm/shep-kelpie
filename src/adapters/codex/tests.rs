@@ -333,7 +333,7 @@ fn every_call_runs_on_a_codex_home_of_its_own_with_the_login_linked_in() {
         std::fs::read_link(&link).unwrap(),
         w.path("login/auth.json")
     );
-    let _ = cli.run(&call);
+    let _ = cli.run(&call, &Ending::default());
     assert_eq!(
         std::fs::read_to_string(w.path("codex_home")).unwrap(),
         home.to_str().unwrap()
@@ -383,7 +383,7 @@ fn a_turn_answers_with_its_last_message_and_its_tokens() {
     let cli = stand_in(&w, FRESH);
     let call = w.call(Role::Worker, Session::New(id(WORKER_ID)));
     cli.prepare(&call).unwrap();
-    let reply = cli.run(&call).unwrap();
+    let reply = cli.run(&call, &Ending::default()).unwrap();
     assert_eq!(reply.text, "done");
     assert_eq!(reply.session_id, id(WORKER_ID));
     assert_eq!(reply.session_cost, None);
@@ -404,11 +404,11 @@ fn a_resumed_turn_counts_only_its_own_tokens_and_reads_past_refusals() {
     let cli = stand_in(&w, FRESH);
     let call = w.call(Role::Worker, Session::New(id(WORKER_ID)));
     cli.prepare(&call).unwrap();
-    cli.run(&call).unwrap();
+    cli.run(&call, &Ending::default()).unwrap();
 
     let cli = stand_in(&w, RESUMED);
     let again = w.call(Role::Worker, Session::Resume(id(WORKER_ID)));
-    let reply = cli.run(&again).unwrap();
+    let reply = cli.run(&again, &Ending::default()).unwrap();
     let argv = std::fs::read_to_string(w.path("argv")).unwrap();
     assert!(argv.starts_with("exec\nresume\n"), "{argv}");
     assert!(argv.contains(&format!("--\n{THREAD}\n")), "{argv}");
@@ -439,12 +439,12 @@ fn a_session_resumed_as_another_is_unreadable() {
     let cli = stand_in(&w, FRESH);
     let call = w.call(Role::Worker, Session::New(id(WORKER_ID)));
     cli.prepare(&call).unwrap();
-    cli.run(&call).unwrap();
+    cli.run(&call, &Ending::default()).unwrap();
     let other = RESUMED.replace(THREAD, "01a0f7fd-0000-7000-8000-000000000000");
     let cli = stand_in(&w, &other);
     let again = w.call(Role::Worker, Session::Resume(id(WORKER_ID)));
     assert!(matches!(
-        cli.run(&again),
+        cli.run(&again, &Ending::default()),
         Err(AgentError::Unreadable(CODEX, _))
     ));
 }
@@ -455,14 +455,14 @@ fn a_usage_limit_fails_the_turn_naming_it() {
     let cli = stand_in(&w, LIMITED);
     let call = w.call(Role::Worker, Session::New(id(WORKER_ID)));
     cli.prepare(&call).unwrap();
-    let Err(AgentError::Failed(CODEX, why)) = cli.run(&call) else {
+    let Err(AgentError::Failed(CODEX, why)) = cli.run(&call, &Ending::default()) else {
         panic!("a usage limit was not a failure");
     };
     assert!(why.contains("hit your usage limit"), "{why}");
     // Nothing started, so there is no session to resume.
     let again = w.call(Role::Worker, Session::Resume(id(WORKER_ID)));
     assert_eq!(
-        cli.run(&again),
+        cli.run(&again, &Ending::default()),
         Err(AgentError::NoSession(CODEX, id(WORKER_ID)))
     );
 }
@@ -495,11 +495,14 @@ fn a_resume_with_no_codex_session_of_kelpies_is_no_session() {
     let call = w.call(Role::Worker, Session::Resume(id(WORKER_ID)));
     cli.prepare(&call).unwrap();
     assert_eq!(
-        cli.run(&call),
+        cli.run(&call, &Ending::default()),
         Err(AgentError::NoSession(CODEX, id(WORKER_ID)))
     );
     let odd = w.call(Role::Worker, Session::Resume(id("../../x")));
-    assert!(matches!(cli.run(&odd), Err(AgentError::Setup(_))));
+    assert!(matches!(
+        cli.run(&odd, &Ending::default()),
+        Err(AgentError::Setup(_))
+    ));
 }
 
 #[test]
@@ -543,7 +546,6 @@ impl World {
             settings: self.path("worker/settings.json"),
             instructions: None,
             prompt: String::new(),
-            timeout: None,
             plugin_dirs: Vec::new(),
             tools: Tools::Answer,
             reach: Reach::default(),
@@ -774,7 +776,7 @@ fn measure_a_claude_code_worker_on_the_same_issue() {
     call.prompt = std::fs::read_to_string(env("KELPIE_ISSUE")).unwrap();
     claude.prepare(&call).unwrap();
     let started = Instant::now();
-    let reply = claude.run(&call);
+    let reply = claude.run(&call, &Ending::default());
     eprintln!("secs: {}", started.elapsed().as_secs());
     eprintln!("{reply:#?}");
     eprintln!("kept: {}", world.root.display());

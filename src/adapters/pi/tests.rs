@@ -425,7 +425,7 @@ fn a_turn_answers_with_its_text_and_its_tokens_and_no_price() {
     let pi = stand_in(&w, FRESH);
     let call = w.call(URL, Role::Reviewer, Session::New(id(FRESH_ID)));
     pi.prepare(&call).unwrap();
-    let reply = pi.run(&call).unwrap();
+    let reply = pi.run(&call, &Ending::default()).unwrap();
     assert_eq!(reply.session_id, id(FRESH_ID));
     assert_eq!(reply.text.trim(), "ok");
     assert_eq!(reply.session_cost, None);
@@ -440,7 +440,7 @@ fn a_resumed_turn_reports_only_its_own_tokens() {
     let pi = stand_in(&w, RESUMED);
     let call = w.call(URL, Role::Reviewer, Session::Resume(id(FRESH_ID)));
     pi.prepare(&call).unwrap();
-    let err = pi.run(&call).unwrap_err();
+    let err = pi.run(&call, &Ending::default()).unwrap_err();
     assert_eq!(err, AgentError::NoSession(Harness::Pi, id(FRESH_ID)));
     assert_eq!(err.to_string(), format!("pi has no session {FRESH_ID}"));
 
@@ -450,7 +450,7 @@ fn a_resumed_turn_reports_only_its_own_tokens() {
         "",
     )
     .unwrap();
-    let second = pi.run(&call).unwrap();
+    let second = pi.run(&call, &Ending::default()).unwrap();
     let first = parse_result(&output(0, FRESH, ""), &id(FRESH_ID)).unwrap();
     assert_eq!(second.session_id, first.session_id);
     assert!(second.text.to_lowercase().contains("ok"), "{second:?}");
@@ -620,7 +620,6 @@ impl World {
             settings: self.path("worker/settings.json"),
             instructions: None,
             prompt: String::new(),
-            timeout: None,
             plugin_dirs: Vec::new(),
             tools: Tools::Answer,
             reach: Reach::default(),

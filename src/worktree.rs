@@ -274,9 +274,7 @@ pub fn base_of(repo: &Path, branch: &str, head: &str) -> Result<Base, WorktreeEr
     // `--is-ancestor` answers no with exit 1, and fails with any other code.
     let base = format!("origin/{BASE}");
     let args = ["merge-base", "--is-ancestor", &base, head];
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
+    let output = in_repo(repo)
         .args(args)
         .stdin(Stdio::null())
         .output()
@@ -610,15 +608,27 @@ fn create(path: &Path) -> Result<(), WorktreeError> {
     })
 }
 
+/// `git -C cwd`, waiting its turn for a ref another git holds
+///
+/// The open work items' worktrees share one repo's refs, and their calls
+/// run at once, so a ref or `packed-refs` lock one git holds makes another
+/// wait for it rather than fail at once.
+pub(crate) fn in_repo(cwd: &Path) -> Command {
+    let mut git = Command::new("git");
+    git.args(["-c", "core.filesRefLockTimeout=2000"])
+        .args(["-c", "core.packedRefsTimeout=5000"])
+        .arg("-C")
+        .arg(cwd);
+    git
+}
+
 pub(crate) fn git<I, S>(cwd: &Path, args: I) -> Result<String, WorktreeError>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
     let args: Vec<_> = args.into_iter().map(|a| a.as_ref().to_owned()).collect();
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(cwd)
+    let output = in_repo(cwd)
         .args(&args)
         .stdin(Stdio::null())
         .output()

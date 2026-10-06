@@ -15,7 +15,7 @@ mod watched;
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -23,7 +23,7 @@ use std::time::Duration;
 use super::process::Processes;
 use crate::lease::gpu::{self, Attempt, Claim, GpuHold, GpuLock, LockHolder};
 use crate::ports::{
-    AgentError, Finding, LocalLeases, ModelSeat, Reviewer, ReviewerError, RoundStage,
+    AgentError, Ending, Finding, LocalLeases, ModelSeat, Reviewer, ReviewerError, RoundStage,
 };
 use crate::settings::{LeaseName, LocalRound};
 
@@ -36,7 +36,7 @@ const STOP_POLL: Duration = Duration::from_millis(100);
 #[derive(Debug, Clone)]
 pub struct LocalReviewer {
     temp_dir: PathBuf,
-    processes: Processes,
+    pub(super) processes: Processes,
     // Where the model sat when a round last looked, for `status`.
     seat: Arc<Mutex<Option<ModelSeat>>>,
     // How long a round waiting on the lock naps, given the seconds it has waited
@@ -67,8 +67,9 @@ impl LocalReviewer {
         self
     }
 
+    /// Naps `naps` between looks at a held lock, given the seconds waited
     #[cfg(test)]
-    fn with_naps(mut self, naps: fn(u64) -> Duration) -> Self {
+    pub(crate) fn with_naps(mut self, naps: fn(u64) -> Duration) -> Self {
         self.naps = naps;
         self
     }
@@ -84,6 +85,7 @@ impl LocalReviewer {
         lease: &str,
         what: String,
         watch: &(dyn Fn(RoundStage) + Sync),
+        ended: &dyn Fn() -> bool,
     ) -> Result<GpuHold, Unheld> {
         let lock = GpuLock::named(&self.temp_dir, lease);
         let claim = Claim {
@@ -117,6 +119,9 @@ impl LocalReviewer {
                 if self.processes.stopping() {
                     return Err(Unheld::Stopped);
                 }
+                if ended() {
+                    return Err(Unheld::Ended);
+                }
                 thread::sleep(STOP_POLL);
                 slept += STOP_POLL;
             }
@@ -128,15 +133,25 @@ impl LocalReviewer {
 // Why a lease was not taken
 enum Unheld {
     Stopped,
+    // The call waiting for it was asked to end
+    Ended,
     Failed(String),
 }
 
 impl LocalLeases for LocalReviewer {
-    fn hold(&self, lease: &LeaseName, what: &str) -> Result<GpuHold, AgentError> {
-        LocalReviewer::hold(self, lease.as_str(), what.to_owned(), &|_| {}).map_err(|e| match e {
-            Unheld::Stopped => AgentError::Stopped,
-            Unheld::Failed(reason) => AgentError::Setup(reason),
-        })
+    fn hold(
+        &self,
+        lease: &LeaseName,
+        what: &str,
+        ending: &Ending,
+    ) -> Result<Option<GpuHold>, AgentError> {
+        let ended = || ending.asked();
+        match LocalReviewer::hold(self, lease.as_str(), what.to_owned(), &|_| {}, &ended) {
+            Ok(held) => Ok(Some(held)),
+            Err(Unheld::Ended) => Ok(None),
+            Err(Unheld::Stopped) => Err(AgentError::Stopped),
+            Err(Unheld::Failed(reason)) => Err(AgentError::Setup(reason)),
+        }
     }
 
     fn holder(&self, lease: &LeaseName) -> Option<LockHolder> {
@@ -178,8 +193,9 @@ impl Reviewer for LocalReviewer {
         let _hold = match &lease {
             Some(lease) => {
                 let what = format!("kelpie local round {round} in {}", worktree.display());
-                let held = self.hold(lease.as_str(), what, watch).map_err(|e| match e {
-                    Unheld::Stopped => ReviewerError::Stopped,
+                let held = self.hold(lease.as_str(), what, watch, &|| false);
+                let held = held.map_err(|e| match e {
+                    Unheld::Stopped | Unheld::Ended => ReviewerError::Stopped,
                     Unheld::Failed(reason) => ReviewerError::Failed(reason),
                 });
                 Some(held?)
@@ -242,9 +258,7 @@ fn clear_round(out: &Path, round: u32) -> Result<(), ReviewerError> {
 
 /// The worktree's head commit
 fn head(worktree: &Path) -> Result<String, ReviewerError> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(worktree)
+    let output = crate::worktree::in_repo(worktree)
         .args(["rev-parse", "HEAD"])
         .stdin(Stdio::null())
         .output()

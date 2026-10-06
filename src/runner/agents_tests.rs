@@ -133,7 +133,7 @@ fn a_settings_file_that_cannot_be_written_keeps_the_turn_for_its_retry() {
     ));
     let calls = rig.claude.calls().len();
     // The first turn's file makes way for a folder of the same name.
-    let taken = rig.paths().worker.join("settings.json");
+    let taken = rig.paths().worker.join("settings-7.json");
     std::fs::remove_file(&taken).unwrap();
     std::fs::create_dir(&taken).unwrap();
     let Some(StepReport::Failed { question, .. }) = step(&runner).unwrap() else {

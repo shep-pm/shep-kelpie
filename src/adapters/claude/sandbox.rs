@@ -150,6 +150,7 @@ mod tests {
 
     use super::*;
     use crate::adapters::{ClaudeCli, SandboxRuntime};
+    use crate::ports::Ending;
     use crate::ports::{Agents, Reach, Role, Session, SessionId, Tools};
     use crate::profile::WorkerProfile;
     use crate::settings::Effort;
@@ -196,7 +197,6 @@ mod tests {
                 settings: self.path("worker/settings.json"),
                 instructions: None,
                 prompt: "go".into(),
-                timeout: None,
                 plugin_dirs: Vec::new(),
                 tools: Tools::Answer,
                 reach: Reach::default(),
@@ -241,7 +241,7 @@ mod tests {
         let cli = w.cli(Arc::new(sandbox.clone()));
         for call in [w.worker(), w.call(Role::Reviewer)] {
             cli.prepare(&call).unwrap();
-            cli.run(&call).unwrap();
+            cli.run(&call, &Ending::default()).unwrap();
         }
         let wrapped = sandbox.wrapped();
         assert_eq!(wrapped.len(), 2);
@@ -256,7 +256,7 @@ mod tests {
         let none = SandboxRuntime::new(KelpieTools::at(w.path("no-tools")));
         let cli = w.cli(Arc::new(none));
         for call in [w.worker(), w.call(Role::Reviewer)] {
-            let err = cli.run(&call).unwrap_err();
+            let err = cli.run(&call, &Ending::default()).unwrap_err();
             assert!(
                 matches!(&err, AgentError::Setup(why) if why.contains("tools install")),
                 "{err:?}"
@@ -336,7 +336,7 @@ mod tests {
         std::fs::create_dir_all(w.path("elsewhere")).unwrap();
         std::fs::write(w.path("elsewhere/keep"), "").unwrap();
         std::os::unix::fs::symlink(w.path("elsewhere"), scratch(&call)).unwrap();
-        cli.run(&call).unwrap();
+        cli.run(&call, &Ending::default()).unwrap();
         assert!(w.path("elsewhere/keep").exists());
         assert!(scratch(&call).is_dir() && !scratch(&call).is_symlink());
         assert!(

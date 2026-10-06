@@ -8,7 +8,7 @@ use std::process::{Command, Output};
 
 use super::sandbox::{policy, transcripts};
 use crate::adapters::SandboxRuntime;
-use crate::ports::{AgentCall, Role, Sandbox, Session, SessionId, Tools};
+use crate::ports::{AgentCall, Ending, Role, Sandbox, Session, SessionId, Tools};
 use crate::profile::WorkerProfile;
 use crate::settings::Effort;
 use crate::tools::Tools as KelpieTools;
@@ -64,7 +64,6 @@ impl World {
             settings: self.path("worker/settings.json"),
             instructions: None,
             prompt: String::new(),
-            timeout: None,
             plugin_dirs: Vec::new(),
             tools: Tools::Work,
             reach: profile.reach(),
@@ -309,14 +308,20 @@ fn a_live_worker_turn_runs_inside_the_sandbox_and_resumes() {
              (5) Bash: curl -sS -m 10 https://example.com -o /dev/null",
             outside = root.join("outside.txt").display()
         ),
-        timeout: Some(std::time::Duration::from_secs(300)),
         plugin_dirs: Vec::new(),
         tools: Tools::Work,
         reach: profile.reach(),
         lease: None,
     };
     cli.prepare(&call).unwrap();
-    let reply = cli.run(&call).expect("the turn ran");
+    // A live call has five minutes, as a worker's turn has its ceiling.
+    let ending = Ending::default();
+    let ceiling = ending.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(300));
+        ceiling.end();
+    });
+    let reply = cli.run(&call, &ending).expect("the turn ran");
     println!("--- turn ---\n{}\n---", reply.text);
     assert_eq!(
         std::fs::read_to_string(wt.join("a.txt")).unwrap(),
@@ -332,7 +337,7 @@ fn a_live_worker_turn_runs_inside_the_sandbox_and_resumes() {
 
     call.session = Session::Resume(id);
     call.prompt = "What did step 1 print? Answer with that word alone.".into();
-    let reply = cli.run(&call).expect("the resumed turn ran");
+    let reply = cli.run(&call, &ending).expect("the resumed turn ran");
     println!("--- resumed ---\n{}\n---", reply.text);
     assert!(reply.text.contains("inside"), "{}", reply.text);
 }
