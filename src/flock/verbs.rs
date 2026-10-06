@@ -5,7 +5,7 @@ use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use super::{Checkout, Launch, add, attach, control, rule};
+use super::{Checkout, Launch, add, attach, control, pm, rule};
 use crate::adapters::{ClaudeCli, Gh};
 use crate::agents::Agents;
 use crate::issues::{self, Mode, Project, Writer};
@@ -18,10 +18,10 @@ use crate::tools::Tools;
 
 /// The verbs [`main`] runs: every trigger a runner takes, `add`, which also
 /// registers a checkout, `issue`, which runs the issue writer itself, and
-/// `attach`, which runs a worker's session here
-pub const VERBS: [&str; 12] = [
+/// `attach` and `pm`, which run a worker's or the project manager's session here
+pub const VERBS: [&str; 14] = [
     "add", "start", "pause", "status", "rule", "rework", "adopt", "gate", "drop", "timings",
-    "issue", "attach",
+    "issue", "attach", "tell", "pm",
 ];
 
 /// What the verbs take, as their help says
@@ -38,6 +38,8 @@ usage: shep kelpie add [<project>]       registers this checkout as a project
        shep kelpie issue --interactive \"<request>\"
                                          plans them with you in claude
        shep kelpie attach <issue>        steers its worker's session here
+       shep kelpie tell \"<note>\"         a note for the project manager's next wake
+       shep kelpie pm                    steers the project manager's session here
 
 `-p <project>` or `--project <project>` goes anywhere in the line, before a
 ruling's answer. Without it, the project is the one whose repo holds this
@@ -144,6 +146,14 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
             let issue = number.ok_or_else(|| format!("{issue:?} is not an issue number"))?;
             attach::attach(&client, &project().await?, issue).await
         }
+        ("tell", [_, ..]) => {
+            let project = project().await?;
+            control::send(&client, &project, "tell", Some(&args.join(" "))).await?;
+            Ok(vec![format!(
+                "told {project}'s project manager, which reads it on its next wake"
+            )])
+        }
+        ("pm", []) => pm::pm(&client, &project().await?).await,
         ("issue", [_, ..]) => {
             let here = Here {
                 client: &client,
@@ -362,6 +372,7 @@ mod tests {
             words("issue -p koji --interactive add a thing")
         );
         assert_eq!(moved("-p koji attach 7"), words("attach -p koji 7"));
+        assert_eq!(moved("-p koji tell hold #4"), words("tell -p koji hold #4"));
         assert_eq!(moved("rule -p koji 14 yes"), words("rule -p koji 14 yes"));
         assert_eq!(moved("-p koji runner x"), words("-p koji runner x"));
         assert_eq!(moved("-p"), words("-p"));

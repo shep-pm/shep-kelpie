@@ -139,7 +139,8 @@ mod tests {
                 "[[app.dogs.kelpie.worker.guard_hooks]]\nevent = \"PreToolUse\"\nmatcher = \"Bash\"\ncommand =",
             )
             .replace("# private_names =", "private_names =")
-            .replace("# reviewers = [\"qwen\", \"defect-hunter\"]", "reviewers = [\"qwen\"]");
+            .replace("# reviewers = [\"qwen\", \"defect-hunter\"]", "reviewers = [\"qwen\"]")
+            .replace("# pm = \"pm\"", "pm = \"pm\"");
         assert!(
             text.contains("reviewers = [\"qwen\"]"),
             "the example's list moved"

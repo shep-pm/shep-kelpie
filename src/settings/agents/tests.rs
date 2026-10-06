@@ -214,3 +214,24 @@ fn an_agents_name_is_lowercase_letters_digits_and_dashes() {
     assert!(AgentName::try_from("opus high".to_owned()).is_err());
     assert!(AgentName::try_from("opus-5-high".to_owned()).is_ok());
 }
+
+#[test]
+fn a_project_manager_is_named_by_its_file_and_none_is_the_default() {
+    let none = project("implementers = [\"sonnet-high\"]\n");
+    assert_eq!(none.role_agents(&book()).unwrap().pm, None);
+
+    let named = project("implementers = [\"sonnet-high\"]\npm = \"pm\"\n");
+    let pm = named.role_agents(&book()).unwrap().pm.unwrap();
+    assert_eq!(pm.name.as_str(), "pm");
+    assert_eq!(pair(&pm.model), ("claude-opus-5-5", Effort::Medium));
+    assert_eq!(pm.limit, Limit::Account(Account::Claude));
+
+    let err = project("implementers = [\"sonnet-high\"]\npm = \"opus-high\"\n")
+        .role_agents(&book())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("`agents.pm` names opus-high, whose agent file's role is `implementer`"),
+        "{err}"
+    );
+}

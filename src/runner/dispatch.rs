@@ -4,9 +4,12 @@
 //! steps, after starting any pull request it adopted and checking its open
 //! pull requests for one asking for a rework. A queued issue waits until a
 //! slot is free, and an issue, or a pull request, whose work item is open
-//! waits for it to end.
+//! waits for it to end. With a project manager and two or more issues the
+//! board could take, its pick goes in place of the board rule's, and a
+//! ready issue it holds waits.
 
 use super::Runner;
+use super::pm::Choice;
 use super::report::{Begin, StepReport};
 use crate::board::{self, ReadyIssue, Skip};
 use crate::state::StateError;
@@ -49,13 +52,19 @@ impl Runner {
             self.skipped = failed;
             return Ok(begin);
         }
+        let implementers = self.agents.implementer_names();
+        let all = takeable(&ready, &open, &self.state.finished, &implementers);
+        let held = self.pm_holds(&all);
+        ready.retain(|issue| !held.contains(&issue.number));
         let mut paced = false;
         loop {
             let implementers = self.agents.implementer_names();
-            let pick = board::pick(&ready, &open, &self.state.finished, &implementers);
+            let finished = &self.state.finished;
+            let pick = board::pick(&ready, &open, finished, &implementers);
             let mut skipped = pick.skipped;
             skipped.extend(failed.iter().cloned());
             skipped.sort_by_key(Skip::issue);
+            let takeable = takeable(&ready, &open, finished, &implementers);
             let Some(issue) = pick.issue else {
                 let reason = failed
                     .iter()
@@ -90,6 +99,14 @@ impl Runner {
                 }
                 paced = true;
             }
+            let issue = match self.pm_pick(&takeable) {
+                Choice::Take(n) => n,
+                Choice::Rule => issue,
+                Choice::Wait => {
+                    self.skipped = skipped;
+                    return Ok(Begin::Idle);
+                }
+            };
             match self.add(issue) {
                 Ok(agent) => {
                     self.skipped.clone_from(&skipped);
@@ -116,6 +133,24 @@ impl Runner {
             }
         }
     }
+}
+
+// The ready issues the board could take now, each on its own.
+fn takeable(
+    ready: &[ReadyIssue],
+    open: &[board::OpenPullRequest],
+    finished: &[u64],
+    implementers: &[crate::settings::AgentName],
+) -> Vec<u64> {
+    (ready.iter())
+        .filter(|i| {
+            let one = std::slice::from_ref(*i);
+            board::pick(one, open, finished, implementers)
+                .issue
+                .is_some()
+        })
+        .map(|i| i.number)
+        .collect()
 }
 
 impl Runner {

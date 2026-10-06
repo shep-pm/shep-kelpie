@@ -126,6 +126,7 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
         ("coderabbit", include_str!("../../../agents/coderabbit.md")),
         ("cubic", include_str!("../../../agents/cubic.md")),
         ("codex", include_str!("../../../agents/codex.md")),
+        ("pm", include_str!("../../../agents/pm.md")),
     ] {
         let written = std::fs::read_to_string(scene.agents().join(format!("{bot}.md")));
         assert_eq!(

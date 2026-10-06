@@ -4,8 +4,9 @@
 //! no thread of the runner's waits on one. The call's end comes back on a
 //! channel, which wakes the runner's loop, and its next pass records it. A
 //! work item has at most one call in flight, and the open work items' calls
-//! run at once. A turn's ceiling is a deadline each pass checks, and a call
-//! past it is ended through its own process group.
+//! run at once, beside the project manager's one call. A turn's ceiling is
+//! a deadline each pass checks, and a call past it is ended through its own
+//! process group.
 
 use std::any::Any;
 use std::collections::BTreeMap;
@@ -41,6 +42,8 @@ pub enum Pass {
 #[derive(Debug)]
 pub(super) struct Flights {
     flying: BTreeMap<u64, Flight>,
+    // The project manager's call, its ceiling and its hold
+    pm: Option<(Timestamp, Ending)>,
     send: Sender<News>,
     news: Receiver<News>,
     // Told after each piece of news, so the loop waiting on it wakes
@@ -52,6 +55,7 @@ impl Default for Flights {
         let (send, news) = mpsc::channel();
         Self {
             flying: BTreeMap::new(),
+            pm: None,
             send,
             news,
             wake: None,
@@ -60,6 +64,12 @@ impl Default for Flights {
 }
 
 impl Flights {
+    /// Whether no call is in flight, the project manager's included
+    #[cfg(test)]
+    fn idle(&self) -> bool {
+        self.flying.is_empty() && self.pm.is_none()
+    }
+
     /// Whether `issue`'s work item has a call in flight
     pub(super) fn flying(&self, issue: u64) -> bool {
         self.flying.contains_key(&issue)
@@ -74,6 +84,13 @@ impl Flights {
         self.flying
             .get(&issue)
             .is_some_and(|f| f.deadline.is_some())
+    }
+
+    /// Ends `issue`'s call in flight, as its ceiling would
+    pub(super) fn end(&self, issue: u64) {
+        if let Some(flight) = self.flying.get(&issue) {
+            flight.ending.end();
+        }
     }
 
     /// `issue`'s call in flight, as the board watches it
@@ -109,6 +126,8 @@ enum News {
         issue: u64,
         end: End,
     },
+    // The project manager's call ended
+    Pm(End),
     // A local round queued for the GPU or began to run. The call waits until
     // `_seen` drops, once the stage is saved, so its time is charged right.
     Stage {
@@ -194,9 +213,14 @@ impl Runner {
     /// been ended yet, or `None` with no such turn
     pub fn next_ceiling(&self) -> Option<Duration> {
         let now = self.ports.clock.now();
-        (self.flights.flying.values())
+        let turns = (self.flights.flying.values())
             .filter(|flight| !flight.ending.asked())
-            .filter_map(|flight| flight.deadline)
+            .filter_map(|flight| flight.deadline);
+        let pm = (self.flights.pm.iter())
+            .filter(|(_, ending)| !ending.asked())
+            .map(|(deadline, _)| *deadline);
+        turns
+            .chain(pm)
             .map(|deadline| Duration::from_secs(deadline.0.saturating_sub(now.0)))
             .min()
     }
@@ -210,6 +234,34 @@ impl Runner {
                 flight.ending.end();
             }
         }
+        if let Some((deadline, ending)) = &self.flights.pm
+            && *deadline <= now
+        {
+            ending.end();
+        }
+    }
+
+    /// Starts the project manager's `call` on a thread of its own, ended
+    /// past `ceiling` seconds, whose end comes back as news
+    pub(super) fn launch_pm(&mut self, call: AgentCall, ceiling: u64) {
+        let (news, wake) = (self.flights.send.clone(), self.flights.wake.clone());
+        let ending = Ending::default();
+        let held = ending.clone();
+        let agents = Arc::clone(&self.ports.agents);
+        let run = move || {
+            let ran = catch_unwind(AssertUnwindSafe(|| End::Turn(agents.run(&call, &held))));
+            let _ = news.send(News::Pm(ran.unwrap_or_else(End::Panicked)));
+            if let Some(wake) = &wake {
+                let _ = wake.send(());
+            }
+        };
+        if let Err(e) = thread::Builder::new().name("pm".into()).spawn(run) {
+            let reason = format!("cannot start a thread for the call: {e}");
+            let end = End::Turn(Err(AgentError::Spawn(Harness::ClaudeCode, reason)));
+            let _ = self.flights.send.send(News::Pm(end));
+        }
+        let now = self.ports.clock.now();
+        self.flights.pm = Some((Timestamp(now.0.saturating_add(ceiling)), ending));
     }
 
     // Counts `issue`'s turn ceiling from now, once its call has the lease it
@@ -373,7 +425,16 @@ fn unstarted(harness: Option<Harness>, e: &std::io::Error) -> End {
 pub fn advance(runner: &Mutex<Runner>) -> Result<Pass, StateError> {
     let pass = one_pass(runner);
     brief(runner);
-    pass
+    // The project manager wakes only on a pass that started nothing else,
+    // once the board it reads is written.
+    match pass {
+        Ok(Pass::Idle) if lock(runner).wake_pm() => Ok(Pass::Started),
+        Ok(Pass::Report(report)) if report.waits() => {
+            lock(runner).wake_pm();
+            Ok(Pass::Report(report))
+        }
+        pass => pass,
+    }
 }
 
 #[track_caller]
@@ -415,9 +476,24 @@ fn hear(runner: &Mutex<Runner>, news: News) -> Result<Option<StepReport>, StateE
             return Ok(None);
         }
         News::Ended { issue, end } => (issue, end),
+        News::Pm(end) => {
+            runner.flights.pm = None;
+            return match end {
+                End::Turn(result) => runner.pm_ended(result),
+                End::Review(_) => Ok(None),
+                End::Panicked(panic) => {
+                    drop(runner);
+                    resume_unwind(panic)
+                }
+            };
+        }
     };
     match end {
-        End::Turn(result) => runner.turn_ended(issue, result),
+        End::Turn(result) => {
+            let ended = runner.turn_ended(issue, result);
+            runner.pm_after_end(issue)?;
+            ended
+        }
         End::Review(reviewed) => {
             let ended = runner.on(Some(issue)).end_review(reviewed);
             runner.flights.flying.remove(&issue);
@@ -465,7 +541,7 @@ fn step_once(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
                     return Ok(Some(report));
                 }
             }
-            None if lock(runner).flights.flying.is_empty() => return Ok(None),
+            None if lock(runner).flights.idle() => return Ok(None),
             None => woken
                 .recv_timeout(PATIENCE)
                 .expect("a call in flight never ended"),

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::guard::{FOLDER_FLAG, NAME_FLAG, RECORD_FLAG};
-use crate::ports::{Fence, Reach, Tools};
+use crate::ports::{Fence, PM_NOTES, Reach, Tools};
 use crate::settings::HookEvent;
 use crate::trim::trimmed;
 
@@ -61,6 +61,26 @@ const ISSUES_DENY: [&str; 13] = [
     "ExitWorktree",
 ];
 
+/// The only tools the project manager's session has, as `--tools` takes them
+pub(crate) const PM_TOOLS: &str = "Read,Glob,Grep,Edit,Write";
+
+/// What the project manager never uses, denied as well in case `--tools`
+/// lets one through: commands, sub-agents, skills, messages, the web, and
+/// the file tools whose writes the append check cannot read
+const PM_DENY: [&str; 11] = [
+    "Agent",
+    "Task",
+    "Bash",
+    "BashOutput",
+    "KillShell",
+    "Skill",
+    "SendMessage",
+    "WebFetch",
+    "WebSearch",
+    "MultiEdit",
+    "NotebookEdit",
+];
+
 /// Every tool name a Claude Code call can reach, denied outright to an answer
 pub(crate) const NO_TOOLS: [&str; 12] = [
     "Agent",
@@ -92,8 +112,8 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
         deny.extend(fence.no_commands.iter().map(|c| format!("Bash({c})")));
     }
     deny.extend(tool_denies(tools, reach).map(str::to_owned));
-    if let (Tools::Issues, Some(fence)) = (tools, &reach.fence) {
-        deny.extend(issue_writer_reads(&fence.guard.worktree, &reach.read));
+    if let (Tools::Issues | Tools::Pm, Some(fence)) = (tools, &reach.fence) {
+        deny.extend(reads_only(&fence.guard.worktree, &reach.read));
     }
     let Some(fence) = &reach.fence else {
         let mut permissions = json!({ "deny": deny });
@@ -107,10 +127,20 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
     if !reach.read.is_empty() {
         permissions["additionalDirectories"] = json!(reach.read);
     }
-    // Its session asks no one, so a command its guard allows must not wait on a prompt.
-    if tools == Tools::Issues {
-        permissions["allow"] = json!(["Bash"]);
-    }
+    let hooks = match tools {
+        // Its session asks no one, so a command its guard allows must not wait on a prompt.
+        Tools::Issues => {
+            permissions["allow"] = json!(["Bash"]);
+            hooks(fence)
+        }
+        // Headless, an edit nothing allows is refused, so these are its only writes.
+        Tools::Pm => {
+            let notes = fence.guard.worktree.join(PM_NOTES).display().to_string();
+            permissions["allow"] = json!([rule("Edit", &notes), rule("Write", &notes)]);
+            pm_hooks(fence)
+        }
+        Tools::Work | Tools::Review | Tools::Answer => hooks(fence),
+    };
     trimmed(json!({
         // Kelpie's sandbox holds the whole process, and on macOS Claude Code's
         // own cannot start inside it: every command would be refused.
@@ -119,7 +149,7 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
         // A project's own settings could otherwise switch every hook off,
         // `confine` and the guard with them. This file outranks them.
         "disableAllHooks": false,
-        "hooks": hooks(fence),
+        "hooks": hooks,
         "env": env(fence),
     }))
 }
@@ -127,7 +157,8 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
 // The issue writer's file tools read its checkout, and `also`, and nothing
 // else: every other entry from `/` down is denied, and the secrets named
 // outright, whichever folder its checkout is in. Its commands read no file.
-fn issue_writer_reads(checkout: &Path, also: &[PathBuf]) -> Vec<String> {
+// The project manager's read its own folder the same way.
+fn reads_only(checkout: &Path, also: &[PathBuf]) -> Vec<String> {
     // Each as given and with its links resolved, since `around` walks a link
     // such as macOS's `/var` as a folder of its own.
     let mut allowed: Vec<PathBuf> = Vec::new();
@@ -148,6 +179,7 @@ fn tool_denies(tools: Tools, reach: &Reach) -> impl Iterator<Item = &'static str
         Tools::Review => &REVIEW_DENY,
         Tools::Answer => &NO_TOOLS,
         Tools::Issues => &ISSUES_DENY,
+        Tools::Pm => &PM_DENY,
     };
     // An answer that may read a folder keeps Read and nothing else.
     let reads = tools == Tools::Answer && !reach.read.is_empty();
@@ -197,9 +229,14 @@ fn around(dir: &Path, read: &[PathBuf]) -> Vec<String> {
 }
 
 fn read_rule(path: &str) -> String {
+    rule("Read", path)
+}
+
+// `tool`'s rule on `path`.
+fn rule(tool: &str, path: &str) -> String {
     match path.starts_with('/') {
-        true => format!("Read(/{path})"),
-        false => format!("Read({path})"),
+        true => format!("{tool}(/{path})"),
+        false => format!("{tool}({path})"),
     }
 }
 
@@ -265,6 +302,21 @@ fn hooks(fence: &Fence) -> Value {
         hooks["PostToolUse"] = post.into();
     }
     hooks
+}
+
+// The project manager's one hook: its file tools may only add to the end
+// of its notes.
+fn pm_hooks(fence: &Fence) -> Value {
+    let notes = fence.guard.worktree.join(PM_NOTES);
+    let command = [
+        fence.guard.kelpie.as_path(),
+        Path::new("confine"),
+        Path::new(crate::confine::APPEND),
+        &notes,
+    ]
+    .map(|p| shell_quote(&p.to_string_lossy()))
+    .join(" ");
+    json!({ "PreToolUse": [entry(Some(FILE_TOOLS), &command)] })
 }
 
 fn entry(matcher: Option<&str>, command: &str) -> Value {
@@ -342,7 +394,13 @@ mod tests {
     #[test]
     fn every_role_drops_the_features_it_never_uses() {
         // A worker's fenced settings are pinned in `profile`'s tests.
-        for tools in [Tools::Work, Tools::Review, Tools::Answer, Tools::Issues] {
+        for tools in [
+            Tools::Work,
+            Tools::Review,
+            Tools::Answer,
+            Tools::Issues,
+            Tools::Pm,
+        ] {
             let s = settings(tools, &Reach::default());
             for key in [
                 "disableBundledSkills",
@@ -359,6 +417,7 @@ mod tests {
                 Tools::Review => &REVIEW_DENY,
                 Tools::Answer => &NO_TOOLS,
                 Tools::Issues => &ISSUES_DENY,
+                Tools::Pm => &PM_DENY,
             };
             assert_eq!(s["permissions"]["deny"], deny_with_trim(own), "{tools:?}");
             // What kelpie's own calls use stays, unless the role denies it itself.

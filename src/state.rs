@@ -20,14 +20,15 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
-use crate::ports::{Finding, Timestamp};
+use crate::ports::{Finding, SessionId, Timestamp};
 use crate::settings::Account;
-use crate::work_item::{Known, Phase, Review, Seconds, Turn, WorkItem};
+use crate::work_item::{Attached, Known, Phase, Review, Seconds, Turn, WorkItem};
 
-/// The state file's format version. 7 added a work item's `attached`, 6
-/// folded the timing phases to six, and 5 added the board's events, each
-/// of which an older kelpie refuses
-const VERSION: u32 = 7;
+/// The state file's format version. 8 added the project manager's session,
+/// notes and attach, 7 a work item's `attached`, 6 folded the timing phases
+/// to six, and 5 added the board's events, each of which an older kelpie
+/// refuses
+const VERSION: u32 = 8;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
@@ -105,6 +106,17 @@ pub struct ProjectState {
     /// The last board event the project manager has read, once it has read one
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pm_seen: Option<u64>,
+    /// The project manager's session, which each wake resumes, once it has one
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pm_session: Option<SessionId>,
+    /// What the maintainer told the project manager since its last
+    /// answered wake, oldest first
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pm_told: Vec<String>,
+    /// The maintainer's terminal holding the project manager's session,
+    /// which pauses its wakes
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pm_attached: Option<Attached>,
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -134,6 +146,9 @@ impl ProjectState {
             events: Vec::new(),
             last_event: 0,
             pm_seen: None,
+            pm_session: None,
+            pm_told: Vec::new(),
+            pm_attached: None,
         }
     }
 

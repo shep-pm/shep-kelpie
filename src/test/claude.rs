@@ -53,6 +53,8 @@ pub(crate) enum Scripted {
     Billed(&'static str, Cost),
     /// Answers with this final message
     Say(&'static str),
+    /// Answers with this final message, its session's context this many tokens
+    SayAt(&'static str, u64),
     /// Blocks until the test releases it, then answers. Ended first, by
     /// the call's ending or by [`FakeClaude::stop`], it fails as the real
     /// adapters do.
@@ -287,6 +289,10 @@ impl Agents for FakeClaude {
                 panic!("the runner is killed mid-turn");
             }
             Some(Scripted::Text(text) | Scripted::Say(text)) => Ok(said(text)),
+            Some(Scripted::SayAt(text, context)) => Ok(AgentReply {
+                context: Some(context),
+                ..said(text)
+            }),
             Some(Scripted::Billed(text, cost)) => Ok(AgentReply {
                 session_cost: Some(cost),
                 ..said(text)
@@ -344,6 +350,7 @@ fn answer(call: &AgentCall, text: &str) -> AgentReply {
         text: text.to_owned(),
         usage: Usage::default(),
         session_cost: Some(Cost(0)),
+        context: None,
     }
 }
 

@@ -28,7 +28,8 @@ use bot::at_key;
 enum Front {
     Implementer(Implementer),
     Reviewer(Reviewer),
-    IssueWriter(IssueWriter),
+    IssueWriter(OnClaude),
+    Pm(OnClaude),
 }
 
 // The first pass: the role alone, whatever else is there
@@ -56,11 +57,11 @@ struct Implementer {
     context: Option<ContextSize>,
 }
 
-// The issue writer's keys: a Claude Code session, since `--interactive`
-// starts `claude` and its guard is a Claude Code hook
+// The issue writer's and the project manager's keys: a Claude Code
+// session, since each is held by a Claude Code hook
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct IssueWriter {
+struct OnClaude {
     #[serde(rename = "role")]
     _role: Role,
     harness: Harness,
@@ -149,6 +150,7 @@ pub(super) fn parse(text: &str) -> Result<Agent, String> {
         Role::Implementer => Front::Implementer(serde_saphyr::from_str(&yaml).map_err(refused)?),
         Role::Reviewer => Front::Reviewer(serde_saphyr::from_str(&yaml).map_err(refused)?),
         Role::IssueWriter => Front::IssueWriter(serde_saphyr::from_str(&yaml).map_err(refused)?),
+        Role::Pm => Front::Pm(serde_saphyr::from_str(&yaml).map_err(refused)?),
     };
     let body = body.trim();
     let prompt = (!body.is_empty()).then(|| body.to_owned());
@@ -178,41 +180,65 @@ pub(super) fn parse(text: &str) -> Result<Agent, String> {
                 second_look: keys.second_look,
             })
         }
-        Front::IssueWriter(keys) => {
-            let name = keys.harness.as_str();
-            if keys.harness != Harness::ClaudeCode {
-                return Err(at_key(
-                    &yaml,
-                    "harness",
-                    &format!(
-                        "the issue writer runs on claude-code, not {name}: `--interactive` \
-                         starts `claude`, and its guard is a Claude Code hook"
-                    ),
-                ));
-            }
-            if prompt.is_none() {
-                return Err(
-                    "the issue writer's prompt is the file's body: write it below \
-                            the closing `---`"
-                        .into(),
-                );
-            }
-            Ok(Agent {
-                role: Role::IssueWriter,
-                runs: session(&SessionKeys {
-                    harness: keys.harness,
-                    model: &keys.model,
-                    effort: keys.effort,
-                    usage: None,
-                    lease: None,
-                    url: None,
-                    context: None,
-                })?,
-                prompt,
-                paths: Vec::new(),
-                second_look: false,
-            })
+        Front::IssueWriter(keys) => keys.agent(
+            Role::IssueWriter,
+            prompt,
+            &yaml,
+            (
+                "the issue writer",
+                "`--interactive` starts `claude`, and its guard is a Claude Code hook",
+            ),
+        ),
+        Front::Pm(keys) => keys.agent(
+            Role::Pm,
+            prompt,
+            &yaml,
+            (
+                "the project manager",
+                "a Claude Code hook is what holds its writes to its notes",
+            ),
+        ),
+    }
+}
+
+impl OnClaude {
+    /// The agent of `role` these keys and `prompt` make, or why not: `who`
+    /// names it and why it runs on Claude Code alone
+    fn agent(
+        &self,
+        role: Role,
+        prompt: Option<String>,
+        yaml: &str,
+        (who, why): (&str, &str),
+    ) -> Result<Agent, String> {
+        if self.harness != Harness::ClaudeCode {
+            let name = self.harness.as_str();
+            return Err(at_key(
+                yaml,
+                "harness",
+                &format!("{who} runs on claude-code, not {name}: {why}"),
+            ));
         }
+        if prompt.is_none() {
+            return Err(format!(
+                "{who}'s prompt is the file's body: write it below the closing `---`"
+            ));
+        }
+        Ok(Agent {
+            role,
+            runs: session(&SessionKeys {
+                harness: self.harness,
+                model: &self.model,
+                effort: self.effort,
+                usage: None,
+                lease: None,
+                url: None,
+                context: None,
+            })?,
+            prompt,
+            paths: Vec::new(),
+            second_look: false,
+        })
     }
 }
 

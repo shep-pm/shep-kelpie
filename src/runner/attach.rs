@@ -345,7 +345,7 @@ fn live_by(attached: &Attached, ps: &str) -> bool {
 }
 
 // Process `pid` with its start time, as a hold records it.
-fn running(pid: u32) -> Result<Holder, AttachError> {
+pub(super) fn running(pid: u32) -> Result<Holder, AttachError> {
     match seen(PS, pid) {
         Seen::Runs(holder) => Ok(holder),
         Seen::Gone => Err(AttachError::NotRunning(pid)),

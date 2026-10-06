@@ -20,9 +20,9 @@ use crate::state::{Finished, LeaseHeld, Ruling, RunState, StateError, Waiting};
 use crate::work_item::{Attached, BotSkipped, Phase, QwenTally, Spend, Split, Turn, WorkItem};
 
 /// The triggers a runner answers
-pub const ACTIONS: [&str; 12] = [
+pub const ACTIONS: [&str; 14] = [
     "status", "start", "pause", "add", "rework", "adopt", "rule", "gate", "drop", "timings",
-    "attach", "detach",
+    "attach", "detach", "tell", "pm",
 ];
 
 /// How many finished work items `timings` totals when given no count
@@ -34,6 +34,9 @@ pub(super) const STATUS_HISTORY: usize = 10;
 /// What `attach` and `detach` take, as their refusals say
 const ATTACH_USAGE: &str = "takes an issue number and the attaching process's pid, and \
                             `attach` the pid of the session it started";
+
+/// What `pm` takes, as its refusals say
+const PM_USAGE: &str = "takes `attach <pid>`, `attach <pid> <session pid>` or `detach <pid>`";
 
 /// What `rule` takes, as its refusals say
 const RULE_USAGE: &str = "takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`";
@@ -84,6 +87,9 @@ pub struct Status<'a> {
     pub local_leases: BTreeMap<String, Option<LockHolder>>,
     /// The board briefing the project manager's agent reads
     pub board: &'a Path,
+    /// The project manager, when the project names one
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pm: Option<super::PmStatus<'a>>,
 }
 
 /// The local model's placement, as Ollama's `/api/ps` last said
@@ -220,6 +226,9 @@ enum Request {
     Timings(usize),
     Attach(u64, u32, Option<u32>),
     Detach(u64, u32),
+    Tell(String),
+    PmAttach(u32, Option<u32>),
+    PmDetach(u32),
 }
 
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
@@ -232,8 +241,10 @@ enum Request {
 /// out) and answers the totals, not the status, `attach` and `detach` take
 /// an issue and the attaching process's pid, `attach` then the pid of the
 /// session it started, if it has, and answers
-/// [`Attaching`](super::Attaching) rather than the status, and every other
-/// action takes nothing.
+/// [`Attaching`](super::Attaching) rather than the status, `tell` takes a
+/// note for the project manager, `pm` takes `attach` or `detach` with the
+/// same pids and answers [`PmAttaching`](super::PmAttaching) for `attach`,
+/// and every other action takes nothing.
 pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> String {
     let error = |message: String| serde_json::json!({ "error": message }).to_string();
     let request = match read(action, params.map(str::trim).filter(|p| !p.is_empty())) {
@@ -255,6 +266,14 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
             };
         }
         Request::Detach(issue, pid) => runner.detach(issue, pid).map_err(|e| e.to_string()),
+        Request::PmAttach(pid, session) => {
+            return match runner.attach_pm(pid, session) {
+                Ok(attaching) => serde_json::to_string(&attaching).expect("it serializes to JSON"),
+                Err(e) => error(e.to_string()),
+            };
+        }
+        Request::PmDetach(pid) => runner.detach_pm(pid).map_err(|e| e.to_string()),
+        Request::Tell(note) => runner.tell(&note).map_err(|e| e.to_string()),
         Request::Status | Request::Timings(_) => Ok(()),
         Request::Start => runner.start().map_err(|e| e.to_string()),
         Request::Pause => runner.pause().map_err(|e| e.to_string()),
@@ -321,6 +340,20 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
             read.ok_or_else(|| format!("`{action}` {ATTACH_USAGE}, not {p:?}"))
         }
         ("attach" | "detach", None) => Err(format!("`{action}` {ATTACH_USAGE}")),
+        ("tell", Some(note)) => Ok(Request::Tell(note.to_owned())),
+        ("tell", None) => Err("`tell` takes a note for the project manager".into()),
+        ("pm", Some(p)) => {
+            let words: Vec<&str> = p.split_whitespace().collect();
+            let read = match words.as_slice() {
+                ["attach", pid] => pid_of(pid).map(|pid| Request::PmAttach(pid, None)),
+                ["attach", pid, session] => (pid_of(pid).zip(pid_of(session)))
+                    .map(|(pid, session)| Request::PmAttach(pid, Some(session))),
+                ["detach", pid] => pid_of(pid).map(Request::PmDetach),
+                _ => None,
+            };
+            read.ok_or_else(|| format!("`pm` {PM_USAGE}, not {p:?}"))
+        }
+        ("pm", None) => Err(format!("`pm` {PM_USAGE}")),
         ("rule", None) => Err(format!("`{action}` {RULE_USAGE}")),
         (_, _) if !ACTIONS.contains(&action) => Err(format!("unknown action `{action}`")),
         (_, Some(_)) => Err(format!("`{action}` takes no params")),
@@ -549,7 +582,7 @@ mod tests {
         let runner = rig.open().unwrap();
         for action in ACTIONS.into_iter().filter(|a| {
             ![
-                "rework", "adopt", "rule", "gate", "drop", "attach", "detach",
+                "rework", "adopt", "rule", "gate", "drop", "attach", "detach", "tell", "pm",
             ]
             .contains(a)
         }) {
@@ -563,6 +596,25 @@ mod tests {
         assert_eq!(
             rig.ask(&runner, "rework", Some("71")),
             json!({ "error": "the work item for #7 is in flight" })
+        );
+        let no_pm = "the project has no project manager: name one in `agents.pm`, such as `pm`";
+        let me = std::process::id();
+        assert_eq!(
+            rig.ask(&runner, "tell", Some("hold #4")),
+            json!({ "error": no_pm })
+        );
+        assert_eq!(
+            rig.ask(&runner, "pm", Some(&format!("attach {me}"))),
+            json!({ "error": no_pm })
+        );
+        assert_eq!(
+            rig.ask(&runner, "pm", Some(&format!("detach {me}"))),
+            json!({ "error": no_pm })
+        );
+        assert_eq!(
+            rig.ask(&runner, "pm", Some("attach 0")),
+            json!({ "error": "`pm` takes `attach <pid>`, `attach <pid> <session pid>` or \
+                              `detach <pid>`, not \"attach 0\"" })
         );
         assert_eq!(
             rig.ask(&runner, "adopt", Some("71")),

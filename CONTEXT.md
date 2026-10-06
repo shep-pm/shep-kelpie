@@ -12,8 +12,9 @@ _Avoid_: harness (the working name before 2026-09-25), control room
 1. **Issue.** The maintainer and the issue writer turn a request into an
    issue with acceptance criteria, one pull request's worth, labelled with
    the agent that should build it.
-2. **Pick.** The board takes the next ready issue by priority, then age, and
-   opens a work item for it.
+2. **Pick.** The project manager's agent picks the next ready issue, or,
+   without one, the board takes it by priority, then age; either opens a
+   work item for it.
 3. **Build.** A worker implements it inline, opens a draft pull request and
    ends its turn.
 4. **Review.** Each reviewer in the project's list reads the pull request
@@ -33,9 +34,15 @@ _Avoid_: shift
 
 **Project manager (PM)**:
 The role that owns a project's merge queue, git state and gates. Kelpie's
-code does all of that. The PM's agent, woken only on events and briefed from
-the board, picks work, unsticks items and answers the maintainer; it never
-runs git or gh. Its shape waits on the experiments repo's series 7.
+code does all of that. The PM's agent, an agent file whose role is `pm`
+that a project names in `agents.pm`, picks work, holds it back, unsticks
+items and answers the maintainer. Code wakes it on a free slot with two or
+more ready issues, two open branches in conflict, a stuck work item, or a
+**tell** (`shep kelpie tell "<note>"`), and it reads only the board and its
+own notes, never running git or gh. Kelpie checks each answer against the
+board before acting on it. One session per project is resumed on each wake
+and compacted past 100k tokens of context. Without one, or while it is
+down, the board's rule picks and stuck items wait on their rulings.
 _Avoid_: lead, control room, control center
 
 **Worker**:
@@ -98,7 +105,8 @@ session it starts, worker or reviewer, is that sheep's **lamb**. Stopping
 the sheep stops every lamb (ADR 0005). Crew members are usually not
 processes at all; one started as its own process is a deeper lamb. The
 sessions the maintainer opens by hand, `--interactive`, `attach` and the
-PM's, run in the maintainer's terminal and are not lambs.
+PM's (`shep kelpie pm`), run in the maintainer's terminal and are not
+lambs. The PM's woken calls are lambs.
 
 ## What they handle
 
@@ -174,7 +182,9 @@ code summons, in the listed bot's round of a review pass.
 **Ruling**:
 A decision only the maintainer makes, one of five kinds: `merge`,
 `question`, `stuck` (with its reason), `agent-files` and `foreign-change`. A
-worker waiting on one is **parked**.
+worker waiting on one is **parked**. The one exception: the PM may retry a
+stuck item, which answers its `stuck` ruling for the maintainer, with a yes
+or, for CI still red, a note sending the worker back.
 
 **Merge authority**:
 A project's setting for who decides a merge. `ask` raises a ruling before

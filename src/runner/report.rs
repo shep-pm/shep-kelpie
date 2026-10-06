@@ -538,6 +538,40 @@ pub enum StepReport {
         /// The head it pushed; none when an older state file kept no head
         head: Option<String>,
     },
+    /// The project manager answered a wake, and kelpie acted on what the
+    /// board allowed
+    PmAnswered {
+        /// Its session
+        session: SessionId,
+        /// What woke it
+        woke_for: Vec<String>,
+        /// What kelpie did with its answer
+        acted: Vec<String>,
+        /// What kelpie dropped, each with why
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        dropped: Vec<String>,
+        /// Its message to the maintainer
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reply: Option<String>,
+        /// Why, in its words
+        #[serde(skip_serializing_if = "Option::is_none")]
+        why: Option<String>,
+        /// What its session has cost so far, in US dollars
+        session_cost_usd: Option<f64>,
+        /// The tokens its context held at the call's end
+        context: Option<u64>,
+    },
+    /// The project manager's call failed or its reply held no answer, so
+    /// the board rule picks and stuck items keep their rulings for now
+    PmFailed {
+        /// Why
+        reason: String,
+    },
+    /// The project manager's session was compacted, its context past the mark
+    PmCompacted {
+        /// Its session
+        session: SessionId,
+    },
 }
 
 impl StepReport {
