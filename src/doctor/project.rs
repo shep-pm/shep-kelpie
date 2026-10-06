@@ -1,5 +1,8 @@
 //! The checks that hold for one project, from its settings
 
+use std::collections::BTreeMap;
+use std::path::Path;
+
 use serde_json::{Map, Value};
 
 use super::{Here, Line, Probes, rulings};
@@ -7,8 +10,46 @@ use crate::agents::Agents;
 use crate::flock::add::LABELS;
 use crate::ports::{NewLabel, Visibility};
 use crate::runner::{ProjectName, ProjectPaths, SUMMON_LABEL, check_instructions, check_repo};
-use crate::settings::{Account, Limit, Settings};
+use crate::settings::{Account, Limit, Settings, SettingsError};
 use crate::webhook::KelpieSettings;
+
+/// A line for each project folder in kelpie's home whose old settings file
+/// is still there while its `[app.dogs.kelpie]` table is unset
+///
+/// Kelpie no longer reads the file, so the runner would stop on it.
+pub(super) fn old_files(
+    tables: &BTreeMap<String, Map<String, Value>>,
+    kelpie_home: &Path,
+    only: Option<&ProjectName>,
+) -> Vec<Line> {
+    let Ok(entries) = std::fs::read_dir(kelpie_home) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| !tables.contains_key(name))
+        .filter(|name| only.is_none_or(|n| n.as_str() == name))
+        .collect();
+    names.sort();
+    let mut lines = Vec::new();
+    for name in names {
+        let file = kelpie_home.join(&name).join("settings.toml");
+        if !file.is_file() {
+            continue;
+        }
+        let what = SettingsError::Unset {
+            table: format!("[app.dogs.kelpie] table on the {name} sheep"),
+            old_file: Some(file),
+        };
+        lines.push(Line::missing(
+            format!("{name}: settings"),
+            what.to_string(),
+            "move the file's keys into the runner's `[app.dogs.kelpie]` table, then delete the file",
+        ));
+    }
+    lines
+}
 
 /// Every check for the project on `sheep`, whose table is `table`
 ///
@@ -33,8 +74,7 @@ pub(super) fn checks(
         Ok(name) => ProjectPaths::under(here.kelpie_home, here.shep_home, &name),
         Err(e) => return wrong(e.to_string()),
     };
-    let folder = paths.settings.parent().unwrap_or(here.home);
-    let settings = match Settings::from_table(table, sheep, here.home, folder) {
+    let settings = match Settings::from_table(table, sheep, here.home, &paths.folder) {
         Ok(settings) => settings,
         Err(e) => return wrong(e.to_string()),
     };

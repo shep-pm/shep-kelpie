@@ -37,9 +37,6 @@
 //! the commands it lists. With `--record` too it is the PostToolUse hook
 //! that records what the session filed and read in that ledger.
 //!
-//! `shep kelpie settings move <project> [<sheep>]`: moves a project's settings
-//! file, and kelpie's own, into their tables on kelpie's shepherd.
-//!
 //! `shep kelpie tools install`: installs the sandbox runtime every agent runs
 //! in, under kelpie's home.
 //!
@@ -57,11 +54,7 @@ use std::process::ExitCode;
 
 use shep_kelpie::confine::{APPEND, Verdict, judge, judge_append};
 use shep_kelpie::guard::{self, Checkout};
-use shep_kelpie::runner::{ProjectName, ProjectPaths};
-use shep_kelpie::settings::moving;
-use shep_kelpie::settings::source::Files;
 use shep_kelpie::tools::Tools;
-use shep_kelpie::{shep_home, shepherd};
 
 /// A PreToolUse hook's exit code that refuses the tool call
 const REFUSE: u8 = 2;
@@ -157,11 +150,6 @@ fn main() -> ExitCode {
         [command] if command == "totp" => totp(false),
         [command, flag] if command == "totp" && flag == "--rotate" => totp(true),
         [command, flag] if command == "totp" && flag == "--unlock" => unlock(),
-        [command, sub, project, sheep @ ..]
-            if command == "settings" && sub == "move" && sheep.len() < 2 =>
-        {
-            move_settings(project, sheep.first().unwrap_or(project))
-        }
         // `shep kelpie` with no verb also sets SHEP_DOG_NAME; only the
         // shepherd's own start sets SHEP_NAME.
         [] if ["SHEP_DOG_NAME", "SHEP_NAME"]
@@ -171,8 +159,12 @@ fn main() -> ExitCode {
             shep_kelpie::dog::run()
         }
         _ => {
+            if let Some(gone) = shep_kelpie::settings::removed_command(&args) {
+                eprintln!("{gone}");
+                return ExitCode::from(2);
+            }
             eprintln!(
-                "usage: shep-kelpie add [<project>] | add <issue>\n       shep-kelpie start | pause | status\n       shep-kelpie rule [<id> <answer>]\n       shep-kelpie rework <pr> | adopt <pr>\n       shep-kelpie gate [<issue>] | drop [<issue>]\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie upgrade [--now] --ref <git ref> | --release <version> | --binary <path> | --rollback\n       shep-kelpie version [--json]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.\n\n{}\n\n{}",
+                "usage: shep-kelpie add [<project>] | add <issue>\n       shep-kelpie start | pause | status\n       shep-kelpie rule [<id> <answer>]\n       shep-kelpie rework <pr> | adopt <pr>\n       shep-kelpie gate [<issue>] | drop [<issue>]\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie upgrade [--now] --ref <git ref> | --release <version> | --binary <path> | --rollback\n       shep-kelpie version [--json]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.\n\n{}\n\n{}",
                 shep_kelpie::lease::cli::USAGE,
                 shep_kelpie::flock::USAGE,
                 shep_kelpie::flock::rule::HELP
@@ -232,43 +224,6 @@ fn unlock() -> ExitCode {
     }
 }
 
-fn move_settings(project: &str, sheep: &str) -> ExitCode {
-    let Some(home) = std::env::var_os("HOME") else {
-        eprintln!("HOME is not set");
-        return ExitCode::FAILURE;
-    };
-    let project = match ProjectName::try_from(project) {
-        Ok(project) => project,
-        Err(e) => {
-            eprintln!("shep kelpie settings move: {e}");
-            return ExitCode::from(2);
-        }
-    };
-    with_shep_home("settings move", shep_home::MOVE_FIX, |shep_home| {
-        let kelpie_home = shep_kelpie::home::kelpie_home_of(shep_home);
-        let paths = ProjectPaths::under(&kelpie_home, shep_home, &project);
-        let files = Files {
-            project: project.as_str(),
-            sheep,
-            settings: &paths.settings,
-            kelpie_settings: &paths.kelpie_settings,
-        };
-        let moved = shepherd::block_on(moving::move_files(shep_home, files, Path::new(&home)));
-        match moved {
-            Ok(lines) => {
-                for line in lines {
-                    println!("{line}");
-                }
-                ExitCode::SUCCESS
-            }
-            Err(message) => {
-                eprintln!("shep kelpie settings move: {message}");
-                ExitCode::FAILURE
-            }
-        }
-    })
-}
-
 fn install_tools() -> ExitCode {
     let Some(home) = kelpie_home() else {
         return ExitCode::FAILURE;
@@ -293,18 +248,6 @@ fn hook(verdict: Verdict) -> ExitCode {
         Verdict::Refuse(why) => {
             eprintln!("{why}");
             ExitCode::from(REFUSE)
-        }
-    }
-}
-
-// A command with no `SHEP_HOME` would reach the default shepherd, where no
-// runner is, so it refuses instead.
-fn with_shep_home(role: &str, fix: &str, run: impl FnOnce(&Path) -> ExitCode) -> ExitCode {
-    match shep_home::required(fix) {
-        Ok(home) => run(&home),
-        Err(message) => {
-            eprintln!("kelpie {role}: {message}");
-            ExitCode::FAILURE
         }
     }
 }

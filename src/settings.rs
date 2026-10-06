@@ -1,7 +1,6 @@
 //! A project's settings
 //!
-//! Its runner sheep's `[app.dogs.kelpie]` table, or the settings file a
-//! project had before one. Unknown keys are refused, so a misspelt or
+//! Its runner sheep's `[app.dogs.kelpie]` table. Unknown keys are refused, so a misspelt or
 //! malformed setting stops the runner with a message naming it. Every
 //! setting is required except the ones added after the first build
 //! (`max_items`, `pacing.enabled`, `worker.allowed_domains`,
@@ -11,7 +10,6 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::io;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
@@ -19,7 +17,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use shep_client::dogs::dog_config;
 
-pub mod moving;
 pub mod source;
 mod table;
 
@@ -78,6 +75,7 @@ pub struct Settings {
     pub skills: StepSkills,
 }
 
+pub use removed::removed_command;
 pub(crate) use removed::{DELETE, Removed, refuse as refuse_removed};
 
 const RELAY: &str = "the relay is gone";
@@ -122,6 +120,13 @@ const REMOVED: &[Removed] = &[
         key: "skills.planning",
         because: PLANNING,
         fix: DELETE,
+    },
+    Removed {
+        key: "skills.review",
+        because: "no step drives `code-review` now: a reviewer's prompt is the body of its \
+                  agent file",
+        fix: "write the prompt as the body of a reviewer's agent file, listed in \
+              `agents.reviewers`, and delete the key",
     },
     Removed {
         key: "models.auditor",
@@ -543,26 +548,12 @@ impl TryFrom<i64> for KickoffHours {
 /// Why a project's settings cannot be used
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettingsError {
-    /// The settings file could not be read
-    Read {
-        /// The file
-        path: PathBuf,
-        /// What reading it failed with
-        kind: io::ErrorKind,
-    },
-    /// The file is not valid TOML, or a setting is missing, unknown or malformed
-    Parse {
-        /// The file
-        path: PathBuf,
-        /// The parser's message, which names the setting and its line
-        message: String,
-    },
-    /// Neither the table nor the file it stands in for is there
+    /// The table is not there
     Unset {
         /// The table, as `[app.dogs.kelpie] table on the <sheep> sheep`
         table: String,
-        /// The file
-        path: PathBuf,
+        /// The settings file an older kelpie read in its place, where one is still there
+        old_file: Option<PathBuf>,
     },
     /// A sheep's table has a setting missing, unknown or malformed
     Table {
@@ -588,15 +579,18 @@ pub enum SettingsError {
 impl fmt::Display for SettingsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Read { path, kind } => {
-                write!(f, "cannot read settings file {}: {kind}", path.display())
-            }
-            Self::Parse { path, message } => {
-                write!(f, "settings file {}: {message}", path.display())
-            }
-            Self::Unset { table, path } => {
-                write!(f, "there is no {table}, and no {}", path.display())
-            }
+            Self::Unset {
+                table,
+                old_file: None,
+            } => write!(f, "there is no {table}"),
+            Self::Unset {
+                table,
+                old_file: Some(file),
+            } => write!(
+                f,
+                "there is no {table}, and kelpie no longer reads {}: move its keys into the table",
+                file.display()
+            ),
             Self::Table { sheep, message } => {
                 write!(f, "the [app.dogs.kelpie] table on {sheep}: {message}")
             }
@@ -611,34 +605,6 @@ impl fmt::Display for SettingsError {
 impl core::error::Error for SettingsError {}
 
 impl Settings {
-    /// Reads and checks a settings file, expanding `~/` in `repo` against `home`
-    ///
-    /// # Errors
-    ///
-    /// - [`SettingsError::Read`] when the file cannot be read.
-    /// - [`SettingsError::Parse`] when a setting is missing, unknown or malformed.
-    pub fn load(path: &Path, home: &Path) -> Result<Self, SettingsError> {
-        let text = std::fs::read_to_string(path).map_err(|e| SettingsError::Read {
-            path: path.to_owned(),
-            kind: e.kind(),
-        })?;
-        let mut settings = Self::parse(&text, home).map_err(|message| SettingsError::Parse {
-            path: path.to_owned(),
-            message,
-        })?;
-        if let Some(folder) = path.parent() {
-            settings.relative_to(folder);
-        }
-        Ok(settings)
-    }
-
-    pub(crate) fn parse(text: &str, home: &Path) -> Result<Self, String> {
-        refuse_removed_settings(text, home)?;
-        let mut settings: Self = toml::from_str(text).map_err(|e| e.to_string())?;
-        settings.expand(home);
-        Ok(settings)
-    }
-
     // `~/` in a path setting is the home folder.
     fn expand(&mut self, home: &Path) {
         if let Ok(rest) = self.repo.strip_prefix("~") {

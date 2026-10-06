@@ -71,14 +71,13 @@ impl core::error::Error for ProjectNameError {}
 /// Where a project's files live under kelpie's home
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectPaths {
-    /// Kelpie's own settings file, which every project shares
-    pub kelpie_settings: PathBuf,
     /// The authenticator secret and the codes used, which every project shares
     pub totp: PathBuf,
     /// The agent files, which every project shares
     pub agents: PathBuf,
-    /// The settings file
-    pub settings: PathBuf,
+    /// The project's own folder, which a relative path in its settings is
+    /// taken from
+    pub folder: PathBuf,
     /// The state file
     pub state: PathBuf,
     /// The board briefing, `board.md`, which the project manager's agent reads
@@ -105,16 +104,15 @@ pub struct ProjectPaths {
 }
 
 impl ProjectPaths {
-    /// `<kelpie home>/<project>/`, holding the project's state, settings and
-    /// worker files, and its `worktrees`, `builds` and `issues` folders, beside
-    /// kelpie's own `settings.toml`, `totp`, `agents` and `tools`
+    /// `<kelpie home>/<project>/`, holding the project's state and worker
+    /// files, and its `worktrees`, `builds` and `issues` folders, beside
+    /// kelpie's own `totp`, `agents` and `tools`
     pub fn under(kelpie_home: &Path, shep_home: &Path, project: &ProjectName) -> Self {
         let folder = kelpie_home.join(project.as_str());
         Self {
-            kelpie_settings: kelpie_home.join("settings.toml"),
             totp: kelpie_home.join("totp"),
             agents: kelpie_home.join(crate::agents::FOLDER),
-            settings: folder.join("settings.toml"),
+            folder: folder.clone(),
             state: folder.join("state.json"),
             board: folder.join("board.md"),
             pm: folder.join("pm"),

@@ -303,6 +303,6 @@ mod tests {
             .to_string();
         assert!(err.contains("worker.instructions_file"), "{err}");
         assert_eq!(runner.settings().worker.instructions_file, None);
-        assert!(Path::new(&rig.paths().settings).exists());
+        assert!(Path::new(&rig.settings_file()).exists());
     }
 }

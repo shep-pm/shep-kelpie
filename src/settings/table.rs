@@ -1,9 +1,8 @@
 //! A project's settings as its runner sheep's `[app.dogs.kelpie]` table
 //!
 //! shep stores the table without reading it, and hands it over as JSON.
-//! Kelpie writes it back out as TOML and reads that with the settings
-//! file's own parser, so a table and a file take the same keys, defaults
-//! and checks. A refusal names the setting as a dotted key.
+//! Kelpie writes it back out as TOML and reads that with the settings'
+//! own parser. A refusal names the setting as a dotted key.
 
 use std::path::Path;
 
@@ -14,7 +13,7 @@ use super::{Settings, SettingsError};
 impl Settings {
     /// Reads and checks `sheep`'s `[app.dogs.kelpie]` table
     ///
-    /// `~/` expands against `home`, and a relative `worker.instructions_file`
+    /// `~/` expands against `home`, and a relative path in the settings
     /// is taken from `folder`, the project's own folder under kelpie's home.
     ///
     /// # Errors
@@ -40,7 +39,7 @@ impl Settings {
     }
 }
 
-/// A settings file's text as the table `shep kelpie settings move` writes
+/// A settings text as a table, the shape a sheep's `[app.dogs.kelpie]` table is stored in
 ///
 /// # Errors
 ///

@@ -11,7 +11,7 @@ use crate::agents::Agents;
 use crate::issues::{self, Mode, Project, Writer};
 use crate::ports::SandboxError;
 use crate::runner::{ProjectName, ProjectPaths};
-use crate::settings::source::{self, Files};
+use crate::settings::source;
 use crate::shepherd;
 use crate::state::ids::RulingIds;
 use crate::tools::Tools;
@@ -114,12 +114,12 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
                 shep_home: shep_home.to_owned(),
                 kelpie_home: kelpie_home_set,
             };
-            let old = ProjectPaths::under(&kelpie_home, shep_home, &name).settings;
+            let folder = kelpie_home.join(name.as_str());
             let agents = kelpie_home.join(crate::agents::FOLDER);
             let place = add::Place {
                 checkout: &checkout,
                 home: &home,
-                old_settings: &old,
+                folder: &folder,
                 agents: &agents,
             };
             add::add(&client, &Gh, &launch, &name, place).await
@@ -190,13 +190,8 @@ async fn issue(here: Here<'_>, name: &ProjectName, args: &[&str]) -> Result<Vec<
     }
     let tables = shepherd::read_tables_with(here.client, name.as_str()).await?;
     let paths = ProjectPaths::under(here.kelpie_home, here.shep_home, name);
-    let files = Files {
-        project: name.as_str(),
-        sheep: name.as_str(),
-        settings: &paths.settings,
-        kelpie_settings: &paths.kelpie_settings,
-    };
-    let loaded = source::load(&tables, files, here.home).map_err(|e| e.to_string())?;
+    let loaded = source::load(&tables, name.as_str(), here.home, &paths.folder)
+        .map_err(|e| e.to_string())?;
     let agents = Agents::load(&paths.agents).map_err(|e| e.to_string())?;
     let listed = (loaded.settings.role_agents(&agents)).map_err(|e| e.to_string())?;
     let writer = Writer::of(&agents)?;

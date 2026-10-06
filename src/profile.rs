@@ -52,9 +52,10 @@ pub(crate) const CREDENTIALS: [&str; 12] = [
     "~/.npmrc",
     "~/.cargo/credentials",
     "~/.cargo/credentials.toml",
-    // Kelpie's old home, should a migration leave a project's state, the
-    // webhook URL's old file or the authenticator secret behind. Kelpie's
-    // home and the shepherd's are the profile's own.
+    // Kelpie's old home. The maintainer's disk still holds a project's state
+    // and settings file, the webhook URL's old file and the authenticator
+    // secret there, so these rules still protect real files. Kelpie's home
+    // and the shepherd's are the profile's own.
     "~/.kelpie/projects/**",
     "~/.kelpie/settings.toml",
     "~/.kelpie/totp/**",

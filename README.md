@@ -277,7 +277,7 @@ On an ntfy webhook, a ruling can be answered from the topic: run `shep kelpie to
 
 shep-kelpie keeps everything under `$SHEP_HOME/kelpie`, or the folder `KELPIE_HOME` names:
 
-- `settings.toml`, `totp`, `tools` and `rulings`, shared by every project
+- `totp`, `tools` and `rulings`, shared by every project
 - `dog`, with the dog's book and its door, `lease.sock`. The adopted dog gets `SHEP_HOME` and no `KELPIE_HOME` from shep, so it is always under `$SHEP_HOME/kelpie`, even with `KELPIE_HOME` set for your own commands
 - `<project>`, with the project's `state.json`, `board.md`, worker files, `worktrees` and `builds`, and `pm`, the project manager's folder
 
@@ -315,7 +315,6 @@ Every step shep-kelpie drives an agent through runs a skill, by default from [ma
 | `spec` | `to-spec` | not driven yet |
 | `implement` | `implement` | the worker's first turn on an issue |
 | `tests` | `tdd` | named in the worker's instructions |
-| `review` | `code-review` | not driven: a reviewer's prompt is its agent file's body |
 | `ci` | `diagnosing-bugs` | the worker's turn on a red CI run |
 | `pr` | `pr` | named in the worker's instructions, unless the repo has a pull request template |
 | `reset` | `handoff` | not driven yet |

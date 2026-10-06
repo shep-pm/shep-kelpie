@@ -174,8 +174,6 @@ pub struct Here<'a> {
     pub kelpie_home: &'a Path,
     /// The shepherd's home kelpie's runners work theirs out from
     pub shep_home: &'a Path,
-    /// Kelpie's own settings file from before the `[kelpie]` section
-    pub kelpie_settings: &'a Path,
 }
 
 /// What doctor was asked
@@ -226,13 +224,14 @@ async fn projects(client: &Client, probes: Probes<'_>, here: Here<'_>, ask: Ask<
         Err(e) => return vec![Line::missing("projects", e, "put the shepherd right")],
     };
     let mut lines = Vec::new();
-    let kelpie = match rulings::kelpie_settings(&section, here.kelpie_settings) {
+    let kelpie = match rulings::kelpie_settings(&section) {
         Ok(kelpie) => Some(kelpie),
         Err(line) => {
             lines.push(line);
             None
         }
     };
+    lines.extend(rulings::old_file(&section, here.kelpie_home));
     if ask.test_alert {
         lines.push(rulings::test_alert(kelpie.as_ref(), probes.alerts));
     }
@@ -243,6 +242,7 @@ async fn projects(client: &Client, probes: Probes<'_>, here: Here<'_>, ask: Ask<
             "`shep kelpie add` in its checkout sets one up",
         ));
     }
+    lines.extend(project::old_files(&tables, here.kelpie_home, ask.project));
     for (sheep, table) in &tables {
         if ask.project.is_none_or(|n| n.as_str() == sheep) {
             lines.extend(project::checks(sheep, table, probes, here, kelpie.as_ref()));
@@ -270,7 +270,6 @@ pub fn main(args: &[String]) -> ExitCode {
             home: &home,
             kelpie_home: &kelpie_home,
             shep_home: &shep_home,
-            kelpie_settings: &kelpie_home.join("settings.toml"),
         };
         let ask = Ask {
             project: project.as_ref(),

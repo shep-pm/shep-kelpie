@@ -12,7 +12,6 @@ use crate::test::{FakeForge, FakeShepherd};
 
 // Bounds every call against a fake shepherd, so a hang fails by name.
 const PATIENCE: Duration = Duration::from_secs(10);
-const EXAMPLE: &str = include_str!("../../../settings.example.toml");
 
 /// A scratch checkout of a private repo with CI, a home with no qwen
 /// script, a forge with one label of its own, and a flock holding only the
@@ -57,20 +56,17 @@ impl Scene {
         self.home.join(".shep/kelpie/agents")
     }
 
-    fn old_settings(&self) -> PathBuf {
-        self.home
-            .join(".kelpie/projects")
-            .join(self.name.as_str())
-            .join("settings.toml")
+    fn folder(&self) -> PathBuf {
+        self.home.join(".shep/kelpie").join(self.name.as_str())
     }
 
     async fn add(&self) -> Result<Vec<String>, String> {
         let client = shepherd::connect(self.shepherd.home()).await.unwrap();
-        let (old, agents) = (self.old_settings(), self.agents());
+        let (folder, agents) = (self.folder(), self.agents());
         let place = Place {
             checkout: &self.checkout,
             home: &self.home,
-            old_settings: &old,
+            folder: &folder,
             agents: &agents,
         };
         let added = add(&client, &self.forge, &self.launch, &self.name, place);
@@ -257,22 +253,7 @@ async fn an_enabled_dog_that_holds_the_project_s_name_is_not_kelpie_s() {
 }
 
 #[tokio::test]
-async fn a_flockfile_runner_or_a_broken_table_for_this_checkout_is_refused() {
-    let mut scene = Scene::new().await;
-    let root = scene.checkout.root.display().to_string();
-    // A Flockfile runner with no table, whose old file names this checkout.
-    let mut flockfile = scene
-        .launch
-        .runner(&ProjectName::try_from("old").unwrap(), Map::new());
-    flockfile.dogs.clear();
-    scene.shepherd.holds(flockfile, true);
-    let file = scene.home.join(".kelpie/projects/old/settings.toml");
-    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-    std::fs::write(&file, format!("repo = {root:?}\n")).unwrap();
-    let err = scene.add().await.unwrap_err();
-    assert!(err.starts_with("project `old` already runs"), "{err}");
-    assert_eq!(scene.shepherd.writes(), []);
-
+async fn a_broken_table_for_this_checkout_is_refused() {
     // A table that no longer parses still names its checkout.
     let mut scene = Scene::new().await;
     let mut broken = Map::new();
@@ -299,41 +280,6 @@ async fn a_checkout_or_repo_another_project_runs_is_refused() {
     scene.name = ProjectName::try_from("koji-again").unwrap();
     let err = scene.add().await.unwrap_err();
     assert!(err.starts_with("project `koji` already runs"), "{err}");
-    assert_eq!(scene.shepherd.writes(), []);
-}
-
-#[tokio::test]
-async fn a_project_s_file_from_before_the_tables_becomes_its_table() {
-    let scene = Scene::new().await;
-    let mut table = crate::test::project_table(EXAMPLE);
-    let root = scene.checkout.root.display().to_string();
-    table.insert("repo".into(), Value::String(root));
-    table.insert(
-        "forge".into(),
-        Value::String(scene.checkout.forge.as_str().into()),
-    );
-    table.insert("merge_authority".into(), Value::String("auto".into()));
-    let file = scene.old_settings();
-    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-    std::fs::write(&file, toml::to_string(&table).unwrap()).unwrap();
-
-    scene.add().await.unwrap();
-    let (runner, _) = scene.shepherd.sheep("koji").unwrap();
-    assert_eq!(runner.dogs.get(DOG).unwrap().as_map(), &table);
-}
-
-#[tokio::test]
-async fn a_file_for_another_checkout_is_refused() {
-    let mut scene = Scene::new().await;
-    let file = scene.old_settings();
-    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-    std::fs::write(
-        &file,
-        toml::to_string(&crate::test::project_table(EXAMPLE)).unwrap(),
-    )
-    .unwrap();
-    let err = scene.add().await.unwrap_err();
-    assert!(err.contains("not this checkout"), "{err}");
     assert_eq!(scene.shepherd.writes(), []);
 }
 
