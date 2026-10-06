@@ -5,8 +5,8 @@
 //! `shep kelpie lease ...`: the maintainer's lease commands
 //!
 //! `shep kelpie add`, `start`, `pause`, `status`, `rule`, `rework`, `adopt`,
-//! `gate` and `drop`: a project in the maintainer's own flock, the one
-//! `-p` names or whose repo holds the folder it runs in.
+//! `gate`, `drop`, `timings` and `issue`: a project in the maintainer's own
+//! flock, the one `-p` names or whose repo holds the folder it runs in.
 //!
 //! `shep kelpie doctor [<project>] [--test-alert]`: checks what the projects need
 //! on this machine, and changes nothing. Run as `shep kelpie doctor`.
@@ -27,6 +27,10 @@
 //! titles out of what it publishes. Claude Code runs it, like `confine`.
 //! On Codex it takes `--pin-folder`, and the command it answers with runs
 //! it again with `--judge-here` when Codex runs the command in another folder.
+//! With `--issues=<label>`, an `--agent=<name>` per implementer and
+//! `--ledger=<file>` it is the issue writer's hook instead, which runs only
+//! the commands it lists. With `--record` too it is the PostToolUse hook
+//! that records what the session filed and read in that ledger.
 //!
 //! `shep kelpie settings move <project> [<sheep>]`: moves a project's settings
 //! file, and kelpie's own, into their tables on kelpie's shepherd.
@@ -69,7 +73,9 @@ fn main() -> ExitCode {
                 git_common_dir: Path::new(git_common_dir),
                 worktree: Path::new(worktree),
             };
-            let (pin, local) = guard::pin_flag(local);
+            let (issues, local) = guard::issue_rules(local);
+            let (record, local) = guard::record_flag(&local);
+            let (pin, local) = guard::pin_flag(&local);
             let (here, local) = guard::here_flag(&local);
             let paths = match guard::local_paths(home.as_deref(), &local) {
                 Ok(paths) => paths,
@@ -80,6 +86,18 @@ fn main() -> ExitCode {
                 return hook(Verdict::Refuse(format!(
                     "kelpie cannot read this tool call: {e}"
                 )));
+            }
+            if let Some(rules) = issues.as_ref().filter(|_| record) {
+                guard::record_issues(&input[..], rules);
+                return ExitCode::SUCCESS;
+            }
+            if let Some(rules) = issues {
+                return hook(guard::judge_issues(
+                    &input[..],
+                    home.as_deref(),
+                    paths,
+                    &rules,
+                ));
             }
             if here {
                 let folder = std::env::current_dir()

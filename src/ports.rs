@@ -384,13 +384,13 @@ pub enum Checks {
 
 /// A label kelpie makes on a project's repo
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NewLabel {
+pub struct NewLabel<'a> {
     /// Its name
-    pub name: &'static str,
+    pub name: &'a str,
     /// Its colour, as six lowercase hex digits with no `#`, as GitHub takes it
-    pub color: &'static str,
+    pub color: &'a str,
     /// What it means, shown beside it on the forge
-    pub description: &'static str,
+    pub description: &'a str,
 }
 
 /// An issue as the forge holds it

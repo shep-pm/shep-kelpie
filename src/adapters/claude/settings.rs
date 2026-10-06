@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::guard::{FOLDER_FLAG, NAME_FLAG};
+use crate::guard::{FOLDER_FLAG, NAME_FLAG, RECORD_FLAG};
 use crate::ports::{Fence, Reach, Tools};
 use crate::settings::HookEvent;
 use crate::trim::trimmed;
@@ -31,6 +31,35 @@ const WORK_DENY: [&str; 5] = [
 
 /// The tools a review round never uses: sub-agents, under either name, and commands
 const REVIEW_DENY: [&str; 3] = ["Agent", "Task", "Bash"];
+
+/// What the issue writer's file tools never read, named outright: gh's
+/// token, Claude Code's own files and the shell's history
+const ISSUES_NO_READ: [&str; 6] = [
+    "~/.config/gh/**",
+    "~/.claude.json",
+    "~/.claude/**",
+    "~/.zsh_history",
+    "~/.bash_history",
+    "~/.zsh_sessions/**",
+];
+
+/// The tools the issue writer never uses: sub-agents, the file writers, the
+/// web, and the rest a worker is denied. Its commands are its guard's.
+const ISSUES_DENY: [&str; 13] = [
+    "Agent",
+    "Task",
+    "Edit",
+    "Write",
+    "MultiEdit",
+    "NotebookEdit",
+    "WebFetch",
+    "WebSearch",
+    "Monitor",
+    "RemoteTrigger",
+    "Workflow",
+    "EnterWorktree",
+    "ExitWorktree",
+];
 
 /// Every tool name a Claude Code call can reach, denied outright to an answer
 pub(crate) const NO_TOOLS: [&str; 12] = [
@@ -63,6 +92,9 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
         deny.extend(fence.no_commands.iter().map(|c| format!("Bash({c})")));
     }
     deny.extend(tool_denies(tools, reach).map(str::to_owned));
+    if let (Tools::Issues, Some(fence)) = (tools, &reach.fence) {
+        deny.extend(issue_writer_reads(&fence.guard.worktree, &reach.read));
+    }
     let Some(fence) = &reach.fence else {
         let mut permissions = json!({ "deny": deny });
         if !reach.read.is_empty() {
@@ -74,6 +106,10 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
     let mut permissions = json!({ "deny": deny });
     if !reach.read.is_empty() {
         permissions["additionalDirectories"] = json!(reach.read);
+    }
+    // Its session asks no one, so a command its guard allows must not wait on a prompt.
+    if tools == Tools::Issues {
+        permissions["allow"] = json!(["Bash"]);
     }
     trimmed(json!({
         // Kelpie's sandbox holds the whole process, and on macOS Claude Code's
@@ -88,11 +124,30 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
     }))
 }
 
+// The issue writer's file tools read its checkout, and `also`, and nothing
+// else: every other entry from `/` down is denied, and the secrets named
+// outright, whichever folder its checkout is in. Its commands read no file.
+fn issue_writer_reads(checkout: &Path, also: &[PathBuf]) -> Vec<String> {
+    // Each as given and with its links resolved, since `around` walks a link
+    // such as macOS's `/var` as a folder of its own.
+    let mut allowed: Vec<PathBuf> = Vec::new();
+    for path in std::iter::once(checkout).chain(also.iter().map(PathBuf::as_path)) {
+        allowed.push(path.to_owned());
+        allowed.extend(path.canonicalize().ok().filter(|c| c != path));
+    }
+    let outside = around(Path::new("/"), &allowed);
+    (ISSUES_NO_READ.iter().map(|p| (*p).to_owned()))
+        .chain(outside)
+        .map(|p| read_rule(&p))
+        .collect()
+}
+
 fn tool_denies(tools: Tools, reach: &Reach) -> impl Iterator<Item = &'static str> {
     let denied: &'static [&'static str] = match tools {
         Tools::Work => &WORK_DENY,
         Tools::Review => &REVIEW_DENY,
         Tools::Answer => &NO_TOOLS,
+        Tools::Issues => &ISSUES_DENY,
     };
     // An answer that may read a folder keeps Read and nothing else.
     let reads = tools == Tools::Answer && !reach.read.is_empty();
@@ -180,9 +235,21 @@ fn hooks(fence: &Fence) -> Value {
         .private_names
         .iter()
         .map(|n| shell_quote(&format!("{NAME_FLAG}{n}")));
-    let commands: Vec<String> = commands.into_iter().chain(folders).chain(names).collect();
+    let issues = (guard.issues.iter())
+        .flat_map(|rules| rules.flags())
+        .map(|flag| shell_quote(&flag));
+    let commands: Vec<String> = (commands.into_iter())
+        .chain(folders)
+        .chain(names)
+        .chain(issues)
+        .collect();
     pre.push(entry(Some(GUARDED_TOOLS), &commands.join(" ")));
     let mut post = Vec::new();
+    // The issue writer's ledger of what it filed and read, kept after each command.
+    if guard.issues.is_some() {
+        let record = format!("{} {RECORD_FLAG}", commands.join(" "));
+        post.push(entry(Some("Bash"), &record));
+    }
     for hook in &fence.hooks {
         let e = entry(
             hook.matcher.as_ref().map(|m| m.as_str()),
@@ -275,7 +342,7 @@ mod tests {
     #[test]
     fn every_role_drops_the_features_it_never_uses() {
         // A worker's fenced settings are pinned in `profile`'s tests.
-        for tools in [Tools::Work, Tools::Review, Tools::Answer] {
+        for tools in [Tools::Work, Tools::Review, Tools::Answer, Tools::Issues] {
             let s = settings(tools, &Reach::default());
             for key in [
                 "disableBundledSkills",
@@ -291,6 +358,7 @@ mod tests {
                 Tools::Work => &WORK_DENY,
                 Tools::Review => &REVIEW_DENY,
                 Tools::Answer => &NO_TOOLS,
+                Tools::Issues => &ISSUES_DENY,
             };
             assert_eq!(s["permissions"]["deny"], deny_with_trim(own), "{tools:?}");
             // What kelpie's own calls use stays, unless the role denies it itself.

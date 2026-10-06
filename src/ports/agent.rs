@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Serialize};
 
 use super::Timestamp;
+use crate::guard::IssueRules;
 use crate::settings::{AgentHarness, Effort, GuardHook, Harness, LeaseName};
 
 /// Which role an agent call is made for
@@ -24,6 +25,9 @@ pub enum Role {
     Worker,
     /// A reviewer's session, always a fresh one
     Reviewer,
+    /// The issue writer's one-shot session, which no work item records
+    #[serde(rename = "issue-writer")]
+    IssueWriter,
 }
 
 #[cfg(test)]
@@ -37,6 +41,8 @@ mod role_tests {
         let name = |role| serde_json::to_value(role).unwrap();
         assert_eq!(name(Role::Reviewer), "reviewer");
         assert_eq!(Role::Reviewer.as_str(), "reviewer");
+        assert_eq!(name(Role::IssueWriter), "issue-writer");
+        assert_eq!(Role::IssueWriter.as_str(), "issue-writer");
     }
 }
 
@@ -46,6 +52,7 @@ impl Role {
         match self {
             Self::Worker => "worker",
             Self::Reviewer => "reviewer",
+            Self::IssueWriter => "issue-writer",
         }
     }
 }
@@ -83,6 +90,9 @@ pub enum Tools {
     Review,
     /// None, beyond reading the folders its sandbox lists
     Answer,
+    /// Reading and searching files, and the commands the issue writer's
+    /// guard allows, with no crew and no file written
+    Issues,
 }
 
 /// What a session may reach, named for no harness
@@ -140,6 +150,9 @@ pub struct Guard {
     pub folders: Vec<PathBuf>,
     /// Words that stay off the forge
     pub private_names: Vec<String>,
+    /// For the issue writer, what it may file. The guard then runs only the
+    /// commands that file, label and link issues, and git's read-only ones.
+    pub issues: Option<IssueRules>,
 }
 
 /// One session call to an agent

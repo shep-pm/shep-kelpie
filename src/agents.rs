@@ -3,7 +3,8 @@
 //! Each agent is `<name>.md` in the `agents` folder of kelpie's home: YAML
 //! frontmatter naming what it is for and what runs it, then a Markdown body.
 //! An implementer's body is added to kelpie's own instructions, and a
-//! reviewer's is its prompt. Kelpie embeds its defaults, which a file of the
+//! reviewer's or the issue writer's is its prompt. Kelpie embeds its
+//! defaults, which a file of the
 //! same name replaces, and `shep kelpie add` writes out any that are
 //! missing. A file that cannot be read or used stops the runner, naming the
 //! file and what is wrong with it. A `.md` file whose name is no agent's,
@@ -37,6 +38,9 @@ pub const DEFECT_HUNTER: &str = "defect-hunter";
 /// The reviewer that runs the maintainer's qwen-review script
 pub const QWEN: &str = "qwen";
 
+/// The agent `shep kelpie issue` runs
+pub const ISSUE_WRITER: &str = "issue-writer";
+
 /// The maintainer's qwen-review script, which the `qwen` reviewer runs
 pub const QWEN_REVIEW: &str = "~/.claude/scripts/qwen-review.sh";
 
@@ -50,7 +54,7 @@ enum Written {
 
 // Kelpie's own agents, by name: what `add` writes out, and what a missing
 // file falls back to. A project lists none of the review bots unless told to.
-const DEFAULTS: [(&str, &str, Written); 7] = [
+const DEFAULTS: [(&str, &str, Written); 8] = [
     (
         DEFAULT_IMPLEMENTER,
         include_str!("../agents/sonnet-high.md"),
@@ -78,17 +82,24 @@ const DEFAULTS: [(&str, &str, Written); 7] = [
     ),
     ("cubic", include_str!("../agents/cubic.md"), Written::Always),
     ("codex", include_str!("../agents/codex.md"), Written::Always),
+    (
+        ISSUE_WRITER,
+        include_str!("../agents/issue-writer.md"),
+        Written::Always,
+    ),
 ];
 
 /// What an agent is for
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum Role {
     /// It builds a work item, once a project lists it in `agents.implementers`
     Implementer,
     /// It reads a pull request once a pass, once a project lists it in
     /// `agents.reviewers`
     Reviewer,
+    /// It turns a request into issues, as `shep kelpie issue` runs it
+    IssueWriter,
 }
 
 impl Role {
@@ -97,6 +108,7 @@ impl Role {
         match self {
             Self::Implementer => "implementer",
             Self::Reviewer => "reviewer",
+            Self::IssueWriter => "issue-writer",
         }
     }
 }
@@ -154,13 +166,14 @@ pub struct Agent {
     /// What runs its calls
     pub runs: Runs,
     /// Its file's body: an implementer's addition to kelpie's own
-    /// instructions, or a reviewer's prompt. None when blank.
+    /// instructions, or a reviewer's or the issue writer's prompt. None
+    /// when blank.
     pub prompt: Option<String>,
     /// Globs of the files a pull request must change for this reviewer to
-    /// run. Every pull request when empty, and always empty for an implementer.
+    /// run. Every pull request when empty, and always empty for another role.
     pub paths: Vec<NonBlank>,
     /// Whether this reviewer reads twice, the second time shown what it found
-    /// the first and asked only for what it missed. Never for an implementer.
+    /// the first and asked only for what it missed. Never for another role.
     pub second_look: bool,
 }
 

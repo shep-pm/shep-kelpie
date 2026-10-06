@@ -1,19 +1,26 @@
 //! `shep kelpie <verb>`: the command line, read into a trigger for a project
 
+use std::ffi::OsStr;
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use super::{Checkout, Launch, add, control, rule};
-use crate::adapters::Gh;
+use crate::adapters::{ClaudeCli, Gh};
+use crate::agents::Agents;
+use crate::issues::{self, Mode, Project, Writer};
+use crate::ports::SandboxError;
 use crate::runner::{ProjectName, ProjectPaths};
+use crate::settings::source::{self, Files};
 use crate::shepherd;
 use crate::state::ids::RulingIds;
+use crate::tools::Tools;
 
-/// The verbs [`main`] runs: every trigger a runner takes, and `add` also
-/// registers a checkout
-pub const VERBS: [&str; 10] = [
+/// The verbs [`main`] runs: every trigger a runner takes, `add`, which also
+/// registers a checkout, and `issue`, which runs the issue writer itself
+pub const VERBS: [&str; 11] = [
     "add", "start", "pause", "status", "rule", "rework", "adopt", "gate", "drop", "timings",
+    "issue",
 ];
 
 /// What the verbs take, as their help says
@@ -26,6 +33,9 @@ usage: shep kelpie add [<project>]       registers this checkout as a project
        shep kelpie rework <pr> | adopt <pr>
        shep kelpie gate [<issue>] | drop [<issue>]
        shep kelpie timings [<n>]         where the last n finished items' time went
+       shep kelpie issue \"<request>\"     files issues for it, for you to read
+       shep kelpie issue --interactive \"<request>\"
+                                         plans them with you in claude
 
 `-p <project>` or `--project <project>` goes anywhere in the line, before a
 ruling's answer. Without it, the project is the one whose repo holds this
@@ -126,8 +136,78 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
         ("gate" | "drop", [issue]) => send(command, Some(issue)).await,
         ("timings", []) => send("timings", None).await,
         ("timings", [count]) => send("timings", Some(count)).await,
+        ("issue", [_, ..]) => {
+            let here = Here {
+                client: &client,
+                shep_home,
+                kelpie_home: &kelpie_home,
+                home: &home,
+            };
+            issue(here, &project().await?, &args).await
+        }
         _ => Err(USAGE.to_owned()),
     }
+}
+
+// Where `issue` finds the project's settings and files.
+struct Here<'a> {
+    client: &'a shep_client::Client,
+    shep_home: &'a Path,
+    kelpie_home: &'a Path,
+    home: &'a Path,
+}
+
+// `issue [--interactive] <request>`: the issue writer, run here rather than
+// by the runner, since the maintainer waits on it or works in it.
+async fn issue(here: Here<'_>, name: &ProjectName, args: &[&str]) -> Result<Vec<String>, String> {
+    let (interactive, words) = match args {
+        ["--interactive", words @ ..] => (true, words),
+        words => (false, words),
+    };
+    let request = words.join(" ");
+    if request.trim().is_empty() || request.starts_with('-') {
+        return Err(USAGE.to_owned());
+    }
+    let tables = shepherd::read_tables_with(here.client, name.as_str()).await?;
+    let paths = ProjectPaths::under(here.kelpie_home, here.shep_home, name);
+    let files = Files {
+        project: name.as_str(),
+        sheep: name.as_str(),
+        settings: &paths.settings,
+        kelpie_settings: &paths.kelpie_settings,
+    };
+    let loaded = source::load(&tables, files, here.home).map_err(|e| e.to_string())?;
+    let agents = Agents::load(&paths.agents).map_err(|e| e.to_string())?;
+    let listed = (loaded.settings.role_agents(&agents)).map_err(|e| e.to_string())?;
+    let writer = Writer::of(&agents)?;
+    let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
+    let project = Project {
+        settings: &loaded.settings,
+        paths: &paths,
+        agents: &listed,
+        kelpie: &kelpie,
+    };
+    if interactive {
+        issues::make_labels(&Gh, &project, Mode::Interactive)?;
+        let mut claude = issues::interactive(&project, &writer, &request, OsStr::new("claude"))?;
+        let status = claude.command.status();
+        for file in &claude.files {
+            let _ = std::fs::remove_file(file);
+        }
+        let status = status.map_err(|e| format!("cannot run claude: {e}"))?;
+        return match status.success() {
+            true => Ok(Vec::new()),
+            false => Err(format!("claude ended with {status}")),
+        };
+    }
+    let tools = Tools::under(here.kelpie_home);
+    if !tools.sandbox().is_file() {
+        return Err(SandboxError::Missing(tools.sandbox()).to_string());
+    }
+    let codex_home =
+        (loaded.kelpie.codex_home(here.home, here.kelpie_home)).map_err(|e| e.to_string())?;
+    let claude = ClaudeCli::default().in_runtime(tools, here.home.to_owned(), &codex_home);
+    issues::headless(&project, &writer, &request, &Gh, &claude)
 }
 
 // `rule`: the ruling and its answer read first, asking in a terminal, so
@@ -269,6 +349,10 @@ mod tests {
         assert_eq!(moved("-p koji rule 14 yes"), words("rule -p koji 14 yes"));
         assert_eq!(moved("--project=koji gate"), words("gate --project=koji"));
         assert_eq!(moved("-p koji timings 5"), words("timings -p koji 5"));
+        assert_eq!(
+            moved("-p koji issue --interactive add a thing"),
+            words("issue -p koji --interactive add a thing")
+        );
         assert_eq!(moved("rule -p koji 14 yes"), words("rule -p koji 14 yes"));
         assert_eq!(moved("-p koji runner x"), words("-p koji runner x"));
         assert_eq!(moved("-p"), words("-p"));

@@ -416,7 +416,8 @@ impl FakeForge {
         self.skipped.lock().unwrap().clone()
     }
 
-    /// Leaves issue `number` open, as someone other than kelpie would have
+    /// Leaves issue `number` open, as someone other than kelpie would have,
+    /// and shows this title and body when it is viewed
     pub(crate) fn open_issue(&self, number: u64, title: &str, body: &str) {
         self.issues.lock().unwrap().push(OpenIssue {
             number,
@@ -571,9 +572,18 @@ impl Forge for FakeForge {
         }
         // Each read takes its own lock, so none may be held across another.
         let open = !self.closed.lock().unwrap().contains(&number);
+        let filed = (self.issues.lock().unwrap().iter())
+            .find(|i| i.number == number)
+            .map(|i| (i.title.clone(), i.body.clone()));
+        let (title, body) = filed.unwrap_or_else(|| {
+            (
+                format!("Title of #{number}"),
+                format!("Body of #{number}.\n"),
+            )
+        });
         Ok(Issue {
-            title: format!("Title of #{number}"),
-            body: format!("Body of #{number}.\n"),
+            title,
+            body,
             labels: self.labels_of(number),
             open,
             parent: self.parent_of(number),
