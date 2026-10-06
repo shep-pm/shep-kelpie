@@ -405,6 +405,7 @@ fn phase_text(phase: &Phase, now: Timestamp) -> String {
                 ReviewStage::Round => String::new(),
                 ReviewStage::Found { .. } => ", findings in".into(),
                 ReviewStage::Fixing { .. } => ", the worker fixing its findings".into(),
+                ReviewStage::Pushing => ", the worker pushing its work first".into(),
                 ReviewStage::SecondLook { .. } => ", a second look".into(),
                 ReviewStage::Summon { bot, .. } => format!(", waiting to summon {bot}"),
                 ReviewStage::Summoned { bot, at, .. } => {

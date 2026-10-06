@@ -32,7 +32,12 @@ impl Runner {
         match outcome {
             Ok(Rebase::Pushed(rebased)) => {
                 let (seen, since) = (Some(rebased.clone()), self.ports.clock.now());
+                // Kelpie's own catch-up carries what vouched for the head it rebased.
+                let vouched = self.current().is_some_and(|item| item.vouches_for(head));
                 self.update(|item| {
+                    if vouched {
+                        item.send_unread(rebased.clone());
+                    }
                     item.caught_up(seen.clone());
                     item.phase = Phase::Ci { head: seen, since };
                 })?;

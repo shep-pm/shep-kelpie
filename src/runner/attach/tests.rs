@@ -126,7 +126,7 @@ fn an_attached_item_runs_nothing_and_its_push_is_the_worker_s_once_it_detaches()
     ));
     assert_eq!(
         rig.ask(&runner, "status", None)["rulings"][0]["kind"],
-        json!({ "kind": "merge", "head": pushed }),
+        json!({ "kind": "merge", "head": pushed, "unread_head": true }),
         "the push is the worker's, not a change kelpie did not make"
     );
     assert_eq!(rig.claude.all_calls().len(), calls, "no call ran for it");
@@ -270,7 +270,7 @@ fn a_hold_whose_process_ended_is_let_go_at_the_next_pass_with_its_push() {
     assert_eq!(attached(&rig, &runner), Value::Null);
     assert_eq!(
         rig.ask(&runner, "status", None)["rulings"][0]["kind"],
-        json!({ "kind": "merge", "head": pushed })
+        json!({ "kind": "merge", "head": pushed, "unread_head": true })
     );
 }
 

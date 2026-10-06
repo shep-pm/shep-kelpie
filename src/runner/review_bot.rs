@@ -100,10 +100,12 @@ impl Runner {
             full: false,
         };
         self.update(|item| {
+            // A bot reads the pull request, not the worktree.
             item.phase = Phase::Review(Review {
                 stage,
                 reviewer,
                 failures: 0,
+                reading: None,
                 ..review
             });
         })?;
@@ -188,6 +190,7 @@ impl Runner {
         };
         if self.lands_unsummoned(bot, &head, &activity) {
             self.release(bot)?;
+            self.update(|item| item.reviewed(head))?;
             return self.settle_threads(bot, &activity);
         }
         let now = self.ports.clock.now();
@@ -469,13 +472,13 @@ impl Runner {
         let owed = self.item().summons_owed.contains(&bot);
         let activity = if owed { activity.since(at) } else { activity };
         match profile.read(&activity, &head, at) {
-            Reading::Reviewed => self.answered(bot, number, &activity, at),
+            Reading::Reviewed => self.answered(bot, number, &activity, (at, &head)),
             Reading::Completed { at: done } if now.saturating_sub(done.0) < DONE_SETTLE => {
                 self.accepted(bot, at).map(|()| Begin::Idle)
             }
             // A bot with no full review has nothing more to ask for.
             Reading::Completed { .. } if !owed || profile.full_review().is_none() => {
-                self.answered(bot, number, &activity, at)
+                self.answered(bot, number, &activity, (at, &head))
             }
             // An owed summon found nothing new: ask once more, for a full review.
             Reading::Completed { .. } if !full => {
@@ -574,22 +577,21 @@ impl Runner {
         self.send(bot, number, round, at, full, true)
     }
 
-    // A summon answered, by a review of the head or by the bot finding
-    // nothing new in it, which is a clean read. It settles a summon owed
-    // since an adoption.
+    // A summon answered at `at`, by a review of `head` or by the bot finding
+    // nothing new in it, which is a clean read of it. It settles a summon
+    // owed since an adoption.
     fn answered(
         &mut self,
         bot: Bot,
         number: u64,
         activity: &Activity,
-        at: Timestamp,
+        (at, head): (Timestamp, &str),
     ) -> Result<Begin, StateError> {
         self.accepted(bot, at)?;
-        if self.item().summons_owed.contains(&bot) {
-            self.update(|item| {
-                item.summons_owed.remove(&bot);
-            })?;
-        }
+        self.update(|item| {
+            item.summons_owed.remove(&bot);
+            item.reviewed(head.to_owned());
+        })?;
         if let Err(reason) = self.label(bot, number, false) {
             return Ok(self.gate_failed(reason));
         }

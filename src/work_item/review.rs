@@ -47,6 +47,10 @@ pub struct Review {
     /// kept, whose other reviewers had already read it
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub bots_only: bool,
+    /// The head this round's reviewer reads: the pushed head, which the
+    /// worktree held, clean, as the round started
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reading: Option<String>,
 }
 
 impl Review {
@@ -61,6 +65,7 @@ impl Review {
             last: None,
             unread: true,
             bots_only: false,
+            reading: None,
         }
     }
 
@@ -78,6 +83,7 @@ impl Review {
             last: None,
             unread: self.unread,
             bots_only: self.bots_only,
+            reading: None,
         }
     }
 }
@@ -114,6 +120,10 @@ pub enum ReviewStage {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         deferred_before: Vec<Finding>,
     },
+    /// The worktree was not the head on `origin` as this round was about to
+    /// run, so the worker has a turn to push or discard. Once it ends, the
+    /// round runs on a worktree at the pushed head, or the work item parks.
+    Pushing,
     /// A reviewer with a second look has read once, and a fresh session of
     /// it is about to read again, shown what the first found. Both lists then
     /// go on as `Found`.

@@ -93,6 +93,7 @@ mod tests {
             head: "abc".into(),
             unreviewed: None,
             open_threads: None,
+            unread_head: false,
         };
         assert_eq!(Wants::of(&merge), Wants::YesOrNo);
     }

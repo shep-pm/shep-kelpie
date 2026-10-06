@@ -10,12 +10,13 @@ use std::fmt;
 
 use super::gate::short;
 use super::report::{Begin, StepReport};
+use super::review::pushed::{off_text, push_prompt};
 use super::rework::HUMAN;
 use super::{Names, Runner};
 use crate::ports::Timestamp;
 use crate::settings::MergeAuthority;
 use crate::state::{Fix, ProjectState, Resume, Ruling, RulingKind, StateError, Stuck};
-use crate::work_item::{Known, Phase, Review, Turn, WorkItem, foreign_change};
+use crate::work_item::{Known, Phase, Review, ReviewStage, Turn, WorkItem, foreign_change};
 use crate::worktree;
 
 /// The prompt for a turn resumed after the maintainer accepts a timed-out
@@ -415,6 +416,9 @@ fn stuck_comment(reason: &Stuck) -> String {
             "A fix for review findings ended without a push, so those findings still hold."
                 .to_owned()
         }
+        Stuck::Unpushed { .. } => {
+            "Work in this pull request's worktree is not pushed, so its review waits.".to_owned()
+        }
         Stuck::TurnTimeout { .. } => {
             "The work on this pull request ran too long and was stopped.".to_owned()
         }
@@ -517,6 +521,25 @@ fn decide(
         (Answer::Yes, RulingKind::Stuck(Stuck::LocalModelSpilled { review, .. })) => {
             Phase::Review(review)
         }
+        // The turn ends under the same round, which checks the worktree again.
+        (
+            Answer::Yes,
+            RulingKind::Stuck(Stuck::Unpushed {
+                files,
+                head,
+                pushed,
+                review,
+            }),
+        ) => {
+            return Ok(Move::Turn {
+                prompt: push_prompt(&files, &head, &pushed),
+                phase: Phase::Review(Review {
+                    stage: ReviewStage::Pushing,
+                    ..review
+                }),
+                force: None,
+            });
+        }
         // The fix ends under the same round, which checks the head again.
         (Answer::Yes, RulingKind::Stuck(Stuck::FixNotPushed { fix, prompt })) => {
             let Fix::Review(review) = fix;
@@ -548,10 +571,16 @@ pub(super) fn question(id: u64, issue: u64, number: Option<u64>, kind: &RulingKi
             head,
             unreviewed,
             open_threads,
+            unread_head,
         } => {
-            let unread = unreviewed.as_ref().map_or_else(String::new, |why| {
+            let mut unread = unreviewed.as_ref().map_or_else(String::new, |why| {
                 format!(" No reviewer read it in its last review: {why}.")
             });
+            if *unread_head {
+                unread.push_str(
+                    " Kelpie has no record of a review round reading this head, or of a fix turn it sent pushing it.",
+                );
+            }
             let open = open_threads.as_ref().map_or_else(String::new, |open| {
                 format!(" Review bot threads are still open on it: {open}.")
             });
@@ -584,6 +613,18 @@ pub(super) fn question(id: u64, issue: u64, number: Option<u64>, kind: &RulingKi
             Stuck::LocalModelSpilled { review, why } => format!(
                 "Round {} of the review on {about} did not run: {why}. \
                  Once the model is back on the GPU, {yes} runs the round again",
+                review.round
+            ),
+            Stuck::Unpushed {
+                files,
+                head,
+                pushed,
+                review,
+            } => format!(
+                "The worker on {about} still has work not pushed after its turn to push or \
+                 discard it: {}. Round {} of the review did not run. {yes} gives the worker \
+                 another turn to push or discard it",
+                off_text(files, head, pushed),
                 review.round
             ),
             Stuck::FixNotPushed { fix, .. } => {
