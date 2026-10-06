@@ -170,7 +170,7 @@ impl Agents for CodexCli {
     fn run(&self, call: &AgentCall, ending: &Ending) -> Result<AgentReply, AgentError> {
         let files = Files::of(call);
         let mut command = self.sandboxed_command(call)?;
-        let label = format!("#{} {}", call.issue, call.role.as_str());
+        let label = call.label();
         let spawned = |pid| {
             if let Some(lambs) = &self.lambs {
                 lambs.label(pid, &label);
@@ -203,6 +203,7 @@ impl Agents for CodexCli {
             text: turn.text,
             usage: turn.spent.since(before),
             session_cost: None,
+            context: None,
         })
     }
 

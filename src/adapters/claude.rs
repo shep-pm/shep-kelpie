@@ -129,7 +129,7 @@ impl Agents for ClaudeCli {
 
     fn run(&self, call: &AgentCall, ending: &Ending) -> Result<AgentReply, AgentError> {
         let mut command = self.sandboxed_command(call)?;
-        let label = format!("#{} {}", call.issue, call.role.as_str());
+        let label = call.label();
         let spawned = |pid| {
             if let Some(lambs) = &self.lambs {
                 lambs.label(pid, &label);
@@ -202,7 +202,7 @@ fn terminal_argv(call: &AgentCall) -> Vec<OsString> {
 }
 
 fn profile(call: &AgentCall) -> Vec<OsString> {
-    vec![
+    let mut argv: Vec<OsString> = vec![
         "--model".into(),
         call.model.as_str().into(),
         "--effort".into(),
@@ -211,7 +211,16 @@ fn profile(call: &AgentCall) -> Vec<OsString> {
         "project".into(),
         "--settings".into(),
         call.settings.clone().into(),
-    ]
+    ];
+    // The project manager's tools are an allow-list, and it loads no MCP server.
+    if call.role == Role::Pm {
+        argv.extend([
+            "--tools".into(),
+            settings::PM_TOOLS.into(),
+            "--strict-mcp-config".into(),
+        ]);
+    }
+    argv
 }
 
 fn session(call: &AgentCall) -> Vec<OsString> {
@@ -253,6 +262,15 @@ fn parse_result(output: &Output, session: &Session) -> Result<AgentReply, AgentE
         cache_creation_input_tokens: u64,
         cache_read_input_tokens: u64,
         output_tokens: u64,
+        // One entry per model request, the last one's input being the context
+        #[serde(default)]
+        iterations: Vec<Iteration>,
+    }
+    #[derive(Deserialize)]
+    struct Iteration {
+        input_tokens: u64,
+        cache_creation_input_tokens: u64,
+        cache_read_input_tokens: u64,
     }
     let stdout = || String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -272,6 +290,9 @@ fn parse_result(output: &Output, session: &Session) -> Result<AgentReply, AgentE
     let (Some(u), Some(cost)) = (r.usage, r.total_cost_usd.and_then(Cost::from_usd)) else {
         return Err(AgentError::Unreadable(CLAUDE, stdout()));
     };
+    let context = (u.iterations.last()).map(|last| {
+        last.input_tokens + last.cache_creation_input_tokens + last.cache_read_input_tokens
+    });
     Ok(AgentReply {
         session_id: SessionId(r.session_id),
         text: r.result,
@@ -282,6 +303,7 @@ fn parse_result(output: &Output, session: &Session) -> Result<AgentReply, AgentE
             output: u.output_tokens,
         },
         session_cost: Some(cost),
+        context,
     })
 }
 
@@ -502,6 +524,36 @@ mod tests {
             }
         );
         assert_eq!(reply.session_cost, Some(Cost(17_648_300)));
+    }
+
+    #[test]
+    fn the_project_manager_runs_on_an_allow_list_of_tools_and_no_mcp_server() {
+        for pm in [
+            argv(&call(Role::Pm, fresh())),
+            terminal_argv(&call(Role::Pm, fresh())),
+        ] {
+            let at = pm.iter().position(|a| a == "--tools").unwrap();
+            assert_eq!(pm[at + 1], "Read,Glob,Grep,Edit,Write");
+            assert!(pm.iter().any(|a| a == "--strict-mcp-config"));
+            assert!(!pm.iter().any(|a| a == "bypassPermissions"));
+        }
+        let worker = argv(&call(Role::Worker, fresh()));
+        assert!(
+            !worker
+                .iter()
+                .any(|a| a == "--tools" || a == "--strict-mcp-config")
+        );
+    }
+
+    #[test]
+    fn the_context_is_the_last_model_requests_input_not_the_calls_sum() {
+        // Eight model requests, whose cache reads sum to 108,226 tokens.
+        let many = include_str!("../../fixtures/claude-p-question.json");
+        let reply = parse_result(&output(0, many, ""), &fresh()).unwrap();
+        assert_eq!(reply.usage.cache_read, 108_226);
+        assert_eq!(reply.context, Some(2 + 1_573 + 30_304));
+        let one = parse_result(&output(0, RESULT, ""), &fresh()).unwrap();
+        assert_eq!(one.context, Some(10 + 8_003 + 13_673));
     }
 
     #[test]

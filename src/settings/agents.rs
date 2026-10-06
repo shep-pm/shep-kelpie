@@ -222,6 +222,12 @@ pub struct RoleAgentNames {
     /// maintainer's qwen-review script is installed, then `defect-hunter`.
     #[serde(default)]
     pub reviewers: Option<Vec<AgentName>>,
+    /// The project manager, from kelpie's agent files, such as `pm`: woken
+    /// on the board's events to pick work, unstick items and answer the
+    /// maintainer. When absent, the board's rule picks and stuck items wait
+    /// on rulings alone.
+    #[serde(default)]
+    pub pm: Option<AgentName>,
 }
 
 impl Default for RoleAgentNames {
@@ -229,6 +235,7 @@ impl Default for RoleAgentNames {
         Self {
             implementers: default_implementers(),
             reviewers: None,
+            pm: None,
         }
     }
 }
@@ -257,7 +264,20 @@ impl Implementer {
     }
 }
 
-/// The project's implementers, from the agents it names
+/// The agent a project names in `agents.pm`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmAgent {
+    /// Its name
+    pub name: AgentName,
+    /// Its harness, model and effort
+    pub model: RoleModel,
+    /// What holds its calls back
+    pub limit: Limit,
+    /// Its file's body, its standing prompt
+    pub prompt: Option<String>,
+}
+
+/// The project's implementers and project manager, from the agents it names
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoleAgents {
     /// The project's implementers, in its order, each once
@@ -265,6 +285,8 @@ pub struct RoleAgents {
     /// The implementer an issue with no `agent:` label runs on: the first
     /// listed that is not a local model
     pub default_implementer: Implementer,
+    /// The project manager, when the project names one
+    pub pm: Option<PmAgent>,
 }
 
 impl RoleAgents {
@@ -283,12 +305,12 @@ impl RoleAgents {
 const IMPLEMENTERS: &str = "agents.implementers";
 
 impl Settings {
-    /// The implementers the project lists, from `agents`
+    /// The implementers and project manager the project names, from `agents`
     ///
     /// # Errors
     ///
     /// [`SettingsError::Invalid`] naming an agent `agents` lacks or whose
-    /// file is a reviewer's, an implementer the worker's fence cannot hold,
+    /// file is another role's, an implementer the worker's fence cannot hold,
     /// or a list with no implementer that is not a local model.
     pub fn role_agents(&self, agents: &Agents) -> Result<RoleAgents, SettingsError> {
         let mut implementers: Vec<Implementer> = Vec::new();
@@ -317,9 +339,25 @@ impl Settings {
                     .into(),
             });
         };
+        let pm = match &self.agents.pm {
+            Some(name) => {
+                let agent = find(agents, name, "agents.pm", "agents", Role::Pm)?;
+                let Runs::Session { model, limit } = &agent.runs else {
+                    unreachable!("a project manager's file only parses to a session")
+                };
+                Some(PmAgent {
+                    name: name.clone(),
+                    model: model.clone(),
+                    limit: limit.clone(),
+                    prompt: agent.prompt.clone(),
+                })
+            }
+            None => None,
+        };
         Ok(RoleAgents {
             implementers,
             default_implementer,
+            pm,
         })
     }
 

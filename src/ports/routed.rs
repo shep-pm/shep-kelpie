@@ -80,6 +80,7 @@ mod tests {
                 text: self.0.into(),
                 usage: Usage::default(),
                 session_cost: None,
+                context: None,
             })
         }
     }

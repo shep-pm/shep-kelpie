@@ -5,9 +5,9 @@
 //! `shep kelpie lease ...`: the maintainer's lease commands
 //!
 //! `shep kelpie add`, `start`, `pause`, `status`, `rule`, `rework`, `adopt`,
-//! `gate`, `drop`, `timings`, `issue` and `attach`: a project in the
-//! maintainer's own flock, the one `-p` names or whose repo holds the folder
-//! it runs in.
+//! `gate`, `drop`, `timings`, `issue`, `attach`, `tell` and `pm`: a project
+//! in the maintainer's own flock, the one `-p` names or whose repo holds the
+//! folder it runs in.
 //!
 //! `shep kelpie doctor [<project>] [--test-alert]`: checks what the projects need
 //! on this machine, and changes nothing. Run as `shep kelpie doctor`.
@@ -21,7 +21,9 @@
 //! made with, which `upgrade` reads from a build before it installs it.
 //!
 //! `kelpie confine <folder>...`: the hook that holds a worker's file tools
-//! to its folders. Claude Code runs it; it is not for the maintainer.
+//! to its folders. Claude Code runs it; it is not for the maintainer. With
+//! `--append <file>` it is the project manager's, which may only add to the
+//! end of that file.
 //!
 //! `kelpie guard <git common dir> <worktree>`: the hook on every worker's
 //! Bash calls that keeps the home folder's path and freeform pull request
@@ -51,7 +53,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use shep_kelpie::confine::{Verdict, judge};
+use shep_kelpie::confine::{APPEND, Verdict, judge, judge_append};
 use shep_kelpie::guard::{self, Checkout};
 use shep_kelpie::runner::{ProjectName, ProjectPaths};
 use shep_kelpie::settings::moving;
@@ -142,6 +144,9 @@ fn main() -> ExitCode {
         [command, rest @ ..] if command == "upgrade" => shep_kelpie::upgrade::main(rest),
         [command] if command == "version" => version(false),
         [command, flag] if command == "version" && flag == "--json" => version(true),
+        [role, flag, file] if role == "confine" && flag == APPEND => {
+            hook(judge_append(std::io::stdin().lock(), Path::new(file)))
+        }
         [role, folders @ ..] if role == "confine" && !folders.is_empty() => {
             let folders: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
             hook(judge(std::io::stdin().lock(), &folders))

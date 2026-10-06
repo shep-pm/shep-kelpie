@@ -28,6 +28,8 @@ pub enum Role {
     /// The issue writer's one-shot session, which no work item records
     #[serde(rename = "issue-writer")]
     IssueWriter,
+    /// The project manager's session, resumed across its wakes
+    Pm,
 }
 
 #[cfg(test)]
@@ -53,6 +55,7 @@ impl Role {
             Self::Worker => "worker",
             Self::Reviewer => "reviewer",
             Self::IssueWriter => "issue-writer",
+            Self::Pm => "pm",
         }
     }
 }
@@ -93,7 +96,13 @@ pub enum Tools {
     /// Reading and searching files, and the commands the issue writer's
     /// guard allows, with no crew and no file written
     Issues,
+    /// The project manager's: reading its working folder, and adding to
+    /// the end of [`PM_NOTES`] there, which a hook holds it to
+    Pm,
 }
+
+/// The project manager's own notes, the one file in its folder it may change
+pub const PM_NOTES: &str = "pm-notes.md";
 
 /// What a session may reach, named for no harness
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -192,6 +201,17 @@ pub struct AgentCall {
     pub reach: Reach,
 }
 
+impl AgentCall {
+    /// What its lamb is labelled: its issue and role, such as `#7 worker`,
+    /// or `pm` for the project manager, which is no work item's
+    pub fn label(&self) -> String {
+        match self.role {
+            Role::Pm => Role::Pm.as_str().to_owned(),
+            role => format!("#{} {}", self.issue, role.as_str()),
+        }
+    }
+}
+
 /// Tokens one call used, as the harness reports them
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -249,6 +269,9 @@ pub struct AgentReply {
     /// What the session has cost so far, this call included, where the
     /// harness reports it
     pub session_cost: Option<Cost>,
+    /// The tokens the session's context held at the call's last model
+    /// request, where the harness reports it
+    pub context: Option<u64>,
 }
 
 /// Runs agent sessions, one call at a time per session

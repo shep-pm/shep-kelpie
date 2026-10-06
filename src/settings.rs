@@ -31,8 +31,8 @@ mod reviewers;
 mod skills;
 
 pub use agents::{
-    Account, AgentHarness, AgentName, Harness, Implementer, Limit, ModelServer, RoleAgentNames,
-    RoleAgents, UsageReader,
+    Account, AgentHarness, AgentName, Harness, Implementer, Limit, ModelServer, PmAgent,
+    RoleAgentNames, RoleAgents, UsageReader,
 };
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use reviewers::{LeaseName, ListedReviewer, default_reviewers};

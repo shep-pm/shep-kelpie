@@ -30,8 +30,8 @@ mod routed;
 mod sandbox;
 
 pub use agent::{
-    AgentCall, AgentError, AgentReply, Agents, CallActivity, Cost, Ending, Fence, Guard, Reach,
-    Role, Session, SessionId, Tools, Usage, written_at,
+    AgentCall, AgentError, AgentReply, Agents, CallActivity, Cost, Ending, Fence, Guard, PM_NOTES,
+    Reach, Role, Session, SessionId, Tools, Usage, written_at,
 };
 pub use gpu::{Gpu, GpuError, GpuMetrics};
 pub use leased::{Leased, LocalLeases};

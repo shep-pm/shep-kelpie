@@ -55,8 +55,9 @@ fn tool_names(tools: Tools, reads: bool) -> Option<&'static str> {
         Tools::Work => Some("read,bash,edit,write,grep,find,ls"),
         // The issue writer runs on Claude Code alone, whose hook is its guard.
         Tools::Review | Tools::Issues => Some("read,grep,find,ls"),
-        Tools::Answer if reads => Some("read"),
-        Tools::Answer => None,
+        // The project manager runs on Claude Code alone, so pi only ever reads for it.
+        Tools::Answer | Tools::Pm if reads => Some("read"),
+        Tools::Answer | Tools::Pm => None,
     }
 }
 
@@ -136,7 +137,7 @@ impl Agents for PiCli {
     fn run(&self, call: &AgentCall, ending: &Ending) -> Result<AgentReply, AgentError> {
         // The forwarder stays open until the call has ended.
         let (mut command, _forwarder) = self.sandboxed_command(call)?;
-        let label = format!("#{} {}", call.issue, call.role.as_str());
+        let label = call.label();
         let spawned = |pid| {
             if let Some(lambs) = &self.lambs {
                 lambs.label(pid, &label);
@@ -619,5 +620,6 @@ fn parse_result(output: &Output, asked: &SessionId) -> Result<AgentReply, AgentE
         text,
         usage,
         session_cost: None,
+        context: None,
     })
 }

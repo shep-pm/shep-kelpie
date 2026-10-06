@@ -60,6 +60,8 @@ impl WorkItem {
                 Role::Reviewer => &mut spend.reviewer,
                 // It runs before any work item opens, so none records it.
                 Role::IssueWriter => continue,
+                // The project manager is the project's, so no work item records it.
+                Role::Pm => continue,
             };
             role.calls += 1;
             role.tokens += call.usage;

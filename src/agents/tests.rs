@@ -3,6 +3,7 @@ use crate::settings::{Account, AgentHarness, AgentName, LeaseName};
 
 mod bots;
 mod issue_writer;
+mod pm;
 
 const QWEN: &str = "---\nrole: implementer\nharness: pi\nmodel: qwen3.8:27b\neffort: low\n\
                     url: http://box:11434/v1\ncontext: 65536\n---\n";
@@ -277,7 +278,8 @@ fn defaults_are_written_where_missing_and_never_over_a_file() {
             "coderabbit",
             "cubic",
             "codex",
-            "issue-writer"
+            "issue-writer",
+            "pm"
         ]
     );
     assert_eq!(Agents::load(&agents).unwrap(), Agents::embedded());

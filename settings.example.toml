@@ -67,6 +67,16 @@ implementers = ["sonnet-high"]
 # script is installed and then `defect-hunter`, with no bot; empty, no
 # review at all.
 # reviewers = ["qwen", "defect-hunter"]
+# The project manager, from a file whose role is `pm`: kelpie's own `pm` is
+# Opus 5.5 at medium. Code wakes it when a slot is free with two or more
+# ready issues, two open branches conflict, a work item is stuck, or you
+# `shep kelpie tell` it something. It reads `board.md` and its own notes,
+# never runs git or gh, and answers with a pick, holds, an unstick or a
+# reply, which kelpie checks against the board before acting. One session
+# is kept across its wakes and compacted past 100k tokens of context.
+# Absent, the board's rule picks (priority, then age) and a stuck item
+# waits on its ruling, as it does whenever the project manager is down.
+# pm = "pm"
 
 # Turn `enabled` off for a stretch when usage limits do not matter: neither
 # the daily allowance nor the 5-hour window then holds anything, and `status`

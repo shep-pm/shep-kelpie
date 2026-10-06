@@ -15,6 +15,10 @@ use serde::Deserialize;
 
 use crate::fence;
 
+mod append;
+
+pub use append::{APPEND, judge_append};
+
 /// What the hook tells Claude Code
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {

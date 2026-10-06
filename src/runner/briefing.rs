@@ -13,7 +13,8 @@ use std::sync::Mutex;
 use super::Runner;
 use super::trigger::lock;
 use crate::board::briefing::{
-    self, Briefing, Files, IDLE_AFTER, Item, Ready, ReadyLine, RulingLine, Session, age, quiet_for,
+    self, Briefing, Files, IDLE_AFTER, Item, Merge, Ready, ReadyLine, RulingLine, Session, age,
+    quiet_for,
 };
 use crate::board::{ReadyIssue, Skip, priority, rule_order};
 use crate::local_paths::Surface;
@@ -77,6 +78,7 @@ impl Runner {
         if !found.is_empty() {
             self.brief.due = true;
         }
+        self.pm_noticed(next);
         for what in found {
             next.record_event(now, what);
         }
@@ -123,6 +125,17 @@ impl Runner {
         self.record(found)
     }
 
+    /// The ready issues the board shows, as last read, none of them open
+    pub(super) fn board_ready(&self) -> Vec<u64> {
+        let Some((_, ready)) = &self.brief.ready else {
+            return Vec::new();
+        };
+        (ready.iter())
+            .filter(|i| self.state.item(i.number).is_none())
+            .map(|i| i.number)
+            .collect()
+    }
+
     /// Writes the board now if it is due, git and all, as the runner's
     /// start does before any lock exists
     pub(super) fn brief_now(&mut self) {
@@ -164,6 +177,7 @@ impl Runner {
     fn watch_idle(&mut self, now: Timestamp) -> Vec<String> {
         let agents = std::sync::Arc::clone(&self.ports.agents);
         let mut found = Vec::new();
+        let mut stuck = Vec::new();
         for (issue, watched) in self.flights.watched_mut() {
             let Some(call) = &watched.call else { continue };
             let Some(quiet) = quiet_for(watched.started, agents.last_active(call), now) else {
@@ -171,14 +185,19 @@ impl Runner {
             };
             let idle = quiet >= IDLE_AFTER;
             if idle && !watched.idle {
+                let quiet = age(now, Timestamp(now.0.saturating_sub(quiet)));
                 found.push(format!(
-                    "#{issue}: worker idle, no tool call or output for {}",
-                    age(now, Timestamp(now.0.saturating_sub(quiet)))
+                    "#{issue}: worker idle, no tool call or output for {quiet}"
                 ));
+                stuck.push((issue, quiet));
             } else if !idle && watched.idle {
                 found.push(format!("#{issue}: worker active again"));
             }
             watched.idle = idle;
+        }
+        for (issue, quiet) in stuck {
+            let what = format!("its worker has shown no tool call or output for {quiet}");
+            self.pm_due(super::pm::Wake::Stuck(issue, what));
         }
         found
     }
@@ -187,6 +206,13 @@ impl Runner {
         let now = self.ports.clock.now();
         self.brief.git = std::mem::take(&mut answers.git);
         self.brief.named = std::mem::take(&mut answers.named);
+        let conflicts = (answers.merges.iter())
+            .filter_map(|(&pair, merge)| match merge {
+                Merge::Conflicts(files) => Some((pair, files.clone())),
+                Merge::Unknown => None,
+            })
+            .collect();
+        self.pm_conflicts(conflicts);
         let text = briefing::render(&self.briefing(now, answers));
         let path = &self.paths.board;
         let made = path.parent().map_or(Ok(()), std::fs::create_dir_all);
@@ -201,7 +227,7 @@ impl Runner {
 
     // `text`, or a note in its place when it names this machine or a
     // private name, as nothing kelpie posts may
-    fn shown(&self, text: String) -> String {
+    pub(super) fn shown(&self, text: String) -> String {
         match self.local.find(&text, Surface::Prose) {
             Some(leak) => format!("(withheld: it names {leak})"),
             None => text,
@@ -287,10 +313,13 @@ impl Runner {
             .into_iter()
             .map(|issue| {
                 let skip = self.skipped.iter().find(|s| s.issue() == issue.number);
-                let (waits, quoted) = skip.map_or((None, true), |s| {
+                let (mut waits, quoted) = skip.map_or((None, true), |s| {
                     let (text, quoted) = passed_over(s, &|text| self.shown(text));
                     (Some(text), quoted)
                 });
+                if waits.is_none() && self.pm_held().contains(&issue.number) {
+                    waits = Some("held by you until an open work item closes".to_owned());
+                }
                 let named = self.brief.named.get(&issue.number);
                 ReadyLine {
                     number: issue.number,

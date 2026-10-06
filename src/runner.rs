@@ -57,6 +57,7 @@ mod older_bots;
 mod pace;
 mod parent;
 mod paths;
+mod pm;
 mod question;
 mod replies;
 mod report;
@@ -84,6 +85,7 @@ pub use gpu::GpuStatus;
 pub use merge::DropError;
 pub use pace::PacerStatus;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
+pub use pm::{PmAttaching, PmError, PmStatus};
 pub use replies::READ_EVERY;
 pub use report::StepReport;
 pub use rework::{HUMAN, ReworkError};
@@ -237,6 +239,8 @@ pub struct Runner {
     brief: briefing::BoardCache,
     // What the board withholds, as the forge does
     local: LocalPaths,
+    // The project manager's wakes and decisions, in memory only
+    pm: pm::Desk,
 }
 
 impl Runner {
@@ -348,6 +352,7 @@ impl Runner {
             flights: flight::Flights::default(),
             brief: briefing::BoardCache::default(),
             local,
+            pm: pm::Desk::default(),
         };
         runner.settle_older_bots()?;
         runner.settle_labels();
@@ -418,6 +423,7 @@ impl Runner {
             gpu: self.gpu.status(),
             local_leases: self.local_leases(),
             board: &self.paths.board,
+            pm: self.pm_status(),
         }
     }
 
