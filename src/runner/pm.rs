@@ -16,7 +16,7 @@ use super::report::StepReport;
 use crate::pacer::Scope;
 use crate::ports::{AgentError, AgentReply, Session, SessionId, Timestamp};
 use crate::settings::PmAgent;
-use crate::state::{RunState, StateError};
+use crate::state::StateError;
 use crate::usage::CallKind;
 use crate::work_item::new_session_id;
 
@@ -242,7 +242,7 @@ impl Runner {
         let Some(agent) = self.agents.pm.clone() else {
             return false;
         };
-        if self.pm.flying.is_some() || self.state.run != RunState::Running || self.draining {
+        if self.pm.flying.is_some() || self.draining {
             return false;
         }
         // What the maintainer told it outlasts a restart, and wakes it again.

@@ -47,7 +47,6 @@ mod tests {
     fn asking(project: &str) -> (Rig, Mutex<Runner>) {
         let rig = Rig::new(project);
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.claude.script([Scripted::Say(ASKS)]);
         (rig, runner)
@@ -265,7 +264,6 @@ mod tests {
     fn a_question_naming_a_local_folder_reaches_the_maintainer_but_not_the_pull_request() {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
         let log = rig.home.path().join(".npm/_logs/debug-0.log");
@@ -296,7 +294,6 @@ mod tests {
     fn a_question_during_a_fix_turn_resumes_that_round() {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
         rig.claude.script([Scripted::Push("work.txt", "work\n")]);
@@ -386,7 +383,6 @@ mod tests {
     fn a_turn_that_quotes_the_tags_mid_message_asks_nothing() {
         let rig = Rig::new("chelone");
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.claude.script([Scripted::Say(
             "I documented <kelpie-question>x</kelpie-question> in the README.",

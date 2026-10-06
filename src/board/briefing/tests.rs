@@ -40,7 +40,6 @@ fn a_board_with_an_idle_worker_a_review_call_and_a_ruling_reads_whole() {
     let board = Briefing {
         project: "acme",
         now: Timestamp(NOW),
-        running: false,
         max_items: 2,
         main: None,
         items: vec![
@@ -73,7 +72,7 @@ fn a_board_with_an_idle_worker_a_review_call_and_a_ruling_reads_whole() {
         render(&board),
         "# Board: acme, 2026-09-21 14:13 UTC\n\
          \n\
-         Paused, 2 of 2 work items open.\n\
+         2 of 2 work items open.\n\
          \n\
          ## Open work\n\
          \n\
@@ -163,7 +162,6 @@ fn quoting(body: &str) -> String {
     let board = Briefing {
         project: "acme",
         now: Timestamp(NOW),
-        running: true,
         max_items: 2,
         main: None,
         items: vec![seven, eight],

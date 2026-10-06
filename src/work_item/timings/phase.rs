@@ -18,8 +18,7 @@ pub enum TimingPhase {
     Ruling,
     /// Merged and being cleaned up
     Merge,
-    /// Anything else: between steps, while the project is paused and while
-    /// kelpie is not running
+    /// Anything else: between steps, and while the runner is not running
     Other,
 }
 

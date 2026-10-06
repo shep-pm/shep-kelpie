@@ -27,7 +27,6 @@ fn auto_with_issue_7(project: &str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
     rig.merge_auto();
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     (rig, runner)
 }

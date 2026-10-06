@@ -3,7 +3,6 @@ use std::path::Path;
 use super::*;
 
 const FORMS: &str = "It takes `shep kelpie rule 14 yes` or `shep kelpie rule 14 no <note>`";
-use crate::ports::Timestamp;
 use crate::state::{ProjectState, Resume, RulingKind, StateStore, Stuck};
 
 fn yes_or_no(id: u64) -> Ruling {
@@ -31,7 +30,7 @@ fn question(id: u64) -> Ruling {
 
 // Project `name`'s state file under kelpie's home, holding `rulings`.
 fn waiting(home: &Path, name: &str, rulings: Vec<Ruling>) {
-    let mut state = ProjectState::new(Timestamp(0));
+    let mut state = ProjectState::new();
     state.last_ruling = rulings.iter().map(|r| r.id).max().unwrap_or(0);
     state.rulings = rulings;
     let path = home.join(name).join("state.json");

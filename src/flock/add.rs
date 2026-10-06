@@ -4,9 +4,10 @@
 //! gets the labels kelpie uses, kelpie's home gets its own agent files, and
 //! the flock gets the project's runner holding its settings as its
 //! `[app.dogs.kelpie]` table. Each is made only when it is missing, so a
-//! second `add` changes nothing. The runner is
-//! registered stopped: `shep kelpie start` starts it. The dog is the
-//! adopted kelpie, and `add` says when it is not running.
+//! second `add` changes nothing. The runner is registered stopped. The last
+//! line names the command that starts it, or, for a runner already running,
+//! the one that pauses it. The dog is the adopted kelpie, and `add` says
+//! when it is not running.
 
 use std::path::Path;
 
@@ -15,6 +16,7 @@ use shep_client::Client;
 use shep_client::shep_core::config::DogTable;
 use shep_client::shep_core::protocol::Request;
 use shep_client::shep_core::protocol::request::Response;
+use shep_client::shep_core::status::ProcStatus;
 
 use super::{Checkout, Launch, flock, kelpie_sheep, send, tables};
 use crate::board::READY;
@@ -183,15 +185,16 @@ pub async fn add(
             )),
         }
 
+        let running = runner
+            .as_ref()
+            .is_some_and(|r| matches!(r.status, ProcStatus::Online | ProcStatus::Starting));
         match (runner, set) {
             (None, _) => {
                 let request = Request::Add {
                     apps: vec![launch.runner(name, table)],
                 };
                 send(client, request, |r| matches!(r, Response::Added(_))).await?;
-                done.push(format!(
-                    "runner `{name}`: added with its settings, stopped until `shep kelpie start`"
-                ));
+                done.push(format!("runner `{name}`: added with its settings, stopped"));
             }
             (Some(_), false) => {
                 let request = Request::SetSheepDogSettings {
@@ -211,6 +214,10 @@ pub async fn add(
         }
 
         done.extend(super::dog_down(&rows));
+        done.push(match running {
+            true => format!("runner `{name}` is running: `shep kelpie pause {name}` stops it"),
+            false => format!("`shep kelpie start {name}` runs it"),
+        });
         Ok::<(), String>(())
     }
     .await;

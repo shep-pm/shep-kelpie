@@ -298,7 +298,6 @@ fn a_reviewer_whose_call_fails_three_times_in_a_row_is_passed_over_for_the_pass(
 fn reviewer_sessions_never_match_the_workers() {
     let rig = Rig::new("shep");
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([
@@ -404,7 +403,6 @@ fn status_shows_where_the_local_model_sits() {
 fn at_round_1(project: &str) -> (Rig, std::sync::Mutex<crate::runner::Runner>) {
     let rig = Rig::new(project);
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);

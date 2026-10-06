@@ -198,7 +198,7 @@ mod tests {
     use crate::pacer::{DayStart, HoldKind};
     use crate::ports::{Cost, MeterError, Usage};
     use crate::runner::step;
-    use crate::state::{ProjectState, RunState, StateStore};
+    use crate::state::{ProjectState, StateStore};
     use crate::test::{Rig, Scripted};
 
     const DAY: u64 = Rig::DAY;
@@ -218,8 +218,7 @@ mod tests {
                 s.replace(on, "[app.dogs.kelpie.pacing]\nenabled = false")
             });
         }
-        let mut state = ProjectState::new(Timestamp(Rig::EPOCH));
-        state.run = RunState::Running;
+        let mut state = ProjectState::new();
         state.pacing = Some(DayStart {
             week_resets_at: Timestamp(Rig::EPOCH + 7 * DAY),
             day: 0,
@@ -371,7 +370,6 @@ mod tests {
     fn the_day_start_survives_a_restart() {
         let rig = Rig::new("rotom");
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.forge.list_ready(7, false);
         step(&runner).unwrap();
         drop(runner);

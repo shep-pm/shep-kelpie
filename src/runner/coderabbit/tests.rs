@@ -34,7 +34,6 @@ pub(in crate::runner) fn reviewed_by_qwen(project: &str) -> (Rig, Mutex<Runner>,
     let rig = Rig::new(project);
     rig.coderabbit_on();
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([
@@ -515,7 +514,6 @@ fn a_bot_alone_that_never_answers_leaves_the_pass_unreviewed() {
     let rig = Rig::new("acme");
     rig.reviewers(&["coderabbit"]);
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);

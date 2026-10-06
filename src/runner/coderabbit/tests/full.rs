@@ -45,7 +45,6 @@ pub(super) fn adopted_set(project: &str, setup: impl FnOnce(&Rig)) -> (Rig, Mute
     rig.forge.open_pull_request(80, "fix/timeline", &[5]);
     rig.forge.ready_pull_request(80);
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "adopt", Some("80"));
     step(&runner).unwrap();
     rig.forge.set_checks(&head, Checks::Passed);

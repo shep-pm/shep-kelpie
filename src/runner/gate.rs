@@ -462,7 +462,6 @@ pub(super) mod tests {
         let rig = Rig::new("webapp");
         rig.edit_settings(|s| s.replace("ci = true", "ci = false"));
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
         rig.claude.script([

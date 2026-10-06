@@ -10,7 +10,6 @@ use crate::test::{Rig, Scripted};
 // it: its worker on `worker`, its first turn due.
 fn saved_before_agent_files(rig: &Rig, worker: Value) -> Mutex<Runner> {
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     drop(runner);
     let path = rig.paths().state;

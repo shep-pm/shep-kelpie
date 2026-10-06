@@ -18,7 +18,6 @@ const PATIENCE: Duration = Duration::from_secs(30);
 fn seven_due(project: &str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     (rig, runner)
 }
@@ -154,7 +153,6 @@ fn a_drained_runner_does_not_wake_the_project_manager() {
         s.replace(listed, "\nimplementers = [\"sonnet-high\"]\npm = \"pm\"\n")
     });
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     assert_eq!(
         rig.ask(&runner, "drain", None)["draining"]["ceiling"],
         3600,

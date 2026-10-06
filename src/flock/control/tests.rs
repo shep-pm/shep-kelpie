@@ -9,8 +9,18 @@ use crate::flock::Launch;
 use crate::shepherd;
 use crate::test::FakeShepherd;
 
+mod pause;
+
 // Bounds every call against a fake shepherd, so a hang fails by name.
 const PATIENCE: Duration = Duration::from_secs(40);
+
+// A pause's waits, short so a test of one running out ends soon
+const FAST: Patience = Patience {
+    poll: Duration::from_millis(10),
+    start: Duration::from_secs(10),
+    merge: Duration::from_secs(10),
+    margin: Duration::from_secs(10),
+};
 const EXAMPLE: &str = include_str!("../../../settings.example.toml");
 
 fn launch(shepherd: &FakeShepherd) -> Launch {
@@ -53,7 +63,7 @@ async fn start_brings_up_the_runner_then_reaches_it() {
 
     let client = client(&shepherd).await;
     let started = in_time(start(&client, &project("koji"))).await.unwrap();
-    assert_eq!(started, [r#"{"action":"start","sheep":"koji"}"#]);
+    assert_eq!(started, [r#"{"action":"status","sheep":"koji"}"#]);
     assert!(shepherd.sheep("koji").unwrap().1);
     let restarts: Vec<_> = shepherd
         .writes()
@@ -80,7 +90,7 @@ async fn start_brings_up_a_runner_whose_entry_still_sets_kill_timeout() {
 
     let client = client(&shepherd).await;
     let started = in_time(start(&client, &project("koji"))).await.unwrap();
-    assert_eq!(started, [r#"{"action":"start","sheep":"koji"}"#]);
+    assert_eq!(started, [r#"{"action":"status","sheep":"koji"}"#]);
     let (kept, running) = shepherd.sheep("koji").unwrap();
     assert!(running);
     assert_eq!(kept.kill_timeout.as_millis(), 10_000);
@@ -122,7 +132,15 @@ async fn start_and_pause_leave_a_sheep_that_is_not_kelpie_s_alone() {
     for name in ["web", "koji"] {
         let err = in_time(start(&client, &project(name))).await.unwrap_err();
         assert!(err.starts_with("no kelpie runner named"), "{err}");
-        let err = in_time(pause(&client, &project(name))).await.unwrap_err();
+        let err = in_time(pause(
+            &client,
+            &project(name),
+            FAST,
+            Interrupt::Never,
+            &mut |_| {},
+        ))
+        .await
+        .unwrap_err();
         assert!(err.starts_with("no kelpie runner named"), "{err}");
     }
     assert_eq!(shepherd.writes(), []);
@@ -302,20 +320,6 @@ fn a_runner_s_refusal_is_its_error() {
 }
 
 #[tokio::test]
-async fn pause_reaches_a_running_runner_and_names_one_that_is_not() {
-    let shepherd = FakeShepherd::new().await;
-    runner(&shepherd, "koji", Path::new("/src/koji"), true);
-    runner(&shepherd, "reactmap", Path::new("/src/reactmap"), false);
-    let client = client(&shepherd).await;
-    let paused = in_time(pause(&client, &project("koji"))).await.unwrap();
-    assert_eq!(paused, [r#"{"action":"pause","sheep":"koji"}"#]);
-    let err = in_time(pause(&client, &project("reactmap")))
-        .await
-        .unwrap_err();
-    assert_eq!(err, "reactmap's runner is not running");
-}
-
-#[tokio::test]
 async fn status_reports_every_project() {
     let shepherd = FakeShepherd::new().await;
     runner(&shepherd, "koji", Path::new("/src/koji"), true);
@@ -354,6 +358,8 @@ async fn a_runner_still_taking_its_actions_is_starting() {
     assert_eq!(in_time(status(&client)).await.unwrap(), ["koji: starting"]);
     // Each answer from a runner still starting uses the flag up.
     shepherd.just_started("koji");
-    let err = in_time(pause(&client, &project("koji"))).await.unwrap_err();
+    let err = in_time(send(&client, &project("koji"), "drop", None))
+        .await
+        .unwrap_err();
     assert_eq!(err, "koji's runner is starting: ask again in a moment");
 }

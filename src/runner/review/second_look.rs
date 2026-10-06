@@ -18,7 +18,6 @@ fn at_defect_hunter() -> (Rig, Mutex<Runner>) {
     let rig = Rig::new("shep");
     rig.default_review();
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);

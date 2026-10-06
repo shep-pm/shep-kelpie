@@ -92,7 +92,6 @@ mod tests {
     fn a_reviewers_session_keeps_its_read_tools_to_check_its_own_work() {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
         rig.claude.script([

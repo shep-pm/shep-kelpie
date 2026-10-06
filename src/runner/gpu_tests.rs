@@ -68,7 +68,7 @@ fn an_unreadable_page_leaves_status_working_and_says_why() {
     watching(&rig, &server.metrics_url());
     let runner = rig.open().unwrap();
     let status = read(&rig, &runner);
-    assert_eq!(status["run"], "paused");
+    assert_eq!(status["project"], "shep");
     assert_eq!(
         status["gpu"]["error"],
         "cannot read the GPU metrics: the page holds no GPU metrics"
@@ -113,8 +113,8 @@ fn a_box_that_never_replies_does_not_slow_status_or_hold_the_runner() {
         std::thread::sleep(Duration::from_millis(50));
     }
     let asked = Instant::now();
-    assert_eq!(rig.ask(&runner, "pause", None)["run"], "paused");
-    assert!(asked.elapsed() < ACTION_BUDGET / 3, "pause waited");
+    assert!(rig.ask(&runner, "drain", None)["draining"].is_object());
+    assert!(asked.elapsed() < ACTION_BUDGET / 3, "drain waited");
     drop(hung);
 }
 

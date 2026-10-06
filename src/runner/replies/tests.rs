@@ -214,7 +214,6 @@ fn a_reply_rule_refuses_is_told_on_the_topic() {
 fn a_questions_answer_by_reply_is_the_workers_next_turn() {
     let rig = Rig::new("rotom");
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.claude.script([Scripted::Say(
         "Done.\n\n<kelpie-question>\nShould it be `--dry-run` or `--check`?\n</kelpie-question>\n",
@@ -262,7 +261,6 @@ fn a_reply_takes_the_same_answers_as_the_terminal_without_the_project() {
 fn a_yes_by_reply_to_a_question_is_the_answer_s_text() {
     let rig = Rig::new("rotom");
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.claude.script([Scripted::Say(
         "Done.\n\n<kelpie-question>\nShall I keep the old flag?\n</kelpie-question>\n",
@@ -402,7 +400,7 @@ fn the_topic_is_read_every_few_seconds_less_while_it_fails_and_not_long_after() 
 
     // An hour after the last ruling waiting on it, the topic is let be.
     rig.ask(&runner, "rule", Some("1 no try again"));
-    rig.ask(&runner, "pause", None);
+    rig.ask(&runner, "drain", None);
     rig.clock.advance(LATE);
     step(&runner).unwrap();
     let reads = rig.alerts.reads().len();

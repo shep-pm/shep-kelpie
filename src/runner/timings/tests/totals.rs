@@ -144,7 +144,7 @@ fn the_timings_reply_is_pinned() {
 fn a_state_file_from_before_history_answers_timings_with_zeros() {
     let rig = Rig::new("koji");
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
+    rig.ask(&runner, "add", Some("7"));
     drop(runner);
     let file = rig.paths().state;
     let mut state: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();

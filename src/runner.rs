@@ -22,7 +22,7 @@ use crate::settings::{
 };
 use crate::skills::Skills;
 use crate::state::ids::RulingIds;
-use crate::state::{ProjectState, RunState, StateError, StateStore};
+use crate::state::{ProjectState, StateError, StateStore};
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{
     Known, Phase, QwenTally, ReviewCallState, Timings, Turn, WorkItem, new_session_id,
@@ -55,6 +55,7 @@ mod kept_tests;
 mod ledger;
 #[cfg(test)]
 mod ledger_tests;
+mod left;
 #[cfg(test)]
 mod limits_tests;
 mod merge;
@@ -90,6 +91,7 @@ pub use flight::{Pass, advance};
 pub use gpu::GpuStatus;
 pub use in_flight::Stopping;
 pub use ledger::count_stopped;
+pub use left::leave as leave_answer;
 pub use merge::DropError;
 pub use pace::PacerStatus;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
@@ -254,6 +256,8 @@ pub struct Runner {
     // Whether `drain` holds back every new call, in memory only, so a
     // restart ends it
     draining: bool,
+    // What the answers folder held that was no answer, in memory only
+    left: left::Seen,
 }
 
 impl Runner {
@@ -313,9 +317,7 @@ impl Runner {
         let skills = Skills::load(&settings.skills, &paths.skills);
         check_coderabbit(&settings, &lineup, &ports)?;
         check_local(&lineup, &ports)?;
-        let mut state = store
-            .load()?
-            .unwrap_or_else(|| ProjectState::new(ports.clock.now()));
+        let mut state = store.load()?.unwrap_or_default();
         // A review call in flight when the runner stopped never resumes on
         // its own, unlike a turn: nothing reruns review_step to naturally
         // clear it, so a restart clears it here instead of leaving it stuck
@@ -368,6 +370,7 @@ impl Runner {
             local,
             pm: pm::Desk::default(),
             draining: false,
+            left: left::Seen::default(),
         };
         runner.settle_older_bots()?;
         runner.settle_labels();
@@ -409,8 +412,6 @@ impl Runner {
         Status {
             project: self.project.as_str(),
             merge_authority: self.settings.merge_authority,
-            run: self.state.run,
-            since: self.state.since,
             work_item: self
                 .state
                 .work_items
@@ -448,26 +449,8 @@ impl Runner {
         WorkItemStatus::new(item, split)
     }
 
-    /// Lets the project take work. Starting a running project changes nothing.
-    ///
-    /// # Errors
-    ///
-    /// [`StateError::Write`] when the change cannot be saved. Nothing changes then.
-    pub fn start(&mut self) -> Result<(), StateError> {
-        self.set_run(RunState::Running)
-    }
-
-    /// Stops the project taking work. Pausing a paused project changes nothing.
-    ///
-    /// # Errors
-    ///
-    /// [`StateError::Write`] when the change cannot be saved. Nothing changes then.
-    pub fn pause(&mut self) -> Result<(), StateError> {
-        self.set_run(RunState::Paused)
-    }
-
     /// Opens a work item for `issue`, and returns the implementer its
-    /// worker runs on. Its first turn runs once the project is running.
+    /// worker runs on. Its first turn runs on a later pass.
     ///
     /// # Errors
     ///
@@ -594,16 +577,6 @@ impl Runner {
     pub(super) fn on(&mut self, issue: Option<u64>) -> &mut Self {
         self.focus = issue;
         self
-    }
-
-    fn set_run(&mut self, run: RunState) -> Result<(), StateError> {
-        if self.state.run == run {
-            return Ok(());
-        }
-        let mut next = self.state.clone();
-        next.run = run;
-        next.since = self.ports.clock.now();
-        self.save(next)
     }
 
     fn save(&mut self, mut next: ProjectState) -> Result<(), StateError> {
@@ -738,42 +711,78 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::runner::step;
     use crate::test::{Rig, git};
 
+    // A project saved paused by an older kelpie runs once its runner starts.
     #[test]
-    fn start_and_pause_survive_a_restart() {
+    fn a_project_saved_paused_reads_the_board_on_its_first_pass() {
         let rig = Rig::new("reactmap");
-        let runner = rig.open().unwrap();
-        rig.clock.advance(60);
-        assert_eq!(rig.ask(&runner, "start", None)["run"], "running");
-        drop(runner);
+        let epoch = Rig::EPOCH;
+        let old = json!({
+            "version": 9,
+            "run": "paused",
+            "since": epoch,
+            "work_items": [],
+            "rulings": [{
+                "id": 3,
+                "issue": null,
+                "question": "q",
+                "pull_request": 30,
+                "kind": { "kind": "stuck", "reason": "closed" },
+                "alerted": true,
+            }],
+            "last_ruling": 3,
+            "finished": [5],
+            "history": [{
+                "issue": 5,
+                "title": "Five",
+                "pull_request": 50,
+                "merged": true,
+                "at": epoch,
+                "wall": 100,
+                "seconds": { "worker": 60, "review": 0, "ci": 40, "ruling": 0, "merge": 0, "other": 0 },
+            }],
+            "reworked": [],
+            "adopted": [],
+            "leases": [],
+            "pacing": null,
+            "notices": [],
+            "replies": { "last": null },
+            "events": [
+                { "id": 1, "at": epoch, "what": "project started" },
+                { "id": 2, "at": epoch, "what": "#5: PR #50 merged, work item done" },
+                { "id": 3, "at": epoch, "what": "project paused" },
+            ],
+            "last_event": 3,
+            "pm_seen": 2,
+            "pm_session": "0e2c6a52-5b0e-4c5f-9a43-3c1f1d8b7e10",
+        });
+        let state = rig.paths().state;
+        std::fs::create_dir_all(state.parent().unwrap()).unwrap();
+        std::fs::write(&state, old.to_string()).unwrap();
 
         let runner = rig.open().unwrap();
+        rig.forge.list_ready(7, false);
+        assert!(matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Dispatched { issue: 7, .. })
+        ));
         let status = rig.ask(&runner, "status", None);
-        assert_eq!(
-            (&status["run"], &status["since"]),
-            (&json!("running"), &json!(Rig::EPOCH + 60))
-        );
-        rig.clock.advance(60);
-        assert_eq!(rig.ask(&runner, "pause", None)["run"], "paused");
+        assert_eq!(status["work_item"]["issue"], 7);
+        assert_eq!((status.get("run"), status.get("since")), (None, None));
+        assert_eq!(status["rulings"][0]["id"], 3);
+        assert_eq!(status["history"][0]["issue"], 5);
         drop(runner);
-
-        let runner = rig.open().unwrap();
-        let status = rig.ask(&runner, "status", None);
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
+        assert_eq!(saved["version"], 11);
         assert_eq!(
-            (&status["run"], &status["since"]),
-            (&json!("paused"), &json!(Rig::EPOCH + 120))
+            saved["events"][2]["what"], "project paused",
+            "old events stay"
         );
-        assert_eq!(rig.claude.calls(), [], "starting and pausing spend nothing");
-    }
-
-    #[test]
-    fn starting_a_running_project_keeps_its_since() {
-        let rig = Rig::new("golbat");
-        let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
-        rig.clock.advance(3600);
-        assert_eq!(rig.ask(&runner, "start", None)["since"], Rig::EPOCH);
+        assert_eq!(saved["pm_seen"], 2);
+        assert_eq!(saved["pm_session"], "0e2c6a52-5b0e-4c5f-9a43-3c1f1d8b7e10");
     }
 
     #[test]
@@ -784,7 +793,7 @@ mod tests {
         std::fs::remove_dir_all(&folder).unwrap();
         // A file where the folder was, which a save cannot make a folder of.
         std::fs::write(&folder, "").unwrap();
-        let reply = rig.ask(&runner, "start", None);
+        let reply = rig.ask(&runner, "add", Some("7"));
         assert!(
             reply["error"]
                 .as_str()
@@ -792,7 +801,7 @@ mod tests {
                 .contains("cannot write state file"),
             "{reply}"
         );
-        assert_eq!(rig.ask(&runner, "status", None)["run"], "paused");
+        assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
     }
 
     #[test]

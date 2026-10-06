@@ -103,7 +103,6 @@ mod tests {
     fn pushed(file: &'static str) -> (Rig, Mutex<Runner>) {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
         rig.claude.script([Scripted::Push(file, HOOK)]);
@@ -174,7 +173,6 @@ mod tests {
         let rig = Rig::new("shep");
         rig.merge_auto();
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
         rig.claude.script([
@@ -214,7 +212,6 @@ mod tests {
             },
         );
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "rework", Some("71"));
         let (id, question) = ruling(step(&runner).unwrap());
         assert!(question.contains("worktree: .mcp.json."), "{question}");
@@ -237,7 +234,6 @@ mod tests {
         rig.push_by_hand("fix/tools", ".mcp.json");
         rig.forge.open_pull_request(80, "fix/tools", &[5]);
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "adopt", Some("80"));
         assert!(matches!(
             step(&runner).unwrap(),
@@ -255,7 +251,6 @@ mod tests {
         let head = rig.push_by_hand("fix/timeline", "work.txt");
         rig.forge.open_pull_request(80, "fix/timeline", &[5]);
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "adopt", Some("80"));
         step(&runner).unwrap(); // the adoption
         rig.forge.set_checks(&head, Checks::Passed);
@@ -300,7 +295,6 @@ mod tests {
     fn a_settings_file_left_in_the_worktree_runs_no_review_call() {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.ask(&runner, "add", Some("7"));
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
         rig.claude

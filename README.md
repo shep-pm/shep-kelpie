@@ -118,7 +118,8 @@ label `ready-for-human`: already on shep-pm/shep
 label `in-progress`: already on shep-pm/shep
 label `review please`: already on shep-pm/shep
 agent files: wrote sonnet-high, opus-high, defect-hunter, coderabbit, cubic, codex, issue-writer, pm in /path/to/.shep/kelpie/agents
-runner `scratch`: added with its settings, stopped until `shep kelpie start`
+runner `scratch`: added with its settings, stopped
+`shep kelpie start scratch` runs it
 ```
 
 On a repo without those four labels, `add` makes them. The runner puts `in-progress` on an issue while a work item has it. It writes kelpie's own [agent files](#agents) where they are missing, and never over one you edited. The project is named after the repo, or `shep kelpie add <name>`, as `scratch` was here.
@@ -190,6 +191,8 @@ For npm, that is `registry.npmjs.org`. A change reaches a running runner at its 
 shep kelpie start
 ```
 
+It starts the project's runner, and the project runs while it does: `shep start scratch` and lookout's start do the same, and `shep ls` shows it `online`. The runner reads the board from its first pass.
+
 Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria, or have the issue writer write it (see [Writing issues](#writing-issues)). The runner gives it to a worker, which opens a draft pull request. Then the review runs, each listed reviewer once, then CI. Last, you get a ruling before the merge. `shep kelpie status` shows every project. [The board](#the-board) says what decides whether, and when, an issue starts.
 
 ### 8. Answer a ruling
@@ -210,7 +213,7 @@ On ntfy you can also reply in the topic, after a one-time `shep kelpie totp`. [R
 shep kelpie pause
 ```
 
-The calls already running finish, then the workers park. `shep kelpie start` resumes it. A runner's log is `shep bleats <project>`, and the dog's is `shep bleats kelpie`.
+The runner starts no new call, the calls already running finish and a merge found in flight lands, then shep stops it, so `shep ls` shows it `stopped`. It says what it waits on meanwhile. A session you attached keeps running in your terminal. A ruling still waiting can be answered with `shep kelpie rule` while it is stopped, and the runner acts on the answer when it starts. `shep kelpie start` runs it again. A merge a ruling starts in the moment between that check and the stop can still be cut short, and its work item resumes when the runner starts. If a wait runs out, you interrupt it or shep refuses the stop, the runner keeps running. A runner's log is `shep bleats <project>`, and the dog's is `shep bleats kelpie`.
 
 ## The flow
 
@@ -551,7 +554,7 @@ shep-kelpie is a dog of your own shepherd, and leans on it for everything a proc
 
 - **Supervision.** The adopted `kelpie` is the dog, and each project's runner is a sheep. shep starts, restarts and stops them, and keeps them beside your other sheep. `shep stop <project>` stops a runner, and `shep delete <project>` removes it
 - **Lambs.** Every agent call a runner starts, a worker's turn, a reviewer's session or the project manager's wake, is a lamb of that runner. `shep describe <project>` labels each with its issue and role, such as `#114 worker`
-- **Stopping the calls.** A runner asks for `shutdown_with_message`, so a stop reaches it as a message, and it sends each call's process group SIGTERM and exits at once, without waiting for them. shep's stop then ends every lamb the runner left, whatever process group or session it is in (shep-pm/shep#688, ADR 0005), so a runner's entry takes shep's default `kill_timeout`. A runner still ends a single call itself, at its turn ceiling or on a pause, through the process group each call leads
+- **Stopping the calls.** A runner asks for `shutdown_with_message`, so a stop reaches it as a message, and it sends each call's process group SIGTERM and exits at once, without waiting for them. shep's stop then ends every lamb the runner left, whatever process group or session it is in (shep-pm/shep#688, ADR 0005), so a runner's entry takes shep's default `kill_timeout`. A runner still ends a single call itself, at its turn ceiling, through the process group each call leads
 - **Triggers and status.** Every `shep kelpie` verb is a trigger on the shepherd channel, which `shep trigger <project> <action>` sends too, and the runner answers while its calls run. Runners ask the dog for leases with metrics on shep's bus
 - **Settings.** A project's settings are its runner's `[app.dogs.kelpie]` table, and shep-kelpie's own are the `[kelpie]` section of `dogs.toml`. shep keeps both, and lookout edits both from shep-kelpie's settings schema
 - **Logs.** `shep bleats <project>` is a runner's log, and `shep bleats kelpie` the dog's
@@ -570,8 +573,8 @@ shep-kelpie runs in your own shepherd, beside your other sheep. The adopted dog 
 
 ```sh
 shep kelpie add        # labels, settings, agent files, and the runner, stopped
-shep kelpie start      # starts the runner, then the project
-shep kelpie pause
+shep kelpie start      # starts the runner, which runs the project
+shep kelpie pause      # stops it once its calls end
 shep kelpie status     # every project
 shep kelpie doctor     # what each project still needs on this machine
 shep kelpie rule 14 yes

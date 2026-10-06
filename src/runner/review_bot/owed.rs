@@ -31,7 +31,6 @@ fn adopted_by_both(rig: &Rig) -> (Mutex<Runner>, String) {
     rig.forge.open_pull_request(80, "fix/timeline", &[5]);
     rig.forge.ready_pull_request(80);
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "adopt", Some("80"));
     step(&runner).unwrap();
     (runner, head)

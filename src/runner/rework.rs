@@ -118,7 +118,7 @@ impl Runner {
     /// Opens a work item reworking open pull request `number`, which kelpie
     /// opened, and returns the implementer its worker runs on
     ///
-    /// Its first turn runs once the project is running.
+    /// Its first turn runs on a later pass.
     ///
     /// # Errors
     ///

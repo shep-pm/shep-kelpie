@@ -14,9 +14,6 @@ pub(super) fn changes(
     shown: &dyn Fn(String) -> String,
 ) -> Vec<String> {
     let mut found = Vec::new();
-    if was.run != now.run {
-        found.push(format!("project {}", run_word(now)));
-    }
     for item in &now.work_items {
         match was.item(item.issue) {
             None => found.push(opened(item)),
@@ -42,13 +39,6 @@ pub(super) fn changes(
         }
     }
     found
-}
-
-fn run_word(state: &ProjectState) -> &'static str {
-    match state.run {
-        crate::state::RunState::Running => "started",
-        crate::state::RunState::Paused => "paused",
-    }
 }
 
 fn opened(item: &WorkItem) -> String {

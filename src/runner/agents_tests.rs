@@ -25,7 +25,6 @@ fn name_agents(rig: &Rig, names: &str) {
 // round whose one MEDIUM finding goes to the worker, the fix, and a clean
 // Claude round that reads it, each reviewer once.
 fn whole_work_item(rig: &Rig, runner: &Mutex<Runner>) {
-    rig.ask(runner, "start", None);
     rig.ask(runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.reviewer.script([ScriptedRound::Findings(vec![Finding {
@@ -109,7 +108,6 @@ fn naming_an_agent_while_the_runner_runs_takes_effect_at_the_next_dispatch() {
         line.as_deref(),
         Some("settings changed: agents now in effect")
     );
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.claude.script([Scripted::Say("done")]);
     crate::runner::step(&runner).unwrap();

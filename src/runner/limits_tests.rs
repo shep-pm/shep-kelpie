@@ -45,7 +45,6 @@ fn named(project: &str, names: &str) -> (Rig, Mutex<Runner>) {
         }
     });
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     (rig, runner)
 }
 
@@ -294,9 +293,7 @@ fn a_local_turn_waits_while_a_review_round_holds_the_gpu() {
 fn reopened(rig: &Rig, runner: Mutex<Runner>, change: impl FnOnce()) -> Mutex<Runner> {
     drop(runner);
     change();
-    let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
-    runner
+    rig.open().unwrap()
 }
 
 #[test]

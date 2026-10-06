@@ -15,6 +15,7 @@ use crate::settings::source;
 use crate::shepherd;
 use crate::state::ids::RulingIds;
 use crate::tools::Tools;
+use crate::upgrade::restart::{Interrupt, Patience};
 
 /// The verbs [`main`] runs: every trigger a runner takes, `add`, which also
 /// registers a checkout, `issue`, which runs the issue writer itself, and
@@ -29,7 +30,7 @@ pub const VERBS: [&str; 17] = [
 pub const USAGE: &str = "\
 usage: shep kelpie add [<project>]       registers this checkout as a project
        shep kelpie add <issue>           puts an issue on the project's board
-       shep kelpie start | pause
+       shep kelpie start | pause         runs the project, or stops it once its calls end
        shep kelpie status                every project, or one with -p
        shep kelpie rule [<id> <answer>]
        shep kelpie rework <pr> | adopt <pr>
@@ -139,7 +140,11 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
             };
             match command {
                 "start" => control::start(&client, &name).await,
-                _ => control::pause(&client, &name).await,
+                _ => {
+                    let say = &mut |line: String| println!("{line}");
+                    let patience = Patience::default();
+                    control::pause(&client, &name, patience, Interrupt::Signals, say).await
+                }
             }
         }
         ("status", []) if named.is_none() => control::status(&client).await,
@@ -252,9 +257,8 @@ async fn answer(
     let client = shepherd::connect(shep_home)
         .await
         .map_err(|e| e.describe(shep_home))?;
-    control::send(&client, &project, "rule", Some(&params)).await?;
-    let (id, said) = params.split_once(' ').unwrap_or((&params, ""));
-    Ok(vec![format!("ruling {id} on {project}: {said}")])
+    let answers = ProjectPaths::under(kelpie_home, shep_home, &project).answers;
+    control::rule(&client, &project, &params, &answers).await
 }
 
 /// `-p <project>`, `--project <project>` or `--project=<project>` from

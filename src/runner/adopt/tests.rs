@@ -19,9 +19,7 @@ fn opened_80(rig: &Rig) -> String {
 }
 
 fn running(rig: &Rig) -> Mutex<Runner> {
-    let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
-    runner
+    rig.open().unwrap()
 }
 
 fn adopted_80() -> StepReport {
@@ -440,7 +438,6 @@ fn adopted_pull_requests_wait_for_the_work_item_in_flight_across_a_restart() {
     assert_eq!(status["adopted"], waiting(&[81, 80], false));
     assert_eq!(status["work_item"]["issue"], 7);
     rig.ask(&runner, "drop", None);
-    rig.ask(&runner, "start", None);
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::Adopted {
@@ -611,7 +608,6 @@ fn a_waiting_pull_request_merged_or_closed_by_hand_leaves_without_a_comment() {
     rig.forge.set_state(80, PullRequestState::Merged);
     rig.forge.set_state(81, PullRequestState::Closed);
     rig.ask(&runner, "drop", None);
-    rig.ask(&runner, "start", None);
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(rig.forge.comments(), []);
     assert_eq!(rig.ask(&runner, "status", None)["adopted"], json!([]));

@@ -29,8 +29,11 @@ _Avoid_: harness (the working name before 2026-09-25), control room
 ## Who
 
 **Project**:
-A repo under kelpie, with its settings, board and state file. You start or
-pause a project; its settings (merge authority, agents, pacing) live on it.
+A repo under kelpie, with its settings, board and state file. It runs while
+its runner's sheep runs: you start it, or pause it, which waits for its
+calls and any merge in flight to end and then stops that sheep. A wait that
+runs out, an interrupt or a refused stop leaves it running. Its settings
+(merge authority, agents, pacing) live on it.
 _Avoid_: shift
 
 **Project manager (PM)**:

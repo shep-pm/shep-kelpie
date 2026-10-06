@@ -82,6 +82,9 @@ pub struct ProjectPaths {
     pub state: PathBuf,
     /// The board briefing, `board.md`, which the project manager's agent reads
     pub board: PathBuf,
+    /// The rulings answered while the runner was stopped, one file each,
+    /// which it acts on when it starts
+    pub answers: PathBuf,
     /// The project manager's folder: the board as it stood at its last wake,
     /// and its notes
     pub pm: PathBuf,
@@ -115,6 +118,7 @@ impl ProjectPaths {
             folder: folder.clone(),
             state: folder.join("state.json"),
             board: folder.join("board.md"),
+            answers: folder.join("answers"),
             pm: folder.join("pm"),
             worker: folder.join("worker"),
             skills: folder.join("skills"),

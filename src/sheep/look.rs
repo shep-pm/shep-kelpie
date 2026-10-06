@@ -283,7 +283,6 @@ mod tests {
         rig.write_agent("mine", MINE);
         rig.implementers(&["sonnet-high", "mine"]);
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         rig.forge.label(7, "agent:mine");
         rig.ask(&runner, "add", Some("7"));
         runner
@@ -313,7 +312,6 @@ mod tests {
         std::fs::remove_file(rig.paths().agents.join("mine.md")).unwrap();
         rig.implementers(&["sonnet-high"]);
         let runner = rig.open().unwrap();
-        rig.ask(&runner, "start", None);
         assert!(matches!(
             step(&runner).unwrap(),
             Some(StepReport::Failed { .. })

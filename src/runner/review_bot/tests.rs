@@ -144,7 +144,6 @@ fn summoned(project: &str) -> (Rig, Mutex<Runner>, String) {
     let rig = Rig::new(project);
     rig.coderabbit_on();
     let runner = rig.open_with(vec![Arc::new(StandIn)]).unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([
@@ -299,7 +298,6 @@ fn an_owed_stand_in_summon_marked_done_is_answered_not_summoned_again() {
     rig.forge.open_pull_request(80, "fix/timeline", &[5]);
     rig.forge.ready_pull_request(80);
     let runner = rig.open_with(vec![Arc::new(StandIn)]).unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "adopt", Some("80"));
     step(&runner).unwrap();
     assert!(matches!(

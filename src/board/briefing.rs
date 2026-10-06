@@ -33,8 +33,6 @@ pub struct Briefing<'a> {
     pub project: &'a str,
     /// When it was written
     pub now: Timestamp,
-    /// Whether the project takes work
-    pub running: bool,
     /// How many work items may be open at once
     pub max_items: u32,
     /// `origin/main`'s commit, once git has read it
@@ -174,14 +172,13 @@ pub fn render(board: &Briefing<'_>) -> String {
     let mut out = String::new();
     let now = board.now;
     let _ = writeln!(out, "# Board: {}, {} UTC\n", board.project, date_time(now));
-    let run = if board.running { "Running" } else { "Paused" };
     let main = board
         .main
         .as_deref()
         .map_or(String::new(), |m| format!(" Main is at {}.", short(m)));
     let _ = writeln!(
         out,
-        "{run}, {} of {} work items open.{main}\n",
+        "{} of {} work items open.{main}\n",
         board.items.len(),
         board.max_items
     );
@@ -286,7 +283,7 @@ fn ready_queue(out: &mut String, ready: Option<&Ready>, now: Timestamp) {
     let Some(ready) = ready else {
         out.push_str(
             "## Ready queue\n\nNot read since the runner started. The board reads it while \
-             the project runs with a slot free.\n\n",
+             a slot is free.\n\n",
         );
         return;
     };

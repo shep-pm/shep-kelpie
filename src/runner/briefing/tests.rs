@@ -37,7 +37,6 @@ fn seven_and_eight(project: &str) -> (Rig, Mutex<Runner>) {
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.forge.open_pull_request(81, "kelpie/8", &[8]);
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.ask(&runner, "add", Some("8"));
     (rig, runner)
@@ -54,7 +53,7 @@ fn a_new_project_gets_its_board_at_start_with_nothing_on_it() {
         format!(
             "# Board: acme, 2026-09-21 14:13 UTC\n\
              \n\
-             Paused, 0 of 1 work items open. Main is at {}.\n\
+             0 of 1 work items open. Main is at {}.\n\
              \n\
              ## Open work\n\
              \n\
@@ -62,8 +61,7 @@ fn a_new_project_gets_its_board_at_start_with_nothing_on_it() {
              \n\
              ## Ready queue\n\
              \n\
-             Not read since the runner started. The board reads it while the project runs \
-             with a slot free.\n\
+             Not read since the runner started. The board reads it while a slot is free.\n\
              \n\
              ## Recent events\n\
              \n\
@@ -102,7 +100,7 @@ fn two_branches_editing_one_file_read_as_a_conflict_and_a_ready_issue_naming_it_
 
 const TWO_BRANCHES: &str = r#"# Board: acme, 2026-09-21 14:18 UTC
 
-Running, 2 of 3 work items open. Main is at MAIN.
+2 of 3 work items open. Main is at MAIN.
 
 ## Open work
 
@@ -119,23 +117,22 @@ Running, 2 of 3 work items open. Main is at MAIN.
 
 ## Recent events
 
-- [1] 14:13 project started
-- [2] 14:13 #7: work item opened on sonnet-high: "Title of #7"
-- [3] 14:13 #8: work item opened on sonnet-high: "Title of #8"
-- [4] 14:13 #7: worker turn started
-- [5] 14:13 #7: worker turn ended
-- [6] 14:13 #7: pull request #71 opened
-- [7] 14:13 #7: implement to review round 1
-- [8] 14:13 #8: worker turn started
-- [9] 14:13 #8: worker turn ended
-- [10] 14:13 #8: pull request #81 opened
-- [11] 14:13 #8: implement to review round 1
-- [12] 14:13 #7: review call started
-- [13] 14:13 #7: review call ended
-- [14] 14:13 #7: review round 1 to review round 2
-- [15] 14:13 #8: review call started
-- [16] 14:13 #8: review call ended
-- [17] 14:13 #8: review round 1 to review round 2
+- [1] 14:13 #7: work item opened on sonnet-high: "Title of #7"
+- [2] 14:13 #8: work item opened on sonnet-high: "Title of #8"
+- [3] 14:13 #7: worker turn started
+- [4] 14:13 #7: worker turn ended
+- [5] 14:13 #7: pull request #71 opened
+- [6] 14:13 #7: implement to review round 1
+- [7] 14:13 #8: worker turn started
+- [8] 14:13 #8: worker turn ended
+- [9] 14:13 #8: pull request #81 opened
+- [10] 14:13 #8: implement to review round 1
+- [11] 14:13 #7: review call started
+- [12] 14:13 #7: review call ended
+- [13] 14:13 #7: review round 1 to review round 2
+- [14] 14:13 #8: review call started
+- [15] 14:13 #8: review call ended
+- [16] 14:13 #8: review round 1 to review round 2
 
 ## Overlap
 
@@ -165,7 +162,6 @@ Files both sides touch, and the files `git merge-tree` finds in conflict between
 fn a_worker_silent_past_ten_minutes_reads_as_idle_until_it_shows_something_again() {
     let rig = Rig::new("acme");
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     let hold = Hold::default();
     rig.claude.script([Scripted::Hold(hold.clone())]);
@@ -200,22 +196,20 @@ fn a_worker_silent_past_ten_minutes_reads_as_idle_until_it_shows_something_again
 fn the_events_shown_start_after_the_project_managers_cursor() {
     let rig = Rig::new("acme");
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
-    rig.ask(&runner, "pause", None);
+    rig.ask(&runner, "drop", None);
     drop(runner);
     let path = rig.paths().state;
     let mut state: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(state["last_event"], 3);
+    assert_eq!(state["last_event"], 2);
     state["pm_seen"] = 1.into();
     std::fs::write(&path, state.to_string()).unwrap();
 
     rig.open().unwrap();
     let text = board(&rig);
     let events = "## Since your last wake\n\n\
-                  - [2] 14:13 #7: work item opened on sonnet-high: \"Title of #7\"\n\
-                  - [3] 14:13 project paused\n\n";
+                  - [2] 14:13 #7: work item dropped\n\n";
     assert!(text.contains(events), "{text}");
 }
 
@@ -223,7 +217,6 @@ fn the_events_shown_start_after_the_project_managers_cursor() {
 fn a_turn_hung_before_its_transcript_exists_reads_as_idle() {
     let rig = Rig::new("acme");
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     let hold = Hold::default();
     rig.claude.script([Scripted::Hold(hold.clone())]);
@@ -257,7 +250,6 @@ fn a_summary_naming_a_private_name_is_withheld_from_the_board() {
         )
     });
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.claude
         .script([Scripted::Say("Done for Kestrel, nothing pushed yet.")]);
@@ -273,7 +265,6 @@ fn a_summary_naming_a_private_name_is_withheld_from_the_board() {
 fn a_failure_naming_a_path_on_this_machine_is_withheld_from_the_board() {
     let rig = Rig::new("acme");
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     let repo = rig.repo().display().to_string();
     let reason = format!("cannot read {repo}/src/lib.rs");

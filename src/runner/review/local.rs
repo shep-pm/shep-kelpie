@@ -41,7 +41,6 @@ fn command(path: &str) -> String {
 fn with_no_local_round_listed_one_clean_claude_round_reaches_ci() {
     let rig = claude_alone();
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([
@@ -68,7 +67,6 @@ fn with_no_local_round_listed_one_clean_claude_round_reaches_ci() {
 fn with_no_local_round_listed_claudes_fix_goes_on_to_ci() {
     let rig = claude_alone();
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([
@@ -97,7 +95,6 @@ fn the_endpoint_reviewers_findings_reach_the_worker() {
     let rig = rig_with(&endpoint(server.url()));
     rig.reviewer.pass_through();
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);
@@ -137,7 +134,6 @@ fn a_named_command_runs_in_place_of_the_script() {
     rig.write_agent("mine", &self::command(&command.display().to_string()));
     rig.reviewer.pass_through();
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);
@@ -162,7 +158,6 @@ fn a_named_command_runs_in_place_of_the_script() {
 fn a_session_that_says_neither_findings_nor_clean_fails() {
     let rig = claude_alone();
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([
@@ -241,7 +236,6 @@ fn qwen() -> AgentName {
 
 fn at_round_one(rig: &Rig) -> Mutex<Runner> {
     let runner = rig.open().unwrap();
-    rig.ask(&runner, "start", None);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);
