@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 pub const UPSTREAM: &str = "https://github.com/mattpocock/skills";
 
 /// The upstream commit every file here was taken from
-pub const PIN: &str = "d81f3a183412e71a5b1e84ca21bc1a35eea03a60";
+pub const PIN: &str = "6fd947921b935b7e1e69293a200400f0fdd5c15f";
 
 /// The plugin's name, which each skill's slash command starts with
 pub const PLUGIN: &str = "mattpocock";
