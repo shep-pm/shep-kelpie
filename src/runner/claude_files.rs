@@ -43,7 +43,7 @@ impl Runner {
         match fence::changed(&self.settings.repo, &item.branch, accepted) {
             Ok((_, files)) if files.is_empty() => Ok(None),
             Ok((head, files)) => {
-                let kind = RulingKind::ClaudeFiles { head, files, phase };
+                let kind = RulingKind::AgentFiles { head, files, phase };
                 self.raise(number, kind).map(Some)
             }
             Err(e) if unchecked == Unchecked::Stop => Ok(Some(self.gate_failed(format!(

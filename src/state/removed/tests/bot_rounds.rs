@@ -6,7 +6,7 @@ use super::saved_with;
 use crate::ports::{Finding, Timestamp};
 use crate::review_bot::Bot;
 use crate::settings::AgentName;
-use crate::state::{Fix, ProjectState, Resume, RulingKind};
+use crate::state::{Fix, ProjectState, Resume, RulingKind, Stuck};
 use crate::work_item::{Phase, Review, ReviewStage};
 
 fn racy() -> Value {
@@ -153,10 +153,10 @@ fn a_bot_fix_that_pushed_nothing_is_a_fix_in_the_pass_of_the_bots() {
     };
     assert_eq!(
         state.rulings[0].kind,
-        RulingKind::FixNotPushed {
+        RulingKind::from(Stuck::FixNotPushed {
             fix: Fix::Review(review),
             prompt: "again".into(),
-        }
+        })
     );
 }
 
@@ -197,10 +197,10 @@ fn a_round_cap_ruling_asks_again_to_send_the_threads_it_held() {
     };
     assert_eq!(
         state.rulings[0].kind,
-        RulingKind::FixNotPushed {
+        RulingKind::from(Stuck::FixNotPushed {
             fix: Fix::Review(review(Some("c0ffee"), vec![finding(racy())])),
             prompt: "fix these".into(),
-        }
+        })
     );
     assert_eq!(
         state.rulings[0].question,
@@ -212,10 +212,10 @@ fn a_round_cap_ruling_asks_again_to_send_the_threads_it_held() {
     assert_eq!(state.work_items[0].threads_sent, ["PRRT_1"]);
     assert_eq!(
         state.rulings[1].kind,
-        RulingKind::FixNotPushed {
+        RulingKind::from(Stuck::FixNotPushed {
             fix: Fix::Review(review(None, Vec::new())),
             prompt: "older".into(),
-        },
+        }),
         "a ruling that parks no item sends what it held when answered"
     );
 }
@@ -234,9 +234,9 @@ fn a_ruling_that_keeps_a_bot_rounds_phase_keeps_it_as_the_pass_of_the_bots() {
     });
     assert_eq!(
         state.rulings[0].kind,
-        RulingKind::TurnTimeout {
+        RulingKind::from(Stuck::TurnTimeout {
             phase: Some(bots_pass(fixing(Some("c0ffee")), None)),
-        }
+        })
     );
 }
 
@@ -323,7 +323,7 @@ fn a_file_with_a_bot_round_saves_as_the_current_version_with_none() {
     store.save(&state).unwrap();
     let saved = std::fs::read_to_string(dir.path().join("state.json")).unwrap();
     let saved: Value = serde_json::from_str(&saved).unwrap();
-    assert_eq!(saved["version"], 8);
+    assert_eq!(saved["version"], 9);
     assert_eq!(saved["work_items"][0]["phase"]["state"], "review");
     assert_eq!(saved["work_items"][0].get("coderabbit"), None);
     assert_eq!(store.load().unwrap().unwrap(), state);

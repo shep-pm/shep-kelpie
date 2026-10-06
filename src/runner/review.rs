@@ -36,7 +36,7 @@ use crate::ports::{
     RoundStage, Severity, Timestamp, read_review,
 };
 use crate::settings::{AgentName, ListedReviewer};
-use crate::state::{Fix, RulingKind, StateError};
+use crate::state::{Fix, StateError, Stuck};
 use crate::work_item::{CallKind, Phase, Review, ReviewCallState, ReviewStage, Turn, WorkItem};
 use crate::worktree;
 
@@ -223,7 +223,7 @@ impl Runner {
                     let path = findings::findings_path(build);
                     let prompt = findings::again_prompt(number, round, &path);
                     let fix = Fix::Review(review);
-                    return self.raise(number, RulingKind::FixNotPushed { fix, prompt });
+                    return self.raise(number, Stuck::FixNotPushed { fix, prompt }.into());
                 }
                 // A fix that moved the head answers the bot threads it was sent.
                 Ok(now) => {
@@ -431,7 +431,11 @@ impl Runner {
         // the round is parked on a ruling, which alerts.
         if let ReviewResult::Spilled(reason) = &result {
             let reason = reason.clone();
-            let kind = RulingKind::LocalModelSpilled { review, reason };
+            let kind = Stuck::LocalModelSpilled {
+                review,
+                why: reason,
+            }
+            .into();
             let (id, question) = park(self.names(), &mut next, issue, Some(number), kind);
             self.save(next)?;
             let comment_failed = self.post_ruling(Some(number), id);

@@ -15,7 +15,7 @@ use super::report::{Begin, StepReport};
 use super::trigger::WhichItem;
 use crate::ports::{Checks, PullRequestState};
 use crate::settings::MergeAuthority;
-use crate::state::{Finished, Notice, RulingKind, StateError};
+use crate::state::{Finished, Notice, RulingKind, StateError, Stuck};
 use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, Turn};
 use crate::worktree::{self, Base};
 
@@ -147,7 +147,7 @@ impl Runner {
             }
             PullRequestState::Closed => {
                 self.update(|item| item.merge_queued = None)?;
-                return self.raise(number, RulingKind::Closed);
+                return self.raise(number, Stuck::Closed.into());
             }
         }
         // Queued, the pull request is tested on top of the ones ahead of it
@@ -337,7 +337,7 @@ impl Runner {
             item.merge_tried = tried;
         })?;
         if refused_before {
-            return self.raise(number, RulingKind::MergeRefused { head, reason });
+            return self.raise(number, Stuck::MergeRefused { head, why: reason }.into());
         }
         self.withdraw(issue, number, true, reason)
     }

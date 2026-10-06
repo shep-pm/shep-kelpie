@@ -22,7 +22,7 @@ fn big_state(n: u64) -> ProjectState {
             issue: Some(n),
             question: format!("question {n}"),
             pull_request: Some(n),
-            kind: RulingKind::Closed,
+            kind: RulingKind::from(Stuck::Closed),
             alerted: false,
         })
         .collect();
@@ -105,7 +105,7 @@ fn a_file_with_one_work_item_loads_as_a_list_of_one() {
     let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(
         (&saved["version"], saved.get("work_item")),
-        (&serde_json::json!(8), None)
+        (&serde_json::json!(9), None)
     );
     assert_eq!(store.load().unwrap(), Some(state));
 
@@ -154,18 +154,18 @@ fn the_file_format_is_pinned() {
         ),
         ruling(
             2,
-            RulingKind::Rebase {
-                reason: "conflicts".into(),
-            },
+            RulingKind::from(Stuck::Rebase {
+                why: "conflicts".into(),
+            }),
         ),
         ruling(
             3,
-            RulingKind::StillRed {
+            RulingKind::from(Stuck::StillRed {
                 head: "bad".into(),
                 checks: vec!["lint".into()],
-            },
+            }),
         ),
-        ruling(4, RulingKind::Closed),
+        ruling(4, RulingKind::from(Stuck::Closed)),
         ruling(
             5,
             RulingKind::Question {
@@ -173,7 +173,7 @@ fn the_file_format_is_pinned() {
                 resume: Resume::Nothing,
             },
         ),
-        ruling(6, RulingKind::TurnTimeout { phase: None }),
+        ruling(6, RulingKind::from(Stuck::TurnTimeout { phase: None })),
         ruling(
             7,
             RulingKind::ForeignChange {
@@ -187,10 +187,10 @@ fn the_file_format_is_pinned() {
         ),
         ruling(
             8,
-            RulingKind::MergeRefused {
+            RulingKind::from(Stuck::MergeRefused {
                 head: "c0ffee".into(),
-                reason: "a ruleset".into(),
-            },
+                why: "a ruleset".into(),
+            }),
         ),
     ];
     state.last_ruling = 8;
@@ -238,15 +238,20 @@ fn the_file_format_is_pinned() {
     assert_eq!(
         value,
         serde_json::json!({
-            "version": 8,
+            "version": 9,
             "run": "paused",
             "since": 7,
             "work_items": [],
             "rulings": [
                 pinned(1, serde_json::json!({ "kind": "merge", "head": "c0ffee" })),
-                pinned(2, serde_json::json!({ "kind": "rebase", "reason": "conflicts" })),
-                pinned(3, serde_json::json!({ "kind": "still-red", "head": "bad", "checks": ["lint"] })),
-                pinned(4, serde_json::json!({ "kind": "closed" })),
+                pinned(2, serde_json::json!({ "kind": "stuck", "reason": "rebase", "why": "conflicts" })),
+                pinned(3, serde_json::json!({
+                    "kind": "stuck",
+                    "reason": "still-red",
+                    "head": "bad",
+                    "checks": ["lint"],
+                })),
+                pinned(4, serde_json::json!({ "kind": "stuck", "reason": "closed" })),
                 pinned(
                     5,
                     serde_json::json!({
@@ -255,16 +260,17 @@ fn the_file_format_is_pinned() {
                         "resume": { "state": "nothing" },
                     }),
                 ),
-                pinned(6, serde_json::json!({ "kind": "turn-timeout" })),
+                pinned(6, serde_json::json!({ "kind": "stuck", "reason": "turn-timeout" })),
                 pinned(7, serde_json::json!({
                     "kind": "foreign-change",
                     "description": "the `bug` label was added",
                     "known": { "labels": ["bug"], "ready": false, "head": "c0ffee" },
                 })),
                 pinned(8, serde_json::json!({
-                    "kind": "merge-refused",
+                    "kind": "stuck",
+                    "reason": "merge-refused",
                     "head": "c0ffee",
-                    "reason": "a ruleset",
+                    "why": "a ruleset",
                 })),
             ],
             "last_ruling": 8,
@@ -339,30 +345,35 @@ fn a_finished_work_item_is_pinned() {
 
 #[test]
 fn a_timeout_keeps_the_phase_its_turn_ran_in() {
-    let kind = RulingKind::TurnTimeout {
+    let kind = RulingKind::from(Stuck::TurnTimeout {
         phase: Some(Phase::Implement),
-    };
+    });
     let saved = serde_json::to_value(&kind).unwrap();
     assert_eq!(
         saved,
-        serde_json::json!({ "kind": "turn-timeout", "phase": { "state": "implement" } })
+        serde_json::json!({
+            "kind": "stuck",
+            "reason": "turn-timeout",
+            "phase": { "state": "implement" },
+        })
     );
     assert_eq!(serde_json::from_value::<RulingKind>(saved).unwrap(), kind);
 }
 
 #[test]
 fn a_failed_turn_keeps_its_phase_and_the_turn_to_retry() {
-    let kind = RulingKind::TurnFailed {
-        reason: "no worktree".into(),
+    let kind = RulingKind::from(Stuck::TurnFailed {
+        why: "no worktree".into(),
         phase: Phase::Implement,
         retry: Turn::Due,
-    };
+    });
     let saved = serde_json::to_value(&kind).unwrap();
     assert_eq!(
         saved,
         serde_json::json!({
-            "kind": "turn-failed",
-            "reason": "no worktree",
+            "kind": "stuck",
+            "reason": "turn-failed",
+            "why": "no worktree",
             "phase": { "state": "implement" },
             "retry": { "state": "due" },
         })
@@ -371,8 +382,8 @@ fn a_failed_turn_keeps_its_phase_and_the_turn_to_retry() {
 }
 
 #[test]
-fn a_change_to_claudes_files_keeps_its_head_files_and_phase() {
-    let kind = RulingKind::ClaudeFiles {
+fn a_change_to_agent_files_keeps_its_head_files_and_phase() {
+    let kind = RulingKind::AgentFiles {
         head: "c0ffee".into(),
         files: vec![".mcp.json".into()],
         phase: Phase::Implement,
@@ -381,7 +392,7 @@ fn a_change_to_claudes_files_keeps_its_head_files_and_phase() {
     assert_eq!(
         saved,
         serde_json::json!({
-            "kind": "claude-files",
+            "kind": "agent-files",
             "head": "c0ffee",
             "files": [".mcp.json"],
             "phase": { "state": "implement" },
@@ -393,7 +404,8 @@ fn a_change_to_claudes_files_keeps_its_head_files_and_phase() {
 #[test]
 fn a_qwen_fix_not_pushed_keeps_its_wire_shape() {
     let saved = serde_json::json!({
-        "kind": "fix-not-pushed",
+        "kind": "stuck",
+        "reason": "fix-not-pushed",
         "review": {
             "round": 1,
             "stage": { "stage": "fixing", "head": "c0ffee" },
@@ -401,24 +413,27 @@ fn a_qwen_fix_not_pushed_keeps_its_wire_shape() {
         "prompt": "again",
     });
     let kind: RulingKind = serde_json::from_value(saved.clone()).unwrap();
-    let RulingKind::FixNotPushed {
+    let RulingKind::Stuck(Stuck::FixNotPushed {
         fix: Fix::Review(review),
         ..
-    } = &kind
+    }) = &kind
     else {
         panic!("read as {kind:?}");
     };
     assert_eq!(review.round, 1);
     assert_eq!(serde_json::to_value(&kind).unwrap(), saved);
     let stray = serde_json::json!({
-        "kind": "fix-not-pushed",
+        "kind": "stuck",
+        "reason": "fix-not-pushed",
         "coderabbit": { "round": 3, "head": "c0ffee" },
         "prompt": "again",
         "extra": true,
     });
     assert!(serde_json::from_value::<RulingKind>(stray).is_err());
     let misspelt = serde_json::json!({
-        "kind": "fix-not-pushed",
+        "kind": "stuck",
+        "reason": "fix-not-pushed",
+
         "coderabbit": { "round": 3, "head": "c0ffee", "heade": "c0ffee" },
         "prompt": "again",
     });
@@ -474,7 +489,7 @@ fn a_malformed_file_names_its_path() {
 }
 
 #[test]
-fn a_version_6_file_loads_with_nothing_attached_and_saves_as_8() {
+fn a_version_6_file_loads_with_nothing_attached_and_saves_as_9() {
     let dir = tempfile::tempdir().unwrap();
     let store = store_in(dir.path());
     let mut state = ProjectState::new(Timestamp(7));
@@ -488,11 +503,11 @@ fn a_version_6_file_loads_with_nothing_attached_and_saves_as_8() {
     store.save(&loaded).unwrap();
     let text = fs::read_to_string(dir.path().join("state.json")).unwrap();
     let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(saved["version"], 8);
+    assert_eq!(saved["version"], 9);
 }
 
 #[test]
-fn a_version_7_file_loads_with_no_project_manager_and_saves_as_8() {
+fn a_version_7_file_loads_with_no_project_manager_and_saves_as_9() {
     let dir = tempfile::tempdir().unwrap();
     let store = store_in(dir.path());
     let mut old = serde_json::to_value(ProjectState::new(Timestamp(7))).unwrap();
@@ -507,7 +522,7 @@ fn a_version_7_file_loads_with_no_project_manager_and_saves_as_8() {
     store.save(&loaded).unwrap();
     let text = fs::read_to_string(dir.path().join("state.json")).unwrap();
     let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(saved["version"], 8);
+    assert_eq!(saved["version"], 9);
 }
 
 #[test]
@@ -516,14 +531,14 @@ fn a_newer_format_is_reported_as_one() {
     let store = store_in(dir.path());
     fs::write(
         dir.path().join("state.json"),
-        r#"{"version": 9, "shape": "new"}"#,
+        r#"{"version": 10, "shape": "new"}"#,
     )
     .unwrap();
     assert_eq!(
         store.load().unwrap_err(),
         StateError::Version {
             path: store.path.clone(),
-            found: 9
+            found: 10
         }
     );
 }

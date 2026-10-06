@@ -10,7 +10,7 @@ use super::super::gate::{settled, short};
 use super::super::report::Begin;
 use crate::ports::Checks;
 use crate::skills::Step;
-use crate::state::{RulingKind, StateError};
+use crate::state::{StateError, Stuck};
 use crate::work_item::{MergeQueued, Phase};
 
 impl Runner {
@@ -55,7 +55,7 @@ impl Runner {
         self.update(|item| item.merge_queued = None)?;
         let item = self.current().expect("a merge is of a work item");
         if item.red_head.as_deref() == Some(head.as_str()) {
-            return self.raise(number, RulingKind::MergeRefused { head, reason });
+            return self.raise(number, Stuck::MergeRefused { head, why: reason }.into());
         }
         let prompt = self
             .skills

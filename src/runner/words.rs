@@ -24,15 +24,8 @@ impl Wants {
         match kind {
             RulingKind::Question { .. } => Self::Answer,
             RulingKind::Merge { .. }
-            | RulingKind::Rebase { .. }
-            | RulingKind::StillRed { .. }
-            | RulingKind::MergeRefused { .. }
-            | RulingKind::Closed
-            | RulingKind::LocalModelSpilled { .. }
-            | RulingKind::FixNotPushed { .. }
-            | RulingKind::TurnTimeout { .. }
-            | RulingKind::TurnFailed { .. }
-            | RulingKind::ClaudeFiles { .. }
+            | RulingKind::Stuck(..)
+            | RulingKind::AgentFiles { .. }
             | RulingKind::ForeignChange { .. }
             | RulingKind::FollowUp { .. } => Self::YesOrNo,
         }

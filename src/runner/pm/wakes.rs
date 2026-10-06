@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use super::{Pick, Wake};
 use crate::runner::Runner;
-use crate::state::{ProjectState, RulingKind};
+use crate::state::{ProjectState, RulingKind, Stuck};
 use crate::work_item::Phase;
 
 impl Runner {
@@ -99,9 +99,15 @@ fn stuck_wake(issue: u64, id: u64, kind: &RulingKind) -> Option<Wake> {
 /// is not about a stuck item
 pub(in crate::runner) fn stuck_on(kind: &RulingKind) -> Option<&'static str> {
     match kind {
-        RulingKind::TurnFailed { .. } => Some("its worker's turn failed or stopped short twice"),
-        RulingKind::TurnTimeout { .. } => Some("its worker's turn ran past its ceiling"),
-        RulingKind::StillRed { .. } => Some("CI failed again and the worker pushed no fix"),
+        RulingKind::Stuck(Stuck::TurnFailed { .. }) => {
+            Some("its worker's turn failed or stopped short twice")
+        }
+        RulingKind::Stuck(Stuck::TurnTimeout { .. }) => {
+            Some("its worker's turn ran past its ceiling")
+        }
+        RulingKind::Stuck(Stuck::StillRed { .. }) => {
+            Some("CI failed again and the worker pushed no fix")
+        }
         _ => None,
     }
 }

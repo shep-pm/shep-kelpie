@@ -14,7 +14,7 @@ use super::rework::HUMAN;
 use super::{Names, Runner};
 use crate::ports::Timestamp;
 use crate::settings::MergeAuthority;
-use crate::state::{Fix, ProjectState, Resume, Ruling, RulingKind, StateError};
+use crate::state::{Fix, ProjectState, Resume, Ruling, RulingKind, StateError, Stuck};
 use crate::work_item::{Known, Phase, Review, Turn, WorkItem, foreign_change};
 use crate::worktree;
 
@@ -128,7 +128,7 @@ impl Runner {
             _ => None,
         };
         let accepts = match (&answer, &ruling.kind) {
-            (Answer::Yes, RulingKind::ClaudeFiles { head, .. }) => Some(head.clone()),
+            (Answer::Yes, RulingKind::AgentFiles { head, .. }) => Some(head.clone()),
             _ => None,
         };
         // These ask the maintainer to fix the branch, so a yes vouches for its head.
@@ -136,11 +136,11 @@ impl Runner {
             (&answer, &ruling.kind),
             (
                 Answer::Yes,
-                RulingKind::Rebase { .. } | RulingKind::StillRed { .. }
+                RulingKind::Stuck(Stuck::Rebase { .. } | Stuck::StillRed { .. })
             )
         );
         // Any answer to a refused merge gives the next one its catch-up again.
-        let refusal_answered = matches!(ruling.kind, RulingKind::MergeRefused { .. });
+        let refusal_answered = matches!(ruling.kind, RulingKind::Stuck(Stuck::MergeRefused { .. }));
         // Only the ruling the work item is parked on moves it. Any other,
         // which nothing leaves behind today, is answered by clearing it.
         let parked_on = |item: &WorkItem| item.phase == Phase::Ruling { id };
@@ -375,36 +375,9 @@ pub(super) fn park(
 fn comment(kind: &RulingKind) -> Option<String> {
     let said = match kind {
         RulingKind::Merge { .. } => return None,
-        RulingKind::Rebase { reason } => {
-            format!("This branch could not be rebased onto main: {reason}.")
-        }
-        RulingKind::StillRed { head, checks } => format!(
-            "CI failed again at {} and no fix was pushed: {}.",
-            short(head),
-            checks.join(", ")
-        ),
-        // The forge's own words stay off a public pull request.
-        RulingKind::MergeRefused { head, .. } => {
-            format!("Merging at {} was refused twice.", short(head))
-        }
-        RulingKind::Closed => "This pull request was closed without merging.".to_owned(),
-        RulingKind::LocalModelSpilled { .. } => {
-            "The local model for this pull request's review is not fully on the GPU, \
-             so a review round did not run."
-                .to_owned()
-        }
-        RulingKind::FixNotPushed { .. } => {
-            "A fix for review findings ended without a push, so those findings still hold."
-                .to_owned()
-        }
+        RulingKind::Stuck(reason) => stuck_comment(reason),
         RulingKind::Question { asked, .. } => asked.clone(),
-        RulingKind::TurnTimeout { .. } => {
-            "The work on this pull request ran too long and was stopped.".to_owned()
-        }
-        RulingKind::TurnFailed { .. } => {
-            "The work on this pull request hit an error and stopped.".to_owned()
-        }
-        RulingKind::ClaudeFiles { files, .. } => format!(
+        RulingKind::AgentFiles { files, .. } => format!(
             "This pull request changes agents' own files: {}.",
             files.join(", ")
         ),
@@ -415,6 +388,39 @@ fn comment(kind: &RulingKind) -> Option<String> {
         RulingKind::FollowUp { .. } => return None,
     };
     Some(format!("{said}\n\nWaiting on the maintainer."))
+}
+
+fn stuck_comment(reason: &Stuck) -> String {
+    match reason {
+        Stuck::Rebase { why } => {
+            format!("This branch could not be rebased onto main: {why}.")
+        }
+        Stuck::StillRed { head, checks } => format!(
+            "CI failed again at {} and no fix was pushed: {}.",
+            short(head),
+            checks.join(", ")
+        ),
+        // The forge's own words stay off a public pull request.
+        Stuck::MergeRefused { head, .. } => {
+            format!("Merging at {} was refused twice.", short(head))
+        }
+        Stuck::Closed => "This pull request was closed without merging.".to_owned(),
+        Stuck::LocalModelSpilled { .. } => {
+            "The local model for this pull request's review is not fully on the GPU, \
+             so a review round did not run."
+                .to_owned()
+        }
+        Stuck::FixNotPushed { .. } => {
+            "A fix for review findings ended without a push, so those findings still hold."
+                .to_owned()
+        }
+        Stuck::TurnTimeout { .. } => {
+            "The work on this pull request ran too long and was stopped.".to_owned()
+        }
+        Stuck::TurnFailed { .. } => {
+            "The work on this pull request hit an error and stopped.".to_owned()
+        }
+    }
 }
 
 // A yes, a no or an answer that does not fit the ruling is refused.
@@ -454,7 +460,7 @@ fn decide(
         (_, RulingKind::Question { .. }) => return Err(RuleError::WantsAnswer(id)),
         (Answer::Text(_), _) => return Err(RuleError::NotAQuestion(id)),
         // A fix turn resumes in its round, which checks it pushed.
-        (Answer::Yes, RulingKind::TurnTimeout { phase }) => {
+        (Answer::Yes, RulingKind::Stuck(Stuck::TurnTimeout { phase })) => {
             return Ok(Move::Turn {
                 prompt: TIMEOUT_CONTINUE.to_owned(),
                 phase: phase.unwrap_or(Phase::Implement),
@@ -464,7 +470,7 @@ fn decide(
         // A turn that had started is resumed with a prompt of its own, and
         // the yes starts its ceiling afresh: the time it spent failing and
         // waiting is not held against it.
-        (Answer::Yes, RulingKind::TurnFailed { phase, retry, .. }) => {
+        (Answer::Yes, RulingKind::Stuck(Stuck::TurnFailed { phase, retry, .. })) => {
             let turn = match retry {
                 Turn::Running { .. } => Turn::Next {
                     prompt: FAILED_CONTINUE.to_owned(),
@@ -476,11 +482,10 @@ fn decide(
         // A worker cannot write agents' own files, so a note would not help it.
         (
             Answer::No(_),
-            RulingKind::TurnTimeout { .. }
-            | RulingKind::TurnFailed { .. }
-            | RulingKind::ClaudeFiles { .. },
+            RulingKind::Stuck(Stuck::TurnTimeout { .. } | Stuck::TurnFailed { .. })
+            | RulingKind::AgentFiles { .. },
         ) => Phase::Done { merged: false },
-        (Answer::Yes, RulingKind::ClaudeFiles { phase, .. }) => phase,
+        (Answer::Yes, RulingKind::AgentFiles { phase, .. }) => phase,
         (Answer::Yes, RulingKind::ForeignChange { known, .. }) => return Ok(Move::Accept(known)),
         // The pull request is merged, so a no has no worker to send a note to.
         (Answer::Yes | Answer::No(_), RulingKind::FollowUp { .. }) => Phase::Done { merged: true },
@@ -500,17 +505,19 @@ fn decide(
         },
         (
             Answer::Yes,
-            RulingKind::Rebase { .. }
-            | RulingKind::StillRed { .. }
-            | RulingKind::MergeRefused { .. },
+            RulingKind::Stuck(
+                Stuck::Rebase { .. } | Stuck::StillRed { .. } | Stuck::MergeRefused { .. },
+            ),
         ) => Phase::Ci {
             head: None,
             since: now,
         },
-        (Answer::Yes, RulingKind::Closed) => Phase::Done { merged: false },
-        (Answer::Yes, RulingKind::LocalModelSpilled { review, .. }) => Phase::Review(review),
+        (Answer::Yes, RulingKind::Stuck(Stuck::Closed)) => Phase::Done { merged: false },
+        (Answer::Yes, RulingKind::Stuck(Stuck::LocalModelSpilled { review, .. })) => {
+            Phase::Review(review)
+        }
         // The fix ends under the same round, which checks the head again.
-        (Answer::Yes, RulingKind::FixNotPushed { fix, prompt, .. }) => {
+        (Answer::Yes, RulingKind::Stuck(Stuck::FixNotPushed { fix, prompt })) => {
             let Fix::Review(review) = fix;
             return Ok(Move::Turn {
                 prompt,
@@ -545,60 +552,62 @@ pub(super) fn question(id: u64, issue: u64, number: Option<u64>, kind: &RulingKi
                 short(head)
             )
         }
-        RulingKind::Rebase { reason } => format!(
-            "Kelpie cannot rebase {about} onto main: {reason}. \
-             Once the branch is fixed, {yes} has kelpie look again"
-        ),
-        RulingKind::StillRed { head, checks } => format!(
-            "CI failed again on {about} at {}, and the worker pushed \
-             no fix: {}. {yes} has kelpie look again",
-            short(head),
-            checks.join(", ")
-        ),
-        RulingKind::MergeRefused { head, reason } => format!(
-            "Kelpie could not merge {about} at {} after catching it up: {reason}. \
-             {yes} has kelpie look again and merge once every gate passes",
-            short(head)
-        ),
-        RulingKind::Closed => format!(
-            "{} was closed without merging. {yes} drops the work \
-             item and keeps its branch on the forge",
-            capitalized(&about)
-        ),
-        RulingKind::LocalModelSpilled { review, reason } => format!(
-            "Round {} of the review on {about} did not run: {reason}. \
-             Once the model is back on the GPU, {yes} runs the round again",
-            review.round
-        ),
-        RulingKind::FixNotPushed { fix, .. } => {
-            let Fix::Review(review) = fix;
-            format!(
-                "The worker on {about} ended its fix for round {} of the review without \
-                 pushing, so those findings still hold. {yes} sends it the findings again",
+        RulingKind::Stuck(reason) => match reason {
+            Stuck::Rebase { why } => format!(
+                "Kelpie cannot rebase {about} onto main: {why}. \
+                 Once the branch is fixed, {yes} has kelpie look again"
+            ),
+            Stuck::StillRed { head, checks } => format!(
+                "CI failed again on {about} at {}, and the worker pushed \
+                 no fix: {}. {yes} has kelpie look again",
+                short(head),
+                checks.join(", ")
+            ),
+            Stuck::MergeRefused { head, why } => format!(
+                "Kelpie could not merge {about} at {} after catching it up: {why}. \
+                 {yes} has kelpie look again and merge once every gate passes",
+                short(head)
+            ),
+            Stuck::Closed => format!(
+                "{} was closed without merging. {yes} drops the work \
+                 item and keeps its branch on the forge",
+                capitalized(&about)
+            ),
+            Stuck::LocalModelSpilled { review, why } => format!(
+                "Round {} of the review on {about} did not run: {why}. \
+                 Once the model is back on the GPU, {yes} runs the round again",
                 review.round
-            )
-        }
+            ),
+            Stuck::FixNotPushed { fix, .. } => {
+                let Fix::Review(review) = fix;
+                format!(
+                    "The worker on {about} ended its fix for round {} of the review without \
+                     pushing, so those findings still hold. {yes} sends it the findings again",
+                    review.round
+                )
+            }
+            Stuck::TurnTimeout { .. } => {
+                return format!(
+                    "The worker on {about} has been running past its turn's ceiling, \
+                     and kelpie stopped it. {yes} resumes its session for another turn, \
+                     and {no} stops the work item{kept}."
+                );
+            }
+            Stuck::TurnFailed { why, .. } => {
+                return format!(
+                    "The worker's turn on {about} failed: {}. {yes} tries that step again, \
+                     and {no} stops the work item{kept}.",
+                    why.trim()
+                );
+            }
+        },
         RulingKind::Question { asked, .. } => {
             return format!(
                 "The worker on {about} asks:\n\n{asked}\n\n{} sends the worker your answer.",
                 trigger("<text>")
             );
         }
-        RulingKind::TurnTimeout { .. } => {
-            return format!(
-                "The worker on {about} has been running past its turn's ceiling, \
-                 and kelpie stopped it. {yes} resumes its session for another turn, \
-                 and {no} stops the work item{kept}."
-            );
-        }
-        RulingKind::TurnFailed { reason, .. } => {
-            return format!(
-                "The worker's turn on {about} failed: {}. {yes} tries that step again, \
-                 and {no} stops the work item{kept}.",
-                reason.trim()
-            );
-        }
-        RulingKind::ClaudeFiles { head, files, .. } => {
+        RulingKind::AgentFiles { head, files, .. } => {
             return format!(
                 "{} at {} changes agents' own files, which decide what \
                  an agent runs in the worktree: {}. {yes} accepts them at that head and kelpie \

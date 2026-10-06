@@ -290,7 +290,8 @@ mod tests {
         assert_eq!(
             status["rulings"][0]["kind"],
             json!({
-                "kind": "fix-not-pushed",
+                "kind": "stuck",
+                "reason": "fix-not-pushed",
                 "review": {
                     "round": 1,
                     "reviewer": "qwen",

@@ -90,6 +90,13 @@ fn still_asks(rig: &Rig, runner: &Mutex<Runner>, id: u64, kind: &str) {
     assert_eq!(rig.forge.merges(), []);
 }
 
+// Ruling `id` is `stuck` for `reason`, and parks the worker as it would under `ask`.
+fn still_stuck(rig: &Rig, runner: &Mutex<Runner>, id: u64, reason: &str) {
+    let status = rig.ask(runner, "status", None);
+    assert_eq!(status["rulings"][0]["kind"]["reason"], reason);
+    still_asks(rig, runner, id, "stuck");
+}
+
 #[test]
 fn green_gates_merge_with_no_ruling_and_one_notice_after() {
     let (rig, runner, head) = Rig::with_pull_request("shep");
@@ -259,7 +266,7 @@ fn a_merge_the_forge_refuses_is_caught_up_once_then_parks_and_a_yes_looks_again(
         )],
         "the forge's words stay off the pull request"
     );
-    still_asks(&rig, &runner, id, "merge-refused");
+    still_stuck(&rig, &runner, id, "merge-refused");
 
     // The answer gives the next refusal its catch-up again.
     rig.ask(&runner, "rule", Some(&format!("{id} yes")));
@@ -346,7 +353,7 @@ fn a_second_red_run_still_parks_on_a_ruling() {
         .script([Scripted::Say("Looked, changed nothing.")]);
     step(&runner).unwrap();
     let id = raised(rig.verdict(&runner));
-    still_asks(&rig, &runner, id, "still-red");
+    still_stuck(&rig, &runner, id, "still-red");
 }
 
 #[test]
@@ -361,7 +368,7 @@ fn a_rebase_that_fails_still_parks_on_a_ruling() {
     rig.claude.script([Scripted::Say("Could not resolve it.")]);
     step(&runner).unwrap();
     let id = raised(step(&runner).unwrap());
-    still_asks(&rig, &runner, id, "rebase");
+    still_stuck(&rig, &runner, id, "rebase");
 }
 
 #[test]
@@ -370,7 +377,7 @@ fn a_closed_pull_request_still_parks_on_a_ruling() {
     let runner = under_auto(&rig, runner);
     rig.forge.set_state(71, PullRequestState::Closed);
     let id = raised(step(&runner).unwrap());
-    still_asks(&rig, &runner, id, "closed");
+    still_stuck(&rig, &runner, id, "closed");
 }
 
 #[test]
@@ -391,7 +398,7 @@ fn a_failed_turn_still_parks_on_a_ruling() {
         "overloaded".into(),
     ))]);
     let id = raised(step(&runner).unwrap());
-    still_asks(&rig, &runner, id, "turn-failed");
+    still_stuck(&rig, &runner, id, "turn-failed");
 }
 
 #[test]
@@ -401,7 +408,7 @@ fn a_turn_past_its_ceiling_still_parks_on_a_ruling() {
         crate::settings::Harness::ClaudeCode,
     ))]);
     let id = raised(step(&runner).unwrap());
-    still_asks(&rig, &runner, id, "turn-timeout");
+    still_stuck(&rig, &runner, id, "turn-timeout");
 }
 
 #[test]
@@ -414,7 +421,7 @@ fn a_fix_that_pushes_nothing_still_parks_on_a_ruling() {
     rig.claude.script([Scripted::Say("Nothing to change.")]);
     step(&runner).unwrap();
     let id = raised(step(&runner).unwrap());
-    still_asks(&rig, &runner, id, "fix-not-pushed");
+    still_stuck(&rig, &runner, id, "fix-not-pushed");
 }
 
 // The qwen and Claude rounds read it, so the pass is not unread.

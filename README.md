@@ -183,7 +183,16 @@ What decides whether, and when, the first issue starts:
 
 ### 8. Answer a ruling
 
-A ruling reaches the channel you chose in step 5. Answer it from there, or from the terminal:
+A ruling reaches the channel you chose in step 5. It is one of six kinds:
+
+- `merge`: CI is green, and a yes merges the pull request
+- `question`: the worker asks, and your answer is its next turn
+- `stuck`: the work item cannot go on by itself, and its reason says why: `rebase`, `still-red`, `merge-refused`, `closed`, `local-model-spilled`, `fix-not-pushed`, `turn-timeout` or `turn-failed`. The question says what a yes does
+- `agent-files`: the pull request changes agents' own files, and a yes accepts them
+- `foreign-change`: someone else changed the pull request, and a yes accepts the change
+- `follow-up`: a merged pull request left findings unfixed, and a yes files them as issues
+
+Answer it from there, or from the terminal:
 
 ```sh
 shep kelpie rule          # lists the rulings waiting

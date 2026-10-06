@@ -14,7 +14,7 @@ use crate::ports::Timestamp;
 use crate::runner::report::{Begin, StepReport};
 use crate::runner::ruling::park;
 use crate::runner::{Names, Runner};
-use crate::state::{ProjectState, RulingKind, StateError};
+use crate::state::{ProjectState, StateError, Stuck};
 use crate::work_item::{Phase, Review, Turn, WorkItem};
 
 /// The prompt that sends back a worker whose turn ended with no pull request
@@ -159,7 +159,7 @@ pub(super) fn timed_out(names: Names<'_>, next: &mut ProjectState, issue: u64) -
         next,
         issue,
         pull_request,
-        RulingKind::TurnTimeout { phase },
+        Stuck::TurnTimeout { phase }.into(),
     );
     StepReport::TimedOut {
         issue,
@@ -190,11 +190,12 @@ pub(in crate::runner) fn failed(
     };
     let retry = std::mem::replace(&mut item.turn, failure);
     let pull_request = item.pull_request;
-    let kind = RulingKind::TurnFailed {
-        reason,
+    let kind = Stuck::TurnFailed {
+        why: reason,
         phase: item.phase.clone(),
         retry,
-    };
+    }
+    .into();
     let (id, question) = park(names, next, issue, pull_request, kind);
     StepReport::Failed {
         issue,

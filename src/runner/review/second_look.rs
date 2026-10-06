@@ -181,7 +181,11 @@ fn a_fix_turn_that_pushes_nothing_parks_like_any_reviewers() {
         "{question}"
     );
     let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["rulings"][0]["kind"]["kind"], "fix-not-pushed");
+    let kind = &status["rulings"][0]["kind"];
+    assert_eq!(
+        (&kind["kind"], &kind["reason"]),
+        (&json!("stuck"), &json!("fix-not-pushed"))
+    );
 }
 
 #[test]

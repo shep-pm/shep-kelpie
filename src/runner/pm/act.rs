@@ -165,7 +165,7 @@ impl Runner {
         let why = plain(&self.shown(why.to_owned()), WORDS);
         if action == Action::Retry {
             let answer = match ruling.kind {
-                RulingKind::StillRed { .. } => Ruled::No(format!(
+                RulingKind::Stuck(crate::state::Stuck::StillRed { .. }) => Ruled::No(format!(
                     "(from the project manager) CI is still red: fix it and push. PM says: {why}"
                 )),
                 _ => Ruled::Yes,

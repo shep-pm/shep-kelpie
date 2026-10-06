@@ -5,7 +5,7 @@ use serde_json::json;
 
 use super::saved_with;
 use crate::settings::AgentName;
-use crate::state::{Fix, RulingKind};
+use crate::state::{Fix, RulingKind, Stuck};
 use crate::test::a_work_item;
 use crate::work_item::{CallKind, Phase, Review, ReviewStage, TimingPhase};
 
@@ -60,7 +60,7 @@ fn a_claude_round_s_last_reviewer_and_its_ruling_name_defect_hunter() {
     let state = store.load().unwrap().unwrap();
     assert_eq!(
         state.rulings[0].kind,
-        RulingKind::FixNotPushed {
+        RulingKind::from(Stuck::FixNotPushed {
             fix: Fix::Review(Review {
                 round: 2,
                 stage: ReviewStage::Fixing {
@@ -74,7 +74,7 @@ fn a_claude_round_s_last_reviewer_and_its_ruling_name_defect_hunter() {
                 ..Review::first()
             }),
             prompt: "p".into(),
-        }
+        })
     );
 }
 
