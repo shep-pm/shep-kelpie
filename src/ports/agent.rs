@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 
+use super::Timestamp;
 use crate::settings::{AgentHarness, Effort, GuardHook, Harness, LeaseName};
 
 /// Which role an agent call is made for
@@ -253,6 +254,36 @@ pub trait Agents: Send + Sync {
     /// [`AgentError`] when the call cannot run or does not succeed, and
     /// [`AgentError::TimedOut`] when `ending` ended it.
     fn run(&self, call: &AgentCall, ending: &Ending) -> Result<AgentReply, AgentError>;
+
+    /// When `call`, in flight, last showed something: a tool call or a line
+    /// of output, as its transcript or its output file was last written
+    fn last_active(&self, call: &AgentCall) -> CallActivity {
+        let _ = call;
+        CallActivity::Untracked
+    }
+}
+
+/// What a harness can say of a call's activity
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallActivity {
+    /// The harness keeps no record kelpie can read
+    Untracked,
+    /// The harness keeps a record, and the call has written none of it yet
+    Nothing,
+    /// The call last made a tool call or wrote output at this time
+    At(Timestamp),
+}
+
+/// When the file at `path` was last written, or [`CallActivity::Nothing`] while
+/// it cannot be read
+pub fn written_at(path: &std::path::Path) -> CallActivity {
+    let modified = std::fs::metadata(path).and_then(|m| m.modified());
+    let since = modified
+        .ok()
+        .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok());
+    since.map_or(CallActivity::Nothing, |s| {
+        CallActivity::At(Timestamp(s.as_secs()))
+    })
 }
 
 /// The runner's hold on one call in flight, to end it past its turn's ceiling

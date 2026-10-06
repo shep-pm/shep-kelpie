@@ -5,9 +5,11 @@
 //! to a temporary file that is synced and then renamed over the old one, so
 //! a runner killed mid-write leaves the previous state whole.
 
+mod events;
 pub mod ids;
 mod removed;
 
+pub use events::{BoardEvent, EVENTS_KEPT};
 pub use removed::OldWorker;
 
 use std::fmt;
@@ -22,8 +24,8 @@ use crate::ports::{Finding, Timestamp};
 use crate::settings::Account;
 use crate::work_item::{Known, Phase, Review, Seconds, Turn, WorkItem};
 
-/// The state file's format version
-const VERSION: u32 = 4;
+/// The state file's format version. 5 added the board's events, which an older kelpie refuses
+const VERSION: u32 = 5;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
@@ -92,6 +94,19 @@ pub struct ProjectState {
     /// Where reading the webhook's replies has got to
     #[serde(default)]
     pub replies: Replies,
+    /// The board's newest events, oldest first
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<BoardEvent>,
+    /// The id of the last board event recorded
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub last_event: u64,
+    /// The last board event the project manager has read, once it has read one
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pm_seen: Option<u64>,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 impl ProjectState {
@@ -114,6 +129,9 @@ impl ProjectState {
             codex_pacing: None,
             notices: Vec::new(),
             replies: Replies::default(),
+            events: Vec::new(),
+            last_event: 0,
+            pm_seen: None,
         }
     }
 

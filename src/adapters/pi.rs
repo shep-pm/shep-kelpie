@@ -27,8 +27,8 @@ use crate::fence;
 use crate::forwarder::{Upstream, WORKER_HOST};
 use crate::guard::{FOLDER_FLAG, NAME_FLAG};
 use crate::ports::{
-    AgentCall, AgentError, AgentReply, Agents, Ending, Fence, Forward, Policy, Sandbox, Session,
-    SessionId, Tools, Usage,
+    AgentCall, AgentError, AgentReply, Agents, CallActivity, Ending, Fence, Forward, Policy,
+    Sandbox, Session, SessionId, Tools, Usage, written_at,
 };
 use crate::profile::CREDENTIALS;
 use crate::settings::{AgentHarness, Harness, ModelServer};
@@ -150,6 +150,12 @@ impl Agents for PiCli {
             RunError::TimedOut => AgentError::TimedOut(PI),
         })?;
         parse_result(&output, call.session.id())
+    }
+
+    fn last_active(&self, call: &AgentCall) -> CallActivity {
+        // pi names its session file when it first writes it.
+        session_file(&Files::of(call).sessions(), call.session.id())
+            .map_or(CallActivity::Nothing, |file| written_at(&file))
     }
 }
 

@@ -81,6 +81,8 @@ pub struct ProjectPaths {
     pub settings: PathBuf,
     /// The state file
     pub state: PathBuf,
+    /// The board briefing, `board.md`, which the project manager's agent reads
+    pub board: PathBuf,
     /// The folder for the worker's settings file and instructions
     pub worker: PathBuf,
     /// The folder for the plugins that hold each step's skill
@@ -110,6 +112,7 @@ impl ProjectPaths {
             agents: kelpie_home.join(crate::agents::FOLDER),
             settings: folder.join("settings.toml"),
             state: folder.join("state.json"),
+            board: folder.join("board.md"),
             worker: folder.join("worker"),
             skills: folder.join("skills"),
             tools: Tools::under(kelpie_home),

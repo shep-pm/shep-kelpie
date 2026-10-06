@@ -19,6 +19,8 @@ use serde::Serialize;
 
 use crate::settings::AgentName;
 
+pub mod briefing;
+
 /// The label that puts an issue on the board
 pub const READY: &str = "ready-for-agent";
 
@@ -41,6 +43,10 @@ const PRIORITIES: [&str; 4] = [
 pub struct ReadyIssue {
     /// Its number
     pub number: u64,
+    /// Its title
+    pub title: String,
+    /// Its body, as written
+    pub body: String,
     /// Whether anyone is assigned to it
     pub assigned: bool,
     /// Its labels' names
@@ -259,6 +265,17 @@ pub fn pick(
     }
 }
 
+/// The priority an issue's labels give it, from `P0` to `P3`, or `None` with none
+pub fn priority(labels: &[String]) -> Option<&'static str> {
+    let label = PRIORITIES.get(priority_rank(labels))?;
+    label.strip_prefix("priority: ")
+}
+
+/// Sorts `ready` into the board rule's order: priority, then oldest by number
+pub fn rule_order(ready: &mut [ReadyIssue]) {
+    ready.sort_by_key(|i| (priority_rank(&i.labels), i.number));
+}
+
 // Where an issue's priority label puts it: 0 for P0 to 3 for P3, and 4 with
 // none. With several, the highest counts.
 fn priority_rank(labels: &[String]) -> usize {
@@ -353,6 +370,8 @@ mod tests {
     fn ready(number: u64) -> ReadyIssue {
         ReadyIssue {
             number,
+            title: String::new(),
+            body: String::new(),
             assigned: false,
             labels: vec![READY.into()],
             blocked_by: vec![],

@@ -32,6 +32,7 @@ mod adopt;
 #[cfg(test)]
 mod agents_tests;
 mod alert;
+mod briefing;
 mod claim;
 mod claude_files;
 #[cfg(test)]
@@ -230,6 +231,10 @@ pub struct Runner {
     notes: Vec<String>,
     // The calls this process has in flight, kept in memory only
     flights: flight::Flights,
+    // What the board briefing keeps between writes, in memory only
+    brief: briefing::BoardCache,
+    // What the board withholds, as the forge does
+    local: LocalPaths,
 }
 
 impl Runner {
@@ -254,7 +259,7 @@ impl Runner {
         let folders = [home, paths.kelpie_home.as_path(), settings.repo.as_path()];
         let names = settings.private_names.iter().map(NonBlank::as_str);
         let local = LocalPaths::new(folders, names);
-        ports.forge = Box::new(Guarded::new(ports.forge, local));
+        ports.forge = Box::new(Guarded::new(ports.forge, local.clone()));
         let leases = Arc::clone(&ports.local_leases);
         ports.agents = Arc::new(Leased::new(Arc::clone(&ports.agents), leases));
         let gpu = gpu::GpuWatch::start(
@@ -339,9 +344,12 @@ impl Runner {
             last_acted: None,
             notes,
             flights: flight::Flights::default(),
+            brief: briefing::BoardCache::default(),
+            local,
         };
         runner.settle_older_bots()?;
         runner.settle_labels();
+        runner.brief_now();
         Ok(runner)
     }
 
@@ -407,6 +415,7 @@ impl Runner {
             local_model: self.ports.reviewer.seat().map(Into::into),
             gpu: self.gpu.status(),
             local_leases: self.local_leases(),
+            board: &self.paths.board,
         }
     }
 
@@ -533,6 +542,7 @@ impl Runner {
             rebased: false,
             held: Vec::new(),
             follow_ups: None,
+            summary: None,
             timings: Some(Timings::starting(self.ports.clock.now())),
             calls: Vec::new(),
         }
@@ -572,6 +582,7 @@ impl Runner {
 
     fn save(&mut self, mut next: ProjectState) -> Result<(), StateError> {
         self.charge(&mut next);
+        self.note_changes(&mut next);
         self.store.save(&next)?;
         self.state = next;
         Ok(())

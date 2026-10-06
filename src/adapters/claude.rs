@@ -11,8 +11,8 @@ use serde::Deserialize;
 use super::process::{Processes, RunError};
 use super::srt::SandboxRuntime;
 use crate::ports::{
-    AgentCall, AgentError, AgentReply, Agents, Cost, Ending, Role, Sandbox, Session, SessionId,
-    Unreadable, Usage,
+    AgentCall, AgentError, AgentReply, Agents, CallActivity, Cost, Ending, Role, Sandbox, Session,
+    SessionId, Unreadable, Usage, written_at,
 };
 use crate::settings::Harness;
 use crate::tools::Tools;
@@ -144,6 +144,15 @@ impl Agents for ClaudeCli {
             RunError::TimedOut => AgentError::TimedOut(CLAUDE),
         })?;
         parse_result(&output, &call.session)
+    }
+
+    // Claude Code appends to the session's transcript at each message and
+    // tool call, so a write is the session doing something.
+    fn last_active(&self, call: &AgentCall) -> CallActivity {
+        let Ok(folder) = sandbox::transcripts(&self.home, &call.cwd) else {
+            return CallActivity::Untracked;
+        };
+        written_at(&folder.join(format!("{}.jsonl", call.session.id().0)))
     }
 }
 
@@ -292,6 +301,31 @@ mod tests {
                 .any(|p| p == unread.as_str()),
             "{written}"
         );
+    }
+
+    #[test]
+    fn a_calls_activity_is_when_its_session_transcript_was_last_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let claude = ClaudeCli::default().sandboxed(Arc::new(OpenSandbox::default()), home.clone());
+        let mut call = call(Role::Worker, fresh());
+        call.cwd = dir.path().join("wt");
+        std::fs::create_dir_all(&call.cwd).unwrap();
+        assert_eq!(
+            claude.last_active(&call),
+            CallActivity::Nothing,
+            "no transcript yet"
+        );
+
+        let folder = sandbox::transcripts(&home, &call.cwd).unwrap();
+        std::fs::create_dir_all(&folder).unwrap();
+        let transcript = folder.join(format!("{}.jsonl", call.session.id().0));
+        std::fs::write(&transcript, "{\"type\":\"assistant\"}\n").unwrap();
+        assert_eq!(
+            claude.last_active(&call),
+            crate::ports::written_at(&transcript)
+        );
+        assert!(matches!(claude.last_active(&call), CallActivity::At(_)));
     }
 
     // Recorded from Claude Code 2.1.283 on Haiku: a call asked to say ok.

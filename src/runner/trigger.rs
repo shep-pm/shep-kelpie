@@ -77,6 +77,8 @@ pub struct Status<'a> {
     /// null while it is free
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub local_leases: BTreeMap<String, Option<LockHolder>>,
+    /// The board briefing the project manager's agent reads
+    pub board: &'a Path,
 }
 
 /// The local model's placement, as Ollama's `/api/ps` last said
@@ -490,6 +492,7 @@ mod tests {
                     "skill": format!("/mattpocock:{}", step.default_skill()),
                     "fallback": null,
                 })),
+                "board": rig.paths().board,
             })
         );
     }

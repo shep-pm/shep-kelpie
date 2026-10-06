@@ -30,8 +30,8 @@ use super::process::{Processes, RunError};
 use crate::fence;
 use crate::guard::{FOLDER_FLAG, NAME_FLAG, PIN_FLAG};
 use crate::ports::{
-    AgentCall, AgentError, AgentReply, Agents, Ending, Fence, Policy, Sandbox, Session, SessionId,
-    Tools, Usage,
+    AgentCall, AgentError, AgentReply, Agents, CallActivity, Ending, Fence, Policy, Sandbox,
+    Session, SessionId, Tools, Usage, written_at,
 };
 use crate::profile::CREDENTIALS;
 use crate::settings::{AgentHarness, Harness};
@@ -204,6 +204,11 @@ impl Agents for CodexCli {
             usage: turn.spent.since(before),
             session_cost: None,
         })
+    }
+
+    // `codex exec --json` writes a line to its output file at each event.
+    fn last_active(&self, call: &AgentCall) -> CallActivity {
+        written_at(&Files::of(call).stdout)
     }
 }
 

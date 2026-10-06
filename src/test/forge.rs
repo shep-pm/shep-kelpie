@@ -209,6 +209,8 @@ impl FakeForge {
         self.label(number, READY);
         self.ready.lock().unwrap().push(ReadyIssue {
             number,
+            title: format!("Title of #{number}"),
+            body: format!("Body of #{number}.\n"),
             assigned,
             labels: Vec::new(),
             blocked_by: Vec::new(),
@@ -216,6 +218,13 @@ impl FakeForge {
             parent: None,
             sub_issues: SubIssues::default(),
         });
+    }
+
+    /// Gives ready issue `number` the body `body`, as its author wrote it
+    pub(crate) fn set_ready_body(&self, number: u64, body: &str) {
+        let mut ready = self.ready.lock().unwrap();
+        let issue = ready.iter_mut().find(|i| i.number == number).unwrap();
+        issue.body = body.to_owned();
     }
 
     /// Makes issue `child` a sub-issue of issue `parent`, as someone else would

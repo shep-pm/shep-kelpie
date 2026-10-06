@@ -104,6 +104,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         rebased: false,
         held: Vec::new(),
         follow_ups: None,
+        summary: None,
         timings: Some(Timings {
             created: Timestamp(5),
             since: Timestamp(12),

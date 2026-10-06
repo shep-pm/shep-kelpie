@@ -135,8 +135,14 @@ worker's session in the maintainer's terminal, to steer it by hand.
 
 **Board**:
 The project's open work items and ready issues, as kelpie's code sees them.
-Kelpie writes it out as `board.md`, with the files each open branch touches,
-for the PM's agent to read.
+Kelpie's code writes it out as `<kelpie home>/<project>/board.md` whenever it
+changes, for the PM's agent to read: each open work item with its session's
+activity, the rulings waiting, the ready queue, the board's events since the
+PM's last wake, and the files open branches and ready issues share.
+
+**Board event**:
+One change to the board, such as a turn ending or a ruling raised, with an
+id that only grows. The PM's cursor names the last one it has read.
 
 **Gate**:
 The checks a pull request must pass before it merges.
