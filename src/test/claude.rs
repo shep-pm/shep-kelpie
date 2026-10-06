@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use super::{FakeMeter, git, write_in};
 use crate::ports::{
-    AgentCall, AgentError, AgentReply, Agents, Cost, Ending, Role, Usage, Utilization,
+    AgentCall, AgentError, AgentReply, Agents, CallActivity, Cost, Ending, Role, Usage, Utilization,
 };
 
 /// How often a held call looks whether it was ended, as the real adapters
@@ -145,6 +145,9 @@ pub(crate) struct FakeClaude {
     script: Arc<Mutex<VecDeque<Scripted>>>,
     meter: Option<FakeMeter>,
     stopped: Arc<AtomicBool>,
+    // What every call in flight last showed, as a transcript would say;
+    // untracked until a test sets it
+    active: Arc<Mutex<Option<CallActivity>>>,
 }
 
 impl FakeClaude {
@@ -181,6 +184,11 @@ impl FakeClaude {
         self.seen.lock().unwrap().clone()
     }
 
+    /// Says what every call in flight last showed
+    pub(crate) fn set_activity(&self, activity: CallActivity) {
+        *self.active.lock().unwrap() = Some(activity);
+    }
+
     /// Queues answers for its next calls, oldest first
     pub(crate) fn script(&self, steps: impl IntoIterator<Item = Scripted>) {
         self.script.lock().unwrap().extend(steps);
@@ -210,6 +218,13 @@ impl Agents for FakeClaude {
     // call really left on disk.
     fn prepare(&self, call: &AgentCall) -> Result<(), AgentError> {
         crate::adapters::write_claude_settings(call)
+    }
+
+    fn last_active(&self, _call: &AgentCall) -> CallActivity {
+        self.active
+            .lock()
+            .unwrap()
+            .unwrap_or(CallActivity::Untracked)
     }
 
     fn run(&self, call: &AgentCall, ending: &Ending) -> Result<AgentReply, AgentError> {

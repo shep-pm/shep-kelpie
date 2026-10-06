@@ -182,6 +182,9 @@ pub struct WorkItem {
     /// merges. None until then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub follow_ups: Option<FollowUps>,
+    /// The worker's last turn's closing message, on one line and cut short
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
     /// Where its wall time went, from the runner that first loaded it
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timings: Option<Timings>,

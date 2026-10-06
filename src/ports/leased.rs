@@ -7,7 +7,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use super::{AgentCall, AgentError, AgentReply, Agents, Ending};
+use super::{AgentCall, AgentError, AgentReply, Agents, CallActivity, Ending};
 use crate::lease::gpu::{GpuHold, LockHolder};
 use crate::settings::LeaseName;
 
@@ -76,5 +76,9 @@ impl Agents for Leased {
             None => None,
         };
         self.agents.run(call, ending)
+    }
+
+    fn last_active(&self, call: &AgentCall) -> CallActivity {
+        self.agents.last_active(call)
     }
 }

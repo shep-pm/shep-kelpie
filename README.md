@@ -265,7 +265,7 @@ shep-kelpie keeps everything under `$SHEP_HOME/kelpie`, or the folder `KELPIE_HO
 
 - `settings.toml`, `totp`, `tools` and `rulings`, shared by every project
 - `dog`, with the dog's book and its door, `lease.sock`. The adopted dog gets `SHEP_HOME` and no `KELPIE_HOME` from shep, so it is always under `$SHEP_HOME/kelpie`, even with `KELPIE_HOME` set for your own commands
-- `<project>`, with the project's `state.json`, worker files, `worktrees` and `builds`
+- `<project>`, with the project's `state.json`, `board.md`, worker files, `worktrees` and `builds`
 
 So a project can't be named for one of shep-kelpie's own folders. Socket paths must stay under 104 bytes, so a runner with a long `SHEP_HOME` refuses to start and names the path that is too long. Keep a shepherd's `SHEP_HOME` short.
 
@@ -399,6 +399,15 @@ With a lease, before a round against Ollama, kelpie reads the host's `/api/ps`. 
 ### The board
 
 Issues labelled `ready-for-agent` are the board. On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep kelpie rework <pr>`. On any other open pull request of kelpie's account, `ready-for-agent` adopts it, the same as `shep kelpie adopt <pr>`. Kelpie puts `ready-for-human` on each pull request it hands back.
+
+The runner writes the board out as `board.md` in the project's folder, and `status` names the file under `board`. It is the briefing the project manager's agent reads, so that agent never runs git or gh itself, and you can read it too. Code writes it, with no model call, at start and whenever the board changes: a call starting or ending, a phase change, a ruling raised or answered, a read of the ready queue. It is written again at least once a minute while the runner looks at the board, and each write replaces the file whole. Text that names this machine or one of the project's `private_names` is withheld from it, as from the forge. It holds:
+
+- each open work item: its issue, phase, pull request, age and agent, the worker's last closing message, and the files its branch touches
+- what each item's session is doing. A worker's turn shows when it last made a tool call or wrote output, read from its transcript (Codex's output file, pi's session file), and reads as idle after 10 minutes of neither
+- the rulings waiting on you
+- the ready queue in the board's order, with each issue's priority, why the board passes over it if it does, the paths its body names in backticks, and the first 600 characters of its body, quoted
+- the board's events since the project manager last read it, or the last 20 before it ever has
+- the overlap: for each pair of open branches, the files both touch and the files `git merge-tree` finds in conflict, and each ready issue's named paths against them. The conflict check needs git 2.38 or later
 
 ## Agents
 

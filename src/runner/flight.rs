@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use super::Runner;
 use super::alert::post_due;
+use super::briefing::{Watched, brief};
 use super::replies::answer_replies;
 use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, StepReport};
 use super::review::run_review_call;
@@ -74,6 +75,18 @@ impl Flights {
             .get(&issue)
             .is_some_and(|f| f.deadline.is_some())
     }
+
+    /// `issue`'s call in flight, as the board watches it
+    pub(super) fn watched(&self, issue: u64) -> Option<&Watched> {
+        self.flying.get(&issue).map(|f| &f.watched)
+    }
+
+    /// Every call in flight by its work item's issue, as the board watches it
+    pub(super) fn watched_mut(&mut self) -> impl Iterator<Item = (u64, &mut Watched)> {
+        self.flying
+            .iter_mut()
+            .map(|(&issue, f)| (issue, &mut f.watched))
+    }
 }
 
 // One call in flight
@@ -87,6 +100,7 @@ struct Flight {
     ending: Ending,
     // Whether this call starts over a session that died before it began
     again: bool,
+    watched: Watched,
 }
 
 // What a call's thread sends the runner
@@ -249,6 +263,15 @@ impl Runner {
             Launch::Review(_) => (None, false, None),
         };
         let role = harness.map_or("reviewer", |_| "worker");
+        let now = self.ports.clock.now();
+        let watched = Watched {
+            started: now,
+            call: match &launch {
+                Launch::Turn { call, .. } => Some(call.clone()),
+                Launch::Review(_) => None,
+            },
+            idle: false,
+        };
         let (agents, reviewer) = (
             Arc::clone(&self.ports.agents),
             Arc::clone(&self.ports.reviewer),
@@ -274,15 +297,16 @@ impl Runner {
             let end = unstarted(harness, &e);
             let _ = self.flights.send.send(News::Ended { issue, end });
         }
-        let now = self.ports.clock.now();
         let left = deadline.map_or(0, |deadline| deadline.0.saturating_sub(now.0));
         let flight = Flight {
             deadline,
             left,
             ending,
             again,
+            watched,
         };
         self.flights.flying.insert(issue, flight);
+        self.board_changed();
     }
 
     // Records the end of `issue`'s turn. A session that died before it
@@ -347,6 +371,13 @@ fn unstarted(harness: Option<Harness>, e: &std::io::Error) -> End {
 /// Resumes the panic of a call's thread, as one in the runner's own would be.
 #[track_caller]
 pub fn advance(runner: &Mutex<Runner>) -> Result<Pass, StateError> {
+    let pass = one_pass(runner);
+    brief(runner);
+    pass
+}
+
+#[track_caller]
+fn one_pass(runner: &Mutex<Runner>) -> Result<Pass, StateError> {
     lock(runner).beat();
     loop {
         let news = lock(runner).next_news();
@@ -409,6 +440,13 @@ fn hear(runner: &Mutex<Runner>, news: News) -> Result<Option<StepReport>, StateE
 /// [`StateError`] as [`advance`].
 #[cfg(test)]
 pub fn step(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
+    let stepped = step_once(runner);
+    brief(runner);
+    stepped
+}
+
+#[cfg(test)]
+fn step_once(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
     // A call's end that never comes fails the test that waited for it.
     const PATIENCE: Duration = Duration::from_secs(120);
     let (wake, woken) = mpsc::channel();

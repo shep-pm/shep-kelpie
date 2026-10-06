@@ -32,6 +32,7 @@ impl Runner {
         // An issue in flight is left out, and not listed in `skipped`: it is
         // being worked on, not passed over.
         ready.retain(|issue| self.state.item(issue.number).is_none());
+        self.ready_read(&ready)?;
         if let Some(begin) = self.close_done_parent(&ready) {
             return Ok(begin);
         }

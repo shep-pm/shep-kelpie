@@ -31,7 +31,7 @@ fn ready_args(repo: &ForgeSlug) -> [&str; 12] {
         "--limit",
         LIST_LIMIT,
         "--json",
-        "number,assignees,labels,blockedBy,parent,subIssuesSummary",
+        "number,title,body,assignees,labels,blockedBy,parent,subIssuesSummary",
     ]
 }
 
@@ -59,6 +59,11 @@ fn parse_ready_issues(stdout: &[u8]) -> Result<Vec<ReadyIssue>, ForgeError> {
     #[serde(rename_all = "camelCase")]
     struct Listed {
         number: u64,
+        // Absent only from a listing made without asking for them.
+        #[serde(default)]
+        title: String,
+        #[serde(default)]
+        body: String,
         assignees: Vec<serde::de::IgnoredAny>,
         labels: Vec<Label>,
         blocked_by: BlockedBy,
@@ -99,6 +104,8 @@ fn parse_ready_issues(stdout: &[u8]) -> Result<Vec<ReadyIssue>, ForgeError> {
         .into_iter()
         .map(|i| ReadyIssue {
             number: i.number,
+            title: i.title,
+            body: i.body,
             assigned: !i.assignees.is_empty(),
             labels: i.labels.into_iter().map(|l| l.name).collect(),
             parent: i.parent.map(|p| p.number),

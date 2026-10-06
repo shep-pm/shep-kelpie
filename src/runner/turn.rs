@@ -420,6 +420,7 @@ impl Runner {
                 let session = item.session.clone();
                 let cost =
                     item.record_call(Role::Worker, now, session, reply.usage, reply.session_cost);
+                item.summary = crate::board::briefing::summary(&reply.text);
                 // A turn that left its work uncommitted and pushed nothing is
                 // sent back once, before the gate can park it on a ruling.
                 let asked = std::mem::take(&mut item.asked_to_commit);
