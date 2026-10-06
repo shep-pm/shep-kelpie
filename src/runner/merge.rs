@@ -31,6 +31,8 @@ pub enum DropError {
     ReviewRunning(u64),
     /// A yes is being carried out, and the merge is not stopped halfway
     Merging(u64),
+    /// The maintainer's `attach`, by this process, holds the work item
+    Attached(u64, u32),
     /// Its worktree, branch or build folder could not be removed
     Cleanup(String),
     /// The change could not be saved
@@ -46,6 +48,11 @@ impl fmt::Display for DropError {
                 write!(f, "a review round on #{issue} is running")
             }
             Self::Merging(issue) => write!(f, "the work item for #{issue} is merging"),
+            Self::Attached(issue, pid) => write!(
+                f,
+                "the work item for #{issue} is attached, by process {pid}: quit that claude \
+                 session first, which lets it go"
+            ),
             Self::Cleanup(reason) => f.write_str(reason),
             Self::State(e) => e.fmt(f),
         }
@@ -75,6 +82,10 @@ impl Runner {
         }
         if matches!(item.review_call, ReviewCallState::Running { .. }) {
             return Err(DropError::ReviewRunning(item.issue));
+        }
+        // Its worktree is the attached session's working folder.
+        if let Some(attached) = item.attached.as_ref().filter(|a| super::attach::live(a)) {
+            return Err(DropError::Attached(item.issue, attached.by.pid));
         }
         // A merged pull request parked on its follow-up ruling is past its
         // merge: dropping it would hand the merged pull request back as unmerged.

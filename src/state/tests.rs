@@ -105,7 +105,7 @@ fn a_file_with_one_work_item_loads_as_a_list_of_one() {
     let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(
         (&saved["version"], saved.get("work_item")),
-        (&serde_json::json!(6), None)
+        (&serde_json::json!(7), None)
     );
     assert_eq!(store.load().unwrap(), Some(state));
 
@@ -238,7 +238,7 @@ fn the_file_format_is_pinned() {
     assert_eq!(
         value,
         serde_json::json!({
-            "version": 6,
+            "version": 7,
             "run": "paused",
             "since": 7,
             "work_items": [],
@@ -474,19 +474,37 @@ fn a_malformed_file_names_its_path() {
 }
 
 #[test]
+fn a_version_6_file_loads_with_nothing_attached_and_saves_as_7() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path());
+    let mut state = ProjectState::new(Timestamp(7));
+    state.work_items.push(a_work_item());
+    let mut old = serde_json::to_value(&state).unwrap();
+    old["version"] = 6.into();
+    fs::write(dir.path().join("state.json"), old.to_string()).unwrap();
+
+    let loaded = store.load().unwrap().expect("a saved state");
+    assert_eq!(loaded.work_items[0].attached, None);
+    store.save(&loaded).unwrap();
+    let text = fs::read_to_string(dir.path().join("state.json")).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(saved["version"], 7);
+}
+
+#[test]
 fn a_newer_format_is_reported_as_one() {
     let dir = tempfile::tempdir().unwrap();
     let store = store_in(dir.path());
     fs::write(
         dir.path().join("state.json"),
-        r#"{"version": 7, "shape": "new"}"#,
+        r#"{"version": 8, "shape": "new"}"#,
     )
     .unwrap();
     assert_eq!(
         store.load().unwrap_err(),
         StateError::Version {
             path: store.path.clone(),
-            found: 7
+            found: 8
         }
     );
 }

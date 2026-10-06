@@ -3,7 +3,7 @@
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::process::Output;
+use std::process::{Command, Output};
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -154,6 +154,10 @@ impl Agents for ClaudeCli {
         };
         written_at(&folder.join(format!("{}.jsonl", call.session.id().0)))
     }
+
+    fn foreground(&self, call: &AgentCall) -> Result<Command, AgentError> {
+        self.terminal_command(call)
+    }
 }
 
 /// Writes the call's settings file whole, from the call alone
@@ -176,9 +180,29 @@ pub(crate) fn write_settings(call: &AgentCall) -> Result<(), AgentError> {
 // drops the maintainer's own hooks, plugins and skills. It also drops the
 // worktree's `settings.local.json`, which nothing kelpie runs needs.
 fn argv(call: &AgentCall) -> Vec<OsString> {
-    let mut argv: Vec<OsString> = vec![
-        "-p".into(),
-        call.prompt.as_str().into(),
+    let mut argv: Vec<OsString> = vec!["-p".into(), call.prompt.as_str().into()];
+    argv.extend(profile(call));
+    argv.extend(["--output-format".into(), "json".into()]);
+    if call.role == Role::Worker {
+        argv.extend(["--permission-mode".into(), "bypassPermissions".into()]);
+    }
+    argv.extend(session(call));
+    argv
+}
+
+// The same session in the maintainer's terminal: Claude Code asks before
+// each tool call as it always does, and a prompt is its first message.
+fn terminal_argv(call: &AgentCall) -> Vec<OsString> {
+    let mut argv = profile(call);
+    argv.extend(session(call));
+    if !call.prompt.is_empty() {
+        argv.push(call.prompt.as_str().into());
+    }
+    argv
+}
+
+fn profile(call: &AgentCall) -> Vec<OsString> {
+    vec![
         "--model".into(),
         call.model.as_str().into(),
         "--effort".into(),
@@ -187,12 +211,11 @@ fn argv(call: &AgentCall) -> Vec<OsString> {
         "project".into(),
         "--settings".into(),
         call.settings.clone().into(),
-        "--output-format".into(),
-        "json".into(),
-    ];
-    if call.role == Role::Worker {
-        argv.extend(["--permission-mode".into(), "bypassPermissions".into()]);
-    }
+    ]
+}
+
+fn session(call: &AgentCall) -> Vec<OsString> {
+    let mut argv = Vec::new();
     for plugin in &call.plugin_dirs {
         argv.extend(["--plugin-dir".into(), plugin.into()]);
     }

@@ -220,6 +220,17 @@ impl Agents for FakeClaude {
         crate::adapters::write_claude_settings(call)
     }
 
+    // The session as the terminal would resume it, with no sandbox around it.
+    fn foreground(&self, call: &AgentCall) -> Result<std::process::Command, AgentError> {
+        let mut command = std::process::Command::new("claude");
+        command
+            .arg("--settings")
+            .arg(&call.settings)
+            .args(["--resume", &call.session.id().0])
+            .current_dir(&call.cwd);
+        Ok(command)
+    }
+
     fn last_active(&self, _call: &AgentCall) -> CallActivity {
         self.active
             .lock()

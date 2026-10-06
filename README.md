@@ -218,6 +218,7 @@ shep kelpie status     # every project
 shep kelpie doctor     # what each project still needs on this machine
 shep kelpie rule 14 yes
 shep kelpie issue "<request>"   # issues for you to read, or --interactive
+shep kelpie attach 7   # steer issue 7's worker in this terminal
 ```
 
 Every trigger the runner takes is also a verb: `add <issue>`, `rework <pr>`, `adopt <pr>`, `gate [<issue>]`, `drop [<issue>]`, `timings [<n>]` and `rule`. Each reaches the project whose repo holds the folder you run it in, a worktree of it included, or the one `-p <project>` names anywhere in the line. From anywhere else it lists the projects and guesses nothing. `shep trigger` still works.
@@ -409,6 +410,14 @@ The runner writes the board out as `board.md` in the project's folder, and `stat
 - the ready queue in the board's order, with each issue's priority, why the board passes over it if it does, the paths its body names in backticks, and the first 600 characters of its body, quoted
 - the board's events since the project manager last read it, or the last 20 before it ever has
 - the overlap: for each pair of open branches, the files both touch and the files `git merge-tree` finds in conflict, and each ready issue's named paths against them. The conflict check needs git 2.38 or later
+
+### Attaching to a worker
+
+`shep kelpie attach <issue>` takes over a work item's worker by hand. The runner holds the work item, so no call starts for it. A call already in flight runs to its end, and `attach` says it is waiting. Then it resumes the worker's session with `claude --resume` in your terminal, in the item's worktree, with the worker's settings file and inside the worker's sandbox, so its deny rules, its guard and its fence hold while you drive. Claude Code asks before each tool call as it always does.
+
+When you exit `claude`, the work item carries on, and its next turn resumes the same session. A commit or push you make while attached is the worker's own, as a push in a turn is, so the gate takes it as the branch's head rather than a change kelpie did not make. The runner holds the work item while either the `attach` command or the session it started runs, each known by its pid and start time, and lets it go at its next pass once both have ended. A SIGTERM or SIGHUP to `attach` is passed on to the session, which `attach` waits for. `status` shows the hold under the item's `attached`, and `drop` refuses the item while it is held.
+
+`attach` changes nothing and says what to do instead for a work item whose worker has no session yet (its first turn starts one), one parked on a ruling (answer it first), or one merging. Only a Claude Code worker can be attached: a Codex or pi worker's session resumes another way, by hand.
 
 ### Writing issues
 

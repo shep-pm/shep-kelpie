@@ -37,6 +37,7 @@ pub mod shep_home;
 pub mod shepherd;
 pub mod skills;
 pub mod state;
+pub mod terminal;
 pub mod tools;
 pub mod totp;
 mod trim;

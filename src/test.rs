@@ -112,6 +112,7 @@ pub(crate) fn a_work_item() -> WorkItem {
             call: None,
             queued: false,
         }),
+        attached: None,
         calls: vec![CallRecord {
             role: Role::Worker,
             at: Timestamp(10),

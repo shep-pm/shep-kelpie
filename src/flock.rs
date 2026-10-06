@@ -8,6 +8,7 @@
 //! (ADR 0004).
 
 pub mod add;
+mod attach;
 pub mod control;
 pub mod rule;
 mod verbs;

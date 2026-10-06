@@ -17,11 +17,12 @@ use crate::review_bot::Bot;
 use crate::settings::{AgentName, MergeAuthority};
 use crate::skills::StepSkill;
 use crate::state::{Finished, LeaseHeld, Ruling, RunState, StateError, Waiting};
-use crate::work_item::{BotSkipped, Phase, QwenTally, Spend, Split, Turn, WorkItem};
+use crate::work_item::{Attached, BotSkipped, Phase, QwenTally, Spend, Split, Turn, WorkItem};
 
 /// The triggers a runner answers
-pub const ACTIONS: [&str; 10] = [
+pub const ACTIONS: [&str; 12] = [
     "status", "start", "pause", "add", "rework", "adopt", "rule", "gate", "drop", "timings",
+    "attach", "detach",
 ];
 
 /// How many finished work items `timings` totals when given no count
@@ -29,6 +30,10 @@ const TIMINGS_DEFAULT: usize = 10;
 
 /// How many finished work items `status` lists
 pub(super) const STATUS_HISTORY: usize = 10;
+
+/// What `attach` and `detach` take, as their refusals say
+const ATTACH_USAGE: &str = "takes an issue number and the attaching process's pid, and \
+                            `attach` the pid of the session it started";
 
 /// What `rule` takes, as its refusals say
 const RULE_USAGE: &str = "takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`";
@@ -149,6 +154,9 @@ pub struct WorkItemStatus<'a> {
     pub by_role: Spend,
     /// Its qwen rounds, which cost no money
     pub qwen: QwenTally,
+    /// The maintainer's `attach` holding it, while one does
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attached: Option<&'a Attached>,
     /// The local reviewers that reviewed nothing twice, so the review goes on
     /// without them
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -189,6 +197,7 @@ impl<'a> WorkItemStatus<'a> {
             unpriced_calls: item.calls.iter().filter(|c| c.unpriced).count(),
             by_role: item.spend(),
             qwen: item.qwen,
+            attached: item.attached.as_ref(),
             local_reviewers_down: item.local_reviewers_down(),
             reviewers_skipped: &item.reviewers_skipped,
             unreviewed: item.unreviewed.as_deref(),
@@ -209,6 +218,8 @@ enum Request {
     Gate(Option<u64>),
     Drop(Option<u64>),
     Timings(usize),
+    Attach(u64, u32, Option<u32>),
+    Detach(u64, u32),
 }
 
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
@@ -218,8 +229,11 @@ enum Request {
 /// `<id> answer <text>`, `gate` and `drop` take the
 /// issue of the work item they are about when more than one is open,
 /// `timings` takes how many finished work items to total (ten when left
-/// out) and answers the totals, not the status, and every other action takes
-/// nothing.
+/// out) and answers the totals, not the status, `attach` and `detach` take
+/// an issue and the attaching process's pid, `attach` then the pid of the
+/// session it started, if it has, and answers
+/// [`Attaching`](super::Attaching) rather than the status, and every other
+/// action takes nothing.
 pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> String {
     let error = |message: String| serde_json::json!({ "error": message }).to_string();
     let request = match read(action, params.map(str::trim).filter(|p| !p.is_empty())) {
@@ -234,6 +248,13 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
         _ => None,
     };
     let changed = match request {
+        Request::Attach(issue, pid, session) => {
+            return match runner.attach(issue, pid, session) {
+                Ok(attaching) => serde_json::to_string(&attaching).expect("it serializes to JSON"),
+                Err(e) => error(e.to_string()),
+            };
+        }
+        Request::Detach(issue, pid) => runner.detach(issue, pid).map_err(|e| e.to_string()),
         Request::Status | Request::Timings(_) => Ok(()),
         Request::Start => runner.start().map_err(|e| e.to_string()),
         Request::Pause => runner.pause().map_err(|e| e.to_string()),
@@ -283,6 +304,23 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
             .map(Request::Timings)
             .ok_or_else(|| format!("`timings` takes a count of finished work items, not {p:?}")),
         ("timings", None) => Ok(Request::Timings(TIMINGS_DEFAULT)),
+        ("attach" | "detach", Some(p)) => {
+            let words: Vec<&str> = p.split_whitespace().collect();
+            let read = match (action, words.as_slice()) {
+                ("attach", [issue, pid]) => number(issue)
+                    .zip(pid_of(pid))
+                    .map(|(issue, pid)| Request::Attach(issue, pid, None)),
+                ("attach", [issue, pid, session]) => number(issue)
+                    .zip(pid_of(pid).zip(pid_of(session)))
+                    .map(|(issue, (pid, session))| Request::Attach(issue, pid, Some(session))),
+                ("detach", [issue, pid]) => number(issue)
+                    .zip(pid_of(pid))
+                    .map(|(issue, pid)| Request::Detach(issue, pid)),
+                _ => None,
+            };
+            read.ok_or_else(|| format!("`{action}` {ATTACH_USAGE}, not {p:?}"))
+        }
+        ("attach" | "detach", None) => Err(format!("`{action}` {ATTACH_USAGE}")),
         ("rule", None) => Err(format!("`{action}` {RULE_USAGE}")),
         (_, _) if !ACTIONS.contains(&action) => Err(format!("unknown action `{action}`")),
         (_, Some(_)) => Err(format!("`{action}` takes no params")),
@@ -306,6 +344,14 @@ pub(super) fn read_rule(params: &str) -> Option<(u64, Answer)> {
         _ => return None,
     };
     Some((id, answer))
+}
+
+// A pid that names one process: not 0, and not past `i32::MAX`, which
+// a signal would take as a negative process group.
+fn pid_of(text: &str) -> Option<u32> {
+    number(text)
+        .filter(|&pid| pid <= i32::MAX.unsigned_abs().into())
+        .and_then(|pid| u32::try_from(pid).ok())
 }
 
 // Digits only, so `+7` and `#7` are refused rather than read as 7.
@@ -501,10 +547,12 @@ mod tests {
     fn every_registered_action_is_answered_and_no_other() {
         let rig = Rig::new("koji");
         let runner = rig.open().unwrap();
-        for action in ACTIONS
-            .into_iter()
-            .filter(|a| !["rework", "adopt", "rule", "gate", "drop"].contains(a))
-        {
+        for action in ACTIONS.into_iter().filter(|a| {
+            ![
+                "rework", "adopt", "rule", "gate", "drop", "attach", "detach",
+            ]
+            .contains(a)
+        }) {
             let params = (action == "add").then_some("7");
             assert_eq!(
                 rig.ask(&runner, action, params)["project"],

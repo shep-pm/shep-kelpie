@@ -52,6 +52,10 @@ impl Agents for Routed {
     fn last_active(&self, call: &AgentCall) -> CallActivity {
         self.adapter(call).last_active(call)
     }
+
+    fn foreground(&self, call: &AgentCall) -> Result<std::process::Command, AgentError> {
+        self.adapter(call).foreground(call)
+    }
 }
 
 #[cfg(test)]
