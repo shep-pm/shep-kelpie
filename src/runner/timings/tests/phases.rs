@@ -88,7 +88,7 @@ fn a_merged_work_items_phases_sum_to_its_wall_time_at_every_stop() {
     let phases: Vec<_> = stops.iter().map(|t| t["phase"].as_str().unwrap()).collect();
     assert_eq!(
         phases,
-        ["worker", "gpu_wait", "local_round", "ci", "ruling", "merge"]
+        ["worker", "review", "review", "ci", "ruling", "merge"]
     );
     for stop in &stops {
         assert_sums(stop);
@@ -98,8 +98,7 @@ fn a_merged_work_items_phases_sum_to_its_wall_time_at_every_stop() {
     assert_eq!(split.wall, wall);
     let got = |phase| split.seconds.get(phase);
     assert_eq!(got(TimingPhase::Worker), 100);
-    assert_eq!(got(TimingPhase::GpuWait), 20);
-    assert_eq!(got(TimingPhase::LocalRound), 30);
+    assert_eq!(got(TimingPhase::Review), 50);
     assert_eq!(got(TimingPhase::Ruling), 1_200);
     assert!(got(TimingPhase::Ci) >= 300);
     assert!(got(TimingPhase::Merge) >= crate::runner::CHECKS_SETTLE);
@@ -115,7 +114,7 @@ fn a_merged_work_items_phases_sum_to_its_wall_time_at_every_stop() {
 }
 
 #[test]
-fn a_gpu_wait_is_counted_apart_from_the_round() {
+fn a_gpu_wait_and_the_round_both_count_as_review() {
     let rig = Rig::new("koji");
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
@@ -133,23 +132,23 @@ fn a_gpu_wait_is_counted_apart_from_the_round() {
         assert!(queued.entered(PATIENCE), "the round never queued");
         rig.clock.advance(120);
         let t = timings(&rig, &runner);
-        assert_eq!(t["phase"], "gpu_wait");
-        assert_eq!((secs(&t, "gpu_wait"), secs(&t, "local_round")), (120, 0));
+        assert_eq!(t["phase"], "review");
+        assert_eq!(secs(&t, "review"), 120);
         assert_sums(&t);
 
         queued.release();
         assert!(running.entered(PATIENCE), "the round never ran");
         rig.clock.advance(45);
         let t = timings(&rig, &runner);
-        assert_eq!(t["phase"], "local_round");
-        assert_eq!((secs(&t, "gpu_wait"), secs(&t, "local_round")), (120, 45));
+        assert_eq!(t["phase"], "review");
+        assert_eq!(secs(&t, "review"), 165);
         assert_sums(&t);
 
         running.release();
         round.join().unwrap().unwrap();
     });
     let t = timings(&rig, &runner);
-    assert_eq!((secs(&t, "gpu_wait"), secs(&t, "local_round")), (120, 45));
+    assert_eq!(secs(&t, "review"), 165);
     assert_eq!(
         t["phase"], "other",
         "the round is over, and no call is running"
@@ -172,17 +171,17 @@ fn at_the_claude_round() -> (Rig, Mutex<Runner>) {
 }
 
 #[test]
-fn a_claude_round_in_flight_is_claude_round() {
+fn a_claude_round_in_flight_is_review() {
     let (rig, runner) = at_the_claude_round();
     let hold = Hold::default();
     rig.claude.script([Scripted::Hold(hold.clone())]);
     let t = read_while_held(&rig, &runner, &hold, 90);
-    assert_eq!(t["phase"], "claude_round");
-    assert_eq!(secs(&t, "claude_round"), 90);
+    assert_eq!(t["phase"], "review");
+    assert_eq!(secs(&t, "review"), 90);
     assert_sums(&t);
     let t = timings(&rig, &runner);
     assert_eq!(
-        (t["phase"].as_str(), secs(&t, "claude_round")),
+        (t["phase"].as_str(), secs(&t, "review")),
         (Some("other"), 90)
     );
     assert_sums(&t);
@@ -204,8 +203,8 @@ fn a_second_look_in_flight_is_a_reviewers_session() {
     let hold = Hold::default();
     rig.claude.script([Scripted::Hold(hold.clone())]);
     let t = read_while_held(&rig, &runner, &hold, 90);
-    assert_eq!(t["phase"], "claude_round");
-    assert_eq!(secs(&t, "claude_round"), 90);
+    assert_eq!(t["phase"], "review");
+    assert_eq!(secs(&t, "review"), 90);
     assert_sums(&t);
 }
 
@@ -236,8 +235,8 @@ fn coderabbit_is_the_window_until_the_summon_and_the_review_after() {
     rig.clock.advance(300);
     let t = timings(&rig, &runner);
     assert_eq!(
-        (t["phase"].as_str(), secs(&t, "coderabbit_window")),
-        (Some("coderabbit_window"), 300)
+        (t["phase"].as_str(), secs(&t, "review")),
+        (Some("review"), 300)
     );
     assert_sums(&t);
 
@@ -248,10 +247,7 @@ fn coderabbit_is_the_window_until_the_summon_and_the_review_after() {
     ));
     rig.clock.advance(700);
     let t = timings(&rig, &runner);
-    assert_eq!(t["phase"], "coderabbit_review");
-    assert_eq!(
-        (secs(&t, "coderabbit_window"), secs(&t, "coderabbit_review")),
-        (300, 700)
-    );
+    assert_eq!(t["phase"], "review");
+    assert_eq!(secs(&t, "review"), 1_000);
     assert_sums(&t);
 }

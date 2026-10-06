@@ -198,7 +198,7 @@ fn the_second_look_is_its_own_stage_in_status_and_a_reviewers_time() {
     );
     let timings = rig.ask(&runner, "timings", None);
     let seconds: &Value = &timings["seconds"];
-    assert!(seconds.get("claude_round").is_some(), "{timings}");
+    assert!(seconds.get("review").is_some(), "{timings}");
     assert!(seconds.get("deep_round").is_none(), "{timings}");
 }
 

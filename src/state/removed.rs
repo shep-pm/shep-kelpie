@@ -3,9 +3,11 @@
 //! Such a file still loads. The relay's, the planning call's, the
 //! whole-issue check's, the review loop's, the deep round's later steps' and
 //! the shots' fields are dropped before reading. The check's, the judge's
-//! and the deep round's time and calls count as a reviewer's session's, and
-//! the shots' time as other, so totals still add up. A review saved mid-loop
-//! goes on from the reviewer after the one it last recorded. The deep round
+//! and the deep round's calls count as a reviewer's session's. Their time,
+//! a round's, a GPU wait's and a review bot's all count as review's, and
+//! the shots' and a paused project's as other, so totals still add up. A
+//! review saved mid-loop goes on from the reviewer after the one it last
+//! recorded. The deep round
 //! and the project's own Claude round, `deep` and `claude`, are
 //! `defect-hunter`, and a deep round's two reads are its two looks. A work
 //! item's worker model becomes the agent named for it. A review bot round
@@ -29,12 +31,20 @@ const RULINGS: [&str; 6] = [
 ];
 
 // The judge and the check each ran as a fresh Claude session reviewing the
-// work, so their time is a Claude round's and their calls a reviewer's. A
-// shots run was kelpie's own, between steps, so its time is other.
-const PHASES: [(&str, &str); 4] = [
-    ("audit", "claude_round"),
-    ("judging", "claude_round"),
-    ("deep_round", "claude_round"),
+// work, so their time is review's and their calls a reviewer's. A shots run
+// was kelpie's own, between steps, so its time is other. The phases that
+// came before review and other took them in, and a paused project's time
+// is other's.
+const PHASES: [(&str, &str); 10] = [
+    ("audit", "review"),
+    ("judging", "review"),
+    ("deep_round", "review"),
+    ("gpu_wait", "review"),
+    ("local_round", "review"),
+    ("claude_round", "review"),
+    ("coderabbit_window", "review"),
+    ("coderabbit_review", "review"),
+    ("paused", "other"),
     ("shots", "other"),
 ];
 const CALLS: [&str; 3] = ["audit", "judge", "deep"];

@@ -83,7 +83,7 @@ mod tests {
     fn seconds_serialize_every_phase_zeros_included() {
         let seconds = Seconds::of(&[(TimingPhase::Ci, 7)]);
         let value = serde_json::to_value(&seconds).unwrap();
-        assert_eq!(value.as_object().unwrap().len(), 11);
+        assert_eq!(value.as_object().unwrap().len(), 6);
         assert_eq!((&value["ci"], &value["worker"]), (&json!(7), &json!(0)));
         let back: Seconds = serde_json::from_value(value).unwrap();
         assert_eq!(back, seconds);

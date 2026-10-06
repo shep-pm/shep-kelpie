@@ -403,7 +403,7 @@ fn hear(runner: &Mutex<Runner>, news: News) -> Result<Option<StepReport>, StateE
     let (issue, end) = match news {
         News::Stage { issue, stage, .. } => {
             // A failed save is told and let go. A GPU wait may then count as
-            // `local_round`, but the phases still sum to the wall time.
+            // the round's, but the phases still sum to the wall time.
             if let Err(e) = runner.on(Some(issue)).round_stage(stage) {
                 eprintln!("cannot save the local round's stage: {e}");
             }

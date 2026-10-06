@@ -224,7 +224,7 @@ Every trigger the runner takes is also a verb: `add <issue>`, `rework <pr>`, `ad
 
 - `drop [<issue>]` ends a work item without merging it. Its worktree, local branch and build folder go, and its pull request stays, labelled `ready-for-human`
 - `gate [<issue>]` sends a work item whose worker's turn ended with a pull request into the review gate, when it was never entered
-- `timings [<n>]` totals where the time went over the last `n` finished work items (10 when left out), and answers JSON with the totals under `seconds` and a plain-text `table`, so `shep kelpie timings 20 | jq -r .table` prints it. `status` shows each open item's split under `timings`, and the ten most recent finished items under `history`. The state file keeps the last 100
+- `timings [<n>]` totals where the time went over the last `n` finished work items (10 when left out), in six phases: `worker`, `review`, `ci`, `ruling`, `merge` and `other` (every second lands in exactly one), and answers JSON with the totals under `seconds` and a plain-text `table`, so `shep kelpie timings 20 | jq -r .table` prints it. `status` shows each open item's split under `timings`, and the ten most recent finished items under `history`. The state file keeps the last 100
 
 A ruling's id is unique across projects, so `rule` needs no project:
 
