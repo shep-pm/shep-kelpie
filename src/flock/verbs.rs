@@ -19,9 +19,9 @@ use crate::tools::Tools;
 /// The verbs [`main`] runs: every trigger a runner takes, `add`, which also
 /// registers a checkout, `issue`, which runs the issue writer itself, and
 /// `attach` and `pm`, which run a worker's or the project manager's session here
-pub const VERBS: [&str; 14] = [
+pub const VERBS: [&str; 16] = [
     "add", "start", "pause", "status", "rule", "rework", "adopt", "gate", "drop", "timings",
-    "issue", "attach", "tell", "pm",
+    "issue", "attach", "tell", "pm", "drain", "undrain",
 ];
 
 /// What the verbs take, as their help says
@@ -40,6 +40,7 @@ usage: shep kelpie add [<project>]       registers this checkout as a project
        shep kelpie attach <issue>        steers its worker's session here
        shep kelpie tell \"<note>\"         a note for the project manager's next wake
        shep kelpie pm                    steers the project manager's session here
+       shep kelpie drain | undrain       holds back every new call, or lets them start
 
 `-p <project>` or `--project <project>` goes anywhere in the line, before a
 ruling's answer. Without it, the project is the one whose repo holds this
@@ -140,6 +141,7 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
         ("gate" | "drop", [issue]) => send(command, Some(issue)).await,
         ("timings", []) => send("timings", None).await,
         ("timings", [count]) => send("timings", Some(count)).await,
+        ("drain" | "undrain", []) => send(command, None).await,
         ("attach", [issue]) => {
             let number = (issue.parse::<u64>().ok())
                 .filter(|&n| n > 0 && issue.bytes().all(|b| b.is_ascii_digit()));

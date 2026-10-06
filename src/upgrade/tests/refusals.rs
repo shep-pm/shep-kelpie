@@ -141,6 +141,8 @@ async fn a_flock_with_no_adopted_kelpie_has_nothing_to_upgrade() {
         shep_home: shepherd.home(),
         repo: "/nowhere",
         patience: FAST,
+        now: false,
+        interrupt: Interrupt::Never,
     };
     let err = run(&scene, &Action::Rollback, &mut |_| {})
         .await
@@ -156,6 +158,8 @@ async fn no_shepherd_means_no_upgrade() {
         shep_home: Path::new("/nowhere/shep"),
         repo: "/nowhere",
         patience: FAST,
+        now: false,
+        interrupt: Interrupt::Never,
     };
     let err = run(&scene, &Action::Rollback, &mut |_| {})
         .await

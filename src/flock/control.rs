@@ -167,6 +167,7 @@ pub async fn status(client: &Client) -> Result<Vec<String>, String> {
     let mut lines = Vec::new();
     for sheep in tables(client).await?.into_keys() {
         let line = match trigger(client, &sheep, "status", None).await? {
+            Answered::Runner(body) if draining(&body) => format!("{sheep} (draining): {body}"),
             Answered::Runner(body) => format!("{sheep}: {body}"),
             Answered::Starting => format!("{sheep}: starting"),
             Answered::Down => format!("{sheep}: not running"),
@@ -205,6 +206,12 @@ pub async fn send(
         Answered::Down => Err(format!("{runner}'s runner is not running")),
         Answered::TimedOut => Err(format!("{runner}'s runner did not answer in time")),
     }
+}
+
+// Whether a runner's answer shows it draining.
+fn draining(body: &str) -> bool {
+    let answer = serde_json::from_str::<serde_json::Value>(body);
+    answer.is_ok_and(|answer| answer.get("draining").is_some_and(|d| !d.is_null()))
 }
 
 // The `error` a runner's answer carries, if any.

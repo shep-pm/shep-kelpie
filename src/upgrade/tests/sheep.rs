@@ -131,9 +131,9 @@ async fn a_runner_that_never_answers_status_is_named_and_nothing_restarts() {
 #[tokio::test]
 async fn a_restarted_sheep_that_never_answers_again_is_named() {
     let mut rig = Rig::new().await;
-    // Two idle looks (before the dog, before the runner), then silence.
+    // Three idle looks (before the dog, the runner's drain, its merge wait), then silence.
     rig.shepherd
-        .replies("koji", &[Some(IDLE), Some(IDLE), None]);
+        .replies("koji", &[Some(IDLE), Some(IDLE), Some(IDLE), None]);
     let new = rig.build("new", "0.3.0", "0.12.0");
     let patience = Patience {
         start: Duration::from_secs(1),

@@ -78,7 +78,7 @@ pub(super) fn awaits_a_push(item: &WorkItem) -> bool {
 }
 
 impl Runner {
-    pub(super) fn turn_ceiling(&self) -> Duration {
+    pub(in crate::runner) fn turn_ceiling(&self) -> Duration {
         Duration::from_secs(u64::from(self.settings.worker.turn_timeout.get()) * 60)
     }
 

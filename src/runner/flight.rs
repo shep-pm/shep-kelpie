@@ -19,6 +19,7 @@ use std::time::Duration;
 use super::Runner;
 use super::alert::post_due;
 use super::briefing::{Watched, brief};
+use super::drain::{CallRole, CallRunning};
 use super::replies::answer_replies;
 use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, StepReport};
 use super::review::run_review_call;
@@ -91,6 +92,23 @@ impl Flights {
         if let Some(flight) = self.flying.get(&issue) {
             flight.ending.end();
         }
+    }
+
+    /// Every call in flight: each work item's by its issue, then the
+    /// project manager's
+    pub(super) fn running(&self) -> Vec<CallRunning> {
+        let items = self.flying.iter().map(|(&issue, flight)| CallRunning {
+            issue: Some(issue),
+            role: match flight.deadline {
+                Some(_) => CallRole::Worker,
+                None => CallRole::Reviewer,
+            },
+        });
+        let pm = self.pm.iter().map(|_| CallRunning {
+            issue: None,
+            role: CallRole::Pm,
+        });
+        items.chain(pm).collect()
     }
 
     /// `issue`'s call in flight, as the board watches it

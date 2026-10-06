@@ -39,6 +39,7 @@ mod claude_files;
 #[cfg(test)]
 mod coderabbit;
 mod dispatch;
+mod drain;
 mod flight;
 mod follow_up;
 mod gate;
@@ -78,6 +79,7 @@ pub use crate::coderabbit::LABEL as SUMMON_LABEL;
 pub use adopt::AdoptError;
 pub use attach::{AttachError, Attaching};
 pub use claim::IN_PROGRESS;
+pub use drain::{CallRole, CallRunning, Draining};
 #[cfg(test)]
 pub use flight::step;
 pub use flight::{Pass, advance};
@@ -241,6 +243,9 @@ pub struct Runner {
     local: LocalPaths,
     // The project manager's wakes and decisions, in memory only
     pm: pm::Desk,
+    // Whether `drain` holds back every new call, in memory only, so a
+    // restart ends it
+    draining: bool,
 }
 
 impl Runner {
@@ -353,6 +358,7 @@ impl Runner {
             brief: briefing::BoardCache::default(),
             local,
             pm: pm::Desk::default(),
+            draining: false,
         };
         runner.settle_older_bots()?;
         runner.settle_labels();
@@ -424,6 +430,7 @@ impl Runner {
             local_leases: self.local_leases(),
             board: &self.paths.board,
             pm: self.pm_status(),
+            draining: self.draining_status(),
         }
     }
 

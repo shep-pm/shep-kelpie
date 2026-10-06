@@ -7,6 +7,10 @@
 //! it is waited on, and named if the wait runs out. A sheep that is stopped
 //! stays stopped: it starts on the new build.
 //!
+//! Unless the upgrade was asked to restart at once, each runner is drained
+//! before its merge wait ([`super::drain`]), so its restart cuts no call
+//! short. The dog is never drained, since the calls are the runners'.
+//!
 //! The installed kelpie is the program the adopted dog runs, and every sheep
 //! restarted must run that same path, or the restart would not move it.
 
@@ -17,8 +21,10 @@ use serde_json::Value;
 use shep_client::Client;
 use shep_client::shep_core::protocol::request::DogSource;
 use shep_client::shep_core::status::ProcStatus;
+use tokio::signal::unix::{SignalKind, signal};
 use tokio::time::Instant;
 
+use super::drain;
 use crate::dog;
 use crate::flock::control::{Answered, trigger};
 use crate::flock::{flock, kelpie_sheep, resume, script, tables};
@@ -32,6 +38,9 @@ pub struct Patience {
     pub start: Duration,
     /// For a merge in flight to end, or a runner to say whether it has one
     pub merge: Duration,
+    /// Past the longest a drained runner's call may run, for its last call
+    /// to end and be recorded
+    pub margin: Duration,
 }
 
 impl Default for Patience {
@@ -41,6 +50,44 @@ impl Default for Patience {
             // A runner needs about 7s to stop cleanly before it starts.
             start: Duration::from_secs(60),
             merge: Duration::from_secs(60 * 60),
+            margin: Duration::from_secs(5 * 60),
+        }
+    }
+}
+
+/// What stops an upgrade part way, other than a failure
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Interrupt {
+    /// Ctrl-C or SIGTERM, from the runners' restarts on
+    Signals,
+    /// Nothing
+    Never,
+    /// A stand-in Ctrl-C this long after the runners' restarts begin
+    #[cfg(test)]
+    After(Duration),
+}
+
+// Waits for `interrupt`, and names it.
+async fn interrupted(interrupt: Interrupt) -> &'static str {
+    match interrupt {
+        Interrupt::Signals => {
+            let listen = |kind| signal(kind).ok();
+            match (
+                listen(SignalKind::interrupt()),
+                listen(SignalKind::terminate()),
+            ) {
+                (Some(mut ctrl_c), Some(mut term)) => tokio::select! {
+                    _ = ctrl_c.recv() => "Ctrl-C",
+                    _ = term.recv() => "SIGTERM",
+                },
+                _ => std::future::pending().await,
+            }
+        }
+        Interrupt::Never => std::future::pending().await,
+        #[cfg(test)]
+        Interrupt::After(after) => {
+            tokio::time::sleep(after).await;
+            "Ctrl-C"
         }
     }
 }
@@ -148,16 +195,24 @@ impl Plan {
 
 /// Restarts the dog and each running runner, saying what it does through `say`
 ///
+/// With `drain`, each runner is drained before its merge wait, and sent
+/// `undrain` if it is not restarted after all: on a failure, or when
+/// `interrupt` comes while it is drained.
+///
 /// # Errors
 ///
 /// A message naming the sheep that could not be restarted, did not come back,
 /// or kept a merge in flight, or would not say whether it had one, for longer
-/// than `patience.merge`. The sheep restarted before it are on the new build,
-/// and running the upgrade again finishes the rest.
+/// than `patience.merge`, or a drained runner that kept a call running past
+/// its ceiling and `patience.margin`, or the interrupt that stopped it. The
+/// sheep restarted before it are on the new build, and running the upgrade
+/// again finishes the rest.
 pub async fn restart_all(
     client: &Client,
     plan: &Plan,
     patience: Patience,
+    drain: bool,
+    interrupt: Interrupt,
     say: &mut dyn FnMut(String),
 ) -> Result<(), String> {
     for member in plan
@@ -193,9 +248,26 @@ pub async fn restart_all(
         wait_out_merges(client, &names, patience, say).await?;
         bounce_if_running(client, &plan.dog.name, patience, say).await?;
     }
+    let stop = interrupted(interrupt);
+    tokio::pin!(stop);
     for name in names {
-        wait_out_merges(client, &[name], patience, say).await?;
-        bounce_if_running(client, name, patience, say).await?;
+        if !drain {
+            wait_out_merges(client, &[name], patience, say).await?;
+            bounce_if_running(client, name, patience, say).await?;
+            continue;
+        }
+        let restarted = async {
+            drain::drain(client, name, patience, say).await?;
+            wait_out_merges(client, &[name], patience, say).await?;
+            bounce_if_running(client, name, patience, say).await
+        };
+        let restarted = tokio::select! {
+            restarted = restarted => restarted,
+            by = &mut stop => Err(format!("stopped by {by} while `{name}` was draining")),
+        };
+        if let Err(e) = restarted {
+            return Err(format!("{e}{}", drain::undrain(client, name).await));
+        }
     }
     Ok(())
 }
