@@ -19,7 +19,8 @@ use crate::ports::{
 };
 use crate::review_bot::Profile;
 use crate::runner::{
-    CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, StepReport, answer, step,
+    CHECKS_SETTLE, OpenError, ProjectName, ProjectPaths, Runner, SETTLE_LEAST, StepReport, answer,
+    step,
 };
 use crate::settings::{Settings, SettingsError};
 use crate::webhook::{KelpieSettings, Webhook};
@@ -658,6 +659,15 @@ impl Rig {
             return report;
         }
         self.clock.advance(CHECKS_SETTLE);
+        step(runner).unwrap()
+    }
+
+    /// Steps a bot's round from the review it covers the head with: the
+    /// step that sees the review reads its threads, and the one
+    /// [`SETTLE_LEAST`] on reads them again and lands the round
+    pub(crate) fn threads_read(&self, runner: &Mutex<Runner>) -> Option<StepReport> {
+        assert_eq!(step(runner).unwrap(), None, "the threads read once");
+        self.clock.advance(SETTLE_LEAST);
         step(runner).unwrap()
     }
 

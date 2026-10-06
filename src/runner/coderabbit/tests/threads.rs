@@ -63,7 +63,7 @@ fn a_forge_that_keeps_refusing_to_resolve_lets_the_pass_go_on_after_three_steps(
         .review(71, &guarded, now(&rig) + 60, &[]);
     rig.clock.advance(60);
     assert!(matches!(
-        step(&runner).unwrap(),
+        rig.threads_read(&runner),
         Some(StepReport::BotReviewed {
             round: 3,
             open_threads: 1,

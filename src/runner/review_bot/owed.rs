@@ -53,7 +53,7 @@ fn each_listed_bot_owes_an_adopted_pull_request_its_own_summon() {
     rig.forge.coderabbit.review(80, &head, now(&rig) + 300, &[]);
     rig.clock.advance(300);
     assert!(matches!(
-        step(&runner).unwrap(),
+        rig.threads_read(&runner),
         Some(StepReport::BotReviewed { round: 1, .. })
     ));
     assert_eq!(
@@ -82,7 +82,7 @@ fn a_bot_skipped_while_owed_keeps_its_debt_and_lifts_no_other_bots_rounds() {
     assert_eq!(step(&runner).unwrap(), summoned_80(&head));
     rig.forge.coderabbit.review(80, &head, now(&rig) + 300, &[]);
     rig.clock.advance(300);
-    step(&runner).unwrap(); // CodeRabbit's read lands
+    rig.threads_read(&runner); // CodeRabbit's read lands
     assert!(matches!(
         step(&runner).unwrap(),
         Some(StepReport::ReviewerSkipped { round: 2, .. })

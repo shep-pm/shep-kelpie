@@ -195,7 +195,7 @@ fn with_coderabbit_listed_the_merge_waits_for_its_read() {
     rig.forge.coderabbit.review(71, &head, now(&rig) + 60, &[]);
     rig.clock.advance(60);
     assert!(matches!(
-        step(&runner).unwrap(),
+        rig.threads_read(&runner),
         Some(StepReport::BotReviewed { .. })
     ));
     assert!(merged(rig.verdict(&runner)));
@@ -548,7 +548,7 @@ fn a_yes_that_vouches_for_a_new_head_sends_it_back_through_every_gate() {
     rig.forge.coderabbit.review(71, &head, now(&rig) + 60, &[]);
     rig.clock.advance(60);
     assert!(matches!(
-        step(&runner).unwrap(),
+        rig.threads_read(&runner),
         Some(StepReport::BotReviewed { .. })
     ));
     rig.forge
@@ -653,7 +653,7 @@ fn a_yes_on_a_refused_rebase_with_no_worker_turn_still_summons_coderabbit() {
     rig.forge.coderabbit.review(71, &head, now(&rig) + 60, &[]);
     rig.clock.advance(60);
     assert!(matches!(
-        step(&runner).unwrap(),
+        rig.threads_read(&runner),
         Some(StepReport::BotReviewed { .. })
     ));
     rig.forge.set_checks(&head, Checks::Passed);

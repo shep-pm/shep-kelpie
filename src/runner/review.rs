@@ -70,6 +70,9 @@ impl Runner {
 
         match review.stage.clone() {
             ReviewStage::Round => {
+                if let Some(begin) = self.late_review()? {
+                    return Ok(begin);
+                }
                 let chosen = match self.choose_reviewer(&review, &worktree, &base) {
                     Ok(Some(chosen)) => chosen,
                     Ok(None) => return self.pass_ended(&review),
@@ -109,7 +112,9 @@ impl Runner {
             ReviewStage::Found { findings, threads } => {
                 self.send_findings(review, findings, threads)
             }
-            ReviewStage::Summon { .. } | ReviewStage::Summoned { .. } => self.bot_step(),
+            ReviewStage::Summon { .. }
+            | ReviewStage::Summoned { .. }
+            | ReviewStage::Settling { .. } => self.bot_step(),
             // begin_turn drives the fix turn itself, and comes here once it ends.
             ReviewStage::Fixing {
                 head,

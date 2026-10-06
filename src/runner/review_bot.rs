@@ -9,10 +9,11 @@
 //! passes the bot over for the pass, and so do two hours with no review, two
 //! hours unable to summon, a bot the project stopped listing, and CodeRabbit
 //! on a repo that is not public.
-//! Once a review covers the head the label comes off, and the bot's open
-//! threads are the round's findings, which go to one fix turn as any
-//! reviewer's do. Kelpie resolves the threads it sent once that fix moves
-//! the head.
+//! Once a review covers the head the label comes off, and once two reads
+//! of the bot's open threads agree they are the round's findings, which go
+//! to one fix turn as any reviewer's do. Kelpie resolves the threads it sent
+//! once that fix moves the head. A bot passed over that reviews the head
+//! anyway gets a round of its own before the next reviewer's.
 //!
 //! On a pull request the bot read before, the label asks only for what is
 //! new, and after an adoption or a catch-up with `main` it finds nothing.
@@ -23,6 +24,10 @@
 
 mod lease;
 mod on_ready;
+mod settle;
+
+#[cfg(test)]
+pub(crate) use settle::SETTLE_LEAST;
 
 use super::Runner;
 use super::gate::settled;
@@ -123,7 +128,10 @@ impl Runner {
             Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}: {e}"))),
         }
         let stage = self.pass().stage;
-        let (ReviewStage::Summon { bot, .. } | ReviewStage::Summoned { bot, .. }) = stage else {
+        let (ReviewStage::Summon { bot, .. }
+        | ReviewStage::Summoned { bot, .. }
+        | ReviewStage::Settling { bot, .. }) = stage
+        else {
             unreachable!("bot_step only runs a review bot's summon")
         };
         // Nothing summons a bot the list no longer names: no check of the
@@ -152,6 +160,9 @@ impl Runner {
                 resent,
                 ..
             } => self.await_review(bot, started, head, at, full, resent),
+            ReviewStage::Settling {
+                since, read, open, ..
+            } => self.threads_settling(bot, since, read, &open),
             _ => unreachable!("bot_step only runs a review bot's summon"),
         }
     }
@@ -177,7 +188,7 @@ impl Runner {
         };
         if self.lands_unsummoned(bot, &head, &activity) {
             self.release(bot)?;
-            return self.review_landed(number, bot, &activity);
+            return self.settle_threads(bot, &activity);
         }
         let now = self.ports.clock.now();
         let lease = self.profile(bot).lease();
@@ -582,7 +593,7 @@ impl Runner {
         if let Err(reason) = self.label(bot, number, false) {
             return Ok(self.gate_failed(reason));
         }
-        self.review_landed(number, bot, activity)
+        self.settle_threads(bot, activity)
     }
 
     // The bot read the head, which also reads whatever a catch-up with
@@ -830,6 +841,8 @@ impl Runner {
 mod codex_bot;
 #[cfg(test)]
 mod owed;
+#[cfg(test)]
+mod settling;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

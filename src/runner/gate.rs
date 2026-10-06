@@ -107,15 +107,20 @@ impl Runner {
 
     // Green CI: `auto` merges by the path a yes takes, and `ask` raises the
     // merge ruling with the pull request handed back `ready-for-human`. A
-    // pull request no reviewer read gets the ruling under `auto` too, naming
-    // why. One an older state file left owing the listed bots a pass gets it
-    // first.
+    // pull request no reviewer read, or one with a listed bot's threads
+    // unaddressed, gets the ruling under `auto` too, naming why. One an older
+    // state file left owing the listed bots a pass gets it first.
     fn passed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
         if self.bots_before_merge()? {
             return self.review_step();
         }
         let unreviewed = self.current().and_then(|item| item.unreviewed.clone());
-        if self.settings.merge_authority == MergeAuthority::Auto && unreviewed.is_none() {
+        let open_threads = match self.threads_open(number) {
+            Ok(open) => open,
+            Err(reason) => return Ok(self.gate_failed(reason)),
+        };
+        let vouched = unreviewed.is_none() && open_threads.is_none();
+        if self.settings.merge_authority == MergeAuthority::Auto && vouched {
             self.update(|item| {
                 item.phase = Phase::Merge {
                     head,
@@ -132,7 +137,12 @@ impl Runner {
             item.known.labels.retain(|l| l != READY && l != HUMAN);
             item.known.labels.push(HUMAN.to_owned());
         })?;
-        self.raise(number, RulingKind::Merge { head, unreviewed })
+        let kind = RulingKind::Merge {
+            head,
+            unreviewed,
+            open_threads,
+        };
+        self.raise(number, kind)
     }
 
     // A worker that pushed nothing after its last red run would get the

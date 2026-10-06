@@ -88,7 +88,7 @@ fn a_label_left_on_after_the_bots_read_comes_off_before_the_fix_turn() {
         .coderabbit
         .review(71, &head, now(&rig) + 60, &["Name the flag."]);
     rig.clock.advance(60);
-    assert_eq!(step(&runner).unwrap(), reviewed(1));
+    assert_eq!(rig.threads_read(&runner), reviewed(1));
     rig.forge.label_pull_request(71, LABEL);
     assert!(matches!(
         step(&runner).unwrap(),

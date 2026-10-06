@@ -270,6 +270,7 @@ mod tests {
         let thread = |body: &str| Thread {
             id: "t".into(),
             resolved: false,
+            outdated: false,
             path: "a.rs".into(),
             line: None,
             body: body.into(),

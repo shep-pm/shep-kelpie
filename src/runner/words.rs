@@ -92,6 +92,7 @@ mod tests {
         let merge = RulingKind::Merge {
             head: "abc".into(),
             unreviewed: None,
+            open_threads: None,
         };
         assert_eq!(Wants::of(&merge), Wants::YesOrNo);
     }

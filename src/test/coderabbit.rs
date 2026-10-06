@@ -64,6 +64,7 @@ impl FakeCodeRabbit {
             .extend(titles.iter().enumerate().map(|(i, title)| Thread {
                 id: format!("PRRT_{number}_{}", first + i),
                 resolved: false,
+                outdated: false,
                 path: "work.txt".into(),
                 line: Some(1),
                 body: finding_body(title),

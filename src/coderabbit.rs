@@ -566,6 +566,7 @@ mod tests {
         let thread = Thread {
             id: "t".into(),
             resolved: false,
+            outdated: false,
             path: "a.rs".into(),
             line: Some(3),
             body: "_🟡 Minor_\n\nThis drops the error.\n\nIt matters.".into(),
@@ -609,6 +610,7 @@ mod tests {
         let thread = |label: &str| Thread {
             id: "t".into(),
             resolved: false,
+            outdated: false,
             path: "a.rs".into(),
             line: None,
             body: format!("_⚠️ Potential issue_ | {label}\n\n**Title.**\n\nWhy."),

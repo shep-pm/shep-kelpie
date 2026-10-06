@@ -40,7 +40,10 @@ impl WorkItem {
         match &self.phase {
             Phase::Ruling { .. } => TimingPhase::Ruling,
             Phase::Review(Review {
-                stage: ReviewStage::Summon { .. } | ReviewStage::Summoned { .. },
+                stage:
+                    ReviewStage::Summon { .. }
+                    | ReviewStage::Summoned { .. }
+                    | ReviewStage::Settling { .. },
                 ..
             }) => TimingPhase::Review,
             Phase::Implement | Phase::Review(_) => TimingPhase::Other,

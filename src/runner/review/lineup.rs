@@ -77,6 +77,9 @@ impl Runner {
 
     /// Where the review goes once `review`'s reviewer is done: the next
     /// reviewer's round, or CI at `now` once none is left to run
+    ///
+    /// A pass with a bot it went on without ends in a round step of its own,
+    /// which first reads whether that bot reviewed the head since.
     pub(in crate::runner) fn after_round(&self, review: Review, now: Timestamp) -> Phase {
         let ran = self.ran_of(&review);
         let next = Review { ran, ..review }.next_round();
@@ -84,7 +87,7 @@ impl Runner {
             return Phase::Review(next);
         };
         match self.choose_reviewer(&next, &item.worktree, &item.review_base()) {
-            Ok(None) if !next.unread => Phase::Ci {
+            Ok(None) if !next.unread && item.bots_skipped.is_empty() => Phase::Ci {
                 head: None,
                 since: now,
             },

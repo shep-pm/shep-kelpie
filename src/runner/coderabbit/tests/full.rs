@@ -74,7 +74,7 @@ fn an_adopted_pull_requests_owed_summon_asks_for_a_full_review_under_the_lease()
 
     rig.forge.coderabbit.review(80, &head, summon + 600, &[]);
     rig.clock.advance(600);
-    assert_eq!(step(&runner).unwrap(), read_80(0));
+    assert_eq!(rig.threads_read(&runner), read_80(0));
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["work_item"]["phase"]["state"], "ci");
     assert_eq!(
@@ -152,7 +152,7 @@ fn an_owed_summon_marked_done_with_nothing_posted_asks_once_for_a_full_review_th
 
     rig.forge.coderabbit.review(80, &head, asked + 900, &[]);
     rig.clock.advance(900);
-    assert_eq!(step(&runner).unwrap(), read_80(0));
+    assert_eq!(rig.threads_read(&runner), read_80(0));
 }
 
 fn read_80(open_threads: usize) -> Option<StepReport> {
@@ -220,7 +220,7 @@ fn a_head_marked_done_with_nothing_posted_is_a_clean_read_once_it_settles() {
     assert!(!rig.leases.held(&cr()), "but the summon was answered");
 
     rig.clock.advance(DONE_SETTLE);
-    assert_eq!(step(&runner).unwrap(), reviewed(0));
+    assert_eq!(rig.threads_read(&runner), reviewed(0));
     assert_eq!(labels(&rig), [on(), off()]);
     assert_eq!(rig.forge.comments(), []);
 }

@@ -218,6 +218,9 @@ pub struct Thread {
     pub id: String,
     /// Whether it is resolved
     pub resolved: bool,
+    /// Whether the lines it is on have changed since, so it no longer
+    /// applies as written
+    pub outdated: bool,
     /// The file it is on
     pub path: String,
     /// The line it is on, if it still maps to one
@@ -353,9 +356,9 @@ impl Activity {
         }
     }
 
-    /// Its threads not yet resolved
+    /// Its threads neither resolved nor outdated
     pub fn open_threads(&self) -> impl Iterator<Item = &Thread> {
-        self.threads.iter().filter(|t| !t.resolved)
+        self.threads.iter().filter(|t| !t.resolved && !t.outdated)
     }
 }
 
