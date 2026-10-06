@@ -10,3 +10,5 @@ Kelpie is its own private repo, built on the published shep crates and released 
 - **Standalone with no shepherd.** Kelpie would supervise itself, and a kelpie crash would take its workers with it.
 
 ADR 0003 moves the runners and the dog into the maintainer's own shepherd. The rest of this decision stands.
+
+ADRs 0005 and 0006 leave this decision as it is.
