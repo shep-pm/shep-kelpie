@@ -379,6 +379,7 @@ pub fn advance(runner: &Mutex<Runner>) -> Result<Pass, StateError> {
 #[track_caller]
 fn one_pass(runner: &Mutex<Runner>) -> Result<Pass, StateError> {
     lock(runner).beat();
+    lock(runner).let_go_of_the_gone();
     loop {
         let news = lock(runner).next_news();
         let Some(news) = news else { break };

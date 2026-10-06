@@ -128,8 +128,9 @@ The document a session writes so the next session or a crew member can continue.
 _Avoid_: summary (Claude's compaction output)
 
 **Attach**:
-`shep kelpie <project> attach <issue>` pauses a work item and resumes its
-worker's session in the maintainer's terminal, to steer it by hand.
+`shep kelpie attach <issue>` holds a work item, so no call starts for it,
+and resumes its worker's session in the maintainer's terminal, to steer it
+by hand. Exiting the session lets the work item go.
 
 ## Kelpie's mechanics
 

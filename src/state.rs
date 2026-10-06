@@ -24,9 +24,10 @@ use crate::ports::{Finding, Timestamp};
 use crate::settings::Account;
 use crate::work_item::{Known, Phase, Review, Seconds, Turn, WorkItem};
 
-/// The state file's format version. 6 folded the timing phases to six, which an older kelpie
-/// refuses; 5 added the board's events, which one older still refuses
-const VERSION: u32 = 6;
+/// The state file's format version. 7 added a work item's `attached`, 6
+/// folded the timing phases to six, and 5 added the board's events, each
+/// of which an older kelpie refuses
+const VERSION: u32 = 7;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads

@@ -188,8 +188,37 @@ pub struct WorkItem {
     /// Where its wall time went, from the runner that first loaded it
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timings: Option<Timings>,
+    /// The maintainer's `attach`, which holds it: no call starts for it
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attached: Option<Attached>,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
+}
+
+/// The `attach` holding a work item, which holds while either of its
+/// processes runs
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Attached {
+    /// The `attach` command itself
+    pub by: Holder,
+    /// The session it runs in the terminal, once it has started
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<Holder>,
+    /// When it asked
+    pub since: Timestamp,
+}
+
+/// A process, named so that another given its pid later is not it
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Holder {
+    /// Its pid
+    pub pid: u32,
+    /// When it started, as `ps -o lstart=` prints it
+    pub started: String,
 }
 
 /// A pull request kelpie put in the merge queue

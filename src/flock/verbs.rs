@@ -5,7 +5,7 @@ use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use super::{Checkout, Launch, add, control, rule};
+use super::{Checkout, Launch, add, attach, control, rule};
 use crate::adapters::{ClaudeCli, Gh};
 use crate::agents::Agents;
 use crate::issues::{self, Mode, Project, Writer};
@@ -17,10 +17,11 @@ use crate::state::ids::RulingIds;
 use crate::tools::Tools;
 
 /// The verbs [`main`] runs: every trigger a runner takes, `add`, which also
-/// registers a checkout, and `issue`, which runs the issue writer itself
-pub const VERBS: [&str; 11] = [
+/// registers a checkout, `issue`, which runs the issue writer itself, and
+/// `attach`, which runs a worker's session here
+pub const VERBS: [&str; 12] = [
     "add", "start", "pause", "status", "rule", "rework", "adopt", "gate", "drop", "timings",
-    "issue",
+    "issue", "attach",
 ];
 
 /// What the verbs take, as their help says
@@ -36,6 +37,7 @@ usage: shep kelpie add [<project>]       registers this checkout as a project
        shep kelpie issue \"<request>\"     files issues for it, for you to read
        shep kelpie issue --interactive \"<request>\"
                                          plans them with you in claude
+       shep kelpie attach <issue>        steers its worker's session here
 
 `-p <project>` or `--project <project>` goes anywhere in the line, before a
 ruling's answer. Without it, the project is the one whose repo holds this
@@ -136,6 +138,12 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
         ("gate" | "drop", [issue]) => send(command, Some(issue)).await,
         ("timings", []) => send("timings", None).await,
         ("timings", [count]) => send("timings", Some(count)).await,
+        ("attach", [issue]) => {
+            let number = (issue.parse::<u64>().ok())
+                .filter(|&n| n > 0 && issue.bytes().all(|b| b.is_ascii_digit()));
+            let issue = number.ok_or_else(|| format!("{issue:?} is not an issue number"))?;
+            attach::attach(&client, &project().await?, issue).await
+        }
         ("issue", [_, ..]) => {
             let here = Here {
                 client: &client,
@@ -353,6 +361,7 @@ mod tests {
             moved("-p koji issue --interactive add a thing"),
             words("issue -p koji --interactive add a thing")
         );
+        assert_eq!(moved("-p koji attach 7"), words("attach -p koji 7"));
         assert_eq!(moved("rule -p koji 14 yes"), words("rule -p koji 14 yes"));
         assert_eq!(moved("-p koji runner x"), words("-p koji runner x"));
         assert_eq!(moved("-p"), words("-p"));

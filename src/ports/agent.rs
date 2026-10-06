@@ -274,6 +274,20 @@ pub trait Agents: Send + Sync {
         let _ = call;
         CallActivity::Untracked
     }
+
+    /// `call`'s session as a command for the maintainer's terminal, inside
+    /// the same sandbox and settings a call runs with, after [`Agents::prepare`]
+    ///
+    /// # Errors
+    ///
+    /// [`AgentError::Setup`] when the harness cannot run a session that way,
+    /// or its sandbox cannot be set up.
+    fn foreground(&self, call: &AgentCall) -> Result<std::process::Command, AgentError> {
+        Err(AgentError::Setup(format!(
+            "kelpie cannot start a {} session in a terminal",
+            call.harness.harness().command()
+        )))
+    }
 }
 
 /// What a harness can say of a call's activity

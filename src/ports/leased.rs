@@ -81,4 +81,9 @@ impl Agents for Leased {
     fn last_active(&self, call: &AgentCall) -> CallActivity {
         self.agents.last_active(call)
     }
+
+    // The maintainer drives the session, so no lease of kelpie's holds it.
+    fn foreground(&self, call: &AgentCall) -> Result<std::process::Command, AgentError> {
+        self.agents.foreground(call)
+    }
 }

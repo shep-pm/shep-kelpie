@@ -5,20 +5,34 @@
 //! folder and a scratch folder, and reaches the model's endpoint. Its own
 //! sandbox stays off: on macOS a sandbox cannot start inside another.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{ClaudeCli, argv};
+use super::{ClaudeCli, argv, terminal_argv};
 use crate::fence;
 use crate::ports::{AgentCall, AgentError, Fence, Policy};
 use crate::profile::CREDENTIALS;
 
 impl ClaudeCli {
-    // The call's command inside its sandbox, with its scratch folder emptied
-    // and its transcript folder made. A scratch folder swapped for a link is
-    // removed, not followed.
+    // The call's command inside its sandbox.
     pub(super) fn sandboxed_command(&self, call: &AgentCall) -> Result<Command, AgentError> {
-        let policy = policy(call, &self.home)?;
+        let mut command = self.command(call, argv(call))?;
+        // A headless turn that ends is over, so nothing it waits on in
+        // the background can ever wake it.
+        command.env("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "1");
+        self.inside(call, &command)
+    }
+
+    // The call's session for the maintainer's terminal, inside the same sandbox.
+    pub(super) fn terminal_command(&self, call: &AgentCall) -> Result<Command, AgentError> {
+        let command = self.command(call, terminal_argv(call))?;
+        self.inside(call, &command)
+    }
+
+    // `claude` with `argv`, its scratch folder emptied and its transcript
+    // folder made. A scratch folder swapped for a link is removed, not followed.
+    fn command(&self, call: &AgentCall, argv: Vec<OsString>) -> Result<Command, AgentError> {
         let scratch = scratch(call);
         let setup = |what: &Path, e: std::io::Error| {
             AgentError::Setup(format!("cannot make {}: {}", what.display(), e.kind()))
@@ -32,15 +46,17 @@ impl ClaudeCli {
         }
         let mut command = Command::new(&self.program);
         command
-            .args(argv(call))
+            .args(argv)
             .current_dir(&call.cwd)
             .env("CLAUDE_CODE_TMPDIR", &scratch)
-            .env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1")
-            // A headless turn that ends is over, so nothing it waits on in
-            // the background can ever wake it.
-            .env("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "1");
+            .env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1");
+        Ok(command)
+    }
+
+    fn inside(&self, call: &AgentCall, command: &Command) -> Result<Command, AgentError> {
+        let policy = policy(call, &self.home)?;
         self.sandbox
-            .wrap(&policy, &sandbox_settings(call), &command)
+            .wrap(&policy, &sandbox_settings(call), command)
             .map_err(|e| AgentError::Setup(e.to_string()))
     }
 }
@@ -343,6 +359,53 @@ mod tests {
             transcripts(&w.path("home"), &w.path("wt"))
                 .unwrap()
                 .is_dir()
+        );
+    }
+
+    #[test]
+    fn a_session_for_the_terminal_resumes_in_the_worker_s_sandbox_and_asks_as_usual() {
+        let w = World::new();
+        let sandbox = OpenSandbox::default();
+        let cli = w.cli(Arc::new(sandbox.clone()));
+        let call = AgentCall {
+            session: Session::Resume(SessionId("s".into())),
+            prompt: String::new(),
+            ..w.worker()
+        };
+        cli.prepare(&call).unwrap();
+        let command = cli.foreground(&call).unwrap();
+        let args: Vec<&str> = command.get_args().map(|a| a.to_str().unwrap()).collect();
+        let settings = w.path("worker/settings.json");
+        assert_eq!(
+            args,
+            [
+                "--model",
+                "claude-sonnet-5",
+                "--effort",
+                "medium",
+                "--setting-sources",
+                "project",
+                "--settings",
+                settings.to_str().unwrap(),
+                "--resume",
+                "s",
+            ]
+        );
+        assert_eq!(command.get_current_dir(), Some(w.path("wt").as_path()));
+        let env: Vec<_> = command.get_envs().map(|(name, _)| name).collect();
+        assert_eq!(
+            env,
+            ["CLAUDE_CODE_DISABLE_AUTO_MEMORY", "CLAUDE_CODE_TMPDIR"]
+        );
+        let wrapped = sandbox.wrapped();
+        let [(policy_used, file)] = wrapped.as_slice() else {
+            panic!("wrapped once, not {wrapped:?}")
+        };
+        assert_eq!(policy_used, &policy(&call, &w.path("home")).unwrap());
+        assert_eq!(file, &w.path("worker/settings.sandbox.json"));
+        assert!(
+            !w.path("ran").exists(),
+            "nothing runs until the terminal does"
         );
     }
 

@@ -32,6 +32,7 @@ mod adopt;
 #[cfg(test)]
 mod agents_tests;
 mod alert;
+mod attach;
 mod briefing;
 mod claim;
 mod claude_files;
@@ -74,6 +75,7 @@ mod worker_files;
 
 pub use crate::coderabbit::LABEL as SUMMON_LABEL;
 pub use adopt::AdoptError;
+pub use attach::{AttachError, Attaching};
 pub use claim::IN_PROGRESS;
 #[cfg(test)]
 pub use flight::step;
@@ -544,6 +546,7 @@ impl Runner {
             follow_ups: None,
             summary: None,
             timings: Some(Timings::starting(self.ports.clock.now())),
+            attached: None,
             calls: Vec::new(),
         }
     }

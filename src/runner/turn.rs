@@ -80,6 +80,9 @@ impl Runner {
         }
         if let Some(issue) = start_over {
             self.focus = Some(issue);
+            if self.current().is_some_and(|item| item.attached.is_some()) {
+                return Ok(Begin::Idle);
+            }
             return self.begin_item(true);
         }
         let mut waiting = None;
@@ -108,12 +111,12 @@ impl Runner {
         Ok(waiting.map_or(Begin::Idle, Begin::Report))
     }
 
-    // The open work items with no call in flight oldest first, then the
-    // board while a slot is free, from the one after the last to act, so
-    // one that keeps acting cannot starve the rest
+    // The open work items with no call in flight and none attached, oldest
+    // first, then the board while a slot is free, from the one after the
+    // last to act, so one that keeps acting cannot starve the rest
     fn rotation(&self) -> Vec<Slot> {
         let items = (self.state.work_items.iter())
-            .filter(|i| !self.flights.flying(i.issue))
+            .filter(|i| !self.flights.flying(i.issue) && i.attached.is_none())
             .map(|i| Slot::Item(i.issue));
         let board = self.slot_free().then_some(Slot::Board);
         let mut slots: Vec<Slot> = items.chain(board).collect();
@@ -226,7 +229,7 @@ impl Runner {
     // build folder, its settings file and kelpie's instructions. A turn with
     // no prompt of its own is the first, and takes the issue, the review or
     // what it adopted.
-    fn prepare(
+    pub(super) fn prepare(
         &self,
         item: &WorkItem,
         session: Session,
@@ -558,7 +561,7 @@ impl Runner {
 
     // The open pull request from `branch`. A forge that cannot be asked
     // leaves it unrecorded, and status shows none.
-    fn pull_request_from(&self, branch: &str) -> Option<u64> {
+    pub(super) fn pull_request_from(&self, branch: &str) -> Option<u64> {
         let open = self
             .ports
             .forge
