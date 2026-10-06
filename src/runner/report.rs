@@ -626,6 +626,9 @@ pub(super) enum Spent {
     },
     /// A local round that ran, however it ended
     Local,
+    /// A session's call that reached its model and ended, as given, with
+    /// no usage reported
+    Unanswered(crate::usage::Ended),
 }
 
 /// What a [`ReviewCall`] came back with, and what it spent

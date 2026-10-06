@@ -20,13 +20,15 @@ use super::Runner;
 use super::alert::post_due;
 use super::briefing::{Watched, brief};
 use super::drain::{CallRole, CallRunning};
+use super::in_flight::InFlight;
 use super::replies::answer_replies;
-use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, StepReport};
+use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, Spent, StepReport};
 use super::review::run_review_call;
 use super::trigger::lock;
 use crate::ports::{AgentCall, AgentError, AgentReply, Ending, RoundStage, Timestamp};
 use crate::settings::Harness;
 use crate::state::StateError;
+use crate::usage::{CallKind, Draft};
 
 /// What one pass of the runner's loop did
 #[derive(Debug)]
@@ -45,6 +47,8 @@ pub(super) struct Flights {
     flying: BTreeMap<u64, Flight>,
     // The project manager's call, its ceiling and its hold
     pm: Option<(Timestamp, Ending)>,
+    // Every call's line in the usage ledger, as it started
+    ledger: InFlight,
     send: Sender<News>,
     news: Receiver<News>,
     // Told after each piece of news, so the loop waiting on it wakes
@@ -57,6 +61,7 @@ impl Default for Flights {
         Self {
             flying: BTreeMap::new(),
             pm: None,
+            ledger: InFlight::default(),
             send,
             news,
             wake: None,
@@ -109,6 +114,11 @@ impl Flights {
             role: CallRole::Pm,
         });
         items.chain(pm).collect()
+    }
+
+    /// The calls in flight as the usage ledger knows them
+    pub(super) fn in_flight(&self) -> InFlight {
+        self.ledger.clone()
     }
 
     /// `issue`'s call in flight, as the board watches it
@@ -168,6 +178,21 @@ enum End {
     // The call's thread panicked, which ends the runner as a panic in its
     // own thread does
     Panicked(Box<dyn Any + Send>),
+}
+
+impl End {
+    // Whether it ended before reaching a model: its settings, its harness or
+    // its session never got that far, or a local model sat on the CPU
+    fn reached_no_model(&self) -> bool {
+        match self {
+            Self::Turn(result) => crate::usage::ended(result).is_none(),
+            Self::Review(reviewed) => matches!(
+                (&reviewed.result, &reviewed.spent),
+                (ReviewResult::Spilled(_), _) | (ReviewResult::Findings(Err(_)), None)
+            ),
+            Self::Panicked(_) => false,
+        }
+    }
 }
 
 // What a call's thread needs to tell the runner about its call
@@ -259,16 +284,25 @@ impl Runner {
         }
     }
 
-    /// Starts the project manager's `call` on a thread of its own, ended
-    /// past `ceiling` seconds, whose end comes back as news
-    pub(super) fn launch_pm(&mut self, call: AgentCall, ceiling: u64) {
+    /// Starts the project manager's `call`, a `kind` on the agent named
+    /// `agent`, on a thread of its own, ended past `ceiling` seconds, whose
+    /// end comes back as news
+    pub(super) fn launch_pm(&mut self, call: AgentCall, ceiling: u64, agent: &str, kind: CallKind) {
+        let now = self.ports.clock.now();
+        let draft = Draft::of(&call, agent, kind, now);
+        self.flights.ledger.open(None, draft, self.pacer_lines());
+        let ledger = self.flights.ledger.clone();
         let (news, wake) = (self.flights.send.clone(), self.flights.wake.clone());
         let ending = Ending::default();
         let held = ending.clone();
         let agents = Arc::clone(&self.ports.agents);
         let run = move || {
             let ran = catch_unwind(AssertUnwindSafe(|| End::Turn(agents.run(&call, &held))));
-            let _ = news.send(News::Pm(ran.unwrap_or_else(End::Panicked)));
+            let end = ran.unwrap_or_else(End::Panicked);
+            if end.reached_no_model() {
+                ledger.no_model(None);
+            }
+            let _ = news.send(News::Pm(end));
             if let Some(wake) = &wake {
                 let _ = wake.send(());
             }
@@ -278,7 +312,6 @@ impl Runner {
             let end = End::Turn(Err(AgentError::Spawn(Harness::ClaudeCode, reason)));
             let _ = self.flights.send.send(News::Pm(end));
         }
-        let now = self.ports.clock.now();
         self.flights.pm = Some((Timestamp(now.0.saturating_add(ceiling)), ending));
     }
 
@@ -342,6 +375,22 @@ impl Runner {
             },
             idle: false,
         };
+        let draft = match &launch {
+            Launch::Turn { call, .. } => {
+                Draft::of(call, &self.ledger_worker(issue), CallKind::Turn, now)
+            }
+            Launch::Review(ReviewCall::Session(call)) => {
+                Draft::of(call, &self.ledger_reviewer(issue), CallKind::Review, now)
+            }
+            Launch::Review(ReviewCall::Local { local, .. }) => {
+                Draft::local(local, issue, &self.ledger_reviewer(issue), now)
+            }
+        };
+        let draft = self.with_pull_request(draft);
+        self.flights
+            .ledger
+            .open(Some(issue), draft, self.pacer_lines());
+        let ledger = self.flights.ledger.clone();
         let (agents, reviewer) = (
             Arc::clone(&self.ports.agents),
             Arc::clone(&self.ports.reviewer),
@@ -358,6 +407,9 @@ impl Runner {
                 }
             }));
             let end = ran.unwrap_or_else(End::Panicked);
+            if end.reached_no_model() {
+                ledger.no_model(Some(issue));
+            }
             tell.send(News::Ended { issue, end });
         };
         let started = thread::Builder::new()
@@ -482,6 +534,10 @@ fn hear(runner: &Mutex<Runner>, news: News) -> Result<Option<StepReport>, StateE
     let mut runner = lock(runner);
     let (issue, end) = match news {
         News::Stage { issue, stage, .. } => {
+            if stage == RoundStage::Running {
+                let now = runner.ports.clock.now();
+                runner.flights.ledger.ran(Some(issue), now);
+            }
             // A failed save is told and let go. A GPU wait may then count as
             // the round's, but the phases still sum to the wall time.
             if let Err(e) = runner.on(Some(issue)).round_stage(stage) {
@@ -496,29 +552,54 @@ fn hear(runner: &Mutex<Runner>, news: News) -> Result<Option<StepReport>, StateE
         News::Ended { issue, end } => (issue, end),
         News::Pm(end) => {
             runner.flights.pm = None;
+            let open = runner.flights.ledger.take(None);
             return match end {
-                End::Turn(result) => runner.pm_ended(result),
+                End::Turn(result) => {
+                    if let Some(open) = &open {
+                        runner.pm_line(open, &result);
+                    }
+                    runner.pm_ended(result)
+                }
                 End::Review(_) => Ok(None),
                 End::Panicked(panic) => {
+                    if let Some(open) = &open {
+                        runner.panicked_line(open);
+                    }
                     drop(runner);
                     resume_unwind(panic)
                 }
             };
         }
     };
+    let open = runner.flights.ledger.take(Some(issue));
+    // A call's line goes in only once its end is saved: one not saved runs
+    // again, and its session's cost by then takes in this call's.
     match end {
         End::Turn(result) => {
+            let line = open.and_then(|open| runner.turn_line(&open, &result));
+            let unreported = result.is_err();
             let ended = runner.turn_ended(issue, result);
+            if let (Some(line), Ok(_)) = (line, &ended) {
+                runner.append_call(line, unreported);
+            }
             runner.pm_after_end(issue)?;
             ended
         }
         End::Review(reviewed) => {
+            let line = open.and_then(|open| runner.review_line(&open, &reviewed));
+            let unreported = !matches!(reviewed.spent, Some(Spent::Claude { .. } | Spent::Local));
             let ended = runner.on(Some(issue)).end_review(reviewed);
             runner.flights.flying.remove(&issue);
+            if let (Some(line), Ok(_)) = (line, &ended) {
+                runner.append_call(line, unreported);
+            }
             ended
         }
         End::Panicked(panic) => {
             runner.flights.flying.remove(&issue);
+            if let Some(open) = &open {
+                runner.panicked_line(open);
+            }
             drop(runner);
             resume_unwind(panic)
         }

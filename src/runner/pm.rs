@@ -17,6 +17,7 @@ use crate::pacer::Scope;
 use crate::ports::{AgentError, AgentReply, Session, SessionId, Timestamp};
 use crate::settings::PmAgent;
 use crate::state::{RunState, StateError};
+use crate::usage::CallKind;
 use crate::work_item::new_session_id;
 
 mod act;
@@ -313,7 +314,7 @@ impl Runner {
             session: id,
             fresh,
         });
-        self.launch_pm(call, CEILING);
+        self.launch_pm(call, CEILING, agent.name.as_str(), CallKind::Wake);
         Ok(())
     }
 
@@ -331,7 +332,7 @@ impl Runner {
             session: id,
             fresh: false,
         });
-        self.launch_pm(call, CEILING);
+        self.launch_pm(call, CEILING, agent.name.as_str(), CallKind::Compact);
         Ok(())
     }
 

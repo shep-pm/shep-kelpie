@@ -152,6 +152,7 @@ fn serve(project: &str) -> Result<(), String> {
     let status = serde_json::to_string(&runner.status()).expect("status serializes to JSON");
     println!("up: {status}");
 
+    let stopping = runner.stopping();
     let runner = Arc::new(Mutex::new(runner));
     let (wake, woken) = mpsc::channel();
     for action in ACTIONS {
@@ -192,10 +193,14 @@ fn serve(project: &str) -> Result<(), String> {
     // each work item's turn resumes from its session on restart.
     let why = stopped.recv();
     let let_go = worker.stop(JOIN_BOUND, || stop_calls(&claude, &reviewer));
+    // Their ends will not be heard now, and a pass that did not let go
+    // still holds the runner's lock, which this needs none of.
+    let stopped = stopping.record(crate::ports::Clock::now(&SystemClock));
     if let_go {
         if let Err(e) = crate::runner::settle(&runner) {
             eprintln!("cannot save the work items' time: {e}");
         }
+        crate::runner::count_stopped(&runner, &stopped);
     } else {
         // A pass still running holds the runner's lock, and shutdown must not wait for it.
         eprintln!(

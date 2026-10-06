@@ -574,6 +574,7 @@ fn parse_result(output: &Output, asked: &SessionId) -> Result<AgentReply, AgentE
                     usage += Usage {
                         input: u.input,
                         cache_write: u.cache_write,
+                        cache_write_5m: 0,
                         cache_read: u.cache_read,
                         output: u.output,
                     };

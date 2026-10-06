@@ -618,6 +618,7 @@ impl Runner {
             item.bots_after_ci = false;
             item.unreviewed = None;
             *item.bot_reads.entry(bot).or_default() += 1;
+            item.counts.review_rounds = item.counts.review_rounds.saturating_add(1);
             item.phase = next;
         })?;
         Ok(Begin::Report(StepReport::BotReviewed {

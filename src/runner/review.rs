@@ -368,6 +368,7 @@ impl Runner {
                 }
             }
             item.turn = Turn::Next { prompt };
+            item.counts.fix_turns = item.counts.fix_turns.saturating_add(1);
             item.phase = Phase::Review(Review {
                 stage: ReviewStage::Fixing {
                     head: Some(head),
@@ -456,6 +457,9 @@ impl Runner {
         let ReviewResult::Findings(result) = result else {
             unreachable!("a stopped call and a spilled model return above")
         };
+        if result.is_ok() && matches!(review.stage, ReviewStage::Round) {
+            item.counts.review_rounds = item.counts.review_rounds.saturating_add(1);
+        }
 
         // The script writes a line for a file it could not review, and still
         // finishes the round: those lines are not findings.
@@ -681,7 +685,7 @@ pub(super) fn record_spent(item: &mut WorkItem, spent: Option<Spent>, now: Times
                 item.qwen.seconds += now.0.saturating_sub(since.0);
             }
         }
-        None => {}
+        Some(Spent::Unanswered(_)) | None => {}
     }
     item.call_ended();
 }
@@ -700,12 +704,16 @@ fn run_claude(
     ending: &Ending,
 ) -> (Result<AgentReply, AgentError>, Option<Spent>) {
     let reply = claude.run(call, ending);
-    let spent = reply.as_ref().ok().map(|reply| Spent::Claude {
-        role: call.role,
-        session: call.session.id().clone(),
-        usage: reply.usage,
-        session_cost: reply.session_cost,
-    });
+    let spent = match &reply {
+        Ok(reply) => Some(Spent::Claude {
+            role: call.role,
+            session: call.session.id().clone(),
+            usage: reply.usage,
+            session_cost: reply.session_cost,
+        }),
+        // Its settings, harness or session never got as far as a model.
+        Err(_) => crate::usage::ended(&reply).map(Spent::Unanswered),
+    };
     (reply, spent)
 }
 

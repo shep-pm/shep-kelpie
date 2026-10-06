@@ -105,7 +105,7 @@ fn a_file_with_one_work_item_loads_as_a_list_of_one() {
     let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(
         (&saved["version"], saved.get("work_item")),
-        (&serde_json::json!(9), None)
+        (&serde_json::json!(10), None)
     );
     assert_eq!(store.load().unwrap(), Some(state));
 
@@ -238,7 +238,7 @@ fn the_file_format_is_pinned() {
     assert_eq!(
         value,
         serde_json::json!({
-            "version": 9,
+            "version": 10,
             "run": "paused",
             "since": 7,
             "work_items": [],
@@ -300,6 +300,7 @@ fn the_history_keeps_the_last_hundred_finished_work_items() {
         at: Timestamp(issue),
         wall: 0,
         seconds: Seconds::default(),
+        spend: None,
     };
     let last = HISTORY_CAP as u64 + 5;
     for issue in 1..=last {
@@ -319,6 +320,7 @@ fn a_finished_work_item_is_pinned() {
         at: Timestamp(1_790_000_100),
         wall: 100,
         seconds: Seconds::of(&[(TimingPhase::Worker, 60), (TimingPhase::Ci, 40)]),
+        spend: Some(a_work_item().tally()),
     };
     let saved = serde_json::to_value(&finished).unwrap();
     assert_eq!(serde_json::from_value::<Finished>(saved).unwrap(), finished);
@@ -339,8 +341,50 @@ fn a_finished_work_item_is_pinned() {
                 "merge": 0,
                 "other": 0,
             },
+            "spend": {
+                "worker": {
+                    "calls": 1,
+                    "tokens": { "input": 1, "cache_write": 2, "cache_read": 3, "output": 4 },
+                    "units": 25,
+                    "cost": 5,
+                },
+                "reviewer": {
+                    "calls": 0,
+                    "tokens": { "input": 0, "cache_write": 0, "cache_read": 0, "output": 0 },
+                    "units": 0,
+                    "cost": 0,
+                },
+                "qwen": { "rounds": 0, "seconds": 0 },
+                "counts": { "review_rounds": 2, "fix_turns": 1, "rulings": 1 },
+            },
         })
     );
+}
+
+#[test]
+fn a_version_9_file_loads_with_nothing_counted_and_saves_as_10() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path());
+    let mut old = serde_json::to_value(ProjectState::new(Timestamp(7))).unwrap();
+    old["version"] = 9.into();
+    let mut item = serde_json::to_value(a_work_item()).unwrap();
+    item.as_object_mut().unwrap().remove("counts");
+    old["work_items"] = serde_json::json!([item]);
+    old["history"] = serde_json::json!([{
+        "issue": 3, "title": "Three", "pull_request": 30, "merged": true, "at": 9,
+        "wall": 0, "seconds": {
+            "worker": 0, "review": 0, "ci": 0, "ruling": 0, "merge": 0, "other": 0,
+        },
+    }]);
+    fs::write(dir.path().join("state.json"), old.to_string()).unwrap();
+
+    let loaded = store.load().unwrap().expect("a saved state");
+    assert!(loaded.work_items[0].counts.is_zero());
+    assert_eq!(loaded.history[0].spend, None);
+    store.save(&loaded).unwrap();
+    let text = fs::read_to_string(dir.path().join("state.json")).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(saved["version"], 10);
 }
 
 #[test]
@@ -489,7 +533,7 @@ fn a_malformed_file_names_its_path() {
 }
 
 #[test]
-fn a_version_6_file_loads_with_nothing_attached_and_saves_as_9() {
+fn a_version_6_file_loads_with_nothing_attached_and_saves_as_10() {
     let dir = tempfile::tempdir().unwrap();
     let store = store_in(dir.path());
     let mut state = ProjectState::new(Timestamp(7));
@@ -503,11 +547,11 @@ fn a_version_6_file_loads_with_nothing_attached_and_saves_as_9() {
     store.save(&loaded).unwrap();
     let text = fs::read_to_string(dir.path().join("state.json")).unwrap();
     let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(saved["version"], 9);
+    assert_eq!(saved["version"], 10);
 }
 
 #[test]
-fn a_version_7_file_loads_with_no_project_manager_and_saves_as_9() {
+fn a_version_7_file_loads_with_no_project_manager_and_saves_as_10() {
     let dir = tempfile::tempdir().unwrap();
     let store = store_in(dir.path());
     let mut old = serde_json::to_value(ProjectState::new(Timestamp(7))).unwrap();
@@ -522,7 +566,7 @@ fn a_version_7_file_loads_with_no_project_manager_and_saves_as_9() {
     store.save(&loaded).unwrap();
     let text = fs::read_to_string(dir.path().join("state.json")).unwrap();
     let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(saved["version"], 9);
+    assert_eq!(saved["version"], 10);
 }
 
 #[test]
@@ -531,14 +575,14 @@ fn a_newer_format_is_reported_as_one() {
     let store = store_in(dir.path());
     fs::write(
         dir.path().join("state.json"),
-        r#"{"version": 10, "shape": "new"}"#,
+        r#"{"version": 11, "shape": "new"}"#,
     )
     .unwrap();
     assert_eq!(
         store.load().unwrap_err(),
         StateError::Version {
             path: store.path.clone(),
-            found: 10
+            found: 11
         }
     );
 }

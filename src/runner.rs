@@ -47,10 +47,14 @@ mod gpu;
 #[cfg(test)]
 mod gpu_tests;
 mod guard_hooks;
+mod in_flight;
 mod instructions;
 mod kept;
 #[cfg(test)]
 mod kept_tests;
+mod ledger;
+#[cfg(test)]
+mod ledger_tests;
 #[cfg(test)]
 mod limits_tests;
 mod merge;
@@ -84,6 +88,8 @@ pub use drain::{CallRole, CallRunning, Draining};
 pub use flight::step;
 pub use flight::{Pass, advance};
 pub use gpu::GpuStatus;
+pub use in_flight::Stopping;
+pub use ledger::count_stopped;
 pub use merge::DropError;
 pub use pace::PacerStatus;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
@@ -237,6 +243,8 @@ pub struct Runner {
     notes: Vec<String>,
     // The calls this process has in flight, kept in memory only
     flights: flight::Flights,
+    // Where each call is recorded as it ends
+    ledger: crate::usage::Ledger,
     // What the board briefing keeps between writes, in memory only
     brief: briefing::BoardCache,
     // What the board withholds, as the forge does
@@ -355,6 +363,7 @@ impl Runner {
             last_acted: None,
             notes,
             flights: flight::Flights::default(),
+            ledger: crate::usage::Ledger::in_folder(&paths.folder),
             brief: briefing::BoardCache::default(),
             local,
             pm: pm::Desk::default(),
@@ -560,6 +569,7 @@ impl Runner {
             summary: None,
             timings: Some(Timings::starting(self.ports.clock.now())),
             attached: None,
+            counts: Default::default(),
             calls: Vec::new(),
         }
     }

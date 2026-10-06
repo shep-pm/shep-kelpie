@@ -392,9 +392,30 @@ fn a_turn_answers_with_its_last_message_and_its_tokens() {
         Usage {
             input: 6959,
             cache_write: 0,
+            cache_write_5m: 0,
             cache_read: 10752,
             output: 44,
         }
+    );
+}
+
+// Codex has run by the time its thread is recorded, so that failing is the
+// call's failure, never its setup's: the usage ledger counts the call.
+#[test]
+fn a_thread_that_cannot_be_recorded_fails_the_call_not_its_setup() {
+    let w = World::new();
+    let cli = stand_in(&w, FRESH);
+    let call = w.call(Role::Worker, Session::New(id(WORKER_ID)));
+    cli.prepare(&call).unwrap();
+    let threads = Files::of(&call).threads;
+    let read_only = std::os::unix::fs::PermissionsExt::from_mode(0o555);
+    std::fs::set_permissions(&threads, read_only).unwrap();
+    let err = cli.run(&call, &Ending::default()).unwrap_err();
+    let writable = std::os::unix::fs::PermissionsExt::from_mode(0o755);
+    std::fs::set_permissions(&threads, writable).unwrap();
+    assert!(
+        matches!(&err, AgentError::Failed(_, why) if why.starts_with("cannot write ")),
+        "{err:?}"
     );
 }
 
@@ -418,6 +439,7 @@ fn a_resumed_turn_counts_only_its_own_tokens_and_reads_past_refusals() {
         Usage {
             input: 3686,
             cache_write: 0,
+            cache_write_5m: 0,
             cache_read: 42752,
             output: 427,
         }

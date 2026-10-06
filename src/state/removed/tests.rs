@@ -34,6 +34,7 @@ fn saved_with(dir: &Path, old: impl FnOnce(&mut Value)) -> StateStore {
         at: Timestamp(100),
         wall: 50,
         seconds: Seconds::of(&[(TimingPhase::Worker, 40), (TimingPhase::Ci, 10)]),
+        spend: None,
     });
     let mut value = serde_json::to_value(&state).unwrap();
     value["version"] = json!(2);

@@ -209,6 +209,12 @@ fn a_clean_read_ends_the_pass_and_ci_goes_on_to_the_merge_ruling() {
     rig.clock.advance(60);
     assert_eq!(step(&runner).unwrap(), reviewed(0));
     assert_eq!(phase(&rig, &runner)["state"], "ci");
+    let state = std::fs::read_to_string(rig.paths().state).unwrap();
+    let state: serde_json::Value = serde_json::from_str(&state).unwrap();
+    assert_eq!(
+        state["work_items"][0]["counts"]["review_rounds"], 3,
+        "qwen's, claude's and the bot's"
+    );
     rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
         rig.verdict(&runner),

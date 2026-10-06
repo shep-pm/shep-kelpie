@@ -16,6 +16,7 @@ mod follow_ups;
 mod local;
 mod review;
 mod spend;
+mod tally;
 mod timings;
 
 pub use bots::BotSkipped;
@@ -23,6 +24,7 @@ pub use follow_ups::FollowUps;
 pub use local::LOCAL_FAILURES_DOWN;
 pub use review::{Review, ReviewStage};
 pub use spend::{QwenTally, RoleSpend, Spend};
+pub use tally::{Counts, RoleTally, Tally};
 pub use timings::{CallKind, Seconds, Split, TimingPhase, Timings};
 
 /// The work item in flight
@@ -191,6 +193,9 @@ pub struct WorkItem {
     /// The maintainer's `attach`, which holds it: no call starts for it
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attached: Option<Attached>,
+    /// Its review rounds, fix turns and rulings so far
+    #[serde(default, skip_serializing_if = "Counts::is_zero")]
+    pub counts: Counts,
     /// Every Claude call made for it, oldest first
     pub calls: Vec<CallRecord>,
 }
@@ -555,6 +560,7 @@ mod tests {
                         "ruling": 0, "merge": 0, "other": 0,
                     },
                 },
+                "counts": { "review_rounds": 2, "fix_turns": 1, "rulings": 1 },
                 "calls": [{
                     "role": "worker",
                     "at": 10,

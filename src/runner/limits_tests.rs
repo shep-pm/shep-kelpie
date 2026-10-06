@@ -410,6 +410,7 @@ fn spend_without_dollars_shows_tokens_and_says_it_has_none() {
     let used = Usage {
         input: 120,
         cache_write: 0,
+        cache_write_5m: 0,
         cache_read: 2_400,
         output: 35,
     };
