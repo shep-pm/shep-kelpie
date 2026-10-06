@@ -16,7 +16,7 @@ use super::trigger::WhichItem;
 use crate::ports::{Checks, PullRequestState};
 use crate::settings::MergeAuthority;
 use crate::state::{Finished, Notice, RulingKind, StateError};
-use crate::work_item::{Phase, Review, ReviewCallState, Turn};
+use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, Turn};
 use crate::worktree::{self, Base};
 
 /// Why `drop` was refused
@@ -89,7 +89,13 @@ impl Runner {
         {
             return Err(DropError::Merging(item.issue));
         }
-        if matches!(item.phase, Phase::CodeRabbit(_)) {
+        let summoning = |review: &Review| {
+            matches!(
+                review.stage,
+                ReviewStage::Summon { .. } | ReviewStage::Summoned { .. }
+            )
+        };
+        if matches!(&item.phase, Phase::Review(review) if summoning(review)) {
             self.leave_round();
         }
         match self.finish(false).map_err(DropError::State)? {
@@ -250,7 +256,6 @@ impl Runner {
         let tip = Some(tip.to_owned());
         self.update(|item| {
             item.known.head = tip;
-            item.coderabbit.satisfied = false;
             item.phase = Phase::Review(Review::first());
         })
         .map_err(|e| e.to_string())

@@ -204,7 +204,8 @@ mod tests {
         let runner = rig.open().unwrap();
         let entry = std::fs::read_to_string(rig.paths().settings).unwrap();
         let mut on = project_table(&entry);
-        on["coderabbit"]["enabled"] = Value::Bool(true);
+        let listed = ["qwen", "claude", "coderabbit"].map(|n| Value::String(n.into()));
+        on["agents"]["reviewers"] = Value::Array(listed.to_vec());
         let table = Arc::new(Mutex::new(on));
         let shep_home = tempfile::tempdir().unwrap();
         let _shepherd = shepherd(shep_home.path(), Arc::clone(&table));
@@ -224,18 +225,23 @@ mod tests {
         look.last = Some((rig.settings(), rig.kelpie_settings(), agents));
 
         rig.forge.set_visibility(crate::ports::Visibility::Private);
+        let coderabbit = |runner: &std::sync::Mutex<crate::runner::Runner>| {
+            let settings = runner.lock().unwrap().settings().clone();
+            let listed = settings.agents.reviewers.unwrap_or_default();
+            listed.iter().any(|name| name.as_str() == "coderabbit")
+        };
         look.again(&runner);
-        assert!(!runner.lock().unwrap().settings().coderabbit.enabled);
+        assert!(!coderabbit(&runner));
+        let failed = look.failed.clone().unwrap();
+        assert!(failed.contains("agents.reviewers"), "{failed}");
         assert!(
-            look.failed
-                .as_deref()
-                .unwrap()
-                .contains("coderabbit.enabled")
+            failed.contains("free plan reviews public repos only"),
+            "{failed}"
         );
 
         rig.forge.set_visibility(crate::ports::Visibility::Public);
         look.again(&runner);
-        assert!(runner.lock().unwrap().settings().coderabbit.enabled);
+        assert!(coderabbit(&runner));
         assert_eq!(look.failed, None);
     }
 

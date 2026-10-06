@@ -19,7 +19,7 @@ use crate::board::{LabelError, OpenPullRequest, READY, Skip};
 use crate::ports::{ForgeError, MaintainerReview, PullRequestState, Reviewed};
 use crate::settings::AgentName;
 use crate::state::StateError;
-use crate::work_item::{CodeRabbitTally, Known, Phase, Review, WorkItem, new_session_id};
+use crate::work_item::{Known, Phase, Review, WorkItem, new_session_id};
 use crate::worktree;
 
 /// The label on a pull request kelpie handed back to the maintainer
@@ -57,8 +57,8 @@ pub enum ReworkError {
     ReviewFile(String),
     /// A label could not be taken off the pull request
     Unlabel(u64, &'static str, ForgeError),
-    /// The forge could not show CodeRabbit's reviews of the pull request
-    CodeRabbit(u64, ForgeError),
+    /// The forge could not show a review bot's reviews of the pull request
+    ReviewBot(&'static str, u64, ForgeError),
     /// The branch's head on `origin` could not be read, with the reason
     Head(String, String),
     /// The work item could not be saved
@@ -92,8 +92,8 @@ impl fmt::Display for ReworkError {
             Self::Unlabel(number, label, e) => {
                 write!(f, "cannot take the `{label}` label off #{number}: {e}")
             }
-            Self::CodeRabbit(number, e) => {
-                write!(f, "cannot read CodeRabbit's reviews of #{number}: {e}")
+            Self::ReviewBot(bot, number, e) => {
+                write!(f, "cannot read {bot}'s reviews of #{number}: {e}")
             }
             Self::Head(branch, e) => write!(f, "cannot read the head of `{branch}`: {e}"),
             Self::State(e) => e.fmt(f),
@@ -324,23 +324,28 @@ impl Runner {
             .map_err(ReworkError::Label)?;
         let session = new_session_id().map_err(|e| ReworkError::Session(e.to_string()))?;
         let fresh = self.fresh(issue, found.title, agent.clone(), session);
-        // A rework stays on its pull request, so a fixed number of rounds
-        // counts the reviews every listed bot gave it before. As an adoption
-        // does, it leaves out a review of the current head, which the gate
+        // A rework stays on its pull request, so a listed bot's `rounds`
+        // counts the reviews it gave it before. As an adoption does, it
+        // leaves out a review of the current head, which the bot's round
         // counts once when it finds it.
-        let mut rounds = 0u32;
+        let mut bot_reads = std::collections::BTreeMap::new();
         // The head the turn starts from, so a turn that pushes nothing is told apart.
         let head = worktree::origin_head(&self.settings.repo, &pr.branch)
             .map_err(|e| ReworkError::Head(pr.branch.clone(), e.to_string()))?;
-        if self.settings.coderabbit.rounds.is_some() && self.settings.coderabbit.enabled {
-            for bot in self.settings.reviewers() {
-                let bot = self.profile(bot);
-                let activity = self
-                    .ports
-                    .forge
-                    .review_bot(repo, number, bot.login())
-                    .map_err(|e| ReworkError::CodeRabbit(number, e))?;
-                rounds = rounds.saturating_add(bot.reviewed_besides(&activity, &head));
+        for bot in self
+            .listed_bots()
+            .into_iter()
+            .filter(|b| b.rounds.is_some())
+        {
+            let bot = self.profile(bot.bot);
+            let activity = self
+                .ports
+                .forge
+                .review_bot(repo, number, bot.login())
+                .map_err(|e| ReworkError::ReviewBot(bot.bot().name(), number, e))?;
+            let reads = bot.reviewed_besides(&activity, &head);
+            if reads > 0 {
+                bot_reads.insert(bot.bot(), reads);
             }
         }
         let text = review_text(number, &review);
@@ -363,10 +368,7 @@ impl Runner {
         next.work_items.push(WorkItem {
             branch: pr.branch,
             rework: true,
-            coderabbit: CodeRabbitTally {
-                rounds,
-                ..CodeRabbitTally::default()
-            },
+            bot_reads,
             pull_request: Some(number),
             // The fix is new code, so a pass of the review runs before CI.
             resume: Some(Phase::Review(Review::first())),

@@ -1,7 +1,7 @@
 //! Agents' own files, checked at the gate and before each Claude call
 //!
 //! A pull request that changes them parks the worker on a ruling before any
-//! review or CodeRabbit step, and before CI, since a change there is the
+//! review step, a review bot's included, and before CI, since a change there is the
 //! maintainer's call. A worktree whose copies differ from `main`'s, and from
 //! any head the maintainer accepted, runs no Claude call: the turn fails.
 

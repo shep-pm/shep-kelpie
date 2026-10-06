@@ -3,8 +3,7 @@
 # it to the runner, and lookout edits it in the sheep's pane. Every key is
 # required except `max_items`, `pacing.enabled`,
 # `worker.allowed_domains`, `worker.build_env`, `worker.instructions_file`,
-# `worker.turn_timeout`, `pull_request_reviewers`,
-# `skills` and `agents`, which a table written
+# `worker.turn_timeout`, `skills` and `agents`, which a table written
 # before them may leave out. This entry holds the first build's defaults, for
 # shep.
 
@@ -34,19 +33,6 @@ ci = true
 # worktree and gates, and the worker's turns still run one at a time.
 max_items = 1
 
-# The pull request reviewers a round may summon, in preference order, from
-# those kelpie's `[kelpie.reviewers]` define. Each round goes to the first
-# whose window is free, so a pull request waiting on CodeRabbit's hour takes
-# a cubic or Codex round instead. `coderabbit` alone when absent.
-# pull_request_reviewers = ["coderabbit", "cubic", "codex"]
-
-# Left out of a pull request's changed-line count.
-generated = [
-    "Cargo.lock",
-    "**/snapshots/*.snap",
-    "web/src/data/cli-reference.generated.txt",
-]
-
 # Words that stay off the forge, whatever their case: kelpie posts no text
 # naming one, and a worker's commits and `gh` calls may not either. Each entry
 # is a literal word or phrase, matched as a whole word. A CI check's list is
@@ -70,21 +56,17 @@ implementers = ["sonnet-high"]
 # `defect-hunter` is kelpie's own: Opus 5.5 at high, reading for defects and
 # then looking again for what it missed, with one fix turn after both.
 # `qwen` runs the maintainer's qwen-review script, and `add` writes it only
-# where the script is installed. Absent, `qwen` where the script is
-# installed and then `defect-hunter`; empty, no review at all.
+# where the script is installed. The review bots `coderabbit`, `cubic` and
+# `codex` are reviewers too, on files `add` writes but lists nowhere: one
+# listed here, as in `["qwen", "defect-hunter", "coderabbit"]`, reads the
+# pull request in its place, once a pass, after waiting for its window, and
+# its open threads get the one fix turn. Each
+# file holds its bot's window, and `rounds` there caps its reads of a work
+# item's pull request. CodeRabbit's free plan reviews public repos only, so
+# a repo GitHub marks private cannot list it. Absent, `qwen` where the
+# script is installed and then `defect-hunter`, with no bot; empty, no
+# review at all.
 # reviewers = ["qwen", "defect-hunter"]
-
-# The rounds of every pull request reviewer listed above. CodeRabbit's free
-# plan reviews public repos only, so a private repo lists only cubic or
-# turns this off, and then goes from the review and CI straight to the
-# merge ruling. The cap counts rounds from every reviewer.
-[app.dogs.kelpie.coderabbit]
-enabled = true
-divisor = 1000
-# A fixed number of rounds per pull request, in place of the divisor's cap of
-# ceil(changed lines / divisor) + 1. The last round's open threads go to the
-# worker, and its fix goes to CI and the merge with no further summon.
-# rounds = 1
 
 # Turn `enabled` off for a stretch when usage limits do not matter: neither
 # the daily allowance nor the 5-hour window then holds anything, and `status`

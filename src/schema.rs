@@ -129,7 +129,6 @@ mod tests {
     // so each key is counted.
     fn examples_with_every_key() -> Vec<String> {
         let text = include_str!("../settings.example.toml")
-            .replace("# pull_request_reviewers =", "pull_request_reviewers =")
             .replace("build_env = {}", "build_env = { BUN = \"bun\" }")
             .replace(
                 "# instructions_file = \"~/.shep/kelpie/shep/worker-instructions.md\"",
@@ -140,7 +139,6 @@ mod tests {
                 "[[app.dogs.kelpie.worker.guard_hooks]]\nevent = \"PreToolUse\"\nmatcher = \"Bash\"\ncommand =",
             )
             .replace("# private_names =", "private_names =")
-            .replace("# rounds =", "rounds =")
             .replace("# reviewers = [\"qwen\", \"defect-hunter\"]", "reviewers = [\"qwen\"]");
         assert!(
             text.contains("reviewers = [\"qwen\"]"),
@@ -192,10 +190,6 @@ mod tests {
         let example = include_str!("../kelpie-settings.example.toml")
             .replace("# codex_home =", "codex_home =")
             .replace("# gpu_metrics_url =", "gpu_metrics_url =")
-            .replace("# [kelpie.reviewers.", "[kelpie.reviewers.")
-            .replace("# reviews =", "reviews =")
-            .replace("# hours =", "hours =")
-            .replace("# reviews_on_ready =", "reviews_on_ready =")
             .replace(
                 "# [kelpie.leases]\n# cargo-test",
                 "[kelpie.leases]\ncargo-test",

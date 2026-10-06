@@ -33,7 +33,7 @@ impl Host for FakeHost {
 
 /// A shepherd holding one project, `koji`, on a machine with every piece in
 /// place: a public repo with kelpie's labels, a logged-in `claude` and `gh`,
-/// a sandbox, a webhook, the local round off and CodeRabbit off
+/// a sandbox, a webhook, the local round off and no review bot listed
 struct Scene {
     shepherd: FakeShepherd,
     forge: FakeForge,
@@ -94,7 +94,6 @@ impl Scene {
         );
         table.insert("repo".into(), json!(repo));
         table.insert("forge".into(), json!(format!("shep-pm/{name}")));
-        table["coderabbit"]["enabled"] = json!(false);
         table["agents"]["reviewers"] = json!(["defect-hunter"]);
         edit(&mut table);
         let launch = Launch {
@@ -207,7 +206,7 @@ fn subjects(report: &Report) -> Vec<&str> {
 async fn a_machine_with_everything_in_place_passes_and_changes_nothing() {
     let mut scene = Scene::new().await;
     scene.runs("golbat", |t| {
-        t["coderabbit"]["enabled"] = json!(true);
+        t["agents"]["reviewers"] = json!(["defect-hunter", "coderabbit"]);
     });
     scene.shepherd.writes();
     let labels = scene.forge.repo_labels_now();
@@ -479,7 +478,9 @@ async fn labels_a_repo_lacks_are_named_with_the_command_that_makes_them() {
     assert_eq!(what, "shep-pm/koji has no ready-for-human, in-progress");
     assert!(fix.starts_with("`shep kelpie add` in "), "{fix}");
 
-    scene.runs("golbat", |t| t["coderabbit"]["enabled"] = json!(true));
+    scene.runs("golbat", |t| {
+        t["agents"]["reviewers"] = json!(["defect-hunter", "coderabbit"])
+    });
     let (what, _) = missing(&scene.report().await, "golbat: labels");
     assert_eq!(
         what,
@@ -501,17 +502,21 @@ async fn a_repo_the_account_cannot_push_to_is_told_how_to_get_access() {
 #[tokio::test]
 async fn coderabbit_on_a_repo_that_is_not_public_is_missing_its_plan() {
     let scene = Scene::new().await;
-    scene.runs("golbat", |t| t["coderabbit"]["enabled"] = json!(true));
+    scene.runs("golbat", |t| {
+        t["agents"]["reviewers"] = json!(["defect-hunter", "coderabbit"])
+    });
     scene.forge.set_visibility(Visibility::Private);
     let (what, fix) = missing(&scene.report().await, "golbat: coderabbit");
     assert!(what.contains("is not public"), "{what}");
-    assert!(fix.contains("coderabbit.enabled = false"), "{fix}");
+    assert!(fix.contains("take `coderabbit` off"), "{fix}");
 }
 
 #[tokio::test]
 async fn coderabbit_that_has_never_commented_is_unsure_and_does_not_fail_the_run() {
     let scene = Scene::new().await;
-    scene.runs("golbat", |t| t["coderabbit"]["enabled"] = json!(true));
+    scene.runs("golbat", |t| {
+        t["agents"]["reviewers"] = json!(["defect-hunter", "coderabbit"])
+    });
     scene.forge.set_review_bot_seen(false);
     let report = scene.report().await;
     let Verdict::Unsure { what, next } = verdict(&report, "golbat: coderabbit") else {

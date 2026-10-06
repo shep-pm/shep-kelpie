@@ -17,10 +17,10 @@ pub enum TimingPhase {
     ClaudeRound,
     /// Waiting for CI
     Ci,
-    /// Waiting for the CodeRabbit lease and hourly window
+    /// Waiting for a review bot's lease and window
     #[serde(rename = "coderabbit_window")]
     CodeRabbitWindow,
-    /// Waiting for CodeRabbit's review after a summon
+    /// Waiting for a review bot's review after a summon
     #[serde(rename = "coderabbit_review")]
     CodeRabbitReview,
     /// Parked on a ruling for the maintainer

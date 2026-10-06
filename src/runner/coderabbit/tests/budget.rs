@@ -1,4 +1,5 @@
-//! A fixed number of CodeRabbit rounds in place of the divisor's cap
+//! A bot file's `rounds`: the most reads it makes of a work item's pull
+//! request, whatever its passes
 
 use std::sync::Mutex;
 
@@ -6,122 +7,115 @@ use serde_json::json;
 
 use super::super::{FULL_REVIEW, HEARD_WAIT};
 use super::full::adopted_set;
-use super::{LABEL, fixed, hold_a_finding, labels, now, off, on, reviewed_by_qwen};
+use super::{fixed, hold_a_finding, labels, now, off, on, reviewed_by_qwen};
 use crate::ports::Checks;
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::test::{Rig, Scripted};
 
-// Allows the project `rounds` CodeRabbit rounds, read when a runner next opens.
+// CodeRabbit's file with `rounds` set, read when a runner next opens.
 fn with_rounds(rig: &Rig, rounds: u32) {
-    rig.edit_settings(|s| {
-        assert!(s.contains("divisor = 1000\n"), "the default divisor moved");
-        s.replace(
-            "divisor = 1000\n",
-            &format!("divisor = 1000\nrounds = {rounds}\n"),
-        )
-    });
+    let file = format!(
+        "---\nrole: reviewer\nharness: bot\nbot: coderabbit\nreviews: 1\nhours: 1\n\
+         rounds: {rounds}\n---\n"
+    );
+    rig.write_agent("coderabbit", &file);
 }
 
-// A summoned round on a project that allows `rounds` of them. The runner
-// restarts before the summon, since a restart clears the lease rows.
+// CodeRabbit's round summoned, on a project whose file allows it `rounds` reads.
 fn summoned_with(project: &str, rounds: u32) -> (Rig, Mutex<Runner>, String) {
     let (rig, runner, head) = reviewed_by_qwen(project);
     with_rounds(&rig, rounds);
     drop(runner);
     let runner = rig.open().unwrap();
-    rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
-        rig.verdict(&runner),
+        step(&runner).unwrap(),
         Some(StepReport::MarkedReady { .. })
     ));
     assert!(matches!(
-        rig.verdict(&runner),
+        step(&runner).unwrap(),
         Some(StepReport::Summoned { .. })
     ));
     (rig, runner, head)
 }
 
-// The worker's fix for the last round on `branch`: a push and green CI on it.
-fn last_fix(rig: &Rig, runner: &Mutex<Runner>, branch: &str) -> Option<StepReport> {
-    rig.claude.script([Scripted::Push("flag.txt", "named\n")]);
-    step(runner).unwrap(); // the fix turn
-    let head = rig.forge.head_of(branch).unwrap();
+// The merge ruling on `head`, its no, and the noted turn's pass up to the
+// round after the Claude round.
+fn noted(rig: &Rig, runner: &Mutex<Runner>, head: &str) {
+    rig.forge.set_checks(head, Checks::Passed);
     assert!(matches!(
-        step(runner).unwrap(),
-        Some(StepReport::FixPushed { .. })
+        rig.verdict(runner),
+        Some(StepReport::Ruling { id: 1, .. })
     ));
-    rig.forge.set_checks(&head, Checks::Passed);
-    rig.verdict(runner)
+    rig.ask(runner, "rule", Some("1 no name the flag"));
+    rig.claude.script([
+        Scripted::Push("named.txt", "named\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    step(runner).unwrap(); // the noted turn: pushes, and a pass begins
+    step(runner).unwrap(); // round 1, qwen: clean by default
+    step(runner).unwrap(); // round 2, claude: scripted clean above
 }
 
 #[test]
-fn one_round_sends_its_open_threads_and_the_fix_goes_to_the_merge_without_a_summon() {
+fn one_round_reads_the_first_pass_and_not_the_next() {
     let (rig, runner, head) = summoned_with("shep", 1);
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "Name the flag."),
-        Some(StepReport::CodeRabbitSent {
-            round: 1,
-            held: 1,
-            ..
-        })
+        Some(StepReport::ReviewFindingsSent { held: 1, .. })
     ));
-    assert!(
-        matches!(
-            last_fix(&rig, &runner, "kelpie/7"),
-            Some(StepReport::Ruling { id: 1, .. })
-        ),
-        "the fix summoned another round"
+    let head = fixed(&rig, &runner, "flag.txt");
+    noted(&rig, &runner, &head);
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(
+        status["work_item"]["phase"]["state"], "ci",
+        "the second pass went on without CodeRabbit"
     );
+    assert_eq!(status["work_item"]["bot_reads"], json!({ "coderabbit": 1 }));
     assert_eq!(labels(&rig), [on(), off()], "no second summon");
     assert!(
         !rig.forge.comments().iter().any(|(_, c)| c == FULL_REVIEW),
         "no summon by comment either"
     );
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["rulings"][0]["kind"]["kind"], json!("merge"));
-
-    assert_eq!(merged_on_yes(&rig, &runner), Some(true));
-    assert_eq!(rig.forge.merges().len(), 1);
 }
 
 #[test]
-fn a_label_left_on_after_the_last_round_comes_off_before_the_fix() {
-    let (rig, runner, head) = summoned_with("rotom", 1);
-    rig.forge
-        .coderabbit
-        .review(71, &head, now(&rig) + 60, &["Name the flag."]);
+fn two_rounds_read_two_passes_and_not_a_third() {
+    let (rig, runner, head) = summoned_with("golbat", 2);
+    rig.forge.coderabbit.review(71, &head, now(&rig) + 60, &[]);
     rig.clock.advance(60);
-    step(&runner).unwrap(); // the review lands and the label comes off
-    rig.forge.label_pull_request(71, LABEL);
+    step(&runner).unwrap(); // the first read lands clean
+    noted(&rig, &runner, &head);
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSent { .. })
+        Some(StepReport::Summoned { .. })
     ));
-    assert_eq!(labels(&rig), [on(), off(), off()]);
-}
-
-#[test]
-fn two_rounds_summon_once_more_after_the_first_fix_and_not_after_the_second() {
-    let (rig, runner, head) = summoned_with("golbat", 2);
+    let second = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge
+        .coderabbit
+        .review(71, &second, now(&rig) + 60, &[]);
+    rig.clock.advance(60);
+    step(&runner).unwrap(); // the second read lands clean
+    rig.forge.set_checks(&second, Checks::Passed);
     assert!(matches!(
-        hold_a_finding(&rig, &runner, &head, "First."),
-        Some(StepReport::CodeRabbitSent { round: 1, .. })
+        rig.verdict(&runner),
+        Some(StepReport::Ruling { id: 2, .. })
     ));
-    let head = fixed(&rig, &runner, "one.txt");
-    rig.forge.coderabbit.settle("PRRT_71_0");
-    assert!(matches!(
-        hold_a_finding(&rig, &runner, &head, "Second."),
-        Some(StepReport::CodeRabbitSent { round: 2, .. })
-    ));
-    assert!(matches!(
-        last_fix(&rig, &runner, "kelpie/7"),
-        Some(StepReport::Ruling { id: 1, .. })
-    ));
+    rig.ask(&runner, "rule", Some("2 no once more"));
+    rig.claude.script([
+        Scripted::Push("again.txt", "again\n"),
+        Scripted::Text("CLEAN"),
+    ]);
+    step(&runner).unwrap(); // the noted turn
+    step(&runner).unwrap(); // round 1, qwen
+    step(&runner).unwrap(); // round 2, claude
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["phase"]["state"], "ci");
+    assert_eq!(status["work_item"]["bot_reads"], json!({ "coderabbit": 2 }));
     assert_eq!(labels(&rig), [on(), off(), on(), off()]);
 }
 
 #[test]
-fn a_re_send_in_the_one_round_is_that_round_and_the_fix_still_reaches_the_merge() {
+fn a_re_send_in_the_one_round_is_that_read() {
     let (rig, runner, head) = summoned_with("xilriws", 1);
     rig.clock.advance(HEARD_WAIT);
     assert!(matches!(
@@ -130,15 +124,12 @@ fn a_re_send_in_the_one_round_is_that_round_and_the_fix_still_reaches_the_merge(
     ));
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "Name the flag."),
-        Some(StepReport::CodeRabbitSent { round: 1, .. })
+        Some(StepReport::ReviewFindingsSent { round: 3, .. })
     ));
-    assert!(matches!(
-        last_fix(&rig, &runner, "kelpie/7"),
-        Some(StepReport::Ruling { id: 1, .. })
-    ));
+    fixed(&rig, &runner, "flag.txt");
     assert_eq!(labels(&rig), [on(), off(), on(), off()]);
     let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["work_item"]["coderabbit"]["rounds"], json!(1));
+    assert_eq!(status["work_item"]["bot_reads"], json!({ "coderabbit": 1 }));
 }
 
 // Merges on a yes to the merge ruling, and says whether it did.
@@ -155,8 +146,8 @@ fn merged_on_yes(rig: &Rig, runner: &Mutex<Runner>) -> Option<bool> {
 fn an_adopted_pull_request_whose_earlier_review_spent_the_rounds_still_gets_one_full_review() {
     let (rig, runner, head) = adopted_set("shep", |rig| with_rounds(rig, 1));
     assert_eq!(
-        rig.ask(&runner, "status", None)["work_item"]["coderabbit"]["rounds"],
-        json!(1),
+        rig.ask(&runner, "status", None)["work_item"]["bot_reads"],
+        json!({ "coderabbit": 1 }),
         "the review from before the adoption spent the round"
     );
     assert!(matches!(
@@ -171,10 +162,18 @@ fn an_adopted_pull_request_whose_earlier_review_spent_the_rounds_still_gets_one_
     step(&runner).unwrap(); // the review lands
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSent { held: 1, .. })
+        Some(StepReport::ReviewFindingsSent { held: 1, .. })
     ));
+    rig.claude.script([Scripted::Push("flag.txt", "named\n")]);
+    step(&runner).unwrap(); // the fix turn
     assert!(matches!(
-        last_fix(&rig, &runner, "fix/timeline"),
+        step(&runner).unwrap(),
+        Some(StepReport::FixPushed { .. })
+    ));
+    let fixed = rig.forge.head_of("fix/timeline").unwrap();
+    rig.forge.set_checks(&fixed, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(&runner),
         Some(StepReport::Ruling { id: 1, .. })
     ));
     let asked: Vec<_> = rig.forge.comments();

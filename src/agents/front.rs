@@ -6,16 +6,22 @@
 //! rather than as a serde-tagged enum, which buffers the keys and so loses
 //! the line a refusal names.
 
+use std::num::NonZeroU32;
 use std::path::PathBuf;
 
 use serde::Deserialize;
 
 use super::{Agent, Role, Runs};
 use crate::forwarder::Upstream;
+use crate::review_bot::Bot;
+
+mod bot;
+
 use crate::settings::{
     Account, AgentHarness, ContextSize, Effort, Endpoint, EndpointUrl, Harness, LeaseName, Limit,
     LocalCommand, ModelServer, NonBlank, RoleModel, UsageReader,
 };
+use bot::at_key;
 
 // An agent file's frontmatter, by its role
 #[derive(Debug)]
@@ -49,7 +55,8 @@ struct Implementer {
     context: Option<ContextSize>,
 }
 
-// What runs a reviewer: a session on a harness, a command or an endpoint
+// What runs a reviewer: a session on a harness, a command, an endpoint or a
+// review bot
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 enum ReviewerHarness {
@@ -58,6 +65,7 @@ enum ReviewerHarness {
     Codex,
     Command,
     Endpoint,
+    Bot,
     #[cfg(test)]
     StandIn,
 }
@@ -91,6 +99,16 @@ struct Reviewer {
     paths: Vec<NonBlank>,
     #[serde(default)]
     second_look: bool,
+    #[serde(default)]
+    bot: Option<Bot>,
+    #[serde(default)]
+    reviews: Option<NonZeroU32>,
+    #[serde(default)]
+    hours: Option<NonZeroU32>,
+    #[serde(default)]
+    reviews_on_ready: Option<bool>,
+    #[serde(default)]
+    rounds: Option<NonZeroU32>,
 }
 
 // A session's keys, whichever role runs it
@@ -137,7 +155,7 @@ pub(super) fn parse(text: &str) -> Result<Agent, String> {
             second_look: false,
         }),
         Front::Reviewer(keys) => {
-            let runs = keys.runs(prompt.is_some())?;
+            let runs = keys.runs(prompt.is_some(), &yaml)?;
             Ok(Agent {
                 role: Role::Reviewer,
                 runs,
@@ -152,17 +170,31 @@ pub(super) fn parse(text: &str) -> Result<Agent, String> {
 impl Reviewer {
     /// What runs it, or why its keys cannot: `prompted` says whether the
     /// file has a body
-    fn runs(&self, prompted: bool) -> Result<Runs, String> {
+    fn runs(&self, prompted: bool, yaml: &str) -> Result<Runs, String> {
         let harness = match self.harness {
             ReviewerHarness::ClaudeCode => Harness::ClaudeCode,
             ReviewerHarness::Pi => Harness::Pi,
             ReviewerHarness::Codex => Harness::Codex,
             #[cfg(test)]
             ReviewerHarness::StandIn => Harness::StandIn,
-            ReviewerHarness::Command => return self.command(prompted).map(Runs::Command),
-            ReviewerHarness::Endpoint => return self.endpoint(prompted).map(Runs::Endpoint),
+            ReviewerHarness::Command => {
+                self.no_bot_keys("command", yaml)?;
+                return self.command(prompted).map(Runs::Command);
+            }
+            ReviewerHarness::Endpoint => {
+                self.no_bot_keys("endpoint", yaml)?;
+                return self.endpoint(prompted).map(Runs::Endpoint);
+            }
+            ReviewerHarness::Bot => {
+                let key = if self.bot.is_some() { "bot" } else { "harness" };
+                return self
+                    .bot(prompted)
+                    .map(Runs::Bot)
+                    .map_err(|m| at_key(yaml, key, &m));
+            }
         };
         let name = harness.as_str();
+        self.no_bot_keys(name, yaml)?;
         if self.command.is_some() || self.ollama.is_some() || self.ollama_model.is_some() {
             return Err(format!(
                 "runs a session on {name}, which takes no `command`, `ollama` or \
@@ -348,6 +380,31 @@ fn limit(keys: &SessionKeys<'_>) -> Result<Limit, String> {
         (_, Some(_)) => Err("sets `lease`, which only an agent with `usage: none` takes".into()),
         (UsageReader::Claude, None) => Ok(Limit::Account(Account::Claude)),
         (UsageReader::Codex, None) => Ok(Limit::Account(Account::Codex)),
+    }
+}
+
+/// The agent `name`'s file `text` defines, or what is wrong with it
+///
+/// A review bot's file is named for its bot: the dog books each bot's
+/// window from that file, so a second file could not hold a window of its own.
+pub(super) fn parse_named(name: &str, text: &str) -> Result<Agent, String> {
+    let agent = parse(text)?;
+    match agent.runs.bot() {
+        Some(bot) if name != bot.bot.as_str() => {
+            let yaml = split(text)
+                .map(|(front, _)| format!("\n{front}"))
+                .unwrap_or_default();
+            Err(at_key(
+                &yaml,
+                "bot",
+                &format!(
+                    "runs {}, so it must be named `{}.md`: each bot has one file, which \
+                     holds its account's window",
+                    bot.bot, bot.bot
+                ),
+            ))
+        }
+        _ => Ok(agent),
     }
 }
 

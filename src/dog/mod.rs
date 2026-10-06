@@ -6,8 +6,8 @@
 //! shepherd's bus for runners' lease metrics and their process events,
 //! keeps the book on its [`desk`], and grants with a `grant` trigger on the
 //! runner. The book is saved to `<kelpie home>/dog/book.json` after every
-//! change and loaded on start, with a review window for each reviewer
-//! kelpie's `[kelpie]` section defines.
+//! change and loaded on start, with a review window for each review bot as
+//! its agent file in kelpie's home defines it.
 
 pub mod desk;
 mod door;
@@ -30,6 +30,7 @@ use shep_client::{EventStream, Lagged, ReconnectingClient};
 use tokio::sync::mpsc;
 
 use crate::adapters::SystemClock;
+use crate::agents::{self, Agents};
 use crate::home;
 use crate::lease::gpu::{self, GpuLock};
 use crate::lease::saved::{BookFile, SavedBook};
@@ -79,13 +80,16 @@ pub fn shepherd_socket() -> Result<PathBuf, String> {
     Ok(home::shep_home()?.join("run/shep.sock"))
 }
 
+/// The dog's book file, under kelpie's home
+pub const BOOK: &str = "dog/book.json";
+
 /// The dog's book file: `<kelpie home>/dog/book.json`
 ///
 /// # Errors
 ///
 /// A message when kelpie's home cannot be worked out.
 pub fn book_path() -> Result<PathBuf, String> {
-    Ok(home::kelpie_home()?.join("dog/book.json"))
+    Ok(home::kelpie_home()?.join(BOOK))
 }
 
 // The desk and the file it is saved to, written whenever the book changes.
@@ -126,17 +130,39 @@ fn open(file: BookFile, clock: Box<dyn Clock>, gpu: GpuLock, reviewers: Reviewer
         }
     };
     let now = clock.now();
+    let bots: Vec<_> = reviewers.defined().map(|(bot, _)| bot).collect();
     let mut desk = Desk::restore(clock, gpu, last.clone(), reviewers);
     if unread {
-        for (bot, _) in reviewers.defined() {
+        for bot in bots {
             desk.book.summoned(&bot.lease(), now);
         }
     }
     Kept { desk, file, last }
 }
 
-// Kelpie's section, for its review windows and leases. One that cannot be
-// read books CodeRabbit's window alone, at the default capacities.
+// Each review bot's window, from its agent file in kelpie's home. Files
+// that cannot be read leave kelpie's own windows, and a runner refuses to
+// start on them anyway.
+fn windows() -> Reviewers {
+    match home::kelpie_home() {
+        Ok(home) => windows_in(&home.join(agents::FOLDER)),
+        Err(e) => {
+            println!("{e}: booking each review bot's window as kelpie's own file has it");
+            Reviewers::from_agents(&Agents::embedded())
+        }
+    }
+}
+
+fn windows_in(folder: &std::path::Path) -> Reviewers {
+    let agents = Agents::load(folder).unwrap_or_else(|e| {
+        println!("{e}: booking each review bot's window as kelpie's own file has it");
+        Agents::embedded()
+    });
+    Reviewers::from_agents(&agents)
+}
+
+// Kelpie's section, for its leases. One that cannot be read holds them at
+// the default capacities.
 async fn settings(client: &ReconnectingClient) -> KelpieSettings {
     let section = client.request(Request::DogConfig {
         name: crate::shepherd::DOG.into(),
@@ -165,15 +191,12 @@ async fn settings(client: &ReconnectingClient) -> KelpieSettings {
 // are read apart, so a mistake in one leaves the other standing.
 fn salvage(text: &str) -> KelpieSettings {
     let Ok(mut table) = text.parse::<toml::Table>() else {
-        println!("booking CodeRabbit's window alone, and cargo-test for 3 at a time");
+        println!("cargo-test is held by 3 at a time");
         return KelpieSettings::default();
     };
     let leases = table.remove("leases");
     let rest = toml::to_string(&table).unwrap_or_default();
-    let mut settings = KelpieSettings::from_section(&rest).unwrap_or_else(|_| {
-        println!("booking CodeRabbit's window alone");
-        KelpieSettings::default()
-    });
+    let mut settings = KelpieSettings::from_section(&rest).unwrap_or_default();
     match leases.map(toml::Value::try_into).transpose() {
         Ok(leases) => settings.leases = leases.unwrap_or_default(),
         Err(e) => println!("[leases] is not right ({e}): cargo-test is held by 3 at a time"),
@@ -224,7 +247,7 @@ async fn serve() -> Result<(), String> {
     }
     println!("the book is {}", file.path().display());
     let settings = settings(&client).await;
-    let mut kept = open(file, Box::new(SystemClock), lock, settings.reviewers);
+    let mut kept = open(file, Box::new(SystemClock), lock, windows());
     let capacity = settings.leases.cargo_test_capacity();
     kept.desk.set_test_capacity(capacity);
     let desk = Arc::new(Mutex::new(kept));
@@ -446,6 +469,7 @@ async fn deliver_grant(client: &ReconnectingClient, grant: &Delivery) {
 mod tests {
     use super::*;
     use crate::lease::LeaseKind;
+    use crate::review_bot::{Bot, ReviewWindow};
     use crate::test::FakeClock;
 
     const NOW: u64 = 1_790_000_000;
@@ -561,17 +585,96 @@ mod tests {
     }
 
     #[test]
-    fn a_bad_leases_table_leaves_the_review_windows_standing() {
-        let text = "[reviewers.cubic]\nreviews = 20\nhours = 720\n[leases]\ncargo-test = 0\n";
+    fn a_bad_leases_table_leaves_the_rest_standing() {
+        let text = "gpu_metrics_url = \"http://gpu-box:9835/metrics\"\n[leases]\ncargo-test = 0\n";
         let settings = salvage(text);
-        assert!(settings.reviewers.cubic.is_some());
+        assert!(settings.gpu_metrics_url.is_some());
         assert_eq!(settings.leases.cargo_test_capacity().get(), 3);
     }
 
     #[test]
-    fn bad_review_windows_leave_the_leases_standing() {
-        let settings = salvage("[reviewers.cubic]\nreviews = 0\n[leases]\ncargo-test = 5\n");
-        assert_eq!(settings.reviewers.cubic, None);
+    fn refused_review_windows_leave_the_leases_standing() {
+        let settings =
+            salvage("[reviewers.cubic]\nreviews = 20\nhours = 720\n[leases]\ncargo-test = 5\n");
         assert_eq!(settings.leases.cargo_test_capacity().get(), 5);
+    }
+
+    fn month(reviews: u32) -> ReviewWindow {
+        ReviewWindow {
+            reviews: std::num::NonZeroU32::new(reviews).unwrap(),
+            hours: std::num::NonZeroU32::new(720).unwrap(),
+        }
+    }
+
+    #[test]
+    fn each_bots_window_is_its_agent_file_s() {
+        let dir = tempfile::tempdir().unwrap();
+        let none = windows_in(&dir.path().join("agents"));
+        assert_eq!(
+            none.window(Bot::Cubic),
+            Some(month(20)),
+            "kelpie's own cubic file"
+        );
+        assert_eq!(none.window(Bot::Coderabbit), Some(ReviewWindow::HOURLY));
+        let cubic = "---\nrole: reviewer\nharness: bot\nbot: cubic\nreviews: 5\nhours: 720\n---\n";
+        crate::test::write_in(dir.path(), "cubic.md", cubic);
+        assert_eq!(windows_in(dir.path()).window(Bot::Cubic), Some(month(5)));
+    }
+
+    // Its summons stand, and each window's span is its bot's file's.
+    #[test]
+    fn a_book_saved_before_bot_files_loads_with_each_files_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = BookFile::new(dir.path().join("book.json"));
+        let window = |quota: u32| {
+            serde_json::json!({
+                "quota": quota, "quota_at": null, "summons": [NOW - 600], "refusal": null,
+            })
+        };
+        let saved = serde_json::json!({
+            "version": 1,
+            "leases": [
+                { "kind": "coderabbit", "held": null, "queue": [], "window": window(1) },
+                { "kind": "cubic", "held": null, "queue": [], "window": window(20) },
+            ],
+            "runs": [],
+            "retired": [],
+        });
+        std::fs::write(file.path(), saved.to_string()).unwrap();
+        let mut kept = open(
+            file,
+            Box::new(FakeClock::at(NOW)),
+            GpuLock::under(dir.path()),
+            windows_in(&dir.path().join("agents")),
+        );
+        assert_eq!(
+            window_of(&mut kept, "coderabbit"),
+            serde_json::json!({ "quota": 1, "summons": [NOW - 600], "opens": NOW + 3000 })
+        );
+        assert_eq!(
+            window_of(&mut kept, "cubic"),
+            serde_json::json!({ "quota": 20, "summons": [NOW - 600], "opens": null }),
+            "one of cubic's twenty a month"
+        );
+    }
+
+    fn window_of(kept: &mut Kept, kind: &str) -> serde_json::Value {
+        let (body, _) = kept.desk.answer("status", None);
+        let status: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let leases = status["leases"].as_array().unwrap();
+        leases.iter().find(|l| l["kind"] == kind).unwrap()["window"].clone()
+    }
+
+    #[test]
+    fn agent_files_that_cannot_be_used_leave_kelpies_own_windows() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test::write_in(
+            dir.path(),
+            "cubic.md",
+            "---\nrole: reviewer\nharness: bot\n---\n",
+        );
+        let windows = windows_in(dir.path());
+        assert_eq!(windows, Reviewers::from_agents(&Agents::embedded()));
+        assert_eq!(windows.window(Bot::Cubic), Some(month(20)));
     }
 }

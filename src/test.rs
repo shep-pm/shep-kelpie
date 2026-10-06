@@ -76,7 +76,8 @@ pub(crate) fn a_work_item() -> WorkItem {
         }),
         resume: None,
         review_call: crate::work_item::ReviewCallState::Idle,
-        coderabbit: crate::work_item::CodeRabbitTally::default(),
+        bot_reads: Default::default(),
+        bots_skipped: Vec::new(),
         known: Known {
             labels: vec!["review please".into()],
             ready: false,
@@ -90,6 +91,8 @@ pub(crate) fn a_work_item() -> WorkItem {
         merge_tried: None,
         merge_queued: None,
         summon_owed: false,
+        summons_owed: Default::default(),
+        bots_after_ci: false,
         threads_sent: Vec::new(),
         resolve_failures: 0,
         reviewers_skipped: Vec::new(),
@@ -137,9 +140,9 @@ pub(crate) fn project_table(entry: &str) -> serde_json::Map<String, serde_json::
 /// A runner entry like `settings.example.toml` with `tables` added to its
 /// kelpie table, such as an older `[app.dogs.kelpie.review]`
 pub(crate) fn with_tables(entry: &str, tables: &str) -> String {
-    const GATE: &str = "\n[app.dogs.kelpie.coderabbit]\n";
-    assert!(entry.contains(GATE), "the example's CodeRabbit table moved");
-    entry.replace(GATE, &format!("\n{tables}{GATE}"))
+    const PACING: &str = "\n[app.dogs.kelpie.pacing]\n";
+    assert!(entry.contains(PACING), "the example's pacing table moved");
+    entry.replace(PACING, &format!("\n{tables}{PACING}"))
 }
 
 /// The `repo` in `settings.example.toml`, which the rig points at its own
@@ -157,9 +160,9 @@ pub(crate) const CLAUDE_REVIEWER: &str = "---\nrole: reviewer\nharness: claude-c
 model: claude-sonnet-5\neffort: medium\n---\nReview the change against {{BASE}} for \
 defects. Output one finding per line as SEVERITY|file:line|what|why, or exactly CLEAN.\n";
 
-/// The CodeRabbit gate as `settings.example.toml` sets it, and turned off
-pub(crate) const CODERABBIT_ON: &str = "[app.dogs.kelpie.coderabbit]\nenabled = true\n";
-pub(crate) const CODERABBIT_OFF: &str = "[app.dogs.kelpie.coderabbit]\nenabled = false\n";
+/// The rig's reviewers with CodeRabbit read last
+pub(crate) const RIG_REVIEWERS_AND_CODERABBIT: &str =
+    "reviewers = [\"qwen\", \"claude\", \"coderabbit\"]\n";
 
 /// A meter that reports what a test sets, and counts its reads
 ///
@@ -290,11 +293,8 @@ impl Rig {
         };
         rig.make_repo();
 
-        // CodeRabbit is off unless a test turns it on: most tests are about
-        // what comes before it.
         let example = include_str!("../settings.example.toml");
         assert!(example.contains(EXAMPLE_REPO), "the example's repo moved");
-        assert!(example.contains(CODERABBIT_ON), "the example's gate moved");
         // Most tests are about what comes after the review, so the rig's
         // project runs a short one: a local round and then a Claude session. A
         // test of a new project's review takes that out with [`Rig::default_review`].
@@ -304,7 +304,6 @@ impl Rig {
         );
         let settings = example
             .replace(EXAMPLE_REPO, &rig.repo().display().to_string())
-            .replace(CODERABBIT_ON, CODERABBIT_OFF)
             .replace(EXAMPLE_REVIEWERS, RIG_REVIEWERS);
         let paths = rig.paths();
         std::fs::create_dir_all(paths.settings.parent().unwrap()).unwrap();
@@ -454,9 +453,12 @@ impl Rig {
         ProjectPaths::under(&shep.join("kelpie"), &shep, &self.project)
     }
 
-    /// Turns the CodeRabbit gate on, as the example settings have it for shep
+    /// Lists CodeRabbit after the rig's reviewers, so it reads each pass last
     pub(crate) fn coderabbit_on(&self) {
-        self.edit_settings(|s| s.replace(CODERABBIT_OFF, CODERABBIT_ON));
+        self.edit_settings(|s| {
+            assert!(s.contains(RIG_REVIEWERS), "the rig's reviewers moved");
+            s.replace(RIG_REVIEWERS, RIG_REVIEWERS_AND_CODERABBIT)
+        });
     }
 
     /// Makes the project's merge authority `auto`, read when a runner next opens
@@ -531,7 +533,7 @@ impl Rig {
         self.open_with(vec![Arc::new(CodeRabbit), Arc::new(Cubic), Arc::new(Codex)])
     }
 
-    /// Starts a runner whose review bot rounds summon the bots of `review_bots`
+    /// Starts a runner that reads each review bot by its profile in `review_bots`
     pub(crate) fn open_with(
         &self,
         review_bots: Vec<Arc<dyn Profile>>,

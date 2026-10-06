@@ -3,7 +3,7 @@
 use super::{CallKind, Split, TimingPhase, Timings};
 use crate::ports::Timestamp;
 use crate::state::RunState;
-use crate::work_item::{CodeRabbitStage, Phase, ReviewCallState, Turn, WorkItem};
+use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, Turn, WorkItem};
 
 impl WorkItem {
     /// Marks a review call in flight outside the runner's lock
@@ -49,11 +49,16 @@ impl WorkItem {
         }
         match &self.phase {
             Phase::Ruling { .. } => TimingPhase::Ruling,
+            Phase::Review(Review {
+                stage: ReviewStage::Summon { .. },
+                ..
+            }) => TimingPhase::CodeRabbitWindow,
+            Phase::Review(Review {
+                stage: ReviewStage::Summoned { .. },
+                ..
+            }) => TimingPhase::CodeRabbitReview,
             Phase::Implement | Phase::Review(_) => TimingPhase::Other,
             Phase::Ci { .. } => TimingPhase::Ci,
-            Phase::CodeRabbit(CodeRabbitStage::Lease { .. }) => TimingPhase::CodeRabbitWindow,
-            Phase::CodeRabbit(CodeRabbitStage::Summoned { .. }) => TimingPhase::CodeRabbitReview,
-            Phase::CodeRabbit(_) => TimingPhase::Other,
             Phase::Merge { .. } | Phase::Done { .. } => TimingPhase::Merge,
         }
     }
@@ -74,7 +79,6 @@ mod tests {
     use super::*;
     use crate::review_bot::Bot;
     use crate::test::a_work_item;
-    use crate::work_item::{Review, ReviewStage};
 
     fn in_phase(phase: Phase) -> WorkItem {
         let mut item = a_work_item();
@@ -156,20 +160,31 @@ mod tests {
             head: None,
             since: Timestamp(1),
         };
-        let lease = Phase::CodeRabbit(CodeRabbitStage::Lease {
+        let bot = |stage| {
+            Phase::Review(Review {
+                stage,
+                ..Review::first()
+            })
+        };
+        let lease = bot(ReviewStage::Summon {
+            bot: Bot::Coderabbit,
+            started: Timestamp(1),
             head: "c0ffee".into(),
             readied: None,
             full: false,
         });
-        let summoned = Phase::CodeRabbit(CodeRabbitStage::Summoned {
+        let summoned = bot(ReviewStage::Summoned {
             bot: Bot::Coderabbit,
+            started: Timestamp(1),
             head: "c0ffee".into(),
             at: Timestamp(1),
             full: false,
             resent: false,
         });
-        let fixing = Phase::CodeRabbit(CodeRabbitStage::Fixing {
-            head: "c0ffee".into(),
+        let fixing = bot(ReviewStage::Fixing {
+            head: Some("c0ffee".into()),
+            sent: Vec::new(),
+            deferred_before: Vec::new(),
         });
         let merge = Phase::Merge {
             head: "c0ffee".into(),

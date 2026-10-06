@@ -7,7 +7,8 @@
 //! same name replaces, and `shep kelpie add` writes out any that are
 //! missing. A file that cannot be read or used stops the runner, naming the
 //! file and what is wrong with it. A `.md` file whose name is no agent's,
-//! such as a `README.md`, is skipped and named in the log.
+//! such as a `README.md`, is skipped and named in the log. A review bot's
+//! file is named for its bot, since the bot's window is its account's.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -17,6 +18,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::review_bot::BotReviewer;
 use crate::settings::{
     AgentName, Effort, Endpoint, Limit, LocalCommand, LocalRound, NonBlank, RoleModel,
 };
@@ -46,8 +48,9 @@ enum Written {
     Beside(&'static str),
 }
 
-// Kelpie's own agents, by name: what `add` writes out, and what a missing file falls back to.
-const DEFAULTS: [(&str, &str, Written); 4] = [
+// Kelpie's own agents, by name: what `add` writes out, and what a missing
+// file falls back to. A project lists none of the review bots unless told to.
+const DEFAULTS: [(&str, &str, Written); 7] = [
     (
         DEFAULT_IMPLEMENTER,
         include_str!("../agents/sonnet-high.md"),
@@ -68,6 +71,13 @@ const DEFAULTS: [(&str, &str, Written); 4] = [
         include_str!("../agents/qwen.md"),
         Written::Beside(QWEN_REVIEW),
     ),
+    (
+        "coderabbit",
+        include_str!("../agents/coderabbit.md"),
+        Written::Always,
+    ),
+    ("cubic", include_str!("../agents/cubic.md"), Written::Always),
+    ("codex", include_str!("../agents/codex.md"), Written::Always),
 ];
 
 /// What an agent is for
@@ -105,6 +115,8 @@ pub enum Runs {
     Command(LocalCommand),
     /// Kelpie's own reviewer over an OpenAI-compatible server: a reviewer only
     Endpoint(Endpoint),
+    /// A review bot summoned on the pull request: a reviewer only
+    Bot(BotReviewer),
 }
 
 impl Runs {
@@ -112,16 +124,24 @@ impl Runs {
     pub fn session(&self) -> Option<(&RoleModel, &Limit)> {
         match self {
             Self::Session { model, limit } => Some((model, limit)),
-            Self::Command(_) | Self::Endpoint(_) => None,
+            Self::Command(_) | Self::Endpoint(_) | Self::Bot(_) => None,
         }
     }
 
     /// The local round, for an agent that runs on its own
     pub fn local(&self) -> Option<LocalRound> {
         match self {
-            Self::Session { .. } => None,
+            Self::Session { .. } | Self::Bot(_) => None,
             Self::Command(command) => Some(LocalRound::Command(command.clone())),
             Self::Endpoint(endpoint) => Some(LocalRound::Endpoint(endpoint.clone())),
+        }
+    }
+
+    /// The bot, for an agent that is a review bot
+    pub fn bot(&self) -> Option<BotReviewer> {
+        match self {
+            Self::Bot(bot) => Some(*bot),
+            Self::Session { .. } | Self::Command(_) | Self::Endpoint(_) => None,
         }
     }
 }
@@ -196,10 +216,11 @@ impl Agents {
                 continue;
             };
             let text = fs::read_to_string(&path).map_err(|e| failed(&path, e))?;
-            let agent = front::parse(&text).map_err(|message| AgentsError::File {
-                path: path.clone(),
-                message,
-            })?;
+            let agent =
+                front::parse_named(name.as_str(), &text).map_err(|message| AgentsError::File {
+                    path: path.clone(),
+                    message,
+                })?;
             agents.agents.insert(name, agent);
         }
         Ok(agents)
@@ -229,9 +250,9 @@ impl Agents {
     #[cfg(test)]
     #[track_caller]
     pub(crate) fn with(mut self, name: &str, text: &str) -> Self {
-        let agent = front::parse(text).unwrap_or_else(|e| panic!("agent {name}: {e}"));
-        self.agents
-            .insert(name.to_owned().try_into().unwrap(), agent);
+        let named: AgentName = name.to_owned().try_into().unwrap();
+        let agent = front::parse_named(name, text).unwrap_or_else(|e| panic!("agent {name}: {e}"));
+        self.agents.insert(named, agent);
         self
     }
 }

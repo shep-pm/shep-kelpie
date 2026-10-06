@@ -81,12 +81,14 @@ fn findings(values: &[Value]) -> Vec<Finding> {
 fn not_sent() -> ReviewStage {
     ReviewStage::Found {
         findings: findings(&[high(), medium()]),
+        threads: Vec::new(),
     }
 }
 
 fn done() -> ReviewStage {
     ReviewStage::Found {
         findings: Vec::new(),
+        threads: Vec::new(),
     }
 }
 

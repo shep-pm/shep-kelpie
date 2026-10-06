@@ -105,7 +105,7 @@ fn a_file_with_one_work_item_loads_as_a_list_of_one() {
     let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(
         (&saved["version"], saved.get("work_item")),
-        (&serde_json::json!(3), None)
+        (&serde_json::json!(4), None)
     );
     assert_eq!(store.load().unwrap(), Some(state));
 
@@ -238,7 +238,7 @@ fn the_file_format_is_pinned() {
     assert_eq!(
         value,
         serde_json::json!({
-            "version": 3,
+            "version": 4,
             "run": "paused",
             "since": 7,
             "work_items": [],
@@ -343,62 +343,6 @@ fn a_finished_work_item_is_pinned() {
 }
 
 #[test]
-fn the_coderabbit_rulings_are_pinned() {
-    let cap = RulingKind::CodeRabbitCap {
-        rounds: 2,
-        held: 1,
-        prompt: "fix".into(),
-        head: Some("c0ffee".into()),
-    };
-    let silent = RulingKind::CodeRabbitSilent {
-        bot: crate::review_bot::Bot::Coderabbit,
-        head: "c0ffee".into(),
-    };
-    let unpushed = RulingKind::FixNotPushed {
-        fix: Fix::CodeRabbit {
-            round: 3,
-            head: "c0ffee".into(),
-        },
-        prompt: "again".into(),
-    };
-    for kind in [&cap, &silent, &unpushed] {
-        let saved = serde_json::to_value(kind).unwrap();
-        assert_eq!(&serde_json::from_value::<RulingKind>(saved).unwrap(), kind);
-    }
-    assert_eq!(
-        serde_json::to_value([&cap, &silent, &unpushed]).unwrap(),
-        serde_json::json!([
-            {
-                "kind": "coderabbit-cap",
-                "rounds": 2,
-                "held": 1,
-                "prompt": "fix",
-                "head": "c0ffee",
-            },
-            { "kind": "coderabbit-silent", "head": "c0ffee" },
-            {
-                "kind": "fix-not-pushed",
-                "coderabbit": { "round": 3, "head": "c0ffee" },
-                "prompt": "again",
-            },
-        ])
-    );
-    let saved_before_the_head: RulingKind = serde_json::from_value(serde_json::json!(
-        { "kind": "coderabbit-cap", "rounds": 2, "held": 1, "prompt": "fix" }
-    ))
-    .unwrap();
-    assert_eq!(
-        saved_before_the_head,
-        RulingKind::CodeRabbitCap {
-            rounds: 2,
-            held: 1,
-            prompt: "fix".into(),
-            head: None,
-        }
-    );
-}
-
-#[test]
 fn a_timeout_keeps_the_phase_its_turn_ran_in() {
     let kind = RulingKind::TurnTimeout {
         phase: Some(Phase::Implement),
@@ -449,19 +393,6 @@ fn a_change_to_claudes_files_keeps_its_head_files_and_phase() {
         })
     );
     assert_eq!(serde_json::from_value::<RulingKind>(saved).unwrap(), kind);
-}
-
-#[test]
-fn a_question_during_a_coderabbit_fix_is_pinned() {
-    let resume = Resume::CodeRabbitFix {
-        head: "c0ffee".into(),
-    };
-    let saved = serde_json::to_value(&resume).unwrap();
-    assert_eq!(
-        saved,
-        serde_json::json!({ "state": "coderabbit-fix", "head": "c0ffee" })
-    );
-    assert_eq!(serde_json::from_value::<Resume>(saved).unwrap(), resume);
 }
 
 #[test]
@@ -553,14 +484,14 @@ fn a_newer_format_is_reported_as_one() {
     let store = store_in(dir.path());
     fs::write(
         dir.path().join("state.json"),
-        r#"{"version": 4, "shape": "new"}"#,
+        r#"{"version": 5, "shape": "new"}"#,
     )
     .unwrap();
     assert_eq!(
         store.load().unwrap_err(),
         StateError::Version {
             path: store.path.clone(),
-            found: 4
+            found: 5
         }
     );
 }

@@ -20,6 +20,7 @@ use crate::coderabbit::CodeRabbit;
 use crate::codex::Codex;
 use crate::cubic::Cubic;
 use crate::lease::Epoch;
+use crate::lease::saved::BookFile;
 use crate::lease::wire::{Asker, GRANT};
 use crate::ports::{Leases, Ports, Routed, SandboxError};
 use crate::runner::{ACTIONS, ProjectName, ProjectPaths, READ_EVERY, Runner, answer, step};
@@ -114,7 +115,8 @@ fn serve(project: &str) -> Result<(), String> {
     );
     let reviewer = LocalReviewer::default();
     let epoch = Epoch(u64::from(std::process::id()));
-    let leases = Arc::new(ShepLeases::new(shepherd.clone(), Asker::new(epoch)));
+    let book = BookFile::new(kelpie_home.join(crate::dog::BOOK));
+    let leases = Arc::new(ShepLeases::new(shepherd.clone(), Asker::new(epoch), book));
     let ports = Ports {
         agents: Arc::new(Routed::new(
             Arc::new(claude.clone()),

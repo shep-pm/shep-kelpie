@@ -15,7 +15,7 @@ use super::{Names, Runner};
 use crate::ports::Timestamp;
 use crate::settings::MergeAuthority;
 use crate::state::{Fix, ProjectState, Resume, Ruling, RulingKind, StateError};
-use crate::work_item::{CodeRabbitStage, Known, Phase, Review, Turn, WorkItem, foreign_change};
+use crate::work_item::{Known, Phase, Review, Turn, WorkItem, foreign_change};
 use crate::worktree;
 
 /// The prompt for a turn resumed after the maintainer accepts a timed-out
@@ -121,10 +121,6 @@ impl Runner {
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
         let ruling = next.rulings.remove(at);
-        let lifts_cap = matches!(
-            (&answer, &ruling.kind),
-            (Answer::Yes, RulingKind::CodeRabbitCap { .. })
-        );
         // Whether the findings a merged pull request left are filed or dropped.
         let follow_up = match (&answer, &ruling.kind) {
             (Answer::Yes, RulingKind::FollowUp { .. }) => Some(true),
@@ -174,7 +170,6 @@ impl Runner {
         }
         let moved = decide(id, answer, ruling, now, head_moved)?;
         if let Some(item) = next.work_items.iter_mut().find(|item| parked_on(item)) {
-            item.coderabbit.cap_cleared |= lifts_cap;
             if let (Some(filed), Some(pending)) = (follow_up, item.follow_ups.as_mut()) {
                 if filed {
                     pending.ruled = true;
@@ -215,7 +210,6 @@ impl Runner {
                             let (repo, branch) = (&self.settings.repo, &item.branch);
                             worktree::adopt(repo, &item.worktree, branch, &from, &to)
                                 .map_err(|e| RuleError::Adopt(to, e.to_string()))?;
-                            item.coderabbit.satisfied = false;
                             Phase::Review(Review::first())
                         }
                         _ => Phase::Ci {
@@ -308,7 +302,7 @@ impl Runner {
     pub(super) fn post_ruling(&self, number: Option<u64>, id: u64) -> Option<String> {
         let number = number?;
         let ruling = self.state.rulings.iter().find(|r| r.id == id)?;
-        let comment = comment(&ruling.kind, &self.names().bot)?;
+        let comment = comment(&ruling.kind)?;
         let posted = self
             .ports
             .forge
@@ -344,7 +338,6 @@ fn regate(repo: &std::path::Path, item: &mut WorkItem) -> Result<bool, RuleError
     worktree::adopt(repo, &item.worktree, &item.branch, &from, &tip)
         .map_err(|e| RuleError::Adopt(tip.clone(), e.to_string()))?;
     item.known.head = Some(tip);
-    item.coderabbit.satisfied = false;
     Ok(true)
 }
 
@@ -363,7 +356,7 @@ pub(super) fn park(
         .item_mut(issue)
         .expect("a ruling is about an open work item");
     item.phase = Phase::Ruling { id };
-    let text = question(names, id, issue, pull_request, &kind);
+    let text = question(id, issue, pull_request, &kind);
     next.last_ruling = id;
     next.rulings.push(Ruling {
         id,
@@ -379,7 +372,7 @@ pub(super) fn park(
 // What a reader of the pull request is told of a ruling: what happened and
 // that it waits on the maintainer, with no command and nothing of kelpie's.
 // A merge ruling says nothing, since `ready-for-human` already does.
-fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
+fn comment(kind: &RulingKind) -> Option<String> {
     let said = match kind {
         RulingKind::Merge { .. } => return None,
         RulingKind::Rebase { reason } => {
@@ -403,13 +396,6 @@ fn comment(kind: &RulingKind, bot: &str) -> Option<String> {
         RulingKind::FixNotPushed { .. } => {
             "A fix for review findings ended without a push, so those findings still hold."
                 .to_owned()
-        }
-        RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
-            "{bot} has run {rounds} rounds here, its cap, \
-             and {held} of its threads are still open."
-        ),
-        RulingKind::CodeRabbitSilent { bot: silent, head } => {
-            format!("{} never reviewed {}.", silent.name(), short(head))
         }
         RulingKind::Question { asked, .. } => asked.clone(),
         RulingKind::TurnTimeout { .. } => {
@@ -458,7 +444,6 @@ fn decide(
                 Resume::Nothing => (Phase::Implement, None),
                 Resume::ReviewFirst => (Phase::Implement, Some(Phase::Review(Review::first()))),
                 Resume::Review(review) => (Phase::Review(review), None),
-                Resume::CodeRabbitFix { head } => (fixing(Some(head)), None),
             };
             return Ok(Move::Turn {
                 prompt: answer_prompt(&text),
@@ -526,39 +511,18 @@ fn decide(
         (Answer::Yes, RulingKind::LocalModelSpilled { review, .. }) => Phase::Review(review),
         // The fix ends under the same round, which checks the head again.
         (Answer::Yes, RulingKind::FixNotPushed { fix, prompt, .. }) => {
-            let phase = match fix {
-                Fix::Review(review) => Phase::Review(review),
-                Fix::CodeRabbit { head, .. } => fixing(Some(head)),
-            };
+            let Fix::Review(review) = fix;
             return Ok(Move::Turn {
                 prompt,
-                phase,
+                phase: Phase::Review(review),
                 force: None,
             });
         }
-        (Answer::Yes, RulingKind::CodeRabbitCap { prompt, head, .. }) => {
-            return Ok(Move::Turn {
-                prompt,
-                phase: fixing(head),
-                force: None,
-            });
-        }
-        (Answer::Yes, RulingKind::CodeRabbitSilent { .. }) => Phase::Ci {
-            head: None,
-            since: now,
-        },
     };
     Ok(Move::Phase(phase))
 }
 
-pub(super) fn question(
-    names: Names<'_>,
-    id: u64,
-    issue: u64,
-    number: Option<u64>,
-    kind: &RulingKind,
-) -> String {
-    let Names { bot, .. } = names;
+pub(super) fn question(id: u64, issue: u64, number: Option<u64>, kind: &RulingKind) -> String {
     let trigger = |answer: &str| format!("`shep kelpie rule {id} {answer}`");
     let (yes, no) = (trigger("yes"), trigger("no <note>"));
     let about = number.map_or_else(
@@ -607,26 +571,13 @@ pub(super) fn question(
             review.round
         ),
         RulingKind::FixNotPushed { fix, .. } => {
-            let round = match fix {
-                Fix::Review(review) => format!("round {} of the review", review.round),
-                Fix::CodeRabbit { round, .. } => format!("{bot} round {round}"),
-            };
+            let Fix::Review(review) = fix;
             format!(
-                "The worker on {about} ended its fix for {round} without pushing, \
-                 so those findings still hold. {yes} sends it the findings again"
+                "The worker on {about} ended its fix for round {} of the review without \
+                 pushing, so those findings still hold. {yes} sends it the findings again",
+                review.round
             )
         }
-        RulingKind::CodeRabbitCap { rounds, held, .. } => format!(
-            "{bot} has run {rounds} rounds on {about}, its cap, and {held} of its \
-             threads are still open. {yes} sends the worker those findings and lets \
-             the rounds go past the cap"
-        ),
-        RulingKind::CodeRabbitSilent { bot: silent, head } => format!(
-            "{} never reviewed {about} at {} after kelpie summoned it. \
-             {yes} has kelpie look at CI and summon it again",
-            silent.name(),
-            short(head)
-        ),
         RulingKind::Question { asked, .. } => {
             return format!(
                 "The worker on {about} asks:\n\n{asked}\n\n{} sends the worker your answer.",
@@ -700,15 +651,6 @@ pub(super) fn question(
         }
     };
     format!("{ask}, and {no} sends the worker your note.")
-}
-
-// A review bot fix ends back in its round, which checks it moved `head`.
-// With no head, from an older state file, it ends under Implement and
-// goes straight to CI.
-fn fixing(head: Option<String>) -> Phase {
-    head.map_or(Phase::Implement, |head| {
-        Phase::CodeRabbit(CodeRabbitStage::Fixing { head })
-    })
 }
 
 fn capitalized(text: &str) -> String {

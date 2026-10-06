@@ -9,9 +9,7 @@ use crate::ports::Finding;
 use crate::settings::AgentName;
 use crate::state::{Fix, RulingKind, StateError};
 use crate::test::a_work_item;
-use crate::work_item::{
-    CallKind, CodeRabbitStage, OpenThread, Phase, Review, ReviewStage, TimingPhase,
-};
+use crate::work_item::{CallKind, Phase, Review, ReviewStage, TimingPhase};
 
 fn named(name: &str) -> Option<AgentName> {
     Some(AgentName::try_from(name.to_owned()).unwrap())
@@ -86,6 +84,7 @@ fn a_round_waiting_on_the_judge_keeps_its_findings_without_verdicts() {
         review.stage,
         ReviewStage::Found {
             findings: vec![finding(racy()), finding(nit())],
+            threads: Vec::new(),
         },
         "every finding the reviewer made, at its own severity"
     );
@@ -120,13 +119,15 @@ fn a_bot_review_waiting_on_the_judge_keeps_its_threads_without_verdicts() {
     }));
     assert_eq!(
         phase,
-        Phase::CodeRabbit(CodeRabbitStage::Found {
-            bot: crate::review_bot::Bot::Cubic,
-            head: "c0ffee".into(),
-            threads: vec![OpenThread {
-                id: "PRRT_1".into(),
-                finding: finding(racy()),
-            }],
+        Phase::Review(Review {
+            stage: ReviewStage::Found {
+                findings: vec![finding(racy())],
+                threads: vec!["PRRT_1".into()],
+            },
+            reviewer: named("cubic"),
+            bots_only: true,
+            unread: false,
+            ..Review::first()
         })
     );
 }
@@ -302,8 +303,15 @@ fn a_bot_fix_saved_with_the_loop_loads_with_no_threads_to_resolve() {
     let item = store.load().unwrap().unwrap().work_items[0].clone();
     assert_eq!(
         item.phase,
-        Phase::CodeRabbit(CodeRabbitStage::Fixing {
-            head: "c0ffee".into()
+        Phase::Review(Review {
+            stage: ReviewStage::Fixing {
+                head: Some("c0ffee".into()),
+                sent: Vec::new(),
+                deferred_before: Vec::new(),
+            },
+            bots_only: true,
+            unread: false,
+            ..Review::first()
         })
     );
     assert_eq!(item.held, [finding(racy())]);

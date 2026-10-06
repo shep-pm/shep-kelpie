@@ -661,10 +661,7 @@ mod tests {
             reviews: std::num::NonZeroU32::new(20).unwrap(),
             hours: std::num::NonZeroU32::new(720).unwrap(),
         };
-        book.set_reviewers(Reviewers {
-            cubic: Some(month),
-            ..Reviewers::default()
-        });
+        book.set_reviewers(Reviewers::default().with(Bot::Cubic, month));
         let granted = book.tick();
         assert_eq!(granted.len(), 1);
         assert_eq!(granted[0].kind, cubic);

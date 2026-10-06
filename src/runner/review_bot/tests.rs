@@ -1,14 +1,15 @@
-//! Review bot rounds with a stand-in bot, through the runner's stand-ins
+//! A review bot's round with a stand-in bot, through the runner's stand-ins
 
 use std::sync::{Arc, Mutex};
 
 use super::{DONE_SETTLE, HEARD_WAIT};
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
-use crate::ports::{Checks, Finding, Severity, Timestamp};
+use crate::ports::{Finding, Severity, Timestamp};
 use crate::review_bot::{Activity, Bot, Comment, Login, Profile, Reading, Review, Status, Thread};
 use crate::runner::coderabbit::tests::now;
 use crate::runner::{Runner, StepReport, step};
+use crate::settings::AgentName;
 use crate::test::{Rig, Scripted, Told};
 
 const LABEL: &str = "stand-in please";
@@ -136,8 +137,9 @@ fn read_as_stand_in(rig: &Rig) {
     assert!(logins.iter().all(|l| l == LOGIN), "{logins:?}");
 }
 
-// Pull request 71 with the stand-in on, the review done, green
-// CI, the draft marked ready, and the stand-in summoned.
+// Pull request 71 with the stand-in listed after the qwen and Claude
+// rounds, which read it clean, the draft marked ready, and the stand-in
+// summoned.
 fn summoned(project: &str) -> (Rig, Mutex<Runner>, String) {
     let rig = Rig::new(project);
     rig.coderabbit_on();
@@ -153,13 +155,12 @@ fn summoned(project: &str) -> (Rig, Mutex<Runner>, String) {
     step(&runner).unwrap(); // review round 1, qwen: clean by default
     step(&runner).unwrap(); // review round 2, claude: scripted clean above
     let head = rig.forge.head_of("kelpie/7").unwrap();
-    rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
-        rig.verdict(&runner),
+        step(&runner).unwrap(),
         Some(StepReport::MarkedReady { .. })
     ));
     assert!(matches!(
-        rig.verdict(&runner),
+        step(&runner).unwrap(),
         Some(StepReport::Summoned { .. })
     ));
     assert_eq!(labels(&rig), [(71, LABEL.to_owned(), true)]);
@@ -185,10 +186,11 @@ fn a_stand_in_bot_runs_a_whole_round_through_to_the_worker() {
     rig.clock.advance(60);
     assert_eq!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitReviewed {
+        Some(StepReport::BotReviewed {
             issue: 7,
             pull_request: 71,
-            round: 1,
+            round: 3,
+            reviewer: AgentName::kelpies("coderabbit"),
             open_threads: 1
         })
     );
@@ -204,7 +206,7 @@ fn a_stand_in_bot_runs_a_whole_round_through_to_the_worker() {
 
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSent { held: 1, .. })
+        Some(StepReport::ReviewFindingsSent { held: 1, .. })
     ));
     let file = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
     assert!(
@@ -217,7 +219,7 @@ fn a_stand_in_bot_runs_a_whole_round_through_to_the_worker() {
     let fix = rig.claude.calls().pop().unwrap();
     assert!(
         fix.prompt
-            .starts_with("Stand-in round 1 on your pull request #71 left 1 open thread(s)"),
+            .starts_with("Round 3 of the review on your pull request #71 found 1 finding(s)"),
         "{}",
         fix.prompt
     );
@@ -291,7 +293,7 @@ fn an_owed_stand_in_summon_marked_done_is_answered_not_summoned_again() {
     rig.coderabbit_on();
     let reviewed = rig.push_by_hand("fix/timeline", "work.txt");
     rig.forge.coderabbit.post_as(80, LOGIN, |seen| {
-        seen.reviews.push(review(&reviewed, Rig::EPOCH - 60))
+        seen.reviews.push(review(&reviewed, Rig::EPOCH - 3600))
     });
     let head = rig.push_by_hand("fix/timeline", "more.txt");
     rig.forge.open_pull_request(80, "fix/timeline", &[5]);
@@ -300,9 +302,8 @@ fn an_owed_stand_in_summon_marked_done_is_answered_not_summoned_again() {
     rig.ask(&runner, "start", None);
     rig.ask(&runner, "adopt", Some("80"));
     step(&runner).unwrap();
-    rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
-        rig.verdict(&runner),
+        step(&runner).unwrap(),
         Some(StepReport::Summoned { .. })
     ));
     let summon = now(&rig);
@@ -320,7 +321,10 @@ fn an_owed_stand_in_summon_marked_done_is_answered_not_summoned_again() {
     rig.clock.advance(30 + DONE_SETTLE);
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSatisfied { .. })
+        Some(StepReport::BotReviewed {
+            open_threads: 0,
+            ..
+        })
     ));
     assert_eq!(
         labels(&rig),

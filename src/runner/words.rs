@@ -30,8 +30,6 @@ impl Wants {
             | RulingKind::Closed
             | RulingKind::LocalModelSpilled { .. }
             | RulingKind::FixNotPushed { .. }
-            | RulingKind::CodeRabbitCap { .. }
-            | RulingKind::CodeRabbitSilent { .. }
             | RulingKind::TurnTimeout { .. }
             | RulingKind::TurnFailed { .. }
             | RulingKind::ClaudeFiles { .. }

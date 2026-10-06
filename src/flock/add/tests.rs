@@ -4,6 +4,7 @@ use std::time::Duration;
 use shep_client::shep_core::config::AppConfig;
 
 use super::*;
+use crate::ports::Visibility;
 use crate::runner::ProjectPaths;
 use crate::settings::{AgentName, ForgeSlug};
 use crate::shepherd;
@@ -102,7 +103,6 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
     assert_eq!(settings.repo, scene.checkout.root);
     assert_eq!(settings.forge.as_str(), "shep-pm/koji-website");
     assert!(settings.ci, "the checkout has workflows");
-    assert!(!settings.coderabbit.enabled, "the repo is private");
     let reviewers = settings.agents.reviewers.clone().unwrap();
     assert_eq!(
         reviewers,
@@ -122,6 +122,18 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
         !scene.agents().join("qwen.md").exists(),
         "no qwen-review script, so no qwen reviewer"
     );
+    for (bot, text) in [
+        ("coderabbit", include_str!("../../../agents/coderabbit.md")),
+        ("cubic", include_str!("../../../agents/cubic.md")),
+        ("codex", include_str!("../../../agents/codex.md")),
+    ] {
+        let written = std::fs::read_to_string(scene.agents().join(format!("{bot}.md")));
+        assert_eq!(
+            written.unwrap(),
+            text,
+            "written, though no project lists it"
+        );
+    }
     assert_eq!(
         scene.forge.repo_labels_now(),
         [
@@ -202,14 +214,15 @@ async fn add_twice_changes_nothing() {
 }
 
 #[tokio::test]
-async fn a_public_repo_with_no_ci_gets_coderabbit_and_no_ci() {
+async fn a_public_repo_with_no_ci_gets_no_ci_and_still_lists_no_review_bot() {
     let scene = Scene::new().await;
     scene.forge.set_visibility(Visibility::Public);
     std::fs::remove_dir_all(scene.checkout.root.join(".github")).unwrap();
     scene.add().await.unwrap();
     let settings = scene.settings();
-    assert!(settings.coderabbit.enabled);
     assert!(!settings.ci);
+    let reviewers = settings.agents.reviewers.unwrap();
+    assert_eq!(reviewers, [AgentName::kelpies("defect-hunter")]);
 }
 
 #[tokio::test]

@@ -5,25 +5,32 @@ use std::sync::{Mutex, PoisonError};
 use shep_channel::Shepherd;
 
 use crate::lease::LeaseKind;
+use crate::lease::saved::BookFile;
+use crate::lease::window::Window;
 use crate::lease::wire::{Asker, GrantError, WindowFact};
-use crate::ports::Leases;
+use crate::ports::{Leases, Timestamp};
+use crate::review_bot::ReviewWindow;
 
 /// Leases asked for over this runner's shepherd channel
 ///
 /// The dog answers with a `grant` trigger, which the runner's sheep hands
-/// to [`ShepLeases::grant`].
+/// to [`ShepLeases::grant`]. When a window opens is read from the dog's
+/// book file, which the dog saves after every change.
 #[derive(Debug)]
 pub struct ShepLeases {
     shepherd: Shepherd,
     asker: Mutex<Asker>,
+    book: BookFile,
 }
 
 impl ShepLeases {
-    /// This run's side, raising its metrics through `shepherd`
-    pub fn new(shepherd: Shepherd, asker: Asker) -> Self {
+    /// This run's side, raising its metrics through `shepherd`, and reading
+    /// the dog's `book`
+    pub fn new(shepherd: Shepherd, asker: Asker, book: BookFile) -> Self {
         Self {
             shepherd,
             asker: Mutex::new(asker),
+            book,
         }
     }
 
@@ -72,5 +79,13 @@ impl Leases for ShepLeases {
     fn window(&self, kind: &LeaseKind, fact: WindowFact, value: u64) {
         let (name, value) = self.asker().window(kind, fact, value);
         self.shepherd.metric(name, value);
+    }
+
+    fn opens(&self, kind: &LeaseKind, window: ReviewWindow, now: Timestamp) -> Option<Timestamp> {
+        let book = self.book.load().ok()??;
+        let lease = book.leases.into_iter().find(|lease| &lease.kind == kind)?;
+        let mut saved = Window::from(lease.window?);
+        saved.define(window);
+        saved.opens(now)
     }
 }

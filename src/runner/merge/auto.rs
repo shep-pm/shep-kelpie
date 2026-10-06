@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use serde_json::json;
 
 use crate::ports::{AgentError, Checks, PullRequestState};
-use crate::runner::coderabbit::tests::{fixed, hold_a_finding, now, reviewed_by_qwen};
+use crate::runner::coderabbit::tests::{hold_a_finding, now, reviewed_by_qwen};
 use crate::runner::coderabbit::{ANSWER_WAIT, REVIEW_WAIT};
 use crate::runner::rework::HUMAN;
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
@@ -32,17 +32,17 @@ fn auto_with_issue_7(project: &str) -> (Rig, Mutex<Runner>) {
     (rig, runner)
 }
 
-// With CodeRabbit on, green CI, the draft marked ready and the summon
+// With CodeRabbit listed last, the draft marked ready for its round and
+// the summon
 fn summoned_under_auto(project: &str) -> (Rig, Mutex<Runner>, String) {
     let (rig, runner, head) = reviewed_by_qwen(project);
     let runner = under_auto(&rig, runner);
-    rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
-        rig.verdict(&runner),
+        step(&runner).unwrap(),
         Some(StepReport::MarkedReady { .. })
     ));
     assert!(matches!(
-        rig.verdict(&runner),
+        step(&runner).unwrap(),
         Some(StepReport::Summoned { .. })
     ));
     (rig, runner, head)
@@ -180,14 +180,17 @@ fn a_notice_the_webhook_refuses_is_tried_again_across_a_restart_and_posted_once(
 }
 
 #[test]
-fn with_coderabbit_on_the_merge_waits_until_it_is_satisfied() {
+fn with_coderabbit_listed_the_merge_waits_for_its_read() {
     let (rig, runner, head) = summoned_under_auto("golbat");
+    rig.forge.set_checks(&head, Checks::Passed);
+    rig.clock.advance(CHECKS_SETTLE);
+    assert_eq!(step(&runner).unwrap(), None, "green CI waits for the read");
     assert_eq!(rig.forge.merges(), []);
     rig.forge.coderabbit.review(71, &head, now(&rig) + 60, &[]);
     rig.clock.advance(60);
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSatisfied { .. })
+        Some(StepReport::BotReviewed { .. })
     ));
     assert!(merged(rig.verdict(&runner)));
     assert_eq!(rig.forge.merges(), [(71, head)]);
@@ -406,7 +409,7 @@ fn a_fix_that_pushes_nothing_still_parks_on_a_ruling() {
     let (rig, runner, head) = summoned_under_auto("shep");
     assert!(matches!(
         hold_a_finding(&rig, &runner, &head, "Name the flag."),
-        Some(StepReport::CodeRabbitSent { round: 1, .. })
+        Some(StepReport::ReviewFindingsSent { round: 3, .. })
     ));
     rig.claude.script([Scripted::Say("Nothing to change.")]);
     step(&runner).unwrap();
@@ -414,27 +417,19 @@ fn a_fix_that_pushes_nothing_still_parks_on_a_ruling() {
     still_asks(&rig, &runner, id, "fix-not-pushed");
 }
 
+// The qwen and Claude rounds read it, so the pass is not unread.
 #[test]
-fn coderabbits_cap_still_parks_on_a_ruling() {
-    let (rig, runner, head) = summoned_under_auto("koji");
-    assert!(matches!(
-        hold_a_finding(&rig, &runner, &head, "First."),
-        Some(StepReport::CodeRabbitSent { round: 1, .. })
-    ));
-    let head = fixed(&rig, &runner, "one.txt");
-    rig.forge.coderabbit.settle("PRRT_71_0");
-    let id = raised(hold_a_finding(&rig, &runner, &head, "Second."));
-    still_asks(&rig, &runner, id, "coderabbit-cap");
-}
-
-#[test]
-fn a_summon_coderabbit_never_answers_still_parks_on_a_ruling() {
-    let (rig, runner, _) = summoned_under_auto("chelone");
+fn a_summon_coderabbit_never_answers_passes_it_over_and_a_read_pass_still_merges() {
+    let (rig, runner, head) = summoned_under_auto("chelone");
     rig.clock.advance(ANSWER_WAIT);
     step(&runner).unwrap();
     rig.clock.advance(REVIEW_WAIT - ANSWER_WAIT);
-    let id = raised(step(&runner).unwrap());
-    still_asks(&rig, &runner, id, "coderabbit-silent");
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewerSkipped { .. })
+    ));
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert!(merged(rig.verdict(&runner)));
 }
 
 // After the gate passed under `auto` with CodeRabbit off: the draft marked
@@ -548,7 +543,7 @@ fn a_yes_that_vouches_for_a_new_head_sends_it_back_through_every_gate() {
     rig.clock.advance(60);
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSatisfied { .. })
+        Some(StepReport::BotReviewed { .. })
     ));
     rig.forge
         .set_checks(&head, Checks::Failed(vec!["lint".into()]));
@@ -567,14 +562,13 @@ fn a_yes_that_vouches_for_a_new_head_sends_it_back_through_every_gate() {
     rig.ask(&runner, "rule", Some(&format!("{id} yes")));
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["work_item"]["phase"]["state"], "review");
-    assert_eq!(status["work_item"]["coderabbit"]["satisfied"], false);
 
     rig.claude.script([Scripted::Text("CLEAN")]);
     step(&runner).unwrap(); // review round 1, qwen: clean by default
     step(&runner).unwrap(); // review round 2, claude: scripted clean above
     rig.forge.set_checks(&fixed, Checks::Passed);
     assert_eq!(
-        rig.verdict(&runner),
+        step(&runner).unwrap(),
         Some(StepReport::Summoned {
             issue: 7,
             pull_request: 71,
@@ -654,8 +648,9 @@ fn a_yes_on_a_refused_rebase_with_no_worker_turn_still_summons_coderabbit() {
     rig.clock.advance(60);
     assert!(matches!(
         step(&runner).unwrap(),
-        Some(StepReport::CodeRabbitSatisfied { .. })
+        Some(StepReport::BotReviewed { .. })
     ));
+    rig.forge.set_checks(&head, Checks::Passed);
     let worktree = rig.worktree_7();
     std::fs::write(worktree.join("work.txt"), "half done\n").unwrap();
     rig.land_on_origin("landed.txt");
@@ -664,21 +659,17 @@ fn a_yes_on_a_refused_rebase_with_no_worker_turn_still_summons_coderabbit() {
 
     // The maintainer clears the worktree, pushes a fix and says yes.
     git(&worktree, &["checkout", "--quiet", "--", "work.txt"]);
-    rig.push_by_hand("kelpie/7", "fix.txt");
+    let fix = rig.push_by_hand("kelpie/7", "fix.txt");
     rig.ask(&runner, "rule", Some(&format!("{id} yes")));
     rig.claude.script([Scripted::Text("CLEAN")]);
     step(&runner).unwrap(); // review round 1, qwen: clean by default
     step(&runner).unwrap(); // review round 2, claude: scripted clean above
-    let Some(StepReport::Rebased { head: rebased, .. }) = step(&runner).unwrap() else {
-        panic!("the branch was not rebased");
-    };
-    rig.forge.set_checks(&rebased, Checks::Passed);
     assert_eq!(
-        rig.verdict(&runner),
+        step(&runner).unwrap(),
         Some(StepReport::Summoned {
             issue: 7,
             pull_request: 71,
-            head: rebased,
+            head: fix,
         })
     );
     assert_eq!(rig.forge.merges(), []);

@@ -30,7 +30,7 @@ use crate::profile::WorkerProfile;
 use crate::settings::{AgentHarness, Effort, Limit};
 use crate::skills::{Step, split_command};
 use crate::state::{Resume, RulingKind, RunState, StateError};
-use crate::work_item::{CodeRabbitStage, Phase, Review, ReviewStage, Turn, WorkItem};
+use crate::work_item::{Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree::{self, Start};
 pub(super) use unfinished::failed;
 use unfinished::{awaits_a_push, timed_out, uncommitted_prompt};
@@ -213,15 +213,7 @@ impl Runner {
                 }
                 return self.review_step();
             }
-            Phase::CodeRabbit(CodeRabbitStage::Fixing { .. })
-                if !matches!(item.turn, Turn::Ended { .. }) => {}
             Phase::Ci { .. } => return self.check_ci(),
-            Phase::CodeRabbit(_) => {
-                if let Some(parked) = self.fence_gate()? {
-                    return Ok(parked);
-                }
-                return self.review_bot_step();
-            }
             Phase::Ruling { .. } => return Ok(Begin::Idle),
             Phase::Merge { .. } => return self.merge(),
             Phase::Done { merged } => return self.finish(*merged),
@@ -535,8 +527,6 @@ impl Runner {
                 } else {
                     Turn::Ended { at: now }
                 };
-                // The turn may have changed the code CodeRabbit was satisfied with.
-                item.coderabbit.satisfied = false;
                 // A question leaves the phase untouched: it interrupted
                 // whatever was running, before that turn could be said to
                 // have ended normally, and the answer resumes exactly this,
@@ -575,9 +565,6 @@ impl Runner {
                     Some(text) => {
                         let resume = match &item.phase {
                             Phase::Review(review) => Resume::Review(review.clone()),
-                            Phase::CodeRabbit(CodeRabbitStage::Fixing { head }) => {
-                                Resume::CodeRabbitFix { head: head.clone() }
-                            }
                             Phase::Implement if pull_request.is_some() => Resume::ReviewFirst,
                             _ => Resume::Nothing,
                         };

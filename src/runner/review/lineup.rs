@@ -2,15 +2,16 @@
 //!
 //! Each round goes to the first listed reviewer the pass has not run,
 //! skipping any that cannot run: one limited to paths the pull request does
-//! not change, or a local one that has reviewed nothing twice running. The
-//! pass ends once none is left. A round's reviewer is kept in its state once
-//! it starts, so a round cut short resumes with the same one.
+//! not change, a local one that has reviewed nothing twice running, or a
+//! review bot that has made its `rounds` of reads. A pass of the bots alone
+//! skips every other reviewer. The pass ends once none is left. A round's
+//! reviewer is kept in its state once it starts, so a round cut short
+//! resumes with the same one.
 
 use std::path::Path;
 use std::process::{Command, Stdio};
 
 use super::super::Runner;
-use super::super::review_bot::cap::matches;
 use crate::ports::Timestamp;
 use crate::settings::{AgentName, ListedReviewer};
 use crate::work_item::{Phase, Review, WorkItem};
@@ -40,13 +41,23 @@ impl Runner {
             let item = self.current();
             item.is_some_and(|item| item.local_reviewer_down(&r.name))
         };
+        // A bot that owes an adopted pull request a summon reads whatever its reads.
+        let read_out = |r: &ListedReviewer| {
+            let (Some(bot), Some(item)) = (r.bot(), self.current()) else {
+                return false;
+            };
+            let reads = item.bot_reads.get(&bot.bot).copied().unwrap_or(0);
+            let owed = item.summons_owed.contains(&bot.bot);
+            !owed && bot.rounds.is_some_and(|rounds| reads >= rounds.get())
+        };
         let runs = |r: &ListedReviewer| {
             let paths = &r.paths;
             let touched = paths.is_empty()
                 || changed
                     .iter()
                     .any(|file| paths.iter().any(|glob| matches(glob.as_str(), file)));
-            touched && !(r.is_local() && down(r))
+            let kind = !review.bots_only || r.bot().is_some();
+            kind && touched && !(r.is_local() && down(r)) && !read_out(r)
         };
         let due = |r: &&ListedReviewer| !ran.contains(&r.name) && runs(r);
         Ok(self.lineup.iter().find(due).cloned())
@@ -90,7 +101,10 @@ impl Runner {
         let ran = self.ran_of(review);
         let missed: Vec<String> = (self.lineup.iter())
             .filter_map(|r| {
-                let why = if ran.contains(&r.name) && item.reviewers_skipped.contains(&r.name) {
+                let skipped = item.bots_skipped.iter().find(|s| s.reviewer() == &r.name);
+                let why = if let Some(skipped) = skipped.filter(|_| ran.contains(&r.name)) {
+                    return Some(format!("{} was passed over: {}", r.name, skipped.why()));
+                } else if ran.contains(&r.name) && item.reviewers_skipped.contains(&r.name) {
                     "was passed over after its calls kept failing"
                 } else if ran.contains(&r.name) {
                     "reviewed no file"
@@ -117,7 +131,7 @@ impl Runner {
     }
 
     // The listed reviewer named `name`.
-    pub(super) fn listed(&self, name: &AgentName) -> Option<ListedReviewer> {
+    pub(in crate::runner) fn listed(&self, name: &AgentName) -> Option<ListedReviewer> {
         self.lineup.iter().find(|r| &r.name == name).cloned()
     }
 }
@@ -139,4 +153,49 @@ fn changed_files(worktree: &Path, base: &str) -> Result<Vec<String>, String> {
     }
     let names = String::from_utf8_lossy(&output.stdout);
     Ok(names.lines().map(str::to_owned).collect())
+}
+
+/// Whether `path` matches `glob`: `*` and `?` stay inside one folder,
+/// `**` spans folders, and `**/` may match none
+pub(in crate::runner) fn matches(glob: &str, path: &str) -> bool {
+    matches_bytes(glob.as_bytes(), path.as_bytes())
+}
+
+fn matches_bytes(glob: &[u8], path: &[u8]) -> bool {
+    match glob {
+        [] => path.is_empty(),
+        [b'*', b'*', b'/', rest @ ..] => {
+            matches_bytes(rest, path)
+                || path
+                    .iter()
+                    .enumerate()
+                    .any(|(i, b)| *b == b'/' && matches_bytes(rest, &path[i + 1..]))
+        }
+        [b'*', b'*', rest @ ..] => (0..=path.len()).any(|i| matches_bytes(rest, &path[i..])),
+        [b'*', rest @ ..] => {
+            let folder = path.iter().position(|b| *b == b'/').unwrap_or(path.len());
+            (0..=folder).any(|i| matches_bytes(rest, &path[i..]))
+        }
+        [b'?', rest @ ..] => path
+            .first()
+            .is_some_and(|b| *b != b'/' && matches_bytes(rest, &path[1..])),
+        [c, rest @ ..] => path.first() == Some(c) && matches_bytes(rest, &path[1..]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_glob_keeps_single_stars_inside_one_folder() {
+        assert!(matches("*.lock", "Cargo.lock"));
+        assert!(!matches("*.lock", "sub/Cargo.lock"));
+        assert!(matches("**/*.lock", "sub/deeper/Cargo.lock"));
+        assert!(matches("**/*.lock", "Cargo.lock"));
+        assert!(matches("docs/**", "docs/a/b.md"));
+        assert!(matches("a?c", "abc"));
+        assert!(!matches("a?c", "a/c"));
+        assert!(!matches("Cargo.lock", "Cargo.lockx"));
+    }
 }

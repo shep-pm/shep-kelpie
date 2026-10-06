@@ -7,25 +7,27 @@
 use super::super::Runner;
 use super::super::report::Begin;
 use crate::ports::Timestamp;
+use crate::review_bot::Bot;
 use crate::state::StateError;
-use crate::work_item::{CodeRabbitStage, Phase};
+use crate::work_item::ReviewStage;
+
+// When the round began, and the head it summons for.
+type Round<'a> = (Timestamp, &'a str);
 
 impl Runner {
-    /// Marks a draft ready as the summon of the bot that takes the round, when
-    /// that bot reviews on ready, and so the lease it holds is the review's
+    /// Marks a draft ready as `bot`'s summon, when its file says it reviews
+    /// on ready, once the dog grants its lease
     ///
-    /// `None` leaves the round to the usual path: a pull request already
-    /// ready, one kelpie already marked, a round that goes to another bot
-    /// (whose own mark-ready then draws a review outside any lease, which the
-    /// repo's Codex settings are the only cure for), or none at all.
+    /// `None` leaves the round to the usual path: a bot that does not review
+    /// on ready, a pull request already ready, or one kelpie already marked.
     pub(super) fn summon_by_ready(
         &mut self,
-        head: &str,
+        bot: Bot,
+        (started, head): Round<'_>,
         readied: Option<Timestamp>,
         full: bool,
     ) -> Result<Option<Begin>, StateError> {
-        let listed = self.settings.reviewers();
-        if readied.is_some() || !listed.iter().any(|b| self.reviewers.ready_summons(*b)) {
+        if readied.is_some() || !self.bot_reviewer(bot).reviews_on_ready {
             return Ok(None);
         }
         let number = self.number();
@@ -39,31 +41,30 @@ impl Runner {
         if !draft {
             return Ok(None);
         }
-        let Some(bot) = self.choose_bot()? else {
-            return Ok(None);
-        };
-        if !self.reviewers.ready_summons(bot) {
-            return Ok(None);
+        // Marking it ready without the lease would draw a review outside it.
+        if !self.lease_granted(bot) {
+            return Ok(Some(Begin::Idle));
         }
         // Saved before the pull request is marked, so a restart never marks it twice.
         let now = self.ports.clock.now();
         self.hold(bot, now)?;
         let head = head.to_owned();
-        let stage = CodeRabbitStage::Summoned {
+        self.set_stage(ReviewStage::Summoned {
             bot,
+            started,
             head: head.clone(),
             at: now,
             full: true,
             resent: false,
-        };
-        self.update(|item| item.phase = Phase::CodeRabbit(stage))?;
+        })?;
         if let Err(e) = self.ports.forge.mark_ready(&repo, number) {
-            let stage = CodeRabbitStage::Lease {
+            self.set_stage(ReviewStage::Summon {
+                bot,
+                started,
                 head,
                 readied: None,
                 full,
-            };
-            self.update(|item| item.phase = Phase::CodeRabbit(stage))?;
+            })?;
             self.release(bot)?;
             let reason = format!("cannot mark #{number} ready: {e}");
             return Ok(Some(self.gate_failed(reason)));

@@ -1,6 +1,6 @@
 //! The work item in flight, as the state file keeps it
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Read};
 use std::path::PathBuf;
@@ -8,19 +8,20 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage};
+use crate::review_bot::Bot;
 use crate::settings::AgentName;
 
+mod bots;
 mod follow_ups;
 mod local;
 mod review;
-mod round;
 mod spend;
 mod timings;
 
+pub use bots::BotSkipped;
 pub use follow_ups::FollowUps;
 pub use local::LOCAL_FAILURES_DOWN;
 pub use review::{Review, ReviewStage};
-pub use round::{CodeRabbitStage, CodeRabbitTally, OpenThread};
 pub use spend::{QwenTally, RoleSpend, Spend};
 pub use timings::{CallKind, Seconds, Split, TimingPhase, Timings};
 
@@ -48,12 +49,22 @@ pub struct WorkItem {
     /// against instead of `origin/main`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arrived: Option<String>,
-    /// Whether an adopted pull request still waits for a CodeRabbit review
-    /// kelpie summoned. Until one lands, no round is satisfied.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    /// The listed review bots that owe an adopted pull request a review
+    /// kelpie summoned. Until a bot's lands, a review from before the
+    /// adoption does not stand for that bot's read.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub summons_owed: BTreeSet<Bot>,
+    /// An older file's mark that the listed review bots owe an adopted pull
+    /// request a summon, which the runner's start reads into `summons_owed`
+    #[serde(default, skip_serializing)]
     pub summon_owed: bool,
-    /// Whether kelpie caught the branch up with `main` since CodeRabbit last
-    /// answered a summon. CodeRabbit finds nothing new in a caught-up branch,
+    /// Whether a work item from a file older than review bots in the pass,
+    /// past its review and not yet read by a bot, owes the listed bots a
+    /// pass before its merge, which CI's next green run starts
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bots_after_ci: bool,
+    /// Whether kelpie caught the branch up with `main` since a review bot
+    /// last answered a summon. A bot finds nothing new in a caught-up branch,
     /// so the next summon asks it for a full review.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub rebased: bool,
@@ -106,9 +117,13 @@ pub struct WorkItem {
     /// Whether a review call is in flight
     #[serde(default)]
     pub review_call: ReviewCallState,
-    /// Its pull request reviewer rounds so far, from every bot
-    #[serde(default)]
-    pub coderabbit: CodeRabbitTally,
+    /// The reads each review bot has made of its pull request, which a
+    /// bot's `rounds` limits
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub bot_reads: BTreeMap<Bot, u32>,
+    /// The listed review bots this pass went on without, and why
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bots_skipped: Vec<BotSkipped>,
     /// The forge's ids of the review bot threads sent to the worker, which
     /// kelpie resolves once its fix moves the head
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -306,9 +321,6 @@ pub enum Phase {
         /// When kelpie first saw that head, or entered CI
         since: Timestamp,
     },
-    /// A CodeRabbit round, between green CI and the merge ruling
-    #[serde(rename = "coderabbit")]
-    CodeRabbit(CodeRabbitStage),
     /// Parked on a ruling
     Ruling {
         /// The ruling's id
@@ -359,6 +371,12 @@ impl WorkItem {
         self.resolve_failures = 0;
     }
 
+    /// Forgets what the last pass made of the review bots, as a new one starts
+    pub fn new_pass(&mut self) {
+        self.forget_threads();
+        self.bots_skipped.clear();
+    }
+
     /// Remembers findings sent to the worker, once each
     pub fn record_held(&mut self, held: &[Finding]) {
         for finding in held {
@@ -368,8 +386,8 @@ impl WorkItem {
         }
     }
 
-    /// Records the head kelpie's own catch-up with `main` pushed, which
-    /// CodeRabbit has not read
+    /// Records the head kelpie's own catch-up with `main` pushed, which no
+    /// review bot has read
     pub fn caught_up(&mut self, head: Option<String>) {
         self.known.head = head;
         self.rebased = true;
@@ -495,7 +513,6 @@ mod tests {
                 "conflict": { "head": "c0ffee", "main": "a11ce", "turns": 1 },
                 "resume": null,
                 "review_call": { "state": "idle" },
-                "coderabbit": { "rounds": 0, "cap_cleared": false, "satisfied": false },
                 "known": { "labels": ["review please"], "ready": false },
                 "qwen": { "rounds": 0, "seconds": 0 },
                 "timings": {
@@ -579,52 +596,50 @@ mod tests {
         });
         let read: Phase = serde_json::from_value(older.clone()).unwrap();
         assert_eq!(value(read), older, "kept until the next round reads it");
+        let bot = |stage: ReviewStage| {
+            value(Phase::Review(Review {
+                stage,
+                reviewer: name("cubic"),
+                bots_only: true,
+                unread: false,
+                ..Review::first()
+            }))
+        };
         assert_eq!(
-            value(Phase::CodeRabbit(CodeRabbitStage::Summoned {
-                bot: Bot::Coderabbit,
-                head: "c0ffee".into(),
-                at: Timestamp(12),
-                full: false,
-                resent: false,
-            })),
-            json!({ "state": "coderabbit", "stage": "summoned", "head": "c0ffee", "at": 12 })
-        );
-        let again = json!({ "state": "coderabbit", "stage": "summoned", "head": "c0ffee", "at": 12, "resent": true });
-        let sent: Phase = serde_json::from_value(again.clone()).unwrap();
-        assert_eq!(value(sent), again);
-        let full = json!({ "state": "coderabbit", "stage": "summoned", "head": "c0ffee", "at": 12, "full": true });
-        let asked: Phase = serde_json::from_value(full.clone()).unwrap();
-        assert_eq!(value(asked), full);
-        assert_eq!(
-            value(Phase::CodeRabbit(CodeRabbitStage::Lease {
+            bot(ReviewStage::Summon {
+                bot: Bot::Cubic,
+                started: Timestamp(10),
                 head: "c0ffee".into(),
                 readied: None,
                 full: true,
-            })),
-            json!({ "state": "coderabbit", "stage": "lease", "head": "c0ffee", "full": true })
+            }),
+            json!({
+                "state": "review",
+                "round": 1,
+                "stage": { "stage": "summon", "bot": "cubic", "started": 10, "head": "c0ffee", "full": true },
+                "reviewer": "cubic",
+                "bots_only": true,
+            })
         );
-        let cubic = json!({ "state": "coderabbit", "stage": "summoned", "bot": "cubic", "head": "c0ffee", "at": 12, "full": true });
-        let by_cubic: Phase = serde_json::from_value(cubic.clone()).unwrap();
-        assert_eq!(value(by_cubic), cubic);
-        let found = Phase::CodeRabbit(CodeRabbitStage::Found {
-            bot: Bot::Cubic,
-            head: "c0ffee".into(),
-            threads: vec![OpenThread {
-                id: "PRRT_1".into(),
-                finding: Finding {
-                    severity: crate::ports::Severity::Medium,
-                    file: "a.rs".into(),
-                    line: 0,
-                    what: "w".into(),
-                    why: "y".into(),
-                },
-            }],
-        });
-        let pinned = value(found.clone());
-        assert_eq!(pinned["stage"], "found");
-        assert_eq!(pinned["threads"][0]["id"], "PRRT_1");
-        assert_eq!(pinned["bot"], "cubic");
-        assert_eq!(serde_json::from_value::<Phase>(pinned).unwrap(), found);
+        assert_eq!(
+            bot(ReviewStage::Summoned {
+                bot: Bot::Coderabbit,
+                started: Timestamp(10),
+                head: "c0ffee".into(),
+                at: Timestamp(12),
+                full: false,
+                resent: true,
+            })["stage"],
+            json!({ "stage": "summoned", "bot": "coderabbit", "started": 10, "head": "c0ffee", "at": 12, "resent": true })
+        );
+        let found = ReviewStage::Found {
+            findings: Vec::new(),
+            threads: vec!["PRRT_1".into()],
+        };
+        assert_eq!(
+            bot(found)["stage"],
+            json!({ "stage": "found", "findings": [], "threads": ["PRRT_1"] })
+        );
         assert_eq!(
             value(Phase::Ruling { id: 3 }),
             json!({ "state": "ruling", "id": 3 })

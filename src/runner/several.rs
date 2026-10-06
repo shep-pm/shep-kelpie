@@ -100,9 +100,9 @@ fn phases(rig: &Rig, runner: &Mutex<Runner>) -> Vec<(u64, String)> {
         .collect()
 }
 
-// Two slots with CodeRabbit on and the dog granting nothing, and #7 through
-// its turn, its review rounds and green CI, waiting on the lease. Returns
-// #7's head.
+// Two slots with CodeRabbit listed last and the dog granting nothing, and
+// #7 through its turn and its qwen and Claude rounds, its draft marked
+// ready for CodeRabbit's round, waiting on the lease. Returns #7's head.
 fn seven_waits_on_the_lease(project: &str) -> (Rig, Mutex<Runner>, String) {
     let rig = two_slot_rig(project);
     rig.coderabbit_on();
@@ -186,7 +186,7 @@ fn a_restart_leaves_no_resend_under_a_grant_another_item_took() {
 fn an_item_waiting_on_coderabbit_yields_to_one_implementing_and_reviewing() {
     let (rig, runner, seven) = seven_waits_on_the_lease("shep");
 
-    // #8 opens while #7 waits, and its turn and review rounds go ahead.
+    // #8 opens while #7 waits, and its turn and qwen and Claude rounds go ahead.
     rig.ask(&runner, "add", Some("8"));
     rig.claude.script([
         Scripted::Push("eight.txt", "eight\n"),
@@ -197,7 +197,7 @@ fn an_item_waiting_on_coderabbit_yields_to_one_implementing_and_reviewing() {
     }
     assert_eq!(
         phases(&rig, &runner),
-        [(7, "coderabbit".into()), (8, "ci".into())]
+        [(7, "review".into()), (8, "review".into())]
     );
     let eight = rig.forge.head_of("kelpie/8").unwrap();
     rig.forge.set_checks(&eight, Checks::Passed);
