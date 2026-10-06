@@ -209,14 +209,14 @@ fn the_judges_time_counts_as_a_claude_rounds_and_the_totals_hold() {
     });
     let state = store.load().unwrap().unwrap();
     let open = &state.work_items[0].timings.as_ref().unwrap().seconds;
-    assert_eq!(open.get(TimingPhase::ClaudeRound), 2);
+    assert_eq!(open.get(TimingPhase::Review), 2);
     assert_eq!(
         open.total(),
         7,
         "the work item's seconds since it was created"
     );
     let finished = &state.history[0].seconds;
-    assert_eq!(finished.get(TimingPhase::ClaudeRound), 6);
+    assert_eq!(finished.get(TimingPhase::Review), 6);
     assert_eq!(finished.total(), state.history[0].wall);
 }
 

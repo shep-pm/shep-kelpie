@@ -9,43 +9,28 @@ use serde::{Deserialize, Serialize};
 pub enum TimingPhase {
     /// A worker turn runs
     Worker,
-    /// A local review round queues for the GPU
-    GpuWait,
-    /// A local review round runs, after any GPU wait
-    LocalRound,
-    /// A reviewer's session runs, on any harness
-    ClaudeRound,
+    /// A review runs: a round queued for the GPU or running on any harness,
+    /// and a review bot's lease, window and review
+    Review,
     /// Waiting for CI
     Ci,
-    /// Waiting for a review bot's lease and window
-    #[serde(rename = "coderabbit_window")]
-    CodeRabbitWindow,
-    /// Waiting for a review bot's review after a summon
-    #[serde(rename = "coderabbit_review")]
-    CodeRabbitReview,
     /// Parked on a ruling for the maintainer
     Ruling,
     /// Merged and being cleaned up
     Merge,
-    /// The project is paused and nothing is running for the work item
-    Paused,
-    /// Anything else: between steps, and while kelpie is not running
+    /// Anything else: between steps, while the project is paused and while
+    /// kelpie is not running
     Other,
 }
 
 impl TimingPhase {
     /// Every phase, in the order `status` and the table list them
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 6] = [
         Self::Worker,
-        Self::GpuWait,
-        Self::LocalRound,
-        Self::ClaudeRound,
+        Self::Review,
         Self::Ci,
-        Self::CodeRabbitWindow,
-        Self::CodeRabbitReview,
         Self::Ruling,
         Self::Merge,
-        Self::Paused,
         Self::Other,
     ];
 
@@ -53,15 +38,10 @@ impl TimingPhase {
     pub fn name(self) -> &'static str {
         match self {
             Self::Worker => "worker",
-            Self::GpuWait => "gpu_wait",
-            Self::LocalRound => "local_round",
-            Self::ClaudeRound => "claude_round",
+            Self::Review => "review",
             Self::Ci => "ci",
-            Self::CodeRabbitWindow => "coderabbit_window",
-            Self::CodeRabbitReview => "coderabbit_review",
             Self::Ruling => "ruling",
             Self::Merge => "merge",
-            Self::Paused => "paused",
             Self::Other => "other",
         }
     }
@@ -78,19 +58,7 @@ mod tests {
         let names: Vec<_> = TimingPhase::ALL.iter().map(|p| p.name()).collect();
         assert_eq!(
             names,
-            [
-                "worker",
-                "gpu_wait",
-                "local_round",
-                "claude_round",
-                "ci",
-                "coderabbit_window",
-                "coderabbit_review",
-                "ruling",
-                "merge",
-                "paused",
-                "other",
-            ]
+            ["worker", "review", "ci", "ruling", "merge", "other"]
         );
         for phase in TimingPhase::ALL {
             assert_eq!(serde_json::to_value(phase).unwrap(), json!(phase.name()));

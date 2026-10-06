@@ -34,29 +34,19 @@ impl WorkItem {
         if live && matches!(self.turn, Turn::Running { .. }) {
             return TimingPhase::Worker;
         }
-        if let (ReviewCallState::Running { .. }, Some(call)) =
-            (self.review_call, self.timings.as_ref().and_then(|t| t.call))
-        {
-            let queued = self.timings.as_ref().is_some_and(|t| t.queued);
-            return match call {
-                CallKind::Local if queued => TimingPhase::GpuWait,
-                CallKind::Local => TimingPhase::LocalRound,
-                CallKind::Claude => TimingPhase::ClaudeRound,
-            };
+        let call = self.timings.as_ref().and_then(|t| t.call);
+        if matches!(self.review_call, ReviewCallState::Running { .. }) && call.is_some() {
+            return TimingPhase::Review;
         }
         if run == RunState::Paused {
-            return TimingPhase::Paused;
+            return TimingPhase::Other;
         }
         match &self.phase {
             Phase::Ruling { .. } => TimingPhase::Ruling,
             Phase::Review(Review {
-                stage: ReviewStage::Summon { .. },
+                stage: ReviewStage::Summon { .. } | ReviewStage::Summoned { .. },
                 ..
-            }) => TimingPhase::CodeRabbitWindow,
-            Phase::Review(Review {
-                stage: ReviewStage::Summoned { .. },
-                ..
-            }) => TimingPhase::CodeRabbitReview,
+            }) => TimingPhase::Review,
             Phase::Implement | Phase::Review(_) => TimingPhase::Other,
             Phase::Ci { .. } => TimingPhase::Ci,
             Phase::Merge { .. } | Phase::Done { .. } => TimingPhase::Merge,
@@ -116,21 +106,21 @@ mod tests {
         let item = a_work_item();
         assert_eq!(
             item.timing_phase(RunState::Paused, false),
-            TimingPhase::Paused
+            TimingPhase::Other
         );
         assert_eq!(item.timing_phase(RunState::Running, false), TimingPhase::Ci);
     }
 
     #[test]
-    fn a_call_in_flight_is_named_by_its_kind_and_a_queued_round_is_a_gpu_wait() {
+    fn a_call_in_flight_is_a_review_queued_or_not() {
         let run = RunState::Running;
         let phase = |kind, queued| running_call(kind, queued).timing_phase(run, false);
-        assert_eq!(phase(CallKind::Local, false), TimingPhase::LocalRound);
-        assert_eq!(phase(CallKind::Local, true), TimingPhase::GpuWait);
-        assert_eq!(phase(CallKind::Claude, false), TimingPhase::ClaudeRound);
+        assert_eq!(phase(CallKind::Local, false), TimingPhase::Review);
+        assert_eq!(phase(CallKind::Local, true), TimingPhase::Review);
+        assert_eq!(phase(CallKind::Claude, false), TimingPhase::Review);
         assert_eq!(
             running_call(CallKind::Local, false).timing_phase(RunState::Paused, false),
-            TimingPhase::LocalRound,
+            TimingPhase::Review,
             "a call that is running is not paused"
         );
     }
@@ -198,8 +188,8 @@ mod tests {
         let run = RunState::Running;
         let of = |phase| in_phase(phase).timing_phase(run, false);
         assert_eq!(of(ci), TimingPhase::Ci);
-        assert_eq!(of(lease), TimingPhase::CodeRabbitWindow);
-        assert_eq!(of(summoned), TimingPhase::CodeRabbitReview);
+        assert_eq!(of(lease), TimingPhase::Review);
+        assert_eq!(of(summoned), TimingPhase::Review);
         assert_eq!(of(Phase::Ruling { id: 1 }), TimingPhase::Ruling);
         assert_eq!(of(merge), TimingPhase::Merge);
         assert_eq!(of(Phase::Done { merged: true }), TimingPhase::Merge);
@@ -209,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn a_paused_project_reads_paused_whatever_the_work_item_waits_for() {
+    fn a_paused_project_reads_other_whatever_the_work_item_waits_for() {
         let paused = RunState::Paused;
         let ci = Phase::Ci {
             head: None,
@@ -218,7 +208,7 @@ mod tests {
         for waiting in [ci, Phase::Implement, Phase::Ruling { id: 1 }] {
             assert_eq!(
                 in_phase(waiting).timing_phase(paused, false),
-                TimingPhase::Paused
+                TimingPhase::Other
             );
         }
     }

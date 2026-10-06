@@ -105,7 +105,7 @@ fn a_file_with_one_work_item_loads_as_a_list_of_one() {
     let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(
         (&saved["version"], saved.get("work_item")),
-        (&serde_json::json!(5), None)
+        (&serde_json::json!(6), None)
     );
     assert_eq!(store.load().unwrap(), Some(state));
 
@@ -238,7 +238,7 @@ fn the_file_format_is_pinned() {
     assert_eq!(
         value,
         serde_json::json!({
-            "version": 5,
+            "version": 6,
             "run": "paused",
             "since": 7,
             "work_items": [],
@@ -327,15 +327,10 @@ fn a_finished_work_item_is_pinned() {
             "wall": 100,
             "seconds": {
                 "worker": 60,
-                "gpu_wait": 0,
-                "local_round": 0,
-                "claude_round": 0,
+                "review": 0,
                 "ci": 40,
-                "coderabbit_window": 0,
-                "coderabbit_review": 0,
                 "ruling": 0,
                 "merge": 0,
-                "paused": 0,
                 "other": 0,
             },
         })
@@ -484,14 +479,14 @@ fn a_newer_format_is_reported_as_one() {
     let store = store_in(dir.path());
     fs::write(
         dir.path().join("state.json"),
-        r#"{"version": 6, "shape": "new"}"#,
+        r#"{"version": 7, "shape": "new"}"#,
     )
     .unwrap();
     assert_eq!(
         store.load().unwrap_err(),
         StateError::Version {
             path: store.path.clone(),
-            found: 6
+            found: 7
         }
     );
 }

@@ -12,14 +12,14 @@ use crate::settings::Harness;
 use crate::test::{Hold, Rig, Scripted};
 
 #[test]
-fn a_work_item_in_a_paused_project_spends_its_time_paused() {
+fn a_work_item_in_a_paused_project_spends_its_time_as_other() {
     let rig = Rig::new("koji");
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.clock.advance(30);
     let t = timings(&rig, &runner);
-    assert_eq!((&t["phase"], &t["wall"]), (&json!("paused"), &json!(30)));
-    assert_eq!(secs(&t, "paused"), 30);
+    assert_eq!((&t["phase"], &t["wall"]), (&json!("other"), &json!(30)));
+    assert_eq!(secs(&t, "other"), 30);
     assert_sums(&t);
 }
 
@@ -32,7 +32,7 @@ fn a_running_project_between_steps_is_other() {
     rig.clock.advance(20);
     let t = timings(&rig, &runner);
     assert_eq!(t["phase"], "other");
-    assert_eq!((secs(&t, "other"), secs(&t, "paused")), (20, 0));
+    assert_eq!(secs(&t, "other"), 20);
     assert_sums(&t);
 }
 
@@ -43,7 +43,7 @@ fn every_phase_is_listed_with_zeros() {
     rig.ask(&runner, "add", Some("7"));
     let t = timings(&rig, &runner);
     let names: Vec<_> = t["seconds"].as_object().unwrap().keys().cloned().collect();
-    assert_eq!(names.len(), 11, "{names:?}");
+    assert_eq!(names.len(), 6, "{names:?}");
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn a_turn_in_flight_is_the_workers_time_even_before_it_ends() {
 // The call dies unborn while the maintainer pauses the project, so no turn
 // starts over, and the turn marked running has nothing running it.
 #[test]
-fn a_session_that_dies_unborn_in_a_paused_project_is_paused_not_the_workers() {
+fn a_session_that_dies_unborn_in_a_paused_project_is_other_not_the_workers() {
     let rig = Rig::new("koji");
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);
@@ -97,8 +97,8 @@ fn a_session_that_dies_unborn_in_a_paused_project_is_paused_not_the_workers() {
     );
     rig.clock.advance(100);
     let t = timings(&rig, &runner);
-    assert_eq!(t["phase"], "paused");
-    assert_eq!((secs(&t, "worker"), secs(&t, "paused")), (40, 100));
+    assert_eq!(t["phase"], "other");
+    assert_eq!((secs(&t, "worker"), secs(&t, "other")), (40, 100));
     assert_sums(&t);
 }
 
@@ -130,19 +130,19 @@ fn cut_short_while_paused() -> (Rig, Mutex<Runner>) {
 }
 
 #[test]
-fn a_turn_cut_short_in_a_paused_project_is_paused_not_the_workers() {
+fn a_turn_cut_short_in_a_paused_project_is_other_not_the_workers() {
     let (rig, runner) = cut_short_while_paused();
     let t = timings(&rig, &runner);
     assert_eq!((secs(&t, "worker"), secs(&t, "other")), (50, 600));
     rig.clock.advance(100);
     let t = timings(&rig, &runner);
-    assert_eq!(t["phase"], "paused");
-    assert_eq!((secs(&t, "worker"), secs(&t, "paused")), (50, 100));
+    assert_eq!(t["phase"], "other");
+    assert_eq!((secs(&t, "worker"), secs(&t, "other")), (50, 700));
     assert_sums(&t);
     crate::runner::settle(&runner).unwrap();
     rig.clock.advance(30);
     let t = timings(&rig, &runner);
-    assert_eq!((secs(&t, "worker"), secs(&t, "paused")), (50, 130));
+    assert_eq!((secs(&t, "worker"), secs(&t, "other")), (50, 730));
     assert_sums(&t);
 }
 
@@ -155,7 +155,7 @@ fn a_cut_short_turn_that_starts_again_is_the_workers_again() {
     rig.claude.script([Scripted::Hold(hold.clone())]);
     let t = read_while_held(&rig, &runner, &hold, 40);
     assert_eq!(t["phase"], "worker");
-    assert_eq!((secs(&t, "worker"), secs(&t, "paused")), (90, 100));
+    assert_eq!((secs(&t, "worker"), secs(&t, "other")), (90, 700));
     assert_sums(&t);
 }
 
@@ -189,7 +189,7 @@ fn ci_and_a_ruling_each_keep_their_own_seconds() {
 }
 
 #[test]
-fn a_ruling_parked_while_the_project_is_paused_is_paused_time() {
+fn a_ruling_parked_while_the_project_is_paused_is_other_time() {
     let (rig, runner, head) = Rig::with_pull_request("koji");
     rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
@@ -197,19 +197,26 @@ fn a_ruling_parked_while_the_project_is_paused_is_paused_time() {
         Some(StepReport::Ruling { id: 1, .. })
     ));
     rig.ask(&runner, "pause", None);
-    let ruling = secs(&timings(&rig, &runner), "ruling");
+    let before = timings(&rig, &runner);
+    let (ruling, other) = (secs(&before, "ruling"), secs(&before, "other"));
 
     rig.clock.advance(900);
     let t = timings(&rig, &runner);
-    assert_eq!(t["phase"], "paused");
-    assert_eq!((secs(&t, "paused"), secs(&t, "ruling")), (900, ruling));
+    assert_eq!(t["phase"], "other");
+    assert_eq!(
+        (secs(&t, "other"), secs(&t, "ruling")),
+        (other + 900, ruling)
+    );
     assert_sums(&t);
 
     rig.ask(&runner, "start", None);
     rig.clock.advance(60);
     let t = timings(&rig, &runner);
     assert_eq!(t["phase"], "ruling");
-    assert_eq!((secs(&t, "paused"), secs(&t, "ruling")), (900, ruling + 60));
+    assert_eq!(
+        (secs(&t, "other"), secs(&t, "ruling")),
+        (other + 900, ruling + 60)
+    );
     assert_sums(&t);
 }
 
@@ -222,10 +229,7 @@ fn the_time_kelpie_is_down_is_other() {
     rig.clock.advance(600);
     let runner = rig.open().unwrap();
     let t = timings(&rig, &runner);
-    assert_eq!(
-        (secs(&t, "other"), secs(&t, "paused"), &t["wall"]),
-        (600, 0, &json!(600))
-    );
+    assert_eq!((secs(&t, "other"), &t["wall"]), (600, &json!(600)));
     assert_sums(&t);
 }
 
@@ -249,7 +253,7 @@ fn a_work_item_saved_without_timings_counts_from_the_load() {
     assert_eq!(t["wall"], 0, "the work item counts from this first load");
     rig.clock.advance(10);
     let t = timings(&rig, &runner);
-    assert_eq!((&t["wall"], secs(&t, "paused")), (&json!(10), 10));
+    assert_eq!((&t["wall"], secs(&t, "other")), (&json!(10), 10));
 }
 
 #[test]
@@ -307,6 +311,6 @@ fn a_beat_that_cannot_save_lets_the_step_go_on_and_loses_no_time() {
     assert_eq!(stepped.unwrap(), None);
     rig.clock.advance(5);
     let t = timings(&rig, &runner);
-    assert_eq!((&t["wall"], secs(&t, "paused")), (&json!(65), 65));
+    assert_eq!((&t["wall"], secs(&t, "other")), (&json!(65), 65));
     assert_sums(&t);
 }

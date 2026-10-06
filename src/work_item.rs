@@ -522,9 +522,8 @@ mod tests {
                     "created": 5,
                     "since": 12,
                     "seconds": {
-                        "worker": 4, "gpu_wait": 0, "local_round": 0, "claude_round": 0,
-                        "ci": 3, "coderabbit_window": 0, "coderabbit_review": 0,
-                        "ruling": 0, "merge": 0, "paused": 0, "other": 0,
+                        "worker": 4, "review": 0, "ci": 3,
+                        "ruling": 0, "merge": 0, "other": 0,
                     },
                 },
                 "calls": [{
