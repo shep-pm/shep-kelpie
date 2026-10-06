@@ -121,14 +121,15 @@ fn it_reads_its_folder_appends_to_its_notes_and_runs_nothing() {
     let [wake] = pm_seen(&rig).try_into().unwrap();
     let notes = rig.paths().pm.join("pm-notes.md").display().to_string();
     let permissions = &wake.settings["permissions"];
-    assert_eq!(
-        permissions["allow"],
-        json!([format!("Edit(/{notes})"), format!("Write(/{notes})")])
-    );
+    assert_eq!(permissions["allow"], json!([format!("Edit(/{notes})")]));
     let denied = permissions["deny"].to_string();
-    for tool in ["\"Bash\"", "\"Agent\"", "\"WebFetch\"", "\"MultiEdit\""] {
+    for tool in ["\"Bash\"", "\"Agent\"", "\"WebFetch\""] {
         assert!(denied.contains(tool), "{tool} is not denied: {denied}");
     }
+    assert!(
+        !denied.contains("MultiEdit"),
+        "Claude Code warns about a rule for a tool it lacks: {denied}"
+    );
     let hook = wake.settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"].clone();
     let command = format!("'{}' 'confine' '--append' '{notes}'", Rig::KELPIE);
     assert_eq!(hook, json!(command));
