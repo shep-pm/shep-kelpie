@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use shep_client::shep_core::config::AppConfig;
+use shep_client::shep_core::values::UpDuration;
 
 use super::*;
 use crate::ports::Visibility;
@@ -95,6 +96,12 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
         panic!("{writes:?}");
     };
     assert_eq!(runner[0].args, ["runner", "koji"]);
+    let shep_s_own = AppConfig::minimal("koji", "/opt/kelpie").kill_timeout;
+    assert_eq!(
+        runner[0].kill_timeout.as_millis(),
+        shep_s_own.as_millis(),
+        "add wrote a kill_timeout"
+    );
     let settings = scene.settings();
     assert_eq!(settings.repo, scene.checkout.root);
     assert_eq!(settings.forge.as_str(), "shep-pm/koji-website");
@@ -323,6 +330,28 @@ async fn add_says_how_to_give_an_old_adoption_the_channel() {
         ),
         "{last}"
     );
+}
+
+#[tokio::test]
+async fn a_runner_entry_that_still_sets_kill_timeout_is_taken_as_it_is() {
+    let mut scene = Scene::new().await;
+    let mut runner = scene.launch.runner(&scene.name, Map::new());
+    runner.dogs.clear();
+    runner.kill_timeout = UpDuration::from_millis(10_000);
+    scene.shepherd.holds(runner, true);
+    let lines = scene.add().await.unwrap();
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.ends_with("already there, and given its settings")),
+        "{lines:?}"
+    );
+    let (kept, running) = scene.shepherd.sheep("koji").unwrap();
+    assert_eq!(kept.kill_timeout.as_millis(), 10_000);
+    assert!(running);
+    let writes = scene.shepherd.writes();
+    let added_runner = |w: &Request| matches!(w, Request::Add { apps } if apps[0].name == "koji");
+    assert!(!writes.iter().any(added_runner), "{writes:?}");
 }
 
 #[tokio::test]

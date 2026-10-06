@@ -123,9 +123,8 @@ Kelpie is a **dog**: it watches its projects rather than being one. The
 adopted dog, `kelpie`, holds the leases. Each **project** runs as a
 **sheep**, kelpie's **runner**, and every agent call it starts, a worker's
 turn, a reviewer's session or the PM's wake, is that sheep's **lamb**.
-Until shep sweeps a sheep's lamb tree on every stop (ADR 0005), the runner
-ends the calls it started with its own stop ladder before it exits, and a
-restart resumes each work item from its session. The sessions the
+A stop is shep's: the runner exits, shep's stop ends every lamb it left
+(ADR 0005), and a restart resumes each work item from its session. The sessions the
 maintainer opens by hand, `--interactive`, `attach` and `shep kelpie pm`,
 run in the maintainer's terminal and are not lambs.
 

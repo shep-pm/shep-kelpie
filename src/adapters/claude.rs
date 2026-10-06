@@ -113,9 +113,10 @@ impl ClaudeCli {
         }
     }
 
-    /// Ends every call in flight, and refuses new ones, as the runner stops
+    /// Refuses new calls as the runner stops, sends those in flight SIGTERM,
+    /// and leaves the rest to shep's stop
     ///
-    /// A call ended this way returns [`AgentError::Stopped`].
+    /// A call refused, or one that ends after, returns [`AgentError::Stopped`].
     pub fn stop(&self) {
         self.processes.stop();
     }

@@ -3,7 +3,9 @@
 //! Always through the shep client kelpie is built with, never a `shep` on
 //! `PATH`, which can be another version. A shepherd on another shep major
 //! or minor is refused, since the requests kelpie sends may not mean the
-//! same there. A patch release of the pinned line is taken.
+//! same there. On the pinned line, the pinned patch or a later one is
+//! taken: kelpie leaves every lamb to shep's stop, which sweeps them from
+//! 0.12.4.
 
 use std::path::Path;
 
@@ -13,7 +15,7 @@ use shep_client::shep_core::protocol::{Request, RpcErrorCode};
 use shep_client::{Client, ConnectError, RequestError};
 
 /// The shep version kelpie is built with, pinned in the workspace manifest
-pub const SHEP_VERSION: &str = "0.12.0";
+pub const SHEP_VERSION: &str = "0.12.4";
 
 /// The name kelpie's tables are kept under: `[app.dogs.kelpie]` on a
 /// runner sheep, and `[kelpie]` in `dogs.toml`
@@ -37,7 +39,8 @@ pub fn block_on<T>(work: impl Future<Output = Result<T, String>>) -> Result<T, S
 pub enum ConnectRefused {
     /// Nothing answered on the socket, or the handshake failed
     Unreachable(String),
-    /// The shepherd runs another shep minor or major, named when it said
+    /// The shepherd runs another shep minor or major, or an earlier patch
+    /// than [`SHEP_VERSION`], named when it said
     Skew(Option<String>),
 }
 
@@ -57,7 +60,8 @@ impl ConnectRefused {
                 let (major, minor) = release_line(SHEP_VERSION);
                 format!(
                     "kelpie's shepherd at {} runs {running}, and kelpie is built for shep \
-                     {SHEP_VERSION} and takes only a {}.{}.x shepherd",
+                     {SHEP_VERSION} and takes only a {}.{}.x shepherd from {SHEP_VERSION} on, \
+                     whose stop ends every lamb",
                     shep_home.display(),
                     major.unwrap_or_default(),
                     minor.unwrap_or_default(),
@@ -67,15 +71,16 @@ impl ConnectRefused {
     }
 }
 
-/// Connects to the shepherd at `shep_home`, refusing another minor or major
+/// Connects to the shepherd at `shep_home`, refusing another minor or major,
+/// or an earlier patch than [`SHEP_VERSION`]
 ///
 /// # Errors
 ///
-/// [`ConnectRefused`] when nothing answers or the version is not the pinned line.
+/// [`ConnectRefused`] when nothing answers or kelpie does not take the version.
 pub async fn connect(shep_home: &Path) -> Result<Client, ConnectRefused> {
     let client = connect_any(shep_home).await?;
     let running = client.daemon().daemon_version.as_str();
-    if release_line(running) != release_line(SHEP_VERSION) {
+    if !takes(SHEP_VERSION, running) {
         return Err(ConnectRefused::Skew(Some(running.to_owned())));
     }
     Ok(client)
@@ -114,6 +119,37 @@ pub fn names_no_sheep(error: &RequestError) -> bool {
 pub(crate) fn release_line(version: &str) -> (Option<&str>, Option<&str>) {
     let mut parts = version.split('.');
     (parts.next(), parts.next())
+}
+
+/// Whether a kelpie built for shep `built` takes a shepherd on `running`:
+/// the same line, at `built`'s patch or a later one
+///
+/// A pre-release of `built`'s own patch is refused, since it may predate
+/// what that patch shipped.
+pub(crate) fn takes(built: &str, running: &str) -> bool {
+    let at_or_after = match (patch(running), patch(built)) {
+        (Some(r), Some(b)) => r > b || (r == b && !pre_release(running)),
+        _ => false,
+    };
+    release_line(running) == release_line(built) && at_or_after
+}
+
+/// A version's patch number, without a pre-release or build suffix
+pub(crate) fn patch(version: &str) -> Option<u64> {
+    let patch = version.split('.').nth(2)?;
+    patch[..digits(patch)].parse().ok()
+}
+
+// Whether `version`'s patch number is followed by a pre-release, `-rc.1`.
+fn pre_release(version: &str) -> bool {
+    let patch = version.split('.').nth(2).unwrap_or_default();
+    patch[digits(patch)..].starts_with('-')
+}
+
+// How many ASCII digits `text` starts with.
+fn digits(text: &str) -> usize {
+    text.find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(text.len())
 }
 
 /// Kelpie's two tables, as the shepherd holds them
@@ -250,7 +286,7 @@ mod tests {
     // handshake while the fake's socket is merely waiting.
     #[tokio::test]
     async fn a_runner_reads_its_own_sheep_s_table_and_kelpie_s_section() {
-        let (home, _sent) = shepherd("0.12.2").await;
+        let (home, _sent) = shepherd("0.12.7").await;
         let tables = read_in_time(home.path(), "koji").await.unwrap();
         assert_eq!(tables.project, Some(table("shep-pm/koji")));
         assert_eq!(tables.kelpie, "[webhook]\nkind = \"ntfy\"\n");
@@ -289,6 +325,30 @@ mod tests {
             assert!(err.contains("takes only a 0.12.x shepherd"), "{err}");
             assert!(sent.try_recv().is_err(), "{version} was asked for a table");
         }
+    }
+
+    // 0.12.4 is the first shep whose stop sweeps a sheep's whole lamb tree.
+    #[tokio::test]
+    async fn a_shepherd_from_before_the_lamb_sweep_is_refused_naming_the_one_needed() {
+        for version in ["0.12.0", "0.12.3", "0.12.4-rc.1"] {
+            let (home, mut sent) = shepherd(version).await;
+            let err = read_in_time(home.path(), "shep").await.unwrap_err();
+            assert!(err.contains(&format!("runs shep {version}")), "{err}");
+            assert!(err.contains("0.12.x shepherd from 0.12.4 on"), "{err}");
+            assert!(sent.try_recv().is_err(), "{version} was asked for a table");
+        }
+    }
+
+    #[test]
+    fn a_later_patch_is_taken_but_not_a_pre_release_of_the_floor_or_an_unnumbered_one() {
+        assert!(takes("0.12.4", "0.12.4"));
+        assert!(takes("0.12.4", "0.12.10"));
+        assert!(takes("0.12.4", "0.12.5-rc.1"));
+        assert!(!takes("0.12.4", "0.12.4-rc.1"));
+        assert!(takes("0.12.4", "0.12.4+build.7"));
+        assert!(!takes("0.12.4", "0.12"));
+        assert!(!takes("0.12.4", "0.12.x"));
+        assert!(!takes("0.12.4", "1.12.4"));
     }
 
     #[test]

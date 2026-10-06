@@ -26,7 +26,6 @@ use shep_client::shep_core::config::{AppConfig, DogTable};
 use shep_client::shep_core::protocol::request::{DogSource, ProcessInfo, Response};
 use shep_client::shep_core::protocol::{Request, SelectorSpec};
 use shep_client::shep_core::status::ProcStatus;
-use shep_client::shep_core::values::UpDuration;
 
 use crate::runner::ProjectName;
 use crate::settings::ForgeSlug;
@@ -108,8 +107,8 @@ impl Launch {
         app
     }
 
-    // A runner needs about 7s to stop cleanly, so shep's 1.6s default kill
-    // timeout is raised, and it stops on the channel's shutdown message.
+    // It stops on the channel's shutdown message, within shep's default kill
+    // timeout, and shep's stop ends every lamb it started.
     fn app(&self, name: &str, args: &[&str]) -> AppConfig {
         let mut app = AppConfig::minimal(name, &self.kelpie.display().to_string());
         app.args = args.iter().map(|&a| a.to_owned()).collect();
@@ -122,7 +121,6 @@ impl Launch {
         app.autorestart = true;
         app.channel = true;
         app.shutdown_with_message = true;
-        app.kill_timeout = UpDuration::from_millis(10_000);
         app
     }
 }
@@ -347,7 +345,8 @@ mod tests {
         );
         assert!(!app.env.contains_key("KELPIE_HOME"));
         assert!(app.channel && app.shutdown_with_message && app.autorestart);
-        assert_eq!(app.kill_timeout.as_millis(), 10_000);
+        let shep_s_own = AppConfig::minimal("koji", "/opt/kelpie").kill_timeout;
+        assert_eq!(app.kill_timeout.as_millis(), shep_s_own.as_millis());
         assert_eq!(app.dogs.get(DOG).map(DogTable::as_map), Some(&table));
     }
 }

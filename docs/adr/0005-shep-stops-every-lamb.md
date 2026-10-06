@@ -14,8 +14,9 @@ So the stop is shep's. shep gets one general feature, shep-pm/shep#688: on any s
 
 ## Consequences
 
-- Until shep's sweep ships, kelpie's ladder stays as it is.
-- Kelpie keeps a process group per call only to end that one call (a turn ceiling, a pause). Ending a single lamb from the CLI or lookout is a shep feature too, asked on shep-pm/shep#354.
-- The runner never blocks a thread on a lamb (shep-pm/shep-kelpie#318), so it answers a stop at once. Once kelpie's own ladder goes, it has nothing left to wind down past shep's default `kill_timeout`.
+- shep's sweep shipped in shep 0.12.4, and kelpie's ladder went with shep-pm/shep-kelpie#319. Kelpie requires a 0.12.4 shepherd or later on the 0.12 line, and refuses an earlier one naming the version it needs. A stop of a runner leaving no lamb running, one in a group or session of its own included, is checked against a real shepherd in the `real-shepherd` job.
+- On a stop the runner lets its loop go, refuses new calls, sends each call's process group SIGTERM without waiting, saves, flushes and exits, leaving the rest to shep. The group SIGTERM reaches a member already reparented to init, which shep's sweep does not find. Its entry takes shep's default `kill_timeout`: `add` writes none, and an entry that still sets one keeps working.
+- Kelpie keeps a process group per call only to end that one call (a turn ceiling, a pause, `drop` or rework). Ending a single lamb from the CLI or lookout is a shep feature too, asked on shep-pm/shep#354.
+- The runner never blocks a thread on a lamb (shep-pm/shep-kelpie#318), so it answers a stop at once, with nothing left to wind down past shep's default `kill_timeout`.
 - The relay goes. It was a `claude --bg` session that Claude Code's own supervisor owned, so no stop of kelpie's reached it. Rulings reach the maintainer through ntfy or the webhook until shep can carry a question itself (shep-pm/shep#689).
 - The sessions the maintainer opens by hand (`--interactive`, `attach`, the project manager's) run in the maintainer's own terminal and are not lambs. git and gh calls stay short children of the runner.

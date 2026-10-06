@@ -1,4 +1,4 @@
-//! The lease round trip through a real pinned shepherd
+//! The lease round trip, and a runner's stop, through a real pinned shepherd
 //!
 //! Starts its own shepherd under a scratch `SHEP_HOME`, with two stand-in
 //! runners as sheep and kelpie adopted as its dog, the way the experiments
@@ -25,6 +25,7 @@ use shep_kelpie::lease::{Epoch, LeaseKind};
 
 const KELPIE: &str = env!("CARGO_BIN_EXE_shep-kelpie");
 const STAND_IN: &str = "KELPIE_TEST_STAND_IN";
+const LAMBS: &str = "KELPIE_TEST_LAMBS";
 
 const DOG: &str = "kelpie";
 
@@ -99,6 +100,46 @@ fn stand_in_runner() {
     }
 }
 
+// A project runner reduced to how it stops: it asks for shep's shutdown
+// message and exits on it at once, leaving its lambs running. One leads a
+// process group, as each agent call does, and one leads a session of its
+// own. Both ignore SIGTERM. Their pids go to the file `LAMBS` names.
+#[test]
+#[ignore = "a sheep of a_stop_of_a_runner_leaves_none_of_its_lambs_running"]
+#[expect(
+    clippy::zombie_processes,
+    reason = "the lambs are left for shep's stop"
+)]
+fn stand_in_runner_with_lambs() {
+    use std::os::unix::process::CommandExt;
+
+    let Some(pids) = std::env::var_os(LAMBS) else {
+        return;
+    };
+    let shepherd = shep_channel::serve();
+    let (stop, stopped) = std::sync::mpsc::channel();
+    shepherd.on_shutdown(move || {
+        let _ = stop.send(());
+    });
+    let ignoring = "trap '' TERM; exec sleep 300";
+    let group = Command::new("sh")
+        .args(["-c", ignoring])
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let session = Command::new("perl")
+        .args(["-MPOSIX", "-e", "POSIX::setsid() or die; exec @ARGV or die"])
+        .args(["sh", "-c", ignoring])
+        .spawn()
+        .unwrap();
+    let written = PathBuf::from(&pids).with_extension("partial");
+    std::fs::write(&written, format!("{}\n{}\n", group.id(), session.id())).unwrap();
+    std::fs::rename(&written, &pids).unwrap();
+    shepherd.ready().unwrap();
+    let _ = stopped.recv();
+    shepherd.flush(Duration::from_secs(1)).unwrap();
+}
+
 // A child that is killed if the test ends before it is waited on.
 struct Reaped(Option<std::process::Child>);
 
@@ -138,29 +179,32 @@ impl Shepherd {
     }
 
     // The two stand-in runners alone.
-    // Under /tmp: a socket path longer than 104 bytes is refused on macOS.
     fn runners() -> Self {
+        Self::with_flock(|_| {
+            let runner = |name: &str| {
+                format!(
+                    "[[app]]\nname = {name:?}\nscript = {:?}\n\
+                     args = [\"--exact\", \"stand_in_runner\", \"--ignored\", \"--nocapture\"]\n\
+                     channel = true\nautorestart = false\nenv = {{ {STAND_IN} = \"1\" }}\n\n",
+                    std::env::current_exe().unwrap()
+                )
+            };
+            format!("{}{}", runner("koji"), runner("reactmap"))
+        })
+    }
+
+    // A shepherd started on the Flockfile `flock` writes for its home.
+    // Under /tmp: a socket path longer than 104 bytes is refused on macOS.
+    fn with_flock(flock: impl FnOnce(&Path) -> String) -> Self {
         let home = tempfile::Builder::new()
             .prefix("kd")
             .tempdir_in("/tmp")
             .unwrap();
         let shepherd = Self { home };
         let flockfile = shepherd.home.path().join("flock.toml");
-        std::fs::write(&flockfile, shepherd.flockfile()).unwrap();
+        std::fs::write(&flockfile, flock(shepherd.home.path())).unwrap();
         shepherd.shep_ok(&["start", flockfile.to_str().unwrap()]);
         shepherd
-    }
-
-    fn flockfile(&self) -> String {
-        let me = std::env::current_exe().unwrap();
-        let runner = |name: &str| {
-            format!(
-                "[[app]]\nname = {name:?}\nscript = {me:?}\n\
-                 args = [\"--exact\", \"stand_in_runner\", \"--ignored\", \"--nocapture\"]\n\
-                 channel = true\nautorestart = false\nenv = {{ {STAND_IN} = \"1\" }}\n\n"
-            )
-        };
-        format!("{}{}", runner("koji"), runner("reactmap"))
     }
 
     // The book the adopted dog keeps, under the shepherd's home.
@@ -551,6 +595,63 @@ async fn an_adopted_start_runs_the_dog_instead_of_exiting() {
         "{:?}",
         dog.dog
     );
+}
+
+// Pids the test kills however it ends, so a failed sweep leaves nothing.
+struct Lambs(Vec<u32>);
+
+impl Drop for Lambs {
+    fn drop(&mut self) {
+        for pid in &self.0 {
+            let mut kill = Command::new("kill");
+            kill.args(["-KILL", &pid.to_string()]);
+            let _ = kill.stderr(Stdio::null()).status();
+        }
+    }
+}
+
+// A zombie still answers `kill -0`; `ps` names it `Z`, and a reaped pid not at all.
+fn alive(pid: u32) -> bool {
+    let out = Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    let stat = String::from_utf8_lossy(&out.stdout);
+    !stat.trim().is_empty() && !stat.trim().starts_with('Z')
+}
+
+// Kelpie leaves every lamb to shep's stop (ADR 0005), so a stop must reach
+// a lamb in a group or session of its own, and one that ignores SIGTERM.
+#[tokio::test]
+#[ignore = "needs a shepherd at KELPIE_TEST_SHEP or ~/.kelpie/bin/shep"]
+async fn a_stop_of_a_runner_leaves_none_of_its_lambs_running() {
+    let shepherd = Shepherd::with_flock(|home| {
+        format!(
+            "[[app]]\nname = \"koji\"\nscript = {:?}\n\
+             args = [\"--exact\", \"stand_in_runner_with_lambs\", \"--ignored\", \"--nocapture\"]\n\
+             channel = true\nshutdown_with_message = true\nautorestart = false\n\
+             env = {{ {LAMBS} = {:?} }}\n",
+            std::env::current_exe().unwrap(),
+            home.join("lambs"),
+        )
+    });
+    let file = shepherd.home.path().join("lambs");
+    until("the lambs", async || file.exists()).await;
+    let lambs = Lambs(
+        (std::fs::read_to_string(&file).unwrap().lines())
+            .map(|pid| pid.parse().unwrap())
+            .collect(),
+    );
+    assert_eq!(lambs.0.len(), 2);
+    assert!(lambs.0.iter().all(|&pid| alive(pid)), "a lamb never ran");
+
+    shepherd.shep_ok(&["stop", "koji"]);
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while let Some(pid) = lambs.0.iter().find(|&&pid| alive(pid)) {
+        assert!(Instant::now() < deadline, "lamb {pid} outlived the stop");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 // The `--version` answer shep reads at `shep adopt` asks for the channel.

@@ -1,9 +1,9 @@
-//! Child processes the runner can stop on its way out
+//! Child processes the runner starts, each leading a process group
 //!
-//! A runner that exits on shep's shutdown message never reaches shep's
-//! stop ladder, so a child it leaves running is orphaned. Each child here
-//! is kept where [`Processes::stop`] can reach it. Only this module reaps
-//! them, and only under the lock, so a signalled pid is never a reused one.
+//! The group lets one call be ended with whatever it spawned, at its
+//! ceiling or when its ending is asked. A stop is shep's: the runner sends
+//! each group SIGTERM and exits, and shep's stop ends every lamb it leaves. Only this module reaps the
+//! children, and only under the lock, so a signalled pid is never a reused one.
 
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -20,10 +20,8 @@ use crate::ports::Ending;
 /// How often a running child is checked for its exit
 const POLL: Duration = Duration::from_millis(50);
 
-// Time for a child to exit on SIGTERM before it gets SIGKILL. A stop gives
-// the runner shep's `kill_timeout` after its shutdown message, which its
-// Flockfile entry must set to 10s or more, and the runner flushes for 2s after.
-pub(super) const STOP_GRACE: Duration = Duration::from_secs(3);
+// Time for an ended call's group to exit on SIGTERM before it gets SIGKILL.
+const END_GRACE: Duration = Duration::from_secs(3);
 
 /// Why a stoppable child did not run to its end
 #[derive(Debug)]
@@ -229,14 +227,14 @@ impl Processes {
 
     /// Stops child `id`, and whatever it spawned
     ///
-    /// It gets the stop ladder [`Self::stop`] uses, and stays listed until
-    /// the ladder is done, so a stop that comes meanwhile waits for it too.
+    /// Its group gets SIGTERM, then SIGKILL if any of it is still running
+    /// after a grace period.
     pub(super) fn end(&self, id: u64) {
         let Some(pid) = self.with_child(id, |child| child.id()) else {
             return;
         };
         signal_group(pid, "TERM");
-        let deadline = Instant::now() + STOP_GRACE;
+        let deadline = Instant::now() + END_GRACE;
         while Instant::now() < deadline {
             let exited = self.with_child(id, |child| matches!(child.try_wait(), Ok(Some(_))));
             // A zombie leader still counts as a member, so the group is
@@ -273,25 +271,18 @@ impl Processes {
         self.lock().stopping
     }
 
-    /// Ends every running child and refuses new ones
+    /// Refuses new children, sends each running one's group SIGTERM, and
+    /// leaves the rest to shep
     ///
-    /// Each gets SIGTERM, so it can end its own children, and SIGKILL if it
-    /// is still running after a grace period.
+    /// shep's stop ends every lamb once the runner exits, but finds them by
+    /// parent, so the group signal reaches a member already reparented to
+    /// init. Nothing here waits. A child that ends comes back as
+    /// [`RunError::Stopped`].
     pub(super) fn stop(&self) {
-        {
-            let mut running = self.lock();
-            running.stopping = true;
-            for (_, child) in &running.children {
-                signal_group(child.id(), "TERM");
-            }
-        }
-        let deadline = Instant::now() + STOP_GRACE;
-        while Instant::now() < deadline && !self.lock().children.is_empty() {
-            thread::sleep(POLL);
-        }
-        for (_, child) in &mut self.lock().children {
-            signal_group(child.id(), "KILL");
-            let _ = child.kill();
+        let mut running = self.lock();
+        running.stopping = true;
+        for (_, child) in &running.children {
+            signal_group(child.id(), "TERM");
         }
     }
 
@@ -303,7 +294,7 @@ impl Processes {
                     .children
                     .iter()
                     .position(|(i, _)| *i == id)
-                    .expect("only wait and its ladder take a child off the list");
+                    .expect("only wait and `end` take a child off the list");
                 // Checked before the deadline below, so a child that has
                 // already exited by the time a poll lands is never reported
                 // as timed out, however close the two were.
@@ -314,9 +305,9 @@ impl Processes {
                 until.passed()
             };
             if passed {
-                // The same stop ladder `stop` uses, so a build or test the
-                // worker started and left running past the ceiling is ended
-                // too, not just the `claude` process this struct tracked.
+                // The whole group, so a build or test the worker started
+                // and left running past the ceiling is ended too, not just
+                // the `claude` process this struct tracked.
                 self.end(id);
                 return Err(RunError::TimedOut);
             }
@@ -586,7 +577,7 @@ mod tests {
         }
         asker.end();
         let result = finished
-            .recv_timeout(STOP_GRACE + Duration::from_secs(10))
+            .recv_timeout(END_GRACE + Duration::from_secs(10))
             .expect("the ended call never returned");
         assert!(matches!(result, Err(RunError::TimedOut)), "{result:?}");
         let grandchild: u32 = std::fs::read_to_string(&pid_file)
@@ -602,50 +593,6 @@ mod tests {
             );
             thread::sleep(POLL);
         }
-    }
-
-    // Real time: a child that ignores SIGTERM is in its ceiling's ladder
-    // when the runner stops, and the stop still waits for it.
-    #[test]
-    fn a_stop_during_a_ceilings_ladder_waits_for_that_child_too() {
-        let dir = tempfile::tempdir().unwrap();
-        let pid_file = dir.path().join("child.pid");
-        let script = format!(
-            "trap '' TERM; echo $$ > {}; sleep 30",
-            shell_quote(&pid_file)
-        );
-        let processes = Processes::default();
-        let running = processes.clone();
-        let ceiling = thread::spawn(move || {
-            running.output_within(
-                Command::new("sh").args(["-c", &script]),
-                Duration::from_millis(200),
-            )
-        });
-        let started = Instant::now();
-        // Past the limit, the ladder has the child, whose SIGTERM it ignores.
-        while !pid_file.exists() || started.elapsed() < Duration::from_millis(600) {
-            assert!(started.elapsed() < Duration::from_secs(10), "no child");
-            thread::sleep(POLL);
-        }
-        let child: u32 = std::fs::read_to_string(&pid_file)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-
-        processes.stop();
-
-        let deadline = Instant::now() + Duration::from_secs(1);
-        while process_is_alive(child) {
-            assert!(
-                Instant::now() < deadline,
-                "the stop returned with the child still running"
-            );
-            thread::sleep(POLL);
-        }
-        let result = ceiling.join().unwrap();
-        assert!(matches!(result, Err(RunError::TimedOut)), "{result:?}");
     }
 
     fn shell_quote(path: &std::path::Path) -> String {
@@ -665,56 +612,75 @@ mod tests {
         !stat.is_empty() && !stat.starts_with('Z')
     }
 
-    // Real time: the child is a real process, and the test bounds its own
-    // wait with recv_timeout.
+    // Real time: real calls that note SIGTERM and keep running, ended by the
+    // test as shep's stop would end them. The test bounds its own waits.
     #[test]
-    fn stop_ends_a_running_child_and_refuses_the_next() {
-        let processes = Processes::default();
-        let (done, finished) = mpsc::channel();
-        let running = processes.clone();
-        let started = Instant::now();
-        thread::spawn(move || {
-            let result = running.output(Command::new("sh").args(["-c", "sleep 30"]));
-            let _ = done.send(result);
-        });
-        while processes.lock().children.is_empty() {
-            assert!(
-                started.elapsed() < Duration::from_secs(10),
-                "no child started"
-            );
-            thread::sleep(POLL);
-        }
-        processes.stop();
-        let result = finished
-            .recv_timeout(Duration::from_secs(10))
-            .expect("the stopped call never returned");
-        assert!(matches!(result, Err(RunError::Stopped)), "{result:?}");
-        assert!(started.elapsed() < Duration::from_secs(10));
-
-        let next = processes.output(Command::new("sh").args(["-c", "exit 0"]));
-        assert!(matches!(next, Err(RunError::Stopped)), "{next:?}");
-    }
-
-    #[test]
-    fn a_child_that_ignores_sigterm_gets_sigkill() {
+    fn a_stop_signals_each_call_s_group_without_waiting_and_refuses_the_next() {
         let dir = tempfile::tempdir().unwrap();
-        let trapped = dir.path().join("trapped");
         let processes = Processes::default();
         let (done, finished) = mpsc::channel();
-        let running = processes.clone();
-        let script = format!("trap '' TERM; touch '{}'; sleep 30", trapped.display());
-        thread::spawn(move || {
-            let _ = done.send(running.output(Command::new("sh").args(["-c", &script])));
+        let (told, pids) = mpsc::channel();
+        let calls = ["one", "two"].map(|name| {
+            let (ready, termed) = (
+                dir.path().join(name),
+                dir.path().join(format!("{name}.term")),
+            );
+            let script = format!(
+                "trap 'touch {}' TERM; touch {}; while :; do sleep 0.1; done",
+                shell_quote(&termed),
+                shell_quote(&ready),
+            );
+            let (running, done, told) = (processes.clone(), done.clone(), told.clone());
+            thread::spawn(move || {
+                let mut command = Command::new("sh");
+                command.args(["-c", &script]);
+                let result = running.output_telling(&mut command, None, &|pid| {
+                    let _ = told.send(pid);
+                });
+                let _ = done.send(result);
+            });
+            (ready, termed)
         });
+        let pids: Vec<u32> = (0..2)
+            .map(|_| {
+                pids.recv_timeout(Duration::from_secs(10))
+                    .expect("no child")
+            })
+            .collect();
         let started = Instant::now();
-        while !trapped.exists() {
+        while !calls.iter().all(|(ready, _)| ready.exists()) {
             assert!(started.elapsed() < Duration::from_secs(10), "no trap set");
             thread::sleep(POLL);
         }
+
+        let stopping = Instant::now();
         processes.stop();
-        let result = finished
-            .recv_timeout(STOP_GRACE + Duration::from_secs(10))
-            .expect("the stopped call never returned");
-        assert!(matches!(result, Err(RunError::Stopped)), "{result:?}");
+        assert!(
+            stopping.elapsed() < Duration::from_secs(1),
+            "the stop waited"
+        );
+
+        let next = processes.output(Command::new("sh").args(["-c", "exit 0"]));
+        assert!(matches!(next, Err(RunError::Stopped)), "{next:?}");
+        while !calls.iter().all(|(_, termed)| termed.exists()) {
+            assert!(
+                stopping.elapsed() < Duration::from_secs(10),
+                "a group had no SIGTERM"
+            );
+            thread::sleep(POLL);
+        }
+        assert!(
+            pids.iter().all(|&pid| process_is_alive(pid)),
+            "the stop ended a call"
+        );
+        for pid in pids {
+            signal_group(pid, "KILL");
+        }
+        for _ in 0..2 {
+            let result = finished
+                .recv_timeout(Duration::from_secs(10))
+                .expect("an ended call never returned");
+            assert!(matches!(result, Err(RunError::Stopped)), "{result:?}");
+        }
     }
 }

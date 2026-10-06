@@ -196,8 +196,8 @@ impl FakeClaude {
         self.script.lock().unwrap().extend(steps);
     }
 
-    /// Ends every held call, as the real adapters end their calls in flight
-    /// when the runner stops
+    /// Ends every held call with [`AgentError::Stopped`], so a test's held
+    /// calls return once it stops the runner
     pub(crate) fn stop(&self) {
         self.stopped.store(true, Ordering::SeqCst);
     }

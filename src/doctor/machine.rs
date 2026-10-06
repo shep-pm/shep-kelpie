@@ -170,7 +170,9 @@ pub(super) fn refused(refused: &ConnectRefused, shep_home: &Path) -> Line {
         ConnectRefused::Unreachable(_) => {
             "start your shepherd, or set SHEP_HOME to the one you run"
         }
-        ConnectRefused::Skew(_) => "run a shep and a kelpie built for the same shep minor",
+        ConnectRefused::Skew(_) => {
+            "run a shep on kelpie's shep minor, at the version kelpie is built for or later"
+        }
     };
     Line::missing("shepherd", refused.describe(shep_home), fix)
 }
