@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 use shep_client::shep_core::config::AppConfig;
+use shep_client::shep_core::values::UpDuration;
 
 use super::*;
 use crate::flock::Launch;
@@ -65,6 +66,24 @@ async fn start_brings_up_the_runner_then_reaches_it() {
         })
         .collect();
     assert_eq!(restarts, ["koji"]);
+}
+
+#[tokio::test]
+async fn start_brings_up_a_runner_whose_entry_still_sets_kill_timeout() {
+    let shepherd = FakeShepherd::new().await;
+    let mut table = crate::test::project_table(EXAMPLE);
+    table.insert("repo".into(), Value::String("/src/koji".into()));
+    let mut entry = launch(&shepherd).runner(&project("koji"), table);
+    entry.kill_timeout = UpDuration::from_millis(10_000);
+    shepherd.holds(entry, false);
+    shepherd.holds_dog("kelpie", true);
+
+    let client = client(&shepherd).await;
+    let started = in_time(start(&client, &project("koji"))).await.unwrap();
+    assert_eq!(started, [r#"{"action":"start","sheep":"koji"}"#]);
+    let (kept, running) = shepherd.sheep("koji").unwrap();
+    assert!(running);
+    assert_eq!(kept.kill_timeout.as_millis(), 10_000);
 }
 
 #[tokio::test]

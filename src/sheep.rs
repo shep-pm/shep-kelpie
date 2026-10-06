@@ -33,21 +33,19 @@ use crate::runner::{
 use crate::shep_home;
 
 /// How long queued replies get to reach the shepherd before the runner exits
-const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
+///
+/// With [`JOIN_BOUND`], 1.5s, inside shep's default `kill_timeout` of 1.6s.
+const FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 
 // How often an idle runner looks at the board, or at its pull request's CI.
 // A look is at most two `gh` calls, 120 an hour, against GitHub's 5,000 an
 // hour for the maintainer's login.
 const BOARD_POLL: Duration = Duration::from_secs(60);
 
-// How long a stopping runner waits for its loop's thread to end. A pass
-// never waits on an agent call, only on short git and gh calls, so this
-// bounds those. A stop or restart gives the runner shep's `kill_timeout`
-// after the shutdown message, 1.6s unless its Flockfile entry says more, and
-// 3s of stop ladder for the calls in flight and 2s of flush follow this
-// wait. The whole stop needs about 7s, so the entry needs
-// `kill_timeout = "10s"` or more.
-const JOIN_BOUND: Duration = Duration::from_secs(2);
+// How long a stopping runner waits for its loop's thread, whose pass waits
+// only on short git and gh calls. With the flush after it, it fits inside
+// shep's default `kill_timeout` of 1.6s, past which shep kills the runner.
+const JOIN_BOUND: Duration = Duration::from_secs(1);
 
 mod look;
 
@@ -189,10 +187,9 @@ fn serve(project: &str) -> Result<(), String> {
     });
     shepherd.ready().map_err(|e| e.to_string())?;
 
-    // Only a shutdown message or a dead loop thread ends the wait. Without
-    // either, the shepherd's stop signal ends the process instead. Exiting on
-    // the message skips shep's stop ladder, so the calls in flight are ended
-    // here, and each work item's turn resumes from its session on restart.
+    // Only a shutdown message or a dead loop thread ends the wait. Each call
+    // gets SIGTERM, shep's stop ends what is left once the runner exits, and
+    // each work item's turn resumes from its session on restart.
     let why = stopped.recv();
     let let_go = worker.stop(JOIN_BOUND, || stop_calls(&claude, &reviewer));
     if let_go {
@@ -275,8 +272,7 @@ impl Worker {
     /// Asks the thread to stop, waits up to `bound` for it, then runs `stop_ports`
     ///
     /// A pass waits on no agent call, so the thread lets go at once, and no
-    /// call starts once the ports stop. Stopping them ends every call in
-    /// flight. Returns whether it let go in time.
+    /// call starts once the ports stop. Returns whether it let go in time.
     fn stop(self, bound: Duration, stop_ports: impl FnOnce()) -> bool {
         self.stopping.store(true, Ordering::SeqCst);
         let _ = self.wake.send(());
@@ -410,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stop_with_calls_running_ends_them_without_waiting_for_them() {
+    fn a_stop_with_calls_running_lets_go_without_waiting_for_them() {
         let rig = Rig::new("acme");
         rig.edit_settings(|s| s.replace("max_items = 1", "max_items = 2"));
         let runner = Arc::new(rig.open().unwrap());

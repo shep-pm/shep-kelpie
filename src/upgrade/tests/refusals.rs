@@ -12,7 +12,7 @@ async fn a_build_for_another_shep_minor_stops_before_anything_changes() {
     let (ran, said) = rig.install(&new).await;
     let err = ran.unwrap_err();
     assert!(err.contains("shep 0.13.0"), "{err}");
-    assert!(err.contains("runs shep 0.12.0"), "{err}");
+    assert!(err.contains("runs shep 0.12.4"), "{err}");
     assert!(err.contains("Nothing was installed or restarted"), "{err}");
     assert!(
         err.contains("1. upgrade shep and reload its shepherd"),
@@ -52,6 +52,24 @@ async fn a_newer_patch_of_the_same_minor_is_taken() {
     let new = rig.build("new", "0.3.0", "0.12.0");
     rig.install(&new).await.0.unwrap();
     assert_eq!(rig.installed_says(), "0.3.0 for shep 0.12.0");
+}
+
+#[tokio::test]
+async fn a_build_for_a_later_patch_than_the_shepherd_says_to_move_the_shepherd_first() {
+    for running in ["0.12.3", "0.12.4-rc.1"] {
+        let rig = Rig::on(running, false).await;
+        let new = rig.build("new", "0.3.0", "0.12.4");
+        let err = rig.install(&new).await.0.unwrap_err();
+        assert!(
+            err.contains(&format!("runs shep {running}, which it would refuse")),
+            "{err}"
+        );
+        assert!(
+            err.contains("1. upgrade shep and reload its shepherd"),
+            "{err}"
+        );
+        assert_eq!(rig.installed_says(), "0.1.0 for shep 0.12.0");
+    }
 }
 
 #[tokio::test]

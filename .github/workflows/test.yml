@@ -60,7 +60,7 @@ jobs:
     timeout-minutes: 15
     env:
       # The version in `SHEP_VERSION` (src/shepherd.rs) and Cargo.toml.
-      SHEP_VERSION: 0.12.0
+      SHEP_VERSION: 0.12.4
       KELPIE_TEST_SHEP: ${{ github.workspace }}/.shep/shep
     steps:
       - uses: actions/checkout@v7

@@ -43,7 +43,7 @@ From nothing to a worker on your repo. The examples use a project called `scratc
 You need these on your machine:
 
 - macOS or Linux
-- [shep](https://github.com/shep-pm/shep) 0.12 and Rust 1.88 or later, to build shep-kelpie
+- [shep](https://github.com/shep-pm/shep) 0.12, from 0.12.4, and Rust 1.88 or later, to build shep-kelpie
 - Claude Code, signed in
 - `node` and `npm`: `tools install` runs them, and so does every agent's sandbox
 - on Linux, `bwrap` and `socat`, which the sandbox needs
@@ -146,7 +146,7 @@ shep kelpie doctor
 ok       claude: installed and logged in
 ok       gh: logged in as <you>
 ok       sandbox: the sandbox runtime can run
-ok       shepherd: shep 0.12.0 at /path/to/.shep
+ok       shepherd: shep 0.12.4 at /path/to/.shep
 ok       dog: kelpie's dog is running and has named itself
 ok       scratch: checkout: /path/to/checkout is a git checkout with an origin
 ok       scratch: implementers: an issue with no `agent:` label runs on sonnet-high
@@ -543,7 +543,7 @@ If an upgrade stops after the swap (a merge or a call that outlasts the wait, a 
 
 Every sheep it restarts must run the dog's path. If one does not, the upgrade stops before it changes anything and names the sheep and its path. A `--binary` without its executable bits is refused with the `chmod +x` that fixes it, and only one upgrade runs at a time: a second refuses while the first holds `$SHEP_HOME/kelpie/upgrade.lock`. The swap changes the file for every shepherd that adopts the same path, with no check against their shep.
 
-Before it changes anything it asks the new build which shep it is made with (`shep-kelpie version --json`) and compares the minor with your shepherd's. If they differ it stops before restarting anything and prints the steps: upgrade shep and reload its shepherd, then run the new build's own `upgrade` with `SHEP_HOME` set to your shepherd, since the old kelpie that `shep kelpie` runs refuses the new shepherd. The upgrade prints the exact line. `--rollback` checks the previous build the same way.
+Before it changes anything it asks the new build which shep it is made with (`shep-kelpie version --json`) and compares it with your shepherd's. If your shepherd is on another minor, or on an earlier patch than the build's, it stops before restarting anything and prints the steps: upgrade shep and reload its shepherd, then run the new build's own `upgrade` with `SHEP_HOME` set to your shepherd, since the old kelpie that `shep kelpie` runs refuses the new shepherd. The upgrade prints the exact line. `--rollback` checks the previous build the same way.
 
 ## What shep does for it
 
@@ -551,16 +551,16 @@ shep-kelpie is a dog of your own shepherd, and leans on it for everything a proc
 
 - **Supervision.** The adopted `kelpie` is the dog, and each project's runner is a sheep. shep starts, restarts and stops them, and keeps them beside your other sheep. `shep stop <project>` stops a runner, and `shep delete <project>` removes it
 - **Lambs.** Every agent call a runner starts, a worker's turn, a reviewer's session or the project manager's wake, is a lamb of that runner. `shep describe <project>` labels each with its issue and role, such as `#114 worker`
+- **Stopping the calls.** A runner asks for `shutdown_with_message`, so a stop reaches it as a message, and it sends each call's process group SIGTERM and exits at once, without waiting for them. shep's stop then ends every lamb the runner left, whatever process group or session it is in (shep-pm/shep#688, ADR 0005), so a runner's entry takes shep's default `kill_timeout`. A runner still ends a single call itself, at its turn ceiling or on a pause, through the process group each call leads
 - **Triggers and status.** Every `shep kelpie` verb is a trigger on the shepherd channel, which `shep trigger <project> <action>` sends too, and the runner answers while its calls run. Runners ask the dog for leases with metrics on shep's bus
 - **Settings.** A project's settings are its runner's `[app.dogs.kelpie]` table, and shep-kelpie's own are the `[kelpie]` section of `dogs.toml`. shep keeps both, and lookout edits both from shep-kelpie's settings schema
 - **Logs.** `shep bleats <project>` is a runner's log, and `shep bleats kelpie` the dog's
 
-Two things shep-kelpie still does itself, until shep can:
+One thing shep-kelpie still does itself, until shep can:
 
-- **Stopping its calls.** A runner asks for `shutdown_with_message`, so a stop reaches it as a message, and it ends the calls it started with its own stop ladder (SIGTERM, then SIGKILL after 3 seconds) before it exits. That needs `kill_timeout = "10s"` or more on the runner's entry. Once shep sweeps a sheep's whole lamb tree on every stop (shep-pm/shep#688), that ladder goes (ADR 0005)
 - **Reaching you.** Rulings go to kelpie's own webhook, ntfy or Discord, and ntfy replies are checked with kelpie's own TOTP, until shep can carry a question itself (shep-pm/shep#689)
 
-shep-kelpie refuses a shepherd on another shep minor or major than the pinned one, naming both versions. shep-kelpie's commands talk to the shepherd's socket with the shep client it is built with, never a `shep` on `PATH`. Keep a shepherd's `SHEP_HOME` short: see [shep-kelpie's home](#shep-kelpies-home).
+shep-kelpie refuses a shepherd on another shep minor or major than the pinned one, or on an earlier patch, naming both versions. It needs 0.12.4 or later, the first shep whose stop ends every lamb. shep-kelpie's commands talk to the shepherd's socket with the shep client it is built with, never a `shep` on `PATH`. Keep a shepherd's `SHEP_HOME` short: see [shep-kelpie's home](#shep-kelpies-home).
 
 ## Reference
 
@@ -603,7 +603,7 @@ The dog holds `cargo-test`, a share of this machine for running tests, and `gpu`
 
 ### Settings
 
-A project's settings are its `[app.dogs.kelpie]` table, which lookout edits in the runner's pane. `settings.example.toml` lists every key, and shows a runner's Flockfile entry for a project set up by hand. It needs `SHEP_HOME` as an absolute path in `env`, since a sheep starts without it, and `kill_timeout = "10s"` or more, since a runner needs about 7s to stop cleanly. The keys:
+A project's settings are its `[app.dogs.kelpie]` table, which lookout edits in the runner's pane. `settings.example.toml` lists every key, and shows a runner's Flockfile entry for a project set up by hand. It needs `SHEP_HOME` as an absolute path in `env`, since a sheep starts without it. An older entry's `kill_timeout = "10s"` still works, and is no longer needed. The keys:
 
 - `repo` and `forge`: the checkout and its GitHub repo
 - `merge_authority`, `ci` and `max_items`: see [CI and the merge](#ci-and-the-merge) and [Add your project](#4-add-your-project)

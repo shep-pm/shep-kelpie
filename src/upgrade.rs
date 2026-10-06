@@ -10,9 +10,9 @@
 //!
 //! The new build is asked for its shep line (`version --json`) and the
 //! shepherd for its version before any file or sheep changes. A shepherd on
-//! another minor stops the upgrade there, with the steps to take, because a
-//! kelpie built for one shep minor refuses a shepherd on another and would
-//! come up into that refusal. One upgrade runs at a time.
+//! another minor, or an earlier patch than the build's, stops the upgrade
+//! there, with the steps to take, because the build refuses that shepherd
+//! and would come up into that refusal. One upgrade runs at a time.
 //!
 //! Each runner is drained before its restart, so the restart cuts no call
 //! short. `--now`, before or after the other arguments, restarts without
@@ -144,7 +144,7 @@ pub struct Scene<'a> {
 /// # Errors
 ///
 /// A message when the build cannot be had, run or installed, when the
-/// shepherd cannot be reached or runs another shep minor than the build, or
+/// shepherd cannot be reached or runs a shep the build refuses, or
 /// when a restart fails. Nothing is installed or restarted on the first
 /// three. A failure after the swap says what is installed and the command
 /// that finishes the restarts, `upgrade --binary` on the installed file.
@@ -301,13 +301,13 @@ fn fetch_source(scene: &Scene<'_>, source: &Source) -> Result<PathBuf, String> {
 // `binary` is the build, which runs its own upgrade once the shepherd is moved.
 fn fits(build: &Build, running: &str, scene: &Scene<'_>, binary: &Path) -> Result<(), String> {
     let shep_home = scene.shep_home;
-    let (theirs, ours) = (release_line(running), release_line(&build.shep));
-    if theirs == ours {
+    if shepherd::takes(&build.shep, running) {
         return Ok(());
     }
-    let number = |line: (Option<&str>, Option<&str>)| {
+    let number = |version: &str| {
+        let line = release_line(version);
         let part = |p: Option<&str>| p.and_then(|p| p.parse::<u64>().ok());
-        part(line.0).zip(part(line.1))
+        part(line.0).zip(part(line.1)).zip(shepherd::patch(version))
     };
     let shepherd_first = format!(
         "\n  1. upgrade shep and reload its shepherd\n  2. run the new build's own upgrade: \
@@ -316,8 +316,8 @@ fn fits(build: &Build, running: &str, scene: &Scene<'_>, binary: &Path) -> Resul
         shep_home.display()
     );
     let build_first = "install a kelpie built for the shepherd's shep line instead".to_owned();
-    let what_to_do = match (number(theirs), number(ours)) {
-        (Some(running), Some(built)) if built > running => shepherd_first,
+    let what_to_do = match (number(running), number(&build.shep)) {
+        (Some(running), Some(built)) if built >= running => shepherd_first,
         (Some(_), Some(_)) => build_first,
         _ => format!("either:{shepherd_first}\n  or {build_first}"),
     };

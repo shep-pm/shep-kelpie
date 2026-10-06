@@ -74,7 +74,8 @@ impl LocalReviewer {
         self
     }
 
-    /// Ends every round in flight, and refuses new ones, as the runner stops
+    /// Refuses new rounds as the runner stops, ends a wait for the GPU lock,
+    /// sends the rounds in flight SIGTERM, and leaves the rest to shep's stop
     pub fn stop(&self) {
         self.processes.stop();
     }

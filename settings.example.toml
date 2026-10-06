@@ -14,7 +14,6 @@ args = ["runner", "shep"]
 env = { SHEP_HOME = "/path/to/home/.shep" }
 channel = true
 shutdown_with_message = true
-kill_timeout = "10s"
 
 [app.dogs.kelpie]
 repo = "~/GitHub/shep" # the checkout `shep kelpie add` ran in
