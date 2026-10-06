@@ -314,6 +314,19 @@ async fn status_reports_every_project() {
 }
 
 #[tokio::test]
+async fn status_marks_a_draining_runner() {
+    let shepherd = FakeShepherd::new().await;
+    runner(&shepherd, "koji", Path::new("/src/koji"), true);
+    let draining = r#"{"draining":{"calls":[],"ceiling":3600}}"#;
+    shepherd.says("koji", &[draining]);
+    let client = client(&shepherd).await;
+    assert_eq!(
+        in_time(status(&client)).await.unwrap(),
+        [format!("koji (draining): {draining}")]
+    );
+}
+
+#[tokio::test]
 async fn a_runner_still_taking_its_actions_is_starting() {
     let shepherd = FakeShepherd::new().await;
     runner(&shepherd, "koji", Path::new("/src/koji"), true);

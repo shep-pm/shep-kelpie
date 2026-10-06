@@ -241,7 +241,7 @@ impl Runner {
         let Some(agent) = self.agents.pm.clone() else {
             return false;
         };
-        if self.pm.flying.is_some() || self.state.run != RunState::Running {
+        if self.pm.flying.is_some() || self.state.run != RunState::Running || self.draining {
             return false;
         }
         // What the maintainer told it outlasts a restart, and wakes it again.

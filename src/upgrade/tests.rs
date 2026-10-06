@@ -16,6 +16,7 @@ use crate::flock::Launch;
 use crate::runner::ProjectName;
 use crate::test::{FakeShepherd, write_script};
 
+mod drain;
 mod files;
 mod refusals;
 mod sheep;
@@ -28,6 +29,7 @@ const FAST: Patience = Patience {
     poll: Duration::from_millis(10),
     start: Duration::from_secs(10),
     merge: Duration::from_secs(10),
+    margin: Duration::from_secs(10),
 };
 
 const MERGING: &str = r#"{"work_items":[{"issue":7,"phase":{"state":"merge","head":"abc"}}]}"#;
@@ -105,6 +107,8 @@ impl Rig {
             shep_home: self.shepherd.home(),
             repo: "/nowhere",
             patience,
+            now: false,
+            interrupt: Interrupt::Never,
         }
     }
 
@@ -113,8 +117,15 @@ impl Rig {
         action: Action,
         patience: Patience,
     ) -> (Result<(), String>, Vec<String>) {
+        self.upgrade_in(self.scene(patience), action).await
+    }
+
+    async fn upgrade_in(
+        &self,
+        scene: Scene<'_>,
+        action: Action,
+    ) -> (Result<(), String>, Vec<String>) {
         let mut said = Vec::new();
-        let scene = self.scene(patience);
         let ran = tokio::time::timeout(PATIENCE, run(&scene, &action, &mut |line| said.push(line)))
             .await
             .expect("the upgrade neither ended nor failed in time");

@@ -201,6 +201,9 @@ impl Runner {
             // `AgentError::TimedOut` would, with no call spent.
             return self.park_ceiling_passed(now);
         }
+        if self.draining {
+            return Ok(Begin::Idle);
+        }
         let issue = item.issue;
         let prepared = self.prepare(item, session, prompt);
         let mut next = self.state.clone();

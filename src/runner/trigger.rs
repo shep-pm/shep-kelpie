@@ -20,9 +20,9 @@ use crate::state::{Finished, LeaseHeld, Ruling, RunState, StateError, Waiting};
 use crate::work_item::{Attached, BotSkipped, Phase, QwenTally, Spend, Split, Turn, WorkItem};
 
 /// The triggers a runner answers
-pub const ACTIONS: [&str; 14] = [
+pub const ACTIONS: [&str; 16] = [
     "status", "start", "pause", "add", "rework", "adopt", "rule", "gate", "drop", "timings",
-    "attach", "detach", "tell", "pm",
+    "attach", "detach", "tell", "pm", "drain", "undrain",
 ];
 
 /// How many finished work items `timings` totals when given no count
@@ -90,6 +90,9 @@ pub struct Status<'a> {
     /// The project manager, when the project names one
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pm: Option<super::PmStatus<'a>>,
+    /// The calls still running, while `drain` holds back new ones
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub draining: Option<super::Draining>,
 }
 
 /// The local model's placement, as Ollama's `/api/ps` last said
@@ -229,6 +232,8 @@ enum Request {
     Tell(String),
     PmAttach(u32, Option<u32>),
     PmDetach(u32),
+    Drain,
+    Undrain,
 }
 
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
@@ -244,7 +249,9 @@ enum Request {
 /// [`Attaching`](super::Attaching) rather than the status, `tell` takes a
 /// note for the project manager, `pm` takes `attach` or `detach` with the
 /// same pids and answers [`PmAttaching`](super::PmAttaching) for `attach`,
-/// and every other action takes nothing.
+/// and every other action takes nothing. `drain` holds back every new call
+/// and answers the status with the calls still running, and `undrain` lets
+/// calls start again.
 pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> String {
     let error = |message: String| serde_json::json!({ "error": message }).to_string();
     let request = match read(action, params.map(str::trim).filter(|p| !p.is_empty())) {
@@ -275,6 +282,14 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
         Request::PmDetach(pid) => runner.detach_pm(pid).map_err(|e| e.to_string()),
         Request::Tell(note) => runner.tell(&note).map_err(|e| e.to_string()),
         Request::Status | Request::Timings(_) => Ok(()),
+        Request::Drain => {
+            runner.drain();
+            Ok(())
+        }
+        Request::Undrain => {
+            runner.undrain();
+            Ok(())
+        }
         Request::Start => runner.start().map_err(|e| e.to_string()),
         Request::Pause => runner.pause().map_err(|e| e.to_string()),
         Request::Add(issue) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
@@ -361,6 +376,8 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
         ("pause", None) => Ok(Request::Pause),
         ("gate", None) => Ok(Request::Gate(None)),
         ("drop", None) => Ok(Request::Drop(None)),
+        ("drain", None) => Ok(Request::Drain),
+        ("undrain", None) => Ok(Request::Undrain),
         (_, None) => Ok(Request::Status),
     }
 }

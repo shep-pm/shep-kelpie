@@ -81,6 +81,9 @@ impl Runner {
                 let Some(local) = chosen.runs.local() else {
                     return self.session_call(&chosen, None);
                 };
+                if self.draining {
+                    return Ok(Begin::Idle);
+                }
                 let criteria = match self.criteria(issue) {
                     Ok(criteria) => criteria,
                     Err(reason) => return Ok(self.gate_failed(reason)),
@@ -131,6 +134,9 @@ impl Runner {
         let Some((model, limit)) = chosen.runs.session() else {
             unreachable!("only a reviewer that runs sessions is called in one")
         };
+        if self.draining {
+            return Ok(Begin::Idle);
+        }
         if let Some(held) = self.pace(Scope::Turn, limit)?.holds() {
             return Ok(held);
         }

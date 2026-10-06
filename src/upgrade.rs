@@ -13,8 +13,13 @@
 //! another minor stops the upgrade there, with the steps to take, because a
 //! kelpie built for one shep minor refuses a shepherd on another and would
 //! come up into that refusal. One upgrade runs at a time.
+//!
+//! Each runner is drained before its restart, so the restart cuts no call
+//! short. `--now`, before or after the other arguments, restarts without
+//! draining.
 
 pub mod build;
+pub mod drain;
 pub mod fetch;
 pub mod install;
 pub mod lock;
@@ -27,7 +32,7 @@ use std::process::ExitCode;
 use build::Build;
 use install::{Change, Layout};
 use lock::Lock;
-use restart::{Patience, Plan};
+use restart::{Interrupt, Patience, Plan};
 
 use crate::shep_home;
 use crate::shepherd::{self, release_line};
@@ -53,8 +58,18 @@ pub enum Source {
 }
 
 /// The usage `upgrade` prints for arguments it does not take
-pub const USAGE: &str = "usage: shep-kelpie upgrade --ref <git ref> | --release <version> | \
-                         --binary <path> | --rollback";
+pub const USAGE: &str = "usage: shep-kelpie upgrade [--now] --ref <git ref> | --release \
+                         <version> | --binary <path> | --rollback";
+
+/// Takes `--now` off the front or the end of `upgrade`'s arguments, and
+/// says whether it was there
+pub fn now(args: &[String]) -> (bool, &[String]) {
+    match args {
+        [first, rest @ ..] if first == "--now" => (true, rest),
+        [rest @ .., last] if last == "--now" => (true, rest),
+        _ => (false, args),
+    }
+}
 
 /// Reads `upgrade`'s arguments
 ///
@@ -75,6 +90,7 @@ pub fn parse(args: &[String]) -> Result<Action, String> {
 
 /// Runs `shep-kelpie upgrade <args>`
 pub fn main(args: &[String]) -> ExitCode {
+    let (now, args) = now(args);
     let action = match parse(args) {
         Ok(action) => action,
         Err(usage) => {
@@ -88,6 +104,8 @@ pub fn main(args: &[String]) -> ExitCode {
             shep_home: &shep_home,
             repo: &std::env::var("KELPIE_SOURCE").unwrap_or_else(|_| fetch::REPO.to_owned()),
             patience: Patience::default(),
+            now,
+            interrupt: Interrupt::Signals,
         };
         let say = &mut |line: String| println!("{line}");
         shepherd::block_on(run(&scene, &action, say))
@@ -112,6 +130,10 @@ pub struct Scene<'a> {
     pub repo: &'a str,
     /// How long it waits on the shepherd's sheep
     pub patience: Patience,
+    /// Restart each runner without draining it first
+    pub now: bool,
+    /// What stops the restarts part way, sending a drained runner `undrain`
+    pub interrupt: Interrupt,
 }
 
 /// Installs or rolls back a build, and restarts the dog and the runners onto it
@@ -218,15 +240,22 @@ pub async fn run(
     say(format!(
         "restarting onto it: if this stops before it finishes, {finish} finishes the restarts"
     ));
-    restart::restart_all(&client, &plan, scene.patience, say)
-        .await
-        .map_err(|e| {
-            format!(
-                "{e}\nThe new build is installed at {installed}, and a sheep not yet restarted \
+    restart::restart_all(
+        &client,
+        &plan,
+        scene.patience,
+        !scene.now,
+        scene.interrupt,
+        say,
+    )
+    .await
+    .map_err(|e| {
+        format!(
+            "{e}\nThe new build is installed at {installed}, and a sheep not yet restarted \
                  may still run the old one. To finish the restarts: {finish}. `--rollback` \
                  would swap the builds back, not finish them"
-            )
-        })
+        )
+    })
 }
 
 async fn connect(scene: &Scene<'_>) -> Result<shep_client::Client, String> {

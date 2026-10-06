@@ -5,9 +5,9 @@
 //! `shep kelpie lease ...`: the maintainer's lease commands
 //!
 //! `shep kelpie add`, `start`, `pause`, `status`, `rule`, `rework`, `adopt`,
-//! `gate`, `drop`, `timings`, `issue`, `attach`, `tell` and `pm`: a project
-//! in the maintainer's own flock, the one `-p` names or whose repo holds the
-//! folder it runs in.
+//! `gate`, `drop`, `timings`, `issue`, `attach`, `tell`, `pm`, `drain` and
+//! `undrain`: a project in the maintainer's own flock, the one `-p` names or
+//! whose repo holds the folder it runs in.
 //!
 //! `shep kelpie doctor [<project>] [--test-alert]`: checks what the projects need
 //! on this machine, and changes nothing. Run as `shep kelpie doctor`.
@@ -15,7 +15,9 @@
 //! `shep kelpie upgrade --ref <git ref> | --release <version> | --binary <path>`,
 //! `shep kelpie upgrade --rollback`: installs a new kelpie over the one the
 //! adopted dog runs and restarts the dog and each runner onto it, between
-//! merges, or puts the previous build back. Run as `shep kelpie upgrade ...`.
+//! merges, or puts the previous build back. Each runner is drained first, so
+//! no call is cut short, unless `--now` is given. Run as
+//! `shep kelpie upgrade ...`.
 //!
 //! `kelpie version [--json]`: the build's version and the shep version it is
 //! made with, which `upgrade` reads from a build before it installs it.
@@ -170,7 +172,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: shep-kelpie add [<project>] | add <issue>\n       shep-kelpie start | pause | status\n       shep-kelpie rule [<id> <answer>]\n       shep-kelpie rework <pr> | adopt <pr>\n       shep-kelpie gate [<issue>] | drop [<issue>]\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie upgrade --ref <git ref> | --release <version> | --binary <path> | --rollback\n       shep-kelpie version [--json]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.\n\n{}\n\n{}",
+                "usage: shep-kelpie add [<project>] | add <issue>\n       shep-kelpie start | pause | status\n       shep-kelpie rule [<id> <answer>]\n       shep-kelpie rework <pr> | adopt <pr>\n       shep-kelpie gate [<issue>] | drop [<issue>]\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie upgrade [--now] --ref <git ref> | --release <version> | --binary <path> | --rollback\n       shep-kelpie version [--json]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie settings move <project> [<sheep>]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.\n\n{}\n\n{}",
                 shep_kelpie::lease::cli::USAGE,
                 shep_kelpie::flock::USAGE,
                 shep_kelpie::flock::rule::HELP
