@@ -4,6 +4,36 @@ A [shep](https://github.com/shep-pm/shep) dog that runs Claude Code workers on y
 
 This is early. It changes without notice, and there is no release yet.
 
+## How it works
+
+```
+ request ──> issue writer ──> issue: acceptance criteria, agent:<name>, ready-for-agent
+                                 │
+                                 v
+ pick:   the project manager, or the board's rule (priority, then age)
+                                 │
+                                 v
+ build:  one worker builds it inline and opens a draft pull request
+                                 │
+                                 v
+ review: each listed reviewer reads it once, in order ──> one fix turn per reviewer
+                                 │                          with a finding above a nit
+                                 v
+ CI:     red goes back to the worker; red again on the same head is a ruling
+                                 │ green, on the latest main
+                                 v
+ merge:  a ruling under `ask`, kelpie's code under `auto`, as a merge commit
+```
+
+1. **Issue.** You and the issue writer turn a request into an issue with acceptance criteria, one pull request's worth, labelled with the agent that should build it (see [Writing issues](#writing-issues)).
+2. **Pick.** A `ready-for-agent` issue joins the board. The project manager's agent picks the next one, or, without one, the board takes it by priority, then age, and opens a work item for it (see [The board](#the-board)).
+3. **Build.** A worker, one of the project's implementers, builds it inline, opens a draft pull request and ends its turn (see [Building](#building)).
+4. **Review.** Each reviewer in the project's list reads the pull request once, in order. One that finds anything above a nit sends the worker all its findings for one fix turn, and the next reviewer reads the fix. No loop, no judge (see [The review](#the-review)).
+5. **CI.** A red run goes back to the worker. A second red run on a head the worker left alone asks you.
+6. **Merge.** Under `ask` you get a ruling; under `auto` kelpie merges once every gate passes. Either way it is a merge commit of the head the gates passed (see [CI and the merge](#ci-and-the-merge)).
+
+Anything kelpie cannot settle itself is a [ruling](#rulings) for you. Each project runs as a sheep of your own shepherd, and every agent call it starts is one of that sheep's lambs (see [What shep does for it](#what-shep-does-for-it)).
+
 ## Getting started
 
 From nothing to a worker on your repo. The examples use a project called `scratch`, on the repo `shep-pm/shep`.
@@ -18,7 +48,7 @@ You need these on your machine:
 - `node` and `npm`: `tools install` runs them, and so does every agent's sandbox
 - on Linux, `bwrap` and `socat`, which the sandbox needs
 - `git`, and `gh` signed in to the account that opens the pull requests
-- `pi` or `codex`, only to run an agent on that harness (see Agents)
+- `pi` or `codex`, only to run an agent on that harness (see [Agents](#agents))
 - a GitHub repo whose default branch is `main`, and a checkout of it
 
 A runner is a sheep, so it gets the `PATH` your shepherd was started with, and it needs `claude`, `node`, `gh` and `git` on it. `shep kelpie doctor` runs in your shell, not the shepherd's, so it can pass while a runner fails to find one. Start the shepherd from a shell where `command -v claude node gh git` finds all four.
@@ -87,10 +117,11 @@ label `ready-for-agent`: already on shep-pm/shep
 label `ready-for-human`: already on shep-pm/shep
 label `in-progress`: already on shep-pm/shep
 label `review please`: already on shep-pm/shep
+agent files: wrote sonnet-high, opus-high, defect-hunter, coderabbit, cubic, codex, issue-writer, pm in /path/to/.shep/kelpie/agents
 runner `scratch`: added with its settings, stopped until `shep kelpie start`
 ```
 
-On a repo without those four labels, `add` makes them. The runner puts `in-progress` on an issue while a work item has it. The project is named after the repo, or `shep kelpie add <name>`, as `scratch` was here.
+On a repo without those four labels, `add` makes them. The runner puts `in-progress` on an issue while a work item has it. It writes kelpie's own [agent files](#agents) where they are missing, and never over one you edited. The project is named after the repo, or `shep kelpie add <name>`, as `scratch` was here.
 
 `add` writes the project's settings with these defaults:
 
@@ -118,9 +149,10 @@ ok       sandbox: the sandbox runtime can run
 ok       shepherd: shep 0.12.0 at /path/to/.shep
 ok       dog: kelpie's dog is running and has named itself
 ok       scratch: checkout: /path/to/checkout is a git checkout with an origin
+ok       scratch: implementers: an issue with no `agent:` label runs on sonnet-high
 ok       scratch: push access: may push to shep-pm/shep
-ok       scratch: labels: shep-pm/shep has `ready-for-agent`, `ready-for-human`, `in-progress`, `review please`
-ok       scratch: local review: ready
+ok       scratch: labels: shep-pm/shep has `ready-for-agent`, `ready-for-human`, `in-progress`
+ok       scratch: reviewers: each pull request is read by defect-hunter
 ok       scratch: rulings: no webhook, so rulings reach you only in the log, `status` and `shep kelpie rule`
 nothing a project needs is missing
 ```
@@ -158,41 +190,11 @@ For npm, that is `registry.npmjs.org`. A change reaches a running runner at its 
 shep kelpie start
 ```
 
-Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria, or have the issue writer write it (see [Writing issues](#writing-issues)). The runner gives it to a worker, which opens a draft pull request. Then the review runs, each listed reviewer once, a review bot such as CodeRabbit among them where the project lists one, then CI. Last, you get a ruling before the merge. `shep kelpie status` shows every project. A worker whose first turn ends with no pull request and no question is sent back once, and asks you for a ruling if it stops short again.
-
-What decides whether, and when, the first issue starts:
-
-- The board skips an issue that is assigned to anyone or already has an open pull request, and one blocked by an issue that is still open. Don't assign it to yourself
-- An issue with sub-issues is never worked itself: its sub-issues are, and shep-kelpie closes it once every sub-issue is closed
-- Of the rest, `priority: P0` to `P3` labels order them, then the oldest goes first. An `agent:<name>` label, such as `agent:opus-high`, picks the agent that works it from those the project lists in `agents.implementers` (see [Agents](#agents)), and a label naming one it does not list keeps the issue off the board. An old `worker:` label is no longer read: that issue runs on the default implementer, and the runner's log says so
-- With a project manager set up (see [The project manager](#the-project-manager)), it picks among two or more issues the board could start, and may hold some back. Without one, or while it is down, the order above picks
-- No turn starts while Claude's 5-hour window is at 50% or more, and no new work item starts once today's share of the week is spent. `shep kelpie status` says why under `pacer`, and `enabled = false` in the project's `[app.dogs.kelpie.pacing]` turns both off
-- A project that lists `coderabbit` in `agents.reviewers` waits in CodeRabbit's place in the review for its window, one review an hour. shep-kelpie asks for a review by putting the `review please` label on, so the repo's `.coderabbit.yaml` must review only labelled pull requests. Without that, CodeRabbit reviews every push on its own and spends the hour a round is waiting on:
-
-  ```yaml
-  reviews:
-    auto_review:
-      labels:
-        - "review please"
-  ```
-
-- No review bot is listed unless you list it, and a project that lists none never asks the forge about one. CodeRabbit's free plan reviews public repos only, so a repo GitHub marks private cannot list it, and lists `cubic` or `codex` instead
-- Every thread a review bot leaves open goes to the worker as a finding, and shep-kelpie resolves those threads once the worker's fix moves the head. If the forge refuses three steps in a row, the review goes on with them open and the bot's next read sends them again
-
-`shep kelpie add <issue>` opens a work item for an issue at once, without the label, ahead of the board's order. It queues nothing: while `max_items` work items are open, `add <issue>` is refused.
+Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria, or have the issue writer write it (see [Writing issues](#writing-issues)). The runner gives it to a worker, which opens a draft pull request. Then the review runs, each listed reviewer once, then CI. Last, you get a ruling before the merge. `shep kelpie status` shows every project. [The board](#the-board) says what decides whether, and when, an issue starts.
 
 ### 8. Answer a ruling
 
-A ruling reaches the channel you chose in step 5. It is one of six kinds:
-
-- `merge`: CI is green, and a yes merges the pull request
-- `question`: the worker asks, and your answer is its next turn
-- `stuck`: the work item cannot go on by itself, and its reason says why: `rebase`, `still-red`, `merge-refused`, `closed`, `local-model-spilled`, `fix-not-pushed`, `turn-timeout` or `turn-failed`. The question says what a yes does
-- `agent-files`: the pull request changes agents' own files, and a yes accepts them
-- `foreign-change`: someone else changed the pull request, and a yes accepts the change
-- `follow-up`: a merged pull request left findings unfixed, and a yes files them as issues
-
-Answer it from there, or from the terminal:
+A ruling reaches the webhook you set in step 5, or waits in `status` and `shep kelpie rule`. Answer it from the terminal:
 
 ```sh
 shep kelpie rule          # lists the rulings waiting
@@ -200,7 +202,7 @@ shep kelpie rule 14 yes
 shep kelpie rule 14 no rename the flag
 ```
 
-On ntfy you can reply in the topic after a one-time `shep kelpie totp`, as Settings below describes. In the Claude app, tap an answer or reply in words.
+On ntfy you can also reply in the topic, after a one-time `shep kelpie totp`. [Rulings](#rulings) has the six kinds and how to answer each.
 
 ### 9. Pause, and find the log
 
@@ -210,102 +212,48 @@ shep kelpie pause
 
 The calls already running finish, then the workers park. `shep kelpie start` resumes it. A runner's log is `shep bleats <project>`, and the dog's is `shep bleats kelpie`.
 
-## Reference
+## The flow
 
-### Merging
+### Writing issues
 
-A project on `merge_authority = "auto"` merges its pull requests without asking once every gate passes, and posts a notice after. The example settings use `ask`, which raises a ruling before every merge.
-
-### Running a project
-
-shep-kelpie runs in your own shepherd, beside your other sheep. The adopted dog holds the leases every runner asks before a summon, and it asks shep for the channel the lease commands reach it on. `add` and `start` say how to bring the dog up when it is not running with its channel.
+The issue writer turns a request into issues an agent can build from. It reads the repo, scopes the request to one pull request's worth, or splits it where each piece works, tests and ships on its own (most requests stay whole), writes acceptance criteria into every issue, and labels each `agent:<name>` with one of the project's implementers.
 
 ```sh
-shep kelpie add        # labels, settings, and the runner, stopped
-shep kelpie start      # starts the runner, then the project
-shep kelpie pause
-shep kelpie status     # every project
-shep kelpie doctor     # what each project still needs on this machine
-shep kelpie rule 14 yes
-shep kelpie issue "<request>"   # issues for you to read, or --interactive
-shep kelpie attach 7   # steer issue 7's worker in this terminal
+shep kelpie issue "let a project be paused from lookout"
+shep kelpie issue --interactive "let a project be paused from lookout"
 ```
 
-Every trigger the runner takes is also a verb: `add <issue>`, `rework <pr>`, `adopt <pr>`, `gate [<issue>]`, `drop [<issue>]`, `timings [<n>]`, `tell "<note>"`, `pm`, `rule`, `drain` and `undrain`. Each reaches the project whose repo holds the folder you run it in, a worktree of it included, or the one `-p <project>` names anywhere in the line. From anywhere else it lists the projects and guesses nothing. `shep trigger` still works.
+On its own, it runs one fresh session in a detached checkout of `main`, files what it writes as `ready-for-human`, and ends with the list of what it filed. shep-kelpie reads each issue back and prints it, with its `agent:` label and the issue it is a sub-issue of. Read them, then label them `ready-for-agent`. An issue without acceptance criteria, its status label or exactly one `agent:` label naming a listed implementer is named with what it lacks, and the command exits non-zero. A session that fails, or ends without the list, keeps its checkout and prints the `claude --resume` line that picks it up.
 
-- `drain` holds back every call the runner would start next, and answers the status with the calls still running under `draining`. `undrain`, or a restart, lets calls start again. `shep kelpie upgrade` drains each runner itself: see [Upgrading](#upgrading)
-- `drop [<issue>]` ends a work item without merging it. Its worktree, local branch and build folder go, and its pull request stays, labelled `ready-for-human`
-- `gate [<issue>]` sends a work item whose worker's turn ended with a pull request into the review gate, when it was never entered
-- `tell "<note>"` and `pm` reach the project manager: see [The project manager](#the-project-manager)
-- `timings [<n>]` totals where the time went over the last `n` finished work items (10 when left out), in six phases: `worker`, `review`, `ci`, `ruling`, `merge` and `other` (every second lands in exactly one), and answers JSON with the totals under `seconds` and a plain-text `table`, so `shep kelpie timings 20 | jq -r .table` prints it. `status` shows each open item's split under `timings`, and the ten most recent finished items under `history`. The state file keeps the last 100
+With `--interactive` it runs `claude` in your terminal, in the project's checkout, with the issue writer's prompt appended and the request as your first message. You plan the issues together, and it files what you agree as `ready-for-agent`, onto the board. It is your session, not a runner's: shep-kelpie starts it and gets out of the way, and Claude Code asks you before each command it runs.
 
-A ruling's id is unique across projects, so `rule` needs no project:
+Either way the session reads the checkout with Read, Grep and Glob, and nothing outside it: not gh's config, Claude Code's own files or your shell history. It edits no file. Its Bash runs only what `kelpie guard` lists for it: `gh issue create`, `gh issue view <n>` and `gh issue list` on this repo, and, for the issues it filed in this session, `gh issue edit` on labels and `gh api` on their ids and sub-issue and blocked-by links, each as plain words, with a body given as a heredoc behind a quoted delimiter (`--body-file - <<'EOF'`). It runs no git. A hook after each command records the issues it filed and the ids it read, and the guard refuses an edit or a link on any other. The guard also refuses an issue without acceptance criteria, without the status label, or without exactly one listed `agent:` label, and one whose title or body names a path on this machine. On its own the session also runs in the sandbox, with nothing to write but its own scratch folder and only GitHub to reach. Each implementer's `agent:` label is made on the repo the first time the issue writer needs it.
 
-- `shep kelpie rule 14 yes`
-- `shep kelpie rule 14 no rename the flag`
-- `shep kelpie rule 15 use --dry-run`, for a worker's question. A `yes` there is the answer's text
+The issue writer is the `issue-writer` agent file: edit its body to change its prompt, or its `model` and `effort`.
 
-Quotes are optional, but zsh still needs them around a note with `?`, `*`, `!` or an apostrophe. `-p` goes before the answer: after its first word, and after a `--`, a `-p` is part of the answer. `shep kelpie rule` alone lists the rulings waiting and asks which to answer and how. Each ruling's question says what `yes` and `no` do.
+### The board
 
-`add` names the project after the repo, or `shep kelpie add <name>`. It makes the four labels where the repo lacks them, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name. `shep stop <project>` stops a runner, and `shep delete <project>` removes it.
+Issues labelled `ready-for-agent` are the board. What decides whether, and when, an issue starts:
 
-`doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's labels, CodeRabbit where a project lists it, each project's reviewers, in order, with any command or endpoint among them checked as a runner's start checks it, and which webhook, if any, rulings post to. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
+- The board skips an issue that is assigned to anyone or already has an open pull request, and one blocked by an issue that is still open. Don't assign it to yourself
+- An issue with sub-issues is never worked itself: its sub-issues are, and shep-kelpie closes it once every sub-issue is closed
+- Of the rest, `priority: P0` to `P3` labels order them, then the oldest goes first. An `agent:<name>` label, such as `agent:opus-high`, picks the agent that works it from those the project lists in `agents.implementers` (see [Agents](#agents)), and a label naming one it does not list keeps the issue off the board. An old `worker:` label is no longer read: that issue runs on the default implementer, and the runner's log says so
+- With a project manager set up (see [The project manager](#the-project-manager)), it picks among two or more issues the board could start, and may hold some back. Without one, or while it is down, the order above picks
+- No turn starts while Claude's 5-hour window is at 50% or more, and no new work item starts once today's share of the week is spent. `shep kelpie status` says why under `pacer`, and `enabled = false` in the project's `[app.dogs.kelpie.pacing]` turns both off
 
-`shep describe <project>` labels each Claude session the runner starts with its issue and role, such as `#114 worker`.
+`shep kelpie add <issue>` opens a work item for an issue at once, without the label, ahead of the board's order. It queues nothing: while `max_items` work items are open, `add <issue>` is refused.
 
-shep-kelpie refuses a shepherd on another shep minor or major than the pinned one, naming both versions. shep-kelpie's commands talk to the shepherd's socket with the shep client it is built with, never a `shep` on `PATH`.
+On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep kelpie rework <pr>`. On any other open pull request of kelpie's account, `ready-for-agent` adopts it, the same as `shep kelpie adopt <pr>`. Adoptions and reworks go before any issue. Kelpie puts `ready-for-human` on each pull request it hands back.
 
-### Leases
+### Building
 
-The dog holds `cargo-test`, a share of this machine for running tests, and `gpu`, this machine's GPU lock. Workers run their test suites under `cargo-test`, and so can anything else on the machine: `shep kelpie lease run cargo-test -- cargo test` waits for a turn, runs the command and exits with its code, or 75 when it cannot reach the dog. Three hold it at once unless `[kelpie.leases]` says otherwise, the rest queue, and `shep kelpie lease status` shows who holds each lease and who waits. A command that ends or dies gives its turn back. One whose `lease run` was killed outright keeps it until the command, and anything it left running, exits: `status` shows how long each has held it.
+A worker builds its work item inline, in a worktree of its own cut from `origin/main`, on the agent its issue's `agent:` label names or the project's default implementer. It commits, pushes, opens a draft pull request that ends `Resolves #<issue>`, and ends its turn. When the repo has a pull request template, it fills that. A project's `worker.instructions_file` adds rules the repo's own docs don't carry.
 
-`shep kelpie lease take gpu` holds the GPU lock for you until `shep kelpie lease return gpu`, so whatever takes that lock waits. Use it when you need the GPU to yourself.
+A worker whose first turn ends with no pull request and no question is sent back once, and asks you for a ruling if it stops short again. A worker that needs a decision only you can make ends its turn on a question, which reaches you as a ruling, and your answer is its next turn. A turn still running at `worker.turn_timeout` minutes is ended and asks you whether to go on.
 
-### Settings
+Each worker runs inside the sandbox with its fence: it writes only its worktree and build folder, reaches only GitHub, the model's API and the project's `allowed_domains`, and never merges, marks a pull request ready or summons a review bot. `kelpie confine` checks every file write and `kelpie guard` every command. Workers run their test suites under the `cargo-test` lease (see [Leases](#leases)).
 
-A project's settings are its `[app.dogs.kelpie]` table, which lookout edits in the runner's pane. `settings.example.toml` lists every key, and shows a runner's Flockfile entry for a project set up by hand. It needs `SHEP_HOME` as an absolute path in `env`, since a sheep starts without it, and `kill_timeout = "10s"` or more, since a runner needs about 7s to stop cleanly.
-
-shep-kelpie's own settings, shared by every project, are the `[kelpie]` section of `dogs.toml`, which lookout edits in the dog's pane. Start from `kelpie-settings.example.toml`, and keep `dogs.toml` private: the webhook's URL is a credential.
-
-- `[kelpie.webhook]` is where rulings are posted, and the only way one reaches you away from the terminal. With none, a ruling shows only in the log, `status` and `shep kelpie rule`
-- `gpu_metrics_url` is the GPU's Prometheus metrics page, such as `nvidia_gpu_exporter`'s `/metrics`. `status` then shows the GPU's load, memory, power and temperature under `gpu`, read every 15 seconds
-- A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start. The dog reads `[kelpie.leases]`, and each review bot's window from its agent file, only when it starts, so after a change to either run `shep restart kelpie`
-
-On an ntfy webhook, a ruling can be answered from the topic: run `shep kelpie totp` once and scan the QR code into an authenticator app, then reply with the line the alert ends on, such as `14 yes <code>`, with the app's code last. A reply takes the same answers as `shep kelpie rule`. Anyone who can read the topic can read rulings, but only a reply with the code of the moment answers one, and each code answers once. Five wrong codes turn answers off until `shep kelpie totp --unlock`, and `shep kelpie totp --rotate` replaces a secret that may have leaked.
-
-### shep-kelpie's home
-
-shep-kelpie keeps everything under `$SHEP_HOME/kelpie`, or the folder `KELPIE_HOME` names:
-
-- `totp`, `tools` and `rulings`, shared by every project
-- `dog`, with the dog's book and its door, `lease.sock`. The adopted dog gets `SHEP_HOME` and no `KELPIE_HOME` from shep, so it is always under `$SHEP_HOME/kelpie`, even with `KELPIE_HOME` set for your own commands
-- `<project>`, with the project's `state.json`, `board.md`, worker files, `worktrees` and `builds`, and `pm`, the project manager's folder
-
-So a project can't be named for one of shep-kelpie's own folders. Socket paths must stay under 104 bytes, so a runner with a long `SHEP_HOME` refuses to start and names the path that is too long. Keep a shepherd's `SHEP_HOME` short.
-
-A runner or the dog refuses to start while `~/.kelpie` still holds its files from before shep-kelpie's home moved under `$SHEP_HOME`. Run the previous release once, which moves them, or move them by hand.
-
-### Upgrading
-
-```sh
-shep kelpie upgrade --ref main          # build shep-kelpie at a git ref and install it
-shep kelpie upgrade --release 0.3.0     # install a release (none is published yet)
-shep kelpie upgrade --binary ./kelpie   # install a build made by hand, as it is
-shep kelpie upgrade --rollback          # put back the build the last upgrade replaced
-shep kelpie upgrade --ref main --now    # restart the runners without draining them first
-```
-
-The installed shep-kelpie is whatever program the adopted dog runs, which the shepherd knows (`~/.cargo/bin/shep-kelpie` for the install above), and `shep kelpie add` registers runners that run the same path. An upgrade writes the new build beside that file and renames it over, as shep upgrades itself, so the running file's bytes are never edited in place. Before the swap it copies the file it replaces into `$SHEP_HOME/kelpie/builds` (resolved first if the path is a symlink), and `--rollback` puts that copy back the same way. Then it restarts the dog and each running runner one at a time, never while a work item is merging: it waits, and says what it waits on. A runner that does not answer `status` is waited on too, and named if it never does. A runner you stop while the upgrade waits stays stopped, and so does one stopped before it. A stopped runner starts on the new build when you start it.
-
-Before it restarts a runner, the upgrade drains it, so the restart cuts no worker's turn short. The runner's `drain` trigger tells it to start no new call (a worker's turn, a reviewer's session or local round, the project manager's wake), while the calls it has running go on to their end and its merges go on as ever. The upgrade asks again until the runner shows no call running, saying what it waits on, then waits out any merge and restarts it. It waits no longer than the runner's turn ceiling (or the project manager's, if longer) plus five minutes, counted from when the wait began. A turn's ceiling counts from when it got the lease it waited for, and a reviewer's session has no ceiling, so either can outrun that bound. Past it the upgrade sends the runner `undrain`, so it starts calls again on the old build, names it, and restarts nothing for it, as for a merge that outlasts its wait. A runner on a build from before `drain` is restarted as before, and the upgrade says the restart cuts its calls short. `--now`, first or last, restarts without draining, for when you want the build in place at once; the merge wait still holds. The dog is never drained, since the calls are the runners'. A restart ends draining. So does a Ctrl-C or SIGTERM to the upgrade, or any failure, while a runner drains: the upgrade sends it `undrain` before it exits. Only a shepherd it cannot reach leaves one drained. The upgrade prints `shep kelpie undrain -p <project>` as each drain starts, for that case, and `shep kelpie status` marks a draining runner `(draining)`.
-
-If an upgrade stops after the swap (a merge or a call that outlasts the wait, a sheep that does not come back, Ctrl-C), the new build is already installed and the message says so. `shep kelpie upgrade --binary <installed path>` finishes the restarts and touches no file. `--rollback` does not: it swaps the two builds again.
-
-Every sheep it restarts must run the dog's path. If one does not, the upgrade stops before it changes anything and names the sheep and its path. A `--binary` without its executable bits is refused with the `chmod +x` that fixes it, and only one upgrade runs at a time: a second refuses while the first holds `$SHEP_HOME/kelpie/upgrade.lock`. The swap changes the file for every shepherd that adopts the same path, with no check against their shep.
-
-Before it changes anything it asks the new build which shep it is made with (`shep-kelpie version --json`) and compares the minor with your shepherd's. If they differ it stops before restarting anything and prints the steps: upgrade shep and reload its shepherd, then run the new build's own `upgrade` with `SHEP_HOME` set to your shepherd, since the old kelpie that `shep kelpie` runs refuses the new shepherd. The upgrade prints the exact line. `--rollback` checks the previous build the same way.
-
-### Skills
+#### Skills
 
 Every step shep-kelpie drives an agent through runs a skill, by default from [mattpocock/skills](https://github.com/mattpocock/skills) (MIT). shep-kelpie vendors the ones it uses in `skills/`, pinned to one upstream commit with its licence, and writes them out as a Claude Code plugin when a runner starts. A project installs nothing.
 
@@ -330,14 +278,16 @@ A skill that can't load runs shep-kelpie's own prompt instead. The runner logs w
 
 ### The review
 
-Each pull request goes through a review before CI. A project lists its reviewers in `agents.reviewers`, in the order the review runs them, each an agent file whose `role` is `reviewer` (see Agents below). Each listed reviewer runs once, in order, and a list changed mid-pass runs whichever listed reviewers the pass has not. A reviewer whose call fails three times in a row is passed over for the rest of the pass, and `status` lists it under `reviewers_skipped`. One that finds anything above a nit sends the worker all of its findings, nits included and at its own severity, for one fix turn, and the next reviewer reads the fix. A round of nits, or of nothing, goes straight to the next reviewer. A fix turn that pushes nothing parks on a ruling, unless the worker deferred every finding it was sent, in which case the next reviewer reads the pull request as it stands. A pass that ends with no reviewer having read the pull request, because one was down, kept failing or reviewed no file, marks the work item unreviewed: `status` shows why, the merge ruling's question says so, and under `auto` it gets the merge ruling instead of merging. An empty list, or reviewers whose `paths` all miss the change, is your choice, and the log says so once. After the last one the pull request goes to CI. There is no judge and no second pass: whatever the last fix leaves is what CI and the merge see. A pass starts again from the top only on new code the review has not seen, such as the fix a merge ruling's `no` asks for, a change you accept that someone else pushed, or a rework. An empty list reviews nothing.
+Each pull request goes through a review before CI. A project lists its reviewers in `agents.reviewers`, in the order the review runs them, each an agent file whose `role` is `reviewer` (see [Agents](#agents)). Each listed reviewer runs once, in order, and a list changed mid-pass runs whichever listed reviewers the pass has not. A reviewer whose call fails three times in a row is passed over for the rest of the pass, and `status` lists it under `reviewers_skipped`. One that finds anything above a nit sends the worker all of its findings, nits included and at its own severity, for one fix turn, and the next reviewer reads the fix. A round of nits, or of nothing, goes straight to the next reviewer. A fix turn that pushes nothing parks on a ruling, unless the worker deferred every finding it was sent, in which case the next reviewer reads the pull request as it stands. A pass that ends with no reviewer having read the pull request, because one was down, kept failing or reviewed no file, marks the work item unreviewed: `status` shows why, the merge ruling's question says so, and under `auto` it gets the merge ruling instead of merging. An empty list, or reviewers whose `paths` all miss the change, is your choice, and the log says so once. After the last one the pull request goes to CI. There is no judge and no second pass: whatever the last fix leaves is what CI and the merge see. A pass starts again from the top only on new code the review has not seen, such as the fix a merge ruling's `no` asks for, a change you accept that someone else pushed, or a rework. An empty list reviews nothing.
+
+A finding the worker leaves as out of scope goes into its deferred findings file. Once the pull request merges, each one becomes a `ready-for-agent` issue linking it: under `ask` after a `follow-up` ruling, and under `auto` with none.
 
 A reviewer runs in one of four ways, by its file's `harness`:
 
 - `claude-code`, `codex` or `pi`: a fresh session on its `model` and `effort`, which reads the worktree with Read, Grep and Glob and runs no command. The file's body is its prompt.
 - `command`: a command of your own that keeps the contract below, and takes no body.
 - `endpoint`: shep-kelpie's own reviewer, for any OpenAI-compatible server such as Ollama, LM Studio or llama.cpp's server, and takes no body.
-- `bot`: a pull request review bot, CodeRabbit, cubic or Codex, summoned on the pull request (see Review bots below), and takes no body.
+- `bot`: a pull request review bot, CodeRabbit, cubic or Codex, summoned on the pull request (see [Review bots](#review-bots)), and takes no body.
 
 A session's prompt is its file's body with the commit the change is against at `{{BASE}}` and the diff at `{{DIFF}}`. A body with no `{{DIFF}}` gets the diff after it. The body asks for kelpie's format, one finding per line as `SEVERITY|file:line|what|why`, or `CLEAN` alone. Every reviewer's prompt carries the issue's acceptance criteria: the section under an "Acceptance criteria" heading, or the whole body without one. `paths` limits a reviewer to pull requests that change a file under one of its globs, and the review skips it elsewhere. `second_look: true` runs a session twice: the second fresh session is shown what the first found and asked only for what it missed, and the worker gets one fix turn for both lists.
 
@@ -397,6 +347,19 @@ hours: 1
 
 A bot's file is named for its bot, since `reviews` in `hours` is its account's window, which the dog books from that file when it starts and every project shares. Its round marks a draft ready, since a bot may skip drafts, waits for the bot's window and lease, and summons it: CodeRabbit by the `review please` label, or by `@coderabbitai full review` on a pull request it read before that would otherwise find nothing new, cubic and Codex by their comments. A summon with no sign of being heard in fifteen minutes goes out once more. Once a review covers the head, the bot's open threads are its findings, and go to one fix turn as any reviewer's do. A refusal hands the window back to the dog and the round asks again. A window that opens more than an hour on, by the dog's book or by the bot's refusal, passes the bot over for the pass, and so do two hours with no review, two hours its round could not summon it, a bot you stop listing mid-round, and CodeRabbit on a repo the forge reports not public, which is checked just before each summon; `status` lists each under `bots_skipped`, and a pass nobody else read is marked unreviewed. `rounds: 1` lets a bot read a work item's pull request once, whatever its passes, counting its reviews from before a rework or an adoption, and is unset by default. An adopted pull request goes through a pass of the listed bots alone, and until each bot answers a summon of shep-kelpie's own, none of its reviews from before the adoption stands for its read. Codex's `reviews_on_ready: true` says it reviews a pull request when it leaves draft, as the repo's Codex settings may have it: then marking ready, under its lease, is the summon, with no comment, and it is never asked again by comment. List it before any other bot, whose mark-ready would draw its review outside its lease: the runner refuses the other order.
 
+No review bot is listed unless you list it, and a project that lists none never asks the forge about one. CodeRabbit's free plan reviews public repos only, so a repo GitHub marks private cannot list it, and lists `cubic` or `codex` instead. shep-kelpie asks CodeRabbit for a review by putting the `review please` label on, so the repo's `.coderabbit.yaml` must review only labelled pull requests. Without that, CodeRabbit reviews every push on its own and spends the hour a round is waiting on:
+
+```yaml
+reviews:
+  auto_review:
+    labels:
+      - "review please"
+```
+
+Every thread a review bot leaves open goes to the worker as a finding, and shep-kelpie resolves those threads once the worker's fix moves the head. If the forge refuses three steps in a row, the review goes on with them open and the bot's next read sends them again.
+
+#### Local reviewers
+
 An endpoint takes `url` (the base, up to and including `/v1`), `model`, and `context`, the context size in tokens the server gives that model. Kelpie diffs the pull request, cuts the diff to fit that context, and sends each piece with its own review prompt. Set `context` to what the server really uses: Ollama gives its OpenAI-compatible endpoint a small default context unless `OLLAMA_CONTEXT_LENGTH` says more, and drops whatever doesn't fit without saying so.
 
 A command is run as `<command> --dir <worktree> --round <n> --diff <base>`, with:
@@ -412,75 +375,17 @@ It writes `round-<n>.txt` in that folder, one finding per line as `SEVERITY|path
 
 With a lease, before a round against Ollama, kelpie reads the host's `/api/ps`. An endpoint's host is its `url` without the `/v1`. A command names its host with `ollama: http://localhost:11434`, which needs a lease, and its model with `ollama_model`, else every model the host has loaded is checked. A model partly or wholly on the CPU fails the round and raises a ruling, and a yes runs the round again once the model is back on the GPU. A host with no `/api/ps` is not checked, and `status` shows the model's name, its share on the GPU, its context length and when it unloads.
 
-### The board
+### CI and the merge
 
-Issues labelled `ready-for-agent` are the board. On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep kelpie rework <pr>`. On any other open pull request of kelpie's account, `ready-for-agent` adopts it, the same as `shep kelpie adopt <pr>`. Kelpie puts `ready-for-human` on each pull request it hands back.
+After the review's last reviewer, kelpie waits for CI on the pull request's head. A red run is the worker's next turn, naming the failed checks; a second red run on a head the worker left alone asks you. A green run on a branch without the latest `main` is caught up first: kelpie rebases its own commits onto `main` and pushes with a lease, or merges `main` in where the branch holds a merge or commits that are not its own, and a conflict is the worker's next turn. A project with `ci = false` reads no checks.
 
-The runner writes the board out as `board.md` in the project's folder, and `status` names the file under `board`. It is the briefing the project manager's agent reads, so that agent never runs git or gh itself, and you can read it too. Code writes it, with no model call, at start and whenever the board changes: a call starting or ending, a phase change, a ruling raised or answered, a read of the ready queue. It is written again at least once a minute while the runner looks at the board, and each write replaces the file whole. Text that names this machine or one of the project's `private_names` is withheld from it, as from the forge. It holds:
+A project on `merge_authority = "ask"` gets a ruling before every merge, and a yes merges only the head it was asked about, while CI on it is green and it has the latest `main`. A project on `"auto"` merges its pull requests without asking once every gate passes, and posts a notice after. Every other ruling still asks under `auto`. The merge is always a merge commit of the head the gates passed, never a squash, and kelpie then removes the worktree, both branches and the build folder. With a merge queue on `main`, kelpie queues the pull request and waits on the queue.
 
-- each open work item: its issue, phase, pull request, age and agent, the worker's last closing message, and the files its branch touches
-- what each item's session is doing. A worker's turn shows when it last made a tool call or wrote output, read from its transcript (Codex's output file, pi's session file), and reads as idle after 10 minutes of neither
-- the rulings waiting on you
-- the ready queue in the board's order, with each issue's priority, why the board passes over it if it does, the paths its body names in backticks, and the first 600 characters of its body, quoted
-- the board's events since the project manager last read it, or the last 20 before it ever has
-- the overlap: for each pair of open branches, the files both touch and the files `git merge-tree` finds in conflict, and each ready issue's named paths against them. The conflict check needs git 2.38 or later
-
-### Attaching to a worker
-
-`shep kelpie attach <issue>` takes over a work item's worker by hand. The runner holds the work item, so no call starts for it. A call already in flight runs to its end, and `attach` says it is waiting. Then it resumes the worker's session with `claude --resume` in your terminal, in the item's worktree, with the worker's settings file and inside the worker's sandbox, so its deny rules, its guard and its fence hold while you drive. Claude Code asks before each tool call as it always does.
-
-When you exit `claude`, the work item carries on, and its next turn resumes the same session. A commit or push you make while attached is the worker's own, as a push in a turn is, so the gate takes it as the branch's head rather than a change kelpie did not make. The runner holds the work item while either the `attach` command or the session it started runs, each known by its pid and start time, and lets it go at its next pass once both have ended. A SIGTERM or SIGHUP to `attach` is passed on to the session, which `attach` waits for. `status` shows the hold under the item's `attached`, and `drop` refuses the item while it is held.
-
-`attach` changes nothing and says what to do instead for a work item whose worker has no session yet (its first turn starts one), one parked on a ruling (answer it first), or one merging. Only a Claude Code worker can be attached: a Codex or pi worker's session resumes another way, by hand.
-
-### Writing issues
-
-The issue writer turns a request into issues an agent can build from. It reads the repo, scopes the request to one pull request's worth, or splits it where each piece works, tests and ships on its own (most requests stay whole), writes acceptance criteria into every issue, and labels each `agent:<name>` with one of the project's implementers.
-
-```sh
-shep kelpie issue "let a project be paused from lookout"
-shep kelpie issue --interactive "let a project be paused from lookout"
-```
-
-On its own, it runs one fresh session in a detached checkout of `main`, files what it writes as `ready-for-human`, and ends with the list of what it filed. shep-kelpie reads each issue back and prints it, with its `agent:` label and the issue it is a sub-issue of. Read them, then label them `ready-for-agent`. An issue without acceptance criteria, its status label or exactly one `agent:` label naming a listed implementer is named with what it lacks, and the command exits non-zero. A session that fails, or ends without the list, keeps its checkout and prints the `claude --resume` line that picks it up.
-
-With `--interactive` it runs `claude` in your terminal, in the project's checkout, with the issue writer's prompt appended and the request as your first message. You plan the issues together, and it files what you agree as `ready-for-agent`, onto the board. It is your session, not a runner's: shep-kelpie starts it and gets out of the way, and Claude Code asks you before each command it runs.
-
-Either way the session reads the checkout with Read, Grep and Glob, and nothing outside it: not gh's config, Claude Code's own files or your shell history. It edits no file. Its Bash runs only what `kelpie guard` lists for it: `gh issue create`, `gh issue view <n>` and `gh issue list` on this repo, and, for the issues it filed in this session, `gh issue edit` on labels and `gh api` on their ids and sub-issue and blocked-by links, each as plain words, with a body given as a heredoc behind a quoted delimiter (`--body-file - <<'EOF'`). It runs no git. A hook after each command records the issues it filed and the ids it read, and the guard refuses an edit or a link on any other. The guard also refuses an issue without acceptance criteria, without the status label, or without exactly one listed `agent:` label, and one whose title or body names a path on this machine. On its own the session also runs in the sandbox, with nothing to write but its own scratch folder and only GitHub to reach. Each implementer's `agent:` label is made on the repo the first time the issue writer needs it.
-
-The issue writer is the `issue-writer` agent file: edit its body to change its prompt, or its `model` and `effort`.
-
-### The project manager
-
-A project can name an agent that manages its board, the project manager:
-
-```toml
-[app.dogs.kelpie.agents]
-implementers = ["sonnet-high"]
-pm = "pm"
-```
-
-Kelpie's own `pm` is Opus 5.5 at medium. Code wakes it, never a timer, when:
-
-- a slot is free and two or more ready issues could fill it
-- the branches of two open work items conflict, as `git merge-tree` finds them
-- a work item is stuck: its turn failed, it stopped twice with no pull request, CI stayed red with no fix pushed (each of which already asks you a ruling), or its worker has been idle for 10 minutes
-- you tell it something: `shep kelpie tell "hold #12 until the release"`
-
-Each wake carries every reason gathered since the last one, in one call that runs as a lamb like any other and that the runner never waits on, one at a time per project. It runs in `<project>/pm`, which holds `board.md` as it stood when it woke and its own notes, `pm-notes.md`. Of kelpie's and the shepherd's homes it reads that folder alone, and it never reads your checkout, `gh`'s token or the credentials no worker reads. It reaches no host but the model's, has only Read, Glob, Grep, Edit and Write and no MCP server, runs no command, git or gh, and may only add to the end of its notes, at most 64 KiB a write, which a hook holds it to. It answers in one JSON object: a pick, the ready issues to hold until an open work item closes, an unstick (`retry`, `re-scope`, `ask` or `none`) and a reply to you.
-
-Kelpie checks the answer against the board before it acts. A pick or a hold must name a ready issue the board shows, and an unstick a work item that is stuck now. Anything else is dropped and logged as `pm-answered`, with why. A `retry` answers the item's ruling yes (for CI still red, sends the worker back to it), or ends an idle worker's call and resumes its session. A `re-scope` or `ask` adds the project manager's words to the item's ruling, on one line after `PM says:`, and posts it to you again. A pick of none starts nothing until its next wake; with no work item open it lasts 30 minutes before the board's rule picks, and a hold over every issue the board could start goes at once, so a project with nothing in flight never stalls. Its reply shows in `status` under `pm.reply` and in the log.
-
-It keeps one session per project, resumed on each wake. Once a wake leaves its context past 100k tokens, the session is compacted before the next wake. A session that cannot be resumed starts again from the board. `shep kelpie pm` opens that session in your terminal, in its settings and sandbox, as `attach` opens a worker's: the runner holds the project manager for that command and for the session it starts, each known by its pid and start time, so no wake starts until both have ended, and a wake already in flight runs to its end first. One terminal holds it at a time. When there is no session yet, `pm` starts the one its wakes then resume.
-
-With no project manager named, while it is down (a failed call passes it over for 10 minutes), over Claude's 5-hour pace, held in your terminal, or when its pick is dropped, the board's rule picks and a stuck item waits on its ruling, as without one.
-
-Measured on 33 real decision points from this repo and shep, a project manager briefed this way avoided 9 to 12 of 11 to 15 avoidable conflicts where the board's rule avoided 4 of 15, and decided as well as one that ran git and gh itself at about half the cost a wake. On a scripted day of 40 wakes, one session compacted as it went cost $3.31 a day on Opus, against $8.16 for a fresh session every wake, and kept what it knew.
-
+A commit someone else pushes to a work item's branch, or a label or ready state kelpie did not set, parks it on a `foreign-change` ruling. A pull request that changes agents' own files, such as `.claude` or `.mcp.json`, parks it on an `agent-files` ruling. A pull request you merge by hand ends its work item; one closed without merging parks it.
 
 ## Agents
 
-An agent is a file: `$SHEP_HOME/kelpie/agents/<name>.md` (or the `agents` folder of the home `KELPIE_HOME` names), YAML frontmatter and then a Markdown body. The name is the file's name without `.md`. An implementer's body is added to kelpie's own instructions for that agent, and an empty body adds nothing. A reviewer's body is its prompt (see The review above).
+An agent is a file: `$SHEP_HOME/kelpie/agents/<name>.md` (or the `agents` folder of the home `KELPIE_HOME` names), YAML frontmatter and then a Markdown body. The name is the file's name without `.md`. An implementer's body is added to kelpie's own instructions for that agent, and an empty body adds nothing. A reviewer's body is its prompt (see [The review](#the-review)).
 
 ```markdown
 ---
@@ -548,6 +453,187 @@ Each Codex call gets a home of its own with that login linked in, so no call see
 A local implementer, one whose usage is `none`, is never the default: it gets only the issues labelled `agent:<name>` for it, so you pick which issues it takes. Each account keeps its own daily allowance and 5-hour stop, shown under its name in `status.pacer`, and a new work item waits on every account its roles spend. `shep kelpie doctor` checks Codex answers for a project that spends it. A `none` agent holds `lease` (the GPU lock, `gpu`, by default) for the whole of each call instead, so a qwen round waits behind its turn, and `status.local_leases` shows who holds it.
 
 `status` shows each role's tokens in `by_role`, with `cost_usd` only for calls whose harness reports dollars. `unpriced_calls` counts the rest.
+
+## The board and the project manager
+
+### The briefing
+
+The runner writes the board out as `board.md` in the project's folder, and `status` names the file under `board`. It is the briefing the project manager's agent reads, so that agent never runs git or gh itself, and you can read it too. Code writes it, with no model call, at start and whenever the board changes: a call starting or ending, a phase change, a ruling raised or answered, a read of the ready queue. It is written again at least once a minute while the runner looks at the board, and each write replaces the file whole. Text that names this machine or one of the project's `private_names` is withheld from it, as from the forge. It holds:
+
+- each open work item: its issue, phase, pull request, age and agent, the worker's last closing message, and the files its branch touches
+- what each item's session is doing. A worker's turn shows when it last made a tool call or wrote output, read from its transcript (Codex's output file, pi's session file), and reads as idle after 10 minutes of neither
+- the rulings waiting on you
+- the ready queue in the board's order, with each issue's priority, why the board passes over it if it does, the paths its body names in backticks, and the first 600 characters of its body, quoted
+- the board's events since the project manager last read it, or the last 20 before it ever has
+- the overlap: for each pair of open branches, the files both touch and the files `git merge-tree` finds in conflict, and each ready issue's named paths against them. The conflict check needs git 2.38 or later
+
+### The project manager
+
+A project can name an agent that manages its board, the project manager:
+
+```toml
+[app.dogs.kelpie.agents]
+implementers = ["sonnet-high"]
+pm = "pm"
+```
+
+Kelpie's own `pm` is Opus 5.5 at medium. Code wakes it, never a timer, when:
+
+- a slot is free and two or more ready issues could fill it
+- the branches of two open work items conflict, as `git merge-tree` finds them
+- a work item is stuck: its turn failed, it stopped twice with no pull request, CI stayed red with no fix pushed (each of which already asks you a ruling), or its worker has been idle for 10 minutes
+- you tell it something: `shep kelpie tell "hold #12 until the release"`
+
+Each wake carries every reason gathered since the last one, in one call that runs as a lamb like any other and that the runner never waits on, one at a time per project. It runs in `<project>/pm`, which holds `board.md` as it stood when it woke and its own notes, `pm-notes.md`. Of kelpie's and the shepherd's homes it reads that folder alone, and it never reads your checkout, `gh`'s token or the credentials no worker reads. It reaches no host but the model's, has only Read, Glob, Grep, Edit and Write and no MCP server, runs no command, git or gh, and may only add to the end of its notes, at most 64 KiB a write, which a hook holds it to. It answers in one JSON object: a pick, the ready issues to hold until an open work item closes, an unstick (`retry`, `re-scope`, `ask` or `none`) and a reply to you.
+
+Kelpie checks the answer against the board before it acts. A pick or a hold must name a ready issue the board shows, and an unstick a work item that is stuck now. Anything else is dropped and logged as `pm-answered`, with why. A `retry` answers the item's ruling yes (for CI still red, sends the worker back to it), or ends an idle worker's call and resumes its session. A `re-scope` or `ask` adds the project manager's words to the item's ruling, on one line after `PM says:`, and posts it to you again. A pick of none starts nothing until its next wake; with no work item open it lasts 30 minutes before the board's rule picks, and a hold over every issue the board could start goes at once, so a project with nothing in flight never stalls. Its reply shows in `status` under `pm.reply` and in the log.
+
+It keeps one session per project, resumed on each wake. Once a wake leaves its context past 100k tokens, the session is compacted before the next wake. A session that cannot be resumed starts again from the board. `shep kelpie pm` opens that session in your terminal, in its settings and sandbox, as `attach` opens a worker's: the runner holds the project manager for that command and for the session it starts, each known by its pid and start time, so no wake starts until both have ended, and a wake already in flight runs to its end first. One terminal holds it at a time. When there is no session yet, `pm` starts the one its wakes then resume.
+
+With no project manager named, while it is down (a failed call passes it over for 10 minutes), over Claude's 5-hour pace, held in your terminal, or when its pick is dropped, the board's rule picks and a stuck item waits on its ruling, as without one.
+
+Measured on 33 real decision points from this repo and shep, a project manager briefed this way avoided 9 to 12 of 11 to 15 avoidable conflicts where the board's rule avoided 4 of 15, and decided as well as one that ran git and gh itself at about half the cost a wake. On a scripted day of 40 wakes, one session compacted as it went cost $3.31 a day on Opus, against $8.16 for a fresh session every wake, and kept what it knew.
+
+## Attaching to a worker
+
+`shep kelpie attach <issue>` takes over a work item's worker by hand. The runner holds the work item, so no call starts for it. A call already in flight runs to its end, and `attach` says it is waiting. Then it resumes the worker's session with `claude --resume` in your terminal, in the item's worktree, with the worker's settings file and inside the worker's sandbox, so its deny rules, its guard and its fence hold while you drive. Claude Code asks before each tool call as it always does.
+
+When you exit `claude`, the work item carries on, and its next turn resumes the same session. A commit or push you make while attached is the worker's own, as a push in a turn is, so the gate takes it as the branch's head rather than a change kelpie did not make. The runner holds the work item while either the `attach` command or the session it started runs, each known by its pid and start time, and lets it go at its next pass once both have ended. A SIGTERM or SIGHUP to `attach` is passed on to the session, which `attach` waits for. `status` shows the hold under the item's `attached`, and `drop` refuses the item while it is held.
+
+`attach` changes nothing and says what to do instead for a work item whose worker has no session yet (its first turn starts one), one parked on a ruling (answer it first), or one merging. Only a Claude Code worker can be attached: a Codex or pi worker's session resumes another way, by hand.
+
+## Rulings
+
+A ruling is a decision only you make. The worker waiting on one is parked, and the rest of the project goes on. It is one of six kinds:
+
+- `merge`: CI is green, and a yes merges the pull request
+- `question`: the worker asks, and your answer is its next turn
+- `stuck`: the work item cannot go on by itself, and its reason says why: `rebase`, `still-red`, `merge-refused`, `closed`, `local-model-spilled`, `fix-not-pushed`, `turn-timeout` or `turn-failed`. The question says what a yes does
+- `agent-files`: the pull request changes agents' own files, and a yes accepts them
+- `foreign-change`: someone else changed the pull request, and a yes accepts the change
+- `follow-up`: a merged pull request left findings unfixed, and a yes files them as issues
+
+A ruling shows in the runner's log, in `shep kelpie status` and in `shep kelpie rule`, and posts to the webhook when kelpie's `[kelpie.webhook]` is set (see [Settings](#settings)). The pull request gets a comment for every ruling but a merge. Answer it from the terminal:
+
+- `shep kelpie rule 14 yes`
+- `shep kelpie rule 14 no rename the flag`
+- `shep kelpie rule 15 use --dry-run`, for a worker's question. A `yes` there is the answer's text
+
+A ruling's id is unique across projects, so `rule` needs no project. Quotes are optional, but zsh still needs them around a note with `?`, `*`, `!` or an apostrophe. `-p` goes before the answer: after its first word, and after a `--`, a `-p` is part of the answer. `shep kelpie rule` alone lists the rulings waiting and asks which to answer and how. Each ruling's question says what `yes` and `no` do. A `no` with a note is the worker's next turn.
+
+On an ntfy webhook, a ruling can be answered from the topic: run `shep kelpie totp` once and scan the QR code into an authenticator app, then reply with the line the alert ends on, such as `14 yes <code>`, with the app's code last. A reply takes the same answers as `shep kelpie rule`. Anyone who can read the topic can read rulings, but only a reply with the code of the moment answers one, and each code answers once. Five wrong codes turn answers off until `shep kelpie totp --unlock`, and `shep kelpie totp --rotate` replaces a secret that may have leaked.
+
+With a project manager, it may answer a `stuck` ruling for you with a retry, or add its words to the ruling and post it again (see [The project manager](#the-project-manager)).
+
+## Upgrading
+
+```sh
+shep kelpie upgrade --ref main          # build shep-kelpie at a git ref and install it
+shep kelpie upgrade --release 0.3.0     # install a release (none is published yet)
+shep kelpie upgrade --binary ./kelpie   # install a build made by hand, as it is
+shep kelpie upgrade --rollback          # put back the build the last upgrade replaced
+shep kelpie upgrade --ref main --now    # restart the runners without draining them first
+```
+
+The installed shep-kelpie is whatever program the adopted dog runs, which the shepherd knows (`~/.cargo/bin/shep-kelpie` for the install above), and `shep kelpie add` registers runners that run the same path. An upgrade writes the new build beside that file and renames it over, as shep upgrades itself, so the running file's bytes are never edited in place. Before the swap it copies the file it replaces into `$SHEP_HOME/kelpie/builds` (resolved first if the path is a symlink), and `--rollback` puts that copy back the same way. Then it restarts the dog and each running runner one at a time, never while a work item is merging: it waits, and says what it waits on. A runner that does not answer `status` is waited on too, and named if it never does. A runner you stop while the upgrade waits stays stopped, and so does one stopped before it. A stopped runner starts on the new build when you start it.
+
+Before it restarts a runner, the upgrade drains it, so the restart cuts no worker's turn short. The runner's `drain` trigger tells it to start no new call (a worker's turn, a reviewer's session or local round, the project manager's wake), while the calls it has running go on to their end and its merges go on as ever. The upgrade asks again until the runner shows no call running, saying what it waits on, then waits out any merge and restarts it. It waits no longer than the runner's turn ceiling (or the project manager's, if longer) plus five minutes, counted from when the wait began. A turn's ceiling counts from when it got the lease it waited for, and a reviewer's session has no ceiling, so either can outrun that bound. Past it the upgrade sends the runner `undrain`, so it starts calls again on the old build, names it, and restarts nothing for it, as for a merge that outlasts its wait. A runner on a build from before `drain` is restarted as before, and the upgrade says the restart cuts its calls short. `--now`, first or last, restarts without draining, for when you want the build in place at once; the merge wait still holds. The dog is never drained, since the calls are the runners'. A restart ends draining. So does a Ctrl-C or SIGTERM to the upgrade, or any failure, while a runner drains: the upgrade sends it `undrain` before it exits. Only a shepherd it cannot reach leaves one drained. The upgrade prints `shep kelpie undrain -p <project>` as each drain starts, for that case, and `shep kelpie status` marks a draining runner `(draining)`.
+
+If an upgrade stops after the swap (a merge or a call that outlasts the wait, a sheep that does not come back, Ctrl-C), the new build is already installed and the message says so. `shep kelpie upgrade --binary <installed path>` finishes the restarts and touches no file. `--rollback` does not: it swaps the two builds again.
+
+Every sheep it restarts must run the dog's path. If one does not, the upgrade stops before it changes anything and names the sheep and its path. A `--binary` without its executable bits is refused with the `chmod +x` that fixes it, and only one upgrade runs at a time: a second refuses while the first holds `$SHEP_HOME/kelpie/upgrade.lock`. The swap changes the file for every shepherd that adopts the same path, with no check against their shep.
+
+Before it changes anything it asks the new build which shep it is made with (`shep-kelpie version --json`) and compares the minor with your shepherd's. If they differ it stops before restarting anything and prints the steps: upgrade shep and reload its shepherd, then run the new build's own `upgrade` with `SHEP_HOME` set to your shepherd, since the old kelpie that `shep kelpie` runs refuses the new shepherd. The upgrade prints the exact line. `--rollback` checks the previous build the same way.
+
+## What shep does for it
+
+shep-kelpie is a dog of your own shepherd, and leans on it for everything a process manager does:
+
+- **Supervision.** The adopted `kelpie` is the dog, and each project's runner is a sheep. shep starts, restarts and stops them, and keeps them beside your other sheep. `shep stop <project>` stops a runner, and `shep delete <project>` removes it
+- **Lambs.** Every agent call a runner starts, a worker's turn, a reviewer's session or the project manager's wake, is a lamb of that runner. `shep describe <project>` labels each with its issue and role, such as `#114 worker`
+- **Triggers and status.** Every `shep kelpie` verb is a trigger on the shepherd channel, which `shep trigger <project> <action>` sends too, and the runner answers while its calls run. Runners ask the dog for leases with metrics on shep's bus
+- **Settings.** A project's settings are its runner's `[app.dogs.kelpie]` table, and shep-kelpie's own are the `[kelpie]` section of `dogs.toml`. shep keeps both, and lookout edits both from shep-kelpie's settings schema
+- **Logs.** `shep bleats <project>` is a runner's log, and `shep bleats kelpie` the dog's
+
+Two things shep-kelpie still does itself, until shep can:
+
+- **Stopping its calls.** A runner asks for `shutdown_with_message`, so a stop reaches it as a message, and it ends the calls it started with its own stop ladder (SIGTERM, then SIGKILL after 3 seconds) before it exits. That needs `kill_timeout = "10s"` or more on the runner's entry. Once shep sweeps a sheep's whole lamb tree on every stop (shep-pm/shep#688), that ladder goes (ADR 0005)
+- **Reaching you.** Rulings go to kelpie's own webhook, ntfy or Discord, and ntfy replies are checked with kelpie's own TOTP, until shep can carry a question itself (shep-pm/shep#689)
+
+shep-kelpie refuses a shepherd on another shep minor or major than the pinned one, naming both versions. shep-kelpie's commands talk to the shepherd's socket with the shep client it is built with, never a `shep` on `PATH`. Keep a shepherd's `SHEP_HOME` short: see [shep-kelpie's home](#shep-kelpies-home).
+
+## Reference
+
+### Commands
+
+shep-kelpie runs in your own shepherd, beside your other sheep. The adopted dog holds the leases every runner asks before a summon, and it asks shep for the channel the lease commands reach it on. `add` and `start` say how to bring the dog up when it is not running with its channel.
+
+```sh
+shep kelpie add        # labels, settings, agent files, and the runner, stopped
+shep kelpie start      # starts the runner, then the project
+shep kelpie pause
+shep kelpie status     # every project
+shep kelpie doctor     # what each project still needs on this machine
+shep kelpie rule 14 yes
+shep kelpie issue "<request>"   # issues for you to read, or --interactive
+shep kelpie attach 7   # steer issue 7's worker in this terminal
+shep kelpie upgrade --ref main
+shep kelpie tools install
+shep kelpie totp       # once, to answer rulings from ntfy
+shep kelpie lease status
+```
+
+Every trigger a person sends the runner is also a verb: `add <issue>`, `rework <pr>`, `adopt <pr>`, `gate [<issue>]`, `drop [<issue>]`, `timings [<n>]`, `tell "<note>"`, `pm`, `rule`, `drain` and `undrain`. Each reaches the project whose repo holds the folder you run it in, a worktree of it included, or the one `-p <project>` names anywhere in the line. From anywhere else it lists the projects and guesses nothing. `shep trigger` still works.
+
+- `drain` holds back every call the runner would start next, and answers the status with the calls still running under `draining`. `undrain`, or a restart, lets calls start again. `shep kelpie upgrade` drains each runner itself: see [Upgrading](#upgrading)
+- `drop [<issue>]` ends a work item without merging it. Its worktree, local branch and build folder go, and its pull request stays, labelled `ready-for-human`
+- `gate [<issue>]` sends a work item whose worker's turn ended with a pull request into the review gate, when it was never entered
+- `tell "<note>"` and `pm` reach the project manager: see [The project manager](#the-project-manager)
+- `timings [<n>]` totals where the time went over the last `n` finished work items (10 when left out), in six phases: `worker`, `review`, `ci`, `ruling`, `merge` and `other` (every second lands in exactly one), and answers JSON with the totals under `seconds` and a plain-text `table`, so `shep kelpie timings 20 | jq -r .table` prints it. `status` shows each open item's split under `timings`, and the ten most recent finished items under `history`. The state file keeps the last 100
+
+`add` names the project after the repo, or `shep kelpie add <name>`. It makes the four labels where the repo lacks them, writes kelpie's own agent files where they are missing, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name.
+
+`doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's checkout, implementers and labels, CodeRabbit where a project lists it, each project's reviewers, in order, with any command or endpoint among them checked as a runner's start checks it, Codex's usage for a project that spends it, and which webhook, if any, rulings post to. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
+
+### Leases
+
+The dog holds `cargo-test`, a share of this machine for running tests, and `gpu`, this machine's GPU lock. Workers run their test suites under `cargo-test`, and so can anything else on the machine: `shep kelpie lease run cargo-test -- cargo test` waits for a turn, runs the command and exits with its code, or 75 when it cannot reach the dog. Three hold it at once unless `[kelpie.leases]` says otherwise, the rest queue, and `shep kelpie lease status` shows who holds each lease and who waits. A command that ends or dies gives its turn back. One whose `lease run` was killed outright keeps it until the command, and anything it left running, exits: `status` shows how long each has held it.
+
+`shep kelpie lease take gpu` holds the GPU lock for you until `shep kelpie lease return gpu`, so whatever takes that lock waits. Use it when you need the GPU to yourself.
+
+### Settings
+
+A project's settings are its `[app.dogs.kelpie]` table, which lookout edits in the runner's pane. `settings.example.toml` lists every key, and shows a runner's Flockfile entry for a project set up by hand. It needs `SHEP_HOME` as an absolute path in `env`, since a sheep starts without it, and `kill_timeout = "10s"` or more, since a runner needs about 7s to stop cleanly. The keys:
+
+- `repo` and `forge`: the checkout and its GitHub repo
+- `merge_authority`, `ci` and `max_items`: see [CI and the merge](#ci-and-the-merge) and [Add your project](#4-add-your-project)
+- `private_names`: words that stay off the forge, whatever their case, and off a worker's commits and `gh` calls
+- `agents.implementers`, `agents.reviewers` and `agents.pm`: see [Agents](#agents)
+- `pacing.enabled` and `pacing.kickoff_hours`: whether usage holds work, and the hours a day the per-hour figure in `status` divides the day's allowance by
+- `worker.allowed_domains`, `worker.build_env` (variables that point tool caches into the build folder), `worker.instructions_file`, `worker.guard_hooks` (Claude Code hooks of the project's own, after kelpie's guard) and `worker.turn_timeout`
+- `skills.<step>`: see [Skills](#skills)
+
+shep-kelpie's own settings, shared by every project, are the `[kelpie]` section of `dogs.toml`, which lookout edits in the dog's pane. Start from `kelpie-settings.example.toml`, and keep `dogs.toml` private: the webhook's URL is a credential.
+
+- `[kelpie.webhook]` is where rulings are posted, and the only way one reaches you away from the terminal. With none, a ruling shows only in the log, `status` and `shep kelpie rule`
+- `[kelpie.leases]` sets how many hold `cargo-test` at once
+- `gpu_metrics_url` is the GPU's Prometheus metrics page, such as `nvidia_gpu_exporter`'s `/metrics`. `status` then shows the GPU's load, memory, power and temperature under `gpu`, read every 15 seconds
+- `codex_home` is where shep-kelpie's own Codex login lives (see [Agents](#agents))
+- A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start. The dog reads `[kelpie.leases]`, and each review bot's window from its agent file, only when it starts, so after a change to either run `shep restart kelpie`
+
+A key kelpie no longer reads, such as `review.reviewers`, `coderabbit` or `planning`, stops the runner, naming the key and what replaces it.
+
+### shep-kelpie's home
+
+shep-kelpie keeps everything under `$SHEP_HOME/kelpie`, or the folder `KELPIE_HOME` names:
+
+- `agents`, `builds`, `codex`, `rulings`, `tools`, `totp` and `upgrade`, shared by every project
+- `dog`, with the dog's book and its door, `lease.sock`. The adopted dog gets `SHEP_HOME` and no `KELPIE_HOME` from shep, so it is always under `$SHEP_HOME/kelpie`, even with `KELPIE_HOME` set for your own commands
+- `<project>`, with the project's `state.json`, `board.md`, worker files, `worktrees` and `builds`, and `pm`, the project manager's folder
+
+So a project can't be named for one of shep-kelpie's own folders. Socket paths must stay under 104 bytes, so a runner with a long `SHEP_HOME` refuses to start and names the path that is too long. Keep a shepherd's `SHEP_HOME` short.
+
+A runner or the dog refuses to start while `~/.kelpie` still holds its files from before shep-kelpie's home moved under `$SHEP_HOME`. Run the previous release once, which moves them, or move them by hand.
 
 ## Design
 

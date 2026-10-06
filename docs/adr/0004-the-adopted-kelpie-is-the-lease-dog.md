@@ -17,3 +17,5 @@ So kelpie asks for the channel, and the adopted `kelpie`, started with no argume
 - The adopted dog removes a left-over `kelpie-dog` sheep of kelpie's before it opens the book, and never writes the book to do it. shep answers the delete once the sheep has exited, so the book on disk is the one that sheep last saved. A left-over whose entry sets `KELPIE_HOME` or `HOME` is refused and kept, since shep hands an adopted dog no `KELPIE_HOME` and its own `HOME`, so that book may be elsewhere.
 - `shep kelpie lease` and the lease triggers name `kelpie`. Support for a Flockfile dog under that name, and `add`'s move from it to `kelpie-dog`, are removed: a sheep named `kelpie` stops `shep enable kelpie` anyway.
 - Kelpie takes only a 0.12.x shepherd.
+
+ADRs 0005 and 0006 leave this decision as it is.
