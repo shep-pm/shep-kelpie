@@ -66,8 +66,8 @@ pub(crate) const PM_TOOLS: &str = "Read,Glob,Grep,Edit,Write";
 
 /// What the project manager never uses, denied as well in case `--tools`
 /// lets one through: commands, sub-agents, skills, messages, the web, and
-/// the file tools whose writes the append check cannot read
-const PM_DENY: [&str; 11] = [
+/// the file tool whose writes the append check cannot read
+const PM_DENY: [&str; 10] = [
     "Agent",
     "Task",
     "Bash",
@@ -77,7 +77,6 @@ const PM_DENY: [&str; 11] = [
     "SendMessage",
     "WebFetch",
     "WebSearch",
-    "MultiEdit",
     "NotebookEdit",
 ];
 
@@ -136,7 +135,9 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
         // Headless, an edit nothing allows is refused, so these are its only writes.
         Tools::Pm => {
             let notes = fence.guard.worktree.join(PM_NOTES).display().to_string();
-            permissions["allow"] = json!([rule("Edit", &notes), rule("Write", &notes)]);
+            // Claude Code matches a file rule against the Edit tool alone and applies it to
+            // `Write` too, and warns about a `Write(path)` rule.
+            permissions["allow"] = json!([rule("Edit", &notes)]);
             pm_hooks(fence)
         }
         Tools::Work | Tools::Review | Tools::Answer => hooks(fence),
