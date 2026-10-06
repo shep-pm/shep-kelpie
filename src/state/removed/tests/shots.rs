@@ -136,6 +136,7 @@ fn a_merge_ruling_and_a_notice_lose_whether_the_shots_failed() {
             head: "c0ffee".into(),
             unreviewed: None,
             open_threads: None,
+            unread_head: false,
         }
     );
     assert_eq!(

@@ -13,6 +13,7 @@ use crate::settings::AgentName;
 
 mod bots;
 mod follow_ups;
+mod heads;
 mod local;
 mod review;
 mod spend;
@@ -146,6 +147,14 @@ pub struct WorkItem {
     /// worker leave them. A mismatch at the gate is a change kelpie did not make.
     #[serde(default)]
     pub known: Known,
+    /// The heads a review round read, oldest first
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reviewed_heads: Vec<String>,
+    /// The heads kelpie sends to CI with no round's read, on purpose, oldest
+    /// first: a fix turn's push, a pass the project's own list gives nobody
+    /// to read, and kelpie's own catch-up of a head it vouches for
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sent_unread: Vec<String>,
     /// The head at which the maintainer accepted a change to `.claude` or
     /// `.mcp.json`. Later heads that leave those files as this one has them
     /// pass the gate, and so does a worktree holding this head's copies.
@@ -531,8 +540,11 @@ mod tests {
 
     #[test]
     fn the_format_is_pinned() {
+        let mut item = a_work_item();
+        item.reviewed_heads = vec!["c0ffee".into()];
+        item.sent_unread = vec!["f1x".into()];
         assert_eq!(
-            serde_json::to_value(a_work_item()).unwrap(),
+            serde_json::to_value(item).unwrap(),
             json!({
                 "issue": 42,
                 "title": "Add a thing",
@@ -551,6 +563,8 @@ mod tests {
                 "resume": null,
                 "review_call": { "state": "idle" },
                 "known": { "labels": ["review please"], "ready": false },
+                "reviewed_heads": ["c0ffee"],
+                "sent_unread": ["f1x"],
                 "qwen": { "rounds": 0, "seconds": 0 },
                 "timings": {
                     "created": 5,
@@ -685,6 +699,10 @@ mod tests {
                 open: vec!["PRRT_2".into()],
             })["stage"],
             json!({ "stage": "settling", "bot": "cubic", "since": 20, "read": 40, "open": ["PRRT_2"] })
+        );
+        assert_eq!(
+            bot(ReviewStage::Pushing)["stage"],
+            json!({ "stage": "pushing" })
         );
         assert_eq!(
             value(Phase::Ruling { id: 3 }),

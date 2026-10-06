@@ -36,6 +36,12 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
             resume: Resume::Nothing,
         },
         RulingKind::from(Stuck::TurnTimeout { phase: None }),
+        RulingKind::from(Stuck::Unpushed {
+            files: vec!["late.txt".into()],
+            head: "a1".into(),
+            pushed: "b2".into(),
+            review: Review::first(),
+        }),
         RulingKind::from(Stuck::TurnFailed {
             why: "boom".into(),
             phase: Phase::Implement,
@@ -64,6 +70,7 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
         head: "abc".into(),
         unreviewed: None,
         open_threads: None,
+        unread_head: false,
     };
     assert_eq!(comment(&merge), None);
 }

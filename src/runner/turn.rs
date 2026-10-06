@@ -29,8 +29,8 @@ use crate::skills::{Step, split_command};
 use crate::state::{Resume, RulingKind, StateError};
 use crate::work_item::{Phase, Review, ReviewStage, Turn, WorkItem};
 use crate::worktree::{self, Start};
-pub(super) use unfinished::failed;
 use unfinished::{awaits_a_push, timed_out, uncommitted_prompt};
+pub(super) use unfinished::{failed, named_files};
 
 mod unfinished;
 
@@ -129,10 +129,13 @@ impl Runner {
         };
         match &item.phase {
             Phase::Implement => {}
-            // A fix turn that ended goes back to its round, to check it pushed.
+            // A fix turn, or a turn to push before a round, that ended goes
+            // back to its round, to check it pushed.
             Phase::Review(review)
-                if matches!(review.stage, ReviewStage::Fixing { .. })
-                    && !matches!(item.turn, Turn::Ended { .. }) => {}
+                if matches!(
+                    review.stage,
+                    ReviewStage::Fixing { .. } | ReviewStage::Pushing
+                ) && !matches!(item.turn, Turn::Ended { .. }) => {}
             Phase::Review(_) => {
                 if let Some(parked) = self.fence_gate()? {
                     return Ok(parked);
@@ -398,6 +401,9 @@ impl Runner {
         // Whatever the turn left on `origin` is the worker's own. A head
         // that cannot be read keeps the last one, which errs toward parking.
         let pushed = self.current().and_then(|_| self.own_push());
+        // Whether the head on `origin` is the worktree's own commit, which a
+        // push by anyone else is not.
+        let own_commit = pushed.is_some() && self.worktree_head() == pushed;
         let mut next = self.state.clone();
         let Some(item) = self.current_in(&mut next) else {
             return Ok(None);
@@ -425,11 +431,14 @@ impl Runner {
                     item.record_call(Role::Worker, now, session, reply.usage, reply.session_cost);
                 item.summary = crate::board::briefing::summary(&reply.text);
                 // A turn that left its work uncommitted and pushed nothing is
-                // sent back once, before the gate can park it on a ruling.
+                // sent back once, before the gate can park it on a ruling. A
+                // turn to push before a round is that once already.
                 let asked = std::mem::take(&mut item.asked_to_commit);
+                let pushing =
+                    matches!(&item.phase, Phase::Review(r) if r.stage == ReviewStage::Pushing);
                 // A worktree git cannot be read in is told and let go: the
                 // turn ends as it did before, which errs toward the ruling.
-                let uncommitted = match (question.is_none() && no_push && !asked)
+                let uncommitted = match (question.is_none() && no_push && !asked && !pushing)
                     .then(|| worktree::uncommitted(&self.settings.repo, &item.worktree))
                 {
                     Some(Ok(files)) => files,
@@ -466,12 +475,26 @@ impl Runner {
                 if question.is_none() && !stopped_short && !commit_first {
                     if let Some(resume) = item.resume.take() {
                         item.phase = resume;
+                        // The follow-up was the worker's one turn to push, so
+                        // a round finding the worktree off the pushed head parks.
+                        if asked
+                            && let Phase::Review(review) = &mut item.phase
+                            && review.stage == ReviewStage::Round
+                        {
+                            review.stage = ReviewStage::Pushing;
+                        }
                     } else {
                         match item.phase.clone() {
                             Phase::Implement if discovering && item.pull_request.is_some() => {
                                 item.phase = Phase::Review(Review::first());
                             }
+                            // A fix sent to CI with no round's read, on purpose:
+                            // red CI's, a conflict's.
                             Phase::Implement if item.pull_request.is_some() => {
+                                let fixed = !no_push && own_commit;
+                                if let Some(head) = item.known.head.clone().filter(|_| fixed) {
+                                    item.send_unread(head);
+                                }
                                 item.phase = Phase::Ci {
                                     head: None,
                                     since: now,

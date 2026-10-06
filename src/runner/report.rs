@@ -526,6 +526,22 @@ pub enum StepReport {
         /// How many findings it deferred
         deferred: usize,
     },
+    /// The worktree was not the head on `origin` as a review round was
+    /// about to run, so the worker's next turn pushes or discards first
+    Unpushed {
+        /// The work item's issue
+        issue: u64,
+        /// Its pull request
+        pull_request: u64,
+        /// The round that waits
+        round: u32,
+        /// The files the worktree holds uncommitted
+        files: Vec<String>,
+        /// The commit the worktree has checked out
+        head: String,
+        /// The branch's head on `origin`
+        pushed: String,
+    },
     /// The worker's fix turn for a round's held findings ended, and the
     /// round counts
     FixPushed {

@@ -85,6 +85,8 @@ pub(crate) fn a_work_item() -> WorkItem {
             ready: false,
             head: None,
         },
+        reviewed_heads: Vec::new(),
+        sent_unread: Vec::new(),
         claude_files_accepted: None,
         qwen: crate::work_item::QwenTally::default(),
         merge_refused: false,

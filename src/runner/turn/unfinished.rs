@@ -38,12 +38,8 @@ const PUSHED_NOTHING: &str = "Your last turn ended without a new push to this \
 /// The most uncommitted files a prompt names before it counts the rest
 const NAMED_FILES: usize = 10;
 
-/// The prompt that sends back a worker whose turn pushed nothing and left
-/// `files` uncommitted in its worktree
-///
-/// A turn that ends is over, and nothing the worker started in the
-/// background will wake it, so the prompt says to wait in the foreground.
-pub(super) fn uncommitted_prompt(files: &[String]) -> String {
+/// `files` as a prompt or a ruling names them: the first few, then a count
+pub(in crate::runner) fn named_files(files: &[String]) -> String {
     let mut named = files
         .iter()
         .take(NAMED_FILES)
@@ -53,6 +49,16 @@ pub(super) fn uncommitted_prompt(files: &[String]) -> String {
     if files.len() > NAMED_FILES {
         named.push_str(&format!(" and {} more", files.len() - NAMED_FILES));
     }
+    named
+}
+
+/// The prompt that sends back a worker whose turn pushed nothing and left
+/// `files` uncommitted in its worktree
+///
+/// A turn that ends is over, and nothing the worker started in the
+/// background will wake it, so the prompt says to wait in the foreground.
+pub(super) fn uncommitted_prompt(files: &[String]) -> String {
+    let named = named_files(files);
     format!(
         "Your last turn ended with uncommitted changes in your worktree and nothing \
          pushed: {named}. A turn that ends is over, and nothing wakes you when a \

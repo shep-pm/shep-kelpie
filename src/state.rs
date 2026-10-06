@@ -25,13 +25,15 @@ use crate::ports::{Finding, SessionId, Timestamp};
 use crate::settings::Account;
 use crate::work_item::{Attached, Known, Phase, Review, Seconds, Tally, Turn, WorkItem};
 
-/// The state file's format version. 12 added the `settling` review stage
+/// The state file's format version. 13 added the `pushing` review stage, a
+/// round's `reading`, the `unpushed` stuck reason, a work item's `reviewed_heads` and
+/// `sent_unread` and the merge ruling's `unread_head`, 12 added the `settling` review stage
 /// and the merge ruling's `open_threads`, 11 dropped the run state, 10 added
 /// a work item's `counts` and a finished one's `spend`, 9 folded the ruling
 /// kinds to six, 8 added the project manager's session, notes and attach, 7
 /// a work item's `attached`, 6 folded the timing phases to six, and 5 added
 /// the board's events, each of which an older kelpie refuses
-const VERSION: u32 = 12;
+const VERSION: u32 = 13;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
@@ -319,6 +321,10 @@ pub enum RulingKind {
         /// when any are
         #[serde(default, skip_serializing_if = "Option::is_none")]
         open_threads: Option<String>,
+        /// Whether no review round read the head, and no fix turn kelpie
+        /// sent pushed it
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        unread_head: bool,
     },
     /// The worker ended its turn on a question. The answer is its next turn.
     Question {
@@ -406,6 +412,20 @@ pub enum Stuck {
         fix: Fix,
         /// The fix turn a yes starts
         prompt: String,
+    },
+    /// The worktree was still not the head on `origin` after the worker's
+    /// turn to push or discard, so a review round did not run. A yes gives
+    /// the worker another such turn.
+    Unpushed {
+        /// The files it holds uncommitted
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        files: Vec<String>,
+        /// The commit it has checked out
+        head: String,
+        /// The branch's head on `origin`
+        pushed: String,
+        /// The review, at the round that did not run
+        review: Review,
     },
     /// A worker's turn ran past its ceiling and kelpie stopped it, keeping
     /// its session. A yes resumes it; a no stops the work item.

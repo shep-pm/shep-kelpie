@@ -521,7 +521,12 @@ mod tests {
         let rig = Rig::new("shep");
         let hold = Hold::default();
         let (_runner, worker) = in_a_turn(&rig, &hold);
-        // A failed review round is a step the worker waits after.
+        // A failed review round is a step the worker waits after. It reads
+        // the head the turn pushed.
+        crate::test::git(
+            &rig.worktree_7(),
+            &["push", "--quiet", "origin", "HEAD:kelpie/7"],
+        );
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
         let down = ReviewerError::Failed("the GPU is gone".into());
         rig.reviewer.script([ScriptedRound::Fail(down)]);

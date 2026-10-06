@@ -523,6 +523,7 @@ fn a_claude_round_stopped_with_the_runner_runs_again_on_restart() {
     drop(runner);
 
     let runner = rig.open().unwrap();
+    let pushed = rig.forge.head_of("kelpie/7").unwrap();
     assert_eq!(
         rig.ask(&runner, "status", None)["work_item"]["phase"],
         json!({
@@ -531,8 +532,9 @@ fn a_claude_round_stopped_with_the_runner_runs_again_on_restart() {
             "stage": { "stage": "round" },
             "reviewer": "claude",
             "ran": ["qwen"],
+            "reading": pushed,
         }),
-        "round 2 is still due, with the same reviewer"
+        "round 2 is still due, with the same reviewer and the head it reads"
     );
     rig.claude.script([Scripted::Text("CLEAN")]);
     step(&runner).unwrap();

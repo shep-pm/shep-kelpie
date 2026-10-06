@@ -531,6 +531,8 @@ impl Runner {
             bot_reads: Default::default(),
             bots_skipped: Vec::new(),
             known: Known::default(),
+            reviewed_heads: Vec::new(),
+            sent_unread: Vec::new(),
             claude_files_accepted: None,
             qwen: QwenTally::default(),
             merge_refused: false,
@@ -778,7 +780,7 @@ mod tests {
         drop(runner);
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
-        assert_eq!(saved["version"], 12);
+        assert_eq!(saved["version"], 13);
         assert_eq!(
             saved["events"][2]["what"], "project paused",
             "old events stay"

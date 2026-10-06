@@ -104,7 +104,9 @@ impl Runner {
             }
             let open = open_ids(&activity);
             let now = self.ports.clock.now();
+            let read = head.clone();
             self.update(|item| {
+                item.reviewed(read);
                 item.bots_skipped.retain(|s| s.reviewer() != &reviewer);
                 if let Phase::Review(review) = &mut item.phase {
                     review.reviewer = Some(reviewer.clone());

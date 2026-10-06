@@ -16,6 +16,7 @@ mod lineup;
 #[cfg(test)]
 mod local;
 mod prompts;
+pub(super) mod pushed;
 #[cfg(test)]
 mod second_look;
 #[cfg(test)]
@@ -70,6 +71,11 @@ impl Runner {
 
         match review.stage.clone() {
             ReviewStage::Round => {
+                // First, since who reviews is chosen from the worktree's diff.
+                let mut review = review;
+                if let Some(begin) = self.before_round(&mut review)? {
+                    return Ok(begin);
+                }
                 if let Some(begin) = self.late_review()? {
                     return Ok(begin);
                 }
@@ -115,7 +121,8 @@ impl Runner {
             ReviewStage::Summon { .. }
             | ReviewStage::Summoned { .. }
             | ReviewStage::Settling { .. } => self.bot_step(),
-            // begin_turn drives the fix turn itself, and comes here once it ends.
+            // begin_turn drives the worker's turn itself, and comes here once it ends.
+            ReviewStage::Pushing => self.pushing_ended(review),
             ReviewStage::Fixing {
                 head,
                 sent,
@@ -180,6 +187,11 @@ impl Runner {
         let item = self.current().expect("a pass is a work item's");
         let (issue, number) = (item.issue, item.pull_request);
         let unread = review.unread.then(|| self.unread(item, review));
+        // Nobody to read it, by the project's own list, sends it unread on purpose.
+        let unread_by_choice = match &unread {
+            Some(None) => self.origin_head().map_err(|e| eprintln!("{e}")).ok(),
+            _ => None,
+        };
         if let Some(None) = &unread {
             let why = match self.lineup.is_empty() {
                 true => "the project lists no reviewer",
@@ -193,6 +205,9 @@ impl Runner {
         let flagged = reason.clone();
         self.update(|item| {
             item.phase = Phase::Ci { head: None, since };
+            if let Some(head) = unread_by_choice {
+                item.send_unread(head);
+            }
             if flagged.is_some() {
                 item.unreviewed = flagged;
             }
@@ -245,6 +260,12 @@ impl Runner {
                             left_open = Some((threads, reason));
                         }
                     }
+                    // Only the worker's own commit is its fix: a push from
+                    // anyone else stays unvouched for.
+                    if self.worktree_head().as_ref() == Some(&now) {
+                        let head = now.clone();
+                        self.update(|item| item.send_unread(head))?;
+                    }
                     Some(now)
                 }
                 Err(reason) => return Ok(self.gate_failed(reason)),
@@ -291,6 +312,19 @@ impl Runner {
             round,
             deferred,
         }))
+    }
+
+    // The commit the work item's worktree has checked out, or none when git
+    // cannot say, which leaves the head unrecorded and errs toward a ruling.
+    pub(super) fn worktree_head(&self) -> Option<String> {
+        let item = self.current()?;
+        match worktree::head(&self.settings.repo, &item.worktree) {
+            Ok(head) => Some(head),
+            Err(e) => {
+                eprintln!("cannot read issue #{}'s worktree head: {e}", item.issue);
+                None
+            }
+        }
     }
 
     // Asks git rather than the forge: the forge's head lags a push by a moment.
@@ -411,6 +445,15 @@ impl Runner {
             }
             _ => (false, false),
         };
+        // The round read the pushed head its start found the worktree at, if
+        // nothing moved or dirtied the worktree while it ran.
+        let reading = match self.current().map(|item| &item.phase) {
+            Some(Phase::Review(review)) => review.reading.clone(),
+            _ => None,
+        };
+        let read = reading
+            .filter(|_| matches!(&result, ReviewResult::Findings(Ok(_))))
+            .filter(|head| self.still_at(head));
         let mut next = self.state.clone();
         // Tolerated the same way `end_turn` tolerates a turn's result
         // arriving with nothing (or something else) to apply it to: the
@@ -425,6 +468,11 @@ impl Runner {
         let Phase::Review(review) = item.phase.clone() else {
             self.save(next)?;
             return Ok(None);
+        };
+        // Read above; the round's next start checks the worktree afresh.
+        let review = Review {
+            reading: None,
+            ..review
         };
         if !matches!(
             review.stage,
@@ -523,6 +571,9 @@ impl Runner {
             (ReviewStage::Round, Ok(first)) if second_look && !local_round => {
                 let findings = first.len();
                 item.unreviewed = None;
+                if let Some(head) = read {
+                    item.reviewed(head);
+                }
                 item.phase = Phase::Review(Review {
                     stage: ReviewStage::SecondLook { first },
                     failures: 0,
@@ -564,6 +615,9 @@ impl Runner {
                         ..review
                     };
                     item.unreviewed = None;
+                    if let Some(head) = read {
+                        item.reviewed(head);
+                    }
                     if local_round {
                         item.note_local_round(&reviewer, &unreviewed);
                     }

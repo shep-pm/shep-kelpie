@@ -107,19 +107,21 @@ impl Runner {
 
     // Green CI: `auto` merges by the path a yes takes, and `ask` raises the
     // merge ruling with the pull request handed back `ready-for-human`. A
-    // pull request no reviewer read, or one with a listed bot's threads
-    // unaddressed, gets the ruling under `auto` too, naming why. One an older
+    // pull request no reviewer read, one with a listed bot's threads
+    // unaddressed, or a head no round read and no fix turn of kelpie's
+    // pushed, gets the ruling under `auto` too, naming why. One an older
     // state file left owing the listed bots a pass gets it first.
     fn passed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
         if self.bots_before_merge()? {
             return self.review_step();
         }
         let unreviewed = self.current().and_then(|item| item.unreviewed.clone());
+        let unread_head = self.current().is_some_and(|item| !item.vouches_for(&head));
         let open_threads = match self.threads_open(number) {
             Ok(open) => open,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
-        let vouched = unreviewed.is_none() && open_threads.is_none();
+        let vouched = unreviewed.is_none() && open_threads.is_none() && !unread_head;
         if self.settings.merge_authority == MergeAuthority::Auto && vouched {
             self.update(|item| {
                 item.phase = Phase::Merge {
@@ -141,6 +143,7 @@ impl Runner {
             head,
             unreviewed,
             open_threads,
+            unread_head,
         };
         self.raise(number, kind)
     }
