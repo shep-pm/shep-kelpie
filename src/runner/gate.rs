@@ -121,7 +121,16 @@ impl Runner {
             Ok(open) => open,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
-        let vouched = unreviewed.is_none() && open_threads.is_none() && !unread_head;
+        // A merge ruling's `no` sent its fix here unread, so the maintainer
+        // decides on it again, even under `auto`, and is told so. A head
+        // kelpie did not send unread itself, such as someone else's push,
+        // is not the worker's fix.
+        let note_fix = self.current().is_some_and(|item| {
+            item.noted_from.as_ref().is_some_and(|from| *from != head)
+                && !item.reviewed_heads.contains(&head)
+                && item.sent_unread.contains(&head)
+        });
+        let vouched = unreviewed.is_none() && open_threads.is_none() && !unread_head && !note_fix;
         if self.settings.merge_authority == MergeAuthority::Auto && vouched {
             self.update(|item| {
                 item.phase = Phase::Merge {
@@ -144,6 +153,7 @@ impl Runner {
             unreviewed,
             open_threads,
             unread_head,
+            note_fix,
         };
         self.raise(number, kind)
     }
@@ -270,7 +280,9 @@ pub(super) mod tests {
             question,
             format!(
                 "Merge pull request #71 at {} into main? `shep kelpie rule 1 yes` \
-                 merges it, and `shep kelpie rule 1 no <note>` sends the worker your note.",
+                 merges it, `shep kelpie rule 1 no <note>` sends the worker your note for \
+                 a fix that goes to CI and back to you, and `shep kelpie rule 1 rework \
+                 <note>` sends it your note for a change the whole review reads again.",
                 &head[..7]
             )
         );

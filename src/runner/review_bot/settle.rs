@@ -127,7 +127,7 @@ impl Runner {
     /// `number`, as the merge ruling names them, or `None` when there are none
     ///
     /// A thread is unaddressed when it is open, not outdated, not sent to a
-    /// fix turn awaiting it, and above a nit, which the nit rule holds back.
+    /// fix turn awaiting it, and above a nit: a nit never holds a merge.
     ///
     /// # Errors
     ///

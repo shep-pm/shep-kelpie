@@ -230,8 +230,10 @@ mod tests {
             alert.text,
             format!(
                 "Merge pull request #71 at {short} into main? \
-                 `shep kelpie rule 1 yes` merges it, and \
-                 `shep kelpie rule 1 no <note>` sends the worker your note."
+                 `shep kelpie rule 1 yes` merges it, \
+                 `shep kelpie rule 1 no <note>` sends the worker your note for a fix that \
+                 goes to CI and back to you, and `shep kelpie rule 1 rework <note>` sends \
+                 it your note for a change the whole review reads again."
             )
         );
         assert_eq!(

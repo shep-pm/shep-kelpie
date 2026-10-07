@@ -225,7 +225,8 @@ fn a_head_marked_done_with_nothing_posted_is_a_clean_read_once_it_settles() {
     assert_eq!(rig.forge.comments(), []);
 }
 
-// A merge ruling's no starts a pass of its own, after the catch-up.
+// A merge ruling's rework starts a pass of its own, after the catch-up; a
+// no would send its fix straight to CI.
 fn noted_after_a_catch_up(rig: &Rig, runner: &Mutex<Runner>, head: &str) -> String {
     rig.land_on_origin("landed.txt");
     rig.forge.set_checks(head, Checks::Passed);
@@ -237,7 +238,7 @@ fn noted_after_a_catch_up(rig: &Rig, runner: &Mutex<Runner>, head: &str) -> Stri
         rig.verdict(runner),
         Some(StepReport::Ruling { id: 1, .. })
     ));
-    rig.ask(runner, "rule", Some("1 no name the flag"));
+    rig.ask(runner, "rule", Some("1 rework name the flag"));
     rig.claude.script([
         Scripted::Push("flag.txt", "named\n"),
         Scripted::Text("CLEAN"),

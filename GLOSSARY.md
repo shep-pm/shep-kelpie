@@ -19,8 +19,8 @@ _Avoid_: harness (the working name before 2026-09-25), control room
 3. **Build.** A worker implements it inline, opens a draft pull request and
    ends its turn.
 4. **Review.** Each reviewer in the project's list reads the pull request
-   once, in order, and one with any finding above a nit is followed by one
-   fix turn. The pass ends where it ends: no loop, no judge.
+   once, in order, and one with any finding, nits included, is followed by
+   one fix turn. The pass ends where it ends: no loop, no judge.
 5. **CI.** A red run goes back to the worker. A second red run on a head the
    worker left alone is a `stuck` ruling.
 6. **Merge.** A ruling under `ask`, kelpie's code under `auto`, as a merge
@@ -185,7 +185,8 @@ id that only grows. The PM's cursor names the last one it has read.
 
 **Pass**:
 One run down a project's reviewers, each once, in order. A pass starts
-again from the top only on new code the review has not seen.
+again from the top only on new code that needs the whole review, such as
+a merge ruling's `rework`.
 
 **Finding**:
 One thing a reviewer reports, as `SEVERITY|file:line|what|why`, with a
@@ -194,8 +195,11 @@ a finding at the bot's own severity.
 
 **Fix turn**:
 The one worker turn after a reviewer's findings, which counts only if it
-moves the branch's head. Findings the worker leaves out of scope go in
-the **deferred findings** file, which the merge files as follow-ups.
+moves the branch's head. A fix turn sent only nits starts nothing new: no
+reviewer reads again because of it, and a bot that read the pull request
+before has its nits on that fix's head left open. Findings the worker
+leaves out of scope go in the **deferred findings** file, which the merge
+files as follow-ups, all but its nits.
 
 **Unreviewed**:
 The mark on a work item whose pass ended with no reviewer having read the
@@ -272,7 +276,11 @@ bounds model calls; `max_parked` caps how many are parked on rulings that
 hold their work back, which leaves out the `follow-up` ruling of a merged
 pull request. The one exception: the PM may retry a stuck item, which
 answers its `stuck` ruling for the maintainer, with a yes or, for CI still
-red, a note sending the worker back.
+red, a note sending the worker back. A merge ruling takes three answers:
+`yes`, `no <note>`, whose fix goes to CI and back to the ruling, and
+`rework <note>`, whose change starts a new pass, as a `no` does on a
+merge ruling that warns of open bot threads, an unread pass or an unread
+head.
 
 **Merge authority**:
 A project's setting for who decides a merge. `ask` raises a ruling before

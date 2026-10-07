@@ -52,6 +52,43 @@ fn two_projects() -> (tempfile::TempDir, RulingIds) {
 }
 
 #[test]
+fn a_merge_ruling_takes_a_rework_and_another_ruling_refuses_one() {
+    let home = tempfile::tempdir().unwrap();
+    let merge = Ruling {
+        kind: RulingKind::Merge {
+            head: "c0ffee".into(),
+            unreviewed: None,
+            open_threads: None,
+            unread_head: false,
+            note_fix: false,
+        },
+        ..yes_or_no(16)
+    };
+    waiting(home.path(), "koji", vec![yes_or_no(14), merge]);
+    let ids = RulingIds::under(home.path());
+    let answer = |args: &[&str]| prepare(&ids, None, args, None);
+    assert_eq!(
+        answer(&["16", "rework", "split", "the", "parser"]),
+        Ok((project("koji"), "16 rework split the parser".into()))
+    );
+    assert_eq!(
+        answer(&["16", "maybe"]),
+        Err(
+            "ruling 16 was not answered: it takes `yes`, `no <note>` or `rework <note>`. \
+             It takes `shep kelpie rule 16 yes`, `shep kelpie rule 16 no <note>` or \
+             `shep kelpie rule 16 rework <note>`"
+                .into()
+        )
+    );
+    assert_eq!(
+        answer(&["14", "rework", "split", "it"]),
+        Err(format!(
+            "ruling 14 was not answered: it takes `yes`, or `no <note>`. {FORMS}"
+        ))
+    );
+}
+
+#[test]
 fn each_answer_form_reads_right_for_its_ruling_s_kind() {
     let (_home, ids) = two_projects();
     let answer = |args: &[&str]| prepare(&ids, None, args, None);

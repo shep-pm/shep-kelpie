@@ -12,8 +12,10 @@
 //! Once a review covers the head the label comes off, and once two reads
 //! of the bot's open threads agree they are the round's findings, which go
 //! to one fix turn as any reviewer's do. Kelpie resolves the threads it sent
-//! once that fix moves the head. A bot passed over that reviews the head
-//! anyway gets a round of its own before the next reviewer's.
+//! once that fix moves the head. A bot that read the pull request before
+//! has its nits on a head a nit-only fix pushed left open, not sent again.
+//! A bot passed over that reviews the head anyway gets a round of its own
+//! before the next reviewer's.
 //!
 //! On a pull request the bot read before, the label asks only for what is
 //! new, and after an adoption or a catch-up with `main` it finds nothing.
@@ -601,6 +603,8 @@ impl Runner {
     // The bot read the head, which also reads whatever a catch-up with
     // `main` brought, so this pass has been read. Its open threads are the
     // round's findings; with none, the pass goes on to the next reviewer.
+    // A bot that read the pull request before has its nits on a head a
+    // nit-only fix pushed left open, so it cannot loop on nits.
     fn review_landed(
         &mut self,
         number: u64,
@@ -608,9 +612,13 @@ impl Runner {
         activity: &Activity,
     ) -> Result<Begin, StateError> {
         let profile = self.profile(bot);
+        let nits_left = self.nits_left_open(bot);
+        // The report counts every open thread; the findings leave out the nits left open.
+        let open_threads = activity.open_threads().count();
         let (threads, findings): (Vec<String>, Vec<Finding>) = activity
             .open_threads()
             .map(|t| (t.id.clone(), profile.finding(t)))
+            .filter(|(_, f)| !(nits_left && f.is_nit()))
             .unzip();
         let review = Review {
             unread: false,
@@ -618,8 +626,7 @@ impl Runner {
             ..self.pass()
         };
         let (round, reviewer) = (review.round, self.round_reviewer(bot));
-        let open_threads = threads.len();
-        let next = match open_threads {
+        let next = match threads.len() {
             0 => self.after_round(review, self.ports.clock.now()),
             _ => Phase::Review(Review {
                 stage: ReviewStage::Found { findings, threads },
@@ -641,6 +648,28 @@ impl Runner {
             reviewer,
             open_threads,
         }))
+    }
+
+    // Whether `bot` read the pull request before and the head on `origin`
+    // is one a nit-only fix pushed. Git that cannot say counts as no, which
+    // sends the nits as any round's.
+    fn nits_left_open(&self, bot: Bot) -> bool {
+        let item = self.item();
+        let read_before = item.bot_reads.get(&bot).is_some_and(|reads| *reads > 0);
+        if !read_before || item.nit_fix_heads.is_empty() {
+            return false;
+        }
+        match self.origin_head() {
+            Ok(head) => item.nit_fix_heads.contains(&head),
+            Err(e) => {
+                let name = bot.name();
+                eprintln!(
+                    "cannot read issue #{}'s head on origin, so {name}'s nits are sent: {e}",
+                    item.issue
+                );
+                false
+            }
+        }
     }
 
     // The pass goes on without the bot, and says why. A pass no other
@@ -841,6 +870,8 @@ impl Runner {
 
 #[cfg(test)]
 mod codex_bot;
+#[cfg(test)]
+mod nit_fixes;
 #[cfg(test)]
 mod owed;
 #[cfg(test)]

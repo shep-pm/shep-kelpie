@@ -53,7 +53,7 @@ fn the_alert_says_how_to_reply_and_carries_no_code() {
         alert.reply,
         Some(ReplyWith {
             id: 1,
-            takes: Takes::YesOrNo
+            takes: Takes::Merge
         })
     );
     let code = rig.code_at(rig.clock.now());
@@ -187,7 +187,7 @@ fn a_reply_to_a_settled_ruling_runs_nothing_and_the_topic_is_told() {
 fn a_reply_rule_refuses_is_told_on_the_topic() {
     let (rig, runner, _) = alerted("koji");
     rig.reply("koji 1 answer merge it");
-    let reason = "it takes `yes`, or `no <note>`";
+    let reason = "it takes `yes`, `no <note>` or `rework <note>`";
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::ReplyRefused {
@@ -255,6 +255,34 @@ fn a_reply_takes_the_same_answers_as_the_terminal_without_the_project() {
         status["work_item"]["phase"],
         json!({ "state": "ruling", "id": 1 })
     );
+}
+
+#[test]
+fn a_rework_by_reply_sends_the_note_and_a_new_pass_of_the_review() {
+    let (rig, runner, _) = alerted("koji");
+    let alert = &rig.alerts.posts()[0].1;
+    assert!(
+        alert.text.contains("`shep kelpie rule 1 rework <note>`"),
+        "{}",
+        alert.text
+    );
+    rig.reply("koji 1 Rework split the parser out");
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReplyAnswered { id: 1 })
+    );
+    rig.claude.script([Scripted::Push("split.txt", "split\n")]);
+    step(&runner).unwrap(); // the noted turn: pushes, and a pass begins
+    let noted = rig.claude.calls().pop().unwrap();
+    assert!(
+        noted.prompt.starts_with(
+            "The maintainer asked for a rework of pull request #71, with this note:\n\n\
+             split the parser out\n"
+        ),
+        "{}",
+        noted.prompt
+    );
+    assert_eq!(phase(&rig, &runner)["state"], "review");
 }
 
 #[test]

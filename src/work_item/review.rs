@@ -10,9 +10,10 @@ use crate::settings::AgentName;
 /// Where the review stands
 ///
 /// A pass runs the project's reviewers once each, in order, review bots
-/// among them. A round that finds anything above a nit (LOW) sends the
+/// among them. A round that finds anything, nits (LOW) included, sends the
 /// worker all of its findings for one fix turn before the next reviewer
-/// runs. After the last, the pull request goes to CI.
+/// runs, but for the notice of a file the script skipped for its size,
+/// which is never sent. After the last, the pull request goes to CI.
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -95,7 +96,8 @@ impl Review {
 pub enum ReviewStage {
     /// About to run this round's reviewer
     Round,
-    /// The round's findings, about to go to the worker if any is above a nit
+    /// The round's findings, about to go to the worker, but for a size-skipped
+    /// file's notice, which is never sent
     Found {
         /// What the reviewer found
         findings: Vec<Finding>,

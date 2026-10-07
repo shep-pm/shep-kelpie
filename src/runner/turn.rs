@@ -527,6 +527,8 @@ impl Runner {
                     Some(text) => {
                         let resume = match &item.phase {
                             Phase::Review(review) => Resume::Review(review.clone()),
+                            // A merge ruling's no sends its fix to CI, question or none.
+                            Phase::Implement if item.noted_from.is_some() => Resume::Nothing,
                             Phase::Implement if pull_request.is_some() => Resume::ReviewFirst,
                             _ => Resume::Nothing,
                         };

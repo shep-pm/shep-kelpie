@@ -137,6 +137,7 @@ fn a_merge_ruling_and_a_notice_lose_whether_the_shots_failed() {
             unreviewed: None,
             open_threads: None,
             unread_head: false,
+            note_fix: false,
         }
     );
     assert_eq!(

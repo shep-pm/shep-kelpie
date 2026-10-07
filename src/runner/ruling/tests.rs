@@ -71,6 +71,7 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
         unreviewed: None,
         open_threads: None,
         unread_head: false,
+        note_fix: false,
     };
     assert_eq!(comment(&merge), None);
 }
@@ -87,19 +88,19 @@ fn nothing_merges_without_a_yes() {
         ("2 yes", "no ruling 2 is pending"),
         (
             "1 no",
-            "`rule` takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`, not \"1 no\"",
+            "`rule` takes `<id> yes`, `<id> no <note>`, `<id> rework <note>` or `<id> answer <text>`, not \"1 no\"",
         ),
         (
             "1 yes please",
-            "`rule` takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`, not \"1 yes please\"",
+            "`rule` takes `<id> yes`, `<id> no <note>`, `<id> rework <note>` or `<id> answer <text>`, not \"1 yes please\"",
         ),
         (
             "one yes",
-            "`rule` takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`, not \"one yes\"",
+            "`rule` takes `<id> yes`, `<id> no <note>`, `<id> rework <note>` or `<id> answer <text>`, not \"one yes\"",
         ),
         (
             "1 maybe",
-            "`rule` takes `<id> yes`, `<id> no <note>` or `<id> answer <text>`, not \"1 maybe\"",
+            "`rule` takes `<id> yes`, `<id> no <note>`, `<id> rework <note>` or `<id> answer <text>`, not \"1 maybe\"",
         ),
     ];
     for (params, error) in refused {
@@ -115,12 +116,75 @@ fn nothing_merges_without_a_yes() {
     assert!(rig.worktree_7().exists());
 }
 
-// A no's fix is new code the review has not seen: it goes back through
-// a pass of the review, not straight to CI, before the next ruling.
+// A merge ruling's no is a fix of what the maintainer read: it goes to CI
+// and back to the merge ruling, with no new pass of the review, and its
+// head is the worker's own fix, so the ruling does not call it unread.
 #[test]
-fn a_no_sends_the_note_to_the_worker_and_it_goes_through_review_before_the_next_ruling() {
+fn a_no_on_a_merge_ruling_sends_the_note_and_its_fix_goes_to_ci_and_back_to_the_ruling() {
     let (rig, runner, _) = Rig::parked("rotom");
+    let reads = (rig.reviewer.seen().len(), rig.claude.all_calls().len());
     rig.ask(&runner, "rule", Some("1 no  rename the flag to --dry-run "));
+    rig.claude
+        .script([Scripted::Push("rename.txt", "renamed\n")]);
+    step(&runner).unwrap(); // the noted turn: pushes, and goes to CI
+    let calls = rig.claude.calls();
+    let (first, noted) = (&calls[0], calls.last().unwrap());
+    assert_eq!(noted.session, Session::Resume(first.session.id().clone()));
+    assert_eq!(
+        noted.prompt,
+        "The maintainer answered no on pull request #71, with this note:\n\n\
+         rename the flag to --dry-run\n"
+    );
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+        "ci",
+        "a no's fix goes to CI with no pass of the review"
+    );
+
+    let pushed = rig.forge.head_of("kelpie/7").unwrap();
+    assert_eq!(
+        step(&runner).unwrap(),
+        None,
+        "CI on the new head is pending"
+    );
+    rig.forge.set_checks(&pushed, Checks::Passed);
+    let Some(StepReport::Ruling {
+        id: 2, question, ..
+    }) = rig.verdict(&runner)
+    else {
+        panic!("no second merge ruling");
+    };
+    assert!(
+        question.contains(
+            "into main? This head is the worker's fix for your note, and no reviewer read it."
+        ),
+        "{question}"
+    );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(
+        status["rulings"][0]["kind"],
+        json!({ "kind": "merge", "head": pushed, "note_fix": true })
+    );
+    let item = runner.lock().unwrap().state.work_items[0].clone();
+    assert!(item.noted_from.is_some(), "kept until ruling 2 is answered");
+    assert_eq!(
+        (rig.reviewer.seen().len(), rig.claude.all_calls().len()),
+        (reads.0, reads.1 + 1),
+        "no reviewer, local or Claude, read the fix: the only call was the worker's"
+    );
+    assert_eq!(rig.forge.merges(), []);
+}
+
+// A rework is a change that needs the whole review: it goes back through a
+// pass of the review, not straight to CI, before the next ruling.
+#[test]
+fn a_rework_sends_the_note_to_the_worker_and_it_goes_through_review_before_the_next_ruling() {
+    let (rig, runner, _) = Rig::parked("rotom");
+    rig.ask(
+        &runner,
+        "rule",
+        Some("1 rework  rename the flag to --dry-run "),
+    );
     rig.claude.script([
         Scripted::Push("rename.txt", "renamed\n"),
         Scripted::Text("CLEAN"),
@@ -130,13 +194,14 @@ fn a_no_sends_the_note_to_the_worker_and_it_goes_through_review_before_the_next_
     assert_eq!(noted.session, Session::Resume(first.session.id().clone()));
     assert_eq!(
         noted.prompt,
-        "The maintainer answered no on pull request #71, with this note:\n\n\
-         rename the flag to --dry-run\n"
+        "The maintainer asked for a rework of pull request #71, with this note:\n\n\
+         rename the flag to --dry-run\n\nOnce you push it, the whole review reads your \
+         change again.\n"
     );
     assert_eq!(
         rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
         "review",
-        "a no's fix starts a pass of the review, not CI directly"
+        "a rework starts a pass of the review, not CI directly"
     );
 
     let pushed = rig.forge.head_of("kelpie/7").unwrap();
@@ -202,6 +267,11 @@ fn a_no_on_a_commit_pushed_by_hand_has_the_worker_build_on_it_without_force() {
         rig.verdict(&runner),
         Some(StepReport::Ruling { id: 1, .. })
     ));
+    assert_eq!(
+        rig.ask(&runner, "rule", Some("1 rework revert it")),
+        json!({ "error": "ruling 1 is not a merge ruling, so it takes a yes, or a no with a note" }),
+        "only a merge ruling takes a rework"
+    );
     rig.ask(&runner, "rule", Some("1 no revert it"));
     // A plain push from the worktree: the stand-in panics if it is refused.
     rig.claude.script([

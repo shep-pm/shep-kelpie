@@ -1,13 +1,17 @@
 //! The review: one pass down the project's reviewers, each run once, in order
 //!
-//! A round whose findings are all nits (LOW), or none, goes straight to the
-//! next reviewer. One with anything above a nit sends the worker all of its
-//! findings, at the reviewer's own severity, for one fix turn, and the next
-//! reviewer reads the fix. A reviewer with a second look reads twice first,
-//! the second time shown what it found, and both lists go to that one fix
-//! turn. A review bot's round is [`super::review_bot`]'s, and its open
-//! threads are its findings. After the last reviewer the work item goes on
-//! to [`super::gate`].
+//! A round with no findings goes straight to the next reviewer. One with any,
+//! nits (LOW) included, sends the worker all of them but a size-skipped
+//! file's notice, at the reviewer's own severity, for one fix turn, and the
+//! next reviewer reads the fix. A fix turn sent only nits starts nothing
+//! new: the pass goes on as after any fix turn, one that pushes nothing
+//! declines the nits, and the worker's own head it pushes is kept, so a bot
+//! that read the pull request before has its nits on that head left open
+//! rather than sent again. A
+//! reviewer with a second look reads twice first, the second time shown what
+//! it found, and both lists go to that one fix turn. A review bot's round is
+//! [`super::review_bot`]'s, and its open threads are its findings. After the
+//! last reviewer the work item goes on to [`super::gate`].
 
 pub(super) mod calls;
 mod criteria;
@@ -15,6 +19,8 @@ pub(super) mod findings;
 mod lineup;
 #[cfg(test)]
 mod local;
+#[cfg(test)]
+mod nits;
 mod prompts;
 pub(super) mod pushed;
 #[cfg(test)]
@@ -34,7 +40,7 @@ use crate::agents::{DEFECT_HUNTER, QWEN};
 use crate::pacer::Scope;
 use crate::ports::{
     AgentCall, AgentError, AgentReply, Agents, Ending, Finding, Reviewer, ReviewerError,
-    RoundStage, Severity, Timestamp, read_review,
+    RoundStage, Timestamp, read_review,
 };
 use crate::settings::{AgentName, ListedReviewer};
 use crate::state::{Fix, StateError, Stuck};
@@ -229,7 +235,9 @@ impl Runner {
 
     // A fix turn that pushed nothing fixed nothing, whatever it says: the
     // findings sent still stand, so the next reviewer does not run yet,
-    // unless the worker deferred every one of them as out of scope.
+    // unless the worker deferred every one of them as out of scope, or they
+    // were all nits, which the worker may decline: a ruling over nits would
+    // ask the maintainer about what never holds a merge.
     fn fix_ended(
         &mut self,
         number: u64,
@@ -244,9 +252,16 @@ impl Runner {
         let pushed = match head {
             Some(before) => match self.origin_head() {
                 Ok(now) if now == before => {
+                    // A size-skipped file's notice an older kelpie sent is no finding.
+                    let count = (sent.findings.iter())
+                        .filter(|f| !f.is_skipped_for_size())
+                        .count();
+                    if sent.findings.iter().all(Finding::is_nit) {
+                        return self.went_unfixed(number, review, Unfixed::NitsDeclined(count));
+                    }
                     match findings::all_deferred(build, sent) {
                         Ok(true) => {
-                            return self.all_deferred(number, review, sent.findings.len());
+                            return self.went_unfixed(number, review, Unfixed::Deferred(count));
                         }
                         Ok(false) => {}
                         Err(reason) => return Ok(self.gate_failed(reason)),
@@ -267,9 +282,16 @@ impl Runner {
                     }
                     // Only the worker's own commit is its fix: a push from
                     // anyone else stays unvouched for.
+                    // So is a nit fix's head, which a bot's nits are not sent on.
                     if self.worktree_head().as_ref() == Some(&now) {
                         let head = now.clone();
-                        self.update(|item| item.send_unread(head))?;
+                        let nits = sent.findings.iter().all(Finding::is_nit);
+                        self.update(|item| {
+                            item.send_unread(head.clone());
+                            if nits {
+                                item.nit_fixed(head);
+                            }
+                        })?;
                     }
                     Some(now)
                 }
@@ -295,14 +317,15 @@ impl Runner {
         }))
     }
 
-    // Every finding sent was left for a follow-up issue, so there was nothing
-    // to push, and the next reviewer reads the pull request as it stands.
-    // Bot threads sent stay open, since nothing answered them.
-    fn all_deferred(
+    // Every finding sent was left for a follow-up issue, or every one was a
+    // nit the worker declined, so there was nothing to push, and the next
+    // reviewer reads the pull request as it stands. Bot threads sent stay
+    // open, since nothing answered them.
+    fn went_unfixed(
         &mut self,
         number: u64,
         review: Review,
-        deferred: usize,
+        unfixed: Unfixed,
     ) -> Result<Begin, StateError> {
         let issue = self.current().expect("a fix is a work item's").issue;
         let round = review.round;
@@ -311,11 +334,19 @@ impl Runner {
             item.forget_threads();
             item.phase = next;
         })?;
-        Ok(Begin::Report(StepReport::FindingsDeferred {
-            issue,
-            pull_request: number,
-            round,
-            deferred,
+        Ok(Begin::Report(match unfixed {
+            Unfixed::Deferred(deferred) => StepReport::FindingsDeferred {
+                issue,
+                pull_request: number,
+                round,
+                deferred,
+            },
+            Unfixed::NitsDeclined(nits) => StepReport::NitsDeclined {
+                issue,
+                pull_request: number,
+                round,
+                nits,
+            },
         }))
     }
 
@@ -360,9 +391,11 @@ impl Runner {
         })
     }
 
-    // Nits alone are not worth a fix turn. Otherwise every finding goes, at
-    // the reviewer's own severity, nits included, and a bot's threads sent
-    // with them are kept to resolve once the fix moves the head.
+    // Every finding goes, at the reviewer's own severity, nits included, and
+    // a bot's threads sent with them are kept to resolve once the fix moves
+    // the head. A file the script skipped for its size is reported with the
+    // round but never sent, since no fix of the worker's reviews it. A round
+    // left with nothing to send goes on to the next reviewer.
     fn send_findings(
         &mut self,
         review: Review,
@@ -375,7 +408,11 @@ impl Runner {
             .pull_request
             .expect("review runs once a pull request is known");
         let round = review.round;
-        if findings.iter().all(|f| f.severity <= Severity::Low) {
+        let findings: Vec<Finding> = findings
+            .into_iter()
+            .filter(|f| !f.is_skipped_for_size())
+            .collect();
+        if findings.is_empty() {
             let next = self.after_round(review, self.ports.clock.now());
             self.update(|item| item.phase = next)?;
             return Ok(Begin::Report(StepReport::ReviewFindingsSent {
@@ -660,6 +697,15 @@ impl Runner {
         self.save(next)?;
         Ok(Some(report))
     }
+}
+
+// Why a fix turn that pushed nothing still lets the pass go on, with how
+// many findings it was sent.
+enum Unfixed {
+    // The worker deferred every one as out of scope.
+    Deferred(usize),
+    // Every one was a nit, which the worker may decline.
+    NitsDeclined(usize),
 }
 
 // What both looks found, each once, the worst first. A stable sort keeps

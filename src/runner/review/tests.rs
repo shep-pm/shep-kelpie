@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::*;
-use crate::ports::{Cost, Role, Session};
+use crate::ports::{Cost, Role, Session, Severity};
 use crate::runner::step;
 use crate::test::{Rig, Scripted, ScriptedRound};
 
@@ -103,32 +103,6 @@ fn a_review_saved_after_its_last_reviewer_goes_on_to_ci() {
 }
 
 #[test]
-fn a_round_of_nits_goes_to_the_next_reviewer_with_no_fix_turn() {
-    let (rig, runner) = at_round_1("shep");
-    rig.reviewer.script([ScriptedRound::Findings(vec![Finding {
-        severity: Severity::Low,
-        file: "src/lib.rs".into(),
-        line: 3,
-        what: "unused variable".into(),
-        why: "dead code".into(),
-    }])]);
-    step(&runner).unwrap(); // round 1's qwen call: one nit
-    assert_eq!(
-        step(&runner).unwrap(),
-        Some(StepReport::ReviewFindingsSent {
-            issue: 7,
-            pull_request: 71,
-            round: 1,
-            held: 0,
-        })
-    );
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["work_item"]["turn"]["state"], "ended");
-    assert_eq!(status["work_item"]["phase"]["ran"], json!(["qwen"]));
-    assert_eq!(rig.claude.calls().len(), 1, "no fix turn");
-}
-
-#[test]
 fn a_round_above_a_nit_sends_every_finding_for_one_fix_and_the_next_reviewer_reads_it() {
     let (rig, runner) = at_round_1("shep");
 
@@ -173,8 +147,12 @@ fn a_round_above_a_nit_sends_every_finding_for_one_fix_and_the_next_reviewer_rea
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["work_item"]["turn"]["state"], "next");
     let held = runner.lock().unwrap().state.work_items[0].held.clone();
-    assert_eq!(held.len(), 2, "{held:?}");
-    assert_eq!(held[1].severity, Severity::Low);
+    assert_eq!(
+        held.len(),
+        1,
+        "a nit is never held for a follow-up: {held:?}"
+    );
+    assert_eq!(held[0].severity, Severity::Medium);
     let text = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
     assert!(
         text.contains("MEDIUM|src/lib.rs:3|the flag is misnamed"),

@@ -16,8 +16,9 @@ use crate::state::ids::RulingIds;
 pub const HELP: &str = "\
 usage: shep kelpie rule <id> yes
        shep kelpie rule <id> no <note>
-       shep kelpie rule <id> <text>      for a ruling that asks for text
-       shep kelpie rule                  lists the rulings waiting, and asks
+       shep kelpie rule <id> rework <note>   for a merge ruling
+       shep kelpie rule <id> <text>          for a ruling that asks for text
+       shep kelpie rule                      lists the rulings waiting, and asks
 
 Quotes are optional. In zsh a note with ?, *, ! or an apostrophe still
 needs them: shep kelpie rule 14 no \"it's the wrong flag\". `-p` goes
@@ -165,6 +166,10 @@ fn forms(ruling: &Ruling) -> String {
     let id = ruling.id;
     match Wants::of(&ruling.kind) {
         Wants::Answer => format!("your answer to the worker: `shep kelpie rule {id} <text>`"),
+        Wants::Merge => format!(
+            "`shep kelpie rule {id} yes`, `shep kelpie rule {id} no <note>` or \
+             `shep kelpie rule {id} rework <note>`"
+        ),
         Wants::YesOrNo => {
             format!("`shep kelpie rule {id} yes` or `shep kelpie rule {id} no <note>`")
         }
@@ -247,6 +252,7 @@ fn pick(
     };
     let prompt = match Wants::of(&ruling.kind) {
         Wants::Answer => "Your answer: ",
+        Wants::Merge => "yes, no <note> or rework <note>: ",
         Wants::YesOrNo => "yes, or no <note>: ",
     };
     loop {

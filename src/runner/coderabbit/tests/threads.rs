@@ -45,7 +45,7 @@ fn a_forge_that_keeps_refusing_to_resolve_lets_the_pass_go_on_after_three_steps(
         rig.verdict(&runner),
         Some(StepReport::Ruling { id: 1, .. })
     ));
-    rig.ask(&runner, "rule", Some("1 no guard it too"));
+    rig.ask(&runner, "rule", Some("1 rework guard it too"));
     rig.claude.script([
         Scripted::Push("guard.txt", "guarded\n"),
         Scripted::Text("CLEAN"),

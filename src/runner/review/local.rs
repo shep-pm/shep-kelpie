@@ -244,7 +244,7 @@ fn at_round_one(rig: &Rig) -> Mutex<Runner> {
 }
 
 // Takes the work item, its review done, through green CI to the merge
-// ruling, and answers it no: the worker's fix starts a fresh pass.
+// ruling, and answers it rework: the worker's fix starts a fresh pass.
 fn next_pass(rig: &Rig, runner: &Mutex<Runner>, fix: &'static str) {
     assert_eq!(phase(rig, runner)["state"], "ci");
     let head = rig.forge.head_of("kelpie/7").unwrap();
@@ -252,7 +252,7 @@ fn next_pass(rig: &Rig, runner: &Mutex<Runner>, fix: &'static str) {
     let Some(StepReport::Ruling { id, .. }) = rig.verdict(runner) else {
         panic!("no merge ruling");
     };
-    rig.ask(runner, "rule", Some(&format!("{id} no fix it")));
+    rig.ask(runner, "rule", Some(&format!("{id} rework fix it")));
     rig.claude.script([Scripted::Push(fix, "fixed\n")]);
     step(runner).unwrap(); // the noted turn: pushes, and a pass begins
     assert_eq!(phase(rig, runner)["round"], 1);
@@ -346,11 +346,18 @@ fn phase(rig: &Rig, runner: &Mutex<Runner>) -> serde_json::Value {
     rig.ask(runner, "status", None)["work_item"]["phase"].clone()
 }
 
-// One pass in which qwen's round is `round` and claude's is clean, ending at CI.
+// One pass in which qwen's round is `round` and claude's is clean, ending at
+// CI. A round with a finding gets the worker's fix turn first, which pushes.
 fn pass(rig: &Rig, runner: &Mutex<Runner>, round: ScriptedRound) {
+    let found = matches!(&round, ScriptedRound::Findings(f) if f.iter().any(|f| !f.is_unreviewed() && !f.is_skipped_for_size()));
     rig.reviewer.script([round]);
+    if found {
+        let fix = format!("tidy-{}.txt", rig.reviewer.seen().len());
+        rig.claude
+            .script([Scripted::Push(Box::leak(fix.into_boxed_str()), "tidied\n")]);
+    }
     rig.claude.script([Scripted::Text("CLEAN")]);
-    for _ in 0..4 {
+    for _ in 0..6 {
         if phase(rig, runner)["state"] != "review" {
             return;
         }
@@ -422,4 +429,39 @@ fn a_file_skipped_for_its_size_stays_a_finding_and_is_not_unreviewed() {
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["work_item"]["phase"]["stage"]["stage"], "found");
     assert_eq!(status["work_item"].get("local_reviewers_down"), None);
+    // No fix of the worker's reviews the file, so it goes to no fix turn.
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewFindingsSent {
+            issue: 7,
+            pull_request: 71,
+            round: 1,
+            held: 0,
+        })
+    );
+    assert_eq!(phase(&rig, &runner)["ran"], json!(["qwen"]));
+    assert_eq!(rig.claude.calls().len(), 1, "no fix turn");
+}
+
+#[test]
+fn a_file_skipped_for_its_size_is_left_out_of_a_fix_turn_sent_other_findings() {
+    let rig = Rig::new("koji");
+    let runner = at_round_one(&rig);
+    rig.reviewer.script([found(
+        "MEDIUM|src/c.rs:4|the flag is misnamed|it reads as its opposite\n\
+         LOW|src/big.rs:0|not reviewed: 900 lines exceeds the chunk limit|split the file or review it by hand\n",
+    )]);
+    step(&runner).unwrap(); // round 1, qwen: a finding and a skipped file
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewFindingsSent {
+            issue: 7,
+            pull_request: 71,
+            round: 1,
+            held: 1,
+        })
+    );
+    let text = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
+    assert!(text.contains("MEDIUM|src/c.rs:4"), "{text}");
+    assert!(!text.contains("src/big.rs"), "{text}");
 }

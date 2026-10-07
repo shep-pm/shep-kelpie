@@ -60,7 +60,12 @@ pub(in crate::runner) struct Sent<'a> {
 ///
 /// As [`deferred`].
 pub(in crate::runner) fn all_deferred(build: &Path, sent: Sent<'_>) -> Result<bool, String> {
-    if sent.findings.is_empty() {
+    // A version 13 state file can hold a size-skipped file's line among
+    // the findings sent, which no worker defers.
+    let fixable: Vec<&Finding> = (sent.findings.iter())
+        .filter(|f| !f.is_skipped_for_size())
+        .collect();
+    if fixable.is_empty() {
         return Ok(false);
     }
     let mut since = deferred(build)?;
@@ -69,8 +74,7 @@ pub(in crate::runner) fn all_deferred(build: &Path, sent: Sent<'_>) -> Result<bo
             since.remove(at);
         }
     }
-    Ok(sent
-        .findings
+    Ok(fixable
         .iter()
         .all(|f| since.iter().any(|d| d.is_same_as(f))))
 }
@@ -86,7 +90,8 @@ pub(in crate::runner) fn write_findings_file(
         "Round {round}'s findings, at the reviewer's severity. Fix each one, then \
          commit and push. A finding that is out of scope for this pull request may be \
          left: copy its line, as it stands here, onto a line of its own in {}. Kelpie \
-         files what is there as an issue once the pull request merges.\n\n",
+         files what is there as an issue once the pull request merges, except a LOW \
+         one, which is dropped.\n\n",
         deferred.display()
     );
     for f in findings {
@@ -380,6 +385,29 @@ mod tests {
             }),
             "the next reviewer in the list reads the pull request as it stands"
         );
+    }
+
+    // A version 13 state file's fix turn may have been sent a size-skipped
+    // file's notice beside its findings: no worker defers that, so deferring
+    // the rest defers them all.
+    #[test]
+    fn a_size_skipped_files_notice_sent_by_an_older_kelpie_need_not_be_deferred() {
+        let dir = tempfile::tempdir().unwrap();
+        let medium = "MEDIUM|src/lib.rs:3|the flag is misnamed|it reads as its opposite\n";
+        let notice = "LOW|src/big.rs:0|not reviewed: 900 lines exceeds the chunk limit|split it\n";
+        let sent = parse_findings(&format!("{medium}{notice}"));
+        std::fs::write(dir.path().join("deferred-findings.md"), medium).unwrap();
+        let sent = Sent {
+            findings: &sent,
+            deferred_before: &[],
+        };
+        assert_eq!(all_deferred(dir.path(), sent), Ok(true));
+        let only_notice = parse_findings(notice);
+        let sent = Sent {
+            findings: &only_notice,
+            deferred_before: &[],
+        };
+        assert_eq!(all_deferred(dir.path(), sent), Ok(false));
     }
 
     #[test]

@@ -95,7 +95,7 @@ fn a_bot_skipped_while_owed_keeps_its_debt_and_lifts_no_other_bots_rounds() {
         rig.verdict(&runner),
         Some(StepReport::Ruling { id: 1, .. })
     ));
-    rig.ask(&runner, "rule", Some("1 no once more"));
+    rig.ask(&runner, "rule", Some("1 rework once more"));
     rig.claude.script([
         Scripted::Push("again.txt", "again\n"),
         Scripted::Text("CLEAN"),

@@ -179,6 +179,7 @@ impl Runner {
         self.replies_on()?;
         let takes = match Wants::of(kind) {
             Wants::Answer => Takes::Answer,
+            Wants::Merge => Takes::Merge,
             Wants::YesOrNo => Takes::YesOrNo,
         };
         Some(ReplyWith { id, takes })

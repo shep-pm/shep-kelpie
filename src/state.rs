@@ -25,7 +25,9 @@ use crate::ports::{Finding, SessionId, Timestamp};
 use crate::settings::Account;
 use crate::work_item::{Attached, Known, Phase, Review, Seconds, Tally, Turn, WorkItem};
 
-/// The state file's format version. 13 added the `pushing` review stage, a
+/// The state file's format version. 14 added a work item's `nit_fix_heads`
+/// and `noted_from` and the merge ruling's `note_fix`,
+/// 13 added the `pushing` review stage, a
 /// round's `reading`, the `unpushed` stuck reason, a work item's `reviewed_heads` and
 /// `sent_unread` and the merge ruling's `unread_head`, 12 added the `settling` review stage
 /// and the merge ruling's `open_threads`, 11 dropped the run state, 10 added
@@ -33,7 +35,7 @@ use crate::work_item::{Attached, Known, Phase, Review, Seconds, Tally, Turn, Wor
 /// kinds to six, 8 added the project manager's session, notes and attach, 7
 /// a work item's `attached`, 6 folded the timing phases to six, and 5 added
 /// the board's events, each of which an older kelpie refuses
-const VERSION: u32 = 13;
+const VERSION: u32 = 14;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
@@ -325,6 +327,10 @@ pub enum RulingKind {
         /// sent pushed it
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         unread_head: bool,
+        /// Whether the head is the worker's fix for the note a merge
+        /// ruling's `no` sent, which no reviewer read
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        note_fix: bool,
     },
     /// The worker ended its turn on a question. The answer is its next turn.
     Question {

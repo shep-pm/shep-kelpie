@@ -21,6 +21,13 @@ impl WorkItem {
         }
     }
 
+    /// Records `head` as one a fix turn sent only nits pushed
+    pub fn nit_fixed(&mut self, head: String) {
+        if !self.nit_fix_heads.contains(&head) {
+            self.nit_fix_heads.push(head);
+        }
+    }
+
     /// Whether the merge gate may take `head`: a review round read it, kelpie
     /// sent it to CI unread on purpose, or the pull request arrived at it
     /// when adopted

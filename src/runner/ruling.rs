@@ -34,8 +34,12 @@ const FAILED_CONTINUE: &str = "Your last turn failed before it finished. \
 pub enum Answer {
     /// Go ahead: what that means depends on the ruling
     Yes,
-    /// Do not, and send the worker this note
+    /// Do not, and send the worker this note. On a merge ruling its fix
+    /// goes to CI and back to the ruling.
     No(String),
+    /// On a merge ruling only: send the worker this note, and its change
+    /// through a new pass of the review
+    Rework(String),
     /// The answer to the worker's question
     Text(String),
 }
@@ -49,6 +53,8 @@ pub enum RuleError {
     WantsAnswer(u64),
     /// The ruling is not a question, and was given an answer
     NotAQuestion(u64),
+    /// The ruling is not a merge ruling, and was given a rework
+    NotAMerge(u64),
     /// The `ready-for-human` label could not come off this pull request
     Unlabel(u64, String),
     /// The worktree could not be brought to the head a yes accepted
@@ -68,6 +74,10 @@ impl fmt::Display for RuleError {
             Self::NotAQuestion(id) => write!(
                 f,
                 "ruling {id} is not a question, so it takes a yes, or a no with a note"
+            ),
+            Self::NotAMerge(id) => write!(
+                f,
+                "ruling {id} is not a merge ruling, so it takes a yes, or a no with a note"
             ),
             Self::Unlabel(number, e) => {
                 write!(f, "cannot take the `{HUMAN}` label off #{number}: {e}")
@@ -132,6 +142,15 @@ impl Runner {
             (Answer::Yes, RulingKind::AgentFiles { head, .. }) => Some(head.clone()),
             _ => None,
         };
+        // A merge ruling's no whose fix goes to CI with no pass of the review.
+        // Any answer to a merge ruling replaces what an earlier no left.
+        let merge = matches!(ruling.kind, RulingKind::Merge { .. });
+        let noted_from = match (&answer, &ruling.kind) {
+            (Answer::No(_), RulingKind::Merge { head, .. }) if !needs_pass(&ruling.kind) => {
+                Some(head.clone())
+            }
+            _ => None,
+        };
         // These ask the maintainer to fix the branch, so a yes vouches for its head.
         let vouches = matches!(
             (&answer, &ruling.kind),
@@ -181,6 +200,9 @@ impl Runner {
             }
             if accepts.is_some() {
                 item.claude_files_accepted = accepts;
+            }
+            if merge {
+                item.noted_from = noted_from;
             }
             let regate = match (vouches, self.settings.merge_authority) {
                 (true, MergeAuthority::Auto) => regate(&self.settings.repo, item)?,
@@ -445,6 +467,7 @@ fn decide(
             to,
         });
     }
+    let warned = needs_pass(&ruling.kind);
     let phase = match (answer, ruling.kind) {
         (Answer::Text(text), RulingKind::Question { resume, .. }) => {
             // A question resumes exactly where it interrupted the review;
@@ -464,6 +487,35 @@ fn decide(
         }
         (_, RulingKind::Question { .. }) => return Err(RuleError::WantsAnswer(id)),
         (Answer::Text(_), _) => return Err(RuleError::NotAQuestion(id)),
+        // A merge ruling's no is a fix of what the maintainer read, which
+        // goes to CI and back to this ruling. A rework is a change that needs
+        // the whole review again, and so is a no on a ruling that warns of
+        // what only a pass clears.
+        (Answer::No(note), RulingKind::Merge { .. }) if warned => {
+            return Ok(Move::Turn {
+                prompt: format!(
+                    "{}\nOnce you push it, the whole review reads your change again.\n",
+                    note_prompt(ruling.pull_request, &note)
+                ),
+                phase: Phase::Implement,
+                force: Some(Phase::Review(Review::first())),
+            });
+        }
+        (Answer::No(note), RulingKind::Merge { .. }) => {
+            return Ok(Move::Turn {
+                prompt: note_prompt(ruling.pull_request, &note),
+                phase: Phase::Implement,
+                force: None,
+            });
+        }
+        (Answer::Rework(note), RulingKind::Merge { .. }) => {
+            return Ok(Move::Turn {
+                prompt: rework_prompt(ruling.pull_request, &note),
+                phase: Phase::Implement,
+                force: Some(Phase::Review(Review::first())),
+            });
+        }
+        (Answer::Rework(_), _) => return Err(RuleError::NotAMerge(id)),
         // A fix turn resumes in its round, which checks it pushed.
         (Answer::Yes, RulingKind::Stuck(Stuck::TurnTimeout { phase })) => {
             return Ok(Move::Turn {
@@ -495,7 +547,7 @@ fn decide(
         // The pull request is merged, so a no has no worker to send a note to.
         (Answer::Yes | Answer::No(_), RulingKind::FollowUp { .. }) => Phase::Done { merged: true },
         // A no's fix is new code, unreviewed: it goes through a pass of the
-        // review again before CI, whatever ruling this answers.
+        // review again before CI, whatever other ruling this answers.
         (Answer::No(note), _) => {
             return Ok(Move::Turn {
                 prompt: note_prompt(ruling.pull_request, &note),
@@ -572,6 +624,7 @@ pub(super) fn question(id: u64, issue: u64, number: Option<u64>, kind: &RulingKi
             unreviewed,
             open_threads,
             unread_head,
+            note_fix,
         } => {
             let mut unread = unreviewed.as_ref().map_or_else(String::new, |why| {
                 format!(" No reviewer read it in its last review: {why}.")
@@ -581,13 +634,29 @@ pub(super) fn question(id: u64, issue: u64, number: Option<u64>, kind: &RulingKi
                     " Kelpie has no record of a review round reading this head, or of a fix turn it sent pushing it.",
                 );
             }
+            if *note_fix {
+                unread.push_str(
+                    " This head is the worker's fix for your note, and no reviewer read it.",
+                );
+            }
             let open = open_threads.as_ref().map_or_else(String::new, |open| {
                 format!(" Review bot threads are still open on it: {open}.")
             });
-            format!(
-                "Merge {about} at {} into main?{unread}{open} {yes} merges it",
+            let rework = trigger("rework <note>");
+            if needs_pass(kind) {
+                return format!(
+                    "Merge {about} at {} into main?{unread}{open} {yes} merges it, and {no} \
+                     or {rework} sends the worker your note for a change the whole review \
+                     reads again, since only a new pass clears that.",
+                    short(head)
+                );
+            }
+            return format!(
+                "Merge {about} at {} into main?{unread}{open} {yes} merges it, {no} sends the \
+                 worker your note for a fix that goes to CI and back to you, and {rework} \
+                 sends it your note for a change the whole review reads again.",
                 short(head)
-            )
+            );
         }
         RulingKind::Stuck(reason) => match reason {
             Stuck::Rebase { why } => format!(
@@ -711,6 +780,17 @@ pub(super) fn question(id: u64, issue: u64, number: Option<u64>, kind: &RulingKi
     format!("{ask}, and {no} sends the worker your note.")
 }
 
+// Whether a merge ruling warns of what only a new pass of the review clears:
+// a pass no reviewer read, a listed bot's threads left open, or a head no
+// round read and no fix turn of kelpie's pushed.
+fn needs_pass(kind: &RulingKind) -> bool {
+    matches!(
+        kind,
+        RulingKind::Merge { unreviewed, open_threads, unread_head, .. }
+            if unreviewed.is_some() || open_threads.is_some() || *unread_head
+    )
+}
+
 fn capitalized(text: &str) -> String {
     let mut chars = text.chars();
     chars.next().map_or_else(String::new, |first| {
@@ -724,6 +804,17 @@ fn note_prompt(number: Option<u64>, note: &str) -> String {
         |n| format!("pull request #{n}"),
     );
     format!("The maintainer answered no on {about}, with this note:\n\n{note}\n")
+}
+
+fn rework_prompt(number: Option<u64>, note: &str) -> String {
+    let about = number.map_or_else(
+        || "your work item".to_owned(),
+        |n| format!("pull request #{n}"),
+    );
+    format!(
+        "The maintainer asked for a rework of {about}, with this note:\n\n{note}\n\n\
+         Once you push it, the whole review reads your change again.\n"
+    )
 }
 
 fn declined_prompt(number: Option<u64>, head: &str, note: &str) -> String {
@@ -744,5 +835,7 @@ fn answer_prompt(text: &str) -> String {
     format!("The maintainer answered your question:\n\n{text}\n")
 }
 
+#[cfg(test)]
+mod no_fix;
 #[cfg(test)]
 mod tests;
