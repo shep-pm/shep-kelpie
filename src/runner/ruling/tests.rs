@@ -72,6 +72,8 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
         open_threads: None,
         unread_head: false,
         note_fix: false,
+        late_fix: false,
+        nits: None,
     };
     assert_eq!(comment(&merge), None);
 }

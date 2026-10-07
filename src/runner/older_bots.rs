@@ -55,25 +55,28 @@ impl Runner {
         next.rulings
             .retain(|r| !withdrawn.iter().any(|(id, ..)| *id == r.id));
         self.save(next)?;
+        let project = self.project.as_str().to_owned();
+        let why = format!(
+            "no review bot {project} lists had read it, so they read it first, and the \
+             merge ruling is raised again after they have"
+        );
         for (id, issue, number) in withdrawn {
-            self.say_withdrawn(id, issue, number);
+            self.late_reads.remove(&issue);
+            self.say_withdrawn(id, issue, number, &why);
         }
         Ok(())
     }
 
-    // Logs the withdrawn merge ruling and posts it once to the webhook,
-    // where one is set: no ruling is left to retry the post for.
-    fn say_withdrawn(&mut self, id: u64, issue: u64, number: Option<u64>) {
+    /// Logs that merge ruling `id` on `issue`'s pull request `number` is
+    /// withdrawn, and `why`, and posts it once to the webhook, where one is
+    /// set: no ruling is left to retry the post for.
+    pub(super) fn say_withdrawn(&mut self, id: u64, issue: u64, number: Option<u64>, why: &str) {
         let project = self.project.as_str().to_owned();
         let about = number.map_or_else(
             || format!("issue #{issue}"),
             |n| format!("pull request #{n}"),
         );
-        let text = format!(
-            "Merge ruling {id} on {about} is withdrawn: no review bot {project} lists had \
-             read it, so they read it first, and the merge ruling is raised again after \
-             they have. Nothing to answer."
-        );
+        let text = format!("Merge ruling {id} on {about} is withdrawn: {why}. Nothing to answer.");
         self.notes.push(text.clone());
         let Some(webhook) = self.webhook.clone() else {
             return;

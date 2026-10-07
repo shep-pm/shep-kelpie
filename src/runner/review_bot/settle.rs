@@ -2,16 +2,15 @@
 //!
 //! The forge can list a bot's review before the threads posted with it. So
 //! the round reads the threads again a little later, until two reads agree.
-//! A bot the pass went on without may review the head anyway. Its review
-//! then gets a round of its own before the next reviewer's or the pass's
-//! end. The merge ruling names any listed bot's threads nothing addressed.
+//! The merge ruling names any listed bot's threads nothing addressed, and
+//! its nits apart.
 
 use super::super::Runner;
 use super::super::report::Begin;
-use crate::ports::{Severity, Timestamp};
+use crate::ports::Timestamp;
 use crate::review_bot::{Activity, Bot};
 use crate::state::StateError;
-use crate::work_item::{Phase, ReviewStage};
+use crate::work_item::ReviewStage;
 
 // CodeRabbit's two threads on shep#703 were missing two seconds after its
 // review. Reads of the threads are this far apart.
@@ -72,88 +71,55 @@ impl Runner {
         Ok(Begin::Idle)
     }
 
-    /// Starts a round for a bot this pass went on without that has since
-    /// reviewed the head anyway, whose threads then settle as any review's
-    ///
-    /// `None` when no such bot has, and the round goes to the next reviewer.
-    pub(in crate::runner) fn late_review(&mut self) -> Result<Option<Begin>, StateError> {
-        let skipped = self.item().bots_skipped.clone();
-        if skipped.is_empty() {
-            return Ok(None);
-        }
-        let head = match self.origin_head() {
-            Ok(head) => head,
-            Err(reason) => return Ok(Some(self.gate_failed(reason))),
-        };
-        let number = self.number();
-        for reviewer in skipped.iter().map(|s| s.reviewer().clone()) {
-            let listed = self.listed(&reviewer).and_then(|r| r.bot());
-            // A review from before an adoption does not stand for one of kelpie's.
-            let Some(bot) = listed
-                .map(|b| b.bot)
-                .filter(|bot| !self.item().summons_owed.contains(bot))
-            else {
-                continue;
-            };
-            let activity = match self.activity(bot, number) {
-                Ok(activity) => activity,
-                Err(reason) => return Ok(Some(self.gate_failed(reason))),
-            };
-            if !self.profile(bot).covers(&activity, &head) {
-                continue;
-            }
-            let open = open_ids(&activity);
-            let now = self.ports.clock.now();
-            let read = head.clone();
-            self.update(|item| {
-                item.reviewed(read);
-                item.bots_skipped.retain(|s| s.reviewer() != &reviewer);
-                if let Phase::Review(review) = &mut item.phase {
-                    review.reviewer = Some(reviewer.clone());
-                    review.stage = ReviewStage::Settling {
-                        bot,
-                        since: now,
-                        read: now,
-                        open,
-                    };
-                }
-            })?;
-            return Ok(Some(Begin::Idle));
-        }
-        Ok(None)
-    }
-
     /// The listed review bots' unaddressed threads on pull request
-    /// `number`, as the merge ruling names them, or `None` when there are none
+    /// `number`, as the merge ruling names them
     ///
-    /// A thread is unaddressed when it is open, not outdated, not sent to a
-    /// fix turn awaiting it, and above a nit: a nit never holds a merge.
+    /// A thread is unaddressed when it is open, not outdated and not sent to
+    /// a fix turn awaiting it. Nits are named apart, since a nit never holds
+    /// a merge.
     ///
     /// # Errors
     ///
     /// A message when the forge cannot read a bot's activity.
-    pub(in crate::runner) fn threads_open(&self, number: u64) -> Result<Option<String>, String> {
+    pub(in crate::runner) fn threads_open(&self, number: u64) -> Result<OpenThreads, String> {
         let sent = self.current().map(|item| item.threads_sent.clone());
         let sent = sent.unwrap_or_default();
-        let mut named = Vec::new();
+        let (mut holding, mut nits) = (Vec::new(), Vec::new());
         for listed in self.listed_bots() {
             let profile = self.profile(listed.bot);
             let activity = self.activity(listed.bot, number)?;
-            let open = activity
-                .open_threads()
+            let (low, above): (Vec<_>, Vec<_>) = (activity.open_threads())
                 .filter(|t| !sent.contains(&t.id))
-                .filter(|t| profile.finding(t).severity > Severity::Low)
-                .count();
-            if open > 0 {
-                named.push(format!("{open} from {}", profile.name()));
+                .partition(|t| profile.finding(t).is_nit());
+            let name = profile.name();
+            if !above.is_empty() {
+                holding.push(format!("{} from {name}", above.len()));
+            }
+            match low.len() {
+                0 => {}
+                1 => nits.push(format!("1 nit left open ({name})")),
+                n => nits.push(format!("{n} nits left open ({name})")),
             }
         }
-        Ok((!named.is_empty()).then(|| named.join(", ")))
+        let joined = |named: Vec<String>| (!named.is_empty()).then(|| named.join(", "));
+        Ok(OpenThreads {
+            holding: joined(holding),
+            nits: joined(nits),
+        })
     }
 }
 
+/// The listed review bots' unaddressed threads, as the merge ruling names
+/// them, by bot
+pub(in crate::runner) struct OpenThreads {
+    /// Those above a nit, which hold a merge under `auto`, if any
+    pub(in crate::runner) holding: Option<String>,
+    /// The nits, which hold nothing, if any
+    pub(in crate::runner) nits: Option<String>,
+}
+
 // The ids of the bot's open threads, sorted so two reads compare as sets.
-fn open_ids(activity: &Activity) -> Vec<String> {
+pub(super) fn open_ids(activity: &Activity) -> Vec<String> {
     let mut ids: Vec<String> = activity.open_threads().map(|t| t.id.clone()).collect();
     ids.sort();
     ids

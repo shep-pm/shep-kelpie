@@ -15,7 +15,7 @@
 //! once that fix moves the head. A bot that read the pull request before
 //! has its nits on a head a nit-only fix pushed left open, not sent again.
 //! A bot passed over that reviews the head anyway gets a round of its own
-//! before the next reviewer's.
+//! before the next reviewer's, at green CI, or while the merge ruling waits.
 //!
 //! On a pull request the bot read before, the label asks only for what is
 //! new, and after an adoption or a catch-up with `main` it finds nothing.
@@ -24,6 +24,7 @@
 //! and found clean, unless a summon is owed: that one asks once more, for a
 //! full review.
 
+mod late;
 mod lease;
 mod on_ready;
 mod settle;
@@ -870,6 +871,8 @@ impl Runner {
 
 #[cfg(test)]
 mod codex_bot;
+#[cfg(test)]
+mod late_reads;
 #[cfg(test)]
 mod nit_fixes;
 #[cfg(test)]

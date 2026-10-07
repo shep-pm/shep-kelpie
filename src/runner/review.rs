@@ -70,13 +70,15 @@ impl Runner {
         let base = item.review_base();
         let build = item.build.clone();
         // A new pass reviews new code, so no fix of the last one will
-        // resolve the bot threads it sent, and its bots are asked afresh.
+        // resolve the bot threads it sent, its bots are asked afresh, and a
+        // late round's fix is read like any other head.
         let fresh = review
             == Review {
                 bots_only: review.bots_only,
                 ..Review::first()
             };
-        if fresh && (!item.threads_sent.is_empty() || !item.bots_skipped.is_empty()) {
+        let left = !item.threads_sent.is_empty() || !item.bots_skipped.is_empty();
+        if fresh && (left || item.late_from.is_some()) {
             self.update(WorkItem::new_pass)?;
         }
 

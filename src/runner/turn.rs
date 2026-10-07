@@ -151,7 +151,7 @@ impl Runner {
                 return self.review_step();
             }
             Phase::Ci { .. } => return self.check_ci(),
-            Phase::Ruling { .. } => return Ok(Begin::Idle),
+            Phase::Ruling { id } => return self.late_while_parked(*id),
             Phase::Merge { .. } => return self.merge(),
             Phase::Done { merged } => return self.finish(*merged),
         }

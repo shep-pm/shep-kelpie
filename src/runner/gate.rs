@@ -66,6 +66,15 @@ impl Runner {
             Ok(base) => base,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
+        // A late round that left the head it read pushed no fix, so a
+        // catch-up of that head is not one.
+        let head = Some(pr.head.as_str());
+        if self
+            .current()
+            .is_some_and(|i| i.late_from.as_deref() == head)
+        {
+            self.update(|item| item.late_from = None)?;
+        }
         // Past the lag, the forge's head is the branch on `origin`, not a
         // worker's push still arriving. A rework asked for mid-flight waits.
         let mut labels = pr.labels;
@@ -109,28 +118,39 @@ impl Runner {
     // merge ruling with the pull request handed back `ready-for-human`. A
     // pull request no reviewer read, one with a listed bot's threads
     // unaddressed, or a head no round read and no fix turn of kelpie's
-    // pushed, gets the ruling under `auto` too, naming why. One an older
-    // state file left owing the listed bots a pass gets it first.
+    // pushed, gets the ruling under `auto` too, naming why; open nits are
+    // named and hold nothing. One an older state file left owing the listed
+    // bots a pass gets it first, and a bot the pass went on without that
+    // has since reviewed the head gets its late round first.
     fn passed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
         if self.bots_before_merge()? {
             return self.review_step();
         }
+        if let Some(begin) = self.late_review()? {
+            return Ok(begin);
+        }
         let unreviewed = self.current().and_then(|item| item.unreviewed.clone());
         let unread_head = self.current().is_some_and(|item| !item.vouches_for(&head));
-        let open_threads = match self.threads_open(number) {
+        let open = match self.threads_open(number) {
             Ok(open) => open,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
-        // A merge ruling's `no` sent its fix here unread, so the maintainer
-        // decides on it again, even under `auto`, and is told so. A head
-        // kelpie did not send unread itself, such as someone else's push,
-        // is not the worker's fix.
-        let note_fix = self.current().is_some_and(|item| {
-            item.noted_from.as_ref().is_some_and(|from| *from != head)
+        // A merge ruling's `no`, or a bot's late round, sent its fix here
+        // unread, so the maintainer decides on it again, even under `auto`,
+        // and is told so. A head kelpie did not send unread itself, such as
+        // someone else's push, is not the worker's fix.
+        let item = self.current().expect("CI runs on a work item");
+        let fix_from = |from: &Option<String>| {
+            from.as_ref().is_some_and(|from| *from != head)
                 && !item.reviewed_heads.contains(&head)
                 && item.sent_unread.contains(&head)
-        });
-        let vouched = unreviewed.is_none() && open_threads.is_none() && !unread_head && !note_fix;
+        };
+        let (note_fix, late_fix) = (fix_from(&item.noted_from), fix_from(&item.late_from));
+        let vouched = unreviewed.is_none()
+            && open.holding.is_none()
+            && !unread_head
+            && !note_fix
+            && !late_fix;
         if self.settings.merge_authority == MergeAuthority::Auto && vouched {
             self.update(|item| {
                 item.phase = Phase::Merge {
@@ -151,10 +171,13 @@ impl Runner {
         let kind = RulingKind::Merge {
             head,
             unreviewed,
-            open_threads,
+            open_threads: open.holding,
             unread_head,
             note_fix,
+            late_fix,
+            nits: open.nits,
         };
+        self.late_read_now();
         self.raise(number, kind)
     }
 

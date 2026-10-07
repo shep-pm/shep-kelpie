@@ -105,6 +105,8 @@ mod tests {
             open_threads: None,
             unread_head: false,
             note_fix: false,
+            late_fix: false,
+            nits: None,
         };
         assert_eq!(Wants::of(&merge), Wants::Merge);
         assert_eq!(Wants::of(&Stuck::Closed.into()), Wants::YesOrNo);

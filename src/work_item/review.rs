@@ -70,6 +70,19 @@ impl Review {
         }
     }
 
+    /// A round of `reviewer`'s, at `stage`, after its pass has ended, with
+    /// every reviewer in `ran` counted as run, so its fix starts no new pass
+    pub fn late(reviewer: AgentName, ran: Vec<AgentName>, stage: ReviewStage) -> Self {
+        Self {
+            round: u32::try_from(ran.len()).map_or(u32::MAX, |n| n.saturating_add(1)),
+            stage,
+            reviewer: Some(reviewer),
+            ran,
+            unread: false,
+            ..Self::first()
+        }
+    }
+
     /// The next round of the same pass, once this one's reviewer is done
     pub fn next_round(self) -> Self {
         let mut ran = self.ran;

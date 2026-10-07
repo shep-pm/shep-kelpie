@@ -25,7 +25,8 @@ use crate::ports::{Finding, SessionId, Timestamp};
 use crate::settings::Account;
 use crate::work_item::{Attached, Known, Phase, Review, Seconds, Tally, Turn, WorkItem};
 
-/// The state file's format version. 14 added a work item's `nit_fix_heads`
+/// The state file's format version. 15 added a work item's `late_from` and
+/// the merge ruling's `late_fix` and `nits`, 14 added a work item's `nit_fix_heads`
 /// and `noted_from` and the merge ruling's `note_fix`,
 /// 13 added the `pushing` review stage, a
 /// round's `reading`, the `unpushed` stuck reason, a work item's `reviewed_heads` and
@@ -35,7 +36,7 @@ use crate::work_item::{Attached, Known, Phase, Review, Seconds, Tally, Turn, Wor
 /// kinds to six, 8 added the project manager's session, notes and attach, 7
 /// a work item's `attached`, 6 folded the timing phases to six, and 5 added
 /// the board's events, each of which an older kelpie refuses
-const VERSION: u32 = 14;
+const VERSION: u32 = 15;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
@@ -331,6 +332,14 @@ pub enum RulingKind {
         /// ruling's `no` sent, which no reviewer read
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         note_fix: bool,
+        /// Whether the head is the worker's fix for a review bot's late
+        /// round, which no reviewer read
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        late_fix: bool,
+        /// The listed review bots' nits still open on the head, by bot,
+        /// when any are. They never hold a merge.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nits: Option<String>,
     },
     /// The worker ended its turn on a question. The answer is its next turn.
     Question {

@@ -266,6 +266,9 @@ pub struct Runner {
     draining: bool,
     // What the answers folder held that was no answer, in memory only
     left: left::Seen,
+    // When each work item parked on a merge ruling last read the review bots
+    // its pass went on without, kept in memory only
+    late_reads: BTreeMap<u64, Timestamp>,
 }
 
 impl Runner {
@@ -379,6 +382,7 @@ impl Runner {
             pm: pm::Desk::default(),
             draining: false,
             left: left::Seen::default(),
+            late_reads: BTreeMap::new(),
         };
         runner.settle_older_bots()?;
         runner.settle_labels();
@@ -545,6 +549,7 @@ impl Runner {
             sent_unread: Vec::new(),
             nit_fix_heads: Vec::new(),
             noted_from: None,
+            late_from: None,
             claude_files_accepted: None,
             qwen: QwenTally::default(),
             merge_refused: false,
@@ -788,7 +793,7 @@ mod tests {
         drop(runner);
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
-        assert_eq!(saved["version"], 14);
+        assert_eq!(saved["version"], 15);
         assert_eq!(
             saved["events"][2]["what"], "project paused",
             "old events stay"
