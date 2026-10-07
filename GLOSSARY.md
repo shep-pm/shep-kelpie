@@ -117,8 +117,11 @@ A reviewer on the `bot` harness: CodeRabbit, cubic or Codex, summoned on the
 pull request and answering there within a rate **window** of its own,
 which its file holds. A listed bot reads once a pass in its place, and its
 open threads are its findings; one whose window opens more than an hour on,
-or that never answers, is passed over for the pass. No bot is listed unless
-the project lists it.
+or that never answers, is passed over for the pass. One passed over that
+reviews the head anyway gets a **late round** of its own: kelpie reads for
+its review at the start of each round, at green CI, and while the merge
+ruling waits, which that review withdraws. After the pass, a late round's
+fix goes to CI and back to the merge ruling with no new pass. No bot is listed unless the project lists it.
 
 ## In shep's terms
 
@@ -280,7 +283,8 @@ red, a note sending the worker back. A merge ruling takes three answers:
 `yes`, `no <note>`, whose fix goes to CI and back to the ruling, and
 `rework <note>`, whose change starts a new pass, as a `no` does on a
 merge ruling that warns of open bot threads, an unread pass or an unread
-head.
+head. It names open bot nits apart from the threads that hold a merge, and
+nits never do.
 
 **Merge authority**:
 A project's setting for who decides a merge. `ask` raises a ruling before

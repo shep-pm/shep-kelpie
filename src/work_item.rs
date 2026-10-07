@@ -170,6 +170,11 @@ pub struct WorkItem {
     /// head no round read, says that head is the fix.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub noted_from: Option<String>,
+    /// The head a review bot's late round read once the pass had ended, while
+    /// its fix goes to CI with no reviewer's read. The next merge ruling, on
+    /// another head no round read, says that head is the late round's fix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub late_from: Option<String>,
     /// The head at which the maintainer accepted a change to `.claude` or
     /// `.mcp.json`. Later heads that leave those files as this one has them
     /// pass the gate, and so does a worktree holding this head's copies.
@@ -432,10 +437,12 @@ impl WorkItem {
         self.resolve_failures = 0;
     }
 
-    /// Forgets what the last pass made of the review bots, as a new one starts
+    /// Forgets what the last pass made of the review bots, as a new one
+    /// starts, and the head of a late round's fix, which the pass reads
     pub fn new_pass(&mut self) {
         self.forget_threads();
         self.bots_skipped.clear();
+        self.late_from = None;
     }
 
     /// Remembers findings sent to the worker, once each, but for nits: a
@@ -560,6 +567,7 @@ mod tests {
         item.reviewed_heads = vec!["c0ffee".into()];
         item.sent_unread = vec!["f1x".into()];
         item.nit_fix_heads = vec!["f1x".into()];
+        item.late_from = Some("c0ffee".into());
         assert_eq!(
             serde_json::to_value(item).unwrap(),
             json!({
@@ -583,6 +591,7 @@ mod tests {
                 "reviewed_heads": ["c0ffee"],
                 "sent_unread": ["f1x"],
                 "nit_fix_heads": ["f1x"],
+                "late_from": "c0ffee",
                 "qwen": { "rounds": 0, "seconds": 0 },
                 "timings": {
                     "created": 5,

@@ -401,6 +401,7 @@ impl Runner {
         self.save(next)?;
         self.ledger.append(&crate::usage::Line::Finished(line));
         self.mark_held(issue, false);
+        self.late_reads.remove(&issue);
         Ok(Begin::Report(report))
     }
 }

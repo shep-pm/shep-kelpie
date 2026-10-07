@@ -1,11 +1,14 @@
-//! A bot's threads read until they settle, and the threads of a bot the
-//! pass went on without, through the runner's stand-ins
+//! A bot's threads read until they settle, the threads of a bot the pass
+//! went on without, and those the merge ruling names, through the runner's
+//! stand-ins
+
+use std::sync::Mutex;
 
 use crate::ports::Checks;
 use crate::review_bot::Thread;
 use crate::runner::coderabbit::tests::now;
 use crate::runner::review_bot::two_bots::{bot_reviewed, listing, reviewed, summoned};
-use crate::runner::{StepReport, step};
+use crate::runner::{Runner, StepReport, step};
 use crate::test::{Rig, Scripted};
 
 const FINDING: &str = "P2: `bleats` loses a stamped prefix. Strip only files shep stamped.";
@@ -134,72 +137,45 @@ fn a_bot_passed_over_that_reviews_the_head_anyway_gets_a_round_before_the_next_r
     assert!(findings_file(&rig).contains("`bleats` loses a stamped prefix."));
 }
 
-#[test]
-fn the_merge_ruling_names_the_threads_a_bot_passed_over_left_once_the_pass_ended() {
-    let rig = listing("shep", &["coderabbit", "cubic"]);
-    let (runner, head) = reviewed(&rig);
-    step(&runner).unwrap(); // marks the draft ready
-    assert_eq!(step(&runner).unwrap(), summoned(&head));
-    rig.forge.coderabbit.review(71, &head, now(&rig) + 60, &[]);
-    rig.clock.advance(60);
-    assert_eq!(rig.threads_read(&runner), bot_reviewed(3, "coderabbit", 0));
-    assert_eq!(step(&runner).unwrap(), summoned(&head));
-    let summon = now(&rig);
-    rig.forge.coderabbit.cubic_refuse(71, summon + 20);
-    rig.clock.advance(20);
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::ReviewerSkipped { round: 4, .. })
-    ));
-    assert_eq!(
-        rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
-        "ci"
-    );
-
-    rig.forge
-        .coderabbit
-        .cubic_review(71, &head, summon + 60, &[FINDING, FINDING]);
-    rig.forge.set_checks(&head, Checks::Passed);
-    let Some(StepReport::Ruling { question, .. }) = rig.verdict(&runner) else {
-        panic!("no merge ruling");
-    };
-    assert!(
-        question.contains(
-            "into main? Review bot threads are still open on it: 2 from cubic. \
-             `shep kelpie rule 1 yes` merges it"
-        ),
-        "{question}"
-    );
-}
-
-// cubic, last in the pass, passed over, then reviewing the head anyway with
-// `findings`, and CI green on it: the next step is the merge ruling's.
-fn passed_over_then_reviewed(
-    rig: &Rig,
-    findings: &[&str],
-) -> std::sync::Mutex<crate::runner::Runner> {
+// cubic, last in the pass, reads the head and leaves FINDING, whose fix
+// goes to CI. cubic, which reviews every push, then leaves `findings` on the
+// fix's head, and CI is green on it: the next step is the merge ruling's.
+fn read_then_reviewed_again(rig: &Rig, findings: &[&str]) -> Mutex<Runner> {
     let (runner, head) = reviewed(rig);
     step(&runner).unwrap(); // marks the draft ready
     assert_eq!(step(&runner).unwrap(), summoned(&head));
-    let summon = now(rig);
-    rig.forge.coderabbit.cubic_refuse(71, summon + 20);
-    rig.clock.advance(20);
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::ReviewerSkipped { round: 3, .. })
-    ));
     rig.forge
         .coderabbit
-        .cubic_review(71, &head, summon + 60, findings);
-    rig.forge.set_checks(&head, Checks::Passed);
+        .cubic_review(71, &head, now(rig) + 300, &[FINDING]);
+    rig.clock.advance(300);
+    assert_eq!(rig.threads_read(&runner), bot_reviewed(3, "cubic", 1));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::ReviewFindingsSent { held: 1, .. })
+    ));
+    rig.claude
+        .script([Scripted::Push("strip.txt", "stripped\n")]);
+    step(&runner).unwrap(); // the worker's fix turn
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::FixPushed { .. })
+    ));
+    let fixed = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge
+        .coderabbit
+        .cubic_review(71, &fixed, now(rig) + 60, findings);
+    rig.forge.set_checks(&fixed, Checks::Passed);
     runner
 }
 
+// cubic read once this pass, so its thread on a later head is named in the
+// merge ruling and sent to no fix turn, and under `auto` it holds the merge.
 #[test]
 fn under_auto_a_bots_unaddressed_threads_raise_the_merge_ruling_instead_of_merging() {
     let rig = listing("shep", &["cubic"]);
     rig.merge_auto();
-    let runner = passed_over_then_reviewed(&rig, &[FINDING]);
+    let runner = read_then_reviewed_again(&rig, &[FINDING]);
+    let worker_turns = rig.claude.calls().len();
     let Some(StepReport::Ruling { question, .. }) = rig.verdict(&runner) else {
         panic!("merged with a thread nothing addressed");
     };
@@ -207,6 +183,41 @@ fn under_auto_a_bots_unaddressed_threads_raise_the_merge_ruling_instead_of_mergi
         question.contains("Review bot threads are still open on it: 1 from cubic."),
         "{question}"
     );
+    assert_eq!(rig.claude.calls().len(), worker_turns, "no fix turn");
+    assert_eq!(rig.forge.merges(), []);
+}
+
+// Open nits are named apart from the threads that hold a merge, and hold none.
+#[test]
+fn the_merge_ruling_names_open_nits_and_under_auto_they_hold_nothing() {
+    let nits = [
+        "P3: The name could be shorter.",
+        "P3: The comment restates the code.",
+    ];
+    let rig = listing("shep", &["cubic"]);
+    let runner = read_then_reviewed_again(&rig, &nits);
+    let Some(StepReport::Ruling { question, .. }) = rig.verdict(&runner) else {
+        panic!("no merge ruling");
+    };
+    assert!(
+        question.contains(" into main? 2 nits left open (cubic). `shep kelpie rule 1 yes`"),
+        "{question}"
+    );
+    assert!(
+        question.contains("your note for a fix that goes to CI and back to you"),
+        "a no is a fix turn: {question}"
+    );
+
+    let rig = listing("shep", &["cubic"]);
+    rig.merge_auto();
+    let runner = read_then_reviewed_again(&rig, &nits);
+    let fixed = rig.forge.head_of("kelpie/7").unwrap();
+    let merged = rig.verdict(&runner);
+    assert!(
+        matches!(merged, Some(StepReport::Finished { merged: true, .. })),
+        "{merged:?}"
+    );
+    assert_eq!(rig.forge.merges(), [(71, fixed)]);
 }
 
 // A fix sent straight to CI could not clear the threads the ruling warns
@@ -214,7 +225,7 @@ fn under_auto_a_bots_unaddressed_threads_raise_the_merge_ruling_instead_of_mergi
 #[test]
 fn a_no_on_a_merge_ruling_that_warns_of_open_threads_starts_a_new_pass() {
     let rig = listing("shep", &["cubic"]);
-    let runner = passed_over_then_reviewed(&rig, &[FINDING]);
+    let runner = read_then_reviewed_again(&rig, &[FINDING]);
     let Some(StepReport::Ruling { question, .. }) = rig.verdict(&runner) else {
         panic!("no merge ruling");
     };
@@ -228,7 +239,7 @@ fn a_no_on_a_merge_ruling_that_warns_of_open_threads_starts_a_new_pass() {
     );
     rig.ask(&runner, "rule", Some("1 no strip only stamped files"));
     rig.claude
-        .script([Scripted::Push("strip.txt", "stripped\n")]);
+        .script([Scripted::Push("stamped.txt", "stamped only\n")]);
     step(&runner).unwrap(); // the noted turn: pushes, and a pass begins
     let noted = rig.claude.calls().pop().unwrap();
     assert!(

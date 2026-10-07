@@ -203,6 +203,8 @@ impl Runner {
             }
             if merge {
                 item.noted_from = noted_from;
+                item.late_from = None;
+                self.late_reads.remove(&item.issue);
             }
             let regate = match (vouches, self.settings.merge_authority) {
                 (true, MergeAuthority::Auto) => regate(&self.settings.repo, item)?,
@@ -625,6 +627,8 @@ pub(super) fn question(id: u64, issue: u64, number: Option<u64>, kind: &RulingKi
             open_threads,
             unread_head,
             note_fix,
+            late_fix,
+            nits,
         } => {
             let mut unread = unreviewed.as_ref().map_or_else(String::new, |why| {
                 format!(" No reviewer read it in its last review: {why}.")
@@ -639,9 +643,17 @@ pub(super) fn question(id: u64, issue: u64, number: Option<u64>, kind: &RulingKi
                     " This head is the worker's fix for your note, and no reviewer read it.",
                 );
             }
-            let open = open_threads.as_ref().map_or_else(String::new, |open| {
+            if *late_fix {
+                unread.push_str(
+                    " This head is the worker's fix for a review bot's late review, and no reviewer read it.",
+                );
+            }
+            let mut open = open_threads.as_ref().map_or_else(String::new, |open| {
                 format!(" Review bot threads are still open on it: {open}.")
             });
+            if let Some(nits) = nits {
+                open.push_str(&format!(" {nits}."));
+            }
             let rework = trigger("rework <note>");
             if needs_pass(kind) {
                 return format!(
