@@ -24,6 +24,16 @@ pub enum Start {
     Pushed,
 }
 
+/// A work item's worktree and the project repo it belongs to, whose git
+/// dirs kelpie checks it against before running git on it
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Linked<'a> {
+    /// The project's repo
+    pub repo: &'a Path,
+    /// The work item's worktree, which its worker writes
+    pub worktree: &'a Path,
+}
+
 /// A prepared worktree, and the git dirs a commit from it writes to
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Worktree {
@@ -563,24 +573,65 @@ pub fn rebase(
     Ok(Rebase::Pushed(rebased))
 }
 
-// Git for the worktree, with its git dirs named rather than found. The
-// worker can write the worktree's own git dir, so its `commondir` is checked
-// against the repo's, and hooks are off: none of them is kelpie's to run.
-// Replace refs are ignored too: a worker's `git replace` would show a read
-// one commit while a push packs another.
+// Git for the worktree, with its git dirs named rather than found, as every
+// git kelpie runs on a worker's worktree must be: git that finds them reads
+// the config of whatever repo the worker points it at. The worker can write
+// the worktree's own git dir, so its `commondir` is checked against the
+// repo's, and hooks are off: none of them is kelpie's to run. Replace refs
+// are ignored too: a worker's `git replace` would show a read one commit
+// while a push packs another.
 pub(crate) fn trusted<'a>(
     repo: &Path,
     worktree: &'a Path,
 ) -> Result<impl Fn(&[&str]) -> Result<String, WorktreeError> + 'a, WorktreeError> {
-    let prefix = trusted_prefix(repo, worktree)?;
-    Ok(move |args: &[&str]| {
-        let args = prefix.iter().cloned().chain(args.iter().map(Into::into));
-        git(worktree, args.collect::<Vec<std::ffi::OsString>>())
-    })
+    let dirs = git_dirs(repo, worktree)?;
+    Ok(move |args: &[&str]| output(trusted_git(worktree, &dirs), args))
 }
 
-// The options that make `git` about `worktree` the trusted one.
-fn trusted_prefix(repo: &Path, worktree: &Path) -> Result<Vec<std::ffi::OsString>, WorktreeError> {
+/// `git` about `worktree`, as [`trusted`] runs it, for a call that reads
+/// its exit code or its output whole
+pub(crate) fn trusted_command(repo: &Path, worktree: &Path) -> Result<Command, WorktreeError> {
+    Ok(trusted_git(worktree, &git_dirs(repo, worktree)?))
+}
+
+/// Sets the environment that makes the git `program` runs on `worktree` the
+/// trusted one, as [`trusted`] runs it
+///
+/// # Errors
+///
+/// [`WorktreeError`] when the worktree's git dirs are not `repo`'s.
+pub(crate) fn trust_git_of(
+    program: &mut Command,
+    repo: &Path,
+    worktree: &Path,
+) -> Result<(), WorktreeError> {
+    let (own, common) = git_dirs(repo, worktree)?;
+    program
+        .env_remove("GIT_CONFIG_PARAMETERS")
+        .env("GIT_DIR", own)
+        .env("GIT_WORK_TREE", worktree)
+        .env("GIT_COMMON_DIR", common)
+        .env("GIT_CONFIG_COUNT", TRUSTED_CONFIG.len().to_string())
+        .env("GIT_NO_REPLACE_OBJECTS", "1");
+    for (n, (key, value)) in TRUSTED_CONFIG.iter().enumerate() {
+        program
+            .env(format!("GIT_CONFIG_KEY_{n}"), key)
+            .env(format!("GIT_CONFIG_VALUE_{n}"), value);
+    }
+    Ok(())
+}
+
+// The config every trusted git runs with.
+const TRUSTED_CONFIG: [(&str, &str); 2] = [
+    // None of the hooks is kelpie's to run.
+    ("core.hooksPath", "/dev/null"),
+    // `status`, `diff`, `reset`, `merge` and `rebase` start this program.
+    ("core.fsmonitor", "false"),
+];
+
+// The worktree's own git dir and the repo's common one, once the own dir's
+// `commondir` is checked to name the repo's.
+fn git_dirs(repo: &Path, worktree: &Path) -> Result<(PathBuf, PathBuf), WorktreeError> {
     let foreign = || WorktreeError::Foreign(worktree.to_owned());
     let common = git(
         repo,
@@ -592,15 +643,26 @@ fn trusted_prefix(repo: &Path, worktree: &Path) -> Result<Vec<std::ffi::OsString
     if canonical(&own.join(named.trim())) != common {
         return Err(foreign());
     }
-    Ok(vec![
-        "--git-dir".into(),
-        own.into_os_string(),
-        "--work-tree".into(),
-        worktree.as_os_str().to_owned(),
-        "-c".into(),
-        "core.hooksPath=/dev/null".into(),
-        "--no-replace-objects".into(),
-    ])
+    Ok((own, common))
+}
+
+// `git` about `worktree` with its git dirs named. The common dir is named
+// too, so git never reads `commondir` again after the check. Config passed
+// down from kelpie's own environment is dropped.
+fn trusted_git(worktree: &Path, (own, common): &(PathBuf, PathBuf)) -> Command {
+    let mut git = in_repo(worktree);
+    git.env_remove("GIT_CONFIG_PARAMETERS")
+        .env_remove("GIT_CONFIG_COUNT")
+        .env("GIT_COMMON_DIR", common)
+        .arg("--git-dir")
+        .arg(own)
+        .arg("--work-tree")
+        .arg(worktree);
+    for (key, value) in TRUSTED_CONFIG {
+        git.arg("-c").arg(format!("{key}={value}"));
+    }
+    git.arg("--no-replace-objects");
+    git
 }
 
 // Everything about the worktree is read from the project's repo, never from
@@ -667,8 +729,17 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    output(in_repo(cwd), args)
+}
+
+// Runs `git` with `args` added, and returns its trimmed stdout.
+fn output<I, S>(mut git: Command, args: I) -> Result<String, WorktreeError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
     let args: Vec<_> = args.into_iter().map(|a| a.as_ref().to_owned()).collect();
-    let output = in_repo(cwd)
+    let output = git
         .args(&args)
         .stdin(Stdio::null())
         .output()

@@ -15,12 +15,13 @@ use crate::adapters::process::RunError;
 use crate::lease::gpu::GpuLock;
 use crate::ports::{Finding, ReviewerError, RoundStage, parse_findings};
 use crate::settings::LocalCommand;
+use crate::worktree::Linked;
 
 /// What every call of one round shares
 #[derive(Clone, Copy)]
 struct Round<'a> {
     script: &'a Path,
-    worktree: &'a Path,
+    worktree: Linked<'a>,
     base: &'a str,
     head: &'a str,
     round: u32,
@@ -36,7 +37,7 @@ impl LocalReviewer {
     pub(super) fn command_round(
         &self,
         local: &LocalCommand,
-        worktree: &Path,
+        worktree: Linked<'_>,
         base: &str,
         out: &Path,
         round: u32,
@@ -87,11 +88,16 @@ impl LocalReviewer {
         files: Option<&str>,
     ) -> Result<Vec<Finding>, ReviewerError> {
         let round = at.round;
-        super::clear_round(out, round)?;
+        let Linked { repo, worktree } = at.worktree;
         let mut command = Command::new(at.script);
+        // The script runs git in the worktree outside the sandbox, so its
+        // git gets the git dirs named, as kelpie's own does.
+        crate::worktree::trust_git_of(&mut command, repo, worktree)
+            .map_err(|e| ReviewerError::Failed(e.to_string()))?;
+        super::clear_round(out, round)?;
         command
             .arg("--dir")
-            .arg(at.worktree)
+            .arg(worktree)
             .arg("--round")
             .arg(round.to_string())
             .env("QWEN_REVIEW_OUT", out)
@@ -154,8 +160,17 @@ impl LocalReviewer {
         skipped: &Finding,
     ) -> Result<Vec<Finding>, ReviewerError> {
         let round = at.round;
-        let diff = crate::worktree::in_repo(at.worktree)
-            .args(["diff", at.base, "-U25", "--"])
+        let Linked { repo, worktree } = at.worktree;
+        let diff = crate::worktree::trusted_command(repo, worktree)
+            .map_err(|e| ReviewerError::Failed(e.to_string()))?
+            .args([
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                at.base,
+                "-U25",
+                "--",
+            ])
             .arg(&skipped.file)
             .stdin(Stdio::null())
             .output()
@@ -221,7 +236,7 @@ mod tests {
     use super::*;
     use crate::ports::{Reviewer, Severity};
     use crate::settings::LocalRound;
-    use crate::test::write_script;
+    use crate::test::{Elsewhere, write_script};
 
     fn local(script: &Path) -> LocalRound {
         LocalRound::Command(LocalCommand {
@@ -232,16 +247,9 @@ mod tests {
         })
     }
 
-    // A worktree with one commit and no `origin/main`.
-    fn repo(home: &Path) -> PathBuf {
-        let worktree = home.join("wt");
-        std::fs::create_dir_all(&worktree).unwrap();
-        crate::test::git(&worktree, &["init", "--quiet", "-b", "main"]);
-        crate::test::git(
-            &worktree,
-            &["commit", "--quiet", "--allow-empty", "-m", "init"],
-        );
-        worktree
+    // A repo and its worktree, from `crate::test::linked_worktree`.
+    fn linked((repo, worktree): &(PathBuf, PathBuf)) -> Linked<'_> {
+        Linked { repo, worktree }
     }
 
     // A stand-in that writes the head it was given as a finding's file.
@@ -255,11 +263,11 @@ mod tests {
              printf 'LOW|%s:1|seen|seen\\n' \"$KELPIE_REVIEW_HEAD\" > \"$QWEN_REVIEW_OUT/round-1.txt\"\n\
              : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n",
         );
-        let worktree = repo(home.path());
-        let head = crate::test::git(&worktree, &["rev-parse", "HEAD"]);
+        let wt = crate::test::linked_worktree(home.path());
+        let head = crate::test::git(&wt.1, &["rev-parse", "HEAD"]);
         let out = home.path().join("out");
         let findings = LocalReviewer::default()
-            .round(&local(&script), &worktree, "origin/main", &out, 1, "")
+            .round(&local(&script), linked(&wt), "origin/main", &out, 1, "")
             .unwrap();
         assert_eq!(findings[0].file, head);
     }
@@ -284,13 +292,13 @@ mod tests {
         );
         write_script(&script, &contents);
 
-        let worktree = repo(home.path());
+        let wt = crate::test::linked_worktree(home.path());
         let out = home.path().join("out");
         let reviewer = LocalReviewer::default();
 
         assert_eq!(
             reviewer
-                .round(&local(&script), &worktree, "origin/main", &out, 1, "")
+                .round(&local(&script), linked(&wt), "origin/main", &out, 1, "")
                 .unwrap(),
             vec![]
         );
@@ -316,13 +324,13 @@ mod tests {
              : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n",
         );
 
-        let worktree = repo(home.path());
+        let wt = crate::test::linked_worktree(home.path());
         let out = home.path().join("out");
         let reviewer =
             LocalReviewer::default().with_temp_dir(PathBuf::from("/var/folders/xx/yy/T/"));
 
         let findings = reviewer
-            .round(&local(&script), &worktree, "origin/main", &out, 1, "")
+            .round(&local(&script), linked(&wt), "origin/main", &out, 1, "")
             .unwrap();
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].file, "/var/folders/xx/yy/T/");
@@ -341,14 +349,43 @@ mod tests {
             "#!/bin/sh\nmkdir -p \"$QWEN_REVIEW_OUT\"\nexit 0\n",
         );
 
-        let worktree = repo(home.path());
+        let wt = crate::test::linked_worktree(home.path());
         let out = home.path().join("out");
         let reviewer = LocalReviewer::default();
 
         assert_eq!(
-            reviewer.round(&local(&script), &worktree, "origin/main", &out, 1, ""),
+            reviewer.round(&local(&script), linked(&wt), "origin/main", &out, 1, ""),
             Err(ReviewerError::Incomplete)
         );
+    }
+
+    // The script runs outside the worker's sandbox, and runs git in the
+    // worktree its worker writes.
+    #[test]
+    fn the_scripts_git_never_follows_a_git_file_pointed_elsewhere() {
+        let home = tempfile::tempdir().unwrap();
+        let script = home.path().join("review");
+        write_script(
+            &script,
+            "#!/bin/sh\ngit -C \"$2\" diff --name-only HEAD || exit 1\n\
+             mkdir -p \"$QWEN_REVIEW_OUT\"\n\
+             : > \"$QWEN_REVIEW_OUT/round-1.txt\"\n\
+             : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n",
+        );
+        let wt = crate::test::linked_worktree(home.path());
+        let elsewhere = Elsewhere::copy_of(&wt.0, home.path());
+        elsewhere.as_git_dir_of(&wt.1);
+        let out = home.path().join("out");
+
+        let findings = LocalReviewer::default()
+            .round(&local(&script), linked(&wt), "origin/main", &out, 1, "")
+            .unwrap();
+        assert_eq!(findings, vec![]);
+        assert!(
+            !elsewhere.ran.exists(),
+            "the script's git started the program"
+        );
+        elsewhere.assert_plain_git_starts_it(&wt.1);
     }
 
     // The last run's findings and marker are still on disk: a rework, or a
@@ -361,13 +398,20 @@ mod tests {
             &script,
             "#!/bin/sh\nmkdir -p \"$QWEN_REVIEW_OUT\"\nexit 0\n",
         );
-        let worktree = repo(home.path());
+        let wt = crate::test::linked_worktree(home.path());
         let out = home.path().join("out");
         std::fs::create_dir_all(&out).unwrap();
         std::fs::write(out.join("round-1.txt"), "HIGH|old.rs:1|old|old\n").unwrap();
         std::fs::write(out.join("round-1.txt.done"), "").unwrap();
         assert_eq!(
-            LocalReviewer::default().round(&local(&script), &worktree, "origin/main", &out, 1, ""),
+            LocalReviewer::default().round(
+                &local(&script),
+                linked(&wt),
+                "origin/main",
+                &out,
+                1,
+                ""
+            ),
             Err(ReviewerError::Incomplete)
         );
     }
@@ -399,9 +443,9 @@ esac
 ";
         write_script(&script, contents);
 
-        let worktree = home.path().join("repo");
+        let wt = crate::test::linked_worktree(home.path());
+        let worktree = wt.1.clone();
         std::fs::create_dir_all(worktree.join("sub/dir")).unwrap();
-        crate::test::git(&worktree, &["init", "--quiet", "-b", "main"]);
         std::fs::write(worktree.join("sub/dir/big.rs"), "fn old() {}\n").unwrap();
         crate::test::git(&worktree, &["add", "."]);
         crate::test::git(&worktree, &["commit", "--quiet", "-m", "init"]);
@@ -422,7 +466,7 @@ esac
 
         assert_eq!(
             reviewer
-                .round(&local(&script), &worktree, "origin/main", &out, 1, "")
+                .round(&local(&script), linked(&wt), "origin/main", &out, 1, "")
                 .unwrap(),
             vec![Finding {
                 severity: Severity::Medium,
@@ -447,7 +491,7 @@ esac
              : > \"$QWEN_REVIEW_OUT/round-1.txt.done\"\n";
         write_script(&script, contents);
 
-        let worktree = repo(home.path());
+        let wt = crate::test::linked_worktree(home.path());
         let out = home.path().join("out");
         let reviewer = LocalReviewer::default();
 
@@ -460,7 +504,7 @@ esac
         };
         assert_eq!(
             reviewer
-                .round(&local(&script), &worktree, "origin/main", &out, 1, "")
+                .round(&local(&script), linked(&wt), "origin/main", &out, 1, "")
                 .unwrap(),
             vec![skip]
         );
@@ -493,9 +537,9 @@ esac
 ";
         write_script(&script, contents);
 
-        let worktree = home.path().join("repo");
+        let wt = crate::test::linked_worktree(home.path());
+        let worktree = wt.1.clone();
         std::fs::create_dir_all(worktree.join("sub")).unwrap();
-        crate::test::git(&worktree, &["init", "--quiet", "-b", "main"]);
         std::fs::write(worktree.join("sub/big.rs"), "fn big() {}\n").unwrap();
         crate::test::git(&worktree, &["add", "."]);
         crate::test::git(&worktree, &["commit", "--quiet", "-m", "init"]);
@@ -510,7 +554,7 @@ esac
         let out = home.path().join("out");
         let reviewer = LocalReviewer::default();
         let findings = reviewer
-            .round(&local(&script), &worktree, "origin/main", &out, 1, "")
+            .round(&local(&script), linked(&wt), "origin/main", &out, 1, "")
             .unwrap();
         assert_eq!(
             findings,
@@ -561,10 +605,10 @@ esac
 ";
         write_script(&script, contents);
 
-        let worktree = home.path().join("repo");
+        let wt = crate::test::linked_worktree(home.path());
+        let worktree = wt.1.clone();
         std::fs::create_dir_all(worktree.join("sub/a")).unwrap();
         std::fs::create_dir_all(worktree.join("sub/b")).unwrap();
-        crate::test::git(&worktree, &["init", "--quiet", "-b", "main"]);
         std::fs::write(worktree.join("sub/a/util.rs"), "fn a() {}\n").unwrap();
         std::fs::write(worktree.join("sub/b/util.rs"), "fn b() {}\n").unwrap();
         crate::test::git(&worktree, &["add", "."]);
@@ -581,7 +625,7 @@ esac
         let out = home.path().join("out");
         let reviewer = LocalReviewer::default();
         let findings = reviewer
-            .round(&local(&script), &worktree, "origin/main", &out, 1, "")
+            .round(&local(&script), linked(&wt), "origin/main", &out, 1, "")
             .unwrap();
         assert_eq!(findings.len(), 2, "{findings:?}");
         assert_eq!(findings[0].file, "sub/a/util.rs");

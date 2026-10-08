@@ -16,6 +16,8 @@
 pub(super) mod calls;
 mod criteria;
 pub(super) mod findings;
+#[cfg(test)]
+mod foreign;
 mod lineup;
 #[cfg(test)]
 mod local;
@@ -45,7 +47,7 @@ use crate::ports::{
 use crate::settings::{AgentName, ListedReviewer};
 use crate::state::{Fix, StateError, Stuck};
 use crate::work_item::{CallKind, Phase, Review, ReviewCallState, ReviewStage, Turn, WorkItem};
-use crate::worktree;
+use crate::worktree::{self, Linked};
 
 // A reviewer whose call fails this many times in a row is passed over for
 // the rest of its pass: a reply it cannot give would otherwise stall the
@@ -113,6 +115,7 @@ impl Runner {
                 self.round_started(&chosen, CallKind::Local)?;
                 Ok(Begin::Review(ReviewCall::Local {
                     local,
+                    repo: self.settings.repo.clone(),
                     worktree,
                     base,
                     out: build.join("qwen-review"),
@@ -171,7 +174,7 @@ impl Runner {
             Ok(criteria) => criteria,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
-        let diff = match calls::diff_against(&worktree, &base) {
+        let diff = match calls::diff_against(&self.settings.repo, &worktree, &base) {
             Ok(diff) => diff,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
@@ -738,13 +741,18 @@ pub(super) fn run_review_call(
     match action {
         ReviewCall::Local {
             local,
+            repo,
             worktree,
             base,
             out,
             round,
             criteria,
         } => {
-            match reviewer.round_watched(&local, &worktree, &base, &out, round, &criteria, watch) {
+            let worktree = Linked {
+                repo: &repo,
+                worktree: &worktree,
+            };
+            match reviewer.round_watched(&local, worktree, &base, &out, round, &criteria, watch) {
                 Err(ReviewerError::Stopped) => stopped(),
                 Err(ReviewerError::Spilled(reason)) => Reviewed {
                     result: ReviewResult::Spilled(reason),

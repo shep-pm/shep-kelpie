@@ -31,6 +31,7 @@ mod claude;
 mod coderabbit;
 mod codex;
 mod cubic;
+mod elsewhere;
 mod endpoint;
 mod forge;
 mod leases;
@@ -41,6 +42,7 @@ mod shepherd;
 
 pub(crate) use alerts::FakeAlerts;
 pub(crate) use claude::{FakeClaude, Hold, LEFT_BEHIND, Scripted, Seen};
+pub(crate) use elsewhere::Elsewhere;
 pub(crate) use endpoint::{Answer, StandInEndpoint, unreachable_url};
 pub(crate) use forge::FakeForge;
 pub(crate) use leases::{FakeLeases, Told};
@@ -735,4 +737,19 @@ pub(crate) fn git(cwd: &Path, args: &[&str]) -> String {
         cwd.display()
     );
     String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+/// A repo at `home/repo` with one commit on `main`, and a worktree of it at
+/// `home/wt` on its own branch, the way kelpie cuts one
+pub(crate) fn linked_worktree(home: &Path) -> (PathBuf, PathBuf) {
+    let repo = home.join("repo");
+    let worktree = home.join("wt");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "--quiet", "-b", "main"]);
+    git(&repo, &["commit", "--quiet", "--allow-empty", "-m", "init"]);
+    git(
+        &repo,
+        &["worktree", "add", "--quiet", "-b", "wt", path(&worktree)],
+    );
+    (repo, worktree)
 }

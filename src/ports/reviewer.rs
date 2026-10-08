@@ -4,6 +4,7 @@ use std::fmt;
 
 use super::{Finding, ModelSeat};
 use crate::settings::LocalRound;
+use crate::worktree::Linked;
 
 /// Whether a local round waits for the GPU or runs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,14 +30,17 @@ pub trait Reviewer: Send + Sync {
     ///
     /// `criteria` is what the issue asks for, which the round checks the
     /// diff against, as its prompt or a file the command is pointed at.
+    /// The worker writes `worktree`, so git is run on it only as checked
+    /// against its repo.
     ///
     /// # Errors
     ///
-    /// [`ReviewerError`] when the round cannot be run or did not finish.
+    /// [`ReviewerError`] when the round cannot be run or did not finish,
+    /// or when `worktree`'s git dirs are not its repo's.
     fn round(
         &self,
         local: &LocalRound,
-        worktree: &std::path::Path,
+        worktree: Linked<'_>,
         base: &str,
         out: &std::path::Path,
         round: u32,
@@ -56,7 +60,7 @@ pub trait Reviewer: Send + Sync {
     fn round_watched(
         &self,
         local: &LocalRound,
-        worktree: &std::path::Path,
+        worktree: Linked<'_>,
         base: &str,
         out: &std::path::Path,
         round: u32,

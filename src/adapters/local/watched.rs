@@ -9,7 +9,8 @@ use super::LocalReviewer;
 use crate::lease::gpu::{Attempt, Claim, GpuLock};
 use crate::ports::{Reviewer, RoundStage};
 use crate::settings::{LeaseName, LocalCommand, LocalRound};
-use crate::test::{git, write_script};
+use crate::test::{linked_worktree, write_script};
+use crate::worktree::Linked;
 
 fn command(path: &Path, gpu_lease: bool) -> LocalRound {
     leased(path, gpu_lease.then(LeaseName::gpu))
@@ -70,15 +71,16 @@ fn someone_elses_lock(temp: &Path) -> (GpuLock, u32) {
     (lock, other)
 }
 
-fn a_worktree(home: &Path) -> PathBuf {
-    let worktree = home.join("wt");
-    std::fs::create_dir_all(&worktree).unwrap();
-    git(&worktree, &["init", "--quiet", "-b", "main"]);
-    git(
-        &worktree,
-        &["commit", "--quiet", "--allow-empty", "-m", "init"],
-    );
-    worktree
+fn linked((repo, worktree): &(PathBuf, PathBuf)) -> Linked<'_> {
+    Linked { repo, worktree }
+}
+
+// A folder that is no git repo, as its own repo.
+fn nowhere(folder: &Path) -> Linked<'_> {
+    Linked {
+        repo: folder,
+        worktree: folder,
+    }
 }
 
 const ONE_FINDING: &str = "mkdir -p \"$QWEN_REVIEW_OUT\"\n\
@@ -98,8 +100,9 @@ fn a_round_holding_the_gpu_itself_reports_queued_then_running() {
     let out = dir.path().join("out");
     thread::scope(|scope| {
         let _release = Release(&lock, other);
-        let round =
-            scope.spawn(|| reviewer.round_watched(&local, dir.path(), "main", &out, 1, "", &watch));
+        let round = scope.spawn(|| {
+            reviewer.round_watched(&local, nowhere(dir.path()), "main", &out, 1, "", &watch)
+        });
         wait_for(&seen, RoundStage::Queued);
         assert_eq!(*seen.lock().unwrap(), [RoundStage::Queued], "still waiting");
         lock.release(other).unwrap();
@@ -120,7 +123,7 @@ fn a_round_that_finds_the_lock_free_reports_nothing() {
     let (seen, watch) = stages();
     let local = command(Path::new("/bin/true"), true);
     let out = dir.path().join("out");
-    let _ = reviewer.round_watched(&local, dir.path(), "main", &out, 1, "", &watch);
+    let _ = reviewer.round_watched(&local, nowhere(dir.path()), "main", &out, 1, "", &watch);
     assert_eq!(*seen.lock().unwrap(), []);
 }
 
@@ -145,15 +148,16 @@ fn a_command_queued_on_someone_elses_lock_reports_queued_then_running() {
              rm -rf \"$held\"\n"
         ),
     );
-    let worktree = a_worktree(dir.path());
+    let worktree = linked_worktree(dir.path());
     let reviewer = LocalReviewer::default().with_temp_dir(temp.clone());
     let (seen, watch) = stages();
     let local = command(&script, false);
     let out = dir.path().join("out");
     let findings = thread::scope(|scope| {
         let _release = Release(&lock, other);
-        let round =
-            scope.spawn(|| reviewer.round_watched(&local, &worktree, "main", &out, 1, "", &watch));
+        let round = scope.spawn(|| {
+            reviewer.round_watched(&local, linked(&worktree), "main", &out, 1, "", &watch)
+        });
         let _go = Go(&temp);
         wait_for(&seen, RoundStage::Queued);
         lock.release(other).unwrap();
@@ -182,7 +186,7 @@ fn a_command_under_a_named_lease_is_not_queued_behind_the_gpu_lock() {
     let (lock, other) = someone_elses_lock(&temp);
     let script = dir.path().join("review");
     write_script(&script, &format!("#!/bin/sh\nsleep 0.6\n{ONE_FINDING}"));
-    let worktree = a_worktree(dir.path());
+    let worktree = linked_worktree(dir.path());
     let reviewer = LocalReviewer::default().with_temp_dir(temp);
     let (seen, watch) = stages();
     let remote = LeaseName::try_from("remote".to_owned()).unwrap();
@@ -190,7 +194,7 @@ fn a_command_under_a_named_lease_is_not_queued_behind_the_gpu_lock() {
     let out = dir.path().join("out");
     let _release = Release(&lock, other);
     reviewer
-        .round_watched(&local, &worktree, "main", &out, 1, "", &watch)
+        .round_watched(&local, linked(&worktree), "main", &out, 1, "", &watch)
         .unwrap();
     assert_eq!(*seen.lock().unwrap(), []);
 }
@@ -200,13 +204,13 @@ fn a_command_that_takes_no_lock_is_never_queued() {
     let dir = tempfile::tempdir().unwrap();
     let script = dir.path().join("review");
     write_script(&script, &format!("#!/bin/sh\n{ONE_FINDING}"));
-    let worktree = a_worktree(dir.path());
+    let worktree = linked_worktree(dir.path());
     let reviewer = LocalReviewer::default().with_temp_dir(dir.path().join("tmp"));
     let (seen, watch) = stages();
     let local = command(&script, false);
     let out = dir.path().join("out");
     reviewer
-        .round_watched(&local, &worktree, "main", &out, 1, "", &watch)
+        .round_watched(&local, linked(&worktree), "main", &out, 1, "", &watch)
         .unwrap();
     assert_eq!(*seen.lock().unwrap(), []);
 }
@@ -217,13 +221,13 @@ fn a_command_run_under_kelpies_own_hold_is_never_queued() {
     let dir = tempfile::tempdir().unwrap();
     let script = dir.path().join("review");
     write_script(&script, &format!("#!/bin/sh\nsleep 0.3\n{ONE_FINDING}"));
-    let worktree = a_worktree(dir.path());
+    let worktree = linked_worktree(dir.path());
     let reviewer = LocalReviewer::default().with_temp_dir(dir.path().join("tmp"));
     let (seen, watch) = stages();
     let local = command(&script, true);
     let out = dir.path().join("out");
     reviewer
-        .round_watched(&local, &worktree, "main", &out, 1, "", &watch)
+        .round_watched(&local, linked(&worktree), "main", &out, 1, "", &watch)
         .unwrap();
     assert_eq!(*seen.lock().unwrap(), []);
 }

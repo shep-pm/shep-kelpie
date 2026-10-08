@@ -56,9 +56,16 @@ pub(in crate::runner) fn build_call(
     })
 }
 
-pub(in crate::runner) fn diff_against(worktree: &Path, base: &str) -> Result<String, String> {
-    let output = crate::worktree::in_repo(worktree)
-        .args(["diff", base])
+pub(in crate::runner) fn diff_against(
+    repo: &Path,
+    worktree: &Path,
+    base: &str,
+) -> Result<String, String> {
+    // Neither a program the global config names nor one the worktree's
+    // attributes pick turns the diff a reviewer reads into something else.
+    let output = crate::worktree::trusted_command(repo, worktree)
+        .map_err(|e| e.to_string())?
+        .args(["diff", "--no-ext-diff", "--no-textconv", base])
         .stdin(Stdio::null())
         .output()
         .map_err(|e| format!("cannot run git diff: {e}"))?;

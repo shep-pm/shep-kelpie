@@ -15,7 +15,6 @@ mod watched;
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -26,6 +25,7 @@ use crate::ports::{
     AgentError, Ending, Finding, LocalLeases, ModelSeat, Reviewer, ReviewerError, RoundStage,
 };
 use crate::settings::{LeaseName, LocalRound};
+use crate::worktree::Linked;
 
 /// How often a round waiting on the GPU lock looks for a stop
 const STOP_POLL: Duration = Duration::from_millis(100);
@@ -171,7 +171,7 @@ impl Reviewer for LocalReviewer {
     fn round(
         &self,
         local: &LocalRound,
-        worktree: &Path,
+        worktree: Linked<'_>,
         base: &str,
         out: &Path,
         round: u32,
@@ -183,7 +183,7 @@ impl Reviewer for LocalReviewer {
     fn round_watched(
         &self,
         local: &LocalRound,
-        worktree: &Path,
+        worktree: Linked<'_>,
         base: &str,
         out: &Path,
         round: u32,
@@ -193,7 +193,10 @@ impl Reviewer for LocalReviewer {
         let lease = local.lease();
         let _hold = match &lease {
             Some(lease) => {
-                let what = format!("kelpie local round {round} in {}", worktree.display());
+                let what = format!(
+                    "kelpie local round {round} in {}",
+                    worktree.worktree.display()
+                );
                 let held = self.hold(lease.as_str(), what, watch, &|| false);
                 let held = held.map_err(|e| match e {
                     Unheld::Stopped | Unheld::Ended => ReviewerError::Stopped,
@@ -258,20 +261,13 @@ fn clear_round(out: &Path, round: u32) -> Result<(), ReviewerError> {
 }
 
 /// The worktree's head commit
-fn head(worktree: &Path) -> Result<String, ReviewerError> {
-    let output = crate::worktree::in_repo(worktree)
-        .args(["rev-parse", "HEAD"])
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|e| ReviewerError::Spawn(e.to_string()))?;
-    if !output.status.success() {
-        return Err(ReviewerError::Failed(format!(
-            "cannot read the head of {}: {}",
-            worktree.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+fn head(at: Linked<'_>) -> Result<String, ReviewerError> {
+    crate::worktree::head(at.repo, at.worktree).map_err(|e| {
+        ReviewerError::Failed(format!(
+            "cannot read the head of {}: {e}",
+            at.worktree.display()
+        ))
+    })
 }
 
 #[cfg(test)]
@@ -329,20 +325,18 @@ mod tests {
             lock = lock.path().display(),
         );
         write_script(&script, &contents);
-        let worktree = dir.path().join("wt");
-        std::fs::create_dir_all(&worktree).unwrap();
-        crate::test::git(&worktree, &["init", "--quiet", "-b", "main"]);
-        crate::test::git(
-            &worktree,
-            &["commit", "--quiet", "--allow-empty", "-m", "init"],
-        );
+        let (repo, worktree) = crate::test::linked_worktree(dir.path());
+        let worktree = Linked {
+            repo: &repo,
+            worktree: &worktree,
+        };
         let reviewer = LocalReviewer::default().with_temp_dir(temp.clone());
 
         for (gpu_lease, seen) in [(false, "free"), (true, "held")] {
             let out = dir.path().join(format!("out-{gpu_lease}"));
             let local = command(&script, gpu_lease);
             let findings = reviewer
-                .round(&local, &worktree, "main", &out, 1, "")
+                .round(&local, worktree, "main", &out, 1, "")
                 .unwrap();
             assert_eq!(findings[0].file, seen, "gpu_lease = {gpu_lease}");
             assert!(
@@ -358,13 +352,11 @@ mod tests {
     fn each_reviewer_takes_only_its_own_lease() {
         let dir = tempfile::tempdir().unwrap();
         let temp = dir.path().join("tmp");
-        let worktree = dir.path().join("wt");
-        std::fs::create_dir_all(&worktree).unwrap();
-        crate::test::git(&worktree, &["init", "--quiet", "-b", "main"]);
-        crate::test::git(
-            &worktree,
-            &["commit", "--quiet", "--allow-empty", "-m", "init"],
-        );
+        let (repo, worktree) = crate::test::linked_worktree(dir.path());
+        let worktree = Linked {
+            repo: &repo,
+            worktree: &worktree,
+        };
         let reviewer = LocalReviewer::default().with_temp_dir(temp.clone());
         let parent = Claim {
             pid: std::os::unix::process::parent_id(),
@@ -389,7 +381,7 @@ mod tests {
             let local = leased(&script, Some(lease));
             let out = dir.path().join(format!("out-{own}"));
             let findings = reviewer
-                .round(&local, &worktree, "main", &out, 1, "")
+                .round(&local, worktree, "main", &out, 1, "")
                 .unwrap();
             assert_eq!(findings[0].file, "held", "{own} is held around its round");
             assert!(own_lock.holder().is_none(), "{own} is let go after");
@@ -416,7 +408,11 @@ mod tests {
         let local = command(Path::new("/bin/true"), true);
         let out = dir.path().join("out");
         let started = std::time::Instant::now();
-        let result = reviewer.round(&local, dir.path(), "main", &out, 1, "");
+        let nowhere = Linked {
+            repo: dir.path(),
+            worktree: dir.path(),
+        };
+        let result = reviewer.round(&local, nowhere, "main", &out, 1, "");
         stopping.join().unwrap();
         assert_eq!(result, Err(ReviewerError::Stopped));
         assert!(

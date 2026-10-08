@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use super::*;
 use crate::ports::{Reviewer, Severity};
 use crate::settings::{ContextSize, EndpointUrl, LocalRound, NonBlank};
-use crate::test::{Answer, StandInEndpoint, git, unreachable_url};
+use crate::test::{Answer, Elsewhere, StandInEndpoint, git, linked_worktree, unreachable_url};
 
 const DIFF: &str = "\
 diff --git a/src/lib.rs b/src/lib.rs
@@ -98,10 +98,10 @@ fn a_new_start_line_is_read_from_the_hunk_header() {
 }
 
 // A repo with `origin/main` at its first commit and one commit on top.
-fn repo(dir: &Path, change: &str) -> PathBuf {
-    let worktree = dir.join("wt");
+// A repo and a worktree of it whose commit changes `src/lib.rs` to `change`
+fn repo(dir: &Path, change: &str) -> (PathBuf, PathBuf) {
+    let (repo, worktree) = linked_worktree(dir);
     std::fs::create_dir_all(worktree.join("src")).unwrap();
-    git(&worktree, &["init", "--quiet", "-b", "main"]);
     std::fs::write(worktree.join("src/lib.rs"), "fn a() {}\n").unwrap();
     git(&worktree, &["add", "."]);
     git(&worktree, &["commit", "--quiet", "-m", "init"]);
@@ -112,7 +112,11 @@ fn repo(dir: &Path, change: &str) -> PathBuf {
     );
     std::fs::write(worktree.join("src/lib.rs"), change).unwrap();
     git(&worktree, &["commit", "--quiet", "-am", "change"]);
-    worktree
+    (repo, worktree)
+}
+
+fn linked((repo, worktree): &(PathBuf, PathBuf)) -> Linked<'_> {
+    Linked { repo, worktree }
 }
 
 fn local(url: &str, context: u32) -> LocalRound {
@@ -136,7 +140,7 @@ fn a_round_sends_the_diff_with_the_prompt_and_reads_the_findings() {
     let findings = LocalReviewer::default()
         .round(
             &local(server.url(), 8192),
-            &worktree,
+            linked(&worktree),
             "origin/main",
             &out,
             3,
@@ -177,7 +181,7 @@ fn a_diff_bigger_than_the_context_goes_in_several_requests() {
     let findings = LocalReviewer::default()
         .round(
             &local(server.url(), 4096),
-            &worktree,
+            linked(&worktree),
             "origin/main",
             &out,
             1,
@@ -204,7 +208,14 @@ fn an_empty_diff_asks_nothing() {
     let server = StandInEndpoint::start([]);
     let out = dir.path().join("out");
     let findings = LocalReviewer::default()
-        .round(&local(server.url(), 8192), &worktree, "HEAD", &out, 1, "")
+        .round(
+            &local(server.url(), 8192),
+            linked(&worktree),
+            "HEAD",
+            &out,
+            1,
+            "",
+        )
         .unwrap();
     assert!(findings.is_empty());
     assert!(server.requests().is_empty());
@@ -223,7 +234,7 @@ fn a_refused_or_unreadable_reply_fails_the_round() {
     let local = local(server.url(), 8192);
     let out = dir.path().join("out");
     let err = reviewer
-        .round(&local, &worktree, "origin/main", &out, 1, "")
+        .round(&local, linked(&worktree), "origin/main", &out, 1, "")
         .unwrap_err();
     let url = format!("{}/chat/completions", server.url());
     assert_eq!(
@@ -233,7 +244,7 @@ fn a_refused_or_unreadable_reply_fails_the_round() {
         ))
     );
     let err = reviewer
-        .round(&local, &worktree, "origin/main", &out, 2, "")
+        .round(&local, linked(&worktree), "origin/main", &out, 2, "")
         .unwrap_err();
     assert_eq!(err, ReviewerError::Unreadable("not json".into()));
 }
@@ -249,7 +260,7 @@ fn a_reply_cut_off_while_thinking_fails_the_round() {
     let err = LocalReviewer::default()
         .round(
             &local(server.url(), 8192),
-            &worktree,
+            linked(&worktree),
             "origin/main",
             &out,
             1,
@@ -281,7 +292,7 @@ fn a_reply_with_no_findings_that_is_not_clean_fails_the_round() {
     let url = server.url();
     for said in ["", "", "The code looks fine."] {
         assert_eq!(
-            reviewer.round(&local, &worktree, "origin/main", &out, 1, ""),
+            reviewer.round(&local, linked(&worktree), "origin/main", &out, 1, ""),
             Err(ReviewerError::Failed(format!(
                 "{url}'s reply is neither findings nor CLEAN: {said}"
             )))
@@ -289,7 +300,7 @@ fn a_reply_with_no_findings_that_is_not_clean_fails_the_round() {
         assert!(!out.join("round-1.txt.done").exists());
     }
     assert_eq!(
-        reviewer.round(&local, &worktree, "origin/main", &out, 1, ""),
+        reviewer.round(&local, linked(&worktree), "origin/main", &out, 1, ""),
         Ok(vec![])
     );
 }
@@ -305,9 +316,9 @@ fn a_retried_round_never_reads_the_last_tries_reply() {
     let reviewer = LocalReviewer::default();
     let local = local(server.url(), 8192);
     let out = dir.path().join("out");
-    let first = reviewer.round(&local, &worktree, "origin/main", &out, 1, "");
+    let first = reviewer.round(&local, linked(&worktree), "origin/main", &out, 1, "");
     assert_eq!(first.unwrap().len(), 1);
-    let again = reviewer.round(&local, &worktree, "origin/main", &out, 1, "");
+    let again = reviewer.round(&local, linked(&worktree), "origin/main", &out, 1, "");
     assert_eq!(again, Err(ReviewerError::Unreadable(String::new())));
 }
 
@@ -350,8 +361,19 @@ fn round(
     reviewer: &LocalReviewer,
     local: &LocalRound,
 ) -> Result<Vec<Finding>, ReviewerError> {
-    let worktree = repo(dir, "fn a() {}\nfn b() {}\n");
-    reviewer.round(local, &worktree, "origin/main", &dir.join("out"), 1, "")
+    // A second round in `dir` reviews the worktree the first made.
+    let worktree = match dir.join("wt").exists() {
+        true => (dir.join("repo"), dir.join("wt")),
+        false => repo(dir, "fn a() {}\nfn b() {}\n"),
+    };
+    reviewer.round(
+        local,
+        linked(&worktree),
+        "origin/main",
+        &dir.join("out"),
+        1,
+        "",
+    )
 }
 
 fn reviewer(dir: &Path) -> LocalReviewer {
@@ -499,4 +521,34 @@ fn an_ollama_host_that_cannot_be_reached_fails_the_round_and_says_so() {
         why.starts_with("cannot reach http://127.0.0.1:1/api/ps: "),
         "{why}"
     );
+}
+
+// The round runs outside the worker's sandbox, and its worker can write
+// the `commondir` git follows to the repo whose config it reads.
+#[test]
+fn a_worktree_whose_commondir_points_elsewhere_is_refused_and_runs_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let checkout = repo(dir.path(), "fn a() {}\nfn b() {}\n");
+    let elsewhere = Elsewhere::copy_of(&checkout.0, dir.path());
+    elsewhere.as_common_dir_of(&checkout.1);
+    let server = StandInEndpoint::start([]);
+    let out = dir.path().join("out");
+
+    let err = LocalReviewer::default()
+        .round(
+            &local(server.url(), 8192),
+            linked(&checkout),
+            "origin/main",
+            &out,
+            1,
+            "",
+        )
+        .unwrap_err();
+    let ReviewerError::Failed(why) = err else {
+        panic!("{err:?}")
+    };
+    assert!(why.contains("is not this work item's worktree"), "{why}");
+    assert!(!elsewhere.ran.exists(), "the round started the program");
+    assert!(server.requests().is_empty(), "nothing was reviewed");
+    elsewhere.assert_plain_git_starts_it(&checkout.1);
 }
