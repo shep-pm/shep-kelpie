@@ -1,5 +1,11 @@
 use super::*;
-use crate::settings::{Account, AgentHarness, AgentName, LeaseName};
+use crate::settings::{
+    Account, AgentHarness, AgentName, EndpointUrl, GatewayName, LeaseName, ModelHost,
+};
+
+fn url(text: &str) -> EndpointUrl {
+    EndpointUrl::try_from(text.to_owned()).unwrap()
+}
 
 mod bots;
 mod issue_writer;
@@ -82,7 +88,7 @@ fn a_file_adds_an_agent_and_one_named_for_a_default_replaces_it() {
     let AgentHarness::Pi(server) = &model(qwen).harness else {
         panic!("{qwen:?}");
     };
-    assert_eq!(server.url.as_str(), "http://box:11434/v1");
+    assert_eq!(server.host, ModelHost::Url(url("http://box:11434/v1")));
     assert_eq!(server.context.get(), 65536);
     assert_eq!(*limit(qwen), Limit::Lease(LeaseName::gpu()));
     assert!(agents.get(&name("opus-high")).is_some());
@@ -228,12 +234,12 @@ fn a_harness_missing_a_key_it_needs_is_refused_naming_the_key() {
     let cases = [
         (
             QWEN.replace("url: http://box:11434/v1\n", ""),
-            "runs on pi, which needs the model's server as `url` and its context size \
-             as `context`",
+            "runs on pi, which needs the model's server as `url` or a `gateway`, and its \
+             context size as `context`",
         ),
         (
             QWEN.replace("harness: pi", "harness: claude-code"),
-            "runs on claude-code, which takes no `url` or `context`",
+            "runs on claude-code, which takes no `url`, `gateway` or `context`",
         ),
         (
             QWEN.replace("http://box", "https://box"),
@@ -350,7 +356,7 @@ fn a_reviewer_runs_a_session_a_command_or_an_endpoint() {
     let Runs::Endpoint(endpoint) = &agents.get(&name("box")).unwrap().runs else {
         panic!("not an endpoint");
     };
-    assert_eq!(endpoint.url.as_str(), "http://box:11434/v1");
+    assert_eq!(endpoint.host, ModelHost::Url(url("http://box:11434/v1")));
     assert_eq!(endpoint.context.get(), 32768);
     assert_eq!(endpoint.lease.as_ref().unwrap().as_str(), "gpu-box");
     let script = agents.get(&name("script")).unwrap();
@@ -426,13 +432,51 @@ fn a_reviewer_whose_keys_its_harness_cannot_use_is_refused_naming_why() {
         (
             "---\nrole: reviewer\nharness: endpoint\nurl: http://box/v1\nmodel: m\n---\n"
                 .to_owned(),
-            "runs on an endpoint, which needs the server as `url`, its `model` and the \
-             model's context size as `context`",
+            "runs on an endpoint, which needs the server as `url` or a `gateway`, its \
+             `model` and the model's context size as `context`",
         ),
     ];
     for (text, why) in cases {
         let err = refused(&[("x.md", &text)]);
         assert!(err.contains("x.md: "), "{err}");
         assert!(err.contains(why), "{err}\nwanted: {why}");
+    }
+}
+
+#[test]
+fn a_model_behind_a_gateway_takes_no_lease_and_its_endpoint_reads_no_api_ps() {
+    let on = QWEN.replace("url: http://box:11434/v1", "gateway: paddock");
+    let endpoint = "---\nrole: reviewer\nharness: endpoint\ngateway: paddock\nmodel: coder\n\
+                    context: 32768\n---\n";
+    let dir = folder(&[("local.md", &on), ("box.md", endpoint)]);
+    let agents = Agents::load(dir.path()).unwrap();
+    let local = agents.get(&name("local")).unwrap();
+    assert_eq!(*limit(local), Limit::Gateway);
+    assert_eq!(limit(local).lease(), None);
+    let paddock = GatewayName::try_from("paddock".to_owned()).unwrap();
+    assert_eq!(local.runs.gateway(), Some((&paddock, "qwen3.8:27b")));
+    let round = agents.get(&name("box")).unwrap().runs.local().unwrap();
+    assert_eq!((round.lease(), round.ollama()), (None, None));
+
+    for (text, why) in [
+        (
+            on.replace("effort: low", "effort: low\nlease: gpu"),
+            "no `lease`",
+        ),
+        (
+            endpoint.replace("model: coder", "model: coder\nlease: gpu"),
+            "no `lease`",
+        ),
+        (
+            on.replace("gateway: paddock", "gateway: paddock\nurl: http://box/v1"),
+            "names both",
+        ),
+        (
+            REVIEWER.replace("effort: high", "effort: high\ngateway: paddock"),
+            "no `url`, `gateway`",
+        ),
+    ] {
+        let err = refused(&[("x.md", &text)]);
+        assert!(err.contains(why), "{err}");
     }
 }

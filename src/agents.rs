@@ -20,7 +20,8 @@ use serde::Deserialize;
 
 use crate::review_bot::BotReviewer;
 use crate::settings::{
-    AgentName, Effort, Endpoint, Limit, LocalCommand, LocalRound, NonBlank, RoleModel,
+    AgentHarness, AgentName, Effort, Endpoint, GatewayName, Limit, LocalCommand, LocalRound,
+    ModelHost, ModelServer, NonBlank, RoleModel,
 };
 
 mod front;
@@ -155,6 +156,25 @@ impl Runs {
         }
     }
 
+    /// The gateway its model is behind, and the model's name there, if any
+    pub fn gateway(&self) -> Option<(&GatewayName, &str)> {
+        match self {
+            Self::Session { model, .. } => match &model.harness {
+                AgentHarness::Pi(ModelServer {
+                    host: ModelHost::Gateway(name),
+                    ..
+                }) => Some((name, model.model.as_str())),
+                _ => None,
+            },
+            Self::Endpoint(Endpoint {
+                host: ModelHost::Gateway(name),
+                model,
+                ..
+            }) => Some((name, model.as_str())),
+            Self::Endpoint(_) | Self::Command(_) | Self::Bot(_) => None,
+        }
+    }
+
     /// The bot, for an agent that is a review bot
     pub fn bot(&self) -> Option<BotReviewer> {
         match self {
@@ -248,6 +268,11 @@ impl Agents {
     /// The agent `name`, if kelpie has one
     pub fn get(&self, name: &AgentName) -> Option<&Agent> {
         self.agents.get(name)
+    }
+
+    /// Every agent, by name
+    pub fn iter(&self) -> impl Iterator<Item = (&AgentName, &Agent)> {
+        self.agents.iter()
     }
 
     /// A line for each `.md` file skipped because its name is no agent's

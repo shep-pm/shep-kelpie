@@ -41,6 +41,9 @@ impl Runner {
         let book = Agents::load(&self.paths.agents)?;
         let agents = settings.role_agents(&book)?;
         let lineup = settings.lineup(&book, &self.home)?;
+        let listed = agents.implementers.iter().map(|i| &i.name);
+        let reviewers = lineup.iter().map(|r| &r.name);
+        (kelpie.gateways()).check_listed(&book, listed.chain(reviewers))?;
         let webhook = kelpie.webhook;
         let mut changed = changed((&self.settings, &self.webhook), (&settings, &webhook));
         if agents != self.agents || lineup != self.lineup || book != self.book {

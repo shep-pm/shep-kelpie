@@ -15,7 +15,7 @@ use std::fs;
 use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 /// Where the installed build lives, and where its predecessor is kept
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -235,7 +235,7 @@ fn sign(path: &Path, identifier: &str) -> Result<(), String> {
     if !cfg!(target_os = "macos") || !is_mach_o(path) {
         return Ok(());
     }
-    let output = Command::new("codesign")
+    let output = crate::spawn::command("codesign")
         .args(["--force", "--sign", "-", "--identifier", identifier])
         .arg(path)
         .stdin(Stdio::null())
@@ -263,6 +263,8 @@ fn is_mach_o(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
+
     use std::os::unix::fs::MetadataExt;
 
     use super::*;

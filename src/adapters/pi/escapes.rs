@@ -32,7 +32,11 @@ fn curl_allowing(
     args: &[&str],
 ) -> Output {
     let tools = KelpieTools::at(std::env::var("KELPIE_TOOLS").expect(NEEDS).into());
-    let mut policy = policy(call, &Files::of(call), &forwarder.socket);
+    let upstream = ClaudeCli::default()
+        .pi()
+        .upstream(server(call).unwrap())
+        .unwrap();
+    let mut policy = policy(call, &Files::of(call), &upstream, &forwarder.socket);
     policy.hosts.extend(allowed.iter().cloned());
     let mut command = Command::new("env");
     command
@@ -72,11 +76,10 @@ fn a_worker_reaches_the_model_only_through_a_forwarder_that_passes_chat() {
         Path::new("/k/kelpie"),
         Session::New(id(WORKER_ID)),
     );
-    let AgentHarness::Pi(model) = &call.harness else {
-        unreachable!()
-    };
+    let upstream = (ClaudeCli::default().pi()).upstream(super::server(&call).unwrap());
+    let upstream = upstream.unwrap();
     let folder = call.settings.parent().unwrap();
-    let forwarder = Forwarder::open(folder, upstream(model).unwrap()).unwrap();
+    let forwarder = Forwarder::open(folder, upstream).unwrap();
     let on_worker_host = |path: &str| format!("http://{WORKER_HOST}{path}");
 
     let chat = curl(

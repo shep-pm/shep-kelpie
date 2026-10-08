@@ -4,7 +4,8 @@
 //! contract, as the maintainer's qwen-review script does. An endpoint gets
 //! kelpie's own reviewer. Either way kelpie holds a lease around a round
 //! only when the definition names one: the qwen-review script takes the GPU
-//! lock itself, and would wait forever behind kelpie's hold.
+//! lock itself, and would wait forever behind kelpie's hold. An endpoint
+//! behind a gateway never names one, since the gateway queues its rounds.
 
 mod command;
 mod endpoint;
@@ -24,7 +25,7 @@ use crate::lease::gpu::{self, Attempt, Claim, GpuHold, GpuLock, LockHolder};
 use crate::ports::{
     AgentError, Ending, Finding, LocalLeases, ModelSeat, Reviewer, ReviewerError, RoundStage,
 };
-use crate::settings::{LeaseName, LocalRound};
+use crate::settings::{Gateways, LeaseName, LocalRound};
 use crate::worktree::Linked;
 
 /// How often a round waiting on the GPU lock looks for a stop
@@ -41,6 +42,8 @@ pub struct LocalReviewer {
     seat: Arc<Mutex<Option<ModelSeat>>>,
     // How long a round waiting on the lock naps, given the seconds it has waited
     naps: fn(u64) -> Duration,
+    // Where an endpoint behind a gateway sends its rounds, with the gateway's key
+    pub(super) gateways: Gateways,
 }
 
 impl Default for LocalReviewer {
@@ -50,6 +53,7 @@ impl Default for LocalReviewer {
             processes: Processes::default(),
             seat: Arc::default(),
             naps: gpu::scripts_naps,
+            gateways: Gateways::default(),
         }
     }
 }
@@ -64,6 +68,12 @@ impl LocalReviewer {
     /// folder, and the two queues run the GPU at once.
     pub fn with_temp_dir(mut self, temp_dir: PathBuf) -> Self {
         self.temp_dir = temp_dir;
+        self
+    }
+
+    /// Sends an endpoint's rounds behind a gateway through `gateways`
+    pub fn with_gateways(mut self, gateways: Gateways) -> Self {
+        self.gateways = gateways;
         self
     }
 

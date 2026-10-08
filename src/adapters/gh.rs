@@ -7,7 +7,7 @@ mod queue;
 mod review;
 pub(crate) mod review_bot;
 
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use serde::Deserialize;
 
@@ -245,7 +245,7 @@ fn merge_args<'a>(repo: &'a ForgeSlug, number: &'a str, head: &'a str) -> [&'a s
 }
 
 fn gh(args: &[&str]) -> Result<Vec<u8>, ForgeError> {
-    let output = Command::new("gh")
+    let output = crate::spawn::command("gh")
         .args(args)
         .stdin(Stdio::null())
         .output()

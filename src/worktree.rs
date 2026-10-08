@@ -716,7 +716,7 @@ fn create(path: &Path) -> Result<(), WorktreeError> {
 /// run at once, so a ref or `packed-refs` lock one git holds makes another
 /// wait for it rather than fail at once.
 pub(crate) fn in_repo(cwd: &Path) -> Command {
-    let mut git = Command::new("git");
+    let mut git = crate::spawn::command("git");
     git.args(["-c", "core.filesRefLockTimeout=2000"])
         .args(["-c", "core.packedRefsTimeout=5000"])
         .arg("-C")

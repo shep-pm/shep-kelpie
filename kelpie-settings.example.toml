@@ -33,6 +33,18 @@
 kind = "ntfy"
 url = "https://ntfy.sh/your-private-topic"
 
+# A model gateway, such as paddock, by name. An agent file names it as
+# `gateway: paddock` in place of its server's `url`, with the model's name as
+# the gateway knows it. `url` is the gateway's own `http://` address, with
+# its OpenAI routes under `/v1`. `key_env` names the variable in the
+# runner's environment holding the key the gateway gave kelpie: no agent
+# call sees that variable, and no file kelpie writes holds the key. Kelpie
+# takes no GPU lease and reads no `/api/ps` for a model behind a gateway,
+# which queues its calls itself. A runner reads its gateways when it starts.
+# [kelpie.gateways.paddock]
+# url = "http://gpu-box:8700"
+# key_env = "PADDOCK_KEY"
+
 # How many commands may hold the `cargo-test` lease at once, 3 when absent.
 # A worker runs its test suite under it, as does anything on this machine
 # that runs `shep kelpie lease run cargo-test -- <command>`, and the rest

@@ -8,7 +8,7 @@
 //! from one a killed round left.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use super::{LocalReviewer, queue};
 use crate::adapters::process::RunError;
@@ -89,7 +89,7 @@ impl LocalReviewer {
     ) -> Result<Vec<Finding>, ReviewerError> {
         let round = at.round;
         let Linked { repo, worktree } = at.worktree;
-        let mut command = Command::new(at.script);
+        let mut command = crate::spawn::command(at.script);
         // The script runs git in the worktree outside the sandbox, so its
         // git gets the git dirs named, as kelpie's own does.
         crate::worktree::trust_git_of(&mut command, repo, worktree)
@@ -231,6 +231,7 @@ fn first_line(text: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
+
     use std::path::PathBuf;
 
     use super::*;

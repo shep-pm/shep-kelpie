@@ -4,7 +4,7 @@
 //! of kelpie's sight. The lock's holder says whether the round still queues.
 
 use std::collections::HashMap;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::Duration;
 
@@ -113,7 +113,7 @@ fn group_of(
 }
 
 fn process_group(pid: u32) -> Option<u32> {
-    let output = Command::new("ps")
+    let output = crate::spawn::command("ps")
         .args(["-o", "pgid=", "-p", &pid.to_string()])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
@@ -124,6 +124,8 @@ fn process_group(pid: u32) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
+
     use std::sync::Mutex;
     use std::sync::mpsc::channel;
     use std::time::Instant;

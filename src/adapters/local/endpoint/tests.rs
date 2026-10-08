@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::ports::{Reviewer, Severity};
-use crate::settings::{ContextSize, EndpointUrl, LocalRound, NonBlank};
+use crate::settings::{ContextSize, EndpointUrl, LocalRound, ModelHost, NonBlank};
 use crate::test::{Answer, Elsewhere, StandInEndpoint, git, linked_worktree, unreachable_url};
 
 const DIFF: &str = "\
@@ -121,7 +121,7 @@ fn linked((repo, worktree): &(PathBuf, PathBuf)) -> Linked<'_> {
 
 fn local(url: &str, context: u32) -> LocalRound {
     LocalRound::Endpoint(Endpoint {
-        url: EndpointUrl::try_from(url.to_owned()).unwrap(),
+        host: ModelHost::Url(EndpointUrl::try_from(url.to_owned()).unwrap()),
         model: NonBlank::try_from("coder".to_owned()).unwrap(),
         context: ContextSize::try_from(i64::from(context)).unwrap(),
         lease: None,
@@ -551,4 +551,39 @@ fn a_worktree_whose_commondir_points_elsewhere_is_refused_and_runs_nothing() {
     assert!(!elsewhere.ran.exists(), "the round started the program");
     assert!(server.requests().is_empty(), "nothing was reviewed");
     elsewhere.assert_plain_git_starts_it(&checkout.1);
+}
+
+#[test]
+fn a_round_behind_a_gateway_sends_its_key_from_curls_stdin_and_holds_no_lock() {
+    use crate::settings::{Gateway, GatewayName, Gateways, KeyVar};
+    let dir = tempfile::tempdir().unwrap();
+    let checkout = repo(dir.path(), "fn a() {}\nfn b() {}\n");
+    let server = StandInEndpoint::start([Answer::Says("CLEAN")]).like_paddock("pk-r", &[]);
+    let name = GatewayName::try_from("paddock".to_owned()).unwrap();
+    let gateway = Gateway {
+        url: EndpointUrl::try_from(server.host().to_owned()).unwrap(),
+        key_env: KeyVar::try_from("PADDOCK_KEY".to_owned()).unwrap(),
+    };
+    let table = std::collections::BTreeMap::from([(name.clone(), gateway)]);
+    let reviewer = LocalReviewer::default()
+        .with_temp_dir(dir.path().join("locks"))
+        .with_gateways(Gateways::reading(table, |_| Some("pk-r".into())));
+    let LocalRound::Endpoint(mut endpoint) = local("http://unused/v1", 8192) else {
+        unreachable!()
+    };
+    endpoint.host = ModelHost::Gateway(name);
+    let round = LocalRound::Endpoint(endpoint);
+    reviewer.check(&round).unwrap();
+    let out = dir.path().join("out");
+    let findings = reviewer.round(&round, linked(&checkout), "origin/main", &out, 1, "");
+    assert_eq!(findings, Ok(Vec::new()));
+    assert_eq!(
+        server.seen(),
+        [
+            "GET /v1/models HTTP/1.1",
+            "POST /v1/chat/completions HTTP/1.1"
+        ]
+    );
+    assert_eq!(server.authorizations()[1].as_deref(), Some("Bearer pk-r"));
+    assert!(!dir.path().join("locks").exists(), "no lock was taken");
 }

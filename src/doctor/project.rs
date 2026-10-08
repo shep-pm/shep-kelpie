@@ -340,7 +340,12 @@ fn reviewers(
         }
     };
     for reviewer in &lineup {
-        let Some(round) = reviewer.runs.local() else {
+        // A round behind a gateway is checked on the gateway's own lines.
+        let Some(round) = reviewer
+            .runs
+            .local()
+            .filter(|_| reviewer.runs.gateway().is_none())
+        else {
             continue;
         };
         if let Err(reason) = probes.reviewer.check(&round) {

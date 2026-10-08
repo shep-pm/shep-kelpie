@@ -8,7 +8,9 @@
 //! call also loads an extension that runs kelpie's checks before each
 //! command and file write. pi starts no MCP servers. The sandbox allows no
 //! model host: pi's calls go to a forwarder outside it, which passes the
-//! server only the chat completions call.
+//! server only the chat completions call. A model behind a gateway gets the
+//! gateway's key from the forwarder, and a worker's turn on one holds a
+//! paddock lease on its model from start to end.
 
 use std::ffi::OsString;
 use std::net::{IpAddr, ToSocketAddrs};
@@ -22,16 +24,17 @@ use serde_json::json;
 use super::claude::sandbox::fence_policy;
 use super::claude::{ClaudeCli, LambLabels};
 use super::forwarder::Forwarder;
+use super::paddock;
 use super::process::{Processes, RunError};
 use crate::fence;
 use crate::forwarder::{Upstream, WORKER_HOST};
 use crate::guard::{FOLDER_FLAG, NAME_FLAG};
 use crate::ports::{
-    AgentCall, AgentError, AgentReply, Agents, CallActivity, Ending, Fence, Forward, Policy,
+    AgentCall, AgentError, AgentReply, Agents, CallActivity, Ending, Fence, Forward, Policy, Role,
     Sandbox, Session, SessionId, Tools, Usage, written_at,
 };
 use crate::profile::CREDENTIALS;
-use crate::settings::{AgentHarness, Harness, ModelServer};
+use crate::settings::{AgentHarness, Gateways, Harness, ModelHost, ModelServer};
 use crate::skills::split_command;
 
 #[cfg(test)]
@@ -39,6 +42,9 @@ mod tests;
 
 #[cfg(test)]
 mod escapes;
+
+#[cfg(test)]
+mod gateway_tests;
 
 /// This adapter's harness, as its errors and the fence name it
 const PI: Harness = Harness::Pi;
@@ -70,6 +76,7 @@ pub struct PiCli {
     program: OsString,
     lambs: Option<Arc<dyn LambLabels>>,
     sandbox: Arc<dyn Sandbox>,
+    gateways: Gateways,
 }
 
 impl ClaudeCli {
@@ -81,11 +88,17 @@ impl ClaudeCli {
             program: "pi".into(),
             lambs: self.lambs.clone(),
             sandbox: Arc::clone(&self.sandbox),
+            gateways: Gateways::default(),
         }
     }
 }
 
 impl PiCli {
+    /// Sends a model behind a gateway through `gateways`
+    pub fn with_gateways(self, gateways: Gateways) -> Self {
+        Self { gateways, ..self }
+    }
+
     /// Runs `program` in place of `pi`, as a stand-in script does
     #[cfg(test)]
     pub(crate) fn with_program(self, program: PathBuf) -> Self {
@@ -99,7 +112,7 @@ impl PiCli {
 impl Agents for PiCli {
     fn prepare(&self, call: &AgentCall) -> Result<(), AgentError> {
         let server = server(call)?;
-        let upstream = upstream(server)?;
+        let upstream = self.upstream(server)?;
         refuse_unsupported(call)?;
         let files = Files::of(call);
         let setup = |what: &Path, e: std::io::Error| {
@@ -109,7 +122,7 @@ impl Agents for PiCli {
         let models = json!({ "providers": { PROVIDER: {
             "baseUrl": upstream.worker_url(),
             "api": "openai-completions",
-            // The server ignores it, and pi lists no model without one.
+            // pi lists no model without one. The forwarder sends a gateway's own key.
             "apiKey": PROVIDER,
             "models": [{
                 "id": call.model,
@@ -135,8 +148,9 @@ impl Agents for PiCli {
     }
 
     fn run(&self, call: &AgentCall, ending: &Ending) -> Result<AgentReply, AgentError> {
-        // The forwarder stays open until the call has ended.
+        // The forwarder and the lease stay until the call has ended.
         let (mut command, _forwarder) = self.sandboxed_command(call)?;
+        let _lease = self.gateway_lease(call, ending)?;
         let label = call.label();
         let spawned = |pid| {
             if let Some(lambs) = &self.lambs {
@@ -162,8 +176,47 @@ impl Agents for PiCli {
 }
 
 impl PiCli {
+    /// What the forwarder passes the call's chat calls to, a gateway's key included
+    fn upstream(&self, server: &ModelServer) -> Result<Upstream, AgentError> {
+        self.gateways
+            .upstream(&server.host)
+            .map_err(AgentError::Setup)
+    }
+
+    // A worker's turn on a gateway's model holds a lease on it, so the
+    // gateway evicts nothing it runs on midway. Its ceiling counts from the grant.
+    fn gateway_lease(
+        &self,
+        call: &AgentCall,
+        ending: &Ending,
+    ) -> Result<Option<paddock::Lease>, AgentError> {
+        let server = server(call)?;
+        let ModelHost::Gateway(name) = &server.host else {
+            return Ok(None);
+        };
+        if call.role != Role::Worker {
+            return Ok(None);
+        }
+        let upstream = self.upstream(server)?;
+        let note = format!("kelpie {}", call.label());
+        let give_up = || ending.asked() || self.processes.stopping();
+        let timing = paddock::Timing::RUNNER;
+        match paddock::Lease::take(&upstream, &call.model, &note, &give_up, timing) {
+            Ok(Some(lease)) => {
+                ending.begin();
+                Ok(Some(lease))
+            }
+            Ok(None) if self.processes.stopping() => Err(AgentError::Stopped),
+            Ok(None) => Err(AgentError::TimedOut(PI)),
+            Err(why) => Err(AgentError::Setup(format!(
+                "cannot take a lease on {} from gateway {name}: {why}",
+                call.model
+            ))),
+        }
+    }
+
     fn sandboxed_command(&self, call: &AgentCall) -> Result<(Command, Forwarder), AgentError> {
-        let upstream = upstream(server(call)?)?;
+        let upstream = self.upstream(server(call)?)?;
         let files = Files::of(call);
         if let Session::Resume(id) = &call.session
             && session_file(&files.sessions(), id).is_none()
@@ -188,15 +241,15 @@ impl PiCli {
             ))
         })?;
         let folder = call.settings.parent().unwrap_or(Path::new("/"));
-        let forwarder = Forwarder::open(folder, upstream).map_err(AgentError::Setup)?;
+        let forwarder = Forwarder::open(folder, upstream.clone()).map_err(AgentError::Setup)?;
         // `env` runs inside the sandbox, after the sandbox has set its own variables.
-        let mut command = Command::new("env");
+        let mut command = crate::spawn::command("env");
         command
             .args(env_args(call, &files))
             .arg(&self.program)
             .args(argv(call, &files))
             .current_dir(&call.cwd);
-        let policy = policy(call, &files, &forwarder.socket);
+        let policy = policy(call, &files, &upstream, &forwarder.socket);
         let wrapped = self
             .sandbox
             .wrap(&policy, &files.sandbox_settings, &command)
@@ -213,11 +266,6 @@ fn server(call: &AgentCall) -> Result<&ModelServer, AgentError> {
             "kelpie routed a call to pi that names no model server".into(),
         )),
     }
-}
-
-/// What the forwarder passes chat calls to, for the call's model server
-fn upstream(server: &ModelServer) -> Result<Upstream, AgentError> {
-    Upstream::new(&server.url).map_err(|e| AgentError::Setup(e.to_string()))
 }
 
 // What a worker on Claude Code has and pi cannot give it.
@@ -437,7 +485,7 @@ fn guard_extension(fence: &Fence) -> String {
 /// The whole call's policy: its fence, or none, and what pi itself needs
 ///
 /// The model's host is not in it. The one host pi may dial is the forwarder's.
-fn policy(call: &AgentCall, files: &Files, forwarder: &Path) -> Policy {
+fn policy(call: &AgentCall, files: &Files, upstream: &Upstream, forwarder: &Path) -> Policy {
     let mut policy = match &call.reach.fence {
         Some(fence) => fence_policy(fence),
         None => Policy {
@@ -460,11 +508,7 @@ fn policy(call: &AgentCall, files: &Files, forwarder: &Path) -> Policy {
             .chain(call.plugin_dirs.iter().cloned())
             .chain(call.reach.read.iter().cloned()),
     );
-    if let AgentHarness::Pi(server) = &call.harness
-        && let Ok(upstream) = Upstream::new(&server.url)
-    {
-        deny_the_server(&mut policy, &upstream);
-    }
+    deny_the_server(&mut policy, upstream);
     policy.forward = Some(Forward {
         host: WORKER_HOST.to_owned(),
         socket: forwarder.to_owned(),

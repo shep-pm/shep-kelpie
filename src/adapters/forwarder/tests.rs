@@ -381,3 +381,23 @@ fn a_sweep_clears_only_old_sockets_nothing_answers_on() {
     assert!(live.exists());
     assert!(other.exists());
 }
+
+#[test]
+fn a_gateway_gets_its_own_key_in_place_of_the_workers() {
+    let server = StandInEndpoint::start([Answer::Says("ok")]);
+    let dir = tempfile::tempdir_in("/tmp").unwrap();
+    let key = crate::settings::GatewayKey::for_test("pk-gateway");
+    let keyed = upstream(server.url()).with_key(key);
+    let forwarder = Forwarder::open(&dir.path().canonicalize().unwrap(), keyed).unwrap();
+    let body = "{}";
+    let request = format!(
+        "{CHAT}authorization: Bearer kelpie\r\ncontent-length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    let reply = send(&forwarder, request.as_bytes());
+    assert!(status(&reply).contains("200"), "{reply}");
+    assert_eq!(
+        server.authorizations(),
+        [Some("Bearer pk-gateway".to_owned())]
+    );
+}

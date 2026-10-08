@@ -487,7 +487,7 @@ pub fn interactive(
     std::fs::create_dir_all(&folder)
         .and_then(|()| std::fs::write(&file, text))
         .map_err(|e| format!("cannot write {}: {}", file.display(), e.kind()))?;
-    let mut command = Command::new(program);
+    let mut command = crate::spawn::command(program);
     command
         .arg("--model")
         .arg(writer.model.model.as_str())

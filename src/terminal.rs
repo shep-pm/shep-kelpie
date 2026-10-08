@@ -69,7 +69,7 @@ impl Foreground {
 
     /// The command, which inherits the terminal and kelpie's own variables
     pub fn command(&self) -> Command {
-        let mut command = Command::new(&self.program);
+        let mut command = crate::spawn::command(&self.program);
         command.args(&self.args).current_dir(&self.cwd);
         for (name, value) in &self.env {
             match value {
@@ -120,7 +120,7 @@ pub async fn run(command: Command, started: impl AsyncFnOnce(u32)) -> Result<Exi
 // Sends the session `signal`, which it answers before kelpie goes on.
 fn pass_on(pid: Option<u32>, signal: &str) {
     if let Some(pid) = pid {
-        let _ = Command::new("kill")
+        let _ = crate::spawn::command("kill")
             .arg(format!("-{signal}"))
             .arg(pid.to_string())
             .status();
@@ -143,7 +143,11 @@ mod tests {
         let text = serde_json::to_string(&foreground).unwrap();
         let back: Foreground = serde_json::from_str(&text).unwrap();
         assert_eq!(back, foreground);
-        let again = Foreground::of(&back.command()).unwrap();
+        // Rebuilt, it also unsets whatever `spawn` hides, which another test may add.
+        let mut again = Foreground::of(&back.command()).unwrap();
+        again
+            .env
+            .retain(|name, _| foreground.env.contains_key(name));
         assert_eq!(again, foreground);
         assert_eq!(
             back.env.get("CLAUDE_CODE_SSE_PORT"),

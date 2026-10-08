@@ -43,7 +43,7 @@ mod shepherd;
 pub(crate) use alerts::FakeAlerts;
 pub(crate) use claude::{FakeClaude, Hold, LEFT_BEHIND, Scripted, Seen};
 pub(crate) use elsewhere::Elsewhere;
-pub(crate) use endpoint::{Answer, StandInEndpoint, unreachable_url};
+pub(crate) use endpoint::{Answer, StandInEndpoint, Take, unreachable_url};
 pub(crate) use forge::FakeForge;
 pub(crate) use leases::{FakeLeases, Told};
 pub(crate) use reviewer::{FakeReviewer, ScriptedRound};

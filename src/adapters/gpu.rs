@@ -4,7 +4,7 @@
 //! shows the host, and no error carries it.
 
 use std::io::{Read, Write};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use super::curl::render;
 use crate::ports::{Gpu, GpuError, GpuMetrics};
@@ -37,7 +37,7 @@ impl GpuMetrics for GpuCurl {
             ("max-filesize", PAGE_MAX.to_string()),
             ("write-out", "\n%{http_code}".to_owned()),
         ]);
-        let mut child = Command::new("curl")
+        let mut child = crate::spawn::command("curl")
             .args(["--config", "-"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

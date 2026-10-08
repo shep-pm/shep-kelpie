@@ -8,7 +8,7 @@
 //! where it will go. A server with no `/api/ps`, which is not Ollama, is
 //! skipped.
 
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use serde_json::Value;
 
@@ -57,7 +57,7 @@ fn bare(name: &str) -> &str {
 // None where the host has no `/api/ps` to read.
 fn read_seats(host: &str) -> Result<Option<Vec<ModelSeat>>, ReviewerError> {
     let url = format!("{host}/api/ps");
-    let output = Command::new("curl")
+    let output = crate::spawn::command("curl")
         .args(["-sS", "-w", "\n%{http_code}"])
         .args([
             "--connect-timeout",

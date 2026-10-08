@@ -12,7 +12,7 @@
 
 use std::fmt;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use serde::{Deserialize, Serialize};
 
@@ -383,7 +383,7 @@ enum Seen {
 // process has another start time. The C locale and UTC keep the text the
 // same across a restart under another locale, time zone or clock change.
 fn seen(ps: &str, pid: u32) -> Seen {
-    let output = Command::new(ps)
+    let output = crate::spawn::command(ps)
         .args(["-o", "lstart=", "-p", &pid.to_string()])
         .env("LC_ALL", "C")
         .env("TZ", "UTC")

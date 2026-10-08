@@ -191,8 +191,8 @@ fn an_agent_file_that_cannot_be_used_stops_the_runner_naming_the_file_and_the_ke
         ),
         (
             "---\nrole: implementer\nharness: pi\nmodel: m\neffort: low\n---\n",
-            "runs on pi, which needs the model's server as `url` and its context size as \
-             `context`",
+            "runs on pi, which needs the model's server as `url` or a `gateway`, and its \
+             context size as `context`",
         ),
     ];
     for (text, why) in cases {
@@ -218,5 +218,34 @@ fn an_md_file_named_for_no_agent_is_skipped_and_logged_and_the_runner_starts() {
             "agent file {} is skipped: an agent's name is lowercase letters, digits and `-`",
             file.display()
         )]
+    );
+}
+
+#[test]
+fn an_agent_on_a_gateway_kelpie_cannot_route_to_stops_the_runner() {
+    let rig = Rig::new("shep");
+    rig.write_agent(
+        "local",
+        "---\nrole: implementer\nharness: pi\nmodel: m\neffort: low\n\
+         gateway: paddock\ncontext: 65536\n---\n",
+    );
+    rig.edit_settings(|s| {
+        s.replace(
+            "implementers = [\"sonnet-high\"]\n",
+            "implementers = [\"sonnet-high\", \"local\"]\n",
+        )
+    });
+    let err = rig.open().unwrap_err().to_string();
+    assert!(
+        err.contains("local: gateway paddock is not in kelpie's settings"),
+        "{err}"
+    );
+    rig.set_kelpie_settings(
+        "[gateways.paddock]\nurl = \"http://127.0.0.1:1\"\nkey_env = \"KELPIE_TEST_KEY_NEVER_SET\"\n",
+    );
+    let err = rig.open().unwrap_err().to_string();
+    assert!(
+        err.contains("KELPIE_TEST_KEY_NEVER_SET, which holds"),
+        "{err}"
     );
 }

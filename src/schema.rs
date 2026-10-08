@@ -191,6 +191,12 @@ mod tests {
         let example = include_str!("../kelpie-settings.example.toml")
             .replace("# codex_home =", "codex_home =")
             .replace("# gpu_metrics_url =", "gpu_metrics_url =")
+            .replace("# [kelpie.gateways.paddock]", "[kelpie.gateways.paddock]")
+            .replace(
+                "# url = \"http://gpu-box:8700\"",
+                "url = \"http://gpu-box:8700\"",
+            )
+            .replace("# key_env =", "key_env =")
             .replace(
                 "# [kelpie.leases]\n# cargo-test",
                 "[kelpie.leases]\ncargo-test",

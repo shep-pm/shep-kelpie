@@ -34,7 +34,7 @@ impl Tools {
             .and_then(|()| std::fs::write(self.0.join("package.json"), PACKAGE))
             .map_err(|e| format!("cannot write {}: {e}", self.0.display()))?;
         let npm = ["install", "--no-audit", "--no-fund"];
-        run(Command::new("npm").args(npm).current_dir(&self.0))
+        run(crate::spawn::command("npm").args(npm).current_dir(&self.0))
     }
 
     /// The folder itself

@@ -2,7 +2,7 @@
 
 use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
@@ -96,7 +96,7 @@ impl Build {
     pub fn within(binary: &Path, limit: Duration) -> Result<Self, BuildError> {
         let started = Instant::now();
         let mut child = loop {
-            let spawned = Command::new(binary)
+            let spawned = crate::spawn::command(binary)
                 .args(["version", "--json"])
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())

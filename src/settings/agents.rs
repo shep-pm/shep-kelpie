@@ -12,7 +12,8 @@ use std::fmt;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::local::{ContextSize, EndpointUrl};
+use super::gateway::ModelHost;
+use super::local::ContextSize;
 use super::reviewers::{LeaseName, lowercase_name};
 use super::{RoleModel, Settings, SettingsError};
 use crate::agents::{Agent, Agents, FOLDER, Role, Runs};
@@ -133,8 +134,8 @@ impl AgentHarness {
 /// An OpenAI-compatible server a local model runs on
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelServer {
-    /// Its base URL, up to and including its `/v1`
-    pub url: EndpointUrl,
+    /// Its base URL, or the gateway in front of it
+    pub host: ModelHost,
     /// The context size it gives the model, in tokens
     pub context: ContextSize,
 }
@@ -190,13 +191,15 @@ pub enum Limit {
     Account(Account),
     /// A lease it holds for the whole of each call. It is never paced.
     Lease(LeaseName),
+    /// A gateway, which queues its calls itself: no lease and no pacing
+    Gateway,
 }
 
 impl Limit {
     /// The lease a call holds, for an agent limited by one
     pub fn lease(&self) -> Option<&LeaseName> {
         match self {
-            Self::Account(_) => None,
+            Self::Account(_) | Self::Gateway => None,
             Self::Lease(lease) => Some(lease),
         }
     }
@@ -258,9 +261,9 @@ pub struct Implementer {
 }
 
 impl Implementer {
-    /// Whether it runs on a local model, which is held by a lease and never paced
+    /// Whether it runs on a local model, held by a lease or a gateway and never paced
     pub fn is_local(&self) -> bool {
-        self.limit.lease().is_some()
+        !matches!(self.limit, Limit::Account(_))
     }
 }
 
@@ -391,7 +394,8 @@ impl Settings {
             });
         }
         if let AgentHarness::Pi(server) = &agent.harness
-            && let Ok(upstream) = Upstream::new(&server.url)
+            && let ModelHost::Url(url) = &server.host
+            && let Ok(upstream) = Upstream::new(url)
             && let Some(domain) =
                 (self.worker.allowed_domains.iter()).find(|d| upstream.is_reached_by(d.as_str()))
         {

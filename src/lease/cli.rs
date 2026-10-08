@@ -236,7 +236,7 @@ fn take_gpu() -> Result<(), String> {
     // The holder outlives take, so it keeps none of take's own output
     // open: a caller reading take's output to its end would wait forever.
     let exe = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
-    let mut holder = std::process::Command::new(exe)
+    let mut holder = crate::spawn::command(exe)
         .args(["lease", "hold", GPU])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -384,7 +384,7 @@ async fn run_command(command: &[&str], signals: &mut Signals) -> Result<ExitCode
         caught = signals.recv() => return Ok(caught.exit_code()),
         () = std::future::ready(()) => {}
     }
-    let mut child = tokio::process::Command::new(program)
+    let mut child = tokio::process::Command::from(crate::spawn::command(program))
         .args(args)
         .spawn()
         .map_err(|e| format!("cannot run {program}: {e}"))?;
@@ -401,7 +401,7 @@ async fn run_command(command: &[&str], signals: &mut Signals) -> Result<ExitCode
 }
 
 fn signal_process(pid: u32, name: &str) {
-    let _ = std::process::Command::new("kill")
+    let _ = crate::spawn::command("kill")
         .args([format!("-{name}"), pid.to_string()])
         .stderr(Stdio::null())
         .status();

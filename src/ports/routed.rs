@@ -112,7 +112,9 @@ mod tests {
             Arc::new(Named("codex")),
         );
         let pi = AgentHarness::Pi(ModelServer {
-            url: EndpointUrl::try_from("http://box:11434/v1".to_owned()).unwrap(),
+            host: crate::settings::ModelHost::Url(
+                EndpointUrl::try_from("http://box:11434/v1".to_owned()).unwrap(),
+            ),
             context: ContextSize::try_from(65_536).unwrap(),
         });
         let harnesses = [
