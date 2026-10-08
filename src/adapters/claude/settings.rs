@@ -392,6 +392,62 @@ mod tests {
         assert_eq!(deny, deny_with_trim(&without_read));
     }
 
+    // The file tools each role's settings may leave undenied, with the reason.
+    // A match with no catch-all, so a new role cannot join without a decision.
+    fn file_tools_left_open(tools: Tools) -> &'static [&'static str] {
+        match tools {
+            // It builds the change, so it writes files, held to its folders by `confine`.
+            Tools::Work => &["Edit", "Write", "MultiEdit", "NotebookEdit"],
+            // It may edit its notes file and nothing else, which `Edit(<notes>)` allows
+            // and `confine --append` holds to appending (`Write` rides the `Edit` rule).
+            // `MultiEdit` was left off its deny list on purpose in #357: Claude Code warns
+            // that a rule for it matches no known tool, and its `--tools` allow-list
+            // already leaves the tool out. `NotebookEdit` stays denied.
+            Tools::Pm => &["Edit", "Write", "MultiEdit"],
+            // Known gap: a reviewer's session is read-only by design (Read, Grep and Glob),
+            // but its own deny list holds `Agent`, `Task` and `Bash` only. Every settings
+            // file denies `NotebookEdit` through `trimmed`, so that one is asserted. Kelpie's
+            // sandbox holds the writes of the other three, so no deny is asserted for them yet.
+            Tools::Review => &["Edit", "Write", "MultiEdit"],
+            Tools::Answer | Tools::Issues => &[],
+        }
+    }
+
+    // Every role, walked by a match with no catch-all: a new `Tools` variant fails to
+    // compile here until it is chained in, so the test below cannot skip it.
+    fn next_role(tools: Tools) -> Option<Tools> {
+        match tools {
+            Tools::Work => Some(Tools::Review),
+            Tools::Review => Some(Tools::Answer),
+            Tools::Answer => Some(Tools::Issues),
+            Tools::Issues => Some(Tools::Pm),
+            Tools::Pm => None,
+        }
+    }
+
+    #[test]
+    fn every_role_denies_every_file_tool_it_does_not_leave_open() {
+        let file_tools: Vec<&str> = FILE_TOOLS.split('|').collect();
+        assert!(file_tools.contains(&"MultiEdit"), "{file_tools:?}");
+        let mut role = Some(Tools::Work);
+        while let Some(tools) = role {
+            role = next_role(tools);
+            let s = settings(tools, &Reach::default());
+            let denied: Vec<&str> = s["permissions"]["deny"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(Value::as_str)
+                .collect();
+            let open = file_tools_left_open(tools);
+            for tool in &file_tools {
+                if !open.contains(tool) {
+                    assert!(denied.contains(tool), "{tools:?} does not deny {tool}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn every_role_drops_the_features_it_never_uses() {
         // A worker's fenced settings are pinned in `profile`'s tests.
